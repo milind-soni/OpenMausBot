@@ -16,10 +16,10 @@ export interface SkillCommand {
   request: string;
 }
 
-/** `/name` or `/name request` where name is one of `skills`. Anything else,
+/** `/name` or `/name request` where name is one of `skills`; punctuation right after the name (`/name.`) ends it. Anything else,
  * including an engine's own slash command, is ordinary text. */
 export function parseSkillCommand(text: string, skills: Iterable<string>): SkillCommand | null {
-  const match = /^\/([a-z0-9-]+)(?:\s+|$)([\s\S]*)$/.exec(text.trimStart());
+  const match = /^\/([a-z0-9-]+)(?:[.,;:!?)]+(?=\s|$))?(?:\s+|$)([\s\S]*)$/.exec(text.trimStart());
   if (!match) return null;
   const name = match[1]!;
   if (!isSkillName(name) || BUILT_IN_SLASH_COMMANDS.includes(name)) return null;
@@ -36,7 +36,7 @@ export function offersSkillCommand(name: string): boolean {
  * such as "a/b" or "https://x/y" names nothing. */
 export function skillMentions(text: string): string[] {
   const found = new Set<string>();
-  for (const match of text.matchAll(/(?:^|\s)\/([a-z0-9-]+)(?=$|\s|[.,;:!?)])/g)) {
+  for (const match of text.matchAll(/(?:^|\s)\/([a-z0-9-]+)(?=$|\s|[.,;:!?)]+(?:$|\s))/g)) {
     if (offersSkillCommand(match[1]!)) found.add(match[1]!);
   }
   return [...found];

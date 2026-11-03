@@ -19,6 +19,8 @@ describe("parseSkillCommand", () => {
   it("reads a leading /name and the request after it", () => {
     expect(parseSkillCommand("/standup", ["standup"])).toEqual({ name: "standup", request: "" });
     expect(parseSkillCommand("/standup  the billing work\nand more", ["standup"])).toEqual({ name: "standup", request: "the billing work\nand more" });
+    expect(parseSkillCommand("/standup.", ["standup"])).toEqual({ name: "standup", request: "" });
+    expect(parseSkillCommand("/standup: the billing work", ["standup"])).toEqual({ name: "standup", request: "the billing work" });
     expect(parseSkillCommand("  /weekly-2 go", ["weekly-2"])).toEqual({ name: "weekly-2", request: "go" });
   });
 
@@ -48,6 +50,7 @@ describe("expandSkillCommandTurnText", () => {
     expect(text).toContain("Request: the billing work");
     expect(text).toContain("{input}");
     expect(expandSkillCommandTurnText(bot, "/standup")).toContain("There is no further request");
+    expect(expandSkillCommandTurnText(bot, "/standup.")).toContain("There is no further request");
   });
 
   it("runs a skill named later in the message with the whole message as the request", () => {
@@ -76,6 +79,8 @@ describe("expandSkillCommandTurnText", () => {
     expect(expandSkillCommandTurnText(bot, "see https://x.test/standup")).toBe("see https://x.test/standup");
     expect(expandSkillCommandTurnText(bot, "the /standups folder")).toBe("the /standups folder");
     expect(skillMentions("run /learn then /goal and /standup")).toEqual(["standup"]);
+    expect(skillMentions("open /standup.txt or /standup,now")).toEqual([]);
+    expect(expandSkillCommandTurnText(bot, "open /standup.txt")).toBe("open /standup.txt");
   });
 
   it("passes a disabled skill, an unknown name and plain text through", () => {

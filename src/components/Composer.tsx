@@ -387,7 +387,8 @@ export function Composer({
 
   const pickCommand = (command: ComposerSlashCommand | undefined) => {
     if (!slash || !command) return;
-    const replacement = command.kind === "skill" ? `${command.label} `
+    const spaceAfter = /^\s/.test(text.slice(slash.end)) ? "" : " ";
+    const replacement = command.kind === "skill" ? `${command.label}${spaceAfter}`
       : command.id === "learn" ? "/learn " : command.id === "setup" ? "/setup " : "";
     const next = replaceComposerSlashTrigger(text, slash, replacement);
     editText(next.text);

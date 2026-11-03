@@ -56,10 +56,10 @@ describe("the / menu in the composer", () => {
     vi.unstubAllGlobals();
   });
 
-  function fill(text: string) {
+  function fill(text: string, caret = text.length) {
     flushSync(() => restoreComposerDraft(draftId, { text, attachments: [] }));
     const input = container.querySelector("textarea")!;
-    input.setSelectionRange(text.length, text.length);
+    input.setSelectionRange(caret, caret);
     flushSync(() => input.dispatchEvent(new KeyboardEvent("keyup", { key: "/", bubbles: true })));
     return input;
   }
@@ -76,6 +76,12 @@ describe("the / menu in the composer", () => {
     expect(labels()).toEqual(["/standup"]);
     flushSync(() => options()[0]!.click());
     expect(input.value).toBe("write it up with /standup ");
+  });
+
+  it("adds no second space when text already follows the pick", () => {
+    const input = fill("use /st later", "use /st".length);
+    flushSync(() => options()[0]!.click());
+    expect(input.value).toBe("use /standup later");
   });
 
   it("opens nothing inside a path or link", () => {
