@@ -338,3 +338,20 @@ test("every page beside the rail, from any server, gets the button's bridge, lea
   await local.bridge.rail.setHidden(false);
   assert.deepEqual(plain(local.invoked), [["rail:hide", false]], "this app's own page, as for its other choices");
 });
+
+test("the accounts sheet holds the rail's page up, even for someone who hid the rail or has one place, and letting go puts things back", () => {
+  const w = world({ wanted: false, hidden: true });
+  w.rail.attach(w.win);
+  assert.equal(w.rail.shown(), false);
+  w.rail.holdOpen(true);
+  assert.equal(w.rail.shown(), true);
+  w.rail.expand(true);
+  assert.equal(w.made[0].bounds.width, 1440, "the sheet has the whole window");
+  w.rail.expand(false);
+  w.rail.holdOpen(false);
+  assert.equal(w.rail.shown(), false);
+  w.state.hidden = false; w.state.wanted = true;
+  w.rail.refresh();
+  w.rail.holdOpen(true); w.rail.holdOpen(false);
+  assert.equal(w.rail.shown(), true, "a rail that was there stays");
+});
