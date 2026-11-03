@@ -2995,6 +2995,7 @@
   "model.section.default": "Default model",
   "model.section.starting": "Starting model for the new bot and its threads.",
   "model.section.threads": "For groups and every thread that uses the bot's model. A thread keeps its own model only when you pick one in it.",
+  "model.section.installationDefault": "A new bot starts on this installation's default model unless you pick another here. To switch automatically when this model is at its usage limit, add backup models below.",
   "model.section.effort": "Effort",
   "model.section.startingReasoning": "Starting reasoning variant for the new bot.",
   "model.section.effortHelp": "How hard this bot thinks in groups and every thread that uses its model.",
