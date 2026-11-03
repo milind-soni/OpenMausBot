@@ -2292,7 +2292,6 @@
   "mausbotWelcome.add": "Ajouter {name}",
   "mausbotWelcome.notNow": "Pas maintenant",
   "mausbotWelcome.notNowHint": "{name} reste hors de la barre latérale. Activez-le à tout moment dans Paramètres → Général.",
-  "grokFinish.messageApps": "Apps à connecter : {apps}.",
   "app.loading.connecting": "Connexion à vos bots…",
   "app.loading.updating": "Mise à jour de My Cloud…",
   "cloudSend.list.routineOne": "1 routine",

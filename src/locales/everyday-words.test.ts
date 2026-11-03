@@ -10,6 +10,7 @@ const EVERYDAY_PREFIXES: Record<string, readonly string[]> = {
   ],
   "notifications and alerts": ["attention.", "notifications.", "error.", "readyBots.", "app.loading."],
   "the sidebar and the switcher": ["sidebar."],
+  "moving from Grok Bot": ["grokMove."],
   "the rail of Clouds and its ＋": ["rail."],
   "a place's color, in Settings": ["placeLook."],
   "the bot panel": [
@@ -51,7 +52,7 @@ const EVERYDAY_KEYS: Record<string, readonly string[]> = {
     "engineSetup.grok.security", "engineSetup.grok.connectedAccount", "engineSetup.grok.failed", "engineSetup.grok.notInstalled",
     "engineSetup.serverInstall", "engineSetup.serverUpdate", "engineSetup.serverInstalling", "engineSetup.sendRedirect",
     "engineSetup.sameMachine", "engineSetup.invalidStatus", "engines.account.signInHint", "engines.trialCredit", "engines.trialCreditEnded",
-    "grokFinish.messageApps", "keys.cerebras.desc", "keys.groq.desc", "keys.meta.desc",
+    "keys.cerebras.desc", "keys.groq.desc", "keys.meta.desc",
   ],
   "the Settings pages Simple mode shows": [
     "settings.diagnostics.subtitle", "settings.diagnostics.elsewhere", "settings.import.appsSubtitle", "settings.profiles.temporaryHint",

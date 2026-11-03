@@ -4779,7 +4779,6 @@
   "mausbotWelcome.add": "Thêm {name}",
   "mausbotWelcome.notNow": "Để sau",
   "mausbotWelcome.notNowHint": "{name} sẽ không hiện trên thanh bên. Bật lại bất cứ lúc nào trong Cài đặt → Chung.",
-  "grokFinish.messageApps": "Ứng dụng cần kết nối: {apps}.",
   "app.loading.connecting": "Đang kết nối tới các bot của bạn…",
   "app.loading.updating": "Đang cập nhật My Cloud…",
   "cloudSend.list.routineOne": "1 thói quen",
