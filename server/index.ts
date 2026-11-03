@@ -8284,8 +8284,7 @@ async function beginTurn(
         if (wants === "vm") {
           if (await attachLocalVm(true)) computerKind = "vm";
         } else if (wants === "local") {
-          integrations.localComputer = await mountHostComputer(resourceOwner, bot.id, mountsLocalComputer, surfaceLazyClaimRejection("this computer"),
-            placeSource === "auto-pin" && approvalModeForTurn(bot, commsDepth > 0, threadId) !== "full", savedSteps.journals(directRequestOwners.get(threadId)));
+          integrations.localComputer = await mountHostComputer(resourceOwner, bot.id, mountsLocalComputer, surfaceLazyClaimRejection("this computer"), placeSource === "auto-pin" && approvalModeForTurn(bot, commsDepth > 0, threadId) !== "full", savedSteps.journals(directRequestOwners.get(threadId)));
           computerKind = "local";
         }
 

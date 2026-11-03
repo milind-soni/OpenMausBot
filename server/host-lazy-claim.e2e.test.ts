@@ -146,7 +146,7 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
 
   itAutoHost("holds no computer:host claim and records no pin until a screen tool runs", async () => {
     await start();
-    const { bot: holder } = await apiOk("POST", "/api/bots", { name: "Screenless Host Bot", approvalMode: ASKS });
+    const { bot: holder } = await apiOk("POST", "/api/bots", { name: "Screenless Host Bot", settings: { approvalMode: ASKS } });
     const { task } = await apiOk("POST", `/api/bots/${holder.id}/tasks`, {});
     resetTurn();
     await apiOk("POST", `/api/bots/${holder.id}/messages`, { text: "Work slowly without touching the screen.", threadId: task.threadId });
@@ -155,7 +155,7 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
     expect(computer.env.OMB_CUA_COMMAND).toBe("/fixture/cua-driver");
     expect(computer.args.some((arg: string) => arg.includes("local-computer-proxy"))).toBe(true);
     expect(savedTask(holder.id, task.threadId)).not.toHaveProperty("surface");
-    const { bot: claimer } = await apiOk("POST", "/api/bots", { name: "Host Claim Bot", approvalMode: ASKS });
+    const { bot: claimer } = await apiOk("POST", "/api/bots", { name: "Host Claim Bot", settings: { approvalMode: ASKS } });
     const { task: claimTask } = await apiOk("POST", `/api/bots/${claimer.id}/tasks`, {});
     await apiOk("POST", `/api/bots/${claimer.id}/messages`, { text: "Work slowly too.", threadId: claimTask.threadId });
     await busy(claimer.id, claimTask.threadId);
@@ -169,7 +169,7 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
 
   itAutoHost("claims the seat and records the pin on the first screen tool call", async () => {
     await start();
-    const { bot } = await apiOk("POST", "/api/bots", { name: "Host Screen Bot", approvalMode: ASKS });
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Host Screen Bot", settings: { approvalMode: ASKS } });
     const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
     resetTurn();
     await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Work slowly; the screen comes later.", threadId: task.threadId });
@@ -179,7 +179,7 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
     expect(await withAnswer(base, task.threadId, gate(computer))).toEqual({ held: false, helpOpen: false });
     await until(() => savedTask(bot.id, task.threadId)?.surface === "local", Boolean);
     expect(savedTask(bot.id, task.threadId)).toMatchObject({ surface: "local", surfaceSource: "auto" });
-    const { bot: second } = await apiOk("POST", "/api/bots", { name: "Host Contended Bot", approvalMode: ASKS });
+    const { bot: second } = await apiOk("POST", "/api/bots", { name: "Host Contended Bot", settings: { approvalMode: ASKS } });
     const { task: secondTask } = await apiOk("POST", `/api/bots/${second.id}/tasks`, {});
     await apiOk("POST", `/api/bots/${second.id}/messages`, { text: "Also work slowly.", threadId: secondTask.threadId });
     await busy(second.id, secondTask.threadId);
@@ -195,7 +195,7 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
   itAutoHost("a busy computer is waited for inside the call: it answers when the holder ends, and a person's hold is waited out", async () => {
     await start();
     const turn = async (name: string) => {
-      const { bot } = await apiOk("POST", "/api/bots", { name, approvalMode: ASKS });
+      const { bot } = await apiOk("POST", "/api/bots", { name, settings: { approvalMode: ASKS } });
       const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
       await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Work slowly on the screen.", threadId: task.threadId });
       await busy(bot.id, task.threadId);
@@ -247,7 +247,7 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
   itAutoHost("a person's hold past the wait ceiling is not waited for: the turn is told to stop and say so", async () => {
     const ceilingMs = 2_000;
     await start({ OMB_COMPUTER_WAIT_MAX_MS: String(ceilingMs) });
-    const { bot } = await apiOk("POST", "/api/bots", { name: "Host Away Bot", approvalMode: ASKS });
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Host Away Bot", settings: { approvalMode: ASKS } });
     const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
     await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Work slowly on the screen.", threadId: task.threadId });
     await busy(bot.id, task.threadId);
@@ -274,7 +274,7 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
   itAutoHost("a call waiting behind another turn never goes through once its own turn is stopped", async () => {
     await start();
     const turn = async (name: string) => {
-      const { bot } = await apiOk("POST", "/api/bots", { name, approvalMode: ASKS });
+      const { bot } = await apiOk("POST", "/api/bots", { name, settings: { approvalMode: ASKS } });
       const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
       await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Work slowly on the screen.", threadId: task.threadId });
       await busy(bot.id, task.threadId);
@@ -317,7 +317,7 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
 
   itAutoHost("asks once before the first screen call below Full access, in plain words naming the app and the site", async () => {
     await start();
-    const { bot } = await apiOk("POST", "/api/bots", { name: "Host Asking Bot", approvalMode: ASKS });
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Host Asking Bot", settings: { approvalMode: ASKS } });
     const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
     resetTurn();
     await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Look at my calendar slowly.", threadId: task.threadId });
@@ -347,7 +347,7 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
 
   itAutoHost("a No is an answer, not a failure: the screen stays untouched and the bot is told to finish another way", async () => {
     await start();
-    const { bot } = await apiOk("POST", "/api/bots", { name: "Host Declined Bot", approvalMode: ASKS });
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Host Declined Bot", settings: { approvalMode: ASKS } });
     const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
     resetTurn();
     await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Book a table slowly.", threadId: task.threadId });
@@ -369,7 +369,7 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
 
   itAutoHost("a question the request outlives is closed, and answers nothing", async () => {
     await start();
-    const { bot } = await apiOk("POST", "/api/bots", { name: "Host Stopped Bot", approvalMode: ASKS });
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Host Stopped Bot", settings: { approvalMode: ASKS } });
     const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
     resetTurn();
     await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Work slowly on the screen.", threadId: task.threadId });
@@ -386,7 +386,7 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
 
   itAutoHost("asks again on the next request, and never when the person picked this computer themselves", async () => {
     await start();
-    const { bot } = await apiOk("POST", "/api/bots", { name: "Host Again Bot", approvalMode: ASKS });
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Host Again Bot", settings: { approvalMode: ASKS } });
     const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
     const request = async (text: string) => {
       resetTurn();
@@ -416,7 +416,7 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
   // Like the tests above, this needs the desktop driver fixture, which only macOS and Windows have here.
   itAutoHost("never asks in a thread the app pinned to this computer once the bot works on this computer", async () => {
     await start();
-    const { bot } = await apiOk("POST", "/api/bots", { name: "Host Works On Bot", approvalMode: ASKS });
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Host Works On Bot", settings: { approvalMode: ASKS } });
     const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
     await apiOk("PATCH", `/api/bots/${bot.id}`, { computer: "local" });
     await stop();
