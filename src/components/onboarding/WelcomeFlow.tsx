@@ -31,7 +31,7 @@ async function nameFromComputer(config: Config, done: (config: NonNullable<Confi
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /** Tab and Shift+Tab stay inside `root`, the way a modal dialog keeps them. */
-export function trapTab(event: ReactKeyboardEvent<HTMLElement>, root: HTMLElement | null): void {
+function trapTab(event: ReactKeyboardEvent<HTMLElement>, root: HTMLElement | null): void {
   if (event.key !== "Tab" || !root) return;
   const focusable = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.getClientRects().length > 0);
   if (!focusable.length) return;
@@ -169,7 +169,7 @@ export function WelcomeFlow({
       {chief ? (
         <ChiefIntro replay={replay} onLeave={fadeScrim} onDone={(botId) => void finish("completed", botId)} />
       ) : (
-        <MeetScreen hosted={hosted} onNext={next} onGrokMoved={(botId) => void finish("completed", botId)} />
+        <MeetScreen hosted={hosted} onNext={next} />
       )}
     </div>
   );

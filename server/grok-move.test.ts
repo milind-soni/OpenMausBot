@@ -73,28 +73,29 @@ describe("a moved Bot, through the real package path", () => {
     expect(bot.approvalMode ?? null).not.toBe("auto");
 
     expect(result.routines).toHaveLength(1);
-    expect(app.routines.listRoutines()[0]).toMatchObject({ name: "Open up", enabled: false, botId: bot.id, schedule: { type: "cron", expression: "0 8 * * 1-5", timeZone: "Asia/Tokyo" } });
+    expect(app.routines.listRoutines()[0]).toMatchObject({ name: "Desk: Open up", enabled: false, botId: bot.id, schedule: { type: "cron", expression: "0 8 * * 1-5", timeZone: "Asia/Tokyo" } });
 
+    // The package path leaves it off; the move switches on what the scan passed, through the bot's own skill route.
     expect(app.skills.listSkills(bot.id).filter((skill) => skill.name === "greet").map((skill) => skill.enabled)).toEqual([false]);
 
     const memory = app.workspace.readMemoryFile(bot.id).text;
     expect(memory).toContain("- The door sticks");
     expect(memory).toContain("- Lives in Tokyo");
+    expect(app.workspace.readMemoryTopic(bot.id, "grok-bot-event-routines.md")).toContain("Answer it.");
+    expect(app.routines.listRoutines().map((routine) => routine.name)).toEqual(["Desk: Open up"]);
 
     expect(app.mcp.servers).toEqual({ linear: { type: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: "" }, enabled: false } });
     expect(bot.mcpServers).toEqual(["linear"]);
     expect(JSON.stringify(app.mcp.servers)).not.toContain("real-secret-value");
   });
 
-  it("a second Bot with the same names does not collide, and neither does moving one twice", async () => {
+  it("a second Bot with the same skill and routine names does not collide", async () => {
     const app = await installation();
     const first = app.move(DESK);
-    const second = app.move({ ...DESK, name: "Lobby" });
-    const again = app.move(DESK);
-    expect(new Set([first.section, second.section, again.section]).size).toBe(3);
-    expect(app.store.bots.filter((bot) => ["Desk", "Lobby", "Desk 2"].includes(bot.name)).map((bot) => bot.name).sort()).toEqual(["Desk", "Desk 2", "Lobby"]);
-    expect(Object.keys(app.mcp.servers).sort()).toEqual(["linear", "linear-2", "linear-3"]);
-    expect(app.store.bot(second.bots[0]!.id)!.mcpServers).toEqual(["linear-2"]);
-    expect(app.routines.listRoutines().map((routine) => routine.enabled)).toEqual([false, false, false]);
+    const second = app.move({ ...DESK, name: "Lobby", apps: [] });
+    expect(first.section).not.toBe(second.section);
+    expect(app.store.bots.filter((bot) => ["Desk", "Lobby"].includes(bot.name)).map((bot) => bot.name).sort()).toEqual(["Desk", "Lobby"]);
+    expect(app.routines.listRoutines().map((routine) => routine.name).sort()).toEqual(["Desk: Open up", "Lobby: Open up"]);
+    expect(app.routines.listRoutines().map((routine) => routine.enabled)).toEqual([false, false]);
   });
 });

@@ -137,13 +137,8 @@ function readExportFiles(machine: SetupMachine): GrokFoundFile[] {
   });
 }
 
-/** `quiet`: on the first screen, for everyone. macOS asks permission the first time an app reads Downloads, so there it
- * is read only on a Mac that has Grok Bot; everywhere else the flow itself looks, once someone has chosen it. */
-export function lookForGrokBot(machine: SetupMachine, options: { quiet?: boolean } = {}): GrokLook {
-  const hints = readAppHints(machine);
-  const hasApp = USER_DATA_FOLDERS.some((parts) => machine.fs.lstat(join(machine.home, ...parts)) !== null);
-  const files = options.quiet && machine.platform === "darwin" && !hasApp ? [] : readExportFiles(machine);
-  return { files, ...hints };
+export function lookForGrokBot(machine: SetupMachine): GrokLook {
+  return { files: readExportFiles(machine), ...readAppHints(machine) };
 }
 
 /** Security: a Cursor sign-in saved by an older version may still be here. Nothing reads it, so no live token stays behind. */

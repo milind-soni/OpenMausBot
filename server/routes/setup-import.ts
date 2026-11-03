@@ -37,12 +37,12 @@ export function createSetupImportRoutes(deps: SetupImportRouteDeps): RouteHandle
     mcpConfigBusy: deps.mcpConfigBusy,
     claudeUserMcp: () => claudeUserMcpEnabled(deps.cfg),
   };
-  return async ({ req, res, path, url, method, auth, json, readBody }) => {
+  return async ({ req, res, path, method, auth, json, readBody }) => {
     if (path === GROK_LOOK_PATH) {
       if (method !== "GET") return json(res, 405, { error: "method not allowed" });
       if (!deps.local || auth.kind !== "loopback" || auth.trust === "service") return json(res, 403, { error: LOCAL_ONLY });
       res.setHeader("Cache-Control", "no-store");
-      return json(res, 200, lookForGrokBot(machine(), { quiet: url.searchParams.has("quiet") }));
+      return json(res, 200, lookForGrokBot(machine()));
     }
     if (path !== SETUP_IMPORT_PATH) return PASS;
     if (method !== "GET" && method !== "POST") return json(res, 405, { error: "method not allowed" });

@@ -118,16 +118,6 @@ describe("what the desktop app finds about Grok Bot", () => {
     for (const path of [other, elsewhere, target]) expect(machine.opened).not.toContain(path);
   });
 
-  it("leaves Downloads alone on the first screen of a Mac without Grok Bot, because macOS would ask permission", () => {
-    const { home, put } = fixtureHome();
-    put("Downloads/grok-bot-export-drew.json", "x");
-    expect(lookForGrokBot(machineAt(home), { quiet: true }).files).toEqual([]);
-    expect(lookForGrokBot(machineAt(home)).files).toHaveLength(1);
-    expect(lookForGrokBot(machineAt(home, "linux"), { quiet: true }).files).toHaveLength(1);
-    put("Library/Application Support/Grok Bot/Preferences", "{}");
-    expect(lookForGrokBot(machineAt(home), { quiet: true }).files).toHaveLength(1);
-  });
-
   it("deletes an old Cursor sign-in, and minds nothing when there is none", () => {
     const { home, put } = fixtureHome();
     const token = put("data/cursor-session.json", SECRET);

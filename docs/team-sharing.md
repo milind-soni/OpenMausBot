@@ -106,67 +106,60 @@ If any step fails, everything the import created is removed again.
 
 ## Moving from Grok Bot
 
-**Move from Grok Bot** opens one full-window flow, from the first-run welcome,
-the Cloud welcome, **Settings → Import** and **Templates → Import**. It needs
-no sign-in and makes no network call: Grok Bot has no export button, so each
-Bot writes down its own setup.
+**Settings → Import → Move from Grok Bot** opens one dialog. It needs no sign-in
+and the import makes no network call. Grok Bot has no export button, so each Bot
+writes down its own setup.
 
-1. **Start.** Copy the message and send it in the Bot's chat. The Bot saves
-   `grok-bot-export-<name>.json` or replies with it. Bring that back by pasting
-   the whole reply (chat text and a code fence are fine), dropping the file or
-   choosing it. In the desktop app, on the computer running OpenMausBot, files
-   named `grok-bot-export*` in Downloads are offered in one tap, one row per
-   Bot; a split or re-saved export joins up.
-2. **What's coming over.** Bots, Skills, Routines, Memories and Apps with their
-   counts and names, and what stays behind. Nothing is written yet.
-3. **Finish setting up.** Only what still needs you, one tap each: connect an
-   AI, sign in to apps, let the bot use them, turn on its connections, review
-   its skills, turn on its routines (after switching them off in Grok Bot),
-   give paused webhook automations their new address, and rebuild event
-   routines through a message prepared in the bot's chat, never sent for you.
+1. Copy the message and send it in the Bot's chat. The Bot saves
+   `grok-bot-export-<name>.json` or replies with it.
+2. Bring that back: paste the whole reply (chat text and code fences are fine),
+   drop the file or choose it. In the desktop app, on the computer running
+   OpenMausBot, files named `grok-bot-export*` in Downloads are offered in one
+   tap; a split or re-saved export joins up.
+3. The preview lists what would be imported, skipped or in conflict. Nothing is
+   written yet.
+4. Import, then the report: the same list as it turned out, warnings, and the one
+   next step, turning each routine off in Grok Bot and then on here.
 
-Each Bot exports itself, so **Move another Bot** goes round again. Each becomes
-its own bot in its own section; a name already taken gets a number.
+**Move another Bot** goes round again; each Bot exports itself.
 
 | In Grok Bot | Here |
 | --- | --- |
-| Name, title, instructions | A new bot, as an `openmaus.package` import |
-| Skills | That bot's skills, off until reviewed |
+| Name, title, instructions | A new bot in its own section, through the `openmaus.package` import |
+| Skills | That bot's skills, switched on. One the skill scan flags stays off and says why |
 | Memories and facts about you | That bot's `MEMORY.md`, repeats dropped |
-| Routine on a schedule | A routine, paused, with its schedule, time zone and the skills it uses named in its prompt |
-| Routine on a webhook | A webhook automation, paused, with a new address |
-| Routine on Slack, GitHub, Linear, Sentry, PagerDuty, email or anything else | Not created: a connected-app automation needs the app signed in and an event chosen. Listed with its full text, and offered as a prepared chat message |
+| Routine on a schedule | A routine named `<Bot>: <routine>`, paused, with its schedule and time zone and the skills it uses named in its prompt |
+| Routine on an event (Slack, GitHub, Linear, Sentry, PagerDuty, email, webhook) or with a schedule that can't be read | Not created: its trigger and instruction are saved in that bot's `memory/grok-bot-event-routines.md` and shown in the report |
 | App with a remote `https` MCP address | That bot's MCP server, switched off, with values stripped and their names listed |
-| Other apps | Listed, to sign in to here |
+| Other apps | Listed as skipped: their logins stay in Grok Bot |
 
 Chat history, app logins and the model never come over.
 
-The export text is untrusted. A document with credential-looking keys is
-refused whole; token-shaped text elsewhere is redacted before anything uses it,
-including what is listed to rebuild. An address carrying a key in its query
-loses it, and one with a key in its path is not carried at all. Importing grants
-nothing: the package path sets every privilege-bearing field itself.
+The export text is untrusted. A document with credential-looking keys is refused
+whole; token-shaped text elsewhere is redacted before anything uses it. An
+address carrying a key in its query loses it, and one with a key in its path is
+not carried at all. Importing grants nothing else: the package path sets every
+privilege-bearing field itself. A server name you already have is reported as a
+conflict and skipped, and a Bot already moved is not added twice. One file or
+item that can't be read gets its own error and the rest carry on.
 
 The earlier `openmaus.grok/1` export still reads.
 
-On the computer running OpenMausBot the desktop app also reads, through
-`GET /api/setup-import/grok` (the desktop's own window only, never a paired
-device, a browser, a bot's shell, a Cloud or a hosted server), two slices of
-the Grok Bot app's UI cache in `<user data>/sand-client-persistence/`:
-`roster.last-roster` for Bot names and `transcript.replicas.<bot id>` for the
-routine names in its `automation-changed` events. Chat text is dropped. They
-give the "Your Bots on this computer" checklist and warn when an export leaves
-out a routine its Bot announced. They are a hint: routines, skills, memory and
-instructions live on the Bot's cloud computer, so the export is still needed.
-Nothing else in that folder is opened, nor `~/.grokbot`. macOS asks permission
-the first time an app reads Downloads, so the welcome screen reads it only on a
-Mac that has Grok Bot; otherwise the flow looks once someone has opened it.
+After the button is pressed, and on the computer running OpenMausBot only, the
+desktop app reads through `GET /api/setup-import/grok` (its own window only, never
+a paired device, a browser, a bot's shell, a Cloud or a hosted server) those
+Downloads files and two slices of the Grok Bot app's UI cache in
+`<user data>/sand-client-persistence/`: `roster.last-roster` for Bot names and
+`transcript.replicas.<bot id>` for the routine names in its `automation-changed`
+events. Chat text is dropped. They warn about Bots not exported yet and routines a
+Bot announced that its export left out. They are a hint: the export is still
+needed. Nothing else in that folder is opened, nor `~/.grokbot`.
 
-A `cursor-session.json` left in the data folder by an older version is deleted
-at start.
+A `cursor-session.json` left in the data folder by an older version is deleted at
+start.
 
 The mapping lives in `shared/grok-import.ts`, the local look in
-`server/grok-local.ts`, the screens in `src/components/move-from-grok/`.
+`server/grok-local.ts`, the dialog in `src/components/GrokMoveDialog.tsx`.
 
 ## The file format
 

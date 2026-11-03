@@ -12,10 +12,9 @@ import { saveWelcomeDraft } from "@/lib/welcome-draft";
 import type { InstanceInfo } from "@/state/store";
 
 const f = vi.hoisted(() => ({ state: {} as Record<string, unknown>, dispatch: vi.fn(), api: vi.fn(), landed: vi.fn(), onDone: vi.fn(),
-  checks: [] as string[], openGrokMove: vi.fn() }));
+  checks: [] as string[] }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f.dispatch }), api: f.api }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn(), setEmailGateDone: vi.fn() }));
-vi.mock("@/lib/grok-move", async (original) => ({ ...(await original<typeof import("@/lib/grok-move")>()), openGrokMove: f.openGrokMove }));
 vi.mock("@/components/Avatar", () => ({ BotAvatar: () => null, MausAvatar: () => null }));
 vi.mock("@/components/mascot-clock", () => ({ usePrefersReducedMotion: () => true }));
 vi.mock("@/components/EngineSetup", async (original) => {
@@ -79,7 +78,6 @@ beforeEach(() => {
   f.dispatch.mockReset();
   f.landed.mockReset();
   f.onDone.mockReset();
-  f.openGrokMove.mockReset();
   f.api.mockReset();
   f.checks = [];
   f.api.mockImplementation(async (path: string, init?: { body?: string }) => {
@@ -182,26 +180,6 @@ describe("What's new", () => {
 });
 
 describe("with no AI working yet", () => {
-  it("offers the move from Grok Bot to everyone, as one line that adds no screen", async () => {
-    await show();
-    expect(button("Move from Grok Bot")).toBeDefined();
-    expect(f.api.mock.calls.map(([path]) => path), "a browser page never looks on this computer").not.toContain("/api/setup-import/grok?quiet=1");
-    await press("Move from Grok Bot");
-    expect(f.openGrokMove).toHaveBeenCalledOnce();
-    expect(host.querySelector("h1")?.textContent, "still the first screen behind it").toBe("Meet MausBot");
-    await act(async () => f.openGrokMove.mock.calls[0]![0].onMoved("moved-bot"));
-    expect(f.onDone).toHaveBeenCalledWith("moved-bot");
-  });
-
-  it("names a Bot whose export is already on this computer", async () => {
-    vi.stubGlobal("ogb", { remoteClient: { active: false } });
-    f.api.mockImplementation(async (path: string) => path === "/api/setup-import/grok?quiet=1"
-      ? { files: [{ name: "grok-bot-export-drew.json", modifiedAt: 1, text: JSON.stringify({ format: "grok-bot-export", bots: [{ name: "Drew" }] }) }], bots: [], routines: {} }
-      : path === "/api/instances" ? { instances: f.state.instances } : {});
-    await show();
-    expect(button("Move from Grok Bot · Drew is ready")).toBeDefined();
-  });
-
   it("keeps the screen's shape: the pill signs in, and the line under it offers other ways or later", async () => {
     f.state = { ...f.state, instances: [signIn()] };
     await show();

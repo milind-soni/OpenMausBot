@@ -5,7 +5,6 @@ import { cn } from "@/lib/cn";
 import { listOf } from "@/lib/cloud-send";
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
-import { GrokMoveChoice } from "@/components/move-from-grok/GrokMoveGate";
 import { CARD, CARD_IDLE, CARD_PICKED, CardIcon, Footer, PRIMARY, QUIET, SECONDARY, StepHeading } from "./parts";
 
 export type BringOutcome = "team" | "here" | "skipped";
@@ -84,7 +83,6 @@ export function WelcomeBring({ name, desktop, older = false, cloudHasWork, sent 
           </div>}
         </div>}
     <Footer>{actions}</Footer>
-    {!team && <GrokMoveChoice hosted onMoved={() => { onTeam(); onFinish("team"); }} className="self-start" />}
     {library}
   </section>;
 }

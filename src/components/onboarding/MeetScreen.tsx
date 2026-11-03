@@ -9,7 +9,6 @@ import { DEFAULT_BOT_NAME, myDefaultBot, useViewerEmail } from "@/lib/default-bo
 import { activeLocale, t } from "@/lib/i18n";
 import { aiChoices, aiWorks } from "@/lib/onboarding";
 import { useStore } from "@/state/store";
-import { GrokMoveChoice } from "../move-from-grok/GrokMoveGate";
 import { ConnectAiDialog } from "./ConnectAi";
 import { PILL, SignInPill, useSignInPill } from "./SignInPill";
 import { useWelcomeAi } from "./welcome-ai";
@@ -56,7 +55,7 @@ function DemoComposer({ reduced, onTyping }: { reduced: boolean; onTyping: (typi
 
 /** The first run's first screen: the app's name, its mascot and a composer typing one sentence, then one pill. With
  * no AI working yet the pill is the sign-in, and Next comes once the AI has answered its test message. */
-export function MeetScreen({ hosted, onNext, onGrokMoved }: { hosted: boolean; onNext: () => void; onGrokMoved: (botId: string) => void }) {
+export function MeetScreen({ hosted, onNext }: { hosted: boolean; onNext: () => void }) {
   const { state } = useStore();
   const reduced = usePrefersReducedMotion();
   const maus = myDefaultBot(state.bots, useViewerEmail());
@@ -118,7 +117,6 @@ export function MeetScreen({ hosted, onNext, onGrokMoved }: { hosted: boolean; o
           </p>
         )}
         {signingIn && failure && <p role="alert" className="mt-2 text-[13px] leading-[18px] text-danger">{failure}</p>}
-        <GrokMoveChoice hosted={hosted} onMoved={onGrokMoved} className="mt-3" />
       </div>
       {dialog && <ConnectAiDialog hosted={hosted} tested={tested} onClose={() => setDialog(false)} />}
     </div>

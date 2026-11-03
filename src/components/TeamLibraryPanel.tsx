@@ -13,14 +13,11 @@ import { createPortal } from "react-dom";
 import { catalogCopy, catalogMatches, type TeamCatalog, type TeamCatalogEntry } from "@/lib/team-catalog";
 
 import { TEAM_GLYPHS, TeamImportDetails } from "./TeamImportDetails";
-import { GrokBotMark } from "./GrokBotMark";
 import { ReadyBotGallery } from "./ReadyBotGallery";
 import { ShareTeamDialog } from "./ShareTeamDialog";
 import { OrgLibraryTab } from "./TeamLibraryPanelOrg";
 import { MAX_TEAM_BACKUP_BYTES } from "../../shared/team-backup";
 import { takeImportName } from "../../shared/import-name";
-import { mentionsGrokExport } from "../../shared/grok-import";
-import { openGrokMove } from "@/lib/grok-move";
 const COMMUNITY_TEAMS_REPOSITORY = "https://github.com/milind-soni/openmausbot-teams";
 
 export { TeamImportDetails };
@@ -219,10 +216,6 @@ export function TeamLibraryPanel({
   const readFile = async (file: File) => {
     if (file.size > MAX_TEAM_BACKUP_BYTES) throw new Error(t("templates.fileTooLarge"));
     const raw = await file.text();
-    if (mentionsGrokExport(raw)) {
-      onClose();
-      return openGrokMove({ reply: raw });
-    }
     let manifest: unknown = raw;
     if (!file.name.toLowerCase().endsWith(".md")) {
       try {
@@ -787,14 +780,6 @@ export function TeamLibraryPanel({
                       </div>
                     </div>
                   </div>
-                  <button type="button" data-grok-move-open onClick={() => { onClose(); openGrokMove(); }}
-                    className="mt-5 flex w-full items-center gap-3 rounded-2xl bg-raised/25 px-6 py-5 text-left transition-colors hover:bg-raised/40">
-                    <GrokBotMark size={22} />
-                    <span className="min-w-0">
-                      <span className="block text-[14px] font-medium text-ink">{t("grokMove.open")}</span>
-                      <span className="mt-0.5 block text-[13px] leading-relaxed text-ink-secondary">{t("settings.import.grokSubtitle")}</span>
-                    </span>
-                  </button>
                   {error && <div role="alert" className="mt-4 rounded-lg bg-danger/10 px-3 py-2 text-[13px] text-danger">{error}</div>}
                 </div>
               )}

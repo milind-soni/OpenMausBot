@@ -1,12 +1,11 @@
-import { useSyncExternalStore } from "react";
-
-import { engineReady } from "@/components/EngineLibrary";
-import { prependComposerDraft } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
 import { addTemplate } from "@/lib/template-add";
-import { api, type Action, type AppSettingsSection, type Bot, type BotSettingsSection, type InstanceInfo } from "@/state/store";
-import { GrokImportError, mergeGrokBots, parseGrokExport, routinesLeftOut, type GrokBot, type GrokMovePlan } from "../../shared/grok-import";
+import { api, type Action, type Bot } from "@/state/store";
 import type { LocaleKey } from "@/locales";
+import { takeImportName } from "../../shared/import-name";
+import {
+  GrokImportError, grokMovePlan, grokRedactions, mergeGrokBots, parseGrokExport, routinesLeftOut, type GrokBot, type GrokItem, type GrokMovePlan,
+} from "../../shared/grok-import";
 
 /** What the desktop app found on this computer. */
 export interface GrokLook {
@@ -17,8 +16,8 @@ export interface GrokLook {
 
 export const NOTHING_FOUND: GrokLook = { files: [], bots: [], routines: {} };
 
-export function lookForGrokBot(quiet = false): Promise<GrokLook> {
-  return api<Partial<GrokLook> | null>(`/api/setup-import/grok${quiet ? "?quiet=1" : ""}`, { timeoutMs: 10_000 }).then(
+export function lookForGrokBot(): Promise<GrokLook> {
+  return api<Partial<GrokLook> | null>("/api/setup-import/grok", { timeoutMs: 10_000 }).then(
     (look) => ({ files: Array.isArray(look?.files) ? look.files : [], bots: Array.isArray(look?.bots) ? look.bots : [], routines: look?.routines ?? {} }),
     () => NOTHING_FOUND,
   );
@@ -35,10 +34,11 @@ export interface FoundExports {
   refused: Array<{ file: string; error: string }>;
 }
 
-/** One row per Bot however many files it wrote: a split export joins up, and a saved-twice file counts once. */
+/** Every file found, joined by Bot: a split export comes together and a saved-twice one counts once. A refused file says
+ * why and costs the others nothing. Oldest first, so the newest copy wins. */
 export function foundExports(files: GrokLook["files"]): FoundExports {
   const refused: FoundExports["refused"] = [];
-  const bots = [...files].reverse().flatMap((file) => {
+  const bots = [...files].sort((a, b) => a.modifiedAt - b.modifiedAt).flatMap((file) => {
     try {
       return parseGrokExport(file.text);
     } catch (cause) {
@@ -49,176 +49,87 @@ export function foundExports(files: GrokLook["files"]): FoundExports {
   return { bots: mergeGrokBots(bots), refused };
 }
 
-/** Routines each Bot's chat announced that its export does not have. */
-export function missingRoutines(bots: readonly GrokBot[], look: GrokLook): Array<{ bot: string; routines: string[] }> {
-  return bots.flatMap((bot) => {
-    const announced = Object.entries(look.routines).find(([name]) => name.toLowerCase() === bot.name.toLowerCase())?.[1] ?? [];
-    const routines = routinesLeftOut(bot, announced);
-    return routines.length ? [{ bot: bot.name, routines }] : [];
-  });
+export interface GrokPreview {
+  plans: GrokMovePlan[];
+  /** Lines for what could not be planned or is here already. */
+  items: GrokItem[];
+  warnings: string[];
 }
 
-export interface GrokMoved {
-  plan: GrokMovePlan;
-  bot: Bot;
-  routineIds: string[];
-  webhookIds: string[];
-  /** Webhook routines whose paused automation could not be made: they join the ones to rebuild. */
-  webhooksFailed: string[];
-  servers: string[];
-  serversSkipped: number;
+export interface GrokPreviewFacts {
+  look: GrokLook;
+  bots: readonly Pick<Bot, "name" | "installedPackage">[];
+  servers: ReadonlySet<string>;
+  timeZone: string;
 }
 
-/** Writes one plan: the package path for everything it can carry, then a paused webhook automation per webhook routine.
- * A failed automation leaves the bot in place and the routine in the list to rebuild. */
-export async function moveGrokBot(plan: GrokMovePlan, dispatch: (action: Action) => void): Promise<GrokMoved> {
-  const added = await addTemplate(plan.document, dispatch);
-  const bot = added.first;
-  if (!bot) throw new Error(t("grokMove.error.noBot"));
-  const webhookIds: string[] = [];
-  const webhooksFailed: string[] = [];
-  for (const webhook of plan.webhooks) {
+/** The whole plan, nothing written. A Bot already moved is a conflict, a Bot that can't be read an error of its own. */
+export function previewGrokMove(bots: readonly GrokBot[], facts: GrokPreviewFacts): GrokPreview {
+  const moved = new Set(facts.bots.flatMap((bot) => bot.installedPackage?.id ?? []));
+  const names = new Set(facts.bots.map((bot) => bot.name.trim().toLowerCase()));
+  const servers = new Set(facts.servers);
+  const plans: GrokMovePlan[] = [];
+  const items: GrokItem[] = [];
+  for (const bot of bots) {
     try {
-      const created = await api<{ webhook: { id: string } }>("/api/webhooks", {
-        method: "POST",
-        body: JSON.stringify({ name: webhook.name, prompt: webhook.prompt, botId: bot.id, enabled: false }),
-      });
-      if (!webhook.pausedThere) webhookIds.push(created.webhook.id);
-    } catch {
-      webhooksFailed.push(webhook.name);
+      const plan = grokMovePlan(bot, { timeZone: facts.timeZone, takenServers: servers });
+      if (moved.has(plan.packageId)) {
+        items.push({ kind: "bot", name: plan.name, status: "conflict", reason: "alreadyMoved" });
+        continue;
+      }
+      for (const connection of plan.document.package.connections ?? []) servers.add(connection.key);
+      const taken = takeImportName(plan.name, names);
+      if (taken !== plan.name) plan.items[0] = { ...plan.items[0]!, reason: "renamed", values: { name: taken } };
+      plans.push(plan);
+    } catch (cause) {
+      items.push({ kind: "bot", name: bot.name, status: "error", reason: "botFailed", values: { error: grokErrorText(cause) } });
     }
   }
-  const routineIds = (added.routines ?? []).filter((_, index) => !plan.routines[index]?.pausedThere).map((routine) => routine.id);
-  const connections = (added.connections ?? []) as Array<{ name: string }>;
-  return {
-    plan, bot, routineIds, webhookIds, webhooksFailed,
-    servers: connections.map((connection) => connection.name),
-    serversSkipped: plan.servers.length - connections.length,
-  };
+  const named = new Set(bots.map((bot) => bot.name.toLowerCase()));
+  const notExported = facts.look.bots.filter((name) => !named.has(name.toLowerCase()) && !facts.bots.some((bot) => bot.installedPackage?.name.toLowerCase() === name.toLowerCase()));
+  const redacted = bots.reduce((total, bot) => total + grokRedactions(bot), 0);
+  const warnings = [
+    ...(notExported.length ? [t("grokMove.warning.notExported", { names: notExported.join(", ") })] : []),
+    ...bots.flatMap((bot) => {
+      const announced = Object.entries(facts.look.routines).find(([name]) => name.toLowerCase() === bot.name.toLowerCase())?.[1] ?? [];
+      const routines = routinesLeftOut(bot, announced);
+      return routines.length ? [t("grokMove.warning.routinesLeftOut", { bot: bot.name, routines: routines.join(", ") })] : [];
+    }),
+    ...(redacted ? [t("grokMove.warning.redacted", { count: redacted })] : []),
+  ];
+  return { plans, items, warnings };
 }
 
-export type GrokMoveTarget =
-  | { kind: "appSettings"; section: AppSettingsSection }
-  | { kind: "plugins"; surface: "apps" | "mcp" }
-  | { kind: "botSettings"; section: BotSettingsSection; botId: string }
-  | { kind: "automations"; botId: string }
-  | { kind: "chat"; bot: Bot; message: string };
-
-export type GrokMoveRowId = "ai" | "signIn" | "appAccess" | "servers" | "skills" | "routines" | "webhooks" | "rebuild";
-
-export interface GrokMoveRow {
-  /** Stable across renders: what a tap marks as seen. */
-  key: string;
-  id: GrokMoveRowId;
-  title: string;
-  detail: string;
-  target: GrokMoveTarget;
-  done: boolean;
-  /** What each routine to rebuild said, for the person to read here. */
-  rebuild?: GrokMovePlan["rebuild"];
+export interface GrokReport {
+  items: GrokItem[];
+  warnings: string[];
+  /** The routines now paused here, for the one next step. */
+  routines: string[];
 }
 
-export interface GrokMoveFacts {
-  instances: readonly InstanceInfo[];
-  routines: ReadonlyArray<{ id: string; enabled: boolean }>;
-  webhooks: ReadonlyArray<{ id: string; enabled: boolean }>;
-  seen: ReadonlySet<string>;
-}
-
-/** Word for word in the chat message: the person reads it there before sending. Never sent for them. */
-export function rebuildMessage(moved: GrokMoved): string {
-  const named = moved.webhooksFailed.map((name) => moved.plan.webhooks.find((webhook) => webhook.name === name)!)
-    .map((webhook) => ({ name: webhook.name, trigger: "webhook", details: webhook.details, when: "", instruction: webhook.prompt }));
-  const routines = [...moved.plan.rebuild, ...named].map((routine) => [
-    `- ${routine.name}`,
-    routine.trigger ? `  ${t("grokMove.message.trigger", { trigger: routine.trigger })}` : "",
-    routine.details || routine.when ? `  ${t("grokMove.message.details", { details: routine.details || routine.when })}` : "",
-    `  ${routine.instruction.replace(/\n/g, "\n  ")}`,
-  ].filter(Boolean).join("\n"));
-  return `${t("grokMove.message.intro", { name: moved.bot.name })}\n\n${routines.join("\n\n")}`;
-}
-
-/** Only what still needs the person, each with the one place that does it. Rows they have dealt with stay, ticked. */
-export function grokMoveRows(moved: readonly GrokMoved[], facts: GrokMoveFacts): GrokMoveRow[] {
-  const rows: GrokMoveRow[] = [];
-  const ready = facts.instances.filter(engineReady);
-  if (facts.instances.length && !ready.length) {
-    rows.push({ key: "ai", id: "ai", title: t("grokMove.row.ai"), detail: t("grokMove.row.aiDetail"), target: { kind: "appSettings", section: "engines" }, done: false });
-  }
-  const many = moved.length > 1;
-  for (const item of moved) {
-    const { plan, bot } = item;
-    const row = (id: GrokMoveRowId, title: string, detail: string, target: GrokMoveTarget, done?: boolean, rebuild?: GrokMovePlan["rebuild"]) => {
-      const key = `${bot.id}:${id}`;
-      rows.push({ key, id, title: many ? `${bot.name}: ${title}` : title, detail, target, done: done ?? facts.seen.has(key), ...(rebuild ? { rebuild } : {}) });
-    };
-    if (plan.apps.length) {
-      row("signIn", t("grokMove.row.signIn", { apps: plan.apps.join(", ") }), t("grokMove.row.signInDetail"), { kind: "plugins", surface: "apps" });
-      row("appAccess", t("grokMove.row.appAccess", { name: bot.name }), t("grokMove.row.appAccessDetail"), { kind: "botSettings", section: "access", botId: bot.id });
-    }
-    if (item.servers.length) {
-      const needs = [...new Set(plan.servers.flatMap((server) => server.values))];
-      row("servers", t("grokMove.row.servers", { apps: plan.servers.map((server) => server.name).join(", ") }),
-        needs.length ? t("grokMove.row.serversNeed", { values: needs.join(", ") }) : t("grokMove.row.serversDetail"), { kind: "plugins", surface: "mcp" });
-    }
-    if (plan.skills.length) {
-      row("skills", t("grokMove.row.skills", { count: plan.skills.length }), t("grokMove.row.skillsDetail"), { kind: "botSettings", section: "skills", botId: bot.id });
-    }
-    if (item.routineIds.length) {
-      const on = facts.routines.filter((routine) => item.routineIds.includes(routine.id) && routine.enabled).length;
-      row("routines", t("grokMove.row.routines", { count: item.routineIds.length }), t("grokMove.row.routinesDetail"),
-        { kind: "botSettings", section: "routines", botId: bot.id }, on === item.routineIds.length);
-    }
-    if (item.webhookIds.length) {
-      const on = facts.webhooks.filter((webhook) => item.webhookIds.includes(webhook.id) && webhook.enabled).length;
-      row("webhooks", t("grokMove.row.webhooks", { count: item.webhookIds.length }), t("grokMove.row.webhooksDetail"),
-        { kind: "automations", botId: bot.id }, on === item.webhookIds.length);
-    }
-    const toRebuild = plan.rebuild.length + item.webhooksFailed.length;
-    if (toRebuild) {
-      row("rebuild", t("grokMove.row.rebuild", { count: toRebuild }), t("grokMove.row.rebuildDetail", { name: bot.name }),
-        { kind: "chat", bot, message: rebuildMessage(item) }, undefined, plan.rebuild);
+/** Imports each plan through the package path, then switches on its skills. One Bot failing gets its own error line. */
+export async function runGrokMove(preview: GrokPreview, dispatch: (action: Action) => void): Promise<GrokReport> {
+  const items = [...preview.items];
+  const routines: string[] = [];
+  for (const plan of preview.plans) {
+    try {
+      const added = await addTemplate(plan.document, dispatch);
+      const bot = added.first;
+      if (!bot) throw new Error(t("grokMove.error.noBot"));
+      const stillOff = new Set<string>();
+      for (const skill of plan.skillsOn) {
+        await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill)}`, { method: "PATCH", body: JSON.stringify({ enabled: true }) }).catch(() => stillOff.add(skill));
+      }
+      const refused = new Set((plan.document.package.connections ?? []).map((connection) => connection.label));
+      for (const connection of (added.connections ?? []) as Array<{ label: string }>) refused.delete(connection.label);
+      items.push(...plan.items.map((item): GrokItem => {
+        if (item.kind === "app" && item.status === "imported" && refused.has(item.name)) return { kind: "app", name: item.name, status: "skipped", reason: "serverRefused" };
+        return item.skill && stillOff.has(item.skill) ? { ...item, reason: "skillStillOff" } : item;
+      }));
+      routines.push(...(added.routines ?? []).map((routine) => routine.name));
+    } catch (cause) {
+      items.push({ kind: "bot", name: plan.name, status: "error", reason: "botFailed", values: { error: grokErrorText(cause) } });
     }
   }
-  return rows;
-}
-
-/** Goes to the row's place. The chat's message is only put in its composer. */
-export function goToGrokMoveTarget(target: GrokMoveTarget, dispatch: (action: Action) => void): void {
-  switch (target.kind) {
-    case "appSettings": return dispatch({ type: "toggleAppSettings", open: true, section: target.section });
-    case "plugins": return dispatch({ type: "togglePlugins", open: true, surface: target.surface });
-    case "botSettings": return dispatch({ type: "toggleSettings", open: true, section: target.section, botId: target.botId });
-    case "automations":
-      dispatch({ type: "toggleAppSettings", open: false });
-      return dispatch({ type: "showRoutines", botId: target.botId });
-    case "chat":
-      prependComposerDraft(`bot:${target.bot.id}:${target.bot.threadId}`, target.message);
-      dispatch({ type: "toggleAppSettings", open: false });
-      dispatch({ type: "showChat" });
-      return dispatch({ type: "select", id: target.bot.id });
-  }
-}
-
-export interface GrokMoveRequest {
-  /** A reply already in hand, such as a file dropped on Templates. */
-  reply?: string;
-  /** After a first import, from a welcome screen that must now step aside. */
-  onMoved?: (botId: string) => void;
-}
-
-let request: GrokMoveRequest | null = null;
-const listeners = new Set<() => void>();
-const publish = (next: GrokMoveRequest | null) => {
-  request = next;
-  for (const listener of listeners) listener();
-};
-
-export const openGrokMove = (next: GrokMoveRequest = {}) => publish(next);
-export const closeGrokMove = () => publish(null);
-export function useGrokMoveRequest(): GrokMoveRequest | null {
-  return useSyncExternalStore((listener) => {
-    listeners.add(listener);
-    return () => listeners.delete(listener);
-  }, () => request);
+  return { items, warnings: preview.warnings, routines };
 }

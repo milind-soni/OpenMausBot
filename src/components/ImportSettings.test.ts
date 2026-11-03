@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -18,7 +16,7 @@ const apps = (overrides: Partial<AiAppsImportViewProps> = {}) => text(renderToSt
 })));
 
 describe("Settings → Import", () => {
-  it("draws From your AI apps and the one button for moving from Grok Bot", () => {
+  it("draws From your AI apps and the one button for moving from Grok Bot, and opens nothing until it is pressed", () => {
     const value = { state: { config: {} }, dispatch: vi.fn() } as never;
     const markup = renderToStaticMarkup(createElement(StoreContext.Provider, { value }, createElement(ImportSettings, {
       client: { detect: vi.fn(() => new Promise<SetupDetection>(() => {})), apply: vi.fn() },
@@ -31,6 +29,7 @@ describe("Settings → Import", () => {
     expect(shown).toContain("Tools arrive switched off; logins and history are never read.");
     expect(shown).toContain("Move from Grok Bot");
     expect(markup).toContain("data-grok-move-open");
+    expect(markup).not.toContain("data-grok-move=");
     expect(markup.indexOf('data-import-section="apps"')).toBeLessThan(markup.indexOf('data-import-section="grok"'));
   });
 
@@ -47,14 +46,5 @@ describe("Settings → Import", () => {
     expect(apps({ detection: { skills: [], tools: [] } })).toContain("Nothing new to bring in from your AI apps.");
     expect(apps({ local: false })).toContain("Only the desktop app on the computer running MausBot");
     expect(apps({ result: { skills: { added: ["pdf"], present: [], skipped: [], filesLeftOut: 0, review: [] } } })).toContain("Added 1 skill.");
-  });
-
-  it("opens the one move from Settings, Templates and both welcomes", () => {
-    const source = (file: string) => readFileSync(join(import.meta.dirname, file), "utf8");
-    for (const file of ["TeamLibraryPanel.tsx", "ImportSettings.tsx", "move-from-grok/GrokMoveGate.tsx"]) {
-      expect(source(file), file).toMatch(/import \{[^}]*openGrokMove[^}]*\} from "@\/lib\/grok-move"/);
-      expect(source(file), file).toContain("openGrokMove(");
-    }
-    for (const file of ["onboarding/MeetScreen.tsx", "cloud-welcome/WelcomeBring.tsx"]) expect(source(file), file).toContain("<GrokMoveChoice");
   });
 });

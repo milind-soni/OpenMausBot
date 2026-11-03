@@ -12,7 +12,7 @@ import {
 import { BOT_PROFILE_LIMITS } from "./bot-profile.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { normalizeCronSchedule } from "./routine-schedule.ts";
-import { parseSkillMd, SKILL_FILE_MAX_BYTES, yamlFrontmatterValue } from "./skill-md.ts";
+import { parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, yamlFrontmatterValue } from "./skill-md.ts";
 
 export const GROK_EXPORT_FORMAT = "grok-bot-export";
 const OLD_EXPORT_FORMAT = "openmaus.grok/1";
@@ -21,11 +21,10 @@ export const GROK_EXPORT_FILE = /^grok-bot-export[^/\\]*\.(?:json|md|txt)$/i;
 export const GROK_EXPORT_MAX_CHARS = 4 * 1024 * 1024;
 const MAX_ROUTINES = 50;
 const BOT_COLORS = ["green", "blue", "red", "orange", "purple", "cyan", "pink", "yellow", "teal", "coral"] as const;
-const MAX_APPS = 30;
 /** Failed brace matches before a reply stops being searched: each one scans to the end of the text. */
 const MAX_UNBALANCED = 50;
 
-export const GROK_EXPORT_PROMPT = `I'm moving to OpenMausBot and need a complete, machine-readable copy of your setup. Do not change, pause or delete anything.
+export const GROK_EXPORT_PROMPT = `I'm moving to another assistant and need a complete, machine-readable copy of your setup. Do not change, pause or delete anything.
 
 Write one JSON document with exactly this shape, then save it as grok-bot-export-<your name>.json (your name in lowercase, spaces as hyphens): in my Downloads folder if you can write to my computer, otherwise in your workspace, and attach it to your reply. If you cannot attach files, put the whole document in a single \`\`\`json code block instead.
 
@@ -35,31 +34,33 @@ Write one JSON document with exactly this shape, then save it as grok-bot-export
   "bots": [
     {
       "name": "your name",
-      "title": "your label or job title, or empty",
-      "instructions": "your full role, job description and lasting rules, word for word where you can",
+      "title": "your label/job title, or empty",
+      "instructions": "your full role, job description and lasting rules, verbatim where you can",
       "memories": ["each thing you remember about the work, one string per fact"],
-      "user_facts": ["each fact you know about me (name, time zone, preferences), one string per fact"],
+      "user_facts": ["each fact you know about me (name, time zone, preferences), one per string"],
       "skills": [
-        {"name": "skill name", "description": "when to use it", "instructions": "the COMPLETE skill text, every step, rule and output format, word for word"}
+        {"name": "skill name", "description": "when to use it",
+         "instructions": "the COMPLETE skill text, every step, rule and output format, verbatim"}
       ],
       "routines": [
         {"name": "routine name",
-         "instruction": "the COMPLETE instruction the routine runs, word for word",
+         "instruction": "the COMPLETE instruction the routine runs, verbatim",
          "trigger": "schedule | slack | github | linear | sentry | pagerduty | email | webhook | other",
-         "schedule_cron": "5-field cron expression in the routine's time zone, such as 0 8 * * 1-5 (empty when not on a schedule)",
-         "schedule_text": "when it runs, in words, as the app shows it",
-         "timezone": "IANA time zone, such as America/New_York",
+         "schedule_cron": "5-field cron expression in the routine's time zone, e.g. 0 8 * * 1-5 (empty when not on a schedule)",
+         "schedule_text": "When to run, in words, as the app shows it",
+         "timezone": "IANA time zone, e.g. America/New_York",
          "paused": false,
-         "skills": ["names of the skills this routine uses"],
-         "trigger_details": "for event triggers: channel, repository, phrase, senders and so on"}
+         "skills": ["names of skills this routine uses"],
+         "trigger_details": "for event triggers: channel, repository, phrase, senders, etc."}
       ],
-      "apps": [{"name": "connected app or MCP server name", "mcp_url": "its remote MCP URL if it has one, else empty", "header_names": ["names of any headers it needs to sign in, names only"]}]
+      "apps": [{"name": "connected app or MCP server name", "mcp_url": "remote MCP URL if any, else empty"}]
     }
   ]
 }
 
-Rules: include EVERY routine you own (paused ones too) and EVERY skill enabled for you, with full text, not summaries. If you cannot read something (a routine's schedule, a skill's text), leave it out and tell me in your reply what you left out; never guess or fill it in from memory. Never include passwords, API keys, tokens, webhook keys, cookies or card numbers, and no other people's contact details or customer data: leave those out entirely. Output valid JSON only (no comments).
-If it is too long for one message or file, split it: send several documents, each complete and valid in this same shape with the same bot name, each holding the part the others do not. They are imported together.`;
+Rules: include EVERY routine you own (paused ones too) and EVERY skill enabled for you, with full text, not summaries. If you cannot read something (a routine's schedule, a skill's text), leave it out and tell me in your reply what you left out; never guess or fill it in from memory. Never include passwords, API keys, tokens, webhook keys, cookies or card numbers: leave those out entirely. Output valid JSON only (no comments).
+If it is too long for one message or file, split it: send several documents, each complete and valid in this same shape with the same bot name, each holding the part the others do not. They are imported together.
+`;
 
 export type GrokImportErrorCode = "notExport" | "cutOff" | "tooLarge" | "credentials" | "newerVersion" | "unusable";
 
@@ -204,7 +205,7 @@ function readApp(app: unknown): GrokApp[] {
     name: oneLine(name),
     mcpUrl: first(record.mcp_url, record.mcpUrl, record.url),
     transport: first(record.transport, record.type).toLowerCase(),
-    headerNames: [...new Set([...strings(record.header_names), ...headers])],
+    headerNames: headers,
     envNames: [...new Set(env)],
   }] : [];
 }
@@ -293,9 +294,6 @@ export function parseGrokExport(text: string): GrokBot[] {
 /** Pieces of a Bot's text that looked like a key and were taken out. */
 export const grokRedactions = (bot: GrokBot) => JSON.stringify(bot).match(/«redacted \d+ chars»/g)?.length ?? 0;
 
-/** Text that says it is a Grok Bot export (it may still be malformed). */
-export const mentionsGrokExport = (text: string) => text.includes(GROK_EXPORT_FORMAT) || text.includes(OLD_EXPORT_FORMAT);
-
 const slug = (value: string, max: number) =>
   value.normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, max).replace(/-+$/, "");
 
@@ -321,54 +319,22 @@ function fitBytes(text: string, max: number): string {
   return text.slice(0, end);
 }
 
-const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-const EVENT_WORDS = /\b(?:when|whenever|each time|every time|on (?:new|each|every)|webhook|mention(?:ed|s)?|incoming|arrives?|opens?|merged?|pushed?)\b/i;
 const CLOCK_TRIGGERS = new Set(["", "schedule", "scheduled", "time", "cron", "interval"]);
 
-/** "Weekdays at 9am", "every day at 18:30", "Mondays and Thursdays at 10" → a daily schedule. */
-function simpleDaily(text: string): PackageRoutineSchedule | null {
-  const lower = text.toLowerCase();
-  if (EVENT_WORDS.test(lower) || /\b(?:hour|hourly|minute|minutes|month|monthly|year)\b/.test(lower)) return null;
-  let hour: number, minute = 0;
-  const clock = lower.match(/\b(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)(?![a-z])/) ?? lower.match(/\b(\d{1,2}):(\d{2})\b/) ?? lower.match(/\bat (\d{1,2})\b/);
-  if (/\bnoon\b/.test(lower)) hour = 12;
-  else if (/\bmidnight\b/.test(lower)) hour = 0;
-  else if (clock) {
-    hour = Number(clock[1]);
-    minute = clock[2] ? Number(clock[2]) : 0;
-    const half = clock[3]?.[0];
-    if (half && (hour < 1 || hour > 12)) return null;
-    if (half === "p" && hour < 12) hour += 12;
-    if (half === "a" && hour === 12) hour = 0;
-  } else return null;
-  if (hour > 23 || minute > 59) return null;
-  let weekdays: number[] = [];
-  if (/\bweekdays?\b|\bmon(?:day)?s?\s*(?:-|–|to|through)\s*fri(?:day)?\b|\bbusiness days?\b|\bworkdays?\b/.test(lower)) weekdays = [1, 2, 3, 4, 5];
-  else if (/\bweekends?\b/.test(lower)) weekdays = [0, 6];
-  else if (/\b(?:daily|every ?day|each day|every (?:morning|evening|night|afternoon))\b/.test(lower)) weekdays = [0, 1, 2, 3, 4, 5, 6];
-  else weekdays = WEEKDAYS.flatMap((day, index) => (new RegExp(`\\b${day}(?:[a-z]*day)?s?\\b`).test(lower) ? [index] : []));
-  if (!weekdays.length) return null;
-  return { type: "daily", time: `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`, weekdays };
-}
-
-/** Five fields whose minute and hour are cron, not words. */
-function looksLikeCron(value: string): boolean {
-  const fields = value.trim().split(/\s+/);
-  return fields.length === 5 && fields.slice(0, 2).every((field) => /^[\d*/,-]+$/.test(field));
-}
-
-/** The schedule, in the routine's own zone. `movedZone`: it named a zone nothing here can read, so it runs in the person's. */
+/** The schedule in the routine's own zone, from its cron or its words when those are a cron. `movedZone`: it named a zone
+ * nothing here can read, so it runs in the person's. Null for anything else: a routine with no readable clock. */
 function routineSchedule(routine: GrokRoutine, timeZone: string): { schedule: PackageRoutineSchedule; movedZone: boolean } | null {
-  const expression = routine.cron || (looksLikeCron(routine.when) ? routine.when : "");
-  for (const zone of expression ? [routine.timeZone || timeZone, timeZone] : []) {
-    try {
-      return { schedule: normalizeCronSchedule({ type: "cron", expression, timeZone: zone }), movedZone: zone !== (routine.timeZone || timeZone) };
-    } catch {
-      // the next zone, then the plain words
+  if (!CLOCK_TRIGGERS.has(routine.trigger)) return null;
+  for (const expression of [routine.cron, routine.when].filter(Boolean)) {
+    for (const zone of [routine.timeZone || timeZone, timeZone]) {
+      try {
+        return { schedule: normalizeCronSchedule({ type: "cron", expression, timeZone: zone }), movedZone: zone !== (routine.timeZone || timeZone) };
+      } catch {
+        // the next zone, then the words
+      }
     }
   }
-  const daily = simpleDaily(routine.when);
-  return daily ? { schedule: daily, movedZone: false } : null;
+  return null;
 }
 
 function skillEntry(skill: GrokSkill, name: string): { name: string; description: string; instructions: string } | null {
@@ -413,29 +379,33 @@ function serverAddress(raw: string): { url: string; stripped: string[] } | "inse
 }
 
 const VALID_HEADER = /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/;
+/** Where a Bot's event routines are kept for rebuilding: a topic of the new bot's memory. */
+export const GROK_NOTES_FILE = "memory/grok-bot-event-routines.md";
 
-export type GrokNote =
-  | { kind: "instructionsCut" | "memoriesTooBig" }
-  | { kind: "skillLimit" | "skillUnreadable" | "skillEmpty" | "routineEmpty" | "routineMovedZone" | "appLimit" | "serverInsecure" | "serverKeyInAddress" | "serverLimit"; name: string };
+export type GrokItemKind = "bot" | "skill" | "routine" | "memory" | "app";
+export type GrokItemStatus = "imported" | "notes" | "conflict" | "skipped" | "error";
 
-/** A routine the import cannot run as it was: its full text goes to the person, to rebuild. */
-export interface GrokRebuild { name: string; trigger: string; details: string; when: string; instruction: string; reason: "event" | "schedule" | "limit" }
+/** One line of the preview and of the report. `reason` is a locale key's last part; `values` fill it. */
+export interface GrokItem {
+  kind: GrokItemKind;
+  name: string;
+  status: GrokItemStatus;
+  reason?: string;
+  values?: Record<string, string>;
+  /** A routine saved as notes: its trigger and instruction, in full. */
+  details?: string;
+  instruction?: string;
+  /** A skill's folder name. */
+  skill?: string;
+}
 
 export interface GrokMovePlan {
   name: string;
-  title: string;
-  instructions: string;
+  packageId: string;
   document: PackageDocument;
-  skills: string[];
-  routines: Array<{ name: string; when: string; timeZone: string; pausedThere: boolean }>;
-  /** A webhook routine maps onto a webhook automation; it is created paused, with a new address. */
-  webhooks: Array<{ name: string; prompt: string; details: string; pausedThere: boolean }>;
-  rebuild: GrokRebuild[];
-  memories: string[];
-  servers: Array<{ name: string; url: string; values: string[] }>;
-  /** Apps with no address to carry: the person signs in to them here. */
-  apps: string[];
-  notes: GrokNote[];
+  items: GrokItem[];
+  /** Skill folder names to switch on after the import; one the skill scan flags is left off. */
+  skillsOn: string[];
 }
 
 const sameFact = (value: string) => value.replace(/\s+/g, " ").trim().toLowerCase();
@@ -456,138 +426,162 @@ function memoryNotes(bot: GrokBot): { lines: string[]; text: string | null } {
   return { lines, text: `# Notes from Grok Bot\n\n${part("What I remember", facts)}${part("About the person", about)}`.trimEnd() + "\n" };
 }
 
-/** One Grok Bot as one bot in an openmaus.package v2 file, with everything the person is told about it. */
-export function grokMovePlan(bot: GrokBot, options: { timeZone?: string } = {}): GrokMovePlan {
+function eventNotes(name: string, routines: readonly GrokRoutine[]): string {
+  const sections = routines.flatMap((routine) => [
+    `## ${routine.name || "routine"}`, "",
+    `- Trigger: ${routine.trigger || "unknown"}`,
+    `- Details: ${routine.details || routine.when || "n/a"}`, "",
+    routine.instruction, "",
+  ]);
+  return [`# ${name}: Grok Bot routines that run on an event`, "",
+    "These start on something happening instead of a schedule, so they were not turned into routines. Set up each one again here.", "",
+    ...sections].join("\n");
+}
+
+/** One Grok Bot as one bot in an openmaus.package v2 file, with a line for everything that happens to it. `takenServers`
+ * holds server names already here: an existing one is a conflict, never overwritten or shared. */
+export function grokMovePlan(bot: GrokBot, options: { timeZone?: string; takenServers?: ReadonlySet<string> } = {}): GrokMovePlan {
   const timeZone = options.timeZone?.trim() || "UTC";
-  const notes: GrokNote[] = [];
+  const items: GrokItem[] = [];
+  const add = (item: GrokItem) => items.push(item);
   const name = clip(bot.name || "Grok Bot", 100);
   const agentKey = slug(name, 60) || "grok-bot";
 
   let soul = bot.instructions.trim();
-  if (utf8Bytes(soul) > BOT_PROFILE_LIMITS.soul) {
-    soul = fitBytes(soul, BOT_PROFILE_LIMITS.soul);
-    notes.push({ kind: "instructionsCut" });
-  }
+  const cut = utf8Bytes(soul) > BOT_PROFILE_LIMITS.soul;
+  if (cut) soul = fitBytes(soul, BOT_PROFILE_LIMITS.soul);
+  add({ kind: "bot", name: bot.title ? `${name} · ${bot.title}` : name, status: "imported", ...(cut ? { reason: "instructionsCut" } : {}) });
 
   const skillNames = new Set<string>();
   const skillSlugs = new Map<string, string>();
   const skills: Array<NonNullable<ReturnType<typeof skillEntry>>> = [];
-  const shownSkills: string[] = [];
+  const skillsOn: string[] = [];
   for (const [index, skill] of bot.skills.entries()) {
     const label = oneLine(skill.name) || String(index + 1);
     if (skills.length >= AGENT_MAX_SKILLS) {
-      notes.push({ kind: "skillLimit", name: label });
+      add({ kind: "skill", name: label, status: "skipped", reason: "skillLimit" });
       continue;
     }
     if (!skill.instructions.trim()) {
-      notes.push({ kind: "skillEmpty", name: label });
+      add({ kind: "skill", name: label, status: "skipped", reason: "skillEmpty" });
       continue;
     }
     const entry = skillEntry(skill, uniqueSlug(skill.name, `skill-${index + 1}`, skillNames));
     if (!entry) {
-      notes.push({ kind: "skillUnreadable", name: label });
+      add({ kind: "skill", name: label, status: "error", reason: "skillUnreadable" });
       continue;
     }
     skills.push(entry);
-    shownSkills.push(label);
     skillSlugs.set(skill.name.trim().toLowerCase(), entry.name);
+    const [warning] = scanSkillText(entry.instructions);
+    if (warning) add({ kind: "skill", name: label, status: "imported", skill: entry.name, reason: "skillFlagged", values: { warning } });
+    else {
+      skillsOn.push(entry.name);
+      add({ kind: "skill", name: label, status: "imported", skill: entry.name });
+    }
   }
 
   const routineKeys = new Set<string>();
+  const routineNames = new Set<string>();
   const routines: NonNullable<PackageDocument["package"]["routines"]> = [];
-  const plan: Pick<GrokMovePlan, "routines" | "webhooks" | "rebuild"> = { routines: [], webhooks: [], rebuild: [] };
+  const unscheduled: GrokRoutine[] = [];
   for (const [index, routine] of bot.routines.entries()) {
-    const label = clip(oneLine(routine.name) || `Routine ${index + 1}`, 80);
+    const label = oneLine(routine.name) || "routine";
     if (!routine.instruction) {
-      notes.push({ kind: "routineEmpty", name: label });
-      continue;
-    }
-    const usesSkills = routine.skills.flatMap((skill) => skillSlugs.get(skill.toLowerCase()) ?? []);
-    const prompt = `${routine.instruction}${usesSkills.length ? `\n\nUse these skills: ${usesSkills.join(", ")}.` : ""}`.slice(0, 20_000);
-    const rebuild = (reason: GrokRebuild["reason"]) =>
-      plan.rebuild.push({ name: label, trigger: routine.trigger, details: routine.details, when: routine.when, instruction: routine.instruction, reason });
-    const event = !CLOCK_TRIGGERS.has(routine.trigger) || (!routine.trigger && !routine.cron && EVENT_WORDS.test(routine.when));
-    if (event) {
-      if (routine.trigger === "webhook") plan.webhooks.push({ name: label, prompt, details: routine.details, pausedThere: routine.paused });
-      else rebuild("event");
+      add({ kind: "routine", name: label, status: "skipped", reason: "routineEmpty" });
       continue;
     }
     const timing = routineSchedule(routine, timeZone);
     if (!timing) {
-      rebuild("schedule");
+      unscheduled.push(routine);
+      const event = !CLOCK_TRIGGERS.has(routine.trigger);
+      add({
+        kind: "routine", name: label, status: "notes", reason: event ? "routineEvent" : "routineSchedule",
+        ...(event ? { values: { trigger: routine.trigger } } : {}),
+        ...(routine.details || routine.when ? { details: routine.details || routine.when } : {}),
+        instruction: routine.instruction,
+      });
       continue;
     }
     if (routines.length >= MAX_ROUTINES) {
-      rebuild("limit");
+      add({ kind: "routine", name: label, status: "skipped", reason: "routineLimit" });
       continue;
     }
-    if (timing.movedZone) notes.push({ kind: "routineMovedZone", name: label });
+    const base = clip(`${name}: ${label}`, 74);
+    let jobName = base;
+    for (let n = 2; routineNames.has(jobName); n += 1) jobName = `${base} (${n})`;
+    routineNames.add(jobName);
+    const usesSkills = routine.skills.flatMap((skill) => skillSlugs.get(skill.toLowerCase()) ?? []);
     routines.push({
       key: uniqueSlug(label, `routine-${index + 1}`, routineKeys),
-      name: label,
+      name: jobName,
       agent: agentKey,
-      prompt,
+      prompt: `${routine.instruction}${usesSkills.length ? `\n\nUse these skills: ${usesSkills.join(", ")}.` : ""}`.slice(0, 20_000),
       runOn: "maus",
       schedule: timing.schedule,
       durationMinutes: 30,
       enabledAfterInstall: false,
     });
-    plan.routines.push({ name: label, when: routine.when || routine.cron, timeZone: timing.movedZone ? timeZone : routine.timeZone || timeZone, pausedThere: routine.paused });
+    add({
+      kind: "routine", name: `${jobName} · ${routine.when || routine.cron} (${timing.movedZone ? timeZone : routine.timeZone || timeZone})`, status: "imported",
+      ...(timing.movedZone ? { reason: "routineMovedZone", values: { zone: routine.timeZone } } : {}),
+    });
+  }
+
+  const memory = memoryNotes(bot);
+  const seed: Record<string, string> = {};
+  if (memory.text && utf8Bytes(memory.text) <= SEED_FILE_MAX_BYTES) {
+    seed["MEMORY.md"] = memory.text;
+    for (const line of memory.lines) add({ kind: "memory", name: line, status: "imported" });
+  } else if (memory.text) add({ kind: "memory", name: String(memory.lines.length), status: "error", reason: "memoriesTooBig" });
+  if (unscheduled.length) {
+    const notes = eventNotes(name, unscheduled);
+    if (utf8Bytes(notes) <= SEED_FILE_MAX_BYTES) seed[GROK_NOTES_FILE] = notes;
+    else add({ kind: "routine", name: String(unscheduled.length), status: "error", reason: "notesTooBig" });
   }
 
   const connectionKeys = new Set<string>();
   const connections: NonNullable<PackageDocument["package"]["connections"]> = [];
-  const servers: GrokMovePlan["servers"] = [];
-  const appSlugs = new Set<string>();
-  const requiredApps: PackageDocument["package"]["requirements"]["apps"] = [];
-  const signInApps: string[] = [];
   for (const app of bot.apps) {
     const label = clip(app.name, 100);
     const address = app.mcpUrl ? serverAddress(app.mcpUrl) : null;
+    if (!address) {
+      add({ kind: "app", name: label, status: "skipped", reason: "appNoAddress" });
+      continue;
+    }
     if (address === "insecure" || address === "keyInAddress") {
-      notes.push({ kind: address === "insecure" ? "serverInsecure" : "serverKeyInAddress", name: label });
+      add({ kind: "app", name: label, status: "skipped", reason: address === "insecure" ? "serverInsecure" : "serverKeyInAddress" });
       continue;
     }
-    if (address) {
-      if (connections.length >= PACKAGE_MAX_CONNECTIONS) {
-        notes.push({ kind: "serverLimit", name: label });
-        continue;
-      }
-      const key = uniqueSlug(`${/^[a-z]/i.test(label) ? "" : "server-"}${label}`, `server-${connections.length + 1}`, connectionKeys, 28);
-      const headers = app.headerNames.filter((header) => VALID_HEADER.test(header)).slice(0, 32);
-      connections.push({
-        key,
-        label,
-        reason: clip(`${name} used ${label} in Grok Bot.`, 240),
-        mcp: { transport: app.transport === "sse" || /\/sse\/?$/.test(new URL(address.url).pathname) ? "sse" : "http", url: address.url, valueNames: headers },
-      });
-      servers.push({ name: label, url: address.url, values: [...new Set([...app.headerNames, ...app.envNames, ...address.stripped])] });
+    if (connections.length >= PACKAGE_MAX_CONNECTIONS) {
+      add({ kind: "app", name: label, status: "skipped", reason: "serverLimit" });
       continue;
     }
-    const appSlug = slug(label, 60);
-    if (!appSlug || appSlugs.has(appSlug)) continue;
-    if (appSlugs.size >= MAX_APPS) {
-      notes.push({ kind: "appLimit", name: label });
+    const proposed = slug(`${/^[a-z]/i.test(label) ? "" : "server-"}${label}`, 25) || `server-${connections.length + 1}`;
+    if (options.takenServers?.has(proposed)) {
+      add({ kind: "app", name: label, status: "conflict", reason: "serverConflict" });
       continue;
     }
-    appSlugs.add(appSlug);
-    requiredApps.push({ slug: appSlug, label, reason: clip(`${name} used ${label} in Grok Bot.`, 240) });
-    signInApps.push(label);
+    const key = uniqueSlug(proposed, proposed, connectionKeys, 28);
+    connections.push({
+      key,
+      label,
+      reason: clip(`${name} used ${label} in Grok Bot.`, 240),
+      mcp: { transport: app.transport === "sse" || /\/sse\/?$/.test(new URL(address.url).pathname) ? "sse" : "http", url: address.url, valueNames: app.headerNames.filter((header) => VALID_HEADER.test(header)).slice(0, 32) },
+    });
+    const stripped = [...new Set([...app.headerNames, ...app.envNames, ...address.stripped])];
+    add({ kind: "app", name: label, status: "imported", reason: stripped.length ? "serverOffNeeds" : "serverOff", ...(stripped.length ? { values: { values: stripped.join(", ") } } : {}) });
   }
-
-  const memory = memoryNotes(bot);
-  let seed: { memory: Record<string, string> } | undefined;
-  if (memory.text && utf8Bytes(memory.text) <= SEED_FILE_MAX_BYTES) seed = { memory: { "MEMORY.md": memory.text } };
-  else if (memory.text) notes.push({ kind: "memoriesTooBig" });
 
   const description = bot.description.trim();
   const summary = clip(description || bot.title || `${name}, brought over from Grok Bot.`, 2_000);
   const hash = shortHash(`${name}\n${soul}`);
+  const packageId = `${agentKey}-${hash.toString(16).padStart(8, "0").slice(0, 6)}`;
   const draft: PackageDocument = {
     format: PACKAGE_FORMAT,
     version: PACKAGE_VERSION,
     package: {
-      id: `${agentKey}-${hash.toString(16).padStart(8, "0").slice(0, 6)}`,
+      id: packageId,
       release: "1.0.0",
       name,
       tagline: clip(oneLine(summary), 160),
@@ -597,7 +591,7 @@ export function grokMovePlan(bot: GrokBot, options: { timeZone?: string } = {}):
       license: "See source",
       outcomes: [clip(`${name} runs in OpenMausBot with your own engine and apps.`, 240)],
       setupMinutes: 5,
-      requirements: { apps: requiredApps, capabilities: [] },
+      requirements: { apps: [], capabilities: [] },
       team: { name: clip(name, 60) },
       agents: [{
         key: agentKey,
@@ -608,7 +602,7 @@ export function grokMovePlan(bot: GrokBot, options: { timeZone?: string } = {}):
         appearance: { color: BOT_COLORS[hash % BOT_COLORS.length]! },
         ...(skills.length ? { skills: skills.map((skill) => skill.name) } : {}),
         ...(connections.length ? { connections: connections.map((connection) => connection.key) } : {}),
-        ...(seed ? { seed } : {}),
+        ...(Object.keys(seed).length ? { seed: { memory: seed } } : {}),
       }],
       ...(routines.length ? { routines } : {}),
       ...(connections.length ? { connections } : {}),
@@ -621,10 +615,7 @@ export function grokMovePlan(bot: GrokBot, options: { timeZone?: string } = {}):
   } catch {
     throw new GrokImportError("unusable");
   }
-  return {
-    name, title: bot.title, instructions: soul, document, skills: shownSkills, ...plan,
-    memories: seed ? memory.lines : [], servers, apps: signInApps, notes,
-  };
+  return { name, packageId, document, items, skillsOn };
 }
 
 /** Routines the Bot's chat announced that its export does not have, by the same slug either side would get. */
