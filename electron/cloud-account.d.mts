@@ -174,8 +174,10 @@ export interface CloudAccountBridge {
 }
 /** Who is signed in on this device, as the You menu shows it. `signIn`: this account's sign-in has ended here. */
 export interface AccountRow { id: string; email: string; signIn?: true }
-export interface AccountsView { active: AccountRow | null; others: AccountRow[] }
+export interface AccountsView { active: AccountRow | null }
 export interface AccountSwitchResult { outcome: "switched" | "signed-out" | "moving" | "sign-in" | "gone" | "failed"; email?: string; view: AccountsView }
+/** What a click on a place of another account answers when it didn't switch: nothing moved. `sign-in`: that sign-in has ended. */
+export interface RailOpenResult { outcome: "switched" | "moving" | "sign-in" | "gone" | "failed"; email?: string }
 /** `added`: kept signed in, not switched to, while this computer's move finishes; `already`: that account is the one signed in. */
 export type AccountAddResult =
   | { outcome: "switched" | "added" | "already"; email?: string; view: AccountsView }
@@ -184,9 +186,7 @@ export type AccountAddResult =
 /** This app's own pages only: main refuses any other page. Absent on an older app. */
 export interface AccountsBridge {
   list(): Promise<AccountsView>;
-  /** One tap, no code: `moving` while this computer's move is finishing, `sign-in` once that sign-in has ended, `gone` when it isn't here any more. */
-  switchTo(id: string): Promise<AccountSwitchResult>;
-  /** Removes that account from this device; the active one's place goes to another signed in here, else the app is signed out. */
+  /** Removes that account from this device; the window goes to another signed in here, else the app is signed out. */
   signOut(id: string): Promise<AccountSwitchResult>;
   /** Add another account: the active account goes on until this succeeds. The attempt and the token stay in main. */
   addStart(email: string): Promise<CloudSignInStart>;

@@ -4,8 +4,15 @@ export interface RailPlace {
   id: string;
   name: string;
   color: import("./cloud-buy.mjs").CloudColor | null;
-  /** This computer, a Cloud of the person's own (My Cloud included), a team's Cloud, or a server they connected by hand. */
-  kind: "computer" | "cloud" | "team" | "server";
+  /** This computer, a Cloud of the person's own (My Cloud included), a team's Cloud, a server they connected by hand, or an
+   * account signed in here with no place of its own to show. */
+  kind: "computer" | "cloud" | "team" | "server" | "account";
+  /** With several accounts signed in here: which group it is in (a divider stands between groups). None with one account. */
+  group?: string;
+  /** With several accounts signed in here: the address of the account it belongs to. Only the rail's own page gets this. */
+  email?: string;
+  /** Its account's sign-in has ended: a click asks for the emailed code. */
+  signIn?: true;
   /** False while there is nothing to open yet (a Cloud being made, with no address). */
   opens: boolean;
   active?: true;
@@ -42,7 +49,8 @@ export interface RailPlace {
 }
 /** ＋'s choices here: buying a Cloud, pasting a server's pairing link, typing its address on this computer's Settings, and
  * a new organization on the Team plan this account pays for (absent from an older app's main). */
-export interface RailAddChoices { cloud: boolean; link: boolean; address: boolean; organization?: boolean }
+/** `account`: Add another account (the rail's own page runs that sign-in). */
+export interface RailAddChoices { cloud: boolean; link: boolean; address: boolean; organization?: boolean; account?: boolean }
 /** `beside`: a place's page, which never reads the list, learns that the window's rail stands beside it. */
 export interface RailState { places: RailPlace[]; add: RailAddChoices; beside?: true }
 /** Buying another Cloud as a page sees it: what the sheet says, never the account, an address or the checkout page. */

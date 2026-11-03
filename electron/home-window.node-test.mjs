@@ -869,21 +869,3 @@ test("moved to A's Cloud, B signed in with a Cloud of its own: B's Cloud opens, 
   assert.deepEqual(homeOf({ journal: done(), state: { status: "unavailable", account: { id: "acct-2" } } }), { kind: "signin", other: true }, "before the Admin answers");
   assert.deepEqual(homeOf({ journal: done(), state: { status: "reauth-required", account: { id: "acct-2" } } }), { kind: "signin", other: true });
 });
-
-test("moved to A's Cloud, B signed in with none: the screen names where the bots are, and Sign in adds that account beside B", async () => {
-  const added = [], asked = [];
-  const w = world({ state: accountB(null), deps: { signInOther: async () => added.push("add"), movedAccount: (id) => { asked.push(id); return { id, email: "a@example.test" }; } } });
-  await w.home.show();
-  assert.deepEqual(w.home.view(), { screen: "signin", other: true, movedTo: { id: "acct-1", email: "a@example.test" } });
-  assert.deepEqual(asked, ["acct-1"]);
-  assert.deepEqual([w.fetched, w.pairs], [[], 0], "A's Cloud is never asked for with B's sign-in");
-  await w.home.signIn();
-  assert.deepEqual(added, ["add"]);
-  assert.deepEqual(w.signIns, [], "B stays signed in: nothing signs out or starts over");
-});
-
-test("moved to A's Cloud, B signed in and A not saved here: the plain words, with no address to switch to", async () => {
-  const w = world({ state: accountB(null), deps: { movedAccount: () => null } });
-  await w.home.show();
-  assert.deepEqual(w.home.view(), { screen: "signin", other: true });
-});

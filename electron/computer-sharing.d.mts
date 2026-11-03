@@ -146,6 +146,8 @@ export function createComputerSharing(options: {
   lentToCloud(env: Workspace | null | undefined): { lendingId: string; folders: Array<{ id: string; path: string; name: string; write: boolean }>; protectedPaths: string[]; paused?: true } | { off: true };
   /** Another account takes over: lending to this account's Clouds stops, and goes on if it comes back. */
   leaveAccount(accountId: string | null): void;
+  /** Lending's last requests have been answered or have timed out; a Cloud's answer can re-issue its session cookie. */
+  goodbyesDone(): Promise<unknown>;
   lendingToCloud(): boolean;
   /** A server is using this computer now: a job running on it, or its browsing going through this computer. */
   busy(): boolean;

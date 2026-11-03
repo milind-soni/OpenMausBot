@@ -1,25 +1,27 @@
 import { useEffect, useState } from "react";
 import { Check, LogOut, Plus, UserRound, X } from "lucide-react";
-import type { AccountRow, AccountsView, AccountSwitchResult } from "../../electron/cloud-account.mjs";
+import type { AccountsView, AccountSwitchResult, RailOpenResult } from "../../electron/cloud-account.mjs";
 import { cn } from "@/lib/cn";
 import type { CloudSignInPhase } from "@/lib/cloud-plan";
 import { t } from "@/lib/i18n";
-import { CLOSE, Heading, QUIET, SCREEN, SHEET } from "./cloud-buy/parts";
+import { usePlaces } from "@/lib/places";
+import { CLOSE, Heading, PRIMARY, QUIET, SCREEN, SHEET } from "./cloud-buy/parts";
 import { codeDigits, SignInScreen } from "./cloud-buy/SignInScreen";
 import type { SidebarMenuItem } from "./SidebarPopoverMenu";
 
 export interface AccountsAccess {
-  /** This app's own page: the list itself. Any other page has none. */
+  /** This app's own page: who is signed in. Any other page has none. */
   view: AccountsView | null;
   /** Another page: main opens the sheet on the rail's page for it. */
   openSheet: (() => void) | null;
-  switchTo(row: AccountRow): void;
+  /** No rail stands beside this page, so its ＋ can't be where another account is added. */
+  noRail: boolean;
   signOut(id: string): void;
   add(email?: string): void;
 }
 
-/** What a switch or sign-out that didn't go through says; null when it went through. */
-export function switchNote(result: Pick<AccountSwitchResult, "outcome">): string | null {
+/** What a click or sign-out that didn't go through says; null when it went through. */
+export function switchNote(result: Pick<RailOpenResult | AccountSwitchResult, "outcome">): string | null {
   switch (result.outcome) {
     case "moving": return t("accounts.moving");
     case "gone": return t("accounts.gone");
@@ -33,6 +35,7 @@ export function useAccounts(): AccountsAccess & { sheet: { email: string | null;
   const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.accounts;
   const remote = window.ogb?.accountSheet;
   const own = window.ogb?.app?.ownPage === true && Boolean(bridge);
+  const places = usePlaces();
   const [view, setView] = useState<AccountsView | null>(null);
   const [offered, setOffered] = useState(false);
   const [sheet, setSheet] = useState<{ email: string | null; note: string | null } | null>(null);
@@ -48,37 +51,28 @@ export function useAccounts(): AccountsAccess & { sheet: { email: string | null;
     void remote.offered().then((yes) => { if (alive) setOffered(yes === true); }).catch(() => {});
     return () => { alive = false; };
   }, [own, remote]);
-  const said = (result: AccountSwitchResult, row?: AccountRow) => {
-    setView(result.view);
-    if (result.outcome === "sign-in") setSheet({ email: row?.email ?? null, note: null });
-    else { const note = switchNote(result); if (note) setSheet({ email: null, note }); }
-  };
   return {
     view: own ? view : null,
     openSheet: !own && offered && remote ? () => { void remote.open().catch(() => {}); } : null,
-    switchTo: (row) => {
-      if (row.signIn) { setSheet({ email: row.email, note: null }); return; }
-      void bridge?.switchTo(row.id).then((result) => said(result, row)).catch(() => setSheet({ email: null, note: t("accounts.failed") }));
-    },
-    signOut: (id) => { void bridge?.signOut(id).then((result) => said(result)).catch(() => setSheet({ email: null, note: t("accounts.failed") })); },
+    noRail: !places.beside && !places.places.length,
+    signOut: (id) => { void bridge?.signOut(id).then((result) => { setView(result.view); const note = switchNote(result); if (note) setSheet({ email: null, note }); }).catch(() => setSheet({ email: null, note: t("accounts.failed") })); },
     add: (email) => setSheet({ email: email ?? "", note: null }),
     sheet,
     closeSheet: () => setSheet(null),
   };
 }
 
-/** The You menu's last rows. One account: its address, Add another account, Sign out. On another page, one row that opens
- * the sheet. Signed out here: Sign in, as anyone with no account yet has. */
-export function accountMenuItems({ view, openSheet, switchTo, signOut, add }: AccountsAccess): SidebarMenuItem[] {
+/** The You menu's last rows: who is signed in here and Sign out. The other accounts are on the rail, and so is Add another account,
+ * in its ＋; with no rail beside this page (nothing to list but This computer, or the person hid it) it is here. On another page,
+ * one row that opens the sheet, with no address. Signed out: nothing, as Settings has the sign-in. */
+export function accountMenuItems({ view, openSheet, noRail, signOut, add }: AccountsAccess): SidebarMenuItem[] {
   if (openSheet) return [{ key: "accounts-sheet", label: t("accounts.manage"), icon: <UserRound size={18} />, onSelect: openSheet }];
-  if (!view) return [];
-  const active = view.active;
-  if (!active && !view.others.length) return [];
+  const active = view?.active;
+  if (!active) return [];
   return [
-    ...(active ? [{ key: "accounts-active", heading: t("accounts.heading"), label: active.email, title: active.email, checked: true, icon: <Check size={18} />, disabled: !active.signIn, ...(active.signIn ? { subtitle: t("accounts.needsSignIn") } : {}), onSelect: () => { if (active.signIn) add(active.email); } }] : []),
-    ...view.others.map((row) => ({ key: `accounts-${row.id}`, label: row.email, title: row.email, checked: false, icon: <UserRound size={18} />, ...(row.signIn ? { subtitle: t("accounts.needsSignIn") } : {}), onSelect: () => switchTo(row) })),
-    { key: "accounts-add", label: t("accounts.add"), icon: <Plus size={18} />, onSelect: () => add() },
-    ...(active ? [{ key: "accounts-sign-out", label: t("accounts.signOut"), icon: <LogOut size={18} />, onSelect: () => signOut(active.id) }] : []),
+    { key: "accounts-active", heading: t("accounts.heading"), label: active.email, title: active.email, checked: true, icon: <Check size={18} />, disabled: !active.signIn, ...(active.signIn ? { subtitle: t("accounts.needsSignIn") } : {}), onSelect: () => { if (active.signIn) add(active.email); } },
+    ...(noRail ? [{ key: "accounts-add", label: t("accounts.add"), icon: <Plus size={18} />, onSelect: () => add() }] : []),
+    { key: "accounts-sign-out", label: t("accounts.signOut"), icon: <LogOut size={18} />, onSelect: () => signOut(active.id) },
   ];
 }
 
@@ -86,7 +80,7 @@ const EMAIL_STEP: CloudSignInPhase = { step: "email", intent: false, problem: nu
 
 /** Add another account in place: the emailed code, or the browser for single sign-on and two-step. The account in use goes
  * on until this succeeds; the code's attempt and the token stay in main. */
-function AddAccount({ start, onDone, onBack }: { start: string; onDone: (note: string | null, view?: AccountsView) => void; onBack: () => void }) {
+function AddAccount({ start, onDone, onBack }: { start: string; onDone: (note: string | null) => void; onBack: () => void }) {
   const bridge = window.ogb?.accounts;
   const [phase, setPhase] = useState<CloudSignInPhase>(EMAIL_STEP);
   const [email, setEmail] = useState(start);
@@ -100,7 +94,7 @@ function AddAccount({ start, onDone, onBack }: { start: string; onDone: (note: s
     if (busy || !bridge) return;
     setBusy(true);
     void bridge.addStart(email).then((result) => {
-      if (result.outcome === "sent") { setPhase({ step: "code", intent: false, email: result.email, resendAt: result.resendAt, problem: null, triesLeft: null, ...(result.signupOpen === false ? { signupOpen: false } : {}) }); setEmail(result.email); setCode(""); }
+      if (result.outcome === "sent") { setPhase({ step: "code", intent: false, email: result.email, resendAt: result.resendAt, problem: null, triesLeft: null, ...(result.signupOpen === false ? { signupOpen: false } : {}) }); setCode(""); }
       else setPhase({ step: "email", intent: false, problem: result.outcome });
     }, () => setPhase({ step: "email", intent: false, problem: "failed" })).finally(() => setBusy(false));
   };
@@ -109,19 +103,19 @@ function AddAccount({ start, onDone, onBack }: { start: string; onDone: (note: s
     const at = phase;
     setBusy(true);
     void bridge.addVerify(digits).then((result) => {
-      if (result.outcome === "switched") onDone(null, result.view);
-      else if (result.outcome === "added") onDone(t("accounts.added", { email: result.email ?? email }), result.view);
-      else if (result.outcome === "already") onDone(t("accounts.already", { email: result.email ?? email }), result.view);
+      if (result.outcome === "switched") onDone(null);
+      else if (result.outcome === "added") onDone(t("accounts.added", { email: result.email ?? email }));
+      else if (result.outcome === "already") onDone(t("accounts.already", { email: result.email ?? email }));
       else { setCode(""); setPhase({ ...at, problem: result.outcome, triesLeft: result.outcome === "wrong-code" ? result.triesLeft : null }); }
     }, () => setPhase({ ...at, problem: "failed", triesLeft: null })).finally(() => setBusy(false));
   };
   // The browser's way ends in main; the sheet closes once the account it brought is the one in use.
   useEffect(() => {
     if (!browser || !bridge) return;
-    let before: AccountRow | null | undefined;
+    let before: AccountsView["active"] | undefined;
     const look = () => { void bridge.list().then((view) => {
       if (before === undefined) { before = view.active; return; }
-      if (view.active && !view.active.signIn && (view.active.id !== before?.id || before?.signIn)) onDone(null, view);
+      if (view.active && !view.active.signIn && (view.active.id !== before?.id || before?.signIn)) onDone(null);
     }).catch(() => {}); };
     look();
     return bridge.onChanged(look);
@@ -136,8 +130,8 @@ function AddAccount({ start, onDone, onBack }: { start: string; onDone: (note: s
     onResend={send} onBrowser={() => { setBusy(true); void bridge?.addBrowser().then((result) => { if (result.outcome === "browser") setBrowser(true); else setPhase({ step: "email", intent: false, problem: "failed" }); }, () => setPhase({ step: "email", intent: false, problem: "failed" })).finally(() => setBusy(false)); }} />;
 }
 
-/** Over any place's page, on the rail's own page, or over this computer's: who is signed in here, the others, Add another
- * account and Sign out. `adding`: straight to the sign-in, for this address when it has one. */
+/** Over any place's page, on the rail's own page, or over this computer's: who is signed in here and Sign out, or a plain line
+ * (`note`). `adding`: the sign-in, for this address when it has one: Add another account, or a saved account whose sign-in ended. */
 export function AccountsSheet({ onClose, adding = null, note: given = null }: { onClose: () => void; adding?: string | null; note?: string | null }) {
   const bridge = window.ogb?.accounts;
   const [view, setView] = useState<AccountsView | null>(null);
@@ -149,12 +143,12 @@ export function AccountsSheet({ onClose, adding = null, note: given = null }: { 
     read();
     return bridge.onChanged(read);
   }, [bridge]);
-  const act = (work: Promise<AccountSwitchResult> | undefined, row?: AccountRow) => {
+  const signOut = (id: string) => {
     setNote(null);
-    void work?.then((result) => {
+    void bridge?.signOut(id).then((result) => {
       setView(result.view);
-      if (result.outcome === "sign-in") setAdd(row?.email ?? "");
-      else { const said = switchNote(result); if (said) setNote(said); else onClose(); }
+      const said = switchNote(result);
+      if (said) setNote(said); else onClose();
     }, () => setNote(t("accounts.failed")));
   };
   const active = view?.active ?? null;
@@ -162,23 +156,12 @@ export function AccountsSheet({ onClose, adding = null, note: given = null }: { 
     <div role="dialog" aria-modal="true" aria-labelledby="cloud-add-title" data-accounts-sheet className={cn(SHEET, "relative w-full max-w-[420px]")}>
       <button type="button" onClick={onClose} aria-label={t("accounts.close")} className={cn(CLOSE, "absolute end-4 top-4 z-10")}><X size={16} /></button>
       {add !== null
-        ? <AddAccount start={add} onBack={() => setAdd(null)} onDone={(said, next) => { if (next) setView(next); setAdd(null); if (said) setNote(said); else onClose(); }} />
+        ? <AddAccount start={add} onBack={() => (adding !== null ? onClose() : setAdd(null))} onDone={(said) => { setAdd(null); if (said) setNote(said); else onClose(); }} />
         : <div className={SCREEN}>
           <Heading title={t("accounts.title")} />
-          <ul className="flex flex-col gap-1">
-            {active && <li data-accounts-active className="flex min-h-[36px] items-center gap-2 text-[14px] text-ink"><Check size={16} aria-label={t("accounts.heading")} /><span className="truncate" title={active.email}>{active.email}</span></li>}
-            {(view?.others ?? []).map((row) => <li key={row.id}>
-              <button type="button" data-accounts-other={row.id} className="flex min-h-[36px] w-full items-center gap-2 rounded-lg px-1 text-start text-[14px] text-ink hover:bg-ink/[0.05]" onClick={() => (row.signIn ? setAdd(row.email) : act(bridge?.switchTo(row.id), row))}>
-                <UserRound size={16} aria-hidden="true" /><span className="min-w-0 flex-1 truncate" title={row.email}>{row.email}</span>
-                {row.signIn && <span className="shrink-0 text-[12px] text-ink-secondary">{t("accounts.needsSignIn")}</span>}
-              </button>
-            </li>)}
-          </ul>
-          {note && <p role="status" className="text-[13px] leading-5 text-ink-secondary">{note}</p>}
-          <div className="flex flex-wrap gap-2">
-            <button type="button" data-accounts-add className={QUIET} onClick={() => setAdd("")}>{t("accounts.add")}</button>
-            {active && <button type="button" data-accounts-sign-out className={QUIET} onClick={() => act(bridge?.signOut(active.id))}>{t("accounts.signOut")}</button>}
-          </div>
+          {active && !given && <p data-accounts-active className="truncate text-[14px] text-ink" title={active.email}>{t("accounts.heading")} {active.email}</p>}
+          {note && <p role="status" data-accounts-note className="text-[13px] leading-5 text-ink-secondary">{note}</p>}
+          {active && !given && <button type="button" data-accounts-sign-out className={PRIMARY} onClick={() => signOut(active.id)}>{t("accounts.signOut")}</button>}
         </div>}
     </div>
   </div>;

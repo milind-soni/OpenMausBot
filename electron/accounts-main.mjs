@@ -1,26 +1,31 @@
-// Who is signed in on this device, for the You menu. The list goes only to this app's own pages: this computer's and the
-// rail's. A Cloud's or a server's page never reads it, because it would learn the addresses of the person's other accounts;
-// it may only ask main, from the person's click, to open the sheet on the rail's page.
-import { clearPlaceStorage, createPlaceStash, withoutAccountPlaces, withPlacesBack } from "./account-places.mjs";
+// Who is signed in on this device, for the You menu: the account in use, by its address, and only on this app's own pages. The
+// accounts that wait show on the rail (rail-accounts.mjs), whose page is the only one that learns their addresses. A Cloud's or a
+// server's page never reads any of it; it may only ask main, from the person's click, to open the sheet on the rail's page.
+import { accountPlaces, clearPlaceStorage, createPlaceStash, withoutPlaces, withPlacesBack } from "./account-places.mjs";
 import { createCloudAccounts } from "./cloud-accounts.mjs";
+import { accountRows } from "./rail-accounts.mjs";
 
-/** The accounts as the You menu shows them: never a token, and no active account while none is signed in. */
-export function accountsView(state, others = []) {
+/** The sign-in as the You menu shows it: never a token, and no account while none is signed in. */
+export function accountsView(state) {
   const account = state?.account;
-  const active = account?.id && state.status !== "signed-out" && state.status !== "connecting"
-    ? { id: account.id, email: account.email, ...(state.status === "reauth-required" ? { signIn: true } : {}) } : null;
-  return { active, others: others.filter((row) => row.id !== active?.id) };
+  if (!account?.id || state.status === "signed-out" || state.status === "connecting") return { active: null };
+  return { active: { id: account.id, email: account.email, ...(state.status === "reauth-required" ? { signIn: true } : {}) } };
 }
 
-/** Everything of the account this window held: its places leave the list and wait in `keep` (or go, signing out), the window
- * leaves them, and their sessions go. */
-export function createAccountLeave({ saved, persist, session, mine, leaveWindow, keep = () => {}, log = () => {} }) {
-  return async (accountId = null) => {
-    const { saved: next, left } = withoutAccountPlaces(saved(), mine());
-    if (left.length) { keep(accountId, left); persist(next); }
-    await leaveWindow();
-    await clearPlaceStorage(session(), left, log);
-    return left;
+/** Everything of the account this window held. `places()` names them while the sign-in still says which Cloud is My Cloud:
+ * a My Cloud saved by hand carries no other mark, and the sign-in names none once it has ended. `finish(left)`, once it has:
+ * they leave the list, the window leaves them, and once nothing is still waiting on them (`settled`) their sessions go. */
+export function createAccountLeave({ saved, persist, session, mine, leaveWindow, settled = async () => {}, log = () => {} }) {
+  return {
+    places: () => accountPlaces(saved(), mine()),
+    async finish(left) {
+      const next = withoutPlaces(saved(), left);
+      if (next !== saved()) persist(next);
+      await leaveWindow();
+      await settled();
+      await clearPlaceStorage(session(), left, log);
+      return left;
+    },
   };
 }
 
@@ -29,22 +34,31 @@ export function createAccountLeave({ saved, persist, session, mine, leaveWindow,
  * @param {{
  *   allowed(): boolean, active(): any, savedStore(): any, stash(): { read(): unknown, write(value: unknown): void }, client(): any, origin: string,
  *   makeClient(options: { store: any, onState(state: any): void }): any,
- *   saved(): any, persist(next: unknown): void, session(): any, mine(): string | null, leaveWindow(): unknown,
- *   holding(): string | null, letGo(accountId: string | null): void, settled(): Promise<unknown>, forgetLending(place: any): void, tell(): void, log?(line: string): void,
- * }} deps `letGo(id)`: what runs for that account in the window and for lending stops; `forgetLending(place)`: that place is off
- * this device with its account.
+ *   saved(): any, persist(next: unknown): void, session(): any, mine(): string | null, leaveWindow(): unknown, rows(): any[],
+ *   holding(): string | null, letGo(accountId: string | null): void, lendingDone(): Promise<unknown>, settled(): Promise<unknown>, forgetLending(place: any): void, tell(): void, log?(line: string): void,
+ * }} deps `letGo(id)`: what runs for that account in the window and for lending stops; `lendingDone`: lending's last requests have
+ * been answered; `rows`: the rail as it is now, kept for while the account waits; `forgetLending(place)`: that place is off this
+ * device with its account.
  */
 export function createDesktopRing(deps) {
-  let made = null, stash = null;
+  let made = null, stash = null, leavingNow = null;
   const places = () => (stash ??= createPlaceStash(deps.stash()));
-  const leave = createAccountLeave({ saved: deps.saved, persist: deps.persist, session: deps.session, mine: deps.mine, leaveWindow: deps.leaveWindow, keep: (id, left) => places().put(id, left), log: deps.log });
+  const leave = createAccountLeave({ saved: deps.saved, persist: deps.persist, session: deps.session, mine: deps.mine, leaveWindow: deps.leaveWindow, settled: deps.lendingDone, log: deps.log });
   const ring = () => {
     if (!deps.allowed()) return null;
     return made ??= createCloudAccounts({ active: deps.active(), saved: deps.savedStore(), client: deps.client, makeClient: deps.makeClient, origin: deps.origin, holding: deps.holding, settled: deps.settled, changed: deps.tell, log: deps.log,
-      leaving: async (id) => { deps.letGo(id); await leave(id); },
-      arriving: async (id) => { deps.persist(withPlacesBack(deps.saved(), places().take(id))); },
-      removed: async (id) => { for (const place of places().take(id)) deps.forgetLending(place); } });
+      leaving: async (id) => { deps.letGo(id); leavingNow = { left: leave.places(), rows: accountRows(deps.rows()) }; },
+      left: async (id) => {
+        const { left, rows } = leavingNow ?? { left: [], rows: [] };
+        leavingNow = null;
+        places().put(id, left, rows);
+        await leave.finish(left);
+      },
+      arriving: async (id) => { deps.persist(withPlacesBack(deps.saved(), places().take(id).places)); },
+      removed: async (id) => { for (const place of places().take(id).places) deps.forgetLending(place); } });
   };
+  /** The accounts that wait, with their places as they were kept: for the rail's own page only. */
+  ring.waiting = () => (ring()?.others() ?? []).map((row) => ({ ...row, ...places().peek(row.id) }));
   ring.close = () => made?.close();
   return ring;
 }
@@ -66,19 +80,17 @@ export function createDesktopRing(deps) {
  */
 export function installAccounts({ ipcMain, ownPage, placePage, account, client, ring, holdSheet, tellSheet, tell }) {
   let sheetPending = false;
-  const view = () => accountsView(account()?.state(), ring()?.others() ?? []);
-  const answered = async (work) => {
-    try { return { ...await work(), view: view() }; }
-    catch { return { outcome: "failed", view: view() }; }
-  };
+  const view = () => accountsView(account()?.state());
   const own = (channel, handler) => ipcMain.handle(channel, (event, ...args) => {
     if (!ownPage(event)) throw new Error(`${channel} is only available on this app's own page`);
     return handler(...args);
   });
   const text = (value, max) => (typeof value === "string" ? value.slice(0, max) : "");
   own("accounts:list", view);
-  own("accounts:switch", (id) => answered(() => ring().switchTo(text(id, 128))));
-  own("accounts:sign-out", (id) => answered(() => ring().signOut(text(id, 128))));
+  own("accounts:sign-out", async (id) => {
+    try { return { ...await ring().signOut(text(id, 128)), view: view() }; }
+    catch { return { outcome: "failed", view: view() }; }
+  });
   own("accounts:add-start", (email) => ring().addStart(text(email, 254)));
   own("accounts:add-verify", async (code) => {
     const result = await ring().addVerify(text(code, 16));

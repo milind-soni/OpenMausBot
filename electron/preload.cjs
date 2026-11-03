@@ -500,7 +500,6 @@ const bridge = {
   // Who is signed in on this device: this app's own pages only (main checks the sender). No token ever comes through here.
   accounts: process.argv.includes("--omb-company-desktop=1") ? {
     list: () => ipcRenderer.invoke("accounts:list"),
-    switchTo: id => ipcRenderer.invoke("accounts:switch", String(id)),
     signOut: id => ipcRenderer.invoke("accounts:sign-out", String(id)),
     addStart: email => ipcRenderer.invoke("accounts:add-start", String(email)),
     addVerify: code => ipcRenderer.invoke("accounts:add-verify", String(code)),

@@ -28,7 +28,6 @@ export function homeScreenText(view: HomeView | null, now = Date.now()): { title
   if (view?.screen === "setup") return { title: named("homeScreen.setup", "homeScreen.setupNamed"), body: t(view.slow ? "cloudHome.slow" : "homeScreen.setupBody"), reason: null, action: null, busy: true };
   // It didn't answer: said once, with Try again, never a spinner that goes on for ever (it still looks again by itself).
   if (view?.screen === "offline") return { title: named("homeScreen.offline", "homeScreen.offlineNamed"), body: t("homeScreen.offlineBack"), reason: view.reason ?? null, action: "retry", busy: false };
-  if (view?.screen === "signin" && view.movedTo) return { title: t("homeScreen.otherAccountTitle"), body: t("homeScreen.otherAccountBody", { email: view.movedTo.email }), reason: null, action: null, busy: false };
   if (view?.screen === "signin") return { title: named("homeScreen.signIn", "homeScreen.signInNamed"), body: t(view.other ? "homeScreen.signInOther" : "homeScreen.signInEnded"), reason: null, action: "sign-in", busy: false };
   if (view?.screen === "plan") return { title: named("homeScreen.plan", "homeScreen.planNamed"), body: t(MACHINE[view.machine] ?? "cloudHome.failed"), reason: null, action: view.machine === "failed" ? null : "manage", busy: false };
   // A Cloud the Admin's list says isn't running: what it is in plain words, with its one fitting action.
@@ -109,7 +108,6 @@ export function HomeScreen({ bridge, manage }: { bridge: HomeBridge; manage?: ()
         {text.body && <p className="text-[14px] leading-relaxed text-ink-secondary">{text.body}</p>}
         {view?.screen === "setup" && <CloudSetupSteps step={view.step ?? "reserving"} />}
         {text.reason && <p data-home-reason className="text-[13px] leading-relaxed text-ink-secondary">{text.reason}</p>}
-        {view?.screen === "signin" && view.movedTo && <button type="button" data-home-switch className="ui-button ui-button-primary mt-2" onClick={() => act(() => window.ogb!.accounts!.switchTo(view.movedTo!.id))}>{t("homeScreen.otherAccountSwitch", { email: view.movedTo.email })}</button>}
         {text.action === "sign-in" && <button type="button" className="ui-button ui-button-primary mt-2" onClick={() => act(() => bridge.signIn())}>{t("homeScreen.signInButton")}</button>}
         {text.action === "manage" && manage && <button type="button" className="ui-button mt-2" onClick={() => act(manage)}>{t("cloudAccount.manageInBrowser")}</button>}
         {button && run[button] && <button type="button" data-home-action={button} className={button === "retry" ? "ui-button mt-2" : "ui-button ui-button-primary mt-2"}

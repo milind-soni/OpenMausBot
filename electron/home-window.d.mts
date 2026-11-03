@@ -6,8 +6,7 @@ export type HomeView = { name?: string } & (
   /** The Admin is setting it up (or a brand-new one's name isn't found yet, at `checking`): the step it reports. */
   | { screen: "setup"; step?: import("./cloud-home.mjs").CloudSetupStep; slow?: true }
   | { screen: "offline"; reason?: string }
-  /** `movedTo`: this computer's bots moved to that account's Cloud, and it is signed in on this device too. */
-  | { screen: "signin"; other?: true; movedTo?: { id: string; email: string } }
+  | { screen: "signin"; other?: true }
   | { screen: "plan"; machine: "stopped" | "payment-problem" | "failed" }
   /** A Cloud the session's list says isn't running, so nothing looks up its address: it has ended (`deleteAt`: when its kept
    * files are deleted), its checkout wasn't finished, or its payment has a problem; `removable` while its owner may take it

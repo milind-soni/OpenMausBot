@@ -25,6 +25,7 @@ const memoryStore = () => { let held = null; return { read: async () => held, wr
  *   origin: string,
  *   holding?(): string | null,
  *   leaving?(accountId: string | null): Promise<unknown>,
+ *   left?(accountId: string | null): Promise<unknown>,
  *   arriving?(accountId: string): Promise<unknown>,
  *   settled?(): Promise<unknown>,
  *   removed?(accountId: string): Promise<unknown>,
@@ -32,12 +33,14 @@ const memoryStore = () => { let held = null; return { read: async () => held, wr
  *   now?(): number,
  *   log?(line: string): void,
  * }} deps `holding()`: why the active account can't be left now ("moving"), else null. `leaving(id)`: everything that was
- * running for that account stops, while the sign-in is already out of the way. `arriving(id)`: what this device kept for that
+ * running for that account stops, and its places are named while its sign-in can still say which they are. `left(id)`: those
+ * places leave the list and the window, and their sessions go; a sign-out's comes after its sign-in ended, whose last answers can
+ * re-issue a session. `arriving(id)`: what this device kept for that
  * account comes back, before its sign-in is read. `settled()`: the window goes where it belongs. `removed(id)`: that account
  * is off this device: what was kept for it goes. `makeClient`: a sign-in of its own for Add another account, which leaves the
  * active account running until it succeeds.
  */
-export function createCloudAccounts({ active, saved, client, makeClient, origin, holding = () => null, leaving = async () => {}, arriving = async () => {}, settled = async () => {}, removed = async () => {}, changed = () => {}, now = Date.now, log = () => {} }) {
+export function createCloudAccounts({ active, saved, client, makeClient, origin, holding = () => null, leaving = async () => {}, left = async () => {}, arriving = async () => {}, settled = async () => {}, removed = async () => {}, changed = () => {}, now = Date.now, log = () => {} }) {
   let rows = [], known = false, queue = Promise.resolve(), adder = null;
   const serial = (work) => { const run = queue.then(work, work); queue = run.catch(() => {}); return run; };
 
@@ -76,6 +79,7 @@ export function createCloudAccounts({ active, saved, client, makeClient, origin,
     catch (error) { void client().refresh().catch(() => {}); throw error; }
     await writeSaved([...list, ...(waiting ? [waiting] : [])], next.account.id);
     await leaving(leavingId);
+    await left(leavingId);
     await arriving(next.account.id);
     await client().reload();
     await settled();
@@ -117,6 +121,7 @@ export function createCloudAccounts({ active, saved, client, makeClient, origin,
     } else {
       await leaving(id);
       await client().signOut();
+      await left(id);
       await settled();
     }
     await removed(id);
