@@ -545,6 +545,23 @@ describe("activity-only escape hatch", () => {
     expect(markup).toContain('data-sidebar-activity-row="unread"');
   });
 
+  it("offers a running routine's thread under its bot in both modes, also beside an open thread tree, and drops it once the run ends", () => {
+    const runner: Bot = { ...bot, unread: false, threadId: "main", tasks: [
+      { threadId: "main", title: "Main chat", createdAt: 1 },
+      { threadId: "run", title: "Morning report", createdAt: 2, routineRunId: "run-1", busy: true, activity: "working" },
+    ] };
+    const ended: Bot = { ...runner, tasks: runner.tasks!.map((task) => task.routineRunId ? { ...task, busy: false, activity: "idle" as const, unread: true } : task) };
+    // Searching "Main" opens the thread tree, which itself keeps routine runs out: the row is the only way in.
+    const rows = (candidate: Bot, query = "") => renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate, query))).split('data-sidebar-activity-row="run"').length - 1;
+    for (const showThreads of [false, true]) for (const advanced of [false, true]) {
+      fixture.showThreads = showThreads;
+      fixture.advanced = advanced;
+      expect(rows(runner)).toBe(1);
+      expect(rows(ended)).toBe(0);
+      if (showThreads) expect(rows(runner, "Main")).toBe(1);
+    }
+  });
+
   it("lists a reply in the thread a bot was left on, since its row opens the main thread", () => {
     const left: Bot = { ...bot, threadId: "left-behind", mainThreadId: "main-chat", tasks: [
       { threadId: "left-behind", title: "Routine report", createdAt: 1, unread: true },

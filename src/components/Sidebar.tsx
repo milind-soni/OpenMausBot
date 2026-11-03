@@ -84,7 +84,7 @@ import { isSidebarToggle } from "@/lib/keyboard-shortcuts";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { useBotUnread } from "./unread-notice";
-import { attentionHasRunningWork, attentionJumpAction, attentionTriggerLabel, attentionUnpinAction, AttentionThreadRows, crossBotAttentionThreads, crossBotPinnedThreads, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
+import { attentionHasRunningWork, attentionJumpAction, attentionTriggerLabel, attentionUnpinAction, AttentionThreadRows, crossBotAttentionThreads, crossBotPinnedThreads, runningRoutineRun, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
 import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
 export { BotContextMenu };
@@ -913,7 +913,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
     {advanced && !iconOnly && threadsOpen && hasThreadList && <BotThreadList {...props} hidden={!showThreads}
       activityLabel={liveActivityLabel(last)}
       query={bot.name.toLowerCase().includes(query.toLowerCase()) || bot.title.toLowerCase().includes(query.toLowerCase()) ? "" : query} />}
-    {(advanced || (!iconOnly && (waiting || unread))) && !expanded && <SidebarBotActivity bot={bot} rowThreadId={selected ? bot.threadId : botOpensTo(bot, showThreads)} density={density} pendingQueued={pendingQueued} dispatch={dispatch} waitingOnly={!advanced} />}
+    {(advanced || (!iconOnly && (waiting || unread || bot.tasks?.some(runningRoutineRun)))) && <SidebarBotActivity bot={bot} rowThreadId={selected ? bot.threadId : botOpensTo(bot, showThreads)} density={density} pendingQueued={pendingQueued} dispatch={dispatch} waitingOnly={!advanced} runsOnly={expanded} />}
     {showThreads && creatingProject && <BotProjectDialog bot={bot} onClose={() => setCreatingProject(false)} />}
     </>
   );
