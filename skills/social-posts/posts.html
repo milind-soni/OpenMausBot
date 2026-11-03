@@ -1,0 +1,676 @@
+<!doctype html>
+<!--
+Card markup and platform styling adapted from MiniMock, https://github.com/minianon/MiniMock
+
+MIT License
+
+Copyright (c) 2026 Tushar Bhardwaj
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Icon paths are from Lucide, https://lucide.dev, ISC License.
+Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of
+Feather (MIT). All other copyright (c) for Lucide are held by Lucide Contributors
+2022. Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above copyright
+notice and this permission notice appear in all copies.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Post preview</title>
+<script id="posts-data" type="application/json">
+{
+  "account": { "name": "Juniper Coffee", "handle": "junipercoffee", "subtitle": "Small-batch roasters in Leeds", "avatar": "" },
+  "posts": [
+    {
+      "title": "Autumn blend launch",
+      "when": "Draft",
+      "text": "Our autumn blend is out on Friday: plum, cocoa and a little smoke. #coffee",
+      "brand": { "background": "#2b1d16", "text": "#fbf3e6", "accent": "#e8a15b" },
+      "media": [
+        { "layout": "cover", "kicker": "New on Friday", "title": "Three things to know about our autumn blend", "note": "Swipe to read" },
+        { "layout": "points", "title": "What's in the bag", "points": ["Washed Ethiopian for the plum", "Brazilian natural for the cocoa", "A slow finish for the smoke"] },
+        { "layout": "quote", "quote": "It tastes like the first cold morning of the year.", "by": "Priya, head roaster" }
+      ],
+      "platforms": {
+        "instagram": { "text": "Our autumn blend is out on Friday: plum, cocoa and a little smoke. Swipe for what's in the bag, then tell us how you brew yours. #coffee #leeds" },
+        "linkedin": { "documentTitle": "Three things to know about our autumn blend", "text": "We spent nine weeks on one coffee.\n\nOur autumn blend is out on Friday, and the slides below show why it took that long: three farms, eleven roasts and one very patient head roaster.\n\nWhat have you spent too long getting right? #coffee" },
+        "x": { "media": [], "text": "Autumn blend, out Friday. Plum, cocoa, a little smoke." },
+        "threads": { "text": "We roasted this one eleven times. It's out on Friday." },
+        "facebook": { "media": [], "text": "Our autumn blend is out on Friday! Come and try it at the Kirkgate shop this weekend, on us." },
+        "reels": { "text": "Eleven roasts in thirty seconds. #coffee", "media": [{ "video": "", "poster": "", "duration": 30 }] }
+      }
+    }
+  ]
+}
+</script>
+<style>
+:root {
+  color-scheme: light;
+  --page: light-dark(#f4f4f5, #18181b);
+  --ink: light-dark(#18181b, #f4f4f5);
+  --quiet: light-dark(#5c5c66, #a1a1aa);
+  --edge: light-dark(#d9d9de, #3a3a40);
+  --warn: light-dark(#8a4b00, #f5b35c);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { color-scheme: dark; }
+}
+:root[data-theme="dark"] { color-scheme: dark; }
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  padding: 12px;
+  background: var(--page);
+  color: var(--ink);
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  overflow-wrap: anywhere;
+}
+button { font: inherit; color: inherit; }
+.preview-note { margin: 0 0 12px; font-size: 12px; color: var(--quiet); }
+.problem { padding: 12px; border: 1px solid var(--edge); border-radius: 8px; }
+.post-set + .post-set { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--edge); }
+.post-set-head { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; margin-bottom: 8px; }
+.post-set-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.post-set-head span { font-size: 12px; color: var(--quiet); }
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
+.tab {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 10px;
+  border: 1px solid var(--edge); border-radius: 999px; background: none; color: var(--quiet); font-size: 13px; cursor: pointer;
+}
+.tab[aria-selected="true"] { background: var(--ink); border-color: var(--ink); color: var(--page); }
+.tab-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
+.tab-dot[hidden] { display: none; }
+:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.cards { display: grid; gap: 16px; justify-items: center; }
+.card-wrap { width: 100%; max-width: 440px; min-width: 0; }
+.card-wrap.off { display: none; }
+.card-title { display: none; margin-bottom: 6px; font-size: 12px; color: var(--quiet); }
+@media (min-width: 1040px) {
+  .tabs { display: none; }
+  .cards { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); align-items: start; }
+  .card-wrap.off { display: block; }
+  .card-title { display: block; }
+}
+.checks { list-style: none; margin: 8px 2px 0; padding: 0; font-size: 12px; color: var(--quiet); }
+.checks li + li { margin-top: 2px; }
+.checks .warn { color: var(--warn); }
+.checks .warn::before { content: "\25B2\00A0"; font-size: 9px; }
+
+.post-card {
+  --bg: #fff; --fg: #1d1d1d; --sub: #65676b; --line: #e4e6eb; --link: #0a66c2; --text-size: 14px; --clip: 3;
+  background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+}
+.post-card[data-platform="linkedin"] { --bg: light-dark(#fff, #1b1f23); --fg: light-dark(rgba(0,0,0,.9), rgba(255,255,255,.9)); --sub: light-dark(rgba(0,0,0,.6), rgba(255,255,255,.6)); --line: light-dark(#e0dfdc, #38434f); --link: light-dark(#0a66c2, #71b7fb); }
+.post-card[data-platform="facebook"] { --bg: light-dark(#fff, #242526); --fg: light-dark(#050505, #e4e6eb); --sub: light-dark(#65676b, #b0b3b8); --line: light-dark(#ced0d4, #3e4042); --link: light-dark(#0866ff, #4599ff); --text-size: 15px; --clip: 5; }
+.post-card[data-platform="instagram"] { --bg: light-dark(#fff, #000); --fg: light-dark(#000, #f5f5f5); --sub: light-dark(#737373, #a8a8a8); --line: light-dark(#dbdbdb, #363636); --link: light-dark(#00376b, #e0f1ff); --clip: 2; border-radius: 4px; }
+.post-card[data-platform="x"] { --bg: light-dark(#fff, #000); --fg: light-dark(#0f1419, #e7e9ea); --sub: light-dark(#536471, #71767b); --line: light-dark(#eff3f4, #2f3336); --link: #1d9bf0; --text-size: 15px; --clip: 40; border-radius: 4px; }
+.post-card[data-platform="threads"] { --bg: light-dark(#fff, #101010); --fg: light-dark(#000, #f3f5f7); --sub: light-dark(#6b6b6b, #8a8a8a); --line: light-dark(#e5e5e5, #323232); --link: light-dark(#0095f6, #6cb8f6); --text-size: 15px; --clip: 40; border-radius: 14px; }
+
+.post-header { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px 0; }
+.post-avatar {
+  width: 44px; height: 44px; flex: none; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 16px; font-weight: 600;
+}
+.post-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.post-header-text { flex: 1; min-width: 0; }
+.post-author-name { font-weight: 600; line-height: 1.3; }
+.post-author-subtitle, .post-author-meta { font-size: 12px; color: var(--sub); line-height: 1.35; }
+.post-author-subtitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.post-author-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.post-header-actions { display: flex; align-items: center; gap: 10px; flex: none; color: var(--sub); }
+.post-follow { display: inline-flex; align-items: center; gap: 2px; font-weight: 600; font-size: 14px; color: var(--link); }
+.post-body { padding: 10px 14px; }
+.post-caption { position: relative; font-size: var(--text-size); line-height: 1.42; }
+.clip { white-space: pre-wrap; unicode-bidi: plaintext; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--clip); line-clamp: var(--clip); overflow: hidden; }
+.post-caption.open .clip { display: block; overflow: visible; }
+.see-more { display: none; position: absolute; inset-block-end: 0; inset-inline-end: 0; padding: 0 0 0 16px; border: 0; background: linear-gradient(to right, transparent, var(--bg) 14px); color: var(--sub); cursor: pointer; font-size: inherit; line-height: inherit; }
+.see-more:dir(rtl) { padding: 0 16px 0 0; background: linear-gradient(to left, transparent, var(--bg) 14px); }
+.post-caption.cut .see-more { display: block; }
+.post-caption.open .see-more { display: none; }
+.tok { color: var(--link); }
+.empty-text { color: var(--sub); font-style: italic; }
+.post-actions { display: flex; align-items: center; justify-content: space-around; padding: 4px 8px; border-top: 1px solid var(--line); color: var(--sub); }
+.post-action { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 1; padding: 8px 4px; font-size: 13px; font-weight: 600; }
+
+.post-card[data-platform="x"], .post-card[data-platform="threads"] { position: relative; }
+.post-card[data-platform="x"] .post-header, .post-card[data-platform="threads"] .post-header { padding-left: 64px; }
+.post-card[data-platform="x"] .post-avatar, .post-card[data-platform="threads"] .post-avatar { position: absolute; top: 12px; left: 14px; width: 40px; height: 40px; }
+.post-card[data-platform="x"] .post-author-name, .post-card[data-platform="threads"] .post-author-name { display: inline; }
+.post-card[data-platform="x"] .post-author-meta, .post-card[data-platform="threads"] .post-author-meta { font-size: 14px; }
+.post-card[data-platform="x"] .post-body, .post-card[data-platform="threads"] .post-body { padding: 2px 14px 8px 64px; }
+.post-card[data-platform="x"] .media, .post-card[data-platform="threads"] .media { margin: 0 14px 8px 64px; }
+.post-card[data-platform="x"] .media { border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+.post-card[data-platform="x"] .post-actions, .post-card[data-platform="threads"] .post-actions { justify-content: flex-start; padding: 0 8px 8px 58px; border-top: 0; }
+.post-card[data-platform="x"] .post-action { flex: 1 1 0; justify-content: flex-start; }
+.post-card[data-platform="threads"] .post-action { flex: 0 0 auto; padding: 8px; }
+.post-card[data-platform="threads"] .swipe-item { flex-basis: 72%; border-radius: 10px; overflow: hidden; }
+.post-card[data-platform="threads"] .swipe { gap: 6px; }
+.post-card[data-platform="threads"] .media > .frame { border-radius: 10px; overflow: hidden; }
+.post-card[data-platform="instagram"] .post-avatar { width: 34px; height: 34px; font-size: 13px; box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px #d6249f; }
+.post-card[data-platform="instagram"] .post-header { align-items: center; padding-bottom: 10px; }
+.post-card[data-platform="instagram"] .post-follow { color: var(--fg); font-size: 13px; }
+.post-card[data-platform="instagram"] .post-actions { justify-content: flex-start; gap: 6px; padding: 6px 8px 0; border-top: 0; color: var(--fg); }
+.post-card[data-platform="instagram"] .post-action { flex: 0 0 auto; padding: 4px; }
+.post-card[data-platform="instagram"] .post-action:last-child { margin-inline-start: auto; }
+.post-card[data-platform="instagram"] .post-body { padding: 4px 14px 12px; }
+.post-card[data-platform="facebook"] .post-actions { margin: 0 12px; padding: 2px 0; }
+
+.media { position: relative; }
+.frame { position: relative; width: 100%; aspect-ratio: var(--r, 1); max-height: 560px; overflow: hidden; container-type: inline-size; background: light-dark(#eceef0, #26282b); }
+.frame > img, .frame > video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.frame > video { object-fit: contain; background: #000; }
+.poster-frame { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: linear-gradient(160deg, #3a3f47, #15171a); color: #fff; }
+.poster-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.play-mark { position: relative; display: flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 50%; background: rgba(0,0,0,.55); color: #fff; }
+.video-time { position: absolute; inset-block-end: 8px; inset-inline-end: 8px; padding: 1px 6px; border-radius: 4px; background: rgba(0,0,0,.65); color: #fff; font-size: 12px; }
+.missing-image { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 12px; text-align: center; color: var(--sub); font-size: 13px; }
+
+.carousel { position: relative; }
+.swipe { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior-x: contain; }
+.swipe::-webkit-scrollbar { display: none; }
+.swipe-item { flex: 0 0 100%; min-width: 0; scroll-snap-align: start; }
+.swipe-count { position: absolute; top: 10px; right: 10px; padding: 2px 8px; border-radius: 12px; background: rgba(0,0,0,.65); color: #fff; font-size: 12px; pointer-events: none; }
+.nav { position: absolute; top: 50%; width: 30px; height: 30px; margin-top: -15px; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 50%; background: rgba(255,255,255,.88); color: #111; cursor: pointer; opacity: .9; }
+.nav:disabled { display: none; }
+.nav.prev { left: 8px; }
+.nav.next { right: 8px; }
+.dots { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px; padding-top: 8px; }
+.dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--line); }
+.dots i.on { background: var(--link); }
+.doc-head { display: flex; justify-content: space-between; gap: 8px; padding: 8px 14px; background: rgba(0,0,0,.72); color: #fff; font-size: 13px; font-weight: 600; }
+.doc-head span:last-child { flex: none; font-weight: 400; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
+.grid .frame { --r: 1 !important; }
+.grid .grid-three:first-child { grid-row: span 2; height: 100%; aspect-ratio: auto; }
+.grid-more { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.5); color: #fff; font-size: 24px; font-weight: 600; }
+
+.slide {
+  --slide-bg: #16213a; --slide-ink: #f7f7f2; --slide-accent: #f2b84b;
+  position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: 3.5cqw; padding: 8cqw;
+  overflow: hidden; background: var(--slide-bg); color: var(--slide-ink); font-size: 4.4cqw; line-height: 1.35; overflow-wrap: anywhere; unicode-bidi: plaintext;
+}
+.slide h3, .slide p, .slide ol, .slide blockquote { margin: 0; }
+.slide-kicker { color: var(--slide-accent); font-size: 3.6cqw; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+.slide-title { font-size: 8.4cqw; line-height: 1.12; font-weight: 700; letter-spacing: -.01em; }
+.slide-note { font-size: 4cqw; opacity: .78; }
+.slide-points { padding: 0; list-style: none; counter-reset: point; display: grid; gap: 3cqw; }
+.slide-points li { counter-increment: point; display: grid; grid-template-columns: 9cqw 1fr; align-items: baseline; font-size: 5cqw; }
+.slide-points li::before { content: counter(point); color: var(--slide-accent); font-size: 6cqw; font-weight: 700; }
+.slide-points + .slide-note { margin-top: 2cqw; }
+.slide-quote { font-size: 7.4cqw; line-height: 1.2; font-weight: 600; }
+.slide-quote::before { content: "\201C"; display: block; height: 9cqw; color: var(--slide-accent); font-size: 16cqw; line-height: 1; }
+.slide-foot { position: absolute; inset-inline: 8cqw; bottom: 4.5cqw; display: flex; justify-content: space-between; gap: 2cqw; font-size: 3cqw; opacity: .7; }
+
+.phone { position: relative; width: min(100%, 300px); margin-inline: auto; aspect-ratio: 9 / 16; border: 6px solid #0b0b0c; border-radius: 28px; background: #000; color: #fff; overflow: hidden; }
+.phone .media, .phone .carousel, .phone .swipe, .phone .swipe-item { height: 100%; }
+.phone .frame { height: 100%; aspect-ratio: auto; max-height: none; background: #000; }
+.phone .frame > img { object-fit: contain; }
+.phone-label { position: absolute; top: 12px; left: 14px; font-size: 14px; font-weight: 700; text-shadow: 0 1px 2px rgba(0,0,0,.6); pointer-events: none; }
+.phone-rail { position: absolute; right: 8px; bottom: 76px; display: grid; gap: 16px; justify-items: center; pointer-events: none; filter: drop-shadow(0 1px 1px rgba(0,0,0,.6)); }
+.phone-foot { position: absolute; inset-inline: 0; bottom: 0; padding: 40px 54px 12px 12px; background: linear-gradient(transparent, rgba(0,0,0,.72)); font-size: 13px; pointer-events: none; }
+.phone-author { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-weight: 600; }
+.phone-author .post-avatar { width: 28px; height: 28px; font-size: 11px; }
+.phone .post-caption { --clip: 2; --bg: #111; --sub: #e8e8e8; --link: #fff; font-size: 13px; pointer-events: auto; }
+.phone:has(video) .phone-foot { bottom: 44px; padding-top: 12px; }
+.phone:has(video) .phone-rail { bottom: 120px; }
+.phone .see-more { background: linear-gradient(to right, transparent, rgba(0,0,0,.8) 14px); color: #fff; font-weight: 600; }
+.phone .video-time { inset-block: 12px auto; inset-inline-end: 12px; }
+.phone .tok { font-weight: 600; }
+.phone .dots { position: absolute; left: 0; right: 0; bottom: 4px; padding: 0; pointer-events: none; }
+.phone .dots i { background: rgba(255,255,255,.4); }
+.phone .dots i.on { background: #fff; }
+.phone .play-mark { pointer-events: none; }
+.no-video { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center; background: linear-gradient(160deg, #2c2f36, #0c0d0f); }
+</style>
+</head>
+<body>
+<p class="preview-note">Preview: a close likeness of each platform, not a promise of a pixel match.</p>
+<main id="root"></main>
+<script>
+/* Limits, as each platform's own docs stated them on 2 Nov 2026. A number with no source here is not checked.
+   X: 280 weighted characters, emoji 2, URLs 23: https://docs.x.com/fundamentals/counting-characters
+      weight-1 ranges: https://github.com/twitter/twitter-text/blob/master/config/v3.json
+      up to 4 photos: https://docs.x.com/x-api/posts/manage-tweets/introduction
+   Instagram: caption 2200 characters, 30 hashtags, 20 @ tags; images 4:5 to 1.91:1; carousel 20 items; reels 3 s to 15 min,
+      9:16 recommended: https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-user/media
+      a carousel crops to its first image: https://developers.facebook.com/docs/instagram-platform/content-publishing
+   Threads: 500 characters, an emoji counts as its UTF-8 bytes; carousel 20 items; aspect ratio up to 10:1; video 5 min:
+      https://developers.facebook.com/docs/threads/overview and https://developers.facebook.com/docs/threads/posts/
+   LinkedIn: 3000 characters: https://www.linkedin.com/help/linkedin/answer/a528176
+      150 characters "to avoid truncation" is LinkedIn's ad guidance, its only published cut-off:
+      https://www.linkedin.com/help/linkedin/answer/a426534
+      documents 300 pages: https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/documents-api
+   TikTok: video caption 2200 UTF-16 units: https://developers.tiktok.com/docs/en/content-posting-api-reference-direct-post
+      photo description 4000, 35 photos: https://developers.tiktok.com/docs/en/content-posting-api-reference-photo-post
+   YouTube Shorts: up to 3 minutes, square or vertical: https://support.google.com/youtube/answer/15424877
+   Facebook publishes no organic post limit, so its card has no checks. */
+const X_WEIGHT_ONE = [[0, 4351], [8192, 8205], [8208, 8223], [8242, 8247]];
+const URL_TEXT = /https?:\/\/\S+/g;
+const EMOJI = /\p{Emoji_Presentation}|\p{Extended_Pictographic}[️‍]|\p{Regional_Indicator}|⃣/u;
+const graphemes = (text) => Array.from(new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text), (part) => part.segment);
+const codePoints = (text) => Array.from(text).length;
+const utf8 = (text) => new TextEncoder().encode(text).length;
+
+function countX(text) {
+  const links = text.match(URL_TEXT) ?? [];
+  let total = links.length * 23;
+  for (const part of graphemes(text.replace(URL_TEXT, ""))) {
+    if (EMOJI.test(part)) { total += 2; continue; }
+    for (const char of part) {
+      const point = char.codePointAt(0);
+      total += X_WEIGHT_ONE.some(([low, high]) => point >= low && point <= high) ? 1 : 2;
+    }
+  }
+  return total;
+}
+const countThreads = (text) => graphemes(text).reduce((sum, part) => sum + (EMOJI.test(part) ? utf8(part) : codePoints(part)), 0);
+
+const RULES = {
+  instagram: { name: "Instagram", text: 2200, tags: 30, mentions: 20, imageShape: [4 / 5, 1.91], shapeWords: "4:5 to 1.91:1", most: 20 },
+  linkedin: { name: "LinkedIn", text: 3000, cut: 150, pages: 300 },
+  x: { name: "X", text: 280, count: countX, most: 4 },
+  threads: { name: "Threads", text: 500, count: countThreads, imageShape: [1 / 10, 10], shapeWords: "1:10 to 10:1", most: 20, seconds: [0, 300] },
+  facebook: { name: "Facebook" },
+  tiktok: { name: "TikTok", phone: "For You", text: 2200, count: (text) => text.length, photoText: 4000, most: 35 },
+  reels: { name: "Reels", phone: "Reels", text: 2200, tags: 30, mentions: 20, tall: "recommend", seconds: [3, 900] },
+  shorts: { name: "Shorts", phone: "Shorts", tall: "require", seconds: [0, 180] },
+};
+
+const ICONS = {
+  heart: '<path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5"/>',
+  comment: '<path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/>',
+  send: '<path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/>',
+  repost: '<path d="m2 9 3-3 3 3"/><path d="M13 18H7a2 2 0 0 1-2-2V6"/><path d="m22 15-3 3-3-3"/><path d="M11 6h6a2 2 0 0 1 2 2v10"/>',
+  bookmark: '<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/>',
+  like: '<path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/>',
+  share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/>',
+  globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+  more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  upload: '<path d="M12 3v12"/><path d="m17 8-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>',
+  play: '<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/>',
+  left: '<path d="m15 18-6-6 6-6"/>',
+  right: '<path d="m9 18 6-6-6-6"/>',
+  plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+};
+const icon = (name, size = 18) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
+const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+
+const isVideo = (item) => "video" in item || "poster" in item;
+const isSlide = (item) => "layout" in item || "html" in item;
+const ratioOf = (item) => (item.width > 0 && item.height > 0 ? item.width / item.height : null);
+const parseShape = (value) => {
+  const match = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(String(value ?? ""));
+  return match && Number(match[2]) > 0 ? Number(match[1]) / Number(match[2]) : null;
+};
+const shapeWords = (ratio) => (ratio >= 1 ? `${ratio.toFixed(2).replace(/\.?0+$/, "")}:1` : `1:${(1 / ratio).toFixed(2).replace(/\.?0+$/, "")}`);
+
+function variantOf(post, id) {
+  const own = post.platforms?.[id] && typeof post.platforms[id] === "object" ? post.platforms[id] : {};
+  const list = own.media ?? post.media ?? [];
+  const media = (Array.isArray(list) ? list : [list]).filter((item) => item && typeof item === "object");
+  const shape = parseShape(own.slideShape ?? post.slideShape) ?? 4 / 5;
+  for (const item of media) if (isSlide(item)) { item.width = shape * 1000; item.height = 1000; }
+  return {
+    text: String(own.text ?? post.text ?? ""),
+    media,
+    when: own.when ?? post.when ?? "Now",
+    documentTitle: own.documentTitle ?? post.documentTitle ?? post.title ?? "Document",
+    brand: post.brand ?? {},
+  };
+}
+
+function checksFor(id, variant) {
+  const rule = RULES[id], out = [];
+  const { text, media } = variant;
+  const limit = rule.photoText && media.length && !media.some(isVideo) ? rule.photoText : rule.text;
+  if (limit) {
+    const used = (rule.count ?? codePoints)(text);
+    if (used > limit) out.push(["warn", `${used} of ${limit} characters: ${used - limit} over ${rule.name}'s limit.`]);
+    else if (used) out.push(["note", `${used} of ${limit} characters.`]);
+  }
+  const tags = text.match(/#[\p{L}\p{N}_]+/gu)?.length ?? 0, mentions = text.match(/@[\p{L}\p{N}_.]+/gu)?.length ?? 0;
+  if (rule.tags && tags > rule.tags) out.push(["warn", `${tags} hashtags: ${rule.name} takes up to ${rule.tags}.`]);
+  if (rule.mentions && mentions > rule.mentions) out.push(["warn", `${mentions} @ tags: ${rule.name} takes up to ${rule.mentions}.`]);
+  if (rule.cut && codePoints(text) > rule.cut) {
+    const shown = Array.from(text).slice(0, rule.cut).join("").trim();
+    out.push(["note", `${rule.name} can cut the text around here, with "...see more": "...${Array.from(shown).slice(-28).join("")}"`]);
+  }
+  const count = media.length;
+  if (rule.pages && count > rule.pages) out.push(["warn", `${count} pages: a ${rule.name} document takes up to ${rule.pages}.`]);
+  if (rule.most && count > rule.most) out.push(["warn", `${count} items: ${rule.name} takes up to ${rule.most}.`]);
+  const off = media.find((item) => !isVideo(item) && rule.imageShape && ratioOf(item) && (ratioOf(item) < rule.imageShape[0] * 0.99 || ratioOf(item) > rule.imageShape[1] * 1.01));
+  if (off) out.push(["warn", `An image is ${shapeWords(ratioOf(off))}: ${rule.name} takes ${rule.shapeWords}.`]);
+  if (id === "instagram" && count > 1 && media.every(ratioOf) && media.some((item) => Math.abs(ratioOf(item) - ratioOf(media[0])) > 0.02)) {
+    out.push(["note", "Instagram crops every slide to the first one's shape."]);
+  }
+  const moving = media.find((item) => isVideo(item) && ratioOf(item));
+  if (rule.tall === "recommend" && moving && Math.abs(ratioOf(moving) - 9 / 16) > 0.02) out.push(["warn", `This video is ${shapeWords(ratioOf(moving))}: ${rule.name} recommends 9:16 to avoid cropping or blank space.`]);
+  if (rule.tall === "require" && moving && ratioOf(moving) > 1.01) out.push(["warn", `This video is ${shapeWords(ratioOf(moving))}: ${rule.name} must be square or vertical.`]);
+  if (rule.seconds) for (const item of media) {
+    const seconds = Number(item.duration);
+    if (!isVideo(item) || !(seconds > 0)) continue;
+    if (seconds > rule.seconds[1]) out.push(["warn", `This video runs ${Math.round(seconds)} s: ${rule.name} takes up to ${rule.seconds[1]} s.`]);
+    if (seconds < rule.seconds[0]) out.push(["warn", `This video runs ${Math.round(seconds)} s: ${rule.name} needs at least ${rule.seconds[0]} s.`]);
+  }
+  if (media.some((item) => item.failed && !isVideo(item))) out.push(["warn", "An image can't load here. Use a file beside index.html or a data: URL."]);
+  if (media.some((item) => item.failed && isVideo(item))) out.push(["note", "The video can't play here, so its poster stands in."]);
+  return out;
+}
+
+function initials(name) {
+  const words = String(name ?? "").trim().split(/\s+/).map((word) => graphemes(word).find((part) => /[\p{L}\p{N}]/u.test(part))).filter(Boolean);
+  return (words.length > 1 ? words[0] + words.at(-1) : words[0] ?? "?").toLocaleUpperCase();
+}
+function avatarHtml(account) {
+  const hue = Array.from(String(account.name ?? "")).reduce((sum, char) => (sum * 31 + char.codePointAt(0)) % 360, 210);
+  const fallback = `<span dir="auto">${esc(initials(account.name))}</span>`;
+  return `<div class="post-avatar" style="background:hsl(${hue} 42% 36%)" data-initials="${esc(initials(account.name))}">${account.avatar ? `<img src="${esc(account.avatar)}" alt="">` : fallback}</div>`;
+}
+function richText(text) {
+  return String(text).split(/(https?:\/\/\S+|[#@][\p{L}\p{N}_.]*[\p{L}\p{N}_])/u)
+    .map((part, index) => (index % 2 ? `<span class="tok">${esc(part)}</span>` : esc(part))).join("");
+}
+function captionHtml(variant, lead = "", more = "...more") {
+  if (!variant.text) return `<div class="post-caption"><span class="empty-text">No text yet</span></div>`;
+  return `<div class="post-caption" dir="auto"><div class="clip" dir="auto">${lead}${richText(variant.text)}</div><button type="button" class="see-more">${esc(more)}</button></div>`;
+}
+
+const brandStyle = (brand) => [["--slide-bg", brand.background], ["--slide-ink", brand.text], ["--slide-accent", brand.accent]]
+  .filter(([, value]) => typeof value === "string" && /^[#\w(),.%\s-]+$/.test(value)).map(([name, value]) => `${name}:${value}`).join(";");
+
+function slideHtml(item, variant, account) {
+  const style = esc(brandStyle(variant.brand));
+  const foot = `<div class="slide-foot"><span dir="auto">${esc(account.handle ? `@${account.handle}` : account.name)}</span></div>`;
+  if ("html" in item) return `<div class="slide" style="${style}">${item.html}</div>`;
+  const note = item.note ? `<p class="slide-note" dir="auto">${esc(item.note)}</p>` : "";
+  if (item.layout === "points") {
+    const points = (Array.isArray(item.points) ? item.points : []).map((point) => `<li dir="auto">${esc(point)}</li>`).join("");
+    return `<div class="slide" style="${style}"><h3 class="slide-title" dir="auto">${esc(item.title)}</h3><ol class="slide-points">${points}</ol>${note}${foot}</div>`;
+  }
+  if (item.layout === "quote") {
+    return `<div class="slide" style="${style}"><blockquote class="slide-quote" dir="auto">${esc(item.quote)}</blockquote>${item.by ? `<p class="slide-note" dir="auto">${esc(item.by)}</p>` : ""}${foot}</div>`;
+  }
+  return `<div class="slide" style="${style}">${item.kicker ? `<p class="slide-kicker" dir="auto">${esc(item.kicker)}</p>` : ""}<h3 class="slide-title" dir="auto">${esc(item.title)}</h3>${note}${foot}</div>`;
+}
+function posterHtml(item) {
+  const time = Number(item.duration) > 0 ? `<span class="video-time">${Math.floor(item.duration / 60)}:${String(Math.round(item.duration % 60)).padStart(2, "0")}</span>` : "";
+  return `<div class="poster-frame">${item.poster ? `<img src="${esc(item.poster)}" alt="${esc(item.alt)}">` : ""}<span class="play-mark">${icon("play", 26)}</span>${time}</div>`;
+}
+function itemHtml(item, variant, account, index) {
+  if (isSlide(item)) return slideHtml(item, variant, account);
+  if (isVideo(item)) {
+    if (!item.video || item.failed) return posterHtml(item);
+    return `<video src="${esc(item.video)}" controls playsinline preload="metadata"${item.poster ? ` poster="${esc(item.poster)}"` : ""} data-item="${index}"></video>`;
+  }
+  if (item.failed) return `<div class="missing-image">${esc(item.alt || "Image not available")}</div>`;
+  return `<img src="${esc(item.src)}" alt="${esc(item.alt)}" data-item="${index}">`;
+}
+
+function frameRatio(id, media) {
+  const rule = RULES[id], first = ratioOf(media[0]) ?? 1;
+  const [low, high] = id === "instagram" ? rule.imageShape : [0.5, 2];
+  return Math.min(high, Math.max(low, first));
+}
+const frameHtml = (item, variant, account, index, ratio) =>
+  `<div class="frame" style="--r:${ratio ?? ratioOf(item) ?? 1.5}" data-frame="${index}">${itemHtml(item, variant, account, index)}</div>`;
+
+function carouselHtml(id, variant, account) {
+  const { media } = variant, ratio = frameRatio(id, media);
+  const items = media.map((item, index) => `<div class="swipe-item">${frameHtml(item, variant, account, index, ratio)}</div>`).join("");
+  const label = id === "linkedin" ? "Document pages" : "Carousel slides";
+  const head = id === "linkedin" ? `<div class="doc-head"><span dir="auto">${esc(variant.documentTitle)}</span><span data-count>1 of ${media.length} pages</span></div>` : "";
+  const counter = id === "instagram" ? `<span class="swipe-count" data-count>1/${media.length}</span>` : "";
+  const dots = id === "instagram" || RULES[id].phone ? `<div class="dots" aria-hidden="true">${media.map((_, index) => `<i class="${index ? "" : "on"}"></i>`).join("")}</div>` : "";
+  return `${head}<div class="carousel"><div class="swipe" dir="ltr" tabindex="0" role="group" aria-label="${label}">${items}</div>${counter}<button type="button" class="nav prev" aria-label="Previous" disabled>${icon("left", 16)}</button><button type="button" class="nav next" aria-label="Next">${icon("right", 16)}</button></div>${dots}`;
+}
+function gridHtml(id, variant, account) {
+  const { media } = variant, shown = media.slice(0, 4);
+  const tiles = shown.map((item, index) => {
+    const more = id === "facebook" && index === 3 && media.length > 4 ? `<span class="grid-more">+${media.length - 4}</span>` : "";
+    return `<div class="frame${shown.length === 3 && index === 0 ? " grid-three" : ""}" style="--r:1" data-frame="${index}">${itemHtml(item, variant, account, index)}${more}</div>`;
+  }).join("");
+  return `<div class="grid">${tiles}</div>`;
+}
+function mediaHtml(id, variant, account) {
+  const { media } = variant;
+  if (!media.length) return "";
+  if (media.length === 1) {
+    const ratio = id === "instagram" ? frameRatio(id, media) : undefined;
+    return `<div class="media">${frameHtml(media[0], variant, account, 0, ratio)}</div>`;
+  }
+  if (id === "x" || id === "facebook") return `<div class="media">${gridHtml(id, variant, account)}</div>`;
+  return `<div class="media">${carouselHtml(id, variant, account)}</div>`;
+}
+
+const label = (name, words) => `<span class="post-action">${icon(name)}${words ? ` ${words}` : ""}</span>`;
+const ACTIONS = {
+  linkedin: [["like", "Like"], ["comment", "Comment"], ["repost", "Repost"], ["send", "Send"]],
+  facebook: [["like", "Like"], ["comment", "Comment"], ["share", "Share"]],
+  instagram: [["heart"], ["comment"], ["send"], ["bookmark"]],
+  x: [["comment"], ["repost"], ["heart"], ["bookmark"], ["upload"]],
+  threads: [["heart"], ["comment"], ["repost"], ["send"]],
+};
+const actionsHtml = (id) => `<div class="post-actions" aria-hidden="true">${ACTIONS[id].map(([name, words]) => label(name, words)).join("")}</div>`;
+const dotsMeta = (parts) => parts.filter(Boolean).join(" · ");
+
+function feedCardHtml(id, variant, account) {
+  const handle = account.handle ? `@${account.handle}` : "";
+  const name = `<div class="post-author-name" dir="auto">${esc(account.name)}</div>`;
+  const moreIcon = icon("more");
+  if (id === "instagram") {
+    const shownName = account.handle || account.name;
+    return `<header class="post-header">${avatarHtml(account)}<div class="post-header-text"><div class="post-author-name" dir="auto">${esc(shownName)}</div></div><div class="post-header-actions"><span class="post-follow">Follow</span>${moreIcon}</div></header>${mediaHtml(id, variant, account)}${actionsHtml(id)}<div class="post-body">${captionHtml(variant, variant.text ? `<b>${esc(shownName)}</b> ` : "", "more")}</div>`;
+  }
+  if (id === "x") {
+    return `<header class="post-header">${avatarHtml(account)}<div class="post-header-text">${name} <span class="post-author-meta" style="display:inline" dir="auto">${esc(dotsMeta([handle, variant.when]))}</span></div><div class="post-header-actions">${moreIcon}</div></header><div class="post-body">${captionHtml(variant)}</div>${mediaHtml(id, variant, account)}${actionsHtml(id)}`;
+  }
+  if (id === "threads") {
+    const shownName = account.handle || account.name;
+    return `<header class="post-header">${avatarHtml(account)}<div class="post-header-text"><div class="post-author-name" dir="auto">${esc(shownName)}</div> <span class="post-author-meta" style="display:inline">${esc(variant.when)}</span></div><div class="post-header-actions">${moreIcon}</div></header><div class="post-body">${captionHtml(variant)}</div>${mediaHtml(id, variant, account)}${actionsHtml(id)}`;
+  }
+  const subtitle = account.subtitle && id === "linkedin" ? `<div class="post-author-subtitle" dir="auto">${esc(account.subtitle)}</div>` : "";
+  const follow = id === "linkedin" ? `<span class="post-follow">${icon("plus", 14)} Follow</span>` : "";
+  return `<header class="post-header">${avatarHtml(account)}<div class="post-header-text">${name}${subtitle}<div class="post-author-meta"><span dir="auto">${esc(variant.when)}</span> · ${icon("globe", 12)}</div></div><div class="post-header-actions">${follow}${moreIcon}</div></header><div class="post-body">${captionHtml(variant, "", id === "facebook" ? "See more" : "...more")}</div>${mediaHtml(id, variant, account)}${actionsHtml(id)}`;
+}
+function phoneCardHtml(id, variant, account) {
+  const rule = RULES[id], { media } = variant;
+  const stage = !media.length
+    ? `<div class="no-video"><span class="play-mark">${icon("play", 26)}</span><span>No video yet</span></div>`
+    : `<div class="media">${media.length === 1 ? frameHtml(media[0], variant, account, 0) : carouselHtml(id, variant, account)}</div>`;
+  const rail = ["heart", "comment", id === "tiktok" ? "bookmark" : "repost", "send"].map((name) => icon(name, 24)).join("");
+  return `${stage}<span class="phone-label">${esc(rule.phone)}</span><div class="phone-rail" aria-hidden="true">${rail}</div><div class="phone-foot"><div class="phone-author">${avatarHtml(account)}<span dir="auto">${esc(account.handle ? `@${account.handle}` : account.name)}</span></div>${variant.text ? captionHtml(variant, "", "more") : ""}</div>`;
+}
+function cardHtml(id, variant, account) {
+  const body = RULES[id].phone ? `<div class="phone" data-name="${esc(RULES[id].name)} preview">${phoneCardHtml(id, variant, account)}</div>`
+    : `<article class="post-card" data-platform="${id}" data-name="${esc(RULES[id].name)} preview">${feedCardHtml(id, variant, account)}</article>`;
+  return `<div class="card-title">${esc(RULES[id].name)}</div>${body}<ul class="checks"></ul>`;
+}
+
+function renderChecks(entry) {
+  const checks = checksFor(entry.id, entry.variant);
+  entry.wrap.querySelector(".checks").innerHTML = checks.map(([level, words]) => `<li class="${level}" dir="auto">${esc(words)}</li>`).join("");
+  entry.tab?.querySelector(".tab-dot")?.toggleAttribute("hidden", !checks.some(([level]) => level === "warn"));
+}
+
+const cards = new WeakMap();
+function measureClip(clip) {
+  const caption = clip.closest(".post-caption");
+  if (caption && !caption.classList.contains("open")) caption.classList.toggle("cut", clip.scrollHeight > clip.clientHeight + 1);
+}
+const clipWatcher = window.ResizeObserver ? new ResizeObserver((entries) => entries.forEach((entry) => measureClip(entry.target))) : null;
+
+function fillCard(entry, account) {
+  entry.wrap.innerHTML = cardHtml(entry.id, entry.variant, account);
+  entry.wrap.querySelectorAll(".clip").forEach((clip) => { clipWatcher?.observe(clip); measureClip(clip); });
+  renderChecks(entry);
+}
+
+function tellBot(post, id) {
+  window.mausbot?.setContext?.(`The person is looking at the ${RULES[id].name} preview of "${post.title ?? "this post"}".`)?.catch?.(() => {});
+}
+
+function renderPost(post, account, root, index) {
+  const asked = Object.keys(post.platforms ?? {});
+  const ids = asked.filter((id) => id in RULES);
+  const unknown = asked.filter((id) => !(id in RULES));
+  const set = document.createElement("section");
+  set.className = "post-set";
+  const title = post.title ? `<h2 dir="auto">${esc(post.title)}</h2>` : "";
+  const when = post.when ? `<span dir="auto">${esc(post.when)}</span>` : "";
+  set.innerHTML = `${title || when ? `<div class="post-set-head">${title}${when}</div>` : ""}<div class="tabs" role="tablist" aria-label="Platforms"></div><div class="cards"></div>`;
+  if (!ids.length) {
+    set.querySelector(".cards").innerHTML = `<p class="problem">No platforms to show for this post. Use: ${Object.keys(RULES).join(", ")}.</p>`;
+    set.querySelector(".tabs").remove();
+    root.append(set);
+    return;
+  }
+  if (unknown.length) set.insertAdjacentHTML("beforeend", `<p class="preview-note">No preview for: ${esc(unknown.join(", "))}.</p>`);
+  const tabs = set.querySelector(".tabs"), holder = set.querySelector(".cards");
+  const entries = ids.map((id, position) => {
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = "tab";
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-selected", String(position === 0));
+    tab.dataset.tab = id;
+    tab.innerHTML = `${esc(RULES[id].name)}<span class="tab-dot" hidden></span>`;
+    tabs.append(tab);
+    const wrap = document.createElement("div");
+    wrap.className = `card-wrap${position ? " off" : ""}`;
+    wrap.setAttribute("role", "tabpanel");
+    wrap.dataset.panel = id;
+    holder.append(wrap);
+    const entry = { id, wrap, tab, variant: variantOf(post, id), account };
+    cards.set(wrap, entry);
+    fillCard(entry, account);
+    return entry;
+  });
+  tabs.addEventListener("click", (event) => {
+    const chosen = event.target.closest?.("[data-tab]");
+    if (!chosen) return;
+    for (const entry of entries) {
+      const on = entry.id === chosen.dataset.tab;
+      entry.tab.setAttribute("aria-selected", String(on));
+      entry.wrap.classList.toggle("off", !on);
+      if (on) entry.wrap.querySelectorAll(".clip").forEach(measureClip);
+    }
+    tellBot(post, chosen.dataset.tab);
+  });
+  root.append(set);
+  if (index === 0) tellBot(post, ids[0]);
+}
+
+function itemFor(element) {
+  const wrap = element.closest(".card-wrap");
+  const entry = wrap && cards.get(wrap);
+  const frame = element.closest("[data-frame]");
+  return entry && frame ? { entry, frame, item: entry.variant.media[Number(frame.dataset.frame)] } : null;
+}
+document.addEventListener("load", (event) => {
+  const image = event.target;
+  if (!(image instanceof HTMLImageElement) || !image.dataset.item) return;
+  const found = itemFor(image);
+  if (!found?.item || !image.naturalWidth) return;
+  found.item.width = image.naturalWidth;
+  found.item.height = image.naturalHeight;
+  if (!found.frame.closest(".grid, .phone")) {
+    const inCarousel = found.frame.closest(".carousel");
+    const shape = found.entry.id === "instagram" || inCarousel ? frameRatio(found.entry.id, found.entry.variant.media) : ratioOf(found.item);
+    if (inCarousel) inCarousel.querySelectorAll(".frame").forEach((frame) => frame.style.setProperty("--r", shape));
+    else found.frame.style.setProperty("--r", shape);
+  }
+  renderChecks(found.entry);
+}, true);
+document.addEventListener("loadedmetadata", (event) => {
+  const video = event.target;
+  const found = video instanceof HTMLVideoElement ? itemFor(video) : null;
+  if (!found?.item) return;
+  found.item.width = video.videoWidth;
+  found.item.height = video.videoHeight;
+  found.item.duration = video.duration;
+  if (!found.frame.closest(".grid, .phone, .carousel") && video.videoWidth) found.frame.style.setProperty("--r", video.videoWidth / video.videoHeight);
+  renderChecks(found.entry);
+}, true);
+document.addEventListener("error", (event) => {
+  const target = event.target;
+  if (target instanceof HTMLImageElement && target.closest(".post-avatar")) {
+    const avatar = target.closest(".post-avatar");
+    avatar.textContent = avatar.dataset.initials;
+    return;
+  }
+  if (target instanceof HTMLImageElement && target.closest(".poster-frame")) { target.remove(); return; }
+  if (!(target instanceof HTMLImageElement || target instanceof HTMLVideoElement)) return;
+  const found = itemFor(target);
+  if (!found?.item) return;
+  found.item.failed = true;
+  const index = Number(found.frame.dataset.frame);
+  target.outerHTML = itemHtml(found.item, found.entry.variant, found.entry.account, index);
+  renderChecks(found.entry);
+}, true);
+
+function syncCarousel(swipe) {
+  const items = swipe.children, step = items[1] ? items[1].offsetLeft - items[0].offsetLeft : 0;
+  if (!step) return;
+  const at = Math.max(0, Math.min(items.length - 1, Math.round(swipe.scrollLeft / step)));
+  const media = swipe.closest(".media");
+  const counter = media.querySelector("[data-count]");
+  if (counter) counter.textContent = counter.closest(".doc-head") ? `${at + 1} of ${items.length} pages` : `${at + 1}/${items.length}`;
+  media.querySelectorAll(".dots i").forEach((dot, index) => dot.classList.toggle("on", index === at));
+  media.querySelector(".nav.prev").disabled = at === 0;
+  media.querySelector(".nav.next").disabled = swipe.scrollLeft + swipe.clientWidth >= swipe.scrollWidth - 1;
+}
+document.addEventListener("scroll", (event) => {
+  if (event.target instanceof Element && event.target.matches(".swipe")) syncCarousel(event.target);
+}, true);
+document.addEventListener("click", (event) => {
+  const nav = event.target.closest?.(".nav");
+  if (nav) {
+    const swipe = nav.closest(".carousel").querySelector(".swipe");
+    const step = swipe.children[1].offsetLeft - swipe.children[0].offsetLeft;
+    swipe.scrollBy({ left: nav.classList.contains("next") ? step : -step, behavior: "smooth" });
+    return;
+  }
+  const more = event.target.closest?.(".see-more");
+  if (more) more.closest(".post-caption").classList.add("open");
+});
+
+function start() {
+  const root = document.getElementById("root");
+  let data;
+  try {
+    data = JSON.parse(document.getElementById("posts-data").textContent);
+  } catch (error) {
+    root.innerHTML = `<p class="problem">The posts-data block isn't valid JSON: ${esc(error.message)}</p>`;
+    return;
+  }
+  const given = data.account ?? {};
+  const handle = String(given.handle ?? "").trim().replace(/^@/, "");
+  const account = { ...given, name: String(given.name ?? "").trim() || handle || "Your name", handle };
+  const posts = Array.isArray(data.posts) ? data.posts : [];
+  if (!posts.length) root.innerHTML = `<p class="problem">No posts yet.</p>`;
+  posts.forEach((post, index) => renderPost(post && typeof post === "object" ? post : {}, account, root, index));
+}
+start();
+</script>
+</body>
+</html>
