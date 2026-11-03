@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
 
-import { shortcutBots, shownBotIds } from "./sidebar-shortcut-order";
+import { nextShortcutBot, shortcutBots, shownBotIds } from "./sidebar-shortcut-order";
 
 const bot = (id: string) => ({ id });
 
@@ -51,5 +51,25 @@ describe("shortcutBots", () => {
 
   it("keeps the bots' own order when no sidebar is on screen", () => {
     expect(shortcutBots(bots, []).map((b) => b.id)).toEqual(["a", "b", "c", "d"]);
+  });
+});
+
+describe("nextShortcutBot", () => {
+  const bots = [bot("a"), bot("b"), bot("c")];
+
+  it("steps forward and back through the list, wrapping at both ends", () => {
+    expect(nextShortcutBot(bots, "b", 1)?.id).toBe("c");
+    expect(nextShortcutBot(bots, "c", 1)?.id).toBe("a");
+    expect(nextShortcutBot(bots, "a", -1)?.id).toBe("c");
+  });
+
+  it("starts from either end when the selected bot is not shown, as in a collapsed section", () => {
+    expect(nextShortcutBot(bots, "hidden", 1)?.id).toBe("a");
+    expect(nextShortcutBot(bots, "hidden", -1)?.id).toBe("c");
+    expect(nextShortcutBot(bots, null, -1)?.id).toBe("c");
+  });
+
+  it("opens nothing without bots", () => {
+    expect(nextShortcutBot([], "a", 1)).toBeUndefined();
   });
 });

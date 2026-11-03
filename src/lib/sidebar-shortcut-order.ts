@@ -15,3 +15,14 @@ export function shortcutBots<T extends { id: string }>(bots: readonly T[], shown
   const byId = new Map(bots.map((bot) => [bot.id, bot]));
   return shownIds.flatMap((id) => byId.get(id) ?? []);
 }
+
+/**
+ * The bot ⌘⇧] (`step` 1) or ⌘⇧[ (`step` -1) opens. A selected bot that is not in `bots`, such as one in a
+ * collapsed section, counts as standing just outside the list: ] opens the first bot and [ the last.
+ */
+export function nextShortcutBot<T extends { id: string }>(bots: readonly T[], selectedId: string | null | undefined, step: 1 | -1): T | undefined {
+  if (bots.length === 0) return undefined;
+  const index = bots.findIndex((bot) => bot.id === selectedId);
+  if (index === -1) return step > 0 ? bots[0] : bots.at(-1);
+  return bots[(index + step + bots.length) % bots.length];
+}
