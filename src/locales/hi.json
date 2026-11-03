@@ -2292,7 +2292,6 @@
   "mausbotWelcome.add": "{name} जोड़ें",
   "mausbotWelcome.notNow": "अभी नहीं",
   "mausbotWelcome.notNowHint": "{name} साइडबार से बाहर रहेगा। इसे कभी भी सेटिंग्स → सामान्य में चालू करें।",
-  "grokFinish.messageApps": "जोड़ने वाले ऐप्स: {apps}।",
   "app.loading.connecting": "आपके बॉट से जुड़ रहे हैं…",
   "app.loading.updating": "My Cloud अपडेट हो रहा है…",
   "cloudSend.list.routineOne": "1 रूटीन",
