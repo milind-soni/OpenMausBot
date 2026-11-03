@@ -7,7 +7,7 @@ import {
 import { clampAppend, commentaryChunks, LiveTranscript } from "../shared/live-call.ts";
 import { signInWaits } from "../shared/sign-in-request.ts";
 import type { LiveCallRecord, LiveCallState, LiveClient, LiveEndReason } from "../shared/wire.ts";
-import { LIVE_NEEDS_KEY, liveCallSummaryLine, LiveSessionError, liveVoice } from "./live-call.ts";
+import { LIVE_NEEDS_KEY, liveCallSummaryLine, LiveSessionError, liveVoice, spokenHangUp } from "./live-call.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Message, StoreChange } from "./store.ts";
 
@@ -18,6 +18,8 @@ export const ATTACH_TIMEOUT_MS = 10_000;
 export const CLOSE_TIMEOUT_MS = 5_000;
 export const IDLE_CHECK_MS = 15_000;
 export const STATUS_INTERVAL_MS = 30_000;
+/** Time for the voice to say goodbye before a call the person asked to end is closed. */
+export const GOODBYE_MS = 4_000;
 const SOCKET_OPEN = 1;
 const MAX_ERRORS = 5;
 const MAX_REVOKED_DEVICES = 200;
@@ -116,6 +118,8 @@ interface Call {
   drainBatch: string[] | null;
   spokenAnswers: Set<string>;
   pendingEnd: LiveEndReason | null;
+  /** The person asked to hang up; the voice is saying goodbye before the call closes. */
+  goodbye: boolean;
   timers: Set<Timer>;
   consentTimer: Timer | null;
   idleTimer: ReturnType<typeof setInterval> | null;
@@ -253,6 +257,7 @@ export class LiveCallController {
       drainBatch: null,
       spokenAnswers: new Set(),
       pendingEnd: null,
+      goodbye: false,
       timers: new Set(),
       consentTimer: null,
       idleTimer: null,
@@ -460,9 +465,16 @@ export class LiveCallController {
 
 
   private async delegate(call: Call, id: string, offsetMs: number): Promise<void> {
-    if (call.state.status !== "live") return;
+    if (call.state.status !== "live" || call.goodbye) return;
     const heard = call.transcript.takeRequestParts(offsetMs);
     const said = heard.text;
+    // Only the person's own words, never what the voice said back: same end as the End button.
+    if (spokenHangUp(heard.withoutEcho)) {
+      call.goodbye = true;
+      this.append(call, "instructions", LIVE_COPY.goodbye, id);
+      this.later(call, () => this.hangUp(call, "hung-up"), GOODBYE_MS);
+      return;
+    }
     if (call.approval && !call.approval.submitted) {
       await this.decide(call, heard.withoutEcho, id, said);
       return;

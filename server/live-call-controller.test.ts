@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LiveCallState } from "../shared/wire.ts";
 import {
-  ATTACH_TIMEOUT_MS, CLOSE_TIMEOUT_MS, CONSENT_SETTLE_MS, DELEGATION_SETTLE_MS, IDLE_CHECK_MS, PROGRESS_INTERVAL_MS,
+  ATTACH_TIMEOUT_MS, CLOSE_TIMEOUT_MS, CONSENT_SETTLE_MS, DELEGATION_SETTLE_MS, GOODBYE_MS, IDLE_CHECK_MS, PROGRESS_INTERVAL_MS,
   LiveCallBusyError, LiveCallController, LiveCallSignedOutError, type LiveActivity, type LiveCallDeps, type LiveSocket,
 } from "./live-call-controller.ts";
 import { LIVE_COPY } from "../shared/live-approval.ts";
@@ -471,6 +471,59 @@ describe("LiveCallController relay", () => {
       await vi.advanceTimersByTimeAsync(IDLE_CHECK_MS);
       expect(signedOut(t)).toEqual([expect.objectContaining({ delegation_id: null })]);
       expect(t.socket().sent.at(-1)).toMatchObject({ type: "session.close" });
+    });
+  });
+
+  describe("a spoken request to hang up", () => {
+    const closes = (t: ReturnType<typeof setup>) => t.socket().sent.filter((e) => e.type === "session.close");
+
+    it("says goodbye, then ends the call the way the End button does", async () => {
+      const t = await live();
+      hear(t, "okay, thanks, you can hang up now.", 100);
+      await delegate(t, "del_1", 400);
+      expect(t.deps.send).not.toHaveBeenCalled();
+      expect(t.socket().appends("instructions").at(-1)).toMatchObject({ delegation_id: "del_1", content: LIVE_COPY.goodbye });
+      expect(closes(t)).toHaveLength(0);
+      hear(t, "wait", 1_000);
+      await delegate(t, "del_2", 1_200);
+      expect(t.deps.send).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(GOODBYE_MS);
+      expect(closes(t)).toHaveLength(1);
+      t.socket().receive({ type: "session.closed", reason: "close_requested" });
+      expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "hung-up" });
+      expect(t.controller.current()).toBeNull();
+    });
+
+    it("keeps the call for anything that is not a clear request to hang up", async () => {
+      for (const text of ["don't hang up", "how do I end the call?", "hang up the poster in my room", "end the call with Sam on my calendar", "bye"]) {
+        const t = await live();
+        hear(t, text, 100);
+        await delegate(t, "del_1", 400);
+        expect(vi.mocked(t.deps.send).mock.calls.map(([input]) => input.text), text).toEqual([text]);
+        await vi.advanceTimersByTimeAsync(GOODBYE_MS + CLOSE_TIMEOUT_MS);
+        expect(closes(t), text).toHaveLength(0);
+        expect(t.controller.current()?.status, text).toBe("live");
+      }
+    });
+
+    it("never hangs up on the voice's own words heard back through a speaker", async () => {
+      const t = await live();
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "Should I hang up?", start_ms: 1_000, end_ms: 2_000 });
+      hear(t, "hang up", 1_200, 1_400);
+      await delegate(t, "del_1", 1_500);
+      await vi.advanceTimersByTimeAsync(GOODBYE_MS + CLOSE_TIMEOUT_MS);
+      expect(closes(t)).toHaveLength(0);
+      expect(t.socket().appends("instructions").some((e) => e.content === LIVE_COPY.goodbye)).toBe(false);
+    });
+
+    it("keeps the real end reason when the call drops during the goodbye", async () => {
+      const t = await live();
+      hear(t, "hang up", 100);
+      await delegate(t, "del_1", 400);
+      t.socket().drop();
+      expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "sideband-lost" });
+      await vi.advanceTimersByTimeAsync(GOODBYE_MS);
+      expect(closes(t)).toHaveLength(0);
     });
   });
 
