@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, Loader2, Menu } from "lucide-react";
 import { CLOUD_LINK_SETTINGS, openBot, StoreProvider, useStore } from "@/state/store";
+import { shortcutBots, shownBotIds } from "@/lib/sidebar-shortcut-order";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { useWelcomeViewer, WelcomeGate } from "@/components/onboarding/WelcomeGate";
 import { MausBotWelcome } from "@/components/MausBotWelcome";
@@ -176,7 +177,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
 
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
-      const bots = state.bots.filter((b) => !b.hidden);
+      const bots = shortcutBots(state.bots.filter((b) => !b.hidden), shownBotIds(document.querySelector("[data-sidebar-root]")));
       if (e.key === "n" && !e.shiftKey) {
         e.preventDefault();
         dispatch({ type: "newBot" });
