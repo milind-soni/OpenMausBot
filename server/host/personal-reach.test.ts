@@ -25,6 +25,13 @@ describe("a person's MausBot reaching shared bots", () => {
     expect(world().mayHandOn(mausbot, { id: "editable", name: "Editable" }, "mine")).toBe(true);
   });
 
+  it("opens the work only for the person whose chat this is", () => {
+    expect(world().opensFor(key(MIRA), "mine")).toBe(true);
+    expect(world().opensFor(key(BEN), "mine")).toBe(false);
+    expect(world().opensFor(null, "teamChat")).toBe(false);
+    expect(world().opensFor(key(MIRA), "teamChat")).toBe(false);
+  });
+
   it("says where to go instead in a chat it can't hand work on from, and nothing to anyone else", () => {
     expect(world().notHere(mausbot, "teamChat")).toContain("start a new conversation with you");
     expect(world().notHere(mausbot, "benChat")).toContain("start a new conversation with you");

@@ -43,6 +43,10 @@ export function createPersonalReach(deps: PersonalReachDeps) {
       if (node.id === undefined) return mayHandOn(from, target, fromThreadId);
       return reaches(from, target, fromThreadId) && deps.privateTo(node.threadId) === deps.privateTo(fromThreadId) && node.origin?.kind === "user";
     },
+    /** Whoever the turn acts for must be the person whose chat this is, or the work would open for someone else. */
+    opensFor(opener: string | null | undefined, threadId: string): boolean {
+      return Boolean(opener) && opener === deps.privateTo(threadId);
+    },
     /** An assignment id reaches any thread of the bot, so an answer must stay in this person's own. */
     mayAnswerIn(from: RosterMember, fromThreadId: string, answerThreadId: string | undefined): boolean {
       return personOf(from, fromThreadId) !== null && answerThreadId !== undefined && deps.privateTo(answerThreadId) === deps.privateTo(fromThreadId);
