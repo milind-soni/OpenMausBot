@@ -214,11 +214,20 @@ export async function releaseBrowserProfile(dir: string | undefined, binaryPath?
   for (const name of ["SingletonLock", "SingletonSocket", "SingletonCookie"]) { try { unlinkSync(join(dir, name)); } catch {} }
 }
 
-/** Windows has no tree to re-parent to: the Chromes naming the profile, with their parents. The folder goes in through the
- * environment, so no path is ever quoted into the script. */
-const WINDOWS_PROFILE_BROWSERS = "$d = $env:OMB_BROWSER_PROFILE; ConvertTo-Json -Compress -InputObject @(Get-CimInstance Win32_Process"
-  + " | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($d, [StringComparison]::OrdinalIgnoreCase) -ge 0 }"
-  + " | Select-Object ProcessId, ParentProcessId, CommandLine)";
+/** Windows has no tree to re-parent to: the Chromes naming the profile, each with its image, start time and its parent's (a
+ * pid the system gave on to a newer process is not the parent). Start times are UTC strings, which sort as they compare and
+ * keep their precision. The folder goes in through the environment, so no path is ever quoted into the script. */
+const WINDOWS_PROFILE_BROWSERS = "$d = $env:OMB_BROWSER_PROFILE; $all = @(Get-CimInstance Win32_Process); $by = @{}; foreach ($p in $all) { $by[$p.ProcessId] = $p }"
+  + " ; ConvertTo-Json -Compress -InputObject @($all | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($d, [StringComparison]::OrdinalIgnoreCase) -ge 0 }"
+  + " | ForEach-Object { $q = $by[$_.ParentProcessId]; [pscustomobject]@{ ProcessId = $_.ProcessId; ParentProcessId = $_.ParentProcessId; CommandLine = $_.CommandLine;"
+  + " Name = $_.Name; Started = $_.CreationDate.ToUniversalTime().ToString('o'); ParentName = $(if ($q) { $q.Name });"
+  + " ParentStarted = $(if ($q) { $q.CreationDate.ToUniversalTime().ToString('o') }) } })";
+
+/** One process's start time, read again right before it is stopped. */
+const WINDOWS_PROCESS_STARTED = "(Get-CimInstance Win32_Process -Filter ('ProcessId=' + [uint32]$env:OMB_PROCESS_ID)).CreationDate.ToUniversalTime().ToString('o')";
+
+/** The images Chrome-family browsers run as: no other program on the list is ever stopped. */
+const CHROMIUM_IMAGE = /^(?:chrome|chromium|msedge|brave|chrome-headless-shell)\.exe$/i;
 
 /** A Windows command line's arguments: spaces split them except inside double quotes, which may sit anywhere in one. */
 function windowsArgs(line: string): string[] {
@@ -244,8 +253,8 @@ const heldWindowsProfiles = new Map<string, { browser: number; daemon: number; i
 
 /** Windows Chrome keeps `lockfile` in its profile open and undeletable while it runs. One whose daemon was killed keeps running
  * and makes every later launch on the profile exit with code 21 (profile in use), even after the app restarts, so it is
- * stopped; a daemon's own Chrome (its parent runs `binaryPath` or another agent-browser), or one whose parent tasklist cannot
- * name, is kept. The profile's contents are never touched. */
+ * stopped, once it is checked to be the same Chrome; a daemon's own Chrome (its parent runs `binaryPath` or another
+ * agent-browser) is kept. The profile's contents are never touched. */
 async function releaseWindowsProfile(dir: string, binaryPath?: string): Promise<void> {
   const lock = join(dir, "lockfile");
   if (lockReleased(lock)) { heldWindowsProfiles.delete(dir); return; }
@@ -257,21 +266,25 @@ async function releaseWindowsProfile(dir: string, binaryPath?: string): Promise<
   let rows: unknown;
   try { rows = JSON.parse(listing ?? ""); } catch { return; }
   const flag = `--user-data-dir=${dir}`.toLowerCase();
+  const text = (value: unknown) => typeof value === "string" ? value : "";
   const browsers = (Array.isArray(rows) ? rows : [rows]).flatMap((row) => {
-    const { ProcessId: pid, ParentProcessId: ppid, CommandLine: line } = (row ?? {}) as { ProcessId?: unknown; ParentProcessId?: unknown; CommandLine?: unknown };
-    if (!Number.isInteger(pid) || !Number.isInteger(ppid) || typeof line !== "string") return [];
+    const { ProcessId: pid, ParentProcessId: ppid, CommandLine: line, Name: name, Started: started, ParentName: parent, ParentStarted: parentStarted } = (row ?? {}) as Record<string, unknown>;
+    if (!Number.isInteger(pid) || !Number.isInteger(ppid) || typeof line !== "string" || !CHROMIUM_IMAGE.test(text(name)) || !text(started)) return [];
     // A path's case does not matter on Windows.
     const args = windowsArgs(line).map((arg) => arg.toLowerCase());
-    return args.includes(flag) && !args.some((arg) => arg.startsWith("--type=")) ? [{ pid: pid as number, ppid: ppid as number }] : [];
+    if (!args.includes(flag) || args.some((arg) => arg.startsWith("--type="))) return [];
+    // A parent started after the Chrome holds a reused pid: the Chrome's own parent is gone.
+    const daemon = text(parent) && text(parentStarted) && text(parentStarted) <= text(started) ? text(parent).toLowerCase() : "";
+    return [{ pid: pid as number, ppid: ppid as number, started: started as string, daemon }];
   });
-  for (const { pid, ppid } of browsers) {
-    const parent = await imageOf(ppid);
-    if (parent === null) return;
-    if (parent.startsWith("agent-browser") || (binaryPath && parent === win32.basename(binaryPath).toLowerCase())) {
-      heldWindowsProfiles.set(dir, { browser: pid, daemon: ppid, image: parent });
+  for (const { pid, ppid, started, daemon } of browsers) {
+    if (daemon.startsWith("agent-browser") || (binaryPath && daemon === win32.basename(binaryPath).toLowerCase())) {
+      heldWindowsProfiles.set(dir, { browser: pid, daemon: ppid, image: daemon });
       return;
     }
-    await execText("taskkill", ["/PID", String(pid), "/T", "/F"]);
+    // Between the listing and now the pid may have gone to another program: only the same Chrome is stopped.
+    const now = await execText("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_PROCESS_STARTED], { OMB_PROCESS_ID: String(pid) }, 15_000);
+    if (now?.trim() === started) await execText("taskkill", ["/PID", String(pid), "/T", "/F"]);
   }
   if (browsers.length) await within(2_000, async () => lockReleased(lock));
 }
