@@ -46,6 +46,7 @@ export declare function createChromeRail(deps: {
   args: () => string[];
   url: () => string;
   wanted: () => boolean;
+  listable?: () => boolean;
   prefs?: () => { railHidden(): boolean; setRailHidden(hidden: boolean): void; windowFrame?(): boolean } | null;
   changed?: () => void;
   log?: (line: string) => void;

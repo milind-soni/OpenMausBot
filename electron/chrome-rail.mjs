@@ -40,14 +40,15 @@ const NO_DRAG = "* { -webkit-app-region: no-drag !important; }";
  *   args: () => string[],
  *   url: () => string,
  *   wanted: () => boolean,
+ *   listable?: () => boolean,
  *   prefs?: () => { railHidden(): boolean, setRailHidden(hidden: boolean): void, windowFrame?(): boolean } | null,
  *   changed?: () => void,
  *   log?: (line: string) => void,
  * }} deps `url()`: the rail's page on this app's own server; `wanted()`: whether the window has two places or more to
- * show it for (railPlaces); `args()`: the preload's arguments, as the window's own page gets them; `prefs()`: where this
+ * show it for (railPlaces); `listable()`: whether this app has places to list at all and its server is up; `args()`: the preload's arguments, as the window's own page gets them; `prefs()`: where this
  * desktop keeps the person's choice to hide it; `changed()`: the rail came or went beside the page.
  */
-export function createChromeRail({ createView, preload, args, url, wanted, prefs = () => null, changed = () => {}, log = () => {} }) {
+export function createChromeRail({ createView, preload, args, url, wanted, listable = () => true, prefs = () => null, changed = () => {}, log = () => {} }) {
   let view = null, win = null, shown = false, expanded = false, held = false, beside = false, listAsked = false, dragLifted = null, skinBeside = null;
   // Whether the page beside draws the frame; the window opens as if it does (windowChromeOptions).
   let framed = true, frameGrace = null;
@@ -147,7 +148,10 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
       win.on("resize", layout);
       const contents = win.webContents;
       // Each new document is told again, once it is ready.
-      contents.on("dom-ready", () => { if (beside) tellPage(); });
+      contents.on("dom-ready", () => {
+        if (beside) tellPage();
+        if (expanded) { dragLifted = null; liftDragRegions(true); }
+      });
       contents.on("did-navigate", nextDocument);
       contents.on("render-process-gone", nextDocument);
       // Electron 43 reports an error page that replaced the document here, not as did-navigate.
@@ -233,6 +237,7 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
       // Security: the page beside only asks. The list opens on the rail's own page; nothing of it comes back.
       ipcMain.handle("rail:open-list", (event) => {
         if (!pageBeside(event)) throw new Error("rail:open-list is only available to the page beside the window's rail");
+        if (!listable()) return;
         listAsked = true;
         rail.holdOpen(true);
         rail.send("rail:open-list", stands());

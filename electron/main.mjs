@@ -2684,7 +2684,7 @@ const railInput = () => { ownHome?.refresh(); return { saved: environmentsState,
 // The rail as the window's own chrome (chrome-rail.mjs): this app's page beside every place's page, the one that lists.
 const chromeRail = createChromeRail({ createView: options => new WebContentsView(options), preload: path.join(__dirname, "preload.cjs"), log: slog, prefs: () => desktopPrefs, changed: () => rail.changed(),
   args: () => [...desktopCompanionRendererArguments(rendererOrigin(), desktopRemoteAccess), ...(app.isPackaged && !desktopRemoteAccess ? ["--omb-company-desktop=1"] : []), `--omb-app-version=${app.getVersion()}`],
-  url: () => `${rendererOrigin()}${CHROME_RAIL_PATH}`, wanted: () => !desktopRemoteAccess && serverReady && railList().length > 0 });
+  url: () => `${rendererOrigin()}${CHROME_RAIL_PATH}`, wanted: () => !desktopRemoteAccess && serverReady && railList().length > 0, listable: () => !desktopRemoteAccess && serverReady });
 chromeRail.install(ipcMain);
 function railChanged() { chromeRail.refresh(); rail.changed(); }
 const accountPages = [() => (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents }) ? mainWindow.webContents : null), () => ({ send: channel => chromeRail.send(channel) })];

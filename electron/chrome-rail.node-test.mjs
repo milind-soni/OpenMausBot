@@ -33,13 +33,13 @@ function viewMaker() {
   return { made, createView };
 }
 
-function world({ wanted = true, hidden = false, frame = true } = {}) {
+function world({ wanted = true, hidden = false, frame = true, listable } = {}) {
   const { win, page, children } = appWindow();
   const { made, createView } = viewMaker();
   const state = { wanted, hidden, changes: 0 };
   const prefs = { railHidden: () => state.hidden, setRailHidden: (value) => { state.hidden = value; }, windowFrame: () => frame };
   const rail = createChromeRail({ createView, preload: "/app/preload.cjs", args: () => ["--omb-local-origin=http://127.0.0.1:8799", "--omb-company-desktop=1"], url: () => RAIL,
-    wanted: () => state.wanted, prefs: () => prefs, changed: () => { state.changes++; } });
+    wanted: () => state.wanted, ...(listable ? { listable } : {}), prefs: () => prefs, changed: () => { state.changes++; } });
   const handlers = new Map();
   rail.install({ handle: (channel, handler) => handlers.set(channel, handler) });
   /** The page beside the rail asks, from its main frame. */
@@ -449,6 +449,28 @@ test("while a sheet of the rail's covers the page, the page has no drag regions:
   w.rail.refresh();
   await w.settle();
   assert.equal(css.at(-1)[0], "remove", "the view going takes the sheet with it");
+});
+
+test("connected to another computer, or with this app's server down, the tag's click brings nothing up", async () => {
+  const w = world({ wanted: false, listable: () => false });
+  w.rail.attach(w.win);
+  await w.ask("rail:open-list");
+  assert.deepEqual([w.rail.shown(), w.made.length], [false, 0]);
+});
+
+test("a new document under a sheet of the rail's has no drag regions either", async () => {
+  const w = world();
+  const css = [];
+  Object.assign(w.page, { insertCSS: async (text) => { css.push(text); return `key-${css.length}`; }, removeInsertedCSS: async () => {} });
+  w.rail.attach(w.win);
+  w.rail.expand(true);
+  w.page.emit("dom-ready");
+  await w.settle();
+  assert.equal(css.length, 2, "main puts it on the new document too");
+  w.rail.expand(false);
+  w.page.emit("dom-ready");
+  await w.settle();
+  assert.equal(css.length, 2, "with no sheet open, a new document keeps its own");
 });
 
 test("a rail's page that didn't load lets go of the window, so a list that can't come up leaves nothing over the page", async () => {
