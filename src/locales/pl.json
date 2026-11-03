@@ -109,6 +109,7 @@
   "server.warmSummary.summarized": "podsumowano tę rozmowę podczas przerwy; najnowsze wiadomości zostają słowo w słowo",
   "server.runs.didNotFinish": "To uruchomienie się nie zakończyło.",
   "server.runs.didNotFinishWhy": "To uruchomienie się nie zakończyło: {detail}",
+  "server.runs.partlyDoneWhy": "To uruchomienie zostało wykonane częściowo: {detail}",
   "server.runs.recovered": "Znowu działa: rutyna „{name}” zakończyła się poprawnie o {time}",
   "server.runs.card.line": "Rutyna „{name}” {state}",
   "server.runs.state.needsInput": "czeka na twoją odpowiedź",

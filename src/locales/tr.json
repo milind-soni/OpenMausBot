@@ -87,6 +87,7 @@
   "server.warmSummary.summarized": "bu konuşma boşta kaldığı sırada özetlendi; en son mesajlar kelimesi kelimesine korunuyor",
   "server.runs.didNotFinish": "Bu çalıştırma tamamlanmadı.",
   "server.runs.didNotFinishWhy": "Bu çalıştırma tamamlanmadı: {detail}",
+  "server.runs.partlyDoneWhy": "Bu çalıştırma kısmen tamamlandı: {detail}",
   "server.runs.recovered": "Düzeldi: {name} sorunsuz tamamlandı (saat {time})",
   "server.runs.card.line": "“{name}” rutini {state}",
   "server.runs.state.needsInput": "yanıtınızı bekliyor",

@@ -227,6 +227,20 @@ describe("automation reports", () => {
     expect(f.notified.map((entry) => entry.threadId)).toEqual([f.main, nowhere.threadId]);
   });
 
+  it("says a run whose reply came back but a step failed was partly done, not that it didn't finish", () => {
+    const f = fixture();
+    const partly = f.finished(null, "Inbox brief", { status: "failed", error: "Stopped because the tool call failed.", partial: true });
+    f.reports.runFailed(partly, "Stopped because the tool call failed.");
+    expect(f.lines()).toEqual([expect.objectContaining({
+      text: "This run was partly done: Stopped because the tool call failed.",
+      automation: expect.objectContaining({ failed: true, partial: true }),
+    })]);
+    const broken = f.finished(null, "Other", { status: "failed", error: "Signed out" });
+    f.reports.runFailed(broken, "Signed out");
+    expect(f.lines()[1]).toMatchObject({ text: "This run didn't finish: Signed out" });
+    expect(f.lines()[1]!.automation).not.toHaveProperty("partial");
+  });
+
   it("posts one recovered line when a run with nothing new follows a failed run, and stays quiet after that", () => {
     const f = fixture();
     const failed = f.finished(null, "Inbox brief", { status: "failed", error: "Timed out" });

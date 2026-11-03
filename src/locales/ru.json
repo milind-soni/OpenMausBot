@@ -109,6 +109,7 @@
   "server.warmSummary.summarized": "этот разговор кратко изложен, пока он был в паузе; последние сообщения сохранены дословно",
   "server.runs.didNotFinish": "Этот запуск не завершился.",
   "server.runs.didNotFinishWhy": "Этот запуск не завершился: {detail}",
+  "server.runs.partlyDoneWhy": "Этот запуск выполнен частично: {detail}",
   "server.runs.recovered": "Снова в порядке: процедура «{name}» успешно завершилась в {time}",
   "server.runs.card.line": "Процедура «{name}» {state}",
   "server.runs.state.needsInput": "ждёт вашего ответа",

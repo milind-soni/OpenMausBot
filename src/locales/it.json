@@ -107,6 +107,7 @@
   "server.warmSummary.summarized": "questa conversazione è stata riassunta mentre era inattiva; gli ultimi messaggi restano parola per parola",
   "server.runs.didNotFinish": "Questa esecuzione non è terminata.",
   "server.runs.didNotFinishWhy": "Questa esecuzione non è terminata: {detail}",
+  "server.runs.partlyDoneWhy": "Questa esecuzione è stata completata in parte: {detail}",
   "server.runs.recovered": "Risolto: {name} è terminata correttamente alle {time}",
   "server.runs.card.line": "La routine «{name}» {state}",
   "server.runs.state.needsInput": "aspetta una tua risposta",

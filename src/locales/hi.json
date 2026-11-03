@@ -55,6 +55,7 @@
   "server.warmSummary.summarized": "बातचीत रुकी रहने के दौरान उसका सारांश बनाया गया; सबसे नए संदेश शब्दशः बने रहते हैं",
   "server.runs.didNotFinish": "यह एक्ज़ीक्यूशन पूरा नहीं हुआ।",
   "server.runs.didNotFinishWhy": "यह एक्ज़ीक्यूशन पूरा नहीं हुआ: {detail}",
+  "server.runs.partlyDoneWhy": "यह एक्ज़ीक्यूशन आंशिक रूप से पूरा हुआ: {detail}",
   "server.runs.recovered": "फिर से ठीक है: {name} {time} पर ठीक से पूरा हुआ",
   "server.runs.card.line": "रूटीन “{name}” {state}",
   "server.runs.state.needsInput": "आपके जवाब का इंतज़ार कर रहा है",

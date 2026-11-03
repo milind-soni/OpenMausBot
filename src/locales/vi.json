@@ -87,6 +87,7 @@
   "server.warmSummary.summarized": "đã tóm tắt cuộc trò chuyện này khi nó đang tạm dừng; các tin nhắn mới nhất được giữ nguyên văn",
   "server.runs.didNotFinish": "Lượt chạy này chưa hoàn tất.",
   "server.runs.didNotFinishWhy": "Lượt chạy này chưa hoàn tất: {detail}",
+  "server.runs.partlyDoneWhy": "Lần chạy này chỉ xong một phần: {detail}",
   "server.runs.recovered": "Đã ổn trở lại: {name} đã chạy xong bình thường lúc {time}",
   "server.runs.card.line": "Tác vụ định kỳ “{name}” {state}",
   "server.runs.state.needsInput": "cần bạn trả lời",
