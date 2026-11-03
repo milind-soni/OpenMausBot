@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -586,6 +586,7 @@ winOnly("resolveCli (Windows)", () => {
     expect(resolved.args[0]).toBe("-c");
     expect(resolved.args.slice(2)).toEqual([root, ...args]);
     expect(resolveCli(`"${shim}"`, args)).toEqual(resolved);
+    expect(resolveCli(relative(process.cwd(), shim), args)).toEqual(resolved);
   });
 
   it("does not treat unrelated batch files or incomplete layouts as portable Hermes", () => {

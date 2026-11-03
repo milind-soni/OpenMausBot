@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { resolveCli } from "./procs.ts";
@@ -63,7 +63,7 @@ for line in sys.stdin:
         print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": result}), flush=True)
 `);
     const payload = ["payload", 'spaces & pipes | %PATH% "quotes"', "你好"];
-    const resolved = resolveCli(shim, payload);
+    const resolved = resolveCli(relative(process.cwd(), shim), payload);
     const env = { ...process.env, HERMES_HOME: home, OPENAI_API_KEY: "must-be-cleared", TERMINAL_CWD: dataDir };
     const output = execFileSync(resolved.command, resolved.args, { env, encoding: "utf8" });
     expect(JSON.parse(output)).toEqual(payload);
