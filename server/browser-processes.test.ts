@@ -3,7 +3,7 @@
 // hands its Chrome.
 import { execFile, execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -244,6 +244,146 @@ describe("a browser on Windows", () => {
       expect(await browserProcessesRunning(tree)).toBe(false);
     } finally {
       holder.kill("SIGKILL");
+    }
+  });
+
+  it("stops an orphaned Chrome that runs under the configured Chrome's own image name, and only that one", async () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-win-custom-chrome-"));
+    homes.push(root);
+    const dir = join(root, "Profile");
+    mkdirSync(join(dir, "lockfile"), { recursive: true });
+    const started = "2026-11-03T09:00:00.0000000Z";
+    const commands: string[][] = [];
+    vi.mocked(execFile).mockImplementation(((file: string, args: string[], options: { env?: NodeJS.ProcessEnv }, done: (error: Error | null, stdout: string) => void) => {
+      commands.push([file, ...args]);
+      let stdout = "";
+      if (file === "powershell.exe" && options.env?.OMB_PROCESS_ID) stdout = `${started}\r\n`;
+      else if (file === "powershell.exe") {
+        stdout = JSON.stringify([{
+          ProcessId: 4500, ParentProcessId: 4100, CommandLine: `"C:\\Chrome Dev\\chrome-dev.exe" "--user-data-dir=${dir}"`,
+          Name: "chrome-dev.exe", Started: started, ParentName: null, ParentStarted: null,
+        }]);
+      } else if (file === "taskkill") rmSync(join(dir, "lockfile"), { recursive: true, force: true });
+      queueMicrotask(() => done(null, stdout));
+      return {} as ChildProcess;
+    }) as unknown as typeof execFile);
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    const killed = () => commands.filter(([file]) => file === "taskkill");
+    // Without the configured Chrome, an image off the list is never stopped.
+    await releaseBrowserProfile(dir, "C:\\Tools\\agent-browser.exe");
+    expect(killed()).toEqual([]);
+    await releaseBrowserProfile(dir, "C:\\Tools\\agent-browser.exe", "C:\\Chrome Dev\\Chrome-Dev.exe");
+    expect(killed()).toEqual([["taskkill", "/PID", "4500", "/T", "/F"]]);
+    expect(existsSync(join(dir, "lockfile"))).toBe(false);
+  });
+
+  it("gives up after a bounded wait when the stopped Chrome's lock stays held", async () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-win-held-lock-"));
+    homes.push(root);
+    const dir = join(root, "Profile");
+    mkdirSync(join(dir, "lockfile"), { recursive: true });
+    const started = "2026-11-03T09:00:00.0000000Z";
+    const commands: string[][] = [];
+    vi.mocked(execFile).mockImplementation(((file: string, args: string[], options: { env?: NodeJS.ProcessEnv }, done: (error: Error | null, stdout: string) => void) => {
+      commands.push([file, ...args]);
+      let stdout = "";
+      if (file === "powershell.exe" && options.env?.OMB_PROCESS_ID) stdout = `${started}\r\n`;
+      else if (file === "powershell.exe") {
+        stdout = JSON.stringify([{
+          ProcessId: 4600, ParentProcessId: 4100, CommandLine: `"C:\\Chrome\\chrome.exe" "--user-data-dir=${dir}"`,
+          Name: "chrome.exe", Started: started, ParentName: null, ParentStarted: null,
+        }]);
+      }
+      queueMicrotask(() => done(null, stdout));
+      return {} as ChildProcess;
+    }) as unknown as typeof execFile);
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    const begun = Date.now();
+    await releaseBrowserProfile(dir);
+    expect(Date.now() - begun).toBeGreaterThanOrEqual(1_500);
+    expect(commands.filter(([file]) => file === "taskkill")).toEqual([["taskkill", "/PID", "4600", "/T", "/F"]]);
+    expect(existsSync(join(dir, "lockfile"))).toBe(true);
+  });
+
+  it("stops a Chrome whose daemon was killed under it, which would make every launch exit with code 21, and keeps a daemon's own", async () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-win-profile-"));
+    homes.push(root);
+    const dir = join(root, "Kept Profile");
+    mkdirSync(join(dir, "Default"), { recursive: true });
+    writeFileSync(join(dir, "Default", "Cookies"), "signed in");
+    writeFileSync(join(dir, "lockfile"), "");
+    // Windows keeps a running Chrome's lockfile undeletable; a folder by that name, which no system unlinks, stands in for it.
+    const hold = () => mkdirSync(join(dir, "lockfile"));
+    const release = () => rmSync(join(dir, "lockfile"), { recursive: true, force: true });
+    let parentImage = "";
+    let parentStarted = "";
+    let startedNow = "";
+    const started = "2026-11-03T09:00:00.0000000Z";
+    // The browser is this test's own live pid, so a Chrome kept under its daemon can be seen still running.
+    const browser = process.pid;
+    const commands: string[][] = [];
+    const chrome = (pid: number, args: string, Name = "chrome.exe") => ({
+      ProcessId: pid, ParentProcessId: 4100, CommandLine: `"C:\\Chrome\\${Name}" ${args}`, Name, Started: started,
+      ParentName: parentImage || null, ParentStarted: parentStarted || null,
+    });
+    vi.mocked(execFile).mockImplementation(((file: string, args: string[], options: { env?: NodeJS.ProcessEnv }, done: (error: Error | null, stdout: string) => void) => {
+      commands.push([file, ...args]);
+      let stdout = "";
+      if (file === "powershell.exe" && options.env?.OMB_PROCESS_ID) {
+        expect(options.env.OMB_PROCESS_ID).toBe(String(browser));
+        stdout = `${startedNow}\r\n`;
+      } else if (file === "powershell.exe") {
+        expect(options.env?.OMB_BROWSER_PROFILE).toBe(dir);
+        stdout = JSON.stringify([
+          chrome(browser, `"--user-data-dir=${dir.toUpperCase()}" --remote-debugging-port=0`),
+          chrome(4201, `--type=renderer "--user-data-dir=${dir}"`),
+          chrome(4300, `"--user-data-dir=${dir} backup" --remote-debugging-port=0`),
+          // Another program naming the profile is never stopped.
+          chrome(4400, `"--user-data-dir=${dir}"`, "python.exe"),
+        ]);
+      } else if (file === "tasklist") {
+        stdout = parentImage ? `"${parentImage}","4100","Console","1","12,345 K"\r\n` : "INFO: No tasks are running which match the specified criteria.\r\n";
+      } else if (file === "taskkill") {
+        expect(args).toEqual(["/PID", String(browser), "/T", "/F"]);
+        release();
+      }
+      queueMicrotask(() => done(null, stdout));
+      return {} as ChildProcess;
+    }) as unknown as typeof execFile);
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    const killed = () => commands.filter(([file]) => file === "taskkill");
+    const listed = () => commands.filter(([file, ...args]) => file === "powershell.exe" && args.at(-1)!.includes("OMB_BROWSER_PROFILE")).length;
+    try {
+      // No Chrome holds the profile: nothing is listed.
+      await releaseBrowserProfile(dir);
+      expect(commands).toEqual([]);
+      hold();
+      // Its daemon still runs: the Chrome is kept.
+      parentImage = "agent-browser-win32-x64.exe";
+      parentStarted = "2026-11-03T08:59:59.0000000Z";
+      await releaseBrowserProfile(dir);
+      expect(killed()).toEqual([]);
+      // The next turn finds it under the same daemon without listing every process again.
+      await releaseBrowserProfile(dir);
+      expect(listed()).toBe(1);
+      parentImage = "my-engine.exe";
+      await releaseBrowserProfile(dir, "C:\\Tools\\My-Engine.exe");
+      expect(killed()).toEqual([]);
+      // Its daemon is gone and Windows gave the pid to a newer agent-browser, but by now the browser's pid runs another
+      // program too: nothing is stopped.
+      parentImage = "agent-browser-win32-x64.exe";
+      parentStarted = "2026-11-03T09:00:05.0000000Z";
+      startedNow = "2026-11-03T09:00:07.0000000Z";
+      await releaseBrowserProfile(dir);
+      expect(killed()).toEqual([]);
+      // The same Chrome still holds the profile: the browser process and its helpers go.
+      startedNow = started;
+      await releaseBrowserProfile(dir);
+      expect(killed()).toEqual([["taskkill", "/PID", String(browser), "/T", "/F"]]);
+      expect(existsSync(join(dir, "lockfile"))).toBe(false);
+      expect(readFileSync(join(dir, "Default", "Cookies"), "utf8")).toBe("signed in");
+    } finally {
+      release();
     }
   });
 });
