@@ -37,6 +37,7 @@ describe("data saved with a peers list, a peer-approval switch or an escalations
     expect(JSON.stringify(bot)).not.toMatch(/peers|approvePeerComms/);
     const persisted: Array<Record<string, unknown>> = JSON.parse(readFileSync(file, "utf8"));
     expect(persisted.find((entry) => entry.id === narrow.id)).not.toHaveProperty("peers");
+    expect(persisted.find((entry) => entry.id === narrow.id)).not.toHaveProperty("approvePeerComms");
   });
 
   it("settle a peer card left open, so it cannot lock the composer, and leave every other card alone", () => {

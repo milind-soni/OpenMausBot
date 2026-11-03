@@ -3137,6 +3137,15 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("takes a bot PATCH from an older computer that still sends a peers list or a peer-approval switch, and keeps neither", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const patched = await api("PATCH", `/api/bots/${bot.id}`, { name: "From an older computer", peers: ["nobody"], approvePeerComms: true });
+    expect(patched.status).toBe(200);
+    expect(patched.body.bot.name).toBe("From an older computer");
+    expect(patched.body.bot).not.toHaveProperty("peers");
+    expect(patched.body.bot).not.toHaveProperty("approvePeerComms");
+  });
+
   it("creates, patches, and deletes a bot", async () => {
     const created = await api("POST", "/api/bots");
     expect(created.status).toBe(201);
