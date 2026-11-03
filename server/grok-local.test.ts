@@ -55,15 +55,9 @@ function appCache(put: (path: string, text: string) => string) {
   put(slice("roster.last-roster"), JSON.stringify({ schemaVersion: 1, value: { rows: [
     { id: "b1", name: "Drew" }, { id: "b2", name: "dr eggbot" }, { id: "g1", name: "A group", isGroup: true },
   ] } }));
-  put(slice("transcript.replicas.b1"), JSON.stringify({ schemaVersion: 1, value: { entries: [
-    { event: { type: "message", text: SECRET } },
-    { event: { type: "automation-changed", automationId: "a1", automationName: "Morning watch", action: "created" } },
-    { event: { type: "automation-changed", automationId: "a2", automationName: "Gone", action: "created" } },
-    { event: { type: "automation-changed", automationId: "a2", action: "deleted" } },
-  ] } }));
-  // Slices and files that must never be opened.
-  const never = [
-    put(slice("transcript.replicas.unknown-bot"), SECRET),
+  // What must never be opened: chats, other slices and login material.
+  return [
+    put(slice("transcript.replicas.b1"), JSON.stringify({ schemaVersion: 1, value: { entries: [{ event: { type: "message", text: SECRET } }] } })),
     put(slice("settings.tokens"), SECRET),
     put(`${CACHE}/sand-secrets.json`, SECRET),
     put(`${CACHE}/${base32("sand-secrets")}.blob`, SECRET),
@@ -73,29 +67,26 @@ function appCache(put: (path: string, text: string) => string) {
     put("Library/Application Support/Grok Bot/Local Storage/leveldb/000.log", SECRET),
     put(".grokbot/daemon.json", SECRET),
   ];
-  return never;
 }
 
 describe("what the desktop app finds about Grok Bot", () => {
-  it("reads only the roster and the known Bots' transcript slices, never login material, and keeps no chat text", () => {
+  it("reads only the roster slice, never a chat or login material", () => {
     const { home, put } = fixtureHome();
     const never = appCache(put);
     const machine = machineAt(home);
     const look = lookForGrokBot(machine);
     expect(look.bots).toEqual(["Drew", "dr eggbot"]);
-    expect(look.routines).toEqual({ Drew: ["Morning watch"] });
     expect(JSON.stringify(look)).not.toContain(SECRET);
-    expect(machine.opened.sort()).toEqual([join(home, slice("roster.last-roster")), join(home, slice("transcript.replicas.b1"))].sort());
+    expect(machine.opened).toEqual([join(home, slice("roster.last-roster"))]);
     for (const path of never) expect(machine.opened).not.toContain(path);
   });
 
   it("works without the app, and with an unreadable or foreign cache", () => {
     const empty = fixtureHome();
-    expect(lookForGrokBot(machineAt(empty.home))).toEqual({ files: [], bots: [], routines: {} });
+    expect(lookForGrokBot(machineAt(empty.home))).toEqual({ files: [], bots: [] });
     const broken = fixtureHome();
     broken.put(slice("roster.last-roster"), "not json");
-    broken.put(slice("transcript.replicas.b1"), "{");
-    expect(lookForGrokBot(machineAt(broken.home))).toEqual({ files: [], bots: [], routines: {} });
+    expect(lookForGrokBot(machineAt(broken.home))).toEqual({ files: [], bots: [] });
     const foreign = fixtureHome();
     foreign.put(slice("roster.last-roster"), JSON.stringify({ value: { rows: "nope" } }));
     expect(lookForGrokBot(machineAt(foreign.home)).bots).toEqual([]);

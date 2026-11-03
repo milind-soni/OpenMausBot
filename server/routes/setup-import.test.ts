@@ -85,7 +85,7 @@ describe("the setup import routes", () => {
     expect((await local.call("POST", "/api/setup-import/grok", { body: {} })).status).toBe(405);
     const found = await local.call("GET", "/api/setup-import/grok");
     expect(found.headers.get("cache-control")).toBe("no-store");
-    expect(await found.json()).toMatchObject({ files: [{ name: "grok-bot-export-drew.json", text: "reply" }], bots: [], routines: {} });
+    expect(await found.json()).toMatchObject({ files: [{ name: "grok-bot-export-drew.json", text: "reply" }], bots: [] });
   });
 
   it("deletes an old Cursor sign-in as the routes start, on any server", async () => {

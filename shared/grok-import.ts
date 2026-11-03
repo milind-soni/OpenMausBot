@@ -81,7 +81,7 @@ export interface GrokRoutine {
   name: string; instruction: string; trigger: string; cron: string; when: string; timeZone: string;
   paused: boolean; skills: string[]; details: string;
 }
-export interface GrokApp { name: string; mcpUrl: string; transport: string; headerNames: string[]; envNames: string[] }
+export interface GrokApp { name: string; mcpUrl: string; transport: string; headerNames: string[] }
 export interface GrokBot {
   name: string; title: string; description: string; instructions: string;
   memories: string[]; userFacts: string[]; skills: GrokSkill[]; routines: GrokRoutine[]; apps: GrokApp[];
@@ -199,14 +199,11 @@ function documentsIn(text: string): Array<Record<string, unknown>> {
 function readApp(app: unknown): GrokApp[] {
   const record = isRecord(app) ? app : {};
   const name = typeof app === "string" ? app.trim() : first(record.name, record.label, record.id, record.slug);
-  const headers = isRecord(record.headers) ? Object.keys(record.headers) : [];
-  const env = [record.env, record.environment].flatMap((slot) => (isRecord(slot) ? Object.keys(slot) : []));
   return name ? [{
     name: oneLine(name),
     mcpUrl: first(record.mcp_url, record.mcpUrl, record.url),
     transport: first(record.transport, record.type).toLowerCase(),
-    headerNames: headers,
-    envNames: [...new Set(env)],
+    headerNames: isRecord(record.headers) ? Object.keys(record.headers) : [],
   }] : [];
 }
 
@@ -291,9 +288,6 @@ export function parseGrokExport(text: string): GrokBot[] {
   return bots;
 }
 
-/** Pieces of a Bot's text that looked like a key and were taken out. */
-export const grokRedactions = (bot: GrokBot) => JSON.stringify(bot).match(/«redacted \d+ chars»/g)?.length ?? 0;
-
 const slug = (value: string, max: number) =>
   value.normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, max).replace(/-+$/, "");
 
@@ -321,14 +315,14 @@ function fitBytes(text: string, max: number): string {
 
 const CLOCK_TRIGGERS = new Set(["", "schedule", "scheduled", "time", "cron", "interval"]);
 
-/** The schedule in the routine's own zone, from its cron or its words when those are a cron. `movedZone`: it named a zone
- * nothing here can read, so it runs in the person's. Null for anything else: a routine with no readable clock. */
-function routineSchedule(routine: GrokRoutine, timeZone: string): { schedule: PackageRoutineSchedule; movedZone: boolean } | null {
+/** The schedule in the routine's own zone, or the person's when it names one nothing here can read, from its cron or its
+ * words when those are a cron. Null for anything else: a routine with no readable clock. */
+function routineSchedule(routine: GrokRoutine, timeZone: string): PackageRoutineSchedule | null {
   if (!CLOCK_TRIGGERS.has(routine.trigger)) return null;
   for (const expression of [routine.cron, routine.when].filter(Boolean)) {
     for (const zone of [routine.timeZone || timeZone, timeZone]) {
       try {
-        return { schedule: normalizeCronSchedule({ type: "cron", expression, timeZone: zone }), movedZone: zone !== (routine.timeZone || timeZone) };
+        return normalizeCronSchedule({ type: "cron", expression, timeZone: zone });
       } catch {
         // the next zone, then the words
       }
@@ -353,59 +347,42 @@ const SECRET_QUERY_PARAM = /key|token|secret|pass|auth|sig|session|credential/i;
 /** A path segment this long and mixed reads as a key: such an address cannot be carried without carrying the key. */
 const KEY_LIKE_SEGMENT = /^(?=.*\d)(?=.*[a-zA-Z])[A-Za-z0-9_-]{24,}$/;
 
-/** A remote server address with any key taken out. `https` only: a Bot's export has no business pointing at this
- * computer or at a plain-text address. */
-function serverAddress(raw: string): { url: string; stripped: string[] } | "insecure" | "keyInAddress" {
+/** A remote server address with any key taken out, or null when it can't be carried without one. `https` only: a Bot's
+ * export has no business pointing at this computer or at a plain-text address. */
+function serverAddress(raw: string): string | null {
   let url: URL;
   try {
     url = new URL(raw);
   } catch {
-    return "insecure";
+    return null;
   }
-  if (url.protocol !== "https:") return "insecure";
-  const stripped: string[] = [];
-  if (url.username || url.password) stripped.push("sign-in in the address");
+  if (url.protocol !== "https:") return null;
   url.username = "";
   url.password = "";
   for (const name of Array.from(url.searchParams.keys())) {
-    if (!SECRET_QUERY_PARAM.test(name)) continue;
-    stripped.push(name);
-    url.searchParams.delete(name);
+    if (SECRET_QUERY_PARAM.test(name)) url.searchParams.delete(name);
   }
   const text = url.toString();
   const redactedEarlier = /«redacted|%C2%ABredacted/i.test(text);
-  if (redactedEarlier || redactSecretsInText(text) !== text || url.pathname.split("/").some((part) => KEY_LIKE_SEGMENT.test(part))) return "keyInAddress";
-  return { url: text, stripped };
+  return redactedEarlier || redactSecretsInText(text) !== text || url.pathname.split("/").some((part) => KEY_LIKE_SEGMENT.test(part)) ? null : text;
 }
 
 const VALID_HEADER = /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/;
 /** Where a Bot's event routines are kept for rebuilding: a topic of the new bot's memory. */
 export const GROK_NOTES_FILE = "memory/grok-bot-event-routines.md";
 
-export type GrokItemKind = "bot" | "skill" | "routine" | "memory" | "app";
-export type GrokItemStatus = "imported" | "notes" | "conflict" | "skipped" | "error";
-
-/** One line of the preview and of the report. `reason` is a locale key's last part; `values` fill it. */
-export interface GrokItem {
-  kind: GrokItemKind;
-  name: string;
-  status: GrokItemStatus;
-  reason?: string;
-  values?: Record<string, string>;
-  /** A routine saved as notes: its trigger and instruction, in full. */
-  details?: string;
-  instruction?: string;
-  /** A skill's folder name. */
-  skill?: string;
-}
-
 export interface GrokMovePlan {
   name: string;
   packageId: string;
   document: PackageDocument;
-  items: GrokItem[];
-  /** Skill folder names to switch on after the import; one the skill scan flags is left off. */
-  skillsOn: string[];
+  /** `folder` is the skill's name here. `on`: the skill scan passed it, so the move switches it on. */
+  skills: Array<{ folder: string; name: string; on: boolean }>;
+  routines: number;
+  /** Routines not created, saved in GROK_NOTES_FILE: on an event, or with a schedule that can't be read. */
+  notes: number;
+  memories: number;
+  /** Apps to connect again here: all but those whose server name is already here. */
+  apps: number;
 }
 
 const sameFact = (value: string) => value.replace(/\s+/g, " ").trim().toLowerCase();
@@ -416,14 +393,14 @@ const dedupe = (lines: string[], seen: Set<string>) => lines.filter((line) => {
   return true;
 });
 
-function memoryNotes(bot: GrokBot): { lines: string[]; text: string | null } {
+function memoryNotes(bot: GrokBot): { count: number; text: string | null } {
   const seen = new Set<string>();
   const facts = dedupe(bot.memories.map((line) => line.replace(/\s*\n\s*/g, " ")), seen);
   const about = dedupe(bot.userFacts.map((line) => line.replace(/\s*\n\s*/g, " ")), seen);
-  const lines = [...facts, ...about];
-  if (!lines.length) return { lines, text: null };
+  const count = facts.length + about.length;
+  if (!count) return { count, text: null };
   const part = (heading: string, items: string[]) => (items.length ? `## ${heading}\n\n${items.map((item) => `- ${item}`).join("\n")}\n\n` : "");
-  return { lines, text: `# Notes from Grok Bot\n\n${part("What I remember", facts)}${part("About the person", about)}`.trimEnd() + "\n" };
+  return { count, text: `# Notes from Grok Bot\n\n${part("What I remember", facts)}${part("About the person", about)}`.trimEnd() + "\n" };
 }
 
 function eventNotes(name: string, routines: readonly GrokRoutine[]): string {
@@ -438,47 +415,25 @@ function eventNotes(name: string, routines: readonly GrokRoutine[]): string {
     ...sections].join("\n");
 }
 
-/** One Grok Bot as one bot in an openmaus.package v2 file, with a line for everything that happens to it. `takenServers`
- * holds server names already here: an existing one is a conflict, never overwritten or shared. */
+/** One Grok Bot as one bot in an openmaus.package v2 file, and how much of it comes over. `takenServers` holds server names
+ * already here: one of those is skipped, never overwritten or shared. */
 export function grokMovePlan(bot: GrokBot, options: { timeZone?: string; takenServers?: ReadonlySet<string> } = {}): GrokMovePlan {
   const timeZone = options.timeZone?.trim() || "UTC";
-  const items: GrokItem[] = [];
-  const add = (item: GrokItem) => items.push(item);
   const name = clip(bot.name || "Grok Bot", 100);
   const agentKey = slug(name, 60) || "grok-bot";
-
-  let soul = bot.instructions.trim();
-  const cut = utf8Bytes(soul) > BOT_PROFILE_LIMITS.soul;
-  if (cut) soul = fitBytes(soul, BOT_PROFILE_LIMITS.soul);
-  add({ kind: "bot", name: bot.title ? `${name} · ${bot.title}` : name, status: "imported", ...(cut ? { reason: "instructionsCut" } : {}) });
+  const soul = fitBytes(bot.instructions.trim(), BOT_PROFILE_LIMITS.soul);
 
   const skillNames = new Set<string>();
   const skillSlugs = new Map<string, string>();
   const skills: Array<NonNullable<ReturnType<typeof skillEntry>>> = [];
-  const skillsOn: string[] = [];
+  const planned: GrokMovePlan["skills"] = [];
   for (const [index, skill] of bot.skills.entries()) {
-    const label = oneLine(skill.name) || String(index + 1);
-    if (skills.length >= AGENT_MAX_SKILLS) {
-      add({ kind: "skill", name: label, status: "skipped", reason: "skillLimit" });
-      continue;
-    }
-    if (!skill.instructions.trim()) {
-      add({ kind: "skill", name: label, status: "skipped", reason: "skillEmpty" });
-      continue;
-    }
+    if (skills.length >= AGENT_MAX_SKILLS || !skill.instructions.trim()) continue;
     const entry = skillEntry(skill, uniqueSlug(skill.name, `skill-${index + 1}`, skillNames));
-    if (!entry) {
-      add({ kind: "skill", name: label, status: "error", reason: "skillUnreadable" });
-      continue;
-    }
+    if (!entry) continue;
     skills.push(entry);
     skillSlugs.set(skill.name.trim().toLowerCase(), entry.name);
-    const [warning] = scanSkillText(entry.instructions);
-    if (warning) add({ kind: "skill", name: label, status: "imported", skill: entry.name, reason: "skillFlagged", values: { warning } });
-    else {
-      skillsOn.push(entry.name);
-      add({ kind: "skill", name: label, status: "imported", skill: entry.name });
-    }
+    planned.push({ folder: entry.name, name: oneLine(skill.name) || String(index + 1), on: scanSkillText(entry.instructions).length === 0 });
   }
 
   const routineKeys = new Set<string>();
@@ -486,27 +441,14 @@ export function grokMovePlan(bot: GrokBot, options: { timeZone?: string; takenSe
   const routines: NonNullable<PackageDocument["package"]["routines"]> = [];
   const unscheduled: GrokRoutine[] = [];
   for (const [index, routine] of bot.routines.entries()) {
-    const label = oneLine(routine.name) || "routine";
-    if (!routine.instruction) {
-      add({ kind: "routine", name: label, status: "skipped", reason: "routineEmpty" });
-      continue;
-    }
-    const timing = routineSchedule(routine, timeZone);
-    if (!timing) {
+    if (!routine.instruction) continue;
+    const schedule = routineSchedule(routine, timeZone);
+    if (!schedule) {
       unscheduled.push(routine);
-      const event = !CLOCK_TRIGGERS.has(routine.trigger);
-      add({
-        kind: "routine", name: label, status: "notes", reason: event ? "routineEvent" : "routineSchedule",
-        ...(event ? { values: { trigger: routine.trigger } } : {}),
-        ...(routine.details || routine.when ? { details: routine.details || routine.when } : {}),
-        instruction: routine.instruction,
-      });
       continue;
     }
-    if (routines.length >= MAX_ROUTINES) {
-      add({ kind: "routine", name: label, status: "skipped", reason: "routineLimit" });
-      continue;
-    }
+    if (routines.length >= MAX_ROUTINES) continue;
+    const label = oneLine(routine.name) || "routine";
     const base = clip(`${name}: ${label}`, 74);
     let jobName = base;
     for (let n = 2; routineNames.has(jobName); n += 1) jobName = `${base} (${n})`;
@@ -518,59 +460,36 @@ export function grokMovePlan(bot: GrokBot, options: { timeZone?: string; takenSe
       agent: agentKey,
       prompt: `${routine.instruction}${usesSkills.length ? `\n\nUse these skills: ${usesSkills.join(", ")}.` : ""}`.slice(0, 20_000),
       runOn: "maus",
-      schedule: timing.schedule,
+      schedule,
       durationMinutes: 30,
       enabledAfterInstall: false,
-    });
-    add({
-      kind: "routine", name: `${jobName} · ${routine.when || routine.cron} (${timing.movedZone ? timeZone : routine.timeZone || timeZone})`, status: "imported",
-      ...(timing.movedZone ? { reason: "routineMovedZone", values: { zone: routine.timeZone } } : {}),
     });
   }
 
   const memory = memoryNotes(bot);
   const seed: Record<string, string> = {};
-  if (memory.text && utf8Bytes(memory.text) <= SEED_FILE_MAX_BYTES) {
-    seed["MEMORY.md"] = memory.text;
-    for (const line of memory.lines) add({ kind: "memory", name: line, status: "imported" });
-  } else if (memory.text) add({ kind: "memory", name: String(memory.lines.length), status: "error", reason: "memoriesTooBig" });
+  if (memory.text && utf8Bytes(memory.text) <= SEED_FILE_MAX_BYTES) seed["MEMORY.md"] = memory.text;
   if (unscheduled.length) {
     const notes = eventNotes(name, unscheduled);
     if (utf8Bytes(notes) <= SEED_FILE_MAX_BYTES) seed[GROK_NOTES_FILE] = notes;
-    else add({ kind: "routine", name: String(unscheduled.length), status: "error", reason: "notesTooBig" });
   }
 
   const connectionKeys = new Set<string>();
   const connections: NonNullable<PackageDocument["package"]["connections"]> = [];
+  let apps = 0;
   for (const app of bot.apps) {
     const label = clip(app.name, 100);
     const address = app.mcpUrl ? serverAddress(app.mcpUrl) : null;
-    if (!address) {
-      add({ kind: "app", name: label, status: "skipped", reason: "appNoAddress" });
-      continue;
-    }
-    if (address === "insecure" || address === "keyInAddress") {
-      add({ kind: "app", name: label, status: "skipped", reason: address === "insecure" ? "serverInsecure" : "serverKeyInAddress" });
-      continue;
-    }
-    if (connections.length >= PACKAGE_MAX_CONNECTIONS) {
-      add({ kind: "app", name: label, status: "skipped", reason: "serverLimit" });
-      continue;
-    }
     const proposed = slug(`${/^[a-z]/i.test(label) ? "" : "server-"}${label}`, 25) || `server-${connections.length + 1}`;
-    if (options.takenServers?.has(proposed)) {
-      add({ kind: "app", name: label, status: "conflict", reason: "serverConflict" });
-      continue;
-    }
-    const key = uniqueSlug(proposed, proposed, connectionKeys, 28);
+    if (address && options.takenServers?.has(proposed)) continue;
+    apps += 1;
+    if (!address || connections.length >= PACKAGE_MAX_CONNECTIONS) continue;
     connections.push({
-      key,
+      key: uniqueSlug(proposed, proposed, connectionKeys, 28),
       label,
       reason: clip(`${name} used ${label} in Grok Bot.`, 240),
-      mcp: { transport: app.transport === "sse" || /\/sse\/?$/.test(new URL(address.url).pathname) ? "sse" : "http", url: address.url, valueNames: app.headerNames.filter((header) => VALID_HEADER.test(header)).slice(0, 32) },
+      mcp: { transport: app.transport === "sse" || /\/sse\/?$/.test(new URL(address).pathname) ? "sse" : "http", url: address, valueNames: app.headerNames.filter((header) => VALID_HEADER.test(header)).slice(0, 32) },
     });
-    const stripped = [...new Set([...app.headerNames, ...app.envNames, ...address.stripped])];
-    add({ kind: "app", name: label, status: "imported", reason: stripped.length ? "serverOffNeeds" : "serverOff", ...(stripped.length ? { values: { values: stripped.join(", ") } } : {}) });
   }
 
   const description = bot.description.trim();
@@ -615,11 +534,10 @@ export function grokMovePlan(bot: GrokBot, options: { timeZone?: string; takenSe
   } catch {
     throw new GrokImportError("unusable");
   }
-  return { name, packageId, document, items, skillsOn };
-}
-
-/** Routines the Bot's chat announced that its export does not have, by the same slug either side would get. */
-export function routinesLeftOut(bot: GrokBot, announced: readonly string[]): string[] {
-  const have = new Set(bot.routines.map((routine) => slug(routine.name, 64)));
-  return announced.filter((name) => !have.has(slug(name, 64)));
+  return {
+    name, packageId, document, skills: planned, routines: routines.length,
+    notes: seed[GROK_NOTES_FILE] ? unscheduled.length : 0,
+    memories: seed["MEMORY.md"] ? memory.count : 0,
+    apps,
+  };
 }

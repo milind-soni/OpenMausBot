@@ -1,8 +1,8 @@
 // What the desktop app may find about Grok Bot on this computer. The Bot writes its own export (shared/grok-import.ts);
-// the only things read here are those files in Downloads and two slices of the UI cache the Grok Bot app keeps, as a
-// checklist of Bots and of routines their chats announced. Security: login material lives beside that cache
-// (sand-secrets.json, cookies, ~/.grokbot) and is never opened; no path here is built from anything but the two names
-// below, a file's own listing, or a roster id. Chat text in those slices never leaves this module.
+// the only things read here are those files in Downloads and the roster slice of the UI cache the Grok Bot app keeps, for
+// the names of the Bots on this computer. Security: login material lives beside that cache (sand-secrets.json, cookies,
+// ~/.grokbot) and is never opened, nor is any other slice, chats included; no path here is built from anything but the two
+// names below or a file's own listing.
 //
 // The cache's layout (Grok Bot desktop, recorded from a Windows install) and this reading of it adapt an MIT-licensed
 // importer; see NOTICE.
@@ -17,7 +17,6 @@ const USER_DATA_FOLDERS = [["Library", "Application Support", "Grok Bot"], ["App
 const CACHE_FOLDER = "sand-client-persistence";
 const SLICE_PREFIX = "sand.client.slice.account.";
 const ROSTER_SLICE = "roster.last-roster";
-const TRANSCRIPT_SLICE = "transcript.replicas.";
 const MAX_SLICE_BYTES = 32 * 1024 * 1024;
 const MAX_EXPORT_FILES = 20;
 const MAX_EXPORT_BYTES = 16 * 1024 * 1024;
@@ -28,8 +27,6 @@ export interface GrokLook {
   files: GrokFoundFile[];
   /** Bots the Grok Bot app lists on this computer; empty when it is not here or could not be read. */
   bots: string[];
-  /** Per Bot name, routines its chat announced. */
-  routines: Record<string, string[]>;
 }
 
 /** A slice's id from its file name: unpadded lowercase base32 of the id, plus `.blob`. */
@@ -84,40 +81,16 @@ const rows = (value: unknown): Array<Record<string, unknown>> =>
   Array.isArray(value) ? value.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object") : [];
 
 /** A hint only: a missing or unreadable cache, or a layout this does not know, answers nothing. */
-function readAppHints(machine: SetupMachine): Pick<GrokLook, "bots" | "routines"> {
-  const none = { bots: [], routines: {} };
+function rosterBots(machine: SetupMachine): string[] {
   const folder = USER_DATA_FOLDERS.map((parts) => join(machine.home, ...parts, CACHE_FOLDER))
     .find((path) => machine.fs.lstat(path)?.isDirectory());
   const listing = folder ? machine.fs.readdir(folder) : null;
-  if (!folder || !listing) return none;
-  const slices = new Map<string, string>();
-  for (const name of listing) {
-    const kind = sliceKind(sliceId(name));
-    if (kind === ROSTER_SLICE || kind?.startsWith(TRANSCRIPT_SLICE)) slices.set(kind, join(folder, name));
-  }
-  const rosterPath = slices.get(ROSTER_SLICE);
-  if (!rosterPath) return none;
-  const names = new Map<string, string>();
-  for (const row of rows(sliceValue(machine, rosterPath)?.rows)) {
+  const slice = listing?.find((name) => sliceKind(sliceId(name)) === ROSTER_SLICE);
+  if (!folder || !slice) return [];
+  return rows(sliceValue(machine, join(folder, slice))?.rows).flatMap((row) => {
     const name = shown(row.name);
-    if (name && !row.isGroup && typeof row.id === "string") names.set(row.id, name);
-  }
-  const routines: GrokLook["routines"] = {};
-  for (const [id, name] of names) {
-    const path = slices.get(`${TRANSCRIPT_SLICE}${id}`);
-    if (!path) continue;
-    const seen = new Map<string, string>();
-    for (const entry of rows(sliceValue(machine, path)?.entries)) {
-      const event = entry.event as Record<string, unknown> | null | undefined;
-      if (!event || typeof event !== "object" || event.type !== "automation-changed") continue;
-      const label = shown(event.automationName);
-      const key = shown(event.automationId) || label;
-      if (event.action === "deleted") seen.delete(key);
-      else if (key) seen.set(key, label || key);
-    }
-    if (seen.size) routines[name] = [...seen.values()];
-  }
-  return { bots: [...names.values()], routines };
+    return name && !row.isGroup ? [name] : [];
+  });
 }
 
 /** The exports in Downloads, newest first. A symlink is refused: only a real file with that name counts. */
@@ -138,7 +111,7 @@ function readExportFiles(machine: SetupMachine): GrokFoundFile[] {
 }
 
 export function lookForGrokBot(machine: SetupMachine): GrokLook {
-  return { files: readExportFiles(machine), ...readAppHints(machine) };
+  return { files: readExportFiles(machine), bots: rosterBots(machine) };
 }
 
 /** Security: a Cursor sign-in saved by an older version may still be here. Nothing reads it, so no live token stays behind. */

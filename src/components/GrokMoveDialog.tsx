@@ -8,81 +8,44 @@ import { foundExports, grokErrorText, lookForGrokBot, NOTHING_FOUND, previewGrok
 import { t } from "@/lib/i18n";
 import { localSetupImport } from "@/lib/setup-import";
 import { api, useStore } from "@/state/store";
-import type { LocaleKey } from "@/locales";
-import { GROK_EXPORT_MAX_CHARS, GROK_EXPORT_PROMPT, GROK_NOTES_FILE, parseGrokExport, type GrokBot, type GrokItem, type GrokItemKind } from "../../shared/grok-import";
+import { GROK_EXPORT_MAX_CHARS, GROK_EXPORT_PROMPT, parseGrokExport, type GrokBot } from "../../shared/grok-import";
 
 const PRIMARY = "ui-button ui-button-primary min-h-9 px-4 text-[14px]";
 const SECONDARY = "ui-button min-h-9 px-4 text-[14px]";
-const KINDS: readonly GrokItemKind[] = ["bot", "skill", "routine", "memory", "app"];
+const LINE = "text-[13px] leading-relaxed text-ink-secondary";
 
-const reasonText = (item: GrokItem) => (item.reason ? t(`grokMove.reason.${item.reason}` as LocaleKey, item.values ?? {}) : "");
-
-function Row({ item, label }: { item: GrokItem; label?: string }) {
-  const reason = reasonText(item);
+/** A Bot as one heading and a count per kind; a kind it has none of is left out. */
+export function BotCounts({ heading, skills, routines, memories, notes, skillsOff }: {
+  heading: string; skills: number; routines: number; memories: number; notes: number; skillsOff: readonly string[];
+}) {
+  const rows = [
+    [t("grokMove.count.skills"), skills], [t("grokMove.count.routines"), routines], [t("grokMove.count.memories"), memories], [t("grokMove.count.notes"), notes],
+  ] as const;
   return (
-    <li className="break-words">
-      {label && <span className="text-ink-secondary">{label}: </span>}
-      <span className="text-ink">{item.name}</span>
-      {reason && <span className="text-ink-secondary"> · {reason}</span>}
-      {item.details && <div className="text-ink-secondary">{item.details}</div>}
-      {item.instruction && (
-        <details className="text-ink-secondary">
-          <summary className="cursor-pointer text-accent-text">{t("grokMove.seeInstruction")}</summary>
-          <p className="mt-1 whitespace-pre-wrap">{item.instruction}</p>
-        </details>
-      )}
-    </li>
-  );
-}
-
-function Group({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {
-  return (
-    <section className="flex flex-col gap-1.5">
-      <h3 className="text-[14px] font-medium text-ink">{title}</h3>
-      {note && <p className="text-[13px] leading-relaxed text-ink-secondary">{note}</p>}
-      {children}
+    <section data-grok-move-bot className="flex flex-col gap-1.5">
+      <h3 className="break-words text-[15px] font-semibold text-ink">{heading}</h3>
+      <dl className="flex flex-col gap-1 text-[14px]">
+        {rows.filter(([, count]) => count > 0).map(([label, count]) => (
+          <div key={label} className="flex items-baseline justify-between gap-4">
+            <dt className="text-ink-secondary">{label}</dt>
+            <dd className="tabular-nums text-ink">{count}</dd>
+          </div>
+        ))}
+      </dl>
+      {skillsOff.length > 0 && <p className={LINE}>{t("grokMove.skillsOff", { names: skillsOff.join(", ") })}</p>}
     </section>
   );
 }
 
-const LIST = "flex flex-col gap-1 text-[13px] leading-relaxed";
-
-/** The preview and the report are one list: what comes over by kind, then everything that didn't. */
-export function GrokItems({ items, warnings, report }: { items: readonly GrokItem[]; warnings: readonly string[]; report: boolean }) {
-  const having = (status: GrokItem["status"]) => items.filter((item) => item.status === status);
-  const kindLabel = (kind: GrokItemKind) => t(`grokMove.kind.${kind}` as LocaleKey);
-  const others = ["conflict", "skipped", "error"] as const;
-  const groupTitle = { conflict: "grokMove.group.conflict", skipped: "grokMove.group.skipped", error: "grokMove.group.error" } as const;
-  return (
-    <>
-      <Group title={t(report ? "grokMove.group.imported.report" : "grokMove.group.imported.preview")}>
-        {KINDS.map((kind) => {
-          const rows = having("imported").filter((item) => item.kind === kind);
-          return (
-            <div key={kind} data-grok-kind={kind}>
-              <div className="text-[13px] text-ink-secondary">{kindLabel(kind)}: {rows.length}</div>
-              {rows.length > 0 && <ul className={cn(LIST, "pl-3")}>{rows.map((item, index) => <Row key={index} item={item} />)}</ul>}
-            </div>
-          );
-        })}
-      </Group>
-      {having("notes").length > 0 && (
-        <Group title={t("grokMove.group.notes")} note={t("grokMove.notesLocation", { file: GROK_NOTES_FILE })}>
-          <ul className={LIST}>{having("notes").map((item, index) => <Row key={index} item={item} />)}</ul>
-        </Group>
-      )}
-      {others.map((status) => having(status).length > 0 && (
-        <Group key={status} title={t(groupTitle[status])}>
-          <ul className={LIST}>{having(status).map((item, index) => <Row key={index} item={item} label={kindLabel(item.kind)} />)}</ul>
-        </Group>
-      ))}
-      {warnings.length > 0 && (
-        <Group title={t("grokMove.group.warnings")}>
-          <ul className={LIST}>{warnings.map((line) => <li key={line} className="text-ink">{line}</li>)}</ul>
-        </Group>
-      )}
-    </>
-  );
+export function GrokMoveLines({ paused, apps, moved, unreadable, failed = [] }: { paused: string | null; apps: number; moved: readonly string[]; unreadable: readonly string[]; failed?: readonly string[] }) {
+  const lines = [
+    paused,
+    apps === 1 ? t("grokMove.appsOne") : apps > 1 ? t("grokMove.appsMany", { count: apps }) : null,
+    moved.length ? t("grokMove.alreadyHere", { names: moved.join(", ") }) : null,
+    unreadable.length ? t("grokMove.unreadable", { names: unreadable.join(", ") }) : null,
+    failed.length ? t("grokMove.notAdded", { names: failed.join(", ") }) : null,
+  ].filter((line) => line !== null);
+  return lines.length > 0 && <div className="flex flex-col gap-1">{lines.map((line) => <p key={line} className={LINE}>{line}</p>)}</div>;
 }
 
 function BringBack({ local, look, found, reply, error, onReply, onFile, onFound }: {
@@ -161,9 +124,7 @@ export function GrokMoveDialog({ onClose }: { onClose: () => void }) {
     try {
       const bots = read();
       const servers = await api<{ servers?: Array<{ name: string }> }>("/api/mcp/servers").then((answer) => answer.servers ?? [], () => []);
-      setPreview(previewGrokMove(bots, {
-        look, bots: state.bots, servers: new Set(servers.map((server) => server.name)), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      }));
+      setPreview(previewGrokMove(bots, { bots: state.bots, servers: new Set(servers.map((server) => server.name)), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }));
       setError("");
     } catch (cause) {
       setError(grokErrorText(cause));
@@ -221,7 +182,7 @@ export function GrokMoveDialog({ onClose }: { onClose: () => void }) {
         className="ui-modal animate-pop-in flex max-h-[min(720px,calc(100dvh-32px))] w-[560px] max-w-full flex-col overflow-hidden text-left outline-none">
         <div className="flex h-[52px] shrink-0 items-center justify-between pl-4 pr-3">
           <h2 id="grok-move-title" className="text-[14px] font-semibold leading-[22px] text-ink">
-            {report ? t("grokMove.reportTitle") : preview ? t("grokMove.previewTitle") : t("settings.import.grokTitle")}
+            {preview ? t("grokMove.previewTitle") : t("settings.import.grokTitle")}
           </h2>
           <button type="button" disabled={importing} onClick={onClose} aria-label={t("common.close")} title={t("common.close")}
             className="flex size-7 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink disabled:opacity-40">
@@ -232,17 +193,18 @@ export function GrokMoveDialog({ onClose }: { onClose: () => void }) {
         <div key={report ? "report" : preview ? "preview" : "start"} data-grok-move-body className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 [scrollbar-width:thin]">
           {report ? (
             <>
-              <GrokItems items={report.items} warnings={report.warnings} report />
-              {report.routines.length > 0 && (
-                <Group title={t("grokMove.group.next")}>
-                  <p className="text-[13px] leading-relaxed text-ink">{t("grokMove.next.routines", { names: report.routines.join(", ") })}</p>
-                </Group>
-              )}
+              {report.bots.map((bot) => <BotCounts key={bot.name} heading={t("grokMove.isHere", { name: bot.name })} {...bot} />)}
+              <GrokMoveLines paused={report.bots.some((bot) => bot.routines > 0) ? t("grokMove.pausedReport") : null} apps={report.bots.reduce((total, bot) => total + bot.apps, 0)}
+                moved={report.moved} unreadable={report.unreadable} failed={report.failed} />
             </>
           ) : preview ? (
             <>
-              <p className="text-[13px] leading-relaxed text-ink-secondary">{t("grokMove.previewNote")}</p>
-              <GrokItems items={[...preview.plans.flatMap((plan) => plan.items), ...preview.items]} warnings={preview.warnings} report={false} />
+              {preview.plans.map((plan) => (
+                <BotCounts key={plan.packageId} heading={plan.addedAs} skills={plan.skills.length} routines={plan.routines} memories={plan.memories} notes={plan.notes}
+                  skillsOff={plan.skills.filter((skill) => !skill.on).map((skill) => skill.name)} />
+              ))}
+              <GrokMoveLines paused={preview.plans.some((plan) => plan.routines > 0) ? t("grokMove.pausedPreview") : null} apps={preview.plans.reduce((total, plan) => total + plan.apps, 0)}
+                moved={preview.moved} unreadable={preview.unreadable} />
             </>
           ) : (
             <BringBack local={local} look={look} found={found} reply={reply} error={error} onReply={setReply}

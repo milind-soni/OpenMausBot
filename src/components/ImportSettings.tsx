@@ -10,7 +10,7 @@ import { importOutcome, localSetupImport, setupImportApi, skillsSummary, toolsSu
 import { useStore } from "@/state/store";
 import { detectionCount, detectionSources, type SetupDetection, type SetupImportResult, type SetupSource } from "../../shared/setup-import";
 import { GrokBotMark } from "./GrokBotMark";
-import { GrokMoveDialog } from "./GrokMoveDialog";
+import { GrokMoveDialog } from "./lazy-screens";
 import { ClaudeMark, CodexMark, CursorMark, PresetProviderMark } from "./ProviderIcons";
 
 function SourceMarks({ sources }: { sources: readonly SetupSource[] }) {
