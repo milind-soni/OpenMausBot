@@ -399,6 +399,7 @@ describe("DeepSeek Harness when a turn's tools change", () => {
         HOME: scratch, USERPROFILE: scratch, DSH_HOME: join(scratch, "dsh"), DEEPSEEK_API_KEY: "sk-fixture",
         FAKE_ACP_REJECT_LIVE_LOAD_FILE: join(scratch, "reject"), FAKE_ACP_REJECT_LIVE_LOAD_DSH: "1",
         FAKE_ACP_LAUNCH_COUNT_FILE: join(scratch, "launches"), FAKE_ACP_RPC_APPEND_FILE: join(scratch, "rpc.jsonl"),
+        FAKE_ACP_DUMP: join(scratch, "dump"),
       },
     });
     const recorder = recordEvents(instance.adapter);
@@ -417,9 +418,15 @@ describe("DeepSeek Harness when a turn's tools change", () => {
     const second = await run("two", "token-two", "fake-acp-session");
     expect(recorder.events.filter((event) => event.type === "runtime.error")).toEqual([]);
     expect(second).toMatchObject({ ok: true });
-    const calls = readFileSync(join(scratch, "rpc.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line) as { pid: number; method: string });
+    const calls = readFileSync(join(scratch, "rpc.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line) as { pid: number; method: string; sessionId?: string });
     expect(calls.filter((call) => call.method === "session/new")).toHaveLength(1);
+    expect(calls.filter((call) => call.method === "session/resume").map((call) => call.sessionId)).toEqual(["fake-acp-session"]);
     expect(calls.filter((call) => call.method === "session/prompt")).toHaveLength(2);
     expect(Number(readFileSync(join(scratch, "launches"), "utf8"))).toBe(2);
+    // The fresh process got the second turn's tools, not the first turn's.
+    const servers = JSON.parse(readFileSync(join(scratch, "dump.mcp.json"), "utf8")) as Array<{ name: string }>;
+    const agentsServer = JSON.stringify(servers.find((server) => server.name === "agents"));
+    expect(agentsServer).toContain("OMB_COMMS_TOKEN");
+    expect(agentsServer).toContain("token-two");
   });
 });
