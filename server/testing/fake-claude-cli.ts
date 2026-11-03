@@ -964,6 +964,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
     return;
   }
 
+  if (process.env.FAKE_CLAUDE_USES_CLOUD_COMPUTER === "1") useCloudComputer();
   if (mode === "hang") {
     if (process.env.FAKE_CLAUDE_ELICIT) {
       out({ type: "control_request", request_id: "elicit-1", request: { subtype: "elicitation", ...JSON.parse(process.env.FAKE_CLAUDE_ELICIT) } });
@@ -1028,7 +1029,6 @@ const playTurn = (prompt: JsonValue, late = false) => {
     });
   }
 
-  if (process.env.FAKE_CLAUDE_USES_CLOUD_COMPUTER === "1") useCloudComputer();
   if (process.env.FAKE_CLAUDE_CONNECT_APPS) connectApps(process.env.FAKE_CLAUDE_CONNECT_APPS.split(",").filter(Boolean));
 
   let replyParts = replyForPrompt(prompt) ?? nextScriptedReply();

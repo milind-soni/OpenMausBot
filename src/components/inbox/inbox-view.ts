@@ -5,11 +5,14 @@ import { t } from "@/lib/i18n";
 import { dismissResponse, type CardResponse } from "@/lib/card-answer";
 import { accessRequestWords, cardAnswerFor } from "../bot-access/access-card";
 
-export const INBOX_TABS: readonly InboxTab[] = ["needs-you", "info", "done"];
 /** The Needs you lines the inbox's card in the chat shows, the newest first. */
 export const CARD_ROWS = 3;
 
 export const rowsIn = (view: InboxView | null, tab: InboxTab): InboxRow[] => (view?.rows ?? []).filter((row) => row.tab === tab);
+
+/** The inbox as one list, newest first: what waits on the person and their news; a settled line is read from where it
+ * came, not listed again. */
+export const listedRows = (view: InboxView | null): InboxRow[] => (view?.rows ?? []).filter((row) => row.tab !== "done").sort((a, b) => b.at - a.at);
 
 export function tabCounts(view: InboxView | null): Record<InboxTab, number> {
   const counts: Record<InboxTab, number> = { "needs-you": 0, info: 0, done: 0 };

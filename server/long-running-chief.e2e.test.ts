@@ -420,7 +420,7 @@ it("tells the Chief a teammate's turn stalled, in the watchdog's words", () => c
   await new Promise((resolve) => setTimeout(resolve, 500));
   expect(f.child(job, f.mira.id, "LONG-SUITE").result).toBe(stalled.result);
   expect(f.turns(f.clive.id).map((record: any) => record.planKey)).toEqual(["D0", "D1"]);
-  expect((await f.tasks(f.clive.id)).map((task: any) => task.title)).not.toContain("Team incidents");
+  expect((await f.tasks(f.clive.id)).map((task: any) => task.title)).not.toContain("Problems to look at");
   await expect.poll(() => f.notifications.some((notification: any) => notification.kind === "done"), { timeout: 10_000 }).toBe(true);
   expect(f.notifications.map((notification: any) => [notification.kind, notification.body])).toEqual([
     ["delegation-settled", "Results in from Mira"], ["done", expect.stringContaining("STALL-FINAL")]]);

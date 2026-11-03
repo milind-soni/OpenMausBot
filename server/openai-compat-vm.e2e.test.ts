@@ -166,7 +166,7 @@ beforeAll(async () => {
     try { return (await fetch(base + "/api/health")).ok; } catch { return false; }
   }, Boolean);
   await api("PATCH", "/api/config", { openaiCompat: { key: "fixture-key", url: `http://127.0.0.1:${upstreamPort}/v1`, model: "fixture-model" } });
-  // Chief first makes the seeded bot its team's Chief, which answers a teammate's failed run with a Team incidents turn
+  // Chief first makes the seeded bot its team's Chief, which answers a teammate's failed run with a Problems to look at turn
   // of its own on Claude: its dump would stand in for the turn under test. Stepped down, each dump is the test's own.
   const seeded = (await api("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.chiefOfStaff);
   await api("PATCH", `/api/bots/${seeded.id}`, { chiefOfStaff: false });

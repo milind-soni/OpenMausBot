@@ -142,7 +142,7 @@ it("R1 a routine run coordinates a teammate, waits, and completes through a rout
 
   await f.awaitReady("r1-peer");
   await expect.poll(async () => (await f.runState(run.id))?.status, { timeout: 30_000 }).toBe("waiting");
-  expect((await f.runState(run.id)).attention).toContain("delegated");
+  expect((await f.runState(run.id)).attention).toContain("handed on");
   expect((await f.runState(run.id)).finishedAt).toBeUndefined();
   const root = f.roots()[0];
   expect(root).toMatchObject({ threadId: run.threadId, botId: f.owner.id });

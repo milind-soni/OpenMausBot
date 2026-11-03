@@ -30,7 +30,7 @@ it("carries a Chief's level down every hop it hands out, in threads and in a roo
   const messages = async (threadId: string) => (await api("GET", `/api/threads/${threadId}/messages?limit=100`)).messages as any[];
   const unanswered = async (threadId: string) => (await messages(threadId)).filter(message => message.card && !message.card.answered && !message.card.dismissed);
   const chips = async (threadId: string) => (await messages(threadId))
-    .filter(message => message.kind === "activity" && / — delegated by /.test(message.tool?.name ?? "")).map(message => message.tool.name);
+    .filter(message => message.kind === "activity" && / — handed on by /.test(message.tool?.name ?? "")).map(message => message.tool.name);
   const coordinate = (botId: string, key: string, message: string) =>
     ({ tool: "coordinate_bots", arguments: { bot_ids: [botId], request_key: key, message }, expectError: false });
   const plan = (botId: string, ...turns: any[]) => { (plans[botId] ??= { turns: [] }).turns.push(...turns); writeFileSync(planPath, JSON.stringify(plans)); };
@@ -66,8 +66,8 @@ it("carries a Chief's level down every hop it hands out, in threads and in a roo
     expect(current.find(bot => bot.id === ada.id).approvalMode).toBe("ask");
     expect(current.find(bot => bot.id === bea.id).approvalMode).toBe("ask");
     expect(current.find(bot => bot.id === bea.id).tasks.find((task: any) => task.threadId === beaTurn.threadId).approvalMode).toBe("auto");
-    expect(await chips(adaTurn.threadId)).toEqual(["Approve for me — delegated by Clive, a Chief of Staff on Approve for me"]);
-    expect(await chips(beaTurn.threadId)).toEqual(["Approve for me — delegated by Ada, from Clive, a Chief of Staff on Approve for me"]);
+    expect(await chips(adaTurn.threadId)).toEqual(["Approve for me — handed on by Clive, a Chief of Staff on Approve for me"]);
+    expect(await chips(beaTurn.threadId)).toEqual(["Approve for me — handed on by Ada, from Clive, a Chief of Staff on Approve for me"]);
 
     // Ola's own Approve for me came from the person, not a Chief: the work she hands Bea stays on Bea's level.
     plan(ola.id,
