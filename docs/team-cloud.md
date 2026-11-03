@@ -20,7 +20,10 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   device also says it as a sentence: *"Your chats in Acme are private. Only you can see them: not other members, not
   Acme's admins."* The server marks such a conversation `private: true` on the wire (`WireTask.private`). When you leave
   the team (or are removed), your private chats and everything only yours there are deleted, never handed to an admin
-  (below).
+  (below). The Owner's export of the team's machine (the workspace backup, `OMB_CLOUD_EXPORT_ONLY`) leaves them out too
+  (`server/workspace-backup-team-private.ts`): no private conversation, none of its work folders or files only it used, no
+  member's memory layer, no member's own MausBot, their inbox or anything under `people/`. Restoring such an export gives a
+  team back everything but those.
 - **Who is speaking.** A bot knows who wrote each line it reads. Your own typed line in your own chat with it is the
   only line that carries no note; every other line opens with one, written by the Cloud and never by the sender:
   `[From <who> · <what> · <authority>]`, as in `[From Ben (person) · message · their own request]` on each person's
@@ -83,7 +86,9 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
 The team's rules live on the Admin (openmaus-cloud `docs/team-cloud.md` "Rules"): one document, `{ schema: 1, limits }`, that
 only restricts. `server/cloud-team-policy.ts` fetches it at boot, every 5 minutes and when the Admin's signed `POST
 /api/cloud/team/policy-changed` nudges it, signed with the bootstrap secret (`POST /api/cloud/machines/team-policy`), and each
-request reports the fingerprint in force here. A change applies without a restart.
+request reports the fingerprint in force here. A change applies without a restart, to the next thing each bot does: a turn
+already running finishes with what it had (its engine process and the servers mounted when it began), and every turn that
+starts after the change, a hand-off's included, gets the new rules.
 
 - **One enforcement.** The document is projected into the one policy object (`server/managed-policy.ts`) every refusal site
   and every "Managed by" screen already reads. Nothing restricted: no object at all, as on a team with no rules. Admins are not exempt.
@@ -489,7 +494,8 @@ person's own answer. What only the person can do is asked for exactly, once, whi
 bot's question tool, the bot's own choices as buttons, and anything else as a card with a reply field in place of its
 `NEEDS INPUT:` line (docs/runtime-contract.md). It waits however long they take. Its copy reaches their inbox with the
 same buttons, and the conversation that handed the work on gets no chip about it when that conversation is the inbox
-itself. A line the person types while the bot waits on its own question card answers that card, as a tap would, and so
+itself. An ask left for a day is said in words the next time the person talks in their inbox (a line in the bot's reply, no new
+card), and a Chief also says so in its other chats about the questions it may answer. A line the person types while the bot waits on its own question card answers that card, as a tap would, and so
 does a reply to the card or to its copy, an answer their Chief or another bot passes on with `coordinate_bots`
 (`answers`, the question's assignment id), and anything the bot that handed the work on sends to that thread later. A question whose work ended, or that the bot replaced with a newer one, closes,
 and its copy, Needs you and the overview follow; a restart posts nothing again.
@@ -578,8 +584,8 @@ person as before, and `message_person` and the inbox do not exist.
   there); an engine that does not then write in place keeps a refreshed token for that process only.
 - **What a bot keeps per bot, not per audience.** Its data sheet, the skills it stages and its own profile are the bot's
   (the team's), whichever chat wrote them; so are a routine's definition and schedule (its runs and results are the
-  conversation's). The Owner's whole-machine export (`OMB_CLOUD_EXPORT_ONLY`, the workspace backup) still carries every
-  member's private chats.
+  conversation's). The Owner's whole-machine export leaves every member's private chats out (above), the Owner's own too: an
+  export is the team's, never anyone's alone.
 - **Own apps with the team's own Composio project.** A member's own apps always use OpenMausBot's connected-apps
   service, even when the team connected a Composio project key of its own; an app that needs the project's own auth
   config can't be connected by each person.
