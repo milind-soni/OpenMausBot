@@ -110,7 +110,7 @@ describe("the agents action tools", () => {
     trigger_info: { list: READ, events: READ },
     trigger: { create: CHANGE, update: CHANGE, pause: CHANGE, resume: CHANGE, run_now: CHANGE },
     delete_trigger: { delete: DELETE },
-    manage_room: { create: CHANGE, add_members: CHANGE, remove_members: CHANGE, set_members: CHANGE, rename: CHANGE, set_bulletin: CHANGE },
+    manage_room: { create: CHANGE, add_members: CHANGE, remove_members: CHANGE, set_members: CHANGE, rename: CHANGE, set_bulletin: CHANGE, new_thread: CHANGE },
     session_search: { search: READ, read: READ },
     show_widget: { show: CHANGE, update: CHANGE },
     show_html: { show: CHANGE, update: CHANGE },

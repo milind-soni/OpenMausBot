@@ -1,7 +1,7 @@
 // Which turns on a Cloud home may use the Mac lent to it, read from the harness's own records (server/cloud-lending.ts
 // decides), and the plain words a turn that can't is told. A room member turn acts for the person's line that started
 // its run, for that turn generation alone, while the run lasts.
-import { cloudHomeLendingRefusal, cloudLendingRefusalText, type CloudLendingTurn } from "../cloud-lending.ts";
+import { cloudHomeLendingRefusal, cloudLendingRefusalText, teamLendingRefusal, type CloudLendingTurn } from "../cloud-lending.ts";
 import { unstamped } from "../cloud-owner-lines.ts";
 import { deviceWord } from "../lent-computers.ts";
 import type { Routine, RoutineManager, RoutineRun } from "../routines.ts";
@@ -13,6 +13,8 @@ type Turn = { botId: string; threadId: string; generation: string };
 export interface CloudLendingTurnsDeps {
   store: Pick<Store, "groupByThread" | "messagesFor" | "taskByThread">;
   cloudHome: boolean;
+  /** The team whose Cloud this is; null on a person's own. */
+  team?: string | null;
   /** The one-on-one request a conversation's turns answer (index.ts directRequestOwners). */
   directRequest(threadId: string): CloudLendingTurn["request"];
   threadStarter(threadId: string): string | undefined;
@@ -64,6 +66,7 @@ export function createCloudLendingTurns(deps: CloudLendingTurnsDeps) {
   function cloudLendingRefusalNotice(capability: Turn): string | null {
     const why = cloudLendingRefusal(capability);
     if (!why) return null;
+    if (deps.team) return teamLendingRefusal(deps.team);
     const others = store.messagesFor(capability.threadId).filter((line) => line.role === "user" && !deps.ownerPerson(line.peerAsk ? undefined : line.sender?.id));
     return cloudLendingRefusalText(why, { room: Boolean(store.groupByThread(capability.threadId)), fromBefore: others.length > 0 && others.every(unstamped),
       device: deviceWord(deps.lentPlatform()) });
