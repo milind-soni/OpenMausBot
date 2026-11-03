@@ -104,9 +104,9 @@ describe("the inbox of a place that is no team's", () => {
     f.ask("eli-launch", "b");
     const rows = f.inbox.view(OWNER).rows;
     const of = (id: string) => rows.find((row) => row.id === id)!;
-    expect(of("card-a")).toMatchObject({ workingFor: { botId: "mira", name: "Mira" }, origin: { title: "Pricing work" } });
+    expect(of("card-a")).toMatchObject({ workingFor: { botId: "mira", name: "Mira" }, origin: { threadId: "eli-pricing", title: "Pricing work" } });
     expect(of("card-b").workingFor).toBeUndefined();
-    expect(of("card-b").origin?.title).toBe("Launch work");
+    expect(of("card-b").origin).toMatchObject({ threadId: "eli-launch", title: "Launch work" });
   });
 
   it("gets a bot's message to the person once: one line, one row, one notification, and their words settle it", () => {

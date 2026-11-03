@@ -150,6 +150,25 @@ describe.each([
     expect((await h.inbox()).rows.find((row) => row.id === line.id)!.tab).toBe("done");
   }, hostTimeout(120_000));
 
+  it("says who a bot was working for, on a question from work another bot handed it", async () => {
+    const h = here();
+    const mira = await h.bot(`Mira ${role}`);
+    const eli = await h.bot(`Ori ${role}`);
+    h.script(mira.id,
+      { key: "W1", match: ["W1-GO"], steps: [{ arguments: { bot_ids: [eli.id], message: "W1-BRIEF: pick the page." } }], reply: "W1: handed on" },
+      { key: "W1-DONE", match: ["Your downstream room requests have settled.", "W1-GO"], reply: "W1-DONE" });
+    h.script(eli.id, { key: "W1-E", match: ["W1-BRIEF"], timeoutMs: 120_000, steps: [{ server: "ogb", tool: "ask_user", arguments: { question: "Which page for Mira?", choices: ["Home", "Pricing"] }, capture: { answer: "([\\s\\S]+)" } }], reply: "W1-E: {{answer}}" });
+    await h.say(mira.id, mira.threadId, "W1-GO");
+    await until(async () => (await h.listed()).some((row) => row.from.name === eli.name && row.kind === "ask"), "the handed-on question in the inbox");
+    const row = (await h.listed()).find((one) => one.from.name === eli.name && one.kind === "ask")!;
+    expect(row.workingFor?.name).toBe(mira.name);
+    expect(row.origin?.botId).toBe(eli.id);
+    const call = role === "desktop" ? fx.local : fx.onCloud;
+    expect((await call("POST", `/api/threads/${row.origin!.threadId}/respond`, { requestId: row.card!.requestId, behavior: "answer", message: "Home" })).status).toBe(200);
+    await until(async () => (await h.messages(row.origin!.threadId)).some((line) => line.text === "W1-E: Home"), "the work to go on");
+    expect((await h.listed()).some((one) => one.id === row.id)).toBe(false);
+  }, hostTimeout(180_000));
+
   it("clears news once it is read, and keeps it listed until it is done", async () => {
     const h = here();
     const eli = await h.bot(`Nia ${role}`);

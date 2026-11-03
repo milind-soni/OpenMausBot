@@ -1087,14 +1087,14 @@
     },
     {
       "name": "message_person",
-      "description": "Pass a message to a person on this team, when someone asks you to tell them something (\"tell Bob the launch moved\"). Only your message goes, never this conversation. Someone who can see this conversation is tagged here; anyone else gets it in a new private conversation with you, and their answer can come back here.",
+      "description": "Get a message to a person's Inbox, when someone asks you to tell them something (\"tell Bob the launch moved\") or when you have news for someone who isn't watching this conversation. Only your message goes, never this conversation, and their answer comes back here. With people on a team, say who with `to`; with none, leave `to` out and it reaches the one person here.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
           "to": {
             "type": "string",
-            "description": "Their name or email address."
+            "description": "Their name or email address, on a team; otherwise leave it out."
           },
           "message": {
             "type": "string",
@@ -1102,7 +1102,6 @@
           }
         },
         "required": [
-          "to",
           "message"
         ]
       }
