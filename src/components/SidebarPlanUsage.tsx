@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { quietPlanRow } from "@/lib/plan-usage";
+import { useSidebarPlanUsage } from "@/lib/sidebar-preferences";
 import { meterBand, type MeterBand } from "@/lib/usage-meter";
 import { api, useStore } from "@/state/store";
 
@@ -107,6 +108,7 @@ function useSidebarPlanReport(enabled: boolean): SidebarPlanReport | null {
     if (!enabled) return;
     const load = () => {
       void api<SidebarPlanReport>("/api/plan-usage", { background: true })
+        // No cancelled flag: `last` outlives a restarted effect, so a dropped answer would not be asked for again for a minute.
         .then(setReport)
         .catch(() => {});
     };
@@ -118,16 +120,21 @@ function useSidebarPlanReport(enabled: boolean): SidebarPlanReport | null {
 
 const TONE: Record<MeterBand, string> = { ok: "text-accent", near: "text-warning", full: "text-danger" };
 const AMOUNT: Record<MeterBand, string> = { ok: "text-ink-secondary", near: "text-warning", full: "text-danger" };
-const RING = 2 * Math.PI * 6;
+const RADIUS = 6;
+const RING = 2 * Math.PI * RADIUS;
+const MIN_ARC = 4;
 
 function PlanRing({ entry }: { entry: SidebarPlanWindow }) {
   const band = meterBand(entry.percent);
+  const arc = entry.percent > 0 ? Math.max(entry.percent, MIN_ARC) : 0;
   return (
     <span data-plan-ring={entry.label} data-band={band} title={`${entry.label} ${entry.percent}%`} className="flex shrink-0 items-center gap-1">
       <svg viewBox="0 0 16 16" className="size-3.5 -rotate-90">
-        <circle cx="8" cy="8" r="6" fill="none" strokeWidth="2.5" className="stroke-current text-ink/15" />
-        <circle cx="8" cy="8" r="6" fill="none" strokeWidth="2.5" strokeLinecap="round" className={cn("stroke-current", TONE[band])}
-          strokeDasharray={`${(RING * Math.max(entry.percent, entry.percent > 0 ? 4 : 0)) / 100} ${RING}`} />
+        <circle cx="8" cy="8" r={RADIUS} fill="none" strokeWidth="2.5" className="stroke-current text-ink/15" />
+        {arc > 0 && (
+          <circle cx="8" cy="8" r={RADIUS} fill="none" strokeWidth="2.5" className={cn("stroke-current", TONE[band])}
+            strokeDasharray={`${(RING * arc) / 100} ${RING}`} />
+        )}
       </svg>
       <span className={cn("tabular-nums", AMOUNT[band])}>{entry.percent}%</span>
     </span>
@@ -155,11 +162,15 @@ export function SidebarPlanUsageView({ view, onOpen }: { view: SidebarPlanView; 
   );
 }
 
-export function SidebarPlanUsage() {
+function ShownSidebarPlanUsage() {
   const { state, dispatch } = useStore();
   const enabled = state.config?.cloudHome !== true && window.ogb?.remoteClient?.active !== true;
   const views = sidebarPlanViews(useSidebarPlanReport(enabled));
   if (views.length === 0) return null;
   const open = () => dispatch({ type: "toggleAppSettings", open: true, section: "usage" });
   return <div className="mb-2">{views.map((view) => <SidebarPlanUsageView key={view.product} view={view} onOpen={open} />)}</div>;
+}
+
+export function SidebarPlanUsage() {
+  return useSidebarPlanUsage() ? <ShownSidebarPlanUsage /> : null;
 }
