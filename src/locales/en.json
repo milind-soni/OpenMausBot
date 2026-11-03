@@ -3315,6 +3315,8 @@
   "settings.experimental.browserOff": "Off by default. Enable it to let supported bots use a browser tab you can watch and take over.",
   "settings.experimental.browserWindows": "Not available on this Windows machine yet: install the browser with `openmausbot browser install`.",
   "settings.experimental.browserAria": "Enable the built-in browser",
+  "settings.browser.serverSites": "Open sites on this server",
+  "settings.browser.serverSitesDetail": "Off by default. Turn it on to let bots' browsers open websites hosted on this server and on its local network. OpenMausBot itself stays blocked.",
   "settings.experimental.newBrowser": "New browser",
   "settings.experimental.newBrowserDetail": "Off by default. Bots' browsers run on {app}'s own Chrome driver instead of agent-browser: pages render at your screen's sharpness, and bots can handle uploads, downloads, dialogs and pop-ups. Profiles that use your own Chrome are not affected. Switching closes open browsers, and sign-ins saved in one do not carry over to the other.",
   "settings.experimental.newBrowserAria": "Use the new browser",
