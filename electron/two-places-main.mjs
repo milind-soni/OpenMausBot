@@ -6,6 +6,7 @@
 import { BACKGROUND_HEADERS } from "./cloud-power.mjs";
 import { awayIn, parseJournal } from "./one-home.mjs";
 import { handSaved, serverRequests } from "./own-home-main.mjs";
+import { teamPlaces } from "./team-places.mjs";
 import { createTwoPlaces, installTwoPlaces } from "./two-places.mjs";
 
 /** How often main looks whether the places changed (a server said it is the person's own, My Cloud became ready). */
@@ -32,13 +33,17 @@ async function sent(response, what) {
  *   oneHome: { journal(): unknown, keep: { state(): { shown: boolean, on: boolean, moved: boolean }, set(on: boolean): Promise<unknown> } },
  *   ownHome: { owns(place: any): boolean, offers(place: any): boolean, start(id: string): Promise<unknown>, active(): boolean, away(): boolean, refresh(): void },
  *   dismissed: { read(): unknown, write(value: unknown): void },
+ *   account?: () => ({ state(): any } | null),
+ *   teamsRemembered?: { read(): unknown, write(value: unknown): void },
  *   tell(): void,
  *   log?(line: string): void,
  * }} deps `guard`: this computer's own page only. `cloud()`: My Cloud's address while it is ready, and whether it sleeps
- * now (a sleeping Cloud is never asked). `tell()`: the suggestion changed, so this computer's page asks again.
+ * now (a sleeping Cloud is never asked). `account()` and `teamsRemembered`: the person's teams, read as places that have
+ * bots. `tell()`: the suggestion changed, so this computer's page asks again.
  */
-export function installTwoPlacesMain({ ipcMain, guard, localRequest, fetch: fetchImpl, environments, cloud, oneHome, ownHome, dismissed, tell, log = () => {} }) {
+export function installTwoPlacesMain({ ipcMain, guard, localRequest, fetch: fetchImpl, environments, cloud, oneHome, ownHome, dismissed, account = null, teamsRemembered = null, tell, log = () => {} }) {
   const put = (payload) => ({ method: "PUT", body: JSON.stringify(payload), signal: AbortSignal.timeout(10_000) });
+  const teams = account && teamsRemembered ? teamPlaces({ account, fetch: fetchImpl, remembered: teamsRemembered }) : () => [];
   const places = () => {
     const out = [];
     const mine = cloud(), keep = oneHome.keep.state();
@@ -57,7 +62,7 @@ export function installTwoPlacesMain({ ipcMain, guard, localRequest, fetch: fetc
         tell: async (payload) => sent(await server.request("PUT", ROUTE, { ...put(payload), headers: { "content-type": "application/json" } }), place.name),
         ...(ownHome.offers(place) ? { bring: () => ownHome.start(place.id) } : {}) });
     }
-    return out;
+    return [...out, ...teams()];
   };
   const journal = () => parseJournal(oneHome.journal());
   /** This computer's bots moved: to My Cloud, or to a server of the person's own. */

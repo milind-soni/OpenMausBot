@@ -5,8 +5,9 @@ import type { HandoffView } from "../coordinator.ts";
 import { escapeNotes } from "../peer-provenance.ts";
 import { canManage } from "../peer-roster.ts";
 import type { BotRecord, Store } from "../store.ts";
+import { SAY_LONG_WAIT, waitedLong, waitedWords, waitNow } from "./long-waits.ts";
 
-type WaitingQuestion = { bot: string; threadId: string; thread: string; question: string };
+type WaitingQuestion = { bot: string; threadId: string; thread: string; question: string; since: number };
 
 export interface TeammatePromptDeps {
   store: Pick<Store, "bots" | "bot">;
@@ -21,6 +22,7 @@ export interface TeammatePromptDeps {
   confined(threadId: string): boolean;
   readableFrom(threadId: string): (other: string) => boolean;
   waitingForPerson(chief: BotRecord, teammates: readonly BotRecord[], readable: (threadId: string) => boolean): WaitingQuestion[];
+  now?(): number;
 }
 
 export function createTeammatePrompts(deps: TeammatePromptDeps) {
@@ -42,20 +44,26 @@ export function createTeammatePrompts(deps: TeammatePromptDeps) {
 
   const unattendedWork = (botId: string, threadId: string): boolean => deps.isUnattended(botId, threadId) || deps.startedOutside(threadId);
 
-  /** Security invariant: only a turn the person is behind speaks for them. A webhook, routine or guest turn must not answer their questions. */
-  const actsForPerson = (bot: BotRecord, threadId: string): boolean =>
-    chiefLevel(bot) && !unattendedWork(bot.id, threadId) && !deps.guestDriven(threadId) && !deps.confined(threadId);
+  /** Security invariant: a webhook, routine or guest turn has no person behind it, so it neither hears nor says what waits on them. */
+  const personBehind = (botId: string, threadId: string): boolean =>
+    !unattendedWork(botId, threadId) && !deps.guestDriven(threadId) && !deps.confined(threadId);
+
+  /** Security invariant: only a turn the person is behind speaks for them. */
+  const actsForPerson = (bot: BotRecord, threadId: string): boolean => chiefLevel(bot) && personBehind(bot.id, threadId);
 
   /** A Chief's turns list the questions teammates it manages wait on the person for, so it can answer one for them or send
    * the person to the thread that asks. */
   function questions(bot: BotRecord, threadId: string): string {
     if (!actsForPerson(bot, threadId)) return "";
     const teammates = store.bots.filter((teammate) => teammate.id !== bot.id && !teammate.hidden && canManage(bot, teammate));
+    const now = deps.now?.() ?? waitNow();
     const waiting = deps.waitingForPerson(bot, teammates, deps.readableFrom(threadId))
-      .map((one) => ({ ...one, thread: escapeNotes(one.thread).slice(0, 120), question: escapeNotes(one.question).slice(0, 400) }));
+      .map(({ since, ...one }) => ({ ...one, thread: escapeNotes(one.thread).slice(0, 120), question: escapeNotes(one.question).slice(0, 400),
+        ...(waitedLong(since, now) ? { waited: waitedWords(since, now) } : {}) }));
     if (!waiting.length) return "";
-    return ` Teammates you manage wait on the person's answer to these questions: ${JSON.stringify(waiting)}. When the person gives you an answer or asks you to answer one${deps.fullAccess(bot.id, threadId) ? ", or you know the answer for certain" : ""}, send it to that teammate with coordinate_bots with its threadId as thread: it answers the question there for the person, who can still change it. Otherwise tell the person which thread asks; never guess an answer.`;
+    const said = waiting.some((one) => one.waited) ? ` Those with "waited" have waited more than a day. ${SAY_LONG_WAIT}` : "";
+    return ` Teammates you manage wait on the person's answer to these questions: ${JSON.stringify(waiting)}. When the person gives you an answer or asks you to answer one${deps.fullAccess(bot.id, threadId) ? ", or you know the answer for certain" : ""}, send it to that teammate with coordinate_bots with its threadId as thread: it answers the question there for the person, who can still change it. Otherwise tell the person which thread asks; never guess an answer.${said}`;
   }
 
-  return { outstanding, unattendedWork, actsForPerson, questions };
+  return { outstanding, unattendedWork, personBehind, actsForPerson, questions };
 }
