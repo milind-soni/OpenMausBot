@@ -5722,7 +5722,7 @@
   "settings.threads.starter": "Starter ejecuta un hilo a la vez por bot, y un plan mayor ejecuta más. El trabajo que un bot inicia por su cuenta se ejecuta igualmente, y cada bot tiene el suyo.",
   "botApi.title": "Bot API",
   "botApi.switch": "Permitir que las apps hablen con este bot",
-  "botApi.hint": "Las apps y los scripts envían un mensaje a {name} con una clave y reciben la respuesta. Lo que envían es trabajo externo: nunca actúa por ti, y todo lo que necesite tu aprobación te espera en el hilo.",
+  "botApi.hint": "Las apps y los scripts envían un mensaje a {name} con una clave y reciben una respuesta. {name} responde a partir de sus instrucciones y su memoria, sin usar herramientas.",
   "botApi.keyOnce": "Tu clave está en el comando y se muestra solo esta vez. Cópiala ahora: cuando salgas, YOUR_KEY ocupará su lugar.",
   "botApi.keyHidden": "Pon tu clave en el lugar de YOUR_KEY. ¿La perdiste? Crea una nueva.",
   "botApi.copy": "Copiar",

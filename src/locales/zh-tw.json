@@ -4605,7 +4605,7 @@
   "settings.threads.starter": "Starter 每個機器人一次執行一個對話，更大的方案可以執行更多。機器人自己發起的工作仍會執行，每個機器人各有一個。",
   "botApi.title": "Bot API",
   "botApi.switch": "允許應用程式與此機器人對話",
-  "botApi.hint": "應用程式和指令碼憑金鑰向{name}傳送訊息並取得回覆。它們傳送的內容屬於外部工作：絕不會代表你行事，任何需要你同意的事都會在對話中等你。",
+  "botApi.hint": "應用程式和指令碼憑金鑰向{name}傳送訊息並取得回覆。{name}根據自己的指示和記憶回答,不使用任何工具。",
   "botApi.keyOnce": "你的金鑰就在指令裡，只顯示這一次。現在複製：你離開後，它的位置會變成 YOUR_KEY。",
   "botApi.keyHidden": "把你的金鑰填到 YOUR_KEY 的位置。遺失了？建立新的。",
   "botApi.copy": "複製",

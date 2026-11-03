@@ -276,7 +276,7 @@ export function createBotApiHost(deps: BotApiHostDeps) {
   /** What callers sent is for the people who manage the key, not everyone who can see the bot. */
   const view = (botId: string, auth: RequestAuth): BotApiStatus & { included: boolean; canTakeCalls: boolean; url: string; canManage: boolean; calls: BotApiAttempt[] } => {
     const canManage = deps.manageRefusal(auth, botId) === null;
-    return { included: included(), canTakeCalls: deps.canConfine(botId), ...manager.status(botId), url: botApiEndpoint(deps.hooksBaseUrl(), botId), canManage, calls: canManage ? manager.listAttempts(botId).slice(-10).reverse() : [] };
+    return { included: included(), canTakeCalls: deps.canConfine(botId), ...manager.status(botId), url: botApiEndpoint(deps.hooksBaseUrl(), botId), canManage, calls: canManage ? manager.callsSinceOn(botId).slice(-10).reverse() : [] };
   };
 
   const routes: RouteHandler = async ({ req, res, path, method, auth, json: answer, readBody }) => {

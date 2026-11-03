@@ -7343,7 +7343,7 @@
   "settings.threads.starter": "Starter 每个机器人一次运行一个对话，更大的方案可以运行更多。机器人自己发起的工作仍会运行，每个机器人各有一个。",
   "botApi.title": "Bot API",
   "botApi.switch": "允许应用与此机器人对话",
-  "botApi.hint": "应用和脚本凭密钥向{name}发送消息并获得回复。它们发送的内容属于外部工作：绝不会代表你行事，任何需要你同意的事都会在对话中等你。",
+  "botApi.hint": "应用和脚本凭密钥向{name}发送消息并获得回复。{name}根据自己的指示和记忆回答,不使用任何工具。",
   "botApi.keyOnce": "你的密钥就在命令里，只显示这一次。现在复制：你离开后，它的位置会变成 YOUR_KEY。",
   "botApi.keyHidden": "把你的密钥填到 YOUR_KEY 的位置。丢了？新建一个。",
   "botApi.copy": "复制",

@@ -6559,7 +6559,7 @@
   "settings.threads.starter": "Starter uruchamia jeden wątek naraz na bota, a większy plan więcej. Praca, którą bot zaczyna sam, i tak się wykonuje, a każdy bot ma swój wątek.",
   "botApi.title": "Bot API",
   "botApi.switch": "Pozwól aplikacjom rozmawiać z tym botem",
-  "botApi.hint": "Aplikacje i skrypty wysyłają do {name} wiadomość z kluczem i otrzymują odpowiedź. To, co wysyłają, jest pracą z zewnątrz: nigdy nie działa w Twoim imieniu, a wszystko, co wymaga Twojej zgody, czeka na Ciebie w wątku.",
+  "botApi.hint": "Aplikacje i skrypty wysyłają do {name} wiadomość z kluczem i otrzymują odpowiedź. {name} odpowiada na podstawie swoich instrukcji i pamięci, bez użycia narzędzi.",
   "botApi.keyOnce": "Twój klucz jest w poleceniu i jest pokazywany tylko ten jeden raz. Skopiuj go teraz: gdy wyjdziesz, jego miejsce zajmie YOUR_KEY.",
   "botApi.keyHidden": "Wstaw swój klucz w miejsce YOUR_KEY. Zgubiony? Utwórz nowy.",
   "botApi.copy": "Kopiuj",

@@ -174,6 +174,12 @@ export class BotApiManager {
     return true;
   }
 
+  /** The calls since it was last switched on, which is what its count counts. */
+  callsSinceOn(botId: string): BotApiAttempt[] {
+    const record = this.bots.find((candidate) => candidate.botId === botId);
+    return record ? this.listAttempts(botId).filter((attempt) => attempt.receivedAt >= record.createdAt) : [];
+  }
+
   listAttempts(botId: string): BotApiAttempt[] {
     return this.attempts.filter((attempt) => attempt.botId === botId).map((attempt) => ({ ...attempt }));
   }

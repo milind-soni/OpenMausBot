@@ -5213,7 +5213,7 @@
   "settings.threads.starter": "Starter chạy mỗi bot một luồng một lúc, gói lớn hơn chạy được nhiều hơn. Việc do bot tự bắt đầu vẫn chạy, và mỗi bot có luồng riêng.",
   "botApi.title": "Bot API",
   "botApi.switch": "Cho ứng dụng trò chuyện với bot này",
-  "botApi.hint": "Ứng dụng và script gửi tin nhắn cho {name} kèm một khóa và nhận câu trả lời. Những gì chúng gửi là công việc từ bên ngoài: không bao giờ thay bạn hành động, và bất cứ điều gì cần bạn đồng ý sẽ chờ bạn trong luồng.",
+  "botApi.hint": "Ứng dụng và script gửi tin nhắn cho {name} kèm một khóa và nhận câu trả lời. {name} trả lời dựa trên hướng dẫn và bộ nhớ của mình, không dùng công cụ.",
   "botApi.keyOnce": "Khóa của bạn nằm trong lệnh và chỉ hiển thị lần này. Hãy sao chép ngay: sau khi bạn rời đi, YOUR_KEY sẽ thay vào đó.",
   "botApi.keyHidden": "Đặt khóa của bạn vào chỗ YOUR_KEY. Mất rồi? Tạo khóa mới.",
   "botApi.copy": "Sao chép",

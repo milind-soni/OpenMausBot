@@ -7418,7 +7418,7 @@
   "settings.threads.starter": "Starter runs one thread at a time per bot, and a bigger plan runs more. Work a bot starts for itself still runs, and each bot has its own one.",
   "botApi.title": "Bot API",
   "botApi.switch": "Let apps talk to this bot",
-  "botApi.hint": "Apps and scripts send {name} a message with a key and get the reply. What they send is outside work: it never acts for you, and anything that needs your OK waits for you in the thread.",
+  "botApi.hint": "Apps and scripts send {name} a message with a key and get a reply. {name} answers from its instructions and memory, and uses no tools for them.",
   "botApi.keyOnce": "Your key is in the command, shown this once. Copy it now: after you leave, YOUR_KEY takes its place.",
   "botApi.keyHidden": "Put your key in place of YOUR_KEY. Lost it? Make a new one.",
   "botApi.copy": "Copy",

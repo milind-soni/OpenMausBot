@@ -91,6 +91,25 @@ describe("how it keeps its records", () => {
     expect(reopen().listAttempts("b1")).toHaveLength(52);
   });
 
+  it("shows the calls since it was switched on, so the count and the list agree, and keeps the older ones", () => {
+    const { manager, tick } = harness();
+    manager.enable("b1");
+    manager.record("b1", { outcome: "accepted", statusCode: 200 });
+    tick(1_000);
+    manager.disable("b1");
+    tick(1_000);
+    manager.enable("b1");
+    expect(manager.status("b1").callCount).toBe(0);
+    expect(manager.callsSinceOn("b1")).toEqual([]);
+    expect(manager.listAttempts("b1")).toHaveLength(1);
+    manager.record("b1", { outcome: "accepted", statusCode: 200 });
+    expect(manager.status("b1").callCount).toBe(1);
+    expect(manager.callsSinceOn("b1")).toHaveLength(1);
+    manager.disable("b1");
+    expect(manager.callsSinceOn("b1")).toEqual([]);
+    manager.flush();
+  });
+
   it("keeps each bot's calls apart, so one bot's callers can't push out another's", () => {
     const { manager } = harness();
     manager.record("quiet", { outcome: "accepted", statusCode: 200 });

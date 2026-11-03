@@ -6401,7 +6401,7 @@
   "settings.threads.starter": "O Starter executa uma conversa por vez em cada bot, e um plano maior executa mais. O trabalho que um bot inicia por conta própria ainda é executado, e cada bot tem a sua.",
   "botApi.title": "Bot API",
   "botApi.switch": "Deixar apps falarem com este bot",
-  "botApi.hint": "Apps e scripts enviam uma mensagem a {name} com uma chave e recebem a resposta. O que eles enviam é trabalho de fora: nunca age por você, e tudo que precisar do seu OK espera por você na conversa.",
+  "botApi.hint": "Apps e scripts enviam uma mensagem a {name} com uma chave e recebem uma resposta. {name} responde com base nas instruções e na memória, sem usar ferramentas.",
   "botApi.keyOnce": "Sua chave está no comando e aparece só esta vez. Copie agora: depois que você sair, YOUR_KEY toma o lugar dela.",
   "botApi.keyHidden": "Coloque sua chave no lugar de YOUR_KEY. Perdeu? Crie uma nova.",
   "botApi.copy": "Copiar",

@@ -2779,7 +2779,7 @@
   "settings.threads.starter": "Starter exécute un fil à la fois par bot, un plan supérieur en exécute davantage. Le travail qu'un bot lance lui-même s'exécute quand même, et chaque bot a le sien.",
   "botApi.title": "Bot API",
   "botApi.switch": "Laisser des apps parler à ce bot",
-  "botApi.hint": "Des apps et des scripts envoient un message à {name} avec une clé et reçoivent la réponse. Ce qu’ils envoient est un travail venu de l’extérieur : il n’agit jamais pour vous, et tout ce qui demande votre accord vous attend dans le fil.",
+  "botApi.hint": "Des apps et des scripts envoient un message à {name} avec une clé et reçoivent une réponse. {name} répond à partir de ses instructions et de sa mémoire, sans utiliser d’outils.",
   "botApi.keyOnce": "Votre clé est dans la commande, affichée cette seule fois. Copiez-la maintenant : après votre départ, YOUR_KEY prend sa place.",
   "botApi.keyHidden": "Mettez votre clé à la place de YOUR_KEY. Perdue ? Créez-en une nouvelle.",
   "botApi.copy": "Copier",

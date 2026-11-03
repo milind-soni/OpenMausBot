@@ -149,9 +149,9 @@ function BotApiSection({ bot, webhooksLink = false, className }: { bot: Bot; web
       {view?.canTakeCalls === false && <div className="mt-2 text-[13px] text-warning" data-testid="bot-api-cant-take">{t("botApi.cantTake")}</div>}
       {view?.enabled && (
         <div className="mt-3 flex flex-col gap-2">
-          <div className="relative">
-            <pre data-testid="bot-api-curl" className="overflow-x-auto whitespace-pre rounded-lg bg-inset px-3 py-2 pr-24 font-mono text-[12px] leading-[1.5] text-ink">{curl}</pre>
-            <button type="button" onClick={() => void copy()} className={cn(buttonCls, "absolute right-2 top-2 inline-flex items-center gap-1.5")} data-testid="bot-api-copy">
+          <pre data-testid="bot-api-curl" className="whitespace-pre-wrap break-all rounded-lg bg-inset px-3 py-2 font-mono text-[12px] leading-[1.5] text-ink">{curl}</pre>
+          <div className="flex justify-end">
+            <button type="button" onClick={() => void copy()} className={cn(buttonCls, "inline-flex items-center gap-1.5")} data-testid="bot-api-copy">
               <Copy size={13} aria-hidden="true" />
               {copied === "copied" ? t("botApi.copied") : copied === "failed" ? t("botApi.copyFailed") : t("botApi.copy")}
             </button>

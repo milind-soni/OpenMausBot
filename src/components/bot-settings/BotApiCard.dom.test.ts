@@ -90,6 +90,14 @@ describe("the Bot API card", () => {
     expect(find("bot-api-cant-take")!.textContent).toBe("This bot's AI can't take Bot API calls. Choose another AI to use them.");
   });
 
+  it("keeps Copy off the command, so nothing in it is hidden", async () => {
+    Object.assign(fixture.view!, { enabled: true });
+    await mount();
+    expect(find("bot-api-curl")!.contains(find("bot-api-copy"))).toBe(false);
+    expect(find("bot-api-copy")!.className).not.toContain("absolute");
+    expect(find("bot-api-curl")!.className).toContain("whitespace-pre-wrap");
+  });
+
   it("is off with no command until switched on", async () => {
     await mount();
     expect(find("bot-api")!.textContent).toContain("Bot API");

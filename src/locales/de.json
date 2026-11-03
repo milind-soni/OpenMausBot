@@ -2833,7 +2833,7 @@
   "settings.threads.starter": "Starter führt pro Bot einen Thread gleichzeitig aus, ein größerer Plan führt mehr aus. Arbeit, die ein Bot selbst startet, läuft trotzdem, und jeder Bot hat seinen eigenen Thread.",
   "botApi.title": "Bot API",
   "botApi.switch": "Apps mit diesem Bot sprechen lassen",
-  "botApi.hint": "Apps und Skripte schicken {name} mit einem Schlüssel eine Nachricht und bekommen die Antwort. Was sie schicken, ist Arbeit von außen: sie handelt nie für dich, und alles, was dein OK braucht, wartet im Thread auf dich.",
+  "botApi.hint": "Apps und Skripte schicken {name} mit einem Schlüssel eine Nachricht und bekommen eine Antwort. {name} antwortet aus seinen Anweisungen und seinem Gedächtnis und nutzt dafür keine Tools.",
   "botApi.keyOnce": "Dein Schlüssel steht im Befehl und wird nur dieses eine Mal gezeigt. Kopiere ihn jetzt: nachdem du gehst, steht dort YOUR_KEY.",
   "botApi.keyHidden": "Setze deinen Schlüssel an die Stelle von YOUR_KEY. Verloren? Erstelle einen neuen.",
   "botApi.copy": "Kopieren",

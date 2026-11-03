@@ -6418,7 +6418,7 @@
   "settings.threads.starter": "Starter esegue un thread alla volta per bot, un piano più grande ne esegue di più. Il lavoro che un bot avvia da solo viene comunque eseguito, e ogni bot ha il suo.",
   "botApi.title": "Bot API",
   "botApi.switch": "Lascia che le app parlino con questo bot",
-  "botApi.hint": "App e script inviano a {name} un messaggio con una chiave e ricevono la risposta. Ciò che inviano è lavoro dall’esterno: non agisce mai per conto tuo, e tutto ciò che richiede il tuo OK ti aspetta nel thread.",
+  "botApi.hint": "App e script inviano a {name} un messaggio con una chiave e ricevono una risposta. {name} risponde in base alle sue istruzioni e alla sua memoria, senza usare strumenti.",
   "botApi.keyOnce": "La tua chiave è nel comando, mostrata solo questa volta. Copiala ora: quando esci, al suo posto compare YOUR_KEY.",
   "botApi.keyHidden": "Metti la tua chiave al posto di YOUR_KEY. L’hai persa? Creane una nuova.",
   "botApi.copy": "Copia",
