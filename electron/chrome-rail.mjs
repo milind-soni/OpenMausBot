@@ -15,6 +15,10 @@
 // The person may hide it with a button on the page beside it. That page may be a Cloud or a server of their own on an
 // older release with no such button, so the rail hides only beside a document that offered one; a new document has a
 // few seconds to offer it, and the rail comes back beside one that doesn't, or that stops responding.
+//
+// The place tag in the page's top bar opens the list of places here too, on the rail's own page: the page only asks, from the
+// person's click, and learns nothing of the list. That works with the rail hidden, or with no rail at all: the view comes up
+// for the list and the page keeps the whole window.
 
 import { TRAFFIC_LIGHTS } from "./window-chrome.mjs";
 
@@ -25,6 +29,9 @@ export const RAIL_OFFER_GRACE_MS = 5_000;
 
 /** Chromium's net::ERR_ABORTED: a load replaced by another, not a page that failed. */
 const ABORTED = -3;
+/** Electron 43 gives a press to any view's drag region, whatever lies over it: a sheet of the rail's over the page's headers
+ * would move the window instead of taking the click, so the page has none while one is open. */
+const NO_DRAG = "* { -webkit-app-region: no-drag !important; }";
 
 /**
  * @param {{
@@ -41,7 +48,7 @@ const ABORTED = -3;
  * desktop keeps the person's choice to hide it; `changed()`: the rail came or went beside the page.
  */
 export function createChromeRail({ createView, preload, args, url, wanted, prefs = () => null, changed = () => {}, log = () => {} }) {
-  let view = null, win = null, shown = false, expanded = false, held = false;
+  let view = null, win = null, shown = false, expanded = false, held = false, beside = false, listAsked = false, dragLifted = null, skinBeside = null;
   // Whether the page beside draws the frame; the window opens as if it does (windowChromeOptions).
   let framed = true, frameGrace = null;
   // The document beside the rail offered its button; a new one may still (`grace`); the page stopped responding.
@@ -54,10 +61,24 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
   };
   const page = () => (alive() && !win.webContents.isDestroyed() ? win.webContents : null);
   /** The page beside the rail moves over by its width (0: it has the whole window again). */
-  const tellPage = () => page()?.send("rail:beside", shown ? CHROME_RAIL_WIDTH : 0);
+  const tellPage = () => page()?.send("rail:beside", beside ? CHROME_RAIL_WIDTH : 0);
   const choseHidden = () => prefs()?.railHidden() === true;
   /** Hidden by the person's choice, beside a document that can bring it back. */
   const hidden = () => choseHidden() && !hung && (offered || grace !== null);
+  /** The rail itself is up, not only its page for a sheet the person asked for. */
+  const stands = () => alive() && wanted() && !hidden();
+  /** The page's drag regions go while a sheet covers it, and come back after, on the document that lost them. */
+  const liftDragRegions = (on) => {
+    if (on === Boolean(dragLifted)) return;
+    if (on) {
+      const contents = page();
+      dragLifted = { contents, inserted: Promise.resolve(contents?.insertCSS?.(NO_DRAG)).catch(() => null) };
+    } else {
+      const { contents, inserted } = dragLifted;
+      dragLifted = null;
+      void inserted.then((key) => { if (key && !contents.isDestroyed()) return contents.removeInsertedCSS?.(key); }).catch(() => {});
+    }
+  };
   const pageState = () => ({ available: alive() && wanted(), hidden: choseHidden() });
   /** The document that offered the button hears when it would change. */
   const tellState = () => {
@@ -104,7 +125,11 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
     contents.on("will-navigate", stay);
     contents.on("will-redirect", stay);
     contents.on("render-process-gone", () => { log("chrome rail: its page went away; loading it again"); void contents.loadURL(url()).catch(() => {}); });
-    contents.on("did-finish-load", () => contents.send("rail:framed", framed));
+    contents.on("did-finish-load", () => {
+      contents.send("rail:framed", framed);
+      // A view that came up for a sheet missed the page's skin: this page's own may be another place's.
+      if (skinBeside) contents.send("rail:skin", skinBeside);
+    });
     void contents.loadURL(url()).catch((error) => log(`chrome rail: ${error?.message ?? error}`));
     return view;
   };
@@ -112,7 +137,7 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
     /** The window the rail stands beside: its size moves the rail, and each of its documents gets the room again. */
     attach(next) {
       win = next;
-      shown = false; expanded = false; held = false; offered = false; hung = false; told = "";
+      shown = false; expanded = false; held = false; beside = false; listAsked = false; dragLifted = null; offered = false; hung = false; told = "";
       framed = prefs()?.windowFrame?.() !== false;
       // The window's first document has the same time as any other to offer the button and to draw the frame.
       if (choseHidden()) startGrace(); else stopGrace();
@@ -120,7 +145,7 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
       win.on("resize", layout);
       const contents = win.webContents;
       // Each new document is told again, once it is ready.
-      contents.on("dom-ready", () => { if (shown) tellPage(); });
+      contents.on("dom-ready", () => { if (beside) tellPage(); });
       contents.on("did-navigate", nextDocument);
       contents.on("render-process-gone", nextDocument);
       // Electron 43 reports an error page that replaced the document here, not as did-navigate.
@@ -130,14 +155,14 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
       win.once("closed", () => {
         if (view && !view.webContents.isDestroyed()) view.webContents.close?.({ waitForBeforeUnload: false });
         stopGrace(); clearTimeout(frameGrace); frameGrace = null;
-        view = null; win = null; shown = false; expanded = false; offered = false;
+        view = null; win = null; shown = false; expanded = false; beside = false; dragLifted = null; offered = false;
       });
       rail.refresh();
     },
     /** Shown while there are two places or more (railPlaces) and the person hasn't hidden it; the page beside it has the
      * whole window otherwise. */
     refresh() {
-      const on = alive() && ((wanted() && !hidden()) || held);
+      const standing = stands(), on = standing || (alive() && held);
       if (on === shown) layout();
       else {
         shown = on;
@@ -146,8 +171,12 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
           layout();
         } else {
           expanded = false;
+          liftDragRegions(false);
           if (view) win.contentView.removeChildView(view);
         }
+      }
+      if (standing !== beside) {
+        beside = standing;
         tellPage();
         changed();
       }
@@ -164,6 +193,7 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
       const was = expanded;
       expanded = on === true && shown;
       layout();
+      liftDragRegions(expanded);
       // The keyboard goes with the sheet, and back to the page once it closes.
       if (expanded) view?.webContents.focus();
       else if (was) page()?.focus?.();
@@ -171,6 +201,8 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
     /** The rail's own page asks (never a place's page). */
     owns: (event) => Boolean(view && event?.sender === view.webContents && event.senderFrame === view.webContents.mainFrame),
     shown: () => shown,
+    /** The rail stands beside the page and takes its width; its page may also be up only for a sheet. */
+    beside: () => beside,
     framed: () => framed,
     expanded: () => expanded,
     /** The rail's page asks for the whole window while a sheet of its own is open, and gives it back after. The page
@@ -196,9 +228,27 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
         if (!pageBeside(event)) throw new Error("rail:draws-frame is only available to the page beside the window's rail");
         frameDrawn(drawn !== false);
       });
+      // Security: the page beside only asks. The list opens on the rail's own page; nothing of it comes back.
+      ipcMain.handle("rail:open-list", (event) => {
+        if (!pageBeside(event)) throw new Error("rail:open-list is only available to the page beside the window's rail");
+        listAsked = true;
+        rail.holdOpen(true);
+        rail.send("rail:open-list", stands());
+      });
+      const own = (channel, handler) => ipcMain.handle(channel, (event) => {
+        if (!rail.owns(event)) throw new Error(`${channel} is only available to the window's rail`);
+        return handler();
+      });
+      own("rail:list-asked", () => {
+        if (!listAsked) return null;
+        listAsked = false;
+        return stands();
+      });
+      own("rail:list-closed", () => { listAsked = false; rail.holdOpen(false); });
     },
     /** Tells the rail's page something (the places changed, the skin of the page beside it). */
     send(channel, ...values) {
+      if (channel === "rail:skin") skinBeside = values[0];
       if (view && !view.webContents.isDestroyed()) view.webContents.send(channel, ...values);
     },
   };

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { usePlaceLook } from "@/lib/place-look";
+import { placeKindWord, type RailPlace } from "@/lib/places";
 import { useStore } from "@/state/store";
 import { PlaceMark } from "./PlacesRail";
 
@@ -29,16 +31,38 @@ export function windowPlaceName(place: WorkspaceState, team: string | undefined)
   return place.name;
 }
 
-/** The middle of the window frame's top bar: the place on screen, its mark as the rail draws it and its name, quiet. It
- * stays part of the bar's drag region. */
+/** The rail's word for this place, from what this page knows of itself: main's word for it and its own server's config (null
+ * until that has loaded). A server anyone may run learns nothing here that it doesn't already know. */
+export function windowPlaceKind(place: WorkspaceState, config: { cloudHome?: boolean; team?: unknown } | null | undefined): RailPlace["kind"] | null {
+  if (place.local) return "computer";
+  if (place.role || config?.team) return "team";
+  if (place.home || config?.cloudHome) return "cloud";
+  return config ? "server" : null;
+}
+
+/** The middle of the window frame's top bar: where the person is, as a tag with the place's mark, its name and its kind. A click
+ * opens the list of places on the rail's own page, with the rail hidden or no rail at all; beside an older app, which has no
+ * such list, it is a label and part of the bar's drag region. */
 export function WindowPlaceTitle() {
   const place = useWindowPlace();
   const look = usePlaceLook();
   const { state } = useStore();
   if (!place) return <span aria-hidden="true" />;
   const name = windowPlaceName(place, state.config?.team?.name);
-  return <div data-window-place className="flex min-w-0 items-center justify-center gap-1.5 px-2 text-[12px] font-medium text-ink-secondary">
-    <PlaceMark place={{ kind: place.local ? "computer" : place.role ? "team" : "cloud", name, color: look?.color ?? place.color ?? null }} size={16} />
-    <span className="min-w-0 truncate">{name}</span>
-  </div>;
+  const kind = windowPlaceKind(place, state.config);
+  const word = kind && placeKindWord(kind, name);
+  const said = word ? `${name} · ${word}` : name;
+  const openList = window.ogb?.rail?.openList;
+  const face = <>
+    <PlaceMark place={{ kind: kind ?? "cloud", name, color: look?.color ?? place.color ?? null }} size={16} />
+    <span className="min-w-0 truncate">{said}</span>
+  </>;
+  const tag = "flex h-[22px] min-w-0 max-w-full items-center justify-center gap-1.5 justify-self-center rounded-md bg-ink/[0.06] px-1.5 text-[12px] font-medium text-ink";
+  if (!openList) return <div data-window-place className={tag}>{face}</div>;
+  return <button type="button" data-window-place aria-haspopup="dialog" aria-label={t("rail.tagOpen", { name: said })} title={t("rail.tagOpen", { name: said })}
+    onClick={() => void openList().catch(() => {})}
+    className={`${tag} transition-colors hover:bg-ink/[0.11] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus`}>
+    {face}
+    <ChevronDown size={13} strokeWidth={2} aria-hidden="true" className="shrink-0 text-ink-secondary" />
+  </button>;
 }

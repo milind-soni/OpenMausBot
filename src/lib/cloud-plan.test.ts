@@ -422,3 +422,35 @@ describe("why a step of the dialog ended without going on", () => {
     expect(cloudAddView(free, OFFER, { ...at, conflict: true })).toMatchObject({ kind: "offer", notice: "preparing" });
   });
 });
+
+describe("someone in a team with no plan of their own", () => {
+  const NOW = 1_800_000_000_000;
+  const OFFER: CloudOffer = { plans: [{ tier: "pro", label: "Pro", amount: 4900, trialDays: 7 }], recommended: "pro" };
+  const member = (machine: CloudTeam["machine"], extra: Partial<CloudAccountState> = {}): CloudAccountState => ({ status: "connected", account: { id: "a", email: "p@example.test" },
+    entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 1 }, offer: OFFER, teams: [{ id: "team-acme", name: "Acme", role: "member", machine }], ...extra });
+  const ready = { status: "ready", origin: "https://team.example" } as CloudTeam["machine"];
+
+  it("isn't offered a plan unasked, though the Admin's session offers them one; the plan line says whose Cloud they use", () => {
+    const view = cloudPlanView(member(ready));
+    expect(view).toEqual({ kind: "free", team: "Acme" });
+    expect(buyOfferAllowed(view)).toBe(false);
+    expect(cloudPlanLine(view)).toBe("You're part of Acme");
+    expect(buyOfferAllowed(cloudPlanView(member(ready, { teams: [] }))), "with no team, the offer stands").toBe(true);
+    expect(cloudPlanLine(cloudPlanView(member(ready, { teams: [] })))).toBe("No plan yet");
+    expect(buyOfferAllowed({ kind: "signed-out" }), "signed out, nobody knows yet").toBe(true);
+  });
+
+  it("signed in from the sheet just now, sees their team's Cloud to open, never plan cards", () => {
+    const at = { now: NOW, arrived: true };
+    expect(cloudAddView(member(ready), OFFER, at)).toEqual({ kind: "team-ready", team: { id: "team-acme", name: "Acme" } });
+    expect(cloudAddView(member(ready), undefined, at), "nor waits for an offer").toEqual({ kind: "team-ready", team: { id: "team-acme", name: "Acme" } });
+    expect(cloudAddView(member(ready), null, at), "nor needs one").toEqual({ kind: "team-ready", team: { id: "team-acme", name: "Acme" } });
+    expect(cloudAddView(member(null), OFFER, at)).toEqual({ kind: "team-starting", team: "Acme", step: null, slow: false });
+  });
+
+  it("can still buy a Cloud of their own by asking for one: billing is as it was", () => {
+    expect(cloudAddView(member(ready), OFFER, { now: NOW })).toEqual({ kind: "offer", offer: OFFER, signedOut: false, notice: null });
+    const paying = member(ready, { checkout: { plan: "pro", source: null, startedAt: NOW } });
+    expect(cloudAddView(paying, OFFER, { now: NOW, arrived: true }).kind, "a checkout they opened goes on").toBe("waiting");
+  });
+});

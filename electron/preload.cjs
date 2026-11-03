@@ -24,7 +24,7 @@ ipcRenderer.on("chat:open", (_event, link) => {
 });
 
 // Only fixed actions are retained, never a destination supplied by a renderer.
-const FIXED_SETTINGS_ACTIONS = new Set(["organization", "cloud", "cloud-settings", "cloud-add", "cloud-add-howto"]);
+const FIXED_SETTINGS_ACTIONS = new Set(["organization", "cloud", "cloud-settings", "cloud-add", "cloud-add-howto", "cloud-sign-in"]);
 let pendingSettingsAction = null;
 const appSettingsListeners = new Set();
 ipcRenderer.on("app:open-settings", (_event, section) => {
@@ -53,6 +53,9 @@ function leaveRailRoom() {
   if (!railRoom.isConnected) (document.head ?? document.documentElement).append(railRoom);
 }
 const railState = (state) => ({ available: state?.available === true, hidden: state?.hidden === true });
+// Main tells the rail's page the skin beside it as that page loads, perhaps before its script listens.
+let skinBeside = null;
+if (isLocalPage) ipcRenderer.on("rail:skin", (_event, skin) => { skinBeside = String(skin); });
 ipcRenderer.on("rail:beside", (_event, width) => { railBeside = Math.max(0, Math.min(200, Number(width) || 0)); leaveRailRoom(); });
 // The rail's own page keeps its size whatever the zoom of this app's page: Chromium gives every page of a host the same
 // zoom, the rail's included, so the rail takes it back out and stays as wide as its strip.
@@ -171,9 +174,20 @@ const bridge = {
       ipcRenderer.on("rail:state", handler);
       return () => ipcRenderer.removeListener("rail:state", handler);
     },
+    // The place tag in the page's top bar: the list opens on the rail's own page, from the person's click, and nothing of it comes back.
+    openList: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("rail:open-list").then(() => undefined) : Promise.reject(new Error("Choose where you are to see your places.")),
     ...(isLocalPage ? {
       expand: (on) => ipcRenderer.invoke("rail:expand", on === true),
+      listAsked: () => ipcRenderer.invoke("rail:list-asked"),
+      listClosed: () => ipcRenderer.invoke("rail:list-closed"),
+      onOpenList: (cb) => {
+        const handler = (_event, besideRail) => cb(besideRail === true);
+        ipcRenderer.on("rail:open-list", handler);
+        return () => ipcRenderer.removeListener("rail:open-list", handler);
+      },
       onSkin: (cb) => {
+        if (skinBeside) cb(skinBeside);
         const handler = (_event, skin) => cb(String(skin));
         ipcRenderer.on("rail:skin", handler);
         return () => ipcRenderer.removeListener("rail:skin", handler);

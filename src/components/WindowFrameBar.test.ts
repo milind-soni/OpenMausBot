@@ -12,7 +12,7 @@ const fixture = vi.hoisted(() => ({
   rail: { available: true, hidden: false } as { available: boolean; hidden: boolean } | null,
   update: null as UpdaterState | null,
   dispatch: vi.fn(),
-  config: {} as { team?: { name: string } },
+  config: {} as { team?: { name: string }; cloudHome?: boolean } | null,
   look: null as { color: string | null } | null,
   frameDrawn: vi.fn(),
 }));
@@ -80,21 +80,51 @@ describe("the window frame's top bar", () => {
       .toEqual(["start", "place", "end"]);
   });
 
-  it("names the place on screen in its middle, with its mark, quiet and in one line, and keeps it part of the drag region", async () => {
+  it("says where you are as a tag in its middle, with the place's mark, in one line; beside an older app, with no list to open, it is a label and drags the window", async () => {
     await mount(createElement(WindowFrameBar));
     expect(middle()!.textContent).toBe("MCMy Cloud");
-    expect(middle()!.className.split(" ")).toEqual(expect.arrayContaining(["text-ink-secondary", "min-w-0"]));
+    expect(middle()!.className.split(" ")).toEqual(expect.arrayContaining(["text-ink", "min-w-0", "rounded-md"]));
     expect(middle()!.querySelector("span:last-child")!.className).toContain("truncate");
     expect(middle()!.querySelector("[aria-hidden='true']")!.getAttribute("style"), "the rail's tile, small, in the place's colour").toContain("width: 16px; height: 16px");
     expect(middle()!.closest("button, a, [role='button']"), "no control: it drags the window like the rest of the bar").toBeNull();
+  });
+
+  it("on this app, a click on the tag asks main for the list and nothing else: this page never reads the places", async () => {
+    const openList = vi.fn(async () => {}), places = vi.fn(async () => ({ places: [], add: {} }));
+    Object.assign(window, { ogb: { workspaces: { state: async () => place, onChanged: () => () => {}, menu: async () => {}, places }, rail: { openList } } });
+    fixture.config = { cloudHome: true };
+    place = { local: false, name: "Studio", origin: "https://cloud.example" };
+    await mount(createElement(WindowFrameBar));
+    expect(middle()!.tagName).toBe("BUTTON");
+    expect(middle()!.getAttribute("aria-label")).toBe("Studio · Cloud: see all your places");
+    expect(middle()!.getAttribute("aria-haspopup")).toBe("dialog");
+    await act(async () => middle()!.click());
+    expect(openList).toHaveBeenCalledExactlyOnceWith();
+    expect(places, "the list stays on the rail's own page").not.toHaveBeenCalled();
+  });
+
+  it("the tag stays with the rail hidden, and with no rail at all", async () => {
+    Object.assign(window, { ogb: { workspaces: { state: async () => place, onChanged: () => () => {}, menu: async () => {} }, rail: { openList: vi.fn(async () => {}) } } });
+    for (const rail of [{ available: true, hidden: true }, { available: false, hidden: false }, null]) {
+      fixture.rail = rail;
+      await mount(createElement(WindowFrameBar));
+      expect(middle()?.tagName, JSON.stringify(rail)).toBe("BUTTON");
+      await act(async () => root!.unmount());
+    }
   });
 
   it.each([
     [{ local: true, name: "Mac mini" }, {}, "This computer"],
     [{ local: true, name: "Lab", localPath: "/Users/me/lab" }, {}, "Lab"],
     [{ local: false, name: "Saved name", home: true }, {}, "My Cloud"],
-    [{ local: false, name: "Acme", role: "Admin" }, { team: { name: "Acme" } }, "Acme"],
-    [{ local: false, name: "Office", origin: "https://office.example" }, {}, "Office"],
+    [{ local: false, name: "Saved name", home: true }, { team: { name: "Acme" } }, "Acme · Team"],
+    [{ local: false, name: "Acme", role: "Admin" }, { team: { name: "Acme" } }, "Acme · Team"],
+    [{ local: false, name: "Acme", role: "User" }, null, "Acme · Team"],
+    [{ local: false, name: "Acme Team", role: "User" }, null, "Acme Team"],
+    [{ local: false, name: "Second", origin: "https://second.example" }, { cloudHome: true }, "Second · Cloud"],
+    [{ local: false, name: "My Cloud", origin: "https://mine.example" }, { cloudHome: true }, "My Cloud"],
+    [{ local: false, name: "Office", origin: "https://office.example" }, {}, "Office · Server"],
+    [{ local: false, name: "Office", origin: "https://office.example" }, null, "Office"],
   ] as const)("names %o as it should", async (shown, config, name) => {
     place = { ...shown };
     fixture.config = config;

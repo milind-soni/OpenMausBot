@@ -86,6 +86,16 @@ export async function makeHome(id: string): Promise<true | string> {
  * list main gave it (two places or more). */
 export const railShown = (state: RailState): boolean => state.beside === true || state.places.length > 0;
 
+const KIND_WORD = { cloud: "rail.kindCloud", team: "rail.kindTeam", server: "rail.kindServer" } as const;
+
+/** The word after a place's name saying what kind of place it is. This computer needs none, nor a name that says it already
+ * ("My Cloud"). */
+export function placeKindWord(kind: RailPlace["kind"], name: string): string | null {
+  if (kind === "computer") return null;
+  const word = t(KIND_WORD[kind]);
+  return name.toLocaleLowerCase().split(/\s+/).includes(word.toLocaleLowerCase()) ? null : word;
+}
+
 /** A circle's letters: the first of up to two words, so "Client A" is CA and "Acme" is A. */
 export function placeInitials(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);

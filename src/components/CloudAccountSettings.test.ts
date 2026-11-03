@@ -34,7 +34,7 @@ async function ready(state: CloudAccountState = { status: "signed-out" }) { vi.m
 it("loads optional account state without enrollment/network and delegates sign-in without arguments", async () => {
   await ready(); expect(bridge.begin).not.toHaveBeenCalled(); expect(fetch).not.toHaveBeenCalled();
   expect(render().html).toContain("Free local use"); expect(render().html).toContain("separate from organization sign-in");
-  click("Sign in to your Cloud plan"); await flush(); expect(bridge.begin).toHaveBeenCalledExactlyOnceWith();
+  click("Have an invite or a plan? Sign in"); await flush(); expect(bridge.begin).toHaveBeenCalledExactlyOnceWith();
 });
 it("a free account starts in the Add a Cloud dialog, but only a verified native update displays Pro; unavailable/revoked states remove it", async () => {
   const onAddCloud = vi.fn();
@@ -60,7 +60,7 @@ it("sign-out requires confirmation and preserves local and organization wording"
   await ready(free); click("Sign out of MausBot Cloud"); expect(bridge.signOut).not.toHaveBeenCalled();
   expect(render().html).toContain("does not cancel your subscription"); click("Keep signed in"); expect(bridge.signOut).not.toHaveBeenCalled();
   click("Sign out of MausBot Cloud"); click("Sign out of MausBot Cloud"); await flush(); expect(bridge.signOut).toHaveBeenCalledExactlyOnceWith();
-  expect(render().html).toContain("Sign in to your Cloud plan"); expect(fetch).not.toHaveBeenCalled();
+  expect(render().html).toContain("Have an invite or a plan? Sign in"); expect(fetch).not.toHaveBeenCalled();
 });
 it("never accesses account bridge from remote companion pages", async () => {
   vi.stubGlobal("window", { ogb: { cloudAccount: bridge, remoteClient: { active: true } } }); render(); f.effects[0](); await flush();
@@ -157,12 +157,12 @@ it("shows the sign-in code plainly, with how long it works", async () => {
   all(html, ["Check that your browser shows this code:", "ABCDE-FGHJK", "The code works until"]);
   expect(html).not.toContain("<details"); expect(html).not.toContain("Security details");
   push({ status: "signed-out", message: "enrollment-expired" });
-  all(render().html, ["The sign-in code expired. Choose Sign in to your Cloud plan to get a new one.", ">Sign in to your Cloud plan<"]);
+  all(render().html, ["The sign-in code expired. Choose Sign in to get a new one.", ">Have an invite or a plan? Sign in<"]);
 });
 it("while a saved sign-in is read, nothing is offered and the Cloud link waits", async () => {
   await ready({ status: "signed-out", message: "restoring" });
   const html = render().html;
-  expect(html).toContain("Loading Cloud account"); none(html, ["Sign in to your Cloud plan", "could not be completed", ...BUY]);
+  expect(html).toContain("Loading Cloud account"); none(html, ["Have an invite or a plan? Sign in", "could not be completed", ...BUY]);
   expect(cloudLinkAction({ status: "signed-out", message: "restoring" }, { arrived: true, connected: false })).toBeNull();
   render({ linkRequest: 1 }); f.effects[1](); await flush(); expect(bridge.begin).not.toHaveBeenCalled();
 });
@@ -171,7 +171,7 @@ it("a saved sign-in that could not be read was removed: one line says so, and Si
   const html = render().html;
   expect(html).toContain("Cloud sign-in couldn&#x27;t be read, so it was removed. Sign in again.");
   none(html, ["could not be completed", "Unlock your system keychain"]);
-  expect(button("Sign in to your Cloud plan")).toBeTruthy();
+  expect(button("Have an invite or a plan? Sign in")).toBeTruthy();
   none(render({ onAddCloud: vi.fn() }).html, BUY);
 });
 it("a saved sign-in that can't be read right now says the app tries again by itself, and asks for no sign-out", async () => {
@@ -362,7 +362,7 @@ it("only shows the status of a Cloud that is not Ready, and a later sign-out sta
     expect(render().html).toContain(`data-cloud-home="${machine.status}"`);
   }
   push({ status: "signed-out" }); linked(); await flush();
-  expect(render().html).toContain("Sign in to your Cloud plan");
+  expect(render().html).toContain("Have an invite or a plan? Sign in");
   expect(bridge.connectHome).not.toHaveBeenCalled();
   expect(bridge.begin).not.toHaveBeenCalled();
 });
@@ -510,8 +510,8 @@ it("signed out or with no plan, the Add a Cloud button names the trial only when
   render({ onAddCloud }); f.effects.at(-1)!(); await flush();
   expect(offer).toHaveBeenCalledExactlyOnceWith();
   let html = render({ onAddCloud }).html;
-  all(html, [">Start free trial<", "14-day money-back on every plan.", "Sign in to your Cloud plan"]);
-  expect(html.indexOf("Start free trial")).toBeLessThan(html.indexOf("Sign in to your Cloud plan"));
+  all(html, [">Start free trial<", "14-day money-back on every plan.", "Have an invite or a plan? Sign in"]);
+  expect(html.indexOf("Start free trial")).toBeLessThan(html.indexOf("Have an invite or a plan? Sign in"));
   render({ onAddCloud }).nodes.find(node => node.type === "button" && node.props.children === "Start free trial")!.props.onClick!();
   expect(onAddCloud).toHaveBeenCalledOnce();
   offer.mockResolvedValue({ plans: [{ tier: "pro", amount: 4900 }], recommended: "pro" });
@@ -536,7 +536,7 @@ it("on My Cloud, Settings shows the trial and its credit, and its button names t
 it("Sign in is the sheet's email code when Settings hands it over; the staging Admin is marked plainly", async () => {
   const onSignIn = vi.fn();
   await ready();
-  render({ onSignIn }).nodes.find(node => node.type === "button" && node.props.children === "Sign in to your Cloud plan")!.props.onClick!();
+  render({ onSignIn }).nodes.find(node => node.type === "button" && node.props.children === "Have an invite or a plan? Sign in")!.props.onClick!();
   await flush();
   expect(onSignIn).toHaveBeenCalledOnce(); expect(bridge.begin).not.toHaveBeenCalled();
   expect(render().html).not.toContain("data-cloud-staging");

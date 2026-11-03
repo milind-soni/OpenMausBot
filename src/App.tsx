@@ -101,7 +101,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     };
     const url = new URL(window.location.href);
     const requestedSettings = url.searchParams.get("desktop-settings");
-    const cloud = ["cloud", "cloud-settings", "cloud-add", "cloud-add-howto"].includes(requestedSettings ?? "");
+    const cloud = ["cloud", "cloud-settings", "cloud-add", "cloud-add-howto", "cloud-sign-in"].includes(requestedSettings ?? "");
     if (requestedSettings === "workspaces" || (requestedSettings === "organization" && window.ogb.organization && !remoteClient) ||
       (cloud && window.ogb.cloudAccount && !remoteClient)) {
       url.searchParams.delete("desktop-settings");
@@ -109,6 +109,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       if (requestedSettings === "organization") dispatch({ type: "toggleAppSettings", open: true, section: "organization" });
       else if (requestedSettings === "cloud") dispatch(CLOUD_LINK_SETTINGS);
       else if (requestedSettings === "cloud-settings") dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
+      else if (requestedSettings === "cloud-sign-in") dispatch({ type: "openCloudAdd", source: "app_menu", signIn: true });
       else if (requestedSettings === "cloud-add" || requestedSettings === "cloud-add-howto") dispatch({ type: "openCloudAdd", source: requestedSettings === "cloud-add" ? "app_menu" : "app_howto" });
       else open();
     }
@@ -270,7 +271,9 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     state.pluginsOpen;
 
   useEffect(() => {
-    return window.ogb?.onOpenAppSettings?.(section => dispatch((section === "cloud-add" || section === "cloud-add-howto") && window.ogb?.cloudAccount && !remoteClient
+    return window.ogb?.onOpenAppSettings?.(section => dispatch(section === "cloud-sign-in" && window.ogb?.cloudAccount && !remoteClient
+      ? { type: "openCloudAdd", source: "app_menu", signIn: true }
+      : (section === "cloud-add" || section === "cloud-add-howto") && window.ogb?.cloudAccount && !remoteClient
       ? { type: "openCloudAdd", source: section === "cloud-add" ? "app_menu" : "app_howto" }
       : section === "cloud" && window.ogb?.cloudAccount && !remoteClient
         ? CLOUD_LINK_SETTINGS

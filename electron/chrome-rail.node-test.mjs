@@ -310,7 +310,7 @@ test("the rail's own page keeps its size at any zoom of this app's page (Chromiu
 
 test("every page beside the rail, from any server, gets the button's bridge, learns only whether there is a rail to hide, and says when it draws the frame; the rail's own channels stay this app's", async () => {
   const remote = pageWithPreload("https://bots.example.test", "/", (channel) => (channel === "rail:offer" ? { available: "yes", hidden: 1, places: [{ id: "home" }] } : { available: true, hidden: true }));
-  assert.deepEqual(Object.keys(remote.bridge.rail), ["state", "drawsFrame", "setHidden", "onState"]);
+  assert.deepEqual(Object.keys(remote.bridge.rail), ["state", "drawsFrame", "setHidden", "onState", "openList"]);
   /** A value made in the page's own context, as this one sees it. */
   const plain = (value) => JSON.parse(JSON.stringify(value));
   assert.deepEqual(plain(await remote.bridge.rail.state()), { available: false, hidden: false }, "two plain answers, nothing else main might send");
@@ -327,7 +327,7 @@ test("every page beside the rail, from any server, gets the button's bridge, lea
   remote.hear("rail:state", { available: true, hidden: true });
   assert.deepEqual(plain(heard), [{ available: true, hidden: false }]);
   const local = pageWithPreload("http://127.0.0.1:8799", "/");
-  assert.deepEqual(Object.keys(local.bridge.rail), ["state", "drawsFrame", "setHidden", "onState", "expand", "onSkin", "onFramed"]);
+  assert.deepEqual(Object.keys(local.bridge.rail), ["state", "drawsFrame", "setHidden", "onState", "openList", "expand", "listAsked", "listClosed", "onOpenList", "onSkin", "onFramed"]);
   const framed = [];
   const unheard = local.bridge.rail.onFramed((value) => framed.push(value));
   local.hear("rail:framed", false);
@@ -354,4 +354,108 @@ test("the accounts sheet holds the rail's page up, even for someone who hid the 
   w.rail.refresh();
   w.rail.holdOpen(true); w.rail.holdOpen(false);
   assert.equal(w.rail.shown(), true, "a rail that was there stays");
+});
+
+test("a tag on any page opens the list on the rail's own page, only from the person's click, and nothing of the list comes back", async () => {
+  const remote = pageWithPreload("https://bots.example.test", "/", (channel) => (channel === "rail:open-list" ? { places: [{ id: "home" }] } : undefined));
+  await assert.rejects(remote.bridge.rail.openList(), /Choose where you are/, "a server's page can't open it by itself");
+  assert.deepEqual(JSON.parse(JSON.stringify(remote.invoked)), []);
+  remote.navigator.userActivation.isActive = true;
+  assert.equal(await remote.bridge.rail.openList(), undefined, "whatever main says, the page hears nothing");
+  assert.deepEqual(JSON.parse(JSON.stringify(remote.invoked)), [["rail:open-list"]]);
+  for (const name of ["listAsked", "listClosed", "onOpenList", "expand"]) assert.equal(remote.bridge.rail[name], undefined, `${name} is the rail's own page's`);
+});
+
+/** The rail's own page asks, from its main frame. */
+const fromRail = (w) => ({ sender: w.made[0].webContents, senderFrame: w.made[0].webContents.mainFrame });
+
+test("with no rail, or one the person hid, the list brings the rail's page up over a page that keeps the whole window; closing it puts things back", async () => {
+  for (const setup of [{ wanted: false }, { hidden: true }]) {
+    const w = world(setup);
+    w.rail.attach(w.win);
+    await w.ask("rail:offer");
+    const tellings = w.page.told.length, signals = w.state.changes;
+    await w.ask("rail:open-list");
+    assert.equal(w.rail.shown(), true, "the rail's page is up for the list");
+    assert.equal(w.rail.beside(), false, "the rail itself isn't");
+    assert.equal(w.page.told.length, tellings, "the page is never told to move over, so it doesn't jump");
+    assert.equal(w.state.changes, signals, "nor told that a rail came");
+    assert.deepEqual(w.made[0].webContents.sent.at(-1), ["rail:open-list", false]);
+    assert.equal(await w.handlers.get("rail:list-asked")(fromRail(w)), false, "a page that just came up learns it was asked for");
+    assert.equal(await w.handlers.get("rail:list-asked")(fromRail(w)), null, "once");
+    w.rail.expand(true);
+    assert.equal(w.made[0].bounds.width, 1440, "the list has the whole window");
+    await w.handlers.get("rail:list-closed")(fromRail(w));
+    w.rail.expand(false);
+    assert.deepEqual([w.rail.shown(), w.rail.beside(), w.children.length], [false, false, 0]);
+    assert.equal(w.page.told.length, tellings);
+  }
+});
+
+test("beside a rail that stands, the list leaves it standing and the page where it is", async () => {
+  const w = world();
+  w.rail.attach(w.win);
+  await w.ask("rail:open-list");
+  assert.deepEqual(w.made[0].webContents.sent.at(-1), ["rail:open-list", true]);
+  assert.equal(await w.handlers.get("rail:list-asked")(fromRail(w)), true);
+  await w.handlers.get("rail:list-closed")(fromRail(w));
+  assert.deepEqual([w.rail.shown(), w.rail.beside(), w.page.told], [true, true, [CHROME_RAIL_WIDTH]]);
+});
+
+test("the rail coming while the list holds its page up moves the page over then, and only then", async () => {
+  const w = world({ wanted: false });
+  w.rail.attach(w.win);
+  await w.ask("rail:open-list");
+  w.state.wanted = true;
+  w.rail.refresh();
+  assert.deepEqual([w.rail.beside(), w.page.told], [true, [CHROME_RAIL_WIDTH]]);
+  await w.handlers.get("rail:list-closed")(fromRail(w));
+  assert.equal(w.rail.shown(), true);
+  w.page.emit("dom-ready");
+  assert.deepEqual(w.page.told, [CHROME_RAIL_WIDTH, CHROME_RAIL_WIDTH], "each new document is told again");
+});
+
+test("only the page beside the rail asks for the list, and only the rail's own page takes it", async () => {
+  const w = world({ wanted: false });
+  w.rail.attach(w.win);
+  const open = w.handlers.get("rail:open-list");
+  assert.throws(() => open({ sender: w.page, senderFrame: { id: "a-frame-inside" } }), /only available to the page beside/);
+  assert.throws(() => open({ sender: { id: "another-window" }, senderFrame: w.page.mainFrame }), /only available to the page beside/);
+  assert.equal(w.made.length, 0, "nothing came up");
+  await w.ask("rail:open-list");
+  for (const channel of ["rail:list-asked", "rail:list-closed"]) {
+    assert.throws(() => w.handlers.get(channel)({ sender: w.page, senderFrame: w.page.mainFrame }), /only available to the window's rail/, channel);
+  }
+  assert.throws(() => open(fromRail(w)), /only available to the page beside/, "the rail's own page has no business asking");
+});
+
+test("while a sheet of the rail's covers the page, the page has no drag regions: Electron would give them the press over the sheet", async () => {
+  const w = world();
+  const css = [];
+  Object.assign(w.page, { insertCSS: async (text) => { css.push(["insert", text]); return "key-1"; }, removeInsertedCSS: async (key) => { css.push(["remove", key]); } });
+  w.rail.attach(w.win);
+  w.rail.expand(true);
+  w.rail.expand(true);
+  await w.settle();
+  assert.deepEqual(css, [["insert", "* { -webkit-app-region: no-drag !important; }"]], "once");
+  w.rail.expand(false);
+  await w.settle();
+  assert.deepEqual(css.at(-1), ["remove", "key-1"], "and back after");
+  w.rail.expand(false);
+  await w.settle();
+  assert.equal(css.length, 2);
+  w.rail.expand(true);
+  w.state.wanted = false;
+  w.rail.refresh();
+  await w.settle();
+  assert.equal(css.at(-1)[0], "remove", "the view going takes the sheet with it");
+});
+
+test("main's own wiring: the list holds the rail's page up through its window, and a page hears of a rail beside it only when it stands", () => {
+  const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  assert.match(main, /beside: \(\) => chromeRail\.beside\(\)/);
+  assert.match(main, /places: railList, list: everyPlace, open: id => workspaceMenuAction\(\(\) => switchEnvironment\(id\)\)/, "one switch, the rail's");
+  assert.match(main, /signIn: cloudOffersAllowed\(\) && signInDue\(cloudAccount\?\.state\(\)\)/);
+  assert.match(main, /choice === "signIn" \? \(homeWindow\.cloudOrigin\(\) \? homeWindow\.signIn\(\) : openCloudAdd\("app_menu", true\)\)/);
+  assert.match(main, /const action = signIn \? "cloud-sign-in" :/);
 });

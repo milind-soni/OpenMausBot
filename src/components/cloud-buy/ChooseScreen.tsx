@@ -131,7 +131,7 @@ export function ChooseScreen({ offer, current = null, own = null, now, busy, sig
         </span>
         <span aria-hidden="true">·</span><span>{t("cloudBuy.cancelEasy")}</span>
       </p>
-      {signedOut && <button type="button" className={LINK} onClick={onSignIn}>{t("cloudBuy.haveAccount")}</button>}
+      {signedOut && <button type="button" className={LINK} onClick={onSignIn}>{t("cloudAccount.signInInvite")}</button>}
     </div>
   </div>;
 }

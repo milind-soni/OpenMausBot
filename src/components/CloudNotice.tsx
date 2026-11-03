@@ -9,7 +9,7 @@ export const CLOUD_NOTICE_SIGN_IN_DISMISSED = "cloud-notice-sign-in-dismissed";
 
 export const CLOUD_NOTICE_CARD: Record<CloudNoticeKind, { title: LocaleKey; hint: LocaleKey; action: LocaleKey; dismissed: string }> = {
   "sign-in-again": { title: "cloudNotice.signIn.title", hint: "cloudNotice.signIn.hint", action: "cloudAccount.signInAgain", dismissed: CLOUD_NOTICE_SIGN_IN_DISMISSED },
-  removed: { title: "cloudNotice.removed.title", hint: "cloudNotice.removed.hint", action: "cloudAccount.signIn", dismissed: CLOUD_NOTICE_SIGN_IN_DISMISSED },
+  removed: { title: "cloudNotice.removed.title", hint: "cloudNotice.removed.hint", action: "cloudAccount.signInShort", dismissed: CLOUD_NOTICE_SIGN_IN_DISMISSED },
 };
 
 export function cloudNoticeStep(kind: CloudNoticeKind, bridge: CloudAccountBridge): Promise<CloudAccountState> {

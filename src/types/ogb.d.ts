@@ -173,8 +173,9 @@ const __APP_VERSION__: string;
         /** Opens a circle main listed, by its id, through main's own switch: only from the person's click. */
         open?: (id: string) => Promise<unknown>;
         /** ＋'s fixed choices: buy a Cloud (this computer's own sheet), a server's pairing link (`link`: the one pasted on the
-         * sheet; without it, the clipboard's), or type its address. Resolves false when the person cancels Connect. */
-        add?: (choice: "cloud" | "link" | "address", link?: string) => Promise<unknown>;
+         * sheet; without it, the clipboard's), or type its address. Resolves false when the person cancels Connect. `signIn`:
+         * the title bar's list, once main offers it: this computer's own sheet, at its sign-in. */
+        add?: (choice: "cloud" | "link" | "address" | "signIn", link?: string) => Promise<unknown>;
         /** The colour of the place this page is (This computer's too), and whether it can be changed here. Absent on an
          * older app. */
         look?: () => Promise<import("../../electron/place-look.mjs").PlaceLook | null>;
@@ -367,7 +368,7 @@ const __APP_VERSION__: string;
        * app Settings. Every server's page in the window receives it, and the
        * bridge is absent in the browser. "cloud" is the
        * openmausbot://cloud link (Settings → OMB Cloud, opened by the link). */
-      onOpenAppSettings?(cb: (section?: "organization" | "cloud" | "cloud-settings" | "cloud-add" | "cloud-add-howto") => void): () => void;
+      onOpenAppSettings?(cb: (section?: "organization" | "cloud" | "cloud-settings" | "cloud-add" | "cloud-add-howto" | "cloud-sign-in") => void): () => void;
       /** Updates the native Dock/taskbar unread indicator. */
       setUnreadCount?(count: number): void;
       /** Opens a live desktop as a sandboxed window owned by OpenMausBot. */

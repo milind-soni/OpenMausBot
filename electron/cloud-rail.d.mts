@@ -41,10 +41,12 @@ export interface RailPlace {
   makeHome?: true;
 }
 /** ＋'s choices here: buying a Cloud, pasting a server's pairing link, typing its address on this computer's Settings, and
- * a new organization on the Team plan this account pays for (absent from an older app's main). */
-export interface RailAddChoices { cloud: boolean; link: boolean; address: boolean; organization?: boolean }
-/** `beside`: a place's page, which never reads the list, learns that the window's rail stands beside it. */
-export interface RailState { places: RailPlace[]; add: RailAddChoices; beside?: true }
+ * a new organization on the Team plan this account pays for (absent from an older app's main). `signIn`: nobody is signed in
+ * here, or a sign-in ended, so the title bar's list offers to sign in. */
+export interface RailAddChoices { cloud: boolean; link: boolean; address: boolean; organization?: boolean; signIn?: boolean }
+/** `beside`: a place's page, which never reads the list, learns that the window's rail stands beside it. `list`: every place
+ * the window can show, however few, for the title bar's list; the rail's own page alone gets it. */
+export interface RailState { places: RailPlace[]; list?: RailPlace[]; add: RailAddChoices; beside?: true }
 /** Buying another Cloud as a page sees it: what the sheet says, never the account, an address or the checkout page. */
 export type AddCloudView =
   | { signedIn: false }

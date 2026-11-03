@@ -19,7 +19,8 @@ export type CloudPlanView =
   | { kind: "signed-out" }
   | { kind: "removed" }
   | { kind: "connecting" }
-  | { kind: "free" }
+  /** `team`: no plan of their own, but in a team, whose Cloud they use. */
+  | { kind: "free"; team?: string }
   | { kind: "paid"; label: string; checking: boolean; trial?: true }
   | { kind: "attention"; label: string | null }
   | { kind: "purchase"; label: string | null; paidAt?: number }
@@ -42,11 +43,14 @@ export function cloudPlanView(account: CloudAccountState | null | undefined): Cl
   }
   if (entitlement?.plan === "pro") return { kind: "attention", label: cloudPlanLabel(entitlement.tier) };
   if (account.machine) return { kind: "attention", label: null };
-  return { kind: "free" };
+  const team = account.teams?.[0]?.name;
+  return team ? { kind: "free", team } : { kind: "free" };
 }
 
+/** Whether to offer a plan unasked. The Admin's session also offers one to someone in a team with no plan of their own; they
+ * came for their team's Cloud, and can still buy from Add a Cloud. */
 export function buyOfferAllowed(view: CloudPlanView): boolean {
-  return view.kind === "signed-out" || view.kind === "free";
+  return view.kind === "signed-out" || (view.kind === "free" && !view.team);
 }
 
 /** What the X research card offers someone whose server has no plan credential yet: a paying desktop is still connecting
@@ -66,7 +70,7 @@ export function cloudPlanLine(view: CloudPlanView): string | null {
     case "purchase": return t("cloudAccount.purchaseReceived", { plan: view.label ?? "MausBot Cloud" });
     case "unverified": return view.label ? t("cloudAccount.lastPlan", { plan: view.label }) : null;
     case "reauth": return view.label ? t("cloudAccount.planName", { plan: view.label }) : null;
-    case "free": return t("cloudAccount.free");
+    case "free": return view.team ? t("cloudAccount.inTeam", { team: view.team }) : t("cloudAccount.free");
     default: return null;
   }
 }
@@ -320,7 +324,7 @@ export function cloudAddView(account: CloudAccountState | null | undefined, offe
   const started = (): CloudStarted => ({ tier: account?.entitlement?.tier ?? account?.purchase?.tier ?? null,
     trial: account?.trial && trialRunning(account.trial) ? account.trial : null, credit: account?.credit?.state === "active" ? account.credit : null,
     ...(account?.machine?.power?.sleeps ? { sleeps: true as const } : {}) });
-  // Asked to sign in (Settings, the card, Already have a plan?): that needs no offer, and is the way back for a saved
+  // Asked to sign in (Settings, the card, Have an invite or a plan?): that needs no offer, and is the way back for a saved
   // sign-in that could not be read and was removed.
   if (signIn && !error && (view.kind === "signed-out" || view.kind === "removed")) return { kind: "sign-in", phase: signIn };
   switch (view.kind) {
@@ -337,6 +341,8 @@ export function cloudAddView(account: CloudAccountState | null | undefined, offe
       return (account?.checkout && !account.checkout.done) || arrived ? { kind: "ready", ...started() } : { kind: "has-cloud" };
     }
     case "signed-out": case "free": {
+      // Signed in from this sheet just now, to a team and no plan: their team's Cloud is what they came for, not a plan to buy.
+      if (view.kind === "free" && view.team && arrived && !account?.checkout) return teamCloudView(account?.teams?.[0] ?? null);
       if (error) return { kind: "error", reason: error };
       if (offer === undefined) return { kind: "checking" };
       if (offer === null) return { kind: "unreachable" };

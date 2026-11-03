@@ -103,7 +103,7 @@ export function CloudAddSheet({ kind, staging, onClose, children }: { kind: Clou
 }
 const OFFER_VIEWS: ReadonlyArray<CloudAddView["kind"]> = ["offer", "checking", "unreachable", "waiting", "sign-in", "signing-in"];
 const FOCUSABLE = "button:not([disabled]):not([tabindex='-1']), input:not([disabled]):not([tabindex='-1']), [href], [tabindex='0']";
-const free = (state: CloudAccountState) => state.status === "connected" && state.entitlement?.plan === "free" && !state.purchase && !state.machine;
+const free = (state: CloudAccountState) => state.status === "connected" && state.entitlement?.plan === "free" && !state.purchase && !state.machine && !state.teams?.length;
 const currentTier = (state: CloudAccountState | null | undefined) =>
   state?.status === "connected" && state.entitlement?.plan === "pro" && state.entitlement.status === "active" ? state.entitlement.tier ?? "pro" : null;
 type AutoOpen = number | "off" | "done" | null;
@@ -193,7 +193,7 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
   // Pay or Setting up seen in this sheet: when the Cloud is ready, it is theirs to open here (not "one Cloud for now").
   // Ready shown here ends the purchase for main, so a later Add a Cloud… is one Cloud for now.
   useEffect(() => {
-    if ((kind === "waiting" || kind === "starting" || kind === "ready") && !arrived) setArrived(true);
+    if ((kind === "waiting" || kind === "starting" || kind === "ready" || kind === "signing-in") && !arrived) setArrived(true);
     if (kind === "ready" || kind === "team-ready") void bridge?.readySeen?.().catch(() => {});
   }, [kind]);
   useEffect(() => {

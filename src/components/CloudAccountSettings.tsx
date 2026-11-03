@@ -116,7 +116,7 @@ function accountMessage(account: CloudAccountState | null, view: CloudPlanView, 
   if (view.kind === "unverified") return t("cloudAccount.unavailable");
   if (view.kind === "purchase") return view.paidAt ? t("cloudAccount.purchaseNote", { date: day(view.paidAt) }) : t("cloudAccount.purchaseNoteNoDate");
   if (view.kind === "attention" && !account.machine && !account.trial) return t("cloudAccount.attention");
-  if (account.status === "signed-out" && account.message === "enrollment-expired") return t("cloudAccount.codeExpired");
+  if (account.status === "signed-out" && account.message === "enrollment-expired") return t("cloudAccount.signInCodeExpired");
   if (account.status === "signed-out" && account.message === "restore-removed") return t("cloudAccount.restoreRemoved");
   if (account.status === "signed-out" && account.message && account.message !== "restoring") return t("cloudAccount.signinFailed");
   return null;
@@ -274,9 +274,10 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamH
       {(!account || view.kind === "unknown") && <p role="status" className="text-[13px] text-ink-secondary">{t("cloudAccount.loading")}</p>}
       {message && <p role="status" className="mb-3 text-[13px] text-ink-secondary">{message}</p>}
       {(view.kind === "signed-out" || view.kind === "removed") && <div className="flex flex-col items-start gap-3">
+        <p data-cloud-not-signed-in className="text-[14px] font-medium text-ink">{t("cloudAccount.notSignedIn")}</p>
         {addCloudButton}
         <button type="button" disabled={busy} className={addCloudButton ? "text-[13px] font-medium text-accent-text underline underline-offset-2 hover:text-ink" : "ui-button"}
-          onClick={() => onSignIn ? onSignIn() : void perform(() => bridge.begin())}>{t("cloudAccount.signIn")}</button>
+          onClick={() => onSignIn ? onSignIn() : void perform(() => bridge.begin())}>{t("cloudAccount.signInInvite")}</button>
       </div>}
       {account?.status === "connecting" && <div className="flex flex-col items-start gap-3">
         <p role="status" className="text-[13px] text-ink-secondary">{t("cloudAccount.browser")}</p>

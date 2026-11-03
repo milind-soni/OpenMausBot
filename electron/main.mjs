@@ -108,7 +108,7 @@ import { createCleanWorkspace } from "./clean-workspace.mjs"; import { installOn
 import { askForMicrophone, openPrivacySettings } from "./privacy-settings.mjs";
 import { createHomeWindow, installHomeWindowIpc } from "./home-window.mjs";
 import { createTeamProfileSeeds } from "./team-profile-seed.mjs";
-import { createHomePlaces } from "./home-places.mjs"; import { createAccountLeave, installAccounts } from "./accounts-main.mjs"; import { createAddedCloudNotice, installCloudRail, railPlaces } from "./cloud-rail.mjs"; import { homeLook, otherOwnClouds, withoutOldCloudHome } from "./cloud-list.mjs"; import { installPlaceLook } from "./place-look.mjs"; import { CHROME_RAIL_PATH, createChromeRail } from "./chrome-rail.mjs";
+import { createHomePlaces } from "./home-places.mjs"; import { createAccountLeave, installAccounts } from "./accounts-main.mjs"; import { createAddedCloudNotice, installCloudRail, railPlaces, signInDue, windowPlaces } from "./cloud-rail.mjs"; import { homeLook, otherOwnClouds, withoutOldCloudHome } from "./cloud-list.mjs"; import { installPlaceLook } from "./place-look.mjs"; import { CHROME_RAIL_PATH, createChromeRail } from "./chrome-rail.mjs";
 import { createWindowStateFile } from "./window-state-file.mjs";
 import { createEnvironmentsFile } from "./environments-file.mjs";
 import { createOrgLibrary } from "./org-library.mjs";
@@ -887,13 +887,13 @@ function refreshCloudMenus() {
   refreshApplicationMenu();
 }
 /** Add a Cloud… is always the sheet on this computer's page, which says what is true now (setting up, one Cloud for now). */
-async function openCloudAdd(source) {
+async function openCloudAdd(source, signIn = false) {
   if (!cloudOffersAllowed() || !serverReady) return;
   await cloudAccountRestored();
   if (activeRemote(environmentsState)) persistEnvironments(withActive(environmentsState, LOCAL_ID));
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow({ deferNavigation: true });
   if (!desktopTray?.show()) activateExistingWindow(appWindows());
-  const action = source === "app_howto" ? "cloud-add-howto" : "cloud-add";
+  const action = signIn ? "cloud-sign-in" : source === "app_howto" ? "cloud-add-howto" : "cloud-add";
   if (!win.webContents.isLoadingMainFrame() && senderIsLocal({ sender: win.webContents })) win.webContents.send("app:open-settings", action);
   else await win.loadURL(`${rendererOrigin()}/?desktop-settings=${action}`);
 }
@@ -2680,7 +2680,7 @@ function showHome(options) {
 }
 const openOwnCloud = id => showHome({ place: { cloud: id, name: environmentsState.environments.find(entry => entry.cloud?.id === id)?.name } });
 // The rail and its ＋ (cloud-rail.mjs): its list for this app's page and hosted Clouds' pages only, opened through switchEnvironment.
-const railList = () => { ownHome?.refresh(); return railPlaces({ saved: environmentsState, home: homeWindow.cloudOrigin() ?? ownHome?.origin() ?? null, mine: myCloud(), state: desktopRemoteAccess ? null : cloudAccount?.state(), offers: entry => !desktopRemoteAccess && ownHome?.offers(entry) === true }); };
+const railInput = () => { ownHome?.refresh(); return { saved: environmentsState, home: homeWindow.cloudOrigin() ?? ownHome?.origin() ?? null, mine: myCloud(), state: desktopRemoteAccess ? null : cloudAccount?.state(), offers: entry => !desktopRemoteAccess && ownHome?.offers(entry) === true }; }, railList = () => railPlaces(railInput()), everyPlace = () => windowPlaces(railInput());
 // The rail as the window's own chrome (chrome-rail.mjs): this app's page beside every place's page, the one that lists.
 const chromeRail = createChromeRail({ createView: options => new WebContentsView(options), preload: path.join(__dirname, "preload.cjs"), log: slog, prefs: () => desktopPrefs, changed: () => rail.changed(),
   args: () => [...desktopCompanionRendererArguments(rendererOrigin(), desktopRemoteAccess), ...(app.isPackaged && !desktopRemoteAccess ? ["--omb-company-desktop=1"] : []), `--omb-app-version=${app.getVersion()}`],
@@ -2691,11 +2691,11 @@ const accountPages = [() => (mainWindow && !mainWindow.isDestroyed() && senderIs
 const accounts = installAccounts({ ipcMain, ownPage: event => chromeRail.owns(event) || cloudPageAsking(event) === "local", placePage: event => cloudPageAsking(event) !== null || ownCloudPage(event) !== null || homeWindow.homePage(event) || (Boolean(ownHome?.home()) && activeEnvironment(environmentsState)?.origin === ownHome.home().origin && workspaceSenderAllowed(event, mainWindow?.webContents, environmentsState, rendererOrigin())), account: () => (app.isPackaged && !desktopRemoteAccess ? cloudAccount : null), client: ensureCloudAccount, holdSheet: open => chromeRail.holdOpen(open), tellSheet: () => chromeRail.send("accounts:open-sheet"), leaving: () => homeWindow.accountLeaving(), leave: createAccountLeave({ saved: () => environmentsState, persist: persistEnvironments, session: () => session.defaultSession, mine: () => myCloud(), leaveWindow: () => (mainWindow && !mainWindow.isDestroyed() && !senderIsLocal({ sender: mainWindow.webContents }) ? navigateMainWindow(rendererOrigin()) : null), settled: () => computerSharing?.goodbyesDone(), log: slog }), show: () => showHome(), tell: () => { for (const page of accountPages) page()?.send("accounts:changed"); } });
 const rail = installCloudRail({ ipcMain, clipboard, openCloud: openOwnCloud, account: () => (app.isPackaged && !desktopRemoteAccess ? cloudAccount : null),
   guard: handler => (event, ...args) => (chromeRail.owns(event) ? handler(event, ...args) : workspaceOnly(handler)(event, ...args)),
-  lists: event => chromeRail.owns(event), trusted: event => chromeRail.owns(event) || senderIsLocal(event), beside: () => chromeRail.shown(),
+  lists: event => chromeRail.owns(event), trusted: event => chromeRail.owns(event) || senderIsLocal(event), beside: () => chromeRail.beside(),
   targets: () => [mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null, { send: channel => chromeRail.send(channel), isDestroyed: () => false }],
-  places: railList, open: id => workspaceMenuAction(() => switchEnvironment(id)), makeHome: id => ownHome.start(id), forget: id => forgetEnvironment(id, false, true),
-  add: { choices: () => ({ cloud: cloudOffersAllowed(), link: !desktopRemoteAccess, address: !desktopRemoteAccess && !homeWindow.cloudOrigin() }),
-    run: (choice, link) => (choice === "link" ? (link ? connectHostedWorkspace(link) : addServerFromClipboard()) : choice === "address" ? openWorkspaceSettings() : homeWindow.cloudOrigin() ? undefined : openCloudAdd("app_menu")) } });
+  places: railList, list: everyPlace, open: id => workspaceMenuAction(() => switchEnvironment(id)), makeHome: id => ownHome.start(id), forget: id => forgetEnvironment(id, false, true),
+  add: { choices: () => ({ cloud: cloudOffersAllowed(), link: !desktopRemoteAccess, address: !desktopRemoteAccess && !homeWindow.cloudOrigin(), signIn: cloudOffersAllowed() && signInDue(cloudAccount?.state()) }),
+    run: (choice, link) => (choice === "signIn" ? (homeWindow.cloudOrigin() ? homeWindow.signIn() : openCloudAdd("app_menu", true)) : choice === "link" ? (link ? connectHostedWorkspace(link) : addServerFromClipboard()) : choice === "address" ? openWorkspaceSettings() : homeWindow.cloudOrigin() ? undefined : openCloudAdd("app_menu")) } });
 const announceAddedCloud = createAddedCloudNotice({ Notification, focused: () => Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()), sheetOpen: rail.sheetOpen,
   open: id => { if (!desktopTray?.show()) activateExistingWindow(appWindows()); void openOwnCloud(id); }, shown: () => cloudAccount?.addDone() });
 // A place's colour (place-look.mjs): the Admin's for a Cloud, this app's for This computer and a server connected by

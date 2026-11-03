@@ -19,13 +19,22 @@ export interface ChromeRailBridge {
   onSkin?(callback: (skin: string) => void): () => void;
   /** Whether the page beside the rail draws the window's frame, as main hears it. */
   onFramed?(callback: (framed: boolean) => void): () => void;
+  /** Any page beside the rail, from the person's click: the list of places opens on the rail's own page. Nothing of it comes back. */
+  openList?(): Promise<void>;
+  /** The rail's own page: the list was asked for before this page was up; null if not, else whether the rail stands beside it. */
+  listAsked?(): Promise<boolean | null>;
+  listClosed?(): Promise<void>;
+  /** The rail's own page: the list was asked for; `besideRail`: the rail itself is up, not only this page for the list. */
+  onOpenList?(callback: (besideRail: boolean) => void): () => void;
 }
 export interface ChromeRail {
   attach(window: unknown): void;
   refresh(): void;
+  holdOpen(on: boolean): void;
   expand(on: boolean): void;
   owns(event: unknown): boolean;
   shown(): boolean;
+  beside(): boolean;
   framed(): boolean;
   expanded(): boolean;
   send(channel: string, ...values: unknown[]): void;

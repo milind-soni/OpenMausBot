@@ -92,7 +92,7 @@ describe("each screen of the sheet says one thing and offers one next step", () 
       "Card needed, nothing charged until your trial ends. Cancel in the app any time.", "14-day money-back",
       "Every plan includes", "Works while you're away", "Routines, long jobs and replies keep going around the clock.", "Private to you", "Reach it from anywhere",
       "A real browser and desktop", "Bring everything over", "Your bots, chats and memory move across in about a minute.",
-      "Secure checkout in your browser", "Apple Pay", "G Pay", "Card", "Cancel in two clicks", "Already have a plan? Sign in"]);
+      "Secure checkout in your browser", "Apple Pay", "G Pay", "Card", "Cancel in two clicks", "Have an invite or a plan? Sign in"]);
     expect(html, "the night card holds the title, the line and Compare plans").toMatch(/<div data-night-card=""><h2 id="cloud-add-title"[^]*Compare plans[^]*<\/div><\/div><section/);
     expect(html.match(/data-plan-row="(hours|storage|voice)"/g), "what sets the cards apart, three rows on each").toHaveLength(9);
     expect(tree.filter(node => node.props.id?.startsWith?.("cloud-plan-details-")).map(node => node.props.hidden), "the rest waits for Compare plans").toEqual([true, true, true]);
@@ -110,7 +110,7 @@ describe("each screen of the sheet says one thing and offers one next step", () 
     }
     tree.find(node => node.props["data-plan-buy"] === "max")!.props.onClick(); expect(handlers.start).toHaveBeenCalledExactlyOnceWith("max");
     tree.find(node => node.props["data-plan-buy"] === "starter")!.props.onClick(); expect(handlers.start).toHaveBeenLastCalledWith("starter");
-    button(tree, "Already have a plan? Sign in")!.props.onClick(); expect(handlers.signIn).toHaveBeenCalledOnce();
+    button(tree, "Have an invite or a plan? Sign in")!.props.onClick(); expect(handlers.signIn).toHaveBeenCalledOnce();
     const maxFirst = panel({ kind: "offer", offer: { ...TRIAL, recommended: "max" }, signedOut: false, notice: null }).html;
     expect(maxFirst.indexOf("Most popular"), "the Admin's recommended plan, not Pro by itself").toBeGreaterThan(maxFirst.indexOf('data-plan="max"'));
     expect(maxFirst.match(/Most popular/g)).toHaveLength(1);
@@ -156,7 +156,7 @@ describe("each screen of the sheet says one thing and offers one next step", () 
     const plain = text(html);
     inOrder(plain, ["Starter", "Get Starter", "$15 + tax today, then each month", "Pro", "Get Pro", "$49 + tax today, then each month", "Max", "Get Max", "$99 + tax today, then each month",
       "14-day money-back"]);
-    for (const gone of ["Card needed", "Trial starts", "Reminder email", "First payment", "Already have a plan", "Claude credit", "Start free trial"]) expect(plain).not.toContain(gone);
+    for (const gone of ["Card needed", "Trial starts", "Reminder email", "First payment", "Have an invite", "Claude credit", "Start free trial"]) expect(plain).not.toContain(gone);
     button(tree, "Get Pro")!.props.onClick(); expect(handlers.start).toHaveBeenCalledExactlyOnceWith("pro");
     expect(text(panel({ kind: "offer", offer: { ...PLAIN, refundDays: undefined }, signedOut: false, notice: null }).html)).not.toContain("money-back");
     expect(text(panel({ kind: "offer", offer: TRIAL, signedOut: true, notice: "code-expired" }).html)).toContain("The sign-in code expired, so nothing changed.");

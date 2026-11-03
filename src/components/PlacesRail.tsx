@@ -43,6 +43,13 @@ export function placeLabel(place: RailPlace, now = Date.now()): string {
   return [status, place.update && t("rail.update", place.update), place.ownNetwork && t("rail.ownNetwork")].filter(Boolean).join(" · ");
 }
 
+/** A tile or a row opens its place through main by its id; a server of the person's own not connected yet asks how to connect it. */
+export function openPlace(place: RailPlace, connect: (name: string) => void): void {
+  if (!place.opens) { if (place.pairs) connect(place.name); return; }
+  track("rail_place_opened", { kind: place.kind });
+  void window.ogb?.workspaces?.open?.(place.id).catch(() => {});
+}
+
 /** Whether a tile does anything: opens its place, or, for a server of the person's own not connected yet, shows how
  * to connect it (only where a pairing link can be pasted). */
 export const placeActs = (place: RailPlace, canPair: boolean): boolean => place.opens || (place.pairs === true && canPair);
@@ -271,12 +278,7 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
   const covering = more || adding || connecting !== null || menu !== null;
   useEffect(() => { if (chrome) void window.ogb?.rail?.expand?.(covering)?.catch(() => {}); }, [chrome, covering]);
   if (!state.places.length) return null;
-  const bridge = window.ogb?.workspaces;
-  const open = (place: RailPlace) => {
-    if (!place.opens) { if (place.pairs) setConnecting(place.name); return; }
-    track("rail_place_opened", { kind: place.kind });
-    void bridge?.open?.(place.id).catch(() => {});
-  };
+  const open = (place: RailPlace) => openPlace(place, setConnecting);
   const framed = windowFramed(capabilities), draggable = capabilities.windowChrome !== "native";
   // In a framed window the rail is part of the frame: the window's own rail runs the full height, its top in the frame's
   // top bar (the traffic lights' place), so its places start under that bar. With the frame turned off, or beside a page

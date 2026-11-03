@@ -40,6 +40,7 @@ export function ProSettingsCard() {
       <div className="flex items-center gap-3">
         <Crown className="text-ink-secondary" size={18} aria-hidden="true" />
         <div><h3 className="text-[14px] font-semibold text-ink">{t("pro.name")}</h3>
+          {view.kind === "signed-out" && <p data-cloud-not-signed-in className="mt-1 text-[12px] font-medium text-ink">{t("cloudAccount.notSignedIn")}</p>}
           <p className="mt-1 text-[12px] text-ink-secondary">{t("pro.settingsSummary")}</p>
           {cheapest !== null && <p className="mt-1 text-[12px] text-ink-secondary">{t("pro.fromPrice", { price: usd(cheapest / 100) })}</p>}
           {moneyBack && <p className="mt-1 text-[12px] text-ink-secondary">{moneyBack}</p>}
@@ -52,7 +53,7 @@ export function ProSettingsCard() {
           <button type="button" className="ui-button ui-button-primary" onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings" })}>{t(trial ? "cloudIntro.start" : "cloudAccount.upgrade")}</button>
         </div>
         {view.kind === "signed-out" && <button type="button" className="cursor-pointer text-[13px] font-medium text-accent-text underline underline-offset-2 hover:text-ink"
-          onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings", signIn: true })}>{t("cloudAccount.signIn")}</button>}
+          onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings", signIn: true })}>{t("cloudAccount.signInInvite")}</button>}
       </div>
     </section>;
   }
@@ -74,18 +75,20 @@ export function CloudPlanRow({ place, usage = null, upgrade }: { place: "account
   const offering = plan !== null && buyOfferAllowed(plan.view);
   const offer = useCloudOffer(offering, plan?.account?.offer);
   if (!plan) return null;
-  if (offering) {
+  const signedOut = plan.view.kind === "signed-out" || plan.view.kind === "removed";
+  if (offering || signedOut) {
     const trial = offerTrialDays(offer) !== null;
     const cheapest = offer && offer.plans.length ? Math.min(...offer.plans.map((entry) => entry.amount)) : null;
+    const summary = place === "plan" && cheapest !== null ? t("pro.fromPrice", { price: usd(cheapest / 100) }) : t("pro.settingsSummary");
     return (
-      <SettingRow title={t("pro.name")} subtitle={place === "plan" && cheapest !== null ? t("pro.fromPrice", { price: usd(cheapest / 100) }) : t("pro.settingsSummary")}>
-        <div className="flex items-center gap-3">
-          {place === "plan" && plan.view.kind === "signed-out" && (
-            <button type="button" className="cursor-pointer text-[13px] text-ink-secondary hover:text-ink"
-              onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings", signIn: true })}>{t("cloudAccount.signIn")}</button>
+      <SettingRow title={t("pro.name")} subtitle={signedOut ? <><span data-cloud-not-signed-in className="font-medium text-ink">{t("cloudAccount.notSignedIn")}</span> · {summary}</> : summary}>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {signedOut && (
+            <button type="button" data-cloud-sign-in className="ui-button"
+              onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings", signIn: true })}>{t("cloudAccount.signInInvite")}</button>
           )}
-          <button type="button" data-cloud-offer={trial ? "trial" : "plans"} className="ui-button ui-button-primary"
-            onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings" })}>{t(trial ? "cloudIntro.start" : "cloudAccount.upgrade")}</button>
+          {offering && <button type="button" data-cloud-offer={trial ? "trial" : "plans"} className="ui-button ui-button-primary"
+            onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings" })}>{t(trial ? "cloudIntro.start" : "cloudAccount.upgrade")}</button>}
         </div>
       </SettingRow>
     );

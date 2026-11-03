@@ -4,7 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 
 import { parseCloudList } from "./cloud-list.mjs";
-import { addCloudView, createAddedCloudNotice, installCloudRail, railPlaces } from "./cloud-rail.mjs";
+import { addCloudView, createAddedCloudNotice, installCloudRail, railPlaces, signInDue, windowPlaces } from "./cloud-rail.mjs";
 import { otherCloudSnapshot } from "./cloud-plan-ipc.mjs";
 
 const HOME = "https://omb-u-1a2b3c4d5e6f.fly.dev", CLIENT_A = "https://omb-c-a.fly.dev", TEAM = "https://omb-t-acme.fly.dev", VPS = "https://bots.example.test";
@@ -367,4 +367,55 @@ test("Remove from list on a server saved by hand: main forgets it here, by its o
   assert.deepEqual(forgotten, ["vps"], "never a Cloud, a team's Cloud or this computer's own");
   assert.deepEqual(await rail({ forget: async () => false }).call("workspaces:remove", "vps"), { outcome: "failed" });
   assert.deepEqual(await rail().call("workspaces:remove", "vps"), { outcome: "unsupported" }, "a main without forget says so");
+});
+
+test("the window's list has every place however few, where the rail has none for fewer than two", () => {
+  const nothingSaved = { activeId: "local", environments: [] };
+  assert.deepEqual(railPlaces({ saved: nothingSaved }), [], "no rail");
+  assert.deepEqual(windowPlaces({ saved: nothingSaved }).map(place => [place.id, place.kind, place.active]), [["local", "computer", true]], "the list still says where you are");
+  const alone = { activeId: "home", environments: [{ id: "home", kind: "remote", name: "Acme", origin: TEAM, home: true, team: { id: "team-acme", role: "member" } }] };
+  assert.deepEqual(railPlaces({ saved: alone, home: TEAM, mine: TEAM }), []);
+  assert.deepEqual(windowPlaces({ saved: alone, home: TEAM, mine: TEAM }).map(place => place.id), ["home"], "a home alone is its one row, and no This computer");
+  const several = { saved: saved(), home: HOME, mine: HOME, state: session() };
+  assert.deepEqual(windowPlaces(several), railPlaces(several), "from two places on, the same list as the rail's");
+});
+
+test("the rail's own page reads the list, however few; a place's page never does", async () => {
+  const one = [{ id: "local", name: "This computer", color: null, kind: "computer", opens: true, active: true, cloudId: "secret" }];
+  const r = rail({ places: () => [], list: () => one });
+  const answer = await r.call("workspaces:places");
+  assert.deepEqual([answer.places, answer.list.map(place => place.id)], [[], ["local"]]);
+  assert.equal(JSON.stringify(answer).includes("secret"), false, "never the Cloud's id, which only main acts on");
+  r.w.lists = false;
+  assert.equal("list" in await r.call("workspaces:places"), false);
+});
+
+test("a row of the list opens through the rail's one switch, by an id main listed, even with too few places for a rail", () => {
+  const one = [{ id: "home", name: "Acme", color: null, kind: "team", opens: true }, { id: "pending:c-b", name: "B", color: null, kind: "cloud", opens: true, cloudId: "c-b" }];
+  const r = rail({ places: () => [], list: () => one });
+  r.call("workspaces:open", "home");
+  assert.deepEqual(r.opened, ["home"]);
+  assert.throws(() => r.call("workspaces:open", "elsewhere"), /isn't here/);
+});
+
+test("Sign in is a choice only while main offers it, and the signal goes out when the list changes", () => {
+  const offered = { cloud: true, link: true, address: false, signIn: false };
+  let list = [{ id: "local", name: "This computer", color: null, kind: "computer", opens: true, active: true }];
+  const r = rail({ places: () => [], list: () => list, add: { choices: () => offered, run: (...args) => r.ran.push(args) } });
+  assert.throws(() => r.call("workspaces:add", "signIn"), /isn't something/);
+  offered.signIn = true;
+  r.call("workspaces:add", "signIn");
+  assert.deepEqual(r.ran, [["signIn"]]);
+  r.installed.changed();
+  const heard = r.sent.length;
+  list = [...list, { id: "acme", name: "Acme", color: null, kind: "team", opens: true }];
+  r.installed.changed();
+  assert.equal(r.sent.length, heard + 2, "the page and the rail read it again, though the rail has no circles");
+});
+
+test("a sign-in is due with nobody signed in or one that ended: never while a saved one is being read, or for someone signed in", () => {
+  for (const [state, due] of [[{ status: "signed-out" }, true], [{ status: "signed-out", message: "restore-removed" }, true], [{ status: "reauth-required" }, true],
+    [{ status: "signed-out", message: "restoring" }, false], [{ status: "connected" }, false], [{ status: "connecting" }, false], [{ status: "unavailable" }, false], [undefined, false], [null, false]]) {
+    assert.equal(Boolean(signInDue(state)), due, JSON.stringify(state));
+  }
 });

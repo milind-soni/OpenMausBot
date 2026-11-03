@@ -12,7 +12,7 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
 }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ dispatch: f.dispatch }),
   CLOUD_LINK_SETTINGS: { type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true } }));
-import { ProSettingsCard, proOfferAvailable } from "./ProIntroduction";
+import { CloudPlanRow, ProSettingsCard, proOfferAvailable } from "./ProIntroduction";
 
 const PLANS = [{ tier: "starter", label: "Starter", amount: 1500, trialDays: 7 }, { tier: "pro", label: "Pro", amount: 4900, trialDays: 7 }];
 const TRIAL: CloudOffer = { plans: PLANS, recommended: "pro", creditUsd: 5, refundDays: 14 };
@@ -50,7 +50,7 @@ const press = (label: string, Component = ProSettingsCard) => {
 it("for someone who may buy: what Cloud does, the Admin's lowest price and money-back; Start free trial and Compare plans both open the sheet, never the website", async () => {
   const html = await card(signedOut);
   for (const text of ["MausBot Cloud", "Keeps your bots and routines running 24/7, even when this computer is off.", "MausBot Cloud plans from $15/month + tax.",
-    "14-day money-back on every plan.", "OpenMausBot on this computer stays free and open source.", "Compare plans", "Start free trial", "Sign in to your Cloud plan"]) expect(html).toContain(text);
+    "14-day money-back on every plan.", "OpenMausBot on this computer stays free and open source.", "Compare plans", "Start free trial", "Have an invite or a plan? Sign in"]) expect(html).toContain(text);
   for (const gone of ["OMB", "$89", "launch price", "New features first", "Get Pro", "OpenMausBot Pro", "OpenMausBot Cloud"]) expect(html).not.toContain(gone);
   press("Start free trial");
   expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_settings" });
@@ -58,7 +58,7 @@ it("for someone who may buy: what Cloud does, the Admin's lowest price and money
   press("Compare plans"); await flush();
   expect(f.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "openCloudAdd", source: "app_settings" });
   expect(openExternal).not.toHaveBeenCalled();
-  press("Sign in to your Cloud plan");
+  press("Have an invite or a plan? Sign in");
   expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_settings", signIn: true });
   expect(html).toMatch(/class="ui-button ui-button-primary"[^>]*>Start free trial</);
 });
@@ -67,7 +67,7 @@ it("without a trial it says Add a Cloud; signed in, no sign-in link; without the
   offer = { plans: PLANS.map(({ trialDays: _days, ...rest }) => rest), recommended: "pro" };
   const html = await card(plan());
   expect(html).toContain(">Add a Cloud<"); expect(html).not.toContain("Start free trial");
-  expect(html).not.toContain("Sign in to your Cloud plan"); expect(html).not.toContain("money-back");
+  expect(html).not.toContain("Have an invite or a plan? Sign in"); expect(html).not.toContain("money-back");
   offer = null;
   const unknown = await card(plan());
   expect(unknown).toContain(">Add a Cloud<"); expect(unknown).not.toContain("plans from");
@@ -107,4 +107,43 @@ it("never offers a plan to anyone who pays, may pay, or whose state is unknown; 
   expect(await card(signedOut)).toBe("");
   vi.stubGlobal("window", {});
   expect(await card(signedOut)).toBe("");
+});
+
+const AccountRow = () => CloudPlanRow({ place: "account" });
+const PlanRow = () => CloudPlanRow({ place: "plan" });
+const member = plan({ teams: [{ id: "team-acme", name: "Acme", role: "member", machine: { status: "ready", origin: "https://team.example" } as never }], offer: TRIAL });
+
+it("Settings' MausBot Cloud row, signed out: says Not signed in, so the name and address above read as this computer's, and Sign in sits beside the offer", async () => {
+  for (const Row of [AccountRow, PlanRow]) {
+    const html = await card(signedOut, Row);
+    expect(html).toContain('data-cloud-not-signed-in=""');
+    expect(html).toContain("Not signed in");
+    expect(html).toMatch(/class="ui-button"[^>]*>Have an invite or a plan\? Sign in</);
+    expect(html).toMatch(/class="ui-button ui-button-primary"[^>]*>Start free trial</);
+    f.dispatch.mockClear();
+    press("Have an invite or a plan? Sign in", Row);
+    expect(f.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "openCloudAdd", source: "app_settings", signIn: true });
+  }
+});
+
+it("a saved sign-in that was removed is signed out too: Sign in, and no plan to buy until it is known who this is", async () => {
+  const html = await card({ status: "signed-out", message: "restore-removed" }, AccountRow);
+  expect(html).toContain("Not signed in");
+  expect(html).toContain(">Have an invite or a plan? Sign in<");
+  expect(html).not.toContain("data-cloud-offer");
+});
+
+it("signed in, the row says nothing of signing in", async () => {
+  const html = await card(plan(), AccountRow);
+  expect(html).not.toContain("Not signed in"); expect(html).not.toContain("Sign in");
+  expect(html).toContain(">Start free trial<");
+});
+
+it("in a team with no plan of their own: no trial and no price, on the row or the card; the row says whose Cloud they use", async () => {
+  for (const Row of [AccountRow, PlanRow, ProSettingsCard]) {
+    const html = await card(member, Row);
+    for (const gone of ["Start free trial", "Add a Cloud", "Compare plans", "plans from", "money-back", "Sign in", "Not signed in"]) expect(html, gone).not.toContain(gone);
+  }
+  expect(await card(member, AccountRow)).toContain("You&#x27;re part of Acme");
+  expect(proOfferAvailable(member)).toBe(false);
 });

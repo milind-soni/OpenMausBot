@@ -162,7 +162,7 @@ describe("one name per thing", () => {
       ["cloudPhone.step1", [myCloud!]],
       ["cloudAccount.onCloudSignIn", [e["cloudAccount.signInAgain"]!]],
       ["cloudAccount.storageFailed", [e["cloudAccount.signOut"]!]],
-      ["cloudAccount.codeExpired", [e["cloudAccount.signIn"]!]],
+      ["cloudAccount.signInCodeExpired", [e["cloudAccount.signInShort"]!]],
       ["computer.routines.offWarning", [e["routines.runsOn.boat"]!]],
     ];
     const stale = pointers.flatMap(([key, labels]) => labels.filter((label) => !e[key]!.includes(label)).map((label) => `${key} → ${label}`));

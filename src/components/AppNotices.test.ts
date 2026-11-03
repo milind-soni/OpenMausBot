@@ -170,7 +170,7 @@ describe("the card after the update", () => {
     const html = await launch();
     const words = [INTRO, "Free for 7 days", "MausBot Cloud runs your bots for you in the cloud, always on.", "Routines run on time, day and night",
       "Reach your bots from your phone, even with this computer off", "$5 of Claude credit to start", "Then from $15/month + tax. Cancel any time.",
-      "14-day money-back on every plan.", "Start free trial", "Show me how", "Sign in to your Cloud plan", "Not now"];
+      "14-day money-back on every plan.", "Start free trial", "Show me how", "Have an invite or a plan? Sign in", "Not now"];
     for (const text of words) expect(html).toContain(text);
     for (let i = 1; i < words.length; i++) expect(html.indexOf(words[i - 1]!), words[i]).toBeLessThan(html.indexOf(words[i]!));
     for (const gone of ["launch price", "first 100", "$89", "New features first", "Get Pro", STAR]) expect(html).not.toContain(gone);
@@ -184,7 +184,7 @@ describe("the card after the update", () => {
     now = NOW + 3 * 3600_000; expect(await launch()).toBe("");
     now = NOW + DAY; account = free;
     const again = await launch();
-    expect(again).toContain(INTRO); expect(again).not.toContain("Sign in to your Cloud plan");
+    expect(again).toContain(INTRO); expect(again).not.toContain("Have an invite or a plan? Sign in");
     expect(track).toHaveBeenCalledWith("cloud_card_shown", { variant: "free" });
   });
 
@@ -246,9 +246,9 @@ describe("the card after the update", () => {
     expect(track).toHaveBeenCalledWith("cloud_card_action", { action: "close" });
   });
 
-  it("Sign in to your Cloud plan opens the sheet at its own sign-in and only hides the card for now", async () => {
+  it("Have an invite or a plan? Sign in opens the sheet at its own sign-in and only hides the card for now", async () => {
     returning(); await launch();
-    press("Sign in to your Cloud plan");
+    press("Have an invite or a plan? Sign in");
     expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_card", signIn: true });
     expect(storage.get(CLOUD_INTRO)).toBeUndefined(); expect(render()).toBe("");
     now = NOW + DAY; expect(await launch()).toContain(INTRO);
