@@ -35,7 +35,7 @@ export function LiveProviderSettings() {
   return (
     <div className="flex flex-col gap-2">
       <label className="flex items-center justify-between gap-2">
-        <span className="text-ink-secondary">{t("call.live.provider")}</span>
+        <span className="text-[13px] text-ink-secondary">{t("call.live.provider")}</span>
         <Select
           size="sm"
           value={provider}

@@ -290,6 +290,7 @@ describe("createLiveSession on Azure", () => {
     const body = JSON.parse(String(init?.body));
     expect(body.session.model).toBe("live-prod");
     expect(body.session.delegation).toEqual({ type: "client" });
+    expect(body.session.client).toBeUndefined();
     expect(String(init?.body)).not.toContain("azure-secret");
   });
   it("names Azure in its errors", async () => {

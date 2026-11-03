@@ -215,7 +215,8 @@ export async function createLiveSession(input: CreateLiveSessionInput): Promise<
       instructions: liveInstructions(input.bot, { cloudHome: input.cloudHome }),
       delegation: { type: "client" },
       audio: { output: { voice: liveVoice(input.voice) } },
-      client: { data_channel: LIVE_DATA_CHANNEL },
+      // Azure's GPT-Live refuses `session.client` ("Unknown parameter"), so its data channel keeps Azure's default events.
+      ...(endpoint.provider === "azure" ? {} : { client: { data_channel: LIVE_DATA_CHANNEL } }),
       ...(initialInput.length ? { input: initialInput } : {}),
     },
     transport: { type: "webrtc", sdp: input.sdp },
