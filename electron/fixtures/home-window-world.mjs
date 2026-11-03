@@ -18,7 +18,7 @@ export const json = (body, status = 200, headers = {}) => new Response(JSON.stri
  * sign-in (its power word, wake, pairing code), My Cloud's answers (`cloud`), the window (where it went), the startup
  * screen and a manual clock.
  */
-export function world({ journal = done(), marker = null, state = connected(), power = null, cloud = {}, team = {}, client = {}, splash = true, url = "", remembered = null, ownMove = null } = {}) {
+export function world({ clean = null, journal = done(), marker = null, state = connected(), power = null, cloud = {}, team = {}, client = {}, splash = true, url = "", remembered = null, ownMove = null } = {}) {
   const w = {
     journal, marker, state, power, ownMove, clock: 1_000_000, typed: 0, now: () => w.clock,
     cloud: { down: false, signedIn: true, version: "0.1.130", health: 200, wakes: true, ...cloud },
@@ -76,6 +76,7 @@ export function world({ journal = done(), marker = null, state = connected(), po
     },
   };
   w.home = createHomeWindow({
+    clean,
     journal: () => w.journal,
     frozen: async () => w.marker,
     ownMove: () => w.ownMove,
