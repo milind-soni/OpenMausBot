@@ -4,12 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initialState, type AppState, type Bot, type Group } from "@/state/store";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 
-const fixture = vi.hoisted(() => ({ advanced: false, showThreads: true, state: {} as Partial<AppState>, dispatch: vi.fn() }));
+const fixture = vi.hoisted(() => ({ advanced: false, showThreads: true, admin: true as boolean | null, state: {} as Partial<AppState>, dispatch: vi.fn() }));
 vi.mock("@/lib/interface-mode", async (original) => ({
   ...await original<typeof import("@/lib/interface-mode")>(),
   useAdvancedMode: () => fixture.advanced,
 }));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.showThreads }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 vi.mock("react-dom", () => ({ createPortal: (node: ReactNode) => node }));
 vi.mock("@/state/store", async (importOriginal) => {
@@ -56,6 +57,7 @@ function findElement(tree: ReactNode, attribute: string, value: string): ReactEl
 beforeEach(() => {
   fixture.advanced = false;
   fixture.showThreads = true;
+  fixture.admin = true;
   fixture.state = { bots: [bot], selectedId: "other-bot", activeView: "chat", pendingQueued: { queued: [{ queueId: "q", text: "next" }] } };
   fixture.dispatch.mockClear();
   vi.stubGlobal("window", { innerWidth: 1024, innerHeight: 768 });
@@ -434,6 +436,14 @@ describe("bot-first sidebar", () => {
     expect(setMain.props.disabled).toBeFalsy();
     setMain.props.onClick!({} as MouseEvent);
     expect(fixture.dispatch.mock.calls).toEqual([[{ type: "updateBot", botId: bot.id, patch: { mainThreadChoice: "last-selected" } }]]);
+
+    // Not offered until the person is known to be the owner or an admin.
+    for (const admin of [null, false]) {
+      fixture.admin = admin;
+      renderToStaticMarkup(createElement(Capture));
+      expect(named("Set as main thread")).toBeUndefined();
+    }
+    fixture.admin = true;
 
     // Already main: offered but off. Another bot's open thread, or a routine run, is never offered.
     fixture.state = { ...fixture.state, bots: [{ ...bot, mainThreadId: "last-selected" }] };

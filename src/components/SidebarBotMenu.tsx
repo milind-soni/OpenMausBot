@@ -270,7 +270,7 @@ export function BotContextMenu({
       openBotSettings(dispatch, "history", { botId: bot.id, anchor: "conversations" });
     });
     const openTask = state.selectedId === bot.id ? bot.tasks?.find((task) => task.threadId === bot.threadId) : undefined;
-    const setMain = remoteClient || member || !openTask || openTask.routineRunId || isArchived(openTask) ? null : item(
+    const setMain = remoteClient || admin !== true || !openTask || openTask.routineRunId || isArchived(openTask) ? null : item(
       <Star size={16} className="text-ink-secondary" />, t("sidebar.bot.simple.setMainThread"),
       () => dispatch({ type: "updateBot", botId: bot.id, patch: { mainThreadChoice: bot.threadId } }),
       bot.mainThreadId === bot.threadId ? { disabled: true, hint: t("sidebar.bot.simple.isMainThread") } : undefined,
