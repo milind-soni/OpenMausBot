@@ -163,4 +163,11 @@ describe("routine results navigation", () => {
     fixture.state!.routineRuns = [{ ...run, resultsThreadId: "deleted-destination" }];
     expect(buttonsFrom(() => ChatView({ bot })).has("Back to results")).toBe(false);
   });
+
+  it("shows no run banner when the run worked inside the conversation its results go to", () => {
+    fixture.state!.routineRuns = [{ ...run, resultsThreadId: "execution", sourceThreadId: "execution" }];
+    const buttons = buttonsFrom(() => ChatView({ bot }));
+    expect(buttons.has("Back to results")).toBe(false);
+    expect(buttons.has("Run logs")).toBe(false);
+  });
 });

@@ -7,6 +7,8 @@ import type { CloudOwnership } from "./cloud-owner.ts";
 
 /** The writer of a routine a bot made or changed from a conversation that a webhook drove. Never a person. */
 export const CLOUD_OUTSIDE_KEY = `p_${createHash("sha256").update("cloud-outside").digest("base64url").slice(0, 22)}`;
+/** The starter of a conversation nobody's session opened. Never a person. */
+export const CLOUD_NOBODY_KEY = `p_${createHash("sha256").update("cloud-nobody").digest("base64url").slice(0, 22)}`;
 
 export interface SharingEvidence {
   ownership: Pick<CloudOwnership, "adopted" | "proven" | "revoked" | "sharedSince" | "unreadable">;
