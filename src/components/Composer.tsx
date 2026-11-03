@@ -302,8 +302,7 @@ export function Composer({
   const commandCandidates = useMemo(() => {
     if (!slash || slash.start === dismissedSlashAt) return [];
     const available: ComposerSlashCommand[] = [];
-    // Built-in commands only work as the start of a message; skills can be named anywhere in it.
-    const builtIns = slash.start === 0;
+    const builtIns = slash.start === 0; // Built-in commands only work at the start of a message; skills can be named anywhere.
     if (builtIns && !group?.dm) available.push({
       kind: "command",
       id: "goal",

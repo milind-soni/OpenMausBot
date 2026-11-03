@@ -1307,12 +1307,7 @@ export function enabledSkillFile(botId: string, name: string, assignedLibrary?: 
 
 /** SKILL.md of each named skill that is on for the bot. */
 export function enabledSkillFiles(botId: string, names: readonly string[], assignedLibrary?: readonly string[]): Map<string, string> {
-  const files = new Map<string, string>();
-  for (const name of names) {
-    const file = enabledSkillFile(botId, name, assignedLibrary);
-    if (file) files.set(name, file);
-  }
-  return files;
+  return new Map(names.flatMap((name) => { const file = enabledSkillFile(botId, name, assignedLibrary); return file ? [[name, file] as const] : []; }));
 }
 
 export function expandSkillCommandTurnText(botId: string, text: string, assignedLibrary?: readonly string[]): string {
