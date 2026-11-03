@@ -5421,7 +5421,6 @@
   "mausbotWelcome.add": "Añadir a {name}",
   "mausbotWelcome.notNow": "Ahora no",
   "mausbotWelcome.notNowHint": "{name} no aparecerá en la barra lateral. Actívalo cuando quieras en Ajustes → General.",
-  "grokFinish.messageApps": "Apps por conectar: {apps}.",
   "app.loading.connecting": "Conectando con tus bots…",
   "app.loading.updating": "Actualizando My Cloud…",
   "cloudSend.list.routineOne": "1 rutina",

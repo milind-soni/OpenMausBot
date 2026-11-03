@@ -4776,7 +4776,6 @@
   "mausbotWelcome.add": "{name} ekle",
   "mausbotWelcome.notNow": "Şimdi değil",
   "mausbotWelcome.notNowHint": "{name} kenar çubuğunda görünmez. İstediğin zaman Ayarlar → Genel'den aç.",
-  "grokFinish.messageApps": "Bağlanacak uygulamalar: {apps}.",
   "app.loading.connecting": "Botlarınıza bağlanılıyor…",
   "app.loading.updating": "Cloud'um güncelleniyor…",
   "cloudSend.list.routineOne": "1 rutin",
