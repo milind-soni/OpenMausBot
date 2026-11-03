@@ -84,11 +84,13 @@ ARG AGENT_BROWSER_VERSION=0.37.0
 # the publish job passes that version so a Chrome release rebuilds this layer.
 ARG CHROME_CACHE_TAG=""
 # Chrome for Testing has no Linux ARM64 build, so an arm64 image takes
-# Debian's Chromium instead, linked at the same path.
+# Debian's Chromium instead, linked at the same path; the publish job passes
+# its newest bookworm version so a Debian security update rebuilds it too.
+ARG CHROMIUM_CACHE_TAG=""
 ARG TARGETARCH
 # The global link must be the native binary for this platform (agent-browser's
 # postinstall points it there); the other platforms' binaries are never run.
-RUN echo "agent-browser ${AGENT_BROWSER_VERSION}, Chrome for Testing ${CHROME_CACHE_TAG:-Stable}" \
+RUN echo "agent-browser ${AGENT_BROWSER_VERSION}, Chrome for Testing ${CHROME_CACHE_TAG:-Stable}, Debian Chromium ${CHROMIUM_CACHE_TAG:-latest}" \
   && npm install -g --cache /tmp/npm-cache agent-browser@${AGENT_BROWSER_VERSION} \
   && if [ "$TARGETARCH" = arm64 ]; then \
        apt-get update && apt-get install -y --no-install-recommends chromium && rm -rf /var/lib/apt/lists/* \

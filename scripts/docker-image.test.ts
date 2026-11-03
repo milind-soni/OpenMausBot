@@ -266,6 +266,8 @@ describe("container images", () => {
     expect(home.with!["cache-to"]).toBe("type=gha,scope=cloud-home,mode=max");
     // Both builds key the browser layer on the same Chrome, so they share it.
     for (const build of [server, home]) expect(build.with!["build-args"]).toContain("CHROME_CACHE_TAG=${{ steps.keys.outputs.chrome }}");
+    // and the arm64 one on Debian's newest Chromium, so a security update rebuilds it
+    for (const build of [server, home]) expect(build.with!["build-args"]).toContain("CHROMIUM_CACHE_TAG=${{ steps.keys.outputs.chromium }}");
     expect(home.with!["build-args"]).toContain("CLOUD_HOME_ENGINES=${{ steps.keys.outputs.engines }}");
     expect(home.with!["build-args"]).toContain("ENGINES_CACHE_TAG=${{ steps.keys.outputs.engines_tag }}");
   });
@@ -277,6 +279,8 @@ describe("container images", () => {
     expect(declared).toBeGreaterThan(runtime.findIndex(step => step.op === "RUN" && step.args.startsWith("apt-get update")));
     expect(declared).toBeLessThan(runtime.indexOf(browserRun()));
     expect(browserRun().args).toContain("${CHROME_CACHE_TAG");
+    expect(runtime.findIndex(step => step.op === "ARG" && step.args.startsWith("CHROMIUM_CACHE_TAG="))).toBeLessThan(runtime.indexOf(browserRun()));
+    expect(browserRun().args).toContain("${CHROMIUM_CACHE_TAG");
     const home = all.find(s => s.name === "cloud-home")!.steps;
     expect(home).toContainEqual({ op: "ARG", args: 'CLOUD_HOME_ENGINES="@anthropic-ai/claude-code @openai/codex"' });
     // the engines' install, not the tools layer's pinned pnpm beneath it
@@ -292,7 +296,7 @@ describe("container images", () => {
       const root = mkdtempSync(join(tmpdir(), "omb-docker-keys-"));
       temporaryDirectories.push(root);
       const fake = (name: string, body: string) => writeFileSync(join(root, name), `#!/bin/sh\n${ok ? body : "exit 1"}\n`, { mode: 0o755 });
-      fake("curl", `echo '{"channels":{"Stable":{"version":"154.0.8037.92","downloads":{}}}}'`);
+      fake("curl", `case "$*" in *madison*) printf ' chromium | 150.0.7871.100-1~deb12u1 | bookworm          | arm64\\n chromium | 156.0.8078.73-1~deb12u1  | bookworm-security | arm64\\n';; *) echo '{"channels":{"Stable":{"version":"154.0.8037.92","downloads":{}}}}';; esac`);
       fake("npm", `case "$2" in @anthropic-ai/claude-code@latest) echo 2.1.291;; @openai/codex@latest) echo 0.160.1;; *) exit 1;; esac`);
       const output = join(root, "output");
       writeFileSync(output, "");
@@ -304,11 +308,12 @@ describe("container images", () => {
     };
     expect(resolve(true)).toEqual({
       chrome: "154.0.8037.92",
+      chromium: "156.0.8078.73-1~deb12u1",
       engines: "@anthropic-ai/claude-code@2.1.291 @openai/codex@0.160.1",
       engines_tag: "",
     });
     const today = `date-${new Date().toISOString().slice(0, 10)}`;
-    expect(resolve(false)).toEqual({ chrome: today, engines: "@anthropic-ai/claude-code @openai/codex", engines_tag: today });
+    expect(resolve(false)).toEqual({ chrome: today, chromium: today, engines: "@anthropic-ai/claude-code @openai/codex", engines_tag: today });
   });
 
   // An init collects browser processes whose parents exit, and Chrome gets the
