@@ -524,3 +524,12 @@ it("colours stay per Cloud, whichever account it belongs to", async () => {
   const fill = (id: string) => (host.querySelector(`[data-rail-place="${id}"] [aria-hidden="true"][style]`) as HTMLElement | null)?.getAttribute("style");
   expect(fill("a1")).not.toEqual(fill("b1"));
 });
+
+it("＋ stands for Add another account alone, when nothing else can be added", async () => {
+  rail = { places: TWO_ACCOUNTS, add: { cloud: false, link: false, address: false, account: true } };
+  await mount(createElement(PlacesRail));
+  expect(host.querySelector("[data-rail-add]")).not.toBeNull();
+  rail = { places: TWO_ACCOUNTS, add: { cloud: false, link: false, address: false } };
+  await act(async () => { await refreshPlaces(); });
+  expect(host.querySelector("[data-rail-add]")).toBeNull();
+});
