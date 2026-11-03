@@ -12,7 +12,7 @@ const myCloud = (origin, id = origin) => ({ id, kind: "remote", origin, name: "M
 const ownCloud = (origin, name, id = origin) => ({ id, kind: "remote", origin, name, cloud: { id: `c-${id}`, role: "owner" } });
 const teamCloud = (origin, name, id = origin) => ({ id, kind: "remote", origin, name, team: { id: `t-${origin}`, role: "member" } });
 const byHand = (origin, name) => ({ id: origin, kind: "remote", origin, name });
-const signedIn = (email, extra = {}) => ({ status: "connected", account: { id: email, email }, clouds: [], ...extra });
+const signedIn = (email, extra = {}) => ({ status: "connected", account: { id: email, email }, ...extra });
 const list = (environmentsList, activeId = LOCAL_ID) => ({ environments: environmentsList, activeId });
 const waits = (email, places, rows = places.map((entry) => ({ id: entry.id, name: entry.name, color: null, kind: entry.team ? "team" : "cloud", opens: true }))) => ({ id: email, email, places, rows });
 const ids = (rows) => rows.map((row) => row.id);
