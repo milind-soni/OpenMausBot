@@ -378,6 +378,10 @@ async function stopCliTree(child: ChildProcess, pid: number, timeoutMs: number):
         child.kill();
       } catch {
       }
+      // taskkill /T also fails when one process in the tree could not be stopped; that one may still hold the pipes the CLI
+      // inherited, so "close" never comes. The CLI itself exiting is what counts.
+      if (exited()) done(true);
+      else child.once("exit", closed);
     });
   });
 }
