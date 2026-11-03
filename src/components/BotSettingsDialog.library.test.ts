@@ -10,10 +10,21 @@ vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvance
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => false }));
 vi.mock("./bot-settings/useSlackManagement", () => ({ useSlackManagementUrl: () => null }));
 vi.mock("./bot-settings/useBotSettingsDerived", () => ({ useBotSettingsDerived: () => ({}) }));
+const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), onOpen: undefined as undefined | ((page: string) => void) }));
 vi.mock("@/state/store", async (importOriginal) => {
   const store = await importOriginal<typeof import("@/state/store")>();
   const state = { ...store.initialState, botSettingsSection: "library", botSettingsExpandAccordion: true };
-  return { ...store, useStore: () => ({ state, dispatch: vi.fn(), flushBotPatches: vi.fn() }) };
+  return { ...store, useStore: () => ({ state, dispatch: fixture.dispatch, flushBotPatches: vi.fn() }) };
+});
+vi.mock("./bot-panel/LibraryTab", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./bot-panel/LibraryTab")>();
+  return {
+    ...original,
+    LibraryTab: (props: Parameters<typeof original.LibraryTab>[0]) => {
+      fixture.onOpen = props.onOpen as (page: string) => void;
+      return original.LibraryTab(props);
+    },
+  };
 });
 import { BotSettingsDialog } from "./BotSettingsDialog";
 import { DesktopCapabilitiesProvider } from "./DesktopCapabilities";
@@ -26,5 +37,14 @@ describe("Advanced bot settings", () => {
     const markup = html();
     expect(markup).toContain('data-bot-settings-section="library"');
     expect(markup).toContain('data-panel-tabpanel="library"');
+  });
+
+  it("opens the matching settings section from each Library row", () => {
+    html();
+    for (const [page, section] of [["memory", "memory"], ["skills", "skills"], ["folder", "access"], ["apps", "overview"]]) {
+      fixture.dispatch.mockClear();
+      fixture.onOpen!(page);
+      expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleSettings", open: true, section });
+    }
   });
 });

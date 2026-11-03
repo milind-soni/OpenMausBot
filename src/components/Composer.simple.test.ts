@@ -14,6 +14,7 @@ import { BOT_BUTTON, botButtonTone } from "@/lib/bot-button";
 
 const fixture = vi.hoisted(() => ({
   advanced: false,
+  agentsMcp: true,
   dispatch: vi.fn(),
   call: null as Record<string, unknown> | null,
   groupCall: null as Record<string, unknown> | null,
@@ -25,7 +26,7 @@ vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({
     state: { ...original.initialState, config: fixture.config ?? original.initialState.config, bots: [bot, peer], liveCall: fixture.liveCall, instances: [{
-      instanceId: ENGINE, driverKind: "claudeAgent", displayName: "Claude", capabilities: { agentsMcp: true },
+      instanceId: ENGINE, driverKind: "claudeAgent", displayName: "Claude", capabilities: { agentsMcp: fixture.agentsMcp },
     }] },
     dispatch: fixture.dispatch,
   }) };
@@ -86,6 +87,7 @@ function openPlus() {
 
 beforeEach(() => {
   fixture.advanced = false;
+  fixture.agentsMcp = true;
   fixture.liveCall = null;
   fixture.config = undefined;
   setCallMode("turns");
@@ -311,6 +313,13 @@ describe("the Advanced composer", () => {
   it("leaves Teach a task out when skill authoring is off", () => {
     fixture.advanced = true;
     fixture.config = { features: { skillAuthoring: false } };
+    render({ bot });
+    expect(container.querySelector('button[aria-label="Teach a task"]')).toBeNull();
+  });
+
+  it("leaves Teach a task out when the bot's engine can't run agents", () => {
+    fixture.advanced = true;
+    fixture.agentsMcp = false;
     render({ bot });
     expect(container.querySelector('button[aria-label="Teach a task"]')).toBeNull();
   });
