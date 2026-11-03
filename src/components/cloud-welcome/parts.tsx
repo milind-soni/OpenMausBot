@@ -10,9 +10,9 @@ export const CARD = "flex min-w-0 flex-col gap-2 rounded-2xl border p-4 text-lef
 export const CARD_IDLE = "border-hairline/50 bg-card/50";
 export const CARD_PICKED = "border-accent/70 bg-accent/[0.07] shadow-[0_0_0_3px_color-mix(in_oklab,var(--color-accent)_16%,transparent)]";
 
-export function StepHeading({ title, sub, aside, headingRef }: { title: ReactNode; sub: ReactNode; aside?: ReactNode; headingRef?: Ref<HTMLHeadingElement> }) {
+export function StepHeading({ id = "cloud-welcome-step", title, sub, aside, headingRef }: { id?: string; title: ReactNode; sub: ReactNode; aside?: ReactNode; headingRef?: Ref<HTMLHeadingElement> }) {
   return <header className="flex flex-col gap-1.5">
-    <h2 ref={headingRef} id="cloud-welcome-step" tabIndex={-1} className="text-[21px] font-semibold tracking-[-0.02em] text-ink outline-none [text-wrap:balance]">
+    <h2 ref={headingRef} id={id} tabIndex={-1} className="text-[21px] font-semibold tracking-[-0.02em] text-ink outline-none [text-wrap:balance]">
       {title}{aside && <span className="ml-2 align-[2px] text-[13px] font-medium tracking-normal text-ink-tertiary">{aside}</span>}
     </h2>
     <p className="text-[14px] leading-relaxed text-ink-secondary [text-wrap:pretty]">{sub}</p>

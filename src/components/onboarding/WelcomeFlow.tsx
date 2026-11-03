@@ -169,7 +169,7 @@ export function WelcomeFlow({
       {chief ? (
         <ChiefIntro replay={replay} onLeave={fadeScrim} onDone={(botId) => void finish("completed", botId)} />
       ) : (
-        <MeetScreen hosted={hosted} onNext={next} />
+        <MeetScreen hosted={hosted} onNext={next} onGrokMoved={(botId) => void finish("completed", botId)} />
       )}
     </div>
   );

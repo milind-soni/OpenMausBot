@@ -6005,7 +6005,6 @@
   "templates.githubHint": "Cole um repositório público ou um link direto para o JSON da equipe.",
   "templates.githubPlaceholder": "github.com/dono/repositorio",
   "templates.githubUrl": "URL da equipe no GitHub",
-  "grokFinish.messageApps": "Apps para conectar: {apps}.",
   "templates.startFolder": "Começar por uma pasta de projeto",
   "templates.scoutHint": "Aponte o explorador para uma pasta. Ele lê o README, as dependências e a estrutura e sugere uma equipe. Nada é criado até você confirmar.",
   "templates.projectFolder": "Pasta do projeto a explorar",

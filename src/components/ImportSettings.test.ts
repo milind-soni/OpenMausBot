@@ -4,8 +4,6 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("./GrokImportFlow", () => ({ GrokImportFlow: (props: { bare?: boolean }) => `GROK_FLOW(bare=${String(props.bare)})` }));
-
 import { StoreContext } from "@/state/store";
 import type { SetupDetection } from "../../shared/setup-import";
 import { AiAppsImportView, ImportSettings, type AiAppsImportViewProps } from "./ImportSettings";
@@ -20,7 +18,7 @@ const apps = (overrides: Partial<AiAppsImportViewProps> = {}) => text(renderToSt
 })));
 
 describe("Settings → Import", () => {
-  it("draws From your AI apps and From Grok Bot", () => {
+  it("draws From your AI apps and the one button for moving from Grok Bot", () => {
     const value = { state: { config: {} }, dispatch: vi.fn() } as never;
     const markup = renderToStaticMarkup(createElement(StoreContext.Provider, { value }, createElement(ImportSettings, {
       client: { detect: vi.fn(() => new Promise<SetupDetection>(() => {})), apply: vi.fn() },
@@ -31,8 +29,8 @@ describe("Settings → Import", () => {
     expect(shown).toContain("From your AI apps");
     expect(shown).toContain("Claude Code, Codex, Cursor, Claude Desktop and Gemini");
     expect(shown).toContain("Tools arrive switched off; logins and history are never read.");
-    expect(shown).toContain("From Grok Bot");
-    expect(shown).toContain("GROK_FLOW(bare=true)");
+    expect(shown).toContain("Move from Grok Bot");
+    expect(markup).toContain("data-grok-move-open");
     expect(markup.indexOf('data-import-section="apps"')).toBeLessThan(markup.indexOf('data-import-section="grok"'));
   });
 
@@ -51,12 +49,12 @@ describe("Settings → Import", () => {
     expect(apps({ result: { skills: { added: ["pdf"], present: [], skipped: [], filesLeftOut: 0, review: [] } } })).toContain("Added 1 skill.");
   });
 
-  it("uses the one shared bot import in Templates and Settings", () => {
+  it("opens the one move from Settings, Templates and both welcomes", () => {
     const source = (file: string) => readFileSync(join(import.meta.dirname, file), "utf8");
-    for (const file of ["TeamLibraryPanel.tsx", "ImportSettings.tsx"]) {
-      expect(source(file), file).toMatch(/import \{ GrokImportFlow \} from "(?:\.\/|@\/components\/)GrokImportFlow"/);
-      expect(source(file), file).toContain("<GrokImportFlow");
-      expect(source(file), file).not.toContain("<GrokImportBox");
+    for (const file of ["TeamLibraryPanel.tsx", "ImportSettings.tsx", "move-from-grok/GrokMoveGate.tsx"]) {
+      expect(source(file), file).toMatch(/import \{[^}]*openGrokMove[^}]*\} from "@\/lib\/grok-move"/);
+      expect(source(file), file).toContain("openGrokMove(");
     }
+    for (const file of ["onboarding/MeetScreen.tsx", "cloud-welcome/WelcomeBring.tsx"]) expect(source(file), file).toContain("<GrokMoveChoice");
   });
 });

@@ -1,16 +1,16 @@
 // Settings → Import: everything that brings work in from elsewhere, in one place. "From your AI apps" brings the skills
-// and MCP servers another AI tool keeps on this computer; the bot import below is the same one Templates has.
+// and MCP servers another AI tool keeps on this computer.
 import { BookOpen, Check, Info, Loader2, Plug } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { openGrokMove } from "@/lib/grok-move";
 import { importOutcome, localSetupImport, setupImportApi, skillsSummary, toolsSummary, type SetupImportClient } from "@/lib/setup-import";
 import { useStore } from "@/state/store";
 import { detectionCount, detectionSources, type SetupDetection, type SetupImportResult, type SetupSource } from "../../shared/setup-import";
 import { GrokBotMark } from "./GrokBotMark";
-import { GrokImportFlow } from "./GrokImportFlow";
 import { ClaudeMark, CodexMark, CursorMark, PresetProviderMark } from "./ProviderIcons";
 
 function SourceMarks({ sources }: { sources: readonly SetupSource[] }) {
@@ -165,7 +165,7 @@ export function GrokImportSection() {
     <section data-import-section="grok" className="rounded-xl bg-card p-4">
       <div className="flex items-center gap-2 text-[15px] font-medium text-ink"><GrokBotMark size={16} />{t("settings.import.grokTitle")}</div>
       <div className="mt-0.5 text-[13px] leading-relaxed text-ink-secondary">{t("settings.import.grokSubtitle")}</div>
-      <div className="mt-4"><GrokImportFlow bare /></div>
+      <button type="button" data-grok-move-open onClick={() => openGrokMove()} className={cn(buttonClass, "mt-3")}>{t("grokMove.open")}</button>
     </section>
   );
 }

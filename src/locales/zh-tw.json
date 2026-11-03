@@ -4120,7 +4120,6 @@
   "mausbotWelcome.add": "新增 {name}",
   "mausbotWelcome.notNow": "以後再說",
   "mausbotWelcome.notNowHint": "{name} 不會顯示在側邊欄。隨時可在 設定 → 一般 中開啟。",
-  "grokFinish.messageApps": "要連線的應用程式：{apps}。",
   "app.loading.connecting": "正在連線到你的機器人…",
   "app.loading.updating": "正在更新 My Cloud…",
   "cloudSend.list.routineOne": "1 個例行任務",
