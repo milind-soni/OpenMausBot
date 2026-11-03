@@ -98,6 +98,7 @@ export function installAccounts({ ipcMain, ownPage, placePage, account, client, 
   });
   own("accounts:add-browser", () => ring().addBrowser());
   own("accounts:add-reopen", () => ring().addReopen());
+  own("accounts:add-result", () => ring().addResult());
   own("accounts:add-cancel", () => ring().addCancel());
   own("accounts:sheet-pending", () => { const pending = sheetPending; sheetPending = false; return pending; });
   own("accounts:sheet-closed", () => { sheetPending = false; holdSheet(false); });

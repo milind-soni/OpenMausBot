@@ -193,6 +193,8 @@ export interface AccountsBridge {
   addVerify(code: string): Promise<AccountAddResult>;
   addBrowser(): Promise<{ outcome: "browser" | "failed"; code?: string }>;
   addReopen(): Promise<void>;
+  /** How the browser's way ended, asked once the list changes: null until it has. */
+  addResult(): Promise<{ outcome: "switched" | "added" | "already" | "failed"; email?: string } | null>;
   addCancel(): Promise<void>;
   sheetPending(): Promise<boolean>;
   sheetClosed(): Promise<void>;

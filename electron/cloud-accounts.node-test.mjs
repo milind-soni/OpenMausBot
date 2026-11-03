@@ -45,7 +45,7 @@ async function world(t, { active = null, saved = null } = {}) {
     w.ring = createCloudAccounts({ active: activeStore, client: () => w.client, origin, now: () => w.now,
       saved: { read: async () => { if (w.readSaved) throw w.readSaved; return w.savedFile; }, write: async (value) => { w.writes.push(["saved", (value?.accounts ?? []).map((entry) => entry.account.id)]); w.savedFile = structuredClone(value); } },
       makeClient: ({ store, onState }) => createCloudAccountClient({ ...options, store, onState }),
-      holding: () => w.holding, leaving: async (id) => { w.calls.push(`leaving:${id}`); }, arriving: async (id) => { w.calls.push(`arriving:${id}`); }, settled: async () => { w.calls.push("settled"); }, removed: async (id) => { w.calls.push(`removed:${id}`); }, changed: () => w.calls.push("changed") });
+      holding: () => w.holding, leaving: async (id) => { w.calls.push(`leaving:${id}`); await w.duringLeave?.(); }, arriving: async (id) => { w.calls.push(`arriving:${id}`); }, settled: async () => { w.calls.push("settled"); }, removed: async (id) => { w.calls.push(`removed:${id}`); }, changed: () => w.calls.push("changed") });
     return w;
   };
   w.boot = async () => { w.make(); await w.client.start(); await w.ring.start(); return w; };
@@ -335,4 +335,103 @@ test("until the saved accounts have been read, there may be more than one: nothi
   w.readSaved = null;
   await w.ring.start();
   assert.equal(w.ring.count(), 1);
+});
+
+test("while a switch is under way nothing of the old sign-in runs: a window coming to the front or Settings' Refresh can't write it over the new one", async (t) => {
+  const w = await world(t);
+  w.activeFile = w.grant("a"); w.savedFile = { v: 1, accounts: [w.grant("b")] };
+  await w.boot();
+  w.requests.length = 0;
+  let during = null;
+  w.duringLeave = async () => {
+    assert.equal(w.activeFile.account.id, "acct-b", "the new sign-in is in the file by now");
+    during = await w.client.refresh();
+    assert.equal(w.activeFile.account.id, "acct-b", "and stays there");
+  };
+  assert.equal((await w.ring.switchTo("acct-b")).outcome, "switched");
+  assert.ok(during, "a refresh mid-switch still answers");
+  assert.deepEqual(w.requests.filter((row) => row.token === tokenOf("a")), [], "nothing was asked with the old token");
+  assert.equal(w.activeFile.account.id, "acct-b");
+  assert.deepEqual(w.ring.others().map((row) => row.id), ["acct-a"]);
+  assert.equal(w.signedInAs(), "acct-b");
+  assert.equal(w.client.state().status, "connected", "it runs again once the new sign-in is read");
+});
+
+test("a change of account that fails partway never leaves the sign-in stopped: it reads its file again, and the window goes where it belongs", async (t) => {
+  const w = await world(t);
+  w.activeFile = w.grant("a"); w.savedFile = { v: 1, accounts: [w.grant("b")] };
+  await w.boot();
+  w.calls.length = 0;
+  w.duringLeave = async () => { throw new Error("the window wouldn't move"); };
+  await assert.rejects(w.ring.switchTo("acct-b"), /wouldn't move/);
+  assert.equal(w.signedInAs(), "acct-b", "the file says b, and the sign-in reads it");
+  assert.equal(w.client.state().status, "connected");
+  assert.ok(w.calls.includes("settled"), JSON.stringify(w.calls));
+  await w.client.refresh();
+  assert.equal(w.client.state().status, "connected", "a refresh works again");
+});
+
+test("a sign-in that can't be written stays the old account's, running again", async (t) => {
+  const w = await world(t);
+  w.activeFile = w.grant("a"); w.savedFile = { v: 1, accounts: [w.grant("b")] };
+  await w.boot();
+  w.failActive = true;
+  await assert.rejects(w.ring.switchTo("acct-b"), /no keychain/);
+  assert.equal(w.signedInAs(), "acct-a");
+  assert.equal(w.client.state().status, "connected");
+  assert.deepEqual(w.savedFile.accounts.map((record) => record.account.id).sort(), ["acct-a", "acct-b"], "neither sign-in is lost");
+});
+
+/** A ring whose Add another account runs through a fake browser sign-in: `w.browserFinished(letter)` is the browser coming back. */
+function browserRing({ active = "a", holding = null } = {}) {
+  const w = { active, changes: 0, signOuts: 0, activeFile: null, savedFile: null };
+  const record = (letter) => ({ origin: "https://admin.test", token: tokenOf(letter), expiresAt: Date.now() + DAY, device: { id: `device-${letter}` }, account: person(letter) });
+  w.activeFile = record(active);
+  const state = () => ({ status: "connected", account: person(w.activeFile.account.id.at(-1)) });
+  const client = { state, quiesce() {}, reload: async () => {}, signOut: async () => {}, revokeSaved: async () => {} };
+  let fire = null, held = null;
+  w.ring = createCloudAccounts({ origin: "https://admin.test", client: () => client, holding: () => holding, changed: () => { w.changes++; },
+    active: { read: async () => w.activeFile, write: async (value) => { w.activeFile = value; } }, saved: { read: async () => w.savedFile, write: async (value) => { w.savedFile = value; } },
+    makeClient: ({ store, onState }) => { fire = onState; held = store; return { begin: async () => ({ status: "connecting" }), signOut: async () => { w.signOuts++; }, close() {} }; } });
+  w.browserFinished = async (letter) => { await held.write(record(letter)); fire({ status: "connected" }); for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve)); };
+  return w;
+}
+
+test("the browser's way says how it ended: the account in use already, one kept during a move, one switched to, once each", async () => {
+  const already = browserRing();
+  await already.ring.start();
+  await already.ring.addBrowser();
+  assert.equal(already.ring.addResult(), null, "nothing yet");
+  await already.browserFinished("a");
+  assert.deepEqual(already.ring.addResult(), { outcome: "already", email: "a@example.test" }, "the sheet isn't left waiting");
+  assert.equal(already.ring.addResult(), null, "told once");
+  assert.equal(already.signOuts, 1, "the extra sign-in ends at once");
+  assert.ok(already.changes > 0, "the page is told to look");
+  const moving = browserRing({ holding: "moving" });
+  await moving.ring.start();
+  await moving.ring.addBrowser();
+  await moving.browserFinished("b");
+  assert.deepEqual(moving.ring.addResult(), { outcome: "added", email: "b@example.test" });
+  const fresh = browserRing();
+  await fresh.ring.start();
+  await fresh.ring.addBrowser();
+  await fresh.browserFinished("b");
+  assert.deepEqual(fresh.ring.addResult(), { outcome: "switched", email: "b@example.test" });
+});
+
+test("the browser's way failing says so rather than leaving the sheet waiting", async () => {
+  const w = browserRing();
+  await w.ring.start();
+  await w.ring.addBrowser();
+  w.savedFile = { v: 99, accounts: [] };
+  await w.browserFinished("b");
+  assert.deepEqual(w.ring.addResult(), { outcome: "failed" });
+});
+
+test("the emailed code's way answers directly, and leaves nothing for the browser's way to say", async (t) => {
+  const w = await world(t);
+  w.activeFile = w.grant("a");
+  await w.boot();
+  assert.equal((await w.addByCode("b")).outcome, "switched");
+  assert.equal(w.ring.addResult(), null);
 });

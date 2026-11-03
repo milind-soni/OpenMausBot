@@ -20,7 +20,7 @@ const memoryStore = () => { let held = null; return { read: async () => held, wr
  * @param {{
  *   active: { read(): Promise<any>, write(value: unknown): Promise<void> },
  *   saved: { read(): Promise<any>, write(value: unknown): Promise<void> },
- *   client(): { state(): any, quiesce(): void, reload(): Promise<any>, signOut(): Promise<any>, refresh(): Promise<any>, revokeSaved(record: unknown): Promise<void> },
+ *   client(): { state(): any, quiesce(): void, reload(): Promise<any>, signOut(): Promise<any>, revokeSaved(record: unknown): Promise<void> },
  *   makeClient(options: { store: any, onState(state: any): void }): any,
  *   origin: string,
  *   holding?(): string | null,
@@ -41,7 +41,7 @@ const memoryStore = () => { let held = null; return { read: async () => held, wr
  * active account running until it succeeds.
  */
 export function createCloudAccounts({ active, saved, client, makeClient, origin, holding = () => null, leaving = async () => {}, left = async () => {}, arriving = async () => {}, settled = async () => {}, removed = async () => {}, changed = () => {}, now = Date.now, log = () => {} }) {
-  let rows = [], known = false, queue = Promise.resolve(), adder = null;
+  let rows = [], known = false, queue = Promise.resolve(), adder = null, browserResult = null;
   const serial = (work) => { const run = queue.then(work, work); queue = run.catch(() => {}); return run; };
 
   /** An unreadable file stays when the keychain is only locked (it throws here), and is replaced once it can never be read. */
@@ -75,15 +75,19 @@ export function createCloudAccounts({ active, saved, client, makeClient, origin,
     const waiting = keep && usable(current, origin) ? current : null;
     await saved.write({ v: VERSION, accounts: [...list.filter((record) => record.account.id !== waiting?.account.id), ...(waiting ? [waiting] : [])] });
     client().quiesce();
-    try { await active.write(next); }
-    catch (error) { void client().refresh().catch(() => {}); throw error; }
-    await writeSaved([...list, ...(waiting ? [waiting] : [])], next.account.id);
-    await leaving(leavingId);
-    await left(leavingId);
-    await arriving(next.account.id);
-    await client().reload();
-    await settled();
-    changed();
+    // Whatever fails from here, the sign-in reads its file again and the window goes where it belongs: a client left quiet would
+    // do nothing until the app restarts.
+    try {
+      await active.write(next);
+      await writeSaved([...list, ...(waiting ? [waiting] : [])], next.account.id);
+      await leaving(leavingId);
+      await left(leavingId);
+      await arriving(next.account.id);
+    } finally {
+      await client().reload().catch((error) => log(`accounts: ${error?.message ?? error}`));
+      await settled().catch((error) => log(`accounts: ${error?.message ?? error}`));
+      changed();
+    }
   }
 
   async function switchTo(id) {
@@ -155,7 +159,10 @@ export function createCloudAccounts({ active, saved, client, makeClient, origin,
     endAdding();
     const store = memoryStore();
     const entry = { store, finished: null, client: null };
-    entry.client = makeClient({ store, onState: (state) => { if (state?.status === "connected" && store.held() && adder === entry) void finish(entry); } });
+    entry.client = makeClient({ store, onState: (state) => {
+      if (state?.status !== "connected" || !store.held() || adder !== entry || entry.finished) return;
+      void finish(entry).catch((error) => { log(`accounts: ${error?.message ?? error}`); return { outcome: "failed" }; }).then((result) => { if (entry.browser) { browserResult = result; changed(); } });
+    } });
     adder = entry;
     return entry;
   }
@@ -199,9 +206,14 @@ export function createCloudAccounts({ active, saved, client, makeClient, origin,
      * account: its own page says which, and lets them change it. */
     addBrowser() {
       const entry = startAdding();
+      entry.browser = true;
+      browserResult = null;
       return entry.client.begin().then((state) => ({ outcome: state.status === "connecting" ? "browser" : "failed", ...(state.enrollment ? { code: state.enrollment.userCode } : {}) }));
     },
     addReopen: () => adder?.client.reopen().then(() => {}) ?? Promise.resolve(),
+    /** How the browser's way ended, once: that account is in use now, was kept while a move finishes, or was in use already, so
+     * the sheet waiting on it can say so. */
+    addResult() { const result = browserResult; browserResult = null; return result; },
     addCancel() { if (adder && !adder.finished) { const entry = adder; adder = null; void entry.client.cancel().catch(() => {}).finally(() => entry.client.close()); } },
     close() { endAdding(); },
   };

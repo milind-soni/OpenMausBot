@@ -144,7 +144,10 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     if (!closed) { timer = setTimer(() => { timer = null; void work().catch(() => {}); }, Math.max(1, delay)); timer?.unref?.(); }
   };
   const reset = () => { generation++; stopTimer(); controller.abort(); controller = new AbortController(); pending = null; emailed = null; verifiedUntil = 0; failures = 0; return generation; };
-  const current = stamp => !closed && generation === stamp;
+  // `quiet`: another account is taking over (quiesce to reload): this sign-in's grant is still in memory, and nothing may ask for
+  // it or write it over the one taking its place, whoever asks (a window coming to the front, Settings' Refresh).
+  let quiet = false;
+  const current = stamp => !closed && !quiet && generation === stamp;
   const versionHeader = text(appVersion, 40) && /^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/.test(appVersion) ? { "x-openmausbot-version": appVersion } : {};
   async function request(route, { method = "GET", body, token, signal = controller.signal, path = `/api/cloud/desktop/${route}`, timeoutMs = 20_000 } = {}) {
     const response = await fetcher(`${origin}${path}`, {
@@ -925,9 +928,10 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       if (result?.ok !== true) throw new Error("Invalid Cloud consent response.");
     },
     /** Another account takes over: nothing more is asked or written for this sign-in. */
-    quiesce() { reset(); },
+    quiesce() { quiet = true; reset(); },
     /** Reads the sign-in saved in `store` afresh: nothing of the one before stays. Told once, when the Admin has answered. */
     reload() {
+      quiet = false;
       reset();
       grant = null; issued = null; cleanup = null; cleanupNeeded = false; plan = null; savedHint = null; opened = null; adding = null; renewalCloud = null; offerCache = null; waking = false;
       confirmations.clear();

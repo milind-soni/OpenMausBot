@@ -109,17 +109,20 @@ function AddAccount({ start, onDone, onBack }: { start: string; onDone: (note: s
       else { setCode(""); setPhase({ ...at, problem: result.outcome, triesLeft: result.outcome === "wrong-code" ? result.triesLeft : null }); }
     }, () => setPhase({ ...at, problem: "failed", triesLeft: null })).finally(() => setBusy(false));
   };
-  // The browser's way ends in main; the sheet closes once the account it brought is the one in use.
+  // The browser's way ends in main, which says how once the list changes: the account in use now, kept for after a move, or the
+  // one in use already. Nothing else tells the sheet, and it would wait on "Finish signing in" for ever.
   useEffect(() => {
     if (!browser || !bridge) return;
-    let before: AccountsView["active"] | undefined;
-    const look = () => { void bridge.list().then((view) => {
-      if (before === undefined) { before = view.active; return; }
-      if (view.active && !view.active.signIn && (view.active.id !== before?.id || before?.signIn)) onDone(null);
+    const look = () => { void bridge.addResult().then((result) => {
+      if (!result) return;
+      if (result.outcome === "switched") onDone(null);
+      else if (result.outcome === "added") onDone(t("accounts.added", { email: result.email ?? email }));
+      else if (result.outcome === "already") onDone(t("accounts.already", { email: result.email ?? email }));
+      else { setBrowser(false); setPhase({ step: "email", intent: false, problem: "failed" }); }
     }).catch(() => {}); };
     look();
     return bridge.onChanged(look);
-  }, [browser, bridge, onDone]);
+  }, [browser, bridge, onDone, email]);
   if (browser) return <div data-accounts-browser className={SCREEN}>
     <Heading title={t("accounts.browserTitle")} sub={t("accounts.browserBody")} />
     <button type="button" className={QUIET} onClick={() => { void bridge?.addReopen().catch(() => {}); }}>{t("accounts.browserOpen")}</button>

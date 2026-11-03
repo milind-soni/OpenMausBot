@@ -505,6 +505,7 @@ const bridge = {
     addVerify: code => ipcRenderer.invoke("accounts:add-verify", String(code)),
     addBrowser: () => ipcRenderer.invoke("accounts:add-browser"),
     addReopen: () => ipcRenderer.invoke("accounts:add-reopen"),
+    addResult: () => ipcRenderer.invoke("accounts:add-result"),
     addCancel: () => ipcRenderer.invoke("accounts:add-cancel"),
     sheetPending: () => ipcRenderer.invoke("accounts:sheet-pending"),
     sheetClosed: () => ipcRenderer.invoke("accounts:sheet-closed"),
