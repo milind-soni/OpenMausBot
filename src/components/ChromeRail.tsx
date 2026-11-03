@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { effectiveLanguage, useLanguageChoice, usePageLanguage } from "@/lib/language-preference";
 import { wearSkin } from "@/lib/skins";
+import { AccountsSheet, useAccountsSheet } from "./AccountMenu";
 import { DesktopCapabilitiesProvider } from "./DesktopCapabilities";
 import { PlacesRail } from "./PlacesRail";
 
@@ -11,5 +12,6 @@ export function ChromeRail() {
   usePageLanguage(effectiveLanguage(useLanguageChoice(), undefined));
   // The page beside the rail chose its skin: the rail wears the same one.
   useEffect(() => window.ogb?.rail?.onSkin?.(wearSkin), []);
-  return <DesktopCapabilitiesProvider><div data-chrome-rail className="h-full"><PlacesRail chrome /></div></DesktopCapabilitiesProvider>;
+  const accounts = useAccountsSheet();
+  return <DesktopCapabilitiesProvider><div data-chrome-rail className="h-full"><PlacesRail chrome /></div>{accounts.open && <AccountsSheet onClose={accounts.close} />}</DesktopCapabilitiesProvider>;
 }
