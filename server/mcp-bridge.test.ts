@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { CONTROL_REFUSAL_PLAIN, CONTROL_UNCONFIRMED, CONTROL_WAITED, type ControlState } from "./control-client.ts";
 import {
+  completeFor,
   createChildCalls,
   createGateInterceptor,
   createInactivityWatchdog,
@@ -203,6 +204,16 @@ describe("createGateInterceptor", () => {
     expect(answer.result.content[0].text).toBe(CONTROL_REFUSAL_PLAIN);
   });
 
+  it("marks a refusal complete for a client on the 2026-07-28 protocol, which rejects a result without resultType", async () => {
+    const { refused, intercept } = harness(async () => person);
+    const meta = { "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {} };
+    intercept(JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "list_windows", arguments: {}, _meta: meta } }));
+    intercept(frame("tools/call", 5));
+    await drain();
+    expect(JSON.parse(refused[0]!).result).toEqual({ content: [{ type: "text", text: CONTROL_REFUSAL_PLAIN }], isError: true, resultType: "complete" });
+    expect(JSON.parse(refused[1]!).result).toEqual({ content: [{ type: "text", text: CONTROL_REFUSAL_PLAIN }], isError: true });
+  });
+
   it("preserves protocol order even though the check is async", async () => {
     const order: string[] = [];
     let calls = 0;
@@ -369,6 +380,13 @@ describe("createMcpBridgeInterceptor", () => {
     expect(forwarded).toEqual([]);
   });
 
+  it("answers a ping from a client on the 2026-07-28 protocol as complete", () => {
+    const answered: string[] = [];
+    const intercept = createMcpBridgeInterceptor({ answer: (line) => answered.push(line), forward: () => {} });
+    intercept(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping", params: { _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" } } }));
+    expect(answered).toEqual(['{"jsonrpc":"2.0","id":2,"result":{"resultType":"complete"}}']);
+  });
+
   it("treats a ping notification as a silent swallow", () => {
     const forwarded: string[] = [];
     const answered: string[] = [];
@@ -453,5 +471,21 @@ describe("createReplyQueue", () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(seen).toEqual(["a", "b", "c"]);
     expect(written).toEqual(["A", "B", "C"]);
+  });
+});
+
+describe("completeFor", () => {
+  const failure = { content: [{ type: "text", text: "Computer-control transport closed" }], isError: true };
+  const on = (version: string) => ({ "io.modelcontextprotocol/protocolVersion": version });
+
+  it("marks the bridge's own answer complete only for a client on the 2026-07-28 protocol or later", () => {
+    expect(completeFor(on("2026-07-28"), failure)).toEqual({ ...failure, resultType: "complete" });
+    expect(completeFor(on("2025-06-18"), failure)).toBe(failure);
+    expect(completeFor(undefined, failure)).toBe(failure);
+  });
+
+  it("keeps a resultType the driver already sent", () => {
+    const asked = { content: [], resultType: "input_required" };
+    expect(completeFor(on("2026-07-28"), asked)).toBe(asked);
   });
 });
