@@ -34,6 +34,7 @@ import { applyHolds, holdCauses, type AppliedHolds } from "./routine-holds.ts";
 import { sanitizeInput } from "./routine-input.ts";
 import { checkHold, CHECK_BOOT_HOLD_MS, type CheckHold } from "./routine-check-pacing.ts";
 import { resolveRoutineResultsThread, routineRunDefinition, type ResultsThreadAllocation } from "./routine-run-definition.ts";
+import { appendRunLog, compactRunLog, readRunLog, runLogPathFor } from "./routine-run-log.ts";
 
 export type { RoutineContextAttachment, RoutineIntervalWindow, RoutineRunStatus, RoutineRunTrigger };
 export { intervalHasRestrictions } from "./routine-intervals.ts";
@@ -277,6 +278,9 @@ const WAKE_HORIZON_MS = 60 * 60_000;
 
 export const ROUTINE_RESTARTED = "OpenMausBot restarted while this routine was running";
 const MAX_RUNS = 2_000;
+/** A run in one of these statuses may still change (its output, its status, its wait); every other status is
+ * terminal, so once reached the run never changes again and belongs in the append-only log, not this file. */
+const ACTIVE_STATUSES: ReadonlySet<RoutineRunStatus> = new Set(["queued", "running", "waiting"]);
 function cloneRoutine(routine: Routine): Routine {
   return {
     ...routine,
@@ -295,12 +299,15 @@ function cloneRun(run: RoutineRun): RoutineRun {
 
 export class RoutineManager {
   private readonly file: string; private readonly disk: OwnedFile;
+  private readonly runLogPath: string;
   private readonly now: () => number;
   private readonly options: RoutineManagerOptions;
   private routines: Routine[] = [];
   /** Written back unchanged on every save, so unrelated work never deletes a repairable row. */
   private unloadedRoutines: Routine[] = [];
   private runs: RoutineRun[] = [];
+  /** Terminal run ids already durable in the run log, so a save never appends one twice. */
+  private readonly loggedRunIds = new Set<string>();
   private routineRequestReceipts: RoutineRequestReceipt[] = [];
   private webhookRunReceipts: EventRunReceipt[] = [];
   private timer: DueTimer | null = null;
@@ -321,6 +328,7 @@ export class RoutineManager {
   constructor(options: RoutineManagerOptions) {
     this.options = options;
     this.file = options.file ?? join(DATA_DIR, "routines.json"); this.disk = new OwnedFile(this.file, { mode: 0o600 });
+    this.runLogPath = runLogPathFor(this.file);
     this.now = options.now ?? Date.now;
     this.bootedAt = this.now();
     try {
@@ -337,7 +345,18 @@ export class RoutineManager {
         }
         return loaded ? [loaded] : [];
       }) : [];
-      this.runs = Array.isArray(disk.runs) ? disk.runs.map(loadRun) : []; this.malformedAttachments = attachmentsMalformed([...(disk.routines ?? []), ...(disk.runs ?? [])]);
+      const diskRuns = Array.isArray(disk.runs) ? disk.runs.map(loadRun) : [];
+      const active = diskRuns.filter((run) => ACTIVE_STATUSES.has(run.status));
+      // Installs from before the run log existed kept every terminal run inside this file: migrate each into the log
+      // once (never twice, even if the server stops before its next save), so they stop adding weight here for good.
+      const alreadyLogged = new Set(readRunLog(this.runLogPath, -1).map((run) => run.id));
+      for (const run of diskRuns) {
+        if (!ACTIVE_STATUSES.has(run.status) && !alreadyLogged.has(run.id)) appendRunLog(this.runLogPath, run);
+      }
+      this.runs = [...readRunLog(this.runLogPath, MAX_RUNS), ...active];
+      for (const run of this.runs) if (!ACTIVE_STATUSES.has(run.status)) this.loggedRunIds.add(run.id);
+      compactRunLog(this.runLogPath, MAX_RUNS);
+      this.malformedAttachments = attachmentsMalformed([...(disk.routines ?? []), ...this.runs]);
       this.routineRequestReceipts = loadRequestReceipts(disk.routineRequestReceipts);
       this.webhookRunReceipts = loadEventReceipts(disk.webhookRunReceipts, this.runs, this.now());
       this.frozenPending = disk.frozenResultsCleared !== true;
@@ -1543,13 +1562,14 @@ export class RoutineManager {
   private saveLater() { saveSoon(this, () => this.save()); }
   private save() {
     if (this.unreadable) return;
-    // Evict only terminal receipts: an active one owns cancellation, timeout and event routing.
+    // Evict only terminal runs: an active one owns cancellation, timeout and event routing.
     let excess = this.runs.length - MAX_RUNS;
     for (let index = 0; index < this.runs.length && excess > 0;) {
-      if (["queued", "running", "waiting"].includes(this.runs[index]!.status)) {
+      if (ACTIVE_STATUSES.has(this.runs[index]!.status)) {
         index += 1;
         continue;
       }
+      this.loggedRunIds.delete(this.runs[index]!.id);
       this.runs.splice(index, 1);
       excess -= 1;
     }
@@ -1558,12 +1578,25 @@ export class RoutineManager {
       version: 1,
       ...(this.frozenPending ? {} : { frozenResultsCleared: true }),
       routines: [...this.routines, ...this.unloadedRoutines],
-      runs: this.runs,
+      // Terminal runs are immutable once reached, so they live in the append-only run log (routine-run-log.ts)
+      // instead: only runs still active, and so still able to change, are written here on every save.
+      runs: this.runs.filter((run) => ACTIVE_STATUSES.has(run.status)),
       routineRequestReceipts: this.routineRequestReceipts,
       webhookRunReceipts: this.webhookRunReceipts,
       ...(this.startupLaunchId === undefined ? {} : { startupLaunchId: this.startupLaunchId }),
       ...(this.ownerNotices.length ? { ownerNotices: this.ownerNotices } : {}),
       ...(this.holds.length ? { holds: this.holds } : {}),
     } satisfies RoutineFile));
+    // Only after this file's write lands: a run appended to the log here but then rolled back by a later failure
+    // (commitMutation's catch restores `this.runs`) would otherwise leave the log holding a run memory disowns.
+    let loggedAny = false;
+    for (const run of this.runs) {
+      if (!ACTIVE_STATUSES.has(run.status) && !this.loggedRunIds.has(run.id)) {
+        appendRunLog(this.runLogPath, run);
+        this.loggedRunIds.add(run.id);
+        loggedAny = true;
+      }
+    }
+    if (loggedAny) compactRunLog(this.runLogPath, MAX_RUNS);
   }
 }
