@@ -28,7 +28,6 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 }));
 
 const { LiveDesktop } = await import("./LiveDesktop");
-// The selector list of styles.css's window-drag opt-out rule (see window-drag-regions.test.ts).
 const css = readFileSync("src/styles.css", "utf8");
 const noDragSelector = /\/\* Window drag regions\.[\s\S]*?\*\/\s*([^{]+)\{\s*-webkit-app-region: no-drag;/.exec(css)![1].trim();
 let root: Root;
