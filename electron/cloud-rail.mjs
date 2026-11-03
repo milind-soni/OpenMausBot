@@ -165,15 +165,17 @@ export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, bes
   const opening = place => (place.id.startsWith(PENDING) ? openCloud(place.cloudId) : open(place.id));
   // A place of another account: that account becomes the one in use first, and nothing moves if it can't. By then the place is
   // listed as that account's own; an account with no place of its own is simply where the window goes.
-  listed("workspaces:open", async (_event, id) => {
-    const place = places().find(entry => entry.id === plain(id) && entry.opens);
-    if (!place) throw new Error("That place isn't here any more.");
-    if (!place.account) return opening(place);
+  const switchingTo = async place => {
     const said = await switchAccount(place.account);
     if (said.outcome !== "switched") return { outcome: said.outcome, ...(said.email ? { email: said.email } : {}) };
     const arrived = places().find(entry => entry.id === place.id && entry.opens && !entry.account);
     if (arrived) await opening(arrived);
     return { outcome: "switched" };
+  };
+  listed("workspaces:open", (_event, id) => {
+    const place = places().find(entry => entry.id === plain(id) && entry.opens);
+    if (!place) throw new Error("That place isn't here any more.");
+    return place.account ? switchingTo(place) : opening(place);
   });
   // Remove from list, from a circle's menu (the page asked the person first): only a Cloud or a server saved by hand that
   // main listed as removable. A server is forgotten here; a Cloud is taken off the person's list at the Admin.

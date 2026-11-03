@@ -30,9 +30,8 @@ import type { RoutineManager } from "../routines.ts";
 import { readSectionContext } from "../section-context.ts";
 import { sectionKey, type BotRecord, type GroupRecord, type Store } from "../store.ts";
 import { createTeamBackup, importTeamBackup } from "../team-backup.ts";
-import { fetchGithubTeam, fetchGrokTemplateCard, fetchLibraryTeam, fetchTeamCatalog } from "../team-library.ts";
+import { fetchGithubTeam, fetchLibraryTeam, fetchTeamCatalog } from "../team-library.ts";
 import { createTeamManifest, parseTeamManifest } from "../team-manifest.ts";
-import { CursorFallback, defaultCursorSession, type CursorSession } from "../cursor-session.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
@@ -56,8 +55,6 @@ export interface TeamRouteDeps {
   collectTeamSkills(bots: readonly BotRecord[], selection: unknown):
     | { ok: true; all: boolean; skillsByBot: Map<string, ExportablePackageSkill[]>; skipped: TeamExportSkip[]; available: string[] }
     | { ok: false; error: string; available: string[] };
-  /** The optional Cursor sign-in behind the one-click Grok Bot import; the app's own by default. */
-  cursor?: () => CursorSession;
   /** On a Team Cloud: false for someone else's private chat, which a team backup never carries. */
   threadShown?(auth: RequestAuth): (threadId: string) => boolean;
 }
@@ -67,7 +64,6 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
     store, cfg, broadcast, publicBot, publicGroupState, groupWithThread, defaultSelection, defaultsPresetFor,
     packageImportDeps, starterNotes, checkedExportSkillNames, collectExportSkills, collectTeamSkills,
   } = deps;
-  const cursorSession = deps.cursor ?? defaultCursorSession;
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     let m: RegExpMatchArray | null = null;
     const routines = deps.routines();
@@ -225,42 +221,6 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
         const status = (error as { status?: number }).status === 404 ? 404 : 400;
         return json(res, status, { error: error instanceof Error ? error.message : "The GitHub team could not be loaded" });
       }
-    }
-    if (method === "POST" && path === "/api/team-library/grok") {
-      // The public card only (name, creator, description): the full setup comes from the person's own Grok Bot.
-      const body = await readBody(req);
-      if (typeof body.url !== "string" || !body.url.trim()) {
-        return json(res, 400, { error: "A Grok Bot share link is required" });
-      }
-      let card: Awaited<ReturnType<typeof fetchGrokTemplateCard>>;
-      try {
-        card = await fetchGrokTemplateCard(body.url);
-      } catch (error) {
-        const status = (error as { status?: number }).status;
-        return json(res, status === 400 || status === 404 ? status : 502, {
-          error: error instanceof Error ? error.message : "The Grok Bot could not be loaded",
-        });
-      }
-      // Signed in to Cursor: the full setup too. Any failure keeps the card and the copy-paste export, with one line why.
-      const session = cursorSession();
-      if (!(await session.status()).signedIn) return json(res, 200, card);
-      try {
-        return json(res, 200, { ...card, export: await session.fetchTemplate(card) });
-      } catch (error) {
-        return json(res, 200, { ...card, exportNote: error instanceof CursorFallback ? error.message : "Cursor could not share this template's setup." });
-      }
-    }
-    if (method === "GET" && path === "/api/team-library/cursor") {
-      res.setHeader("cache-control", "no-store");
-      return json(res, 200, await cursorSession().status());
-    }
-    if (method === "POST" && path === "/api/team-library/cursor/sign-in") {
-      res.setHeader("cache-control", "no-store");
-      return json(res, 200, cursorSession().startSignIn());
-    }
-    if (method === "POST" && path === "/api/team-library/cursor/sign-out") {
-      cursorSession().signOut();
-      return json(res, 200, await cursorSession().status());
     }
     if (method === "GET" && path === "/api/teams/scout") {
       // Creates nothing: bots exist only once the person sends the manifest to /api/teams/import.
