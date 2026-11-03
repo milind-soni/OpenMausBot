@@ -64,7 +64,7 @@ async function server(env: NodeJS.ProcessEnv = {}) {
   const header = (name: string) => `Routine ${JSON.stringify(name)} — do this now:`;
   /** Rows about these conversations in the workspace Chief's incidents and escalations conversations. */
   const chiefRows = async (...threadIds: string[]) => (await Promise.all((await api("GET", "/api/bots")).bots
-    .flatMap((each: any) => (each.tasks ?? []).filter((task: any) => task.title === "Team incidents" || task.title === "Team escalations"))
+    .flatMap((each: any) => (each.tasks ?? []).filter((task: any) => task.title === "Problems to look at" || task.title === "Team escalations"))
     .map(async (task: any) => (await messages(task.threadId)).filter((message) => threadIds.includes(message.threadRef?.threadId))))).flat();
   /** Whether the turn the script answered with `key` was told that only its last reply leaves the run. */
   const toldOnlyReplyLeaves = (key: string) => {
@@ -222,7 +222,7 @@ it("asks the person in the main chat when a run needs them, and their answer the
   const s = await server();
   s.script([
     { key: "run", match: [s.header("Acme replies")], reply: "I drafted a reply to Acme's invoice question.\nNEEDS INPUT: Should I send it?" },
-    { key: "answer", match: ["Yes, send it."], reply: "Sent.", expectContextIncludes: ["Your automation", "Acme replies", "Should I send it?"] },
+    { key: "answer", match: ["Yes, send it."], reply: "Sent.", expectContextIncludes: ["[From routine ", "Acme replies", "Should I send it?"] },
   ]);
   const id = await s.runNow(await s.routine("Acme replies"));
   await s.settled(id);
@@ -242,7 +242,7 @@ it("takes a 👍 on a run's question in the chat as the answer, with that report
   const s = await server();
   s.script([
     { key: "run", match: [s.header("Acme replies")], reply: "I drafted a reply to Acme's invoice question.\nNEEDS INPUT: Should I send it?" },
-    { key: "answer", match: ["reacted 👍"], reply: "Sent.", expectContextIncludes: ["Your automation", "Acme replies", "Should I send it?"] },
+    { key: "answer", match: ["reacted 👍"], reply: "Sent.", expectContextIncludes: ["[From routine ", "Acme replies", "Should I send it?"] },
   ]);
   const id = await s.runNow(await s.routine("Acme replies"));
   await s.reported(id, "posted");

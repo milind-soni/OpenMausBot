@@ -14,7 +14,8 @@ const rules = (host: EgressHost, over: Partial<EgressRules> = {}): EgressRules =
   host,
   ownPort: (port) => port === 8799,
   botPort: async (port) => port === 3000,
-  localNetwork: true,
+  // As in BrowserEgress.rules(): the desktop's local network is open by default, a server's switch is off.
+  localNetwork: host !== "server",
   allowed: () => false,
   ...over,
 });
@@ -134,6 +135,22 @@ describe("what each host lets a bot's browser reach", () => {
     expect(await decide("server", "127.0.0.1:9000", ["127.0.0.1"], { allowed: (address, port) => address === "127.0.0.1" && port === 9000 })).toBeNull();
     expect(await decide("cloud", "localhost:3000", ["127.0.0.1"])).toBeNull();
     expect(await decide("cloud", "localhost:9000", ["127.0.0.1"], { allowed: () => true })).toBe("this-computer");
+  });
+
+  it("lets a server's owner open this server's own sites and its local network, but never OpenMausBot or metadata", async () => {
+    const on = { localNetwork: true };
+    expect(await decide("server", "app.example:443", ["198.51.100.7"], on)).toBeNull();
+    expect(await decide("server", "localhost:5173", ["127.0.0.1"], on)).toBeNull();
+    expect(await decide("server", "127.0.0.1:5173", ["127.0.0.1"], on)).toBeNull();
+    expect(await decide("server", "evil.example:5173", ["127.0.0.1"], on)).toBe("this-computer");
+    expect(await decide("server", "nas:443", ["10.0.0.20"], on)).toBeNull();
+    expect(await decide("server", "app.example:8799", ["198.51.100.7"], on)).toBe("omb");
+    expect(await decide("server", "169.254.169.254:80", ["169.254.169.254"], on)).toBe("metadata");
+    expect(await decide("server", "172.17.0.1:8799", ["172.17.0.1"], on)).toBe("omb");
+    const off = { localNetwork: false };
+    expect(await decide("server", "app.example:443", ["198.51.100.7"], off)).toBe("this-computer");
+    expect(await decide("server", "nas:443", ["10.0.0.20"], off)).toBe("local-network");
+    expect(await decide("cloud", "app.example:443", ["198.51.100.7"], on)).toBe("this-computer");
   });
 
   it("keeps a server off the local network unless an admin allowed it, and Cloud off it always", async () => {

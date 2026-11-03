@@ -257,7 +257,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   }
   if (notice === TWO_PLACES_NOTICE && two.suggest) {
     const { key, kind } = two.suggest;
-    return <TwoPlacesCard suggest={two.suggest}
+    return <TwoPlacesCard key={key} suggest={two.suggest}
       onBring={() => { track("two_places_card", { action: "bring", kind }); return two.accept(key).then(close); }}
       onDismiss={() => { track("two_places_card", { action: "not_now", kind }); two.dismiss(key); close(); }} />;
   }

@@ -178,7 +178,7 @@ export function BrowserProfilesManager({ bot, onProfileChanged, disabled = false
           </p>
           {usesMyChrome(selectedProfile) ? <>
             {chromeNote}
-            {!myChrome && <p className="text-[11px] leading-relaxed text-ink-secondary">{t("settings.profiles.myChromeLend")}</p>}
+            {!myChrome && <p className="text-[11px] leading-relaxed text-ink-secondary">{t("settings.profiles.myChromeShare")}</p>}
           </>
             : (selected === "" || selectedProfile) && (
               <SignedInSites key={`${currentBot.id}:${selected}`} target={{ bot: currentBot.id }} scope={browserScope(state.config?.team, bot?.threadId)} sharedBy={selected ? usersOf(selected) : [currentBot.name]} disabled={locked} />
@@ -194,7 +194,7 @@ export function BrowserProfilesManager({ bot, onProfileChanged, disabled = false
             <button type="submit" disabled={locked || !name.trim() || profiles.length >= 20} className={`${buttonClass} flex items-center gap-1`}><Plus size={13} />{t("settings.profiles.create")}</button>
           </form>
           {profiles.length >= 20 && <p className="text-[11px] text-ink-secondary">{t("settings.profiles.limit")}</p>}
-          {!myChrome && profiles.length > 0 && <p className="text-[11px] leading-relaxed text-ink-secondary">{t(myChromeLendable ? "settings.profiles.myChromeLend" : "settings.profiles.myChromeUnavailable")}</p>}
+          {!myChrome && profiles.length > 0 && <p className="text-[11px] leading-relaxed text-ink-secondary">{t(myChromeLendable ? "settings.profiles.myChromeShare" : "settings.profiles.myChromeUnavailable")}</p>}
           {!profiles.length && <p className="text-[12px] text-ink-secondary">{t("settings.profiles.sharedEmpty")}</p>}
           <div className="divide-y divide-hairline/30">
             {profiles.map((profile) => {

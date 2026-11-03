@@ -16,6 +16,8 @@ const INPUT = cn(KEY_FIELD, "font-sans");
 /** A slow computer can take minutes before a local model's first words, so the wait is the person's call. */
 export const REPLY_WAIT_CHOICES = [5, 10, 20, 30, 60] as const;
 const ICON_BUTTON = "ui-icon-button shrink-0 hover:text-ink";
+/** Google's Gemini API speaks the OpenAI protocol here; the key comes from Google AI Studio. */
+export const GEMINI_PRESET = { name: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai" } as const;
 
 export function OtherOpenAiCompatServers() {
   const { state } = useStore();
@@ -109,6 +111,15 @@ function AddedServers({ servers }: { servers: Array<InstanceInfo & { url?: strin
         </div>
       ))}
       <div className="mt-2 flex flex-col gap-1.5">
+        <button
+          type="button"
+          onClick={() => { setName(GEMINI_PRESET.name); setUrl(GEMINI_PRESET.url); }}
+          disabled={busy !== null}
+          className="ui-button self-start"
+        >
+          {t("apiInstances.geminiPreset")}
+        </button>
+        {url.trim() === GEMINI_PRESET.url && <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.geminiKeyHint")}</p>}
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("apiInstances.name")} aria-label={t("apiInstances.name")}
           spellCheck={false} disabled={busy !== null} className={INPUT} />
         <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://api.example.com/v1" aria-label={t("apiInstances.url")}
