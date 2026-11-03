@@ -120,7 +120,7 @@ function Gallery() {
   const all = useMemo(() => bots(stateName), []);
   const view: InboxView = { botId: "scout", threadId: INBOX, rows: inboxRows(stateName), anchor: inboxRows(stateName)[0]?.id ?? null };
   setInboxView(view);
-  if (surface === "panel") openInbox(view.rows[0]?.kind === "ask" && stateName !== "answered" ? { reading: view.rows[0].id } : { tab: stateName === "answered" ? "done" : "needs-you" });
+  if (surface === "panel") openInbox(view.rows[0]?.kind === "ask" && stateName !== "answered" ? { reading: view.rows[0].id } : {});
   const shown = surface === "chat" ? all[0]! : all[1]!;
   const state: AppState = { ...initialState, bots: all, selectedId: shown.id, connected: true };
   const value = { state, dispatch: () => {}, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };

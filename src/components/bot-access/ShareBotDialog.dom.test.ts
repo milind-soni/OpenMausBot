@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
-// A team bot's Share dialog in a real DOM: who has access at what level, adding a teammate from the keyboard, a change
-// applied at once with its Undo, handing the bot on, and what someone who can't edit the bot is shown.
+// A team bot's Share dialog in a real DOM: whether everyone in the team can use the bot or only the people added, adding
+// a teammate from the keyboard, a change applied at once with its Undo, handing the bot on, and what someone who can't
+// edit the bot is shown. A person's stored level is kept, never shown.
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -75,54 +76,41 @@ afterEach(() => {
   setTeamPeople(null);
 });
 
-it("lists the owner first as quiet text, then each person added with their level, and what everyone in the team gets", async () => {
+it("lists who looks after it first as quiet text, then each person added with no level shown, and what everyone in the team gets", async () => {
   await open(editable);
   expect([...dialog()!.querySelectorAll("[data-share-person]")].map((row) => row.getAttribute("data-share-person"))).toEqual([ADA.email, BOB.email, CARA.email]);
   const owner = dialog()!.querySelector(`[data-share-person="${ADA.email}"]`)!;
   expect(owner.textContent).toContain("Ada (you)");
-  expect(owner.textContent).toContain("Owner");
+  expect(owner.textContent).toContain("Looks after it");
   expect(owner.querySelector("button")).toBeNull();
-  expect(menuOf("What Bob can do").textContent).toBe("Can view");
+  expect(menuOf("Bob's access").textContent).toBe("Added");
+  expect(dialog()!.textContent).not.toContain("Can view");
+  expect(dialog()!.textContent).not.toContain("Can edit");
   expect(dialog()!.querySelector("select")).toBeNull();
   expect(dialog()!.querySelector("[data-share-general]")!.getAttribute("data-share-general")).toBe("none");
   expect(dialog()!.textContent).toContain("Admins can always edit every bot.");
 });
 
-it("opens a level on a real menu: each level on two lines, a check on the current one, then a divider and Remove access", async () => {
+it("opens a person's real menu: have them look after it, then a divider and Remove access, and no levels", async () => {
   await open(editable);
-  await openMenu("What Bob can do");
-  expect(rows().map((row) => row.dataset.menuKey)).toEqual(["view", "chat", "edit", "owner", "remove"]);
-  expect(rows().map((row) => row.getAttribute("role"))).toEqual(["menuitemradio", "menuitemradio", "menuitemradio", "menuitem", "menuitem"]);
-  expect(rows()[0]!.textContent).toBe("Can viewRead its shared conversations");
-  expect(rows().filter((row) => row.getAttribute("aria-checked") === "true").map((row) => row.dataset.menuKey)).toEqual(["view"]);
-  expect(rows()[0]!.querySelector("svg")).not.toBeNull();
-  expect(rows()[1]!.querySelector("svg")).toBeNull();
+  await openMenu("Bob's access");
+  expect(rows().map((row) => row.dataset.menuKey)).toEqual(["owner", "remove"]);
+  expect(rows().map((row) => row.getAttribute("role"))).toEqual(["menuitem", "menuitem"]);
+  expect(rows()[0]!.textContent).toBe("Have Bob look after it");
   expect(document.querySelectorAll('[role="menu"] [role="separator"]')).toHaveLength(1);
-  expect(rows()[3]!.parentElement!.querySelector('[role="separator"]')).not.toBeNull();
+  expect(rows()[1]!.parentElement!.querySelector('[role="separator"]')).not.toBeNull();
 });
 
-it("offers nothing below what everyone already gets", async () => {
-  await open(payroll({ yourAccess: "edit", access: { everyone: "chat", people: { [BOB.email]: "edit" } } }));
-  await openMenu("What Bob can do");
-  expect(rows().filter((row) => row.disabled).map((row) => row.dataset.menuKey)).toEqual(["view"]);
-});
-
-it("applies a change at once, says so with Undo, and Undo puts the sharing back", async () => {
+it("removes a person at once, says so with Undo, and Undo puts the sharing back with their stored level", async () => {
   await open(editable);
-  await choose("What Bob can do", "edit");
-  expect(server.calls).toEqual([{ path: "/api/bots/payroll/access", body: { everyone: "none", people: { [BOB.email]: "edit", [CARA.email]: "chat" } } }]);
+  await choose("Bob's access", "remove");
+  expect(server.calls).toEqual([{ path: "/api/bots/payroll/access", body: { everyone: "none", people: { [CARA.email]: "chat" } } }]);
   const toast = document.querySelector<HTMLElement>("[data-access-toast]")!;
-  expect(toast.textContent).toContain("Bob · Can edit");
+  expect(toast.textContent).toContain("Removed Bob");
   toast.querySelector("button")!.click();
   await settle();
   expect(server.calls[1]).toEqual({ path: "/api/bots/payroll/access", body: editable.access });
   expect(document.querySelector("[data-access-toast]")).toBeNull();
-});
-
-it("sends nothing when the current level is chosen again", async () => {
-  await open(editable);
-  await choose("What Bob can do", "view");
-  expect(server.calls).toEqual([]);
 });
 
 it("suggests teammates not yet added, and arrow keys and Enter add one at Can chat with Undo", async () => {
@@ -140,7 +128,8 @@ it("suggests teammates not yet added, and arrow keys and Enter add one at Can ch
   expect(offered().find((row) => row.getAttribute("aria-selected") === "true")!.dataset.shareSuggestion).toBe(EVE.email);
   await press("Enter");
   expect(server.calls.at(-1)!.body).toEqual({ everyone: "none", people: { [BOB.email]: "view", [CARA.email]: "chat", [EVE.email]: "chat" } });
-  expect(document.querySelector("[data-access-toast]")!.textContent).toContain("Added Eve · Can chat");
+  expect(document.querySelector("[data-access-toast]")!.textContent).toContain("Added Eve");
+  expect(document.querySelector("[data-access-toast]")!.textContent).not.toContain("Can chat");
   expect(offered()).toEqual([]);
   expect(document.activeElement).toBe(field());
 });
@@ -175,12 +164,13 @@ it("has nobody to add when everyone can already edit", async () => {
   expect(dialog()!.textContent).toContain("Everyone in the team can already edit it.");
 });
 
-it("removes a person, opens the bot to everyone and sets what everyone gets, each from a quiet menu", async () => {
+it("removes a person, and switches between everyone in the team using it and only people added, from quiet menus", async () => {
   await open(editable);
-  await choose("What Cara can do", "remove");
+  await choose("Cara's access", "remove");
   expect(server.calls.at(-1)!.body).toEqual({ everyone: "none", people: { [BOB.email]: "view" } });
   await choose("General access", "everyone");
   expect(server.calls.at(-1)!.body).toEqual({ everyone: "chat", people: editable.access!.people });
+  expect(document.querySelector("[data-access-toast]")!.textContent).toContain("Everyone in Acme can use it now");
   flushSync(() => root.unmount());
   document.body.innerHTML = "";
   host = document.createElement("div");
@@ -188,26 +178,26 @@ it("removes a person, opens the bot to everyone and sets what everyone gets, eac
   root = createRoot(host);
   await open(payroll({ yourAccess: "edit", access: { everyone: "chat", people: {} } }));
   expect(dialog()!.textContent).toContain("Everyone in Acme can find it and chat with it.");
-  await openMenu("What everyone in Acme can do");
-  expect(rows().map((row) => row.dataset.menuKey)).toEqual(["view", "chat", "edit"]);
-  rows()[2]!.click();
+  expect(menuOf("General access").textContent).toBe("Everyone in Acme can use it");
+  expect(document.querySelector('[data-share-bot] button[aria-label="What everyone in Acme can do"]'), "no level for everyone on a team").toBeNull();
+  await openMenu("General access");
+  expect(rows().map((row) => row.dataset.menuKey)).toEqual(["none", "everyone"]);
+  rows()[0]!.click();
   await settle();
-  expect(server.calls.at(-1)!.body).toEqual({ everyone: "edit", people: {} });
-  await choose("General access", "none");
   expect(server.calls.at(-1)!.body).toEqual({ everyone: "none", people: {} });
 });
 
 it("hands the bot to someone added only after a confirmation", async () => {
   await open(editable);
-  await choose("What Bob can do", "owner");
+  await choose("Bob's access", "owner");
   expect(server.calls).toEqual([]);
-  expect(dialog()!.querySelector(`[data-share-make-owner="${BOB.email}"]`)!.textContent).toContain("Make Bob the owner?");
+  expect(dialog()!.querySelector(`[data-share-make-owner="${BOB.email}"]`)!.textContent).toContain("Have Bob look after Payroll?");
   expect(document.activeElement?.textContent).toBe("Cancel");
   await press("Escape");
   expect(dialog()!.querySelector("[data-share-make-owner]")).toBeNull();
   expect(dialog()).not.toBeNull();
-  await choose("What Bob can do", "owner");
-  [...dialog()!.querySelectorAll("button")].find((button) => button.textContent === "Make owner")!.click();
+  await choose("Bob's access", "owner");
+  [...dialog()!.querySelectorAll("button")].find((button) => button.textContent === "Have Bob look after it")!.click();
   await settle();
   expect(server.calls).toEqual([{ path: "/api/bots/payroll/reports-to", body: { email: BOB.email } }]);
   expect(dialog()!.querySelector("[data-share-make-owner]")).toBeNull();
@@ -215,22 +205,22 @@ it("hands the bot to someone added only after a confirmation", async () => {
 
 it("stays on the confirmation and says why when the handover is refused", async () => {
   await open(editable);
-  await choose("What Bob can do", "owner");
-  server.refuse = "Bob already has a Chief of Staff";
-  [...dialog()!.querySelectorAll("button")].find((button) => button.textContent === "Make owner")!.click();
+  await choose("Bob's access", "owner");
+  server.refuse = "Bob is no longer in the team";
+  [...dialog()!.querySelectorAll("button")].find((button) => button.textContent === "Have Bob look after it")!.click();
   await settle();
-  expect(dialog()!.querySelector("[data-share-make-owner]")!.querySelector('[role="alert"]')!.textContent).toBe("Bob already has a Chief of Staff");
+  expect(dialog()!.querySelector("[data-share-make-owner]")!.querySelector('[role="alert"]')!.textContent).toBe("Bob is no longer in the team");
   dialog()!.focus();
   await press("Escape");
   expect(dialog()!.querySelector("[data-share-make-owner]")).toBeNull();
   expect(dialog()!.querySelector('[role="alert"]')).toBeNull();
 });
 
-it("offers Make owner only to whoever may hand it on, and never for an address nobody on the team has", async () => {
+it("offers the handover only to whoever may hand it on, and never for an address nobody on the team has", async () => {
   setTeamPeople({ people: [ADA, BOB, CARA, { ...DAN, you: true }, EVE], me: { ...DAN, you: true }, admin: false, needsYou: [] });
   await open(payroll({ yourAccess: "edit", access: { everyone: "none", people: { [BOB.email]: "view", [DAN.email]: "edit" } } }));
-  await openMenu("What Bob can do");
-  expect(rows().map((row) => row.dataset.menuKey)).toEqual(["view", "chat", "edit", "remove"]);
+  await openMenu("Bob's access");
+  expect(rows().map((row) => row.dataset.menuKey)).toEqual(["remove"]);
   flushSync(() => root.unmount());
   document.body.innerHTML = "";
   host = document.createElement("div");
@@ -238,17 +228,17 @@ it("offers Make owner only to whoever may hand it on, and never for an address n
   root = createRoot(host);
   setTeamPeople({ people: [{ ...ADA, you: true }, BOB], me: { ...ADA, you: true }, admin: true, needsYou: [] });
   await open(payroll({ yourAccess: "edit", access: { everyone: "none", people: { "@acme.test": "chat" } } }));
-  await openMenu("What @acme.test can do");
-  expect(rows().map((row) => row.dataset.menuKey)).toEqual(["view", "chat", "edit", "remove"]);
+  await openMenu("@acme.test's access");
+  expect(rows().map((row) => row.dataset.menuKey)).toEqual(["remove"]);
 });
 
-it("shows someone who can't edit the same layout read only: their level, the owner and the admins line", async () => {
+it("shows someone who can't edit the same layout read only: themselves with no level, who looks after it and the admins line", async () => {
   setTeamPeople({ people: [ADA, { ...BOB, you: true }], me: { ...BOB, you: true }, admin: false, needsYou: [] });
   await open(payroll({ yourAccess: "view" }));
   expect([...dialog()!.querySelectorAll("[data-share-person]")].map((row) => row.getAttribute("data-share-person"))).toEqual([ADA.email, BOB.email]);
   const yours = dialog()!.querySelector("[data-share-yours]")!;
   expect(yours.textContent).toContain("Bob (you)");
-  expect(yours.textContent).toContain("Can view");
+  expect(yours.textContent).not.toContain("Can view");
   expect(dialog()!.textContent).toContain("Admins can always edit every bot.");
   expect(dialog()!.querySelector("input, select, [data-share-general], [aria-haspopup=menu]")).toBeNull();
 });

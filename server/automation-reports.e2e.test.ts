@@ -64,7 +64,7 @@ async function server(env: NodeJS.ProcessEnv = {}) {
   const header = (name: string) => `Routine ${JSON.stringify(name)} — do this now:`;
   /** Rows about these conversations in the workspace Chief's incidents and escalations conversations. */
   const chiefRows = async (...threadIds: string[]) => (await Promise.all((await api("GET", "/api/bots")).bots
-    .flatMap((each: any) => (each.tasks ?? []).filter((task: any) => task.title === "Team incidents" || task.title === "Team escalations"))
+    .flatMap((each: any) => (each.tasks ?? []).filter((task: any) => task.title === "Problems to look at" || task.title === "Team escalations"))
     .map(async (task: any) => (await messages(task.threadId)).filter((message) => threadIds.includes(message.threadRef?.threadId))))).flat();
   /** Whether the turn the script answered with `key` was told that only its last reply leaves the run. */
   const toldOnlyReplyLeaves = (key: string) => {
