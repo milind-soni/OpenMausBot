@@ -16,7 +16,7 @@ export function ChromeRail() {
   useEffect(() => window.ogb?.rail?.onSkin?.(wearSkin), []);
   const accounts = useAccountsSheet(), list = useWindowPlacesList();
   return <DesktopCapabilitiesProvider>
-    <div data-chrome-rail className={cn("h-full", list.open && !list.besideRail && "invisible")}><PlacesRail chrome /></div>
+    <div data-chrome-rail className={cn("h-full", list.hidesRail && "invisible")}><PlacesRail chrome /></div>
     {accounts.open && <AccountsSheet onClose={accounts.close} />}
     {list.open && <WindowPlacesList onClose={list.close} />}
   </DesktopCapabilitiesProvider>;

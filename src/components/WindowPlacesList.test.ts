@@ -21,7 +21,7 @@ const workspaces = { places: vi.fn(async () => state), open: vi.fn(async () => {
 const rail = { expand: vi.fn(async () => {}), listAsked: vi.fn(async () => { const was = asked; asked = null; return was; }), listClosed: vi.fn(async () => {}),
   onOpenList: vi.fn((callback: (besideRail: boolean) => void) => { opening = callback; return () => { opening = null; }; }), onSkin: vi.fn(() => () => {}) };
 let host: HTMLDivElement, root: Root | null = null;
-const flush = async () => { await act(async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); }); };
+const flush = async () => { for (let round = 0; round < 3; round++) await act(async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); }); };
 async function mount() {
   root = createRoot(host);
   await act(async () => { await refreshPlaces(); root!.render(createElement(ChromeRail)); });
@@ -41,6 +41,32 @@ beforeEach(() => {
   host = document.createElement("div"); document.body.append(host);
 });
 afterEach(async () => { await act(async () => root?.unmount()); root = null; host.remove(); document.body.innerHTML = ""; });
+
+it("shows only once the view covers the window, never in the rail's strip", async () => {
+  await mount();
+  let answered = () => {};
+  rail.expand.mockImplementationOnce(() => new Promise<void>((resolve) => { answered = resolve; }));
+  await openIt();
+  expect(rail.expand).toHaveBeenCalledWith(true);
+  expect(list(), "main hasn't widened the view yet").toBeNull();
+  await act(async () => answered());
+  await flush();
+  expect(list()).toBeTruthy();
+});
+
+it("sizes itself against the window, not the viewport units a resize leaves behind", async () => {
+  await mount();
+  await openIt();
+  expect(list()!.className).toContain("max-w-[calc(100%-32px)]");
+  expect(list()!.className).not.toContain("100vw");
+});
+
+it("the keyboard lands on the place on screen", async () => {
+  state = { ...state, list: [place("home", "My Cloud"), place("second", "Second", { active: true })] };
+  await mount();
+  await openIt();
+  expect(document.activeElement).toBe(row("second"));
+});
 
 it("nothing until the tag asks; then every place main lists, its kind in plain words, the one on screen marked, and the window covered", async () => {
   await mount();
