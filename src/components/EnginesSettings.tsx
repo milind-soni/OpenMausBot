@@ -300,36 +300,41 @@ function EngineAdvanced({ instance }: { instance: InstanceInfo }) {
   );
 }
 
-function RemoveAntigravityAccount({ instance }: { instance: InstanceInfo }) {
+/** Remove drops an added account; Sign out forgets a signed-in account's Google sign-in, the first one too. */
+function AntigravityAccountAction({ instance, action }: { instance: InstanceInfo; action: "remove" | "signOut" }) {
   const { state, dispatch, refreshInstances } = useStore();
   const [confirming, setConfirming] = useState(false);
-  const [removing, setRemoving] = useState(false);
+  const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const usedBy = state.bots.filter((bot) => bot.modelSelection.instanceId === instance.instanceId).length;
-  const remove = async () => {
+  const remove = action === "remove";
+  const usedBy = remove ? state.bots.filter((bot) => bot.modelSelection.instanceId === instance.instanceId).length : 0;
+  const label = t(remove ? "accounts.remove" : "accounts.signOut");
+  const run = async () => {
     setConfirming(false);
-    setRemoving(true);
+    setRunning(true);
     setError(null);
     try {
-      const { instances } = await api(`/api/instances/${encodeURIComponent(instance.instanceId)}`, { method: "DELETE" });
+      const path = `/api/instances/${encodeURIComponent(instance.instanceId)}${remove ? "" : "/auth/sign-out"}`;
+      const { instances } = await api(path, { method: remove ? "DELETE" : "POST" });
       if (Array.isArray(instances)) dispatch({ type: "instances", instances });
       else await refreshInstances();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setRemoving(false);
+      setRunning(false);
     }
   };
   return <>
     <div className="flex flex-wrap items-center gap-2">
-      <button type="button" disabled={removing || usedBy > 0} onClick={() => setConfirming(true)} className="rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-50">
-        {removing ? <Loader2 size={13} className="animate-spin" /> : t("accounts.remove")}
+      <button type="button" disabled={running || usedBy > 0} onClick={() => setConfirming(true)} className={cn("rounded-lg px-2.5 py-1.5 text-[12px] font-medium disabled:cursor-not-allowed disabled:opacity-50", remove ? "text-danger hover:bg-danger/10" : "text-ink-secondary hover:bg-raised hover:text-ink")}>
+        {running ? <Loader2 size={13} className="animate-spin" /> : label}
       </button>
       {usedBy > 0 && <p className="text-[11px] text-ink-secondary">{t("accounts.inUse", { count: String(usedBy) })}</p>}
     </div>
     {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
-    <ConfirmDialog open={confirming} title={t("accounts.removeTitle", { name: instance.displayName })} body={t("accounts.removeBodyAntigravity")}
-      confirmLabel={t("accounts.remove")} tone="neutral" pending={removing} onCancel={() => { if (!removing) setConfirming(false); }} onConfirm={() => void remove()} />
+    <ConfirmDialog open={confirming} title={t(remove ? "accounts.removeTitle" : "accounts.signOutTitle", { name: instance.displayName })}
+      body={t(remove ? "accounts.removeBodyAntigravity" : "accounts.signOutBody")}
+      confirmLabel={label} tone="neutral" pending={running} onCancel={() => { if (!running) setConfirming(false); }} onConfirm={() => void run()} />
   </>;
 }
 
@@ -368,7 +373,8 @@ function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: 
         <div className="mt-3 space-y-3">
           {instance.snapshot.authenticated && <p className="break-words text-[12px] text-ink-secondary">{instance.snapshot.account?.email ?? t("engineSetup.antigravity.emailUnavailable")}</p>}
           <AddAccount label={t("engineSetup.antigravity.addAccount")} endpoint="/api/instances/antigravity-accounts" extra={{ sourceInstanceId: instance.instanceId }} onAdded={() => {}} />
-          {instance.instanceId.startsWith("antigravity-") && <RemoveAntigravityAccount instance={instance} />}
+          {instance.snapshot.authenticated === true && instance.authentication?.signOut === true && <AntigravityAccountAction instance={instance} action="signOut" />}
+          {instance.instanceId.startsWith("antigravity-") && <AntigravityAccountAction instance={instance} action="remove" />}
         </div>
       )}
       <EngineAdvanced instance={instance} />

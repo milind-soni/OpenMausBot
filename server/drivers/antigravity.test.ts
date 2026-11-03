@@ -163,6 +163,38 @@ describe("Antigravity sign-in lifecycle", () => {
     }
   });
 
+  it("signs out by forgetting only this account's stored Google sign-in", async () => {
+    ensureDirs();
+    const fake = fakeRuntime();
+    const instanceId = "antigravity-sign-out";
+    const profile = antigravityProfileDirectory(instanceId);
+    const token = join(profile, "antigravity-acp", "acp_token.json");
+    const other = join(antigravityProfileDirectory("antigravity-other"), "antigravity-acp", "acp_token.json");
+    for (const file of [token, other]) {
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, "{}", { mode: 0o600 });
+    }
+    const instance = await AntigravityDriver.create({
+      instanceId, displayName: "Antigravity", enabled: true,
+      config: { cli: fake.executable, fullAuto: false },
+      environment: { FAKE_ACP_AUTH_METHOD: "oauth-personal" },
+    });
+    try {
+      expect((await instance.snapshot()).authenticated).toBe(true);
+      expect(instance.signOut).toBeTypeOf("function");
+      await instance.signOut!();
+      expect(existsSync(token)).toBe(false);
+      expect(existsSync(join(profile, "antigravity-acp", "settings.json"))).toBe(true);
+      expect(existsSync(other)).toBe(true);
+      expect((await instance.snapshot()).authenticated).toBe(false);
+      await instance.signOut!();
+    } finally {
+      await instance.dispose();
+      rmSync(profile, { recursive: true, force: true });
+      rmSync(antigravityProfileDirectory("antigravity-other"), { recursive: true, force: true });
+    }
+  });
+
   it("uses the same discovered PATH for readiness and Google sign-in", async () => {
     const fake = fakeRuntime();
     const executable = join(fake.directory, process.platform === "win32" ? "agy_acp_server.exe" : "agy_acp_server.par");

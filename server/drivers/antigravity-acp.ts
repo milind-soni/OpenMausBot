@@ -121,6 +121,11 @@ export async function removeAntigravityProfile(instanceId: string, baseDir = DAT
     });
 }
 
+/** Signing out forgets only this account's stored Google sign-in; its profile stays for the next sign-in. */
+export async function removeAntigravitySignIn(instanceId: string, baseDir = DATA_DIR): Promise<void> {
+  await rm(join(antigravityProfileDirectory(instanceId, baseDir), "antigravity-acp", "acp_token.json"), { force: true, maxRetries: 4, retryDelay: 250 });
+}
+
 /** An isolated Google profile per instance; foreign Google credentials are stripped so the account
  * and billing never change silently. */
 export async function prepareAntigravityProfile(input: {
