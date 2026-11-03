@@ -183,6 +183,7 @@ describe("how long a server may take to reply", () => {
     fixture.api.mockResolvedValue({ instances: [] });
     const select = builtInSelect("http://localhost:11434/v1")!;
     expect(select.props["aria-label"]).toBe("How long to wait for Other (OpenAI-compatible) to reply");
+    expect(JSON.stringify(select.props.children)).toContain("Wait 30 min");
     select.props.onChange!({ target: { value: "30" } });
     await Promise.resolve();
     expect(fixture.api).toHaveBeenLastCalledWith("/api/instances/openaiCompat", { method: "PATCH", body: JSON.stringify({ replyWaitMinutes: 30 }) });
