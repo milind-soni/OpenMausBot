@@ -307,6 +307,34 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     expect(instance.resetAt("claude"), "a past time is no reset time").toBeNull();
   });
 
+  it("ends a Codex hold once fresh usage shows room and no window resetting at the hold's time, as after a plan upgrade", () => {
+    const codexAccounts = [{ id: "codex", name: "Codex", driver: "codex" as const, environment: {} }];
+    const dir = mkdtempSync(join(tmpdir(), "omb-limit-holds-"));
+    try {
+      const file = join(dir, "limit-holds.json");
+      const boot = () => new LimitResetClock({ accounts: () => codexAccounts, now: () => NOW, file });
+      const first = boot();
+      first.noteRefusal("codex", NOW + 23 * HOUR);
+      first.noteUsage(report(codex([99, NOW + 2 * HOUR], [99, NOW + 23 * HOUR + 30_000])));
+      expect(first.blockedUntil("codex"), "usage still showing the window that refused keeps the hold").toBe(NOW + 23 * HOUR);
+      const restarted = boot();
+      expect(restarted.blockedUntil("codex"), "the hold outlives a restart").toBe(NOW + 23 * HOUR);
+      restarted.noteUsage(report(codex([3, NOW + 4 * HOUR], [8, NOW + 5 * 24 * HOUR])));
+      expect(restarted.blockedUntil("codex")).toBeNull();
+      expect(restarted.limit("codex")).toEqual(expect.objectContaining({ blocked: false, usedPercent: 8 }));
+      expect(boot().blockedUntil("codex"), "and stays gone after the next restart").toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a Claude hold whatever its usage shows, since Claude refuses on limits those windows do not show", () => {
+    const { instance } = clock();
+    instance.noteRefusal("claude", NOW + 23 * HOUR);
+    instance.noteUsage(report(claude([3, NOW + 4 * HOUR], [8, NOW + 5 * 24 * HOUR])));
+    expect(instance.blockedUntil("claude")).toBe(NOW + 23 * HOUR);
+  });
+
   it("never holds the engine for one model's own limit", () => {
     const { instance } = clock();
     instance.noteRuntimeEvent("claude", { ...refused("t1", NOW + 50 * HOUR), limit: "model" } as RuntimeEvent);

@@ -38,6 +38,18 @@ export function engineLimitFromUsage(row: PlanProviderRow): EngineLimit | null {
   return { ...base, window: fullest.window, usedPercent: fullest.used, resetsAt: fullest.resetsAt, blocked: false };
 }
 
+/** How far apart a refusal's reset and its window's own reset can be: a refusal names its minute, usage the second. */
+const SAME_RESET_MS = 5 * 60_000;
+
+/** A Codex refusal's hold that fresh usage shows is over: no window at its limit and none resetting at the hold's time,
+ * so the window that refused is gone (a plan upgrade, a reset Codex moved). Every new turn goes to another AI while the
+ * engine is held, so no turn could end the hold. Claude keeps its holds: it also refuses on limits these windows do not show. */
+function codexHoldGone(row: PlanProviderRow, limit: EngineLimit, held: number | undefined, guessed: boolean): boolean {
+  if (held === undefined || guessed || limit.driver !== "codex" || limit.blocked || limit.usedPercent === null) return false;
+  const windows = [windowLine("5-hour", row.fiveHour), windowLine("weekly", row.weekly)];
+  return windows.every((line) => line === null || (line.resetsAt !== null && Math.abs(line.resetsAt - held) > SAME_RESET_MS));
+}
+
 const PRODUCT_NAMES: Record<string, string> = { claudeAgent: "Claude", codex: "Codex", grokAgent: "Grok" };
 
 /** "Claude", "Codex", or the name the person gave that engine. */
@@ -180,10 +192,17 @@ export class LimitResetClock {
 
   noteUsage(report: PlanUsageReport): void {
     const next = new Map<string, EngineLimit>();
+    let released = false;
     for (const row of report.providers) {
       const limit = engineLimitFromUsage(row);
-      if (limit) next.set(limit.engine, limit);
+      if (!limit) continue;
+      next.set(limit.engine, limit);
+      if (codexHoldGone(row, limit, this.refusals.get(limit.engine), this.guessed.has(limit.engine))) {
+        this.refusals.delete(limit.engine);
+        released = true;
+      }
     }
+    if (released) this.saveHolds();
     this.usage = next;
     this.checkedAt = this.now();
     this.options.onChange?.();
