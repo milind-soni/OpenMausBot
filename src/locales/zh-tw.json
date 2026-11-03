@@ -86,6 +86,7 @@
   "server.warmSummary.summarized": "已在對話閒置時整理摘要；最新的訊息逐字保留",
   "server.runs.didNotFinish": "這次執行沒有完成。",
   "server.runs.didNotFinishWhy": "這次執行沒有完成：{detail}",
+  "server.runs.partlyDoneWhy": "這次執行只完成了一部分：{detail}",
   "server.runs.recovered": "已恢復：{name} 已於 {time} 正常完成",
   "server.runs.card.line": "例行工作「{name}」{state}",
   "server.runs.state.needsInput": "需要你回覆",

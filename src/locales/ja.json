@@ -109,6 +109,7 @@
   "server.warmSummary.summarized": "会話が止まっている間に要約しました。最新のメッセージはそのまま残ります",
   "server.runs.didNotFinish": "この実行は完了しませんでした。",
   "server.runs.didNotFinishWhy": "この実行は完了しませんでした：{detail}",
+  "server.runs.partlyDoneWhy": "この実行は一部だけ完了しました：{detail}",
   "server.runs.recovered": "復旧しました：{name} は {time} に正常に完了しました",
   "server.runs.card.line": "ルーティン「{name}」は{state}",
   "server.runs.state.needsInput": "あなたの入力を待っています",

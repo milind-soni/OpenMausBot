@@ -510,6 +510,8 @@ export interface WireMessage extends HelperIntroField, SetupCardFields, WaitLine
     place?: PlaceRow;
     /** error rows: epoch ms when the usage limit that stopped the turn resets. */
     limitResetsAt?: number;
+    /** error rows: the reply came back; only a step the turn ran failed or wasn't allowed. */
+    partial?: boolean;
     /** Provider item identity, scoped to the owning turn. */
     itemId?: string;
     /** Whether the harness captured the full redacted result. Private

@@ -101,6 +101,7 @@
   "server.warmSummary.summarized": "esta conversa foi resumida enquanto estava parada; as mensagens mais recentes seguem palavra por palavra",
   "server.runs.didNotFinish": "Esta execução não terminou.",
   "server.runs.didNotFinishWhy": "Esta execução não terminou: {detail}",
+  "server.runs.partlyDoneWhy": "Esta execução foi concluída em parte: {detail}",
   "server.runs.recovered": "Resolvido: {name} terminou bem às {time}",
   "server.runs.card.line": "A rotina “{name}” {state}",
   "server.runs.state.needsInput": "precisa da sua resposta",

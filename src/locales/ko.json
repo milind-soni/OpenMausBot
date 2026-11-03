@@ -152,6 +152,7 @@
   "server.warmSummary.summarized": "대화가 쉬는 동안 요약했습니다. 최근 메시지는 그대로 이어집니다",
   "server.runs.didNotFinish": "이번 실행은 끝나지 않았어요.",
   "server.runs.didNotFinishWhy": "이번 실행은 끝나지 않았어요: {detail}",
+  "server.runs.partlyDoneWhy": "이번 실행은 일부만 끝났어요: {detail}",
   "server.runs.recovered": "복구됨: {name} 실행이 {time}에 정상적으로 끝났어요",
   "server.runs.card.line": "루틴 “{name}”: {state}",
   "server.runs.state.needsInput": "입력이 필요해요",

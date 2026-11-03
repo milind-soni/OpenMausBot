@@ -198,6 +198,14 @@ describe("order and the grey line", () => {
     expect(runLine(run("cancelled", at(0, 9)), NOW)).toMatchObject({ mark: "✗", text: "Stopped" });
   });
 
+  it("marks a run whose reply came back but a step failed as partly done, not as a red failure", () => {
+    const partly = run("failed", at(0, 9, 2), { error: "Stopped because the tool call failed.\nmore", output: "Here is the summary.", partial: true });
+    expect(runLine(partly, NOW)).toEqual({ when: "Today 9:02 AM", mark: "!", text: "Partly done: Stopped because the tool call failed." });
+    expect(statusLine(automation([partly]), NOW)).toBe("On · last ran today 9:02 AM ! · next: Monday 9:00 AM");
+    expect(runLine(run("failed", at(0, 9, 2), { error: "Stopped because the tool call failed." }), NOW)).toMatchObject({ mark: "✗" });
+    expect(statusLine(automation([run("failed", at(0, 9, 2))]), NOW)).toBe("On · last ran today 9:02 AM ✗ · next: Monday 9:00 AM");
+  });
+
   it("says a run that found nothing to tell found nothing new, whatever its last words were", () => {
     expect(runLine(run("completed", at(0, 9, 2), { output: "Checked 14 emails.\nNOTHING NEW", report: { state: "quiet" } }), NOW)).toEqual({ when: "Today 9:02 AM", mark: "✓", text: "Nothing new" });
   });
