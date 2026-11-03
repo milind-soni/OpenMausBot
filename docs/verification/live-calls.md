@@ -97,8 +97,10 @@ with no `needsKey`. Nothing reaches Azure or OpenAI: a refused call never falls
 back to another provider. `GET /api/config` and the stream tell a session
 without the admin scope `live.provider`, never `azureEndpoint` or
 `azureDeployment`. `server/live-access.test.ts` runs each caller above through
-the sign-in gate and the limit; `server/live-azure-access.e2e.test.ts` and
-`server/hosted-access.test.ts` do it on the full server with its `fetch` stubbed.
+the sign-in gate and the limit. `server/live-azure-access.e2e.test.ts` does it on
+the full server with a made-up key and its `fetch` stubbed.
+`server/hosted-access.test.ts` does it for a shared workspace, with no key saved,
+so a caller who gets through stops at the setup prompt.
 
 ## User path
 

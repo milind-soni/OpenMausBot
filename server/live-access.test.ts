@@ -145,6 +145,12 @@ describe("an Azure Live call", () => {
       expect(verdict(riding("https://abc.example.page"))).toBe("sign-in gate 403: forbidden: cross-origin request");
       expect(verdict(riding("null"))).toBe("sign-in gate 403: forbidden: cross-origin request");
     });
+    it("is refused inside the desktop app's window too, where the app adds its owner header to every request", () => {
+      const sandboxed = { ...LOCAL, "x-openmausbot-desktop-owner": "desktop-secret", origin: "null", "sec-fetch-site": "cross-site", "sec-fetch-dest": "empty" };
+      expect(verdict(sandboxed, { resolve: DESKTOP })).toBe("sign-in gate 403: forbidden: cross-origin request");
+      const sameHostPage = { ...LOCAL, "x-openmausbot-desktop-owner": "desktop-secret", origin: "http://127.0.0.1:9999", "sec-fetch-site": "same-site", "sec-fetch-dest": "empty" };
+      expect(verdict(sameHostPage, { resolve: DESKTOP })).toMatch(/^sign-in gate 401: unauthorized: this browser is not signed in/);
+    });
     it("is refused with no credential at all", () => {
       expect(verdict({ ...REMOTE, origin: "https://abc.example.page" })).toMatch(/^sign-in gate 403: forbidden: this request came through a proxy/);
     });
