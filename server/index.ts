@@ -1,5 +1,6 @@
 // Import first: it reads a Cloud home's secrets off the launcher's pipe before any module can start a process.
 import { BOOT_CLOUD_SECRETS } from "./cloud-secrets-boot.ts";
+import { gmailDraftRefusal, reserveGmailDrafts } from "./gmail-draft-policy.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, realpathSync, rmSync } from "node:fs";
@@ -1655,6 +1656,7 @@ type InternalCapability = {
   externalRuntime?: ExternalRuntimeGrant;
   /** A Team Cloud member's own connected-apps bridge: their person key. */
   connectorsFor?: string;
+  gmailDrafts?: Set<string>;
 };
 const MAX_ATTACHED_FILES_PER_TURN = 10;
 const MAX_ROOM_POSTS_PER_TURN = 3;
@@ -14654,6 +14656,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const connectorCalls = rpc?.method === "tools/call" && typeof rpcParams?.name === "string"
           ? connectorCallsIn(rpcParams.name, rpcParams.arguments)
           : [];
+        const draftRefusal = gmailDraftRefusal(coordinator.node(internalCapability.generation)?.text ?? "", connectorCalls);
+        if (draftRefusal) {
+          appendDecision(DATA_DIR, { threadId: internalCapability.threadId, botId: currentSender.id, botName: currentSender.name,
+            tool: connectorCalls.map(call => call.slug).join(", "), decision: "auto-denied", source: "connector-scope", rule: "gmail-drafts", summary: draftRefusal });
+          return refuseOutbound(draftRefusal);
+        }
         if (proactive.fence.refusesConnectorCall(currentSender, internalCapability.threadId, body)) return refuseOutbound(READ_AND_DRAFT_REFUSAL);
         const scopeRefusal = managedPolicy.appsCallRefusal(connectorCalls, serviceSlugs) ?? await teamConnections.callRefusal(internalCapability, connectorCalls); if (scopeRefusal) return refuseOutbound(scopeRefusal);
         const access = connectorAccessDecision(currentSender.connectorScopes, connectorCalls, serviceSlugs);
@@ -14695,6 +14703,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             : req.headers["mcp-session-id"],
           () => {
             requireActiveInternalCapability();
+            const draftReservation = reserveGmailDrafts(connectorCalls, internalCapability.gmailDrafts ??= new Set());
+            if (draftReservation) refuseDispatch(draftReservation);
             const fresh = store.bot(internalCapability.botId);
             if (!fresh || fresh.composio === false || !composio.configured(cfg) || managedPolicy.appsCallRefusal(connectorCalls, serviceSlugs)) refuseDispatch("Connected apps were disabled while this call waited.");
             const freshAccess = connectorAccessDecision(fresh.connectorScopes, connectorCalls, serviceSlugs);

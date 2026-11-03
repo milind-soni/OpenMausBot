@@ -15,6 +15,8 @@ let broker: Server;
 let admin: string;
 let member: string;
 let fullBot: any;
+let draftBot: any;
+const gmailDrafts = new Map<string, Record<string, unknown>>();
 let brokerOrigin = "";
 const relayed: unknown[] = [];
 const evidence: unknown[] = [];
@@ -75,6 +77,17 @@ beforeAll(async () => {
     }
     if (req.url === "/mcp") {
       relayed.push(body);
+      const tools = body.params?.arguments?.tools ?? [{ tool_slug: body.params?.name, arguments: body.params?.arguments }];
+      if (tools.every((tool: any) => ["GMAIL_CREATE_EMAIL_DRAFT", "GMAIL_UPDATE_DRAFT"].includes(tool.tool_slug))) {
+        const results = tools.map((tool: any) => {
+          const args = tool.arguments;
+          const id = tool.tool_slug === "GMAIL_CREATE_EMAIL_DRAFT" ? `draft-${gmailDrafts.size + 1}` : args.draft_id;
+          if (tool.tool_slug === "GMAIL_UPDATE_DRAFT" && !gmailDrafts.has(id)) return { tool_slug: tool.tool_slug, response: { successful: false, error: "Draft not found" } };
+          gmailDrafts.set(id, args);
+          return { tool_slug: tool.tool_slug, response: { successful: true, data: { id, message: { threadId: args.thread_id, body: args.body } } } };
+        });
+        return res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: JSON.stringify({ successful: true, data: { results } }) }] } }));
+      }
       if (blockRelay) {
         relayEntered = true;
         await new Promise<void>(resolve => { blockRelay = resolve; });
@@ -91,13 +104,18 @@ beforeAll(async () => {
   const created = await fetch(fixture.info.url + "/api/bots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Existing Full grant" }) });
   expect(created.status).toBe(201);
   fullBot = (await created.json() as any).bot;
+  const draftCreated = await fetch(fixture.info.url + "/api/bots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Full Gmail draft fixture" }) });
+  expect(draftCreated.status).toBe(201);
+  draftBot = (await draftCreated.json() as any).bot;
   await waitForExit(fixture.child, { signal: "SIGTERM" });
   const botsFile = join(fixture.info.dataDir, "bots.json");
   const bots = JSON.parse(readFileSync(botsFile, "utf8"));
   const saved = bots.find((row: any) => row.id === fullBot.id);
-  saved.approvalMode = "full";
-  saved.autoApprove = false;
-  for (const task of saved.tasks) { task.approvalMode = "full"; task.autoApprove = false; }
+  for (const full of [saved, bots.find((row: any) => row.id === draftBot.id)]) {
+    full.approvalMode = "full";
+    full.autoApprove = false;
+    for (const task of full.tasks) { task.approvalMode = "full"; task.autoApprove = false; }
+  }
   writeFileSync(botsFile, JSON.stringify(bots));
   const configFile = join(fixture.info.dataDir, "config.json");
   const config = JSON.parse(readFileSync(configFile, "utf8"));
@@ -165,6 +183,37 @@ it("sends in Full without a card, and still refuses an app outside the bot's sco
   await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "read" } } });
   expect((await relay(token, "GMAIL_SEND_EMAIL")).body.result.isError).toBe(true);
   expect(relayed).toHaveLength(before + 2);
+});
+
+it("blocks sends in a Full draft-only turn and revises the same Gmail draft without another creation", async () => {
+  const b = draftBot;
+  const begin = async (text: string) => {
+    const previous = (await cards(b.threadId)).filter(row => row.role === "bot" && row.kind === "text").length;
+    expect((await api("POST", `/api/bots/${b.id}/messages`, { text, threadId: b.threadId })).status).toBe(202);
+    await expect.poll(async () => (await cards(b.threadId)).filter(row => row.role === "bot" && row.kind === "text").length, { timeout: 10_000 }).toBeGreaterThan(previous);
+    await expect.poll(async () => (await api("GET", "/api/bots")).body.bots.find((row: any) => row.id === b.id).busy, { timeout: 10_000 }).toBe(false);
+    return mint(b.id, b.threadId);
+  };
+  const token = await begin("Create exactly one reply draft for MEGA. If a draft already exists, update it instead of creating another. Do not send it.");
+  const before = relayed.length;
+  for (const name of ["GMAIL_SEND_EMAIL", "GMAIL_SEND_DRAFT", "GMAIL_REPLY_TO_THREAD", "GMAIL_FORWARD_MESSAGE", "COMPOSIO_REMOTE_WORKBENCH"]) {
+    expect((await relay(token, name)).body.result).toMatchObject({ isError: true });
+  }
+  const draft = { thread_id: "mega-thread", recipient_email: "support@example.test", subject: "Re: MEGA", body: "Original reply" };
+  const batch = (tools: any[]) => relay(token, "COMPOSIO_MULTI_EXECUTE_TOOL", { tools });
+  expect((await batch([{ tool_slug: "GMAIL_CREATE_EMAIL_DRAFT", arguments: draft }, { tool_slug: "GMAIL_SEND_EMAIL", arguments: draft }])).body.result.isError).toBe(true);
+  expect(relayed).toHaveLength(before);
+  expect((await relay(token, "GMAIL_CREATE_EMAIL_DRAFT", draft)).body.result.isError).not.toBe(true);
+  expect((await relay(token, "GMAIL_CREATE_EMAIL_DRAFT", draft)).body.result.isError).toBe(true);
+  expect(gmailDrafts.size).toBe(1);
+  const draftId = [...gmailDrafts.keys()][0];
+  const revision = await begin("Update the existing MEGA reply draft. Do not create another. Do not send it.");
+  expect((await relay(revision, "GMAIL_CREATE_EMAIL_DRAFT", draft)).body.result.isError).toBe(true);
+  expect((await relay(revision, "GMAIL_UPDATE_DRAFT", { ...draft, draft_id: draftId, body: "Revised reply" })).body.result.isError).not.toBe(true);
+  expect(gmailDrafts.size).toBe(1);
+  expect(gmailDrafts.get(draftId)).toMatchObject({ body: "Revised reply", thread_id: "mega-thread" });
+  const reached = relayed.slice(before).flatMap((frame: any) => frame.params?.arguments?.tools ?? [{ tool_slug: frame.params?.name }]);
+  expect(reached.map((tool: any) => tool.tool_slug)).toEqual(["GMAIL_CREATE_EMAIL_DRAFT", "GMAIL_UPDATE_DRAFT"]);
 });
 
 it("shows each outbound batch recipient and amount with explicit preview truncation before consent", async () => {
