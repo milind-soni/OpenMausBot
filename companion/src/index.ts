@@ -103,6 +103,7 @@ async function refreshMachineName(): Promise<boolean> {
 }
 
 let nameTimer: ReturnType<typeof setInterval> | null = null;
+let stopping = false;
 
 const devices = new DeviceRegistry();
 const mdns = new MdnsResponder();
@@ -228,7 +229,7 @@ async function main(): Promise<void> {
   await watcher.check();
   watcher.start();
   // A rename in Settings reaches the phone within one tick: the watcher re-advertises when the name moves.
-  nameTimer = setInterval(() => void refreshMachineName().then((changed) => (changed ? watcher.check() : undefined)), 30_000);
+  nameTimer = setInterval(() => void refreshMachineName().then((changed) => (changed && !stopping ? watcher.check() : undefined)), 30_000);
   nameTimer.unref?.();
 
   const addresses = lanAddresses();
@@ -245,7 +246,8 @@ async function main(): Promise<void> {
 
 const shutdown = async (signal: string): Promise<void> => {
   console.log(`\n${signal} — stopping`);
-  // The watcher first, or a tick could re-advertise the withdrawn record.
+  // The watcher first, or a tick (or a name refresh already in flight) could re-advertise the withdrawn record.
+  stopping = true;
   watcher.stop();
   if (nameTimer) clearInterval(nameTimer);
   await mdns.stop().catch(() => {});

@@ -29,7 +29,7 @@ export function ComputerNameRow({ saved, onSaved, className }: { saved: string; 
   return (
     <div data-computer-name className={cn("flex flex-col gap-1", className)}>
       <label htmlFor="computer-name" className="text-[13px] font-medium text-ink">{t("remote.computerName.title")}</label>
-      <input id="computer-name" value={draft} maxLength={63} disabled={saving} placeholder={t("remote.computerName.placeholder")}
+      <input id="computer-name" value={draft} disabled={saving} placeholder={t("remote.computerName.placeholder")}
         aria-describedby="computer-name-help" onChange={(event) => setDraft(event.target.value)} onBlur={() => void save()}
         onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
         className="w-full max-w-xs rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none" />
