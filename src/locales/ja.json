@@ -1,4 +1,8 @@
 {
+  "voice.gemini.keyPlaceholder": "Google AI Studio の API キーを貼り付け",
+  "voice.gemini.model": "Gemini 音声合成モデル",
+  "keys.label.geminiTts": "Gemini 音声合成 API キー",
+  "keys.purpose.geminiTts": "読み上げ、音声メモ、通話に使う Gemini の音声",
   "whop.description": "Whop の公式連携で、商品、支払いリンク、会員登録、決済を扱えます。",
   "hostedMcp.connect": "{service} に接続",
   "hostedMcp.disconnect": "{service} を切断",

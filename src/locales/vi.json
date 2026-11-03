@@ -1,4 +1,8 @@
 {
+  "voice.gemini.keyPlaceholder": "Dán khóa API Google AI Studio của bạn",
+  "voice.gemini.model": "Mô hình giọng nói Gemini",
+  "keys.label.geminiTts": "Khóa API giọng nói Gemini",
+  "keys.purpose.geminiTts": "Giọng Gemini cho câu trả lời bằng giọng nói, ghi chú thoại và cuộc gọi",
   "whop.description": "Sản phẩm, liên kết thanh toán, tư cách thành viên và thanh toán thông qua tích hợp chính thức của Whop.",
   "hostedMcp.connect": "Kết nối {service}",
   "hostedMcp.disconnect": "Ngắt kết nối {service}",

@@ -169,6 +169,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         // Voice ids are provider-owned: never carry one from one catalog into another.
         patch.tts = { ...patch.tts, voice: "" };
       }
+      if (changingVoiceProvider && patch.tts?.model === undefined) patch.tts = { ...patch.tts, model: "" };
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
       if (patch.browserProfiles !== undefined && body.expectedBrowserProfiles !== undefined) {
         const current = (cfg.browserProfiles ?? []).map(({ id, name, browser }) => ({ id, name, ...(browser ? { browser } : {}) }));
@@ -524,6 +525,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           if (persisted.opencodeGo?.apiKey !== undefined) persisted.opencodeGo.apiKey = "";
           if (persisted.tts?.key !== undefined) persisted.tts.key = "";
           if (persisted.tts?.fishKey !== undefined) persisted.tts.fishKey = "";
+          if (persisted.tts?.geminiKey !== undefined) persisted.tts.geminiKey = "";
           if (persisted.decider?.key !== undefined) persisted.decider.key = "";
           if (persisted.decider?.openrouterKey !== undefined) persisted.decider.openrouterKey = "";
           if (persisted.decider?.workersAiToken !== undefined) persisted.decider.workersAiToken = "";

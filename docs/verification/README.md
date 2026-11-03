@@ -321,6 +321,10 @@ desktop routing, cancellation, and computer authority cleanup.
 
 ## Evidence
 
+The [Gemini speech fixture](gemini-speech.md) checks write-only credentials,
+voice selection and WAV synthesis against an offline provider in an isolated
+server, with manual steps for real Google access and playback.
+
 The [persistence responsiveness benchmark](persistence-performance.md) measures
 synthetic message/log bursts and history scans, with isolated chat, visibility
 and packaged-worker checks. It is not a production capacity qualification.

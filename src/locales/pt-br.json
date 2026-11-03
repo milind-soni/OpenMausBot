@@ -1,4 +1,8 @@
 {
+  "voice.gemini.keyPlaceholder": "Cole sua chave de API do Google AI Studio",
+  "voice.gemini.model": "Modelo de voz do Gemini",
+  "keys.label.geminiTts": "Chave de API de voz do Gemini",
+  "keys.purpose.geminiTts": "Vozes do Gemini para respostas faladas, notas de voz e chamadas",
   "whop.description": "Produtos, links de pagamento, assinaturas e pagamentos pela integração oficial do Whop.",
   "hostedMcp.connect": "Conectar o {service}",
   "hostedMcp.disconnect": "Desconectar o {service}",

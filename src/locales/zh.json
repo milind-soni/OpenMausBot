@@ -1,4 +1,8 @@
 {
+  "voice.gemini.keyPlaceholder": "粘贴你的 Google AI Studio API 密钥",
+  "voice.gemini.model": "Gemini 语音合成模型",
+  "keys.label.geminiTts": "Gemini 语音合成 API 密钥",
+  "keys.purpose.geminiTts": "用于朗读回复、语音备忘录和通话的 Gemini 语音",
   "connectedWorkspaces.localTitle": "这台电脑上的环境",
   "connectedWorkspaces.missing": "不存在",
   "connectedWorkspaces.current": "当前",

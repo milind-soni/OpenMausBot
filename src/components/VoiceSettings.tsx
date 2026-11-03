@@ -66,10 +66,13 @@ export function VoiceSettings({
   const [deviceVoice, setDeviceVoice] = useState(() => remoteSystemVoice(bot.id));
   const usesLocalSystem = localMacClient && deviceProvider === "system";
   const provider = tts?.provider ?? "elevenlabs";
-  const searchable = (provider === "fish" || provider === "elevenlabs") && !usesLocalSystem;
-  const voiceSearch = searchable ? searchedQuery : "";
-  const pickedVoice = searchable ? (bot.voice ?? "") : "";
-  const cloudProvider = provider === "fish"
+  const searchable = (provider === "fish" || provider === "elevenlabs" || provider === "gemini") && !usesLocalSystem;
+  const voiceSearch = searchable && provider !== "gemini" ? searchedQuery : "";
+  const pickedVoice = searchable && provider !== "gemini" ? (bot.voice ?? "") : "";
+  const cloudProvider = provider === "gemini"
+    ? { id: "gemini" as const, name: "Gemini", credential: "geminiTtsKey" as const, configField: "geminiKey" as const,
+        placeholder: t("voice.gemini.keyPlaceholder"), keyUrl: "https://aistudio.google.com/api-keys" }
+    : provider === "fish"
     ? {
         id: "fish" as const,
         name: "Fish Audio",
@@ -89,7 +92,7 @@ export function VoiceSettings({
         }
       : null;
   const key = cloudProvider ? voiceKeyDraftValue(keyDraft, cloudProvider.id) : "";
-  const hostProviderLabel = provider === "fish"
+  const hostProviderLabel = provider === "gemini" ? t("voice.hostLabel", { provider: "Gemini" }) : provider === "fish"
     ? t("voice.hostLabel", { provider: t("voice.fish.label") })
     : provider === "elevenlabs"
       ? t("voice.hostLabel", { provider: t("voice.elevenlabs.label") })
@@ -198,7 +201,7 @@ export function VoiceSettings({
       .finally(() => current() && setAddingVoice(null));
   };
 
-  const setProvider = (next: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai") => {
+  const setProvider = (next: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini") => {
     if (next === provider || switching || (next === "system" && !systemVoicesAvailable)) return;
     setSwitching(true);
     setKeyDraft({ provider: null, value: "" });
@@ -311,14 +314,14 @@ export function VoiceSettings({
       {!workspaceConfigurationLocked && (
         <div className="mt-4">
           <div className="mb-2 text-[13px] text-ink-secondary">{t("voice.engine")}</div>
-          {/* Six columns: the three online services share the top row, the two on this computer the bottom one. */}
           <div className="grid grid-cols-6 gap-1 rounded-xl bg-inset p-1" role="radiogroup" aria-label={t("voice.engine")}>
             {([
               { value: "elevenlabs", label: t("voice.elevenlabs.label"), available: true, span: "col-span-2" },
               { value: "fish", label: t("voice.fish.label"), available: true, span: "col-span-2" },
               { value: "xai", label: t("voice.grok.label"), available: true, span: "col-span-2" },
-              { value: "system", label: t("voice.macBuiltIn"), available: systemVoicesAvailable, span: "col-span-3" },
-              { value: "chatterbox", label: t("voice.chatterboxLocal"), available: true, span: "col-span-3" },
+              { value: "gemini", label: "Gemini", available: true, span: "col-span-2" },
+              { value: "system", label: t("voice.macBuiltIn"), available: systemVoicesAvailable, span: "col-span-2" },
+              { value: "chatterbox", label: t("voice.chatterboxLocal"), available: true, span: "col-span-2" },
             ] as const).map((option) => (
               <button
                 key={option.value}
@@ -458,6 +461,20 @@ export function VoiceSettings({
         </div>
       )}
 
+      {!workspaceConfigurationLocked && provider === "gemini" && (
+        <label className="mt-4 block text-[13px] text-ink-secondary">
+          {t("voice.gemini.model")}
+          <Select value={tts.model || "gemini-3.8-flash-lite-tts"} className="mt-2 w-full" onChange={(event) => {
+            void api("/api/config", { method: "PUT", body: JSON.stringify({ tts: { model: event.target.value } }) })
+              .then((status: ConfigStatus) => dispatch({ type: "configStatus", config: status }))
+              .catch((error: Error) => setError(error.message));
+          }}>
+            <option value="gemini-3.8-flash-lite-tts">Gemini 3.8 Flash-Lite TTS</option>
+            <option value="gemini-3.8-flash-tts">Gemini 3.8 Flash TTS</option>
+          </Select>
+        </label>
+      )}
+
       {configured && (
         <div className="mt-4">
           <div className="mb-1.5 text-[13px] text-ink-secondary">{t("voice.title")}</div>
@@ -466,8 +483,8 @@ export function VoiceSettings({
               <VoicePicker
                 key={provider}
                 value={selectedVoice}
-                voices={voices}
-                loading={loadingVoices || voiceQuery.trim() !== searchedQuery}
+                voices={provider === "gemini" ? voices.filter((voice) => voice.label.toLowerCase().includes(voiceQuery.trim().toLowerCase())) : voices}
+                loading={loadingVoices || (provider !== "gemini" && voiceQuery.trim() !== searchedQuery)}
                 query={voiceQuery}
                 onQuery={setVoiceQuery}
                 onPick={pickVoice}

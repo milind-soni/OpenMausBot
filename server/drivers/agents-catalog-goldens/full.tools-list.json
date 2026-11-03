@@ -819,6 +819,7 @@
               "boxToken",
               "opencodeGoApiKey",
               "ttsKey",
+              "geminiTtsKey",
               "fishAudioKey",
               "openaiImageApiKey",
               "onePasswordToken",

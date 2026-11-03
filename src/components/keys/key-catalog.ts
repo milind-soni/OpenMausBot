@@ -40,7 +40,7 @@ export interface KeyTarget {
 
 export type KeyId =
   | "openai" | "anthropic" | "xai" | "openrouter" | "mistral" | "cerebras" | "groq" | "greenference" | "meta" | "deepseek" | "opencodeGo" | "opencodeProviders"
-  | "lmStudio" | "openaiCompat" | "liveCalls" | "liveKey" | "elevenlabs" | "fishAudio" | "box" | "vps" | "onePassword" | "composio" | "treg" | "postiz"
+  | "lmStudio" | "openaiCompat" | "liveCalls" | "liveKey" | "elevenlabs" | "fishAudio" | "geminiTts" | "box" | "vps" | "onePassword" | "composio" | "treg" | "postiz"
   | "jev" | "openrouterHelper" | "workersAi" | "imageOpenai" | "imageCustom";
 
 export type KeyMark = { driverKind: string; preset?: ProviderIconPreset } | { icon: LucideIcon };
@@ -133,6 +133,11 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
       saved: (config) => ({ ...flag(config.savedKeys?.ttsKey ?? { configured: config.tts?.provider === "elevenlabs" && config.tts.configured && !config.tts.included }),
         ...(config.tts?.included ? { included: true } : {}) }),
       placeholder: "sk_…", href: "https://elevenlabs.io/app/settings/api-keys", analytics: "elevenlabs", shape: /^sk_/ } },
+  { id: "geminiTts", section: "voice", labelKey: "keys.label.geminiTts", purposeKey: "keys.purpose.geminiTts", name: "Gemini", env: ["OMB_GEMINI_API_KEY"],
+    words: ["google", "gemini", "speech", "voice", "tts"], mark: { icon: AudioLines }, kind: "key",
+    target: { patch: (value) => ({ tts: { geminiKey: value } }), slot: "geminiTtsKey",
+      saved: (config) => flag(config.savedKeys?.geminiTtsKey), placeholderKey: "voice.gemini.keyPlaceholder", placeholder: "...",
+      href: "https://aistudio.google.com/api-keys", analytics: "gemini_tts" } },
   { id: "fishAudio", section: "voice", labelKey: "keys.label.fishAudio", purposeKey: "keys.purpose.fishAudio", name: "Fish Audio", env: ["OMB_FISH_AUDIO_API_KEY"],
     words: ["fish", "fish audio", "voice", "voices", "speech", "tts"], mark: { icon: AudioLines }, kind: "key",
     target: { patch: (value) => ({ tts: { fishKey: value } }), slot: "fishAudioKey", verifiedOnSave: true,

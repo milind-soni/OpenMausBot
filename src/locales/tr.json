@@ -1,4 +1,8 @@
 {
+  "voice.gemini.keyPlaceholder": "Google AI Studio API anahtarınızı yapıştırın",
+  "voice.gemini.model": "Gemini konuşma modeli",
+  "keys.label.geminiTts": "Gemini konuşma API anahtarı",
+  "keys.purpose.geminiTts": "Sesli yanıtlar, sesli notlar ve aramalar için Gemini sesleri",
   "whop.description": "Whop'un resmi entegrasyonu üzerinden ürünler, ödeme bağlantıları, üyelikler ve ödemeler.",
   "hostedMcp.connect": "{service}'u bağla",
   "hostedMcp.disconnect": "{service} bağlantısını kes",
