@@ -34,6 +34,7 @@ async function ready(state: CloudAccountState = { status: "signed-out" }) { vi.m
 it("loads optional account state without enrollment/network and delegates sign-in without arguments", async () => {
   await ready(); expect(bridge.begin).not.toHaveBeenCalled(); expect(fetch).not.toHaveBeenCalled();
   expect(render().html).toContain("Free local use"); expect(render().html).toContain("separate from organization sign-in");
+  expect(render().html, "the plan page's card says so, too").toContain("Not signed in");
   click("Have an invite or a plan? Sign in"); await flush(); expect(bridge.begin).toHaveBeenCalledExactlyOnceWith();
 });
 it("a free account starts in the Add a Cloud dialog, but only a verified native update displays Pro; unavailable/revoked states remove it", async () => {
