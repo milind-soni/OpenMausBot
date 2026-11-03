@@ -2809,5 +2809,6 @@
   "botApi.call.busy": "Refusé : le bot était occupé",
   "botApi.call.failed": "Le bot n’a pas pu répondre",
   "botApi.starter": "Bot API est inclus dans une offre supérieure.",
-  "botApi.password": "Une clé est comme un mot de passe : qui la détient peut lire ce que ce bot peut lire."
+  "botApi.password": "Une clé est comme un mot de passe : qui la détient peut lire ce que ce bot peut lire.",
+  "botApi.cantTake": "L’IA de ce bot ne peut pas recevoir d’appels Bot API. Choisissez une autre IA pour les utiliser."
 }

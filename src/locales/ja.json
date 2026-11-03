@@ -6673,5 +6673,6 @@
   "botApi.call.busy": "拒否: ボットは取り込み中でした",
   "botApi.call.failed": "ボットは返事できませんでした",
   "botApi.starter": "Bot API は上位プランで使えます。",
-  "botApi.password": "キーはパスワードと同じです。持っている人は、このボットが読めるものを読めます。"
+  "botApi.password": "キーはパスワードと同じです。持っている人は、このボットが読めるものを読めます。",
+  "botApi.cantTake": "このボットの AI は Bot API の呼び出しを受けられません。使うには別の AI を選んでください。"
 }

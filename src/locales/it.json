@@ -6448,5 +6448,6 @@
   "botApi.call.busy": "Rifiutata: il bot era occupato",
   "botApi.call.failed": "Il bot non ha potuto rispondere",
   "botApi.starter": "Bot API è incluso in un piano superiore.",
-  "botApi.password": "Una chiave è come una password: chi la possiede può leggere ciò che questo bot può leggere."
+  "botApi.password": "Una chiave è come una password: chi la possiede può leggere ciò che questo bot può leggere.",
+  "botApi.cantTake": "L’IA di questo bot non può ricevere chiamate Bot API. Scegli un’altra IA per usarle."
 }

@@ -7441,5 +7441,6 @@
   "botApi.call.busy": "Turned away: the bot was busy",
   "botApi.call.failed": "The bot couldn't answer",
   "botApi.starter": "Bot API comes with a higher plan.",
-  "botApi.password": "A key is like a password: whoever holds it can read what this bot can read."
+  "botApi.password": "A key is like a password: whoever holds it can read what this bot can read.",
+  "botApi.cantTake": "This bot's AI can't take Bot API calls. Choose another AI to use them."
 }

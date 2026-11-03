@@ -22,6 +22,8 @@ export interface BotApiCall {
 
 export interface BotApiView {
   enabled: boolean;
+  /** Absent from an older server: it takes calls. */
+  canTakeCalls?: boolean;
   url: string;
   canManage: boolean;
   callCount: number;
@@ -144,6 +146,7 @@ function BotApiSection({ bot, webhooksLink = false, className }: { bot: Bot; web
           data-testid="bot-api-switch"
         />
       </div>
+      {view?.canTakeCalls === false && <div className="mt-2 text-[13px] text-warning" data-testid="bot-api-cant-take">{t("botApi.cantTake")}</div>}
       {view?.enabled && (
         <div className="mt-3 flex flex-col gap-2">
           <div className="relative">

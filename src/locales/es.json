@@ -5752,5 +5752,6 @@
   "botApi.call.busy": "Rechazada: el bot estaba ocupado",
   "botApi.call.failed": "El bot no pudo responder",
   "botApi.starter": "Bot API viene con un plan superior.",
-  "botApi.password": "Una clave es como una contraseña: quien la tenga puede leer lo que este bot puede leer."
+  "botApi.password": "Una clave es como una contraseña: quien la tenga puede leer lo que este bot puede leer.",
+  "botApi.cantTake": "La IA de este bot no puede recibir llamadas de Bot API. Elige otra IA para usarlas."
 }

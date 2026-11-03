@@ -4635,5 +4635,6 @@
   "botApi.call.busy": "已拒絕:機器人忙碌中",
   "botApi.call.failed": "機器人無法回答",
   "botApi.starter": "Bot API 包含在更高的方案中。",
-  "botApi.password": "金鑰就像密碼:持有它的人可以讀取此機器人能讀取的內容。"
+  "botApi.password": "金鑰就像密碼:持有它的人可以讀取此機器人能讀取的內容。",
+  "botApi.cantTake": "此機器人的 AI 無法接收 Bot API 呼叫。請選擇其他 AI 來使用。"
 }

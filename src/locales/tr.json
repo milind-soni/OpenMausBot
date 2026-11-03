@@ -5243,5 +5243,6 @@
   "botApi.call.busy": "Reddedildi: bot meşguldü",
   "botApi.call.failed": "Bot yanıtlayamadı",
   "botApi.starter": "Bot API daha yüksek bir planla gelir.",
-  "botApi.password": "Anahtar parola gibidir: ona sahip olan, bu botun okuyabildiğini okuyabilir."
+  "botApi.password": "Anahtar parola gibidir: ona sahip olan, bu botun okuyabildiğini okuyabilir.",
+  "botApi.cantTake": "Bu botun yapay zekâsı Bot API çağrılarını alamaz. Kullanmak için başka bir yapay zekâ seçin."
 }

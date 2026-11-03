@@ -370,6 +370,7 @@ describe("the Bot API door on the webhook receiver", () => {
     const h = await harness(replies("x"), { noConfine: true });
     const key = (await h.app("POST", "/api/bots/b1/bot-api", { enabled: true })).body.key as string;
     expect(await h.call("b1", key, { message: "Hi" })).toEqual({ status: 403, body: { error: expect.stringMatching(/can't take Bot API calls/) } });
+    expect((await h.app("GET", "/api/bots/b1/bot-api")).body).toMatchObject({ canTakeCalls: false });
     expect(h.turns).toEqual([]);
     expect(h.fake.bots.get("b1")!.tasks).toEqual([]);
     expect((await h.call("b1", `${key}x`, { message: "Hi" })).status).toBe(401);

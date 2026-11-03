@@ -6589,5 +6589,6 @@
   "botApi.call.busy": "Odrzucono: bot był zajęty",
   "botApi.call.failed": "Bot nie mógł odpowiedzieć",
   "botApi.starter": "Bot API jest dostępne w wyższym planie.",
-  "botApi.password": "Klucz jest jak hasło: kto go ma, może czytać to, co może czytać ten bot."
+  "botApi.password": "Klucz jest jak hasło: kto go ma, może czytać to, co może czytać ten bot.",
+  "botApi.cantTake": "AI tego bota nie może przyjmować wywołań Bot API. Wybierz inne AI, aby z nich korzystać."
 }

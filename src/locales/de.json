@@ -2863,5 +2863,6 @@
   "botApi.call.busy": "Abgewiesen: der Bot war beschäftigt",
   "botApi.call.failed": "Der Bot konnte nicht antworten",
   "botApi.starter": "Bot API ist in einem höheren Tarif enthalten.",
-  "botApi.password": "Ein Schlüssel ist wie ein Passwort: Wer ihn hat, kann lesen, was dieser Bot lesen kann."
+  "botApi.password": "Ein Schlüssel ist wie ein Passwort: Wer ihn hat, kann lesen, was dieser Bot lesen kann.",
+  "botApi.cantTake": "Die KI dieses Bots kann keine Bot-API-Aufrufe annehmen. Wähle eine andere KI, um sie zu nutzen."
 }

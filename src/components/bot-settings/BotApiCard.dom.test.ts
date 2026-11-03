@@ -81,6 +81,15 @@ describe("the Bot API card", () => {
     expect(find("bot-api-password")!.textContent).toBe("A key is like a password: whoever holds it can read what this bot can read.");
   });
 
+  it("says in one plain line when this bot's AI can't take calls", async () => {
+    await mount();
+    expect(find("bot-api-cant-take")).toBeNull();
+    unmount();
+    Object.assign(fixture.view!, { canTakeCalls: false });
+    await mount();
+    expect(find("bot-api-cant-take")!.textContent).toBe("This bot's AI can't take Bot API calls. Choose another AI to use them.");
+  });
+
   it("is off with no command until switched on", async () => {
     await mount();
     expect(find("bot-api")!.textContent).toContain("Bot API");

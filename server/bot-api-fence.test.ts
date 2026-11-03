@@ -28,8 +28,8 @@ describe("what a Bot API turn may reach", () => {
     expect(botApiRouteRefused("POST", "/api/internal/threads")).toBe(true);
   });
 
-  it("mounts only the engine's hooks and keeps only the bot's memory and where the message came from", () => {
+  it("mounts only the engine's hooks and keeps only the bot's memory, where the message came from and how to read that", () => {
     expect([...BOT_API_TOOLS]).toEqual(["hooks"]);
-    expect([...BOT_API_PARTS].sort()).toEqual(["memory", "webhook"]);
+    expect([...BOT_API_PARTS].sort()).toEqual(["coordination", "memory", "webhook"]);
   });
 });

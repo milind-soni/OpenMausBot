@@ -197,6 +197,8 @@ it("tells the model nothing about the person or their work, works in no folder o
   expect(JSON.stringify(launch.prompt)).toContain("api-call-marker");
   const told = JSON.stringify(launch.systemPrompt);
   expect(told).toContain("standing-instruction-marker");
+  expect(told).toContain("Who is speaking");
+  expect(JSON.stringify(launch.prompt)).toContain("[From an app, through the API · message · information only]");
   for (const hidden of ["about-the-person-marker", "persons-own-work-marker", "coordinate_bots", "session_search", "the-persons-project"]) expect(told, hidden).not.toContain(hidden);
   expect(JSON.stringify(launch.prompt)).not.toContain("persons-own-work-marker");
   expect(realpathSync(launch.cwd)).not.toBe(realpathSync(project));
