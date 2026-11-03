@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, KeyRound, Loader2, RefreshCw, X } from "lucide-react";
-import { useStore, currentTaskBot, type AppState, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
+import { useStore, currentTaskBot, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
 import type { EffortLevel } from "../../shared/wire";
 import type { ModelVariantOption } from "../../shared/runtime-events";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
@@ -25,6 +25,7 @@ import { SimpleModelMenu, type SimpleThinking } from "./SimpleModelMenu";
 import { apiKeysLabel, ClaudeAccountSelect, engineStatus, FollowBotModelRow, ModelEngineRail, ModelRow, ModelSearch } from "./ModelPickerFull";
 import { MENU_LABEL, MENU_LINE, MENU_ROW, MENU_SEPARATOR, MENU_STROKE, MENU_TRAILING } from "./menu-recipe";
 import { modelMenuKey, modelMenuPointerMove } from "./model-menu-keys";
+import { offersReasoning, useRefocusAfterPick, variantChoices } from "./model-picker-reasoning";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 
@@ -122,17 +123,6 @@ export function EffortRow({
 
 const variantLabel = (option: ModelVariantOption, driverKind?: string): string =>
   option.id === "default" && driverKind === "opencodeGo" ? t("model.variant.openCodeDefault") : option.label;
-
-/** ACP variant ids are opaque; their model/session declares the available choices. */
-function variantChoices(state: Pick<AppState, "instances" | "modelVariantSessions">, selection: ModelSelection, threadId: string | undefined) {
-  const instance = state.instances.find((candidate) => candidate.instanceId === selection.instanceId);
-  if (!instance?.capabilities?.modelVariants) return null;
-  const session = threadId === undefined ? undefined : state.modelVariantSessions[threadId];
-  const reported = session?.instanceId === selection.instanceId && session.model === selection.model ? session.variants : undefined;
-  const options = reported?.options ?? instance.models.options.find((option) => option.id === selection.model)?.variants ?? [];
-  if (!options.length && selection.variant === undefined) return null;
-  return { instance, reported, options };
-}
 
 export function ModelVariantRow({ bot, threadId, updateBotDefault, className, label, compact = false, wide = false, quiet = false }: {
   bot: Bot;
@@ -306,6 +296,7 @@ export function ModelPicker({
   }, [open, placement]);
 
   const selection = bot.modelSelection;
+  const refocusAfterPick = useRefocusAfterPick(menuRef, open, selection, query);
   const instances = withTypedModels(state.instances, selection, query);
   const active = instances.find((instance) => instance.instanceId === selection.instanceId);
   const pickerInstances = configuredModelInstances(instances, selection.instanceId);
@@ -500,7 +491,10 @@ export function ModelPicker({
       selection: nextSelection,
     });
     if (updateBotDefault && threadId) setChangedBotModel(true);
-    close(true);
+    // A model with reasoning levels keeps the menu open, so its level can be set next without opening it again;
+    // picking a variant row already sets that level.
+    if (variant !== undefined || contained || !offersReasoning(state, instance, nextSelection, threadId ?? bot.threadId)) close(true);
+    else refocusAfterPick();
   };
 
   const resetVariant = contained && selection.variant !== undefined ? () => {
@@ -570,8 +564,10 @@ export function ModelPicker({
     if (event.key !== "Escape") return modelMenuKey(event, { query, typed, close: () => close(true) });
     event.preventDefault();
     event.stopPropagation();
-    if (query) setQuery("");
-    else if (!simpleView && pane === "custom" && canReturnToOfficial) setPane("main");
+    if (query) {
+      setQuery("");
+      refocusAfterPick();
+    } else if (!simpleView && pane === "custom" && canReturnToOfficial) setPane("main");
     else if (fullView && !advanced) backToList(true);
     else close(true);
   };
