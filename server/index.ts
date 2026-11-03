@@ -14502,12 +14502,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (phoneSecretSubmissions.hasGroup(room.id)) {
             return json(res, 409, { error: "this room is securely saving a credential — try again when it finishes" });
           }
+          if (name !== undefined && name.length > 80) return json(res, 400, { error: "a new_thread title can be at most 80 characters" });
           const task = store.createGroupTask(room.id, name === undefined ? undefined : redactSecretsInText(name));
           if (!task) return json(res, 500, { error: "couldn't open a thread in that room" });
           internalCapability.openedRoomThreads = (internalCapability.openedRoomThreads ?? 0) + 1;
           return json(res, 201, {
             ok: true, threadId: task.threadId, title: task.title,
-            message: `Opened thread “${task.title}” [thread: ${task.threadId}] in room “${room.name}”. It is now the room's current thread, so post_to_room and coordinate_bots for this room go there.`,
+            message: `Opened thread “${task.title}” [thread: ${task.threadId}] in room “${room.name}”. It is now the room's current thread, so post_to_room for this room and coordinate_bots sent from outside this room go there; coordinate_bots from inside this room stays in that conversation.`,
           });
         }
         const patch: Record<string, unknown> = {};
