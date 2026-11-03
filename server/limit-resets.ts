@@ -177,7 +177,9 @@ export class LimitResetClock {
 
   /** A turn on this engine was refused by its usage limit; `resetsAt` is when the engine said it resets. */
   noteRefusal(engine: string | undefined, resetsAt: number | undefined): void {
-    if (!engine || resetsAt === undefined || !Number.isFinite(resetsAt) || resetsAt <= this.now() || (this.refusals.get(engine) === resetsAt && !this.guessed.has(engine))) return;
+    if (!engine || resetsAt === undefined || !Number.isFinite(resetsAt) || resetsAt <= this.now()) return;
+    // The same refusal again: the hold stands, but it now counts from this refusal, so a usage read between the two cannot end it.
+    if (this.refusals.get(engine) === resetsAt && !this.guessed.has(engine)) { this.heldAt.set(engine, this.now()); return; }
     this.hold(engine, resetsAt, false);
   }
 

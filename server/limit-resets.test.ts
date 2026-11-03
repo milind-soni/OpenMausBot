@@ -338,6 +338,19 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     expect(instance.blockedUntil("codex"), "a read from after it").toBeNull();
   });
 
+  it("counts a Codex hold from its latest refusal, so a read between two refusals with the same reset does not end it", () => {
+    let now = NOW;
+    const instance = new LimitResetClock({ accounts: () => [{ id: "codex", name: "Codex", driver: "codex" as const, environment: {} }], now: () => now });
+    instance.noteRefusal("codex", NOW + 23 * HOUR);
+    now = NOW + 60_000;
+    instance.noteRefusal("codex", NOW + 23 * HOUR);
+    const room = codex([3, NOW + 4 * HOUR], [8, NOW + 5 * 24 * HOUR]);
+    instance.noteUsage({ fetchedAt: iso(NOW + 30_000), providers: [room] });
+    expect(instance.blockedUntil("codex"), "a read from before the second refusal").toBe(NOW + 23 * HOUR);
+    instance.noteUsage({ fetchedAt: iso(NOW + 60_000), providers: [room] });
+    expect(instance.blockedUntil("codex"), "a read from after it").toBeNull();
+  });
+
   it("keeps a Claude hold whatever its usage shows, since Claude refuses on limits those windows do not show", () => {
     const { instance } = clock();
     instance.noteRefusal("claude", NOW + 23 * HOUR);
