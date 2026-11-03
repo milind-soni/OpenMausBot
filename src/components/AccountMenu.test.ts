@@ -25,9 +25,8 @@ it("another place's page shows no address, only the row that asks main for the s
   expect(openSheet).toHaveBeenCalled();
 });
 
-it("the MausBot Cloud row says Sign in only while the clean workspace's line asks for it", () => {
-  expect(cloudRowLabel({ active: null, others: [], clean: true })).toBe("Sign in");
-  expect(cloudRowLabel({ active: null, others: [] })).toBe("MausBot Cloud");
-  expect(cloudRowLabel({ active: { id: "b", email: "b@example.test" }, others: [], clean: true })).toBe("MausBot Cloud");
+it("the MausBot Cloud row says Sign in while nobody is signed in here; any other page keeps its name", () => {
+  expect(cloudRowLabel({ active: null, others: [] })).toBe("Sign in");
+  expect(cloudRowLabel({ active: { id: "b", email: "b@example.test" }, others: [] })).toBe("MausBot Cloud");
   expect(cloudRowLabel(null)).toBe("MausBot Cloud");
 });

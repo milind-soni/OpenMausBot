@@ -174,8 +174,7 @@ export interface CloudAccountBridge {
 }
 /** Who is signed in on this device, as the You menu shows it. `signIn`: this account's sign-in has ended here. */
 export interface AccountRow { id: string; email: string; signIn?: true }
-/** `clean`: the clean workspace runs on this computer, whose line asks the person to sign in. */
-export interface AccountsView { active: AccountRow | null; others: AccountRow[]; clean?: true }
+export interface AccountsView { active: AccountRow | null; others: AccountRow[] }
 /** This app's own pages only: main refuses any other page. Absent on an older app. */
 export interface AccountsBridge {
   list(): Promise<AccountsView>;
