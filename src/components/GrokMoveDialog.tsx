@@ -37,9 +37,10 @@ export function BotCounts({ heading, skills, routines, memories, notes, skillsOf
   );
 }
 
-export function GrokMoveLines({ paused, apps, moved, unreadable, failed = [] }: { paused: string | null; apps: number; moved: readonly string[]; unreadable: readonly string[]; failed?: readonly string[] }) {
+export function GrokMoveLines({ paused, files = null, apps, moved, unreadable, failed = [] }: { paused: string | null; files?: string | null; apps: number; moved: readonly string[]; unreadable: readonly string[]; failed?: readonly string[] }) {
   const lines = [
     paused,
+    files,
     apps === 1 ? t("grokMove.appsOne") : apps > 1 ? t("grokMove.appsMany", { count: apps }) : null,
     moved.length ? t("grokMove.alreadyHere", { names: moved.join(", ") }) : null,
     unreadable.length ? t("grokMove.unreadable", { names: unreadable.join(", ") }) : null,
@@ -138,18 +139,21 @@ export function GrokMoveDialog({ onClose }: { onClose: () => void }) {
     void file.text().then((text) => show(() => parseGrokExport(text)));
   };
   const onStart = !preview && !report;
+  // The chat box behind this dialog attaches any file dropped on the window, and one Send would hand a private export to its
+  // model. So nothing behind the dialog sees a drag, on any step, and only the first step reads what was dropped.
   useEffect(() => {
-    if (!onStart) return;
-    const over = (event: DragEvent) => event.preventDefault();
-    const drop = (event: DragEvent) => {
+    const hold = (event: DragEvent) => {
+      event.stopPropagation();
       event.preventDefault();
-      readFile.current(event.dataTransfer?.files[0]);
     };
-    window.addEventListener("dragover", over);
-    window.addEventListener("drop", drop);
+    const drop = (event: DragEvent) => {
+      hold(event);
+      if (onStart) readFile.current(event.dataTransfer?.files[0]);
+    };
+    const listeners = [["dragenter", hold], ["dragover", hold], ["dragleave", hold], ["drop", drop]] as const;
+    for (const [type, listener] of listeners) window.addEventListener(type, listener, true);
     return () => {
-      window.removeEventListener("dragover", over);
-      window.removeEventListener("drop", drop);
+      for (const [type, listener] of listeners) window.removeEventListener(type, listener, true);
     };
   }, [onStart]);
 
@@ -194,7 +198,7 @@ export function GrokMoveDialog({ onClose }: { onClose: () => void }) {
           {report ? (
             <>
               {report.bots.map((bot) => <BotCounts key={bot.name} heading={t("grokMove.isHere", { name: bot.name })} {...bot} />)}
-              <GrokMoveLines paused={report.bots.some((bot) => bot.routines > 0) ? t("grokMove.pausedReport") : null} apps={report.bots.reduce((total, bot) => total + bot.apps, 0)}
+              <GrokMoveLines paused={report.bots.some((bot) => bot.routines > 0) ? t("grokMove.pausedReport") : null} files={t("grokMove.filesStay")} apps={report.bots.reduce((total, bot) => total + bot.apps, 0)}
                 moved={report.moved} unreadable={report.unreadable} failed={report.failed} />
             </>
           ) : preview ? (
