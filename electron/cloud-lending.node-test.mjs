@@ -365,11 +365,12 @@ test("quitting the app pauses lending; it never switches it off, even mid-reconn
     if (new URL(url).pathname === "/api/auth/session") { identityStarted(); await delay(200); }
     return answer(url, init);
   };
+  sharing.close();
   const restarted = createComputerSharing({
     file: path.join(dir, "profile", "computer-sharing.json"), fetch: (...args) => home.fetch(...args), environments: () => [env], enabled: async () => false,
     cloud: () => ({ status: "connected", accountId: "acct_1", origin: ORIGIN }), home: path.join(dir, "home"), cuaConnection: async () => null,
   });
-  sharing.close();
+  t.after(() => restarted.close());
   restarted.start({ maintainer: false });
   await started;
   restarted.close();

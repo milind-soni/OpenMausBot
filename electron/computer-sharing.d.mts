@@ -66,6 +66,8 @@ export interface LendingSummary {
   clouds: string[];
   using: string[];
   paused: boolean;
+  /** A pause needs a save retry or review after an unclean exit; sharing stays stopped. */
+  pauseError?: string;
   terminal?: boolean;
   busy: { env: string; action: string } | null;
   /** Computer control's latest state, null until it is first read. */
@@ -151,7 +153,7 @@ export function createComputerSharing(options: {
   /** The move's project folders, lent to My Cloud with editing; rejects while that can't happen yet. */
   lendProjects(paths: string[], place?: { id: string; origin: string; name: string } | null): Promise<void>;
   paused(): boolean;
-  /** Every Cloud stops using this computer, across restarts too, until resume(). */
+  /** Stops every Cloud; pauseError reports when the pause could not be saved. */
   pause(): void;
   resume(): Promise<void> | undefined;
   screenChanged(): Promise<void>;

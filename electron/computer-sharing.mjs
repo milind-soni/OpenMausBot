@@ -222,6 +222,22 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     if (typeof parsed?.automatic?.terminalAccount === "string") terminalAccount = parsed.automatic.terminalAccount;
     else if (!parsed?.automatic) terminalAccount = terminalLentBeforeAutomatic(records);
   } catch {}
+  const sessionMarker = `${file}.lending-session`;
+  let sessionGuarded = false, pauseError;
+  // Reserve recovery state before lending: a failed Pause write must survive an app exit, even on a full disk.
+  const guardSession = () => {
+    if (sessionGuarded) return;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.mkdirSync(sessionMarker);
+    sessionGuarded = true;
+  };
+  try { guardSession(); } catch (error) {
+    if (error.code === "EEXIST") {
+      sessionGuarded = true;
+      if (!paused) pauseError = "Lending stays paused because the previous session did not finish saving its state. Retry saving pause or choose Resume.";
+    } else pauseError = "Lending stays paused because restart protection could not be saved. Retry saving pause or choose Resume.";
+    paused = true;
+  }
   const running = new Map();
   const grantVersions = new Map();
   const changeGrant = id => { const version = (grantVersions.get(id) ?? 0) + 1; grantVersions.set(id, version); return version; };
@@ -236,13 +252,15 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   const changed = () => { if (!closed) try { onChange(summary()); } catch {} };
   const summary = () => {
     const browsing = [...inUse.keys()].find(id => linked.has(id));
-    const lent = paused ? [] : environments().filter(env => records[env.id]?.cloud && records[env.id]?.enabled === true);
-    const using = lent.filter(env => executing?.env === env.id || (inUse.has(env.id) && linked.has(env.id)));
+    const lent = environments().filter(env => records[env.id]?.cloud && records[env.id]?.enabled === true);
+    const clouds = paused ? new Map([...ownClouds(), ...lent].map(env => [env.id, env])).values() : lent;
+    const using = paused ? [] : lent.filter(env => executing?.env === env.id || (inUse.has(env.id) && linked.has(env.id)));
     return {
-      lending: lent.map(env => env.id),
-      clouds: (paused ? ownClouds() : lent).map(env => env.name),
+      lending: paused ? [] : lent.map(env => env.id),
+      clouds: [...clouds].map(env => env.name),
       using: using.map(env => env.name),
       paused,
+      ...(pauseError ? { pauseError } : {}),
       terminal: terminalAccount !== null && terminalAccount === signedInAccount(),
       busy: executing ?? (browsing ? { env: browsing, action: "internet" } : null),
       screen: screenNow,
@@ -648,8 +666,17 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   /** Every Cloud of the person's own may use this computer again. */
   const resumeLending = () => {
     if (!paused || closed) return;
-    paused = false;
-    try { store(records); } catch {}
+    try {
+      guardSession();
+      paused = false;
+      store(records);
+      pauseError = undefined;
+    } catch {
+      paused = true;
+      pauseError = "Resume could not be saved. Sharing stays paused. Retry Resume.";
+      changed();
+      return;
+    }
     const automatic = lentAutomatically();
     for (const env of environments()) {
       const grant = records[env.id];
@@ -661,7 +688,10 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   };
   /** Turn on, from this app's prompt or the card: what the ask needs, done here. */
   const turnOn = async (env, ask) => {
-    if (paused) await resumeLending();
+    if (paused) {
+      await resumeLending();
+      if (paused) return { ok: false, reason: "paused" };
+    }
     if (ask.need === "screen") {
       let status = await Promise.resolve().then(screen).catch(() => null);
       if (status && typeof status === "object" && !status.ready) status = await startScreen();
@@ -773,15 +803,20 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       if (records[env.id]?.enabled !== true) throw new Error("Lending to My Cloud did not start.");
     },
     paused: () => paused,
-    /** Every Cloud of the person's own stops using this computer, across restarts too, until resume(). */
+    /** Stops every Cloud of the person's own; pauseError reports when the pause could not be saved. */
     pause() {
-      if (paused || closed) return;
+      if (closed) return;
       paused = true;
-      try { store(records); } catch {}
       for (const env of environments()) {
         if (!records[env.id]?.cloud) continue;
         if (running.has(env.id)) disconnect(env, records[env.id]);
         status.set(env.id, { connected: false, problem: "paused" });
+      }
+      try { store(records); pauseError = undefined; }
+      catch {
+        pauseError = sessionGuarded
+          ? "Pause is not saved. Sharing is stopped now. Retry saving pause before quitting; the next start will stay paused for review."
+          : "Pause is not saved. Sharing is stopped now. A restart can resume lending. Retry saving pause before quitting.";
       }
       changed();
       wakeAsking();
@@ -835,8 +870,16 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
         else if (verdict.pause) { if (running.has(env.id)) { disconnect(env, grant, true); status.set(env.id, { connected: false, problem: "paused" }); changed(); } }
         else if (!running.has(env.id) && !automatic.has(env.id) && validRecord(grant)) run(env, grant);
       }
+      changed();
       void lendAutomatically();
     },
-    close() { closed = true; for (const id of running.keys()) stop(id); syncAsking(); asks.close(); },
+    close() {
+      if (closed) return;
+      closed = true;
+      for (const id of running.keys()) stop(id);
+      syncAsking();
+      asks.close();
+      if (sessionGuarded && !pauseError) try { fs.rmdirSync(sessionMarker); } catch {}
+    },
   };
 }

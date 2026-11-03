@@ -9,8 +9,9 @@ const short = names => names.length < 3 ? listed(names) : `${names.length} Cloud
 
 /** `screen`: computer control's state; while it isn't ready the line says what the Clouds
  * can't use, and `screen` why. */
-export function indicatorText({ clouds, using, paused, screen = null }, device) {
+export function indicatorText({ clouds, using, paused, pauseError, screen = null }, device) {
   const it = `this ${device}`;
+  if (pauseError) return { line: pauseError, title: "Paused: save needs attention", screen: null };
   if (paused) return { line: `Paused: ${listed(clouds)} can't use ${it}`, title: "Paused", screen: null };
   const why = screenLine(screen, device);
   if (using.length) return { line: `${listed(using)} ${using.length > 1 ? "are" : "is"} using ${it}`, title: `${short(using)} ${using.length > 1 ? "are" : "is"} using ${it}`, screen: why };
@@ -32,6 +33,7 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPa
       ...screen ? [{ label: screen, enabled: false }] : [],
       ...fix ? [{ label: fix, click: () => onStartScreen() }] : [],
       { type: "separator" },
+      ...(view.pauseError ? [{ label: "Retry saving pause", click: () => onPause() }] : []),
       view.paused ? { label: "Resume", click: () => onResume() } : { label: "Pause", click: () => onPause() },
       ...view.paused ? [] : [{ label: `Let Clouds run commands on this ${device}`, type: "checkbox", checked: view.terminal,
         // Electron 43 ticks a checkbox on click by itself: the menu keeps the saved choice until the person confirms one.
@@ -40,8 +42,8 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPa
     ]));
   };
   return {
-    update({ clouds = [], using = [], paused = false, terminal = false, screen = null }) {
-      const next = { clouds: [...clouds], using: paused ? [] : [...using], paused: paused === true, terminal: terminal === true,
+    update({ clouds = [], using = [], paused = false, terminal = false, pauseError, screen = null }) {
+      const next = { clouds: [...clouds], using: paused ? [] : [...using], paused: paused === true, terminal: terminal === true, ...(pauseError ? { pauseError } : {}),
         screen: screen ? { ready: screen.ready === true, reason: screen.reason ?? null, fix: screen.fix ?? null, ...(screen.message ? { message: screen.message } : {}) } : null };
       if (shown && JSON.stringify(next) === JSON.stringify(shown)) return;
       shown = next;

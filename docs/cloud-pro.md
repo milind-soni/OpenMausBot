@@ -651,6 +651,12 @@ to resume, a menu-bar item (the notification area on Windows) shows it
   **Resume**, which lends every Cloud again. Files keeps copying lent folders
   while paused, but bots' changes made on My Cloud wait there until Resume, as
   they do while this computer is away.
+- If saving Pause fails, sharing stops immediately. The item reports that the pause is not saved.
+  Choose **Retry saving pause** to save it without resuming. A failed Resume save also keeps sharing paused.
+  Before lending, the desktop reserves `computer-sharing.json.lending-session`, an empty recovery directory beside its settings.
+  A normal exit removes it. A failed pause save or unclean exit retains it.
+  On the next start, lending stays paused with a recovery message. Choose **Retry saving pause** or **Resume**.
+  This guard exists before a disk-full error can prevent saving Pause. It also pauses lending after a crash.
 - **See activity** opens this computer's own record of what its Clouds did here
   (`electron/lending-activity-window.mjs`): every request, refused ones
   included, and each website opened through its internet connection (**Opened a
