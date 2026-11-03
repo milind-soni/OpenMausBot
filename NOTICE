@@ -57,6 +57,13 @@ viewers and screencast pacing, tool definitions and snapshot bound
 (apps/server/src/preview and apps/server/src/mcp), Copyright 2026 T3 Tools
 Inc., used under the MIT License (third_party/t3-code/LICENSE).
 
+The social post previews template (skills/social-posts/posts.html) adapts the
+post card markup and platform styling of MiniMock,
+https://github.com/minianon/MiniMock, Copyright (c) 2026 Tushar Bhardwaj, used
+under the MIT License (third_party/minimock/LICENSE). Its icon paths are from
+Lucide, https://lucide.dev, Copyright Lucide Contributors, used under the ISC
+License; the template carries both notices, so every copy of it keeps them.
+
 The browser desktop viewer bundles the unmodified noVNC 1.7.0 library,
 Copyright the noVNC authors, under MPL-2.0 and its accompanying licenses.
 Attribution, license terms and the corresponding source location are in
