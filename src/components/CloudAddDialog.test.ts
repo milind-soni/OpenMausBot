@@ -642,6 +642,53 @@ describe("the sheet", () => {
     expect(f.dispatch).toHaveBeenCalledWith({ type: "closeCloudAdd" });
   });
 
+  const teammate = (extra: Partial<CloudAccountState> = {}): CloudAccountState => ({ ...free, offer: TRIAL, teams: [{ id: "team-acme", name: "Acme", role: "member", machine: { status: "ready", origin: "https://team.example" } as never }], ...extra });
+  const signInWithCode = async () => {
+    tree().find(node => node.props.id === "cloud-add-email")!.props.onChange({ target: { value: "me@example.test" } });
+    await settle();
+    tree().find(node => node.type === "form")!.props.onSubmit({ preventDefault() {} }); await flush(); await settle();
+    tree().filter(node => node.type === "input")[0]!.props.onChange({ target: { value: "48201937" }, currentTarget: { parentElement: { querySelectorAll: () => [] } } });
+    await flush(); await flush();
+  };
+
+  it("signed in here to a team with no plan of their own, though the Admin offers one: their team's Cloud to open, never plan cards", async () => {
+    f.state = { cloudAdd: { source: "app_settings", signIn: true }, config: {} };
+    expect(await settle()).toContain("Sign in to MausBot Cloud");
+    bridge.signInVerify.mockResolvedValueOnce({ outcome: "signed-in", state: teammate() });
+    await signInWithCode();
+    account = teammate();
+    const shown = await settle();
+    inOrder(shown, ["Your team's Cloud is ready", "Open Acme"]);
+    for (const word of ["Start free trial", "Most popular", "$49"]) expect(shown).not.toContain(word);
+    await press("Open Acme");
+    expect(bridge.openTeam).toHaveBeenCalledExactlyOnceWith("team-acme");
+  });
+
+  it("a plan card pressed before signing in doesn't carry a teammate to checkout once it turns out they have a team", async () => {
+    expect(await settle()).toContain("Your bots, always on.");
+    expect(await buy("max")).toContain("Create your MausBot account");
+    bridge.signInVerify.mockResolvedValueOnce({ outcome: "signed-in", state: teammate() });
+    await signInWithCode();
+    account = teammate();
+    expect(await settle()).toContain("Your team's Cloud is ready");
+    expect(bridge.checkout).not.toHaveBeenCalled();
+  });
+
+  it("the browser's sign-in lands a teammate on their team's Cloud too", async () => {
+    account = { status: "connecting" };
+    expect(await settle()).toContain("Sign in");
+    push(teammate()); account = teammate();
+    expect(await settle()).toContain("Your team's Cloud is ready");
+  });
+
+  it("asking to add a Cloud, a teammate may still buy one of their own", async () => {
+    account = teammate();
+    const shown = await settle();
+    expect(shown).toContain("Your bots, always on.");
+    await buy("max");
+    expect(bridge.checkout).toHaveBeenCalledExactlyOnceWith("max", "app_menu");
+  });
+
   it("a Team plan whose Cloud is still being set up shows the team's steps, then the team's Cloud once it is ready", async () => {
     account = onTeam({ status: "provisioning", setup: { step: "starting" } });
     inOrder(await settle(), ["Setting up your team's Cloud", "Reserving your machine", "Preparing storage", "Starting Acme"]);

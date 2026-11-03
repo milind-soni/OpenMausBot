@@ -130,6 +130,8 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
       // A view that came up for a sheet missed the page's skin: this page's own may be another place's.
       if (skinBeside) contents.send("rail:skin", skinBeside);
     });
+    // A sheet can't come up on a page that didn't load: the view doesn't stay over the window for it.
+    contents.on("did-fail-load", (_event, code, _description, _url, mainFrame) => { if (mainFrame && code !== ABORTED && held) rail.holdOpen(false); });
     void contents.loadURL(url()).catch((error) => log(`chrome rail: ${error?.message ?? error}`));
     return view;
   };

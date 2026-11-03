@@ -451,6 +451,39 @@ test("while a sheet of the rail's covers the page, the page has no drag regions:
   assert.equal(css.at(-1)[0], "remove", "the view going takes the sheet with it");
 });
 
+test("a rail's page that didn't load lets go of the window, so a list that can't come up leaves nothing over the page", async () => {
+  const w = world({ wanted: false });
+  w.rail.attach(w.win);
+  await w.ask("rail:open-list");
+  assert.equal(w.rail.shown(), true);
+  w.made[0].webContents.emit("did-fail-load", {}, -3, "", "", true);
+  assert.equal(w.rail.shown(), true, "a load replaced by another is no failure");
+  w.made[0].webContents.emit("did-fail-load", {}, -102, "", "", false);
+  assert.equal(w.rail.shown(), true, "nor a frame inside it");
+  w.made[0].webContents.emit("did-fail-load", {}, -102, "", "", true);
+  assert.deepEqual([w.rail.shown(), w.children.length], [false, 0]);
+});
+
+test("a view that comes up late still wears the skin of the page beside it, as its page loads and from before its script listens", () => {
+  const w = world({ wanted: false });
+  w.rail.attach(w.win);
+  w.rail.send("rail:skin", "midnight");
+  w.rail.holdOpen(true);
+  const contents = w.made[0].webContents;
+  contents.emit("did-finish-load");
+  assert.deepEqual(contents.sent.find(([channel]) => channel === "rail:skin"), ["rail:skin", "midnight"]);
+  const local = pageWithPreload("http://127.0.0.1:8799", "/rail");
+  local.hear("rail:skin", "midnight");
+  const worn = [];
+  const stop = local.bridge.rail.onSkin((skin) => worn.push(skin));
+  local.hear("rail:skin", "daylight");
+  stop();
+  assert.deepEqual(worn, ["midnight", "daylight"]);
+  const remote = pageWithPreload("https://bots.example.test", "/");
+  remote.hear("rail:skin", "midnight");
+  assert.equal(remote.bridge.rail.onSkin, undefined, "the rail's own page's");
+});
+
 test("main's own wiring: the list holds the rail's page up through its window, and a page hears of a rail beside it only when it stands", () => {
   const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   assert.match(main, /beside: \(\) => chromeRail\.beside\(\)/);
