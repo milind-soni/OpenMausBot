@@ -124,7 +124,8 @@ export interface CloudTeamFixture {
   /** The Admin's signed pairing for one member, as the Admin hands it to the app: a one-time code, not redeemed. */
   grant(member: TeamMember): Promise<{ origin: string; code: string; expiresAt: number }>;
   /** The Admin's signed pairing for one member, redeemed into a bearer. `body` replaces the member and team claims
-   * (a forged or missing claim); `secret` signs with another key (a forgery). */
+   * (a forged or missing claim); `secret` signs with another key (a forgery). The first owner or admin to pair also gives
+   * the team's Chief a fixed name, "Seedling". */
   pair(member: TeamMember | null, options?: { body?: Record<string, unknown>; secret?: string; label?: string }): Promise<{ status: number; body: any; token: string | null }>;
   /** A request as one person, by their bearer. */
   as(token: string, method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any }>;
@@ -288,6 +289,15 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       const response = await remember(await fetch(`${teamBase}${path}`, init));
       return { status: response.status, body: parse(await response.text()) };
     };
+    // A new Team Cloud's Chief gets a name at random, so one run in 64 it would share a name with a bot the test makes.
+    let chiefNamed = false;
+    const nameChief = async (token: string) => {
+      const listed = await as(token, "GET", "/api/bots?messages=0");
+      const chief = (listed.body.bots as Array<{ id: string; chiefOfStaff?: boolean }>).find((bot) => bot.chiefOfStaff);
+      if (!chief) return;
+      const renamed = await as(token, "PATCH", `/api/bots/${chief.id}`, { name: "Seedling" });
+      if (renamed.status !== 200) throw new Error(`could not name the team's Chief: ${renamed.status} ${JSON.stringify(renamed.body)}`);
+    };
     teamFixture = {
       base: teamBase, home: join(root, "team"), id: team.id, name: team.name,
       async grant(member) {
@@ -308,7 +318,12 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
         if (minted.status !== 200) return { status: minted.status, body: grant, token: null };
         const paired = await remember(await fetch(`${teamBase}/api/auth/pair`, { method: "POST", headers: { ...EDGE, "content-type": "application/json" }, body: JSON.stringify({ code: grant.code }) }));
         const session = parse(await paired.text());
-        return { status: paired.status, body: session, token: paired.status === 200 ? session.token as string : null };
+        if (paired.status !== 200) return { status: paired.status, body: session, token: null };
+        if (!chiefNamed && member && member.role !== "member") {
+          chiefNamed = true;
+          await nameChief(session.token as string);
+        }
+        return { status: paired.status, body: session, token: session.token as string };
       },
       as,
       signed: (method, path, body) => signedRequest(teamBase, method, path, body === undefined ? "" : JSON.stringify(body)),
