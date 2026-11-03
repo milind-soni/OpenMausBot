@@ -55,6 +55,7 @@
   "server.warmSummary.summarized": "cette conversation a été résumée pendant une pause ; les derniers messages sont conservés mot pour mot",
   "server.runs.didNotFinish": "Cette exécution ne s'est pas terminée.",
   "server.runs.didNotFinishWhy": "Cette exécution ne s'est pas terminée : {detail}",
+  "server.runs.partlyDoneWhy": "Cette exécution n'a été faite qu'en partie : {detail}",
   "server.runs.recovered": "Rétabli : {name} s'est bien terminé à {time}",
   "server.runs.card.line": "Routine « {name} » {state}",
   "server.runs.state.needsInput": "attend votre réponse",

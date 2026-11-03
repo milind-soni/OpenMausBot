@@ -127,7 +127,7 @@ it("moves no main thread for a teammate's work or results or a team incident; re
         { key: "books", match: ["BOOKS: check the books."], reply: "The books balance." },
         { key: "crash", match: ["Reconcile the invoices."], fail: true },
       ] },
-      [chief.id]: { script: [{ key: "incident", match: ["Incident report"], reply: "Incident noted." }] },
+      [chief.id]: { script: [{ key: "incident", match: ["incident report"], reply: "Incident noted." }] },
     }));
 
     await cli("send", "--bot", asker.id, "--task", asker.activeTaskId, "--text", "Open a side job that asks Teammate.");

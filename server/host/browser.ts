@@ -203,7 +203,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   const audiences = new AudienceBrowsers(join(DATA_DIR, "browser", "audiences.json"));
   const browserAudience = (threadId: string | undefined): Audience => (threadId && deps.audienceOf ? deps.audienceOf(threadId) : "team");
   const device = deps.device && lentDevice(deps.device, (session) => turnResources.holder(`browser:${session}`), mayLend);
-  browserEgress.configure({ host: DESKTOP_MANAGED ? "desktop" : CLOUD_HOME ? "cloud" : "server", config: () => cfg.browserEngine?.egress, ...(device ? { device } : {}) });
+  const egressHost = DESKTOP_MANAGED ? "desktop" : CLOUD_HOME ? "cloud" : "server";
+  browserEgress.configure({ host: egressHost, config: () => cfg.browserEngine?.egress, ...(device ? { device } : {}) });
   /** A live bot's, profile's or temporary browser of this data dir, for any audience. */
   const belongs = (session: string) => isTemporaryBrowserSession(session) || audiences.variants().some((suffix) =>
     store.bots.some((bot) => browserSessionId(bot.id + suffix, "") === session)
@@ -531,9 +532,11 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     return { binaryPath: engine.binaryPath, session, env: browserSessionSpec(engine.binaryPath, session, profile, await browserEgress.open(session)).env, encryptionKey: browserEngineEncryptionKey() };
   }
   /** What Settings shows of the engine that runs bots' browsers here; My Chrome stays on agent-browser. */
-  function engineSummary<T extends { myChrome: boolean }>(agentBrowser: T): (T | (ReturnType<ChromeEngine["summary"]> & { myChrome: boolean })) & { engine: BrowserEngineKind } {
-    if (browserEngineKind(cfg) !== "chrome") return { ...agentBrowser, engine: "agent-browser" };
-    return { ...chromeEngine.summary(), myChrome: agentBrowser.myChrome, ...lentChromeSummary(), engine: "chrome" };
+  function engineSummary<T extends { myChrome: boolean }>(agentBrowser: T): (T | (ReturnType<ChromeEngine["summary"]> & { myChrome: boolean })) & { engine: BrowserEngineKind; serverSites?: boolean } {
+    // Self-hosted servers only: the owner's switch for this server's own sites and its local network.
+    const serverSites = egressHost === "server" ? { serverSites: cfg.browserEngine?.egress?.localNetwork === true } : {};
+    if (browserEngineKind(cfg) !== "chrome") return { ...agentBrowser, ...serverSites, engine: "agent-browser" };
+    return { ...chromeEngine.summary(), myChrome: agentBrowser.myChrome, ...lentChromeSummary(), ...serverSites, engine: "chrome" };
   }
 
   return {

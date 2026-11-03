@@ -493,7 +493,7 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
       const reply = String(replies.at(-1)?.text ?? "");
       expect(reply.startsWith((await runState(turn.runId)).output)).toBe(true);
       expect(reply).toContain("Your downstream room requests have settled.");
-      expect(reply).toContain("[OpenMausBot report from @Capacity fixture on assignment");
+      expect(reply).toContain("[From @Capacity fixture (bot) · report on assignment");
       expect(reply).toContain("What @Capacity fixture said:");
       expect((await messages(turn.threadId)).some((message) => message.tool?.name === "Capacity fixture replied")).toBe(true);
     };

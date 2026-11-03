@@ -10,14 +10,19 @@ export function latestRoutineRun(routineId: string, runs: readonly RoutineRun[])
     .reduce<RoutineRun | undefined>((latest, run) => !latest || routineRunTime(run) > routineRunTime(latest) ? run : latest, undefined);
 }
 
+/** A run that failed only because a step did, after its reply came back. */
+export function partlyDone(run: RoutineRun): boolean {
+  return run.status === "failed" && run.partial === true && !run.goalStatus;
+}
+
 export function routineRunLabel(run: RoutineRun): string {
   if (run.goalStatus) return t(`routines.goal.${run.goalStatus}`);
-  const status = t(`routines.status.${run.status}`);
+  const status = t(partlyDone(run) ? "routines.status.partial" : `routines.status.${run.status}`);
   return run.retried && run.status !== "queued" ? t(`routines.retried.${run.retried}`, { status }) : status;
 }
 
 export function routineRunTone(run: RoutineRun): string {
-  if (run.status === "waiting" || ["needs-input", "limit-reached", "paused"].includes(run.goalStatus ?? "")) return "text-warning";
+  if (run.status === "waiting" || partlyDone(run) || ["needs-input", "limit-reached", "paused"].includes(run.goalStatus ?? "")) return "text-warning";
   if (["failed", "missed"].includes(run.status) || ["failed", "blocked"].includes(run.goalStatus ?? "")) return "text-danger";
   if (run.status === "running") return "text-accent";
   if (run.status === "completed" && (!run.goalStatus || run.goalStatus === "completed")) return "text-success";

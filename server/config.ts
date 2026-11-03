@@ -278,7 +278,7 @@ const instanceConfigSchema = z.object({
       .refine((icon) => providerIconError(icon) === null, { message: "Invalid provider icon" }),
   ]).optional(),
   environment: z.record(z.string(), z.string()).optional(),
-  enabled: z.boolean().optional(),
+  enabled: z.boolean().optional(), hidden: z.boolean().optional(),
   access: z.enum(["subscription", "custom", "api"]).optional(),
   config: z.json().optional(),
 });
@@ -953,7 +953,9 @@ export function saveConfig(
     const current = jsonObjectSchema.safeParse(disk[key]);
     const merged: JsonObject = current.success ? { ...current.data } : {};
     if (key === "threads" && !current.success) merged.maxConcurrentPerBot = DEFAULT_MAX_CONCURRENT_BOT_THREADS;
-    Object.assign(merged, section);
+    // A partial egress patch (the owner's local-sites switch) keeps the rest of the stored egress, such as the allow-list.
+    const egress = key === "browserEngine" && checkedPatch.browserEngine?.egress ? { ...jsonObjectSchema.safeParse(merged.egress).data, ...checkedPatch.browserEngine.egress } : null;
+    Object.assign(merged, section, egress ? { egress } : {});
     for (const [sectionKey, sectionValue] of Object.entries(section as Record<string, unknown>)) {
       if (sectionValue === null) delete merged[sectionKey];
     }
