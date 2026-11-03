@@ -184,7 +184,7 @@ LABEL ${MANAGED_LABEL}="1" \\
 `;
 }
 
-async function sh(cmd: string, args: string[], timeout = 8000): Promise<{ stdout: string }> {
+export async function sh(cmd: string, args: string[], timeout = 8000): Promise<{ stdout: string }> {
   const resolved = resolveCliSpawn(cmd, args);
   const { stdout } = await run(resolved.command, resolved.args, {
     timeout,

@@ -496,6 +496,7 @@ import {
 import { OrgLibrary } from "./org-library.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
 import { autoLocalVmAttachable, type ContainerComputerStatus } from "./container-computer.ts";
+import { startStoppedPodmanMachine } from "./podman-machine.ts";
 import { keepTransient, lazyClaimRetryText, settledWithin, startAutoVmClaim, withinBudget, type AutoVmClaimSlot, type AutoVmClaimTable } from "./auto-vm-claims.ts";
 import { CONTROL_ACT_WITHIN_MS, CONTROL_BUSY, CONTROL_HANDED_BACK, CONTROL_WAIT_MS, CONTROL_WAITED, controlRefusal, type ControlState } from "./control-client.ts";
 import { computerFreeAfterText, computerParkedText, computerPersonAwayText, computerStoppedWaitingText, computerWaitingText, type ComputerHolder } from "./computer-wait.ts";
@@ -11809,6 +11810,7 @@ async function readyLocalVmForTurn(botId: string, target: LocalVmTarget, isCurre
   let status: ContainerComputerStatus;
   try {
     status = await containerComputerStatus(undefined, undefined, target);
+    status = await startStoppedPodmanMachine(status, () => containerComputerStatus(undefined, undefined, target), () => broadcast({ kind: "computer", botId, state: "provisioning" }));
     noteLocalVmSeen(target, status);
     if (!isCurrent()) return status;
     const action = localVmWakeAction(status);
