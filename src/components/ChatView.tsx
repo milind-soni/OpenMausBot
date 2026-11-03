@@ -999,7 +999,10 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
     ? { link: currentLink, assign: (link: string | null) => dispatch({ type: "updateTask", botId: bot.id, threadId: bot.threadId, patch: { link } }) }
     : null, [canWrite, currentLink, bot.id, bot.threadId, dispatch]);
 
-  const routineExecution = useThreadRoutineRun(bot.id, bot.threadId);
+  const routineRun = useThreadRoutineRun(bot.id, bot.threadId);
+  // A run that worked inside the conversation its results go to (a wait finishing in this chat) is part of that
+  // conversation, not a separate execution thread: no banner, whose "back to results" would point at itself.
+  const routineExecution = routineRun && (routineRun.resultsThreadId ?? routineRun.sourceThreadId) !== bot.threadId ? routineRun : undefined;
   const resultsThreadId = routineExecution?.resultsThreadId ?? routineExecution?.sourceThreadId;
   const canOpenResults = resultsThreadId && [...state.bots, ...state.groups].some((owner) => owner.threadId === resultsThreadId || owner.tasks?.some((task) => task.threadId === resultsThreadId));
 
