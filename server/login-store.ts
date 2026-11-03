@@ -196,6 +196,21 @@ export class LoginStore {
     return summarizeLogin(login);
   }
 
+  /** One encrypted write; duplicates never replace passwords, 2FA keys or bot permissions. */
+  importMany(inputs: NewLogin[]): { imported: number; skipped: number } {
+    const data = this.read();
+    if (this.unreadableWarned) throw new Error("saved logins unavailable");
+    const logins = [...data.logins];
+    const now = this.now();
+    for (const input of inputs) {
+      if (logins.some((login) => sameAccount(login, input))) continue;
+      logins.push({ ...input, totp: input.totp ?? undefined, id: randomUUID(), createdAt: now, updatedAt: now });
+    }
+    const imported = logins.length - data.logins.length;
+    if (imported) this.write({ ...data, logins });
+    return { imported, skipped: inputs.length - imported };
+  }
+
   update(id: string, patch: LoginPatch): LoginSummary | null {
     const data = this.read();
     const current = data.logins.find((login) => login.id === id);

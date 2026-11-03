@@ -56,6 +56,32 @@ async function serve() {
 }
 
 describe("Settings → Logins routes", () => {
+  it("bulk imports atomically, skips duplicates on retry and preserves existing permissions and secrets", async () => {
+    const { store, call, answers } = await serve();
+    const prior = await call("POST", "/api/logins", { site: "https://example.com", username: "alice", password: PASSWORD, totp: KEY, bots: ["pepper"] });
+    const entries = [
+      { site: "https://example.com", username: "alice", password: NEW_PASSWORD },
+      { site: "https://other.example.org", username: "bob", password: NEW_PASSWORD },
+    ];
+    const imported = await call("POST", "/api/logins/import", { entries, bots: ["quill"] });
+    expect(imported).toMatchObject({ status: 201, body: { imported: 1, skipped: 1 }, cache: "no-store" });
+    expect(store.get(prior.body.login.id)).toMatchObject({ password: PASSWORD, bots: ["pepper"], totp: { secret: KEY } });
+    expect(store.list().find((login) => login.username === "bob")).toMatchObject({ hosts: ["other.example.org"], exactHost: true, bots: ["quill"] });
+    expect((await call("POST", "/api/logins/import", { entries, bots: "all" })).body).toEqual({ imported: 0, skipped: 2 });
+    expect(store.list()).toHaveLength(2);
+    for (const answer of answers) for (const secret of [PASSWORD, NEW_PASSWORD, KEY]) expect(answer).not.toContain(secret);
+    expect(requiredScope("POST", "/api/logins/import")).toBe("admin");
+  });
+
+  it("rejects a whole invalid batch and invalid bot selection without saving any row", async () => {
+    const { store, call } = await serve();
+    const good = { site: "https://example.com", username: "alice", password: PASSWORD };
+    expect((await call("POST", "/api/logins/import", { entries: [good, { ...good, site: "http://example.org" }], bots: "all" })).status).toBe(400);
+    expect((await call("POST", "/api/logins/import", { entries: [good], bots: ["missing"] })).status).toBe(400);
+    expect((await call("POST", "/api/logins/import", { entries: [good] })).status).toBe(400);
+    expect((await call("POST", "/api/logins/import", { entries: [good], bots: "all" }, "text/plain")).status).toBe(415);
+    expect(store.list()).toHaveLength(0);
+  });
   it("are for admins only", () => {
     for (const method of ["GET", "POST"]) expect(requiredScope(method, "/api/logins")).toBe("admin");
     for (const method of ["PATCH", "DELETE"]) expect(requiredScope(method, "/api/logins/abc")).toBe("admin");

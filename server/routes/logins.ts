@@ -3,10 +3,12 @@ import { LOGIN_FIELD_MAX, loginPlace, normalizeLoginHost, type LoginBots, type L
 import type { LoginPatch, NewLogin } from "../login-store.ts";
 import { parseTotpKey, type TotpKey } from "../totp.ts";
 import { PASS, type RouteHandler } from "./table.ts";
+import { LOGIN_IMPORT_MAX_ROWS, validImportedLogin, type ImportedLogin } from "../../shared/login-import.ts";
 
 export interface LoginRouteDeps {
   list(): LoginSummary[];
   create(input: NewLogin): LoginSummary;
+  importMany(input: NewLogin[]): { imported: number; skipped: number };
   update(id: string, patch: LoginPatch): LoginSummary | null;
   remove(id: string): boolean;
   botExists(id: string): boolean;
@@ -81,6 +83,23 @@ export function createLoginRoutes(deps: LoginRouteDeps): RouteHandler {
     }
     // JSON only, so a form posted from another local page cannot add or change one.
     if (method !== "GET" && method !== "DELETE" && !isJson(req)) return json(res, 415, { error: "content-type must be application/json" });
+    if (path === "/api/logins/import") {
+      if (method !== "POST") return json(res, 405, { error: "method not allowed" });
+      const body = await readBody(req, 16 * 1024 * 1024);
+      if (!body || typeof body !== "object" || Array.isArray(body) || !Array.isArray(body.entries) ||
+          body.entries.length === 0 || body.entries.length > LOGIN_IMPORT_MAX_ROWS || !body.entries.every(validImportedLogin)) {
+        return json(res, 400, { error: "Choose a valid browser password export with at most 5,000 logins." });
+      }
+      const bots = parseBots(body.bots, deps.botExists);
+      if (!bots.ok || bots.value === undefined) return json(res, 400, { error: LOGIN_ERRORS.bots });
+      const chosenBots = bots.value;
+      const entries: NewLogin[] = body.entries.map((entry: ImportedLogin) => ({
+        ...loginPlace(normalizeLoginHost(entry.site)!, [], true), username: entry.username.trim(), password: entry.password,
+        bots: chosenBots, source: "settings",
+      }));
+      try { return json(res, 201, deps.importMany(entries)); }
+      catch { return json(res, 500, { error: "The logins could not be saved. Try the import again." }); }
+    }
     // 1Password's own paths, ahead of the /api/logins/:id pattern they would match.
     if (path === ONE_PASSWORD && method === "POST") {
       const body = await readBody(req, 16_384);
