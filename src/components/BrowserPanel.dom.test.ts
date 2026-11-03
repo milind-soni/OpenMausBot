@@ -81,6 +81,15 @@ describe("the browser panel's Maximize", () => {
     expect(dialogCloses).not.toHaveBeenCalled();
   });
 
+  it("does not look like Full screen: each has its own icon and says what it fills", () => {
+    const fullscreen = host.querySelector<HTMLButtonElement>('[aria-label="Full screen"]')!;
+    const icon = (button: HTMLButtonElement | null) => button?.querySelector("svg")?.getAttribute("class");
+    expect(icon(maximizeButton())).toBe("lucide lucide-app-window");
+    expect(icon(fullscreen)).toBe("lucide lucide-maximize");
+    expect(maximizeButton()?.title).toBe("Maximize (fill the app window)");
+    expect(fullscreen.title).toBe("Full screen (whole display)");
+  });
+
   it("leaves Escape to the app while the panel is its usual size", () => {
     pressEscape();
     expect(skyward()).toBe(false);

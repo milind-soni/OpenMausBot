@@ -246,6 +246,15 @@ export class McpOAuthManager {
     this.store.put(name, { ...rest, url, state: "needs-sign-in" });
   }
 
+  /** A probe that sent no credentials found that the server wants a sign-in this entry doesn't hold. Never touches a
+   * sign-in (one may have landed while the probe ran), so unlike markNeedsSignIn it has no tokens to drop. Idempotent. */
+  requireSignIn(name: string, url: string): void {
+    if (this.authState(name, url) === "signed-in") return;
+    const current = this.store.get(name, url);
+    if (current?.state === "needs-sign-in") return;
+    this.store.put(name, { ...current, url, state: "needs-sign-in" });
+  }
+
   start(name: string, url: string, wwwAuthenticate?: string | null, owner = "loopback", browser: McpSignInBrowser = { remote: false }): Promise<McpSignInStatus> {
     const current = this.flows.get(name);
     if (current?.status.phase === "waiting" && !this.isOwnerLive(current.owner)) {

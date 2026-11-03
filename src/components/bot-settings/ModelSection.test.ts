@@ -11,7 +11,13 @@ vi.mock("@/state/store", async (importOriginal) => {
   return { ...original, useStore: () => ({ state: { ...original.initialState, instances, config: { automaticRecovery: recovery } }, dispatch: vi.fn() }) };
 });
 
-const { FallbackChain } = await import("./ModelSection");
+vi.mock("../ModelPicker", () => ({
+  ModelPicker: ({ label }: { label: ReactNode }) => label,
+  EffortRow: () => null,
+}));
+
+const { FallbackChain, ModelSection } = await import("./ModelSection");
+const { BotEditorContext } = await import("./BotEditorContext");
 
 const engine = (instanceId: string, displayName: string, options: string[], authenticated = true) => ({
   instanceId, displayName, driverKind: "openai-compat", enabled: true,
@@ -60,5 +66,19 @@ describe("a bot's backup models", () => {
   it("keeps showing a saved model the engine no longer lists", () => {
     const markup = renderToStaticMarkup(createElement(FallbackChain, { bot: bot([{ instanceId: "codex", model: "gpt-old" }]), onChange: vi.fn() }));
     expect(markup).toMatch(/aria-label="Model for Codex"[^>]*>.*<option value="gpt-old" selected="">gpt-old<\/option>/);
+  });
+});
+
+describe("the bot's model in Bot settings", () => {
+  const hint = "A new bot starts on this installation&#x27;s default model unless you pick another here. To switch automatically when this model is at its usage limit, add backup models below.";
+  const render = (draft: boolean) => renderToStaticMarkup(createElement(BotEditorContext.Provider, { value: { request: vi.fn() as never, draft } },
+    createElement(ModelSection, { bot: bot(undefined) })));
+
+  it("says where a new bot's model comes from and points to backup models", () => {
+    expect(render(false)).toContain(hint);
+  });
+
+  it("leaves the hint out while a bot is still being made", () => {
+    expect(render(true)).not.toContain(hint);
   });
 });

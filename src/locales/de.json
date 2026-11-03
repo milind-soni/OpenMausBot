@@ -58,6 +58,7 @@
   "server.warmSummary.summarized": "diese Unterhaltung wurde in einer Pause zusammengefasst; die letzten Nachrichten bleiben wörtlich erhalten",
   "server.runs.didNotFinish": "Diese Ausführung wurde nicht beendet.",
   "server.runs.didNotFinishWhy": "Diese Ausführung wurde nicht beendet: {detail}",
+  "server.runs.partlyDoneWhy": "Diese Ausführung wurde teilweise erledigt: {detail}",
   "server.runs.recovered": "Wieder in Ordnung: {name} wurde um {time} erfolgreich beendet",
   "server.runs.card.line": "Routine „{name}“ {state}",
   "server.runs.state.needsInput": "braucht deine Eingabe",

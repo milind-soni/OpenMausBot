@@ -55,6 +55,7 @@
   "server.warmSummary.summarized": "цю розмову підсумовано, поки вона була на паузі; останні повідомлення збережено дослівно",
   "server.runs.didNotFinish": "Цей запуск не завершився.",
   "server.runs.didNotFinishWhy": "Цей запуск не завершився: {detail}",
+  "server.runs.partlyDoneWhy": "Цей запуск виконано частково: {detail}",
   "server.runs.recovered": "Знову все гаразд: рутина «{name}» успішно завершилася о {time}",
   "server.runs.card.line": "Рутина «{name}» {state}",
   "server.runs.state.needsInput": "чекає на вашу відповідь",

@@ -16,8 +16,8 @@ import { hostTimeout } from "./testing/host-timeout.ts";
 import { ownTurnText } from "./testing/room-handoff-agent.ts";
 
 const SETTLED = "Your downstream room requests have settled.";
-const REPORT_FROM_MIRA = "[OpenMausBot report from @Mira";
-const QUESTION_FROM_MIRA = "[OpenMausBot question from @Mira";
+const REPORT_FROM_MIRA = "[From @Mira (bot) · report on assignment";
+const QUESTION_FROM_MIRA = "[From @Mira (bot) · question on assignment";
 
 type Row = Record<string, any>;
 const jsonl = (path: string): any[] => existsSync(path)

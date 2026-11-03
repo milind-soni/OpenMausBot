@@ -140,5 +140,9 @@ describe("sidebar bot threads", () => {
     expect(picker).not.toContain("Tasks");
     const working = renderToStaticMarkup(createElement(StoreProvider, null, createElement(GroupThreadList, { group: { ...group, working: true }, selected: true })));
     expect(working).toContain(`title="Launch plan · ${formatUpdatedAt(3)} · Working"`);
+    const archived = { ...group, tasks: [group.tasks![0]!, { ...group.tasks![1]!, archivedAt: 5 }] };
+    const withArchived = renderToStaticMarkup(createElement(StoreProvider, null, createElement(GroupThreadList, { group: archived, selected: true })));
+    expect(withArchived).not.toContain("Previous review");
+    expect(withArchived).toContain("Show all");
   });
 });

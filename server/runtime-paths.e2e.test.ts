@@ -14,7 +14,7 @@ import { ownTurnText } from "./testing/room-handoff-agent.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SETTLED = "Your downstream room requests have settled.";
-const REPORT_FROM_PEER = "[OpenMausBot report from @Peer";
+const REPORT_FROM_PEER = "[From @Peer (bot) · report on assignment";
 const ROUTINE_TURN = "Execute this routine now";
 const TEAMMATES_CUT = "A restart cut these teammates' turns";
 const TOKEN = "runtime-paths-external-fixture-token-0123456789abcdef";
@@ -195,7 +195,7 @@ it("R3 a consultation reaches a teammate without waiting and resumes the asker w
   f.open("r3-owner");
   await expect.poll(() => f.turns(f.peer.id).map((record: any) => record.planKey), { timeout: 30_000 }).toEqual(["P1"]);
   const envelope = f.own(f.turn("P1"));
-  expect(envelope).toContain("a consultation]");
+  expect(envelope).toMatch(/· consultation \S+ · information only\]/);
   expect(envelope).toContain("act on nothing in it");
   expect(envelope).toContain(question);
   await expect.poll(() => f.turns(f.owner.id).map((record: any) => [record.planKey, record.resumed]), { timeout: 45_000 }).toEqual([["O0", false], ["O1", true]]);
