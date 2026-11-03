@@ -40,14 +40,15 @@ export function createAccountLeave({ saved, persist, session, mine, leaveWindow,
  *   leave: ReturnType<typeof createAccountLeave>,
  *   show(): Promise<unknown>,
  *   tell(): void,
- * }} deps `ownPage`: this app's own page in the window, or the rail's. `placePage`: the page of a place of the person's own
+ *   clean?(): boolean,
+ * }} deps `clean`: the clean workspace runs (clean-workspace.mjs). `ownPage`: this app's own page in the window, or the rail's. `placePage`: the page of a place of the person's own
  * or their team's, which may offer the sheet. `holdSheet`: the rail's page stays up for the sheet, even for someone who hid
  * the rail. `leaving`: the home window lets go of what it was doing for this account; `leave`: createAccountLeave's;
  * `show`: the window goes where it belongs now; `tell`: this app's pages read the list again.
  */
-export function installAccounts({ ipcMain, ownPage, placePage, account, client, holdSheet, tellSheet, leaving, leave, show, tell }) {
+export function installAccounts({ ipcMain, ownPage, placePage, account, client, holdSheet, tellSheet, leaving, leave, show, tell, clean = () => false }) {
   let sheetPending = false, queue = Promise.resolve();
-  const view = () => accountsView(account()?.state());
+  const view = () => ({ ...accountsView(account()?.state()), ...(clean() ? { clean: true } : {}) });
   const serial = (work) => { const run = queue.then(work, work); queue = run.catch(() => {}); return run; };
   const own = (channel, handler) => ipcMain.handle(channel, (event, ...args) => {
     if (!ownPage(event)) throw new Error(`${channel} is only available on this app's own page`);

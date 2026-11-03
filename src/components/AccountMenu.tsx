@@ -40,6 +40,12 @@ export function useAccounts(): AccountsAccess {
   };
 }
 
+/** The You menu's row for the MausBot Cloud page: with the clean workspace open and nobody signed in, the line there asks the person
+ * to sign in, and this row is how. */
+export function cloudRowLabel(view: AccountsView | null): string {
+  return t(view?.clean && !view.active ? "accounts.signIn" : "settings.section.cloudAccount");
+}
+
 /** The You menu's last rows. On another page, one row that opens the sheet. Signed out: nothing, as Settings has the sign-in. */
 export function accountMenuItems({ view, openSheet, signOut }: AccountsAccess): SidebarMenuItem[] {
   if (openSheet) return [{ key: "accounts-sheet", label: t("accounts.manage"), icon: <UserRound size={18} />, onSelect: openSheet }];
