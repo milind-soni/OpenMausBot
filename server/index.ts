@@ -266,7 +266,7 @@ import { EventBus } from "./harness/bus.ts";
 import { ENGINE_LIST_REUSE_MS, engineMemory, enginesByUse, ProviderRegistry } from "./harness/registry.ts"; import { afterFirstEngineRead, holdUntilFirstEngineRead } from "./first-engine-read.ts";
 import { ManagedDesktopProviders } from "./managed-desktop.ts";
 import { mainThread, wasOldestThread } from "./main-thread.ts";
-import { lastHumanRoomMessageAt, NEW_THREAD_TITLE_REFUSAL, newThreadTitle } from "./room-post-thread.ts";
+import { lastHumanRoomMessageAt, NEW_THREAD_TITLE_REFUSAL, newThreadTitle, postToRoomThread } from "./room-post-thread.ts";
 import { computerKindForResource, ManagedDesktopPolicy, type ComputerKind } from "./managed-policy.ts"; import { nudgeCloudTeamPolicy, remoteAccessPaths, startCloudTeamPolicy, stopCloudTeamPolicy } from "./cloud-team-policy.ts";
 import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER } from "./hosted-models.ts";
 import { CLOUD_HOME_SECRET_KEYS, CLOUD_IGNORED_KEYS, cloudHomeConfiguration, cloudHomeOffersPlace, cloudHomePlaceRefusal, firstCloudTurnPatch } from "./cloud-home.ts";
@@ -14239,10 +14239,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               parked.filter((attachment) => attachment.kind !== "audio"),
             );
         }
-        const opened = newThread ? store.createGroupTask(room.id, newThread, false) : null;
-        if (newThread && !opened) return json(res, 404, { error: "that room no longer exists" });
-        if (opened) threadStarters.set(opened.threadId, botOpenedThreadStarter(internalCapability, fromThreadId));
-        const posted = store.appendMessage(opened?.threadId ?? room.threadId, {
+        const landed = postToRoomThread(store, room, newThread, {
           role: "bot",
           kind: "text",
           text: message,
@@ -14250,6 +14247,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           peerPost: unattended ? { unattended: true } : {},
           ...(attachedVoiceNote ? { attachments: stagedAttachments } : {}),
         });
+        if (!landed) return json(res, 404, { error: "that room no longer exists" });
+        const { opened, posted } = landed;
+        if (opened) threadStarters.set(opened.threadId, botOpenedThreadStarter(internalCapability, fromThreadId));
         internalCapability.roomPosts = (internalCapability.roomPosts ?? 0) + 1;
         detachParkedAudio?.();
         if (!opened) store.patchGroup(room.id, { unread: true });
