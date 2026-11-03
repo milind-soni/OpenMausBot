@@ -23,6 +23,7 @@ import {
   Zap,
 } from "lucide-react";
 
+import { accountMenuItems, useAccounts } from "./AccountMenu";
 import { AccountMoveStatus, useAccountMove, type AccountMoveKind } from "./AccountMove";
 import { InitialsAvatar } from "./Avatar";
 import { DiscordIcon } from "./DiscordIcon";
@@ -456,6 +457,7 @@ export function profileMenuItems({
   updateTop = null,
   move = [],
   account,
+  accounts = [],
   simple,
   onUsage,
   onSettings,
@@ -473,6 +475,8 @@ export function profileMenuItems({
   /** the move to My Cloud's own rows, first of all (AccountMove) */
   move?: SidebarMenuItem[];
   account: string | null;
+  /** who is signed in on this device: the last rows, next to where the menu opens */
+  accounts?: SidebarMenuItem[];
   simple?: { tools: SidebarMenuItem[]; places: SidebarMenuItem[] };
   onUsage: () => void;
   onSettings: () => void;
@@ -508,7 +512,7 @@ export function profileMenuItems({
   const accountItem: SidebarMenuItem | null = account ? { key: "account", label: account, icon: <CircleUserRound size={18} />, onSelect: onAccount } : null;
   const present = (...items: Array<SidebarMenuItem | null | false>) => items.filter((item): item is SidebarMenuItem => Boolean(item));
   if (!simple) {
-    const rest = [...present(usageItem), ...phone, support, settings, ...present(update), ...(accountItem ? [{ ...accountItem, separatorBefore: true }] : [])];
+    const rest = [...present(usageItem), ...phone, support, settings, ...present(update), ...(accountItem ? [{ ...accountItem, separatorBefore: true }] : []), ...accounts.map((item, index) => (index === 0 ? { ...item, separatorBefore: true } : item))];
     return [...move, ...rest.map((item, index) => (move.length && index === 0 ? { ...item, separatorBefore: true } : item))];
   }
   const raised: SidebarMenuItem | null = update && updateTop ? {
@@ -524,6 +528,7 @@ export function profileMenuItems({
     [...present(usageItem), ...phone, { ...support, submenu: raised ? help : [...help, ...present(update)] }, settings],
     simple.tools,
     [...simple.places, ...present(accountItem)],
+    accounts,
   ].filter((group) => group.length > 0);
   return groups.flatMap((group, at) => group.map((item, index) => (at > 0 && index === 0 ? { ...item, separatorBefore: true } : item)));
 }
@@ -582,6 +587,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
   const cloudAccount = !remote && Boolean(window.ogb?.cloudAccount || (window.ogb?.cloudPlan && state.config?.cloudHome === true));
   const openCloudAccount = () => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
   const move = useAccountMove(state.config?.cloudHome === true, { onOpen: openCloudAccount, onPairPhone: () => dispatch(phonePairingSettingsAction()) });
+  const accounts = useAccounts();
 
   const items = profileMenuItems({
     phone: simple
@@ -598,6 +604,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
     updateTop: simple ? simpleUpdateTop(update) : null,
     move: move.items,
     account: cloudAccount ? t("settings.section.cloudAccount") : null,
+    accounts: accountMenuItems(accounts),
     ...(account ? { simple: {
       tools: toolMenuItems({
         activeView: state.activeView,
