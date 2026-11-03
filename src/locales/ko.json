@@ -539,6 +539,7 @@
   "rail.kindTeam": "팀",
   "rail.kindServer": "내 서버",
   "cloudBuy.ready.switchHint": "창 위쪽이나 왼쪽 가장자리에서 이 컴퓨터와 {name} 사이를 전환하세요.",
+  "homeLine.joinedTeam": "팀에 참여하셨나요? 초대받은 주소로 로그인하세요.",
   "rail.signIn": "로그인하면 내 클라우드와 팀이 보여요",
   "rail.tagOpen": "{name}: 내 모든 장소 보기",
   "rail.settingUp": "{name}: 설정 중",

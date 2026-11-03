@@ -622,7 +622,7 @@ describe("the sheet", () => {
     expect(bridge.checkout).not.toHaveBeenCalled();
   });
 
-  it("signed in here to a Team plan: the team's Cloud is ready to open, never a My Cloud being set up; Open opens the team and closes", async () => {
+  it("signed in here to a Team plan: their one team opens by itself, never a My Cloud being set up, and the sheet closes", async () => {
     f.state = { cloudAdd: { source: "app_settings", signIn: true }, config: {} };
     expect(await settle()).toContain("Sign in to MausBot Cloud");
     bridge.signInVerify.mockResolvedValueOnce({ outcome: "signed-in", state: onTeam() });
@@ -633,10 +633,8 @@ describe("the sheet", () => {
     await flush(); await flush();
     account = onTeam();
     const shown = await settle();
-    inOrder(shown, ["Your team's Cloud is ready", "Open Acme"]);
     for (const word of ["Reserving your machine", "Setting up your new Cloud", "My Cloud"]) expect(shown).not.toContain(word);
     expect(bridge.readySeen, "the purchase is over for main").toHaveBeenCalled();
-    await press("Open Acme");
     expect(bridge.openTeam).toHaveBeenCalledExactlyOnceWith("team-acme");
     expect(bridge.connectHome).not.toHaveBeenCalled(); expect(bridge.checkout).not.toHaveBeenCalled();
     expect(f.dispatch).toHaveBeenCalledWith({ type: "closeCloudAdd" });
@@ -651,34 +649,62 @@ describe("the sheet", () => {
     await flush(); await flush();
   };
 
-  it("signed in here to a team with no plan of their own, though the Admin offers one: their team's Cloud to open, never plan cards", async () => {
+  it("signed in here to one team with no plan of their own, though the Admin offers one: the team opens by itself, with no plan cards", async () => {
     f.state = { cloudAdd: { source: "app_settings", signIn: true }, config: {} };
     expect(await settle()).toContain("Sign in to MausBot Cloud");
     bridge.signInVerify.mockResolvedValueOnce({ outcome: "signed-in", state: teammate() });
     await signInWithCode();
     account = teammate();
     const shown = await settle();
-    inOrder(shown, ["Your team's Cloud is ready", "Open Acme"]);
     for (const word of ["Start free trial", "Most popular", "$49"]) expect(shown).not.toContain(word);
-    await press("Open Acme");
     expect(bridge.openTeam).toHaveBeenCalledExactlyOnceWith("team-acme");
+    expect(f.dispatch).toHaveBeenCalledWith({ type: "closeCloudAdd" });
+    expect(bridge.checkout).not.toHaveBeenCalled();
   });
 
-  it("a plan card pressed before signing in doesn't carry a teammate to checkout once it turns out they have a team", async () => {
+  it("if the team doesn't open, the sheet says so, its button is there, and it doesn't try again by itself", async () => {
+    f.state = { cloudAdd: { source: "app_settings", signIn: true }, config: {} };
+    await settle();
+    bridge.openTeam.mockRejectedValueOnce(new Error("Acme isn't running right now."));
+    bridge.signInVerify.mockResolvedValueOnce({ outcome: "signed-in", state: teammate() });
+    await signInWithCode();
+    account = teammate();
+    const shown = await settle();
+    inOrder(shown, ["Your team's Cloud is ready", "Open Acme"]);
+    expect(shown).toContain("Acme didn't open. Try again in a minute.");
+    expect(bridge.openTeam).toHaveBeenCalledOnce();
+    await press("Open Acme");
+    expect(bridge.openTeam).toHaveBeenCalledTimes(2);
+  });
+
+  it("a Start free trial pressed before signing in stops before checkout once it turns out they have a team: no second Team, and their team opens", async () => {
     expect(await settle()).toContain("Your bots, always on.");
     expect(await buy("max")).toContain("Create your MausBot account");
     bridge.signInVerify.mockResolvedValueOnce({ outcome: "signed-in", state: teammate() });
     await signInWithCode();
     account = teammate();
-    expect(await settle()).toContain("Your team's Cloud is ready");
+    await settle();
     expect(bridge.checkout).not.toHaveBeenCalled();
+    expect(bridge.openTeam).toHaveBeenCalledExactlyOnceWith("team-acme");
   });
 
-  it("the browser's sign-in lands a teammate on their team's Cloud too", async () => {
+  it("the browser's sign-in opens their one team too", async () => {
     account = { status: "connecting" };
     expect(await settle()).toContain("Finish in your browser");
     push(teammate()); account = teammate();
-    expect(await settle()).toContain("Your team's Cloud is ready");
+    await settle();
+    expect(bridge.openTeam).toHaveBeenCalledExactlyOnceWith("team-acme");
+  });
+
+  it("with several teams, nothing opens by itself: the first is offered, and the rail lists the rest", async () => {
+    f.state = { cloudAdd: { source: "app_settings", signIn: true }, config: {} };
+    await settle();
+    const two = teammate({ teams: [...teammate().teams!, { id: "team-b", name: "Beta", role: "member", machine: { status: "ready", origin: "https://b.example" } as never }] });
+    bridge.signInVerify.mockResolvedValueOnce({ outcome: "signed-in", state: two });
+    await signInWithCode();
+    account = two;
+    expect(await settle()).toContain("Open Acme");
+    expect(bridge.openTeam).not.toHaveBeenCalled();
   });
 
   it("asking to add a Cloud, a teammate may still buy one of their own", async () => {

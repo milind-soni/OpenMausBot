@@ -496,6 +496,7 @@
   "rail.kindTeam": "Zespół",
   "rail.kindServer": "Własny serwer",
   "cloudBuy.ready.switchHint": "Przełączaj między Ten komputer a {name} na górze okna lub przy jego lewej krawędzi.",
+  "homeLine.joinedTeam": "Dołączasz do zespołu? Zaloguj się adresem, na który dostałeś zaproszenie.",
   "rail.signIn": "Zaloguj się, aby zobaczyć swoje Chmury i zespoły",
   "rail.tagOpen": "{name}: zobacz wszystkie swoje miejsca",
   "rail.settingUp": "{name}: konfigurowanie",

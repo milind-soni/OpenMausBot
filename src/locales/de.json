@@ -2660,6 +2660,7 @@
   "rail.kindTeam": "Team",
   "rail.kindServer": "Eigener Server",
   "cloudBuy.ready.switchHint": "Wechsle zwischen „Dieser Computer“ und {name} oben im Fenster oder an seinem linken Rand.",
+  "homeLine.joinedTeam": "Einem Team beigetreten? Melde dich mit der Adresse an, an die die Einladung ging.",
   "rail.signIn": "Melde dich an, um deine Clouds und Teams zu sehen",
   "rail.tagOpen": "{name}: alle deine Orte anzeigen",
   "rail.settingUp": "{name}: wird eingerichtet",

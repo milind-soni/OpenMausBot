@@ -151,7 +151,7 @@ test("the Cloud entry checks the owned server, waits for the saved sign-in, and 
   }
   assert.ok(entry.indexOf("if (desktopRemoteAccess) throw") < guard, "companion client mode is not changed by the link");
   assert.doesNotMatch(entry, /dialog\.|confirm/);
-  assert.match(entry, /const action = cloudLinkOpensSheet\(cloudAccount\?\.state\(\)\) \? "cloud-add" : "cloud";/);
+  assert.match(entry, /const action = cloudLinkTarget\(cloudAccount\?\.state\(\)\);/);
   assert.match(entry, /void cloudAccount\?\.refresh\(\)\.catch\(\(\) => \{\}\);/, "every link asks for the session at once, with or without a checkout waiting");
   assert.deepEqual([...entry.matchAll(/webContents\.send\(([^)]*)\)/g)].map(match => match[1]), ['"app:open-settings", action']);
   assert.deepEqual([...entry.matchAll(/loadURL\((.*)\);/g)].map(match => match[1]), ["`${rendererOrigin()}/?desktop-settings=${action}`"]);

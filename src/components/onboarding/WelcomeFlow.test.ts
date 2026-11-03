@@ -273,3 +273,27 @@ describe("other first runs", () => {
     expect(introStaged("maus"), "a replay lands in a chat that may be long under way").toBe(false);
   });
 });
+
+describe("someone who joined a team in a browser and installed this app", () => {
+  const line = "Joined a team? Sign in with the address you were invited with.";
+  it("the first screen says so while nobody is signed in, and its Sign in opens the sign-in over it", async () => {
+    Object.assign(window, { ogb: { ...window.ogb, cloudAccount: { state: async () => ({ status: "signed-out" }), onState: () => () => {} } } });
+    f.state = { ...f.state, instances: [claude(false)] };
+    await show();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(text()).toContain(line);
+    await act(async () => { host.querySelector<HTMLButtonElement>("[data-joined-team-sign-in]")!.click(); });
+    expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_onboarding", signIn: true });
+  });
+
+  it("not once someone is signed in, nor where nothing can sign in", async () => {
+    Object.assign(window, { ogb: { ...window.ogb, cloudAccount: { state: async () => ({ status: "connected", account: { id: "a", email: "p@example.test" } }), onState: () => () => {} } } });
+    f.state = { ...f.state, instances: [claude(false)] };
+    await show();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(text()).not.toContain(line);
+    Object.assign(window, { ogb: { ...window.ogb, cloudAccount: undefined } });
+    await show();
+    expect(text()).not.toContain(line);
+  });
+});

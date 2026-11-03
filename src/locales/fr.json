@@ -2634,6 +2634,7 @@
   "rail.kindTeam": "Équipe",
   "rail.kindServer": "Serveur personnel",
   "cloudBuy.ready.switchHint": "Passez de « Cet ordinateur » à {name} en haut de la fenêtre ou sur son bord gauche.",
+  "homeLine.joinedTeam": "Vous avez rejoint une équipe ? Connectez-vous avec l’adresse à laquelle vous avez été invité.",
   "rail.signIn": "Connectez-vous pour voir vos Clouds et vos équipes",
   "rail.tagOpen": "{name} : voir tous vos emplacements",
   "rail.settingUp": "{name} : configuration en cours",

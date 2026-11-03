@@ -491,6 +491,7 @@
   "rail.kindTeam": "Team",
   "rail.kindServer": "Server personale",
   "cloudBuy.ready.switchHint": "Passa tra Questo computer e {name} in cima alla finestra o sul suo bordo sinistro.",
+  "homeLine.joinedTeam": "Sei entrato in un team? Accedi con l'indirizzo a cui hai ricevuto l'invito.",
   "rail.signIn": "Accedi per vedere i tuoi Cloud e team",
   "rail.tagOpen": "{name}: vedi tutti i tuoi posti",
   "rail.settingUp": "{name}: in configurazione",

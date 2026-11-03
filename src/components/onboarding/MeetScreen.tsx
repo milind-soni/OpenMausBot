@@ -10,6 +10,7 @@ import { activeLocale, t } from "@/lib/i18n";
 import { aiChoices, aiWorks } from "@/lib/onboarding";
 import { useStore } from "@/state/store";
 import { ConnectAiDialog } from "./ConnectAi";
+import { JoinedTeamSignIn, useSignedOutHere } from "../JoinedTeamLine";
 import { PILL, SignInPill, useSignInPill } from "./SignInPill";
 import { useWelcomeAi } from "./welcome-ai";
 
@@ -76,6 +77,7 @@ export function MeetScreen({ hosted, onNext }: { hosted: boolean; onNext: () => 
   const face = typing ? "listening" : "idle";
   const failure = pill.error ?? (tested?.state === "failed" ? tested.error ?? t("onboarding.engines.noAnswer", { name: tested.instance.displayName }) : null);
   const signingIn = asking && !ready;
+  const signedOut = useSignedOutHere();
   return (
     <div className="relative h-full min-h-[600px] w-full text-center">
       <h1 id="welcome-title" className="absolute left-1/2 top-[calc(50%-264px)] w-max max-w-[min(560px,calc(100%-32px))] -translate-x-1/2 text-[28px] font-normal leading-[34px] tracking-[-0.02em] text-ink">
@@ -117,6 +119,7 @@ export function MeetScreen({ hosted, onNext }: { hosted: boolean; onNext: () => 
           </p>
         )}
         {signingIn && failure && <p role="alert" className="mt-2 text-[13px] leading-[18px] text-danger">{failure}</p>}
+        {signedOut && <p data-meet-joined-team className="mt-3 text-[13px] leading-[18px] text-ink-secondary"><JoinedTeamSignIn source="app_onboarding" /></p>}
       </div>
       {dialog && <ConnectAiDialog hosted={hosted} tested={tested} onClose={() => setDialog(false)} />}
     </div>

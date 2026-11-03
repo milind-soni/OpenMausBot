@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { inflateSync } from "node:zlib";
-import { CLOUD_COLORS, CLOUD_COLOR_HEX, cleanCloudColor, cleanCloudName, cloudLinkOpensSheet, colorDotIcons, colorDotPng, createCloudLook, createCloudReadyNotice,
+import { CLOUD_COLORS, CLOUD_COLOR_HEX, cleanCloudColor, cleanCloudName, cloudLinkOpensSheet, cloudLinkTarget, colorDotIcons, colorDotPng, createCloudLook, createCloudReadyNotice,
   installCloudBuy, lookFile } from "./cloud-buy.mjs";
 import environments from "./environments.cjs";
 
@@ -110,6 +110,13 @@ test("{name} is ready once per checkout from here: not while the sheet is open i
   assert.equal(watched(paid({ status: "ready", origin })), true, "set up while this app watched (bought elsewhere, or restarted): told");
   assert.equal(shown.at(-1).options.title, "Lab is ready");
   assert.equal(watched(paid({ status: "ready", origin })), false, "once");
+});
+
+test("openmausbot://cloud starts a sign-in for someone signed out, as the portal's Open MausBot needs; a purchase under way keeps its sheet, and anyone else has Settings", () => {
+  assert.equal(cloudLinkTarget({ status: "signed-out" }), "cloud-sign-in");
+  assert.equal(cloudLinkTarget({ status: "signed-out", message: "restore-removed" }), "cloud-sign-in");
+  assert.equal(cloudLinkTarget({ status: "connecting", checkout: { plan: "pro", startedAt: 1, signIn: true } }), "cloud-add");
+  for (const state of [null, undefined, { status: "connecting" }, { status: "reauth-required" }, { status: "connected", machine: { status: "ready", origin } }]) assert.equal(cloudLinkTarget(state), "cloud", JSON.stringify(state));
 });
 
 test("openmausbot://cloud shows the sheet while a purchase from here is under way, whether or not its checkout is still watched", () => {

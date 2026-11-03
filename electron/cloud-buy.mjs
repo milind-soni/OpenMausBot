@@ -111,6 +111,10 @@ export function cloudLinkOpensSheet(state) {
   return Boolean((state?.checkout && !state.checkout.done) || (state?.adding && !state.adding.done) || state?.purchase || state?.machine?.status === "provisioning");
 }
 
+/** Where openmausbot://cloud takes the window: that sheet, the sign-in for someone signed out (a person a team just invited,
+ * from the portal's Open MausBot), else Settings. */
+export const cloudLinkTarget = state => (cloudLinkOpensSheet(state) ? "cloud-add" : state?.status === "signed-out" ? "cloud-sign-in" : "cloud");
+
 /** Paid, and the Cloud still being made: a payment linked, no machine yet, or one setting up. */
 const settingUp = state => state?.status === "connected" && (Boolean(state.purchase) || state.machine?.status === "provisioning"
   || (state.entitlement?.status === "active" && !state.machine));

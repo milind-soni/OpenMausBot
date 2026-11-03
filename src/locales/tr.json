@@ -5069,6 +5069,7 @@
   "rail.kindTeam": "Ekip",
   "rail.kindServer": "Kendi sunucunuz",
   "cloudBuy.ready.switchHint": "Bu bilgisayar ile {name} arasında pencerenin üstünden veya sol kenarından geçiş yapın.",
+  "homeLine.joinedTeam": "Bir ekibe mi katıldınız? Davet edildiğiniz adresle giriş yapın.",
   "rail.signIn": "Cloud'larınızı ve ekiplerinizi görmek için giriş yapın",
   "rail.tagOpen": "{name}: tüm yerlerinizi görün",
   "rail.settingUp": "{name}: kuruluyor",

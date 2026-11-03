@@ -130,6 +130,7 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
   const [note, setNote] = useState<Note>(null);
   const [, setTick] = useState(0);
   const [arrived, setArrived] = useState(false);
+  const [signedInHere, setSignedInHere] = useState(false);
   const [terms, setTerms] = useState(false);
   const [extraWide, setExtraWide] = useState(false);
   const open = Boolean(request && bridge);
@@ -157,7 +158,7 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
     if (signIn) void bridge?.signInCancel?.().catch(() => {});
     dispatch({ type: "closeCloudAdd" });
     setError(null); setConflict(false); setChoosing(false); setOpenFailed(false); setReported([]); setChosen(null);
-    setSignIn(null); setForm({ email: "", code: "" }); setLook(null); setAuto(null); setNote(null); setArrived(false); setTerms(false);
+    setSignIn(null); setForm({ email: "", code: "" }); setLook(null); setAuto(null); setNote(null); setArrived(false); setSignedInHere(false); setTerms(false);
   };
   // Capture phase, key marked handled: Escape and Tab reach this before anything underneath (Settings). Focus goes back to the opener.
   useEffect(() => {
@@ -194,6 +195,7 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
   // Ready shown here ends the purchase for main, so a later Add a Cloud… is one Cloud for now.
   useEffect(() => {
     if ((kind === "waiting" || kind === "starting" || kind === "ready" || kind === "signing-in") && !arrived) setArrived(true);
+    if (kind === "signing-in") setSignedInHere(true);
     if (kind === "ready" || kind === "team-ready") void bridge?.readySeen?.().catch(() => {});
   }, [kind]);
   useEffect(() => {
@@ -256,6 +258,13 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
     const timer = setTimeout(() => { if (auto > 1) setAuto(auto - 1); else openCloud(); }, 1000);
     return () => clearTimeout(timer);
   }, [auto]);
+  // Signed in from this sheet to their one team, with no Cloud of their own: that's where they were going. If it doesn't open, the
+  // sheet says so and its button is there.
+  useEffect(() => {
+    if (view?.kind !== "team-ready" || !signedInHere || account?.status !== "connected" || account.teams?.length !== 1) return;
+    setSignedInHere(false);
+    openTeam(view.team.id);
+  }, [kind, signedInHere]);
   // Focus left the window while counting: the person is elsewhere, so nothing switches; Open {name} waits for them.
   const counting = typeof auto === "number";
   useEffect(() => {
@@ -316,7 +325,7 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
           setSignIn({ ...phase, problem: result.outcome, triesLeft: result.outcome === "wrong-code" ? result.triesLeft : null });
           return;
         }
-        setAccount(result.state); setArrived(true);
+        setAccount(result.state); setArrived(true); setSignedInHere(true);
         track("cloud_signin", { step: "signed_in", source: request.source });
         if (plan && free(result.state)) {
           // The account's own offer may differ from the one shown signed out (a trial already used, another price).
