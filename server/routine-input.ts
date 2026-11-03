@@ -1,7 +1,7 @@
 // A routine as a person, a bot or an import asked for it, checked and cleaned before RoutineManager keeps it.
 import { runsOnce } from "../shared/limit-reset.ts";
 import { cleanAttachments, cleanTimeoutMinutes } from "./routine-attachments.ts";
-import { loadChecks } from "./routine-load.ts";
+import { loadChecks, loadModelSelection } from "./routine-load.ts";
 import { cleanSchedule } from "./routine-schedules.ts";
 import type { Routine, RoutineInput } from "./routines.ts";
 
@@ -35,6 +35,9 @@ export function sanitizeInput(input: RoutineInput, after: number): Omit<Routine,
   if (continuity && target === "room-goal") {
     throw new Error("Room goals do not carry continuity yet");
   }
+  const modelSelection = input.modelSelection == null ? undefined : loadModelSelection(input.modelSelection);
+  if (input.modelSelection != null && !modelSelection) throw new Error("Choose a model: an engine, a model id, and an effort level or a variant, not both");
+  if (modelSelection && target === "room-goal") throw new Error("Room goals run on their bots' own models");
   const schedule = cleanSchedule(input.schedule, after);
   const asked = Array.isArray(input.checks) && input.checks.length === 0 ? null : input.checks;
   const checks = asked == null ? undefined : loadChecks(asked);
@@ -55,6 +58,7 @@ export function sanitizeInput(input: RoutineInput, after: number): Omit<Routine,
     ...(timeoutMinutes === undefined ? {} : { timeoutMinutes }),
     attachments,
     ...(continuity ? { continuity: true } : {}),
+    ...(modelSelection ? { modelSelection } : {}),
     ...(input.overlap === "queue" ? { overlap: "queue" as const } : {}),
     ...(input.runOnStartup === true && !runsOnce(schedule) ? { runOnStartup: true } : {}),
     ...(checks ? { checks } : {}),

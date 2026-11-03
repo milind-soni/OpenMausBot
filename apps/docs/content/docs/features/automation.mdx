@@ -36,6 +36,10 @@ Each run starts fresh by default. For work that builds on last time, such as a Q
 
 If your computer is often off when a routine is due, open the routine's **Advanced** options and turn on **Also run when OpenMausBot starts**. The routine then runs once each time OpenMausBot opens, as well as on its schedule. Its run logs show these runs as **On startup**. A routine that OpenMausBot is already catching up on at startup runs once, not twice, and an occurrence missed by more than 12 hours is covered by the startup run instead of being reported as missed. Switching to another workspace and back, or OpenMausBot recovering from a crash, doesn't count as opening the app again. Pausing a routine stops its startup runs too. It's available for repeating routines, and you can also ask the bot in chat to turn it on.
 
+### A routine's own model
+
+A routine runs on its bot's model unless it has its own. Give it one through the API with `modelSelection` (the same shape as a bot's: `instanceId`, `model`, and an optional `effort` or `variant`), for example a light hourly check on a smaller model while the bot chats on a stronger one: `PATCH /api/routines/<id>` with `{"modelSelection": {"instanceId": "claude", "model": "claude-haiku-4-5"}}`. Each run's thread then uses that model; if its AI isn't available, the thread falls back to the bot's model. Send `"modelSelection": null` to go back to the bot's model. Room goals always use their bots' own models.
+
 ### Clear a folder's unread dots
 
 Right-click a folder or open its **…** menu, then choose **Mark folder as read**. This clears unread dots without opening each thread. It does not answer approvals, dismiss questions, or stop any running work.

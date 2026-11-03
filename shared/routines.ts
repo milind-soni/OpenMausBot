@@ -2,6 +2,7 @@
  * snapshot and the `routine` / `routine.run` live frames. */
 import type { LimitResetSchedule, LimitResetScheduleInput } from "./limit-reset.ts";
 import type { RoutineCronSchedule } from "./routine-schedule.ts";
+import type { ModelSelection } from "./wire.ts";
 
 export interface RoutineIntervalWindow {
   start: string;
@@ -131,6 +132,8 @@ export interface Routine {
   overlap?: "skip" | "queue";
   /** Each run starts with the previous run's report. */
   continuity?: boolean;
+  /** The model each run's thread uses instead of its bot's. Missing means the bot's model. */
+  modelSelection?: ModelSelection;
   /** Also run once each time OpenMausBot starts. */
   runOnStartup?: boolean;
   checks?: RoutineCheck[];
@@ -223,6 +226,8 @@ export interface RoutineInput {
   overlap?: "skip" | "queue";
   /** Each run starts with the previous run's report. */
   continuity?: boolean;
+  /** `null` removes it on updates; omission preserves it. */
+  modelSelection?: ModelSelection | null;
   runOnStartup?: boolean;
   /** `null` explicitly removes them on updates; omission preserves them. */
   checks?: RoutineCheck[] | null;

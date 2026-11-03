@@ -2647,6 +2647,15 @@ function retryComputerEngineMove(): Promise<void> {
   return computerEngineMoveRunning;
 }
 
+function routineModelRefusal(body: unknown): { status: number; error: string } | null {
+  const raw = body && typeof body === "object" ? (body as { modelSelection?: unknown }).modelSelection : undefined;
+  if (raw == null) return null;
+  const checked = checkedModelSelection(raw);
+  if (!checked.ok) return checked;
+  (body as { modelSelection: ModelSelection }).modelSelection = checked.selection;
+  return null;
+}
+
 function checkedModelSelection(
   raw: unknown,
   current?: { selection: ModelSelection; busy: boolean },
@@ -8939,7 +8948,8 @@ routines = new RoutineManager({
     return groupIsWorking(group) || coordinator.busy ? "busy" : "ready";
   },
   createTask: (botId, title, run) => {
-    const task = store.createTask(botId, title, false);
+    const model = run && routines?.listRoutines().find((routine) => routine.id === run.routineId)?.modelSelection;
+    const task = store.createTask(botId, title, false, undefined, undefined, undefined, model || undefined);
     // On a Cloud home the routine's writer opens a run's conversation; a webhook run is the owner's, but its payload never reaches the lent Mac.
     if (task && CLOUD_HOME && run) {
       threadStarters.set(task.threadId, run.triggerSource === "webhook" ? CLOUD_OWNER_KEY! : routineOpener(run.routineId));
@@ -14865,6 +14875,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         ? cloudThreadRefusal(auth, (body as { resultsThreadId: string }).resultsThreadId) : null;
     if (path === "/api/routines" && method === "POST") {
       const body = await readBody(req);
+      const model = routineModelRefusal(body);
+      if (model) return json(res, model.status, { error: model.error });
       const hidden = hiddenRoutineTarget(body, visible);
       if (hidden) return json(res, 404, { error: hidden });
       const notYours = routineResultsRefusal(body);
@@ -14888,6 +14900,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     routineMatch = path.match(/^\/api\/routines\/([\w-]+)$/);
     if (routineMatch && method === "PATCH") {
       const body = await readBody(req);
+      const model = routineModelRefusal(body);
+      if (model) return json(res, model.status, { error: model.error });
       const hidden = hiddenRoutineTarget(body, visible);
       if (hidden) return json(res, 404, { error: hidden });
       const notYours = routineResultsRefusal(body);
