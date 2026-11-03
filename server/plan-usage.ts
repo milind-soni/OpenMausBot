@@ -9,7 +9,9 @@ import { codexHome } from "./drivers/codex-identity.ts";
 import { botBox } from "./bot-box/box.ts";
 import { harnessHome, sealedFixture } from "./env-path.ts";
 import { copilotUserUrl, githubHost, githubRateLimited, readGhCliToken } from "./github-token.ts";
-import { asRecord, closedWindow, extraLine, finiteNumber, isoOrNull, openWindow, planLabel, secretString, timeMs } from "./plan-usage-values.ts";
+import { asRecord, closedWindow, extraLine, finiteNumber, isoOrNull, openWindow, planLabel, secretString, timeMs, titleWords } from "./plan-usage-values.ts";
+import { parseCopilotUsage } from "./plan-usage-copilot.ts";
+export { parseCopilotUsage } from "./plan-usage-copilot.ts";
 
 export type PlanDriver = "claude" | "codex" | "grok" | "copilot";
 
@@ -251,31 +253,6 @@ export function parseGrokUsage(credits: unknown, billing?: unknown, settings?: u
   return { plan: grokPlan(settings), fiveHour, weekly, extra, models };
 }
 
-/** GitHub's copilot_internal/user: premium requests are the monthly allowance, paid plans report chat and
- * completions as unlimited, and each snapshot's own quota_reset_at is 0 beside the plan's quota_reset_date_utc. */
-export function parseCopilotUsage(body: unknown): PlanWindows {
-  const root = asRecord(body);
-  const extra: PlanExtra[] = [];
-  const resetsAt = isoOrNull(root?.quota_reset_date_utc ?? root?.quota_reset_date);
-  const snapshots = asRecord(root?.quota_snapshots);
-  for (const [key, value] of Object.entries(snapshots ?? {})) {
-    const snapshot = asRecord(value);
-    if (!snapshot || snapshot.unlimited === true) continue;
-    if (snapshot.has_quota === false && key !== "premium_interactions") continue;
-    if (!/^[a-z][a-z0-9_]{0,40}$/i.test(key)) continue;
-    const used = copilotUsedPercent(snapshot);
-    if (used == null) continue;
-    const ownReset = timeMs(snapshot.quota_reset_at);
-    const window = openWindow(used, ownReset ? isoOrNull(ownReset) : resetsAt);
-    const line: PlanExtra = key === "premium_interactions"
-      ? { ...extraLine("Monthly", window), kind: "monthly" }
-      : extraLine(titleWords(key), window);
-    if (key === "premium_interactions") extra.unshift(line);
-    else extra.push(line);
-  }
-  return { plan: planLabel(root?.copilot_plan), fiveHour: closedWindow(), weekly: closedWindow(), extra, models: [] };
-}
-
 export function fileCredentialReader(source: CredentialSource): CredentialReader {
   const env = source.env ?? process.env;
   const now = source.now ?? Date.now;
@@ -452,12 +429,6 @@ function claudeExtraLabel(key: string): string {
   return titleWords(suffix);
 }
 
-function titleWords(suffix: string): string {
-  const words = suffix.split("_").filter((part) => part.length > 0);
-  if (words.length === 0) return "Window";
-  return words.map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()).join(" ");
-}
-
 function claudeModelWindow(key: string): { name: string; window: string } | null {
   const weekly = key.startsWith("seven_day_");
   const fiveHour = key.startsWith("five_hour_");
@@ -632,15 +603,6 @@ function readGrokSample(body: unknown): GrokSample | null {
   const endMs = timeMs(end);
   const seconds = startMs != null && endMs != null && endMs > startMs ? (endMs - startMs) / 1000 : null;
   return { used, slot: classifyGrok(type, seconds), resetsAt: isoOrNull(end), seconds };
-}
-
-function copilotUsedPercent(snapshot: Record<string, unknown>): number | null {
-  const remaining = finiteNumber(snapshot.percent_remaining);
-  if (remaining != null) return 100 - remaining;
-  const entitlement = finiteNumber(snapshot.entitlement);
-  const left = finiteNumber(snapshot.quota_remaining ?? snapshot.remaining);
-  if (entitlement == null || left == null || entitlement <= 0) return null;
-  return ((entitlement - left) / entitlement) * 100;
 }
 
 function grokPlan(settings: unknown): string | null {

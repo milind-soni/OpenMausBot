@@ -71,3 +71,9 @@ export function secretString(value: unknown): string | null {
   if (!trimmed || trimmed.length > 16_000 || /[\r\n]/.test(trimmed)) return null;
   return trimmed;
 }
+
+export function titleWords(suffix: string): string {
+  const words = suffix.split("_").filter((part) => part.length > 0);
+  if (words.length === 0) return "Window";
+  return words.map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()).join(" ");
+}
