@@ -135,8 +135,8 @@ A self-hosted server opens more with `config.json`:
 
 Each entry is an address or CIDR range with an optional `:port` (IPv6 in
 brackets for a port: `[fd12::1]:443`). OpenMausBot's own ports, metadata and
-link-local addresses stay closed whatever it lists, and MausBot Cloud ignores
-it.
+link-local addresses stay closed whatever it lists, and MausBot Cloud and shared
+company workspaces ignore it.
 
 Settings > Computer > "Open sites on this server" (`browserEngine.egress.localNetwork: true`, off by default and
 shown only to the server's owner or an admin; not on a shared company workspace, whose network is the operator's) opens this server's own sites and its local network without listing
