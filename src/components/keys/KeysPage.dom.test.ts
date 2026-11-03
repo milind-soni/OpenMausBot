@@ -185,6 +185,8 @@ describe("the OpenAI-compatible server row", () => {
     flushSync(() => setConfig({ ...fx.config, openaiCompat: { url: "http://localhost:11434/v1" } }));
     expect(row("openaiCompat")).not.toBeNull();
     expect(waitFor()).not.toBeNull();
+    flushSync(() => setConfig({ ...fx.config, openaiCompat: { url: "" } }));
+    expect(waitFor()).toBeNull();
   });
 });
 
