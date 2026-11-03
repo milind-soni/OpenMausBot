@@ -1087,18 +1087,18 @@
     },
     {
       "name": "message_person",
-      "description": "Get a message to a person's Inbox, when someone asks you to tell them something (\"tell Bob the launch moved\") or when you have news for someone who isn't watching this conversation. Only your message goes, never this conversation, and their answer comes back here. With people on a team, say who with `to`; with none, leave `to` out and it reaches the one person here.",
+      "description": "Send a person a message in their Inbox; their answer comes back here. For news they may miss here, or when asked to tell someone. Only your message goes.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
           "to": {
             "type": "string",
-            "description": "Their name or email address, on a team; otherwise leave it out."
+            "description": "On a team: their name or email."
           },
           "message": {
             "type": "string",
-            "description": "What to tell them, in your words, complete on its own."
+            "description": "Complete on its own."
           }
         },
         "required": [
