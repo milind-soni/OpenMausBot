@@ -5,7 +5,7 @@ with a key and gets its reply. It is off by default, per bot.
 
 ## Turning it on
 
-In the bot's panel (Advanced: Bot settings → Access), **Bot API**: switch on **Let apps
+In Bot settings (the gear in the bot's panel; Advanced: Access), **Bot API**: switch on **Let apps
 talk to this bot**. The card shows the command to paste, with the key filled in.
 The key is shown that once and kept hashed; when the card is opened again the
 command shows `YOUR_KEY` in its place. **New key** replaces the key (apps using

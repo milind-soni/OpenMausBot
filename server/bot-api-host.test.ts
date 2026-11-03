@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BotApiManager } from "./bot-api.ts";
 import { BOT_API_DEFAULT_WAIT_MS, createBotApiHost, type BotApiHostDeps, type BotApiTurnOptions } from "./bot-api-host.ts";
@@ -211,16 +211,17 @@ describe("the Bot API door on the webhook receiver", () => {
   });
 
   it("answers 'working' when the reply takes longer than the wait, and 409 while that thread is still busy", async () => {
+    const finish: Array<() => void> = [];
     const h = await harness((fake, _botId, _prompt, opts) => {
-      setTimeout(() => { fake.store.appendMessage(opts.threadId, { role: "bot", kind: "text", text: "Late" }); opts.onSettled({ ok: true, text: "Late" }); }, 400);
-    }, { waitMs: 150 });
+      finish.push(() => { fake.store.appendMessage(opts.threadId, { role: "bot", kind: "text", text: "Late" }); opts.onSettled({ ok: true, text: "Late" }); });
+    }, { waitMs: 50 });
     const key = (await h.app("POST", "/api/bots/b1/bot-api", { enabled: true })).body.key as string;
     const answer = await h.call("b1", key, { message: "Think hard" });
     expect(answer).toEqual({ status: 202, body: { thread: expect.any(String), status: "working" } });
     const threadId = answer.body.thread as string;
     expect(await h.call("b1", key, { message: "Again", thread: threadId })).toEqual({ status: 409, body: { thread: threadId, status: "working" } });
     expect(await h.call("b1", key, undefined, { method: "GET", query: `?thread=${threadId}` })).toEqual({ status: 202, body: { thread: threadId, status: "working" } });
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    finish.shift()!();
     expect(await h.call("b1", key, undefined, { method: "GET", query: `?thread=${threadId}` })).toEqual({ status: 200, body: { reply: "Late", thread: threadId } });
     // The caller may ask for a shorter wait, never a longer one.
     const quick = await h.call("b1", key, { message: "Quick", wait: 0 });
@@ -253,7 +254,7 @@ describe("the Bot API door on the webhook receiver", () => {
     const slow = await harness((fake, _botId, _prompt, opts) => { fake.bots.get("b1")!.tasks.find((task) => task.threadId === opts.threadId)!.busy = true; }, { waitMs: 10 });
     const slowKey = (await slow.app("POST", "/api/bots/b1/bot-api", { enabled: true })).body.key as string;
     slow.manager.admit = () => true;
-    for (let i = 0; i < 50; i += 1) expect((await slow.call("b1", slowKey, { message: `slow ${i}` })).body).toMatchObject({ status: "working" });
+    for (let i = 0; i < 50; i += 1) expect((await slow.call("b1", slowKey, { message: `slow ${i}`, wait: 0 })).body).toMatchObject({ status: "working" });
     expect((await slow.call("b1", slowKey, { message: "one too many" })).status).toBe(409);
   });
 
@@ -348,13 +349,18 @@ describe("the Bot API door on the webhook receiver", () => {
 
   it("answers within the proxy's idle limit by default, and a caller may ask for longer", async () => {
     expect(BOT_API_DEFAULT_WAIT_MS).toBeLessThan(60_000);
+    const finish: Array<() => void> = [];
     const h = await harness((fake, _botId, _prompt, opts) => {
-      setTimeout(() => { fake.store.appendMessage(opts.threadId, { role: "bot", kind: "text", text: "Late" }); opts.onSettled({ ok: true, text: "Late" }); }, 300);
+      finish.push(() => { fake.store.appendMessage(opts.threadId, { role: "bot", kind: "text", text: "Late" }); opts.onSettled({ ok: true, text: "Late" }); });
     }, { waitMs: 50 });
     const key = (await h.app("POST", "/api/bots/b1/bot-api", { enabled: true })).body.key as string;
     expect((await h.call("b1", key, { message: "Default" })).body).toMatchObject({ status: "working" });
-    await new Promise((resolve) => setTimeout(resolve, 350));
-    expect((await h.call("b1", key, { message: "Longer", wait: 5 })).body).toMatchObject({ reply: "Late" });
+    finish.shift()!();
+    const longer = h.call("b1", key, { message: "Longer", wait: 30 });
+    await vi.waitFor(() => expect(finish).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    finish.shift()!();
+    expect((await longer).body).toMatchObject({ reply: "Late" });
     expect((await h.call("b1", key, { message: "Too long", wait: 301 })).status).toBe(400);
   });
 
