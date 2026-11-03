@@ -159,7 +159,7 @@ export function resolveTeammate<T extends RosterMember>(
   const matches = reachable.filter(bot => fold(bot.name) === name);
   if (matches.length === 1) return { id: matches[0]!.id, byName: true };
   if (matches.length > 1) {
-    return { error: `${matches.length} reachable teammates are named "${shown}" — call list_bots and use the id of the one you mean` };
+    return { error: `${matches.length} teammates you can reach are named "${shown}", so nothing was sent: ${sharedNameChoices(matches)}. Send it again with the id of the one you mean.` };
   }
   const near = reachable.filter(bot => loose(bot.name) === loose(wanted));
   if (near.length === 1) return { id: near[0]!.id, byName: true };
@@ -174,6 +174,14 @@ export function resolveTeammate<T extends RosterMember>(
 }
 
 const CHOICES_MAX = 12;
+
+function sharedNameChoices(matches: readonly RosterMember[]): string {
+  const listed = matches.slice(0, CHOICES_MAX).map((bot) => {
+    const role = bot.chiefOfStaff ? "Chief of Staff" : peerName(bot.title ?? "");
+    return `${peerName(bot.name)}${role ? `, ${role}` : ""} (id ${bot.id})`;
+  });
+  return listed.join("; ") + (matches.length > CHOICES_MAX ? `; and ${matches.length - CHOICES_MAX} more` : "");
+}
 
 function teammateChoices(reachable: readonly RosterMember[]): string {
   if (!reachable.length) return "";
