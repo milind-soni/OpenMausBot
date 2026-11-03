@@ -21,7 +21,7 @@ const miraKey = personKey({ id: "", email: MIRA.email });
 const PRIVATE_NOTE = "Mira's commission is Zebrafinch42";
 
 type Task = { threadId: string; title: string; private?: true; inbox?: true };
-type Bot = { id: string; name: string; threadId: string; approvalMode?: string; defaultBot?: { person?: string }; tasks?: Task[] };
+type Bot = { id: string; name: string; threadId: string; mainThreadId: string; approvalMode?: string; defaultBot?: { person?: string }; tasks?: Task[] };
 type Step = { step?: { tool?: string; arguments?: Record<string, unknown> }; response?: { error?: unknown; result?: { isError?: boolean; content?: Array<{ text: string }> } } };
 type Turn = { botId: string; threadId: string; system: string; prompt: unknown; evidence: Step[]; planKey?: string; unplanned?: true };
 type Line = { id: string; role: string; text?: string; card?: { answered?: string; requestId?: string; subtitle?: string; title?: string } };
@@ -29,7 +29,7 @@ type Line = { id: string; role: string; text?: string; card?: { answered?: strin
 let fx: CloudSendFixture, team: CloudTeamFixture;
 let olive = "", mira = "", ben = "";
 let sales: Bot, archive: Bot, payroll: Bot, counsel: Bot, mausbot: Bot, inbox = "";
-let room = "";
+let room = "", roomThread = "";
 
 const planPath = () => join(team.home, "plan.json");
 const dataDir = (...rest: string[]) => join(team.home, ".openmausbot", ...rest);
@@ -86,6 +86,7 @@ beforeAll(async () => {
   const made = await team.as(olive, "POST", "/api/groups", { name: "All hands", memberIds: [sales.id] });
   expect(made.status, JSON.stringify(made.body)).toBe(201);
   room = (made.body.group as { id: string }).id;
+  roomThread = (made.body.group as { threadId: string }).threadId;
   writeFileSync(planPath(), JSON.stringify({
     [mausbot.id]: { script: [
       { key: "M-LIST", match: ["WHO-CAN-YOU-REACH"], reply: "Listed.", steps: [{ tool: "list_bots", arguments: {} }] },
@@ -108,7 +109,7 @@ beforeAll(async () => {
       ] },
     ] },
     [counsel.id]: { script: [
-      { key: "C-ASKS", match: ["BEN-ASKS-COUNSEL"], reply: "NEEDS INPUT: Which contract?" },
+      { key: "C-ASKS", match: ["BEN-ASKS-COUNSEL"], reply: "NEEDS INPUT: What is the password for the contract portal?" },
       { key: "C-CARRIES", repeat: true, match: ["FORGED-ANSWER"], reply: "C-CARRIES: carried on" },
     ] },
   }));
@@ -164,8 +165,7 @@ it("private hand-off: the work runs in a thread only Mira can open, nothing reac
   expect(readFileSync(dataDir("workspaces", `${sales.id}--member-${miraKey}`, "MEMORY.md"), "utf8")).toContain(PRIVATE_NOTE);
   const teamNotes = dataDir("workspaces", sales.id, "MEMORY.md");
   expect(existsSync(teamNotes) ? readFileSync(teamNotes, "utf8") : "").not.toContain(PRIVATE_NOTE);
-  const group = (await team.as(olive, "GET", "/api/groups")).body.groups.find((one: { id: string }) => one.id === room) as { threadId: string };
-  expect(JSON.stringify(await lines(olive, group.threadId))).not.toContain(PRIVATE_NOTE);
+  expect(JSON.stringify(await lines(olive, roomThread))).not.toContain(PRIVATE_NOTE);
 
   // The work acts for her and nobody else.
   const handed = JSON.parse(readFileSync(dataDir("handed-people.json"), "utf8")) as { work: Record<string, { person: string }> };
@@ -195,7 +195,10 @@ it("sharing level: a bot she can only view, or isn't shared with, is refused by 
 
 it("audience: not from her MausBot's main chat, which isn't private to her", async () => {
   await expect.poll(settled, { timeout: 30_000 }).toBe(true);
-  await say("FROM-MY-MAIN-CHAT", mausbot.threadId);
+  const main = ((await team.as(mira, "GET", "/api/bots")).body.bots as Bot[]).find((bot) => bot.id === mausbot.id)!.mainThreadId;
+  expect(main).toBeTruthy();
+  expect(main).not.toBe(inbox);
+  await say("FROM-MY-MAIN-CHAT", main);
   await ran("M-SHARED");
   expect(steps(turn("M-SHARED"))[0]!.response?.result?.isError).toBe(true);
   expect(turn("M-SHARED").system).toContain("start a new conversation with you");
