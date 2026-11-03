@@ -17,7 +17,7 @@ const KIND_LOOK: Record<NotifyKind, { Icon: LucideIcon; className: string; statu
   question: { Icon: CircleHelp, className: "text-warning", status: "notifications.status.question" },
   "sign-in": { Icon: LogIn, className: "text-warning", status: "notifications.status.signIn" },
   mention: { Icon: AtSign, className: "text-accent", status: "notifications.status.mention" },
-  incident: { Icon: AlertTriangle, className: "text-danger", status: "notifications.status.incident" },
+  incident: { Icon: AlertTriangle, className: "text-danger", status: "notifications.status.problem" },
   "turn-failed": { Icon: AlertTriangle, className: "text-danger", status: "notifications.status.failed" },
   "routine-failed": { Icon: AlertTriangle, className: "text-danger", status: "notifications.status.failed" },
   "routine-deferred": { Icon: RotateCcw, className: "text-accent", status: "notifications.status.deferred" },

@@ -28,7 +28,9 @@ export interface Incident {
   lastReply?: string | null;
 }
 
-export const INCIDENTS_THREAD_TITLE = "Team incidents";
+export const INCIDENTS_THREAD_TITLE = "Problems to look at";
+/** The same notices chat, as older versions named it. */
+export const OLD_INCIDENTS_THREAD_TITLE = "Team incidents";
 
 const sectionKey = (section?: string): string => section?.trim() || "";
 
@@ -137,10 +139,10 @@ export function incidentContext(messages: readonly Pick<Message, "role" | "kind"
 }
 
 const CHIP: Record<IncidentKind, readonly [plain: ServerLineKey, why: ServerLineKey]> = {
-  failed: ["server.incidents.failed", "server.incidents.failedWhy"],
-  stalled: ["server.incidents.stalled", "server.incidents.stalledWhy"],
-  "could-not-start": ["server.incidents.couldNotStart", "server.incidents.couldNotStartWhy"],
-  "routine-failed": ["server.incidents.routineFailed", "server.incidents.routineFailedWhy"],
+  failed: ["server.problem.failed", "server.problem.failedWhy"],
+  stalled: ["server.problem.stalled", "server.problem.stalledWhy"],
+  "could-not-start": ["server.problem.couldNotStart", "server.problem.couldNotStartWhy"],
+  "routine-failed": ["server.problem.routineFailed", "server.problem.routineFailedWhy"],
 };
 
 /** What the person reads (the status row and its notification), in their language; the Chief's report says it in

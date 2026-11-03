@@ -1883,7 +1883,7 @@ describe("RoutineManager", () => {
     await h.manager.tick();
     const base = { eventId: "delegating", provider: "fake", threadId: "thread-1", createdAt: new Date().toISOString() };
     h.manager.handleRuntimeEvent({ ...base, type: "turn.completed", ok: true, cost: 0.02 });
-    expect(h.manager.runForThread("thread-1")).toMatchObject({ id: queued.id, status: "waiting", attention: "Waiting for delegated work to finish" });
+    expect(h.manager.runForThread("thread-1")).toMatchObject({ id: queued.id, status: "waiting", attention: "Waiting for work it handed on to finish" });
     expect(h.manager.runForThread("thread-1")?.finishedAt).toBeUndefined();
     expect(h.manager.isActiveThread("thread-1")).toBe(true);
     pending = false;
