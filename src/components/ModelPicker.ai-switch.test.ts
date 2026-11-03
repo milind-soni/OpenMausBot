@@ -114,7 +114,10 @@ describe("the header model chip and Switch AI", () => {
     act(() => buttonNamed("OpenAI")!.click());
     act(() => buttonNamed("GPT-5.6")!.click());
     expect(document.body.textContent).toContain("Switch model with Ask permissions?");
-    expect(vi.mocked(fixture.dispatch).mock.calls.filter(([action]) => (action as { type: string }).type === "setModel")).toEqual([]);
+    const setModels = () => vi.mocked(fixture.dispatch).mock.calls.filter(([action]) => (action as { type: string }).type === "setModel");
+    expect(setModels()).toEqual([]);
+    act(() => buttonNamed("Switch with Ask")!.click());
+    expect(setModels()).toEqual([[expect.objectContaining({ threadId: "thread-1", resetApprovalToAsk: true })]]);
   });
 
   it("ignores an intent for another place", () => {
