@@ -30,10 +30,13 @@ vi.mock("./whats-new/TeamPicture", () => ({ TeamPicture: () => null }));
 // Who MausBot belongs to: unknown (as before the session answers) unless a test says otherwise.
 vi.mock("@/lib/default-bot", async original => ({ ...await original<typeof import("@/lib/default-bot")>(), useViewerEmail: () => f.viewerEmail }));
 vi.mock("@/lib/brand", () => ({ brandStatus: () => ({ brand: { name: "OpenMausBot" }, source: f.brand, file: "" }), productName: () => "MausBot" }));
+vi.mock("./Avatar", async original => ({ ...await original<typeof import("./Avatar")>(), MausAvatar: () => null }));
+vi.mock("./lazy-screens", async original => ({ ...await original<typeof import("./lazy-screens")>(), GrokMoveDialog: () => "THE MOVE DIALOG" }));
 vi.mock("@/components/EngineLibrary", () => ({ engineReady: (instance: { snapshot: { state: string; authenticated?: boolean } }) =>
   instance.snapshot.state === "available" && instance.snapshot.authenticated !== false }));
 import { AppNotices } from "./AppNotices";
-import { BOAT_OFFER_NOTICE, CLOUD_INTRO, launchNotice, localDay, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, STAR_NOTICE, WHATS_NEW_NOTICE } from "@/lib/notices";
+import { TwoPlacesCard } from "./TwoPlacesCard";
+import { BOAT_OFFER_NOTICE, CLOUD_INTRO, GROK_MOVE_NOTICE, launchNotice, localDay, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, STAR_NOTICE, WHATS_NEW_NOTICE } from "@/lib/notices";
 import { BOAT_OFFER, boatClaimMailto } from "@/lib/boat-offer";
 import { track } from "@/lib/analytics";
 import { ADVANCED_MODE_KEY, setAdvancedMode } from "@/lib/interface-mode";
@@ -130,7 +133,7 @@ const press = (label: string) => {
 const FIRST_REPLY = [{ tasks: [{ threadId: "first", usage: { turns: 1 } }] }];
 let session: Map<string, string>;
 const returning = () => { f.state.bots = [{ tasks: [{ threadId: "t", createdAt: 1, usage: { turns: 2 } }] }]; };
-const launchCardsSeen = () => { desk.saved = { seen: [WHATS_NEW_NOTICE] }; storage.set(PRODUCT_HUNT_NOTICE, "1"); storage.set(SIMPLE_MODE_PROMPT_KEY, "1"); storage.set(BOAT_OFFER_NOTICE, "1"); };
+const launchCardsSeen = () => { desk.saved = { seen: [WHATS_NEW_NOTICE] }; storage.set(GROK_MOVE_NOTICE, "1"); storage.set(PRODUCT_HUNT_NOTICE, "1"); storage.set(SIMPLE_MODE_PROMPT_KEY, "1"); storage.set(BOAT_OFFER_NOTICE, "1"); };
 const hints = () => f.state.config.onboarding.hintsSeen as string[];
 
 beforeEach(() => {
@@ -951,6 +954,144 @@ describe("no Use my Mac popup", () => {
   });
 });
 
+describe("the Move from Grok Bot popup", () => {
+  const TITLE = "Move from Grok Bot", WHATS_NEW = "Meet the new MausBot Cloud", DIALOG = "THE MOVE DIALOG";
+  let modal: boolean;
+  const events = () => vi.mocked(track).mock.calls.filter(([name]) => name === "grok_move_popup").map(([, props]) => (props as { action: string }).action);
+  const reads = () => vi.mocked(api).mock.calls.map(([path]) => path).filter(path => path === "/api/setup-import/grok");
+  const keydown = (key: string) => {
+    const handler = vi.mocked(window.addEventListener).mock.calls.filter(([type]) => type === "keydown").at(-1)![1] as (event: unknown) => void;
+    handler({ key, preventDefault() {}, stopPropagation() {} });
+  };
+  const endedForGood = async () => {
+    expect(render()).toBe("");
+    expect(storage.get(GROK_MOVE_NOTICE)).toBe("1"); expect(hints()).toContain(GROK_MOVE_NOTICE); expect(desk.saved?.seen).toContain(GROK_MOVE_NOTICE);
+    expect(await launch(), "a reload is the same launch").not.toContain(TITLE);
+    expect(await relaunch(), "nor any later one").not.toContain(TITLE);
+  };
+
+  beforeEach(() => {
+    modal = false;
+    storage.delete(GROK_MOVE_NOTICE);
+    vi.stubGlobal("document", { activeElement: null, body: null, documentElement: { dataset: {} }, getElementById: () => null,
+      querySelector: (selector: string) => selector === "[data-grok-move-popup]" ? { querySelectorAll: () => [] } : null,
+      querySelectorAll: () => modal ? [{ closest: () => null, checkVisibility: () => true }] : [] });
+  });
+
+  it("someone already here sees it at their next launch, a modal with the two marks, and it reads nothing on this computer", async () => {
+    returning();
+    const html = await launch();
+    for (const text of [TITLE, "Bring your Bots here, with their skills, routines and memories.", "Let&#x27;s start", "Not now"]) expect(html).toContain(text);
+    for (const part of ['role="dialog"', 'aria-modal="true"', "data-grok-move-popup"]) expect(html).toContain(part);
+    expect(events()).toEqual(["shown"]);
+    expect(launchNotice()).toBe(GROK_MOVE_NOTICE);
+    expect(launchDialogShown(), "MausBot's card waits for a later launch").toBe("notices");
+    expect(await settle()).toContain(TITLE);
+    expect(events(), "shown is counted once").toHaveLength(1);
+    expect(reads(), "showing it looks at neither Downloads nor the Grok Bot app").toEqual([]);
+  });
+
+  it("goes first in the queue, one a launch: What's new, then the rest, wait for later launches", async () => {
+    returning(); desk.saved = null; storage.delete(SIMPLE_MODE_PROMPT_KEY); storage.delete(BOAT_OFFER_NOTICE); storage.delete(STAR_NOTICE);
+    const first = await launch();
+    expect(first).toContain(TITLE);
+    for (const other of ["data-simple-mode-prompt", WHATS_NEW, STAR]) expect(first).not.toContain(other);
+    press("Not now"); await flush();
+    expect(render(), "nothing else after it in this launch").toBe("");
+    expect(await launch(), "a reload is the same launch").toBe("");
+    const second = await relaunch();
+    expect(second).toContain("data-simple-mode-prompt"); expect(second).not.toContain(TITLE);
+    expect(launchNotice()).not.toBe(GROK_MOVE_NOTICE);
+  });
+
+  it("never during onboarding; after a new install's welcome it follows the first messages, while the other cards keep to the first chat's quiet", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout"] });
+    storage.delete(STAR_NOTICE);
+    f.state.bots = [{ tasks: [{ threadId: "first" }] }];
+    f.state.config.onboarding = { ...EMPTY_ONBOARDING };
+    expect(await launch(), "the welcome is due").toBe("");
+    f.state.welcomeOpen = true;
+    f.state.config.onboarding = { ...EMPTY_ONBOARDING, completedAt: "2026-11-01", version: 1, hintsSeen: [MET_CHIEF_HINT] };
+    expect(await launch(), "the welcome is open").toBe("");
+    f.state.welcomeOpen = false; markWelcomeFinished();
+    expect(await settle(), "its first messages are still arriving").toBe("");
+    expect(events()).toEqual([]);
+    vi.advanceTimersByTime(6_000);
+    const html = await settle();
+    expect(html).toContain(TITLE); expect(html).not.toContain(STAR);
+    press("Let&#x27;s start"); await flush();
+    expect(render()).toContain(DIALOG);
+    expect(events()).toEqual(["shown", "start"]);
+    expect(storage.get(GROK_MOVE_NOTICE)).toBe("1");
+  });
+
+  it("Not now, the X and Escape end it for good, on this computer and in the workspace", async () => {
+    for (const how of ["Not now", "Close", "Escape"] as const) {
+      session.clear(); storage.delete(GROK_MOVE_NOTICE); desk = desktopMachine(); desk.saved = { seen: [WHATS_NEW_NOTICE] }; f.state.config.onboarding.hintsSeen = withTourFinished(undefined);
+      returning();
+      expect(await launch(), how).toContain(TITLE);
+      if (how === "Escape") keydown("Escape"); else press(how);
+      await flush();
+      await endedForGood();
+    }
+    expect(events().filter(action => action !== "shown")).toEqual(["not_now", "close", "close"]);
+  });
+
+  it("Let's start opens the same dialog, ends the popup for good, and only the dialog looks on this computer", async () => {
+    returning();
+    await launch();
+    press("Let&#x27;s start"); await flush();
+    expect(render()).toContain(DIALOG);
+    expect(events()).toEqual(["shown", "start"]);
+    expect(storage.get(GROK_MOVE_NOTICE)).toBe("1"); expect(hints()).toContain(GROK_MOVE_NOTICE); expect(desk.saved?.seen).toContain(GROK_MOVE_NOTICE);
+    expect(reads()).toEqual([]);
+    expect(await relaunch()).not.toContain(TITLE);
+  });
+
+  it("never during a bot's turn, a dialog, a call or while a move is starting up; it comes when they end", async () => {
+    returning();
+    f.state.bots = [{ busy: true, tasks: [{ threadId: "t", createdAt: 1, usage: { turns: 2 } }] }];
+    expect(await launch(), "a turn").toBe("");
+    returning();
+    modal = true;
+    expect(await launch(), "another dialog").toBe("");
+    modal = false;
+    f.state.liveCall = { status: "connected" };
+    expect(await launch(), "a call").toBe("");
+    f.state.liveCall = null;
+    expect(await launch()).toContain(TITLE);
+  });
+
+  it("seen on this desktop from another page, it doesn't come back", async () => {
+    returning(); desk.saved = { seen: [WHATS_NEW_NOTICE, GROK_MOVE_NOTICE] };
+    expect(await launch()).not.toContain(TITLE);
+  });
+
+  it("a page newer than its desktop: main ignores the new id, and the workspace and this browser still end it for good", async () => {
+    returning();
+    desk.handlers.set("desktop-notices:seen", async () => undefined);
+    desk.handlers.set("desktop-notices:state", async () => ({ seen: [WHATS_NEW_NOTICE], cloud: false }));
+    expect(await launch()).toContain(TITLE);
+    press("Not now"); await flush();
+    expect(storage.get(GROK_MOVE_NOTICE)).toBe("1"); expect(hints()).toContain(GROK_MOVE_NOTICE);
+    expect(await relaunch()).not.toContain(TITLE);
+    storage.delete(GROK_MOVE_NOTICE);
+    expect(await relaunch(), "in another browser, the workspace remembers").not.toContain(TITLE);
+  });
+
+  it("stays away from those who can't add a bot and from what isn't ours to promote: a member, a Team Cloud, a branded build", async () => {
+    returning();
+    viewer = { hosted: true, canSave: false };
+    expect(await launch(), "a member").not.toContain(TITLE);
+    viewer = LOCAL_VIEWER;
+    f.state.config.team = { id: "t", name: "Acme" };
+    expect(await relaunch(), "a Team Cloud").not.toContain(TITLE);
+    delete f.state.config.team;
+    f.brand = "file";
+    expect(await relaunch(), "a branded build").not.toContain(TITLE);
+  });
+});
+
 describe("the Simple mode popup after the update", () => {
   const TITLE = "Try the new Simple mode", ON = "You&#x27;re on Simple mode", POPUP = "Meet the new MausBot Cloud";
   let modal: boolean;
@@ -1044,7 +1185,7 @@ describe("the Simple mode popup after the update", () => {
 describe("bots in two places", () => {
   const GARAGE = { key: "server:https://garage.example.test", name: "Garage server", kind: "server" as const };
   const BODY = "Your bots live in two places, so they can&#x27;t work together. Bring them together on Garage server?";
-  let suggest: typeof GARAGE | null;
+  let suggest: { key: string; name: string; kind: "cloud" | "server" } | null;
   let accepted: string[], dismissed: string[];
   beforeEach(() => {
     suggest = GARAGE; accepted = []; dismissed = [];
@@ -1053,7 +1194,7 @@ describe("bots in two places", () => {
     desk.handlers.set("two-places:dismiss", async (_event, key) => { dismissed.push(String(key)); suggest = null; return { suggest }; });
   });
 
-  it("one plain card on this computer's page, before any promotion; its one tap asks main to bring them together there", async () => {
+  it("one plain card on this computer's page, before any promotion; bots move there only after the person confirms (#4192)", async () => {
     returning();
     storage.delete(PRODUCT_HUNT_NOTICE);
     const html = await launch();
@@ -1062,10 +1203,63 @@ describe("bots in two places", () => {
     expect(html).toContain(BODY);
     expect(html).not.toContain(STAR);
     press("Bring them together");
+    const asking = await settle();
+    expect(accepted, "one tap never moves anyone").toEqual([]);
+    expect(asking).toContain("Move this computer&#x27;s bots to Garage server?");
+    expect(asking, "the undo switch is My Cloud's only").not.toContain("Keep this computer&#x27;s bots on this computer");
+    press("Move bots");
     await flush();
     expect(accepted).toEqual([GARAGE.key]);
     expect(track).toHaveBeenCalledWith("two_places_card", { action: "bring", kind: "server" });
     expect(await settle()).not.toContain('data-notice="two-places"');
+  });
+
+  it("Cancel on the confirm step moves nothing and keeps the card (#4192)", async () => {
+    returning();
+    suggest = { key: "cloud:mine", name: "My Cloud", kind: "cloud" };
+    await launch();
+    press("Bring them together");
+    const asking = await settle();
+    expect(asking).toContain("Move this computer&#x27;s bots to My Cloud?");
+    expect(asking, "My Cloud names the way back").toContain("Keep this computer&#x27;s bots on this computer");
+    press("Cancel");
+    const after = await settle();
+    expect(accepted).toEqual([]);
+    expect(dismissed).toEqual([]);
+    expect(after).toContain('data-notice="two-places"');
+    expect(after).not.toContain("Move bots");
+    expect(after).toContain("Bring them together");
+    expect(tree().find(node => node.props["data-two-places-bring"])?.props.autoFocus, "focus returns to the button Cancel brought back").toBe(true);
+  });
+
+  it("Escape on the confirm step works as Cancel and never dismisses the card", async () => {
+    returning();
+    await launch();
+    press("Bring them together");
+    await settle();
+    const escape = { key: "Escape", preventDefault: vi.fn(), stopPropagation: vi.fn() };
+    tree().find(node => node.props.role === "group")!.props.onKeyDown(escape);
+    expect(escape.stopPropagation, "the card's own Escape never sees it").toHaveBeenCalled();
+    const after = await settle();
+    expect(dismissed).toEqual([]);
+    expect(accepted).toEqual([]);
+    expect(after).toContain('data-notice="two-places"');
+    expect(after).not.toContain("Move bots");
+  });
+
+  it("a different suggested place starts a fresh card, so a confirm never carries over to it", async () => {
+    returning();
+    await launch();
+    // Children.toArray would re-key, so walk the elements as rendered.
+    const find = (value: unknown): Node | undefined => {
+      if (Array.isArray(value)) return value.map(find).find(Boolean);
+      if (!isValidElement(value)) return undefined;
+      const node = value as Node;
+      if (node.type === TwoPlacesCard) return node;
+      return typeof node.type === "function" ? find((node.type as (props: unknown) => ReactNode)(node.props)) : find(node.props.children);
+    };
+    f.index = 0; f.effects = [];
+    expect(find(AppNotices({ viewer, now: () => now }))?.key).toBe(GARAGE.key);
   });
 
   it("Not now hands main the place to remember, and the card goes", async () => {

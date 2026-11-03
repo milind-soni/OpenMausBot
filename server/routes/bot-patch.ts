@@ -29,7 +29,7 @@ import { memberBotPatchViolation, requestSource, type RequestAuth } from "../req
 import type { RoutineManager } from "../routines.ts";
 import type { SessionRegistry } from "../sessions.ts";
 import { parseConnectorTools } from "../connector-tools.ts";
-import { sectionKey, type BotRecord, type GroupRecord, type Store } from "../store.ts";
+import { sectionKey, type BotRecord, type GroupRecord, type Store, type TaskRecord } from "../store.ts";
 import * as vps from "../vps-computer.ts";
 import { vpsSshAliasForBot } from "../vps-hosts.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
@@ -76,6 +76,8 @@ export interface BotPatchRouteDeps {
   levelOf(auth: RequestAuth, botId: string): "none" | "view" | "chat" | "edit";
   /** A Team Cloud, where a bot's sharing follows its visibility. */
   team: boolean;
+  /** The bot's conversations the main-thread resolver may pick: a Team Cloud keeps only team-visible ones. */
+  mainThreadTasks(botId: string): readonly TaskRecord[];
 }
 
 export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
@@ -213,6 +215,14 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         else if (typeof body.pinnedMessageId === "string" && /^[\w-]+$/.test(body.pinnedMessageId)) {
           patch.pinnedMessageId = body.pinnedMessageId;
         } else return json(res, 400, { error: "pinnedMessageId must be a message id" });
+      }
+      // null clears the choice; otherwise an open conversation the main-thread resolver may pick, never a routine run or archived.
+      // Same 400 for unknown and ineligible ids, so a private thread's existence is not revealed.
+      if (body.mainThreadChoice !== undefined) {
+        const chosen = typeof body.mainThreadChoice === "string" ? deps.mainThreadTasks(m[1]).find((task) => task.threadId === body.mainThreadChoice) : null;
+        if (body.mainThreadChoice === null) patch.mainThreadChoice = undefined;
+        else if (chosen && !chosen.routineRunId && chosen.archivedAt === undefined) patch.mainThreadChoice = chosen.threadId;
+        else return json(res, 400, { error: "mainThreadChoice must be one of this bot's conversations" });
       }
       if (section !== undefined) patch.section = section ?? undefined;
       if (body.chiefOfStaff === false) patch.chiefOfStaff = false;

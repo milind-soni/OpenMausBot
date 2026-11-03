@@ -5,13 +5,15 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setLocale } from "@/lib/i18n";
-import { NewBrowserSettings } from "./BrowserSettingsRows";
+import { NewBrowserSettings, ServerSitesRow } from "./BrowserSettingsRows";
 
 const fixture = vi.hoisted(() => ({
   config: undefined as Record<string, unknown> | undefined,
   api: vi.fn(),
   dispatch: vi.fn(),
 }));
+const owner = vi.hoisted(() => ({ value: true as boolean | null }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => owner.value }));
 vi.mock("@/state/store", () => ({
   api: fixture.api,
   useStore: () => ({ state: { config: fixture.config }, dispatch: fixture.dispatch }),
@@ -69,5 +71,41 @@ describe("New browser setting", () => {
       body: JSON.stringify({ browserEngine: { engine: "agent-browser" } }),
     });
     expect(toggle().getAttribute("aria-checked")).toBe("true");
+  });
+});
+
+describe("Open sites on this server", () => {
+  const sites = () => host.querySelector<HTMLButtonElement>('button[aria-label="Open sites on this server"]');
+  const show = () => flushSync(() => root.render(createElement(ServerSitesRow)));
+  afterEach(() => { owner.value = true; });
+
+  it("shows only on a self-hosted server with the built-in browser on, and only to its owner", () => {
+    show();
+    expect(sites()).toBeNull();
+    fixture.config = { features: { browser: false }, browserEngine: { kind: "engine", serverSites: false } };
+    show();
+    expect(sites()).toBeNull();
+    fixture.config = { features: { browser: true }, browserEngine: { kind: "engine", serverSites: false } };
+    owner.value = false;
+    show();
+    expect(sites()).toBeNull();
+    owner.value = true;
+    show();
+    expect(sites()?.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("turns it on as browserEngine.egress.localNetwork and shows the server's answer", async () => {
+    fixture.config = { features: { browser: true }, browserEngine: { kind: "engine", serverSites: false } };
+    const saved = { features: { browser: true }, browserEngine: { kind: "engine", serverSites: true } };
+    fixture.api.mockResolvedValue(saved);
+    show();
+    flushSync(() => sites()!.click());
+    await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledWith({ type: "configStatus", config: saved }));
+    expect(fixture.api).toHaveBeenCalledExactlyOnceWith("/api/config", {
+      method: "PATCH",
+      body: JSON.stringify({ browserEngine: { egress: { localNetwork: true } } }),
+    });
+    show();
+    expect(sites()?.getAttribute("aria-checked")).toBe("true");
   });
 });

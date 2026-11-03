@@ -349,6 +349,7 @@ test("the window's IPC: the screen reads and retries, My Cloud's page renews its
   w.url = `${LOCAL}${HOME_SCREEN_PATH}`;
   assert.deepEqual(handlers.get("home:state")(page), { screen: "opening" });
   assert.throws(() => handlers.get("home:repair")(page), /only available/);
+  w.state = { status: "signed-out" };
   await handlers.get("home:sign-in")(page);
   w.url = "https://other.example.test/";
   assert.throws(() => handlers.get("home:sign-in")(page), /only available/);
@@ -844,4 +845,16 @@ test("another Cloud the Admin says is no longer theirs is dropped at once and My
   await setup.home.show({ place: { cloud: "c-a" } });
   assert.deepEqual(setup.home.view(), { screen: "setup", step: "starting", name: "Client A" });
   assert.deepEqual(setup.ownPairs, [], "never paired while it is set up");
+});
+
+test("an account leaving: nothing under way for it goes on, and the next show takes the window off its place", async () => {
+  const w = world({ journal: null, state: { status: "signed-out" }, url: `${CLOUD}/` });
+  w.home.accountLeaving();
+  assert.equal(w.home.shown(), null);
+  await w.home.show();
+  assert.deepEqual(w.local, [true], "the window showed that account's Cloud: this computer's page now");
+  const here = world({ journal: null, state: { status: "signed-out" }, url: `${LOCAL}/` });
+  here.home.accountLeaving();
+  await here.home.show();
+  assert.deepEqual(here.local, [false], "already on this computer's page: nothing moves");
 });

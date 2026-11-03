@@ -40,7 +40,7 @@ function DemoComposer({ reduced, onTyping }: { reduced: boolean; onTyping: (typi
   useEffect(() => onTyping(typing), [typing, onTyping]);
   return (
     <div aria-hidden="true" data-demo-composer=""
-      className="absolute left-1/2 top-[calc(50%-14px)] flex min-h-[76px] w-[348px] max-w-[calc(100%-32px)] -translate-x-1/2 select-none flex-col gap-2.5 rounded-[20px] border-[0.5px] border-ink/10 bg-composer px-2 pb-2 pt-3 text-left [:root[data-skin=daylight]_&]:shadow-[0_2px_8px_-1px_rgb(0_0_0/0.05),0_1px_2px_rgb(0_0_0/0.03)]">
+      className="absolute left-1/2 top-[calc(50%-14px)] flex min-h-[76px] w-[348px] max-w-[calc(100%-32px)] -translate-x-1/2 select-none flex-col gap-2.5 rounded-[22px] border-[0.5px] border-ink/10 bg-composer px-2 pb-2 pt-3 text-left [:root[data-skin=daylight]_&]:shadow-[0_2px_8px_-1px_rgb(0_0_0/0.05),0_1px_2px_rgb(0_0_0/0.03)]">
       <div className="mx-2 whitespace-nowrap text-[14px] leading-5">
         {waiting ? <span className="text-ink-tertiary">{t("onboarding.meet.placeholder", { app: productName() })}</span> : <span className="text-ink">{text}</span>}
         {!reduced && (waiting || typing) && <span className="animate-meet-caret ml-px inline-block h-[15px] w-[1.5px] translate-y-[2px] bg-ink align-[-2px]" />}

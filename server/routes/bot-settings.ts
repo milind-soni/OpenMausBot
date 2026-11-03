@@ -165,11 +165,12 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
       const current = requestedTaskBot(m[1], body?.threadId);
       sawThread(current.threadId);
       deps.threadRead?.(auth, current.threadId);
-      store.patchTask(current.id, current.threadId, { unread: false, ...readCursor(current.threadId) });
+      const task = store.taskByThread(current.id, current.threadId), cursor = readCursor(current.threadId);
+      const changed = Boolean(task?.unread) || (cursor.lastReadMessageId !== undefined && task?.lastReadMessageId !== cursor.lastReadMessageId);
+      if (changed) store.patchTask(current.id, current.threadId, { unread: false, ...cursor });
       readThreadNotifications(current.threadId, broadcast, auth);
-      const bot = store.bot(current.id)!;
-      const visible = wireBot(bot);
-      broadcast({ kind: "bot", bot: visible });
+      const visible = wireBot(store.bot(current.id)!);
+      if (changed) broadcast({ kind: "bot", bot: visible });
       return json(res, 200, { bot: visible });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/command-allowlist(?:\/([\w-]+))?$/);

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir, uptime as osUptime } from "node:os";
@@ -58,16 +58,6 @@ async function exitedPid() {
     child.once("close", resolve);
   });
   return pid;
-}
-
-function wmicAvailable() {
-  if (process.platform !== "win32") return false;
-  try {
-    execFileSync("wmic", ["/?"], { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 test.afterEach(() => {
@@ -662,8 +652,8 @@ test("boot identity does not weaken exclusion: only one of many live racers wins
 });
 
 test("a live but unrelated Windows pid reused within the same boot is treated as stale", async (t) => {
-  if (process.platform !== "win32") return t.skip("Windows-only: wmic process-identity check");
-  if (!wmicAvailable()) return t.skip("wmic is not available; the Windows process-identity check cannot be exercised");
+  // With or without wmic: Windows 11 no longer installs it, and the check must still tell a reused pid apart.
+  if (process.platform !== "win32") return t.skip("Windows-only: process-identity check");
   const { dataDir } = temporaryDirectory();
   const sibling = spawn(process.execPath, ["--eval", "setInterval(()=>{}, 1_000);"], { stdio: "ignore" });
   const siblingPid = sibling.pid;

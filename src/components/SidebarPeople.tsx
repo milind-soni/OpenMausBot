@@ -43,7 +43,7 @@ export function SidebarPeople({ compact }: { compact: boolean }) {
   const open = (person: TeamPerson) => {
     if (person.you) {
       if (inbox) openBot(dispatch, inbox, showThreads);
-      if (inboxThread) openInbox({ tab: waiting ? "needs-you" : undefined });
+      if (inboxThread) openInbox();
       return;
     }
     const tag = `@${person.name} `;

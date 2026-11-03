@@ -24,7 +24,7 @@ const MAX_ENTRIES = 20_000;
 
 type Card = { answered?: string; answeredText?: string; dismissed?: boolean; autoApplied?: boolean; answeredBy?: { kind: string; person?: string } };
 export type ActingLine = {
-  id: string; at: number; role: string; peerAsk?: unknown; steered?: boolean; queueId?: string; sender?: { id?: string }; card?: Card;
+  id: string; at: number; role: string; peerAsk?: unknown; steered?: boolean; relayed?: boolean; queueId?: string; sender?: { id?: string }; card?: Card;
 };
 /** A one-on-one conversation's latest request (index.ts directRequestOwners). */
 export type DirectRequest = {
@@ -86,7 +86,7 @@ const linePerson = (line: ActingLine | undefined): string | undefined =>
  * by someone the server can't name), and no answer of theirs to a card. */
 export function onlyTheirs(thread: readonly ActingLine[], person: string, since: number): boolean {
   return !thread.some((line) => line.at >= since && (
-    (line.role === "user" && !line.peerAsk && (line.sender?.id ? line.sender.id !== person : line.steered === true))
+    (line.role === "user" && !line.peerAsk && (line.sender?.id ? line.sender.id !== person : line.steered === true || line.relayed === true))
     || (answeredByPerson(line.card) && line.card!.answeredBy?.kind === "session" && line.card!.answeredBy.person !== person)));
 }
 

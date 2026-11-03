@@ -7,7 +7,7 @@ import { Runtime } from "./runtime/runtime.ts";
 import { importLegacyDelegations, importLegacyHandoffs, type LegacyThreadResolver } from "./runtime/import-legacy.ts";
 import { openRuntimeStore, type RuntimeStore } from "./runtime/store.ts";
 import { personOnly, requesterDecides, withDefault } from "./runtime/questions.ts";
-import { childrenSince, clip, isTerminal, path } from "./runtime/tree.ts";
+import { answersSender, childrenSince, clip, isTerminal, path } from "./runtime/tree.ts";
 import type { Answerer, Assignment, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
 import { sameRequest } from "./same-request.ts";
 
@@ -103,6 +103,16 @@ export function view(a: Assignment, parent?: Assignment): HandoffView {
   return node;
 }
 
+function announcingWrites(store: RuntimeStore, wrote: () => void): RuntimeStore {
+  const announced = <A extends unknown[], R>(write: (...args: A) => R) => (...args: A): R => {
+    const result = write(...args);
+    wrote();
+    return result;
+  };
+  return { ...store, insert: announced(store.insert), update: announced(store.update), addInbox: announced(store.addInbox),
+    markDelivered: announced(store.markDelivered), prune: announced(store.prune) };
+}
+
 /** How often a request that joined another looks at it. */
 const JOIN_POLL_MS = 1_000;
 const JOINED_NOTE = "Another teammate asked this a moment ago, so it was answered once, for both of you:";
@@ -126,7 +136,8 @@ export class RuntimeCoordinator implements Coordinator {
     this.legacyThreads = options.legacyThreads;
     this.now = options.now ?? Date.now;
     this.log = options.log ?? ((line) => console.error("coordinator:", line));
-    this.store = openRuntimeStore(options.dataDir === ":memory:" ? ":memory:" : join(options.dataDir, "runtime.db"));
+    const store = openRuntimeStore(options.dataDir === ":memory:" ? ":memory:" : join(options.dataDir, "runtime.db"));
+    this.store = options.wrote ? announcingWrites(store, options.wrote) : store;
     this.runtime = new Runtime(this.store, this.runner(), {
       clock: { now: () => this.now(), monotonic: () => performance.now() },
       limits: { depth: 4, requests: REQUESTS_PER_ROOT, executions: EXECUTIONS_PER_ROOT, turnStallMs: TURN_STALL_MS, ...options.runtimeLimits },
@@ -162,6 +173,13 @@ export class RuntimeCoordinator implements Coordinator {
     this.ready();
     const a = this.store.get(id);
     return a && this.project(a);
+  }
+
+  answersTo(id: string): { botId: string; threadId: string } | undefined {
+    this.ready();
+    const a = this.store.get(id);
+    const { botId, threadId } = a?.requester ?? {};
+    return a && botId && threadId && answersSender(a, "notify", { botId, threadId }) ? { botId, threadId } : undefined;
   }
 
   has(id: string): boolean {
@@ -200,7 +218,7 @@ export class RuntimeCoordinator implements Coordinator {
     const kind: HandoffView["kind"] = target.groupId !== undefined && target.groupId === source.groupId ? "assignment" : "work";
     const lineage = path(this.store, parent);
     const root = lineage[0]!;
-    if (lineage.some(n => ancestorOf(address(n), target))) throw new Error(ANCESTOR);
+    if (!answersSender(parent, mode, target) && lineage.some(n => ancestorOf(address(n), target))) throw new Error(ANCESTOR);
     const siblings = this.store.children(parent.id);
     const existing = siblings.findLast(c => c.assignee.botId === target.botId && c.assignee.destination.groupId === target.groupId && c.brief === brief && c.mode === mode);
     if (existing && !(rework && isTerminal(existing))) return { node: view(existing, parent), duplicate: true };
@@ -430,6 +448,11 @@ export class RuntimeCoordinator implements Coordinator {
     this.ready();
     this.pruneDaily();
     this.runtime.tick();
+  }
+
+  pace(): "busy" | "parked" | "idle" {
+    this.ready();
+    return this.runtime.pace();
   }
 
   private pruneDaily(): void {

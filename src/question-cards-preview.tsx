@@ -6,7 +6,7 @@ import { createRoot } from "react-dom/client";
 import type { InboxRow, InboxView } from "../shared/inbox";
 import { ChatView } from "@/components/ChatView";
 import { InboxPanel } from "@/components/inbox/InboxPanel";
-import { setLocale } from "@/lib/i18n";
+import { loadLocale } from "@/lib/i18n";
 import { setAdvancedMode } from "@/lib/interface-mode";
 import { applySkinChoice, SKIN_IDS, type SkinId } from "@/lib/skins";
 import { openInbox, setInboxView } from "@/state/inbox";
@@ -20,7 +20,7 @@ const surface = params.get("surface") ?? "chat";
 const skin = params.get("skin") ?? "midnight";
 setAdvancedMode(params.get("mode") === "advanced");
 applySkinChoice(SKIN_IDS.includes(skin as SkinId) ? (skin as SkinId) : "midnight");
-setLocale(params.get("lang") ?? "en");
+await loadLocale(params.get("lang") ?? "en");
 
 const AT = Date.now() - 12 * 60_000;
 const CLEO = { email: "cleo@acme.test", name: "Cleo", role: "owner" };
@@ -120,7 +120,7 @@ function Gallery() {
   const all = useMemo(() => bots(stateName), []);
   const view: InboxView = { botId: "scout", threadId: INBOX, rows: inboxRows(stateName), anchor: inboxRows(stateName)[0]?.id ?? null };
   setInboxView(view);
-  if (surface === "panel") openInbox(view.rows[0]?.kind === "ask" && stateName !== "answered" ? { reading: view.rows[0].id } : { tab: stateName === "answered" ? "done" : "needs-you" });
+  if (surface === "panel") openInbox(view.rows[0]?.kind === "ask" && stateName !== "answered" ? { reading: view.rows[0].id } : {});
   const shown = surface === "chat" ? all[0]! : all[1]!;
   const state: AppState = { ...initialState, bots: all, selectedId: shown.id, connected: true };
   const value = { state, dispatch: () => {}, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };

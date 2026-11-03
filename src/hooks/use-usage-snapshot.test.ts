@@ -10,7 +10,7 @@ import type { AppState, ConfigStatus, InstanceInfo } from "@/state/store";
 const fixture = vi.hoisted(() => ({ owner: true as boolean | null, track: vi.fn(), api: vi.fn(), connectedApps: vi.fn() }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.owner }));
 vi.mock("@/lib/analytics", () => ({ track: fixture.track, analyticsEnabled: () => true }));
-vi.mock("@/components/PluginsPanel", () => ({ preloadConnectedApps: fixture.connectedApps }));
+vi.mock("@/lib/connected-apps", () => ({ preloadConnectedApps: fixture.connectedApps }));
 vi.mock("@/state/store", async (original) => ({ ...await original<typeof import("@/state/store")>(), api: fixture.api }));
 
 const LATE_EVENING = Date.parse("2026-10-15T22:30:00.000Z");
