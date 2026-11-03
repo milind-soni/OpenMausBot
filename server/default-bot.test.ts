@@ -46,7 +46,7 @@ describe("MausBot, every person's helper", () => {
     expect(intros(again, maus)).toHaveLength(1);
   });
 
-  it("leaves a Team Cloud member's MausBot uncrowned: it reaches no bot everyone sees, so a crown would promise work it can't hand on", () => {
+  it("leaves a Team Cloud member's MausBot uncrowned: outside that person's private chats it reaches no bot everyone sees, and it manages none", () => {
     const store = new Store(selection);
     store.seedIfEmpty({ defaultBot: false });
     const own = ensureDefaultBot(store, { dataDir: DATA_DIR, person: "ada@acme.test", team: "Acme" })!;
