@@ -1,6 +1,7 @@
 import { codexToolSurfaceArgs } from "./codex-tool-surface.ts";
 import { codexShellDisabled, GUEST_CONFINED_CODEX_ARGS } from "./codex-guest.ts";
 import { TEAM_TOOLS_FAILED, teamToolsFailed } from "./team-tools.ts";
+import { type McpApprovalMode, mountMcpServer } from "./codex-mcp-mount.ts";
 import { reportUnsupportedCalls, rolloutMark, type RolloutMark } from "./codex-unsupported-calls.ts";
 // The `codex` CLI headless over its app-server JSON-RPC (NDJSON on stdio): completion is
 // `turn/completed`, approvals arrive as server→client requests, resumeCursor is the codex thread id.
@@ -17,7 +18,7 @@ import { cloudHomeConfigured } from "../cloud-home.ts";
 import { serverVersion } from "../environment.ts";
 import { ChatGptPlanAuthController } from "./chatgpt-plan-auth.ts";
 import { captureCliTree, cliVersionReader, describeSpawnFailure, execCli, killCliTree, spawnCli, waitForExit } from "../procs.ts";
-import { codexLaunch, codexLaunchesStarting, codexLaunchSlot, codexRpcTimeoutMs, keepStopping, RELAUNCH_EXIT_WAIT_MS, spawnHoldingSlot, tomlInlineTable, tryCodexLaunchSlot } from "./codex-process.ts";
+import { codexLaunch, codexLaunchesStarting, codexLaunchSlot, codexRpcTimeoutMs, keepStopping, RELAUNCH_EXIT_WAIT_MS, spawnHoldingSlot, tryCodexLaunchSlot } from "./codex-process.ts";
 import { isReservedMcpEnvEntry } from "../mcp-registry.ts";
 
 import type {
@@ -424,34 +425,6 @@ export function codexNativeIncomingLogMessage(
     };
   }
   return withoutInlineImages(message);
-}
-
-/** Codex's default for one MCP server's tools (openai/codex#17843): "auto"
- * runs without asking only tools the server marks read-only, "approve" runs
- * every tool without asking, "prompt" asks for each call. */
-type McpApprovalMode = "approve" | "auto" | "prompt";
-
-function mountMcpServer(
-  appServerArgs: string[],
-  env: Record<string, string | undefined>,
-  name: string,
-  server: StdioMcpSpec,
-  approval: McpApprovalMode = "auto",
-  /** Written into the mount's own `env` table: its process gets them, Codex's command shell does not. */
-  literalEnv: Record<string, string> = {},
-  written: Set<string> = new Set(),
-): void {
-  const prefix = `mcp_servers.${name}`;
-  Object.assign(env, server.env);
-  for (const name of Object.keys(server.env)) written.add(name);
-  appServerArgs.push(
-    "-c", `${prefix}.command=${JSON.stringify(server.command)}`,
-    "-c", `${prefix}.args=${JSON.stringify(server.args)}`,
-    // argv carries names only, so credentials never appear in process listings.
-    "-c", `${prefix}.env_vars=${JSON.stringify(Object.keys(server.env))}`,
-  );
-  if (Object.keys(literalEnv).length) appServerArgs.push("-c", `${prefix}.env=${tomlInlineTable(literalEnv)}`);
-  if (approval !== "prompt") appServerArgs.push("-c", `${prefix}.default_tools_approval_mode="${approval}"`);
 }
 
 export const CodexDriver: ProviderDriver<CodexConfig> = {
