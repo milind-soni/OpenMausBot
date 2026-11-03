@@ -291,7 +291,7 @@ import { createWebhookRoomPost } from "./host/webhook-room-deps.ts";
 import { createRoomJobs, parallelRoomJobsEnabled, type RoomRoundLine } from "./host/room-jobs.ts";
 import { createDelegatedLevel } from "./host/delegated-level.ts";
 import { createLiveApprovalMode } from "./host/live-approval.ts";
-import { CONSENT_RULE, escapeNotes, labelledLine, OUTSIDE, peerLineText, peerProvenanceNote, reportNote, requestWorkOrigin, type WorkOrigin } from "./peer-provenance.ts"; import { lineNote, PROVENANCE_PROMPT } from "./provenance-label.ts"; import { createLineLabels } from "./host/line-labels.ts";
+import { CONSENT_RULE, escapeNotes, labelledLine, OUTSIDE, peerLineText, peerProvenanceNote, reportNote, requestWorkOrigin, type WorkOrigin } from "./peer-provenance.ts"; import { lineNote, PROVENANCE_PROMPT } from "./provenance-label.ts"; import { openRoomThread } from "./host/room-new-thread.ts"; import { createLineLabels } from "./host/line-labels.ts";
 import { decideRoomPost, emptyRoomPostBudget, type RoomPostAttempt, type RoomPostBudget } from "./room-post-budget.ts";
 import { pageMessage, pageSize, slimMessage } from "./host/message-pages.ts";
 import { createTeammatePrompts } from "./host/teammate-prompts.ts";
@@ -14492,21 +14492,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const { action, memberIds, name, bulletin } = parsed.data;
         if (action === "new_thread") {
-          // Same as the person's "New thread" in the room: it becomes the room's current thread.
-          if ((internalCapability.openedRoomThreads ?? 0) >= 4) {
-            return json(res, 429, { error: "you can open at most 4 room threads in one turn" });
-          }
-          if (phoneSecretSubmissions.hasGroup(room.id)) {
-            return json(res, 409, { error: "this room is securely saving a credential — try again when it finishes" });
-          }
-          if (name !== undefined && (name.length > 80 || !fitsOnOneLine(name))) return json(res, 400, { error: "a new_thread title must fit on one line, at most 80 characters" });
-          const task = store.createGroupTask(room.id, name === undefined ? undefined : redactSecretsInText(name));
-          if (!task) return json(res, 500, { error: "couldn't open a thread in that room" });
-          internalCapability.openedRoomThreads = (internalCapability.openedRoomThreads ?? 0) + 1;
-          return json(res, 201, {
-            ok: true, threadId: task.threadId, title: task.title,
-            message: `Opened thread “${task.title}” [thread: ${task.threadId}] in room “${room.name}”. It is now the room's current thread, so post_to_room for this room and coordinate_bots sent from outside this room go there; coordinate_bots from inside this room stays in that conversation.`,
-          });
+          const opened = openRoomThread({ store, turn: internalCapability, room, name, savingCredential: phoneSecretSubmissions.hasGroup(room.id) });
+          return json(res, opened.status, opened.body);
         }
         const patch: Record<string, unknown> = {};
         if (action === "rename") {
