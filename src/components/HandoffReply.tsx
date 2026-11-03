@@ -4,6 +4,8 @@ import type { Bot, Message } from "@/state/store";
 import { handoffResult } from "@/lib/handoff-result";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
+import { useStoreRef } from "@/state/store-ref";
+import { openRoomThread } from "@/state/thread-navigation";
 import { BotAvatar } from "./Avatar";
 
 export function HandoffReply({ message, children }: { message: Message; children: ReactNode }) {
@@ -52,4 +54,12 @@ export function HandoffChip({ message, bots, title, onClick }: { message: Messag
       </button>
     </HandoffReply>
   );
+}
+
+/** A chip into a room opens it on the thread the chip names. */
+export function RoomChip({ message, bots, title }: { message: Message; bots: readonly Bot[]; title: string }) {
+  const store = useStoreRef();
+  return <HandoffChip message={message} bots={bots} title={title} onClick={() => {
+    if (message.comm) openRoomThread(store.dispatch, store.state().groups, message.comm.groupId, message.comm.threadId);
+  }} />;
 }

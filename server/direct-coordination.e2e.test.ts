@@ -473,6 +473,24 @@ it("does not treat self-opened work or an abandoned human branch as new human au
   expect((await f.messages(room.activeTaskId)).filter((message: any) => message.peerPost)).toHaveLength(3);
 }), 45_000);
 
+it("lets a Chief open a new thread in its room with post_to_room new_thread, leaving the room on the person's thread", () => fixture(async f => {
+  const room = (await f.cli("new-channel", "--name", "Launch desk", "--members", f.chief.id, "--section", "Leadership")).channel;
+  f.plan[f.chief.id] = { steps: [{ tool: "post_to_room", arguments: { group_id: room.id, message: "Kickoff: owners and dates below.", new_thread: "Q4 launch" } }],
+    reply: "Opened #Q4 launch in Launch desk" };
+  f.save();
+  await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Open a Q4 launch thread in Launch desk with a kickoff post.");
+  await expect.poll(() => f.evidence().length, { timeout: 20_000 }).toBe(1);
+  const answered = f.evidence()[0].evidence.find((entry: any) => entry.step?.tool === "post_to_room").response.result;
+  expect(answered.isError, JSON.stringify(answered)).toBeFalsy();
+  expect(answered.content[0].text).toContain("the new thread #Q4 launch in Launch desk");
+  const saved = (await f.api("/api/bots?messages=0")).groups.find((group: any) => group.id === room.id);
+  const opened = saved.tasks.find((task: any) => task.title === "Q4 launch");
+  expect(opened).toBeDefined();
+  expect(saved.threadId).toBe(room.activeTaskId);
+  expect((await f.messages(opened.threadId)).map((message: any) => message.text)).toEqual(["Kickoff: owners and dates below."]);
+  expect((await f.messages(room.activeTaskId)).filter((message: any) => message.peerPost)).toHaveLength(0);
+}), 45_000);
+
 it("returns a nested coordinated result after Claude retries a transient provider exit", async () => {
   const scratch = mkdtempSync(join(tmpdir(), "omb-coordination-retry-"));
   try {

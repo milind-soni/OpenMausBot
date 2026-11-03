@@ -324,6 +324,7 @@ describe("a room's chats", () => {
     const room = here.createGroup("Launch", [ava.id, bo.id], false, "Work", { bulletin: "Ship on Friday.", defaultResponder: { kind: "mentions" }, completed: true });
     here.patchGroupTask(room.id, room.threadId, { title: "Plan", pinned: true });
     const pricing = here.createGroupTask(room.id, "Pricing", false)!;
+    here.patchGroupTask(room.id, pricing.threadId, { archivedAt: 77 });
     for (let i = 0; i < 2 * CHAT_ROWS_PAGE + 5; i++) (i % 2 ? answer : say)(here, room.threadId, `plan ${i}`, 10 + i);
     for (let i = 0; i < 4; i++) say(here, pricing.threadId, `price ${i}`, 10 + i);
     const plan = pagesOf(here, room.threadId), prices = pagesOf(here, pricing.threadId);
@@ -335,7 +336,8 @@ describe("a room's chats", () => {
     for (const page of [...plan.pages, ...prices.pages]) expect(take(cloud, [page]).accepted).toEqual([page.threadId]);
     const made = cloud.group(room.id)!;
     expect(made).toMatchObject({ name: "Launch", memberIds: [ava.id], bulletin: "Ship on Friday.", section: "Work", defaultResponder: { kind: "mentions" } });
-    expect(made.tasks!.map((task) => [task.threadId, task.title, Boolean(task.pinned)]).sort()).toEqual([[pricing.threadId, "Pricing", false], [room.threadId, "Plan", true]].sort());
+    expect(made.tasks!.map((task) => [task.threadId, task.title, Boolean(task.pinned), task.archivedAt]).sort())
+      .toEqual([[pricing.threadId, "Pricing", false, 77], [room.threadId, "Plan", true, undefined]].sort());
     expect(shown(cloud, room.threadId)).toEqual(want.plan);
     expect(shown(cloud, pricing.threadId)).toEqual(want.prices);
   });

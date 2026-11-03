@@ -28,7 +28,7 @@ export type ChatStore = Pick<Store, "bots" | "groups" | "bot" | "group" | "messa
 
 const BOT_TASK_KEYS = ["threadId", "title", "createdAt", "titleFromFirstMessage", "openedBy", "closedBy", "archivedAt", "pinned", "link", "linkAuto",
   "lastReadMessageId", "pinnedMessageId", "routineRunId", "askedAt", "snoozedUntil"] as const;
-const GROUP_TASK_KEYS = ["threadId", "title", "createdAt", "titleFromFirstMessage", "pinned", "pinnedMessageId", "turnTimeoutMinutes"] as const;
+const GROUP_TASK_KEYS = ["threadId", "title", "createdAt", "titleFromFirstMessage", "pinned", "pinnedMessageId", "turnTimeoutMinutes", "archivedAt"] as const;
 export const ATTACHMENT_NAME = /^[A-Za-z0-9-]{1,80}\.[A-Za-z0-9]{1,10}$/;
 
 const ownerKey = (owner: Owner) => `${owner.kind}:${owner.id}`;

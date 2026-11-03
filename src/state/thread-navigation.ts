@@ -58,6 +58,20 @@ export function openNotificationTarget(
   else openBot(dispatch, bot, threadsShown);
 }
 
+/** A room chip opens the thread it names while the room still has it, else the room as it stands. */
+export function openRoomThread(
+  dispatch: (action: Action) => void,
+  groups: readonly NotificationThreadOwner[],
+  groupId: string,
+  threadId?: string,
+) {
+  dispatch({ type: "select", id: groupId });
+  const room = groups.find((group) => group.id === groupId);
+  if (threadId && room && room.threadId !== threadId && room.tasks?.some((task) => task.threadId === threadId)) {
+    dispatch({ type: "switchGroupTask", groupId, threadId });
+  }
+}
+
 export function botOpensTo(bot: Pick<NotificationThreadOwner, "threadId" | "mainThreadId" | "tasks">, threadsShown: boolean): string {
   return !threadsShown && bot.mainThreadId && bot.tasks?.some((task) => task.threadId === bot.mainThreadId)
     ? bot.mainThreadId : bot.threadId;

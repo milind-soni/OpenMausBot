@@ -124,7 +124,7 @@ function sentTask(task: TaskRecord): TaskRecord {
 const pick = <T extends object>(source: T, keys: readonly string[]) => Object.fromEntries(keys.filter((key) => (source as Record<string, unknown>)[key] !== undefined)
   .map((key) => [key, (source as Record<string, unknown>)[key]]));
 /** What a room's thread carries to My Cloud: never this computer's folders. */
-const sentRoomTask = (task: GroupTaskRecord) => pick(task, ["threadId", "title", "createdAt", "titleFromFirstMessage", "pinned", "pinnedMessageId", "turnTimeoutMinutes"]) as unknown as GroupTaskRecord;
+const sentRoomTask = (task: GroupTaskRecord) => pick(task, ["threadId", "title", "createdAt", "titleFromFirstMessage", "pinned", "pinnedMessageId", "turnTimeoutMinutes", "archivedAt"]) as unknown as GroupTaskRecord;
 /** As My Cloud takes a room (sentSchema): a calendar call's room keeps the call's name, which may be longer, and one room it
  * refuses refuses every conversation sent beside it. */
 const sentRoom = (room: GroupRecord) => ({ ...pick(room, ["defaultResponder", "section", "setupCompletedAt", "setupSkippedAt", "audienceFloor"]),

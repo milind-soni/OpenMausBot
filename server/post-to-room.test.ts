@@ -104,7 +104,7 @@ interface StoredMessage {
   from?: { botId: string; name: string };
   peerPost?: { unattended?: boolean };
   tool?: { name: string; ok?: boolean };
-  comm?: { groupId: string; withName: string };
+  comm?: { groupId: string; threadId?: string; withName: string };
   card?: { requestId?: string; tool?: string; title?: string };
 }
 
@@ -556,6 +556,54 @@ describe("post_to_room", () => {
     expect(roomMessages.some((m) => m.text === "ready for review" && m.from?.botId === member.id)).toBe(true);
   }, 40_000);
 
+  const roomRecord = async (roomId: string) => {
+    const groups = field((await api("GET", "/api/bots?messages=0")).body, "groups");
+    // SAFETY: /api/bots answers with every room as a WireGroup.
+    return (Array.isArray(groups) ? groups : []).find((group) => str(field(group as Record<string, unknown>, "id")) === roomId) as
+      { threadId: string; unread?: boolean; tasks?: Array<{ threadId: string; title: string }> } | undefined;
+  };
+
+  it("opens a new thread in the room for the post, and leaves the room on the thread the person has open", async () => {
+    const member = await makeBot("Thread Member", "Launch");
+    const chief = await makeCoordinator("Thread Chief", "Room threads", ["Launch"]);
+    const room = await makeRoom("Launch desk", [chief.id, member.id], "Room threads");
+
+    const posted = await internal("POST", "/api/internal/post-to-room", {
+      fromBotId: chief.id, fromThreadId: chief.threadId, groupId: room.id, message: "Kickoff: owners and dates below.", newThread: "Q4 launch",
+    });
+    expect(posted.status, JSON.stringify(posted.body)).toBe(201);
+    const opened = str(posted.body.threadId);
+    expect(opened).not.toBe("");
+    expect(opened).not.toBe(room.threadId);
+    expect(posted.body.threadTitle).toBe("Q4 launch");
+
+    const after = await roomRecord(room.id);
+    expect(after?.threadId, "the post moved the room off the person's thread").toBe(room.threadId);
+    expect(after?.unread, "the room's unread mark is its open thread's, and nothing new arrived there").toBeFalsy();
+    expect(after?.tasks?.find((task) => task.threadId === opened)?.title).toBe("Q4 launch");
+    expect((await messagesOf(opened)).map((message) => message.text)).toEqual(["Kickoff: owners and dates below."]);
+    expect(await messagesOf(room.threadId)).toHaveLength(0);
+
+    const receipt = (await messagesOf(chief.threadId)).find((message) => message.tool?.name === "Posted in Launch desk");
+    expect(receipt?.comm).toMatchObject({ groupId: room.id, threadId: opened });
+  }, 40_000);
+
+  it("refuses a new thread title that is empty, too long or more than one line, and opens nothing", async () => {
+    const poster = await makeBot("Title Poster", "Room threads");
+    const room = await makeRoom("Title desk", [poster.id], "Room threads");
+    const before = (await roomRecord(room.id))?.tasks?.length;
+
+    for (const newThread of ["   ", "x".repeat(81), "line one\nline two", 42]) {
+      const refused = await internal("POST", "/api/internal/post-to-room", {
+        fromBotId: poster.id, fromThreadId: poster.threadId, groupId: room.id, message: "hello", newThread,
+      });
+      expect(refused.status, JSON.stringify(newThread)).toBe(400);
+      expect(str(refused.body.error)).toContain("new_thread");
+    }
+    expect((await roomRecord(room.id))?.tasks?.length).toBe(before);
+    expect(await messagesOf(room.threadId)).toHaveLength(0);
+  }, 40_000);
+
   it("refuses the room the sender is already speaking in", async () => {
     const a = await makeBot("Channel A", "Posting");
     const b = await makeBot("Channel B", "Posting");
@@ -564,6 +612,22 @@ describe("post_to_room", () => {
     const intoOwnRoom = await post(a.id, room.threadId, room.id, "hello again");
     expect(intoOwnRoom.status).toBe(409);
     expect(str(intoOwnRoom.body.error)).toContain("already speaking");
+  }, 40_000);
+
+  it("opens a new thread in the room the sender is speaking in, and leaves its current thread alone", async () => {
+    const a = await makeBot("Desk A", "Posting");
+    const b = await makeBot("Desk B", "Posting");
+    const room = await makeRoom("Planning desk", [a.id, b.id], "Posting");
+
+    const opened = await internal("POST", "/api/internal/post-to-room", {
+      fromBotId: a.id, fromThreadId: room.threadId, groupId: room.id, message: "Notes for the offsite.", newThread: "Offsite",
+    });
+    expect(opened.status, JSON.stringify(opened.body)).toBe(201);
+    expect((await messagesOf(str(opened.body.threadId))).map((message) => message.text)).toEqual(["Notes for the offsite."]);
+    const here = await messagesOf(room.threadId);
+    expect(here.some((message) => message.peerPost)).toBe(false);
+    expect(here.find((message) => message.tool?.name === "Posted in Planning desk")?.comm).toMatchObject({ groupId: room.id, threadId: opened.body.threadId });
+    expect((await roomRecord(room.id))?.threadId).toBe(room.threadId);
   }, 40_000);
 
   it("stops the room at its third bot post and sends the model to the user", async () => {
@@ -595,6 +659,46 @@ describe("post_to_room", () => {
     const reopened = await post(one.id, one.threadId, room.id, "third");
     expect(reopened.status, JSON.stringify(reopened.body)).toBe(201);
     expect((await messagesOf(room.threadId)).filter((message) => message.role === "bot")).toHaveLength(3);
+  }, 40_000);
+
+  it("counts the person writing in the room thread a bot speaks from, after the room has moved to another thread", async () => {
+    const one = await makeBot("Source One", "Answered");
+    const two = await makeBot("Source Two", "Answered");
+    const room = await makeRoom("Source room", [one.id, two.id], "Answered");
+    const open = (bot: { id: string }, newThread: string) => internal("POST", "/api/internal/post-to-room", {
+      fromBotId: bot.id, fromThreadId: room.threadId, groupId: room.id, message: `About ${newThread}.`, newThread,
+    });
+
+    const first = await open(one, "First");
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    expect((await open(two, "Second")).status).toBe(201);
+    expect((await open(one, "Third")).status).toBe(429);
+
+    expect(await personSays(room.id, "go on")).toBe(202);
+    expect((await api("POST", `/api/groups/${room.id}/tasks/${str(first.body.threadId)}?messages=0`)).status).toBe(200);
+    const reopened = await open(one, "Third");
+    expect(reopened.status, JSON.stringify(reopened.body)).toBe(201);
+  }, 40_000);
+
+  it("counts the person writing in any of the room's threads, whichever thread is open now", async () => {
+    const one = await makeBot("Elsewhere One", "Answered");
+    const two = await makeBot("Elsewhere Two", "Answered");
+    const room = await makeRoom("Elsewhere room", [one.id, two.id], "Answered");
+    const open = (bot: { id: string; threadId: string }, newThread: string) => internal("POST", "/api/internal/post-to-room", {
+      fromBotId: bot.id, fromThreadId: bot.threadId, groupId: room.id, message: `About ${newThread}.`, newThread,
+    });
+    const switchTo = (threadId: string) => api("POST", `/api/groups/${room.id}/tasks/${threadId}?messages=0`);
+
+    const first = await open(one, "First");
+    const second = await open(two, "Second");
+    expect([first.status, second.status]).toEqual([201, 201]);
+    expect((await open(one, "Third")).status).toBe(429);
+
+    expect((await switchTo(str(first.body.threadId))).status).toBe(200);
+    expect(await personSays(room.id, "go on")).toBe(202);
+    expect((await switchTo(str(second.body.threadId))).status).toBe(200);
+    const reopened = await open(one, "Third");
+    expect(reopened.status, JSON.stringify(reopened.body)).toBe(201);
   }, 40_000);
 
   it("counts the person who asked for the post, in the bot's own conversation, as present", async () => {

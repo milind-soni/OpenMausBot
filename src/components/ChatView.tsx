@@ -63,7 +63,7 @@ import { LiveToolsContext, useLiveToolIds } from "@/hooks/use-live-tool-ids";
 import { VoiceNoteBubble, type VoiceNoteAttachment } from "./VoiceNoteBubble";
 import { RawMarkdownView, RawToggleAction } from "./RawMarkdownToggle";
 import { ThreadChip } from "./ThreadChip";
-import { HandoffChip } from "./HandoffReply"; import { TeammateChip } from "./TeammateChip"; import { useTeammates } from "@/state/team-people"; import type { MentionPeer } from "@/lib/mentions";
+import { RoomChip } from "./HandoffReply"; import { TeammateChip } from "./TeammateChip"; import { useTeammates } from "@/state/team-people"; import type { MentionPeer } from "@/lib/mentions";
 import { NewConversationInstead } from "./NewConversationInstead";
 import { VerifyCard } from "./VerifyCard";
 import { askText, runSkill, runSteps, runSummary, showRun, skillPrompt } from "@/lib/verify-steps";
@@ -634,14 +634,13 @@ function PeerLabel({ peer }: { peer: PeerLine }) {
 }
 
 const ActivityChip = memo(function ActivityChip({ message, place = "auto" }: { message: Message; place?: EffectivePlace }) {
-  const { bots, dispatch, threadId } = useChatRows(), liveTools = use(LiveToolsContext);
+  const { bots, threadId } = useChatRows(), liveTools = use(LiveToolsContext);
   const tool = message.tool;
   if (!tool) return null;
   if (message.threadRef) return <ThreadChip message={message} />; if (message.relay) return <TeammateChip message={message} />;
   const comm = message.comm;
   if (comm) {
-    return <HandoffChip message={message} bots={bots} title={t("chat.openConversationWith", { name: comm.withName })}
-      onClick={() => dispatch({ type: "select", id: comm.groupId })} />;
+    return <RoomChip message={message} bots={bots} title={t("chat.openConversationWith", { name: comm.withName })} />;
   }
   return <ToolActivity tool={tool} live={liveTools.has(message.id)} place={toolPlace(tool.name, place)} source={{ threadId, messageId: message.id }} />;
 });

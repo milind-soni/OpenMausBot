@@ -357,11 +357,12 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     }
     const r = await api("/api/internal/post-to-room", {
       method: "POST",
-      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, groupId, message, attachVoiceNote }),
+      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, groupId, message, attachVoiceNote, newThread: args.new_thread }),
     });
     if (r.error) return { text: String(r.error), isError: true };
+    const where = typeof r.threadTitle === "string" ? `the new thread #${r.threadTitle} in ${r.roomName ?? "the room"}` : r.roomName ?? "the room";
     return {
-      text: `Posted in ${r.roomName ?? "the room"}${r.attachedVoiceNote ? " with the voice note attached" : ""}. Nobody's turn was started, so expect no reply — tell the user it is posted.`,
+      text: `Posted in ${where}${r.attachedVoiceNote ? " with the voice note attached" : ""}. Nobody's turn was started, so expect no reply — tell the user it is posted.`,
     };
   }
   if (name === "select_computer") {

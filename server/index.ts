@@ -266,6 +266,7 @@ import { EventBus } from "./harness/bus.ts";
 import { ENGINE_LIST_REUSE_MS, engineMemory, enginesByUse, ProviderRegistry } from "./harness/registry.ts"; import { afterFirstEngineRead, holdUntilFirstEngineRead } from "./first-engine-read.ts";
 import { ManagedDesktopProviders } from "./managed-desktop.ts";
 import { mainThread, wasOldestThread } from "./main-thread.ts";
+import { lastHumanRoomMessageAt, NEW_THREAD_TITLE_REFUSAL, newThreadTitle } from "./room-post-thread.ts";
 import { computerKindForResource, ManagedDesktopPolicy, type ComputerKind } from "./managed-policy.ts"; import { nudgeCloudTeamPolicy, remoteAccessPaths, startCloudTeamPolicy, stopCloudTeamPolicy } from "./cloud-team-policy.ts";
 import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER } from "./hosted-models.ts";
 import { CLOUD_HOME_SECRET_KEYS, CLOUD_IGNORED_KEYS, cloudHomeConfiguration, cloudHomeOffersPlace, cloudHomePlaceRefusal, firstCloudTurnPatch } from "./cloud-home.ts";
@@ -1019,6 +1020,10 @@ const cloudGuestDrivenHandoff = (nodeId: string | undefined) => Boolean(CLOUD_HO
 
 /** Never the owner when a guest drives the source, so the new conversation is confined like it. On a Team Cloud it is the
  * source's audience: one person's only from their own private chat (else a shared chat's work reads their notes). */
+function botOpenedThreadStarter(capability: Pick<InternalCapability, "threadId" | "generation">, fromThreadId: string): string | undefined {
+  return (CLOUD_TEAM ? teamConnections.handOnFor(capability.threadId, capability.generation) : null) ?? openerFrom(fromThreadId);
+}
+
 function openerFrom(fromThreadId: string): string | undefined {
   if (CLOUD_TEAM) return teamHost.privateTo(fromThreadId) ?? CLOUD_NOBODY_KEY;
   const person = threadPersonKey(fromThreadId);
@@ -11273,16 +11278,6 @@ function directChatOf(botId: string, threadId: string): boolean { const source =
 function waitTurnChecks(capability: InternalCapability, sender: BotRecord): Pick<WaitRouteContext, "sourceRefusal" | "hostRefusal" | "guest" | "peer" | "elsewhere"> { const { threadId } = capability, place = () => { const turn = turnPlaces.get(threadId); return turn?.botId === sender.id ? turn.place : null; };
   return { sourceRefusal: () => { const source = connectorThread(sender.id, threadId); return waitSourceRefusal({ owned: source !== null, room: Boolean(source?.group), depth: capability.depth, handedOff: Boolean(capability.roomHandoffId), routineRun: Boolean(activeRoutineRunForThread(threadId)), outsideDriven: outsideDrivenThread(threadId), personStarted: turnOrigin(capability).kind === "user", guest: cloudGuestDriven(threadId) }); }, hostRefusal: () => hostWaitRefusal({ cloudHome: Boolean(CLOUD_HOME), hosted: HOSTED_WORKSPACE, guest: cloudGuestDriven(threadId), place: place() }), guest: () => cloudGuestDriven(threadId), peer: (name) => findWaitPeer(reachablePeers(store.bots, sender), sender.id, name), elsewhere: placesElsewhere.explain }; }
 
-/** Read fresh every time; a line stamped via the HTTP API does not count, so a bot cannot re-arm the ceiling it just spent. */
-function lastHumanRoomMessageAt(group: GroupRecord): number | undefined {
-  const messages = store.messagesFor(group.threadId);
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    if (message.role === "user" && message.kind === "text" && !message.via) return message.at;
-  }
-  return undefined;
-}
-
 /** Membership comes from the record, never a tool argument. */
 function roomPostEligibility(
   bot: BotRecord,
@@ -14157,6 +14152,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!groupId || !message) {
           return json(res, 400, { error: "post_to_room needs group_id (from list_rooms) and message" });
         }
+        const newThread = newThreadTitle(body.newThread);
+        if (newThread === null) return json(res, 400, { error: NEW_THREAD_TITLE_REFUSAL });
         if ((internalCapability.roomPosts ?? 0) >= MAX_ROOM_POSTS_PER_TURN) {
           return json(res, 429, { error: `You have already posted ${MAX_ROOM_POSTS_PER_TURN} times this turn, which is the limit. Do not retry — finish your turn and say anything further to the user directly.` });
         }
@@ -14167,7 +14164,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         let room = store.group(groupId);
         if (!room) return json(res, 404, { error: "no such room — call list_rooms and copy the exact id from the result" });
-        if (room.id === owner.group?.id) {
+        if (room.id === owner.group?.id && !newThread) {
           return json(res, 409, { error: "you are already speaking in that room — say it in your reply instead" });
         }
         const eligibility = roomPostEligibility(from, room, fromThreadId);
@@ -14181,7 +14178,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             now: Date.now(),
           };
           const askedAt = owner.group ? undefined : personAskAt.get(fromThreadId);
-          const spokeAt = Math.max(lastHumanRoomMessageAt(group) ?? -Infinity, askedAt ?? -Infinity);
+          const spokeAt = Math.max(lastHumanRoomMessageAt(store, group) ?? -Infinity, askedAt ?? -Infinity);
           if (Number.isFinite(spokeAt)) attempt.lastHumanAt = spokeAt;
           return decideRoomPost(roomPostBudgets.get(group.id) ?? emptyRoomPostBudget(), attempt);
         };
@@ -14242,7 +14239,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               parked.filter((attachment) => attachment.kind !== "audio"),
             );
         }
-        const posted = store.appendMessage(room.threadId, {
+        const opened = newThread ? store.createGroupTask(room.id, newThread, false) : null;
+        if (newThread && !opened) return json(res, 404, { error: "that room no longer exists" });
+        if (opened) threadStarters.set(opened.threadId, botOpenedThreadStarter(internalCapability, fromThreadId));
+        const posted = store.appendMessage(opened?.threadId ?? room.threadId, {
           role: "bot",
           kind: "text",
           text: message,
@@ -14252,16 +14252,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         });
         internalCapability.roomPosts = (internalCapability.roomPosts ?? 0) + 1;
         detachParkedAudio?.();
-        store.patchGroup(room.id, { unread: true });
+        if (!opened) store.patchGroup(room.id, { unread: true });
         const chip: Omit<Message, "id" | "at"> = {
           role: "bot",
           kind: "activity",
           tool: { name: serverLine(threadLanguage(fromThreadId), "server.rooms.postedIn", { room: room.name }), ok: true },
-          comm: { groupId: room.id, withBotId: poster.id, withName: room.name, withColor: poster.color },
+          comm: { groupId: room.id, ...(opened ? { threadId: opened.threadId } : {}), withBotId: poster.id, withName: room.name, withColor: poster.color },
         };
         if (owner.group) chip.from = { botId: poster.id, name: poster.name, color: poster.color };
         store.appendMessage(fromThreadId, chip);
-        return json(res, 201, { ok: true, messageId: posted.id, roomName: room.name, attachedVoiceNote });
+        return json(res, 201, { ok: true, messageId: posted.id, roomName: room.name, attachedVoiceNote, ...(opened ? { threadId: opened.threadId, threadTitle: opened.title } : {}) });
       }
       // start_thread never activates: a bot must not move what the person is looking at.
       if (method === "POST" && path === "/api/internal/threads") {
@@ -14305,7 +14305,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           const inherited = picked?.ok ? { modelSelection: picked.selection, approvalMode: undefined } : parentThreadModel(from.id, fromThreadId);
           const task = store.createTask(from.id, title, false, projectId, { botId: from.id, name: from.name, at: Date.now() }, inherited.approvalMode, inherited.modelSelection);
           if (!task) return json(res, 500, { error: "couldn't create that thread" });
-          threadStarters.set(task.threadId, (CLOUD_TEAM ? teamConnections.handOnFor(internalCapability.threadId, internalCapability.generation) : null) ?? openerFrom(fromThreadId));
+          threadStarters.set(task.threadId, botOpenedThreadStarter(internalCapability, fromThreadId));
           internalCapability.openedThreads += 1;
           const chip: Omit<Message, "id" | "at"> = {
             role: "bot",
