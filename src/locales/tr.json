@@ -5253,5 +5253,7 @@
   "botApi.call.wrongKey": "Yanlış anahtar",
   "botApi.call.off": "Reddedildi: Bot API kapalıydı",
   "botApi.call.busy": "Reddedildi: bot meşguldü",
-  "botApi.call.failed": "Bot yanıtlayamadı"
+  "botApi.call.failed": "Bot yanıtlayamadı",
+  "botApi.starter": "Bot API daha yüksek bir planla gelir.",
+  "botApi.password": "Anahtar parola gibidir: ona sahip olan, bu botun okuyabildiğini okuyabilir."
 }

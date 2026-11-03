@@ -7187,5 +7187,7 @@
   "botApi.call.wrongKey": "잘못된 키",
   "botApi.call.off": "거부됨: Bot API가 꺼져 있었음",
   "botApi.call.busy": "거부됨: 봇이 바빴음",
-  "botApi.call.failed": "봇이 답할 수 없었음"
+  "botApi.call.failed": "봇이 답할 수 없었음",
+  "botApi.starter": "Bot API는 상위 요금제에 포함됩니다.",
+  "botApi.password": "키는 비밀번호와 같습니다. 키를 가진 사람은 이 봇이 읽을 수 있는 것을 읽을 수 있습니다."
 }

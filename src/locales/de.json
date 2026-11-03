@@ -2867,5 +2867,7 @@
   "botApi.call.wrongKey": "Falscher Schlüssel",
   "botApi.call.off": "Abgewiesen: Bot API war aus",
   "botApi.call.busy": "Abgewiesen: der Bot war beschäftigt",
-  "botApi.call.failed": "Der Bot konnte nicht antworten"
+  "botApi.call.failed": "Der Bot konnte nicht antworten",
+  "botApi.starter": "Bot API ist in einem höheren Tarif enthalten.",
+  "botApi.password": "Ein Schlüssel ist wie ein Passwort: Wer ihn hat, kann lesen, was dieser Bot lesen kann."
 }

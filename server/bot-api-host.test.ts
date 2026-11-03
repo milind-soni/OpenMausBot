@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { BotApiManager } from "./bot-api.ts";
-import { createBotApiHost, type BotApiHostDeps, type BotApiTurnOptions } from "./bot-api-host.ts";
+import { BOT_API_DEFAULT_WAIT_MS, createBotApiHost, type BotApiHostDeps, type BotApiTurnOptions } from "./bot-api-host.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Message } from "./store.ts";
 import { createWebhookIngressHandler } from "./webhook-ingress.ts";
@@ -65,7 +65,7 @@ const replies = (text: string): Script => (fake, _botId, _prompt, opts) => {
   }, 30);
 };
 
-async function harness(script: Script, options: { waitMs?: number; full?: boolean } = {}) {
+async function harness(script: Script, options: { waitMs?: number; full?: boolean; included?: () => boolean } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "omb-bot-api-host-"));
   dirs.push(dir);
   const fake = fakeStore();
@@ -86,6 +86,7 @@ async function harness(script: Script, options: { waitMs?: number; full?: boolea
     },
     threadBusy: (botId, threadId) => fake.bots.get(botId)?.tasks.find((task) => task.threadId === threadId)?.busy === true,
     canStart: () => !options.full,
+    ...(options.included ? { included: options.included } : {}),
     hooksBaseUrl: () => "https://bots.example.test",
     manageRefusal: (auth) => (auth.scopes.includes("admin") ? null : "Only people who can edit Scout can change this."),
     record: (_auth, row) => recorded.push(row),
@@ -313,6 +314,48 @@ describe("the Bot API door on the webhook receiver", () => {
     await h.call("b1", key, { message: "private question" });
     expect((await h.app("GET", "/api/bots/b1/bot-api")).body.calls).toMatchObject([{ preview: "private question", statusCode: 200 }]);
     expect((await h.app("GET", "/api/bots/b1/bot-api", undefined, false)).body.calls).toEqual([]);
+  });
+
+  it("on Starter refuses a new key, turns a leftover key away with the upgrade words, and an upgrade works at once", async () => {
+    let starter = false;
+    const h = await harness(replies("ok"), { included: () => !starter });
+    const key = (await h.app("POST", "/api/bots/b1/bot-api", { enabled: true })).body.key as string;
+    expect((await h.call("b1", key, { message: "Before" })).status).toBe(200);
+    const threadId = h.fake.bots.get("b1")!.tasks[0]!.threadId;
+
+    starter = true;
+    const words = { error: "Bot API comes with a higher plan. Upgrade this Cloud to use it." };
+    const before = h.turns.length;
+    expect(await h.call("b1", key, { message: "After" })).toEqual({ status: 403, body: words });
+    expect(await h.call("b1", key, undefined, { method: "GET", query: `?thread=${threadId}` })).toEqual({ status: 403, body: words });
+    expect(h.turns).toHaveLength(before);
+    // Only a key holder learns about the plan: a stranger still gets the wrong-key answer.
+    expect(await h.call("b1", `${key}x`, { message: "Hi" })).toEqual({ status: 401, body: { error: "Invalid key" } });
+    expect(await h.app("POST", "/api/bots/b1/bot-api/new-key")).toMatchObject({ status: 403, body: { ...words, upgrade: true } });
+    expect(await h.app("POST", "/api/bots/b1/bot-api", { enabled: true })).toMatchObject({ status: 403, body: { ...words, upgrade: true } });
+    expect((await h.app("GET", "/api/bots/b1/bot-api")).body).toMatchObject({ included: false, enabled: true });
+    expect(h.manager.authorize("b1", key)).toBe(true);
+
+    starter = false;
+    expect((await h.call("b1", key, { message: "Upgraded" })).status).toBe(200);
+    expect((await h.app("GET", "/api/bots/b1/bot-api")).body).toMatchObject({ included: true });
+
+    // Turning it off stays possible on Starter, and it can't be turned back on there.
+    starter = true;
+    expect((await h.app("POST", "/api/bots/b1/bot-api", { enabled: false })).status).toBe(200);
+    expect((await h.app("POST", "/api/bots/b1/bot-api", { enabled: true })).status).toBe(403);
+  });
+
+  it("answers within the proxy's idle limit by default, and a caller may ask for longer", async () => {
+    expect(BOT_API_DEFAULT_WAIT_MS).toBeLessThan(60_000);
+    const h = await harness((fake, _botId, _prompt, opts) => {
+      setTimeout(() => { fake.store.appendMessage(opts.threadId, { role: "bot", kind: "text", text: "Late" }); opts.onSettled({ ok: true, text: "Late" }); }, 300);
+    }, { waitMs: 50 });
+    const key = (await h.app("POST", "/api/bots/b1/bot-api", { enabled: true })).body.key as string;
+    expect((await h.call("b1", key, { message: "Default" })).body).toMatchObject({ status: "working" });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect((await h.call("b1", key, { message: "Longer", wait: 5 })).body).toMatchObject({ reply: "Late" });
+    expect((await h.call("b1", key, { message: "Too long", wait: 301 })).status).toBe(400);
   });
 
   it("forgets a deleted bot's key and calls", async () => {

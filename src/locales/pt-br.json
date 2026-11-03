@@ -6443,5 +6443,7 @@
   "botApi.call.wrongKey": "Chave errada",
   "botApi.call.off": "Recusada: Bot API estava desligada",
   "botApi.call.busy": "Recusada: o bot estava ocupado",
-  "botApi.call.failed": "O bot não conseguiu responder"
+  "botApi.call.failed": "O bot não conseguiu responder",
+  "botApi.starter": "A Bot API vem com um plano superior.",
+  "botApi.password": "Uma chave é como uma senha: quem a tem pode ler o que este bot pode ler."
 }

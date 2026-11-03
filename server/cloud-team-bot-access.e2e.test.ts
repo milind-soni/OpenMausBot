@@ -239,6 +239,28 @@ describe("a team bot shared with a level per person", () => {
     await until(idle);
   });
 
+  it("follows the Admin's signed plan on Bot API without a restart, and an Admin that sends none means not Starter", async () => {
+    const path = `/api/bots/${mirror.id}/bot-api`;
+    expect((await team.signed("POST", "/api/cloud/plan", { v: 1, cancelled: false })).status).toBe(200);
+    expect((await as("ada", "GET", path)).body).toMatchObject({ included: true });
+    const key = (await as("ada", "POST", path, { enabled: true })).body.key as string;
+    const hooks = `${team.base.replace(/:(\d+)$/, (_, port) => `:${Number(port) + 1}`)}/hooks/api/bots/${mirror.id}/messages`;
+    const send = () => fetch(hooks, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ message: "Plan check", wait: 0 }) });
+
+    expect((await team.signed("POST", "/api/cloud/plan", { v: 1, tier: "starter" })).status).toBe(200);
+    expect((await as("ada", "GET", "/api/config")).body).toMatchObject({ cloudStarter: true });
+    const refused = await send();
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: "Bot API comes with a higher plan. Upgrade this Cloud to use it." });
+    expect((await as("ada", "POST", `${path}/new-key`)).status).toBe(403);
+
+    expect((await team.signed("POST", "/api/cloud/plan", { v: 1, tier: "pro" })).status).toBe(200);
+    expect((await as("ada", "GET", "/api/config")).body).toMatchObject({ cloudStarter: false });
+    expect((await send()).status).toBeLessThan(300);
+    await until(idle);
+    expect((await as("ada", "POST", path, { enabled: false })).status).toBe(200);
+  });
+
   it("relays another app's message only for a person who can chat with the bot", async () => {
     const relay = async (email: string | undefined, n: number) => {
       const leaf = (await as("ada", "GET", `/api/threads/${payroll.threadId}/messages?limit=1`)).body.activeLeafId ?? null;

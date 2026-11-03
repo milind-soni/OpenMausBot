@@ -2813,5 +2813,7 @@
   "botApi.call.wrongKey": "गलत कुंजी",
   "botApi.call.off": "लौटाया गया: Bot API बंद था",
   "botApi.call.busy": "लौटाया गया: बॉट व्यस्त था",
-  "botApi.call.failed": "बॉट जवाब नहीं दे सका"
+  "botApi.call.failed": "बॉट जवाब नहीं दे सका",
+  "botApi.starter": "Bot API ऊँचे प्लान के साथ आता है।",
+  "botApi.password": "कुंजी पासवर्ड जैसी है: जिसके पास यह है, वह वह सब पढ़ सकता है जो यह बॉट पढ़ सकता है।"
 }

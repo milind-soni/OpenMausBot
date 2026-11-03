@@ -5253,5 +5253,7 @@
   "botApi.call.wrongKey": "Sai khóa",
   "botApi.call.off": "Bị từ chối: Bot API đang tắt",
   "botApi.call.busy": "Bị từ chối: bot đang bận",
-  "botApi.call.failed": "Bot không trả lời được"
+  "botApi.call.failed": "Bot không trả lời được",
+  "botApi.starter": "Bot API có trong gói cao hơn.",
+  "botApi.password": "Khóa giống như mật khẩu: ai giữ khóa đều đọc được những gì bot này đọc được."
 }

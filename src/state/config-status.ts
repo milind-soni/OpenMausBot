@@ -135,6 +135,8 @@ export interface ConfigStatus {
   /** This server is an OMB Cloud home: it offers no "this computer" and no
    * Local VM (server/cloud-home.ts). Absent everywhere else. */
   cloudHome?: boolean;
+  /** This Cloud is on the Starter plan, as the Admin last said; absent or false otherwise. */
+  cloudStarter?: boolean;
   /** A Team Cloud: the team this server is the home of, and the Plan page (MausBot Cloud) where its people and plan
    * are managed. Absent everywhere else. */
   team?: { id: string; name: string; cloudPage?: string };

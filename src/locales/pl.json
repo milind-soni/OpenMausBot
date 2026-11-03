@@ -6582,5 +6582,7 @@
   "botApi.call.wrongKey": "Zły klucz",
   "botApi.call.off": "Odrzucono: Bot API było wyłączone",
   "botApi.call.busy": "Odrzucono: bot był zajęty",
-  "botApi.call.failed": "Bot nie mógł odpowiedzieć"
+  "botApi.call.failed": "Bot nie mógł odpowiedzieć",
+  "botApi.starter": "Bot API jest dostępne w wyższym planie.",
+  "botApi.password": "Klucz jest jak hasło: kto go ma, może czytać to, co może czytać ten bot."
 }

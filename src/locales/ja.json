@@ -6685,5 +6685,7 @@
   "botApi.call.wrongKey": "キーが違います",
   "botApi.call.off": "拒否: Bot API はオフでした",
   "botApi.call.busy": "拒否: ボットは取り込み中でした",
-  "botApi.call.failed": "ボットは返事できませんでした"
+  "botApi.call.failed": "ボットは返事できませんでした",
+  "botApi.starter": "Bot API は上位プランで使えます。",
+  "botApi.password": "キーはパスワードと同じです。持っている人は、このボットが読めるものを読めます。"
 }

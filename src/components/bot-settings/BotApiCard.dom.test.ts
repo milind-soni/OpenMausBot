@@ -8,15 +8,20 @@ import { setLocale } from "@/lib/i18n";
 import type { Bot } from "@/state/store";
 
 const URL_ = "https://scout.example.test/hooks/api/bots/b1/messages";
-const fixture = vi.hoisted(() => ({ view: null as Record<string, unknown> | null, sent: [] as Array<{ path: string; body?: unknown }>, dispatched: [] as unknown[], copied: [] as string[], minted: 0 }));
+const fixture = vi.hoisted(() => ({ view: null as Record<string, unknown> | null, sent: [] as Array<{ path: string; body?: unknown }>, read: [] as string[], dispatched: [] as unknown[], copied: [] as string[], minted: 0, starter: false, bridge: true, upgrades: 0 }));
+vi.mock("../CloudUsageMeter", () => ({
+  NoteLine: () => null,
+  useCloudUsage: () => (fixture.bridge ? { usage: { tier: "starter" }, bridge: {} } : { usage: null, bridge: undefined }),
+  useUpgrade: () => ({ busy: null, note: null, dialog: null, start: () => { fixture.upgrades += 1; } }),
+}));
 vi.mock("@/lib/copy-text", () => ({ copyText: async (text: string) => { fixture.copied.push(text); return "copied"; } }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return {
     ...original,
-    useStore: () => ({ state: { webhooks: [{ botId: "b1" }, { botId: "b1" }, { botId: "b2" }] }, dispatch: (action: unknown) => fixture.dispatched.push(action) }),
+    useStore: () => ({ state: { config: { cloudStarter: fixture.starter }, webhooks: [{ botId: "b1" }, { botId: "b1" }, { botId: "b2" }] }, dispatch: (action: unknown) => fixture.dispatched.push(action) }),
     api: async (path: string, init?: { method?: string; body?: string }) => {
-      if (init?.method !== "POST") return fixture.view;
+      if (init?.method !== "POST") { fixture.read.push(path); return fixture.view; }
       fixture.sent.push({ path, body: init.body ? JSON.parse(init.body) : undefined });
       const wants = init.body ? (JSON.parse(init.body) as { enabled: boolean }).enabled : true;
       fixture.view = { ...fixture.view, enabled: wants };
@@ -38,7 +43,7 @@ const click = async (id: string) => { flushSync(() => find(id)!.click()); await 
 
 beforeEach(() => {
   setLocale("en");
-  Object.assign(fixture, { view: { enabled: false, url: URL_, canManage: true, callCount: 0, calls: [] }, sent: [], dispatched: [], copied: [], minted: 0 });
+  Object.assign(fixture, { view: { enabled: false, url: URL_, canManage: true, callCount: 0, calls: [] }, sent: [], read: [], dispatched: [], copied: [], minted: 0, starter: false, bridge: true, upgrades: 0 });
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -46,6 +51,36 @@ beforeEach(() => {
 afterEach(() => { flushSync(() => root.unmount()); host.remove(); });
 
 describe("the Bot API card", () => {
+  it("on Starter is one line and the usual Upgrade: no switch, no key, no command, and nothing asked of the server", async () => {
+    fixture.starter = true;
+    Object.assign(fixture.view!, { enabled: true });
+    await mount({ webhooksLink: true });
+    expect(find("bot-api-starter")!.textContent).toBe("Bot API comes with a higher plan.");
+    for (const gone of ["bot-api-switch", "bot-api-curl", "bot-api-copy", "bot-api-new-key", "bot-api-key-note", "bot-api-webhooks"]) expect(find(gone), gone).toBeNull();
+    expect(fixture.read).toEqual([]);
+    await click("bot-api-upgrade");
+    expect(fixture.upgrades).toBe(1);
+  });
+
+  it("on Starter with no way to change the plan from this page, shows the line alone", async () => {
+    fixture.starter = true;
+    fixture.bridge = false;
+    await mount();
+    expect(find("bot-api-starter")).not.toBeNull();
+    expect(find("bot-api-upgrade")).toBeNull();
+  });
+
+  it("comes back as soon as the plan is no longer Starter, and says a key is like a password", async () => {
+    fixture.starter = true;
+    Object.assign(fixture.view!, { enabled: true });
+    await mount();
+    expect(find("bot-api-switch")).toBeNull();
+    fixture.starter = false;
+    await mount({ className: "x" });
+    expect(find("bot-api-switch")).not.toBeNull();
+    expect(find("bot-api-password")!.textContent).toBe("A key is like a password: whoever holds it can read what this bot can read.");
+  });
+
   it("is off with no command until switched on", async () => {
     await mount();
     expect(find("bot-api")!.textContent).toContain("Bot API");

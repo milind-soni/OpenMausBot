@@ -1,6 +1,8 @@
 /** The Bot API's public address and the command the app shows for it. The receiver that takes webhooks
  * (`<base>/hooks/…`) takes these calls too, so a Cloud and a self-hosted edge need no second route. */
 export const BOT_API_KEY_PLACEHOLDER = "YOUR_KEY";
+/** What a caller or a person is told on the Starter plan. */
+export const BOT_API_UPGRADE = "Bot API comes with a higher plan. Upgrade this Cloud to use it.";
 
 export function botApiEndpoint(hooksBaseUrl: string, botId: string): string {
   return `${hooksBaseUrl.replace(/\/+$/, "")}/hooks/api/bots/${encodeURIComponent(botId)}/messages`;

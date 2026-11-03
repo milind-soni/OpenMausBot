@@ -5,7 +5,7 @@
 import { z } from "zod";
 
 import { redactSecretsInText } from "../shared/redact.ts";
-import { botApiEndpoint, type BotApiReply } from "../shared/bot-api.ts";
+import { BOT_API_UPGRADE, botApiEndpoint, type BotApiReply } from "../shared/bot-api.ts";
 import type { AdminActionRow } from "./admin-activity.ts";
 import { BOT_API_MAX_MESSAGE_CHARS, BOT_API_MAX_PENDING, BotApiManager, botApiPrompt, withoutAttachedImages, type BotApiAttempt, type BotApiStatus } from "./bot-api.ts";
 import type { RequestAuth } from "./request-auth.ts";
@@ -14,8 +14,10 @@ import { parseJson, schemaIssue } from "./schema.ts";
 import type { Message, Store } from "./store.ts";
 import { bearerSecret, header, json, readRawBody, type IngressDoor } from "./webhook-ingress.ts";
 
-/** How long a call waits for the reply before answering "working". */
-export const BOT_API_DEFAULT_WAIT_MS = 5 * 60_000;
+/** How long a call waits by default before answering "working" with its thread id. Under the 60 s that Fly's proxy is reported
+ * (community.fly.io, staff replies, 2022-2024) to allow a connection with no bytes: a dropped answer would lose the thread id. */
+export const BOT_API_DEFAULT_WAIT_MS = 50_000;
+const BOT_API_MAX_WAIT_MS = 5 * 60_000;
 const POLL_MS = 250;
 const PUBLIC_PATH = /^\/hooks\/api\/bots\/([\w-]{1,128})\/messages$/;
 const APP_PATH = /^\/api\/bots\/([\w-]{1,128})\/bot-api(?:\/(new-key))?$/;
@@ -23,8 +25,8 @@ const APP_PATH = /^\/api\/bots\/([\w-]{1,128})\/bot-api(?:\/(new-key))?$/;
 const callSchema = z.object({
   message: z.string().min(1).max(BOT_API_MAX_MESSAGE_CHARS),
   thread: z.string().regex(/^[\w-]{1,128}$/).optional(),
-  /** Seconds to wait for the reply, within the default. */
-  wait: z.number().min(0).max(BOT_API_DEFAULT_WAIT_MS / 1000).optional(),
+  /** Seconds to wait for the reply, for a caller that knows nothing in its path drops a quiet connection. */
+  wait: z.number().min(0).max(BOT_API_MAX_WAIT_MS / 1000).optional(),
 });
 const switchSchema = z.object({ enabled: z.boolean() });
 
@@ -45,6 +47,8 @@ export interface BotApiHostDeps {
   threadBusy(botId: string, threadId: string): boolean;
   /** Whether a new turn would start now, before anything is written. */
   canStart(botId: string, threadId: string): boolean;
+  /** False on a plan that doesn't include the Bot API; asked on every call, so an upgrade counts at once. Absent: included. */
+  included?(): boolean;
   /** A thread the API just opened: whose it is on a Cloud. */
   opened?(threadId: string): void;
   /** The webhook receiver's public base, as the app advertises it for webhooks. */
@@ -95,6 +99,7 @@ export function createBotApiHost(deps: BotApiHostDeps) {
   const running = new Map<string, Set<string>>();
   deps.store.onChange((change) => { if (change.type === "bot.deleted") manager.removeForBot(change.botId); });
 
+  const included = () => deps.included?.() !== false;
   const pendingFor = (botId: string) => {
     const set = running.get(botId);
     for (const threadId of set ?? []) if (!deps.threadBusy(botId, threadId)) set!.delete(threadId);
@@ -153,7 +158,7 @@ export function createBotApiHost(deps: BotApiHostDeps) {
       fail(busy ? 409 : 502, busy ? BUSY : COULD_NOT_ANSWER, error instanceof Error ? error.message : String(error));
     }
     turnStarted();
-    const deadline = Date.now() + Math.min(waitMs, call.wait === undefined ? waitMs : call.wait * 1000);
+    const deadline = Date.now() + (call.wait === undefined ? waitMs : call.wait * 1000);
     for (;;) {
       if (dispatchError !== undefined) fail(502, COULD_NOT_ANSWER, dispatchError);
       if (settled) break;
@@ -189,6 +194,11 @@ export function createBotApiHost(deps: BotApiHostDeps) {
       if (!manager.authorize(botId, bearerSecret(req))) {
         manager.recordRefused(botId, 401, "Invalid key");
         json(res, 401, { error: "Invalid key" });
+        return true;
+      }
+      if (!included()) {
+        manager.recordRefused(botId, 403, BOT_API_UPGRADE);
+        json(res, 403, { error: BOT_API_UPGRADE });
         return true;
       }
       if (req.method === "GET") {
@@ -240,9 +250,9 @@ export function createBotApiHost(deps: BotApiHostDeps) {
   };
 
   /** What callers sent is for the people who manage the key, not everyone who can see the bot. */
-  const view = (botId: string, auth: RequestAuth): BotApiStatus & { url: string; canManage: boolean; calls: BotApiAttempt[] } => {
+  const view = (botId: string, auth: RequestAuth): BotApiStatus & { included: boolean; url: string; canManage: boolean; calls: BotApiAttempt[] } => {
     const canManage = deps.manageRefusal(auth, botId) === null;
-    return { ...manager.status(botId), url: botApiEndpoint(deps.hooksBaseUrl(), botId), canManage, calls: canManage ? manager.listAttempts(botId).slice(-10).reverse() : [] };
+    return { included: included(), ...manager.status(botId), url: botApiEndpoint(deps.hooksBaseUrl(), botId), canManage, calls: canManage ? manager.listAttempts(botId).slice(-10).reverse() : [] };
   };
 
   const routes: RouteHandler = async ({ req, res, path, method, auth, json: answer, readBody }) => {
@@ -258,6 +268,7 @@ export function createBotApiHost(deps: BotApiHostDeps) {
     const target = { kind: "bot", id: bot.id, name: bot.name };
     try {
       if (match[2] === "new-key") {
+        if (!included()) return answer(res, 403, { error: BOT_API_UPGRADE, upgrade: true });
         if (!manager.enabled(botId)) return answer(res, 409, { error: "The Bot API is off for this bot" });
         const minted = manager.enable(botId);
         deps.record?.(auth, { category: "bot-api", action: "bot-api.new-key", target });
@@ -267,6 +278,7 @@ export function createBotApiHost(deps: BotApiHostDeps) {
       if (!parsed.success) return answer(res, 400, { error: schemaIssue(parsed.error, "Send {\"enabled\": true | false}") });
       if (parsed.data.enabled) {
         // Already on keeps its key: only New key replaces one an app may be using.
+        if (!included()) return answer(res, 403, { error: BOT_API_UPGRADE, upgrade: true });
         if (manager.enabled(botId)) return answer(res, 200, view(botId, auth));
         const minted = manager.enable(botId);
         deps.record?.(auth, { category: "bot-api", action: "bot-api.on", target });

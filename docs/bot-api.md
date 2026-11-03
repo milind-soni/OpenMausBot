@@ -13,6 +13,13 @@ the old one stop working); switching the card off forgets it. Only someone who
 may edit the bot can switch it on, mint a key or switch it off; each of those
 is a **Bot API** row in Settings → Activity.
 
+## Plans
+
+Bot API isn't part of a Cloud's Starter plan. There the card shows one line and
+Upgrade; a new key is refused, and a key left from a higher plan answers `403`
+with an upgrade message. An upgrade works at once, with the same key. Desktop and
+self-hosted servers aren't affected.
+
 ## Calling it
 
 ```sh
@@ -33,7 +40,9 @@ The JSON body takes:
 - `thread` (optional): the `thread` an earlier answer returned, to go on in the
   same conversation. Only a thread the API opened can be continued this way.
 - `wait` (optional, seconds, at most 300): how long to wait for the reply
-  before answering `working`. The default is the maximum.
+  before answering `working`. The default is 50, under the 60 seconds of silence
+  Fly's proxy is reported to allow; a longer wait is for a path you know keeps a
+  quiet connection open.
 
 Answers:
 
@@ -60,13 +69,9 @@ computer the app runs on. The thread always asks, whatever the bot's own level
 answers an approval for the caller, and the person's answer in the app is for
 that one request. On a Team Cloud the turn also runs confined, as a webhook's does.
 
-Approvals guard actions, not everything the bot can read: what the bot can read
-without asking, its memory and files included, can reach a key holder through its
-reply. Give a key only to something you would let talk to this bot.
-
-If something between the caller and this address drops a silent connection before
-the reply is ready, pass a shorter `wait` and read the thread with `GET`: an answer
-that never arrived also never gave the caller its thread id.
+A key is like a password: whoever holds it can read what this bot can read.
+Approvals guard actions, not reads, so its memory, files and read-only tools can
+reach a key holder through its reply.
 
 Each call is kept with the bot's API settings and shown on the card (count, last
 call, recent calls) to those who can manage the key. Refused calls roll up into

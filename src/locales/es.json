@@ -5762,5 +5762,7 @@
   "botApi.call.wrongKey": "Clave incorrecta",
   "botApi.call.off": "Rechazada: Bot API estaba desactivada",
   "botApi.call.busy": "Rechazada: el bot estaba ocupado",
-  "botApi.call.failed": "El bot no pudo responder"
+  "botApi.call.failed": "El bot no pudo responder",
+  "botApi.starter": "Bot API viene con un plan superior.",
+  "botApi.password": "Una clave es como una contraseña: quien la tenga puede leer lo que este bot puede leer."
 }
