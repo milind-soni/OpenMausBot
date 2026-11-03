@@ -1,5 +1,6 @@
 // The Local VM's settings, read from the config the server loaded.
 import type { AppConfig } from "./config.ts";
+import type { PersistentLocalVmAddon } from "./local-vm-addons.ts";
 
 export const DEFAULT_LOCAL_VM_MODE = "shared" as const;
 export const DEFAULT_LOCAL_VM_MAX_INSTANCES = 2;
@@ -24,4 +25,9 @@ export function localVmIdleTimeoutMinutes(cfg: AppConfig): number {
 /** App preservation is deliberately opt-in: a normal image replacement keeps its existing small, predictable footprint. */
 export function localVmPreservesInstalledApps(cfg: AppConfig): boolean {
   return cfg.localVm?.preserveInstalledApps === true;
+}
+
+/** Administrator-provided add-ons live below the app data directory and are mounted read-only into each new Local VM. */
+export function localVmPersistentAddons(cfg: AppConfig): ReadonlyArray<PersistentLocalVmAddon> {
+  return cfg.localVm?.persistentAddons ?? [];
 }

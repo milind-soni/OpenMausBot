@@ -1,7 +1,7 @@
 import { z, type ZodString } from "zod";
 import * as boat from "../boat.ts";
 import type { ComputerControl } from "../computer-control.ts";
-import { isValidSshAlias, localVmMaxInstances, localVmMode, type AppConfig } from "../config.ts";
+import { isValidSshAlias, localVmMaxInstances, localVmMode, localVmPersistentAddons, type AppConfig } from "../config.ts";
 import {
   containerComputerAction,
   containerComputerExists,
@@ -10,6 +10,7 @@ import {
   SHARED_LOCAL_VM_TARGET,
   setupCommands,
   type LocalVmTarget,
+  type PersistentLocalVmAddon,
   type Runtime,
 } from "../container-computer.ts";
 import { viewerTargetId } from "../../shared/desktop-viewer.ts";
@@ -31,9 +32,12 @@ import { createComputerUsageRoutes } from "./computer-usage.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 /** "Delete" and "Delete and recreate" keep the desktop's website sign-ins: its Firefox profile moves into the workspace first. */
-async function keepSignInsBeforeRemove(target: LocalVmTarget): Promise<void> {
-  const before = await containerComputerStatus(undefined, undefined, target);
-  await keepFirefoxProfileBeforeRemove(target, before, () => containerComputerAction("stop", undefined, undefined, target));
+async function keepSignInsBeforeRemove(
+  target: LocalVmTarget,
+  persistentAddons: ReadonlyArray<PersistentLocalVmAddon>,
+): Promise<void> {
+  const before = await containerComputerStatus(undefined, undefined, target, { persistentAddons });
+  await keepFirefoxProfileBeforeRemove(target, before, () => containerComputerAction("stop", undefined, undefined, target, persistentAddons));
 }
 
 export interface ComputerRouteDeps {
@@ -311,8 +315,8 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
       if (action === "pull") localVmImageBusy.set(true);
       else localVmLifecycleBusy.add(SHARED_LOCAL_VM_TARGET.key);
       try {
-        if (action === "remove") await keepSignInsBeforeRemove(SHARED_LOCAL_VM_TARGET);
-        const status = await containerComputerAction(action, undefined, undefined, SHARED_LOCAL_VM_TARGET);
+        if (action === "remove") await keepSignInsBeforeRemove(SHARED_LOCAL_VM_TARGET, localVmPersistentAddons(cfg));
+        const status = await containerComputerAction(action, undefined, undefined, SHARED_LOCAL_VM_TARGET, localVmPersistentAddons(cfg));
         if (action === "run" || action === "start") {
           localVmSeen.add(SHARED_LOCAL_VM_TARGET.key);
           localVmIdleFor(SHARED_LOCAL_VM_TARGET).touch();
@@ -320,7 +324,7 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
         if (action === "stop" || action === "remove") localVmIdleFor(SHARED_LOCAL_VM_TARGET).cancel();
         return json(res, 200, {
           ...localVmViewerStatus(status, auth),
-          commands: setupCommands(status.runtime, process.platform, SHARED_LOCAL_VM_TARGET),
+          commands: setupCommands(status.runtime, process.platform, SHARED_LOCAL_VM_TARGET, localVmPersistentAddons(cfg)),
           idle_timeout_ms: localVmIdleMs(),
           mode: localVmMode(cfg),
           max_instances: localVmMaxInstances(cfg),
@@ -334,7 +338,7 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
       localVmIdleFor(SHARED_LOCAL_VM_TARGET).touch();
       res.setHeader("cache-control", "private, no-store");
       return json(res, 200, {
-        image: await containerComputerScreenshot(undefined, undefined, SHARED_LOCAL_VM_TARGET),
+        image: await containerComputerScreenshot(undefined, undefined, SHARED_LOCAL_VM_TARGET, localVmPersistentAddons(cfg)),
       });
     }
 
@@ -375,7 +379,7 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
       if (action === "run") localVmProvisionBusy.set(true);
       try {
         if (action === "run") {
-          const before = await containerComputerStatus(undefined, undefined, target);
+          const before = await containerComputerStatus(undefined, undefined, target, { persistentAddons: localVmPersistentAddons(cfg) });
           if (!before.runtime) return json(res, 409, { error: before.problem ?? "No container runtime is installed" });
           if (!(await containerComputerExists(before.runtime, target))) {
             const count = await existingPerBotLocalVmCount(before.runtime);
@@ -386,8 +390,8 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
             }
           }
         }
-        if (action === "remove") await keepSignInsBeforeRemove(target);
-        const status = await containerComputerAction(action, undefined, undefined, target);
+        if (action === "remove") await keepSignInsBeforeRemove(target, localVmPersistentAddons(cfg));
+        const status = await containerComputerAction(action, undefined, undefined, target, localVmPersistentAddons(cfg));
         if (action === "run" || action === "start") {
           localVmSeen.add(target.key);
           localVmIdleFor(target).touch();
@@ -395,7 +399,7 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
         if (action === "stop" || action === "remove") localVmIdleFor(target).cancel();
         return json(res, 200, {
           ...localVmViewerStatus(status, auth),
-          commands: setupCommands(status.runtime, process.platform, target),
+          commands: setupCommands(status.runtime, process.platform, target, localVmPersistentAddons(cfg)),
           idle_timeout_ms: localVmIdleMs(),
           mode: localVmMode(cfg),
           max_instances: localVmMaxInstances(cfg),
@@ -416,7 +420,7 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
       localVmIdleFor(target).touch();
       res.setHeader("cache-control", "private, no-store");
       return json(res, 200, {
-        image: await containerComputerScreenshot(undefined, undefined, target),
+        image: await containerComputerScreenshot(undefined, undefined, target, localVmPersistentAddons(cfg)),
       });
     }
     // Granted only to the control lease holding this bot's computer, and only with admin scope. The loopback companion
@@ -442,7 +446,7 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
         return json(res, 409, { error: "Take control of this computer first" });
       }
       const target = localVmTargetForStatus(bot.id, threadId);
-      const status = await containerComputerStatus(undefined, undefined, target);
+      const status = await containerComputerStatus(undefined, undefined, target, { persistentAddons: localVmPersistentAddons(cfg) });
       if (!status.ready || !status.managed || status.container !== "running" || status.network !== "loopback"
         || !status.viewer_url) {
         return json(res, 409, { error: status.problem ?? "The Local VM is not ready" });
