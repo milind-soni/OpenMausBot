@@ -1,7 +1,7 @@
 import { useRef } from "react";
 
 import { cn } from "@/lib/cn";
-import type { SidebarDensity } from "@/lib/sidebar-preferences";
+import { useSidebarPlanUsage, type SidebarDensity } from "@/lib/sidebar-preferences";
 import { useStore } from "@/state/store";
 
 import { AccountMoveStatus, useAccountMoveLine } from "./AccountMove";
@@ -38,7 +38,6 @@ function SimpleSidebarFooter({ owner, archived }: { owner: string | null; archiv
     <div ref={footer} data-sidebar-footer="simple" className="px-4 pb-4 pt-2">
       <CloudRoomCard />
       <CloudUsageCard />
-      <SidebarPlanUsage />
       <SidebarPlaceStatus place={place} className="mb-2 px-1" />
       <AccountMoveStatus kind={move.kind} place={move.place} retry={move.retry} onOpen={openAccount} className="ps-1" />
       <div className="flex items-center gap-2 not-first:mt-2">
@@ -59,6 +58,7 @@ export function SidebarFooter({ density, simple = false, owner = null, archived,
   onToggleTools?: () => void;
 }) {
   const { dispatch } = useStore();
+  const planUsage = useSidebarPlanUsage();
   if (simple) return <SimpleSidebarFooter owner={owner} archived={archived} />;
   return (
     <div className={cn("pb-3 pt-2", density === "icons" ? "flex flex-col items-center gap-1 px-2" : "px-3")}>
@@ -75,7 +75,7 @@ export function SidebarFooter({ density, simple = false, owner = null, archived,
         <>
           <CloudRoomCard />
           <CloudUsageCard />
-          <SidebarPlanUsage />
+          {planUsage && <SidebarPlanUsage />}
           <div className="flex items-center gap-1 not-first:mt-3">
             <div className="min-w-0 flex-1">
               <SidebarProfileMenu />

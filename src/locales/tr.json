@@ -2730,6 +2730,7 @@
   "planUsage.fiveHour": "5 saatlik",
   "planUsage.weekly": "Haftalık",
   "planUsage.monthly": "Aylık",
+  "planUsage.inSidebar": "Kenar çubuğunda göster",
   "planUsage.left": "%{remaining} kaldı",
   "planUsage.used": "%{used} kullanıldı",
   "planUsage.byModel": "Modele göre",

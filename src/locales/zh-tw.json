@@ -2299,6 +2299,7 @@
   "planUsage.fiveHour": "5 小時",
   "planUsage.weekly": "每週",
   "planUsage.monthly": "每月",
+  "planUsage.inSidebar": "在側邊欄顯示",
   "planUsage.left": "剩餘 {remaining}%",
   "planUsage.used": "已使用 {used}%",
   "planUsage.byModel": "依模型",

@@ -4,7 +4,8 @@ import { api } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { quietPlanRow } from "@/lib/plan-usage";
-import { Card, SIMPLE_CARD } from "./SettingsPrimitives";
+import { setSidebarPlanUsage, useSidebarPlanUsage } from "@/lib/sidebar-preferences";
+import { Card, SIMPLE_CARD, Switch } from "./SettingsPrimitives";
 import { UsageSummaryCard } from "./CloudUsageMeter";
 import { formatPlanSpend, type PlanSpend } from "@/lib/plan-spend";
 
@@ -256,13 +257,24 @@ export function PlanUsageSummary() {
   );
 }
 
+export function SidebarPlanUsageSwitch() {
+  const shown = useSidebarPlanUsage();
+  return (
+    <label className="flex min-w-0 cursor-pointer items-center gap-2 text-[13px] text-ink-secondary">
+      <Switch checked={shown} aria-label={t("planUsage.inSidebar")} onClick={() => setSidebarPlanUsage(!shown)} />
+      <span className="truncate">{t("planUsage.inSidebar")}</span>
+    </label>
+  );
+}
+
 export function PlanUsage() {
   const { report, loading, error, now, load } = usePlanUsage();
   const providers = report?.providers.filter((provider) => !quietPlanRow(provider)) ?? [];
 
   return (
     <Card title={t("planUsage.title")} subtitle={t("planUsage.subtitle")}>
-      <div className="mb-3 flex justify-end">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <SidebarPlanUsageSwitch />
         <button
           type="button"
           onClick={() => void load(true)}

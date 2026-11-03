@@ -2730,6 +2730,7 @@
   "planUsage.fiveHour": "5 giờ",
   "planUsage.weekly": "Hàng tuần",
   "planUsage.monthly": "Hàng tháng",
+  "planUsage.inSidebar": "Hiện ở thanh bên",
   "planUsage.left": "Còn lại {remaining}%",
   "planUsage.used": "Đã dùng {used}%",
   "planUsage.byModel": "Theo mô hình",

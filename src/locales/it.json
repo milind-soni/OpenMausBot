@@ -3223,6 +3223,7 @@
   "planUsage.fiveHour": "5 ore",
   "planUsage.weekly": "Settimanale",
   "planUsage.monthly": "Mensile",
+  "planUsage.inSidebar": "Mostra nella barra laterale",
   "planUsage.left": "{remaining}% rimasto",
   "planUsage.used": "{used}% usato",
   "planUsage.byModel": "Per modello",

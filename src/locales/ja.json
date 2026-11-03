@@ -3361,6 +3361,7 @@
   "planUsage.fiveHour": "5 時間",
   "planUsage.weekly": "週間",
   "planUsage.monthly": "月間",
+  "planUsage.inSidebar": "サイドバーに表示",
   "planUsage.left": "残り {remaining}%",
   "planUsage.used": "{used}% 使用済み",
   "planUsage.byModel": "モデル別",

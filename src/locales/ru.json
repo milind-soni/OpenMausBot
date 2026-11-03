@@ -3332,6 +3332,7 @@
   "planUsage.fiveHour": "5-часовой",
   "planUsage.weekly": "Недельный",
   "planUsage.monthly": "Месяц",
+  "planUsage.inSidebar": "Показывать на боковой панели",
   "planUsage.left": "Осталось {remaining}%",
   "planUsage.used": "Использовано {used}%",
   "planUsage.byModel": "По моделям",

@@ -8,6 +8,7 @@ vi.mock("react", async (original) => ({
   useState: (initial: unknown) => [initial === null ? fixture.report : initial === true ? false : typeof initial === "function" ? (initial as () => unknown)() : initial, () => {}],
 }));
 vi.mock("@/state/store", () => ({ api: vi.fn() }));
+import { setSidebarPlanUsage } from "@/lib/sidebar-preferences";
 import { PlanUsage } from "./PlanUsage";
 
 describe("Plan usage presentation", () => {
@@ -105,5 +106,17 @@ describe("Usage & billing in Simple mode", () => {
     expect(monthlySpend({ providers: [{ ...provider("claude", true, 40), extra: [budget] }] })).toBeNull();
     expect(monthlySpend({ providers: [{ ...provider("claude", false, null), extra: [budget] }] })).toBeNull();
     expect(monthlySpend(null)).toBeNull();
+  });
+});
+
+describe("the sidebar switch on the plan usage card", () => {
+  const switchOf = (markup: string) => /role="switch" aria-checked="(true|false)"/.exec(markup)?.[1];
+
+  it("says whether the meter shows in the sidebar", () => {
+    fixture.report = { fetchedAt: "2026-10-02T09:00:00Z", providers: [] };
+    setSidebarPlanUsage(true);
+    expect(switchOf(renderToStaticMarkup(createElement(PlanUsage)))).toBe("true");
+    setSidebarPlanUsage(false);
+    expect(switchOf(renderToStaticMarkup(createElement(PlanUsage)))).toBe("false");
   });
 });

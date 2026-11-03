@@ -3224,6 +3224,7 @@
   "planUsage.fiveHour": "5 horas",
   "planUsage.weekly": "Semanal",
   "planUsage.monthly": "Mensal",
+  "planUsage.inSidebar": "Mostrar na barra lateral",
   "planUsage.left": "{remaining}% restantes",
   "planUsage.used": "{used}% usados",
   "planUsage.byModel": "Por modelo",

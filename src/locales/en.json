@@ -3737,6 +3737,7 @@
   "planUsage.fiveHour": "5-hour",
   "planUsage.weekly": "Weekly",
   "planUsage.monthly": "Monthly",
+  "planUsage.inSidebar": "Show in the sidebar",
   "planUsage.left": "{remaining}% left",
   "planUsage.used": "{used}% used",
   "planUsage.monthlySpend": "Monthly spend",
