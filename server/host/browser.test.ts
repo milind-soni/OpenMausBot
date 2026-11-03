@@ -141,11 +141,16 @@ describe("the bots' browser host with browserEngine.engine set to chrome", () =>
     const unavailable = { kind: "unavailable" as const, reason: "agent-browser is not installed", myChrome: false };
     for (const hosted of [false, true]) {
       const { cfg, host } = setup("agent-browser", { server: true, hosted });
-      cfg.browserEngine = { engine: "agent-browser", egress: { localNetwork: true } };
+      cfg.browserEngine = { engine: "agent-browser", egress: { localNetwork: true, allow: ["10.0.0.5"] } };
       expect(host.engineSummary(unavailable).serverSites).toBe(hosted ? undefined : true);
       expect(browserEgress.rules().localNetwork).toBe(!hosted);
+      expect(browserEgress.rules().allowed("10.0.0.5", 80)).toBe(!hosted);
     }
-    expect(setup("agent-browser").host.engineSummary(unavailable).serverSites).toBeUndefined();
+    const desktop = setup("agent-browser");
+    desktop.cfg.browserEngine = { engine: "agent-browser", egress: { allow: ["10.0.0.5"] } };
+    expect(desktop.host.engineSummary(unavailable).serverSites).toBeUndefined();
+    // The desktop's own default stays: its browsers reach the local network unless egress.localNetwork is false.
+    expect(browserEgress.rules().localNetwork).toBe(true);
   });
 
   it("forgets the new engine's sessions when the engine is switched back", async () => {
