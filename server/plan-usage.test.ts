@@ -472,4 +472,25 @@ describe("plan usage fetcher", () => {
       { id: "grok", name: "Grok", driver: "grok", environment: { GROK_HOME: "/tmp/grok" } },
     ]);
   });
+
+  it("reads no usage for a ChatGPT-plan provider, whose sign-in is not the shared Codex login", async () => {
+    // Reading ~/.codex/auth.json for it reported (and held) the default Codex account's limit on a different account.
+    const accounts = planAccountsFromInstances({
+      codex: { driver: "codex" },
+      chatgpt: { driver: "codex", displayName: "ChatGPT plan", config: { authMode: "chatgpt-plan" } },
+    });
+    // Still listed, so a refusal-based hold names it properly.
+    expect(accounts).toEqual([
+      { id: "codex", name: "Codex", driver: "codex", environment: {} },
+      { id: "chatgpt", name: "ChatGPT plan", driver: "codex", environment: {}, noUsage: true },
+    ]);
+    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({ rate_limit: { primary_window: { used_percent: 100 } } }));
+    const report = await fetchPlanUsage(accounts, {
+      fetch: fetchImpl,
+      now: () => NOW,
+      credentials: { read: () => ({ token: SECRET, accountId: null, expired: false }) },
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(report.providers.map((row) => row.id)).toEqual(["codex"]);
+  });
 });
