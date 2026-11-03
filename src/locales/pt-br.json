@@ -6336,5 +6336,12 @@
   "botAccess.overview.botCount.other": "{count} bots",
   "botAccess.overview.noBotsForPerson": "{name} ainda não tem bots.",
   "botAccess.overview.allPeople": "Todas as pessoas",
-  "botAccess.overview.toastRemoved": "{bot}: {name} removido"
+  "botAccess.overview.toastRemoved": "{bot}: {name} removido",
+  "server.browser.waiting": "Aguardando o navegador: {name} está usando. Isto continua sozinho quando ele estiver livre.",
+  "server.browser.waitingTask": "Aguardando o navegador: {name} está usando para {task}. Isto continua sozinho quando ele estiver livre.",
+  "server.browser.free": "O navegador está livre. Continuando.",
+  "server.browser.stoppedWaiting": "Parou de aguardar o navegador.",
+  "composer.queued.capacityStarter": "Na fila. O Starter executa uma conversa por vez em cada bot, então esta começa quando a atual terminar. Um plano maior executa mais.",
+  "composer.queued.seePlans": "Ver planos",
+  "settings.threads.starter": "O Starter executa uma conversa por vez em cada bot, e um plano maior executa mais. O trabalho que um bot inicia por conta própria ainda é executado, e cada bot tem a sua."
 }

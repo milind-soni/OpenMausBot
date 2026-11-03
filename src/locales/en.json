@@ -6624,6 +6624,8 @@
   "apiInstances.key": "API key",
   "apiInstances.models": "Model IDs, separated by commas (optional)",
   "apiInstances.modelsHint": "Leave the model IDs empty to detect them. If the model picker then shows only sample models, this server does not list its models: enter them here.",
+  "apiInstances.geminiPreset": "Fill in Google Gemini",
+  "apiInstances.geminiKeyHint": "Paste a Gemini API key from Google AI Studio (aistudio.google.com/apikey). Models are detected after you add it.",
   "apiInstances.add": "Add server",
   "apiInstances.adding": "Adding…",
   "apiInstances.remove": "Remove {name}",
@@ -7390,5 +7392,12 @@
   "botAccess.overview.botCount.other": "{count} bots",
   "botAccess.overview.noBotsForPerson": "{name} has no bots yet.",
   "botAccess.overview.allPeople": "All people",
-  "botAccess.overview.toastRemoved": "{bot}: removed {name}"
+  "botAccess.overview.toastRemoved": "{bot}: removed {name}",
+  "server.browser.waiting": "Waiting for the browser: {name} is using it. This continues by itself when it is free.",
+  "server.browser.waitingTask": "Waiting for the browser: {name} is using it for {task}. This continues by itself when it is free.",
+  "server.browser.free": "The browser is free. Continuing.",
+  "server.browser.stoppedWaiting": "Stopped waiting for the browser.",
+  "composer.queued.capacityStarter": "Queued. Starter runs one thread at a time per bot, so this starts when the one running finishes. A bigger plan runs more.",
+  "composer.queued.seePlans": "See plans",
+  "settings.threads.starter": "Starter runs one thread at a time per bot, and a bigger plan runs more. Work a bot starts for itself still runs, and each bot has its own one."
 }

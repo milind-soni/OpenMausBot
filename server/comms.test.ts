@@ -241,6 +241,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
     writeFileSync(
       join(home, ".openmausbot", "config.json"),
       JSON.stringify({
+        threads: { maxConcurrentPerBot: 3 },
         openaiCompat: { key: "comms-compat-key", url: compatUrl },
         instances: {
           // the asker: consults the first visible teammate and answers a resume carrying the result with a fixed line

@@ -6494,5 +6494,12 @@
   "botAccess.overview.botCount.other": "Boty: {count}",
   "botAccess.overview.noBotsForPerson": "{name}: jeszcze bez botów.",
   "botAccess.overview.allPeople": "Wszystkie osoby",
-  "botAccess.overview.toastRemoved": "{bot}: usunięto {name}"
+  "botAccess.overview.toastRemoved": "{bot}: usunięto {name}",
+  "server.browser.waiting": "Czekam na przeglądarkę: {name} jej używa. Praca wznowi się sama, gdy będzie wolna.",
+  "server.browser.waitingTask": "Czekam na przeglądarkę: {name} używa jej do: {task}. Praca wznowi się sama, gdy będzie wolna.",
+  "server.browser.free": "Przeglądarka jest wolna. Kontynuuję.",
+  "server.browser.stoppedWaiting": "Przestano czekać na przeglądarkę.",
+  "composer.queued.capacityStarter": "W kolejce. Starter uruchamia jeden wątek naraz na bota, więc ten ruszy, gdy skończy się bieżący. Większy plan uruchamia więcej.",
+  "composer.queued.seePlans": "Zobacz plany",
+  "settings.threads.starter": "Starter uruchamia jeden wątek naraz na bota, a większy plan więcej. Praca, którą bot zaczyna sam, i tak się wykonuje, a każdy bot ma swój wątek."
 }

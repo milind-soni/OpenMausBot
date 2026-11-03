@@ -222,7 +222,7 @@ it("asks the person in the main chat when a run needs them, and their answer the
   const s = await server();
   s.script([
     { key: "run", match: [s.header("Acme replies")], reply: "I drafted a reply to Acme's invoice question.\nNEEDS INPUT: Should I send it?" },
-    { key: "answer", match: ["Yes, send it."], reply: "Sent.", expectContextIncludes: ["Your automation", "Acme replies", "Should I send it?"] },
+    { key: "answer", match: ["Yes, send it."], reply: "Sent.", expectContextIncludes: ["[From routine ", "Acme replies", "Should I send it?"] },
   ]);
   const id = await s.runNow(await s.routine("Acme replies"));
   await s.settled(id);
@@ -242,7 +242,7 @@ it("takes a 👍 on a run's question in the chat as the answer, with that report
   const s = await server();
   s.script([
     { key: "run", match: [s.header("Acme replies")], reply: "I drafted a reply to Acme's invoice question.\nNEEDS INPUT: Should I send it?" },
-    { key: "answer", match: ["reacted 👍"], reply: "Sent.", expectContextIncludes: ["Your automation", "Acme replies", "Should I send it?"] },
+    { key: "answer", match: ["reacted 👍"], reply: "Sent.", expectContextIncludes: ["[From routine ", "Acme replies", "Should I send it?"] },
   ]);
   const id = await s.runNow(await s.routine("Acme replies"));
   await s.reported(id, "posted");

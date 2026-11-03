@@ -6353,5 +6353,12 @@
   "botAccess.overview.botCount.other": "{count} bot",
   "botAccess.overview.noBotsForPerson": "{name} non ha ancora bot.",
   "botAccess.overview.allPeople": "Tutte le persone",
-  "botAccess.overview.toastRemoved": "{bot}: rimosso {name}"
+  "botAccess.overview.toastRemoved": "{bot}: rimosso {name}",
+  "server.browser.waiting": "In attesa del browser: {name} lo sta usando. Si riprende da solo appena è libero.",
+  "server.browser.waitingTask": "In attesa del browser: {name} lo sta usando per {task}. Si riprende da solo appena è libero.",
+  "server.browser.free": "Il browser è libero. Si continua.",
+  "server.browser.stoppedWaiting": "Attesa del browser interrotta.",
+  "composer.queued.capacityStarter": "In coda. Starter esegue un thread alla volta per bot, quindi questo parte quando finisce quello in corso. Un piano più grande ne esegue di più.",
+  "composer.queued.seePlans": "Vedi i piani",
+  "settings.threads.starter": "Starter esegue un thread alla volta per bot, un piano più grande ne esegue di più. Il lavoro che un bot avvia da solo viene comunque eseguito, e ogni bot ha il suo."
 }
