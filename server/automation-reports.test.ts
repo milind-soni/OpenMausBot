@@ -35,10 +35,10 @@ describe("readRunReply", () => {
 describe("what the chat's own session reads", () => {
   it("names and dates each line as the automation's own", () => {
     const line = { routineId: "r1", runId: "run", name: "Inbox brief", trigger: "schedule" as const, executionThreadId: "x", scheduledFor: 0 };
-    expect(automationContextText(line, Date.UTC(2026, 9, 21, 9, 0), "Acme replied.")).toMatch(/^\[Your automation "Inbox brief" reported at 2026-10-21 \d\d:\d\d:\]\nAcme replied\.$/);
-    expect(automationContextText({ ...line, needsYou: true }, 0, "Send it?")).toContain('"Inbox brief" asked at');
-    expect(automationContextText({ ...line, failed: true }, 0, "Signed out.")).toContain('"Inbox brief" could not finish at');
-    expect(automationContextText({ ...line, recovered: true }, 0, "Recovered.")).toContain('"Inbox brief" recovered at');
+    expect(automationContextText(line, Date.UTC(2026, 9, 21, 9, 0), "Acme replied.")).toMatch(/^\[From routine "Inbox brief" · run, reported at 2026-10-21 \d\d:\d\d · information only\]\nAcme replied\.$/);
+    expect(automationContextText({ ...line, needsYou: true }, 0, "Send it?")).toContain('routine "Inbox brief" · run, asked at');
+    expect(automationContextText({ ...line, failed: true }, 0, "Signed out.")).toContain('routine "Inbox brief" · run, could not finish at');
+    expect(automationContextText({ ...line, recovered: true }, 0, "Recovered.")).toContain('routine "Inbox brief" · run, recovered at');
   });
 
   it("always carries the newest line of each automation", () => {

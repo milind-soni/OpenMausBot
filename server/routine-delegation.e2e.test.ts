@@ -6,7 +6,7 @@ import { launchVerificationServer, runControlOmb, type VerificationServer } from
 import { readHandoffs } from "./testing/handoff-rows.ts";
 
 const SETTLED = "Your downstream room requests have settled.";
-const REPORT_FROM_PEER = "[OpenMausBot report from @Routine peer";
+const REPORT_FROM_PEER = "[From @Routine peer (bot) · report on assignment";
 
 describe("routine delegation through the isolated harness", () => {
   let fixture: VerificationServer;
