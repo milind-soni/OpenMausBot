@@ -117,7 +117,9 @@ async function answer(response) {
  *   keep?: { read(): unknown, write(value: unknown): void },
  *   reportTimers?: { set(work: () => void, ms: number): unknown, clear(timer: unknown): void },
  *   other?(): null | { view(): unknown, seen(): unknown, retry(): Promise<unknown>, active(): boolean },
- * }} deps `localRequest`: this computer's server, as its owner (main adds the owner's header). `account`: the MausBot
+ *   accountsHere?(): number,
+ * }} deps `accountsHere`: how many accounts are signed in on this device: with more than one, which Cloud this computer's bots
+ * belong in is the person's to say, so no first move starts by itself. `localRequest`: this computer's server, as its owner (main adds the owner's header). `account`: the MausBot
  * Cloud sign-in (cloud-account.mjs). `journal`: where the move's journal is kept, journalFile by default; `keep`: the
  * person's choice to keep this computer's bots here, one-home-keep.json beside it by default. `openTeam`:
  * shows a team's page, where a bot moved into it from My Cloud now lives (team-move-main.mjs, whose journal is
@@ -127,7 +129,7 @@ async function answer(response) {
  * installCloudSend's.
  */
 export function installOneHome({ localRequest, account, journalFile, tempRoot, lend, phone, openHome, openLocal, restart, version, log = () => {}, journal: kept, keep: keptChoice, openTeam, teamJournal,
-  reportTimers, other = () => null, ...sendDeps }) {
+  reportTimers, other = () => null, accountsHere = () => 1, ...sendDeps }) {
   const fetchImpl = sendDeps.fetch ?? globalThis.fetch;
   let home = null;
   let lastInput = 0;
@@ -146,7 +148,10 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
   const report = createMoveStatusReport({
     status,
     // A sign-in the Admin has ended (or that expired) only gets 401s until the person signs in again.
-    signIn: () => { const state = account()?.state(); return state?.status === "reauth-required" ? null : state?.deviceId ?? null; },
+    signIn: () => {
+      const state = account()?.state(), moved = parseJournal(journal.read());
+      return state?.status === "reauth-required" || (moved && state?.account?.id !== moved.cloud.account) ? null : state?.deviceId ?? null;
+    },
     send: async (body) => (await account()?.reportMoveStatus?.(body)) === true,
     log,
     ...(reportTimers ? { timers: reportTimers } : {}),
@@ -219,7 +224,11 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
   home = createOneHome({
     journal,
     // Every run starts here: the key watch is set up before any wait asks, so a key pressed since then counts.
-    cloud: () => { typed(); const cloud = oneHomeCloud(account()?.state()); return cloud && other()?.active() ? { ...cloud, moves: false } : cloud; },
+    cloud: () => {
+      typed();
+      const cloud = oneHomeCloud(account()?.state()), moved = parseJournal(journal.read());
+      return cloud && (other()?.active() || (accountsHere() > 1 && (!moved || moved.phase === "back"))) ? { ...cloud, moves: false } : cloud;
+    },
     send,
     local: {
       ...local,
@@ -259,7 +268,7 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
    * applies to; `moved`, turning it on brings this computer's bots home; `coming`, they are on their way past turning back. */
   const keepState = () => {
     const cloud = oneHomeCloud(account()?.state()), moving = parseJournal(journal.read());
-    return { shown: Boolean(cloud?.origin) && (cloud.moves || Boolean(moving) || home.keeps()), on: home.keeps(), moved: awayIn(moving) && moving.phase !== "keeping",
+    return { shown: Boolean(cloud?.origin) && (!moving || moving.cloud.account === cloud.account) && (cloud.moves || Boolean(moving) || home.keeps()), on: home.keeps(), moved: awayIn(moving) && moving.phase !== "keeping",
       coming: underWay(moving) };
   };
   const onPage = (channel, handler) => (event, ...args) => {
@@ -277,6 +286,8 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
     ...send,
     /** The switch "Keep this computer's bots on this computer", as Settings shows it, and the person turning it. */
     keep: { state: keepState, set: (on) => home.keep(on === true) },
+    /** Why the account signed in can't be left now: its move, or a bot of its own moving into a team, is under way. */
+    holding: () => { const bot = teamMove.view()?.phase; return home.moving() || (bot && !["done", "failed"].includes(bot)) ? "moving" : null; },
     /** Goes on with the move, and with any bot moving into a team: at launch, and whenever the MausBot Cloud sign-in changes. */
     kick: () => { void teamMove.kick(); return home.kick(); },
     /** Home is My Cloud: this computer's own server is frozen for good, and its phone link stays off. */

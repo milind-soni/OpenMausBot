@@ -25,3 +25,25 @@ export async function clearPlaceStorage(session, places, log = () => {}) {
   await Promise.all(places.filter((entry) => entry.origin).map((entry) => session.clearStorageData({ origin: entry.origin, storages: [...(entry.team ? SHARED_STORAGE : OWN_STORAGE)] })
     .catch((error) => log(`accounts: could not clear what the window kept for a place (${error?.message ?? error})`))));
 }
+
+/** Each account's places while it waits, kept as they were (the same ids, so what was lent to them and their colours come
+ * back with them). `store`: a JSON file of names and addresses, no secret. */
+export function createPlaceStash(store) {
+  const all = () => { try { const value = store.read(); return value && typeof value === "object" && !Array.isArray(value) ? value : {}; } catch { return {}; } };
+  return {
+    put(accountId, places) { if (accountId) store.write({ ...all(), [accountId]: places }); },
+    take(accountId) {
+      const kept = all(), places = Array.isArray(kept[accountId]) ? kept[accountId] : [];
+      if (accountId in kept) { const { [accountId]: _, ...rest } = kept; store.write(rest); }
+      return places;
+    },
+    peek: (accountId) => { const places = all()[accountId]; return Array.isArray(places) ? places : []; },
+  };
+}
+
+/** The saved places with an account's kept ones back; one saved here meanwhile under the same address stays as it is. */
+export function withPlacesBack(saved, places) {
+  const origins = new Set(saved.environments.map((entry) => entry.origin).filter(Boolean)), ids = new Set(saved.environments.map((entry) => entry.id));
+  const back = places.filter((entry) => !origins.has(entry.origin) && !ids.has(entry.id));
+  return back.length ? { ...saved, environments: [...saved.environments, ...back] } : saved;
+}

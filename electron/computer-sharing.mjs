@@ -822,6 +822,18 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       changed();
       void lendAutomatically();
     },
+    /** Another account takes over: this computer stops being lent to this one's Clouds, as when this app quits. Nothing is
+     * told to them (one asleep stays asleep) and what was lent is kept, so lending goes on if it comes back. */
+    leaveAccount(accountId) {
+      if (!accountId) return;
+      for (const [id, grant] of Object.entries(records)) {
+        if (grant?.cloud?.accountId !== accountId) continue;
+        stop(id);
+        const entry = asking.get(id);
+        if (entry) { entry.stop.abort(); asking.delete(id); }
+      }
+      changed();
+    },
     cloudChanged() {
       if (closed) return;
       // The Admin's word on each other Cloud may have changed: a lending loop waiting for one to wake goes on.

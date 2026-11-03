@@ -194,6 +194,8 @@ export function createOneHome(deps) {
     publish();
     return next;
   };
+  /** Someone else is signed in than the account this journal's move belongs to. */
+  const anotherAccount = (journal) => { const cloud = deps.cloud(); return Boolean(journal && cloud && cloud.account !== journal.cloud.account); };
   const later = (ms) => {
     if (closed) return;
     if (timer) timers.clear(timer);
@@ -204,6 +206,7 @@ export function createOneHome(deps) {
    * until it is closed, and coming home; `place`, a server of the person's own the move goes to, by its name. Null when
    * there is nothing to say. */
   function view() {
+    if (anotherAccount(read())) return null;
     const seen = phaseView(), place = read()?.cloud?.name;
     return seen && typeof place === "string" ? { ...seen, place } : seen;
   }
@@ -641,6 +644,8 @@ export function createOneHome(deps) {
       if (journal.phase === "copy" && waiting()) { later(journal.retryAt - now()); return; }
     }
     for (let step = 0; journal && step < 12 && !closed && !kept(); step++) {
+      // Each step reads My Cloud from the sign-in: none of them ever runs for an account that signed in since the last.
+      if (anotherAccount(journal)) { if (FROZEN.has(journal.phase)) await failed(journal, tagged("Another MausBot Cloud account signed in.", "other_account"), true); break; }
       if (journal.phase === "copy") journal = await copy(journal);
       else if (journal.phase === "wait") journal = await wait(journal);
       else if (journal.phase === "freeze") journal = await freeze(journal);
@@ -675,6 +680,9 @@ export function createOneHome(deps) {
     away: () => awayIn(read()),
     /** A move or a send under way that restarting this app would cut into. */
     busy: () => Boolean(running) || Boolean(deps.send.snapshot?.()?.running) || CUT_SHORT.has(read()?.phase ?? ""),
+    /** The move belonging to the account signed in is under way, past where it can stop by itself: that account can't be
+     * left for a moment, or this computer's freeze would have to lift for the other. */
+    moving: () => { const journal = read(); return !anotherAccount(journal) && (Boolean(deps.send.snapshot?.()?.running) || CUT_SHORT.has(journal?.phase ?? "")); },
     /** This computer keeps its bots here: the person's own choice. */
     keeps: kept,
     /** Keeps this computer's bots here (`on`), or lets them move with everything else again, at the next quiet moment as

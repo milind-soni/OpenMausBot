@@ -72,6 +72,12 @@ export function homeOf({ journal = null, frozenCloud = null, state = null }) {
     : frozenCloud ? { origin: typeof frozenCloud === "string" ? frozenCloud : null, account: null } : null;
   if (!moved) return { kind: "computer" };
   const connected = state?.status === "connected";
+  const signedInNow = state?.account?.id ?? null;
+  // This computer moved to another account's Cloud: its frozen copy stays frozen, and this account's own Cloud is what opens.
+  if (moved.account && signedInNow && moved.account !== signedInNow && state.status !== "signed-out" && state.status !== "connecting") {
+    const own = connected && !state.machine?.hold ? state.machine?.origin ?? null : null;
+    return own && own !== moved.origin ? { kind: "cloud", origin: own, otherAccount: true } : { kind: "signin", other: true };
+  }
   if (connected && state.machine?.hold && (!moved.origin || !state.machine.origin || state.machine.origin === moved.origin)) return { kind: "computer" };
   const signedIn = state?.account?.id ?? null;
   if (!signedIn || state.status === "signed-out" || state.status === "connecting") return { kind: "signin" };
@@ -178,6 +184,8 @@ export function routeOf(url, origin) {
  *   power: { asleep(): boolean, hold(): void, woke(): void },
  *   go(url: string, origin: string | null, place: { kind: "cloud", origin: string } | { kind: "team" | "own", id: string, name: string, role: string | null, origin: string } | null): Promise<unknown>,
  *   showLocal(leaving: boolean): unknown,
+ *   signInOther?(): Promise<unknown>,
+ *   movedAccount?(accountId: string | undefined): { id: string, email: string } | null,
  *   remembered?(): ({ team: string } | { cloud: string }) & { name?: string, origin?: string } | null,
  *   remember?(place: { team: string } | { cloud: string } | null): void,
  *   left?(name: string): void,
@@ -199,6 +207,8 @@ export function routeOf(url, origin) {
  * became ready (createReadyClock). `go(url, origin, place)`: main's one way to move the window, to My Cloud or a team's Cloud (`origin`, with the
  * `place` it is) or this computer's screen (null). `showLocal(leaving)`: the window as it was before the move (this computer's page, or a saved server it
  * shows); `leaving`: it showed a place or this computer's screen until now, so it goes back to this computer's page.
+ * `signInOther()`: the account this computer moved to signs in beside the one signed in now, which stays;
+ * `movedAccount(id)`: that account, while it is signed in on this device too.
  * `frozen()`: this computer's server's freeze marker. `splash()`: the startup screen while it is up. `remembered()`: the
  * team or other Cloud shown last time, with its name and origin as saved; `remember(place)`: what to open next time;
  * `left(name)`: the team shown is no longer this person's, so the window says so once; `drop(place)`: the Admin said so
@@ -207,7 +217,7 @@ export function routeOf(url, origin) {
  */
 export function createHomeWindow(deps) {
   const { journal, frozen, account, restored = async () => {}, window, ensureWindow, localOrigin, cookieFetch, power, go, showLocal,
-    remembered = () => null, remember = () => {}, left = () => {}, drop = (place) => { if (place.kind === "team") left(place.name); remember(null); },
+    signInOther = null, movedAccount = () => null, remembered = () => null, remember = () => {}, left = () => {}, drop = (place) => { if (place.kind === "team") left(place.name); remember(null); },
     splash = () => null, lastInput = () => 0, publish = () => {}, rehomed = () => {}, versionEveryMs = VERSION_EVERY_MS, quietMs = QUIET_MS,
     now = Date.now, timers = DEFAULT_TIMERS, hosts = () => null, readyStore = null, ownMove = () => null, log = () => {} } = deps;
   let home = { kind: "computer" }, screen = null, status = null, opens = 0, retry = null, tries = 0, loaded = null, newer = false, repairing = null;
@@ -521,7 +531,11 @@ export function createHomeWindow(deps) {
       return showLocal(leaving);
     }
     ensureWindow();
-    if (current.kind === "signin") { clearRetry(); return toScreen({ screen: "signin", ...(current.other ? { other: true } : {}) }); }
+    if (current.kind === "signin") {
+      clearRetry();
+      const movedTo = current.other ? movedAccount(parseJournal(journal())?.cloud?.account) : null;
+      return toScreen({ screen: "signin", ...(current.other ? { other: true } : {}), ...(movedTo ? { movedTo } : {}) });
+    }
     return connect({ kind: "cloud", origin: current.origin }, token, open);
   }
 
@@ -626,6 +640,7 @@ export function createHomeWindow(deps) {
       if (status !== "signed-out") {
         const current = await refresh();
         if (!(current.kind === "signin" && current.other)) return void await show();
+        if (signInOther) return void await signInOther();
         await client.signOut?.();
       }
       await client.begin();

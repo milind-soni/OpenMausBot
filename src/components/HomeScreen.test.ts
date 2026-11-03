@@ -49,3 +49,11 @@ it("a Cloud that isn't running says what it is in plain words with its one actio
     for (const words of Object.values(homeScreenText({ screen, name: "Client B", deleteAt: day }, now))) expect(String(words)).not.toMatch(/—|\bVM\b|engine|ctx|server/i);
   }
 });
+
+it("moved to another account's Cloud, that account signed in here too: where the bots are, and one button, never a sign-in", () => {
+  const text = homeScreenText({ screen: "signin", other: true, movedTo: { id: "a", email: "a@example.test" } });
+  expect(text.title).toBe("Your bots are on another account's Cloud");
+  expect(text.body).toContain("a@example.test");
+  expect(text.action).toBeNull();
+  expect(homeScreenText({ screen: "signin", other: true }).action).toBe("sign-in");
+});

@@ -104,6 +104,8 @@ export function createOneHome(deps: {
   away(): boolean;
   /** A move or a send under way that restarting this app would cut into. */
   busy(): boolean;
+  /** The move of the account signed in is past where it can stop by itself: that account can't be left for a moment. */
+  moving(): boolean;
   keeps(): boolean;
   /** Throws once this computer's bots are on their way home past turning back and `on` is false. */
   keep(on: boolean): Promise<void>;

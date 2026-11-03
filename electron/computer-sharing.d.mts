@@ -144,6 +144,8 @@ export function createComputerSharing(options: {
   cloudState(env: Workspace | null | undefined): CloudLendingState;
   /** The folders lent to My Cloud, for Files' copies of them (electron/lent-folders.mjs). */
   lentToCloud(env: Workspace | null | undefined): { lendingId: string; folders: Array<{ id: string; path: string; name: string; write: boolean }>; protectedPaths: string[]; paused?: true } | { off: true };
+  /** Another account takes over: lending to this account's Clouds stops, and goes on if it comes back. */
+  leaveAccount(accountId: string | null): void;
   lendingToCloud(): boolean;
   /** A server is using this computer now: a job running on it, or its browsing going through this computer. */
   busy(): boolean;
