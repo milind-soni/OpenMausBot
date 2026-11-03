@@ -33,18 +33,19 @@ function fakeBrowser() {
 function browserWithOpenTab() {
   const sent: string[] = [];
   let listeners: CdpListeners = {};
-  const answer = Promise.withResolvers<void>();
+  let answer = () => {};
+  const answered = new Promise<void>((resolve) => { answer = () => resolve(); });
   const cdp: Cdp = {
     send: async (method, _params, sessionId) => {
       sent.push(sessionId ? `${sessionId} ${method}` : method);
       if (method === "Target.setAutoAttach" && !sessionId) listeners.event?.({ method: "Target.attachedToTarget", params: { sessionId: "tab-1", targetInfo: { type: "page", url: "about:blank" }, waitingForDebugger: false } });
-      if (method === "Emulation.setUserAgentOverride") await answer.promise;
+      if (method === "Emulation.setUserAgentOverride") await answered;
       return {};
     },
     close: () => listeners.closed?.(),
   };
   const connect = async (_url: string, _timeoutMs?: number, given: CdpListeners = {}) => { listeners = given; return cdp; };
-  return { sent, connect, answer };
+  return { sent, connect, answer: () => answer() };
 }
 
 describe("the identity sidecar", () => {
@@ -55,7 +56,7 @@ describe("the identity sidecar", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(browser.sent).toContain("tab-1 Emulation.setUserAgentOverride");
     expect(started).toBe(false);
-    browser.answer.resolve();
+    browser.answer();
     await start;
     expect(started).toBe(true);
     expect(browser.sent).toContain("tab-1 Runtime.runIfWaitingForDebugger");
