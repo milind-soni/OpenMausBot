@@ -521,7 +521,7 @@ export function EnginesSettings({ simple = false, more }: { simple?: boolean; mo
   };
   const rows = listed.filter((instance) => !accountGroupOf(instance) || groupOf(instance));
   // A hidden ordinary Claude instance takes its card, and the endpoint section inside it, away.
-  const orphanEndpoints = !groups.has("claude") && rows.some((instance) => instance.claudeEndpoint !== undefined);
+  const orphanEndpoints = !groups.has("claude");
   const isReady = (instance: InstanceInfo) => { const group = groupOf(instance); return group ? accountsReady(groups.get(group)!) : engineReady(instance); };
   const renderEngine = (instance: InstanceInfo, bare = false) => {
     const group = groupOf(instance);

@@ -67,6 +67,18 @@ describe("Claude custom endpoints settings", () => {
     expect(html).toContain("1 bot(s) use this account");
   });
 
+  it("counts a task that still points at the endpoint", () => {
+    const bot = { id: "bot-3", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      tasks: [{ modelSelection: { instanceId: "claude-endpoint-fixture", model: "deepseek-chat" } }] };
+    vi.stubGlobal("window", {});
+    vi.spyOn(store, "useStore").mockReturnValue({
+      state: { ...store.initialState, instances: [endpoint()], bots: [bot] },
+      dispatch: vi.fn(), flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
+    } as unknown as ReturnType<typeof store.useStore>);
+    const html = renderToStaticMarkup(createElement(ClaudeEndpoints));
+    expect(html).toContain("1 bot(s) use this account");
+  });
+
   it("waits for bots to move off an endpoint before offering its removal", () => {
     const bot = { id: "bot-1", modelSelection: { instanceId: "claude-endpoint-fixture", model: "deepseek-chat" } };
     vi.stubGlobal("window", {});
