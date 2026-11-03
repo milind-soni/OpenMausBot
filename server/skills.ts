@@ -1299,15 +1299,14 @@ export function skillsSystemPrompt(botId: string, assignedLibrary?: readonly str
 }
 
 export function enabledSkillFile(botId: string, name: string, assignedLibrary?: readonly string[]): string | null {
-  const skill = resolveBotSkills(botId, assignedLibrary).find((entry) => entry.name === name && entry.enabled);
-  if (!skill) return null;
-  const entry = readManifest(botId)[name];
-  return entry ? join(skillTarget(workspaceDir(botId), name, entry), "SKILL.md") : librarySkillFilePath(name);
+  return enabledSkillFiles(botId, [name], assignedLibrary).get(name) ?? null;
 }
 
-/** SKILL.md of each named skill that is on for the bot. */
+/** SKILL.md of each named skill that is on for the bot; reads the bot's skills once. */
 export function enabledSkillFiles(botId: string, names: readonly string[], assignedLibrary?: readonly string[]): Map<string, string> {
-  return new Map(names.flatMap((name) => { const file = enabledSkillFile(botId, name, assignedLibrary); return file ? [[name, file] as const] : []; }));
+  if (!names.length) return new Map();
+  const on = new Set(resolveBotSkills(botId, assignedLibrary).filter((skill) => skill.enabled).map((skill) => skill.name)), manifest = readManifest(botId);
+  return new Map(names.filter((name) => on.has(name)).map((name) => [name, manifest[name] ? join(skillTarget(workspaceDir(botId), name, manifest[name]), "SKILL.md") : librarySkillFilePath(name)] as const));
 }
 
 export function expandSkillCommandTurnText(botId: string, text: string, assignedLibrary?: readonly string[]): string {
