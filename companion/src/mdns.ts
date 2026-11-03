@@ -413,8 +413,10 @@ export class MdnsResponder {
   /** Resolves false when mDNS could not start, which is never fatal: pairing
    * by typed address still works. */
   async advertise(service: ServiceInfo): Promise<boolean> {
-    await this.stop();
+    // stop() counts itself before its goodbye wait, so a shutdown during that wait is still seen below.
+    const stopping = this.stop();
     const stops = this.stops;
+    await stopping;
     if (!service.addresses.length) return false;
 
     const socket = this.socketFactory();

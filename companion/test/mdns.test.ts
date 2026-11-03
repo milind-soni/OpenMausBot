@@ -700,4 +700,24 @@ describe("stop while an advertisement is still binding", () => {
     expect(responder.advertising).toBe(false);
     expect(closed).toBe(true);
   });
+
+  it("never publishes when stop() runs during a re-advertisement's goodbye wait", async () => {
+    const first = new FakeSocket();
+    const second = new FakeSocket();
+    const sockets = [first, second];
+    const responder = new MdnsResponder({ socketFactory: () => sockets.shift()! });
+    expect(await responder.advertise(service)).toBe(true);
+    await drained();
+    const held: Array<() => void> = [];
+    first.send = (_packet: Buffer, _port: number, _address: string, callback?: (error: Error | null) => void) => {
+      held.push(() => callback?.(null));
+    };
+    const readvertised = responder.advertise(service);
+    await responder.stop();
+    for (const release of held.splice(0)) release();
+    expect(await readvertised).toBe(false);
+    await drained();
+    expect(second.packets).toHaveLength(0);
+    expect(responder.advertising).toBe(false);
+  });
 });
