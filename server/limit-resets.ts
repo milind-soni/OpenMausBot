@@ -102,6 +102,8 @@ export class LimitResetClock {
   private readonly refusals = new Map<string, number>();
   /** Engines held by a refusal that named no reset time: the hold is a guess, never shown as a reset. */
   private readonly guessed = new Set<string>();
+  /** When each hold began: a usage read from before it (a cached one) says nothing about whether it is over. */
+  private readonly heldAt = new Map<string, number>();
   private readonly turnEngines = new Map<string, string>();
   private checkedAt = 0;
   private loading: Promise<void> | null = null;
@@ -183,6 +185,7 @@ export class LimitResetClock {
     if (guessed) this.guessed.add(engine);
     else this.guessed.delete(engine);
     this.refusals.set(engine, until);
+    this.heldAt.set(engine, this.now());
     this.saveHolds();
     this.options.onChange?.();
     if (this.soon) clearTimeout(this.soon);
@@ -192,12 +195,13 @@ export class LimitResetClock {
 
   noteUsage(report: PlanUsageReport): void {
     const next = new Map<string, EngineLimit>();
+    const fetchedAt = Date.parse(report.fetchedAt);
     let released = false;
     for (const row of report.providers) {
       const limit = engineLimitFromUsage(row);
       if (!limit) continue;
       next.set(limit.engine, limit);
-      if (codexHoldGone(row, limit, this.refusals.get(limit.engine), this.guessed.has(limit.engine))) {
+      if (fetchedAt >= (this.heldAt.get(limit.engine) ?? 0) && codexHoldGone(row, limit, this.refusals.get(limit.engine), this.guessed.has(limit.engine))) {
         this.refusals.delete(limit.engine);
         released = true;
       }

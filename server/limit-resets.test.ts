@@ -328,6 +328,16 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     }
   });
 
+  it("keeps a Codex hold when the usage was read before the refusal, as a cached read can be", () => {
+    const { instance } = clock();
+    instance.noteRefusal("codex", NOW + 23 * HOUR);
+    const room = codex([3, NOW + 4 * HOUR], [8, NOW + 5 * 24 * HOUR]);
+    instance.noteUsage({ fetchedAt: iso(NOW - 30_000), providers: [room] });
+    expect(instance.blockedUntil("codex"), "a read from before the refusal").toBe(NOW + 23 * HOUR);
+    instance.noteUsage({ fetchedAt: iso(NOW), providers: [room] });
+    expect(instance.blockedUntil("codex"), "a read from after it").toBeNull();
+  });
+
   it("keeps a Claude hold whatever its usage shows, since Claude refuses on limits those windows do not show", () => {
     const { instance } = clock();
     instance.noteRefusal("claude", NOW + 23 * HOUR);
