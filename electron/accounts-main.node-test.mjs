@@ -228,14 +228,3 @@ test("a My Cloud saved by hand is the account's only while the sign-in names it;
   assert.equal(withoutPlaces(changed, [byHand]).activeId, "local");
   assert.equal(withoutPlaces(changed, []), changed, "nothing to remove: the same list");
 });
-
-test("the view says when the clean workspace runs, for the You menu's Sign in; nothing changes otherwise", async () => {
-  const handlers = new Map();
-  let clean = true;
-  const client = { state: () => ({ status: "signed-out" }) };
-  installAccounts({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, ownPage: () => true, placePage: () => true, account: () => client, client: () => client, clean: () => clean,
-    ring: () => null, holdSheet() {}, tellSheet() {}, tell() {} });
-  assert.deepEqual(await handlers.get("accounts:list")({}), { active: null, clean: true });
-  clean = false;
-  assert.deepEqual(await handlers.get("accounts:list")({}), { active: null });
-});

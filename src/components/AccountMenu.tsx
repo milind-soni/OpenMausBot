@@ -62,10 +62,10 @@ export function useAccounts(): AccountsAccess & { sheet: { email: string | null;
   };
 }
 
-/** The You menu's row for the MausBot Cloud page: with the clean workspace open and nobody signed in, the line there asks the person
- * to sign in, and this row is how. */
+/** The You menu's row for the MausBot Cloud page, on this app's own page: Sign in while nobody is signed in here, so whoever was
+ * told to sign in finds the words. Any other page knows nothing of who is signed in. */
 export function cloudRowLabel(view: AccountsView | null): string {
-  return t(view?.clean && !view.active ? "accounts.signIn" : "settings.section.cloudAccount");
+  return t(view && !view.active ? "accounts.signIn" : "settings.section.cloudAccount");
 }
 
 /** The You menu's last rows: who is signed in here and Sign out. The other accounts are on the rail, and so is Add another account,
