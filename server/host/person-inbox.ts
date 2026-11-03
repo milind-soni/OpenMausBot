@@ -246,12 +246,13 @@ export function createPersonInbox(deps: PersonInboxDeps) {
 
   /** How many asks in this inbox wait on its person: questions, approvals and work handed on, open here and where they
    * were asked. */
-  function openAsks(threadId: string): number {
+  function waitingAsks(threadId: string): Item[] {
     const asks = items.filter((item) => item.threadId === threadId && item.kind === "ask" && item.requestId);
-    if (!asks.length) return 0;
+    if (!asks.length) return [];
     const copies = new Map(store.messagesFor(threadId).map((message) => [message.id, message]));
-    return asks.filter((item) => askWaits(item, copies.get(item.id))).length;
+    return asks.filter((item) => askWaits(item, copies.get(item.id)));
   }
+  const openAsks = (threadId: string): number => waitingAsks(threadId).length;
 
   function notifyItem(item: Item, title: string, kind: Notification["kind"], body: string): void {
     const bot = store.bot(item.botId);
@@ -449,6 +450,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
       return items.filter((item) => item.threadId === threadId && item.to !== undefined && !settled(item));
     },
     openAsks,
+    waitingAsks,
     /** A task's wire when it is a person's inbox: that it is, how many asks wait on them there, and when its list changed. */
     wire(threadId: string): InboxTask {
       if (!personOf(threadId)) return {};
