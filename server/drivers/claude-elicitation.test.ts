@@ -115,6 +115,8 @@ describe("claudeElicitations", () => {
     elicit.frame(ask("e9"));
     const answered = elicit.answer("elicitation:e9", "allow");
     expect(elicit.frame({ type: "control_cancel_request", request_id: "e9" })).toBe(true);
+    expect(events.filter((e) => e.type === "request.resolved")).toEqual([done("e9", "deny", "timeout")]);
+    elicit.close();
     deliver(true);
     await expect(answered).resolves.toBe("failed");
     expect(events.filter((e) => e.type === "request.resolved")).toEqual([done("e9", "deny", "timeout")]);

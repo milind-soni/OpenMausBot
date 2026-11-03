@@ -27,6 +27,7 @@ export function claudeElicitations(write: (frame: unknown) => Promise<boolean>, 
       if (o?.type === "control_cancel_request") {
         if (typeof o.request_id !== "string") return false;
         if (sending.has(o.request_id)) {
+          if (!sending.get(o.request_id)) resolved(o.request_id, "deny", "timeout");
           sending.set(o.request_id, true);
           return true;
         }
@@ -82,10 +83,7 @@ export function claudeElicitations(write: (frame: unknown) => Promise<boolean>, 
       const cancelled = sending.get(id);
       sending.delete(id);
       // The CLI withdrew the question while the answer was on its way: it never counts as the person's answer.
-      if (cancelled && !closed) {
-        resolved(id, "deny", "timeout");
-        return "failed";
-      }
+      if (cancelled) return "failed";
       // A session closed while the answer was on its way: the CLI that asked is gone, so the card is withdrawn.
       if (!delivered || closed) {
         resolved(id, "deny", "system");
