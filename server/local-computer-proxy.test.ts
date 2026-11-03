@@ -414,8 +414,12 @@ readline.createInterface({input: process.stdin}).on("line", (line) => {
       };
       child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }) + "\n");
       await lines.next();
-      expect((await typed(2, "2026-07-28")).resultType).toBe("complete");
-      expect(await typed(3, "2025-06-18")).not.toHaveProperty("resultType");
+      const marked = await typed(2, "2026-07-28");
+      expect(marked.isError).toBeUndefined();
+      expect(marked.resultType).toBe("complete");
+      const legacy = await typed(3, "2025-06-18");
+      expect(legacy.isError).toBeUndefined();
+      expect(legacy).not.toHaveProperty("resultType");
     } finally {
       child.kill("SIGKILL");
       await new Promise<void>((resolve) => server.close(() => resolve()));
