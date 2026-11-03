@@ -166,7 +166,7 @@ describe("steer-queue module", () => {
     expect(turn(bot.threadId, 2)[6].origin).toBeUndefined();
   });
 
-  it("answers Team incidents reports that waited as one turn, whichever bot broke, through a restart", () => {
+  it("answers Problems to look at reports that waited as one turn, whichever bot broke, through a restart", () => {
     const chief = fakeBot("bot-incidents-chief", "thread-incidents-reports", true);
     const store = fakeStore([chief]);
     const run = vi.fn();

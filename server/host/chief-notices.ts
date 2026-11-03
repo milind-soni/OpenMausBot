@@ -3,7 +3,7 @@ import { admit } from "../admission.ts";
 import { memoryStopped } from "../engine-memory.ts";
 import { ESCALATIONS_THREAD_TITLE, EscalationLedger, escalationChip, escalationDeliverable, escalationText, type Escalation, type EscalationKind } from "../escalations.ts";
 import {
-  AUTO_RETRY_LEAD, chiefForBot, INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, incidentContext, incidentText, RETRY_BLOCKED, RETRY_LEAD,
+  AUTO_RETRY_LEAD, chiefForBot, INCIDENTS_THREAD_TITLE, OLD_INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, incidentContext, incidentText, RETRY_BLOCKED, RETRY_LEAD,
   type Incident, type IncidentKind, type IncidentRetry,
 } from "../incidents.ts";
 import { buildNotification, type Notification } from "../notify.ts";
@@ -122,7 +122,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
   }
 
   function incidentRefused(chief: BotRecord, incidentsThreadId: string, asks: ReadonlyArray<Message["peerAsk"]>, why: string): void {
-    const refused = `the incident could not reach ${chief.name} — ${why}`;
+    const refused = `the problem report could not reach ${chief.name} — ${why}`;
     store.appendMessage(incidentsThreadId, { role: "bot", kind: "activity", tool: failedTurnTool(refused) });
     const lines = store.messagesFor(incidentsThreadId);
     for (const ask of asks) {
@@ -157,7 +157,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     const routing = deps.routing;
     const person = chief && routing ? routing.personOf(chief) : null;
     if (!chief || !reachesChief(chief, bot, threadId)) return tellThePerson();
-    const notices = store.tasks(chief.id).find((candidate) => candidate.title === input.title && !candidate.archivedAt &&
+    const notices = store.tasks(chief.id).find((candidate) => (candidate.title === input.title || (input.title === INCIDENTS_THREAD_TITLE && candidate.title === OLD_INCIDENTS_THREAD_TITLE)) && !candidate.archivedAt &&
         (!routing || routing.startedBy(candidate.threadId) === (person ?? undefined)))
       ?? store.createTask(chief.id, input.title, false, undefined, { botId: chief.id, name: chief.name, at: Date.now() });
     if (!notices || notices.threadId === threadId) return tellThePerson();
