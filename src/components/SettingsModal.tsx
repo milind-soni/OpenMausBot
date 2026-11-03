@@ -195,7 +195,7 @@ export function SettingsModal() {
   const ownerOrAdmin = useOwnerOrAdmin();
   const baseSections = SECTIONS.filter((entry) => !remoteActive || entry.id === "companion" || entry.id === "appearance" || entry.id === "desktopWorkspaces")
     .filter((entry) => entry.id !== "desktopWorkspaces" || Boolean(window.ogb?.environments))
-    .filter((entry) => entry.id !== "organization" || Boolean(window.ogb?.organization)).filter((entry) => entry.id !== "import" || Boolean(window.ogb))
+    .filter((entry) => entry.id !== "organization" || Boolean(window.ogb?.organization))
     .filter((entry) => entry.id !== "cloudAccount" || Boolean(window.ogb?.cloudAccount || (window.ogb?.cloudPlan && state.config?.cloudHome === true)))
     .filter((entry) => entry.id !== "workspaces" || workspacesAvailable(state.config))
     .filter((entry) => entry.id !== "people" || (!window.ogb && state.config?.cloudHome !== true))

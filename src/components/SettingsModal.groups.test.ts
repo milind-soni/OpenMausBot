@@ -123,7 +123,7 @@ describe("Settings rail groups", () => {
   it("keeps the browser-only pages for a hosted workspace's admins", () => {
     fixture.ownerOrAdmin = true;
     const groups = rail(render());
-    expect(groups.account).toEqual(["usage", "backups", "people", "activity", "experimental"]);
+    expect(groups.account).toEqual(["usage", "backups", "import", "people", "activity", "experimental"]);
     expect(Object.values(groups).flat()).not.toContain("desktopWorkspaces");
     expect(Object.values(groups).flat()).not.toContain("cloudAccount");
   });

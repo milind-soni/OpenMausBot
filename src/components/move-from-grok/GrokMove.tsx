@@ -2,6 +2,7 @@ import { ArrowLeft, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { GrokBotMark } from "@/components/GrokBotMark";
+import { trapTab } from "@/components/onboarding/WelcomeFlow";
 import { track } from "@/lib/analytics";
 import {
   closeGrokMove, foundExports, goToGrokMoveTarget, grokErrorText, grokMoveRows, lookForGrokBot, missingRoutines, moveGrokBot, NOTHING_FOUND,
@@ -34,6 +35,7 @@ export function GrokMove({ request }: { request: GrokMoveRequest }) {
   const [seen, setSeen] = useState<ReadonlySet<string>>(new Set());
   const [away, setAway] = useState(false);
   const told = useRef(false);
+  const root = useRef<HTMLDivElement>(null);
 
   const refresh = useCallback(() => {
     if (local) void lookForGrokBot().then(setLook);
@@ -43,6 +45,10 @@ export function GrokMove({ request }: { request: GrokMoveRequest }) {
     window.addEventListener("focus", refresh);
     return () => window.removeEventListener("focus", refresh);
   }, [refresh]);
+
+  useEffect(() => {
+    if (!away) root.current?.focus({ preventScroll: true });
+  }, [away]);
 
   const found = useMemo(() => foundExports(look.files), [look.files]);
 
@@ -128,14 +134,15 @@ export function GrokMove({ request }: { request: GrokMoveRequest }) {
         onBring={bring} onFound={(bot) => setPending(plansFor([bot], look))} onError={setError} />;
 
   return (
-    <div role="dialog" aria-modal="true" aria-labelledby="grok-move-title" data-grok-move={step}
+    <div ref={root} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="grok-move-title" data-grok-move={step}
       onKeyDown={(event) => {
+        trapTab(event, root.current);
         if (event.key !== "Escape" || adding) return;
         event.stopPropagation();
         if (pending) setPending(null);
         else if (!finishing) closeGrokMove();
       }}
-      className="welcome-screen fixed inset-0 z-[70] overflow-y-auto bg-app">
+      className="welcome-screen fixed inset-0 z-[70] overflow-y-auto bg-app outline-none">
       <div className="sticky top-0 z-10 flex h-12 items-center justify-between bg-app/90 px-3 backdrop-blur">
         {pending && !adding
           ? <button type="button" onClick={() => setPending(null)} aria-label={t("grokMove.back")} title={t("grokMove.back")} className="flex size-8 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink"><ArrowLeft size={17} /></button>
