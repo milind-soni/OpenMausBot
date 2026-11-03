@@ -334,6 +334,37 @@ describe("bots' browsers", () => {
     await expect.poll(async () => Promise.race([second, settle().then(() => "waiting")]), { timeout: 2_000, interval: 10 }).toBe(true);
   });
 
+  it.each([[2, 1.5, 2], [8, 7.2, 10]])("holds sixteen threads on a %d GB Cloud to what fits: the rest wait and say so, none refused or stopped", async (totalGb, availableGb, fits) => {
+    let clock = 1_800_000_000_000;
+    const running = new Map<number, number>(), signals: string[] = [];
+    const memory = new EngineMemory({
+      enabled: true, tickMs: 5,
+      read: (): HostMemory => ({ totalBytes: totalGb * GB, availableBytes: availableGb * GB - [...running.values()].reduce((sum, bytes) => sum + bytes, 0), swapFreeBytes: 0, oomKills: 0, fullStall10: 0 }),
+      groups: () => new Map(running), now: () => clock, signal: (pid, signal) => { signals.push(`${signal} ${pid}`); }, log: () => {},
+    });
+    const notices: string[] = [], outcomes = new Map<string, boolean>(), children = new Map<string, FakeChild>();
+    let pid = 2000;
+    const threads = Array.from({ length: 16 }, (_, i) => `thread-${i}`);
+    for (const thread of threads) void memory.admit(thread, new AbortController().signal, (text) => notices.push(text)).then((admitted) => {
+      outcomes.set(thread, admitted);
+      memory.turnStarted(thread);
+      memory.within(thread, () => { const child = new FakeChild(pid++); children.set(thread, child); running.set(child.pid, 600 * MB); memory.track(child as unknown as ChildProcess); });
+    });
+    // Each engine is measured once it has run a while, which is when the next can be let in.
+    for (let round = 0; round < 20; round++) { await settle(); clock += 31_000; }
+    expect(outcomes.size).toBe(fits);
+    expect([...outcomes.values()].every(Boolean)).toBe(true);
+    expect(notices.some((text) => text.startsWith("Waiting for memory:"))).toBe(true);
+    expect(signals, "nothing stopped to make room").toEqual([]);
+    // One ends, and the next starts by itself.
+    const first = threads.find((thread) => outcomes.has(thread))!;
+    memory.turnEnded(first);
+    running.delete(children.get(first)!.pid);
+    children.get(first)!.exit();
+    await expect.poll(() => outcomes.size, { timeout: 2_000, interval: 10 }).toBe(fits + 1);
+    expect(signals).toEqual([]);
+  });
+
   it("stops holding a browser's share once it has run a while, where what it takes shows in free memory", async () => {
     const h = host();
     const { pending } = browsers(h, ["a", "b", "c"]);

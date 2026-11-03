@@ -3632,7 +3632,7 @@ describe("harness HTTP API", () => {
     const waiterThreads: string[] = [];
     try {
       expect((await api("PUT", "/api/config", { box: { token: "box_route" } })).status).toBe(200);
-      // Four live threads on one bot: at the default cap of 3 the fourth would park in the send queue instead.
+      // Four live threads on one bot: on a small machine's default of 3 the fourth would park in the send queue instead.
       expect((await api("PUT", "/api/config", { threads: { maxConcurrentPerBot: 6 } })).status).toBe(200);
       const bot = (await api("POST", "/api/bots", { name: "Queue probe", section,
         modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot;

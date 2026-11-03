@@ -5226,5 +5226,8 @@
   "server.browser.waiting": "Tarayıcı bekleniyor: {name} kullanıyor. Boşalınca kendiliğinden devam eder.",
   "server.browser.waitingTask": "Tarayıcı bekleniyor: {name}, {task} için kullanıyor. Boşalınca kendiliğinden devam eder.",
   "server.browser.free": "Tarayıcı boşta. Devam ediliyor.",
-  "server.browser.stoppedWaiting": "Tarayıcı beklemesi durduruldu."
+  "server.browser.stoppedWaiting": "Tarayıcı beklemesi durduruldu.",
+  "composer.queued.capacityStarter": "Sırada. Starter, bot başına aynı anda bir konu çalıştırır; bu, çalışan bitince başlar. Daha büyük bir plan daha fazlasını çalıştırır.",
+  "composer.queued.seePlans": "Planları gör",
+  "settings.threads.starter": "Starter, bot başına aynı anda bir konu çalıştırır, daha büyük bir plan daha fazlasını çalıştırır. Botun kendi başlattığı iş yine çalışır ve her botun kendi konusu vardır."
 }

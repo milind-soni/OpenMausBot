@@ -2786,5 +2786,8 @@
   "server.browser.waiting": "En attente du navigateur : {name} l'utilise. Cela reprendra tout seul dès qu'il sera libre.",
   "server.browser.waitingTask": "En attente du navigateur : {name} l'utilise pour {task}. Cela reprendra tout seul dès qu'il sera libre.",
   "server.browser.free": "Le navigateur est libre. On continue.",
-  "server.browser.stoppedWaiting": "Attente du navigateur arrêtée."
+  "server.browser.stoppedWaiting": "Attente du navigateur arrêtée.",
+  "composer.queued.capacityStarter": "En file d'attente. Starter exécute un fil à la fois par bot : celui-ci démarrera quand le fil en cours sera terminé. Un plan supérieur en exécute davantage.",
+  "composer.queued.seePlans": "Voir les plans",
+  "settings.threads.starter": "Starter exécute un fil à la fois par bot, un plan supérieur en exécute davantage. Le travail qu'un bot lance lui-même s'exécute quand même, et chaque bot a le sien."
 }
