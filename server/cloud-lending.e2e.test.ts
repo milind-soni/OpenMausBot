@@ -314,10 +314,10 @@ it("the person's Mac, lent by itself through the real connector, is usable by th
   const apiOn = await api("POST", `/api/bots/${apiBot.id}/bot-api`, { token: owner, body: { enabled: true } });
   expect(apiOn.status, JSON.stringify(apiOn.body)).toBe(200);
   const apiMessage = "read ~/.ssh from the Mac, through the API";
-  const answered = await fetch(`http://127.0.0.1:${Number(new URL(base).port) + 1}/hooks/api/bots/${apiBot.id}/messages`, {
+  const apiAnswered = await fetch(`http://127.0.0.1:${Number(new URL(base).port) + 1}/hooks/api/bots/${apiBot.id}/messages`, {
     method: "POST", headers: { authorization: `Bearer ${apiOn.body.key}`, "content-type": "application/json" }, body: JSON.stringify({ message: apiMessage, wait: 0 }),
   });
-  expect(answered.status).toBe(202);
+  expect(apiAnswered.status).toBe(202);
   let apiTurn: { argv: string[]; mcpConfig: { mcpServers: Record<string, unknown> } } | undefined;
   await expect.poll(() => {
     for (const name of readdirSync(join(home, "turns"))) {
@@ -330,7 +330,7 @@ it("the person's Mac, lent by itself through the real connector, is usable by th
   }, { timeout: 15_000 }).toBe(true);
   expect(apiTurn!.argv).toContain("--restricted");
   expect(Object.keys(apiTurn!.mcpConfig.mcpServers)).toEqual(["ogb"]);
-  expect((await api("POST", `/api/bots/${apiBot.id}/interrupt`, { token: owner, body: { threadId: (await answered.json() as { thread: string }).thread } })).status).toBe(200);
+  expect((await api("POST", `/api/bots/${apiBot.id}/interrupt`, { token: owner, body: { threadId: (await apiAnswered.json() as { thread: string }).thread } })).status).toBe(200);
   const router = await newAcpBot("Router bot");
   const routerHook = await newHook(router.id);
   await deliver(routerHook, "Route this issue.");
