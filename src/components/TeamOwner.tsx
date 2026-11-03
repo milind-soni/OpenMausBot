@@ -1,5 +1,5 @@
-// "Reports to" on a Team Cloud: the face of the person a bot reports to at the end of its sidebar row, the picker that
-// changes it (for an Admin, or the person it reports to now), and this person's Needs you.
+// Who looks after a bot on a Team Cloud: the picker that changes it (for an Admin, or the person looking after it now),
+// a teammate's face, and this person's Needs you.
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Bell, Check } from "lucide-react";
@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { api, useStore, openThread, type Bot } from "@/state/store";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { askingWhom, mayChangeOwner, ownerChanged, ownerOf, pictureOf, refreshNeedsYou, useTeamPeople, type TeamPeople, type TeamPerson } from "@/state/team-people";
+import { askingWhom, ownerChanged, ownerOf, pictureOf, refreshNeedsYou, useTeamPeople, type TeamPeople, type TeamPerson } from "@/state/team-people";
 import type { NeedsYouItem } from "../../shared/today";
 import { useHeldMenuMotion } from "./MenuMotion";
 import { MENU_HEADING, MENU_SHEET } from "./menu-recipe";
@@ -46,24 +46,7 @@ export function PersonFace({ person, size = 18 }: { person: TeamPerson; size?: n
     className={cn("inline-flex shrink-0 items-center justify-center rounded-full font-semibold leading-none text-white", hueOf(person.email))}>{initial(person)}</span>;
 }
 
-/** The bot's owner at the end of its row. Clicking it opens the picker when this person may change it. */
-export function OwnerFace({ bot }: { bot: Bot }) {
-  const team = useTeamPeople();
-  if (!team) return null;
-  const owner = ownerOf(bot, team);
-  const label = owner ? t("owner.tooltip", { name: owner.name }) : t("owner.tooltipNone");
-  const face = owner ? <PersonFace person={owner} /> : <span aria-hidden="true" className="inline-flex size-[18px] shrink-0 items-center justify-center rounded-full border border-dashed border-ink-secondary/60 text-[10px] text-ink-secondary">?</span>;
-  if (!mayChangeOwner(bot, team)) return <span data-owner-face={owner?.email ?? ""} role="img" aria-label={label} title={label} className="flex shrink-0">{face}</span>;
-  return <button type="button" data-owner-face={owner?.email ?? ""} aria-label={`${label}. ${t("owner.change", { bot: bot.name })}`} title={label}
-    onClick={(event) => {
-      event.stopPropagation();
-      const rect = event.currentTarget.getBoundingClientRect();
-      requestOwnerPick({ botId: bot.id, current: owner?.email ?? null, x: rect.left, y: rect.bottom + 4 });
-    }}
-    className="flex shrink-0 rounded-full outline-none hover:ring-2 hover:ring-accent/40 focus-visible:ring-2 focus-visible:ring-accent/60">{face}</button>;
-}
-
-/** Changes who one bot reports to. */
+/** Changes who looks after one bot. */
 export function OwnerPicker({ target, onClose }: { target: OwnerPickerTarget | null; onClose: () => void }) {
   const { dispatch } = useStore();
   const team = useTeamPeople();
@@ -112,19 +95,19 @@ export function OwnerPicker({ target, onClose }: { target: OwnerPickerTarget | n
           </button>
         ))}
       </div>
-      <div className="px-2 pb-1 text-[12px] leading-4 text-ink-tertiary">{t("owner.pickHint")}</div>
+      <div className="px-2 pb-1 text-[12px] leading-4 text-ink-tertiary">{t("lookedAfter.pickHint")}</div>
     </div>,
     document.body,
   );
 }
 
-/** The bot menu's line: "Reports to Bob…". */
+/** The bot menu's line: "Looked after by Bob…". */
 export function ownerMenuLabel(bot: Bot, team: TeamPeople): string {
   const owner = ownerOf(bot, team);
-  return owner ? t("owner.menu", { name: owner.name }) : t("owner.menuNone");
+  return owner ? t("lookedAfter.menu", { name: owner.name }) : t("lookedAfter.menuNone");
 }
 
-/** The bot menu's "Reports to…": opens the picker for that bot. */
+/** The bot menu's "Looked after by…": opens the picker for that bot. */
 export function pickOwnerOf(bot: Bot, team: TeamPeople, at: { x: number; y: number }): void {
   requestOwnerPick({ botId: bot.id, current: ownerOf(bot, team)?.email ?? null, x: at.x, y: at.y });
 }

@@ -47,7 +47,7 @@ const FIXED_CAUSES: ReadonlyArray<[RegExp, string]> = [
   [/^no activity for \d+ minutes — the turn was stopped$/, "stalled"],
   [/^turn interrupted — OpenMausBot restarted$/, "restart"],
   [/could not start — /, "could_not_start"],
-  [/^the incident could not reach /, "incident_undelivered"],
+  [/^the problem report could not reach /, "incident_undelivered"],
   [/^could not deliver approval to the provider/, "approval_undelivered"],
   [/^Canonical event history is incomplete/, "event_log"],
 ];

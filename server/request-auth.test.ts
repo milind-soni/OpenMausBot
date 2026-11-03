@@ -105,6 +105,11 @@ describe("scopes", () => {
     ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
   });
 
+  it("keeps the attachments clear to the owner: a client may read one file, never empty the store", () => {
+    for (const method of ["GET", "POST"]) expect(requiredScope(method, "/api/attachment-storage"), method).toBe("admin");
+    expect(requiredScope("GET", "/api/attachments/a1b2.png")).toBe("client");
+  });
+
   it("allows clients to list and read notifications with exactly the feed's methods and paths", () => {
     for (const [method, path] of [
       ["GET", "/api/notifications"],
@@ -649,6 +654,9 @@ describe("loopback trust: owner on one person's machine, service on a shared wor
     expect(check("PUT", "/api/config", { trust: "service", headers: { authorization: `Bearer ${admin.token}` } }).auth?.kind).toBe("session");
     expect(check("POST", "/api/bots/bot-1/messages", { trust: "service", headers: { authorization: `Bearer ${member.token}` } }).auth?.kind).toBe("session");
     expect(check("PUT", "/api/config", { trust: "service", headers: { authorization: `Bearer ${member.token}` } }).status).toBe(403);
+    // PATCH too: a member cannot flip owner switches such as "Open sites on this server" (browserEngine.egress).
+    expect(check("PATCH", "/api/config", { trust: "service", headers: { authorization: `Bearer ${member.token}` } }).status).toBe(403);
+    expect(check("PATCH", "/api/config", { trust: "service", headers: { authorization: `Bearer ${admin.token}` } }).auth?.kind).toBe("session");
   });
 
   it("ignores service trust while the desktop capability is in force", () => {

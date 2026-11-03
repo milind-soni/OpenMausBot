@@ -85,6 +85,21 @@ chmod +x release/OpenMausBot-*-x86_64.AppImage
 
 For a downloaded release AppImage, use `OpenMausBot.AppImage` in place of the versioned path above.
 
+### Arch Linux and EndeavourOS (AppImage)
+
+Arch-based distributions are not an official target, but the release AppImage runs there. A minimal Arch
+install lacks the FUSE helper and some desktop libraries the AppImage needs, so install them first:
+
+```sh
+sudo pacman -S --needed fuse3 gtk3 nss alsa-lib libcups mesa
+chmod +x OpenMausBot.AppImage
+./OpenMausBot.AppImage
+```
+
+A full desktop install (for example EndeavourOS with KDE or GNOME) usually has all of these already, and
+`--needed` skips the ones that are present. This was checked with the v0.1.138 AppImage on a current Arch
+Linux image (fuse3 3.18, gtk3 3.24, mesa 26.2): the app opens to the welcome screen.
+
 ### Updating
 
 The app checks for updates in the background and downloads them by itself. Nothing restarts until you click
@@ -282,3 +297,8 @@ file OpenMausBot-*-x86_64.AppImage
 
 Run it from a terminal once to collect the startup output. Do not install `libfuse2` just for this AppImage; the
 package is built with the static runtime.
+
+If it prints `No suitable fusermount binary found on the $PATH` or `Cannot mount AppImage, please check your FUSE
+setup`, install the distribution's FUSE 3 package (`fuse3` on Ubuntu, Debian and Arch). If it then names a missing
+`lib*.so` file, install the desktop libraries listed under
+[Arch Linux and EndeavourOS](#arch-linux-and-endeavouros-appimage), or your distribution's packages for them.

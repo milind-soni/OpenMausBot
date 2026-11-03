@@ -893,7 +893,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         if (failure && (!abort.signal.aborted || cleanupFailed)) {
           // "upstream" (an OpenAI-compatible URL) names no provider, and the Cloud trial credit reads its raw line.
           const message = options.httpErrorLabel === "upstream" ? failure : plainFailureMessage(options.httpErrorLabel, failure);
-          emit({ ...base(turn.threadId, turnId), type: "runtime.error", message, terminal: !abort.signal.aborted });
+          const replyShownFirst = stopReason === "tool_error";
+          emit({ ...base(turn.threadId, turnId), type: "runtime.error", message, terminal: !abort.signal.aborted, ...(replyShownFirst ? { partial: true } : {}) });
         }
         if (!ok && !abort.signal.aborted) {
           const continuable = classifyContinuable(stopReason, failure);

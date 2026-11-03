@@ -380,7 +380,7 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["shared/plain-time-zone.ts", "every day"],
   ],
   "rooms and teammates": [
-    ["server/host/delegated-level.ts", "…  — delegated by  … ,  … a Chief of Staff on  …"],
+    ["server/host/delegated-level.ts", "…  — handed on by  … ,  … a Chief of Staff on  …"],
     ["server/store.ts", "needs your input"],
     ["server/store.ts", "reached its turn limit"],
   ],

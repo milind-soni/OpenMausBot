@@ -288,6 +288,26 @@ describe("bounded scheduled overlap and run health", () => {
     await h.manager.tick();
   });
 
+  it("keeps a run that failed only on a step, after its reply came back, failed but marked partly done", async () => {
+    const h = harness(start);
+    const routine = h.manager.create({ ...input(), enabled: false });
+    const event = (threadId: string, patch: Record<string, unknown>) => h.manager.handleRuntimeEvent({ eventId: `e-${Math.random()}`, provider: "fake", threadId, createdAt: new Date().toISOString(), ...patch } as Parameters<typeof h.manager.handleRuntimeEvent>[0]);
+    const attempt = async (threadId: string, partial: boolean, { reply = true, cutOff = false } = {}) => {
+      h.manager.runNow(routine.id); await h.manager.tick();
+      if (reply) event(threadId, { type: "item.completed", itemType: "assistant_text", itemId: "reply", text: "Here is the summary." });
+      event(threadId, { type: "runtime.error", message: "Stopped because the tool call “read_file” failed.", terminal: true, ...(partial ? { partial: true } : {}) });
+      if (cutOff) h.manager.failThread(threadId, "Provider settings changed");
+      else event(threadId, { type: "turn.completed", ok: false, stopReason: partial ? "tool_error" : "refusal" });
+    };
+    await attempt("thread-1", true);
+    await attempt("thread-2", false);
+    await attempt("thread-3", true, { reply: false });
+    await attempt("thread-4", true, { cutOff: true });
+    const [partly, failed, silent, cutOff] = h.manager.listRuns().sort((a, b) => a.threadId!.localeCompare(b.threadId!));
+    expect(partly).toMatchObject({ status: "failed", partial: true, output: "Here is the summary.", error: expect.stringContaining("read_file") });
+    expect([failed, silent, cutOff].map((run) => [run.status, run.partial])).toEqual([["failed", undefined], ["failed", undefined], ["queued", undefined]]);
+  });
+
   it("tells of a failure once per streak, and again when it changes or after a run completes", async () => {
     const h = harness(start);
     const alerts: unknown[] = [];
@@ -1194,6 +1214,64 @@ describe("RoutineManager", () => {
     expect(readFileSync(file, "utf8")).toBe(corrupt);
   });
 
+  it("names the files of unloaded routines and runs for an attachments clear, and none while the file is unreadable", () => {
+    const h = harness();
+    const file = h.options.file as string;
+    const routine = h.manager.create({
+      name: "Review attachment",
+      prompt: "Review the supplied context",
+      botId: "maus-1",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+      attachments: [{ id: "file-1", kind: "file", name: "brief.pdf", path: "/tmp/brief.pdf", size: 4_096 }],
+    });
+    h.manager.runNow(routine.id);
+    expect(h.manager.attachmentPaths()).toEqual(["/tmp/brief.pdf", "/tmp/brief.pdf"]);
+
+    const disk = JSON.parse(readFileSync(file, "utf8")) as { routines: Array<{ schedule: unknown }>; runs: Array<{ attachments?: unknown }> };
+    disk.routines[0]!.schedule = { type: "never" };
+    delete disk.runs[0]!.attachments;
+    writeFileSync(file, JSON.stringify(disk));
+    const unloaded = new RoutineManager(h.options);
+    expect(unloaded.listRoutines()).toEqual([]);
+    expect(unloaded.attachmentPaths()).toEqual(["/tmp/brief.pdf"]);
+
+    writeFileSync(file, "{ not json");
+    expect(new RoutineManager(h.options).attachmentPaths()).toBeNull();
+  });
+
+  it("names no files for a clear when an unloaded routine's attachments are malformed", () => {
+    for (const attachments of [{ path: "/tmp/brief.pdf" }, [null], [{ id: "file-1" }], "brief.pdf"]) {
+      const h = harness();
+      const file = h.options.file as string;
+      h.manager.create({ name: "Review", prompt: "Review it", botId: "maus-1", schedule: { type: "daily", time: "09:00", weekdays: [1] } });
+      const disk = JSON.parse(readFileSync(file, "utf8")) as { routines: Array<{ schedule: unknown; attachments?: unknown }> };
+      disk.routines[0]!.schedule = { type: "never" };
+      disk.routines[0]!.attachments = attachments;
+      writeFileSync(file, JSON.stringify(disk));
+      const unloaded = new RoutineManager(h.options);
+      expect(unloaded.listRoutines()).toEqual([]);
+      expect(unloaded.attachmentPaths()).toBeNull();
+    }
+  });
+
+  it("names no files for a clear when a loaded routine's or run's attachment list holds a bad entry", () => {
+    for (const owner of ["routines", "runs"] as const) {
+      const h = harness();
+      const file = h.options.file as string;
+      const routine = h.manager.create({
+        name: "Review", prompt: "Review it", botId: "maus-1", schedule: { type: "daily", time: "09:00", weekdays: [1] },
+        attachments: [{ id: "file-1", kind: "file", name: "brief.pdf", path: "/tmp/brief.pdf", size: 4_096 }],
+      });
+      h.manager.runNow(routine.id);
+      const disk = JSON.parse(readFileSync(file, "utf8")) as Record<typeof owner, Array<{ attachments?: unknown[] }>>;
+      disk[owner][0]!.attachments!.push(null);
+      writeFileSync(file, JSON.stringify(disk));
+      const reloaded = new RoutineManager(h.options);
+      expect(reloaded.listRoutines()).toHaveLength(1);
+      expect(reloaded.attachmentPaths()).toBeNull();
+    }
+  });
+
   it("treats a routines file with a damaged top-level shape as unreadable", () => {
     const h = harness();
     const file = h.options.file as string;
@@ -1883,7 +1961,7 @@ describe("RoutineManager", () => {
     await h.manager.tick();
     const base = { eventId: "delegating", provider: "fake", threadId: "thread-1", createdAt: new Date().toISOString() };
     h.manager.handleRuntimeEvent({ ...base, type: "turn.completed", ok: true, cost: 0.02 });
-    expect(h.manager.runForThread("thread-1")).toMatchObject({ id: queued.id, status: "waiting", attention: "Waiting for delegated work to finish" });
+    expect(h.manager.runForThread("thread-1")).toMatchObject({ id: queued.id, status: "waiting", attention: "Waiting for work it handed on to finish" });
     expect(h.manager.runForThread("thread-1")?.finishedAt).toBeUndefined();
     expect(h.manager.isActiveThread("thread-1")).toBe(true);
     pending = false;

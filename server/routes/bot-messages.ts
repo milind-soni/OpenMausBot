@@ -306,7 +306,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
             if (guardedAdmission.action === "refuse") {
               throw Object.assign(new Error("wait for a free thread slot before retrying this message"), { status: 409, code: "guarded_busy" });
             }
-            const message = await startTurn(bot.id, text, { threadId, replyTo, sendId, sender, trigger, relayed: true, dataContext });
+            // The relayed line is named after the person it is for; with no key it is nobody's own line and acts for nobody.
+            const message = await startTurn(bot.id, text, { threadId, replyTo, sendId, sender: onBehalfOf ? { name: onBehalfOf.name ?? onBehalfOf.email! } : sender, trigger, relayed: true, dataContext });
             return { ok: true as const, threadId, message };
           }
         : undefined;

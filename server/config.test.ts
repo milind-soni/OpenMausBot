@@ -704,6 +704,20 @@ describe("a config.json saved with a byte order mark", () => {
       rmSync(path, { force: true });
     }
   });
+
+  it("keeps the browser's allow-list when the owner flips its local-sites switch", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({ browserEngine: { engine: "chrome", egress: { allow: ["10.0.0.5"] } } }));
+    try {
+      saveConfig({ browserEngine: { egress: { localNetwork: true } } });
+      expect(JSON.parse(readFileSync(path, "utf8")).browserEngine).toEqual({ engine: "chrome", egress: { allow: ["10.0.0.5"], localNetwork: true } });
+      saveConfig({ browserEngine: { egress: { localNetwork: false } } });
+      expect(JSON.parse(readFileSync(path, "utf8")).browserEngine).toEqual({ engine: "chrome", egress: { allow: ["10.0.0.5"], localNetwork: false } });
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
 });
 
 describe("loadConfig between changes", () => {
@@ -1539,6 +1553,15 @@ describe("credential env preference", () => {
     expect(loadConfig().customDomain).toBe("https://bots.example.com");
     saveConfig({ customDomain: "" });
     expect(loadConfig()).toMatchObject({ customDomain: "", language: "en", profile: { name: "Workspace owner" } });
+  });
+
+  it("saves, trims and clears the computer name a paired phone shows", () => {
+    expect(parseConfigPatch({ computerName: "  AdamPC  " })).toEqual({ computerName: "AdamPC" });
+    expect(() => parseConfigPatch({ computerName: "x".repeat(64) })).toThrow();
+    saveConfig({ profile: { name: "Workspace owner" }, computerName: "AdamPC" });
+    expect(loadConfig()).toMatchObject({ computerName: "AdamPC", profile: { name: "Workspace owner" } });
+    saveConfig({ computerName: "" });
+    expect(loadConfig()).toMatchObject({ computerName: "", profile: { name: "Workspace owner" } });
   });
 
   it("merges onboarding progress like any other section", () => {

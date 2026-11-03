@@ -54,7 +54,7 @@ const dump = () => until(() => {
   if (!existsSync(dumpFile)) return null;
   try { return JSON.parse(readFileSync(dumpFile, "utf8")); } catch { return null; }
 }, Boolean);
-// The seeded Chief answers a failed run with a Team incidents turn on this same engine, and that turn writes the dump.
+// The seeded Chief answers a failed run with a Problems to look at turn on this same engine, and that turn writes the dump.
 async function stepDownSeededChief() {
   const seeded = (await api("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.chiefOfStaff);
   if (seeded) await api("PATCH", `/api/bots/${seeded.id}`, { chiefOfStaff: false });
@@ -1105,11 +1105,11 @@ describe("Group Local VM ownership on the real isolated server", () => {
       await idle(auto.id);
       const incidents = await until(async () => {
         const state = await api("GET", "/api/bots?messages=0");
-        const thread = state.bots.find((b: any) => b.id === chief.id)?.tasks?.find((t: any) => t.title === "Team incidents");
+        const thread = state.bots.find((b: any) => b.id === chief.id)?.tasks?.find((t: any) => t.title === "Problems to look at");
         return thread ? (await api("GET", `/api/threads/${thread.threadId}/messages?limit=100`)).messages : null;
       }, (msgs: any) => Array.isArray(msgs) && msgs.some((m: any) =>
-        m.kind === "activity" && String(m.tool?.name ?? "").startsWith("Incident:")));
-      const chips = incidents.filter((m: any) => m.kind === "activity" && String(m.tool?.name ?? "").startsWith("Incident:"));
+        m.kind === "activity" && String(m.tool?.name ?? "").includes(" hit a problem: ")));
+      const chips = incidents.filter((m: any) => m.kind === "activity" && String(m.tool?.name ?? "").includes(" hit a problem: "));
       expect(chips).toHaveLength(1);
       expect(String(chips[0]?.tool?.name)).toContain("computer unavailable — the Local VM could not be claimed for this turn");
       expect(chips[0]?.threadRef?.botId).toBe(auto.id);

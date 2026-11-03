@@ -6,7 +6,7 @@ import { launchVerificationServer, runControlOmb, type VerificationServer } from
 import { readHandoffs } from "./testing/handoff-rows.ts";
 
 const SETTLED = "Your downstream room requests have settled.";
-const REPORT_FROM_PEER = "[OpenMausBot report from @Routine peer";
+const REPORT_FROM_PEER = "[From @Routine peer (bot) · report on assignment";
 
 describe("routine delegation through the isolated harness", () => {
   let fixture: VerificationServer;
@@ -111,7 +111,7 @@ describe("routine delegation through the isolated harness", () => {
     const { receipts } = await delegate(run.threadId);
     finish(run.threadId);
     await expect.poll(async () => (await runState(run.id))?.status, { timeout: 15_000 }).toBe("waiting");
-    expect((await runState(run.id)).attention).toContain("delegated");
+    expect((await runState(run.id)).attention).toContain("handed on");
     expect((await runState(run.id)).finishedAt).toBeUndefined();
     const work = await awaitPeerWork(run.threadId);
     expect(work).toMatchObject({ id: receipts[0].requestId, status: "queued", mode: "work", reply: "resume", text: "Produce the fixture report." });

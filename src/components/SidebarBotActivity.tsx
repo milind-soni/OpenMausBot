@@ -20,6 +20,15 @@ export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown
     .filter((task) => task.activity === "waiting-on-you" || task.activity === "working" || task.busy || task.waitingForTeammates === true || task.queued || task.unread);
 }
 
+/** A routine run's thread stays out of the thread tree, but gets an activity row while it runs, so the person can open it and watch. */
+export function runningRoutineRun(task: Task): boolean {
+  return Boolean(task.routineRunId) && !isArchived(task) && (task.busy === true || task.activity === "working");
+}
+
+export function runningRoutineRuns(bot: Bot): Array<Task & { queued: boolean }> {
+  return orderedThreadList((bot.tasks ?? []).filter(runningRoutineRun).map((task) => ({ ...task, queued: false })));
+}
+
 export function sidebarBotStatus(bot: Bot, queued: Record<string, unknown[]>) {
   const tasks = sidebarBotActivityTasks(bot, queued);
   const waiting = bot.activity === "waiting-on-you" || tasks.some((task) => task.activity === "waiting-on-you");
@@ -196,8 +205,10 @@ export function PinnedThreadRows({ entries, now, onJump, onUnpin }: { entries: A
   </>;
 }
 
-export function SidebarBotActivity({ bot, rowThreadId, density, pendingQueued, dispatch, waitingOnly = false }: { bot: Bot; rowThreadId: string; density: SidebarDensity; pendingQueued: AppState["pendingQueued"]; dispatch: Dispatch<Action>; waitingOnly?: boolean }) {
-  const tasks = (waitingOnly ? threadsWaitingOnPerson : threadsWhenTreeHidden)(bot, pendingQueued).filter((task) => task.threadId !== rowThreadId);
+/** runsOnly: the open thread tree already lists the rest, so only a running routine's row is added. */
+export function SidebarBotActivity({ bot, rowThreadId, density, pendingQueued, dispatch, waitingOnly = false, runsOnly = false }: { bot: Bot; rowThreadId: string; density: SidebarDensity; pendingQueued: AppState["pendingQueued"]; dispatch: Dispatch<Action>; waitingOnly?: boolean; runsOnly?: boolean }) {
+  const others = runsOnly ? [] : (waitingOnly ? threadsWaitingOnPerson : threadsWhenTreeHidden)(bot, pendingQueued);
+  const tasks = [...others, ...runningRoutineRuns(bot)].filter((task) => task.threadId !== rowThreadId);
   if (!tasks.length) return null;
   const iconOnly = density === "icons";
   return <div data-sidebar-bot-activity={bot.id} className={cn("mb-1 space-y-0.5", !iconOnly && "ml-6")}>

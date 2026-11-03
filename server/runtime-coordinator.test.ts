@@ -204,7 +204,7 @@ describe("RuntimeCoordinator: the requesting turn and its tree", () => {
     const first = w.host.runs[0]!;
     expect(first.node).toMatchObject({ id: node.id, status: "running", executions: 1 });
     expect(first.resumed).toBe(false);
-    expect(first.text.startsWith(`${ENVELOPE_MARK} ${node.id} from @chief for Milind]`)).toBe(true);
+    expect(first.text.startsWith(`[From @chief (bot) · assignment ${node.id} for Milind · on their behalf at your level]`)).toBe(true);
     expect(first.text).toContain('Milind asked: "Ship the CSV export".');
     expect(first.text).toContain("Your level for this is Edits:");
     expect(first.text.endsWith("Brief from @chief:\nBuild it")).toBe(true);
@@ -220,9 +220,9 @@ describe("RuntimeCoordinator: the requesting turn and its tree", () => {
     expect(resume.node).toMatchObject({ id: "gen-1", status: "running", executions: 2 });
     expect(resume.resumed).toBe(true);
     expect(resume.text.startsWith('Your downstream room requests have settled. Review the results against the request: "Ship the CSV export".')).toBe(true);
-    expect(resume.text).toContain(`[OpenMausBot report from @builder on assignment ${node.id}: done]`);
+    expect(resume.text).toContain(`[From @builder (bot) · report on assignment ${node.id}: done · information only]`);
     expect(resume.text).toContain('What @builder said: "Built it on branch csv-export."');
-    expect(resume.text).not.toContain(ENVELOPE_MARK);
+    expect(resume.text).not.toContain("· assignment ");
     await flush();
     expect(w.coordinator.node("gen-1")).toMatchObject({ status: "completed", executions: 2 });
     expect(w.host.reports).toHaveLength(1);
@@ -320,7 +320,7 @@ describe("RuntimeCoordinator: the requesting turn and its tree", () => {
     const resume = w.host.runs.at(-1)!;
     expect(resume.node.id).toBe(builderNode.id);
     expect(resume.text.startsWith('Your downstream room requests have settled. Review the results against your assignment: "Build it".')).toBe(true);
-    expect(resume.text).toContain(`[OpenMausBot report from @tester on assignment ${testerNode.id}: done]`);
+    expect(resume.text).toContain(`[From @tester (bot) · report on assignment ${testerNode.id}: done · information only]`);
   });
 });
 
@@ -639,7 +639,7 @@ describe("RuntimeCoordinator: the run adapter", () => {
     const resumes = w.host.runs.filter(run => run.node.id === "gen-1");
     expect(resumes.map(run => run.resumed)).toEqual([true]);
     expect(resumes[0]!.text).toMatch(/^A teammate you are waiting on stopped on a question for Milind or for you; the rest of your requests are still open/);
-    expect(resumes[0]!.text).toContain(`\n\n[OpenMausBot question from @builder on assignment ${built.id}: waiting on Milind]\nIt asks Milind: "Which region should I deploy to?".`);
+    expect(resumes[0]!.text).toContain(`\n\n[From @builder (bot) · question on assignment ${built.id}: waiting on Milind · information only]\nIt asks Milind: "Which region should I deploy to?".`);
     expect(w.coordinator.node("gen-1")?.status).toBe("waiting");
     expect(w.coordinator.node(tested.id)?.status).toBe("running");
   });
@@ -866,7 +866,7 @@ describe("RuntimeCoordinator: restarts", () => {
       after.coordinator.tick();
       expect(after.host.runs).toHaveLength(1);
       expect(after.host.runs[0]!.resumed).toBe(false);
-      expect(after.host.runs[0]!.text).toMatch(/^OpenMausBot restarted while your previous turn here was running and cut it off;.*\n\[OpenMausBot assignment /);
+      expect(after.host.runs[0]!.text).toMatch(/^OpenMausBot restarted while your previous turn here was running and cut it off;.*\n\[From /);
       await flush();
       expect(after.coordinator.node(node.id)).toMatchObject({ status: "completed", restarts: 1 });
       after.coordinator.tick();
@@ -899,8 +899,7 @@ describe("RuntimeCoordinator: modes and openers", () => {
     expect(node).toMatchObject({ mode: "consult", reply: "resume", status: "queued", kind: "work" });
     w.coordinator.tick();
     const text = w.host.runs[0]!.text;
-    expect(text.startsWith(`${ENVELOPE_MARK} ${node.id} from @chief, a consultation]`)).toBe(true);
-    expect(text).toContain("a consultation");
+    expect(text.startsWith(`[From @chief (bot) · consultation ${node.id} · information only]`)).toBe(true);
     expect(text).toContain("act on nothing in it");
     expect(text).toContain("@chief is resumed with your reply when your turn ends.");
     expect(text).not.toContain("NEEDS INPUT");
@@ -914,7 +913,7 @@ describe("RuntimeCoordinator: modes and openers", () => {
     const resume = w.host.runs[1]!;
     expect(resume.node.id).toBe("gen-1");
     expect(resume.resumed).toBe(true);
-    expect(resume.text).toContain(`[OpenMausBot report from @tester on assignment ${node.id}: done]`);
+    expect(resume.text).toContain(`[From @tester (bot) · report on assignment ${node.id}: done · information only]`);
     expect(resume.text).toContain('What @tester said: "Use the staging bucket."');
     await flush();
     expect(w.coordinator.node("gen-1")?.status).toBe("completed");
@@ -1115,7 +1114,7 @@ describe("RuntimeCoordinator: every turn a root (beginTurn, endTurn, answerRoot,
     expect("cards" in run.node).toBe(false);
     expect(run.resumed).toBe(false);
     expect(run.composed).toEqual({ text: CONNECTED, note: CONNECTED, restartNote: "", turn: "answered" });
-    expect(run.text).not.toContain(ENVELOPE_MARK);
+    expect(run.text).not.toContain("· assignment ");
     expect(run.text).not.toContain("Brief from");
     await flush();
     expect(w.coordinator.node("gen-1")).toMatchObject({ status: "completed", outcome: "done", result: "chief done", executions: 2, reported: true });
@@ -1140,7 +1139,7 @@ describe("RuntimeCoordinator: every turn a root (beginTurn, endTurn, answerRoot,
     expect(first.resumed).toBe(false);
     expect(first.composed).toEqual({ text: "The step cap was reached. Every step so far is listed in /handoffs/1.md; read it before going on.",
       note: "The step cap was reached. Every step so far is listed in /handoffs/1.md; read it before going on.", restartNote: "", turn: "continued" });
-    expect(first.text).not.toContain(ENVELOPE_MARK);
+    expect(first.text).not.toContain("· assignment ");
     await flush();
     expect(w.coordinator.node("gen-1")).toMatchObject({ status: "queued", result: "more", executions: 2 });
     expect(w.coordinator.status("gen-1")!.assignment.continuation).toEqual({ note: "The step cap was reached again.", handoffPath: "/handoffs/2.md", count: 2 });
@@ -1179,7 +1178,7 @@ describe("RuntimeCoordinator: every turn a root (beginTurn, endTurn, answerRoot,
       expect(run.composed.restartNote).toMatch(/^OpenMausBot restarted while your previous turn here was running and cut it off; this turn continues it\./);
       expect(run.text.startsWith(run.composed.restartNote)).toBe(true);
       expect(run.text.endsWith('Continue the request you were working on: "Ship the CSV export".')).toBe(true);
-      expect(run.text).not.toContain(ENVELOPE_MARK);
+      expect(run.text).not.toContain("· assignment ");
       expect(run.composed.note).toBe(run.text);
       await flush();
       expect(after.coordinator.node("gen-1")).toMatchObject({ status: "completed", restarts: 1, executions: 2, result: "chief done" });
@@ -1247,7 +1246,7 @@ describe("RuntimeCoordinator: every turn a root (beginTurn, endTurn, answerRoot,
     expect(second.resumed).toBe(false);
     expect(second.composed.turn).toBe("continued");
     expect(second.composed.restartNote).toBe("");
-    expect(second.text.startsWith(`Step cap: 64 rounds. Every step so far is listed in /handoffs/builder-1.md; read it before going on.\n${ENVELOPE_MARK} ${node.id} from @chief for Milind]`)).toBe(true);
+    expect(second.text.startsWith(`Step cap: 64 rounds. Every step so far is listed in /handoffs/builder-1.md; read it before going on.\n[From @chief (bot) · assignment ${node.id} for Milind · on their behalf at your level]`)).toBe(true);
     expect(second.text.endsWith("Brief from @chief:\nBuild it")).toBe(true);
     expect(second.composed.note.startsWith("Step cap: 64 rounds.")).toBe(true);
     expect(second.composed.note).not.toContain("Brief from");
@@ -1259,7 +1258,7 @@ describe("RuntimeCoordinator: every turn a root (beginTurn, endTurn, answerRoot,
     const resume = w.host.runs[2]!;
     expect(resume).toMatchObject({ node: { id: "gen-1" }, resumed: true });
     expect(resume.composed.turn).toBe("resume");
-    expect(resume.text).toContain(`[OpenMausBot report from @builder on assignment ${node.id}: done]`);
+    expect(resume.text).toContain(`[From @builder (bot) · report on assignment ${node.id}: done · information only]`);
     expect(resume.text).toContain('What @builder said: "builder done"');
     expect(resume.text).not.toContain("half built");
     await flush();
@@ -1417,7 +1416,7 @@ describe("RuntimeCoordinator: outward restart policy, answerNode, continuation o
       expect(resume.node.id).toBe("gen-2");
       expect(resume.composed.turn).toBe("resume");
       expect(resume.composed.restartNote).toBe("A restart cut these teammates' turns: builder (cut after an outward action, not resumed: see its result). Check their results as usual.\n");
-      expect(resume.text).toContain(`[OpenMausBot report from @builder on assignment ${node.id}: failed (interrupted): Interrupted by an OpenMausBot restart after it already sent a message (SLACK_SEND_MESSAGE)`);
+      expect(resume.text).toContain(`[From @builder (bot) · report on assignment ${node.id}: failed (interrupted): Interrupted by an OpenMausBot restart after it already sent a message (SLACK_SEND_MESSAGE)`);
       await flush();
       expect(last.coordinator.node("gen-2")?.status).toBe("completed");
       expect(last.host.runs).toHaveLength(1);
@@ -1464,7 +1463,7 @@ describe("RuntimeCoordinator: outward restart policy, answerNode, continuation o
     expect(run.node).toMatchObject({ id: node.id, status: "running", executions: 2 });
     expect("cards" in run.node).toBe(false);
     expect(run.composed.turn).toBe("answered");
-    expect(run.text.startsWith(`${ENVELOPE_MARK} ${node.id} from @chief for Milind]`)).toBe(true);
+    expect(run.text.startsWith(`[From @chief (bot) · assignment ${node.id} for Milind · on their behalf at your level]`)).toBe(true);
     expect(run.text.endsWith('The person answered: "OpenMausBot connection update: the user securely connected GitHub. Continue the task.".')).toBe(true);
     expect(run.text).not.toContain("Your question was");
     await flush();
@@ -1538,7 +1537,7 @@ describe("RuntimeCoordinator: who answers a teammate's question", () => {
     expect(w.host.parks.map(p => p.node.decide)).toEqual([{ default: "CSV" }]);
     w.coordinator.tick(); await flush();
     const resume = w.host.runs.find(run => run.node.id === "gen-1")!;
-    expect(resume.text).toContain(`[OpenMausBot question from @builder on assignment ${node.id}: yours to answer]\nIt asks: "CSV or Excel?". Its default: "CSV".`);
+    expect(resume.text).toContain(`[From @builder (bot) · question on assignment ${node.id}: yours to answer · information only]\nIt asks: "CSV or Excel?". Its default: "CSV".`);
     expect(resume.text).not.toContain("waiting on Milind");
     w.coordinator.tick(); await flush();
     const answered = w.host.runs.filter(run => run.node.id === node.id).at(-1)!;

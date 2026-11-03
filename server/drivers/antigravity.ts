@@ -16,6 +16,7 @@ import {
   antigravityProfileAuthenticated,
   prepareAntigravityProfile,
   probeAntigravityModels,
+  removeAntigravitySignIn,
   validateAntigravityRuntime,
 } from "./antigravity-acp.ts";
 import {
@@ -42,12 +43,12 @@ export const STATIC_ANTIGRAVITY_MODELS: ModelCatalog = {
   ],
 };
 
-/** Bots saved before the thinking-level option hold `gemini-3.8-flash-{low,medium,high}`; the official runtime
- * offers only the base model with that option, so run the base at the saved level. A runtime that still offers
- * the suffixed id, or a turn that chose its own level, keeps its selection. */
+/** Bots saved before the thinking-level option hold ids like `gemini-3.8-flash-medium` or `gemini-4-argon-high`;
+ * the official runtime offers only the base model with that option, so run the base at the saved level. A runtime
+ * that still offers the suffixed id, or lacks the base, or a turn that chose its own level, keeps its selection. */
 export function normalizeAntigravityTurn(turn: SendTurnInput, offeredModels: readonly string[]): SendTurnInput {
   if (turn.variant !== undefined) return turn;
-  const match = turn.model?.match(/^(gemini-3\.8-flash)-(low|medium|high)$/u);
+  const match = turn.model?.match(/^(.+)-(low|medium|high)$/u);
   return match && offeredModels.includes(match[1]) && !offeredModels.includes(match[0])
     ? { ...turn, model: match[1], variant: match[2] }
     : turn;
@@ -210,6 +211,10 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       },
       completeAuthentication: async (flowId, callbackUrl) => auth.complete(flowId, callbackUrl),
       cancelAuthentication: async () => auth.cancel(),
+      signOut: async () => {
+        auth.cancel();
+        await removeAntigravitySignIn(input.instanceId);
+      },
       dispose: async () => {
         auth.cancel();
         await base.dispose();

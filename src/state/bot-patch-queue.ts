@@ -53,12 +53,15 @@ export type BotUpdatePatch = Partial<
   keepThreadModels?: boolean;
   /** With modelSelection: the thread this client shows. Body only: Bot.threadId is the server's selection. */
   threadId?: string;
+  /** The conversation to make main ("Set as main thread"); null clears it. Body only: the bot shows it as mainThreadId. */
+  mainThreadChoice?: string | null;
 };
 
 export type BotStatePatch = Omit<
   BotUpdatePatch,
-  "computer" | "connectorTools" | "connectorScopes" | "phoneApps" | "acknowledgeLocalAuto" | "applyToAllThreads" | "keepThreadModels" | "threadId"
+  "computer" | "connectorTools" | "connectorScopes" | "phoneApps" | "acknowledgeLocalAuto" | "applyToAllThreads" | "keepThreadModels" | "threadId" | "mainThreadChoice"
 > & {
+  mainThreadId?: string;
   computer?: Bot["computer"];
   connectorTools?: Bot["connectorTools"];
   connectorScopes?: Bot["connectorScopes"];
@@ -116,6 +119,7 @@ const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
     applyToAllThreads: _allThreads,
     keepThreadModels: _keepThreadModels,
     threadId: _threadId,
+    mainThreadChoice,
     computer,
     connectorTools,
     connectorScopes,
@@ -131,6 +135,8 @@ const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
   else if (connectorScopes !== undefined) normalized.connectorScopes = connectorScopes;
   if (phoneApps === null) normalized.phoneApps = undefined;
   else if (phoneApps !== undefined) normalized.phoneApps = phoneApps;
+  // A pending choice shows as the bot's main thread, so a broadcast during the save does not revert it.
+  if (typeof mainThreadChoice === "string") normalized.mainThreadId = mainThreadChoice;
   return normalized;
 };
 

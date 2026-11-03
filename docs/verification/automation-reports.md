@@ -12,7 +12,7 @@ the chat it reports to (the bot's main chat unless the routine chose another):
 - **A question**: a last line `NEEDS INPUT: …` becomes the question in that
   message, marked "needs you" and notified as a question. The person answers in
   that chat by typing or with Reply, and the chat's session has the report as
-  `[Your automation "Name" asked at …:]`. A 👍 or 👎 on it is an answer too:
+  `[From routine "Name" · run, asked at … · information only]`. A 👍 or 👎 on it is an answer too:
   it reaches the bot in that chat with the report in hand.
 - **A copy of a card** the run waits on (a question, an approval, a proposal).
   Answering the copy, or giving it a 👍 or 👎, answers the run in its own
