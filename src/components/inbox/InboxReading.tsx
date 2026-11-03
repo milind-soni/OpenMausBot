@@ -13,7 +13,7 @@ import { InboxSender } from "../InboxLine";
 import { pendingApprovals, PendingApprovalActions, PendingApprovalPanel } from "../PendingApproval";
 import { QuestionCard } from "../QuestionCard";
 import { threadUpdatedLabel } from "../SidebarThreadRow";
-import { askOf, closeResponse, subjectOf, textOf } from "./inbox-view";
+import { answerThread, askOf, closeResponse, senderLabel, subjectOf, textOf } from "./inbox-view";
 import { accessRequestWords } from "../bot-access/access-card";
 import { useInboxActions } from "./use-inbox-actions";
 
@@ -46,10 +46,11 @@ export function InboxReading({ view, row, now }: { view: InboxView; row: InboxRo
       setSending(false);
     }
   };
-  const approval = ask === "approval" && view.threadId ? pendingApprovals([asMessage(row)])[0] : undefined;
+  const threadId = answerThread(view, row);
+  const approval = ask === "approval" && threadId ? pendingApprovals([asMessage(row)])[0] : undefined;
   const canReply = !ask && row.tab === "info" && row.replies === true;
   return (
-    <article data-inbox-reading={row.id} aria-label={`${row.from.name} · ${subjectOf(row)}`} className="flex min-h-0 flex-1 flex-col">
+    <article data-inbox-reading={row.id} aria-label={`${senderLabel(row)} · ${subjectOf(row)}`} className="flex min-h-0 flex-1 flex-col">
       <header className="flex items-start gap-2 border-b border-hairline/40 px-3 py-2.5">
         <button type="button" onClick={() => readInboxLine(null)} aria-label={t("inbox.action.back")} title={t("inbox.action.back")}
           className="flex size-7 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink pointer-coarse:size-9">
@@ -58,7 +59,7 @@ export function InboxReading({ view, row, now }: { view: InboxView; row: InboxRo
         <span className="mt-0.5 shrink-0" aria-hidden="true"><InboxSender from={row.from} size={28} /></span>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
-            <span className="min-w-0 truncate text-[14px] font-semibold text-ink">{row.from.name}</span>
+            <span className="min-w-0 truncate text-[14px] font-semibold text-ink">{senderLabel(row)}</span>
             <span className="ml-auto shrink-0 text-[11px] tabular-nums text-ink-tertiary">{threadUpdatedLabel(row.at, now)}</span>
           </div>
           <div className="truncate text-[13px] text-ink">{subjectOf(row)}</div>
@@ -83,11 +84,11 @@ export function InboxReading({ view, row, now }: { view: InboxView; row: InboxRo
             <p className="flex items-center gap-1.5 text-[13px] text-ink-secondary"><Check size={14} aria-hidden="true" />{settledLabel(row)}</p>
           </>
         )}
-        {ask === "question" && view.threadId && <QuestionCard threadId={view.threadId} asker={asker} message={asMessage(row)} />}
-        {approval && view.threadId && (
+        {ask === "question" && threadId && <QuestionCard threadId={threadId} asker={asker} message={asMessage(row)} />}
+        {approval && threadId && (
           <div className={cn("rounded-[24px]", ELEVATED_CARD)}>
             <PendingApprovalPanel pending={approval} count={1} index={0} botName={asker?.name ?? row.from.name} asker={asker}
-              actions={<PendingApprovalActions part="primary" tag="inbox" pending={approval} threadId={view.threadId} bot={asker} onCancelTurn={() => {}} />} />
+              actions={<PendingApprovalActions part="primary" tag="inbox" pending={approval} threadId={threadId} bot={asker} onCancelTurn={() => {}} />} />
           </div>
         )}
         {ask === "review" && <p className="text-[13px] text-ink-secondary">{t("inbox.reviewInChat")}</p>}

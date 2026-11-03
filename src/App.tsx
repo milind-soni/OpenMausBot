@@ -34,7 +34,7 @@ import { CloudSendStrip } from "@/components/CloudSendStrip";
 import { HomeLine } from "@/components/HomeLine";
 import { useTeamChats } from "@/state/team-chats";
 import { needsYouVersion, useTeamPeopleLoader } from "@/state/team-people";
-import { inboxVersion, useInboxLoader, useInboxPanel } from "@/state/inbox";
+import { inboxVersion, useInboxLoader, useInboxPanel, useInboxReady } from "@/state/inbox";
 import { InboxPanel } from "@/components/inbox/InboxPanel";
 import { PlacesRail } from "@/components/PlacesRail";
 import { CloudHowTo } from "@/components/CloudHowTo";
@@ -73,10 +73,11 @@ import { WebPanelPage } from "@/components/WebPanelPage";
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
   useTeamChats(state.config);
-  useTeamPeopleLoader(state.config, needsYouVersion(state.bots, state.groups, state.notifications));
-  const inbox = inboxVersion(state.bots);
-  useInboxLoader(inbox);
-  const inboxShown = useInboxPanel().open && inbox !== null;
+  const needsYou = needsYouVersion(state.bots, state.groups, state.notifications);
+  useTeamPeopleLoader(state.config, needsYou);
+  useInboxLoader(`${inboxVersion(state.bots) ?? ""}|${needsYou}`);
+  const inboxReady = useInboxReady();
+  const inboxShown = useInboxPanel().open && inboxReady;
   // A Switch AI pick lands once its stopped turn's chat is idle, wherever the person is by then.
   useAiSwitchKeeper({ bots: state.bots, dispatch });
   const showThreads = useShowThreads();

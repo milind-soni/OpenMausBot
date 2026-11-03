@@ -1,4 +1,4 @@
-// On a Team Cloud: the person's whole inbox in the right panel as one list, newest first, a dot on what waits on them,
+// The person's whole inbox in the right panel as one list, newest first, a dot on what waits on them,
 // each line a dense row that reads in full in the panel. At phone width it is a sheet over the chat.
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
@@ -7,6 +7,7 @@ import type { InboxRow } from "../../../shared/inbox";
 import { t } from "@/lib/i18n";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { closeInbox, readInboxLine, readInboxRow, useInboxPanel, useInboxView } from "@/state/inbox";
+import { InboxActive } from "./InboxActive";
 import { InboxReading } from "./InboxReading";
 import { InboxRowItem } from "./InboxRow";
 import { listedRows } from "./inbox-view";
@@ -41,10 +42,13 @@ export function InboxPanel() {
         </button>
       </div>
       {reading && view ? <InboxReading view={view} row={reading} now={now} /> : (
-        <div role="list" data-inbox-list aria-label={t("inbox.panel.title")} className="min-h-0 flex-1 overflow-y-auto">
-          {rows.length === 0
-            ? <p className="px-4 py-8 text-center text-[13px] text-ink-secondary">{t("inbox.empty")}</p>
-            : rows.map((row) => <InboxRowItem key={row.id} row={row} now={now} onOpen={open} onAction={run} />)}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div role="list" data-inbox-list aria-label={t("inbox.panel.title")}>
+            {rows.length === 0
+              ? <p className="px-4 py-8 text-center text-[13px] text-ink-secondary">{t("inbox.empty")}</p>
+              : rows.map((row) => <InboxRowItem key={row.id} row={row} now={now} onOpen={open} onAction={run} />)}
+          </div>
+          <InboxActive view={view} />
         </div>
       )}
     </>

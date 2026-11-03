@@ -13,7 +13,7 @@ export interface RailPlace {
   progress?: number;
   /** Waiting for its payment. */
   waiting?: true;
-  /** Something needs the person there (a payment problem on a Cloud they own). */
+  /** Something needs the person there: a line in that place's inbox, or a payment problem on a Cloud they own. */
   attention?: true;
   /** A server or computer of the person's own that signed in with their account. */
   server?: true;
@@ -70,5 +70,5 @@ export type AddCloudView =
   };
 export declare const RAIL_MIN_PLACES: number;
 /** main's own circles: each as the page sees it, plus the Cloud main acts on for it (never sent to a page). */
-export declare function railPlaces(input: { saved: { environments: any[]; activeId: string }; home?: string | null; mine?: string | null; state?: unknown; offers?: (entry: any) => boolean }): Array<RailPlace & { cloudId?: string }>;
+export declare function railPlaces(input: { saved: { environments: any[]; activeId: string }; home?: string | null; mine?: string | null; state?: unknown; offers?: (entry: any) => boolean; waiting?: (id: string) => boolean }): Array<RailPlace & { cloudId?: string }>;
 export declare function addCloudView(state: unknown, offer: import("./cloud-home.mjs").CloudOffer | null): AddCloudView;

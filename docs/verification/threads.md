@@ -89,7 +89,7 @@ switching and Stop can be exercised without a real provider or account.
     returns. Timed snoozes also return when due without a new server snapshot.
     Pinned, selected, unread, queued, and working threads remain reachable.
     Snooze is a display preference, not a pause or cancellation of work.
-16. Open **Active Threads** while a channel is working. Its entry should name
+16. Open the **Inbox** row, then **Active Threads** in its panel, while a channel is working. Its entry should name
     the channel and open that channel's exact thread, not a member's direct
     chat. Direct-chat and channel activity can appear together.
 17. In compact/quiet rows, idle message previews disappear but working,

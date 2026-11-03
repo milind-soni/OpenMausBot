@@ -242,21 +242,9 @@ describe("agents proxy tools/list golden", () => {
     }
   });
 
-  it("mounts message_person only on a Team Cloud, and adds nothing else", () => {
+  it("mounts message_person everywhere: every plan's bots can reach the person's Inbox", () => {
     const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
-    expect(names(wires[FULL]!).filter((tool) => tool !== "message_person")).toEqual(names(wires["skills+shared+voice+escalations+x"]!));
-    for (const [name, profile] of Object.entries(PROFILES)) {
-      expect(names(wires[name]!).includes("message_person"), name).toBe(profile.env.OMB_TEAM_PEOPLE === "1");
-    }
-  });
-
-  it("mounts ask_for_computer only on a person's own Cloud that is lent their computer, never a Team Cloud", () => {
-    for (const [name, profile] of Object.entries(PROFILES)) {
-      expect(toolsOf(wires[name]!).some((tool) => tool.name === "ask_for_computer"), name)
-        .toBe(profile.env.OMB_CLOUD_HOME === "1" && profile.env.OMB_SHARED_COMPUTERS_ENABLED === "1" && profile.env.OMB_TEAM_PEOPLE !== "1");
-    }
-    const team = catalogProfileFromEnv({ ...PROFILES["skills+shared+voice+cloud-home"]!.env, OMB_TEAM_PEOPLE: "1", OMB_BOT_ID: "bot-golden" });
-    expect(availableTools(team).map((tool) => tool.name)).not.toContain("ask_for_computer");
+    for (const name of Object.keys(PROFILES)) expect(names(wires[name]!), name).toContain("message_person");
   });
 
   it("ignores the switches that once picked a catalog profile", () => {

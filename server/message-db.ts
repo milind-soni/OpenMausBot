@@ -559,6 +559,16 @@ export function attentionRows(since: number): AttentionRow[] {
   ).all(since, since, since) as unknown as AttentionRow[];
 }
 
+/** Every card still open, oldest first, whenever it was asked. */
+export function openCardRows(): Array<{ threadId: string; id: string; at: number; card: string | null; fromBotId: string | null }> {
+  return db().prepare(
+    "SELECT thread_id AS threadId, id, at, json_extract(json, '$.card') AS card, json_extract(json, '$.from.botId') AS fromBotId " +
+    `FROM messages INDEXED BY messages_work_at WHERE ${WORK_KINDS} AND kind = 'options' ` +
+    "AND json_extract(json, '$.card.requestId') IS NOT NULL AND json_extract(json, '$.card.answered') IS NULL AND coalesce(json_extract(json, '$.card.dismissed'), 0) = 0 " +
+    "AND coalesce(json_extract(json, '$.card.expired'), 0) = 0 AND json_extract(json, '$.helperIntro') IS NULL AND json_extract(json, '$.inbox') IS NULL ORDER BY at",
+  ).all() as Array<{ threadId: string; id: string; at: number; card: string | null; fromBotId: string | null }>;
+}
+
 /** Successful tool calls after a time whose row mentions `word` (case-insensitive), newest last. */
 export function successfulCallsMentioning(since: number, word: string): Array<{ at: number; name: string; input: string | null }> {
   return db().prepare(

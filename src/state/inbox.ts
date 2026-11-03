@@ -1,6 +1,6 @@
-// On a Team Cloud: the person's inbox as its panel and its card in the chat show it. One copy of the server's list, read
-// again whenever their inbox's task says what it lists changed, and the panel's own place (open, the line read).
-// Null anywhere but a team's Cloud, where no task is anyone's inbox.
+// The person's inbox as the sidebar's row, its panel and a team's card in the chat show it. One copy of the server's list,
+// read again whenever what it depends on changes, and the panel's own place (open, the line read). A server older than this
+// page has none off a team: it answers 404, and the sidebar falls back to what it showed before.
 import { useEffect, useSyncExternalStore } from "react";
 import type { InboxRow, InboxView } from "../../shared/inbox";
 import { api } from "./api";
@@ -29,8 +29,16 @@ function store<T>(initial: T) {
 const list = store<InboxView | null>(null);
 export const currentInbox = list.get;
 export const useInboxView = (): InboxView | null => useSyncExternalStore(list.subscribe, list.get, list.get);
+const hasList = () => list.get() !== null;
+export const useInboxReady = (): boolean => useSyncExternalStore(list.subscribe, hasList, hasList);
+
+export type InboxSupport = "unknown" | "yes" | "no";
+const support = store<InboxSupport>("unknown");
+export const useInboxSupport = (): InboxSupport => useSyncExternalStore(support.subscribe, support.get, support.get);
+/** Tests and previews say what the server does. */
+export const setInboxSupport = support.set;
 /** Tests and previews show a list of their own. */
-export const setInboxView = list.set;
+export const setInboxView = (view: InboxView | null): void => { list.set(view); support.set(view ? "yes" : "unknown"); };
 
 let reading: Promise<void> | null = null;
 let readAgain = false;
@@ -41,8 +49,11 @@ export function refreshInbox(): Promise<void> {
     try {
       do {
         readAgain = false;
-        const view = await api<InboxView>("/api/inbox", { background: true }).catch(() => null);
-        if (view && Array.isArray(view.rows)) list.set(view);
+        const view = await api<InboxView>("/api/inbox", { background: true }).catch((error: unknown) => {
+          if ((error as { status?: number }).status === 404) { list.set(null); support.set("no"); }
+          return null;
+        });
+        if (view && Array.isArray(view.rows)) { list.set(view); support.set("yes"); }
       } while (readAgain);
     } finally {
       reading = null;
@@ -51,12 +62,17 @@ export function refreshInbox(): Promise<void> {
   return reading;
 }
 
-/** Keeps the list in step with the person's inbox task; nothing off a team. */
-export function useInboxLoader(version: string | null): void {
+/** Keeps the list in step with what it depends on, and catches up when the window comes back. A server without an inbox is
+ * not asked again. */
+export function useInboxLoader(version: string): void {
   useEffect(() => {
-    if (version === null) { list.set(null); return; }
-    void refreshInbox();
+    if (support.get() !== "no") void refreshInbox();
   }, [version]);
+  useEffect(() => {
+    const again = () => { if (support.get() !== "no") void refreshInbox(); };
+    window.addEventListener("focus", again);
+    return () => window.removeEventListener("focus", again);
+  }, []);
 }
 
 const patchRow = (id: string, patch: Partial<InboxRow>) => {
@@ -84,8 +100,10 @@ export function doneInboxRow(row: Pick<InboxRow, "id">): void {
 }
 
 /** A reply to a line of news that waits on one: it goes back where the line came from, as a Reply in the chat does. */
-export async function replyToInboxRow(view: Pick<InboxView, "botId" | "threadId">, row: Pick<InboxRow, "id">, text: string): Promise<void> {
-  await api(`/api/bots/${view.botId}/messages`, { method: "POST", body: JSON.stringify({ text, threadId: view.threadId, replyToId: row.id, sendId: crypto.randomUUID() }) });
+export async function replyToInboxRow(view: Pick<InboxView, "botId" | "threadId">, row: Pick<InboxRow, "id" | "origin">, text: string): Promise<void> {
+  const origin = view.threadId ? null : row.origin;
+  const path = origin?.groupId ? `/api/groups/${origin.groupId}/messages` : `/api/bots/${origin?.botId ?? view.botId}/messages`;
+  await api(path, { method: "POST", body: JSON.stringify({ text, threadId: origin?.threadId ?? view.threadId, replyToId: row.id, sendId: crypto.randomUUID() }) });
   void refreshInbox();
 }
 

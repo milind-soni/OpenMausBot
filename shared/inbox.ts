@@ -46,6 +46,10 @@ export interface InboxRow {
   tab: InboxTab;
   from: InboxItem["from"];
   via?: InboxItem["via"];
+  /** The bot that handed this work to the bot it is from. */
+  workingFor?: { botId: string; name: string };
+  /** On someone's Cloud: a guest's conversation asks this, not its owner's; `name` is empty when it isn't known. */
+  askedBy?: { name: string };
   origin?: InboxItem["origin"];
   text: string;
   at: number;
@@ -57,9 +61,10 @@ export interface InboxRow {
 }
 
 /** A person's inbox: where its lines live (none yet before the first arrives), and the line the inbox's card in that
- * conversation sits under (the newest that needed them, else the newest). */
+ * conversation sits under (the newest that needed them, else the newest). Off a team `botId` and `threadId` are null: its
+ * lines stay in the conversations they came from, each answered through its `origin`. */
 export interface InboxView {
-  botId: string;
+  botId: string | null;
   threadId: string | null;
   rows: InboxRow[];
   anchor: string | null;

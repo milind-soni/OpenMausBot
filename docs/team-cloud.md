@@ -64,6 +64,18 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
 - **Never asleep, kept across restarts.** A Team Cloud refuses the Admin's sleep request (`busy: ["team"]`) and keeps
   every member's session across a restart; a My Cloud revokes every session that is not its owner's at each boot.
 
+
+### Off a team
+
+Everyone has an Inbox: on a personal Cloud and in the desktop app with no account, the same row at the top of the sidebar
+opens the same panel. Each place keeps its own, where its bots live, and nothing syncs; the rail's "{name}: needs you"
+says which place to open. There is one person, so nothing is routed and nobody's assistant answers. An approval or a
+question is the open card itself, listed from where it was asked, so one answer settles it however many surfaces show it
+and whatever was waiting before an upgrade is listed. `message_person` leaves out `to`: it posts one line in its
+conversation and sends one notification, and a reply is an ordinary line there. A routine's report and a failure of work
+nobody watches each get a line, in `place-inbox.json`. A guest's conversation left on a Cloud reaches its owner labelled
+with who asked, and its news stays out of the owner's list. See [Verifying the Inbox](verification/inbox.md).
+
 ## Rules
 
 The team's rules live on the Admin (openmaus-cloud `docs/team-cloud.md` "Rules"): one document, `{ schema: 1, limits }`, that
