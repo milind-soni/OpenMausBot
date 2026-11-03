@@ -173,7 +173,7 @@ describe("skills brought in from this computer", () => {
     installSkill(bot, "mine", [{ path: "SKILL.md", content: skillMd("zeta-own", "My own.") }]);
     setSkillEnabled(bot, "zeta-own", true);
     const host = createSkillsLibraryHost({
-      store: { bot: () => undefined, messagesFor: () => [] } as unknown as Store,
+      store: { bot: () => undefined, messagesFor: () => [], taskByThread: () => undefined } as unknown as Store,
       cfg: {} as AppConfig,
       appendSkillRequestCard: () => ({ requestId: "", summary: "" }),
     });

@@ -173,10 +173,11 @@ describe("POST /api/bots/:id/messages and who typed it", () => {
   });
 
   it("takes neither a press, whose words the widget wrote, nor a relay as a person's", async () => {
-    const { store, threadId, post, show } = await fixture();
+    const { store, bot, threadId, post, show } = await fixture();
     const pressed = await post({ threadId, sendId: SEND, text: words, widgetAction: { messageId: show("routineForm"), ref: "confirm", values: { days: "mon,tue,wed,thu,fri,sat,sun", report: "discord:releases" } } });
     expect(pressed.status, JSON.stringify(pressed.body)).toBe(202);
     expect(typedWords(threadId, [pressed.body.message])).toBe("");
+    store.patchBot(bot.id, { approvalMode: "ask", autoApprove: false });
     const relayed = await post({ threadId, sendId: OTHER_SEND, text: words, expectedActiveLeafId: store.activeLeaf(threadId), expectedApprovalMode: "ask" }, "/guarded");
     expect(relayed.status, JSON.stringify(relayed.body)).toBe(202);
     expect(typedWords(threadId, [relayed.body.message])).toBe("");
