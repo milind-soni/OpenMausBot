@@ -123,7 +123,7 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
   { id: "liveCalls", section: "voice", labelKey: "call.live.key", purposeKey: "keys.purpose.liveCalls", name: "OpenAI", env: [],
     words: ["openai", "live calls", "calls", "voice", "talk", "gpt-live"], mark: { icon: Phone }, kind: "uses", uses: "openai" },
   { id: "liveKey", section: "voice", labelKey: "keys.label.liveKey", purposeKey: "keys.purpose.liveKey", name: "OpenAI", env: ["OMB_OPENAI_LIVE_KEY"],
-    words: ["openai", "live calls", "calls", "voice", "gpt-live"], mark: { icon: Phone }, kind: "key",
+    words: ["openai", "live calls", "calls", "voice", "gpt-live", "azure", "foundry"], mark: { icon: Phone }, kind: "key",
     target: { patch: (value) => ({ live: { key: value } }), slot: "openaiLiveKey",
       saved: (config) => flag(config.savedKeys?.openaiLiveKey ?? { configured: config.live?.keySource === "live" }),
       placeholder: "sk-…", href: "https://platform.openai.com/api-keys", analytics: "openai_live", shape: OPENAI_SHAPE } },

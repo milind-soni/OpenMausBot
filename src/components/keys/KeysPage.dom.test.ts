@@ -93,6 +93,15 @@ describe("the keys page", () => {
     expect(rowsShown()).not.toContain("elevenlabs");
   });
 
+  it("offers the Live calls service, OpenAI or Azure OpenAI, on the separate live key row", () => {
+    setConfig({ ...fx.config, live: { configured: false, provider: "azure", voice: "", readTypedReplies: true, idleMinutes: 5 } });
+    page();
+    const select = row("liveKey")!.querySelector<HTMLSelectElement>("select")!;
+    expect([...select.options].map((option) => option.value)).toEqual(["openai", "azure"]);
+    expect(select.value).toBe("azure");
+    expect(row("liveKey")!.querySelector('input[type="url"]')).not.toBeNull();
+  });
+
   it("opens a section that holds a saved key, and counts what is connected", () => {
     setConfig({ ...fx.config, box: { configured: true, last4: "c3d4" } });
     page();
