@@ -111,7 +111,7 @@ describe("CloudWelcome", () => {
     expect(host.querySelector('[aria-current="step"]')!.getAttribute("data-welcome-rail")).toBe("bring");
     expect([...document.body.querySelectorAll("button")].map((node) => node.textContent?.trim())).toEqual([
       "1Bring your stuffYour bots and chats (Not done yet)", "2Connect your AIClaude or ChatGPT (Not done yet)", "3Files and appsOptional (Not done yet)",
-      "Skip setup", "Continue",
+      "Skip setup", "Continue", "Move from Grok Bot",
     ]);
     expect(sent()).toEqual([]);
     expect(hintsPut()).toEqual([[SHOWN]]);

@@ -13,7 +13,6 @@ import { BOT_PROFILE_LIMITS } from "./bot-profile.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { normalizeCronSchedule } from "./routine-schedule.ts";
 import { parseSkillMd, SKILL_FILE_MAX_BYTES, yamlFrontmatterValue } from "./skill-md.ts";
-import { MAUS_COLOR_NAMES } from "./wire.ts";
 
 export const GROK_EXPORT_FORMAT = "grok-bot-export";
 const OLD_EXPORT_FORMAT = "openmaus.grok/1";
@@ -21,6 +20,7 @@ const OLD_EXPORT_FORMAT = "openmaus.grok/1";
 export const GROK_EXPORT_FILE = /^grok-bot-export[^/\\]*\.(?:json|md|txt)$/i;
 export const GROK_EXPORT_MAX_CHARS = 4 * 1024 * 1024;
 const MAX_ROUTINES = 50;
+const BOT_COLORS = ["green", "blue", "red", "orange", "purple", "cyan", "pink", "yellow", "teal", "coral"] as const;
 const MAX_APPS = 30;
 /** Failed brace matches before a reply stops being searched: each one scans to the end of the text. */
 const MAX_UNBALANCED = 50;
@@ -605,7 +605,7 @@ export function grokMovePlan(bot: GrokBot, options: { timeZone?: string } = {}):
         ...(bot.title ? { title: clip(bot.title, 200) } : {}),
         ...(description ? { description: clip(description, 4_000) } : {}),
         ...(soul ? { soul } : {}),
-        appearance: { color: MAUS_COLOR_NAMES[hash % MAUS_COLOR_NAMES.length]! },
+        appearance: { color: BOT_COLORS[hash % BOT_COLORS.length]! },
         ...(skills.length ? { skills: skills.map((skill) => skill.name) } : {}),
         ...(connections.length ? { connections: connections.map((connection) => connection.key) } : {}),
         ...(seed ? { seed } : {}),

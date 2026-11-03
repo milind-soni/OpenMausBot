@@ -16,4 +16,10 @@ describe("the first setup step's promise", () => {
   it("on My Cloud, says it as before", () => {
     expect(bring(false)).toContain("Bots on your computer come here by themselves from the MausBot app.");
   });
+
+  it("offers the move from Grok Bot on My Cloud, as a choice that adds no step; a Team Cloud starts with bots of its own", () => {
+    expect(bring(false)).toContain("data-grok-move-open");
+    expect(bring(false)).toContain("Move from Grok Bot");
+    expect(bring(true)).not.toContain("data-grok-move-open");
+  });
 });
