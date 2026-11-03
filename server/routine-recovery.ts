@@ -27,6 +27,8 @@ export interface RoutineFailureFacts {
   limit?: "engine" | "model" | "credits";
   /** A backup engine takes over from one whose usage limit refused the run, or that is signed out. */
   backupReady?: boolean;
+  /** A usage limit fails the run instead of starting it again at the reset: its routine runs again on its own schedule. */
+  skipLimitReplay?: boolean;
   /** The turn's reply came back; only a step it ran failed or wasn't allowed (the runtime error's `partial`). */
   partial?: boolean;
 }
@@ -181,7 +183,7 @@ export function recoverRun(run: RoutineRun, failure: string, facts: RoutineFailu
   }
   const first = firstNotice(notices, run.botId, verdict.cause, now);
   const reset = verdict.resetsAt;
-  if (reset && reset > now && reset - now <= LIMIT_WAIT_MS && requeueOnce(run, "usage_limit", failure, now, reset + AFTER_RESET_MS)) {
+  if (reset && !facts.skipLimitReplay && reset > now && reset - now <= LIMIT_WAIT_MS && requeueOnce(run, "usage_limit", failure, now, reset + AFTER_RESET_MS)) {
     return { queued: true, ...(first ? { alert: { detail: `This bot's AI reached its usage limit. This run starts again at ${when(reset + AFTER_RESET_MS)}.` } } : {}) };
   }
   const action = verdict.cause === "setup" ? failure : verdict.cause === "credits" && facts.trialCredit ? TRIAL_ACTION : OWNER_ACTION[verdict.cause];

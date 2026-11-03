@@ -264,6 +264,8 @@ export interface RoutineManagerOptions {
   limitResetAt?: (engine: string) => number | null;
   /** The bot has a backup engine to continue on when its own engine's usage limit refuses a run, or it is signed out. */
   limitBackup?: (botId: string, scope?: "engine" | "model" | "credits" | "signed-out") => boolean;
+  /** A recurring routine run that a usage limit stopped waits for its next scheduled run instead of starting again at the reset. */
+  skipLimitReplay?: () => boolean;
   /** Work this thread handed to another bot is still open, so its wait is not only on the person. */
   handedOffWorkLive?: (threadId: string) => boolean;
   launchId?: string;
@@ -1309,7 +1311,8 @@ export class RoutineManager {
     this.failureFacts.delete(run.id);
     if (this.closing) return;
     const held = facts.limit !== undefined || facts.limitResetsAt !== undefined ? facts.limit ?? "engine" : facts.stopReason === "auth_required" ? "signed-out" : undefined, backupReady = held !== undefined && this.options.limitBackup?.(run.botId, held) === true;
-    const recovery = recoverRun(run, failure, { ...facts, ...(backupReady ? { backupReady } : {}) }, this.now(), this.ownerNotices);
+    const skipLimitReplay = this.options.skipLimitReplay?.() === true && this.scheduledRecurringRun(run);
+    const recovery = recoverRun(run, failure, { ...facts, ...(backupReady ? { backupReady } : {}), ...(skipLimitReplay ? { skipLimitReplay } : {}) }, this.now(), this.ownerNotices);
     if (!recovery.queued) this.failRun(Object.assign(run, { partial: (facts.partial && Boolean(run.output)) || undefined }), recovery.error, "failed", recovery.alert);
     else {
       this.saveLater();
@@ -1317,6 +1320,12 @@ export class RoutineManager {
       if (recovery.alert) this.options.onRunDeferred?.(cloneRun(run), recovery.alert);
     }
     queueMicrotask(() => this.tickInBackground());
+  }
+
+  private scheduledRecurringRun(run: RoutineRun): boolean {
+    if ((run.triggerSource ?? (run.manual ? "manual" : "schedule")) !== "schedule") return false;
+    const type = this.routines.find((routine) => routine.id === run.routineId)?.schedule.type;
+    return type !== undefined && type !== "once" && type !== "limit_reset";
   }
 
   finishGoalRun(runId: string, status: GroupGoalRunStatus, detail: string): RoutineRun | null {

@@ -416,6 +416,37 @@ describe("an unattended run only its owner can fix", () => {
     expect(h.deferred).toHaveLength(1);
   });
 
+  it("with skipLimitReplay on, fails a recurring routine's scheduled run at a usage limit; manual and one-time runs still wait for the reset", async () => {
+    const h = harness({ skipLimitReplay: () => true });
+    const limit = "This Claude account has reached its 5-hour limit, which resets soon. Until then, switch this bot to another AI or Claude account.";
+    const hourly = h.manager.create({ name: "Price check", prompt: "Check the price", botId: "maus-1", schedule: { type: "interval", everyMinutes: 60, anchorAt: START } });
+    const once = h.manager.create({ name: "Reminder", prompt: "Remind me", botId: "maus-2", schedule: { type: "once", at: START + 30 * MINUTE } });
+    await h.advance(30 * MINUTE);
+    const oneTime = h.runs().find((run) => run.routineId === once.id)!;
+    h.fail(oneTime.threadId!, limit, { stopReason: "quota", limitResetsAt: START + 3 * 3_600_000 });
+    expect(h.run(oneTime.id)).toMatchObject({ status: "queued", retried: "usage_limit" });
+    await h.advance(30 * MINUTE);
+    const scheduled = h.runs().find((run) => run.routineId === hourly.id)!;
+    expect(scheduled).toMatchObject({ status: "running", triggerSource: "schedule" });
+    h.fail(scheduled.threadId!, limit, { stopReason: "quota", limitResetsAt: START + 3 * 3_600_000 });
+    expect(h.run(scheduled.id)).toMatchObject({ status: "failed", error: limit });
+    expect(h.failed.map(({ run, alert }) => [run.id, alert])).toEqual([
+      [scheduled.id, { detail: "This bot's AI reached its usage limit. Its routines work again once it resets, or choose another AI for this bot now." }],
+    ]);
+    const manual = await h.start(hourly.id);
+    h.fail(manual.threadId!, limit, { stopReason: "quota", limitResetsAt: START + 3 * 3_600_000 });
+    expect(h.run(manual.id)).toMatchObject({ status: "queued", retried: "usage_limit" });
+  });
+
+  it("starts a recurring routine's scheduled run again at the reset while skipLimitReplay is off", async () => {
+    const h = harness();
+    const hourly = h.manager.create({ name: "Price check", prompt: "Check the price", botId: "maus-1", schedule: { type: "interval", everyMinutes: 60, anchorAt: START } });
+    await h.advance(60 * MINUTE);
+    const scheduled = h.runs().find((run) => run.routineId === hourly.id)!;
+    h.fail(scheduled.threadId!, "This Claude account has reached its 5-hour limit.", { stopReason: "quota", limitResetsAt: START + 3 * 3_600_000 });
+    expect(h.run(scheduled.id)).toMatchObject({ status: "queued", retried: "usage_limit", retryAt: START + 3 * 3_600_000 + MINUTE });
+  });
+
   it("fails a usage limit with no reset time, or one too far off, and tells the owner", async () => {
     const h = harness();
     const run = await h.start(h.routine("maus-1").id);

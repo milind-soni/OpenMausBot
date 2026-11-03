@@ -36,6 +36,10 @@ Each run starts fresh by default. For work that builds on last time, such as a Q
 
 If your computer is often off when a routine is due, open the routine's **Advanced** options and turn on **Also run when OpenMausBot starts**. The routine then runs once each time OpenMausBot opens, as well as on its schedule. Its run logs show these runs as **On startup**. A routine that OpenMausBot is already catching up on at startup runs once, not twice, and an occurrence missed by more than 12 hours is covered by the startup run instead of being reported as missed. Switching to another workspace and back, or OpenMausBot recovering from a crash, doesn't count as opening the app again. Pausing a routine stops its startup runs too. It's available for repeating routines, and you can also ask the bot in chat to turn it on.
 
+### When the AI's usage limit stops a run
+
+If a bot's AI reaches its usage limit during a run and the limit resets within 12 hours, OpenMausBot starts that run once more a minute after the reset, and tells you so. For a repeating routine you can have it wait for its next scheduled run instead: set `"recurringRoutinesSkipLimitReplay": true` under `features` in `~/.openmausbot/config.json`. The stopped run then fails with the usual usage-limit notice. Runs you start with **Run now**, one-time routines and routines that run when a limit resets still start again at the reset, and a bot with a backup AI still switches to it at once.
+
 ### Clear a folder's unread dots
 
 Right-click a folder or open its **…** menu, then choose **Mark folder as read**. This clears unread dots without opening each thread. It does not answer approvals, dismiss questions, or stop any running work.
