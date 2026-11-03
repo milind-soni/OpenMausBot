@@ -11,7 +11,8 @@ type ElicitationEvent = Body<Extract<RuntimeEvent, { type: "request.opened" | "r
 const CARD_PREFIX = "elicitation:";
 const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 
-export function claudeElicitations(write: (frame: unknown) => void, emit: (event: ElicitationEvent) => void) {
+/** `write` settles true once the frame reached the CLI's stdin, false when it could not be sent. */
+export function claudeElicitations(write: (frame: unknown) => Promise<boolean>, emit: (event: ElicitationEvent) => void) {
   const pending = new Set<string>();
   const reply = (id: string, response: Record<string, unknown>) =>
     write({ type: "control_response", response: { subtype: "success", request_id: id, response } });
@@ -34,7 +35,7 @@ export function claudeElicitations(write: (frame: unknown) => void, emit: (event
       const properties = r.requested_schema?.properties;
       const fields = properties && typeof properties === "object" ? Object.keys(properties).length : 0;
       if (r.mode === "url" || fields > 0) {
-        reply(id, { action: "decline" });
+        void reply(id, { action: "decline" });
         const url = text(r.url);
         emit({
           type: "runtime.notice",
@@ -56,13 +57,19 @@ export function claudeElicitations(write: (frame: unknown) => void, emit: (event
       });
       return true;
     },
-    /** The person's answer to one of these cards; false when the card is not an open elicitation. */
-    answer(requestId: string, behavior: "allow" | "deny" | "answer"): boolean {
+    /**
+     * The person's answer to one of these cards: "sent" once the CLI has it, "failed" when it could not be
+     * delivered (the card is withdrawn, never shown as approved), false when the card is not an open elicitation.
+     */
+    async answer(requestId: string, behavior: "allow" | "deny" | "answer"): Promise<"sent" | "failed" | false> {
       const id = requestId.startsWith(CARD_PREFIX) ? requestId.slice(CARD_PREFIX.length) : "";
       if (!pending.delete(id)) return false;
-      reply(id, behavior === "allow" ? { action: "accept", content: {} } : { action: "decline" });
+      if (!(await reply(id, behavior === "allow" ? { action: "accept", content: {} } : { action: "decline" }))) {
+        resolved(id, "deny", "system");
+        return "failed";
+      }
       resolved(id, behavior === "allow" ? "allow" : "deny", "user");
-      return true;
+      return "sent";
     },
     /** The CLI that asked is gone: every open card is withdrawn. */
     close(): void {

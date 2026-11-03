@@ -1353,7 +1353,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         child,
         broker,
         // A CLI that already exited needs no answer: the write is skipped, like writeUser's.
-        elicit: claudeElicitations((frame) => { const { stdin } = session.child; if (stdin.writable && !stdin.destroyed) try { stdin.write(`${JSON.stringify(frame)}\n`, () => {}); } catch {} },
+        elicit: claudeElicitations((frame) => new Promise<boolean>((resolve) => {
+          const { stdin } = session.child;
+          if (!stdin.writable || stdin.destroyed) return resolve(false);
+          try { stdin.write(`${JSON.stringify(frame)}\n`, (err) => resolve(!err)); } catch { resolve(false); }
+        }),
           (event) => emit({ ...base(threadId, session.turn?.turnId ?? turnId), ...event })),
         mcpConfigPath,
         systemPromptPath,
@@ -1738,6 +1742,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             session.broker = undefined;
             failedBroker?.pause();
             failedBroker?.close();
+            session.elicit.close();
             if (session.mcpConfigPath) {
               try {
                 rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
@@ -1817,6 +1822,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             });
             session.broker?.close();
             session.broker = undefined;
+            session.elicit.close();
             if (session.mcpConfigPath) {
               try {
                 rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
@@ -2061,7 +2067,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         steer,
         interruptTurn: async (threadId) => active.get(threadId)?.stop(),
         respondToRequest: async (threadId, requestId, decision) => {
-          if (sessions.get(threadId)?.elicit.answer(requestId, decision.behavior)) return decision.behavior === "allow" ? "allowed-once" : "rejected";
+          const elicited = await sessions.get(threadId)?.elicit.answer(requestId, decision.behavior);
+          if (elicited === "failed") return "unavailable";
+          if (elicited === "sent") return decision.behavior === "allow" ? "allowed-once" : "rejected";
           const broker = sessions.get(threadId)?.broker ?? active.get(threadId)?.broker;
           if (!broker) return "unavailable";
           const behavior = decision.behavior === "answer" ? "answer" : decision.behavior;
