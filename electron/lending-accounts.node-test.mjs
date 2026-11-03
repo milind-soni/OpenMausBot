@@ -8,7 +8,7 @@ import { createComputerSharing } from "./computer-sharing.mjs";
 
 const until = async (check, what) => { for (let i = 0; i < 400; i++) { if (check()) return; await new Promise((resolve) => setTimeout(resolve, 5)); } assert.fail(`never: ${what}`); };
 
-async function fixture(t) {
+async function fixture(t, { screen = () => false } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), "omb-lending-accounts-"));
   const env = { id: "cloud-a", origin: "https://a.fixture.test", name: "A's Cloud", cloud: { id: "c" } };
   const f = { env, account: "acct-a", status: "connected", origin: env.origin, places: [env], polls: [], asks: [], routes: [], live: () => [...f.polls, ...f.asks].filter((signal) => !signal.aborted).length };
@@ -17,7 +17,7 @@ async function fixture(t) {
   f.sharing = createComputerSharing({
     file: path.join(dir, "sharing.json"), environments: () => f.places, enabled: async () => false, home: path.join(dir, "home"),
     cloud: () => ({ status: f.status, accountId: f.account, origin: f.origin }), myCloud: () => f.places[0] ?? null, ownClouds: () => f.places,
-    hostControl: async () => ({ renew: async () => {}, release: async () => {} }), screen: () => false,
+    hostControl: async () => ({ renew: async () => {}, release: async () => {} }), screen,
     async fetch(url, { signal }) {
       const route = new URL(url).pathname;
       f.routes.push(route);
@@ -32,11 +32,18 @@ async function fixture(t) {
   return f;
 }
 
+/** The automatic pass has finished, and the connection it left is the one polling. */
+async function settled(f) {
+  await f.sharing.lendProjects([]);
+  await until(() => f.polls.some((signal) => !signal.aborted), "the lent connection");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+}
+
 test("switching: this computer stops working for the account left, its Cloud is told nothing and can go to sleep, and it comes back with that account", async (t) => {
   const f = await fixture(t);
   await f.sharing.saveCloud(f.env, { folders: [], internet: true });
   f.sharing.cloudChanged();
-  await until(() => f.polls.length > 0, "the lent connection");
+  await settled(f);
   assert.equal(f.sharing.lendingToCloud(), true);
   f.routes.length = 0;
 
@@ -67,4 +74,23 @@ test("leaving another account, or none, stops nothing", async (t) => {
   f.sharing.leaveAccount("acct-z");
   f.sharing.leaveAccount(null);
   assert.equal(f.sharing.lendingToCloud(), true);
+});
+
+test("a lending pass already under way when the account is left lends nothing more, and tells that Cloud nothing", async (t) => {
+  const screen = Promise.withResolvers();
+  let held = false;
+  const f = await fixture(t, { screen: () => (held ? screen.promise : false) });
+  await f.sharing.saveCloud(f.env, { folders: [], internet: true });
+  await settled(f);
+  held = true;
+  f.sharing.cloudChanged();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  f.sharing.leaveAccount("acct-a");
+  f.routes.length = 0;
+  const polling = f.polls.length;
+  screen.resolve(true);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(f.routes.filter((route) => route.endsWith("/disconnect")), [], "no request that could wake a sleeping Cloud");
+  assert.equal(f.polls.length, polling, "nothing dials the account left");
+  assert.equal(f.sharing.lendingToCloud(), false);
 });

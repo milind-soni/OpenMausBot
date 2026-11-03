@@ -621,8 +621,11 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     run(env, grant);
     changed();
   };
+  /** Moves on each time an account is left: a pass that began before that lends nothing more. */
+  let accountTurn = 0;
   const automaticPass = async (projects, target) => {
     if (closed || paused || !ownClouds().some(verifiedCloud)) return;
+    const turn = accountTurn;
     const [[homeFolder = null], screenLent, projectFolders] = await Promise.all([
       lendable([{ id: randomUUID(), path: home, write: true, home: true }]),
       readScreen(),
@@ -630,11 +633,11 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     ]);
     for (const env of ownClouds()) {
       const kept = records[env.id], current = verifiedCloud(env);
-      if (closed || paused || !current) continue;
+      if (closed || paused || turn !== accountTurn || !current) continue;
       const keptFolders = kept?.cloud?.accountId === current.accountId && Array.isArray(kept.folders) ? await lendable(kept.folders) : [];
       const wanted = automaticGrant({ kept: keptFolders, home: homeFolder, screen: screenLent, projects: env.id === (target ?? myCloud())?.id ? projectFolders : [],
         terminal: terminalAccount === current.accountId });
-      if (closed || paused || records[env.id] !== kept) continue;
+      if (closed || paused || turn !== accountTurn || records[env.id] !== kept) continue;
       if (!lendsAsWanted(kept, wanted)) lendNow(env, current, kept, wanted);
       else if (!running.has(env.id) && validRecord(kept) && cloudLendingVerdict(kept.cloud, cloud(env), env).allow) run(env, kept);
     }
@@ -826,6 +829,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
      * told to them (one asleep stays asleep) and what was lent is kept, so lending goes on if it comes back. */
     leaveAccount(accountId) {
       if (!accountId) return;
+      accountTurn++;
       for (const [id, grant] of Object.entries(records)) {
         if (grant?.cloud?.accountId !== accountId) continue;
         stop(id);
