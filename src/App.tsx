@@ -54,7 +54,7 @@ import { cloudFirstRun, cloudWelcomeVisible, useCloudWelcome } from "@/lib/cloud
 import { engineReady } from "@/components/EngineLibrary";
 import { CommandPalette } from "@/components/CommandPalette";
 import { t } from "@/lib/i18n";
-import { shouldOpenKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
+import { botCycleStep, shouldOpenKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
 import { effectiveLanguage, useLanguageChoice, usePageLanguage } from "@/lib/language-preference";
 import { botUnreadCount, showBrowserUnread } from "@/lib/bot-unread";
 import { phonePairingSettingsAction, takePhonePairingRequest } from "@/lib/phone-pairing"; import { takeConnectRequest } from "@/lib/connect-link";
@@ -177,6 +177,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
       const bots = state.bots.filter((b) => !b.hidden);
+      const step = e.shiftKey ? botCycleStep(e) : null;
       if (e.key === "n" && !e.shiftKey) {
         e.preventDefault();
         dispatch({ type: "newBot" });
@@ -186,9 +187,9 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           e.preventDefault();
           openBot(dispatch, target, showThreads);
         }
-      } else if (e.shiftKey && (e.key === "[" || e.key === "]")) {
+      } else if (step !== null) {
         const idx = bots.findIndex((b) => b.id === state.selectedId);
-        const next = bots[(idx + (e.key === "]" ? 1 : -1) + bots.length) % bots.length];
+        const next = bots[(idx + step + bots.length) % bots.length];
         if (next) {
           e.preventDefault();
           openBot(dispatch, next, showThreads);
