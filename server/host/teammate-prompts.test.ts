@@ -11,17 +11,20 @@ const teammate = { id: "mira", name: "Mira" } as BotRecord;
 
 const NOW = 10 * 24 * 60 * 60_000;
 
-function questions(fullAccess: boolean, since = NOW - 60_000, now = NOW): string {
+function questions(fullAccess: boolean, since = NOW - 60_000, now = NOW, over: Partial<TeammatePromptDeps> = {}): string {
   const deps = {
     now: () => now,
     store: { bots: [chief, teammate], bot: () => teammate },
     isUnattended: () => false,
     startedOutside: () => false,
+    asksActingPerson: () => () => true,
     guestDriven: () => false,
     confined: () => false,
     fullAccess: () => fullAccess,
     readableFrom: () => () => true,
-    waitingForPerson: () => [{ bot: "Mira", threadId: "t1", thread: "Pricing", question: "Keep the old page?", since }],
+    waitingForPerson: (_chief: BotRecord, _teammates: readonly BotRecord[], readable: (threadId: string, botId: string) => boolean) =>
+      readable("t1", "mira") ? [{ bot: "Mira", threadId: "t1", thread: "Pricing", question: "Keep the old page?", since }] : [],
+    ...over,
   } as unknown as TeammatePromptDeps;
   return createTeammatePrompts(deps).questions(chief, "job");
 }
@@ -55,6 +58,14 @@ describe("what a Chief is told about its teammates' questions", () => {
     for (const over of [{ isUnattended: () => true }, { startedOutside: () => true }, { guestDriven: () => true }, { confined: () => true }]) {
       expect(prompts(over).personBehind("own", "inbox")).toBe(false);
     }
+  });
+
+  it("on a team, lists only the questions for the person the Chief's turn acts for", () => {
+    const asked: Array<[string, string, string]> = [];
+    const forOther = questions(true, NOW - 60_000, NOW, { asksActingPerson: (chiefThread) => (threadId, botId) => { asked.push([chiefThread, threadId, botId]); return false; } });
+    expect(forOther).toBe("");
+    expect(asked).toEqual([["job", "t1", "mira"]]);
+    expect(questions(true)).toContain("Keep the old page?");
   });
 
   it("a teammate's words stay in the JSON list, never loose in the sentence that tells the Chief what to do", () => {

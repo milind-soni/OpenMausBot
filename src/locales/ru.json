@@ -281,7 +281,7 @@
   "server.teammates.backWithResultsRestart": "После перезапуска продолжено с результатами переданной работы, идёт проверка",
   "server.teammates.handedWork": "переданная работа",
   "server.teammates.answerPassed": "Ответ передан ожидающей работе",
-  "server.teammates.answeredForPerson": "Дан ответ за человека на вопрос: {name}",
+  "server.teammates.answeredForPerson": "Дан ответ за человека на вопрос от {name}",
   "server.teammates.personReplied": "{name} ответил",
   "server.teammates.personAssistantAnswered": "Ассистент {name} ответил",
   "server.teammates.told": "Сообщено: {name}",
