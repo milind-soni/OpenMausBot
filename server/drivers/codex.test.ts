@@ -2688,6 +2688,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
 
     expect(recorder.events.some((event) => event.type === "request.opened")).toBe(false);
     expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ action: "decline" });
+    expect(recorder.events.find((event) => event.type === "runtime.notice")?.message).toBe("example asked for input OpenMausBot can't show yet, so the request was declined.");
   });
 
   it("grants Codex additional permissions with their native response shape", async () => {
