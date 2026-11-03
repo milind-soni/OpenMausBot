@@ -302,6 +302,13 @@ const TOOL_DEFINITIONS = [
         message: { type: "string", description: "The complete first message of the thread — everything the run needs, since it will not see this conversation." },
         bot_id: { type: "string", description: START_THREAD_SELF_ID },
         folder: { type: "string", description: "Optional: the name of one of your existing folders to file the thread under. Leave out unless the person named one." },
+        model_selection: {
+          type: "object",
+          additionalProperties: false,
+          properties: { instanceId: { type: "string", minLength: 1 }, model: { type: "string", minLength: 1 } },
+          required: ["instanceId", "model"],
+          description: "Optional: an engine instance and model id you can already use, as in propose_model. Leave out for this conversation's model.",
+        },
       },
       required: ["title", "message"],
     },

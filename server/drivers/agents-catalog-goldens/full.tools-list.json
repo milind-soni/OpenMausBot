@@ -353,6 +353,23 @@
           "folder": {
             "type": "string",
             "description": "Optional: the name of one of your existing folders to file the thread under. Leave out unless the person named one."
+          },
+          "model_selection": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "instanceId": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "instanceId",
+              "model"
+            ],
+            "description": "Optional: an engine instance and model id you can already use, as in propose_model. Leave out for this conversation's model."
           }
         },
         "required": [
