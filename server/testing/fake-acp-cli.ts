@@ -3,6 +3,7 @@
 // session/prompt and scripted session/update streams) for driver tests. Env knobs:
 //   FAKE_ACP_LOAD_NULL  session/load returns null, so the driver falls through to session/new
 //   FAKE_ACP_REJECT_LIVE_LOAD_FILE  while it exists, load/resume of a session live in this process errors
+//     (FAKE_ACP_REJECT_LIVE_LOAD_DSH=1: with dsh's -32602 "session is already active" instead of -32000)
 //   FAKE_ACP_CACHED_LIVE_LOAD  a live session/load is acknowledged but keeps the old MCP credentials, like Qwen
 //   FAKE_ACP_TEXT_REPLY  answer every session/prompt with only this text
 //   FAKE_ACP_MODE  happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | crash-in-prompt | hang
@@ -115,6 +116,9 @@ const handoffIdOf = (reply: string): string => /"requestId":"([\w-]+)"/.exec(rep
 const statusCall = (id: string): { name: string; args: () => object } => ({ name: "assignment_status", args: () => ({ id }) });
 const logFile = process.env.FAKE_ACP_LOG_FILE ?? "";
 const rejectLiveLoadFile = process.env.FAKE_ACP_REJECT_LIVE_LOAD_FILE ?? "";
+const liveLoadError = (sessionId: string) => process.env.FAKE_ACP_REJECT_LIVE_LOAD_DSH === "1"
+  ? { code: -32602, message: `Invalid params: session is already active: ${sessionId}` }
+  : { code: -32000, message: "session already active in this agent" };
 function fakeLog(line: string): void {
   if (!logFile) return;
   try {
@@ -731,7 +735,7 @@ function handle(msg: any) {
         out({
           jsonrpc: "2.0",
           id: msg.id,
-          error: { code: -32000, message: "session already active in this agent" },
+          error: liveLoadError(msg.params.sessionId),
         });
         break;
       }
@@ -757,7 +761,7 @@ function handle(msg: any) {
         out({
           jsonrpc: "2.0",
           id: msg.id,
-          error: { code: -32000, message: "session already active in this agent" },
+          error: liveLoadError(msg.params.sessionId),
         });
         break;
       }
