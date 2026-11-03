@@ -2764,7 +2764,6 @@
   "mausbotWelcome.add": "Додати {name}",
   "mausbotWelcome.notNow": "Не зараз",
   "mausbotWelcome.notNowHint": "{name} не буде на бічній панелі. Увімкніть його будь-коли в Налаштування → Загальні.",
-  "grokFinish.messageApps": "Застосунки для підключення: {apps}.",
   "app.loading.connecting": "Підключаємося до ваших ботів…",
   "app.loading.updating": "Оновлюємо My Cloud…",
   "cloudSend.list.routineOne": "1 рутина",
