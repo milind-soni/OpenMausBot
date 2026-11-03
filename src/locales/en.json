@@ -6633,6 +6633,8 @@
   "apiInstances.key": "API key",
   "apiInstances.models": "Model IDs, separated by commas (optional)",
   "apiInstances.modelsHint": "Leave the model IDs empty to detect them. If the model picker then shows only sample models, this server does not list its models: enter them here.",
+  "apiInstances.geminiPreset": "Fill in Google Gemini",
+  "apiInstances.geminiKeyHint": "Paste a Gemini API key from Google AI Studio (aistudio.google.com/apikey). Models are detected after you add it.",
   "apiInstances.add": "Add server",
   "apiInstances.adding": "Adding…",
   "apiInstances.remove": "Remove {name}",
