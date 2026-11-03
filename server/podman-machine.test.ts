@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { CommandRunner } from "./container-computer.ts";
-import { startStoppedPodmanMachine } from "./podman-machine.ts";
+import { NOT_ANSWERING_YET, startStoppedPodmanMachine } from "./podman-machine.ts";
 
 type Status = { runtime: "docker" | "podman" | null; daemonUp: boolean; problem: string | null };
 const down: Status = { runtime: "podman", daemonUp: false, problem: "Start podman first" };
@@ -89,6 +89,13 @@ describe("starting a stopped Podman machine on a Mac", () => {
     const answers = [down, down, up];
     await expect(fake.start(down, "darwin", Date.now, async () => answers.shift()!)).resolves.toBe(up);
     expect(answers).toEqual([]);
+  });
+
+  it("says the machine started when Podman still does not answer after the wait, not \"Start podman first\"", async () => {
+    const fake = podman([{ Name: "podman-machine-default", Default: true }]);
+    let checks = 0;
+    await expect(fake.start(down, "darwin", Date.now, async () => { checks++; return down; })).resolves.toEqual({ ...down, problem: NOT_ANSWERING_YET });
+    expect(checks).toBe(20);
   });
 
   it("does not hold a failed status check against later turns", async () => {
