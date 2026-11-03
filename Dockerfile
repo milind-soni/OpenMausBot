@@ -14,6 +14,7 @@
 #   docker build -t openmausbot .
 #   docker build --build-arg ENGINES="@anthropic-ai/claude-code @openai/codex" -t openmausbot .
 #   docker build --target cloud-home -t omb-cloud-home .
+#   docker buildx build --platform linux/arm64 -t openmausbot .   # Raspberry Pi 4/5, ARM servers
 #
 # HOME is the /data volume, so engine CLI logins (~/.claude, ~/.codex, ~/.grok,
 # ...) and OpenMausBot's own state (~/.openmausbot) persist across container
@@ -30,7 +31,9 @@ FROM caddy:2.10.2 AS edge
 # capability (and the build user's ownership).
 RUN cp /usr/bin/caddy /caddy
 
-FROM node:24-bookworm-slim AS build
+# The JavaScript build is the same for every CPU, so it runs once on the build
+# host's own; only the Data engine's native tree below follows the image's CPU.
+FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS build
 WORKDIR /src
 # pinned to package.json#packageManager; corepack is being removed from Node
 RUN npm install -g pnpm@10.33.0
@@ -48,10 +51,15 @@ COPY scripts/install-git-hooks.mjs ./scripts/install-git-hooks.mjs
 RUN pnpm install --frozen-lockfile
 COPY . .
 # The Cloud home runs these as root, so nobody else may write them.
-# The Data engine's native modules (server/data/engine.ts), staged like the
-# desktop app's extraResources; the runtime stages copy this tree.
-RUN node scripts/prepare-duckdb.mjs && chmod -R go-w dist-native/duckdb
 RUN pnpm build:server && pnpm exec vite build && chmod -R go-w dist dist-server skills
+# The Data engine's native modules (server/data/engine.ts), staged like the
+# desktop app's extraResources for the image's CPU (amd64 -> x64, arm64), into
+# one tree the runtime stages copy. pnpm installed both CPUs' packages
+# (pnpm-workspace.yaml supportedArchitectures).
+ARG TARGETARCH
+RUN arch=x64 && if [ "$TARGETARCH" = arm64 ]; then arch=arm64; fi \
+  && OMB_DUCKDB_ARCH=$arch node scripts/prepare-duckdb.mjs \
+  && mv "dist-native/duckdb/linux-$arch" dist-native/duckdb/target && chmod -R go-w dist-native/duckdb
 
 FROM node:24-bookworm-slim AS runtime
 # Install Chrome's Bookworm libraries directly: agent-browser --with-deps
@@ -75,12 +83,21 @@ ARG AGENT_BROWSER_VERSION=0.37.0
 # `agent-browser install` fetches Chrome for Testing's last-known-good Stable;
 # the publish job passes that version so a Chrome release rebuilds this layer.
 ARG CHROME_CACHE_TAG=""
+# Chrome for Testing has no Linux ARM64 build, so an arm64 image takes
+# Debian's Chromium instead, linked at the same path; the publish job passes
+# its newest bookworm version so a Debian security update rebuilds it too.
+ARG CHROMIUM_CACHE_TAG=""
+ARG TARGETARCH
 # The global link must be the native binary for this platform (agent-browser's
 # postinstall points it there); the other platforms' binaries are never run.
-RUN echo "agent-browser ${AGENT_BROWSER_VERSION}, Chrome for Testing ${CHROME_CACHE_TAG:-Stable}" \
+RUN echo "agent-browser ${AGENT_BROWSER_VERSION}, Chrome for Testing ${CHROME_CACHE_TAG:-Stable}, Debian Chromium ${CHROMIUM_CACHE_TAG:-latest}" \
   && npm install -g --cache /tmp/npm-cache agent-browser@${AGENT_BROWSER_VERSION} \
-  && HOME=/opt/openmausbot-browser agent-browser install \
-  && ln -s /opt/openmausbot-browser/.agent-browser/browsers/chrome-*/chrome /opt/openmausbot-browser/chrome \
+  && if [ "$TARGETARCH" = arm64 ]; then \
+       apt-get update && apt-get install -y --no-install-recommends chromium && rm -rf /var/lib/apt/lists/* \
+       && mkdir -p /opt/openmausbot-browser && ln -s /usr/lib/chromium/chromium /opt/openmausbot-browser/chrome; \
+     else HOME=/opt/openmausbot-browser agent-browser install \
+       && ln -s /opt/openmausbot-browser/.agent-browser/browsers/chrome-*/chrome /opt/openmausbot-browser/chrome; \
+     fi \
   && native="$(readlink -f "$(command -v agent-browser)")" \
   && case "$native" in */agent-browser/bin/agent-browser-linux-*) ;; *) echo "agent-browser is not a native binary: $native" >&2; exit 1;; esac \
   && [ "$(head -c 4 "$native")" = "$(printf '\177ELF')" ] \
@@ -149,7 +166,7 @@ COPY deploy/fly/Caddyfile /app/cloud/Caddyfile
 # copies stay root's. Only the /data volume is maus's; the launcher refuses to
 # start otherwise (codeTrustProblem), and this check refuses to build.
 # DuckDB and resvg change on a version bump, not per commit: beneath the app files.
-COPY --from=build /src/dist-native/duckdb/linux-x64 ./duckdb
+COPY --from=build /src/dist-native/duckdb/target ./duckdb
 COPY --from=build /src/dist-server ./dist-server
 COPY --from=build /src/dist ./dist
 # The bundled skills (server/skill-library.ts reads ./skills from /app).
@@ -180,7 +197,7 @@ FROM runtime AS server
 # Optional engine CLIs baked into the image (space-separated npm packages).
 ARG ENGINES=""
 RUN if [ -n "$ENGINES" ]; then HOME=/tmp/omb-build-home npm install -g $ENGINES && rm -rf /tmp/omb-build-home /tmp/node-compile-cache; fi
-COPY --from=build --chown=maus:maus /src/dist-native/duckdb/linux-x64 ./duckdb
+COPY --from=build --chown=maus:maus /src/dist-native/duckdb/target ./duckdb
 COPY --from=build --chown=maus:maus /src/dist-server ./dist-server
 COPY --from=build --chown=maus:maus /src/dist ./dist
 COPY --from=build --chown=maus:maus /src/skills ./skills
