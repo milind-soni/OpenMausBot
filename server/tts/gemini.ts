@@ -13,8 +13,12 @@ export function listVoices(): Voice[] {
   return VOICES.map((id) => ({ id, label: id }));
 }
 
+export function isSupportedVoice(voiceId: string | undefined): boolean {
+  return voiceId !== undefined && VOICES.includes(voiceId);
+}
+
 export async function synthesize(text: string, voiceId: string, key: string, model = DEFAULT_GEMINI_MODEL): Promise<Audio> {
-  if (!VOICES.includes(voiceId)) throw new Error("Pick a Gemini voice from the voice list.");
+  if (!isSupportedVoice(voiceId)) throw new Error("Pick a Gemini voice from the voice list.");
   let response: Response;
   try {
     response = await fetch(`${API}/interactions`, {

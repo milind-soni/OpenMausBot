@@ -149,6 +149,12 @@ it("configures Gemini speech and synthesizes WAV through the isolated server", a
   const status = (await call("GET", "/api/config")).body;
   expect(status.tts).toMatchObject({ provider: "gemini", configured: true, ready: true, model: "gemini-3.8-flash-lite-tts" });
   expect(JSON.stringify(status)).not.toContain("fixture-gemini-secret");
+  expect((await call("POST", "/api/tts/prepare", { text: "Hello", voiceId: "invalid" })).body.ready).toBe(false);
+  expect((await call("POST", "/api/tts/prepare", { text: "Hello", voiceId: "" })).body.ready).toBe(true);
+  expect((await call("PUT", "/api/config", { tts: { voice: "invalid" } })).body.tts).toMatchObject({ configured: true, ready: false });
+  expect((await call("POST", "/api/tts/prepare", { text: "Hello" })).body.ready).toBe(false);
+  expect((await call("POST", "/api/tts/prepare", { text: "Hello", voiceId: "Puck" })).body.ready).toBe(true);
+  expect((await call("PUT", "/api/config", { tts: { voice: "Kore" } })).status).toBe(200);
   expect((await call("GET", "/api/tts/voices")).body.voices).toEqual(expect.arrayContaining([{ id: "Puck", label: "Puck" }]));
   const response = await fetch(`${fixture.info.url}/api/tts/speak`, { method: "POST", headers: { "content-type": "application/json", origin: fixture.info.url }, body: JSON.stringify({ text: "Hello from the fixture", voiceId: "Puck" }) });
   expect(response.status).toBe(200);

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { describeVoice, listVoices, providerConfigured, speak, voiceReady } from "./index.ts";
+import { describeVoice, listVoices, providerConfigured, speak, voiceConfigured, voiceReady } from "./index.ts";
 import type { AppConfig } from "../config.ts";
 
 const cfg: AppConfig = { tts: { provider: "gemini", geminiKey: "private-gemini-key", voice: "Kore" } };
@@ -20,6 +20,22 @@ const result = (data = wav.toString("base64"), mime_type = "audio/wav") => ({ st
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Gemini speech", () => {
+  it.each([
+    { saved: "Kore", override: undefined, key: "key", configured: true, ready: true },
+    { saved: "invalid", override: undefined, key: "key", configured: false, ready: false },
+    { saved: "", override: undefined, key: "key", configured: false, ready: false },
+    { saved: undefined, override: undefined, key: "key", configured: false, ready: false },
+    { saved: "invalid", override: "Puck", key: "key", configured: false, ready: true },
+    { saved: "Kore", override: "invalid", key: "key", configured: true, ready: false },
+    { saved: "Kore", override: "", key: "key", configured: true, ready: true },
+    { saved: "Kore", override: "Puck", key: "", configured: false, ready: false },
+    { saved: "kore", override: undefined, key: "key", configured: false, ready: false },
+  ])("checks catalog membership and voice precedence: $saved / $override / $key", ({ saved, override, key, configured, ready }) => {
+    const config: AppConfig = { tts: { provider: "gemini", geminiKey: key, voice: saved } };
+    expect(voiceConfigured(config)).toBe(configured);
+    expect(voiceReady(config, override)).toBe(ready);
+  });
+
   it("requires its own credential and keeps it out of status", async () => {
     const missing: AppConfig = { tts: { provider: "gemini", key: "eleven", fishKey: "fish" }, xai: { key: "xai" } };
     expect(providerConfigured(missing)).toBe(false);
