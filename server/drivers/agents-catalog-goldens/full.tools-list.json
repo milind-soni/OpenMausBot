@@ -479,7 +479,7 @@
           },
           "frameless": {
             "type": "boolean",
-            "description": "Optional: true shows the page without the card frame around it. Default false."
+            "description": "Optional: true shows the page without the card frame around it. Default false for a new page; a replacement with app_id keeps the page's frame unless this is given."
           },
           "app_id": {
             "type": "string",
