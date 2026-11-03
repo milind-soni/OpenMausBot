@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-// Clicking a row in the desktop place menu pins that place, even when Auto already picked it.
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
