@@ -1054,7 +1054,7 @@ function guestEngineRefusal(threadId: string): string {
 const outsideDrivenThread = (threadId: string) => outsideDriven(threadId, { webhookRun: (id) => activeRoutineRunForThread(id)?.triggerSource === "webhook",
   webhookPosted: (id) => store.messagesFor(id).some((line) => line.webhookPost), handedFrom: (id) => coordinator.active().filter((node) => node.threadId === id).flatMap((node) => handedFrom(node.id)) });
 /** A guest-driven turn runs in Ask whatever the bot's own level, with no shell. On a Cloud only its owner ever used, only what came in from outside is. */
-function cloudGuestDriven(threadId: string): boolean {
+/** Security: where the confinement rests on the conversation's own records, a thread opened from it would start with none, at the bot's own level. */ const outsideWorkStaysHere = (threadId: string) => cloudGuestDriven(threadId) && (Boolean(CLOUD_TEAM) || cloudHome?.solo() === true); function cloudGuestDriven(threadId: string): boolean {
   if (!CLOUD_HOME) return false; if (CLOUD_TEAM) return guestDrivenTurns.has(threadId) || outsideDrivenThread(threadId);
   const run = activeRoutineRunForThread(threadId);
   const writer = run ? cloudRoutineAuthors?.writer(run.routineId) : undefined;
@@ -14269,7 +14269,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const from = internalSender;
         const fromThreadId = internalCapability.threadId;
         const owner = connectorThread(from.id, fromThreadId);
-        if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
+        if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" }); if (outsideWorkStaysHere(fromThreadId)) return json(res, 403, { error: "This work came in from outside, so it can't open a new thread. Finish it here." });
         if (
           body.depth !== undefined &&
           (!Number.isInteger(body.depth) || body.depth < 0 || body.depth !== internalCapability.depth)
