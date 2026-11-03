@@ -107,7 +107,8 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
     contents.on("will-navigate", stay);
     contents.on("will-redirect", stay);
     contents.on("render-process-gone", () => { log("chrome rail: its page went away; loading it again"); void contents.loadURL(url()).catch(() => {}); });
-    contents.on("did-finish-load", () => { unloaded = false; contents.send("rail:framed", framed); });
+    contents.on("did-finish-load", () => contents.send("rail:framed", framed));
+    // Only a load's failing says so: the error page that replaces it finishes loading too.
     contents.on("did-fail-load", (_event, code, _description, _url, mainFrame) => { if (mainFrame && code !== ABORTED) unloaded = true; });
     load(contents);
     return view;

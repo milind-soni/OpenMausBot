@@ -378,5 +378,8 @@ test("the rail's page that couldn't load (this app's server was restarting) load
   contents.emit("did-fail-load", {}, -102, "ERR_CONNECTION_REFUSED", "http://127.0.0.1:8799/rail", true);
   contents.emit("did-finish-load");
   w.rail.refresh();
-  assert.equal(loads(), 2, "a page that did load afterwards stays");
+  assert.equal(loads(), 3, "the error page that replaced it finishing loading isn't the rail's page loading (seen in the real app)");
+  contents.emit("did-finish-load");
+  w.rail.refresh();
+  assert.equal(loads(), 3, "and the load that worked stays");
 });
