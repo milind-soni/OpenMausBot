@@ -177,8 +177,8 @@ describe("LiveCallController lifecycle", () => {
     });
 
     it("tells a refused caller nothing about a call already running", async () => {
-      const refusals: Array<string | null> = [null, REFUSED];
-      const t = azure({ azureRefusal: () => refusals.shift() ?? REFUSED });
+      let asked = 0;
+      const t = azure({ azureRefusal: () => (asked++ === 0 ? null : REFUSED) });
       await t.start();
       const second = t.controller.start({ auth: member, ...BOT, client: "web", sdp: "a" });
       await expect(second).rejects.toMatchObject({ status: 403, message: REFUSED });
