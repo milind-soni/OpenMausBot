@@ -456,6 +456,10 @@ describe("bot-first sidebar", () => {
     fixture.state = { ...fixture.state, selectedId: bot.id, bots: [{ ...bot, threadId: "run", tasks: [...bot.tasks!, { threadId: "run", title: "Run", createdAt: 9, routineRunId: "r" }] }] };
     renderToStaticMarkup(createElement(Capture));
     expect(named("Set as main thread")).toBeUndefined();
+    // A Team Cloud private thread can't be the main thread either (the host refuses it).
+    fixture.state = { ...fixture.state, selectedId: bot.id, bots: [{ ...bot, threadId: "mine", tasks: [...bot.tasks!, { threadId: "mine", title: "Mine", createdAt: 9, private: true }] }] };
+    renderToStaticMarkup(createElement(Capture));
+    expect(named("Set as main thread")).toBeUndefined();
     // A view-only teammate can look at the threads but not start one.
     fixture.state = { ...fixture.state, bots: [{ ...bot, yourAccess: "view" }] };
     renderToStaticMarkup(createElement(Capture));
