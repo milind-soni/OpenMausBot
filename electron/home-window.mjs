@@ -640,6 +640,14 @@ export function createHomeWindow(deps) {
       const moved = Boolean(next && (next.kind !== shown.kind || (next.origin ?? null) !== (shown.origin ?? null) || (next.id ?? null) !== (shown.id ?? null)));
       if (moved || after.kind !== before.kind || after.origin !== before.origin || screen || status) await show();
     },
+    /** The signed-in account is about to change: nothing under way for the one leaving goes on, and the next show() takes
+     * the window off whatever it shows of that account. */
+    accountLeaving() {
+      opens++;
+      clearRetry(); clearRenewal();
+      asked = null; naming = null; shown = null; opening = null; screen = null; status = null;
+      away = away || !shows(localOrigin());
+    },
     /** A response the window got (Electron's webRequest): a 401 from the place's API means its session ended. */
     responded({ url, statusCode, webContentsId }) {
       const origin = placeOrigin(), win = window();
