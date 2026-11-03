@@ -6,6 +6,7 @@
 // person, no other turn has run since, and a resend would carry all of it; otherwise Retry stays theirs to press.
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 
+import { askResetBridge } from "@/lib/desktop";
 import { api } from "@/state/api";
 import type { Action, Bot, Message } from "@/state/store";
 import { turnStartCount } from "./stop-turn";
@@ -173,8 +174,9 @@ function resendable(waiting: Pending, bot: Bot | undefined): Message | undefined
 async function saveSwitch(action: SetModel): Promise<unknown> {
   const threadId = action.threadId!;
   const { selection: modelSelection, updateBotDefault, resetApprovalToAsk } = action;
-  if (resetApprovalToAsk && window.ogb?.approvals) {
-    return window.ogb.approvals.setMode(action.botId, "ask", { threadId, modelSelection, updateBotDefault: Boolean(updateBotDefault) });
+  const askBridge = resetApprovalToAsk ? askResetBridge() : undefined;
+  if (askBridge) {
+    return askBridge.setMode(action.botId, "ask", { threadId, modelSelection, updateBotDefault: Boolean(updateBotDefault) });
   }
   const body = { modelSelection, ...(updateBotDefault ? { updateBotDefault: true } : {}), ...(resetApprovalToAsk ? { resetApprovalToAsk: true } : {}) };
   const result = await api(`/api/bots/${action.botId}/tasks/${threadId}`, { method: "PATCH", body: JSON.stringify(body) }) as { bot?: unknown } | null;

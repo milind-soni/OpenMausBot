@@ -34,7 +34,7 @@ import type { ModelVariantOption, RuntimeEvent } from "../../shared/runtime-even
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
-import { desktopCapabilitiesNow } from "@/lib/desktop";
+import { askResetBridge, desktopCapabilitiesNow } from "@/lib/desktop";
 import { sameModelSelection } from "../../shared/thread-model";
 import type { BotBodyId } from "../../shared/bot-body";
 import { StoreRefContext } from "./store-ref-context";
@@ -2206,11 +2206,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ? [...taskWrites.values()].filter((write) => write.botId === botId) : [];
       const promise = Promise.all([previous?.promise, ...defaults.map((write) => write.promise)].map((save) => save?.catch(() => {})))
         .then(async () => {
-          if (patch.resetApprovalToAsk && window.ogb?.approvals) {
-            return window.ogb.approvals.setMode(botId, "ask", {
-              threadId, modelSelection: patch.modelSelection, updateBotDefault: Boolean(patch.updateBotDefault),
-            });
-          }
+          const askBridge = patch.resetApprovalToAsk ? askResetBridge() : undefined;
+          if (askBridge) return askBridge.setMode(botId, "ask", {
+            threadId, modelSelection: patch.modelSelection, updateBotDefault: Boolean(patch.updateBotDefault),
+          });
           return persistTaskApproval(botId, threadId, patch, desktopApprovalBridge());
         });
       const execution = Promise.all([previous?.execution, promise]);

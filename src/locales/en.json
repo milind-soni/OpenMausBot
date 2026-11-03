@@ -4352,6 +4352,7 @@
   "remote.client.fallbackName": "remote {app}",
   "remote.client.mode": "This app is in client mode. Bots and conversations run on the other computer; the paired-device token stays in this computer’s encrypted credential store.",
   "remote.client.disconnect": "Disconnect and use this computer",
+  "remote.client.setUpOnHost": "This app uses the AIs on the host computer. Set up {name} there, then come back and pick it.",
   "remote.client.hostHint": "On the host computer, open Settings → Remote access and open a pairing window over HTTPS, Tailscale, or Wi-Fi. Then enter its address and six-digit code here.",
   "remote.client.hostAddress": "Host address",
   "remote.client.pairingCode": "Pairing code",
