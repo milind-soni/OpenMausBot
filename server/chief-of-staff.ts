@@ -28,6 +28,7 @@ export function chiefOfStaffSystemPrompt(
   bots: ChiefTeamMember[],
   canDelegate: boolean,
   escalations = false,
+  also?: (bot: ChiefTeamMember) => boolean,
 ): string {
   const chief = bots.find((bot) => bot.id === chiefId);
   const chiefSection = sectionKey(chief?.section);
@@ -35,7 +36,7 @@ export function chiefOfStaffSystemPrompt(
   const owner = chief ? botOwner(chief) : null;
   const person = owner ? peerName(nameFromEmail(owner)) || "your person" : null;
   // The roster honours the Chief's own allow-list, or the prompt would name teammates the tools then refuse.
-  const reachable = reachablePeers(bots, chief ?? { id: chiefId, name: "" });
+  const reachable = reachablePeers(bots, chief ?? { id: chiefId, name: "" }, also);
   const team = chief ? reachable.filter((bot) => hasAuthority(chief, bot)) : reachable;
   const others = chief ? reachable.filter((bot) => !hasAuthority(chief, bot)) : [];
   const roster = renderRoster(team, {

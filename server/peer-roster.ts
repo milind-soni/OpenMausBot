@@ -129,10 +129,10 @@ export function reachRefusal(from: RosterMember, target: RosterMember, lookedAft
 
 /** What a bot is told about its team can never be wider than what the comms endpoints allow. Its own department comes
  * first, then the others by name, so a capped roster keeps the nearest teammates. */
-export function reachablePeers<T extends RosterMember>(bots: readonly T[], from: RosterMember): T[] {
+export function reachablePeers<T extends RosterMember>(bots: readonly T[], from: RosterMember, also?: (bot: T) => boolean): T[] {
   const own = sectionKey(from.section);
   const department = (bot: T) => (sectionKey(bot.section) === own ? "" : ` ${sectionKey(bot.section).toLowerCase()}`);
-  return bots.filter(bot => canReach(from, bot)).sort((a, b) => {
+  return bots.filter(bot => canReach(from, bot) || also?.(bot)).sort((a, b) => {
     const [left, right] = [department(a), department(b)];
     return left < right ? -1 : left > right ? 1 : 0;
   });
@@ -146,6 +146,7 @@ export function resolveTeammate<T extends RosterMember>(
   raw: string,
   elsewhere: (name: string) => { where: string } | { hint: string } | null = () => null,
   lookedAfterBy?: LookedAfterBy,
+  also?: (bot: T) => boolean,
 ): { id: string; byName: boolean } | { error: string } {
   const wanted = raw.trim();
   if (bots.some(bot => bot.id === wanted)) return { id: wanted, byName: false };
@@ -155,7 +156,7 @@ export function resolveTeammate<T extends RosterMember>(
   const name = fold(wanted);
   const shown = peerName(wanted) || wanted;
   if (!name) return { error: `No bot with id "${shown}" — call list_bots and copy the exact id from the result` };
-  const reachable = reachablePeers(bots, from);
+  const reachable = reachablePeers(bots, from, also);
   const matches = reachable.filter(bot => fold(bot.name) === name);
   if (matches.length === 1) return { id: matches[0]!.id, byName: true };
   if (matches.length > 1) {

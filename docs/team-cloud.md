@@ -381,8 +381,13 @@ private chat goes to that person instead), and it retries their threads and chan
 chat with it is their inbox (below). A crowned bot nobody owns stays its department's Chief, as on any other server.
 The app offers no crown on a team, so this is reached only through the API (`PATCH /api/bots/<id>` with `chiefOfStaff`).
 
-**A member's MausBot is not crowned.** It is theirs alone, and the audience rule below keeps a bot only one person sees
-from reaching a bot everyone sees (`sameAudience`), so today it cannot hand work to the team's shared bots.
+**A member's MausBot hands work on from their private chats.** It isn't crowned, so it has no authority over any bot, but in
+a chat private to its person, with them behind the turn, it can hand work to any team bot they may chat with
+(`server/host/personal-reach.ts`). The work runs in a thread private to them, exactly like their own chat with that bot: it
+reads and writes their layer, comes back whole to them, and never reaches a room, the team's notes, another member or an
+admin. It follows the bot's sharing: a bot they can only view, or isn't shared with them, is refused. A relayed line, a
+routine, a webhook or a guest can't use this, and it can answer a waiting question only in a thread private to the same
+person. Everywhere else the audience rule below stands: a bot only one person sees does not reach a bot everyone sees.
 
 **Every bot reaches every bot.** Departments are folders, not walls. Any bot can ask, hand work to or @mention any
 other bot on the team, in any department, someone's Chief included, with nothing to set up (`canReach` in

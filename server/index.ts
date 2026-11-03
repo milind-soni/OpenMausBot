@@ -294,7 +294,7 @@ import { createLiveApprovalMode } from "./host/live-approval.ts";
 import { CONSENT_RULE, escapeNotes, labelledLine, OUTSIDE, peerLineText, peerProvenanceNote, reportNote, requestWorkOrigin, type WorkOrigin } from "./peer-provenance.ts"; import { lineNote, PROVENANCE_PROMPT } from "./provenance-label.ts"; import { openRoomThread } from "./host/room-new-thread.ts"; import { createLineLabels } from "./host/line-labels.ts";
 import { decideRoomPost, emptyRoomPostBudget, type RoomPostAttempt, type RoomPostBudget } from "./room-post-budget.ts";
 import { pageMessage, pageSize, slimMessage } from "./host/message-pages.ts";
-import { createTeammatePrompts } from "./host/teammate-prompts.ts";
+import { createTeammatePrompts } from "./host/teammate-prompts.ts"; import { createPersonalReach } from "./host/personal-reach.ts";
 import { ReplayBuffer } from "./host/sse-replay.ts";
 import {
   mentionedBots,
@@ -551,7 +551,7 @@ import {
 } from "./admin-activity.ts";
 import {
   frameForMember,
-  memberBody, memberFramePayload,
+  memberBody, memberFramePayload, memberLevel,
   noteSeen,
   notFoundFor,
   pathSubject,
@@ -3792,7 +3792,7 @@ const channelTaskBlocked = (group: GroupRecord) =>
 
 // Load coordination state before registering store listeners or recovering routines: recovery can emit room changes synchronously.
 const groupQueues = new Map<string, Promise<void>>();
-const { roomRootProblem, roomHandoffProblem, roomHandoffTarget, roomSetupPending, roomTalks, laneRoomThread } = createRoomAccess({ store, privateTo: (threadId) => teamHost.privateTo(threadId), lookedAfterBy: (bot) => (CLOUD_TEAM ? lookedAfterBy(bot, teamHost.personName) : null) });
+const { roomRootProblem, roomHandoffProblem, roomHandoffTarget, roomSetupPending, roomTalks, laneRoomThread } = createRoomAccess({ store, privateTo: (threadId) => teamHost.privateTo(threadId), personalReach: (from, target, fromThreadId, node) => personalReach.handOff(from, target, fromThreadId, node), lookedAfterBy: (bot) => (CLOUD_TEAM ? lookedAfterBy(bot, teamHost.personName) : null) });
 const roomJobs = createRoomJobs({ store, coordinator: { all: () => coordinator.all() }, cfg, laneRoomThread,
   operations: groupId => groupTurnOperations.get(groupId) ?? [], speakerOf: threadId => groupSpeakers.get(threadId)?.botId });
 
@@ -3802,7 +3802,7 @@ function coordinationSystemInstructions(): string {
 }
 
 const threadReadableFrom = (threadId: string) => (other: string): boolean => !proactive.fence.confines(other) && (CLOUD_TEAM ? teamHost.readableFrom(threadId)(other) : !CLOUD_HOME || cloudOwnerOnlyThread(other));
-const teammatePrompts = createTeammatePrompts({ store, outstandingDirect: (threadId) => coordinator.outstandingDirect(threadId), openPersonCard, queuedStatus, isUnattended, fullAccess: fullAccessForSource, startedOutside: (threadId) => directRequestOwners.get(threadId)?.origin?.kind === "outside" || coordinator.active().some((node) => node.threadId === threadId && node.origin?.kind === "outside"), guestDriven: cloudGuestDriven, confined: (threadId) => proactive.fence.confines(threadId), readableFrom: threadReadableFrom, waitingForPerson: (chief, teammates, readable) => questionRouting.waitingForPerson(chief, teammates, readable) });
+const teammatePrompts = createTeammatePrompts({ store, outstandingDirect: (threadId) => coordinator.outstandingDirect(threadId), openPersonCard, queuedStatus, isUnattended, fullAccess: fullAccessForSource, startedOutside: (threadId) => directRequestOwners.get(threadId)?.origin?.kind === "outside" || coordinator.active().some((node) => node.threadId === threadId && node.origin?.kind === "outside"), guestDriven: cloudGuestDriven, confined: (threadId) => proactive.fence.confines(threadId), readableFrom: threadReadableFrom, waitingForPerson: (chief, teammates, readable) => questionRouting.waitingForPerson(chief, teammates, readable) }); const personalReach = createPersonalReach({ privateTo: (threadId) => teamHost.privateTo(threadId), personKey: (email) => personKey({ id: "", email }), personBehind: (botId, threadId) => teammatePrompts.personBehind(botId, threadId), level: (bot, email) => ((teamOwners.people?.list() ?? []).some((one) => one.email === email && one.role !== "member") ? "edit" : memberLevel(bot, email)) });
 
 function queuedBehindPerson(node: HandoffView): { threadId: string; kind: "approval" | "question" | "review"; title: string } | undefined {
   if (node.groupId || node.status !== "queued" || threadBusy(node.botId, node.threadId) || !botAtThreadCapacity(node.botId, undefined, true)) return undefined;
@@ -8384,7 +8384,7 @@ async function beginTurn(
         else vpsUnavailableNote = ` This bot's VPS computer is unavailable this turn (${autoVpsProblem}), so no computer is mounted. Work that needs no screen can go ahead. If the request needs the VPS desktop, do not claim to have used it: say it is unavailable${hint ? ` and what the person can do: ${hint}` : "."}`;
       }
       // One reachability rule: a bot is never told about a peer that coordinate_bots would refuse.
-      const sectionPeers = reachablePeers(store.bots, bot);
+      const sectionPeers = personalReach.peers(store.bots, bot, threadId);
       if (agentsMounted) {
         integrations.agents = agentsIntegration(bot.id, threadId, commsDepth, skillAuthoring, dispatchClaimId, opts?.coordination?.id, worksInWorkspace);
       }
@@ -8397,7 +8397,7 @@ async function beginTurn(
           store.bots.filter((one) => !one.hidden).map((one) => one.name)), sectionPeers)
         : [];
       const coordinationPrompt = chiefLevel(bot)
-        ? chiefOfStaffSystemPrompt(bot.id, store.bots, Boolean(integrations.agents), chiefEscalationsEnabled(cfg))
+        ? chiefOfStaffSystemPrompt(bot.id, store.bots, Boolean(integrations.agents), chiefEscalationsEnabled(cfg), (peer) => personalReach.mayHandOn(bot, peer, threadId))
         : integrations.agents && sectionPeers.length > 0
           ? peerRosterSystemPrompt(sectionPeers, bot)
           : "";
@@ -13375,7 +13375,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       if (method === "GET" && path === "/api/internal/agents") {
         const sender = internalSender;
-        const bots = reachablePeers(store.bots, sender)
+        const bots = personalReach.peers(store.bots, sender, internalCapability.threadId)
           .map((b) => {
             const status = peerStatus(b.activity, b.busy);
             return {
@@ -13878,7 +13878,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (groupId && !destination) return refuse(404, "No such room; use list_room_targets.");
         const botIds: string[] = [];
         for (const raw of call.botIds) {
-          const resolved = resolveTeammate(store.bots, internalSender, raw, placesElsewhere.explain, (bot) => (CLOUD_TEAM ? lookedAfterBy(bot, teamHost.personName) : null));
+          const resolved = resolveTeammate(store.bots, internalSender, raw, placesElsewhere.explain, (bot) => (CLOUD_TEAM ? lookedAfterBy(bot, teamHost.personName) : null), (bot) => personalReach.mayHandOn(internalSender, bot, address.threadId));
           if ("error" in resolved) return refuse(403, resolved.error);
           botIds.push(resolved.id);
         }
@@ -13937,7 +13937,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             const recipient = store.bot(target.botId);
             if (!recipient) throw new Error("The recipient no longer exists");
             // Work a person's request hands on opens in the receiving bot's chat with them when it may use their own apps.
-            const opener = (room ? null : handOnFor) ?? openerFrom(address.threadId);
+            const opener = (room ? null : handOnFor) ?? openerFrom(address.threadId), personal = !room && !canReach(internalSender, recipient); if (personal && (opener !== teamHost.privateTo(address.threadId) || (call.answers && !personalReach.mayAnswerIn(internalSender, address.threadId, coordinator.node(call.answers)?.threadId)))) throw new Error("This stays in the person's own chats, and that is not one of them, so nothing was sent.");
             // A Chief answers, for the person, the question a teammate it manages waits on in a thread the Chief did not open.
             const forPerson = EXTERNAL || room || fresh || call.answers || mode !== "work" || call.thread === "standing" || !teammatePrompts.actsForPerson(internalSender, internalCapability.threadId) || !canManage(internalSender, recipient) || !threadReadableFrom(internalCapability.threadId)(call.thread) ? undefined : await questionRouting.answerForPerson({ sender: internalSender, senderThreadId: address.threadId, target: recipient, threadId: call.thread, message: call.message });
             if (forPerson) { if (forPerson.outcome === "failed") refused.push(forPerson.detail); receipts.push(forPerson); continue; }
@@ -13958,7 +13958,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 : store.createTask(target.botId, `@${internalSender.name} · work`, false, undefined, { ...opened, kind: "work" }, undefined, undefined, folder.cwd));
               if (!task) throw new Error("The recipient no longer exists");
               target.threadId = task.threadId;
-              if (!continued) createdThread = task.threadId;
+              if (!continued) createdThread = task.threadId; if (personal && createdThread) threadStarters.set(createdThread, opener!);
               delegatedLevel.apply(internalSender, internalCapability.threadId, internalCapability.roomHandoffId ?? generation, recipient, target.threadId);
             }
             const routed = lane ? { botId: target.botId, threadId: lane.threadId } : target;
@@ -14033,7 +14033,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         });
           // Only this conversation's own tree; a row of another conversation is refused.
         const owned = (a: Row) => coordinator.node(a.rootId)?.threadId === fromThreadId;
-        const reachable = (a: Row) => { const target = store.bot(a.assignee.botId); return !target || target.id === internalSender.id || canReach(internalSender, target); };
+        const reachable = (a: Row) => { const target = store.bot(a.assignee.botId); return !target || target.id === internalSender.id || canReach(internalSender, target) || personalReach.reaches(internalSender, target, fromThreadId); };
         if (!id) {
           const outstanding = coordinator.outstandingFor(fromThreadId).flatMap(n => { const row = coordinator.status(n.id)?.assignment; return row && reachable(row) ? [shape(row)] : []; });
           return json(res, 200, { outstanding });
@@ -14102,7 +14102,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             .map(b => ({ id: b!.id, name: b!.name, title: b!.title, busy: b!.busy })),
         })).filter(g => g.members.length);
         return json(res, 200, { currentRoom: source ? { id: source.id, name: source.name, workingFolder: source.cwd || null } : null,
-          bots: reachablePeers(store.bots, internalSender).map(bot => ({ id: bot.id, name: bot.name, title: bot.title, section: bot.section, busy: bot.busy })),
+          bots: personalReach.peers(store.bots, internalSender, internalCapability.threadId).map(bot => ({ id: bot.id, name: bot.name, title: bot.title, section: bot.section, busy: bot.busy })),
           rooms, note: "Each bot uses its own environment and permissions. Files are not transferred: pass absolute paths only when accessible to the recipient, otherwise pass the content." });
       }
       if (method === "POST" && path === "/api/internal/retry-thread") {
