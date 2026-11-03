@@ -64,9 +64,11 @@ describe("claudeElicitations", () => {
     const { elicit, written, events } = harness();
     elicit.frame(ask("e5", { mode: "url", url: "https://example.com/auth" }));
     elicit.frame(ask("e6", { mode: "url", url: "javascript:alert(1)" }));
-    expect(written).toEqual([sent("e5", { action: "decline" }), sent("e6", { action: "decline" })]);
+    elicit.frame(ask("e6b", { mode: "url", url: "http://example.com/auth" }));
+    expect(written).toEqual([sent("e5", { action: "decline" }), sent("e6", { action: "decline" }), sent("e6b", { action: "decline" })]);
     expect(events[0].message).toContain(": https://example.com/auth.");
     expect(events[1].message).not.toContain("javascript:");
+    expect(events[2].message).not.toContain("http://");
   });
 
   it("withdraws every open card when the session closes", async () => {
@@ -85,6 +87,18 @@ describe("claudeElicitations", () => {
     expect(written).toEqual([sent("e7", { action: "accept", content: {} })]);
     expect(events.at(-1)).toEqual(done("e7", "deny", "system"));
     await expect(elicit.answer("elicitation:e7", "allow")).resolves.toBe(false);
+  });
+
+  it("withdraws a card whose answer was still on its way when the session closed", async () => {
+    let deliver!: (ok: boolean) => void;
+    const events: any[] = [];
+    const elicit = claudeElicitations(() => new Promise<boolean>((resolve) => { deliver = resolve; }), (event) => events.push(event));
+    elicit.frame(ask("e8"));
+    const answered = elicit.answer("elicitation:e8", "allow");
+    elicit.close();
+    deliver(true);
+    await expect(answered).resolves.toBe("failed");
+    expect(events.filter((e) => e.type === "request.resolved")).toEqual([done("e8", "deny", "system")]);
   });
 
   it("leaves other frames and cards alone", async () => {

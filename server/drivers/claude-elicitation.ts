@@ -14,6 +14,7 @@ const text = (value: unknown) => (typeof value === "string" ? value.trim() : "")
 /** `write` settles true once the frame reached the CLI's stdin, false when it could not be sent. */
 export function claudeElicitations(write: (frame: unknown) => Promise<boolean>, emit: (event: ElicitationEvent) => void) {
   const pending = new Set<string>();
+  let closed = false;
   const reply = (id: string, response: Record<string, unknown>) =>
     write({ type: "control_response", response: { subtype: "success", request_id: id, response } });
   const resolved = (id: string, behavior: "allow" | "deny", source: "user" | "timeout" | "system") =>
@@ -40,7 +41,7 @@ export function claudeElicitations(write: (frame: unknown) => Promise<boolean>, 
         emit({
           type: "runtime.notice",
           message: r.mode === "url"
-            ? `${server} asked you to open a link to continue${/^https?:\/\//i.test(url) ? `: ${url}` : ""}. OpenMausBot can't open it from here, so the request was declined. Open the link yourself, then ask the bot to try again.`
+            ? `${server} asked you to open a link to continue${/^https:\/\//i.test(url) ? `: ${url}` : ""}. OpenMausBot can't open it from here, so the request was declined. Open the link yourself, then ask the bot to try again.`
             : `${server} asked you to fill in ${fields === 1 ? "a field" : `${fields} fields`}${message ? ` ("${message}")` : ""}. OpenMausBot can't show that form yet, so the request was declined.`,
         });
         return true;
@@ -64,7 +65,9 @@ export function claudeElicitations(write: (frame: unknown) => Promise<boolean>, 
     async answer(requestId: string, behavior: "allow" | "deny" | "answer"): Promise<"sent" | "failed" | false> {
       const id = requestId.startsWith(CARD_PREFIX) ? requestId.slice(CARD_PREFIX.length) : "";
       if (!pending.delete(id)) return false;
-      if (!(await reply(id, behavior === "allow" ? { action: "accept", content: {} } : { action: "decline" }))) {
+      const delivered = await reply(id, behavior === "allow" ? { action: "accept", content: {} } : { action: "decline" });
+      // A session closed while the answer was on its way: the CLI that asked is gone, so the card is withdrawn.
+      if (!delivered || closed) {
         resolved(id, "deny", "system");
         return "failed";
       }
@@ -73,6 +76,7 @@ export function claudeElicitations(write: (frame: unknown) => Promise<boolean>, 
     },
     /** The CLI that asked is gone: every open card is withdrawn. */
     close(): void {
+      closed = true;
       for (const id of pending) resolved(id, "deny", "system");
       pending.clear();
     },
