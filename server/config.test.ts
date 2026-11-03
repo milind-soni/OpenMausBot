@@ -1541,6 +1541,15 @@ describe("credential env preference", () => {
     expect(loadConfig()).toMatchObject({ customDomain: "", language: "en", profile: { name: "Workspace owner" } });
   });
 
+  it("saves, trims and clears the computer name a paired phone shows", () => {
+    expect(parseConfigPatch({ computerName: "  AdamPC  " })).toEqual({ computerName: "AdamPC" });
+    expect(() => parseConfigPatch({ computerName: "x".repeat(64) })).toThrow();
+    saveConfig({ profile: { name: "Workspace owner" }, computerName: "AdamPC" });
+    expect(loadConfig()).toMatchObject({ computerName: "AdamPC", profile: { name: "Workspace owner" } });
+    saveConfig({ computerName: "" });
+    expect(loadConfig()).toMatchObject({ computerName: "", profile: { name: "Workspace owner" } });
+  });
+
   it("merges onboarding progress like any other section", () => {
     saveConfig({ onboarding: { completedAt: "2026-09-09T10:00:00.000Z", version: 1 } });
     saveConfig({ onboarding: { hintsSeen: ["computer"] } });
