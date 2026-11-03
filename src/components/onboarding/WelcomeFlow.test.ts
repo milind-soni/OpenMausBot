@@ -167,7 +167,7 @@ describe("the Chief step", () => {
 describe("What's new", () => {
   it("is left for a later launch by a first run on a desktop that sells the Cloud: everyone who installs sees it once", async () => {
     const seen = vi.fn(async () => {});
-    vi.stubGlobal("ogb", { remoteClient: { active: false }, cloudAccount: { offer: vi.fn() }, desktopNotices: { seen } });
+    vi.stubGlobal("ogb", { remoteClient: { active: false }, cloudAccount: { offer: vi.fn(), state: async () => ({ status: "signed-out" }), onState: () => () => {} }, desktopNotices: { seen } });
     await show();
     await toChief();
     await press("Create Chief of Staff");

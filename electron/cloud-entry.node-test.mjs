@@ -158,14 +158,14 @@ test("the Cloud entry checks the owned server, waits for the saved sign-in, and 
 });
 
 test("Add a Cloud… is always the sheet on this computer's page, never a native box: the sheet says setting up or one Cloud for now", () => {
-  const add = between("async function openCloudAdd(source)", "\n}\n");
+  const add = between("async function openCloudAdd(source, signIn = false)", "\n}\n");
   assert.ok(add.indexOf("if (!cloudOffersAllowed() || !serverReady) return;") < add.indexOf("await cloudAccountRestored();"));
   const restored = add.indexOf("await cloudAccountRestored();");
   for (const action of ["persistEnvironments(", "createWindow(", "win.webContents.send(", "win.loadURL("]) assert.ok(add.indexOf(action) > restored, `${action} after the restore`);
   assert.doesNotMatch(add, /dialog\.|anotherCloudBox|cloudOwned/);
   assert.equal(main.includes("You already have My Cloud"), false, "the native box is gone");
   assert.ok(add.indexOf("persistEnvironments(withActive(environmentsState, LOCAL_ID))") < add.indexOf("win.webContents.send("));
-  assert.match(add, /const action = source === "app_howto" \? "cloud-add-howto" : "cloud-add";/);
+  assert.match(add, /const action = signIn \? "cloud-sign-in" : source === "app_howto" \? "cloud-add-howto" : "cloud-add";/);
   assert.deepEqual([...add.matchAll(/webContents\.send\(([^)]*)\)/g)].map(match => match[1]), ['"app:open-settings", action']);
   assert.deepEqual([...add.matchAll(/loadURL\((.*)\);/g)].map(match => match[1]), ["`${rendererOrigin()}/?desktop-settings=${action}`"]);
   assert.match(between("function cloudOffersAllowed()", "\n}\n"), /return app\.isPackaged && !desktopRemoteAccess && brandedBuild === false;/);

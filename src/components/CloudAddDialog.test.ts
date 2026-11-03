@@ -653,11 +653,15 @@ describe("the sheet", () => {
     f.state = { cloudAdd: { source: "app_settings", signIn: true }, config: {} };
     expect(await settle()).toContain("Sign in to MausBot Cloud");
     bridge.signInVerify.mockResolvedValueOnce({ outcome: "signed-in", state: teammate() });
+    let opened = () => {};
+    bridge.openTeam.mockImplementationOnce(() => new Promise<void>((resolve) => { opened = resolve; }));
     await signInWithCode();
     account = teammate();
-    const shown = await settle();
-    for (const word of ["Start free trial", "Most popular", "$49"]) expect(shown).not.toContain(word);
+    const opening = await settle();
+    expect(opening).toContain("Your team's Cloud is ready");
+    for (const word of ["Start free trial", "Most popular", "$49"]) expect(opening).not.toContain(word);
     expect(bridge.openTeam).toHaveBeenCalledExactlyOnceWith("team-acme");
+    opened(); await flush();
     expect(f.dispatch).toHaveBeenCalledWith({ type: "closeCloudAdd" });
     expect(bridge.checkout).not.toHaveBeenCalled();
   });
