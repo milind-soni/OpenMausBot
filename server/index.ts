@@ -577,7 +577,7 @@ import { createTeamOwnerRoutes } from "./routes/team-owners.ts";
 import { createBotSettingsRoutes } from "./routes/bot-settings.ts";
 import { createBotPatchRoutes } from "./routes/bot-patch.ts";
 import { createBotOrderRoutes } from "./routes/bot-order.ts";
-import { createDeviceViewRoutes, deviceViewStreams, onSessionLosesAccess, pairingRequest } from "./routes/device-views.ts";
+import { createDeviceViewRoutes, deviceViewStreams, onSessionLosesAccess, openDevicePairing } from "./routes/device-views.ts";
 import { createBotLifecycleRoutes } from "./routes/bot-lifecycle.ts";
 import { createBotSkillsRoutes } from "./routes/bot-skills.ts";
 import { createSkillShareRoutes } from "./routes/skill-share.ts";
@@ -12932,15 +12932,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
         return json(res, 401, { error: "Your session ended. Sign in again before creating a pairing code." });
       }
-      const request = pairingRequest(body, store, Boolean(CLOUD_TEAM));
-      if (!request.ok) return json(res, request.status, { error: request.error });
-      let opened: ReturnType<typeof sessions.openPairing>;
-      try {
-        opened = sessions.openPairing(request.pairing);
-      } catch (error) {
-        if ((error as { code?: unknown }).code === "cloud_personal") return json(res, 403, { error: (error as Error).message, code: "cloud_personal" });
-        throw error;
-      }
+      const pairing = openDevicePairing(body, sessions, store, Boolean(CLOUD_TEAM));
+      if (!pairing.ok) return json(res, pairing.status, { error: pairing.error, ...(pairing.code ? { code: pairing.code } : {}) });
+      const { opened } = pairing;
       const origin = requestOrigin(req);
       const base = publicUrl() ?? (auth.kind === "session" && origin ? origin : null);
       const code = formatPairingCode(opened.code);

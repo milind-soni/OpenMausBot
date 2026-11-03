@@ -25,7 +25,7 @@ import type { EngineInstall } from "./engine-install";
 import { optimisticMessageId, optimisticUserMessage, sendArrived, sendReconciled } from "./optimistic-send";
 import { patchedGroups, roomAnswers, snapshotPatch } from "./room-frames";
 import { savedStateAction, type SavedOwner, type SavedSnapshot } from "./saved-state";
-import { firstChat, keepBotNavigation, keepGroupNavigation, navigatedSince, visibleMessages } from "./snapshot-navigation";
+import { firstChat, hydratedSelection, keepBotNavigation, keepGroupNavigation, navigatedSince, visibleMessages } from "./snapshot-navigation";
 export { visibleMessages } from "./snapshot-navigation";
 export { awayFromMainThread, botOpensTo, openBot, openBotThread, openNotificationTarget, openThread, visibleNotificationThread, type ThreadTarget } from "./thread-navigation";
 import type { TurnDigest } from "../../shared/digest";
@@ -904,12 +904,7 @@ export function reducer(state: AppState, action: Action): AppState {
   if (isNotificationFeedAction(action)) return { ...state, notifications: reduceNotificationFeed(state.notifications, action) };
   switch (action.type) {
     case "hydrate": {
-      const known = (id: string) => action.bots.some((b) => b.id === id && !b.roomOnly) || action.groups.some((g) => g.id === id);
-      const resume = action.resumeId;
-      const resumed =
-        resume && (action.bots.some((b) => b.id === resume && !b.hidden && !b.roomOnly) || action.groups.some((g) => g.id === resume)) ? resume : "";
-      const firstConversation = firstChat(action.bots, action.groups);
-      const selectedId = state.selectedId && known(state.selectedId) ? state.selectedId : resumed || firstConversation;
+      const selectedId = hydratedSelection(state.selectedId, action.resumeId, action.bots, action.groups);
       const hydrated = {
         ...state,
         bots: action.bots.map((sent) => {

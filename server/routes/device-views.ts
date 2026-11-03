@@ -89,6 +89,19 @@ export function pairingRequest(body: { label?: unknown; scopes?: unknown; view?:
   return { ok: true, pairing: { label: typeof body?.label === "string" ? body.label : undefined, scopes, ...(view.view ? { view: view.view } : {}) } };
 }
 
+/** POST /api/auth/pairing: the request read, then the pairing opened. A personal Cloud home refuses to pair a device. */
+export function openDevicePairing(body: Parameters<typeof pairingRequest>[0], sessions: Pick<SessionRegistry, "openPairing">, store: DeviceViewRouteDeps["store"], team: boolean):
+  { ok: true; opened: ReturnType<SessionRegistry["openPairing"]> } | { ok: false; status: number; error: string; code?: string } {
+  const request = pairingRequest(body, store, team);
+  if (!request.ok) return request;
+  try {
+    return { ok: true, opened: sessions.openPairing(request.pairing) };
+  } catch (error) {
+    if ((error as { code?: unknown }).code === "cloud_personal") return { ok: false, status: 403, error: (error as Error).message, code: "cloud_personal" };
+    throw error;
+  }
+}
+
 export function pairingView(value: unknown, store: DeviceViewRouteDeps["store"], team: boolean): { ok: true; view?: DeviceView } | { ok: false; status: number; error: string } {
   if (value === undefined || value === null) return { ok: true };
   if (team) return { ok: false, status: 409, error: TEAM_VIEW_REFUSAL };
