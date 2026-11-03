@@ -36,7 +36,7 @@ export function ThreadConcurrencySettings() {
         onChange={(event) => void save(Number(event.target.value))}>
         {Array.from({ length: 16 }, (_, i) => i + 1).map((limit) => <option key={limit} value={limit}>{limit}</option>)}
       </Select>
-      <p id="thread-concurrency-help" className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("settings.threads.help")}</p>
+      <p id="thread-concurrency-help" className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("settings.threads.helpHanded")}</p>
       {pending !== null && <p role="status" className="mt-2 text-[12px] text-ink-secondary">{t("settings.threads.saving")}</p>}
       {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
     </Card>

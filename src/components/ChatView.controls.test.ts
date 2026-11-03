@@ -54,7 +54,8 @@ vi.mock("./ApprovalModeSelector", () => ({ ApprovalModeSelector: (props: Compone
   return createElement("span", { "data-test-approval-control": true });
 } }));
 
-const { ChatView, ErrorRow, FailedTurnRow, claudeUpdateTarget } = await import("./ChatView");
+const { ChatView, ErrorRow, FailedTurnRow } = await import("./ChatView");
+const { claudeUpdateTarget } = await import("@/lib/failed-turn");
 const { NewConversationInstead } = await import("./NewConversationInstead");
 const { activityPreview } = await import("@/lib/failed-turn");
 afterAll(() => vi.unstubAllGlobals());
@@ -91,12 +92,14 @@ describe("the header's right side", () => {
     }
   });
 
-  it("keeps the computer and ⋯ in a remote client's Simple header, whose settings panel has no room for them", () => {
+  it("keeps the model, the computer and ⋯ in a remote client's Simple header, whose settings panel has no room for them", () => {
     fixture.advanced = false;
     window.ogb = { remoteClient: { active: true } } as NonNullable<Window["ogb"]>;
     try {
       const { markup } = header();
-      expect(markup).not.toContain("data-test-model-control");
+      // The host checks the model against its own catalog, so a paired desktop can change it like the phone can.
+      expect(markup).toContain("data-test-model-control");
+      expect(fixture.model).toMatchObject({ bot: { id: "bot" }, threadId: "selected" });
       expect(markup).toContain('data-tour="computer"');
       expect(markup).toContain('data-testid="chat-more"');
       const more = fixture.menus.find((menu) => menu.ariaLabel === "More")!;
@@ -613,12 +616,17 @@ describe("thread control placement", () => {
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "updateTask", botId: "bot", threadId: "selected", patch: { approvalMode: "full" } });
   });
 
-  it("keeps both controls hidden for remote clients", () => {
+  it("offers remote clients the model picker but keeps approval changes on the host", () => {
     window.ogb = { remoteClient: { active: true } } as NonNullable<Window["ogb"]>;
-    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
-    expect(markup).not.toContain("data-test-model-control");
-    expect(markup).not.toContain("data-test-approval-control");
-    delete window.ogb;
+    try {
+      fixture.model = null;
+      const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+      expect(markup).toContain("data-test-model-control");
+      expect(fixture.model).toMatchObject({ bot: { id: "bot" }, threadId: "selected" });
+      expect(markup).not.toContain("data-test-approval-control");
+    } finally {
+      delete window.ogb;
+    }
   });
 
   it.each([true, false])("pins a place per conversation from the composer only in Advanced (advanced: %s)", (advanced) => {

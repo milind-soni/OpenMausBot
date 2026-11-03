@@ -25,7 +25,6 @@ export function SidebarSectionHeader({
   line = false,
   onMenu,
   menuOpen = false,
-  lead,
   count,
   naming,
   dropInto = false,
@@ -45,8 +44,6 @@ export function SidebarSectionHeader({
   line?: boolean;
   onMenu?: (button: HTMLButtonElement) => void;
   menuOpen?: boolean;
-  /** On a Team Cloud, the person every bot in this department reports to. */
-  lead?: string;
   /** How many rows the section holds, shown at rest where the chevron shows on hover (Simple). */
   count?: number;
   /** A name field in place of the name, for a department being made or renamed. */
@@ -56,8 +53,6 @@ export function SidebarSectionHeader({
 }) {
   const reorderable = canReorder && !naming;
   const Chevron = collapsed ? ChevronRight : ChevronDown;
-  const leadLabel = lead ? <span data-department-lead={lead} title={t("owner.departmentLeadAria", { department: name, name: lead })}
-    className="shrink-0 truncate text-[11px] font-normal text-ink-tertiary">{t("owner.departmentLead", { name: lead })}<span className="sr-only">{`, ${t("owner.departmentLeadAria", { department: name, name: lead })}`}</span></span> : null;
   const attentionLabel = attention ? sidebarAttentionLabel(attention) : "";
   const onHeaderKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (!reorderable || !event.altKey) return;
@@ -109,14 +104,12 @@ export function SidebarSectionHeader({
             className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
           >
             <span className="min-w-0 flex-1 truncate text-[12px] leading-4 text-ink-secondary">{name}</span>
-            {leadLabel}
             {collapsed && <SectionAttention attention={attention} label={attentionLabel} alert={alert} />}
             {tail}
           </button>
         ) : (
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className="min-w-0 flex-1 truncate text-[12px] leading-4 text-ink-secondary">{name}</span>
-            {leadLabel}
             {attentionLabel && <span className="sr-only">{attentionLabel}</span>}
             {tail}
           </div>
@@ -164,7 +157,6 @@ export function SidebarSectionHeader({
           {attentionLabel && <span className="sr-only">{attentionLabel}</span>}
         </div>
       )}
-      {leadLabel}
       {onDelete && !naming && (
         <button
           type="button"

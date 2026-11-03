@@ -14,6 +14,7 @@ import { cn } from "@/lib/cn";
 import { TeamPhoneCard } from "./TeamPhoneCard";
 import type { DeviceView } from "../../shared/device-view";
 import { EMPTY_VIEW, flipTarget, knownTargets, NO_TARGETS, pairingBody, pickedCount, switchTargets, togglePicked, viewNames, viewTargetsFrom, type DeviceAccess, type DeviceViewTargets } from "../lib/device-view-choice";
+import { ComputerNameRow } from "./ComputerNameRow";
 
 export interface PairingOffer {
   id: string;
@@ -98,6 +99,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   const [editing, setEditing] = useState<{ id: string; picked: DeviceView; saving?: boolean } | null>(null);
   const savingView = useRef(false);
   const [targets, setTargets] = useState<DeviceViewTargets>(NO_TARGETS);
+  const [computerName, setComputerName] = useState<string | null>(null);
   const [offer, setOffer] = useState<PairingOffer | null>(null);
   const [devices, setDevices] = useState<PairedDevice[]>([]);
   const [current, setCurrent] = useState<string | null>(null);
@@ -124,7 +126,10 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
       setSession(state);
       if (canPairDevices(state)) void loadDevices();
       if (state.kind === "loopback" || state.kind === "session") {
-        void api("/api/config").then((config) => setPairingCodes(readMembership(config).pairingCodes)).catch(() => {});
+        void api("/api/config").then((config) => {
+          setPairingCodes(readMembership(config).pairingCodes);
+          if (canPairDevices(state)) setComputerName(typeof config?.computerName === "string" ? config.computerName : "");
+        }).catch(() => {});
       }
     });
   }, []);
@@ -255,6 +260,9 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
           )}
         </div>
   ) : null;
+  // Loaded with the config; a personal cloud has no computer of its own to name.
+  const nameRow = (className: string) => pairingCodes && !cloudHome && computerName !== null
+    ? <ComputerNameRow saved={computerName} onSaved={setComputerName} className={className} /> : null;
   const scopeName = (device: PairedDevice) => deviceAccessName(device, targets);
   const limitedEmpty = access === "limited" && pickedCount(knownTargets(picked, targets)) === 0;
   const accessSelect = (props: { variant?: "ghost"; size?: "sm"; name?: string; "aria-label"?: string }) => (
@@ -292,6 +300,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
     return (
       <div ref={root} tabIndex={-1} data-phone-pairing="server" className="flex scroll-mt-4 flex-col gap-1.5 focus:outline-none">
         <div data-settings-rows="" className={cn(SIMPLE_CARD, "flex flex-col")}>
+          {nameRow("px-4 py-2.5")}
           <SettingRow title={t("settings.simple.computer.pair")} subtitle={pairingCodes ? cloudHome ? t("remote.serverPairing.cloudPersonal") : undefined : t("remote.serverPairing.portal")}>
             {pairingCodes ? (
               <div className="flex items-center gap-2">
@@ -332,6 +341,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
     <div ref={root} tabIndex={-1} data-phone-pairing="server" className="scroll-mt-4 rounded-xl focus:outline-none">
     <Card title={t("remote.serverPairing.title")} subtitle={t(pairingCodes ? "remote.serverPairing.subtitle" : "remote.serverPairing.portalSubtitle")}>
       {pairingCodes && cloudHome ? <p data-server-pairing-personal className="mt-3 text-[13px] text-ink-secondary">{t("remote.serverPairing.cloudPersonal")}</p> : null}
+      {nameRow("mt-3")}
       {pairingCodes ? <div className="mt-3 flex flex-wrap items-center gap-3">
         {cloudHome ? null : (
           <label className="flex items-center gap-2 text-[13px] text-ink">

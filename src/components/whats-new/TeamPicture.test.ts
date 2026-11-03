@@ -22,7 +22,7 @@ afterEach(async () => { await act(async () => root.unmount()); host.remove(); de
 it("is one labelled picture: four teammates, each with a Chief of Staff of their own, around the team's shared bots in two departments", async () => {
   await render();
   const picture = host.querySelector('svg[role="img"]')!;
-  expect(picture.getAttribute("aria-label")).toBe("Ada, Ben, Cleo and Dara, each with their own Chief of Staff, share the team's Support and Sales bots on one Team Cloud.");
+  expect(picture.getAttribute("aria-label")).toBe("Ada, Ben, Cleo and Dara, each with their own MausBot, share the team's Support and Sales bots on one Team Cloud.");
   expect(texts()).toEqual(["Support", "Sales", "A", "Ada", "B", "Ben", "C", "Cleo", "D", "Dara"]);
   expect(mascots().map(node => node.dataset.maus), "the departments' bots, then each person's Chief").toEqual(["cyan", "blue", "pink", "orange", "pink", "green", "yellow", "cyan"]);
   expect(host.querySelectorAll('path[d^="M0 5.5"]'), "a crown on each Chief").toHaveLength(4);

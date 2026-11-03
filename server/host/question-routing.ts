@@ -7,6 +7,8 @@
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import type { HandoffView } from "../coordinator.ts";
 import { peerDeliveryReceipt, type PeerDeliveryReceipt } from "../peer-delivery.ts";
+import { escapeNotes } from "../peer-provenance.ts";
+import { AUTHORITY } from "../provenance-label.ts";
 import { composeAddition } from "../runtime/envelope.ts";
 import { personOnly, withDefault } from "../runtime/questions.ts";
 import type { Answerer } from "../runtime/types.ts";
@@ -125,8 +127,8 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
    * result still returns once. Undefined when no such turn runs or its engine cannot take it now. */
   async function handOn(input: { sender: BotRecord; senderThreadId: string; target: BotRecord; message: string }, running: HandoffView | undefined): Promise<PeerDeliveryReceipt | undefined> {
     const { sender, target, message } = input;
-    if (!running || !(await deps.steer(running.threadId, composeAddition(running.id, sender.name, message)))) return undefined;
-    store.appendMessage(running.threadId, { role: "user", kind: "text", text: message, peerAsk: { botId: sender.id, name: sender.name }, aside: true, steered: true });
+    if (!running || !(await deps.steer(running.threadId, composeAddition(running.id, sender.name, message, running.origin?.kind === "outside" ? AUTHORITY.info : AUTHORITY.behalf)))) return undefined;
+    store.appendMessage(running.threadId, { role: "user", kind: "text", text: escapeNotes(message), peerAsk: { botId: sender.id, name: sender.name }, aside: true, steered: true });
     const title = store.taskByThread(target.id, running.threadId)?.title;
     store.appendMessage(input.senderThreadId, sentRow({ sender, recipient: target, threadId: running.threadId, via: "direct", language: conversationLanguage(input.senderThreadId),
       ...(title ? { title } : {}) }));

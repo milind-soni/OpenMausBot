@@ -4,8 +4,10 @@ import { installNpmEngine, npmAvailable, serverInstallFor, standaloneLookupPath 
 import { installStandaloneEngine, isAppStandaloneCopy, type StandaloneInstalled } from "../engine-standalone.ts";
 import { withEngineMemory } from "../engine-memory.ts";
 import { withEngineHomes } from "../engine-homes/engine-homes.ts";
+import { withLocalContext } from "../drivers/local-inject.ts";
 import { engineStatusFile, snapshotFrom } from "./engine-status-file.ts";
 import { withUnaskedStops } from "./unasked-stop.ts";
+import { withWslNotice } from "./wsl-launch.ts";
 export { engineMemory } from "../engine-memory.ts";
 import { clientInstall } from "../contracts.ts";
 import type {
@@ -172,13 +174,13 @@ export class ProviderRegistry {
       // The RAW config: decodeConfig fills in the driver default, which would flag every instance as overridden.
       const rawCli = cliOfRaw(entry.config);
       if (rawCli) this.cliByInstance.set(instanceId, rawCli);
-      const live = withUnaskedStops(withEngineHomes(withEngineMemory(await driver.create({
+      const live = withLocalContext(withUnaskedStops(withEngineHomes(withEngineMemory(await driver.create({
         instanceId,
         displayName: entry.displayName ?? driver.metadata.displayName,
         environment: entry.environment ?? {},
         enabled: entry.enabled ?? true,
         config,
-      }))));
+      })))));
       this.shareSnapshot(live);
       return { instanceId, live: decorate ? decorate(live) : live };
     } catch (e) {
@@ -471,7 +473,8 @@ export class ProviderRegistry {
           };
         }
         const inst = entry.live;
-        const snapshot = await statusOf(inst);
+        const cli = this.cliByInstance.get(inst.instanceId);
+        const snapshot = withWslNotice(await statusOf(inst), cli);
         return {
           instanceId: inst.instanceId,
           driverKind: inst.driverKind,
@@ -496,7 +499,7 @@ export class ProviderRegistry {
             backgroundText: inst.generateText !== undefined || inst.generateMemoryText !== undefined,
           },
           access: driver?.metadata.access ?? "subscription",
-          install: withServerInstall(driver?.install, npmPresent, this.appStandaloneCopy(driver, this.cliByInstance.get(inst.instanceId) ?? cliDefaultOf(driver))),
+          install: withServerInstall(driver?.install, npmPresent, this.appStandaloneCopy(driver, cli ?? cliDefaultOf(driver))),
           authentication: inst.startAuthentication
             ? {
                 method: inst.authenticationMethod ?? (inst.getAuthentication && inst.completeAuthentication
@@ -507,7 +510,7 @@ export class ProviderRegistry {
                 signOut: inst.signOut !== undefined,
               }
             : undefined,
-          cli: this.cliByInstance.get(inst.instanceId),
+          cli,
           cliDefault: cliDefaultOf(driver),
           cliCandidates: candidatesFor(driver),
         };

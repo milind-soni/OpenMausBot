@@ -69,3 +69,8 @@ export function keepGroupNavigation(previous: Group | undefined, incoming: Group
     turnStartedAt: previous.turnStartedAt,
   };
 }
+
+/** Where to land when nothing is selected: never a bot this device sees only as a room member. */
+export function firstChat(bots: readonly Pick<Bot, "id" | "roomOnly">[], groups: readonly Pick<Group, "id">[]): string {
+  return bots.find((bot) => !bot.roomOnly)?.id ?? groups[0]?.id ?? "";
+}

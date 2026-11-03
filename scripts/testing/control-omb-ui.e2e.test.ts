@@ -271,7 +271,9 @@ describe("control-omb ui drives the real renderer", () => {
     await ui("click", info.ui, "--name", nextModel.label);
     await expect.poll(async () => (await savedBot()).modelSelection.model, { timeout: 10_000 }).toBe(nextModel.id);
     expect((await savedBot()).tasks.find((task: any) => task.threadId === originalBot.threadId).modelSelection.model).toBe(nextModel.id);
-    await ui("click", info.ui, "--name", nextModel.label);
+    // A model with reasoning levels keeps the menu open after the pick, so its level can be set next.
+    expect(await ui("eval", info.ui, "--js", "String(Boolean(document.querySelector('[data-model-picker-content]')))"))
+      .toMatchObject({ result: "true" });
     await ui("click", info.ui, "--name", "Only this thread");
     const modelSnapshot = await ui("snapshot", info.ui, "--interactive");
     const originalRow = Object.entries(modelSnapshot.refs as Record<string, { name: string; role: string }>)
@@ -282,6 +284,10 @@ describe("control-omb ui drives the real renderer", () => {
       { timeout: 10_000 }).toBe(originalModel);
     expect((await savedBot()).modelSelection.model).toBe(nextModel.id);
     expect((await savedBot()).approvalMode).toBe(originalBot.approvalMode);
+    // The menu is still open after that pick; close it before using the composer.
+    await ui("press", info.ui, "--keys", "Escape");
+    await expect.poll(async () => (await ui("eval", info.ui, "--js", "String(Boolean(document.querySelector('[data-model-picker-content]')))")).result,
+      { timeout: 10_000 }).toBe("false");
 
     const before = await ui("snapshot", info.ui, "--interactive");
     expect(before.ok).toBe(true);

@@ -1,5 +1,7 @@
 import { parseDeviceView, type DeviceView } from "../../shared/device-view.ts";
-import type { SessionRegistry } from "../sessions.ts";
+import { roomMemberMissing, type StreamSeen, type VisibleSet } from "../bot-visibility.ts";
+import type { RequestAuth } from "../request-auth.ts";
+import type { Scope, SessionRegistry } from "../sessions.ts";
 import type { Store } from "../store.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
@@ -33,7 +35,35 @@ export function snapshotsAfterViewChanges(sessions: Pick<SessionRegistry, "onSes
     closeStreams(sessionId);
   });
   sessions.onSessionRevoked((sessionId) => { from.delete(sessionId); });
-  return { mark: (sessionId: string) => { from.set(sessionId, seq()); }, from: (sessionId: string) => from.get(sessionId) ?? -1 };
+  const mark = (sessionId: string) => { from.set(sessionId, seq()); };
+  return {
+    mark,
+    from: (sessionId: string) => from.get(sessionId) ?? -1,
+    /** A listed room gained or lost a bot this stream knows only as its member: no frame of that bot's own adds or
+     * withdraws it, so the stream ends and starts over from a snapshot. */
+    roomChanged(payload: Record<string, unknown>, visible: Pick<VisibleSet, "bot" | "group" | "roomOnly">, client: { sessionId?: string; seen: StreamSeen; close(): void }): boolean {
+      if (!roomMemberMissing(payload, visible, client.seen)) return false;
+      if (client.sessionId) mark(client.sessionId);
+      client.close();
+      return true;
+    },
+    /** A device's view also follows departments and room members, which change without an audience change: a limited
+     * device, or one whose view changed after `since`, always starts over. */
+    startsOver: (auth: RequestAuth, since: number) => auth.kind === "session" && (Boolean(auth.session.view) || since <= (from.get(auth.session.id) ?? -1)),
+  };
+}
+
+/** What a session holds open ends both when it is revoked and when its view changes, since either can take away what it shows. */
+export function onSessionLosesAccess(sessions: Pick<SessionRegistry, "onSessionChanged" | "onSessionRevoked">, end: (sessionId: string) => void): void {
+  sessions.onSessionRevoked(end);
+  sessions.onSessionChanged(end);
+}
+
+/** The live side of device views: snapshots after a view changes, and views kept to the departments that exist. */
+export function deviceViewStreams(sessions: Pick<SessionRegistry, "onSessionChanged" | "onSessionRevoked" | "dropMissingSections">, store: Pick<Store, "sections" | "onChange">, seq: () => number, closeStreams: (sessionId: string) => void) {
+  const snapshots = snapshotsAfterViewChanges(sessions, seq, closeStreams);
+  keepViewsToDepartments(sessions, store);
+  return snapshots;
 }
 
 export function checkedDeviceView(value: unknown, store: DeviceViewRouteDeps["store"], options?: { allowNothing?: boolean }): { ok: true; view: DeviceView | null } | { ok: false; error: string } {
@@ -50,6 +80,15 @@ export function checkedDeviceView(value: unknown, store: DeviceViewRouteDeps["st
 }
 
 /** The view a new pairing code grants (none when the body names none); a Team Cloud refuses one. */
+/** POST /api/auth/pairing's body as openPairing takes it: the scopes it names and the view it limits the device to. */
+export function pairingRequest(body: { label?: unknown; scopes?: unknown; view?: unknown } | null | undefined, store: DeviceViewRouteDeps["store"], team: boolean):
+  { ok: true; pairing: { label?: string; scopes?: Scope[]; view?: DeviceView } } | { ok: false; status: number; error: string } {
+  const scopes = Array.isArray(body?.scopes) ? body.scopes.filter((v): v is Scope => v === "admin" || v === "client") : undefined;
+  const view = pairingView(body?.view, store, team);
+  if (!view.ok) return view;
+  return { ok: true, pairing: { label: typeof body?.label === "string" ? body.label : undefined, scopes, ...(view.view ? { view: view.view } : {}) } };
+}
+
 export function pairingView(value: unknown, store: DeviceViewRouteDeps["store"], team: boolean): { ok: true; view?: DeviceView } | { ok: false; status: number; error: string } {
   if (value === undefined || value === null) return { ok: true };
   if (team) return { ok: false, status: 409, error: TEAM_VIEW_REFUSAL };

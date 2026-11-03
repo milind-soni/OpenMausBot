@@ -1134,6 +1134,17 @@ describe("task rename", () => {
     expect(next.groups[0]?.tasks?.find((task) => task.threadId === "room-task-1")?.title).toBe("Renamed");
     expect(next.groups[0]?.tasks?.find((task) => task.threadId === "room-task-2")?.title).toBe("Other");
   });
+
+  it("archives and unarchives a channel task in local state immediately", () => {
+    const group = {
+      id: "room", threadId: "room-task-1", name: "Launch", memberIds: [], defaultResponder: { kind: "everyone" }, bulletin: "", unread: false, createdAt: 1, messages: [],
+      tasks: [{ threadId: "room-task-1", title: "Open", createdAt: 1 }, { threadId: "room-task-2", title: "Done", createdAt: 2 }],
+    } satisfies Group;
+    const archived = reducer({ ...initialState, groups: [group] }, { type: "archiveGroupTask", groupId: "room", threadId: "room-task-2", archivedAt: 1234 });
+    expect(archived.groups[0]?.tasks?.map((task) => task.archivedAt)).toEqual([undefined, 1234]);
+    const unarchived = reducer(archived, { type: "archiveGroupTask", groupId: "room", threadId: "room-task-2", archivedAt: null });
+    expect(unarchived.groups[0]?.tasks?.[1]?.archivedAt).toBeUndefined();
+  });
 });
 
 describe("config status", () => {

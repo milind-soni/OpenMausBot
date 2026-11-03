@@ -3,7 +3,7 @@ import { Check, ChevronDown, ChevronRight, Loader2, RefreshCw, Search, Server, T
 import { api, useStore, type Bot, type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { glassPopupFrameStyle } from "@/lib/glass-popup";
-import { t } from "@/lib/i18n";
+import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { readCachedInventory } from "@/lib/connected-apps-cache";
 import { connectorStatusMemory, preloadConnectedApps, rememberConnectorStatus } from "@/lib/connected-apps";
@@ -29,6 +29,7 @@ import { BotAvatar } from "./Avatar";
 import { SidebarPopoverMenu } from "./SidebarPopoverMenu";
 import { appCategoryLabel, CATEGORY_SECTION_SIZE, catalogSections, connectorDescription, inCategory, rankCategories } from "@/lib/app-catalog";
 import { McpServersPanel } from "./McpServersPanel";
+import { HOSTED_MCP_APPS, type HostedApp, type HostedConnections } from "@/lib/hosted-mcp-apps";
 import { HighLevelCard } from "./HighLevelCard";
 import { PostizCard } from "./PostizCard";
 import { POSTIZ_CATALOG_CARD, POSTIZ_SEARCH } from "@/lib/postiz";
@@ -73,6 +74,13 @@ export function botsWithLimitedServiceTools(bots: Bot[], instances: InstanceInfo
 
 export function hasUsableConnectedApps(configured: boolean, phase: ConnectorInventoryPhase, stale: boolean, status: Record<string, ConnectorStatus>): boolean {
   return configured && phase === "ready" && !stale && Object.values(status).some((service) => service.connected);
+}
+
+/** Whether a hosted app's card shows: it matches the search, and the filter is All, or Connected and it isn't known to be
+ * disconnected (unknown while its servers load). */
+export function hostedShown(app: HostedApp, search: string, filter: AppsFilter, connected: HostedConnections | null): boolean {
+  const matches = !search || `${app.label} ${app.keywords} ${t(app.description)}`.toLowerCase().includes(search.toLowerCase().trim());
+  return matches && (filter === "all" || (filter === "connected" && connected?.[app.id] !== false));
 }
 
 export type ConnectorSetup = "ready" | "needs-setup" | "service-unavailable";
@@ -141,8 +149,8 @@ export function PluginsPanel() {
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"marketplace" | "connected">("marketplace");
   const [showAllApps, setShowAllApps] = useState(false);
-  const [whopConnected, setWhopConnected] = useState<boolean | null>(null);
-  const [whopRefresh, setWhopRefresh] = useState(0);
+  const [hostedConnected, setHostedConnected] = useState<HostedConnections | null>(null);
+  const [cardsRefresh, setCardsRefresh] = useState(0);
   const [category, setCategory] = useState<string | null>(null);
   // Appended after the older state so tests that seed state by call order keep their indices.
   const [highLevelConnected, setHighLevelConnected] = useState<boolean | null>(null);
@@ -393,8 +401,7 @@ export function PluginsPanel() {
     && (!search || `${c.label} ${c.slug} ${connectorDescription(c)}`.toLowerCase().includes(search.toLowerCase())));
   const isConnected = (slug: string) => Boolean(status[slug]?.connected || status[slug]?.accounts?.length);
   const filter: AppsFilter = surface === "mcp" ? "mcp" : tab === "connected" ? "connected" : "all";
-  const whopMatches = !search || `whop ${t("whop.description")}`.toLowerCase().includes(search.toLowerCase().trim());
-  const showWhop = whopMatches && (filter === "all" || (filter === "connected" && whopConnected !== false));
+  const shownHosted = new Set(HOSTED_MCP_APPS.filter((app) => hostedShown(app, search, filter, hostedConnected)).map((app) => app.id));
   const highLevelMatches = !search || `highlevel high level growably crm ${t("highlevel.description")}`.toLowerCase().includes(search.toLowerCase().trim());
   const showHighLevel = highLevelMatches && (filter === "all" || (filter === "connected" && highLevelConnected !== false));
   const showX = (!search || `${X_CARD_SEARCH} ${t("apps.x.description")}`.toLowerCase().includes(search.toLowerCase().trim())) && (filter === "all" || (filter === "connected" && xConnected !== false));
@@ -403,7 +410,8 @@ export function PluginsPanel() {
     .map((card, index) => ({ card, index }))
     .sort((a, b) => Number(isConnected(b.card.slug)) - Number(isConnected(a.card.slug)) || a.index - b.index)
     .map(({ card }) => card);
-  const connectedCount = Object.values(status).filter(hasActiveConnection).length + Number(whopConnected === true) + Number(highLevelConnected === true) + Number(xConnected === true) + Number(postizConnected === true);
+  const connectedHosted = HOSTED_MCP_APPS.filter((app) => hostedConnected?.[app.id]);
+  const connectedCount = Object.values(status).filter(hasActiveConnection).length + connectedHosted.length + Number(highLevelConnected === true) + Number(xConnected === true) + Number(postizConnected === true);
   const connectedEmptyCopy = connectedInventoryCopy(inventoryPhase);
   const close = () => dispatch({ type: "togglePlugins", open: false });
   const setupNotice = connectorSetupNotice({ configured, stale, setup, remoteClient });
@@ -425,7 +433,7 @@ export function PluginsPanel() {
   const categoryInMore = category !== null && moreCategories.includes(category);
   const inCategoryView = filter === "all" && category !== null;
   const postizHere = showPostiz && (!inCategoryView || inCategory(POSTIZ_CATALOG_CARD, category));
-  const nativeCardsShown = (!inCategoryView && (showWhop || showHighLevel || showX)) || postizHere;
+  const nativeCardsShown = (!inCategoryView && (shownHosted.size > 0 || showHighLevel || showX)) || postizHere;
   const categoryCards = inCategoryView ? visible.filter((card) => inCategory(card, category)) : visible;
   const sectioned = filter === "all" && !search && category === null;
   const sections = sectioned ? catalogSections(visible, isConnected, ranked.inline) : [];
@@ -496,7 +504,7 @@ export function PluginsPanel() {
                 <ChevronRight size={14} aria-hidden="true" className="shrink-0 rtl:-scale-x-100" />
               </button>
               <button
-                onClick={() => { setWhopRefresh((value) => value + 1); void loadConnectionInventory(true); }}
+                onClick={() => { setCardsRefresh((value) => value + 1); void loadConnectionInventory(true); }}
                 disabled={refreshing}
                 className="flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
                 title={t("connectors.refreshTitle")}
@@ -591,7 +599,9 @@ export function PluginsPanel() {
                 setupNotice.tone === "warning" ? "bg-warning/10 text-warning" : "bg-control/50 text-ink-secondary",
               )}
             >
-              {t(whopConnected ? "whop.otherAppsSetup" : setupNotice.key)}{" "}
+              {connectedHosted.length > 0
+                ? t("hostedMcp.otherAppsSetup", { services: new Intl.ListFormat(activeLocale(), { style: "long", type: "conjunction" }).format(connectedHosted.map((app) => app.label)) })
+                : t(setupNotice.key)}{" "}
               <button
                 className={cn(
                   "font-medium underline underline-offset-2",
@@ -717,14 +727,12 @@ export function PluginsPanel() {
                   </>
                 )}
               >
-                <div className={showWhop && !inCategoryView ? "contents" : "hidden"}>
-                  <McpServersPanel whopCard refreshKey={whopRefresh} onWhopConnection={setWhopConnected} />
-                </div>
-                <div data-native-card="x" className={showX && !inCategoryView ? "contents" : "hidden"}><XCard refreshKey={whopRefresh} onConnection={setXConnected} /></div>
+                <McpServersPanel hostedCards={{ shown: (id) => !inCategoryView && shownHosted.has(id), onConnections: setHostedConnected }} refreshKey={cardsRefresh} />
+                <div data-native-card="x" className={showX && !inCategoryView ? "contents" : "hidden"}><XCard refreshKey={cardsRefresh} onConnection={setXConnected} /></div>
                 <div data-native-card="highlevel" className={showHighLevel && !inCategoryView ? "contents" : "hidden"}>
-                  <HighLevelCard refreshKey={whopRefresh} onConnection={setHighLevelConnected} />
+                  <HighLevelCard refreshKey={cardsRefresh} onConnection={setHighLevelConnected} />
                 </div>
-                <div data-native-card="postiz" className={postizHere ? "contents" : "hidden"}><PostizCard refreshKey={whopRefresh} onConnection={setPostizConnected} /></div>
+                <div data-native-card="postiz" className={postizHere ? "contents" : "hidden"}><PostizCard refreshKey={cardsRefresh} onConnection={setPostizConnected} /></div>
                 {allShown.map((card) => renderTile(card))}
               </AppsSection>
             </div>
@@ -732,7 +740,7 @@ export function PluginsPanel() {
 
           {filter !== "connected" && category === null && (
             <div className={cn(filter === "all" && "mt-8 border-t border-hairline/30 pt-6", filter === "mcp" && "pt-1")}>
-              <McpServersPanel embedded hideWhop={filter === "all"} />
+              <McpServersPanel embedded hideHosted={filter === "all"} />
             </div>
           )}
         </div>
