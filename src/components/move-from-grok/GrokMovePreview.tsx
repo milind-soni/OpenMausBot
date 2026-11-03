@@ -87,7 +87,7 @@ export function GrokMovePreview({ pending, takenNames, adding, error, onAdd }: {
               <span className="font-medium text-ink">{newNames[index]}</span>
               {plan.title && <span className="text-ink-secondary"> · {plan.title}</span>}
               {newNames[index] !== plan.name && <span className="block text-ink-secondary">{t("grokMove.preview.renamed", { name: plan.name })}</span>}
-              {plan.instructions && <span className="mt-0.5 line-clamp-2 block text-ink-secondary">{plan.instructions}</span>}
+              {plan.instructions && <span className="mt-0.5 line-clamp-2 text-ink-secondary">{plan.instructions}</span>}
             </li>
           ))}
         </ul>
