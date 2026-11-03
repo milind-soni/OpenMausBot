@@ -3,6 +3,7 @@ import { recordEvents } from "../testing/events.ts";
 import { buildTurnContext, replaysNatively } from "../turn-context.ts";
 import { instanceConfigs } from "../config.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
+import { flushNativeLogs } from "./native.ts";
 
 describe("OpenAICompatDriver", () => {
   const savedUrl = process.env.OPENAI_COMPAT_URL;
@@ -1163,6 +1164,8 @@ describe("OpenAICompatDriver", () => {
 
       const item = recorder.events.find((e) => e.type === "item.completed");
       expect(item).toMatchObject({ text: "start middle end" });
+      // The native log's flush timer is shared across tests and pending only sometimes; it is not the idle timer.
+      flushNativeLogs();
       expect(vi.getTimerCount()).toBe(0);
 
       recorder.stop();
