@@ -18,11 +18,16 @@ const readable = (stored: string | null): boolean => {
   try { JSON.parse(stored); return true; } catch { return false; }
 };
 
-/** codex-cli 0.160.1 says "Logged in using …", "Not logged in", or "Error checking login status: …" for an auth.json it cannot read. */
+/** codex-cli 0.160.1 says "Logged in using …", "Not logged in", or "Error checking login status: …" for an auth.json it
+ * cannot read; 0.165.0 says "API key configured - …" for an API-key login. */
+export function codexReportsLogin(said: string): boolean {
+  return /^(?:logged in|api key configured)\b/im.test(said);
+}
+
 export function codexLoginStatus(cli: string, env: Env): Promise<"signed-in" | "signed-out" | "unknown"> {
   return new Promise((resolve) => execCli(cli, ["login", "status"], { timeout: 8000, env }, (err, stdout, stderr) => {
     const said = `${stdout}\n${stderr ?? ""}`;
-    resolve(!err && /^logged in\b/im.test(said) ? "signed-in"
+    resolve(!err && codexReportsLogin(said) ? "signed-in"
       : err && /^(?:not logged in|error checking login status)\b/im.test(said) ? "signed-out" : "unknown");
   }));
 }

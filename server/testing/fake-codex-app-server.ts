@@ -97,6 +97,10 @@ if (process.argv[2] === "login" && process.argv[3] === "status") {
     process.stderr.write("Not logged in\n");
     process.exit(1);
   }
+  if (mode === "api-key-configured") {
+    process.stderr.write("API key configured - sk-fake-****\nAuthentication is checked when you send a request.\n");
+    process.exit(0);
+  }
   // Codex 0.147.0 reports a successful login on stderr; older versions wrote it on stdout.
   const statusStream = mode === "logged-in-stdout" ? process.stdout : process.stderr;
   statusStream.write("Logged in using ChatGPT\n");
