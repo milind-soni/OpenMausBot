@@ -8,6 +8,7 @@ import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { defuse } from "./records-block.ts";
+import { redactSecretsInText } from "../shared/redact.ts";
 import { parseJson } from "./schema.ts";
 
 export const BOT_API_RATE_LIMIT = 10;
@@ -15,13 +16,17 @@ const RATE_WINDOW_MS = 60_000;
 /** Turns one bot's API may have running at once before a new call is refused. */
 export const BOT_API_MAX_PENDING = 50;
 export const BOT_API_MAX_MESSAGE_CHARS = 20_000;
-const MAX_ATTEMPTS = 2_000;
+/** Per bot: one bot's callers can't push another's calls out. */
+const MAX_ATTEMPTS = 200;
+const SAVE_AFTER_MS = 1_000;
 const KEY_PREFIX = "bak_";
 const REFUSED_BURST_MS = 15 * 60_000;
 
 const recordSchema = z.object({
   botId: z.string().min(1),
   keyHash: z.string().regex(/^[a-f0-9]{64}$/),
+  /** Whose key it is, on a Team Cloud: it goes when they leave. */
+  mintedBy: z.string().optional(),
   createdAt: z.number().finite().nonnegative(),
   keyCreatedAt: z.number().finite().nonnegative(),
   callCount: z.number().int().nonnegative(),
@@ -74,6 +79,7 @@ export class BotApiManager {
   private bots: StoredBotApi[] = [];
   private attempts: BotApiAttempt[] = [];
   private rate = new Map<string, number[]>();
+  private saveTimer: ReturnType<typeof setTimeout> | null = null;
   /** Saves are refused while set, so an empty state never overwrites an unreadable file. */
   private unreadable = false;
 
@@ -84,7 +90,7 @@ export class BotApiManager {
       const parsed = fileSchema.safeParse(parseJson(readFileSync(this.file, "utf8")));
       if (!parsed.success) throw parsed.error;
       this.bots = parsed.data.bots;
-      this.attempts = (parsed.data.attempts ?? []).slice(-MAX_ATTEMPTS);
+      this.attempts = parsed.data.attempts ?? [];
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         this.unreadable = true;
@@ -100,7 +106,7 @@ export class BotApiManager {
   }
 
   /** Turns the API on with a fresh key, or replaces the key of one already on. The key is returned once and never kept. */
-  enable(botId: string): { key: string; status: BotApiStatus } {
+  enable(botId: string, mintedBy?: string): { key: string; status: BotApiStatus } {
     this.assertWritable();
     const key = newKey();
     const now = this.now();
@@ -108,8 +114,9 @@ export class BotApiManager {
     if (record) {
       record.keyHash = hashBotApiKey(key);
       record.keyCreatedAt = now;
+      if (mintedBy) record.mintedBy = mintedBy; else delete record.mintedBy;
     } else {
-      this.bots.unshift({ botId, keyHash: hashBotApiKey(key), createdAt: now, keyCreatedAt: now, callCount: 0 });
+      this.bots.unshift({ botId, keyHash: hashBotApiKey(key), ...(mintedBy ? { mintedBy } : {}), createdAt: now, keyCreatedAt: now, callCount: 0 });
     }
     this.rate.delete(botId);
     this.save();
@@ -124,6 +131,13 @@ export class BotApiManager {
     this.rate.delete(botId);
     this.save();
     return true;
+  }
+
+  /** A teammate who left takes the keys they made: whoever still holds one was given it by them. */
+  revokeMintedBy(person: string): string[] {
+    const gone = this.bots.filter((record) => record.mintedBy === person).map((record) => record.botId);
+    for (const botId of gone) this.disable(botId);
+    return gone;
   }
 
   /** A deleted bot's API goes with it, its calls included. */
@@ -166,16 +180,15 @@ export class BotApiManager {
   record(botId: string, details: Omit<BotApiAttempt, "id" | "botId" | "receivedAt">): BotApiAttempt {
     const attempt: BotApiAttempt = { id: randomUUID(), botId, receivedAt: this.now(), outcome: details.outcome, statusCode: details.statusCode };
     if (details.threadId) attempt.threadId = details.threadId;
-    if (details.preview) attempt.preview = details.preview.replace(/\s+/g, " ").trim().slice(0, 200);
-    if (details.reason) attempt.reason = details.reason.slice(0, 500);
-    this.attempts.push(attempt);
-    if (this.attempts.length > MAX_ATTEMPTS) this.attempts.splice(0, this.attempts.length - MAX_ATTEMPTS);
+    if (details.preview) attempt.preview = redactSecretsInText(details.preview).replace(/\s+/g, " ").trim().slice(0, 200);
+    if (details.reason) attempt.reason = redactSecretsInText(details.reason).slice(0, 500);
+    this.keep(attempt);
     const record = this.bots.find((candidate) => candidate.botId === botId);
     if (record && details.outcome === "accepted") {
       record.callCount += 1;
       record.lastCalledAt = attempt.receivedAt;
     }
-    this.save();
+    this.saveSoon();
     return attempt;
   }
 
@@ -189,9 +202,28 @@ export class BotApiManager {
       return burst;
     }
     const attempt: BotApiAttempt = { id: randomUUID(), botId, receivedAt: this.now(), outcome: "rejected", statusCode, reason };
-    this.attempts.push(attempt);
-    if (this.attempts.length > MAX_ATTEMPTS) this.attempts.splice(0, this.attempts.length - MAX_ATTEMPTS);
+    this.keep(attempt);
     return attempt;
+  }
+
+  private keep(attempt: BotApiAttempt): void {
+    this.attempts.push(attempt);
+    const own = this.attempts.filter((candidate) => candidate.botId === attempt.botId);
+    if (own.length > MAX_ATTEMPTS) this.attempts.splice(this.attempts.indexOf(own[0]!), 1);
+  }
+
+  /** A caller decides how often this runs, so it never writes per call: a synchronous save would block the server. */
+  private saveSoon(): void {
+    if (this.saveTimer) return;
+    this.saveTimer = setTimeout(() => { this.saveTimer = null; this.save(); }, SAVE_AFTER_MS);
+    this.saveTimer.unref?.();
+  }
+
+  flush(): void {
+    if (!this.saveTimer) return;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+    this.save();
   }
 
   private assertWritable(): void {
@@ -200,6 +232,7 @@ export class BotApiManager {
 
   private save(): void {
     if (this.unreadable) return;
+    if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
     mkdirSync(dirname(this.file), { recursive: true });
     writeFileAtomic(this.file, JSON.stringify({ version: 1, bots: this.bots, attempts: this.attempts }, null, 2), { mode: 0o600 });
   }
@@ -209,7 +242,7 @@ export const BOT_API_MESSAGE_DATA = "[UNTRUSTED BOT API MESSAGE]";
 
 /** Security: the tag names a stored file for the turn to load, so a caller's copy of it never reaches the turn. */
 export function withoutAttachedImages(message: string): string {
-  return message.replace(/<(\s*attached-image)/gi, "($1");
+  return defuse(message).replace(/<(\s*attached-image)/gi, "($1");
 }
 
 /** The caller's words go to the model as data from outside, never as the person's request. */
@@ -222,7 +255,7 @@ export function botApiPrompt(message: string, receivedAt: number): string {
     BOT_API_MESSAGE_DATA,
     defuse(`Received: ${new Date(receivedAt).toISOString()}`),
     "",
-    defuse(message),
+    withoutAttachedImages(message),
     "[/UNTRUSTED BOT API MESSAGE]",
   ].join("\n");
 }

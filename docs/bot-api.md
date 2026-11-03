@@ -62,16 +62,22 @@ Answers:
 ## What a call may do
 
 A call starts a normal thread the app shows, marked as sent through the Bot API.
-The turn is outside work: it never acts for the person, gets the message inside
-an untrusted-data block, and can't use a Mac or PC lent to a Cloud, or the
-computer the app runs on. The thread always asks, whatever the bot's own level
-(Full access and Auto included) and with none of its saved allowances; nothing
-answers an approval for the caller, and the person's answer in the app is for
-that one request. On a Team Cloud the turn also runs confined, as a webhook's does.
+Anything in that thread answers only from the bot's standing instructions, its
+saved memory and the thread itself, whoever writes there next:
 
-A key is like a password: whoever holds it can read what this bot can read.
-Approvals guard actions, not reads, so its memory, files and read-only tools can
-reach a key holder through its reply.
+- It runs confined and in Ask, whatever the bot's own level, with none of its
+  saved allowances. Nothing answers an approval for the caller.
+- It has no shell, computer, browser, phone, connected apps, MCP servers or data
+  tools, and none of OpenMausBot's own tools, so it can't start a thread, ask a
+  teammate, make a routine or webhook, change the bot, write its memory or search
+  other conversations.
+- It works in the thread's own empty folder, and its words stay out of the person's
+  other conversations.
+
+A key is like a password: whoever holds it can read what this bot can read, which
+here means its instructions and memory, through its replies. A bot whose AI can't run
+confined (Claude, Codex and the API-key AIs can) answers `403`. A key goes when the
+teammate who made it leaves.
 
 Each call is kept with the bot's API settings and shown on the card (count, last
 call, recent calls) to those who can manage the key. Refused calls roll up into

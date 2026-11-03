@@ -3,7 +3,7 @@
 // and, on a bot that asks before acting, a call that stops at the approval nobody outside may give.
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -41,7 +41,7 @@ const sh = (command: string) => new Promise<string>((resolve, reject) => {
 });
 
 it("answers the card's own curl with the bot's reply, and refuses a wrong key, an API that is off, and an eleventh call in a minute", async () => {
-  fixture = await launchVerificationServer(process.env);
+  fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_VERSION: "2.1.284" });
   const { url } = fixture.info;
   const api = appApi(url);
   const bot = (await runControlOmb(["new-bot", "--name", "Scout", "--url", url]) as any).bot;
@@ -91,7 +91,7 @@ it("answers the card's own curl with the bot's reply, and refuses a wrong key, a
 }, hostTimeout(180_000));
 
 it.each(["ask", "full", "auto"])("a bot at %s stops at the approval: nothing answers it, and the call says needs_approval", async (level) => {
-  fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_MODE: "hang" });
+  fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_VERSION: "2.1.284", FAKE_CLAUDE_MODE: "hang" });
   const { url, dataDir } = fixture.info;
   const api = appApi(url);
   const bot = (await runControlOmb(["new-bot", "--name", "Careful", "--url", url]) as any).bot;
@@ -108,6 +108,10 @@ it.each(["ask", "full", "auto"])("a bot at %s stops at the approval: nothing ans
   expect(launch.argv[launch.argv.indexOf("--permission-mode") + 1]).toBe("default");
   expect(JSON.stringify(launch.prompt)).toContain("[UNTRUSTED BOT API MESSAGE]");
   expect(JSON.stringify(launch.systemPrompt)).toContain("through this bot's API");
+  // Whatever the bot's own level: confined, and no tool of OpenMausBot's, so it can start, schedule or change nothing.
+  expect(launch.argv).toContain("--restricted");
+  expect(launch.argv[launch.argv.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,Edit,Write,WebSearch");
+  expect(Object.keys(launch.mcpConfig.mcpServers)).toEqual(["ogb"]);
   socket = connect(launch.mcpConfig.mcpServers.ogb.args.at(-1));
   await new Promise<void>((resolve, reject) => { socket!.once("connect", resolve); socket!.once("error", reject); });
   const answers: any[] = [];
@@ -129,7 +133,7 @@ it.each(["ask", "full", "auto"])("a bot at %s stops at the approval: nothing ans
 
 it("stays on Ask when the person sets the whole bot to Full access afterwards", async () => {
   // Each turn relaunches the fake engine, so its command line shows the level this turn really runs at.
-  fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_EXIT_AFTER_TURN: "1" });
+  fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_VERSION: "2.1.284", FAKE_CLAUDE_EXIT_AFTER_TURN: "1" });
   const { url, dataDir } = fixture.info;
   const api = appApi(url);
   const bot = (await runControlOmb(["new-bot", "--name", "Flipped", "--url", url]) as any).bot;
@@ -145,7 +149,7 @@ it("stays on Ask when the person sets the whole bot to Full access afterwards", 
 }, hostTimeout(90_000));
 
 it("a saved command rule never answers for a call: the card waits for the person", async () => {
-  fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_MODE: "hang" });
+  fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_VERSION: "2.1.284", FAKE_CLAUDE_MODE: "hang" });
   const { url, dataDir } = fixture.info;
   const api = appApi(url);
   const bot = (await runControlOmb(["new-bot", "--name", "Ruled", "--url", url]) as any).bot;
@@ -167,8 +171,46 @@ it("a saved command rule never answers for a call: the card waits for the person
   expect(answers).toEqual([]);
 }, hostTimeout(90_000));
 
+it("tells the model nothing about the person or their work, works in no folder of theirs, and stays out of their later turns", async () => {
+  fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_VERSION: "2.1.284" });
+  const { url, dataDir } = fixture.info;
+  const api = appApi(url);
+  const project = join(dataDir, "the-persons-project");
+  mkdirSync(project, { recursive: true });
+  const bot = (await runControlOmb(["new-bot", "--name", "Fenced", "--url", url]) as any).bot;
+  await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "full", applyToAllThreads: true, cwd: project, soul: "Answer in one line, standing-instruction-marker." });
+  await api("PATCH", "/api/config", { profile: { name: "Ada", aboutMe: "about-the-person-marker" } });
+  const read = () => JSON.parse(readFileSync(join(dataDir, "fake-claude-dump.json"), "utf8"));
+
+  // The person's own work first: a call must not see it.
+  await api("POST", `/api/bots/${bot.id}/messages`, { text: "persons-own-work-marker" });
+  await expect.poll(() => { try { return JSON.stringify(read().prompt).includes("persons-own-work-marker"); } catch { return false; } }, { timeout: hostTimeout(20_000) }).toBe(true);
+  await expect.poll(async () => ((await api("GET", "/api/bots")).bots as any[]).find((one) => one.id === bot.id).busy, { timeout: hostTimeout(20_000) }).toBeFalsy();
+  const own = read();
+  expect(JSON.stringify(own.systemPrompt)).toContain("about-the-person-marker");
+  expect(Object.keys(own.mcpConfig.mcpServers).length).toBeGreaterThan(1);
+
+  const on = await api("POST", `/api/bots/${bot.id}/bot-api`, { enabled: true });
+  const answered = await call(on.url, on.key, { message: "api-call-marker" });
+  expect(answered.status).toBe(200);
+  const launch = read();
+  expect(JSON.stringify(launch.prompt)).toContain("api-call-marker");
+  const told = JSON.stringify(launch.systemPrompt);
+  expect(told).toContain("standing-instruction-marker");
+  for (const hidden of ["about-the-person-marker", "persons-own-work-marker", "coordinate_bots", "session_search", "the-persons-project"]) expect(told, hidden).not.toContain(hidden);
+  expect(JSON.stringify(launch.prompt)).not.toContain("persons-own-work-marker");
+  expect(realpathSync(launch.cwd)).not.toBe(realpathSync(project));
+
+  // The person's next turn hears nothing of it.
+  await api("POST", `/api/bots/${bot.id}/messages`, { text: "persons-next-marker" });
+  await expect.poll(() => JSON.stringify(read().prompt).includes("persons-next-marker"), { timeout: hostTimeout(20_000) }).toBe(true);
+  const next = read();
+  expect(JSON.stringify(next.systemPrompt)).not.toContain("api-call-marker");
+  expect(JSON.stringify(next.prompt)).not.toContain("api-call-marker");
+}, hostTimeout(120_000));
+
 it("says it is still working when the reply takes longer than the caller will wait", async () => {
-  fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_MODE: "hang" });
+  fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_VERSION: "2.1.284", FAKE_CLAUDE_MODE: "hang" });
   const { url } = fixture.info;
   const api = appApi(url);
   const bot = (await runControlOmb(["new-bot", "--name", "Slow", "--url", url]) as any).bot;

@@ -142,9 +142,10 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
   });
   afterEach(async () => { await stop(); resetTurn(); });
 
-  itAutoHost("never offers this computer to a call through the Bot API, on Auto or when the bot works on this computer", async () => {
-    await start();
-    for (const place of [undefined, "local"] as const) {
+  itAutoHost("never offers a computer to a call through the Bot API, on Auto, on this computer or on a private desktop", async () => {
+    await start({ FAKE_CLAUDE_VERSION: "2.1.284" });
+    // "vm" has no machine here: a turn that reached for one would fail before the engine ever heard the message.
+    for (const place of [undefined, "local", "vm"] as const) {
       const { bot } = await apiOk("POST", "/api/bots", { name: `API bot ${place ?? "auto"}` });
       if (place) await apiOk("PATCH", `/api/bots/${bot.id}`, { computer: place });
       const { key } = await apiOk("POST", `/api/bots/${bot.id}/bot-api`, { enabled: true });
@@ -160,7 +161,7 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
       const { thread } = await answered.json() as { thread: string };
       await idle(bot.id, thread);
     }
-  });
+  }, hostTimeout(90_000));
 
   itAutoHost("holds no computer:host claim and records no pin until a screen tool runs", async () => {
     await start();

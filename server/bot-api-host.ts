@@ -8,6 +8,7 @@ import { redactSecretsInText } from "../shared/redact.ts";
 import { BOT_API_UPGRADE, botApiEndpoint, type BotApiReply } from "../shared/bot-api.ts";
 import type { AdminActionRow } from "./admin-activity.ts";
 import { BOT_API_MAX_MESSAGE_CHARS, BOT_API_MAX_PENDING, BotApiManager, botApiPrompt, withoutAttachedImages, type BotApiAttempt, type BotApiStatus } from "./bot-api.ts";
+import { personKey } from "./person-key.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import { PASS, type RouteHandler } from "./routes/table.ts";
 import { parseJson, schemaIssue } from "./schema.ts";
@@ -47,6 +48,10 @@ export interface BotApiHostDeps {
   threadBusy(botId: string, threadId: string): boolean;
   /** Whether a new turn would start now, before anything is written. */
   canStart(botId: string, threadId: string): boolean;
+  /** This bot's AI can run a turn with no shell and no tools; one that can't doesn't take a call. */
+  canConfine(botId: string): boolean;
+  /** A thread the API opened whose turn never started. */
+  discard?(botId: string, threadId: string): void;
   /** False on a plan that doesn't include the Bot API; asked on every call, so an upgrade counts at once. Absent: included. */
   included?(): boolean;
   /** A thread the API just opened: whose it is on a Cloud. */
@@ -66,16 +71,24 @@ export interface BotApiHostDeps {
 /** `detail` is kept with the call for the person; the caller only ever gets `message`, so no engine error, path or
  * internal wording leaves through the door. */
 function fail(status: number, message: string, detail?: string): never {
-  throw Object.assign(new Error(message), { status, detail });
+  throw Object.assign(new Error(message), { status, detail, forCaller: true });
+}
+
+/** Words written for a caller, or the fixed ones: an unexpected error's own text could name anything. */
+function callerWords(error: unknown): string {
+  return z.object({ forCaller: z.literal(true), message: z.string() }).safeParse(error).data?.message ?? COULD_NOT_ANSWER;
 }
 
 const COULD_NOT_ANSWER = "The bot could not answer. Open this thread in the app to see why.";
 const BUSY = "The bot is busy. Try again soon.";
+const CANNOT_CONFINE = "This bot's AI can't take Bot API calls. Choose another AI for this bot.";
 
 function detailOf(error: unknown): string {
   const parsed = z.object({ detail: z.string() }).safeParse(error);
   return redactSecretsInText(parsed.success ? parsed.data.detail : error instanceof Error ? error.message : String(error));
 }
+
+const minter = (auth: RequestAuth) => (auth.kind === "session" ? personKey(auth.session) : undefined);
 
 function statusOf(error: unknown): number {
   const parsed = z.object({ status: z.number().int() }).safeParse(error);
@@ -111,11 +124,14 @@ export function createBotApiHost(deps: BotApiHostDeps) {
     if (set.size) running.set(botId, set); else running.delete(botId);
   };
 
-  /** The thread as the caller sees it now, from the lines after its last message. */
+  /** The thread as the caller sees it now: only what answers the caller's own last message, up to the next thing anyone
+   * else typed there. A person's words and the bot's answers to them stay in the app. */
   function threadState(botId: string, threadId: string): BotApiReply {
     const lines = deps.store.messagesFor(threadId);
-    const last = lines.findLastIndex((line) => line.role === "user");
-    const after = lines.slice(last + 1);
+    const last = lines.findLastIndex((line) => line.role === "user" && line.via === "api");
+    const rest = lines.slice(last + 1);
+    const next = rest.findIndex((line) => line.role === "user");
+    const after = next === -1 ? rest : rest.slice(0, next);
     if (pendingCard(after)) return { thread: threadId, status: "needs_approval" };
     if (deps.threadBusy(botId, threadId)) return { thread: threadId, status: "working" };
     return { reply: replyText(after), thread: threadId };
@@ -132,11 +148,13 @@ export function createBotApiHost(deps: BotApiHostDeps) {
     }
     if (!deps.canStart(botId, threadId ?? "")) fail(409, BUSY, "The bot already had as many conversations going as it may");
     const message = withoutAttachedImages(call.message);
+    let opened = false;
     if (threadId === undefined) {
       // Asks from the start, with none of the bot's saved allowances: nothing may answer an approval for an outside caller.
       const task = store.createTask(botId, message.slice(0, 80), false, undefined, undefined, "ask");
       if (!task) fail(404, "no such bot");
       threadId = task.threadId;
+      opened = true;
       store.patchTask(botId, threadId, { botApi: true });
       deps.opened?.(threadId);
     }
@@ -154,6 +172,7 @@ export function createBotApiHost(deps: BotApiHostDeps) {
       });
     } catch (error) {
       markRunning(botId, threadId, false);
+      if (opened) deps.discard?.(botId, threadId);
       const busy = z.object({ code: z.enum(["thread_busy", "thread_limit"]) }).safeParse(error).success;
       fail(busy ? 409 : 502, busy ? BUSY : COULD_NOT_ANSWER, error instanceof Error ? error.message : String(error));
     }
@@ -201,6 +220,11 @@ export function createBotApiHost(deps: BotApiHostDeps) {
         json(res, 403, { error: BOT_API_UPGRADE });
         return true;
       }
+      if (!deps.canConfine(botId)) {
+        manager.recordRefused(botId, 403, CANNOT_CONFINE);
+        json(res, 403, { error: CANNOT_CONFINE });
+        return true;
+      }
       if (req.method === "GET") {
         const threadId = url.searchParams.get("thread") ?? "";
         const task = /^[\w-]{1,128}$/.test(threadId) ? deps.store.taskByThread(botId, threadId) : undefined;
@@ -219,7 +243,7 @@ export function createBotApiHost(deps: BotApiHostDeps) {
         call = parsed.data;
       } catch (error) {
         const status = statusOf(error) === 500 ? 400 : statusOf(error);
-        const message = error instanceof Error ? error.message : "Invalid JSON body";
+        const message = statusOf(error) === 500 ? "The body isn't valid JSON" : callerWords(error) === COULD_NOT_ANSWER && error instanceof Error ? error.message : callerWords(error);
         manager.record(botId, { outcome: "rejected", statusCode: status, reason: message });
         json(res, status, { error: message });
         return true;
@@ -241,7 +265,7 @@ export function createBotApiHost(deps: BotApiHostDeps) {
         json(res, answer.status, answer.body);
       } catch (error) {
         manager.record(botId, { outcome: "rejected", statusCode: statusOf(error), reason: detailOf(error), preview: call.message });
-        json(res, statusOf(error), { error: error instanceof Error ? error.message : COULD_NOT_ANSWER });
+        json(res, statusOf(error), { error: callerWords(error) });
       }
       return true;
     } finally {
@@ -270,7 +294,7 @@ export function createBotApiHost(deps: BotApiHostDeps) {
       if (match[2] === "new-key") {
         if (!included()) return answer(res, 403, { error: BOT_API_UPGRADE, upgrade: true });
         if (!manager.enabled(botId)) return answer(res, 409, { error: "The Bot API is off for this bot" });
-        const minted = manager.enable(botId);
+        const minted = manager.enable(botId, minter(auth));
         deps.record?.(auth, { category: "bot-api", action: "bot-api.new-key", target });
         return answer(res, 200, { key: minted.key, ...view(botId, auth) });
       }
@@ -280,7 +304,7 @@ export function createBotApiHost(deps: BotApiHostDeps) {
         // Already on keeps its key: only New key replaces one an app may be using.
         if (!included()) return answer(res, 403, { error: BOT_API_UPGRADE, upgrade: true });
         if (manager.enabled(botId)) return answer(res, 200, view(botId, auth));
-        const minted = manager.enable(botId);
+        const minted = manager.enable(botId, minter(auth));
         deps.record?.(auth, { category: "bot-api", action: "bot-api.on", target });
         return answer(res, 200, { key: minted.key, ...view(botId, auth) });
       }

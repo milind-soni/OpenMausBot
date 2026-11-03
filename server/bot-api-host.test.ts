@@ -65,7 +65,7 @@ const replies = (text: string): Script => (fake, _botId, _prompt, opts) => {
   }, 30);
 };
 
-async function harness(script: Script, options: { waitMs?: number; full?: boolean; included?: () => boolean } = {}) {
+async function harness(script: Script, options: { waitMs?: number; full?: boolean; included?: () => boolean; noConfine?: boolean } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "omb-bot-api-host-"));
   dirs.push(dir);
   const fake = fakeStore();
@@ -86,6 +86,8 @@ async function harness(script: Script, options: { waitMs?: number; full?: boolea
     },
     threadBusy: (botId, threadId) => fake.bots.get(botId)?.tasks.find((task) => task.threadId === threadId)?.busy === true,
     canStart: () => !options.full,
+    canConfine: () => !options.noConfine,
+    discard: (botId, threadId) => { const bot = fake.bots.get(botId)!; bot.tasks = bot.tasks.filter((task) => task.threadId !== threadId); },
     ...(options.included ? { included: options.included } : {}),
     hooksBaseUrl: () => "https://bots.example.test",
     manageRefusal: (auth) => (auth.scopes.includes("admin") ? null : "Only people who can edit Scout can change this."),
@@ -291,7 +293,7 @@ describe("the Bot API door on the webhook receiver", () => {
     const host = createBotApiHost({
       store: fake.store, manager: new BotApiManager({ file: join(dir, "bot-api.json") }), waitMs: 5_000,
       startTurn: async (_botId, _prompt, opts) => { held = release.count; setTimeout(() => { expect(release.count).toBe(1); opts.onSettled({ ok: true, text: "" }); }, 60); },
-      threadBusy: () => false, canStart: () => true, hooksBaseUrl: () => "https://x", manageRefusal: () => null,
+      threadBusy: () => false, canStart: () => true, canConfine: () => true, hooksBaseUrl: () => "https://x", manageRefusal: () => null,
       claimRequest: () => { if (refuse) throw Object.assign(new Error("This Cloud moved"), { status: 409 }); return () => { release.count += 1; }; },
     });
     const key = host.manager.enable("b1").key;
@@ -362,6 +364,53 @@ describe("the Bot API door on the webhook receiver", () => {
     finish.shift()!();
     expect((await longer).body).toMatchObject({ reply: "Late" });
     expect((await h.call("b1", key, { message: "Too long", wait: 301 })).status).toBe(400);
+  });
+
+  it("doesn't take a call on a bot whose AI can't be confined, and says so in plain words", async () => {
+    const h = await harness(replies("x"), { noConfine: true });
+    const key = (await h.app("POST", "/api/bots/b1/bot-api", { enabled: true })).body.key as string;
+    expect(await h.call("b1", key, { message: "Hi" })).toEqual({ status: 403, body: { error: expect.stringMatching(/can't take Bot API calls/) } });
+    expect(h.turns).toEqual([]);
+    expect(h.fake.bots.get("b1")!.tasks).toEqual([]);
+    expect((await h.call("b1", `${key}x`, { message: "Hi" })).status).toBe(401);
+  });
+
+  it("never hands a caller what a person and the bot said afterwards in that thread", async () => {
+    const h = await harness(replies("For the caller"));
+    const key = (await h.app("POST", "/api/bots/b1/bot-api", { enabled: true })).body.key as string;
+    const threadId = (await h.call("b1", key, { message: "Hi" })).body.thread as string;
+    h.fake.store.appendMessage(threadId, { role: "user", kind: "text", text: "My private question" });
+    h.fake.store.appendMessage(threadId, { role: "bot", kind: "text", text: "My private answer" });
+    expect(await h.call("b1", key, undefined, { method: "GET", query: `?thread=${threadId}` })).toEqual({ status: 200, body: { reply: "For the caller", thread: threadId } });
+  });
+
+  it("answers an unexpected error in fixed words, keeps its text for the person, and removes the thread when the turn never started", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-bot-api-raw-"));
+    dirs.push(dir);
+    const fake = fakeStore();
+    const manager = new BotApiManager({ file: join(dir, "bot-api.json") });
+    const removed: string[] = [];
+    let thrown: Error = Object.assign(new Error("/home/me/.secrets/token.json: EACCES"), { status: 500 });
+    const host = createBotApiHost({
+      store: fake.store, manager, waitMs: 5_000, threadBusy: () => false, canStart: () => true, canConfine: () => true, hooksBaseUrl: () => "https://x", manageRefusal: () => null,
+      startTurn: async () => { throw thrown; }, discard: (_botId, threadId) => { removed.push(threadId); },
+    });
+    const key = manager.enable("b1").key;
+    const server = createServer((req, res) => { void createWebhookIngressHandler({} as WebhookManager, undefined, host.door)(req, res); });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/hooks/api/bots/b1/messages`;
+    const send = async (body: string) => { const answer = await fetch(url, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body }); return { status: answer.status, text: await answer.text() }; };
+    const failed = await send(JSON.stringify({ message: "Hi" }));
+    expect(failed.status).toBe(502);
+    expect(failed.text).not.toContain("EACCES");
+    expect(removed).toHaveLength(1);
+    expect(manager.listAttempts("b1").at(-1)!.reason).toContain("EACCES");
+    thrown = Object.assign(new Error("no"), { code: "thread_limit" });
+    expect((await send(JSON.stringify({ message: "Hi" }))).status).toBe(409);
+    const broken = await send("{not json");
+    expect(broken.status).toBe(400);
+    expect(broken.text).not.toContain("Unexpected");
   });
 
   it("forgets a deleted bot's key and calls", async () => {
