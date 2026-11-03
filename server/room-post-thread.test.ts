@@ -51,6 +51,18 @@ describe("postToRoomThread", () => {
     expect(store.deleteGroupTask).toHaveBeenCalledWith("room", "new");
   });
 
+  it("still passes on the post's failure when removing the empty thread fails too", () => {
+    const failure = new Error("disk full");
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const store = { createGroupTask: vi.fn(() => opened), appendMessage: vi.fn(() => { throw failure; }), deleteGroupTask: vi.fn(() => { throw new Error("locked"); }) };
+      expect(() => postToRoomThread(store as never, room(["open"]), "Q4 launch", post)).toThrow(failure);
+      expect(quiet).toHaveBeenCalledWith(expect.stringContaining("new"), expect.objectContaining({ message: "locked" }));
+    } finally {
+      quiet.mockRestore();
+    }
+  });
+
   it("opens nothing and posts nothing when the room can no longer take a thread", () => {
     const store = { createGroupTask: vi.fn(() => null), appendMessage: vi.fn(), deleteGroupTask: vi.fn() };
     expect(postToRoomThread(store as never, room(["open"]), "Q4 launch", post)).toBeNull();

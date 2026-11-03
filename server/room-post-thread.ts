@@ -26,7 +26,13 @@ export function postToRoomThread(store: Pick<Store, "createGroupTask" | "appendM
   try {
     return { opened, posted: store.appendMessage(opened?.threadId ?? room.threadId, message) };
   } catch (error) {
-    if (opened) store.deleteGroupTask(room.id, opened.threadId);
+    if (opened) {
+      try {
+        store.deleteGroupTask(room.id, opened.threadId);
+      } catch (cleanup) {
+        console.error(`room post: could not remove the empty thread ${opened.threadId} after its post failed`, cleanup);
+      }
+    }
     throw error;
   }
 }
