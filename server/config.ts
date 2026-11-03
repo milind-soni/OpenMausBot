@@ -748,6 +748,10 @@ export function ensureDirs() {
 let lastIgnoredConfigWarning = "";
 const storedConfig = settledFileCache(() => join(DATA_DIR, "config.json"), () => parseStoredConfig(parseJson(readFileSync(join(DATA_DIR, "config.json"), "utf8"))));
 
+/**
+ * Loads application configuration from storage, merging environment variable overrides for API keys.
+ * @returns Loaded and normalized AppConfig object.
+ */
 export function loadConfig(): AppConfig {
   let cfg: AppConfig = {};
   try {

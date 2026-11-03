@@ -95,6 +95,17 @@ describe("every credential has one home on the keys page", () => {
     expect(t(live.labelKey)).toBe("OpenAI key");
     expect(t(keyEntry("openai").labelKey)).toBe("OpenAI API key");
   });
+
+  it("reports the Gemini row as configured when saved in savedKeys even if another provider is active", () => {
+    const gemini = keyEntry("geminiTts");
+    const config = {
+      tts: { provider: "elevenlabs", configured: true },
+      savedKeys: {
+        geminiTtsKey: { configured: true, last4: "9abc" },
+      },
+    } as unknown as ConfigStatus;
+    expect(savedState(gemini, config)).toEqual({ configured: true, last4: "9abc" });
+  });
 });
 
 describe("searching the keys", () => {

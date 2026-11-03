@@ -13,6 +13,11 @@ export function keyStatus(secret: string | undefined | null): { configured: bool
   return { configured: Boolean(secret?.trim()), ...keyHint(secret) };
 }
 
+/**
+ * Returns configuration status and redacted last-4 hints for nested service credentials.
+ * @param cfg Current application configuration.
+ * @returns Object mapping credential names to their configuration and hint states.
+ */
 export function nestedKeyStatus(cfg: AppConfig) {
   return {
     ttsKey: keyStatus(cfg.tts?.key),

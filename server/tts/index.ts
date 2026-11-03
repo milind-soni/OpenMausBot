@@ -26,11 +26,21 @@ export class NoVoiceConfigured extends Error {
 
 const elevenLabs = (cfg: AppConfig) => voiceCredential(cfg.tts?.key);
 
+/**
+ * Resolves the currently active voice provider from configuration.
+ * @param cfg Current application configuration.
+ * @returns The resolved VoiceProvider identifier.
+ */
 export function voiceProvider(cfg: AppConfig): VoiceProvider {
   const provider = cfg.tts?.provider;
   return provider === "xai" || provider === "fish" || provider === "system" || provider === "chatterbox" || provider === "gemini" ? provider : "elevenlabs";
 }
 
+/**
+ * Checks whether credentials or required endpoints are configured for the active voice provider.
+ * @param cfg Current application configuration.
+ * @returns True if the active provider has valid configuration or credentials.
+ */
 export function providerConfigured(cfg: AppConfig): boolean {
   const provider = voiceProvider(cfg);
   if (provider === "xai") return Boolean(cfg.xai?.key);
@@ -41,6 +51,11 @@ export function providerConfigured(cfg: AppConfig): boolean {
   return Boolean(elevenLabs(cfg));
 }
 
+/**
+ * Checks whether both the provider and a voice model/id are configured.
+ * @param cfg Current application configuration.
+ * @returns True if the provider is configured and a voice is selected.
+ */
 export function voiceConfigured(cfg: AppConfig): boolean {
   const provider = voiceProvider(cfg);
   if (provider === "xai") return Boolean(cfg.xai?.key && cfg.tts?.voice);
@@ -53,6 +68,12 @@ export function voiceConfigured(cfg: AppConfig): boolean {
   return Boolean(elevenLabs(cfg) && cfg.tts?.voice);
 }
 
+/**
+ * Checks whether speech synthesis can proceed immediately with the given or configured voice.
+ * @param cfg Current application configuration.
+ * @param voiceId Optional override voice identifier.
+ * @returns True if speech synthesis is ready to run.
+ */
 export function voiceReady(cfg: AppConfig, voiceId?: string): boolean {
   const provider = voiceProvider(cfg);
   if (provider === "xai") return Boolean(cfg.xai?.key && (voiceId || cfg.tts?.voice));
@@ -65,7 +86,11 @@ export function voiceReady(cfg: AppConfig, voiceId?: string): boolean {
   return Boolean(elevenLabs(cfg) && (voiceId || cfg.tts?.voice));
 }
 
-/** Never includes the key. */
+/**
+ * Returns a summary of current voice configuration without exposing sensitive API keys.
+ * @param cfg Current application configuration.
+ * @returns Public voice configuration state for client UI consumption.
+ */
 export function describeVoice(cfg: AppConfig) {
   const provider = voiceProvider(cfg);
   const included = provider === "elevenlabs" && elevenLabs(cfg)?.included === true;
@@ -81,12 +106,25 @@ export function describeVoice(cfg: AppConfig) {
   };
 }
 
+/**
+ * Tests an API key against the specified voice provider's verification endpoint.
+ * @param provider Cloud voice provider to verify.
+ * @param key Plaintext API key to test.
+ * @returns Verification result indicating success or human-readable failure reason.
+ */
 export function verifyKey(provider: "elevenlabs" | "fish" | "gemini", key: string) {
   if (provider === "fish") return fish.verifyKey(key);
   if (provider === "gemini") return gemini.verifyKey(key);
   return elevenlabs.verifyKey(key);
 }
 
+/**
+ * Retrieves the available voice catalog for the currently configured provider.
+ * @param cfg Current application configuration.
+ * @param run Optional command runner for system voice discovery.
+ * @param search Optional search query parameters for provider voice catalogs.
+ * @returns Array of available Voice descriptors.
+ */
 export async function listVoices(
   cfg: AppConfig,
   run?: systemVoices.Runner,
@@ -112,12 +150,28 @@ export async function listVoices(
   return elevenlabs.listVoices(credential.token, credential.api, search);
 }
 
+/**
+ * Adds a community or shared voice to the user's account for ElevenLabs.
+ * @param cfg Current application configuration.
+ * @param publicOwnerId Public identifier of the voice creator.
+ * @param voiceId Unique identifier of the shared voice.
+ * @param name Display name for the shared voice.
+ * @returns Voice identifier assigned to the added voice.
+ */
 export async function addSharedVoice(cfg: AppConfig, publicOwnerId: string, voiceId: string, name: string): Promise<string> {
   const credential = voiceProvider(cfg) === "elevenlabs" ? elevenLabs(cfg) : null;
   if (!credential) throw new NoVoiceConfigured("key");
   return elevenlabs.addSharedVoice(credential.token, credential.api, publicOwnerId, voiceId, name);
 }
 
+/**
+ * Synthesizes text to speech using the currently configured provider and voice.
+ * @param cfg Current application configuration.
+ * @param text The text message to speak aloud.
+ * @param voiceId Optional override voice identifier.
+ * @param run Optional command runner for system voice synthesis.
+ * @returns Promise resolving to the synthesized audio payload.
+ */
 export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: systemVoices.Runner) {
   const provider = voiceProvider(cfg);
   if (provider === "xai") {

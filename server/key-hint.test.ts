@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { keyHint, keyStatus, withoutKeyHints } from "./key-hint.ts";
+import { keyHint, keyStatus, nestedKeyStatus, withoutKeyHints } from "./key-hint.ts";
 
 describe("a saved key's hint", () => {
   it("is the last four characters of a key long enough to spare them, and nothing for a short one", () => {
@@ -24,5 +24,10 @@ describe("a saved key's hint", () => {
       vps: { configured: true, sshAlias: "host" },
     });
     expect(status.openai.last4).toBe("a1b2");
+  });
+
+  it("extracts nested key status including geminiTtsKey", () => {
+    const cfg = { tts: { geminiKey: "AIzaSyD-1234567890abcdef" } };
+    expect(nestedKeyStatus(cfg).geminiTtsKey).toEqual({ configured: true, last4: "cdef" });
   });
 });

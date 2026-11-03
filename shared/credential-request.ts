@@ -175,6 +175,12 @@ export function credentialSaveRequest(id: CredentialTargetId, value: string): { 
     : { path: "/api/logins/1password", method: "POST", body: { token: value } };
 }
 
+/**
+ * Builds a partial configuration patch to store a credential for the given target.
+ * @param id The credential target identifier.
+ * @param value The secret key value to store.
+ * @returns Configuration patch object containing the credential.
+ */
 export function credentialConfigPatch(id: ConfigCredentialTargetId, value: string): CredentialConfig {
   switch (id) {
     case "xaiApiKey":
@@ -215,6 +221,12 @@ export function credentialConfigPatch(id: ConfigCredentialTargetId, value: strin
   }
 }
 
+/**
+ * Checks whether a specific credential is configured in the provided configuration.
+ * @param config Current credential configuration snapshot.
+ * @param id The credential target identifier to inspect.
+ * @returns True if the target credential has a non-empty value.
+ */
 export function credentialIsConfigured(config: CredentialConfig, id: CredentialTargetId): boolean {
   switch (id) {
     case "xaiApiKey":

@@ -30,6 +30,11 @@ const FISH_MODELS = [
 ] as const;
 type FishModel = (typeof FISH_MODELS)[number]["value"];
 
+/**
+ * Voice settings component for managing text-to-speech configuration, voice selection, and provider keys.
+ * @param props Component properties containing the bot configuration and update callback.
+ * @returns Rendered voice settings panel.
+ */
 export function VoiceSettings({
   bot,
   onPatch,

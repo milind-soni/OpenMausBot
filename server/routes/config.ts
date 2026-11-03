@@ -102,6 +102,11 @@ export interface ConfigRouteDeps {
   postiz?: Pick<Postiz, "configCheck" | "configSaved">;
 }
 
+/**
+ * Creates route handlers for inspecting, updating, and validating application configuration.
+ * @param deps Configuration route dependencies and runtime controllers.
+ * @returns RouteHandler function handling /api/config requests.
+ */
 export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
   const {
     store, cfg, registry, sessions, browserCleanup, browserLive, browserRuntime, usedBrowserSessions, decider,

@@ -158,6 +158,24 @@ beforeAll(async () => {
         if (modelsFail) return send(404, { detail: "no models route" });
         return send(200, { data: [{ id: "alex" }, { id: "turbo-en" }] });
       }
+      if (path.includes(":generateContent")) {
+        return send(200, {
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    inlineData: {
+                      mimeType: "audio/wav",
+                      data: WAV.toString("base64"),
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      }
       send(404, { detail: "no such stub route" });
     });
   });
@@ -166,6 +184,7 @@ beforeAll(async () => {
   stubBase = `http://127.0.0.1:${port}`;
   process.env.OMB_ELEVENLABS_API = `${stubBase}/v1`;
   process.env.OMB_FISH_AUDIO_API = stubBase;
+  process.env.OMB_GEMINI_TTS_API = stubBase;
 });
 
 afterAll(() => new Promise<void>((r) => server.close(() => r())));
@@ -719,6 +738,25 @@ describe("Gemini", () => {
   it("requires a key to speak", async () => {
     const { speak, NoVoiceConfigured } = await voice();
     expect(() => speak(cfg({ provider: "gemini" }), "hello")).toThrow(NoVoiceConfigured);
+  });
+
+  it("speaks using the Gemini speech generation endpoint and passes voice, text, key, and model", async () => {
+    seen.length = 0;
+    const { speak } = await voice();
+    const audio = await speak(
+      cfg({ provider: "gemini", geminiKey: "test-gemini-key", voice: "Aoede", model: "gemini-3.8-flash-lite-tts" }),
+      "Hello from Gemini",
+    );
+    expect(audio.mime).toBe("audio/wav");
+    expect(Buffer.from(audio.bytes)).toEqual(WAV);
+
+    const call = seen.at(-1)!;
+    expect(call.method).toBe("POST");
+    expect(call.url).toBe("/models/gemini-3.8-flash-lite-tts:generateContent");
+    expect(call.headers["x-goog-api-key"]).toBe("test-gemini-key");
+    const parsedBody = JSON.parse(call.body);
+    expect(parsedBody.contents[0].parts[0].text).toBe("Hello from Gemini");
+    expect(parsedBody.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).toBe("Aoede");
   });
 });
 
