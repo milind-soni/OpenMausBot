@@ -105,14 +105,13 @@ function useSidebarPlanReport(enabled: boolean): SidebarPlanReport | null {
   const noPlan = report !== null && sidebarPlanViews(report).length === 0;
   useEffect(() => {
     if (!enabled) return;
-    let alive = true;
     const load = () => {
       void api<SidebarPlanReport>("/api/plan-usage", { background: true })
-        .then((next) => { if (alive) setReport(next); })
+        .then(setReport)
         .catch(() => {});
     };
     const stop = startPlanPoller(load, browserHost, { every: noPlan ? null : POLL_MS, last: last.current });
-    return () => { alive = false; stop(); };
+    return stop;
   }, [enabled, noPlan]);
   return enabled ? report : null;
 }
