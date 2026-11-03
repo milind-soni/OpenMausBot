@@ -78,9 +78,9 @@ export function OwnerPicker({ target, onClose }: { target: OwnerPickerTarget | n
   const top = Math.max(8, Math.min(shown.y, window.innerHeight - 320));
   const left = Math.max(8, Math.min(shown.x, window.innerWidth - 260));
   return createPortal(
-    <div data-owner-picker role="menu" aria-label={t("owner.pickTitle")} style={{ top, left }}
+    <div data-owner-picker role="menu" aria-label={t("lookedAfter.pickTitle")} style={{ top, left }}
       className={cn("fixed z-50 w-[248px] overflow-hidden", MENU_SHEET, motion.className)} {...motion.exitProps}>
-      <div className={MENU_HEADING}>{t("owner.pickTitle")}</div>
+      <div className={MENU_HEADING}>{t("lookedAfter.pickTitle")}</div>
       <div className="flex max-h-[260px] flex-col gap-1 overflow-y-auto">
         {team.people.map((person) => (
           <button key={person.email} type="button" role="menuitemradio" aria-checked={person.email === shown.current} disabled={busy}
