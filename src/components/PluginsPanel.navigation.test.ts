@@ -41,9 +41,11 @@ vi.mock("@/state/store", () => ({
   }),
 }));
 vi.mock("./McpServersPanel", () => ({
-  McpServersPanel: ({ embedded, whopCard }: { embedded?: boolean; whopCard?: boolean }) => whopCard
-    ? createElement("div", { "data-whop-card": true }, "Connect Whop")
-    : createElement("div", { "data-embedded": String(Boolean(embedded)) }, "MCP inventory"),
+  McpServersPanel: ({ embedded, whopCard, nativeCard }: { embedded?: boolean; whopCard?: boolean; nativeCard?: string }) => {
+    if (whopCard) return createElement("div", { "data-whop-card": true }, "Connect Whop");
+    if (nativeCard) return createElement("div", { "data-native-mcp": nativeCard }, "Connect Famulor");
+    return createElement("div", { "data-embedded": String(Boolean(embedded)) }, "MCP inventory");
+  },
 }));
 vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
 vi.mock("./Avatar", () => ({ BotAvatar: ({ bot }: { bot: Bot }) => createElement("span", { "data-avatar": bot.id }) }));
@@ -69,7 +71,8 @@ const PHASE = 13;
 const HIGHLEVEL_CONNECTED = 21;
 const X_CONNECTED = 22;
 const CATEGORY = 20;
-const POSTIZ_CONNECTED = 23;
+const FAMULOR_CONNECTED = 23;
+const POSTIZ_CONNECTED = 24;
 const MODE = 4;
 const SEARCH = 15;
 const TAB = 16;
@@ -116,6 +119,24 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Apps pop-up", () => {
+  it("connects Famulor inside the apps grid the same way as Whop", () => {
+    const wrapper = (tree: Node[]) => tree.find((node) => node.props["data-native-card"] === "famulor")!;
+    const { html, nodes: tree } = render();
+    expect(html).toContain("Connect Famulor");
+    expect(nodes(wrapper(tree)).some((node) => node.props.nativeCard === "famulor")).toBe(true);
+    expect(wrapper(tree).props.className).toBe("contents");
+    fixture.overrides.set(TAB, "connected");
+    fixture.overrides.set(FAMULOR_CONNECTED, false);
+    expect(wrapper(render().nodes).props.className).toBe("hidden");
+    fixture.overrides.set(FAMULOR_CONNECTED, true);
+    expect(wrapper(render().nodes).props.className).toBe("contents");
+    expect(render().html).toContain("2 connected");
+    fixture.overrides.set(TAB, "marketplace");
+    fixture.overrides.set(SEARCH, "famulor");
+    expect(wrapper(render().nodes).props.className).toBe("contents");
+    fixture.overrides.set(SEARCH, "gmail");
+    expect(wrapper(render().nodes).props.className).toBe("hidden");
+  });
   it("connects Whop inside the apps grid without a Composio key or MCP detour", () => {
     fixture.overrides.set(CONFIGURED, false);
     const { html, nodes: tree } = render();
@@ -520,7 +541,7 @@ describe("Apps pop-up", () => {
     expect(tree.find((node) => node.props.ariaLabel === "More categories")!.props.placement).toBeUndefined();
     tree.find((node) => node.props["data-apps-category"] === "Design")!.props.onClick!();
     const design = render();
-    expect(design.html.match(/data-app-tile="(?!whop)[^"]*"/g)).toEqual(['data-app-tile="figma"']);
+    expect(design.html.match(/data-app-tile="(?!whop|famulor)[^"]*"/g)).toEqual(['data-app-tile="figma"']);
     expect([...design.html.matchAll(/<h3 id="[^"]*"[^>]*>([^<]*)/g)].map((match) => match[1])).toEqual(["Design"]);
     expect(chip(design.nodes, "all").props["aria-pressed"]).toBe(false);
     expect(design.nodes.find((node) => node.props["data-apps-category"] === "Design")!.props["aria-pressed"]).toBe(true);

@@ -61,6 +61,28 @@ manage, and its own consequential-action confirmations still apply. See the
 [official Whop MCP documentation](https://github.com/whopio/whop-mcp-server).
 This is an optional connected tool, not a change to OMB's subscription billing.
 
+### Famulor
+
+In Plugins, find **Famulor** alongside Whop, Gmail and the other apps and click **Connect**. The built-in card
+uses Famulor's official hosted MCP endpoint (`https://app.famulor.io/mcp`) and opens Famulor's browser sign-in;
+no API key, local CLI or Composio connection is needed. After successful
+sign-in and tool discovery it enables the connection. A cancelled or failed
+first setup remains off and can be retried without adding another server.
+
+Open **Bot access** on the Famulor card to reach each bot's existing Access
+settings. Bots set to use every enabled MCP server inherit the connection;
+bots with an explicit selection must include its server name. The next task
+uses the selection. Famulor also appears in the **Connected** filter. **Disconnect** disables the connection and signs out;
+the saved entry remains available to reconnect. Existing custom Famulor entries
+at the official HTTP endpoint are recognized rather than replaced.
+
+Famulor asks for access to the workspace's assistants, calls, campaigns, leads and settings.
+Calls and campaigns can spend credits, so a bot asks before it starts one.
+The card itself does not take an API key. To use a workspace key instead, add a custom MCP server
+at the same address with a header `Authorization` whose value is `Bearer fam_…`.
+
+See [Famulor](https://www.famulor.io). This is an optional connected tool, not a change to OMB's subscription billing.
+
 ### Servers that ask you to sign in
 
 Some URL servers take no token; they want you to sign in with your browser
@@ -101,7 +123,7 @@ computer, where OpenMausBot is not, so sign-in comes back another way:
   the server lets apps register themselves, your browser returns to the
   address you are using OpenMausBot at, at `/mcp-oauth/callback`, and the tab
   says **Signed in. You can close this tab and return to OpenMausBot.** Nothing
-  to copy. Whop works this way. The address is the server's public address
+  to copy. Whop and Famulor work this way. The address is the server's public address
   (a Cloud or hosted workspace's own, a connected domain, or `OMB_PUBLIC_URL`)
   when you are on it, or the https address your browser is on when none is
   set. If you reach the server at an https address it does not list, sign-in

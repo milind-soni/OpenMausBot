@@ -138,6 +138,10 @@ The [Whop fixture](whop.md) checks its one-click setup, cancellation, denied
 consent, discovery failures, reconnect and disconnect using that same registry
 and a synthetic provider, without accessing a real Whop account.
 
+The [Famulor fixture](famulor.md) checks the same path for Famulor's hosted MCP:
+one-click setup, cancellation, denied consent, discovery failures, reconnect
+and disconnect, against a synthetic provider and without a real Famulor account.
+
 The [Postiz fixture](postiz.md) checks the Apps page's Postiz card in the Social
 category: Postiz Cloud's sign-in and an API key for a person's own Postiz, the
 bot's turn getting the `postiz` tools with the token kept out of every answer,

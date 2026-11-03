@@ -24,11 +24,11 @@ vi.mock("@/state/store", () => ({
 }));
 import { McpServersPanel } from "./McpServersPanel";
 
-function render(embedded: boolean, whopCard = false) {
+function render(embedded: boolean, whopCard = false, nativeCard?: "whop" | "famulor", hideNative = false) {
   function Capture() {
     fixture.index = 0;
     fixture.counting = true;
-    try { return McpServersPanel({ embedded, whopCard }); } finally { fixture.counting = false; }
+    try { return McpServersPanel({ embedded, whopCard, nativeCard, hideNative }); } finally { fixture.counting = false; }
   }
   return renderToStaticMarkup(createElement(Capture));
 }
@@ -95,6 +95,45 @@ describe("Your MCP servers inside the Apps pop-up", () => {
     expect(html).toContain("Disconnect Whop");
     expect(html).toContain("Bot access");
     expect(html).not.toContain("data-whop-setup");
+  });
+
+  it("offers Famulor setup with no API key form", () => {
+    fixture.servers = [];
+    const html = render(true, false, "famulor");
+    expect(html).toContain('data-app-tile="famulor"');
+    expect(html).toContain('aria-label="Connect Famulor"');
+    expect(html).toContain("No API key needed");
+    expect(html).toContain("cost credits");
+    expect(html).not.toContain("<textarea");
+    expect(html).not.toContain("Your MCP servers");
+  });
+
+  it("recognizes an existing Famulor URL under any name and exposes access and disconnect", () => {
+    fixture.servers = [{ name: "phones", type: "http", url: "https://app.famulor.io/mcp", headerKeys: [], enabled: true, auth: "signed-in" }];
+    const html = render(true);
+    expect(html).toContain('data-famulor-server="phones"');
+    expect(html).toContain("Disconnect Famulor");
+    expect(html).toContain("Bot access");
+    expect(html).not.toContain("data-whop-server");
+  });
+
+  it("does not brand an unrelated endpoint just because its name is famulor", () => {
+    fixture.servers = [{ name: "famulor", type: "http", url: "https://unrelated.example/mcp", headerKeys: [], enabled: false }];
+    const html = render(true);
+    expect(html).not.toContain("data-famulor-server");
+    expect(html).not.toContain('data-app-tile="famulor"');
+  });
+
+  it("hides both native cards from the embedded list when the apps grid already shows them", () => {
+    fixture.servers = [
+      { name: "whop", type: "http", url: "https://mcp.whop.com/mcp", headerKeys: [], enabled: true, auth: "signed-in" },
+      { name: "famulor", type: "http", url: "https://app.famulor.io/mcp", headerKeys: [], enabled: true, auth: "signed-in" },
+      { name: "notes", command: "npx", args: ["-y", "notes-mcp"], envKeys: [], enabled: true },
+    ];
+    const html = render(true, false, undefined, true);
+    expect(html).not.toContain("data-whop-server");
+    expect(html).not.toContain("data-famulor-server");
+    expect(html).toContain("notes");
   });
 
   it("does not brand an unrelated endpoint just because its name is whop", () => {
