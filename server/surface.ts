@@ -93,6 +93,15 @@ export function handoffUsesOwnCloud(input: { plan: Pick<SurfacePlan, "computer">
   return input.handoffWork && input.plan.computer === undefined && Boolean(input.ownCloudState);
 }
 
+/** Best effort: an unreachable Boat service counts as no cloud computer after `ms`, so a handoff still starts promptly. */
+export function ownCloudStateWithin(status: Promise<{ box?: { state?: string | null } | null }>, ms = 3_000): Promise<string | null | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    status.then((result) => result.box?.state, () => undefined),
+    new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), ms); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 export function browserIsThePlace(plan: SurfacePlan): boolean {
   return plan.computer === "off" && plan.browser;
 }
