@@ -143,6 +143,8 @@ export interface WireTask extends InboxTask {
   projectId?: string;
   /** Detached routine execution, reachable through its visible results card. */
   routineRunId?: string;
+  /** Work from outside (a webhook, an app's event) reached this conversation: what it starts or runs stays confined, for good. */
+  outside?: true;
   /** Set when a bot, not a person, opened this thread. */
   openedBy?: TaskOpenedBy;
   /** On a team's server: one person's conversation, seen by them alone (never by another member or an admin). */
@@ -655,6 +657,8 @@ export interface OptionCardData extends WaitCardField, ComputerAskField, AccessR
   outboundRequest?: { tool: string; app: string | null; calls?: Array<{ app: string | null; label: string }> };
   /** `revision`: the entry as it applied without a person, so Undo can tell it changed since. */
   teamMemoryRequest?: { section: string; entryId: string; kind: string; revision?: string };
+  /** What work from outside asked to write where later turns read it; nothing is written until a person says yes. */
+  outsideWrite?: { kind: "room-bulletin"; roomId: string; bulletin: string } | { kind: "memory"; action: string; text?: string; oldText?: string; until?: string };
   title: string;
   subtitle: string;
   options: string[];

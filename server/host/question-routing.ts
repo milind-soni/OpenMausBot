@@ -36,6 +36,8 @@ export interface QuestionRoutingDeps {
   /** Hands `text` to the turn running in `threadId`, read at its next step as a person's line sent mid-turn is; false when
    * its engine cannot take it now. */
   steer(threadId: string, text: string): Promise<boolean>;
+  /** Work the sender's conversation carries may reach this thread: confined work reaches only what is confined already. */
+  mayReach(fromThreadId: string, toThreadId: string): boolean;
 }
 
 const ENDED: ReadonlySet<HandoffView["status"]> = new Set(["completed", "failed", "cancelled"]);
@@ -94,9 +96,9 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
   async function relay(input: { sender: BotRecord; senderThreadId: string; senderNode?: HandoffView; target: BotRecord; message: string; answers?: string;
     threadId?: string; sentThisTurn?: ReadonlySet<string> }): Promise<PeerDeliveryReceipt | undefined> {
     const { sender, target, message } = input;
-    const waiting = waitingOn(target);
+    const waiting = waitingOn(target).filter((one) => deps.mayReach(input.senderThreadId, one.threadId));
     const ownWork = (node: HandoffView | undefined): node is HandoffView => node !== undefined && node.threadId === input.threadId
-      && !input.sentThisTurn?.has(node.id) && handedOnBy(node, sender.id);
+      && !input.sentThisTurn?.has(node.id) && handedOnBy(node, sender.id) && deps.mayReach(input.senderThreadId, node.threadId);
     const pick = input.answers !== undefined ? waiting.find((one) => one.node?.id === input.answers)
       : waiting.find((one) => one.node !== undefined && input.senderNode?.carrying?.includes(one.node.id) === true)
         ?? waiting.find((one) => ownWork(one.node) && (one.card !== undefined || !one.node.cards?.length));

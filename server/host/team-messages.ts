@@ -56,6 +56,8 @@ export interface TeamMessagesDeps {
   starters: { get(threadId: string): string | undefined; set(threadId: string, person: string): void };
   /** What one person may see, as their own session would. */
   sees(person: { email: string; role: TeamRole }): { bot(botId: string): boolean; thread(threadId: string): boolean };
+  /** Security invariant: a confined conversation's words reach nobody's inbox by naming them. */
+  confined?(threadId: string): boolean;
   notify(notification: Notification): void;
   /** What the inbox needs from the server: whose asks are whose, hand-offs, a bot carrying on, the assistant's reads. */
   inbox: Pick<PersonInboxDeps, "askedPerson" | "handedFrom" | "continueTurn"> & Partial<Pick<PersonInboxDeps, "notes" | "ensureOwnBot" | "changed">> & {
@@ -94,7 +96,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
 
   const { representative, ...wiring } = deps.inbox;
   const inbox = createPersonInbox({
-    notes: (botId) => loadMemory(botId)?.text ?? "", ...wiring, team, dataDir: deps.dataDir, store, starters: deps.starters, audienceOf: deps.audienceOf, personKeyOf: keyOf,
+    notes: (botId) => loadMemory(botId)?.text ?? "", ...wiring, ...(deps.confined ? { confined: deps.confined } : {}), team, dataDir: deps.dataDir, store, starters: deps.starters, audienceOf: deps.audienceOf, personKeyOf: keyOf,
     send: deps.notify, now, person: (key) => byKey(key),
     sees: (key, threadId) => { const one = byKey(key); return one ? deps.sees(one).thread(threadId) : false; },
     ...(representative ? { representative: createRepresentative({ now, timeZone: () => currentTimeZone(), ...representative }) } : {}),
@@ -238,7 +240,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
     if (handledTurns.size > MAX_HANDLED_TURNS) handledTurns.delete(handledTurns.values().next().value!);
     const told = toldThisTurn.get(threadId) ?? new Set<string>();
     toldThisTurn.delete(threadId);
-    if (line.turnSucceeded !== true) return;
+    if (line.turnSucceeded !== true || deps.confined?.(threadId)) return;
     const group = store.groupByThread(threadId);
     const speaker = line.from?.botId ? store.bot(line.from.botId) : store.botByThread(threadId);
     if (!speaker) return;
