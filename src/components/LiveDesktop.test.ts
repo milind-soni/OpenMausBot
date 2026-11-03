@@ -129,7 +129,7 @@ describe("the live desktop", () => {
     expect(props.onHandBack).toHaveBeenCalledTimes(1);
   });
 
-  // #4304: on macOS and frameless Windows the sidebar, chat header and frame bar under the full-screen desktop are window
+  // On macOS and frameless Windows the sidebar, chat header and frame bar under the full-screen desktop are window
   // drag regions, and Electron ignores z-index for them, so a press on the top of the live screen moved the window.
   it("full screen opts the live screen out of the window drag regions beneath it", () => {
     const desktop = () => document.querySelector<HTMLElement>("[data-live-desktop]")!;
