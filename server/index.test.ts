@@ -2441,6 +2441,14 @@ describe("harness HTTP API", () => {
       expect(renamed.status).toBe(200);
       expect(renamed.body.task.title).toBe("Release plan");
 
+      const archived = await api("PATCH", `/api/groups/${room.id}/tasks/${newThread}`, { archivedAt: 1234 });
+      expect(archived.status).toBe(200);
+      expect(archived.body.task.archivedAt).toBe(1234);
+      expect((await api("PATCH", `/api/groups/${room.id}/tasks/${newThread}`, { archivedAt: "soon" })).status).toBe(400);
+      const unarchived = await api("PATCH", `/api/groups/${room.id}/tasks/${newThread}`, { archivedAt: null });
+      expect(unarchived.status).toBe(200);
+      expect(unarchived.body.task).not.toHaveProperty("archivedAt");
+
       const switched = await api("POST", `/api/groups/${room.id}/tasks/${originalThread}`);
       expect(switched.status).toBe(200);
       expect(switched.body.group.threadId).toBe(originalThread);
