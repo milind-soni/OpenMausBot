@@ -1194,6 +1194,64 @@ describe("RoutineManager", () => {
     expect(readFileSync(file, "utf8")).toBe(corrupt);
   });
 
+  it("names the files of unloaded routines and runs for an attachments clear, and none while the file is unreadable", () => {
+    const h = harness();
+    const file = h.options.file as string;
+    const routine = h.manager.create({
+      name: "Review attachment",
+      prompt: "Review the supplied context",
+      botId: "maus-1",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+      attachments: [{ id: "file-1", kind: "file", name: "brief.pdf", path: "/tmp/brief.pdf", size: 4_096 }],
+    });
+    h.manager.runNow(routine.id);
+    expect(h.manager.attachmentPaths()).toEqual(["/tmp/brief.pdf", "/tmp/brief.pdf"]);
+
+    const disk = JSON.parse(readFileSync(file, "utf8")) as { routines: Array<{ schedule: unknown }>; runs: Array<{ attachments?: unknown }> };
+    disk.routines[0]!.schedule = { type: "never" };
+    delete disk.runs[0]!.attachments;
+    writeFileSync(file, JSON.stringify(disk));
+    const unloaded = new RoutineManager(h.options);
+    expect(unloaded.listRoutines()).toEqual([]);
+    expect(unloaded.attachmentPaths()).toEqual(["/tmp/brief.pdf"]);
+
+    writeFileSync(file, "{ not json");
+    expect(new RoutineManager(h.options).attachmentPaths()).toBeNull();
+  });
+
+  it("names no files for a clear when an unloaded routine's attachments are malformed", () => {
+    for (const attachments of [{ path: "/tmp/brief.pdf" }, [null], [{ id: "file-1" }], "brief.pdf"]) {
+      const h = harness();
+      const file = h.options.file as string;
+      h.manager.create({ name: "Review", prompt: "Review it", botId: "maus-1", schedule: { type: "daily", time: "09:00", weekdays: [1] } });
+      const disk = JSON.parse(readFileSync(file, "utf8")) as { routines: Array<{ schedule: unknown; attachments?: unknown }> };
+      disk.routines[0]!.schedule = { type: "never" };
+      disk.routines[0]!.attachments = attachments;
+      writeFileSync(file, JSON.stringify(disk));
+      const unloaded = new RoutineManager(h.options);
+      expect(unloaded.listRoutines()).toEqual([]);
+      expect(unloaded.attachmentPaths()).toBeNull();
+    }
+  });
+
+  it("names no files for a clear when a loaded routine's or run's attachment list holds a bad entry", () => {
+    for (const owner of ["routines", "runs"] as const) {
+      const h = harness();
+      const file = h.options.file as string;
+      const routine = h.manager.create({
+        name: "Review", prompt: "Review it", botId: "maus-1", schedule: { type: "daily", time: "09:00", weekdays: [1] },
+        attachments: [{ id: "file-1", kind: "file", name: "brief.pdf", path: "/tmp/brief.pdf", size: 4_096 }],
+      });
+      h.manager.runNow(routine.id);
+      const disk = JSON.parse(readFileSync(file, "utf8")) as Record<typeof owner, Array<{ attachments?: unknown[] }>>;
+      disk[owner][0]!.attachments!.push(null);
+      writeFileSync(file, JSON.stringify(disk));
+      const reloaded = new RoutineManager(h.options);
+      expect(reloaded.listRoutines()).toHaveLength(1);
+      expect(reloaded.attachmentPaths()).toBeNull();
+    }
+  });
+
   it("treats a routines file with a damaged top-level shape as unreadable", () => {
     const h = harness();
     const file = h.options.file as string;
