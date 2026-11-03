@@ -11,6 +11,7 @@ import { useStore } from "@/state/store";
 import { detectionCount, detectionSources, type SetupDetection, type SetupImportResult, type SetupSource } from "../../shared/setup-import";
 import { GrokBotMark } from "./GrokBotMark";
 import { GrokImportFlow } from "./GrokImportFlow";
+import { MemoryImportSection } from "./MemoryImportSection";
 import { ClaudeMark, CodexMark, CursorMark, PresetProviderMark } from "./ProviderIcons";
 
 function SourceMarks({ sources }: { sources: readonly SetupSource[] }) {
@@ -175,6 +176,7 @@ export function ImportSettings({ client = setupImportApi }: { client?: SetupImpo
   return (
     <div className="flex flex-col gap-4">
       <AiAppsImport client={client} local={localSetupImport(state.config?.cloudHome === true)} />
+      <MemoryImportSection />
       <GrokImportSection />
     </div>
   );

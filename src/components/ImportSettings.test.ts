@@ -20,8 +20,8 @@ const apps = (overrides: Partial<AiAppsImportViewProps> = {}) => text(renderToSt
 })));
 
 describe("Settings → Import", () => {
-  it("draws From your AI apps and From Grok Bot", () => {
-    const value = { state: { config: {} }, dispatch: vi.fn() } as never;
+  it("draws From your AI apps, Bring your memory and From Grok Bot", () => {
+    const value = { state: { config: {}, bots: [] }, dispatch: vi.fn() } as never;
     const markup = renderToStaticMarkup(createElement(StoreContext.Provider, { value }, createElement(ImportSettings, {
       client: { detect: vi.fn(() => new Promise<SetupDetection>(() => {})), apply: vi.fn() },
     })));
@@ -33,7 +33,9 @@ describe("Settings → Import", () => {
     expect(shown).toContain("Tools arrive switched off; logins and history are never read.");
     expect(shown).toContain("From Grok Bot");
     expect(shown).toContain("GROK_FLOW(bare=true)");
-    expect(markup.indexOf('data-import-section="apps"')).toBeLessThan(markup.indexOf('data-import-section="grok"'));
+    expect(shown).toContain("Bring your memory from another assistant");
+    expect(markup.indexOf('data-import-section="apps"')).toBeLessThan(markup.indexOf('data-import-section="memory"'));
+    expect(markup.indexOf('data-import-section="memory"')).toBeLessThan(markup.indexOf('data-import-section="grok"'));
   });
 
   it("offers the welcome step's rows, with its counts, sources and switched-off note", () => {
