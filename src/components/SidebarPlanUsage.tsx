@@ -116,8 +116,23 @@ function useSidebarPlanReport(enabled: boolean): SidebarPlanReport | null {
   return enabled ? report : null;
 }
 
-const BAR: Record<MeterBand, string> = { ok: "bg-accent", near: "bg-warning", full: "bg-danger" };
+const TONE: Record<MeterBand, string> = { ok: "text-accent", near: "text-warning", full: "text-danger" };
 const AMOUNT: Record<MeterBand, string> = { ok: "text-ink-secondary", near: "text-warning", full: "text-danger" };
+const RING = 2 * Math.PI * 6;
+
+function PlanRing({ entry }: { entry: SidebarPlanWindow }) {
+  const band = meterBand(entry.percent);
+  return (
+    <span data-plan-ring={entry.label} data-band={band} title={`${entry.label} ${entry.percent}%`} className="flex shrink-0 items-center gap-1">
+      <svg viewBox="0 0 16 16" className="size-3.5 -rotate-90">
+        <circle cx="8" cy="8" r="6" fill="none" strokeWidth="2.5" className="stroke-current text-ink/15" />
+        <circle cx="8" cy="8" r="6" fill="none" strokeWidth="2.5" strokeLinecap="round" className={cn("stroke-current", TONE[band])}
+          strokeDasharray={`${(RING * Math.max(entry.percent, entry.percent > 0 ? 4 : 0)) / 100} ${RING}`} />
+      </svg>
+      <span className={cn("tabular-nums", AMOUNT[band])}>{entry.percent}%</span>
+    </span>
+  );
+}
 
 export function sidebarPlanLabel(view: SidebarPlanView): string {
   const detail = view.state === "ok" ? view.windows.map((entry) => `${entry.label} ${entry.percent}%`).join(", ") : t("planUsage.fetchError");
@@ -127,22 +142,15 @@ export function sidebarPlanLabel(view: SidebarPlanView): string {
 export function SidebarPlanUsageView({ view, onOpen }: { view: SidebarPlanView; onOpen: () => void }) {
   return (
     <button type="button" onClick={onOpen} data-sidebar-plan-usage={view.state} aria-label={sidebarPlanLabel(view)} title={t("planUsage.title")}
-      className="mb-2 block w-full rounded-lg px-2 py-1.5 text-start hover:bg-control/50">
-      <span aria-hidden="true" className="mb-1 block truncate text-[11px] font-medium text-ink-secondary">{view.name}</span>
+      className="flex w-full min-w-0 items-center gap-2.5 rounded-lg px-2 py-1 text-start text-[11px] hover:bg-control/50">
+      <span aria-hidden="true" className="min-w-0 flex-1 truncate font-medium text-ink-secondary">{view.name}</span>
       {view.state === "unavailable" ? (
-        <span aria-hidden="true" className="block truncate text-[11px] text-ink-secondary">{t("planUsage.fetchError")}</span>
-      ) : view.windows.map((entry) => {
-        const band = meterBand(entry.percent);
-        return (
-          <span key={entry.label} aria-hidden="true" className="mt-1 flex items-center gap-2 text-[11px]">
-            <span className="w-12 shrink-0 truncate text-ink-secondary">{entry.label}</span>
-            <span data-band={band} className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-inset">
-              <span className={cn("block h-full rounded-full", BAR[band])} style={{ width: `${entry.percent > 0 ? Math.max(entry.percent, 2) : 0}%` }} />
-            </span>
-            <span className={cn("w-8 shrink-0 text-end tabular-nums", AMOUNT[band])}>{entry.percent}%</span>
-          </span>
-        );
-      })}
+        <span aria-hidden="true" className="min-w-0 truncate text-ink-tertiary">{t("planUsage.fetchError")}</span>
+      ) : (
+        <span aria-hidden="true" className="flex shrink-0 items-center gap-2.5">
+          {view.windows.map((entry) => <PlanRing key={entry.label} entry={entry} />)}
+        </span>
+      )}
     </button>
   );
 }
@@ -153,5 +161,5 @@ export function SidebarPlanUsage() {
   const views = sidebarPlanViews(useSidebarPlanReport(enabled));
   if (views.length === 0) return null;
   const open = () => dispatch({ type: "toggleAppSettings", open: true, section: "usage" });
-  return <>{views.map((view) => <SidebarPlanUsageView key={view.product} view={view} onOpen={open} />)}</>;
+  return <div className="mb-2">{views.map((view) => <SidebarPlanUsageView key={view.product} view={view} onOpen={open} />)}</div>;
 }

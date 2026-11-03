@@ -142,6 +142,16 @@ describe("SidebarPlanUsageView", () => {
     expect(html).toContain("85%");
   });
 
+  it("fits a product on one line: its name, then a ring per window named on hover", () => {
+    const html = renderToStaticMarkup(createElement(SidebarPlanUsageView, {
+      view: { state: "ok", product: "claude", name: "Claude", windows: [{ label: "5-hour", percent: 42 }, { label: "Weekly", percent: 83 }] }, onOpen: () => {},
+    }));
+    expect(html.match(/data-plan-ring=/g)).toHaveLength(2);
+    expect(html).toContain('title="5-hour 42%"');
+    expect(html).toContain('title="Weekly 83%"');
+    expect(html).not.toContain(">5-hour<");
+  });
+
   it("names the account, its windows and where the button leads", () => {
     expect(sidebarPlanLabel({ state: "ok", product: "claude", name: "Claude", windows: [{ label: "5-hour", percent: 27 }, { label: "Weekly", percent: 7 }] }))
       .toBe("Claude: 5-hour 27%, Weekly 7% Plan usage");
