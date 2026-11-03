@@ -16,6 +16,7 @@ import type { OptionCardData } from "../../shared/wire.ts";
 import { ASK_NOTIFICATIONS } from "../ask-routing.ts";
 import { writeFileAtomic } from "../atomic.ts";
 import type { RequestAuth } from "../request-auth.ts";
+import { conversationLanguage, serverLine } from "../server-lines.ts";
 import type { Message, Store, StoreChange } from "../store.ts";
 import { clip, oneLine } from "./text-clip.ts";
 
@@ -47,6 +48,13 @@ export interface OpenCardRow { threadId: string; id: string; at: number; card: s
 /** Who is asking for the inbox: its owner (on a server with members, a member), a guest on someone's Cloud, or nobody it
  * belongs to (a bot's shell on a Cloud, a local service). */
 export type InboxViewer = { kind: "owner" } | { kind: "guest"; key: string } | { kind: "nobody" };
+
+/** Who is asking on this server. Security: on someone's Cloud loopback is a bot's shell, never its owner, and a session that
+ * isn't the owner's is a guest; a local service is nobody's either. */
+export function placeInboxViewer(auth: RequestAuth, cloud: { personal: boolean; owner(auth: RequestAuth): boolean; personOf(session: Extract<RequestAuth, { kind: "session" }>["session"]): string }): InboxViewer {
+  if (cloud.personal && !cloud.owner(auth)) return auth.kind === "session" ? { kind: "guest", key: cloud.personOf(auth.session) } : { kind: "nobody" };
+  return auth.kind === "loopback" && auth.trust === "service" ? { kind: "nobody" } : { kind: "owner" };
+}
 
 export interface PlaceInboxDeps {
   dataDir: string;
@@ -181,7 +189,7 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     if (group) store.patchGroup(group.id, { unread: true });
     else store.patchTask(bot.id, threadId, { unread: true });
     if (!guest && bot.notifications !== false) {
-      deps.send({ kind: "mention", botId: bot.id, botName: bot.name, threadId, title: handed ? `${bot.name}, working for ${handed.name}` : `Message from ${bot.name}`, body: oneLine(text, 200),
+      deps.send({ kind: "mention", botId: bot.id, botName: bot.name, threadId, title: handed ? serverLine(conversationLanguage(threadId), "server.notify.workingFor", { who: bot.name, other: handed.name }) : serverLine(conversationLanguage(threadId), "server.notify.message", { who: bot.name }), body: oneLine(text, 200),
         ...(group ? { groupId: group.id } : {}), ...(bot.avatarUrl ? { avatarUrl: bot.avatarUrl } : {}) });
     }
     return { status: 200, text: "It is in their Inbox and they were notified. Their answer comes back here, and you carry on from it." };

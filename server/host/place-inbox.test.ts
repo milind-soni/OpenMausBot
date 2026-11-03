@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Notification } from "../../shared/notification.ts";
 import type { OptionCardData } from "../../shared/wire.ts";
 import type { RequestAuth } from "../request-auth.ts";
-import { createPlaceInbox, PLACE_MESSAGES_HOURLY, type InboxViewer, type OpenCardRow, type PlaceInboxDeps } from "./place-inbox.ts";
+import { createPlaceInbox, PLACE_MESSAGES_HOURLY, placeInboxViewer, type InboxViewer, type OpenCardRow, type PlaceInboxDeps } from "./place-inbox.ts";
 
 const OWNER = { kind: "owner-session" } as unknown as RequestAuth;
 const GUEST = { kind: "guest-session" } as unknown as RequestAuth;
@@ -49,7 +49,7 @@ function setup(over: Partial<PlaceInboxDeps> = {}, dataDir = mkdtempSync(join(tm
   const inbox = createPlaceInbox({
     dataDir, store: store as unknown as PlaceInboxDeps["store"], openCards: () => cards,
     viewer: (auth) => viewers.get(auth)!,
-    sees: (auth, threadId) => auth === OWNER || threadId === "guest-chat",
+    sees: () => true,
     mayAnswer: (auth) => auth === OWNER,
     guestOf: (threadId) => guests.get(threadId) ?? null, guestName: () => "Sam",
     handedBy: (threadId) => handed.get(threadId) ?? null,
@@ -62,6 +62,26 @@ function setup(over: Partial<PlaceInboxDeps> = {}, dataDir = mkdtempSync(join(tm
   };
   return { inbox, store, said, cards, sent, handed, guests, bots, listeners, ask, dataDir, tick: (ms: number) => { clock += ms; } };
 }
+
+describe("who is asking for the inbox", () => {
+  const session = { kind: "session", session: { id: "s" } } as unknown as RequestAuth;
+  const ownerShell = { kind: "loopback", trust: "owner" } as unknown as RequestAuth;
+  const service = { kind: "loopback", trust: "service" } as unknown as RequestAuth;
+  const cloud = (personal: boolean, owner: boolean) => ({ personal, owner: () => owner, personOf: () => "p_someone" });
+
+  it("on someone's Cloud: the owner's session is theirs, another is a guest, and loopback is a bot's shell", () => {
+    expect(placeInboxViewer(session, cloud(true, true))).toEqual({ kind: "owner" });
+    expect(placeInboxViewer(session, cloud(true, false))).toEqual({ kind: "guest", key: "p_someone" });
+    expect(placeInboxViewer(ownerShell, cloud(true, false))).toEqual({ kind: "nobody" });
+    expect(placeInboxViewer(service, cloud(true, false))).toEqual({ kind: "nobody" });
+  });
+
+  it("anywhere else: the desktop's page and a paired device are the person's, and a local service nobody's", () => {
+    expect(placeInboxViewer(ownerShell, cloud(false, false))).toEqual({ kind: "owner" });
+    expect(placeInboxViewer(session, cloud(false, false))).toEqual({ kind: "owner" });
+    expect(placeInboxViewer(service, cloud(false, false))).toEqual({ kind: "nobody" });
+  });
+});
 
 describe("the inbox of a place that is no team's", () => {
   it("lists what was already waiting, whenever it was asked, with no copy and no notification of its own", () => {

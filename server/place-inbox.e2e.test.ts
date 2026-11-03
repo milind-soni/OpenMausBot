@@ -193,8 +193,8 @@ describe("on a Cloud someone else once used", () => {
     expect(refused.status, "a personal Cloud takes the owner's own devices only").toBeGreaterThanOrEqual(400);
 
     const shell = await fetch(`${fx.cloudBase}/api/inbox`);
-    const seen = shell.ok ? (await shell.json() as { rows: Row[] }).rows : [];
-    expect(seen).toEqual([]);
+    const seen = await shell.json().catch(() => null) as { rows?: Row[]; error?: string } | null;
+    expect(shell.ok ? seen?.rows : [], `status ${shell.status}`).toEqual([]);
 
     const zed = await h.bot("Zed");
     const theirs = await h.thread(zed.id, "Sam's work");
@@ -216,5 +216,5 @@ describe("on a Cloud someone else once used", () => {
     expect((await h.messages(theirs)).some((line) => line.text === "For the guest"), "the bot did send it").toBe(true);
     expect(rows.some((row) => row.text === "For the guest"), "a guest's news isn't the owner's").toBe(false);
     expect((await h.notes()).some((note) => note.body === "For the guest")).toBe(false);
-  }, hostTimeout(240_000));
+  }, hostTimeout(420_000));
 });

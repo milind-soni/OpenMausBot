@@ -429,18 +429,18 @@ const TOOL_DEFINITIONS = [
   {
     name: "manage_room",
     description:
-      "Chiefs only, for rooms in your own department. create a room (was create_room) when the user asks for one (at most four per turn), with active bots from list_bots in any department; you are included automatically as the default responder, and it creates no turns or messages. For a room from list_rooms: rename it, change its bulletin, or add, remove or set members, with any bots you can reach; keep yourself as a member. Busy rooms, pending approvals and team-goal leads are protected. Moving rooms or bots between departments stays with the user; coordinate_bots reaches bots outside a room directly. Follow the tool result under the effective access level; if the change is refused, report the blocker, or ask the user to make the room change, without trying another route.",
+      "Chiefs only, for rooms in your own department. create a room (was create_room) when the user asks for one (at most four per turn), with active bots from list_bots in any department; you are included automatically as the default responder, and it creates no turns or messages. For a room from list_rooms: rename it, change its bulletin, add, remove or set members, with any bots you can reach (keep yourself as a member), or open a new thread in it (new_thread, at most four per turn), which becomes the room's current thread. Busy rooms, pending approvals and team-goal leads are protected. Moving rooms or bots between departments stays with the user; coordinate_bots reaches bots outside a room directly. Follow the tool result under the effective access level; if the change is refused, report the blocker, or ask the user to make the room change, without trying another route.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         action: {
           type: "string",
-          enum: ["create", "add_members", "remove_members", "set_members", "rename", "set_bulletin"],
+          enum: ["create", "add_members", "remove_members", "set_members", "rename", "set_bulletin", "new_thread"],
           description: "The change to make.",
         },
         room_id: { type: "string", description: "Every action but create: the room's id from list_rooms." },
-        name: { type: "string", minLength: 1, maxLength: 100, description: "create and rename: the room's display name (e.g. \"Nalamdesk Team\")." },
+        name: { type: "string", minLength: 1, maxLength: 100, description: "create and rename: the room's display name (e.g. \"Nalamdesk Team\"). new_thread: the thread's title (optional)." },
         member_bot_ids: {
           type: "array",
           minItems: 1,
