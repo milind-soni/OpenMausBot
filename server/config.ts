@@ -423,8 +423,8 @@ const appConfigSchema = z.object({
   }).optional(),
   /** Non-secret profile details; aboutMe is shared with every bot. */
   profile: z.object({ name: optionalText, email: optionalText, aboutMe: z.string().max(24_000).optional(), avatarUrl: z.union([z.literal(""), botAvatarUrlSchema]).optional() }).optional(),
-  /** UI language override (BCP-47, lowercase); absent follows the system. */
-  language: optionalText,
+  /** UI language override (BCP-47, lowercase), absent follows the system; what a paired phone calls this computer, "" for the default. */
+  language: optionalText, computerName: z.string().trim().max(63).optional(),
   rooms: roomConfigSchema.optional(),
   mcp: mcpConfigSchema.optional(),
   context: z.object({
@@ -483,7 +483,7 @@ export interface AppConfig extends HelperConfig {
     phone?: "ios" | "android";
   };
   mcpServers?: Record<string, unknown>;
-  language?: string;
+  language?: string; computerName?: string;
   xai?: { key?: string; url?: string };
   mistral?: { key?: string };
   cerebras?: { key?: string }; treg?: { key?: string }; /** Postiz: an organisation API key and the server it belongs to (blank: Postiz Cloud). */ postiz?: { key?: string; url?: string };
@@ -960,7 +960,7 @@ export function saveConfig(
     disk[key] = merged;
   }
   if (checkedPatch.vps !== undefined) disk.vps = normalizeVpsConfig(checkedPatch.vps);
-  if (checkedPatch.language !== undefined) disk.language = checkedPatch.language;
+  for (const key of ["language", "computerName"] as const) if (checkedPatch[key] !== undefined) disk[key] = checkedPatch[key];
   if (checkedPatch.customDomain !== undefined) disk.customDomain = checkedPatch.customDomain;
   if (checkedPatch.signIn !== undefined) disk.signIn = checkedPatch.signIn;
   // Replace the section so clearing a backup cannot revive the old selection.
