@@ -10,11 +10,23 @@ import {
 import { enabledSlashSkills } from "./use-slash-skills";
 
 describe("composer slash commands", () => {
-  it("opens command search only for the first unfinished token", () => {
-    expect(composerSlashTrigger("/", 1)).toEqual({ query: "", start: 0, end: 1 });
-    expect(composerSlashTrigger("/go", 3)).toEqual({ query: "go", start: 0, end: 3 });
-    expect(composerSlashTrigger("hello /go", 9)).toBeNull();
+  it("opens command search for the unfinished token at the start", () => {
+    expect(composerSlashTrigger("/", 1)).toEqual({ query: "", start: 0, end: 1, atStart: true });
+    expect(composerSlashTrigger("/go", 3)).toEqual({ query: "go", start: 0, end: 3, atStart: true });
+    expect(composerSlashTrigger("  /go", 5)).toEqual({ query: "go", start: 2, end: 5, atStart: true });
     expect(composerSlashTrigger("/goal write", 11)).toBeNull();
+  });
+
+  it("opens skill search for a token later in the message, after a space or a line break", () => {
+    expect(composerSlashTrigger("hello /go", 9)).toEqual({ query: "go", start: 6, end: 9, atStart: false });
+    expect(composerSlashTrigger("/standup billing\n/rev", 21)).toEqual({ query: "rev", start: 17, end: 21, atStart: false });
+    expect(composerSlashTrigger("hello /go there", 9)).toEqual({ query: "go", start: 6, end: 9, atStart: false });
+  });
+
+  it("does not open inside a path, a link or a finished word", () => {
+    expect(composerSlashTrigger("src/standup", 11)).toBeNull();
+    expect(composerSlashTrigger("see https://example.com/a", 25)).toBeNull();
+    expect(composerSlashTrigger("hello /go ", 10)).toBeNull();
   });
 
   it("replaces the active token without losing text after the caret", () => {
@@ -44,7 +56,7 @@ describe("composer slash commands", () => {
   });
 
   it("opens on a skill name with digits", () => {
-    expect(composerSlashTrigger("/weekly-2", 9)).toEqual({ query: "weekly-2", start: 0, end: 9 });
+    expect(composerSlashTrigger("/weekly-2", 9)).toEqual({ query: "weekly-2", start: 0, end: 9, atStart: true });
   });
 
   it("lists enabled skills as rows after the built-ins, never shadowing one", () => {

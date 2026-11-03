@@ -302,13 +302,14 @@ export function Composer({
   const commandCandidates = useMemo(() => {
     if (!slash || slash.start === dismissedSlashAt) return [];
     const available: ComposerSlashCommand[] = [];
-    if (!group?.dm) available.push({
+    // Later in a message only skills run: /goal, /learn and /setup are read at its start.
+    if (slash.atStart && !group?.dm) available.push({
       kind: "command",
       id: "goal",
       label: "/goal",
       description: t(group ? "composer.command.goalDesc" : "composer.command.goalBotDesc"),
     });
-    if (canLearn) {
+    if (slash.atStart && canLearn) {
       available.push({
         kind: "command",
         id: "learn",
@@ -316,7 +317,7 @@ export function Composer({
         description: t("composer.command.learnDesc"),
       });
     }
-    if (!group && supportsAgents(state.instances, bot)) available.push({
+    if (slash.atStart && !group && supportsAgents(state.instances, bot)) available.push({
       kind: "command",
       id: "setup",
       label: "/setup",

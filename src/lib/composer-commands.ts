@@ -27,14 +27,18 @@ export interface ComposerSlashTrigger {
   query: string;
   start: number;
   end: number;
+  atStart: boolean;
 }
 
+/** The `/word` the caret is in, at the start of the text or after a space or line break, so skills can be called
+ * anywhere in a message. `atStart` is whether only spaces come before it: the built-in commands work only there. */
 export function composerSlashTrigger(text: string, caretInput: number): ComposerSlashTrigger | null {
   const caret = Math.max(0, Math.min(text.length, Math.floor(caretInput)));
   const prefix = text.slice(0, caret);
-  const match = /^\/([a-z0-9-]*)$/i.exec(prefix);
+  const match = /(^|\s)\/([a-z0-9-]*)$/i.exec(prefix);
   if (!match) return null;
-  return { query: match[1] ?? "", start: 0, end: caret };
+  const start = match.index + (match[1] ?? "").length;
+  return { query: match[2] ?? "", start, end: caret, atStart: prefix.slice(0, start).trim() === "" };
 }
 
 export function goalTextFromComposer(text: string): string | null {
@@ -44,7 +48,7 @@ export function goalTextFromComposer(text: string): string | null {
 
 export function replaceComposerSlashTrigger(
   text: string,
-  trigger: ComposerSlashTrigger,
+  trigger: Omit<ComposerSlashTrigger, "atStart">,
   replacement: string,
 ): { text: string; caret: number } {
   const next = `${text.slice(0, trigger.start)}${replacement}${text.slice(trigger.end)}`;

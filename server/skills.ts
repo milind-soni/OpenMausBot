@@ -33,7 +33,7 @@ import {
 } from "./skill-storage.ts";
 import { workspaceDir } from "./workspace.ts";
 import { isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
-import { parseSkillCommand } from "../shared/skill-command.ts";
+import { expandSkillCommands, mayCallSkill } from "../shared/skill-command.ts";
 
 export {
   DESCRIPTION_MAX,
@@ -1306,16 +1306,9 @@ export function enabledSkillFile(botId: string, name: string, assignedLibrary?: 
 }
 
 export function expandSkillCommandTurnText(botId: string, text: string, assignedLibrary?: readonly string[]): string {
-  if (!text.trimStart().startsWith("/")) return text;
+  if (!mayCallSkill(text)) return text;
   const names = resolveBotSkills(botId, assignedLibrary).filter((skill) => skill.enabled).map((skill) => skill.name);
-  const command = parseSkillCommand(text, names);
-  if (!command) return text;
-  const file = enabledSkillFile(botId, command.name, assignedLibrary);
-  if (!file) return text;
-  const lead = `The user ran your ${command.name} skill with /${command.name}. Read ${JSON.stringify(file)} with your file tools and follow it for this turn.`;
-  return command.request
-    ? `${lead} Where the skill says {input}, use the request.\n\nRequest: ${command.request}`
-    : `${lead} There is no further request, so run it as the skill describes.`;
+  return expandSkillCommands(text, names, (name) => enabledSkillFile(botId, name, assignedLibrary));
 }
 
 export function resolveBotSkills(botId: string, assignedLibrary: readonly string[] | undefined): SkillListing[] {
