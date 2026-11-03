@@ -13,7 +13,7 @@ describe("AskCard", () => {
   it("is one raised card in both modes: the composer's surface, a 0.5px hairline, rounded 20, 560 wide", () => {
     const html = renderToStaticMarkup(createElement(AskCard, { ariaLabel: "Plan", title: "Choose a plan", explanation: "Why it asks." }));
     const card = classesOf(html, /^<div[^>]*class="([^"]*)"/);
-    expect(card).toEqual(expect.arrayContaining(["bg-composer", "ring-[0.5px]", "ring-ink/10", "rounded-[20px]", "max-w-[560px]", "w-full", "text-start"]));
+    expect(card).toEqual(expect.arrayContaining(["bg-composer", "ring-[0.5px]", "ring-ink/10", "rounded-[24px]", "max-w-[560px]", "w-full", "text-start"]));
     expect(html).toContain('role="group"');
     expect(html).toContain('aria-label="Plan"');
     expect(html).toContain("Why it asks.");

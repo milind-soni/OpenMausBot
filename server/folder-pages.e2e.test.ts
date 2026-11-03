@@ -3,7 +3,7 @@
 // folder gives the same card its link. One loopback stub stands in for the pages service; no model is called.
 import { randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
@@ -105,4 +105,43 @@ it("shows a dashboard folder inline, serves its Parquet to the frame by token on
   expect(rows.filter((message) => message.kind === "app").map((message) => [message.id, message.publishedPage?.state, message.publishedPage?.url]))
     .toEqual([[appId, "live", `https://${pageId}.mausbot.page/`]]);
   expect(rows.filter((message) => message.publishedPage && message.kind !== "app")).toEqual([]);
+}, 120_000);
+
+it("streams a folder's video to the card by byte range, leaves it out of a publish, and refuses it once the file is replaced", async () => {
+  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: fixture.info.url } }) as Promise<any>;
+  const api = async (path: string) => (await fetch(`${fixture.info.url}${path}`, { headers: { "content-type": "application/json" } })).json() as Promise<any>;
+  const planPath = join(fixture.info.dataDir, "room-plan.json");
+  const reply = (botId: string) => readFileSync(`${planPath}.evidence.jsonl`, "utf8").trim().split("\n").map((line) => JSON.parse(line)).filter((entry: any) => entry.botId === botId)
+    .at(-1).evidence.find((entry: any) => entry.step).response.result.content[0].text as string;
+  const turn = async (bot: any, step: unknown) => {
+    writeFileSync(planPath, JSON.stringify({ [bot.id]: { steps: [step], reply: "Done." } }));
+    await cli("send", "--bot", bot.id, "--task", bot.activeTaskId, "--text", "Show the film.");
+    expect((await cli("wait", "--bot", bot.id, "--task", bot.activeTaskId, "--timeout", "30")).status).toBe("settled");
+    return reply(bot.id);
+  };
+  const bot = (await cli("new-bot", "--name", "Film")).bot;
+  const folder = join(fixture.info.dataDir, "workspaces", bot.id, "film");
+  const movie = randomBytes(3 * 1024 * 1024);
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, "index.html"), "<!doctype html><video src=\"clip.webm\" controls></video>");
+  writeFileSync(join(folder, "clip.webm"), movie);
+
+  const appId = /^Shown as app ([\w-]+)\./.exec(await turn(bot, { tool: "show_html", arguments: { path: "film", title: "Film" } }))?.[1];
+  expect(appId).toBeTruthy();
+  const base = async () => /<base href="([^"]+)">/.exec((await api(`/api/threads/${bot.activeTaskId}/messages/${appId}/app?origin=${encodeURIComponent(fixture.info.url)}`)).srcdoc)?.[1] ?? "";
+  const seek = await realFetch(`${await base()}clip.webm`, { headers: { range: "bytes=2000000-2000099" } });
+  expect(seek.status).toBe(206);
+  expect(seek.headers.get("content-type")).toBe("video/webm");
+  expect(Buffer.from(await seek.arrayBuffer()).equals(movie.subarray(2_000_000, 2_000_100))).toBe(true);
+
+  const published = await turn(bot, { tool: "publish_page", arguments: { path: "film", title: "Film" } });
+  expect(published).toContain("Left out 1 file a page can't serve: clip.webm");
+  expect([...[...stub.service.pages.values()].at(-1)!.files.keys()]).not.toContain("clip.webm");
+  const kept = await realFetch(`${await base()}clip.webm`, { headers: { range: "bytes=0-9" } });
+  expect(kept.status).toBe(206);
+  expect(Buffer.from(await kept.arrayBuffer()).equals(movie.subarray(0, 10))).toBe(true);
+
+  rmSync(join(folder, "clip.webm"));
+  writeFileSync(join(folder, "clip.webm"), movie);
+  expect((await realFetch(`${await base()}clip.webm`)).status).toBe(404);
 }, 120_000);

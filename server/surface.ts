@@ -83,6 +83,27 @@ function placeOf(input: { destination: Destination; pinnedSurface?: Surface | nu
   return { computer: undefined, browser: browserOn, pinned: null, note: "" };
 }
 
+/** On Auto, work handed over by another bot runs on the receiving bot's own cloud computer when it has one (asleep or awake): the handoff cannot pick a place itself. Auto still never creates one; Works on, a pin, a person's turn and a consult keep their usual place. */
+/** Work another bot handed over: a child node (a person's own root also runs as "work" when it resumes), never a consult. */
+export function isHandedWork(node: { parentId?: string; mode: string } | undefined): boolean {
+  return Boolean(node?.parentId && node.mode !== "consult");
+}
+
+export function handoffUsesOwnCloud(input: { plan: Pick<SurfacePlan, "computer">; handoffWork: boolean; ownCloudState: string | null | undefined }): boolean {
+  return input.handoffWork && input.plan.computer === undefined && Boolean(input.ownCloudState);
+}
+
+/** Best effort: an unreachable Boat service counts as no cloud computer after `ms`, so a handoff still starts promptly.
+ * `unavailable` marks a failed or slow lookup, which is not a confirmed "no cloud computer". */
+export function ownCloudStateWithin(status: Promise<{ box?: { state?: string | null } | null }>, ms = 3_000): Promise<{ state: string | null | undefined; unavailable: boolean }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const unavailable = { state: undefined, unavailable: true };
+  return Promise.race([
+    status.then((result) => ({ state: result.box?.state, unavailable: false }), () => unavailable),
+    new Promise<typeof unavailable>((resolve) => { timer = setTimeout(() => resolve(unavailable), ms); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 export function browserIsThePlace(plan: SurfacePlan): boolean {
   return plan.computer === "off" && plan.browser;
 }
@@ -90,6 +111,13 @@ export function browserIsThePlace(plan: SurfacePlan): boolean {
 /** The conversation's pin as a person chose it: a pin a turn made on its own (auto) is none. */
 export function chosenPin(task: { surface?: Surface; surfaceSource?: "user" | "auto" } | undefined): Surface | null | undefined {
   return task?.surfaceSource === "auto" ? null : task?.surface;
+}
+
+/** Where a turn's pinned place came from. A pin a turn made on its own to the place Works on already names is Works on:
+ * the person chose that place, so it is never asked for again (only a turn on Auto asks before using this computer). */
+export function pinSource(pinned: Surface, task: { surfaceSource?: "user" | "auto" } | undefined, destination: Destination): PlaceSource {
+  if (task?.surfaceSource !== "auto") return "pin";
+  return pinned === destination ? "works-on" : "auto-pin";
 }
 
 export function cloudPlaceRefusal(engine: CloudEngine & { name: string }, source: PlaceSource, bot: string): PlaceUnavailableError | null {
@@ -184,7 +212,7 @@ export function surfacePrompt(
       ` Everything you do on screen happens on ${computer}, web pages included, through its own browser; there is no separate built-in browser this turn. If you need the user to sign in, tell them it is on ${computer}.`;
   } else if (mounted.browser) {
     text =
-      " Everything you do on screen happens in the built-in browser tab; there is no desktop, file or shell computer this turn. If you need the user to sign in, tell them it is in the Browser tab of the Screen panel.";
+      " Everything you do on screen happens in the built-in browser tab; there is no desktop computer this turn, but your own shell and file tools still work for ordinary code and file tasks, if you have them. If you need the user to sign in, tell them it is in the Browser tab of the Screen panel.";
   }
   if (text) text += RESTATE_SENTENCE + (opts.canSelect
     ? SURFACE_AUTHORITY.replace(ASK_TO_SWITCH, "inspect connected choices with select_computer and select the requested available place; on a pending result end this turn so OpenMausBot can reconnect the correct tools and continue the original request")

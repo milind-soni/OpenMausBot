@@ -34,9 +34,10 @@ import type { ModelVariantOption, RuntimeEvent } from "../../shared/runtime-even
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
-import { desktopCapabilitiesNow } from "@/lib/desktop";
+import { askResetBridge, desktopCapabilitiesNow } from "@/lib/desktop";
 import { sameModelSelection } from "../../shared/thread-model";
 import type { BotBodyId } from "../../shared/bot-body";
+import { StoreRefContext } from "./store-ref-context";
 import type { QuestionRequestCardData } from "../../shared/ask-question";
 import type { ProfileRequestCardData } from "../../shared/profile-request";
 import type { ModelRequestCardData } from "../../shared/model-request";
@@ -67,15 +68,15 @@ import { t } from "@/lib/i18n";
 import { createBotPatchQueue, flushWhenLeaving, keepaliveFits, type BotUpdatePatch } from "./bot-patch-queue"; import { createNewTaskOnce } from "./new-task-once";
 import { liveCallFromFrame, nextLiveCallLookup } from "./live-call";
 import { useChatErrorClear } from "./chat-error";
-import { openLiveEvents, publishLiveFrame, publishMissedFrames } from "@/lib/live-events";
+import { openLiveEvents, publishLiveFrame, publishMissedFrames, withoutScreenPixels } from "@/lib/live-events";
 import { unlessRefused } from "@/lib/admin-scope";
-import { trimRoutineRuns } from "./routine-runs";
+import { olderRunsSince, ROUTINE_RUNS_WINDOW_MS, trimRoutineRuns, withOlderRoutineRuns } from "./routine-runs";
 import { reconcileSnapshotQueues, rememberConsumedQueueId, replaceBotQueues } from "./queue-receipts";
 
 export type { MausColor } from "@/lib/mascot";
 export type { RoutineRunCardData } from "../../shared/routine-run";
 
-export interface OptionCardData extends Pick<WireOptionCard, "fixedOptions" | "webhookRequest" | "appTriggerRequest" | "yourComputer" | "computerAsk" | "waitRequest" | "stopped" | "accessRequest"> {
+export interface OptionCardData extends Pick<WireOptionCard, "fixedOptions" | "webhookRequest" | "appTriggerRequest" | "yourComputer" | "computerAsk" | "waitRequest" | "stopped" | "accessRequest" | "mcpRequest"> {
   title: string;
   subtitle: string;
   options: string[];
@@ -108,18 +109,7 @@ export interface OptionCardData extends Pick<WireOptionCard, "fixedOptions" | "w
   questionRequest?: QuestionRequestCardData;
 }
 
-export interface ConnectorCardData {
-  slug: string;
-  label: string;
-  description: string;
-  status: "required" | "authorizing" | "connected" | "failed";
-  resumeKey: string;
-  alias?: string;
-  error?: string;
-  dismissed?: boolean;
-  resumed?: boolean;
-  stopped?: boolean;
-}
+export type ConnectorCardData = import("../../shared/connector-card").ConnectorCardData;
 
 export type SecretRequestCardData = Omit<import("../../shared/wire").SecretRequestCardData, "phoneOperationId" | "vm">;
 
@@ -141,7 +131,7 @@ export interface Message extends Pick<import("../../shared/wire").WireMessage, "
   goalRun?: GroupGoalRunCardData;
   call?: import("../../shared/wire").LiveCallRecord;
   channelMode?: "chat" | "goal";
-  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean; claudeUpdate?: boolean; place?: PlaceRow; limitResetsAt?: number; summary?: string; input?: string; output?: string ; itemId?: string; outputPath?: string; fullResult?: boolean; rescue?: import("../../shared/first-reply-rescue").FirstReplyRescue; step?: import("../../shared/turn-progress").LiveStep; whose?: { person: string; app: string } };
+  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean; claudeUpdate?: boolean; place?: PlaceRow; limitResetsAt?: number; partial?: boolean; summary?: string; input?: string; output?: string ; itemId?: string; outputPath?: string; fullResult?: boolean; clipped?: boolean; rescue?: import("../../shared/first-reply-rescue").FirstReplyRescue; step?: import("../../shared/turn-progress").LiveStep; whose?: { person: string; app: string }; label?: string };
   steered?: boolean;
   via?: "api" | "call";
   callId?: string;
@@ -210,6 +200,7 @@ export interface GroupTask {
   pinned?: boolean;
   updatedAt?: number;
   turnTimeoutMinutes?: number;
+  archivedAt?: number;
   lastThreadOrderAt?: number;
   working?: boolean;
   busyBotId?: string | null;
@@ -471,7 +462,7 @@ export interface InstanceInfo {
   readOnly?: boolean;
   trialCredit?: "active" | "used_up" | "ended";
   managed?: { organizationId: string; organizationName: string };
-  policy?: { organizationName: string; reason: string };
+  policy?: { organizationName: string; reason: string; team?: boolean };
   snapshot: {
     state: "available" | "unavailable";
     reason?: string;
@@ -490,7 +481,7 @@ export interface InstanceInfo {
   aiTest?: import("../../shared/ai-ranking").AiTestState;
   /** Why it didn't answer, in plain words, when it said (signed out, a used-up limit…). */
   aiTestError?: string;
-  models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean; provider?: string; variants?: ModelVariantOption[] }> };
+  models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean; provider?: string; variants?: ModelVariantOption[]; orgBlocked?: true }> };
   capabilities?: {
     computerMcp?: boolean;
     agentsMcp?: boolean;
@@ -544,6 +535,7 @@ export type BotSettingsSection =
   | "soul"
   | "skills"
   | "memory"
+  | "library"
   | "routines"
   | "access"
   | "model"
@@ -578,7 +570,7 @@ export interface AppState {
   filesSuggest: string[] | null; webPanelId?: string;
   routines: Routine[];
   routineRuns: RoutineRun[];
-  routinesLoadState: "loading" | "ready" | "error";
+  routinesLoadState: "loading" | "ready" | "error"; routineRunsSince: number | null;
   routinesFocus: { section?: "schedule" | "logs"; view?: "calendar" | "list"; botId?: string; routineId?: string; runStatus?: RoutineRunStatusFilter; nonce: number };
   webhooks: WebhookTrigger[];
   webhookAttempts: WebhookAttempt[];
@@ -658,8 +650,8 @@ export type Action =
   | { type: "showTeamMap" } | { type: "showWebPanel"; id: string }
   | { type: "showFiles"; suggest?: string[] }
   | { type: "showChat" }
-  | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[] }
-  | { type: "routinesLoadFailed" }
+  | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[]; since?: number }
+  | { type: "routinesLoadFailed" } | { type: "routineRunsLoaded"; runs: RoutineRun[]; from?: number; to?: number }
   | { type: "routinePatched"; routine: Routine }
   | { type: "routineDeleted"; routineId: string }
   | { type: "routineRunPatched"; run: RoutineRun }
@@ -706,6 +698,7 @@ export type Action =
   | { type: "switchGroupTask"; groupId: string; threadId: string }
   | { type: "renameGroupTask"; groupId: string; threadId: string; title: string }
   | { type: "pinGroupTask"; groupId: string; threadId: string; pinned: boolean; title: string }
+  | { type: "archiveGroupTask"; groupId: string; threadId: string; archivedAt: number | null }
   | { type: "setConversationTurnLimit"; groupId: string; threadId: string; minutes: number | null; dm: boolean }
   | { type: "deleteGroupTask"; groupId: string; threadId: string }
   | { type: "interruptGroup"; groupId: string; threadId?: string; onError?: () => void }
@@ -1007,7 +1000,7 @@ export function reducer(state: AppState, action: Action): AppState {
         settingsOpen: false, computerOpen: false, inspectorOpen: false, activityOpen: false, appSettingsOpen: false, pluginsOpen: false,
       };
     case "routinesHydrated":
-      return { ...state, routines: action.routines, routineRuns: trimRoutineRuns(action.runs), routinesLoadState: "ready" };
+      return { ...state, routines: action.routines, routineRuns: trimRoutineRuns(action.runs), routineRunsSince: action.since ?? null, routinesLoadState: "ready" };
     case "routinesLoadFailed":
       return { ...state, routinesLoadState: "error" };
     case "routinePatched": {
@@ -1028,11 +1021,10 @@ export function reducer(state: AppState, action: Action): AppState {
       const runs = exists
         ? state.routineRuns.map((run) => (run.id === action.run.id ? action.run : run))
         : [action.run, ...state.routineRuns];
-      return {
-        ...state,
-        routineRuns: trimRoutineRuns(runs),
-      };
+      return { ...state, routineRuns: trimRoutineRuns(runs) };
     }
+    case "routineRunsLoaded":
+      return { ...state, routineRuns: withOlderRoutineRuns(state.routineRuns, action.runs), routineRunsSince: olderRunsSince(state.routineRunsSince, action) };
     case "webhooksHydrated":
       return { ...state, webhooks: action.webhooks, webhookAttempts: action.attempts, webhookIngress: action.ingress };
     case "webhookPatched": {
@@ -1595,13 +1587,13 @@ export function reducer(state: AppState, action: Action): AppState {
       const {
         acknowledgeLocalAuto: _localAck,
         applyToAllThreads: _allThreads,
-        keepThreadModels: _keepThreadModels, threadId: _threadId,
+        keepThreadModels: _keepThreadModels, threadId: _threadId, mainThreadChoice,
         computer,
         connectorTools,
         connectorScopes, phoneApps, peers,
         ...rest
       } = action.patch;
-      const botPatch: Partial<Bot> = { ...rest, ...(phoneApps !== undefined && { phoneApps: phoneApps ?? undefined }), ...(peers !== undefined && { peers: peers ?? undefined }) };
+      const botPatch: Partial<Bot> = { ...rest, ...(phoneApps !== undefined && { phoneApps: phoneApps ?? undefined }), ...(peers !== undefined && { peers: peers ?? undefined }), ...(typeof mainThreadChoice === "string" && { mainThreadId: mainThreadChoice }) };
       if (computer === null) botPatch.computer = undefined;
       else if (computer !== undefined) botPatch.computer = computer;
       if (connectorTools === null) botPatch.connectorTools = undefined;
@@ -1759,6 +1751,8 @@ export function reducer(state: AppState, action: Action): AppState {
       return patchGroupTask(state, action.groupId, action.threadId, { title: action.title });
     case "pinGroupTask":
       return patchGroupTask(state, action.groupId, action.threadId, { pinned: action.pinned ? true : undefined });
+    case "archiveGroupTask":
+      return patchGroupTask(state, action.groupId, action.threadId, { archivedAt: action.archivedAt ?? undefined });
     case "setConversationTurnLimit":
       if (!action.dm) return patchGroupTask(state, action.groupId, action.threadId, { turnTimeoutMinutes: action.minutes ?? undefined });
       return { ...state, groups: state.groups.map((group) => group.id === action.groupId ? { ...group, turnTimeoutMinutes: action.minutes ?? undefined } : group) };
@@ -1875,7 +1869,7 @@ export const initialState: AppState = {
   selectedId: "",
   activeView: "chat",
   routines: [],
-  routineRuns: [],
+  routineRuns: [], routineRunsSince: null,
   routinesLoadState: "loading",
   routinesFocus: { nonce: 0 },
   filesSuggest: null,
@@ -2101,7 +2095,7 @@ export const StoreContext = createContext<{
   state: AppState;
   dispatch: React.Dispatch<Action>;
   flushBotPatches: (botId: string) => Promise<BotAnnouncement | null>;
-  refreshInstances: (options?: { reportErrors?: boolean }) => Promise<void>;
+  refreshInstances: (options?: { reportErrors?: boolean; cached?: boolean }) => Promise<void>;
   refreshModels: (instanceId: string) => Promise<void>;
 } | null>(null);
 
@@ -2217,11 +2211,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ? [...taskWrites.values()].filter((write) => write.botId === botId) : [];
       const promise = Promise.all([previous?.promise, ...defaults.map((write) => write.promise)].map((save) => save?.catch(() => {})))
         .then(async () => {
-          if (patch.resetApprovalToAsk && window.ogb?.approvals) {
-            return window.ogb.approvals.setMode(botId, "ask", {
-              threadId, modelSelection: patch.modelSelection, updateBotDefault: Boolean(patch.updateBotDefault),
-            });
-          }
+          const askBridge = patch.resetApprovalToAsk ? askResetBridge() : undefined;
+          if (askBridge) return askBridge.setMode(botId, "ask", {
+            threadId, modelSelection: patch.modelSelection, updateBotDefault: Boolean(patch.updateBotDefault),
+          });
           return persistTaskApproval(botId, threadId, patch, desktopApprovalBridge());
         });
       const execution = Promise.all([previous?.execution, promise]);
@@ -2890,23 +2883,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             .catch(showError);
           break;
         case "renameGroupTask":
-          api(`/api/groups/${action.groupId}/tasks/${action.threadId}`, {
-            method: "PATCH",
-            body: JSON.stringify({ title: action.title }),
-          }).catch(showSavedState({ groupId: action.groupId }));
-          break;
         case "pinGroupTask":
-          api(`/api/groups/${action.groupId}/tasks/${action.threadId}`, {
-            method: "PATCH",
-            body: JSON.stringify({ pinned: action.pinned, title: action.title }),
-          }).catch(showSavedState({ groupId: action.groupId }));
+        case "archiveGroupTask":
+        case "setConversationTurnLimit": {
+          const body = action.type === "renameGroupTask" ? { title: action.title }
+            : action.type === "pinGroupTask" ? { pinned: action.pinned, title: action.title }
+            : action.type === "archiveGroupTask" ? { archivedAt: action.archivedAt } : { turnTimeoutMinutes: action.minutes };
+          const path = action.type === "setConversationTurnLimit" && action.dm ? `/api/groups/${action.groupId}` : `/api/groups/${action.groupId}/tasks/${action.threadId}`;
+          api(path, { method: "PATCH", body: JSON.stringify(body) }).catch(showSavedState({ groupId: action.groupId }));
           break;
-        case "setConversationTurnLimit":
-          api(action.dm ? `/api/groups/${action.groupId}` : `/api/groups/${action.groupId}/tasks/${action.threadId}`, {
-            method: "PATCH",
-            body: JSON.stringify({ turnTimeoutMinutes: action.minutes }),
-          }).catch(showSavedState({ groupId: action.groupId }));
-          break;
+        }
         case "deleteGroupTask":
           api<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${action.groupId}/tasks/${action.threadId}`, { method: "DELETE" })
             .then(roomAnswer(action.groupId, false))
@@ -2990,8 +2976,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       {
         key: "routines",
         request: async () => {
-          const { routines, runs } = await api("/api/routines");
-          return () => rawDispatch({ type: "routinesHydrated", routines, runs });
+          const since = Date.now() - ROUTINE_RUNS_WINDOW_MS, { routines, runs } = await api(`/api/routines?since=${since}`);
+          return () => rawDispatch({ type: "routinesHydrated", routines, runs, since });
         },
       },
       {
@@ -3297,7 +3283,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       onFrame: (frame) => {
         publishLiveFrame(frame as ServerFrame);
         if (hydrated) handleFrame(frame as ServerFrame);
-        else pendingFrames.push(frame as ServerFrame);
+        else pendingFrames.push(withoutScreenPixels(frame as ServerFrame));
       },
     });
     return () => {
@@ -3310,19 +3296,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const instanceProbe = useRef<Promise<void> | null>(null);
-  const refreshInstances = useCallback(async (options?: { reportErrors?: boolean }) => {
-    const probe = instanceProbe.current ??= api("/api/instances", { timeoutMs: 120_000 }).then(({ instances }) => {
+  const instanceProbes = useRef(new Map<string, Promise<void>>());
+  const refreshInstances = useCallback(async (options?: { reportErrors?: boolean; cached?: boolean }) => {
+    const path = options?.cached ? "/api/instances" : "/api/instances?fresh=1", probes = instanceProbes.current;
+    const probe = probes.get(path) ?? api(path, { timeoutMs: 120_000 }).then(({ instances }) => {
       if (!Array.isArray(instances)) throw new Error(t("engineSetup.invalidStatus"));
       rawDispatch({ type: "instances", instances });
     });
-    try {
-      await probe;
-    } catch (error) {
-      if (options?.reportErrors) throw error;
-    } finally {
-      if (instanceProbe.current === probe) instanceProbe.current = null;
-    }
+    probes.set(path, probe);
+    await probe.catch((error) => { if (options?.reportErrors) throw error; })
+      .finally(() => { if (probes.get(path) === probe) probes.delete(path); });
   }, []);
 
   const refreshModels = useCallback(async (instanceId: string) => {
@@ -3336,9 +3319,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const onFocus = () => {
       const now = Date.now();
-      if (now - lastFocusProbe.current < 30_000) return; // every engine's CLI runs; a Keychain prompt refocuses the window
+      if (now - lastFocusProbe.current < 30_000) return; // a status read can run engine CLIs, and a Keychain prompt refocuses the window
       lastFocusProbe.current = now;
-      void refreshInstances();
+      void refreshInstances({ cached: true });
     };
     window.addEventListener("focus", onFocus);
     const onVisible = () => { if (document.visibilityState === "visible") onFocus(); };
@@ -3357,7 +3340,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     () => ({ state, dispatch, flushBotPatches, refreshInstances, refreshModels }),
     [state, dispatch, flushBotPatches, refreshInstances, refreshModels],
   );
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+  const ref = useMemo(() => ({ dispatch, state: () => stateRef.current }), [dispatch]);
+  return <StoreRefContext value={ref}><StoreContext.Provider value={value}>{children}</StoreContext.Provider></StoreRefContext>;
 }
 
 export function useStore() {
@@ -3367,13 +3351,7 @@ export function useStore() {
 }
 
 export function BotEditorStore({ value, children }: { value: ReturnType<typeof useStore>; children: ReactNode }) {
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+  return <StoreRefContext value={null}><StoreContext.Provider value={value}>{children}</StoreContext.Provider></StoreRefContext>;
 }
 
-const TIME_FORMAT = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
-
-export function formatTime(at: number) {
-  const date = new Date(at);
-  // toLocaleTimeString's output, where Intl.DateTimeFormat.format would throw
-  return Number.isNaN(date.getTime()) ? "Invalid Date" : TIME_FORMAT.format(date);
-}
+export { formatTime } from "@/lib/format-time";

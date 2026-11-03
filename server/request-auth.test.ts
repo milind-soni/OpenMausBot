@@ -92,6 +92,24 @@ describe("request source for the lockout", () => {
 });
 
 describe("scopes", () => {
+  it("lets a member reach a connection card's authorize, whose handler decides who may sign in, and nothing past it", () => {
+    for (const [method, path] of [
+      ["POST", "/api/bots/bot-1/connector-cards/card-1/authorize"],
+      ["GET", "/api/bots/bot-1/connector-cards/card-1/status"],
+      ["POST", "/api/bots/bot-1/connector-cards/card-1/dismiss"],
+    ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("client");
+    for (const [method, path] of [
+      ["GET", "/api/bots/bot-1/connector-cards/card-1/authorize"],
+      ["POST", "/api/bots/bot-1/connector-cards/card-1/authorize/extra"],
+      ["POST", "/api/connectors/gmail/authorize"],
+    ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
+  });
+
+  it("keeps the attachments clear to the owner: a client may read one file, never empty the store", () => {
+    for (const method of ["GET", "POST"]) expect(requiredScope(method, "/api/attachment-storage"), method).toBe("admin");
+    expect(requiredScope("GET", "/api/attachments/a1b2.png")).toBe("client");
+  });
+
   it("allows clients to list and read notifications with exactly the feed's methods and paths", () => {
     for (const [method, path] of [
       ["GET", "/api/notifications"],
@@ -136,10 +154,9 @@ describe("scopes", () => {
       ["GET", "/api/computers/boxes"], ["POST", "/api/computers/boxes/bx_23456789/delete"],
       ["POST", "/api/webhooks"], ["POST", "/api/webhooks/w/rotate"], ["POST", "/api/bots/x/skills"], ["PATCH", "/api/bots/x/skills/s"],
       ["PATCH", "/api/bots/x/model"], ["PATCH", "/api/groups/g/setup"], ["POST", "/api/teams/import"], ["GET", "/api/teams/scout"],
-      ["POST", "/api/team-library/github"], ["POST", "/api/team-library/grok"], ["GET", "/api/team-library/cursor"],
-      ["POST", "/api/team-library/cursor/sign-in"], ["POST", "/api/team-library/cursor/sign-out"],
+      ["POST", "/api/team-library/github"], ["GET", "/api/setup-import/grok"],
       ["GET", "/api/bots/x/memory"], ["PUT", "/api/bots/x/memory"], ["PUT", "/api/section-context"], ["GET", "/api/threads/t/events"],
-      ["GET", "/api/mcp/servers"], ["POST", "/api/mcp/servers"], ["POST", "/api/connectors/slack/authorize"],
+      ["GET", "/api/mcp/servers"], ["POST", "/api/mcp/servers"], ["GET", "/api/bots/x/mcp-servers"], ["POST", "/api/connectors/slack/authorize"],
       ["POST", "/api/bots/x/slack-management"], ["GET", "/api/bots/x/slack-management/extra"],
       ["PUT", "/api/config"], ["POST", "/api/auth/pairing"], ["GET", "/api/auth/sessions"], ["DELETE", "/api/auth/sessions/abc"],
       ["POST", "/api/live/session"], ["POST", "/api/live/call/end"], ["GET", "/api/live/call"], ["PATCH", "/api/live/settings"],
@@ -377,7 +394,7 @@ describe("resolveRequestAuth", () => {
     );
     expect(connectorRefresh.auth).toBeNull();
     expect(connectorRefresh.status).toBe(403);
-    for (const path of ["/api/desktop-viewer/vps/bot-1", "/api/desktop-viewer/local/shared/websockify", "/api/webhooks/hook-1/address",
+    for (const path of ["/api/desktop-viewer/vps/bot-1", "/api/desktop-viewer/local/shared/websockify", "/api/webhooks/hook-1/address", "/api/setup-import/grok",
       "/api/local-computer", "/api/bots/bot-1/local-computer"]) {
       expect(resolveRequestAuth(request({ host: "127.0.0.1:8799" }, "GET"), options(path)).status, path).toBe(403);
       expect(resolveRequestAuth(request({ host: "127.0.0.1:8799", "x-openmausbot-desktop-owner": "owner-token-123" }, "GET"), options(path)).auth?.kind, path)
@@ -636,6 +653,9 @@ describe("loopback trust: owner on one person's machine, service on a shared wor
     expect(check("PUT", "/api/config", { trust: "service", headers: { authorization: `Bearer ${admin.token}` } }).auth?.kind).toBe("session");
     expect(check("POST", "/api/bots/bot-1/messages", { trust: "service", headers: { authorization: `Bearer ${member.token}` } }).auth?.kind).toBe("session");
     expect(check("PUT", "/api/config", { trust: "service", headers: { authorization: `Bearer ${member.token}` } }).status).toBe(403);
+    // PATCH too: a member cannot flip owner switches such as "Open sites on this server" (browserEngine.egress).
+    expect(check("PATCH", "/api/config", { trust: "service", headers: { authorization: `Bearer ${member.token}` } }).status).toBe(403);
+    expect(check("PATCH", "/api/config", { trust: "service", headers: { authorization: `Bearer ${admin.token}` } }).auth?.kind).toBe("session");
   });
 
   it("ignores service trust while the desktop capability is in force", () => {

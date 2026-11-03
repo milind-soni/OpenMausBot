@@ -628,6 +628,7 @@ describe("agents-proxy MCP surface", () => {
       "coordinate_bots",
       "assignment_status",
       "list_bots",
+      "usage_limits",
       "list_rooms",
       "select_computer",
       "list_threads",
@@ -667,7 +668,7 @@ describe("agents-proxy MCP surface", () => {
       "propose_team_memory",
       "skills_list",
       "skill_manage",
-      "add_mcp_server",
+      "mcp_server",
     ]);
     const tool = (name: string) => list.result.tools.find((entry: { name: string }) => entry.name === name);
     const coordinate = tool("coordinate_bots");
@@ -748,7 +749,7 @@ describe("agents-proxy MCP surface", () => {
     const readNames = [
       "tool_result_read",
       "list_shared_computers",
-      "assignment_status", "list_bots", "list_rooms", "list_threads",
+      "assignment_status", "list_bots", "usage_limits", "list_rooms", "list_threads",
       "list_team_setup",
       "session_search", "trigger_info", "list_waits", "skills_list",
     ];
@@ -960,7 +961,7 @@ describe("agents-proxy MCP surface", () => {
     const list = await rpc("tools/list");
     const start = list.result.tools.find((tool: { name: string }) => tool.name === "start_thread");
     expect(start.inputSchema.required).toEqual(["title", "message"]);
-    expect(Object.keys(start.inputSchema.properties)).toEqual(["title", "message", "bot_id", "folder"]);
+    expect(Object.keys(start.inputSchema.properties)).toEqual(["title", "message", "bot_id", "folder", "model_selection"]);
     expect(start.inputSchema.properties.bot_id).toEqual({ type: "string", enum: ["bot-asker"], description: "Leave out, or use your own bot ID. For teammates use coordinate_bots." });
     expect(start.description).toContain("Open a separate job on yourself");
     expect(start.description).toContain('use coordinate_bots for teammates (thread "new" opens a fresh thread on them)');

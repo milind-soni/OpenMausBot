@@ -172,6 +172,21 @@ export interface CloudAccountBridge {
   onState(callback: (state: CloudAccountState) => void): () => void;
   files?: import("./cloud-sync.mjs").CloudFilesBridge;
 }
+/** Who is signed in on this device, as the You menu shows it. `signIn`: this account's sign-in has ended here. */
+export interface AccountRow { id: string; email: string; signIn?: true }
+export interface AccountsView { active: AccountRow | null; others: AccountRow[] }
+/** This app's own pages only: main refuses any other page. Absent on an older app. */
+export interface AccountsBridge {
+  list(): Promise<AccountsView>;
+  /** Removes that account from this device. */
+  signOut(id: string): Promise<AccountsView>;
+  sheetPending(): Promise<boolean>;
+  sheetClosed(): Promise<void>;
+  onChanged(callback: () => void): () => void;
+  onOpenSheet(callback: () => void): () => void;
+}
+/** Any place's own page, from the person's click: the accounts sheet opens on the rail's page, and this page learns nothing of them. */
+export interface AccountSheetBridge { offered(): Promise<boolean>; open(): Promise<void> }
 /** On the person's own Cloud, open in this app's window: the plan, read
  * only, Manage in the browser, and Sign in again. No account, credential or address. */
 /** `signin`: this computer's sign-in ended; `tier` names the plan last verified, if any. */
@@ -311,6 +326,10 @@ export interface CloudAccountClient {
   reportMove(options: { installation: string }): Promise<boolean>;
   /** This computer keeps its bots on itself again: it no longer counts as moved. False when the Admin can't take it yet. */
   reportKept(options: { installation: string }): Promise<boolean>;
+  /** The Admin's word on this account's own Cloud at `origin` (POST /api/cloud/desktop/moved-to): deleted, ended (stopped and
+   * kept only until it is deleted), live, or unknown (none of this account's). Null without a verified sign-in, or from an
+   * Admin that doesn't say. */
+  movedTo(origin: string): Promise<"deleted" | "ended" | "live" | "unknown" | null>;
   /** Tells the Admin where this computer's move to My Cloud stands (POST /api/cloud/desktop/move-status); false without a
    * sign-in or when the Admin doesn't take it yet. */
   reportMoveStatus(report: import("./move-status.mjs").MoveStatusReport): Promise<boolean>;

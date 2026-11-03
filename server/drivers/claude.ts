@@ -7,8 +7,8 @@ import { homedir, tmpdir } from "node:os";
 import { join, dirname, isAbsolute, normalize } from "node:path";
 
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
-import { openStartupModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
-import { writeFileAtomic, writeFileAtomicIfChanged } from "../atomic.ts";
+import { openStartupModelCatalog, unconfirmedModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
+import { writeFileAtomicIfChanged } from "../atomic.ts";
 import { augmentedPath } from "../env-path.ts";
 import { brokerSocketPath, cliVersionReader, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
 import { claudeAuthStatus } from "./claude-auth-status.ts";
@@ -18,6 +18,8 @@ import { claudeBilling, claudeCallUsage } from "./claude-billing.ts";
 import { claudeAuthFailure, claudeAuthRecovery } from "./claude-auth-recovery.ts";
 import { claudeModelExtras } from "./claude-model-extras.ts";
 import { claudeToolSearchSetting } from "./claude-tool-search.ts";
+import { claudeElicitations } from "./claude-elicitation.ts";
+import { readCostHistory, recordCostState } from "./claude-cost-history.ts";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
 import { ClaudeLoginController } from "./claude-login-auth.ts";
 
@@ -39,9 +41,11 @@ import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { askInputSummary, commandSummary, toolDetailPreview } from "../tool-summary.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS, USAGE_LIMIT } from "./retry.ts";
-import { claudeApiErrorMessage, claudeLimitFacts, claudeLimitRefusal, claudeUsageLimit, claudeLimitMessage, type ClaudeLimit } from "./claude-limits.ts";
+import { claudeApiErrorMessage, claudeLimitFacts, claudeLimitRefusal, claudeUsageLimit, claudeLimitMessage, claudeVersionTooOld, type ClaudeLimit } from "./claude-limits.ts";
+import { createOrgModelBlocks, modelSwapNotice, withOrgBlocks } from "./claude-model-access.ts";
+import { engineHomes } from "../engine-homes/engine-homes.ts";
 import { TEAM_TOOLS_FAILED, failedCustomMcp, teamToolsFailed } from "./team-tools.ts";
-import { engineIdleMs, sessionIdlePolicy } from "./session-idle.ts";
+import { armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose } from "./session-idle.ts";
 import { promptHalves, withVolatileNote } from "./prompt-split.ts";
 import { parseVersionTriple, versionAtLeast } from "./acp/version-probe.ts";
 import {
@@ -91,16 +95,6 @@ export function resolveClaudeConfigDir(configDir?: string, env: NodeJS.ProcessEn
     throw new Error("claude: configDir must be an absolute path or start with ~/");
   }
   return normalize(expanded);
-}
-
-/** The API refusing a model newer than the installed CLI, relayed as an api-error frame ("Claude
- * Code 2.1.268 does not support this model; version 2.1.280 or newer is required…"); it names no model. */
-export function claudeVersionTooOld(
-  frame: { error?: unknown; is_api_error_message?: unknown },
-  text: string,
-): boolean {
-  if (frame.is_api_error_message !== true && typeof frame.error !== "string") return false;
-  return /\bClaude Code v?\d+(?:\.\d+)+ does not support this model\b/i.test(text);
 }
 
 /** What an error `result` says failed: its `errors` (2.1.295: "No conversation found with session ID: …"), else its
@@ -717,39 +711,6 @@ export function restoredCostBase(
   return exact ?? inside;
 }
 
-const COST_HISTORY_FILE = join(DATA_DIR, "claude-cost-history.json");
-const COST_HISTORY_SESSIONS = 100;
-const COST_HISTORY_STATES = 8;
-
-function isCostSnapshot(value: unknown): value is ClaudeCostSnapshot {
-  if (!value || typeof value !== "object") return false;
-  const { total, models } = value as { total?: unknown; models?: unknown };
-  return typeof total === "number" && !!models && typeof models === "object" &&
-    Object.values(models).every((counts) => Array.isArray(counts) && counts.length === 4 && counts.every((n) => typeof n === "number"));
-}
-
-function readCostHistory(): Record<string, ClaudeCostSnapshot[]> {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(COST_HISTORY_FILE, "utf8"));
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    return Object.fromEntries(Object.entries(parsed).map(([id, states]) => [id, Array.isArray(states) ? states.filter(isCostSnapshot) : []]));
-  } catch {
-    return {};
-  }
-}
-
-function recordCostState(sessionId: string, state: ClaudeCostSnapshot): void {
-  const history = readCostHistory();
-  const states = [...(history[sessionId] ?? []), state].slice(-COST_HISTORY_STATES);
-  delete history[sessionId];
-  history[sessionId] = states;
-  const ids = Object.keys(history);
-  for (const id of ids.slice(0, Math.max(0, ids.length - COST_HISTORY_SESSIONS))) delete history[id];
-  try {
-    writeFileAtomic(COST_HISTORY_FILE, JSON.stringify(history), { mode: 0o600, durable: false });
-  } catch {}
-}
-
 type ClaudeImage = NonNullable<SendTurnInput["images"]>[number];
 type ClaudeUserContent =
   | { type: "image"; source: { type: "base64"; media_type: ClaudeImage["mime"]; data: string } }
@@ -825,12 +786,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       console.error(`claude (${instanceId}): OMB_CLAUDE_INHERIT_USER_CONFIG=1 — bots inherit this machine's Claude Code MCP servers, skills, hooks and CLAUDE.md on every turn; remove it unless a bot needs a user-scope server`);
     }
     let models = config.managedModels ? { default: config.managedModels[0], options: config.managedModels.map(id => ({ id, label: id })) } : STATIC_CLAUDE_MODELS;
+    const orgBlocks = createOrgModelBlocks(() => engineHomes.everyHome(catalogEnv), (blocked) => { models = withOrgBlocks(models, blocked); });
     const refreshModels = async () => {
       if (config.managed) return;
       try {
         const resolved = await mergeLocalInject(readClaudeModelCatalog(catalogEnv), catalogEnv);
-        if (resolved.options.length) models = resolved;
-      } catch {}
+        if (resolved.options.length) models = resolved; else unconfirmedModelCatalog(models);
+        await orgBlocks.refresh(true);
+      } catch { unconfirmedModelCatalog(models); }
       try { writeStartupModelCache(instanceId, models); } catch {}
     };
     const startupModelRefresh = config.managed ? null : (await openStartupModelCatalog({
@@ -879,6 +842,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     interface Session {
       child: ReturnType<typeof spawnCli>;
       broker?: Awaited<ReturnType<typeof createPermissionBroker>>;
+      elicit: ReturnType<typeof claudeElicitations>;
       mcpConfigPath: string | null;
       systemPromptPath: string | null;
       argsKey: string;
@@ -939,11 +903,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (!s || s.closing) return;
       s.closing = true;
       forks.closed(threadId, why, s.sessionId);
-      if (s.idleTimer) clearTimeout(s.idleTimer);
+      stopIdleClose(`${instanceId}\0${threadId}`, s.idleTimer);
       // Close the broker before a replacement binds the same socket; a late close must not unlink it.
       const broker = s.broker;
       s.broker = undefined;
       broker?.close();
+      s.elicit.close();
       appendNative(threadId, { dir: "out", source: "claude.session", msg: { close: why } });
       // stdin EOF is the CLI's exit signal; give it a moment, then insist
       try {
@@ -959,8 +924,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (!s) return;
       if (s.idleTimer) clearTimeout(s.idleTimer);
       const held = (warmHolds.get(threadId) ?? 0) - Date.now();
-      s.idleTimer = setTimeout(() => closeSession(threadId, "idle"), Math.min(2_147_483_647, Math.max(engineIdleMs(threadId, sessionIdle), held)));
-      s.idleTimer.unref?.();
+      s.idleTimer = armIdleClose(`${instanceId}\0${threadId}`, Math.min(2_147_483_647, Math.max(engineIdleMs(threadId, sessionIdle), held)), { close: () => closeSession(threadId, "idle"),
+        idle: () => sessions.get(threadId) === s && !s.closing && !s.turn && !active.has(threadId) && (warmHolds.get(threadId) ?? 0) <= Date.now() });
     };
     // Keep-warm pings and warm summaries fork a thread's session with its live launch contract (claude-warm-summary.ts).
     const forks = claudeForks({ cli: config.cli, contracts: warmContracts, holds: warmHolds, armIdle, supports: (flag) => cliVersion === null || claudeCliSupports(cliVersion, flag),
@@ -1387,6 +1352,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         closed: new Promise<void>((resolve) => { markClosed = resolve; }),
         child,
         broker,
+        // A CLI that already exited needs no answer: the write is skipped, like writeUser's.
+        elicit: claudeElicitations((frame) => new Promise<boolean>((resolve) => {
+          const { stdin } = session.child;
+          if (!stdin.writable || stdin.destroyed) return resolve(false);
+          try { stdin.write(`${JSON.stringify(frame)}\n`, (err) => resolve(!err)); } catch { resolve(false); }
+        }),
+          (event) => emit({ ...base(threadId, session.turn?.turnId ?? turnId), ...event })),
         mcpConfigPath,
         systemPromptPath,
         argsKey,
@@ -1474,6 +1446,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         authRecovery.frame(threadId, o, session.costTotal);
         // A replayed stdin message carries its images again: keep their bytes out of the log.
         appendNative(threadId, { dir: "in", source: "claude.sdk.message", msg: o?.type === "user" && o.isReplay === true && o.message ? diagnosticClaudeUserMessage(o) : o });
+        if (session.elicit.frame(o)) return;
         if (session.turn?.continuationSilence && !(o.type === "system" && o.subtype === "init") && !(o.type === "user" && o.isReplay === true)) {
           clearTimeout(session.turn.continuationSilence);
           session.turn.continuationSilence = null;
@@ -1541,6 +1514,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           case "assistant": {
             const msg = o.message ?? {};
             const text = firstText(msg.content);
+            const swap = modelSwapNotice(session, threadId, session.turn?.input.model, o, models);
+            if (swap) emit({ ...base(threadId, currentTurnId()), type: "runtime.notice", message: swap });
             // Signed out, the CLI answers with an api-error frame whose only content is "run /login".
             if (claudeAuthFailure(o, text)) {
               if (session.turn) session.turn.authFailed = session.turn.explained = true;
@@ -1633,6 +1608,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               session.turn.explained = true;
               emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: claudeResultError(o) });
             }
+            if (!config.managed) void orgBlocks.refresh();
             // result.usage is per turn "in streaming-input sessions" (2.1.282) even on a retained
             // process; total_cost_usd is the process's running total.
             noteCostState(o.total_cost_usd, o.modelUsage, {
@@ -1766,6 +1742,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             session.broker = undefined;
             failedBroker?.pause();
             failedBroker?.close();
+            session.elicit.close();
             if (session.mcpConfigPath) {
               try {
                 rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
@@ -1845,6 +1822,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             });
             session.broker?.close();
             session.broker = undefined;
+            session.elicit.close();
             if (session.mcpConfigPath) {
               try {
                 rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
@@ -1886,6 +1864,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         }
         if (session.idleTimer) clearTimeout(session.idleTimer);
         session.broker?.close();
+        session.elicit.close();
         if (session.mcpConfigPath) {
           try {
             rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
@@ -2088,6 +2067,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         steer,
         interruptTurn: async (threadId) => active.get(threadId)?.stop(),
         respondToRequest: async (threadId, requestId, decision) => {
+          const elicited = await sessions.get(threadId)?.elicit.answer(requestId, decision.behavior);
+          if (elicited === "failed") return "unavailable";
+          if (elicited === "sent") return decision.behavior === "allow" ? "allowed-once" : "rejected";
           const broker = sessions.get(threadId)?.broker ?? active.get(threadId)?.broker;
           if (!broker) return "unavailable";
           const behavior = decision.behavior === "answer" ? "answer" : decision.behavior;

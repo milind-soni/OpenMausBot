@@ -205,16 +205,20 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "body must be a JSON object" });
       }
-      const allowed = new Set(["title", "pinned", "turnTimeoutMinutes"]);
+      const allowed = new Set(["title", "pinned", "turnTimeoutMinutes", "archivedAt"]);
       if (Object.keys(body).some((key) => !allowed.has(key))) return json(res, 400, { error: "unsupported channel thread setting" });
       const existing = store.groupTaskByThread(group.id, m[2]);
       if (!existing) return json(res, 404, { error: "no such channel task" });
       const pinning = body.pinned !== undefined;
       const renaming = body.title !== undefined;
       const limiting = Object.prototype.hasOwnProperty.call(body, "turnTimeoutMinutes");
-      if (!pinning && !renaming && !limiting) return json(res, 400, { error: "unsupported channel thread setting" });
+      const archiving = body.archivedAt !== undefined;
+      if (!pinning && !renaming && !limiting && !archiving) return json(res, 400, { error: "unsupported channel thread setting" });
       if (pinning && typeof body.pinned !== "boolean") return json(res, 400, { error: "pinned must be a boolean" });
       if (renaming && typeof body.title !== "string") return json(res, 400, { error: "title must be a string" });
+      if (archiving && body.archivedAt !== null && !(typeof body.archivedAt === "number" && Number.isFinite(body.archivedAt) && body.archivedAt >= 0)) {
+        return json(res, 400, { error: "archivedAt must be a timestamp, or null to unarchive" });
+      }
       const parsedLimit = limiting ? parseConversationTurnTimeout(body.turnTimeoutMinutes) : null;
       if (parsedLimit && !parsedLimit.ok) return json(res, 400, { error: parsedLimit.error });
       // Echoing the current title is not a rename: newer clients send it so an older server keeps the title.
@@ -227,6 +231,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       const patch: GroupTaskPatch = {
         ...(parsedLimit?.ok ? { turnTimeoutMinutes: parsedLimit.minutes } : {}),
         ...(pinning ? { pinned: body.pinned === true } : {}),
+        ...(archiving ? { archivedAt: body.archivedAt as number | null } : {}),
         ...(titleChange ? { title: body.title } : {}),
       };
       const task = Object.keys(patch).length ? store.patchGroupTask(group.id, m[2], patch) : existing;

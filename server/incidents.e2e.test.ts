@@ -49,8 +49,8 @@ async function launch(boat?: string, enterprise?: { dir: string; licenseKey: str
   const turnEnded = (botId: string, threadId: string) => expect.poll(async () =>
     (await botsNow()).find((b) => b.id === botId)?.tasks?.find((t: any) => t.threadId === threadId)?.busy, { timeout: 30_000 }).toBe(false);
   const incidentsThread = async (botId: string) => {
-    await expect.poll(async () => (await botsNow()).find((b) => b.id === botId)?.tasks?.some((t: any) => t.title === "Team incidents"), { timeout: 20_000 }).toBe(true);
-    return (await botsNow()).find((b) => b.id === botId).tasks.find((t: any) => t.title === "Team incidents") as { threadId: string };
+    await expect.poll(async () => (await botsNow()).find((b) => b.id === botId)?.tasks?.some((t: any) => t.title === "Problems to look at"), { timeout: 20_000 }).toBe(true);
+    return (await botsNow()).find((b) => b.id === botId).tasks.find((t: any) => t.title === "Problems to look at") as { threadId: string };
   };
   const pushes = async () => {
     const stream = await openSse(`${url}/api/events`, { origin: url });
@@ -80,20 +80,20 @@ it("reports a crashed run to the Chief, who retries it from the incidents thread
     await control(["send", "--bot", ada.id, "--text", "Reconcile the September invoices."]);
     await expect.poll(async () => (await messages(ada.activeTaskId)).some((m) => m.kind === "activity" && /exit_before_result|error/i.test(m.tool?.name ?? "")), { timeout: 20_000 }).toBe(true);
 
-    await expect.poll(async () => (await botsNow()).find((b) => b.id === chief.id)?.tasks?.some((t: any) => t.title === "Team incidents"), { timeout: 20_000 }).toBe(true);
-    const incidents = (await botsNow()).find((b) => b.id === chief.id).tasks.find((t: any) => t.title === "Team incidents");
+    await expect.poll(async () => (await botsNow()).find((b) => b.id === chief.id)?.tasks?.some((t: any) => t.title === "Problems to look at"), { timeout: 20_000 }).toBe(true);
+    const incidents = (await botsNow()).find((b) => b.id === chief.id).tasks.find((t: any) => t.title === "Problems to look at");
     await expect.poll(async () => (await messages(incidents.threadId)).some((m) =>
-      m.kind === "activity" && m.tool?.name === 'Incident: Ada\'s run in its thread #Reconcile the September invoices. failed: "claude exited 3 before result: fake-claude: simulated crash before result"' && m.threadRef?.threadId === ada.activeTaskId && m.threadRef?.botId === ada.id,
+      m.kind === "activity" && m.tool?.name === 'Ada hit a problem: its run in its thread #Reconcile the September invoices. failed: "claude exited 3 before result: fake-claude: simulated crash before result"' && m.threadRef?.threadId === ada.activeTaskId && m.threadRef?.botId === ada.id,
     ), { timeout: 10_000 }).toBe(true);
     const chiefRun = await dump(incidents.threadId);
     const prompt = JSON.stringify(chiefRun.prompt);
-    expect(prompt).toContain("[Incident report from OpenMausBot — not from the person.");
+    expect(prompt).toContain("[From OpenMausBot · incident report · information only — not from the person.");
     expect(prompt).toContain("Ada's run in its thread #Reconcile the September invoices. failed");
     expect(prompt).toContain("Reconcile the September invoices.");
     expect(prompt).toContain(`retry_thread with bot_id \\"${ada.id}\\" and thread_id \\"${ada.activeTaskId}\\"`);
-    expect(chiefRun.systemPrompt).toContain("Team incidents");
+    expect(chiefRun.systemPrompt).toContain("Problems to look at");
     expect(chiefRun.systemPrompt).toContain("retry_thread");
-    const reportLine = (await messages(incidents.threadId)).find((m) => m.role === "user" && /Incident report/.test(m.text ?? ""));
+    const reportLine = (await messages(incidents.threadId)).find((m) => m.role === "user" && /incident report/.test(m.text ?? ""));
     expect(reportLine?.peerAsk).toEqual({ botId: ada.id, name: "Ada", unattended: true, incident: { threadId: ada.activeTaskId } });
 
     const token = chiefRun.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
@@ -111,7 +111,7 @@ it("reports a crashed run to the Chief, who retries it from the incidents thread
     expect((await control(["wait", "--bot", chief.id, "--task", incidents.threadId, "--timeout", "30"])).status).toBe("settled");
 
     const adaMessages = await messages(ada.activeTaskId);
-    const retryLine = adaMessages.find((m) => m.role === "user" && /Retry requested by Clive, your Chief of Staff/.test(m.text ?? ""));
+    const retryLine = adaMessages.find((m) => m.role === "user" && /requested by Clive, your Chief of Staff/.test(m.text ?? ""));
     expect(retryLine?.text).toContain("Note from Clive: The service was down; try again.) (Delegated by @Clive");
     expect(retryLine?.text.split("\n")).toHaveLength(1);
     expect(retryLine?.text.match(/[[\]]/g)).toEqual(["[", "]"]);
@@ -143,7 +143,7 @@ it("files a failed run's incident only once its thread has settled, so the Chief
     await control(["send", "--bot", ada.id, "--text", "Reconcile the September invoices."]);
     const incidents = (await incidentsThread(chief.id)).threadId;
     const chip = await stream.until((frame) => frame.kind === "message" && frame.threadId === incidents &&
-      String(frame.message?.tool?.name ?? "").startsWith("Incident: Ada's run"), 20_000);
+      String(frame.message?.tool?.name ?? "").startsWith("Ada hit a problem: its run"), 20_000);
     const adaBefore = stream.frames.slice(0, stream.frames.indexOf(chip)).filter((frame) => frame.kind === "bot" && frame.bot?.id === ada.id);
     expect(adaBefore.at(-1)?.bot.tasks.find((task: any) => task.threadId === ada.activeTaskId)?.busy).toBe(false);
 
@@ -178,12 +178,12 @@ it("queues reports that find the Chief's incidents thread busy, answers them tog
     const failsWhileBusy = async (bot: { id: string; activeTaskId: string }, name: string, request: string) => {
       await control(["send", "--bot", bot.id, "--text", request]);
       await expect.poll(async () => (await messages(incidents)).some((m) =>
-        m.kind === "activity" && (m.tool?.name ?? "").startsWith(`Incident: ${name}'s run in its thread #${request} failed`) && m.threadRef?.threadId === bot.activeTaskId,
+        m.kind === "activity" && (m.tool?.name ?? "").startsWith(`${name} hit a problem: its run in its thread #${request} failed`) && m.threadRef?.threadId === bot.activeTaskId,
       ), { timeout: 20_000 }).toBe(true);
     };
     await failsWhileBusy(ben, "Ben", "Draft the vendor letter.");
     await failsWhileBusy(cara, "Cara", "File the expense report.");
-    expect((await messages(incidents)).filter((m) => m.role === "user" && /Incident report/.test(m.text ?? "")).length).toBe(1);
+    expect((await messages(incidents)).filter((m) => m.role === "user" && /incident report/.test(m.text ?? "")).length).toBe(1);
     expect((await messages(incidents)).some((m) => /could not reach|error:/.test(m.tool?.name ?? ""))).toBe(false);
 
     writeFileSync(file(incidents, "gate"), "finish");
@@ -195,7 +195,7 @@ it("queues reports that find the Chief's incidents thread busy, answers them tog
     expect((await control(["wait", "--bot", chief.id, "--task", incidents, "--timeout", "30"])).status).toBe("settled");
 
     const lines = await messages(incidents);
-    const reports = lines.filter((m) => m.role === "user" && /Incident report/.test(m.text ?? ""));
+    const reports = lines.filter((m) => m.role === "user" && /incident report/.test(m.text ?? ""));
     expect(reports.map((m) => m.peerAsk)).toEqual([ada, ben, cara].map((bot, at) => ({
       botId: bot.id, name: ["Ada", "Ben", "Cara"][at], unattended: true, incident: { threadId: bot.activeTaskId },
     })));
@@ -248,7 +248,7 @@ it("reviews the work it handed on from a report without the Chief's computer, ev
   }
 }, 150_000);
 
-it("keeps the team computer for a report turn, and answers without it once it is missing", async () => {
+it("keeps the team computer for a report turn, and reports a run that reaches for one that has gone missing", async () => {
   // A loopback Boat: the team computer is created, then disappears; one listing can be held open.
   const boxes: Array<{ id: string; name: string; state: string }> = [];
   let gone = false;
@@ -324,16 +324,22 @@ it("keeps the team computer for a report turn, and answers without it once it is
 
     gone = true;
     rmSync(file(incidents, "gate"));
+    // A turn runs without the computer until it reaches for it, which is when a missing one stops it.
+    const reachForComputer = async (threadId: string) => {
+      const env = (await dump(threadId)).mcpConfig.mcpServers.computer.env;
+      await fetch(`${env.OMB_HARNESS_URL}/api/internal/computer/mcp`, {
+        method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${env.OMB_MCP_TOKEN_COMPUTER}` },
+        body: JSON.stringify({ method: "tools/call", params: { name: "screenshot", arguments: {} } }),
+      });
+    };
     await control(["send", "--bot", team.cara.id, "--text", "File the expense report."]);
+    await reachForComputer(team.cara.activeTaskId);
     await expect.poll(async () => (await messages(incidents)).some((m) =>
-      m.kind === "activity" && /^Incident: Cara's run in its thread #File the expense report\. could not start: .*cloud computer is missing/.test(m.tool?.name ?? ""),
+      m.kind === "activity" && /^Cara hit a problem: its run in its thread #File the expense report\. could not start: .*cloud computer is missing/.test(m.tool?.name ?? ""),
     ), { timeout: 20_000 }).toBe(true);
     await reportRan("Cara's run in its thread #File the expense report. could not start");
-    const run = await dump(incidents);
-    expect(Object.keys(run.mcpConfig.mcpServers)).not.toContain("computer");
-    expect(run.systemPrompt).toContain("your computer could not be prepared for it (The team's cloud computer is missing");
-    expect(run.systemPrompt).not.toContain("Your team shares the cloud computer");
     await control(["send", "--bot", team.dan.id, "--text", "Book the venue."]);
+    await reachForComputer(team.dan.activeTaskId);
     await expect.poll(async () => (await messages(team.dan.activeTaskId)).some((m) => /cloud computer is missing/.test(m.tool?.name ?? "")), { timeout: 20_000 }).toBe(true);
     expect((await messages(team.dan.activeTaskId)).some((m) => /Waiting for its turn/.test(m.tool?.name ?? ""))).toBe(false);
     writeFileSync(file(incidents, "gate"), "finish");
@@ -366,7 +372,7 @@ it("adds no push for answering reports that waited, about failures the person al
         await control(["send", "--bot", bot.id, "--text", request]);
         const thread = incidents ?? (await incidentsThread(chief.id)).threadId;
         await expect.poll(async () => (await messages(thread)).some((m) =>
-          m.kind === "activity" && (m.tool?.name ?? "").startsWith(`Incident: ${name}'s run in its thread #${request} could not start`),
+          m.kind === "activity" && (m.tool?.name ?? "").startsWith(`${name} hit a problem: its run in its thread #${request} could not start`),
         ), { timeout: 20_000 }).toBe(true);
         return thread;
       };
@@ -410,7 +416,7 @@ it("keeps a report that waited quiet through the work it hands on, when the pers
       await control(["send", "--bot", ben.id, "--text", "Draft the vendor letter."]);
       const incidents = (await incidentsThread(chief.id)).threadId;
       await expect.poll(async () => (await messages(incidents)).some((m) =>
-        m.kind === "activity" && (m.tool?.name ?? "").startsWith("Incident: Ben's run in its thread #Draft the vendor letter. could not start")), { timeout: 20_000 }).toBe(true);
+        m.kind === "activity" && (m.tool?.name ?? "").startsWith("Ben hit a problem: its run in its thread #Draft the vendor letter. could not start")), { timeout: 20_000 }).toBe(true);
 
       writeFileSync(file(chief.activeTaskId, "gate"), "finish");
       await expect.poll(async () => JSON.stringify((await dump(incidents)).prompt), { timeout: 20_000 }).toContain("Ben's run in its thread #Draft the vendor letter. could not start");
@@ -454,7 +460,7 @@ it("never parks a report behind work the Chief handed on, even for a Chief that 
 
     await control(["send", "--bot", ben.id, "--text", "Draft the vendor letter."]);
     await expect.poll(async () => (await messages(incidents)).some((m) =>
-      m.kind === "activity" && (m.tool?.name ?? "").startsWith("Incident: Ben's run")), { timeout: 20_000 }).toBe(true);
+      m.kind === "activity" && (m.tool?.name ?? "").startsWith("Ben hit a problem: its run")), { timeout: 20_000 }).toBe(true);
     writeFileSync(file(incidents, "gate"), "finish");
     await expect.poll(async () => JSON.stringify((await dump(incidents)).prompt), { timeout: 20_000 }).toContain("Ben's run in its thread #Draft the vendor letter. failed");
     expect(await caraWorking()).toBe(true);
@@ -496,16 +502,16 @@ it("tells the person of a failure whose report waited and was then refused", asy
       await dump(incidents);
       await control(["send", "--bot", ben.id, "--text", "Draft the vendor letter."]);
       await expect.poll(async () => (await messages(incidents)).some((m) =>
-        m.kind === "activity" && (m.tool?.name ?? "").startsWith("Incident: Ben's run")), { timeout: 20_000 }).toBe(true);
+        m.kind === "activity" && (m.tool?.name ?? "").startsWith("Ben hit a problem: its run")), { timeout: 20_000 }).toBe(true);
 
       await api("PUT", "/api/config", { budgets: { monthlyUsd: 0.005 } });
       writeFileSync(file(incidents, "gate"), "finish");
       await expect.poll(async () => (await messages(incidents)).some((m) =>
-        (m.tool?.name ?? "").startsWith("error: the incident could not reach Clive — this workspace has reached its monthly spend limit")), { timeout: 20_000 }).toBe(true);
+        (m.tool?.name ?? "").startsWith("error: the problem report could not reach Clive — this workspace has reached its monthly spend limit")), { timeout: 20_000 }).toBe(true);
       const sent = await watch.sent(chief.id);
       expect(sent.filter((push: any) => push.kind === "incident")).toEqual([expect.objectContaining({
         botId: ben.id, threadId: ben.activeTaskId, title: "Ben hit a problem",
-        body: expect.stringMatching(/^Incident: Ben's run in its thread #Draft the vendor letter\. failed/),
+        body: expect.stringMatching(/^Ben hit a problem: its run in its thread #Draft the vendor letter\. failed/),
       })]);
       expect((await messages(incidents)).some((m) => /queued message could not start/.test(m.tool?.name ?? ""))).toBe(false);
     } finally {
@@ -533,7 +539,7 @@ it("reports a routine that keeps failing the same way once, and again when the f
       await expect.poll(async () => ((await api("GET", "/api/routines")).runs as any[]).find((run) => run.id === id)?.status, { timeout: 30_000 }).toBe("failed");
     };
     const reports = async (incidents: string) => (await messages(incidents))
-      .filter((m) => m.kind === "activity" && (m.tool?.name ?? "").startsWith("Incident: Ada's scheduled routine")).map((m) => m.tool.name as string);
+      .filter((m) => m.kind === "activity" && (m.tool?.name ?? "").startsWith("Ada hit a problem: its scheduled routine")).map((m) => m.tool.name as string);
 
     await runFails();
     const incidents = (await incidentsThread(chief.id)).threadId;

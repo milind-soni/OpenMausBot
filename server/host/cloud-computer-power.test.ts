@@ -292,6 +292,16 @@ describe("cloud computer power", () => {
     expect(sleeps().sort()).toEqual(["new", "slow"]);
   });
 
+  it("an existing-only start wakes the bot's computer but never creates one", async () => {
+    expect(await power.start(bot("gone"), turn("t1"), { existingOnly: true })).toBeNull();
+    expect(fake.provisionBoat).not.toHaveBeenCalled();
+    expect(broadcasts).toEqual([]);
+
+    fake.states.set("asleep", "archived");
+    expect(await power.start(bot("asleep"), turn("t2"), { existingOnly: true })).toMatchObject({ state: "ready" });
+    expect(fake.provisionBoat).not.toHaveBeenCalled();
+  });
+
   it("a start that outlives its turn keeps the computer on until the start is done", async () => {
     let created!: () => void;
     fake.provisionBoat = vi.fn(() => new Promise<void>(resolve => { created = () => { fake.states.set("new", "ready"); resolve(); }; }));

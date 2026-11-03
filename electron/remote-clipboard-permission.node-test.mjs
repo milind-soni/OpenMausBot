@@ -50,9 +50,10 @@ test("the active paired server may write the clipboard, on request and on check"
   assert.equal(h.check("clipboard-sanitized-write", "", { isMainFrame: true }, Object.assign(h.mainContents, { getURL: () => `${VPS}/chat` })), true);
 });
 
+// Notifications are the one other permission the active server's main frame gets (app-permissions.node-test.mjs).
 test("a remote page can never read the clipboard or gain another permission", () => {
   const h = harness(viewing("vps"));
-  for (const permission of ["clipboard-read", "notifications", "fullscreen", "media", "geolocation", "camera", "display-capture", "openExternal", "unknown"]) {
+  for (const permission of ["clipboard-read", "fullscreen", "media", "geolocation", "camera", "display-capture", "openExternal", "unknown"]) {
     assert.equal(h.request(permission, `${VPS}/`, { isMainFrame: true, mediaTypes: ["audio"] }), false, `request ${permission}`);
     assert.equal(h.check(permission, VPS), false, `check ${permission}`);
   }

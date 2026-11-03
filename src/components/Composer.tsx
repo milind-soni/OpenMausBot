@@ -69,7 +69,7 @@ import { composerPlaceholder, sendLabels, SIMPLE_COMPOSER, SIMPLE_CONTROL, slotC
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { CallButton } from "./CallView";
 import { GroupCallButton } from "./GroupCallView";
-import { ApprovalChip, ComposerPlusMenu, GoalToggle } from "./ComposerPlusMenu";
+import { ApprovalChip, ComposerPlusMenu, GoalToggle, TeachTaskButton } from "./ComposerPlusMenu";
 import { PhonePlus } from "./PhonePlus";
 import { useThreadApproval } from "./thread-approval";
 import { useStackedField, useTallPill } from "./composer-wrap";
@@ -402,10 +402,7 @@ export function Composer({
     editText(learn + text.replace(/^\/learn\s*/, "").trimStart());
     setCaret(learn.length);
     setChannelMode("chat");
-    requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.setSelectionRange(learn.length, learn.length);
-    });
+    requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.setSelectionRange(learn.length, learn.length); });
   };
 
   const pendingCount = (state.pendingQueued[threadId] ?? []).length;
@@ -738,7 +735,7 @@ export function Composer({
         <MentionMenu listRef={mentionListRef} motion={mentionMotion} choices={candidates} highlight={highlight}
           everyoneCount={mentionEveryoneCount} onPick={pickMention} onHighlight={setHighlight} />
         {approval && (
-          <div className={cn("mb-2 overflow-hidden rounded-[20px]", ELEVATED_CARD)}>
+          <div className={cn("mb-2 overflow-hidden rounded-[24px]", ELEVATED_CARD)}>
             <PendingApprovalPanel
               key={approval.requestId}
               pending={approval}
@@ -766,6 +763,8 @@ export function Composer({
         />
         <QueuedComposerMessages
           items={queuedMessages}
+          oneThreadPerBot={state.config?.cloudStarter === true}
+          onSeePlans={() => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" })}
           onSteer={canSteerQueued ? steerQueued : undefined}
           steerInterrupts={!canSteer}
           steerMode={group ? "next" : "all"}
@@ -790,7 +789,7 @@ export function Composer({
             <PhonePlus
               onAttach={() => fileInput.current?.click()}
               goal={goal}
-              teach={!advanced && canLearn ? teachTask : undefined}
+              teach={canLearn ? teachTask : undefined}
               approval={approvalChoice && modeBot && { name: modeBot.name, choice: approvalChoice }}
               callBotId={bot && !group ? bot.id : undefined}
               place={modeBot && !remoteClient && advanced ? {
@@ -828,6 +827,7 @@ export function Composer({
               >
                 <Paperclip size={16} strokeWidth={1.75} absoluteStrokeWidth />
               </button>}
+              {advanced && canLearn && <TeachTaskButton onClick={teachTask} />}
               {/* Simple mode shows a mode's chip only while it is on, so a choice made in the + menu or the bot panel stays in view. */}
               {goal && (advanced || goal.on) && <GoalToggle {...goal} compact={simpleDock} />}
               {advanced && approvalChoice && <ApprovalModeSelector {...approvalChoice} />}

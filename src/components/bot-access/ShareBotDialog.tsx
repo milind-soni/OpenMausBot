@@ -1,103 +1,135 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AtSign, Lock, Users, X } from "lucide-react";
+import { Lock, Users } from "lucide-react";
 
-import { atLeast, GRANTED_LEVELS, type BotAccess, type BotAccessLevel, type GrantedLevel } from "../../../shared/bot-access";
+import type { BotAccess, BotAccessLevel, GrantedLevel } from "../../../shared/bot-access";
 import { botOwner } from "../../../shared/bot-owner";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import type { Bot } from "@/state/store";
-import { ownerOf, useTeamPeople, type TeamPeople, type TeamPerson } from "@/state/team-people";
-import { Select } from "../Select";
-import { PersonFace } from "../TeamOwner";
-import { accessOfBot, addablePeople, canShare, levelLabel, levelWhenAdded, saveAccess, withPerson } from "./access";
+import { useStore, type Bot } from "@/state/store";
+import { mayChangeOwner, ownerChanged, ownerOf, useTeamPeople, type TeamPeople, type TeamPerson } from "@/state/team-people";
+import { MENU_SHEET } from "../menu-recipe";
+import { accessOfBot, addablePeople, canShare, levelWhenAdded, nameOf, personOf, saveAccess, saveOwner, withPerson } from "./access";
+import { choiceItem, EntryFace, PersonMenu, QuietMenu } from "./ShareControls";
 
 export interface AccessChange { before: BotAccess; after: BotAccess; text: string }
 
-const REMOVE = "remove";
-
-/** A bot's Share dialog on a team: who has access and at what level, and what everyone in the team gets. A change
- * applies at once; the caller shows it with Undo. */
-export function ShareBotDialog({ bot, teamName, onClose, onChanged, footer }: {
+/** A bot's Share dialog on a team: whether everyone in the team can use it or only the people added, and who those
+ * are. A change applies at once; the caller shows it with Undo. `headerMenu` holds what else the opener offers there.
+ * A person's stored level (view, chat or edit) stays as it is until they are removed; the dialog does not show it. */
+export function ShareBotDialog({ bot, teamName, onClose, onChanged, headerMenu }: {
   bot: Bot;
   teamName: string;
   onClose: () => void;
   onChanged: (change: AccessChange) => void;
-  footer?: ReactNode;
+  headerMenu?: ReactNode;
 }) {
   const team = useTeamPeople();
+  const { dispatch } = useStore();
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [newOwner, setNewOwner] = useState<TeamPerson | null>(null);
   const access = accessOfBot(bot);
   const owner = team ? ownerOf(bot, team) : null;
   const editable = canShare(bot);
+  const handsOver = mayChangeOwner(bot, team);
 
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     dialogRef.current?.focus();
     return () => { if (opener?.isConnected) opener.focus(); };
   }, []);
+  useEffect(() => {
+    if (document.activeElement === document.body) dialogRef.current?.focus();
+  }, [bot.access, bot.reportsTo, newOwner]);
 
-  const apply = async (after: BotAccess, text: string) => {
+  const run = async (work: () => Promise<void>) => {
     if (busy) return;
     setBusy(true);
     setError("");
     try {
-      await saveAccess(bot.id, after);
-      onChanged({ before: access, after, text });
+      await work();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
     }
   };
+  const apply = (after: BotAccess, text: string) => run(async () => {
+    await saveAccess(bot.id, after);
+    onChanged({ before: access, after, text });
+  });
+  const handOver = (person: TeamPerson) => run(async () => {
+    dispatch({ type: "botPatched", bot: await saveOwner(bot.id, person.email) });
+    ownerChanged();
+    setNewOwner(null);
+  });
+
+  const keepOwner = () => {
+    setError("");
+    setNewOwner(null);
+  };
+
+  const yourRow = !editable && team?.me && bot.yourAccess && bot.yourAccess !== "none"
+    ? <PersonRow person={team.me} you data-share-yours trailing={null} /> : null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 p-4" onMouseDown={(event) => {
+    <div className="ui-scrim fixed inset-0 z-[60] flex items-center justify-center p-4" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="share-bot-title" tabIndex={-1} data-share-bot={bot.id}
-        className="flex max-h-[90vh] w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel text-ink shadow-2xl outline-none"
+        className="ui-modal flex max-h-full w-full max-w-[480px] flex-col text-ink shadow-2xl outline-none"
         onKeyDown={(event) => {
-          if (event.key === "Escape" && !event.defaultPrevented) { event.stopPropagation(); onClose(); }
+          event.stopPropagation();
+          if (event.key === "Escape" && !event.defaultPrevented) {
+            if (newOwner) keepOwner(); else onClose();
+          }
           if (event.key === "Tab") trapTab(event, dialogRef.current);
         }}>
-        <header className="flex items-center justify-between gap-3 px-5 pb-1 pt-4">
-          <h2 id="share-bot-title" className="truncate text-[17px] font-semibold">{t("botAccess.title", { bot: bot.name })}</h2>
-          <button type="button" aria-label={t("common.close")} onClick={onClose} className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised"><X size={18} /></button>
-        </header>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4 pt-2">
-          {editable && team && <AddPerson team={team} access={access} owner={botOwner(bot)} disabled={busy}
-            onAdd={(person, level) => void apply(withPerson(access, person.email, level), t("botAccess.toast.added", { name: person.name, level: levelLabel(level) }))} />}
-          {!editable && <p className="mb-3 text-[13px] leading-relaxed text-ink-secondary" data-share-yours>{yoursLine(bot)}</p>}
-
-          <h3 className="mb-1 mt-3 text-[13px] font-semibold">{t("botAccess.people")}</h3>
-          <ul className="flex flex-col">
-            {owner && <PersonRow person={owner} you={owner.you === true} trailing={<span className="text-[13px] text-ink-secondary">{t("botAccess.owner")}</span>} />}
-            {editable && Object.entries(access.people).sort(([a], [b]) => nameOf(a, team).localeCompare(nameOf(b, team))).map(([entry, level]) => (
-              <PersonRow key={entry} entry={entry} person={personOf(entry, team)} you={team?.me?.email === entry}
-                trailing={<LevelSelect value={level} floor={access.everyone} disabled={busy} label={t("botAccess.levelFor", { name: nameOf(entry, team) })}
-                  onChange={(next) => void apply(withPerson(access, entry, next), next
-                    ? t("botAccess.toast.changed", { name: nameOf(entry, team), level: levelLabel(next) })
-                    : t("botAccess.toast.removed", { name: nameOf(entry, team) }))} />} />
-            ))}
-          </ul>
-          <p className="mt-1.5 text-[12px] leading-relaxed text-ink-secondary">{t("botAccess.admins")}</p>
-
-          {editable && <>
-            <h3 className="mb-1.5 mt-4 text-[13px] font-semibold">{t("botAccess.general")}</h3>
-            <GeneralAccess access={access} teamName={teamName} disabled={busy}
-              onChange={(everyone) => void apply({ everyone, people: access.people }, everyone === "none"
-                ? t("botAccess.toast.onlyAdded")
-                : t("botAccess.toast.everyone", { team: teamName, level: levelLabel(everyone) }))} />
-          </>}
-          {error && <p role="alert" className="mt-3 text-[13px] text-danger">{error}</p>}
-        </div>
-        <footer className="flex items-center justify-between gap-3 border-t border-hairline/40 px-5 py-3">
-          <div className="flex min-w-0 flex-wrap items-center gap-1">{footer}</div>
-          <button type="button" onClick={onClose} className="rounded-full bg-accent px-4 py-1.5 text-[13px] font-semibold text-white hover:brightness-110">{t("common.done")}</button>
-        </footer>
+        {newOwner ? (
+          <MakeOwner person={newOwner} bot={bot} busy={busy} error={error} onCancel={keepOwner} onConfirm={() => void handOver(newOwner)} />
+        ) : <>
+          <header className="flex items-center justify-between gap-3 px-5 pb-3 pt-4">
+            <h2 id="share-bot-title" className="min-w-0 truncate text-[17px] font-semibold">{t("botAccess.title", { bot: bot.name })}</h2>
+            {headerMenu}
+          </header>
+          {editable && team && (
+            <div className="relative z-10 shrink-0 px-5 pb-1">
+              <AddPerson team={team} access={access} owner={botOwner(bot)} disabled={busy}
+                onAdd={(person, level) => void apply(withPerson(access, person.email, level), t("botAccess.toast.addedPlain", { name: person.name }))} />
+            </div>
+          )}
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-2 pt-3">
+            <h3 className="mb-1 text-[13px] font-semibold">{t("botAccess.people")}</h3>
+            <ul data-share-people className="flex max-h-[min(264px,40vh)] flex-col overflow-y-auto">
+              {owner && <PersonRow person={owner} you={owner.you === true} trailing={<span className="px-2 text-[13px] text-ink-secondary">{t("lookedAfter.badge")}</span>} />}
+              {yourRow}
+              {editable && Object.keys(access.people).sort((a, b) => nameOf(a, team).localeCompare(nameOf(b, team))).map((entry) => {
+                const person = personOf(entry, team);
+                return (
+                  <PersonRow key={entry} entry={entry} person={person} you={team?.me?.email === entry}
+                    trailing={<PersonMenu disabled={busy} label={t("botAccess.personMenu", { name: nameOf(entry, team) })}
+                      onMakeOwner={handsOver && person ? () => { setError(""); setNewOwner(person); } : undefined}
+                      makeOwnerLabel={person ? t("lookedAfter.make", { name: person.name }) : undefined}
+                      onRemove={() => void apply(withPerson(access, entry, null), t("botAccess.toast.removed", { name: nameOf(entry, team) }))} />} />
+                );
+              })}
+            </ul>
+            <p className="mt-1.5 text-[12px] leading-relaxed text-ink-secondary">{t("botAccess.admins")}</p>
+            {editable && <>
+              <h3 className="mb-1.5 mt-4 text-[13px] font-semibold">{t("botAccess.general")}</h3>
+              <GeneralAccess access={access} teamName={teamName} disabled={busy}
+                onChange={(everyone) => void apply({ everyone, people: access.people }, everyone === "none"
+                  ? t("botAccess.toast.onlyAdded")
+                  : t("botAccess.toast.everyoneUse", { team: teamName }))} />
+            </>}
+            {error && <p role="alert" className="mt-3 text-[13px] text-danger">{error}</p>}
+          </div>
+          <footer className="flex shrink-0 justify-end px-5 pb-4 pt-3">
+            <button type="button" onClick={onClose} className="ui-button ui-button-primary rounded-full px-4">{t("common.done")}</button>
+          </footer>
+        </>}
       </div>
     </div>,
     document.body,
@@ -105,49 +137,40 @@ export function ShareBotDialog({ bot, teamName, onClose, onChanged, footer }: {
 }
 
 function trapTab(event: React.KeyboardEvent, dialog: HTMLElement | null) {
-  const controls = dialog?.querySelectorAll<HTMLElement>("input:enabled, select:enabled, button:enabled");
+  const controls = dialog?.querySelectorAll<HTMLElement>("input:enabled, button:enabled");
   if (!controls?.length) return;
   const first = controls[0]!, last = controls[controls.length - 1]!;
   if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
 }
 
-function yoursLine(bot: Bot): string {
-  switch (bot.yourAccess) {
-    case "view": return t("botAccess.yours.view", { bot: bot.name });
-    case "chat": return t("botAccess.yours.chat", { bot: bot.name });
-    default: return t("botAccess.yours.other", { bot: bot.name });
-  }
-}
-
-const personOf = (entry: string, team: TeamPeople | null): TeamPerson | null => team?.people.find((person) => person.email === entry) ?? null;
-const nameOf = (entry: string, team: TeamPeople | null): string => personOf(entry, team)?.name ?? entry;
-
-function PersonRow({ person, entry, you, trailing }: { person: TeamPerson | null; entry?: string; you: boolean; trailing: ReactNode }) {
-  const name = person?.name ?? entry ?? "";
+function MakeOwner({ person, bot, busy, error, onCancel, onConfirm }: {
+  person: TeamPerson; bot: Bot; busy: boolean; error: string; onCancel: () => void; onConfirm: () => void;
+}) {
   return (
-    <li className="flex min-h-[44px] items-center gap-3 py-1" data-share-person={person?.email ?? entry}>
-      {person ? <PersonFace person={person} size={28} />
-        : <span aria-hidden="true" className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-raised text-ink-secondary"><AtSign size={14} /></span>}
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[14px] text-ink">{you ? t("botAccess.you", { name }) : name}</span>
-        {person && <span className="block truncate text-[12px] text-ink-secondary">{person.email}</span>}
-      </span>
-      <span className="shrink-0">{trailing}</span>
-    </li>
+    <div data-share-make-owner={person.email} className="px-5 pb-4 pt-4">
+      <h2 id="share-bot-title" className="text-[17px] font-semibold">{t("lookedAfter.makeTitle", { name: person.name, bot: bot.name })}</h2>
+      <p className="mt-2 text-[13px] leading-relaxed text-ink-secondary">{t("lookedAfter.makeBody", { name: person.name, bot: bot.name })}</p>
+      {error && <p role="alert" className="mt-3 text-[13px] text-danger">{error}</p>}
+      <div className="mt-5 flex justify-end gap-2">
+        <button type="button" autoFocus disabled={busy} onClick={onCancel} className="ui-button rounded-full px-4">{t("common.cancel")}</button>
+        <button type="button" disabled={busy} onClick={onConfirm} className="ui-button ui-button-primary rounded-full px-4">{t("lookedAfter.make", { name: person.name })}</button>
+      </div>
+    </div>
   );
 }
 
-function LevelSelect({ value, floor, disabled, label, onChange }: {
-  value: GrantedLevel; floor: BotAccessLevel; disabled: boolean; label: string; onChange: (level: GrantedLevel | null) => void;
-}) {
-  const shown = atLeast(value, floor) ? value : (floor as GrantedLevel);
+function PersonRow({ person, entry, you, trailing, ...data }: { person: TeamPerson | null; entry?: string; you: boolean; trailing: ReactNode; "data-share-yours"?: boolean }) {
+  const name = person?.name ?? entry ?? "";
   return (
-    <Select variant="ghost" aria-label={label} value={shown} disabled={disabled}
-      onChange={(event) => onChange(event.target.value === REMOVE ? null : event.target.value as GrantedLevel)}>
-      {GRANTED_LEVELS.map((level) => <option key={level} value={level} disabled={!atLeast(level, floor)}>{levelLabel(level)}</option>)}
-      <option value={REMOVE}>{t("botAccess.remove")}</option>
-    </Select>
+    <li className="flex min-h-[40px] shrink-0 items-center gap-3 py-1" data-share-person={person?.email ?? entry} {...data}>
+      <EntryFace person={person} size={32} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[14px] leading-[18px] text-ink">{you ? t("botAccess.you", { name }) : name}</span>
+        {person && <span className="block truncate text-[12px] leading-4 text-ink-secondary">{person.email}</span>}
+      </span>
+      <span className="min-w-0 shrink-0">{trailing}</span>
+    </li>
   );
 }
 
@@ -158,26 +181,21 @@ function GeneralAccess({ access, teamName, disabled, onChange }: {
   const hint = access.everyone === "view" ? t("botAccess.everyoneHint.view", { team: teamName })
     : access.everyone === "chat" ? t("botAccess.everyoneHint.chat", { team: teamName })
       : access.everyone === "edit" ? t("botAccess.everyoneHint.edit", { team: teamName }) : t("botAccess.onlyAddedHint");
+  const only = t("botAccess.onlyAdded"), all = t("botAccess.everyoneUse", { team: teamName });
   return (
-    <div className="flex items-start gap-3" data-share-general={access.everyone}>
-      <span aria-hidden="true" className={cn("mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-full", everyone ? "bg-accent/15 text-accent" : "bg-raised text-ink-secondary")}>
-        {everyone ? <Users size={14} /> : <Lock size={14} />}
+    <div className="flex items-center gap-3" data-share-general={access.everyone}>
+      <span aria-hidden="true" className={cn("inline-flex size-8 shrink-0 items-center justify-center rounded-full", everyone ? "bg-accent/15 text-accent" : "bg-ink/[0.08] text-ink-secondary")}>
+        {everyone ? <Users size={16} /> : <Lock size={16} />}
       </span>
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <Select variant="ghost" aria-label={t("botAccess.general")} value={everyone ? "everyone" : "none"} disabled={disabled}
-            onChange={(event) => onChange(event.target.value === "none" ? "none" : "chat")}>
-            <option value="none">{t("botAccess.onlyAdded")}</option>
-            <option value="everyone">{t("botAccess.everyone", { team: teamName })}</option>
-          </Select>
-          {everyone && (
-            <Select variant="ghost" aria-label={t("botAccess.everyoneLevel", { team: teamName })} value={access.everyone} disabled={disabled}
-              onChange={(event) => onChange(event.target.value as GrantedLevel)}>
-              {GRANTED_LEVELS.map((level) => <option key={level} value={level}>{levelLabel(level)}</option>)}
-            </Select>
-          )}
+        <div className="-ms-2 flex">
+          <QuietMenu label={t("botAccess.general")} shown={everyone ? all : only} align="start" className="font-medium text-ink"
+            items={[
+              choiceItem("none", only, !everyone, () => { if (everyone) onChange("none"); }, { disabled }),
+              choiceItem("everyone", all, everyone, () => { if (!everyone) onChange("chat"); }, { disabled }),
+            ]} />
         </div>
-        <p className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{hint}</p>
+        <p className="text-[12px] leading-4 text-ink-secondary">{hint}</p>
       </div>
     </div>
   );
@@ -188,43 +206,62 @@ function AddPerson({ team, access, owner, disabled, onAdd }: {
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const listId = useId();
+  const listRef = useRef<HTMLUListElement | null>(null);
   const level = levelWhenAdded(access.everyone);
-  const matches = useMemo(() => addablePeople(team, access, owner, query).slice(0, 8), [team, access, owner, query]);
-  if (!level) return <p className="text-[13px] text-ink-secondary">{t("botAccess.everyoneEdits")}</p>;
+  const matches = useMemo(() => addablePeople(team, access, owner, query), [team, access, owner, query]);
+  const current = Math.min(active, matches.length - 1);
+  const showing = open && matches.length > 0;
+  useEffect(() => {
+    if (showing) listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest" });
+  }, [showing, current]);
+  if (!level) return <p className="py-1 text-[13px] text-ink-secondary">{t("botAccess.everyoneEdits")}</p>;
   const add = (person: TeamPerson) => {
+    if (disabled) return;
     onAdd(person, level);
     setQuery("");
+    setActive(0);
     setOpen(false);
   };
+  const move = (by: number) => {
+    if (!open) { setOpen(true); return; }
+    if (matches.length) setActive((current + by + matches.length) % matches.length);
+  };
   return (
-    <div className="relative">
-      <input value={query} disabled={disabled} placeholder={t("botAccess.addPlaceholder")} aria-label={t("botAccess.addPlaceholder")}
-        role="combobox" aria-expanded={open && matches.length > 0} aria-controls="share-bot-people" aria-autocomplete="list"
-        onChange={(event) => { setQuery(event.target.value); setOpen(true); }}
+    <>
+      <input value={query} placeholder={t("botAccess.addPlaceholder")} aria-label={t("botAccess.addPlaceholder")}
+        role="combobox" aria-expanded={showing} aria-controls={listId} aria-autocomplete="list"
+        aria-activedescendant={showing ? `${listId}-${current}` : undefined}
+        onChange={(event) => { setQuery(event.target.value); setActive(0); setOpen(true); }}
+        onClick={() => setOpen(true)}
         onFocus={() => setOpen(true)}
-        onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+        onBlur={() => setOpen(false)}
         onKeyDown={(event) => {
-          if (event.key === "Enter" && matches[0]) { event.preventDefault(); add(matches[0]); }
+          if (event.key === "ArrowDown") { event.preventDefault(); move(1); }
+          if (event.key === "ArrowUp") { event.preventDefault(); move(-1); }
+          if (event.key === "Enter" && showing) { event.preventDefault(); add(matches[current]!); }
           if (event.key === "Escape" && open) { event.preventDefault(); setOpen(false); }
         }}
-        className="w-full rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:border-focus focus:outline-none" />
+        className="w-full rounded-lg border border-hairline/50 bg-transparent px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:border-focus focus:outline-none" />
       {open && (
-        <ul id="share-bot-people" role="listbox" className="absolute inset-x-0 top-full z-10 mt-1 max-h-[240px] overflow-y-auto rounded-xl border border-hairline/50 bg-card py-1 shadow-xl">
+        <ul ref={listRef} id={listId} role="listbox" onMouseDown={(event) => event.preventDefault()}
+          className={cn(MENU_SHEET, "absolute inset-x-5 top-full max-h-[min(240px,40vh)] overflow-y-auto")}>
           {matches.length === 0 ? (
-            <li className="px-3 py-2 text-[13px] text-ink-secondary">{query.trim() ? t("botAccess.noMatch") : t("botAccess.nobodyLeft")}</li>
-          ) : matches.map((person) => (
-            <li key={person.email} role="option" aria-selected="false" onMouseDown={(event) => { event.preventDefault(); add(person); }}
-              className="flex cursor-pointer items-center gap-3 px-3 py-1.5 hover:bg-raised">
-              <PersonFace person={person} size={24} />
+            <li className="px-2 py-1.5 text-[13px] text-ink-secondary">{query.trim() ? t("botAccess.noMatch") : t("botAccess.nobodyLeft")}</li>
+          ) : matches.map((person, index) => (
+            <li key={person.email} id={`${listId}-${index}`} role="option" aria-selected={index === current} data-share-suggestion={person.email}
+              onMouseEnter={() => setActive(index)} onMouseDown={() => add(person)}
+              className={cn("flex shrink-0 cursor-pointer items-center gap-3 rounded-md px-2 py-1", index === current && "bg-menu-hover")}>
+              <EntryFace person={person} size={32} />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] text-ink">{person.name}</span>
-                <span className="block truncate text-[12px] text-ink-secondary">{person.email}</span>
+                <span className="block truncate text-[14px] leading-[18px] text-ink">{person.name}</span>
+                <span className="block truncate text-[12px] leading-4 text-ink-secondary">{person.email}</span>
               </span>
-              <span className="text-[12px] text-ink-secondary">{levelLabel(level)}</span>
             </li>
           ))}
         </ul>
       )}
-    </div>
+    </>
   );
 }

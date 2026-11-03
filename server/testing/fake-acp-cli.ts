@@ -3,6 +3,7 @@
 // session/prompt and scripted session/update streams) for driver tests. Env knobs:
 //   FAKE_ACP_LOAD_NULL  session/load returns null, so the driver falls through to session/new
 //   FAKE_ACP_REJECT_LIVE_LOAD_FILE  while it exists, load/resume of a session live in this process errors
+//     (FAKE_ACP_REJECT_LIVE_LOAD_DSH=1: with dsh 0.2's -32602 "session is already active" instead of -32000)
 //   FAKE_ACP_CACHED_LIVE_LOAD  a live session/load is acknowledged but keeps the old MCP credentials, like Qwen
 //   FAKE_ACP_TEXT_REPLY  answer every session/prompt with only this text
 //   FAKE_ACP_MODE  happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | crash-in-prompt | hang
@@ -38,6 +39,8 @@
 //   FAKE_ACP_MODELS  model ids: opencode-shaped configOptions and set_config_option (-32602 for others);
 //     a new session starts on AGY_ACP_DEFAULT_MODEL when set, taken unchecked as agy_acp_server 1.1.1 does
 //   FAKE_ACP_MODELS_FILE  the same list, read once at startup, as `opencode acp` never re-reads a login
+//   FAKE_ACP_MODELS_REFRESH_FROM  `models --refresh` copies this file over FAKE_ACP_MODELS_FILE, as OpenCode 1.19.4
+//     refetches its models.dev cache only then; OPENCODE_CONFIG_CONTENT's provider models join any model list
 //   FAKE_ACP_MODELS_LIST=v2  OpenCode 2: `models` answers empty with exit 0, `models --verbose` exits 1
 //   FAKE_ACP_MODELS_LIST=auto-only  Cursor CLI 2026.10.22: `models` lists only `auto`
 //   FAKE_ACP_VERBOSE_FAIL_ONCE  marker path: the first `models --verbose` fails, like a new OpenCode home's first run
@@ -84,6 +87,12 @@ const modelsText = process.env.FAKE_ACP_MODELS_FILE && existsSync(process.env.FA
   : process.env.FAKE_ACP_MODELS ?? "";
 // One id per line when the list holds a newline (DeepSeek's wire values are JSON pairs with commas); else comma-separated.
 const models = modelsText.split(modelsText.includes("\n") ? "\n" : ",").map((id) => id.trim()).filter(Boolean);
+try {
+  const declared = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || "{}")?.provider ?? {};
+  for (const [provider, entry] of Object.entries<any>(declared)) {
+    for (const id of Object.keys(entry?.models ?? {})) if (models.length && !models.includes(`${provider}/${id}`)) models.push(`${provider}/${id}`);
+  }
+} catch {}
 const defaultModelEnv = process.env.AGY_ACP_DEFAULT_MODEL;
 if (models.length && defaultModelEnv && !models.includes(defaultModelEnv)) models.push(defaultModelEnv);
 let currentModel: string | null = models.length && defaultModelEnv ? defaultModelEnv : models[0] ?? null;
@@ -107,6 +116,9 @@ const handoffIdOf = (reply: string): string => /"requestId":"([\w-]+)"/.exec(rep
 const statusCall = (id: string): { name: string; args: () => object } => ({ name: "assignment_status", args: () => ({ id }) });
 const logFile = process.env.FAKE_ACP_LOG_FILE ?? "";
 const rejectLiveLoadFile = process.env.FAKE_ACP_REJECT_LIVE_LOAD_FILE ?? "";
+const liveLoadError = (sessionId: string) => process.env.FAKE_ACP_REJECT_LIVE_LOAD_DSH === "1"
+  ? { code: -32602, message: `Invalid params: session is already active: ${sessionId}` }
+  : { code: -32000, message: "session already active in this agent" };
 function fakeLog(line: string): void {
   if (!logFile) return;
   try {
@@ -283,6 +295,12 @@ if (argv[0] === "status" || argv[0] === "whoami") {
   console.log(JSON.stringify({ isAuthenticated: authenticated }));
   process.exit(0);
 }
+if (argv[0] === "models" && argv.includes("--refresh")) {
+  if (process.env.FAKE_ACP_MODELS_REFRESH_FROM && process.env.FAKE_ACP_MODELS_FILE) {
+    writeFileSync(process.env.FAKE_ACP_MODELS_FILE, readFileSync(process.env.FAKE_ACP_MODELS_REFRESH_FROM));
+  }
+  process.exit(0);
+}
 if (argv[0] === "models" || argv.includes("--list-models")) {
   const failOnce = process.env.FAKE_ACP_VERBOSE_FAIL_ONCE;
   if (failOnce && argv.includes("--verbose") && !existsSync(failOnce)) {
@@ -367,12 +385,12 @@ const resultAndConfigUpdates = (id: unknown, res: unknown, after: string, sessio
   process.stdout.write([{ jsonrpc: "2.0", id, result: res }, ...updates].map((message) => JSON.stringify(message)).join("\n") + "\n");
 };
 const rpcMethods: string[] = [];
-const recordMethod = (method: string) => {
+const recordMethod = (method: string, sessionId?: unknown) => {
   rpcMethods.push(method);
   if (process.env.FAKE_ACP_RPC_DUMP) writeFileSync(process.env.FAKE_ACP_RPC_DUMP, JSON.stringify(rpcMethods));
   if (process.env.FAKE_ACP_RPC_APPEND_FILE) {
     try {
-      appendFileSync(process.env.FAKE_ACP_RPC_APPEND_FILE, JSON.stringify({ pid: process.pid, method, cwd: process.cwd() }) + "\n");
+      appendFileSync(process.env.FAKE_ACP_RPC_APPEND_FILE, JSON.stringify({ pid: process.pid, method, cwd: process.cwd(), sessionId }) + "\n");
     } catch {}
   }
 };
@@ -614,7 +632,7 @@ function handle(msg: any) {
   }
   if (!msg.method) return;
   if (msg.method === "session/prompt" && heldByHoldFile(msg)) return;
-  recordMethod(msg.method);
+  recordMethod(msg.method, msg.params?.sessionId);
 
   switch (msg.method) {
     case "initialize": {
@@ -717,7 +735,7 @@ function handle(msg: any) {
         out({
           jsonrpc: "2.0",
           id: msg.id,
-          error: { code: -32000, message: "session already active in this agent" },
+          error: liveLoadError(msg.params.sessionId),
         });
         break;
       }
@@ -743,7 +761,7 @@ function handle(msg: any) {
         out({
           jsonrpc: "2.0",
           id: msg.id,
-          error: { code: -32000, message: "session already active in this agent" },
+          error: liveLoadError(msg.params.sessionId),
         });
         break;
       }
@@ -1002,7 +1020,7 @@ function handle(msg: any) {
       }
       const promptText = String(msg.params?.prompt?.[0]?.text ?? "");
       // A hand-off result wake is synthesized: the mode's usual flow would loop on an unprompted turn.
-      const runtimeReport = /\[OpenMausBot report from @[^\]\n]*: ([a-z_]+)/.exec(promptText);
+      const runtimeReport = /\[From @[^\]\n·]* \(bot\) · report on assignment [^\]\n·]*?: ([a-z_]+)/.exec(promptText);
       const wokeFromDelegation = promptText.includes("[A delegated task just completed]")
         || promptText.includes("[A delegated task failed]")
         || runtimeReport !== null;
