@@ -54,7 +54,7 @@ describe("every credential has one home on the keys page", () => {
   // A key saved from a bot's card lands exactly where its Settings row puts it: the same desktop slot, or the same config.
   it("covers every credential a bot can ask for in a chat, saved where Settings saves it", () => {
     const homes: Record<keyof typeof CREDENTIAL_TARGETS, KeyId> = {
-      xaiApiKey: "xai", boxToken: "box", opencodeGoApiKey: "opencodeGo", ttsKey: "elevenlabs", fishAudioKey: "fishAudio",
+      xaiApiKey: "xai", boxToken: "box", opencodeGoApiKey: "opencodeGo", ttsKey: "elevenlabs", fishAudioKey: "fishAudio", geminiTtsKey: "geminiTts",
       openaiImageApiKey: "imageOpenai", onePasswordToken: "onePassword", composioApiKey: "composio", openaiApiKey: "openai",
       anthropicApiKey: "anthropic", openrouterApiKey: "openrouter", mistralApiKey: "mistral", cerebrasApiKey: "cerebras", groqApiKey: "groq",
       greenferenceApiKey: "greenference", metaApiKey: "meta", deepseekApiKey: "deepseek",
@@ -104,10 +104,10 @@ describe("searching the keys", () => {
     expect(found("fish")).toEqual(["fishAudio"]);
     expect(found("ElevenLabs")).toEqual(["elevenlabs"]);
     expect(found("Computers and browser")).toEqual(["box", "vps", "onePassword"]);
-    expect(found("voice")).toEqual(expect.arrayContaining(["liveCalls", "liveKey", "elevenlabs", "fishAudio"]));
+    expect(found("voice")).toEqual(expect.arrayContaining(["liveCalls", "liveKey", "elevenlabs", "fishAudio", "geminiTts"]));
     expect(found("openai")).toEqual(expect.arrayContaining(["openai", "liveCalls", "liveKey", "imageOpenai"]));
     expect(found("gmail")).toEqual(["composio"]);
-    expect(found("gemini")).toEqual(["openaiCompat"]);
+    expect(found("gemini")).toEqual(expect.arrayContaining(["openaiCompat", "geminiTts"]));
     expect(found("no such key anywhere")).toEqual([]);
   });
 });

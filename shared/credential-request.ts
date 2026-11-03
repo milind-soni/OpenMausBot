@@ -34,6 +34,12 @@ export const CREDENTIAL_TARGETS = {
     placeholder: "Paste your Fish Audio API key",
     helpUrl: "https://fish.audio/app/api-keys/",
   },
+  geminiTtsKey: {
+    label: "Gemini API key",
+    description: "Enables Gemini text-to-speech voices in calls and spoken replies.",
+    placeholder: "Paste your Gemini API key",
+    helpUrl: "https://aistudio.google.com/apikey",
+  },
   openaiImageApiKey: {
     label: "OpenAI API key",
     description: "Used only to generate custom bot avatar images.",
@@ -121,7 +127,7 @@ export type CredentialConfig = {
   xai?: { key?: string };
   box?: { token?: string };
   opencodeGo?: { apiKey?: string };
-  tts?: { key?: string; fishKey?: string };
+  tts?: { key?: string; fishKey?: string; geminiKey?: string };
   imageGen?: { key?: string };
   composio?: { apiKey?: string };
   openai?: { key?: string };
@@ -181,6 +187,8 @@ export function credentialConfigPatch(id: ConfigCredentialTargetId, value: strin
       return { tts: { key: value } };
     case "fishAudioKey":
       return { tts: { fishKey: value } };
+    case "geminiTtsKey":
+      return { tts: { geminiKey: value } };
     case "openaiImageApiKey":
       return { imageGen: { key: value } };
     case "composioApiKey":
@@ -219,6 +227,8 @@ export function credentialIsConfigured(config: CredentialConfig, id: CredentialT
       return Boolean(config.tts?.key);
     case "fishAudioKey":
       return Boolean(config.tts?.fishKey);
+    case "geminiTtsKey":
+      return Boolean(config.tts?.geminiKey);
     case "openaiImageApiKey":
       return Boolean(config.imageGen?.key);
     case "onePasswordToken":

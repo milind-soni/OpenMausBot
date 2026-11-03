@@ -14,8 +14,7 @@ describe("gemini tts", () => {
     expect(GEMINI_TTS_DEFAULT_MODEL).toBe("gemini-3.8-flash-lite-tts");
   });
 
-  it("returns fallback prebuilt voices when remote list fails", async () => {
-    // Calling with an invalid key / non-mocked unreachable endpoint falls back gracefully
+  it("returns the static prebuilt voice list", async () => {
     const voices = await listVoices("invalid-dummy-key");
     expect(voices.length).toBe(GEMINI_PREBUILT_VOICES.length);
     expect(voices[0].id).toBe("Puck");

@@ -61,7 +61,7 @@ export function voiceReady(cfg: AppConfig, voiceId?: string): boolean {
   }
   if (provider === "chatterbox") return Boolean(cfg.tts?.baseUrl?.trim() && (voiceId || cfg.tts?.voice));
   if (provider === "fish") return Boolean(cfg.tts?.fishKey && (voiceId || cfg.tts?.voice));
-  if (provider === "gemini") return Boolean(cfg.tts?.geminiKey && (voiceId || cfg.tts?.voice));
+  if (provider === "gemini") return Boolean(cfg.tts?.geminiKey);
   return Boolean(elevenLabs(cfg) && (voiceId || cfg.tts?.voice));
 }
 
@@ -81,8 +81,10 @@ export function describeVoice(cfg: AppConfig) {
   };
 }
 
-export function verifyKey(provider: "elevenlabs" | "fish", key: string) {
-  return provider === "fish" ? fish.verifyKey(key) : elevenlabs.verifyKey(key);
+export function verifyKey(provider: "elevenlabs" | "fish" | "gemini", key: string) {
+  if (provider === "fish") return fish.verifyKey(key);
+  if (provider === "gemini") return gemini.verifyKey(key);
+  return elevenlabs.verifyKey(key);
 }
 
 export async function listVoices(
@@ -147,7 +149,8 @@ export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: syst
     const key = cfg.tts?.geminiKey;
     if (!key) throw new NoVoiceConfigured("key", "Add a Gemini API key in Settings to use Gemini voice.");
     const voice = voiceId || cfg.tts?.voice || "Puck";
-    return gemini.synthesize(text, voice, key, cfg.tts?.model);
+    const model = cfg.tts?.model?.includes("gemini") ? cfg.tts.model : undefined;
+    return gemini.synthesize(text, voice, key, model);
   }
   if (provider === "fish") {
     const key = cfg.tts?.fishKey;

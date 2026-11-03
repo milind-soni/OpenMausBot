@@ -448,6 +448,10 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         const check = await tts.verifyKey("fish", newTts.fishKey.trim());
         if (!check.ok) return json(res, 400, { error: check.message });
       }
+      if (newTts?.geminiKey?.trim()) {
+        const check = await tts.verifyKey("gemini", newTts.geminiKey.trim());
+        if (!check.ok) return json(res, 400, { error: check.message });
+      }
       const deciderKey = patch.decider ? deciderPatchKey(patch.decider, cfg.decider) : null;
       if (deciderKey) {
         const check = await decider.testKey(deciderKey.check);
@@ -524,6 +528,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           if (persisted.opencodeGo?.apiKey !== undefined) persisted.opencodeGo.apiKey = "";
           if (persisted.tts?.key !== undefined) persisted.tts.key = "";
           if (persisted.tts?.fishKey !== undefined) persisted.tts.fishKey = "";
+          if (persisted.tts?.geminiKey !== undefined) persisted.tts.geminiKey = "";
           if (persisted.decider?.key !== undefined) persisted.decider.key = "";
           if (persisted.decider?.openrouterKey !== undefined) persisted.decider.openrouterKey = "";
           if (persisted.decider?.workersAiToken !== undefined) persisted.decider.workersAiToken = "";

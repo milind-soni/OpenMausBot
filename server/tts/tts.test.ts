@@ -687,6 +687,41 @@ describe("Chatterbox (local server)", () => {
   });
 });
 
+describe("Gemini", () => {
+  const ready = { provider: "gemini" as const, geminiKey: "gemini-key", voice: "Puck" };
+
+  it("keeps its setup and key separate from other providers", async () => {
+    const { describeVoice, providerConfigured, voiceConfigured, voiceReady } = await voice();
+    expect(providerConfigured(cfg({ provider: "gemini", key: "eleven-key" }))).toBe(false);
+    expect(providerConfigured(cfg({ provider: "gemini", geminiKey: "gemini-key" }))).toBe(true);
+    expect(voiceConfigured(cfg({ provider: "gemini", geminiKey: "gemini-key" }))).toBe(false);
+    expect(voiceConfigured(cfg(ready))).toBe(true);
+    expect(voiceReady(cfg({ provider: "gemini", geminiKey: "gemini-key" }))).toBe(true);
+    const described = describeVoice(cfg(ready));
+    expect(described).toEqual({
+      configured: true,
+      ready: true,
+      voice: "Puck",
+      provider: "gemini",
+      baseUrl: "",
+      model: "",
+    });
+    expect(JSON.stringify(described)).not.toContain("gemini-key");
+  });
+
+  it("lists prebuilt Gemini voices", async () => {
+    const { listVoices } = await voice();
+    const voices = await listVoices(cfg(ready));
+    expect(voices.length).toBeGreaterThan(10);
+    expect(voices[0].id).toBe("Puck");
+  });
+
+  it("requires a key to speak", async () => {
+    const { speak, NoVoiceConfigured } = await voice();
+    expect(() => speak(cfg({ provider: "gemini" }), "hello")).toThrow(NoVoiceConfigured);
+  });
+});
+
 describe("included voice", () => {
   const INCLUDED = "omb_voice_included-relay-token";
   const relayed = () => seen.filter((request) => request.url.startsWith("/relay/"));

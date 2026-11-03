@@ -78,6 +78,15 @@ export function VoiceSettings({
         placeholder: t("voice.fish.keyPlaceholder"),
         keyUrl: "https://fish.audio/app/api-keys/",
       }
+    : provider === "gemini"
+      ? {
+          id: "gemini" as const,
+          name: "Google Gemini",
+          credential: "geminiTtsKey" as const,
+          configField: "geminiKey" as const,
+          placeholder: t("voice.gemini.keyPlaceholder"),
+          keyUrl: "https://aistudio.google.com/apikey",
+        }
     : provider === "elevenlabs"
       ? {
           id: "elevenlabs" as const,
@@ -91,6 +100,8 @@ export function VoiceSettings({
   const key = cloudProvider ? voiceKeyDraftValue(keyDraft, cloudProvider.id) : "";
   const hostProviderLabel = provider === "fish"
     ? t("voice.hostLabel", { provider: t("voice.fish.label") })
+    : provider === "gemini"
+      ? t("voice.hostLabel", { provider: t("voice.gemini.label") })
     : provider === "elevenlabs"
       ? t("voice.hostLabel", { provider: t("voice.elevenlabs.label") })
       : provider === "chatterbox"
@@ -198,7 +209,7 @@ export function VoiceSettings({
       .finally(() => current() && setAddingVoice(null));
   };
 
-  const setProvider = (next: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai") => {
+  const setProvider = (next: "elevenlabs" | "fish" | "gemini" | "system" | "chatterbox" | "xai") => {
     if (next === provider || switching || (next === "system" && !systemVoicesAvailable)) return;
     setSwitching(true);
     setKeyDraft({ provider: null, value: "" });
@@ -316,9 +327,10 @@ export function VoiceSettings({
             {([
               { value: "elevenlabs", label: t("voice.elevenlabs.label"), available: true, span: "col-span-2" },
               { value: "fish", label: t("voice.fish.label"), available: true, span: "col-span-2" },
+              { value: "gemini", label: t("voice.gemini.label"), available: true, span: "col-span-2" },
               { value: "xai", label: t("voice.grok.label"), available: true, span: "col-span-2" },
-              { value: "system", label: t("voice.macBuiltIn"), available: systemVoicesAvailable, span: "col-span-3" },
-              { value: "chatterbox", label: t("voice.chatterboxLocal"), available: true, span: "col-span-3" },
+              { value: "system", label: t("voice.macBuiltIn"), available: systemVoicesAvailable, span: "col-span-2" },
+              { value: "chatterbox", label: t("voice.chatterboxLocal"), available: true, span: "col-span-2" },
             ] as const).map((option) => (
               <button
                 key={option.value}
