@@ -4,7 +4,7 @@
 import { execFile } from "node:child_process";
 import { readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, unlinkSync } from "node:fs";
 import { hostname } from "node:os";
-import { basename, isAbsolute, join, sep } from "node:path";
+import { basename, isAbsolute, join, sep, win32 } from "node:path";
 
 /** `started` tells a process from a later one that reused its pid; a zombie has exited and counts as gone. */
 type ListedProcess = { ppid: number; pgid: number; zombie: boolean; started: string; args?: string };
@@ -32,9 +32,9 @@ function temporaryProfile(args: string | undefined): string | null {
 const PS = process.platform === "darwin" ? "/bin/ps" : "ps";
 
 /** The C locale keeps `ps` start times in one fixed five-word form. */
-function execText(file: string, args: string[]): Promise<string | null> {
+function execText(file: string, args: string[], env: NodeJS.ProcessEnv = {}, timeout = 5_000): Promise<string | null> {
   return new Promise((done) => {
-    execFile(file, args, { encoding: "utf8", timeout: 5_000, windowsHide: true, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, LC_ALL: "C" } }, (error, stdout) => done(error ? null : stdout));
+    execFile(file, args, { encoding: "utf8", timeout, windowsHide: true, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, LC_ALL: "C", ...env } }, (error, stdout) => done(error ? null : stdout));
   });
 }
 
@@ -193,8 +193,9 @@ async function daemonOf(pid: number, table: Map<number, ListedProcess>): Promise
  * to the Chrome the lock names and exits, and refuses a lock that names another host (a renamed Mac, a moved Cloud volume).
  * A Chrome whose daemon was killed keeps running, re-parented, and would take every later launch, so it is stopped; then the
  * lock goes. A daemon's own Chrome keeps it. The profile's contents are never touched. */
-export async function releaseBrowserProfile(dir: string | undefined): Promise<void> {
-  if (!dir || process.platform === "win32") return;
+export async function releaseBrowserProfile(dir: string | undefined, binaryPath?: string): Promise<void> {
+  if (!dir) return;
+  if (process.platform === "win32") return releaseWindowsProfile(dir, binaryPath);
   let target: string;
   try { target = readlinkSync(join(dir, "SingletonLock")); }
   catch { heldProfiles.delete(dir); return; }
@@ -211,6 +212,68 @@ export async function releaseBrowserProfile(dir: string | undefined): Promise<vo
     if (!await stopBrowserProcesses({ daemon: pid, members: new Map([[pid, entry.started]]), groups: entry.pgid === pid ? [pid] : [] })) return;
   }
   for (const name of ["SingletonLock", "SingletonSocket", "SingletonCookie"]) { try { unlinkSync(join(dir, name)); } catch {} }
+}
+
+/** Windows has no tree to re-parent to: the Chromes naming the profile, with their parents. The folder goes in through the
+ * environment, so no path is ever quoted into the script. */
+const WINDOWS_PROFILE_BROWSERS = "$d = $env:OMB_BROWSER_PROFILE; ConvertTo-Json -Compress -InputObject @(Get-CimInstance Win32_Process"
+  + " | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($d, [StringComparison]::OrdinalIgnoreCase) -ge 0 }"
+  + " | Select-Object ProcessId, ParentProcessId, CommandLine)";
+
+/** A Windows command line's arguments: spaces split them except inside double quotes, which may sit anywhere in one. */
+function windowsArgs(line: string): string[] {
+  const args: string[] = [];
+  let arg = "";
+  let quoted = false;
+  let started = false;
+  for (const char of line) {
+    if (char === "\"") { quoted = !quoted; started = true; }
+    else if (!quoted && /\s/.test(char)) { if (started) args.push(arg); arg = ""; started = false; }
+    else { arg += char; started = true; }
+  }
+  if (started) args.push(arg);
+  return args;
+}
+
+function lockReleased(lock: string): boolean {
+  try { unlinkSync(lock); return true; }
+  catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT"; }
+}
+
+const heldWindowsProfiles = new Map<string, { browser: number; daemon: number; image: string }>();
+
+/** Windows Chrome keeps `lockfile` in its profile open and undeletable while it runs. One whose daemon was killed keeps running
+ * and makes every later launch on the profile exit with code 21 (profile in use), even after the app restarts, so it is
+ * stopped; a daemon's own Chrome (its parent runs `binaryPath` or another agent-browser), or one whose parent tasklist cannot
+ * name, is kept. The profile's contents are never touched. */
+async function releaseWindowsProfile(dir: string, binaryPath?: string): Promise<void> {
+  const lock = join(dir, "lockfile");
+  if (lockReleased(lock)) { heldWindowsProfiles.delete(dir); return; }
+  // The Chrome kept last time still runs under the same daemon: every process is not listed again on each turn.
+  const held = heldWindowsProfiles.get(dir);
+  if (held && processAlive(held.browser) && await imageOf(held.daemon) === held.image) return;
+  heldWindowsProfiles.delete(dir);
+  const listing = await execText("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_PROFILE_BROWSERS], { OMB_BROWSER_PROFILE: dir }, 15_000);
+  let rows: unknown;
+  try { rows = JSON.parse(listing ?? ""); } catch { return; }
+  const flag = `--user-data-dir=${dir}`.toLowerCase();
+  const browsers = (Array.isArray(rows) ? rows : [rows]).flatMap((row) => {
+    const { ProcessId: pid, ParentProcessId: ppid, CommandLine: line } = (row ?? {}) as { ProcessId?: unknown; ParentProcessId?: unknown; CommandLine?: unknown };
+    if (!Number.isInteger(pid) || !Number.isInteger(ppid) || typeof line !== "string") return [];
+    // A path's case does not matter on Windows.
+    const args = windowsArgs(line).map((arg) => arg.toLowerCase());
+    return args.includes(flag) && !args.some((arg) => arg.startsWith("--type=")) ? [{ pid: pid as number, ppid: ppid as number }] : [];
+  });
+  for (const { pid, ppid } of browsers) {
+    const parent = await imageOf(ppid);
+    if (parent === null) return;
+    if (parent.startsWith("agent-browser") || (binaryPath && parent === win32.basename(binaryPath).toLowerCase())) {
+      heldWindowsProfiles.set(dir, { browser: pid, daemon: ppid, image: parent });
+      return;
+    }
+    await execText("taskkill", ["/PID", String(pid), "/T", "/F"]);
+  }
+  if (browsers.length) await within(2_000, async () => lockReleased(lock));
 }
 
 function stillRuns(tree: BrowserProcessTree, table: Map<number, ListedProcess>, pid: number): boolean {
