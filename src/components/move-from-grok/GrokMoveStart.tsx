@@ -1,5 +1,5 @@
 import { Check, ChevronRight, Copy, FileUp } from "lucide-react";
-import { useRef, useState, type DragEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Chip, PRIMARY, SECONDARY, StepHeading } from "@/components/cloud-welcome/parts";
 import { cn } from "@/lib/cn";
@@ -27,21 +27,37 @@ export function GrokMoveStart({ local, found, look, movedNames, error, onBring, 
   const picker = useRef<HTMLInputElement>(null);
   const { state: copied, copy } = useCopyFeedback(GROK_EXPORT_PROMPT);
 
-  const readFile = async (file: File | undefined) => {
+  const readFile = useRef(async (_file: File | undefined) => {});
+  readFile.current = async (file) => {
     if (!file) return;
     if (file.size > GROK_EXPORT_MAX_CHARS) return onError(t("grokMove.error.tooLarge"));
     onBring(await file.text());
   };
-  const onDrop = (event: DragEvent) => {
-    event.preventDefault();
-    setDragging(false);
-    void readFile(event.dataTransfer.files[0]);
-  };
+  // The whole window takes the drop: a file let go beside the column must not replace the page.
+  useEffect(() => {
+    const over = (event: globalThis.DragEvent) => {
+      event.preventDefault();
+      setDragging(true);
+    };
+    const leave = () => setDragging(false);
+    const drop = (event: globalThis.DragEvent) => {
+      event.preventDefault();
+      setDragging(false);
+      void readFile.current(event.dataTransfer?.files[0]);
+    };
+    window.addEventListener("dragover", over);
+    window.addEventListener("dragleave", leave);
+    window.addEventListener("drop", drop);
+    return () => {
+      window.removeEventListener("dragover", over);
+      window.removeEventListener("dragleave", leave);
+      window.removeEventListener("drop", drop);
+    };
+  }, []);
   const isDone = (name: string) => movedNames.includes(name.toLowerCase()) || found.bots.some((bot) => bot.name.toLowerCase() === name.toLowerCase());
 
   return (
-    <section aria-labelledby="grok-move-title" data-grok-move-step="start" className="flex flex-col gap-5"
-      onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop}>
+    <section aria-labelledby="grok-move-title" data-grok-move-step="start" className="flex flex-col gap-5">
       <StepHeading id="grok-move-title" title={t("grokMove.start.title")} sub={t("grokMove.start.sub")} />
 
       {found.bots.length > 0 && (
@@ -90,7 +106,7 @@ export function GrokMoveStart({ local, found, look, movedNames, error, onBring, 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button type="button" data-grok-move-continue disabled={!reply.trim()} onClick={() => onBring(reply)} className={PRIMARY}>{t("onboarding.continue")}</button>
           <button type="button" onClick={() => picker.current?.click()} className={cn(SECONDARY, "inline-flex items-center gap-2")}><FileUp size={15} />{t("grokMove.start.chooseFile")}</button>
-          <input ref={picker} type="file" accept=".json,.md,.txt,application/json,text/plain,text/markdown" className="hidden" onChange={(event) => { void readFile(event.target.files?.[0]); event.target.value = ""; }} />
+          <input ref={picker} type="file" accept=".json,.md,.txt,application/json,text/plain,text/markdown" className="hidden" onChange={(event) => { void readFile.current(event.target.files?.[0]); event.target.value = ""; }} />
         </div>
       </div>
     </section>

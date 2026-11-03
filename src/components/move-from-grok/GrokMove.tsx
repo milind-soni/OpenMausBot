@@ -11,7 +11,7 @@ import {
 import { t } from "@/lib/i18n";
 import { localSetupImport } from "@/lib/setup-import";
 import { useStore } from "@/state/store";
-import { grokMovePlan, grokRedactions, parseGrokExport, type GrokBot, type GrokMovePlan } from "../../../shared/grok-import";
+import { grokMovePlan, grokRedactions, parseGrokExport, type GrokBot } from "../../../shared/grok-import";
 import { GrokMoveFinish } from "./GrokMoveFinish";
 import { GrokMovePreview, type GrokMovePending } from "./GrokMovePreview";
 import { GrokMoveStart } from "./GrokMoveStart";
@@ -52,14 +52,15 @@ export function GrokMove({ request }: { request: GrokMoveRequest }) {
 
   const found = useMemo(() => foundExports(look.files), [look.files]);
 
-  const bring = useCallback((reply: string) => {
+  const preview = useCallback((read: () => readonly GrokBot[]) => {
     try {
-      setPending(plansFor(parseGrokExport(reply), look));
+      setPending(plansFor(read(), look));
       setError("");
     } catch (cause) {
       setError(grokErrorText(cause));
     }
   }, [look]);
+  const bring = useCallback((reply: string) => preview(() => parseGrokExport(reply)), [preview]);
 
   const given = useRef(request.reply);
   useEffect(() => {
@@ -68,24 +69,27 @@ export function GrokMove({ request }: { request: GrokMoveRequest }) {
     given.current = undefined;
   }, [bring]);
 
-  const add = async (plans: readonly GrokMovePlan[]) => {
+  const add = async (current: GrokMovePending) => {
     setAdding(true);
     setError("");
+    const done: GrokMoved[] = [];
     try {
-      const done: GrokMoved[] = [];
-      for (const plan of plans) done.push(await moveGrokBot(plan, dispatch));
-      track("team_imported", { members: done.length, source: "grok", mode: "add", format: "package" });
-      setMoved((now) => [...now, ...done]);
+      for (const plan of current.plans) done.push(await moveGrokBot(plan, dispatch));
       setPending(null);
       setFinishing(true);
-      if (!told.current && done[0]) {
-        told.current = true;
-        request.onMoved?.(done[0].bot.id);
-      }
     } catch (cause) {
+      // Bots already added stay added, so another try brings only the rest.
+      setPending({ ...current, plans: current.plans.slice(done.length) });
       setError(grokErrorText(cause));
     } finally {
       setAdding(false);
+    }
+    if (!done.length) return;
+    track("team_imported", { members: done.length, source: "grok", mode: "add", format: "package" });
+    setMoved((now) => [...now, ...done]);
+    if (!told.current) {
+      told.current = true;
+      request.onMoved?.(done[0]!.bot.id);
     }
   };
 
@@ -129,9 +133,9 @@ export function GrokMove({ request }: { request: GrokMoveRequest }) {
   const body: ReactNode = finishing
     ? <GrokMoveFinish moved={moved} rows={rows} onOpen={open} onAnother={moveAnother} onDone={finish} />
     : pending
-    ? <GrokMovePreview pending={pending} takenNames={state.bots.map((bot) => bot.name)} adding={adding} error={error} onAdd={() => void add(pending.plans)} />
+    ? <GrokMovePreview pending={pending} takenNames={state.bots.map((bot) => bot.name)} adding={adding} error={error} onAdd={() => void add(pending)} />
     : <GrokMoveStart local={local} found={found} look={look} movedNames={movedNames} error={error}
-        onBring={bring} onFound={(bot) => setPending(plansFor([bot], look))} onError={setError} />;
+        onBring={bring} onFound={(bot) => preview(() => [bot])} onError={setError} />;
 
   return (
     <div ref={root} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="grok-move-title" data-grok-move={step}
