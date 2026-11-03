@@ -976,6 +976,8 @@ it("gives a teammate each request once, never also as a bare assistant line", ()
 async function onLoopbackEngine(f: any, answer: (res: ServerResponse) => void): Promise<() => Promise<void>> {
   const llm = createServer(async (req, res) => {
     for await (const _ of req) {}
+    // The chat engine asks a local server whether it is Ollama (/api/version); this one is not, and that is no model call.
+    if (req.url?.endsWith("/api/version")) { res.statusCode = 404; res.end(); return; }
     if (req.url?.endsWith("/models")) { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ data: [{ id: "loop-model" }] })); return; }
     answer(res);
   });
@@ -990,7 +992,7 @@ it("continues a teammate's step cap in place and stops it once it makes no progr
   let calls = 0;
   const close = await onLoopbackEngine(f, res => {
     // Never a final answer: one more tool call, every round.
-    const call = { tool_calls: [{ index: 0, id: `call_${++calls}`, type: "function", function: { name: "missing_tool", arguments: "{}" } }] };
+    const call = { tool_calls: [{ index: 0, id: `call_${++calls}`, type: "function", function: { name: "missing_tool", arguments: JSON.stringify({ attempt: calls }) } }] };
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: call, finish_reason: "tool_calls" }] })}\n\ndata: [DONE]\n\n`);
   });

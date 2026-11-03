@@ -11,6 +11,16 @@ export interface PageFile {
   path: string;
   data: Buffer;
 }
+/** A video beside a chat page's index.html, kept where it is on disk: never read into memory or copied. The identity
+ * is what lets the page's files route refuse a file that was replaced after the page was shown. BigInt stat fields as text,
+ * since inode numbers can pass 2^53. */
+export interface PageVideo {
+  file: string;
+  bytes: number;
+  dev: string;
+  ino: string;
+  mtimeNs: string;
+}
 export interface PageBundle {
   /** The file or folder published, canonical: the same source publishes to the same link again. */
   source: string;
@@ -18,6 +28,8 @@ export interface PageBundle {
   bytes: number;
   /** Files left out because a page can't serve them. */
   skipped: string[];
+  /** Only when asked for, by path in the folder: the pages Worker refuses video, so a published page leaves it out. */
+  videos?: Record<string, PageVideo>;
 }
 
 const SKIPPED_FOLDERS = new Set(["node_modules", "__pycache__"]);
@@ -37,6 +49,7 @@ const containedBy = (root: string, candidate: string) => {
 };
 const servable = (name: string) => PAGE_FILE_EXTENSIONS.has(extname(name).slice(1).toLowerCase());
 const isHtml = (name: string) => /^\.html?$/i.test(extname(name));
+const isVideo = (name: string) => /^\.(?:mp4|webm|mov)$/i.test(extname(name));
 
 async function canonicalRoots(roots: readonly string[]): Promise<string[]> {
   const found = await Promise.all(roots.map(async (root) => {
@@ -79,7 +92,7 @@ export async function pageSource(requested: string, roots: readonly string[]): P
 }
 
 /** The page at `requested`: one .html file (published as index.html), or a folder with index.html at its top. */
-export async function readPageBundle(requested: string, roots: readonly string[], limits = { bytes: PAGE_MAX_BYTES, files: PAGE_MAX_FILES }): Promise<PageBundle> {
+export async function readPageBundle(requested: string, roots: readonly string[], limits = { bytes: PAGE_MAX_BYTES, files: PAGE_MAX_FILES }, options: { videos?: boolean } = {}): Promise<PageBundle> {
   const { target, root } = await locate(requested, roots);
   const info = await stat(target);
   if (info.isFile()) {
@@ -89,7 +102,7 @@ export async function readPageBundle(requested: string, roots: readonly string[]
     return { source: target, files: [{ path: "index.html", data }], bytes: data.byteLength, skipped: [] };
   }
   if (!info.isDirectory()) throw new PageBundleError("Publish an .html file or a folder.");
-  const files: PageFile[] = [], skipped: string[] = [];
+  const files: PageFile[] = [], skipped: string[] = [], videos: Record<string, PageVideo> = {};
   let bytes = 0;
   const walk = async (folder: string, depth: number): Promise<void> => {
     for (const name of (await readdir(folder)).sort()) {
@@ -105,6 +118,12 @@ export async function readPageBundle(requested: string, roots: readonly string[]
         continue;
       }
       if (!entry.isFile()) continue;
+      if (options.videos && isVideo(name) && SEGMENT.test(name) && !name.endsWith(".")) {
+        if (files.length + Object.keys(videos).length >= limits.files) throw new PageBundleError(`The folder has more than ${limits.files} files a page can hold. Publish a smaller folder.`, 413);
+        const identity = await stat(real, { bigint: true });
+        videos[path] = { file: real, bytes: Number(identity.size), dev: String(identity.dev), ino: String(identity.ino), mtimeNs: String(identity.mtimeNs) };
+        continue;
+      }
       if (!servable(name) || !SEGMENT.test(name) || name.endsWith(".")) { skipped.push(path); continue; }
       if (files.length >= limits.files) throw new PageBundleError(`The folder has more than ${limits.files} files a page can hold. Publish a smaller folder.`, 413);
       bytes += entry.size;
@@ -116,17 +135,17 @@ export async function readPageBundle(requested: string, roots: readonly string[]
   if (!files.some((file) => file.path === "index.html")) {
     throw new PageBundleError(`${basename(target)} has no index.html at its top. Name the main page index.html, then publish again.`);
   }
-  return { source: target, files, bytes, skipped };
+  return { source: target, files, bytes, skipped, ...(options.videos ? { videos } : {}) };
 }
 
 /** The bot's own folders for a turn, and its Local VM's workspace on this computer when it has one. */
 export type BotFolders = () => Promise<{ roots: readonly string[]; vmWorkspace: string | null }>;
 
-/** readPageBundle within a bot's own folders; a path inside its Local VM's workspace means the same file here. */
+/** A chat page's bundle, videos included: readPageBundle within a bot's own folders; a path inside its Local VM's workspace means the same file here. */
 export async function readBotPageBundle(requested: string, folders: BotFolders): Promise<PageBundle> {
   const { roots, vmWorkspace } = await folders();
   const path = vmWorkspace ? guestWorkspaceToHost(requested, VM_WORKSPACE_GUEST, vmWorkspace) ?? requested : requested;
-  return readPageBundle(path, vmWorkspace ? [vmWorkspace, ...roots] : roots);
+  return readPageBundle(path, vmWorkspace ? [vmWorkspace, ...roots] : roots, undefined, { videos: true });
 }
 
 /** A file inside a bot's own folders (or its Local VM's workspace), by the same rules as a page: the `extract` tool's. */
