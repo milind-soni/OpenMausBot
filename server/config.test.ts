@@ -704,6 +704,20 @@ describe("a config.json saved with a byte order mark", () => {
       rmSync(path, { force: true });
     }
   });
+
+  it("keeps the browser's allow-list when the owner flips its local-sites switch", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({ browserEngine: { engine: "chrome", egress: { allow: ["10.0.0.5"] } } }));
+    try {
+      saveConfig({ browserEngine: { egress: { localNetwork: true } } });
+      expect(JSON.parse(readFileSync(path, "utf8")).browserEngine).toEqual({ engine: "chrome", egress: { allow: ["10.0.0.5"], localNetwork: true } });
+      saveConfig({ browserEngine: { egress: { localNetwork: false } } });
+      expect(JSON.parse(readFileSync(path, "utf8")).browserEngine).toEqual({ engine: "chrome", egress: { allow: ["10.0.0.5"], localNetwork: false } });
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
 });
 
 describe("loadConfig between changes", () => {
