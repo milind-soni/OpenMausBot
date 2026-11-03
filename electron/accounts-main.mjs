@@ -74,13 +74,14 @@ export function createDesktopRing(deps) {
  *   holdSheet(open: boolean): void,
  *   tellSheet(): void,
  *   tell(): void,
- * }} deps `ownPage`: this app's own page in the window, or the rail's. `placePage`: the page of a place of the person's own
+ *   clean?(): boolean,
+ * }} deps `clean`: the clean workspace runs (clean-workspace.mjs). `ownPage`: this app's own page in the window, or the rail's. `placePage`: the page of a place of the person's own
  * or their team's, which may offer the sheet. `ring`: the accounts kept on this device. `holdSheet`: the rail's page stays up
  * for the sheet, even for someone who hid the rail. `tell`: this app's pages read the list again.
  */
-export function installAccounts({ ipcMain, ownPage, placePage, account, client, ring, holdSheet, tellSheet, tell }) {
+export function installAccounts({ ipcMain, ownPage, placePage, account, client, ring, holdSheet, tellSheet, tell, clean = () => false }) {
   let sheetPending = false;
-  const view = () => accountsView(account()?.state());
+  const view = () => ({ ...accountsView(account()?.state()), ...(clean() ? { clean: true } : {}) });
   const own = (channel, handler) => ipcMain.handle(channel, (event, ...args) => {
     if (!ownPage(event)) throw new Error(`${channel} is only available on this app's own page`);
     return handler(...args);

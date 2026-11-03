@@ -62,6 +62,12 @@ export function useAccounts(): AccountsAccess & { sheet: { email: string | null;
   };
 }
 
+/** The You menu's row for the MausBot Cloud page: with the clean workspace open and nobody signed in, the line there asks the person
+ * to sign in, and this row is how. */
+export function cloudRowLabel(view: AccountsView | null): string {
+  return t(view?.clean && !view.active ? "accounts.signIn" : "settings.section.cloudAccount");
+}
+
 /** The You menu's last rows: who is signed in here and Sign out. The other accounts are on the rail, and so is Add another account,
  * in its ＋; with no rail beside this page (nothing to list but This computer, or the person hid it) it is here. On another page,
  * one row that opens the sheet, with no address. Signed out: nothing, as Settings has the sign-in. */

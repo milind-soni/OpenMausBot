@@ -54,7 +54,7 @@ test("6. two accounts, one Cloud each, both called My Cloud: told apart by group
   assert.equal(rows[2].account, B);
 });
 
-test("7. two accounts with several Clouds and teams: the account in use first, each group in its order, colours per Cloud", () => {
+test("7. two accounts with several Clouds and teams: groups in a fixed order by address, each in its order, colours per Cloud", () => {
   const b = [myCloud("https://b.test", "b1"), ownCloud("https://b2.test", "B Two", "b2"), teamCloud("https://bt.test", "B Team", "b3")];
   const rows = railPlaces({ saved: list([myCloud("https://a.test", "a1"), ownCloud("https://a2.test", "A Two", "a2"), teamCloud("https://at.test", "A Team", "a3")]), mine: "https://a.test", state: signedIn(A),
     waiting: [waits(B, b, [{ id: "b1", name: "My Cloud", color: "red", kind: "cloud", opens: true }, { id: "b2", name: "B Two", color: "blue", kind: "cloud", opens: true }, { id: "b3", name: "B Team", color: null, kind: "team", opens: true }])] });
@@ -75,7 +75,7 @@ test("8. an account with no Clouds has one row of its own while it waits; while 
 test("9. the same team under both accounts is one row: the account in use's when it's a member, else the first that waits", () => {
   const mine = teamCloud("https://t.test", "Team", "t-as-a"), theirs = teamCloud("https://t.test", "Team", "t-as-b");
   const both = railPlaces({ saved: list([mine]), state: signedIn(A), waiting: [waits(B, [theirs])] });
-  assert.deepEqual(ids(both), [LOCAL_ID, "t-as-a", `${ACCOUNT_PLACE}${B}`], "one row, opened as the account in use, and B can still be reached");
+  assert.deepEqual(ids(both).sort(), [LOCAL_ID, "t-as-a", `${ACCOUNT_PLACE}${B}`].sort(), "one row, opened as the account in use, and B can still be reached");
   assert.equal(both[1].account, undefined);
   const notMine = railPlaces({ saved: list([]), state: signedIn(A), waiting: [waits(B, [theirs]), waits(C, [teamCloud("https://t.test", "Team", "t-as-c")])] });
   assert.deepEqual(ids(notMine), [LOCAL_ID, "t-as-b", `${ACCOUNT_PLACE}${C}`]);
@@ -164,4 +164,12 @@ test("no page but the rail's reads the rows, and the rail's never hears which ac
   assert.equal(JSON.stringify(seen.places).includes('"account"'), false);
   assert.deepEqual((await f.page("workspaces:places")).places, []);
   assert.throws(() => f.page("workspaces:open", "b1"), /only available/);
+});
+
+test("the groups keep their order whichever account is in use, so a click doesn't move the row under the pointer", () => {
+  const a = [myCloud("https://a.test", "a1")], b = [myCloud("https://b.test", "b1")];
+  const asAlice = railPlaces({ saved: list(a), mine: "https://a.test", state: signedIn(A), waiting: [waits(B, b)] });
+  const asBob = railPlaces({ saved: list(b), mine: "https://b.test", state: signedIn(B), waiting: [waits(A, a)] });
+  assert.deepEqual(ids(asAlice), ids(asBob));
+  assert.deepEqual(ids(asAlice), [LOCAL_ID, "a1", "b1"], "alice before bob");
 });

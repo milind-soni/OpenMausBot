@@ -174,7 +174,8 @@ export interface CloudAccountBridge {
 }
 /** Who is signed in on this device, as the You menu shows it. `signIn`: this account's sign-in has ended here. */
 export interface AccountRow { id: string; email: string; signIn?: true }
-export interface AccountsView { active: AccountRow | null }
+/** `clean`: the clean workspace runs on this computer, whose line asks the person to sign in. */
+export interface AccountsView { active: AccountRow | null; clean?: true }
 export interface AccountSwitchResult { outcome: "switched" | "signed-out" | "moving" | "sign-in" | "gone" | "failed"; email?: string; view: AccountsView }
 /** What a click on a place of another account answers when it didn't switch: nothing moved. `sign-in`: that sign-in has ended. */
 export interface RailOpenResult { outcome: "switched" | "moving" | "sign-in" | "gone" | "failed"; email?: string }

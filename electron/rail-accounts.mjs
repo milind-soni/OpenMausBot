@@ -17,9 +17,9 @@ export function accountRows(rows) {
 }
 
 /**
- * The rail's rows, grouped: This computer, the account in use, each account that waits, then servers saved by hand. A Cloud two
- * accounts can reach (a team's) is one row: the account in use's when it can, else the first that waits. An account left with
- * no row gets one of its own.
+ * The rail's rows, grouped: This computer, each account by its address, then servers saved by hand. A Cloud two accounts can reach
+ * (a team's) is one row: the account in use's when it can, else the first that waits. An account that waits, left with no row, gets
+ * one of its own.
  * @param {any[]} all the account in use's rows, from railPlaces.
  * @param {{ saved: { environments: any[] }, email?: string | null, waiting?: Array<{ id: string, email: string, signIn?: true, places: any[], rows: any[] }> }} input
  */
@@ -33,16 +33,16 @@ export function withAccounts(all, { saved, email = null, waiting = [] }) {
     taken.add(origin);
     return true;
   };
-  const others = waiting.flatMap((account) => {
+  const rowsOf = (account) => {
     const mark = { account: account.id, group: account.id, email: account.email, ...(account.signIn ? { signIn: true } : {}) };
     const rows = account.rows.filter((row) => first(account, row)).map((row) => ({ ...row, ...mark }));
     return rows.length ? rows : [{ id: `${ACCOUNT_PLACE}${account.id}`, name: account.email, color: null, kind: "account", opens: true, ...mark }];
-  });
+  };
   const isComputer = (row) => row.kind === "computer";
-  return [
-    ...all.filter(isComputer),
-    ...all.filter((row) => !isComputer(row) && !row.forget).map((row) => ({ ...row, group: ACTIVE, ...(email ? { email } : {}) })),
-    ...others,
-    ...all.filter((row) => row.forget).map((row) => ({ ...row, group: HAND })),
-  ];
+  // The first claim to a Cloud two accounts share is the account in use's, whatever the order they show in.
+  const waited = waiting.map((account) => ({ email: account.email, rows: rowsOf(account) }));
+  const own = all.filter((row) => !isComputer(row) && !row.forget).map((row) => ({ ...row, group: ACTIVE, ...(email ? { email } : {}) }));
+  // In a fixed order, so a click that makes another account the one in use doesn't move the row under the pointer.
+  const groups = [...(own.length ? [{ email: email ?? "", rows: own }] : []), ...waited].sort((a, b) => a.email.localeCompare(b.email));
+  return [...all.filter(isComputer), ...groups.flatMap((group) => group.rows), ...all.filter((row) => row.forget).map((row) => ({ ...row, group: HAND }))];
 }

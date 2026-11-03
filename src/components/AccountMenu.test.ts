@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { accountMenuItems, switchNote } from "./AccountMenu";
+import { accountMenuItems, cloudRowLabel, switchNote } from "./AccountMenu";
 
 afterEach(() => vi.clearAllMocks());
 const actions = { signOut: vi.fn(), add: vi.fn() };
@@ -48,4 +48,11 @@ it("what a click or sign-out that didn't go through says, in plain words", () =>
   expect(switchNote({ outcome: "failed" })).toContain("Try again");
   expect(switchNote({ outcome: "switched" })).toBeNull();
   expect(switchNote({ outcome: "signed-out" })).toBeNull();
+});
+
+it("the MausBot Cloud row says Sign in only while the clean workspace's line asks for it", () => {
+  expect(cloudRowLabel({ active: null, clean: true })).toBe("Sign in");
+  expect(cloudRowLabel({ active: null })).toBe("MausBot Cloud");
+  expect(cloudRowLabel({ active: { id: "b", email: "b@example.test" }, clean: true })).toBe("MausBot Cloud");
+  expect(cloudRowLabel(null)).toBe("MausBot Cloud");
 });
