@@ -18,6 +18,8 @@ export interface PersonalReachDeps {
 
 type Placed = Pick<HandoffView, "botId" | "threadId"> & Partial<Pick<HandoffView, "id" | "origin">>;
 
+const NOT_HERE = "You can hand work to the team's bots only from this person's private chats, and this chat is not one of them. If they ask for that here, tell them to start a new conversation with you and ask there.";
+
 export function createPersonalReach(deps: PersonalReachDeps) {
   /** Whose MausBot this is, when this chat is private to that same person. */
   const personOf = (from: RosterMember, threadId: string): string | null => {
@@ -44,6 +46,11 @@ export function createPersonalReach(deps: PersonalReachDeps) {
     /** An assignment id reaches any thread of the bot, so an answer must stay in this person's own. */
     mayAnswerIn(from: RosterMember, fromThreadId: string, answerThreadId: string | undefined): boolean {
       return personOf(from, fromThreadId) !== null && answerThreadId !== undefined && deps.privateTo(answerThreadId) === deps.privateTo(fromThreadId);
+    },
+    /** For a person's MausBot in a chat it can't hand work on from, such as its main chat, so that isn't a dead end. */
+    notHere(from: RosterMember, threadId: string): string {
+      const email = defaultBotPerson(from);
+      return email && deps.privateTo(threadId) !== deps.personKey(email) ? NOT_HERE : "";
     },
     peers<T extends RosterMember>(bots: readonly T[], from: RosterMember, threadId: string): T[] {
       return reachablePeers(bots, from, (bot) => mayHandOn(from, bot, threadId));

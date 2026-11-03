@@ -198,6 +198,7 @@ it("audience: not from her MausBot's main chat, which isn't private to her", asy
   await say("FROM-MY-MAIN-CHAT", mausbot.threadId);
   await ran("M-SHARED");
   expect(steps(turn("M-SHARED"))[0]!.response?.result?.isError).toBe(true);
+  expect(turn("M-SHARED").system).toContain("start a new conversation with you");
 }, hostTimeout(90_000));
 
 it("outside-driven: a line another app relays into her private chat cannot hand work on", async () => {
