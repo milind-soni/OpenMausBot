@@ -438,9 +438,9 @@ export interface GrokMovePlan {
   notes: GrokNote[];
 }
 
-const CHECK_NORMAL = (value: string) => value.replace(/\s+/g, " ").trim().toLowerCase();
+const sameFact = (value: string) => value.replace(/\s+/g, " ").trim().toLowerCase();
 const dedupe = (lines: string[], seen: Set<string>) => lines.filter((line) => {
-  const key = CHECK_NORMAL(line);
+  const key = sameFact(line);
   if (seen.has(key)) return false;
   seen.add(key);
   return true;
