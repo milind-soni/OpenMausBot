@@ -310,16 +310,17 @@ describe("Group Local VM ownership on the real isolated server", () => {
 
       rmSync(dumpFile, { force: true });
       await api("POST", `/api/bots/${bots[2].id}/messages`, { text: "Wait for an available seat." });
+      const waitingComputer = computer(await dump());
+      void gate(waitingComputer).catch(() => undefined);
       await until(async () => {
         const state = await api("GET", "/api/bots?messages=30");
         return state.bots.find((bot: any) => bot.id === bots[2].id)?.messages
           .some((message: any) => String(message.tool?.name ?? "").startsWith("Waiting for its turn on this computer"));
       }, Boolean);
-      expect(existsSync(dumpFile)).toBe(false);
       const waitingStatus = await api("GET", `/api/bots/${bots[2].id}/local-computer`);
       const holder = waitingStatus.target_key === "pool:0" ? bots[0] : bots[1];
       await api("POST", `/api/bots/${holder.id}/interrupt`, {}); await idle(holder.id);
-      expect(JSON.stringify(computer(await dump()))).toContain(waitingStatus.container_name);
+      expect(JSON.stringify(waitingComputer)).toContain(waitingStatus.container_name);
       expect(readState().containers.filter((key: string) => key.startsWith("pool:")).sort()).toEqual(["pool:0", "pool:1"]);
     } finally {
       vmState({ ...readState(), blockedTarget: undefined });

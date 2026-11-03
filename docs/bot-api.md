@@ -54,7 +54,7 @@ Answers:
   and answers there; a later `GET` returns the reply.
 - `400` bad body, `401` wrong key, `403` the API is off for this bot (or there is
   no such bot), `404` no such thread, `409` that thread is still working or the bot
-  is at its limit of conversations at once (3 by default, 50 API calls at most),
+  is at its limit of conversations at once, or 50 API calls are being answered,
   `413` body over 256 KB, `415` not JSON, `429` more than ten calls in a minute for
   this key, `502` the bot could not answer (the reason is on the card, not in the
   response).
