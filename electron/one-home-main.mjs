@@ -148,10 +148,7 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
   const report = createMoveStatusReport({
     status,
     // A sign-in the Admin has ended (or that expired) only gets 401s until the person signs in again.
-    signIn: () => {
-      const state = account()?.state(), moved = parseJournal(journal.read());
-      return state?.status === "reauth-required" || (moved && state?.account?.id !== moved.cloud.account) ? null : state?.deviceId ?? null;
-    },
+    signIn: () => { const state = account()?.state(); return state?.status === "reauth-required" ? null : state?.deviceId ?? null; },
     send: async (body) => (await account()?.reportMoveStatus?.(body)) === true,
     log,
     ...(reportTimers ? { timers: reportTimers } : {}),

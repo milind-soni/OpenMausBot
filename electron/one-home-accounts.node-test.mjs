@@ -131,7 +131,7 @@ test("a move under way stays with its account when a second one signs in here", 
   running.installed.close();
 });
 
-test("Keep this computer's bots here isn't offered to B for A's move, and a move's status isn't reported through B's sign-in", async () => {
+test("Keep this computer's bots here isn't offered to B for A's move, and A's move doesn't hold B", async () => {
   const f = main({ state: withCloud("b", CLOUD_B), accounts: 2, journal: movedToA("done"), marker: { frozen: true, cloud: CLOUD_A } });
   const keep = await f.handlers.get("one-home:keep")({});
   assert.equal(keep.shown, false);
