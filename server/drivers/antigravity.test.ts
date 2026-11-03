@@ -794,13 +794,11 @@ describe("Antigravity driver over shared ACP", () => {
       environment: {
         FAKE_ACP_AUTH_METHOD: "oauth-personal",
         FAKE_ACP_MODELS: sessionModels,
-        FAKE_ACP_VARIANTS: JSON.stringify({
-          "gemini-3.8-flash": {
-            id: "thinking_level",
-            currentValue: "high",
-            options: [{ value: "low", name: "Low" }, { value: "medium", name: "Medium" }, { value: "high", name: "High" }],
-          },
-        }),
+        FAKE_ACP_VARIANTS: JSON.stringify(Object.fromEntries(["gemini-3.8-flash", "gemini-4-argon"].map((id) => [id, {
+          id: "thinking_level",
+          currentValue: "high",
+          options: [{ value: "low", name: "Low" }, { value: "medium", name: "Medium" }, { value: "high", name: "High" }],
+        }]))),
         FAKE_ACP_MODES: "default,yolo,auto_edit",
         FAKE_ACP_DUMP: dump,
       },
@@ -835,6 +833,12 @@ describe("Antigravity driver over shared ACP", () => {
     });
   });
 
+  it("runs a saved Gemini 4 Argon (High) pick as the base model at High thinking when the runtime offers only the base", async () => {
+    const { calls, selection } = await legacyPickTurn("antigravity-legacy-argon", "gemini-3.8-flash,gemini-4-argon", "gemini-4-argon-high");
+    expect(selection).toEqual({ sessionId: expect.any(String), model: "gemini-4-argon", variant: "high" });
+    expect(calls.some((call: any) => call.params.value === "gemini-4-argon-high")).toBe(false);
+  });
+
   it("keeps a suffixed Gemini 3.8 Flash pick unchanged when the runtime still offers it", async () => {
     const { calls, selection } = await legacyPickTurn("antigravity-suffixed-offered", "gemini-3.8-flash,gemini-3.8-flash-medium", "gemini-3.8-flash-medium");
     expect(selection).toEqual({ sessionId: expect.any(String), model: "gemini-3.8-flash-medium" });
@@ -849,7 +853,9 @@ describe("Antigravity driver over shared ACP", () => {
     expect(normalizeAntigravityTurn(turn, ["gemini-3.8-flash", "gemini-3.8-flash-low"])).toBe(turn);
     expect(normalizeAntigravityTurn(turn, ["gemini-3.7-flash"])).toBe(turn);
     expect(normalizeAntigravityTurn({ ...turn, variant: "high" }, ["gemini-3.8-flash"])).toMatchObject({ model: "gemini-3.8-flash-low", variant: "high" });
-    expect(normalizeAntigravityTurn({ ...turn, model: "gemini-3.8-pro-high" }, ["gemini-3.8-flash", "gemini-3.8-pro"])).toMatchObject({ model: "gemini-3.8-pro-high" });
+    expect(normalizeAntigravityTurn({ ...turn, model: "gemini-4-argon-medium" }, ["gemini-3.8-flash", "gemini-4-argon"])).toEqual({ ...turn, model: "gemini-4-argon", variant: "medium" });
+    expect(normalizeAntigravityTurn({ ...turn, model: "gemini-4-argon-high" }, ["gemini-4-argon", "gemini-4-argon-high"])).toMatchObject({ model: "gemini-4-argon-high" });
+    expect(normalizeAntigravityTurn({ ...turn, model: "gemini-4-argon-high" }, ["gemini-3.8-flash"])).toMatchObject({ model: "gemini-4-argon-high" });
   });
 
   it("keeps one process across approval and model changes, starting on OMB's model", async () => {
