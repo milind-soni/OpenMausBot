@@ -24,6 +24,7 @@ const memoryStore = () => { let held = null; return { read: async () => held, wr
  *   makeClient(options: { store: any, onState(state: any): void }): any,
  *   origin: string,
  *   holding?(): string | null,
+ *   naming?(accountId: string | null): Promise<unknown>,
  *   leaving?(accountId: string | null): Promise<unknown>,
  *   left?(accountId: string | null): Promise<unknown>,
  *   arriving?(accountId: string): Promise<unknown>,
@@ -33,14 +34,14 @@ const memoryStore = () => { let held = null; return { read: async () => held, wr
  *   now?(): number,
  *   log?(line: string): void,
  * }} deps `holding()`: why the active account can't be left now ("moving"), else null. `leaving(id)`: everything that was
- * running for that account stops, and its places are named while its sign-in can still say which they are. `left(id)`: those
+ * running for that account stops. `naming(id)`, before anything else: its places are named and kept as the rail shows them, while its sign-in can still say which they are and how they look, which it can't once it is quiet. `left(id)`: those
  * places leave the list and the window, and their sessions go; a sign-out's comes after its sign-in ended, whose last answers can
  * re-issue a session. `arriving(id)`: what this device kept for that
  * account comes back, before its sign-in is read. `settled()`: the window goes where it belongs. `removed(id)`: that account
  * is off this device: what was kept for it goes. `makeClient`: a sign-in of its own for Add another account, which leaves the
  * active account running until it succeeds.
  */
-export function createCloudAccounts({ active, saved, client, makeClient, origin, holding = () => null, leaving = async () => {}, left = async () => {}, arriving = async () => {}, settled = async () => {}, removed = async () => {}, changed = () => {}, now = Date.now, log = () => {} }) {
+export function createCloudAccounts({ active, saved, client, makeClient, origin, holding = () => null, naming = async () => {}, leaving = async () => {}, left = async () => {}, arriving = async () => {}, settled = async () => {}, removed = async () => {}, changed = () => {}, now = Date.now, log = () => {} }) {
   let rows = [], known = false, queue = Promise.resolve(), adder = null, browserResult = null;
   const serial = (work) => { const run = queue.then(work, work); queue = run.catch(() => {}); return run; };
 
@@ -71,6 +72,7 @@ export function createCloudAccounts({ active, saved, client, makeClient, origin,
   /** The account `next` becomes active; `keep`: the one active now stays signed in, waiting. */
   async function become(next, { list, keep = true }) {
     const leavingId = activeId();
+    await naming(leavingId);
     const current = await active.read().catch(() => null);
     const waiting = keep && usable(current, origin) ? current : null;
     await saved.write({ v: VERSION, accounts: [...list.filter((record) => record.account.id !== waiting?.account.id), ...(waiting ? [waiting] : [])] });
@@ -123,6 +125,7 @@ export function createCloudAccounts({ active, saved, client, makeClient, origin,
       await become(next, { list: list.filter((record) => record.account.id !== id), keep: false });
       if (usable(current, origin)) await client().revokeSaved(current).catch((error) => log(`accounts: signed out here only (${error?.message ?? error})`));
     } else {
+      await naming(id);
       await leaving(id);
       await client().signOut();
       await left(id);

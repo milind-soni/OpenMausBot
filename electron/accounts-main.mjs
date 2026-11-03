@@ -47,7 +47,8 @@ export function createDesktopRing(deps) {
   const ring = () => {
     if (!deps.allowed()) return null;
     return made ??= createCloudAccounts({ active: deps.active(), saved: deps.savedStore(), client: deps.client, makeClient: deps.makeClient, origin: deps.origin, holding: deps.holding, settled: deps.settled, changed: deps.tell, log: deps.log,
-      leaving: async (id) => { deps.letGo(id); leavingNow = { left: leave.places(), rows: accountRows(deps.rows()) }; },
+      naming: async () => { leavingNow = { left: leave.places(), rows: accountRows(deps.rows()) }; },
+      leaving: async (id) => { deps.letGo(id); },
       left: async (id) => {
         const { left, rows } = leavingNow ?? { left: [], rows: [] };
         leavingNow = null;

@@ -164,11 +164,13 @@ function desktopRing({ environments = places.environments, order = [], activeId 
   const tokens = (id) => ({ origin: "https://admin.test", token: `omc_${id.repeat(43)}`, account: { id, email: `${id}@example.test` }, device: { id: `d-${id}` }, expiresAt: Date.now() + 86_400_000 });
   const files = { active: tokens(activeId), saved: { v: 1, accounts: [tokens("b")] } };
   const store = (key) => ({ read: async () => files[key], write: async (value) => { files[key] = value; } });
-  const client = { state: () => state, quiesce() {}, async reload() { const id = files.active.account.id; state = { status: "connected", account: { id, email: `${id}@example.test` } }; order.push(`reload:${id}`); }, async refresh() {}, async revokeSaved() { order.push("revoke"); },
+  let quiet = false;
+  const client = { state: () => state, quiesce() { quiet = true; }, async reload() { quiet = false; const id = files.active.account.id; state = { status: "connected", account: { id, email: `${id}@example.test` } }; order.push(`reload:${id}`); }, async refresh() {}, async revokeSaved() { order.push("revoke"); },
     async signOut() { order.push("client-sign-out"); files.active = null; state = { status: "signed-out" }; return state; } };
   const ring = createDesktopRing({ allowed: () => true, active: () => store("active"), savedStore: () => store("saved"), stash: () => stash, client: () => client, origin: "https://admin.test", makeClient: () => { throw new Error("not here"); },
-    saved: () => saved, persist: (next) => { saved = next; order.push("persist"); }, session: () => ({ clearStorageData: async ({ origin }) => { order.push(`clear:${origin}`); } }), mine: () => mine, leaveWindow: async () => order.push("window"),
-    rows: () => [{ id: "home-a", name: "My Cloud", color: "green", kind: "cloud", opens: true, active: true, progress: 0.5, attention: true, paint: { swatch: "green" } }, { id: "by-hand", name: "By hand", kind: "server", opens: true, forget: true }, { id: "local", name: "This computer", kind: "computer", opens: true }],
+    saved: () => saved, persist: (next) => { saved = next; order.push("persist"); }, session: () => ({ clearStorageData: async ({ origin }) => { order.push(`clear:${origin}`); } }), mine: () => (quiet ? null : mine), leaveWindow: async () => order.push("window"),
+    // A quiet sign-in says nothing of its Clouds: what the rail keeps is read before that.
+    rows: () => (quiet ? [] : [{ id: "home-a", name: "My Cloud", color: "green", kind: "cloud", opens: true, active: true, progress: 0.5, attention: true, paint: { swatch: "green" } }, { id: "by-hand", name: "By hand", kind: "server", opens: true, forget: true }, { id: "local", name: "This computer", kind: "computer", opens: true }]),
     holding: () => null, letGo: (id) => order.push(`let-go:${id}`), lendingDone: async () => { order.push("lending-done"); }, settled: async () => order.push("settled"), forgetLending: (place) => lent.push(place.id), tell: () => order.push("tell"), log: () => {} });
   return { ring, order, lent, saved: () => saved, files };
 }

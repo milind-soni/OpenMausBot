@@ -248,7 +248,7 @@ function MorePlaces({ places, canPair, onOpen, onMenu, onClose }: { places: Rail
         <button type="button" disabled={!placeActs(place, canPair)} aria-current={place.active ? "page" : undefined} onClick={() => { onOpen(place); onClose(); }}
           onContextMenu={menuOpener(place, (menu) => { onClose(); onMenu(menu); })} className={cn(MENU_ROW, "h-9")}>
           <PlaceMark place={place} size={22} />
-          <span className="min-w-0 flex-1 truncate">{placeLabel(place)}</span>
+          <span className="min-w-0 flex-1 truncate">{[placeStatus(place, Date.now()), place.signIn && t("accounts.needsSignIn")].filter(Boolean).join(" · ")}</span>
         </button>
       </li>)}
     </ul>
