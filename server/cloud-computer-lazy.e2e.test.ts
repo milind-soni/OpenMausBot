@@ -402,7 +402,11 @@ describe("a cloud computer starts only when the bot uses it", () => {
     for (const bot of [writer, asked, fresh, sender]) await idle(bot.id);
     // Mounting is lazy: nothing was created or woken without a computer call.
     expect({ creates: creates(), resumes: resumes() }).toEqual(before);
-    for (const bot of [writer, asked, fresh, sender]) await apiOk("DELETE", `/api/bots/${bot.id}`);
+    // A finished hand-off can still be settling its dispatch for a moment after the bot reads idle; the delete waits for it.
+    for (const bot of [writer, asked, fresh, sender]) {
+      const deleted = await until(() => api("DELETE", `/api/bots/${bot.id}`), (response) => response.status !== 409);
+      expect(deleted.status).toBeLessThan(400);
+    }
   }, 90_000);
 
   it("a room member whose cloud computer can't start says why in the room, once, under its own name", async () => {
