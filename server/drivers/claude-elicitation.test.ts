@@ -60,6 +60,13 @@ describe("claudeElicitations", () => {
     expect(events).toEqual([{ type: "runtime.notice", message: expect.stringContaining("github asked you to fill in a field") }]);
   });
 
+  it("declines a form whose required fields are not listed as properties", async () => {
+    const { elicit, written, events } = harness();
+    expect(elicit.frame(ask("e4b", { requested_schema: { type: "object", properties: {}, required: ["token"] } }))).toBe(true);
+    expect(written).toEqual([sent("e4b", { action: "decline" })]);
+    expect(events).toEqual([{ type: "runtime.notice", message: expect.stringContaining("github asked you to fill in a field") }]);
+  });
+
   it("declines a link request and passes on only a web link", async () => {
     const { elicit, written, events } = harness();
     elicit.frame(ask("e5", { mode: "url", url: "https://example.com/auth" }));
@@ -99,6 +106,18 @@ describe("claudeElicitations", () => {
     deliver(true);
     await expect(answered).resolves.toBe("failed");
     expect(events.filter((e) => e.type === "request.resolved")).toEqual([done("e8", "deny", "system")]);
+  });
+
+  it("withdraws a card the CLI cancels while its answer is still on its way", async () => {
+    let deliver!: (ok: boolean) => void;
+    const events: any[] = [];
+    const elicit = claudeElicitations(() => new Promise<boolean>((resolve) => { deliver = resolve; }), (event) => events.push(event));
+    elicit.frame(ask("e9"));
+    const answered = elicit.answer("elicitation:e9", "allow");
+    expect(elicit.frame({ type: "control_cancel_request", request_id: "e9" })).toBe(true);
+    deliver(true);
+    await expect(answered).resolves.toBe("failed");
+    expect(events.filter((e) => e.type === "request.resolved")).toEqual([done("e9", "deny", "timeout")]);
   });
 
   it("leaves other frames and cards alone", async () => {

@@ -14,6 +14,8 @@ const text = (value: unknown) => (typeof value === "string" ? value.trim() : "")
 /** `write` settles true once the frame reached the CLI's stdin, false when it could not be sent. */
 export function claudeElicitations(write: (frame: unknown) => Promise<boolean>, emit: (event: ElicitationEvent) => void) {
   const pending = new Set<string>();
+  // Answers still being written to the CLI; true once the CLI withdrew the question meanwhile.
+  const sending = new Map<string, boolean>();
   let closed = false;
   const reply = (id: string, response: Record<string, unknown>) =>
     write({ type: "control_response", response: { subtype: "success", request_id: id, response } });
@@ -23,7 +25,12 @@ export function claudeElicitations(write: (frame: unknown) => Promise<boolean>, 
     /** Consumes an elicitation frame or its withdrawal; false for every other frame. */
     frame(o: any): boolean {
       if (o?.type === "control_cancel_request") {
-        if (typeof o.request_id !== "string" || !pending.delete(o.request_id)) return false;
+        if (typeof o.request_id !== "string") return false;
+        if (sending.has(o.request_id)) {
+          sending.set(o.request_id, true);
+          return true;
+        }
+        if (!pending.delete(o.request_id)) return false;
         resolved(o.request_id, "deny", "timeout");
         return true;
       }
@@ -34,7 +41,12 @@ export function claudeElicitations(write: (frame: unknown) => Promise<boolean>, 
       const server = text(r.display_name) || serverName || "An MCP server";
       const message = text(r.message);
       const properties = r.requested_schema?.properties;
-      const fields = properties && typeof properties === "object" ? Object.keys(properties).length : 0;
+      const required = r.requested_schema?.required;
+      // A required name with no declared property still needs a value the card can't collect.
+      const fields = new Set([
+        ...(properties && typeof properties === "object" ? Object.keys(properties) : []),
+        ...(Array.isArray(required) ? required.filter((name: unknown) => typeof name === "string") : []),
+      ]).size;
       if (r.mode === "url" || fields > 0) {
         void reply(id, { action: "decline" });
         const url = text(r.url);
@@ -65,7 +77,15 @@ export function claudeElicitations(write: (frame: unknown) => Promise<boolean>, 
     async answer(requestId: string, behavior: "allow" | "deny" | "answer"): Promise<"sent" | "failed" | false> {
       const id = requestId.startsWith(CARD_PREFIX) ? requestId.slice(CARD_PREFIX.length) : "";
       if (!pending.delete(id)) return false;
+      sending.set(id, false);
       const delivered = await reply(id, behavior === "allow" ? { action: "accept", content: {} } : { action: "decline" });
+      const cancelled = sending.get(id);
+      sending.delete(id);
+      // The CLI withdrew the question while the answer was on its way: it never counts as the person's answer.
+      if (cancelled && !closed) {
+        resolved(id, "deny", "timeout");
+        return "failed";
+      }
       // A session closed while the answer was on its way: the CLI that asked is gone, so the card is withdrawn.
       if (!delivered || closed) {
         resolved(id, "deny", "system");
