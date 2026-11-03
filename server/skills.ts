@@ -1302,7 +1302,7 @@ export function enabledSkillFile(botId: string, name: string, assignedLibrary?: 
   return enabledSkillFiles(botId, [name], assignedLibrary).get(name) ?? null;
 }
 
-/** SKILL.md of each named skill that is on for the bot; reads the bot's skills once. */
+/** SKILL.md of each named skill that is on for the bot. */
 export function enabledSkillFiles(botId: string, names: readonly string[], assignedLibrary?: readonly string[]): Map<string, string> {
   if (!names.length) return new Map();
   const on = new Set(resolveBotSkills(botId, assignedLibrary).filter((skill) => skill.enabled).map((skill) => skill.name)), manifest = readManifest(botId);
