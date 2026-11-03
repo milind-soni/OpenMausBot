@@ -135,6 +135,38 @@ describe("OpenAICompatDriver", () => {
     await inst.dispose();
   });
 
+  it("lists Gemini's chat models by their plain IDs", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ object: "list", data: [
+      { id: "models/gemini-2.5-pro", object: "model", owned_by: "google" },
+      { id: "models/gemini-embedding-001", object: "model", owned_by: "google" },
+      { id: "models/gemini-2.5-flash", object: "model", owned_by: "google" },
+      { id: "models/gemini-2.5-flash-preview-tts", object: "model", owned_by: "google" },
+      { id: "models/imagen-4.0-generate-001", object: "model", owned_by: "google" },
+      { id: "models/gemini-2.5-flash-image", object: "model", owned_by: "google" },
+      { id: "models/gemini-live-2.5-flash-preview", object: "model", owned_by: "google" },
+    ] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "openai-compat-1", displayName: "Google Gemini", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://generativelanguage.googleapis.com/v1beta/openai", key: "gemini-fixture" }),
+      environment: {},
+    });
+    await vi.waitFor(() => expect(inst.models.options.map((option) => option.id)).toEqual(["gemini-2.5-pro", "gemini-2.5-flash"]));
+    expect(fetchMock).toHaveBeenCalledWith("https://generativelanguage.googleapis.com/v1beta/openai/models", expect.anything());
+    await inst.dispose();
+  });
+
+  it("keeps other servers' model IDs as they list them", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: [{ id: "models/gemini-2.5-pro" }, { id: "text-embedding-3-small" }] })));
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "openai-compat-2", displayName: "Proxy", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://llm.example.com/v1", key: "sk-fixture" }),
+      environment: {},
+    });
+    await vi.waitFor(() => expect(inst.models.options.map((option) => option.id)).toEqual(["models/gemini-2.5-pro", "text-embedding-3-small"]));
+    await inst.dispose();
+  });
+
   it("reports unavailable without an API key", async () => {
     const inst = await OpenAICompatDriver.create({
       instanceId: "test-1",
