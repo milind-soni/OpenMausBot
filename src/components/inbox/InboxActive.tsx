@@ -15,8 +15,12 @@ export function InboxActive({ view }: { view: InboxView | null }) {
   const { state, dispatch } = useStore();
   const team = useTeamPeople();
   const pinned = useAttentionPinned();
-  const asked = new Set((view?.rows ?? []).filter((row) => row.tab === "needs-you").map((row) => row.origin?.threadId));
-  const entries = crossBotAttentionThreads(state.bots, state.pendingQueued, undefined, state.groups).filter((entry) => !asked.has(entry.task.threadId));
+  const rows = view?.rows ?? [];
+  const asked = new Set(rows.filter((row) => row.tab === "needs-you").map((row) => row.origin?.threadId));
+  const news = new Set(rows.filter((row) => row.tab === "info").map((row) => row.origin?.threadId));
+  const atWork = (task: { busy?: boolean; activity?: string; queued?: boolean }) => task.busy === true || task.activity === "working" || task.queued === true;
+  const entries = crossBotAttentionThreads(state.bots, state.pendingQueued, undefined, state.groups)
+    .filter((entry) => !asked.has(entry.task.threadId) && (atWork(entry.task) || !news.has(entry.task.threadId)));
   const fixes = inboxFixes(team?.needsYou, view);
   return (
     <>

@@ -217,10 +217,15 @@ describe("a place's inbox in the panel", () => {
   it("lists the conversations at work with a jump to each and the pin, leaving out what the inbox already asks", async () => {
     const working = { threadId: "eli-work", title: "Writing the page", createdAt: 1, busy: true, activity: "working" as const };
     const asking = { threadId: "eli-pricing", title: "Pricing work", createdAt: 2, activity: "waiting-on-you" as const };
-    await panel([approval], [bot({ tasks: [working, asking] as Bot["tasks"] })]);
+    const told = { threadId: "noa-main", title: "Told already", createdAt: 3, unread: true };
+    const toldAndWorking = { threadId: "line-thread", title: "Told and still working", createdAt: 4, unread: true, busy: true };
+    const lineThere = { ...news, id: "line-t", origin: { botId: "eli", threadId: "line-thread", title: "Told and still working" } };
+    await panel([approval, news, lineThere], [bot({ tasks: [working, asking, told, toldAndWorking] as Bot["tasks"] })]);
     const section = document.querySelector<HTMLElement>("[data-inbox-active]")!;
     expect(section.textContent).toContain("Writing the page");
     expect(section.textContent).not.toContain("Pricing work");
+    expect(section.textContent, "unread news is already a line above").not.toContain("Told already");
+    expect(section.textContent, "work still going stays reachable").toContain("Told and still working");
     await act(async () => { [...section.querySelectorAll<HTMLElement>("button")].find((one) => one.textContent?.includes("Writing the page"))!.click(); });
     expect(dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "eli", threadId: "eli-work" });
     await click("[data-inbox-pin]");
