@@ -10,7 +10,7 @@ import { killCliTree, spawnCli } from "../procs.ts";
 import type { ModelCatalog } from "../contracts.ts";
 import type { ChildProcess } from "node:child_process";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
-import { acpVariantOption } from "./acp/config-options.ts";
+import { acpVariantOption, surveyModelVariants } from "./acp/config-options.ts";
 import {
   VERIFICATION_TEMP_KEY,
   antigravityTempDir,
@@ -28,6 +28,8 @@ const STARTUP_TIMEOUT_MS = 90_000;
 // startup gets another window while that folder grows, up to this cap.
 const STARTUP_CAP_MS = 5 * 60_000;
 const UNPACK_COUNT_BUDGET_MS = 5_000;
+// A new session names thinking levels only for its current model, so discovery switches through the rest (~1.5 s each).
+const VARIANT_SURVEY_MS = 15_000;
 const MAX_PROTOCOL_LINE_BYTES = 16 * 1024 * 1024;
 // Past the 16 KiB ceiling parseAntigravityAuthorizationUrl accepts, so no partial link is dropped.
 const MAX_DIAGNOSTIC_LINE_CHARS = 64 * 1024;
@@ -559,7 +561,16 @@ export async function probeAntigravityModels(input: {
     );
     const catalog = catalogFromAntigravityConfigOptions(session?.configOptions, input.fallbackDefault);
     if (!catalog) throw new Error("Antigravity did not return a model catalog for this Google account.");
-    return catalog;
+    const budget = Math.min(VARIANT_SURVEY_MS, deadline - Date.now());
+    if (budget <= 0) return catalog;
+    const surveyed = await surveyModelVariants((method, params) => client.request(method, params, budget), session, budget);
+    return {
+      ...catalog,
+      options: catalog.options.map((option) => {
+        const variants = surveyed.get(option.id);
+        return !option.variants?.length && variants?.length ? { ...option, variants } : option;
+      }),
+    };
   } finally {
     client.close();
   }
