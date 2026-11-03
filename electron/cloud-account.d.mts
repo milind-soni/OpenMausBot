@@ -172,6 +172,21 @@ export interface CloudAccountBridge {
   onState(callback: (state: CloudAccountState) => void): () => void;
   files?: import("./cloud-sync.mjs").CloudFilesBridge;
 }
+/** Who is signed in on this device, as the You menu shows it. `signIn`: this account's sign-in has ended here. */
+export interface AccountRow { id: string; email: string; signIn?: true }
+export interface AccountsView { active: AccountRow | null; others: AccountRow[] }
+/** This app's own pages only: main refuses any other page. Absent on an older app. */
+export interface AccountsBridge {
+  list(): Promise<AccountsView>;
+  /** Removes that account from this device. */
+  signOut(id: string): Promise<AccountsView>;
+  sheetPending(): Promise<boolean>;
+  sheetClosed(): Promise<void>;
+  onChanged(callback: () => void): () => void;
+  onOpenSheet(callback: () => void): () => void;
+}
+/** Any place's own page, from the person's click: the accounts sheet opens on the rail's page, and this page learns nothing of them. */
+export interface AccountSheetBridge { offered(): Promise<boolean>; open(): Promise<void> }
 /** On the person's own Cloud, open in this app's window: the plan, read
  * only, Manage in the browser, and Sign in again. No account, credential or address. */
 /** `signin`: this computer's sign-in ended; `tier` names the plan last verified, if any. */

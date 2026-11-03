@@ -233,7 +233,10 @@ describe("surfacePrompt", () => {
   it("names only the browser tab when it is the only surface", () => {
     const text = surfacePrompt({ computer: null, browser: true });
     expect(text).toMatch(/happens in the built-in browser tab/);
-    expect(text).toMatch(/no desktop, file or shell computer/);
+    expect(text).toMatch(/no desktop computer this turn/);
+    // The browser is only the screen: a coding engine's own shell and file tools still work.
+    expect(text).not.toMatch(/file or shell computer/);
+    expect(text).toContain("your own shell and file tools still work for ordinary code and file tasks");
     expect(text).toMatch(/Browser tab of the Screen panel/);
     expect(text).toMatch(/say in one short sentence where you are working/);
     expect(text).not.toMatch(/happens on the cloud computer/);

@@ -15,12 +15,15 @@ export const PRODUCT_HUNT_NOTICE = "product-hunt-launch-2026-10";
 export const PRODUCT_HUNT_URL = "https://www.producthunt.com/products/mausbot";
 export const PRODUCT_HUNT_UNTIL = Date.UTC(2026, 10, 1);
 export const BOAT_OFFER_NOTICE = "boat-credit-2026-11";
+/** The Move from Grok Bot popup: each person sees it once, first of all, after their welcome. */
+export const GROK_MOVE_NOTICE = "grok-move-2026-11";
 
 /**
  * Every notice, in the order a launch asks them: one launch shows one notice, the first one due, and only the product-updates
  * question may follow it there. The rest wait for later launches, in this order.
  */
 export const NOTICES = [
+  GROK_MOVE_NOTICE,
   SIMPLE_MODE_NOTICE,
   WHATS_NEW_NOTICE,
   UPDATES_CONSENT_NOTICE,
