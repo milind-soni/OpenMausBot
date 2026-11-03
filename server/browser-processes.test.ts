@@ -247,6 +247,36 @@ describe("a browser on Windows", () => {
     }
   });
 
+  it("stops an orphaned Chrome that runs under the configured Chrome's own image name, and only that one", async () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-win-custom-chrome-"));
+    homes.push(root);
+    const dir = join(root, "Profile");
+    mkdirSync(join(dir, "lockfile"), { recursive: true });
+    const started = "2026-11-03T09:00:00.0000000Z";
+    const commands: string[][] = [];
+    vi.mocked(execFile).mockImplementation(((file: string, args: string[], options: { env?: NodeJS.ProcessEnv }, done: (error: Error | null, stdout: string) => void) => {
+      commands.push([file, ...args]);
+      let stdout = "";
+      if (file === "powershell.exe" && options.env?.OMB_PROCESS_ID) stdout = `${started}\r\n`;
+      else if (file === "powershell.exe") {
+        stdout = JSON.stringify([{
+          ProcessId: 4500, ParentProcessId: 4100, CommandLine: `"C:\\Chrome Dev\\chrome-dev.exe" "--user-data-dir=${dir}"`,
+          Name: "chrome-dev.exe", Started: started, ParentName: null, ParentStarted: null,
+        }]);
+      } else if (file === "taskkill") rmSync(join(dir, "lockfile"), { recursive: true, force: true });
+      queueMicrotask(() => done(null, stdout));
+      return {} as ChildProcess;
+    }) as unknown as typeof execFile);
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    const killed = () => commands.filter(([file]) => file === "taskkill");
+    // Without the configured Chrome, an image off the list is never stopped.
+    await releaseBrowserProfile(dir, "C:\\Tools\\agent-browser.exe");
+    expect(killed()).toEqual([]);
+    await releaseBrowserProfile(dir, "C:\\Tools\\agent-browser.exe", "C:\\Chrome Dev\\Chrome-Dev.exe");
+    expect(killed()).toEqual([["taskkill", "/PID", "4500", "/T", "/F"]]);
+    expect(existsSync(join(dir, "lockfile"))).toBe(false);
+  });
+
   it("stops a Chrome whose daemon was killed under it, which would make every launch exit with code 21, and keeps a daemon's own", async () => {
     const root = mkdtempSync(join(tmpdir(), "omb-win-profile-"));
     homes.push(root);

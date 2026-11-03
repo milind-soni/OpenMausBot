@@ -193,9 +193,9 @@ async function daemonOf(pid: number, table: Map<number, ListedProcess>): Promise
  * to the Chrome the lock names and exits, and refuses a lock that names another host (a renamed Mac, a moved Cloud volume).
  * A Chrome whose daemon was killed keeps running, re-parented, and would take every later launch, so it is stopped; then the
  * lock goes. A daemon's own Chrome keeps it. The profile's contents are never touched. */
-export async function releaseBrowserProfile(dir: string | undefined, binaryPath?: string): Promise<void> {
+export async function releaseBrowserProfile(dir: string | undefined, binaryPath?: string, chromePath?: string): Promise<void> {
   if (!dir) return;
-  if (process.platform === "win32") return releaseWindowsProfile(dir, binaryPath);
+  if (process.platform === "win32") return releaseWindowsProfile(dir, binaryPath, chromePath);
   let target: string;
   try { target = readlinkSync(join(dir, "SingletonLock")); }
   catch { heldProfiles.delete(dir); return; }
@@ -226,7 +226,7 @@ const WINDOWS_PROFILE_BROWSERS = "$d = $env:OMB_BROWSER_PROFILE; $all = @(Get-Ci
 /** One process's start time, read again right before it is stopped. */
 const WINDOWS_PROCESS_STARTED = "(Get-CimInstance Win32_Process -Filter ('ProcessId=' + [uint32]$env:OMB_PROCESS_ID)).CreationDate.ToUniversalTime().ToString('o')";
 
-/** The images Chrome-family browsers run as: no other program on the list is ever stopped. */
+/** The images Chrome-family browsers run as, besides the configured Chrome's own: no other program on the list is ever stopped. */
 const CHROMIUM_IMAGE = /^(?:chrome|chromium|msedge|brave|chrome-headless-shell)\.exe$/i;
 
 /** A Windows command line's arguments: spaces split them except inside double quotes, which may sit anywhere in one. */
@@ -255,7 +255,7 @@ const heldWindowsProfiles = new Map<string, { browser: number; daemon: number; i
  * and makes every later launch on the profile exit with code 21 (profile in use), even after the app restarts, so it is
  * stopped, once it is checked to be the same Chrome; a daemon's own Chrome (its parent runs `binaryPath` or another
  * agent-browser) is kept. The profile's contents are never touched. */
-async function releaseWindowsProfile(dir: string, binaryPath?: string): Promise<void> {
+async function releaseWindowsProfile(dir: string, binaryPath?: string, chromePath?: string): Promise<void> {
   const lock = join(dir, "lockfile");
   if (lockReleased(lock)) { heldWindowsProfiles.delete(dir); return; }
   // The Chrome kept last time still runs under the same daemon: every process is not listed again on each turn.
@@ -267,9 +267,11 @@ async function releaseWindowsProfile(dir: string, binaryPath?: string): Promise<
   try { rows = JSON.parse(listing ?? ""); } catch { return; }
   const flag = `--user-data-dir=${dir}`.toLowerCase();
   const text = (value: unknown) => typeof value === "string" ? value : "";
+  const chromeImage = chromePath ? win32.basename(chromePath).toLowerCase() : undefined;
+  const isChrome = (name: string) => CHROMIUM_IMAGE.test(name) || name.toLowerCase() === chromeImage;
   const browsers = (Array.isArray(rows) ? rows : [rows]).flatMap((row) => {
     const { ProcessId: pid, ParentProcessId: ppid, CommandLine: line, Name: name, Started: started, ParentName: parent, ParentStarted: parentStarted } = (row ?? {}) as Record<string, unknown>;
-    if (!Number.isInteger(pid) || !Number.isInteger(ppid) || typeof line !== "string" || !CHROMIUM_IMAGE.test(text(name)) || !text(started)) return [];
+    if (!Number.isInteger(pid) || !Number.isInteger(ppid) || typeof line !== "string" || !isChrome(text(name)) || !text(started)) return [];
     // A path's case does not matter on Windows.
     const args = windowsArgs(line).map((arg) => arg.toLowerCase());
     if (!args.includes(flag) || args.some((arg) => arg.startsWith("--type="))) return [];
