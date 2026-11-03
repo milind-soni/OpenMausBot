@@ -1,7 +1,7 @@
 // Who is signed in on this device, for the You menu. The list goes only to this app's own pages: this computer's and the
 // rail's. A Cloud's or a server's page never reads it, because it would learn the addresses of the person's other accounts;
 // it may only ask main, from the person's click, to open the sheet on the rail's page.
-import { withoutAccountPlaces, clearPlaceStorage } from "./account-places.mjs";
+import { accountPlaces, clearPlaceStorage, withoutPlaces } from "./account-places.mjs";
 
 /** The sign-in as the You menu shows it: never a token, and no account while none is signed in. */
 export function accountsView(state) {
@@ -10,14 +10,20 @@ export function accountsView(state) {
   return { active: { id: account.id, email: account.email, ...(state.status === "reauth-required" ? { signIn: true } : {}) }, others: [] };
 }
 
-/** Everything of the account this window held: its places leave the list, the window leaves them, and their sessions go. */
-export function createAccountLeave({ saved, persist, session, mine, leaveWindow, log = () => {} }) {
-  return async () => {
-    const { saved: next, left } = withoutAccountPlaces(saved(), mine());
-    if (left.length) persist(next);
-    await leaveWindow();
-    await clearPlaceStorage(session(), left, log);
-    return left;
+/** Everything of the account this window held. `places()` names them while the sign-in still says which Cloud is My Cloud:
+ * a My Cloud saved by hand carries no other mark, and the sign-in names none once it has ended. `finish(left)`, once it has:
+ * they leave the list, the window leaves them, and once nothing is still waiting on them (`settled`) their sessions go. */
+export function createAccountLeave({ saved, persist, session, mine, leaveWindow, settled = async () => {}, log = () => {} }) {
+  return {
+    places: () => accountPlaces(saved(), mine()),
+    async finish(left) {
+      const next = withoutPlaces(saved(), left);
+      if (next !== saved()) persist(next);
+      await leaveWindow();
+      await settled();
+      await clearPlaceStorage(session(), left, log);
+      return left;
+    },
   };
 }
 
@@ -31,7 +37,7 @@ export function createAccountLeave({ saved, persist, session, mine, leaveWindow,
  *   holdSheet(open: boolean): void,
  *   tellSheet(): void,
  *   leaving(): void,
- *   leave(): Promise<unknown>,
+ *   leave: ReturnType<typeof createAccountLeave>,
  *   show(): Promise<unknown>,
  *   tell(): void,
  * }} deps `ownPage`: this app's own page in the window, or the rail's. `placePage`: the page of a place of the person's own
@@ -49,8 +55,9 @@ export function installAccounts({ ipcMain, ownPage, placePage, account, client, 
   });
   const signOutActive = () => serial(async () => {
     leaving();
+    const left = leave.places();
     const after = await client().signOut();
-    await leave();
+    await leave.finish(left);
     await show();
     tell();
     return after;
