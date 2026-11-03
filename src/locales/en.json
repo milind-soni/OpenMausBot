@@ -3490,6 +3490,7 @@
   "settings.logins.noUsername": "No username",
   "settings.logins.source.card": "Saved from a chat",
   "settings.logins.source.settings": "Added here",
+  "settings.logins.sharedBrowser": "Not filled for {bots}: that browser is shared with bots this login isn't kept to, and a sign-in there would reach them too. Give each a browser of its own, or keep the login to every bot on it.",
   "settings.logins.source.1password": "From 1Password",
   "settings.logins.used": "Used {when}",
   "settings.logins.neverUsed": "Not used yet",
