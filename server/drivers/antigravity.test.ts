@@ -482,6 +482,33 @@ describe("official Antigravity runtime", () => {
       .resolves.toMatchObject({ options: [{ id: "account-model" }] });
   }, 20_000);
 
+  it("discovers thinking levels for every account model, not only the one a new session starts on", async () => {
+    const fake = fakeRuntime();
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    const levels = [{ value: "low", name: "Low" }, { value: "high", name: "High" }];
+    const profile = await prepareAntigravityProfile({
+      instanceId: "thinking-levels", runtime, baseDir: fake.directory,
+      baseEnv: {
+        PATH: process.env.PATH,
+        FAKE_ACP_AUTH_METHOD: "oauth-personal",
+        FAKE_ACP_MODELS: "gemini-flash,gemini-argon,gemini-plain",
+        FAKE_ACP_VARIANTS: JSON.stringify({
+          "gemini-flash": { id: "thought_level", currentValue: "low", options: levels },
+          "gemini-argon": { id: "thought_level", currentValue: "high", options: levels },
+        }),
+      },
+    });
+    const variants = [{ id: "low", label: "Low" }, { id: "high", label: "High" }];
+    await expect(probeAntigravityModels({ runtime, profile, fallbackDefault: "gemini-flash" })).resolves.toEqual({
+      default: "gemini-flash",
+      options: [
+        { id: "gemini-flash", label: "gemini-flash", variants },
+        { id: "gemini-argon", label: "gemini-argon", variants },
+        { id: "gemini-plain", label: "gemini-plain" },
+      ],
+    });
+  }, 20_000);
+
   it("rejects a download redirected to insecure HTTP", async () => {
     const baseDir = mkdtempSync(join(tmpdir(), "omb-antigravity-insecure-"));
     scratch.push(baseDir);
