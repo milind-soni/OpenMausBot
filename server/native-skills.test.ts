@@ -8,6 +8,7 @@ import { createSkillsLibraryHost } from "./host/skills-library.ts";
 import { skillExport } from "./skill-export.ts";
 import { installSkill, setSkillEnabled } from "./skills.ts";
 import type { BotRecord, Store } from "./store.ts";
+import { noteTypedSend } from "./typed-sends.ts";
 import { TASK_WORKSPACES_DIR } from "./workspace.ts";
 
 // HOME and the data folder are this test file's own temporary ones (server/testing/setup.ts).
@@ -67,6 +68,25 @@ describe("skills the engine loads by itself", () => {
     expect(host.expandSkillCommand(bot, "main", "/growth-data-expert find churn")).toContain(`Read ${JSON.stringify(shared)}`);
     expect(host.expandSkillCommand(bot, "main", "/bot-notes")).toContain(`Read ${JSON.stringify(own)}`);
     expect(host.expandSkillCommand(bot, "main", "/mine go")).toContain(JSON.stringify(join("workspaces", bot.id, "skills", "mine")).slice(1, -1));
+  });
+
+  it("run from a later line a person typed, alongside the bot's own, and stay off when switched off", () => {
+    const { host, bot } = hostFor("claudeAgent");
+    const shared = plant(SHARED, "growth-data-expert");
+    plant(SHARED, "mine-off");
+    installSkill(bot.id, "local", [{ path: "SKILL.md", content: skillMd("mine") }]);
+    setSkillEnabled(bot.id, "mine", true);
+    installSkill(bot.id, "local", [{ path: "SKILL.md", content: skillMd("mine-off") }]);
+    const typed = (text: string) => {
+      const sendId = randomUUID();
+      noteTypedSend("main", sendId, text);
+      return host.expandSkillCommand(bot, "main", text, undefined, [{ sendId, text }]);
+    };
+    const later = typed("/mine go\n/growth-data-expert find churn");
+    expect(later).toContain(JSON.stringify(join("workspaces", bot.id, "skills", "mine")).slice(1, -1));
+    expect(later).toContain(`The request also calls your growth-data-expert skill with /growth-data-expert (read ${JSON.stringify(shared)})`);
+    expect(typed("Find churn\n/growth-data-expert")).toContain(`your growth-data-expert skill with /growth-data-expert (read ${JSON.stringify(shared)})`);
+    expect(typed("Skip it\n/mine-off")).toBe("Skip it\n/mine-off");
   });
 
   it("stay out of a bot or team package, which carries only the bot's own, library and imported skills", () => {

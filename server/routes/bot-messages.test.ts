@@ -15,6 +15,7 @@ import type { RequestAuth } from "../request-auth.ts";
 import { acceptedSendMatch, sendFingerprint, SendSequencer } from "../send-idempotency.ts";
 import { _queuedCount, drainSteeredMessages, queuedSteeredMessage, queueSteeredMessage } from "../steer-queue.ts";
 import { Store, type Message } from "../store.ts";
+import { typedWords } from "../typed-sends.ts";
 import { createBotMessageRoutes, type BotMessageRouteDeps } from "./bot-messages.ts";
 import { dispatchRoutes } from "./table.ts";
 
@@ -40,7 +41,7 @@ class DirectSendRefused extends Error {
 
 type AcceptInput = Parameters<BotMessageRouteDeps["acceptDirectSend"]>[0];
 
-async function fixture() {
+async function fixture(desktopManaged = true) {
   const store = new Store(() => sonnet);
   const bot = store.createBot({ name: "Scout" });
   const threadId = bot.threadId;
@@ -95,7 +96,7 @@ async function fixture() {
   const deps = {
     store,
     routines: () => null,
-    desktopManaged: true,
+    desktopManaged,
     cloudHome: false,
     DirectSendRefused,
     acceptDirectSend: accept,
@@ -160,6 +161,34 @@ async function fixture() {
   const sent = (thread = threadId): Message[] => store.messagesFor(thread).filter((message) => message.role === "user");
   return { store, bot, threadId, state, post, edit, cancelQueued, show, row, sent, patches: vi.spyOn(store, "patchMessage") };
 }
+
+describe("POST /api/bots/:id/messages and who typed it", () => {
+  const words = "Look at this\n/standup it";
+
+  it("takes a plain send from the desktop's own page as a person's", async () => {
+    const { threadId, post } = await fixture();
+    const plain = await post({ threadId, sendId: SEND, text: words });
+    expect(plain.status, JSON.stringify(plain.body)).toBe(202);
+    expect(typedWords(threadId, [plain.body.message])).toBe(words);
+  });
+
+  it("takes neither a press, whose words the widget wrote, nor a relay as a person's", async () => {
+    const { store, threadId, post, show } = await fixture();
+    const pressed = await post({ threadId, sendId: SEND, text: words, widgetAction: { messageId: show("routineForm"), ref: "confirm", values: { days: "mon,tue,wed,thu,fri,sat,sun", report: "discord:releases" } } });
+    expect(pressed.status, JSON.stringify(pressed.body)).toBe(202);
+    expect(typedWords(threadId, [pressed.body.message])).toBe("");
+    const relayed = await post({ threadId, sendId: OTHER_SEND, text: words, expectedActiveLeafId: store.activeLeaf(threadId), expectedApprovalMode: "ask" }, "/guarded");
+    expect(relayed.status, JSON.stringify(relayed.body)).toBe(202);
+    expect(typedWords(threadId, [relayed.body.message])).toBe("");
+  });
+
+  it("does not take a bare loopback send as a person's on a headless server, where it may be a bot's shell", async () => {
+    const { threadId, post } = await fixture(false);
+    const plain = await post({ threadId, sendId: SEND, text: words });
+    expect(plain.status, JSON.stringify(plain.body)).toBe(202);
+    expect(typedWords(threadId, [plain.body.message])).toBe("");
+  });
+});
 
 describe("POST /api/bots/:id/messages with widgetAction", () => {
   it("lets the server answer a press on its own card with no turn, refuses it for someone else, and reads no widget in another bot's chat", async () => {

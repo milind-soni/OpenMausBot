@@ -1,8 +1,9 @@
-// `/<skill-name>` at the start of a message runs one of the bot's enabled
-// skills for that turn. Like /learn and /setup it is a turn-text rewrite on
-// the server: the transcript keeps the person's raw "/name …" message, and
-// only the text the engine reads names the skill and its SKILL.md. Shared so
-// the composer menu and the server agree on which names are commands.
+// `/<skill-name>` runs one of the bot's enabled skills for that turn: at the very
+// start of a message, or at the start of a later line of what a person typed
+// themselves. Like /learn and /setup it is a turn-text rewrite on the server: the
+// transcript keeps the raw message, and only the text the engine reads names the
+// skill and its SKILL.md. Shared so the composer menu and the server agree on which
+// names are commands.
 import { isSkillName } from "./skill-md.ts";
 
 /** Commands the app already owns. A skill with one of these names keeps
@@ -31,35 +32,84 @@ export function offersSkillCommand(name: string): boolean {
   return isSkillName(name) && !BUILT_IN_SLASH_COMMANDS.includes(name);
 }
 
-/** Each `/name` in `text` that is one of `skills` and stands as its own word: at the start or after a space or
- * line break, and followed by a space, the end, or punctuation. In order, once each. A path such as `src/standup`
- * or a longer word such as `/standupnow` is not a call. */
+const hideCode = (code: string): string => code.replace(/[^\n]/g, "\0");
+const FENCE = /^ {0,3}(`{3,}|~{3,})([^\r]*)/;
+
+/** A backtick run closes at the next run of its own length in the same paragraph. Paired from the far end, so that a person's
+ * long message of odd runs cannot stall the server, which reads it on the turn path. */
+function hideInlineCode(text: string): string {
+  const tokens = [...text.matchAll(/`+|\n[ \t]*(?=\n)/g)];
+  const closers = new Map<number, number>();
+  const nextOfLength = new Map<number, number>();
+  for (let index = tokens.length - 1; index >= 0; index -= 1) {
+    const token = tokens[index]![0];
+    if (token[0] !== "`") { nextOfLength.clear(); continue; }
+    const closer = nextOfLength.get(token.length);
+    if (closer !== undefined) closers.set(index, closer);
+    nextOfLength.set(token.length, index);
+  }
+  let out = "";
+  let at = 0;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const closer = closers.get(index);
+    if (closer === undefined) continue;
+    const start = tokens[index]!.index;
+    const end = tokens[closer]!.index + tokens[closer]![0].length;
+    out += text.slice(at, start) + hideCode(text.slice(start, end));
+    at = end;
+    index = closer;
+  }
+  return out + text.slice(at);
+}
+
+/** `text` with fenced blocks and inline code blanked out, every offset kept. An unclosed fence runs to the end, as it
+ * renders, and inline code ends with its paragraph. */
+export function blankCode(text: string): string {
+  let fence = "";
+  return hideInlineCode(text.split("\n").map((line) => {
+    const [, run = "", rest = ""] = FENCE.exec(line) ?? [];
+    if (fence) {
+      if (run[0] === fence[0] && run.length >= fence.length && !rest.trim()) fence = "";
+      return hideCode(line);
+    }
+    if (!run || (run[0] === "`" && rest.includes("`"))) return line;
+    fence = run;
+    return hideCode(line);
+  }).join("\n"));
+}
+
+/** A `/name` opening a line, at most three spaces in (four is an indented code block). Punctuation may end it only when
+ * whitespace or the end follows, so `/standup.` is a call and `/standup.txt` is not. */
+const LINE_CALL = /^ {0,3}\/([a-z0-9-]+)(?=[.,;:!?)]*(?:\s|$))/gm;
+
+/** Each of `skills` that `text` calls at the start of a line, outside code. In order, once each. */
 export function findSkillCommands(text: string, skills: Iterable<string>): string[] {
   const known = new Set([...skills].filter(offersSkillCommand));
   const found: string[] = [];
-  for (const match of text.matchAll(/(?<=^|\s)\/([a-z0-9-]+)(?=$|\s|[.,;:!?)])/g)) {
+  for (const match of blankCode(text).matchAll(LINE_CALL)) {
     const name = match[1]!;
     if (known.has(name) && !found.includes(name)) found.push(name);
   }
   return found;
 }
 
-/** Whether `text` has a `/` that could start a skill call, checked before the skills are listed. */
-export function mayCallSkill(text: string): boolean {
-  return /(?:^|\s)\//.test(text);
+/** Whether a turn could call a skill at all, checked before the skills are listed. */
+export function mayCallSkill(text: string, typed: string): boolean {
+  return text.trimStart().startsWith("/") || /^ {0,3}\//m.test(typed);
 }
 
 /**
- * The text the engine reads for a message that calls skills with `/name`. A message that starts with one keeps
- * the single-skill wording; skills called later in it, or anywhere in a message that starts with plain text, are
- * listed with their SKILL.md and the message follows as written. `fileOf` gives an enabled skill's SKILL.md, or
- * null. A message that calls no enabled skill comes back unchanged.
+ * The text the engine reads for a turn that calls skills with `/name`. `text` is all the engine would read, and its very
+ * start can call one skill whoever wrote it, which is why every other kind of turn opens with a note saying who it is
+ * from. `typed` holds only the words a person wrote themselves: the one place a later line can call a skill. Those are
+ * listed with their SKILL.md and the message follows as written. `fileOf` gives a skill's SKILL.md, or null. A turn that
+ * calls no skill comes back unchanged.
  */
-export function expandSkillCommands(text: string, skills: readonly string[], fileOf: (name: string) => string | null): string {
+export function expandSkillCommands(text: string, skills: readonly string[], fileOf: (name: string) => string | null, typed = ""): string {
   const command = parseSkillCommand(text, skills);
   const leadFile = command ? fileOf(command.name) : null;
-  const called = findSkillCommands(command && leadFile ? command.request : text, skills)
-    .filter((name) => name !== command?.name || !leadFile)
+  const called = findSkillCommands(typed, skills)
+    .filter((name) => !leadFile || name !== command?.name)
     .flatMap((name) => {
       const file = fileOf(name);
       return file ? [{ name, file }] : [];

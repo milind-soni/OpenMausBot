@@ -302,7 +302,6 @@ export function Composer({
   const commandCandidates = useMemo(() => {
     if (!slash || slash.start === dismissedSlashAt) return [];
     const available: ComposerSlashCommand[] = [];
-    // Later in a message only skills run: /goal, /learn and /setup are read at its start.
     if (slash.atStart && !group?.dm) available.push({
       kind: "command",
       id: "goal",

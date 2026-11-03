@@ -33,7 +33,6 @@ import {
 } from "./skill-storage.ts";
 import { workspaceDir } from "./workspace.ts";
 import { isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
-import { expandSkillCommands, mayCallSkill } from "../shared/skill-command.ts";
 
 export {
   DESCRIPTION_MAX,
@@ -1303,12 +1302,6 @@ export function enabledSkillFile(botId: string, name: string, assignedLibrary?: 
   if (!skill) return null;
   const entry = readManifest(botId)[name];
   return entry ? join(skillTarget(workspaceDir(botId), name, entry), "SKILL.md") : librarySkillFilePath(name);
-}
-
-export function expandSkillCommandTurnText(botId: string, text: string, assignedLibrary?: readonly string[]): string {
-  if (!mayCallSkill(text)) return text;
-  const names = resolveBotSkills(botId, assignedLibrary).filter((skill) => skill.enabled).map((skill) => skill.name);
-  return expandSkillCommands(text, names, (name) => enabledSkillFile(botId, name, assignedLibrary));
 }
 
 export function resolveBotSkills(botId: string, assignedLibrary: readonly string[] | undefined): SkillListing[] {

@@ -7,6 +7,7 @@ import {
   slashCommandMatches,
   type ComposerSlashCommandId,
 } from "./composer-commands";
+import { findSkillCommands } from "../../shared/skill-command";
 import { enabledSlashSkills } from "./use-slash-skills";
 
 describe("composer slash commands", () => {
@@ -27,6 +28,23 @@ describe("composer slash commands", () => {
     expect(composerSlashTrigger("src/standup", 11)).toBeNull();
     expect(composerSlashTrigger("see https://example.com/a", 25)).toBeNull();
     expect(composerSlashTrigger("hello /go ", 10)).toBeNull();
+  });
+
+  it("does not open inside code, and opens again after it", () => {
+    expect(composerSlashTrigger("```\n/st", 7)).toBeNull();
+    expect(composerSlashTrigger("`a /st` b", 6)).toBeNull();
+    expect(composerSlashTrigger("```\nx\n```\n/st", 13)).toEqual({ query: "st", start: 10, end: 13, atStart: false });
+  });
+
+  it("moves a skill picked later in a line onto a line of its own, where the server reads it", () => {
+    const pick = (text: string, start: number, end: number) => replaceComposerSlashTrigger(text, { query: "", start, end }, "/standup ");
+    expect(pick("hello /go", 6, 9)).toEqual({ text: "hello\n/standup ", caret: 15 });
+    expect(pick("hello /go there", 6, 9)).toEqual({ text: "hello\n/standup  there", caret: 15 });
+    expect(findSkillCommands(pick("hello /go there", 6, 9).text, ["standup"])).toEqual(["standup"]);
+    expect(pick("hello\n/go", 6, 9)).toEqual({ text: "hello\n/standup ", caret: 15 });
+    expect(pick("  /go", 2, 5)).toEqual({ text: "  /standup ", caret: 11 });
+    expect(pick("     /go", 5, 8)).toEqual({ text: "/standup ", caret: 9 });
+    expect(replaceComposerSlashTrigger("hello /go", { query: "go", start: 6, end: 9 }, "")).toEqual({ text: "hello ", caret: 6 });
   });
 
   it("replaces the active token without losing text after the caret", () => {

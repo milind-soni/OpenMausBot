@@ -7,7 +7,7 @@ import { DATA_DIR, type AppConfig } from "../config.ts";
 import { appendDecision } from "../decision-log.ts";
 import { UNDO_STALE, type DirectApply } from "../direct-apply.ts";
 import {
-  expandImportedSkillCommand, importedSkillListings, importedSkillsFor, importedSkillsPrompt, nativeSkillFolders, readImportedSkillFile, readImportedSkills,
+  importedSkillListings, importedSkillsFor, importedSkillsPrompt, nativeSkillFolders, readImportedSkillFile, readImportedSkills,
   type ImportedSkillView, type SkillTurnEngine,
 } from "../imported-skills.ts";
 import { nativeSkillListing, nativeSkills, readNativeSkillFile } from "../native-skills.ts";
@@ -24,7 +24,9 @@ import {
   updateSharedLearnedSkill,
   type ShareBot,
 } from "../skill-share.ts";
-import { expandSkillCommandTurnText, listSkills, readSkillFile, resolveBotSkills, skillsSystemPrompt, type SkillListing } from "../skills.ts";
+import { enabledSkillFile, listSkills, readSkillFile, resolveBotSkills, skillsSystemPrompt, type SkillListing } from "../skills.ts";
+import { expandSkillCommands, mayCallSkill } from "../../shared/skill-command.ts";
+import { typedWords } from "../typed-sends.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
 import { claudeUserSkillsEnabled } from "../turn-settings.ts";
 import { TASK_WORKSPACES_DIR } from "../workspace.ts";
@@ -253,17 +255,18 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       return importsFor(bot, conversationSkills(bot, threadId), instance);
     },
 
-    /** `/name` for one of the bot's own, library or imported skills, or one its engine loads by itself. */
-    expandSkillCommand(bot: BotRecord, threadId: string, text: string, instance?: TurnInstance): string {
+    /** `/name` for one of the bot's own, library or imported skills, or one its engine loads by itself. `lines` are the
+     * turn's own lines when it is a person's turn: only words they typed can call a skill past the start of the text. */
+    expandSkillCommand(bot: BotRecord, threadId: string, text: string, instance?: TurnInstance, lines: ReadonlyArray<{ sendId?: string; text?: string }> = []): string {
+      const typed = typedWords(threadId, lines);
+      if (!mayCallSkill(text, typed)) return text;
       const assigned = skillsLibraryEnabled(cfg) ? liveAssigned(bot) : undefined;
-      const own = expandSkillCommandTurnText(bot.id, text, assigned);
-      if (own !== text || !text.trimStart().startsWith("/")) return own;
-      const imported = expandImportedSkillCommand(text, importsFor(bot, assigned, instance));
-      if (imported !== text) return imported;
+      const own = resolveBotSkills(bot.id, assigned);
       // A skill switched off on the Skills page stays off, even when the engine holds one of the same name.
-      const switched = new Set([...resolveBotSkills(bot.id, assigned), ...importedSkillListings(bot.id, new Set())]
-        .filter((skill) => !skill.enabled).map((skill) => skill.name));
-      return expandImportedSkillCommand(text, nativesFor(bot, threadId, instance).filter((skill) => !switched.has(skill.name)));
+      const switched = new Set([...own, ...importedSkillListings(bot.id, new Set())].filter((skill) => !skill.enabled).map((skill) => skill.name));
+      const outside = [...importsFor(bot, assigned, instance), ...nativesFor(bot, threadId, instance).filter((skill) => !switched.has(skill.name))];
+      const names = [...own.filter((skill) => skill.enabled), ...outside].map((skill) => skill.name);
+      return expandSkillCommands(text, names, (name) => enabledSkillFile(bot.id, name, assigned) ?? outside.find((skill) => skill.name === name)?.file ?? null, typed);
     },
 
     shareNote(bot: BotRecord, threadId: string, enabled: boolean): TurnShareNote {

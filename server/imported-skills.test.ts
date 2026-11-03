@@ -6,12 +6,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import { DATA_DIR, type AppConfig } from "./config.ts";
 import { createSkillsLibraryHost } from "./host/skills-library.ts";
 import {
-  expandImportedSkillCommand, IMPORTED_CHANGED_WARNING, IMPORTED_SKILLS_DIR, importedSkillListings, importedSkillsFor, importedSkillsPrompt,
+  IMPORTED_CHANGED_WARNING, IMPORTED_SKILLS_DIR, importedSkillListings, importedSkillsFor, importedSkillsPrompt,
   nativeSkillFolders, readImportedSkillFile, setImportedSkillEnabled, storeImportedSkills, syncImportedSkillLinks, type ImportedSkillInput,
 } from "./imported-skills.ts";
+import { expandSkillCommands } from "../shared/skill-command.ts";
 import { ensureTaskWorkspaceWithSkills } from "./skill-task-links.ts";
 import { installSkill, setSkillEnabled } from "./skills.ts";
 import type { BotRecord, Store } from "./store.ts";
+import { noteTypedSend } from "./typed-sends.ts";
 import { ensureTaskWorkspace } from "./workspace.ts";
 
 // HOME and the data folder are this test file's own temporary ones (server/testing/setup.ts).
@@ -58,8 +60,9 @@ describe("skills brought in from this computer", () => {
       const prompt = importedSkillsPrompt(skills);
       expect(prompt).toContain("Skills from this computer:");
       expect(prompt).toContain(`- pdf: Works with pdf. Read ${JSON.stringify(join(IMPORTED_SKILLS_DIR, "pdf", "SKILL.md"))}.`);
-      expect(expandImportedSkillCommand("/review the diff", skills)).toContain(`Read ${JSON.stringify(join(IMPORTED_SKILLS_DIR, "review", "SKILL.md"))}`);
-      expect(expandImportedSkillCommand("/other thing", skills)).toBe("/other thing");
+      const fileOf = (name: string) => skills.find((skill) => skill.name === name)?.file ?? null;
+      expect(expandSkillCommands("/review the diff", names(skills), fileOf)).toContain(`Read ${JSON.stringify(join(IMPORTED_SKILLS_DIR, "review", "SKILL.md"))}`);
+      expect(expandSkillCommands("/other thing", names(skills), fileOf)).toBe("/other thing");
       const folder = ensureTaskWorkspaceWithSkills(bot, "thread-1", skills);
       for (const family of [".claude", ".agents", ".grok"]) {
         expect(target(join(folder, family, "skills", "pdf"))).toBe(resolve(IMPORTED_SKILLS_DIR, "pdf"));
@@ -185,5 +188,13 @@ describe("skills brought in from this computer", () => {
     expect(host.readBotSkillFile(record, "skill-03")).toBe(skillMd("skill-03"));
     expect(host.expandSkillCommand(record, "thread", "/skill-03 go", { instanceId: "claude", driverKind: "claudeAgent" })).toContain(`Read ${JSON.stringify(join(IMPORTED_SKILLS_DIR, "skill-03", "SKILL.md"))}`);
     expect(host.expandSkillCommand(record, "thread", "/zeta-own go")).toContain(JSON.stringify(join("workspaces", bot, "skills", "zeta-own", "SKILL.md")).slice(1, -1));
+    // One message reaches both kinds, whichever comes first.
+    const sendId = randomUUID();
+    const typed = "Two things\n/skill-03 the diff\n/zeta-own after it";
+    noteTypedSend("thread", sendId, typed);
+    const both = host.expandSkillCommand(record, "thread", typed, { instanceId: "claude", driverKind: "claudeAgent" }, [{ sendId, text: typed }]);
+    expect(both).toContain(JSON.stringify(join(IMPORTED_SKILLS_DIR, "skill-03", "SKILL.md")));
+    expect(both).toContain(JSON.stringify(join("workspaces", bot, "skills", "zeta-own", "SKILL.md")).slice(1, -1));
+    expect(both.endsWith(`Message: ${typed}`)).toBe(true);
   });
 });
