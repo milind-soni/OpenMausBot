@@ -14,9 +14,8 @@ const text = (value: unknown) => (typeof value === "string" ? value.trim() : "")
 /** `write` settles true once the frame reached the CLI's stdin, false when it could not be sent. */
 export function claudeElicitations(write: (frame: unknown) => Promise<boolean>, emit: (event: ElicitationEvent) => void) {
   const pending = new Set<string>();
-  // Answers still being written to the CLI; true once the CLI withdrew the question meanwhile.
+  // Answers still being written to the CLI; true once the card was withdrawn meanwhile.
   const sending = new Map<string, boolean>();
-  let closed = false;
   const reply = (id: string, response: Record<string, unknown>) =>
     write({ type: "control_response", response: { subtype: "success", request_id: id, response } });
   const resolved = (id: string, behavior: "allow" | "deny", source: "user" | "timeout" | "system") =>
@@ -82,10 +81,9 @@ export function claudeElicitations(write: (frame: unknown) => Promise<boolean>, 
       const delivered = await reply(id, behavior === "allow" ? { action: "accept", content: {} } : { action: "decline" });
       const cancelled = sending.get(id);
       sending.delete(id);
-      // The CLI withdrew the question while the answer was on its way: it never counts as the person's answer.
+      // The card was withdrawn (CLI cancelled, session closed) while the answer was on its way: it never counts.
       if (cancelled) return "failed";
-      // A session closed while the answer was on its way: the CLI that asked is gone, so the card is withdrawn.
-      if (!delivered || closed) {
+      if (!delivered) {
         resolved(id, "deny", "system");
         return "failed";
       }
@@ -94,9 +92,14 @@ export function claudeElicitations(write: (frame: unknown) => Promise<boolean>, 
     },
     /** The CLI that asked is gone: every open card is withdrawn. */
     close(): void {
-      closed = true;
       for (const id of pending) resolved(id, "deny", "system");
       pending.clear();
+      // Answers still on their way are withdrawn now too; answer() then reports them as failed.
+      for (const [id, withdrawn] of sending) {
+        if (withdrawn) continue;
+        resolved(id, "deny", "system");
+        sending.set(id, true);
+      }
     },
   };
 }

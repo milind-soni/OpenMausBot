@@ -103,6 +103,7 @@ describe("claudeElicitations", () => {
     elicit.frame(ask("e8"));
     const answered = elicit.answer("elicitation:e8", "allow");
     elicit.close();
+    expect(events.filter((e) => e.type === "request.resolved")).toEqual([done("e8", "deny", "system")]);
     deliver(true);
     await expect(answered).resolves.toBe("failed");
     expect(events.filter((e) => e.type === "request.resolved")).toEqual([done("e8", "deny", "system")]);
