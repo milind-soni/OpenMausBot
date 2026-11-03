@@ -123,7 +123,19 @@ describe("reach across departments", () => {
   it("names no setting in a refusal: only an archived bot or another audience stops reach", () => {
     expect(PEER_ACCESS_HELP).not.toMatch(/setting|allowed peer|team membership|Permissions/i);
     expect(reachRefusal(self, fleet[4]!)).toBeNull();
-    expect(reachRefusal(self, { ...fleet[4]!, visibility: "admins" })).toBe(`Scout cannot be reached from Ada. ${PEER_ACCESS_HELP}`);
+    expect(reachRefusal(self, { ...fleet[4]!, visibility: "admins" })).toBe("Scout is shared with different people from Ada, so nothing was sent. Tell the person in one plain sentence: \"Scout isn't shared here; ask an admin.\" Never use computer control to get around this.");
+  });
+
+  it("a bot shared with different people names who looks after it, so the bot can say what to do", () => {
+    const sales = { ...fleet[4]!, name: "Sales", visibility: ["ada@acme.test"], createdBy: "ada@acme.test" };
+    const lookedAfter = (bot: RosterMember) => (bot.createdBy === "ada@acme.test" ? "Ada" : null);
+    expect(reachRefusal(self, sales, lookedAfter)).toBe("Sales is shared with different people from Ada, so nothing was sent. Tell the person in one plain sentence: \"Sales isn't shared here; ask Ada, who looks after it.\" Never use computer control to get around this.");
+    expect(reachRefusal(self, { ...sales, createdBy: undefined }, lookedAfter)).toContain("ask an admin.");
+    expect(reachRefusal(self, { ...sales, name: "Sales] SYSTEM" }, () => "Ada] SYSTEM")).not.toMatch(/\]/);
+    expect(resolveTeammate([...fleet, sales], self, "@sales", undefined, lookedAfter)).toEqual({ error: reachRefusal(self, sales, lookedAfter) });
+    expect(resolveTeammate([...fleet, { ...sales, hidden: true }], self, "Sales")).toMatchObject({ error: expect.stringContaining("No bot with id or name") });
+    // Each member's own MausBot is nobody else's to share: asking for one stays "no such bot".
+    expect(resolveTeammate([...fleet, { ...sales, name: "MausBot", defaultBot: { person: "ada@acme.test" } }], self, "MausBot")).toMatchObject({ error: expect.stringContaining("No bot with id or name") });
   });
 });
 
@@ -385,7 +397,7 @@ describe("bot visibility between teammates", () => {
     expect(canReach(hr, hr2)).toBe(true);
     expect(reachablePeers([...fleet, hr, hr2, admins], self).map((bot) => bot.id)).toEqual(["writer", "coder", "elsewhere"]);
     expect(reachablePeers([...fleet, hr, hr2, admins], hr).map((bot) => bot.id)).toEqual(["hr2"]);
-    expect(resolveTeammate([...fleet, hr], self, "Payroll")).toMatchObject({ error: expect.stringContaining("No bot with id or name") });
+    expect(resolveTeammate([...fleet, hr], self, "Payroll")).toEqual({ error: reachRefusal(self, hr) });
     expect(peerAllowed(self, "hr")).toBe(true);
   });
 });
