@@ -7,6 +7,7 @@ import { z } from "zod";
 import { normalizeImageGenerationUrl, type ImageGenerationConfig } from "../shared/image-generation.ts";
 import { botAvatarUrlSchema } from "../shared/bot-avatar.ts";
 import { writeFileAtomic } from "./atomic.ts";
+import { defaultBotThreads, MAX_CONCURRENT_BOT_THREADS } from "./bot-thread-limits.ts";
 import { anthropicKeyEnv } from "./anthropic-key-env.ts";
 import { withoutComputerEngine } from "./computer-engine-removal.ts";
 import { newBotDefaultsSchema, type NewBotDefaults } from "./new-bot-defaults.ts";
@@ -44,8 +45,6 @@ export const MAX_ROOM_TURN_TIMEOUT_MINUTES = 1_440;
 export const DEFAULT_MCP_CALL_TIMEOUT_MINUTES = 10;
 export const MIN_MCP_CALL_TIMEOUT_MINUTES = 1;
 export const MAX_MCP_CALL_TIMEOUT_MINUTES = 60;
-export const DEFAULT_MAX_CONCURRENT_BOT_THREADS = 3;
-export const MAX_CONCURRENT_BOT_THREADS = 16;
 /** The floor keeps a log tail large enough for the event inspector's recent-line window. */
 export const MIN_THREAD_EVENT_LOG_BYTES = 256 * 1024;
 export const MAX_THREAD_EVENT_LOG_BYTES = 4 * 1024 * 1024 * 1024;
@@ -639,10 +638,6 @@ export function cacheKeepWarmSettings(cfg: AppConfig): { enabled: boolean; windo
   return { enabled: cfg.cacheKeepWarm?.enabled === true, windowMinutes: cfg.cacheKeepWarm?.windowMinutes ?? DEFAULT_WINDOW_MINUTES };
 }
 
-export function maxConcurrentBotThreads(cfg: { threads?: { maxConcurrentPerBot?: number } }): number {
-  return cfg.threads?.maxConcurrentPerBot ?? DEFAULT_MAX_CONCURRENT_BOT_THREADS;
-}
-
 export function threadEventLogMaxBytes(cfg: AppConfig): number | null {
   const cap = cfg.threads?.eventLogMaxBytes;
   return typeof cap === "number" && Number.isFinite(cap) && cap > 0 ? cap : null;
@@ -952,10 +947,8 @@ export function saveConfig(
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
     const merged: JsonObject = current.success ? { ...current.data } : {};
-    if (key === "threads" && !current.success) merged.maxConcurrentPerBot = DEFAULT_MAX_CONCURRENT_BOT_THREADS;
-    // A partial egress patch (the owner's local-sites switch) keeps the rest of the stored egress, such as the allow-list.
-    const egress = key === "browserEngine" && checkedPatch.browserEngine?.egress ? { ...jsonObjectSchema.safeParse(merged.egress).data, ...checkedPatch.browserEngine.egress } : null;
-    Object.assign(merged, section, egress ? { egress } : {});
+    if (key === "threads" && !current.success) merged.maxConcurrentPerBot = defaultBotThreads();
+    Object.assign(merged, section, key === "browserEngine" && checkedPatch.browserEngine?.egress ? { egress: { ...jsonObjectSchema.safeParse(merged.egress).data, ...checkedPatch.browserEngine.egress } } : {}); // a partial egress patch keeps the stored allow-list
     for (const [sectionKey, sectionValue] of Object.entries(section as Record<string, unknown>)) {
       if (sectionValue === null) delete merged[sectionKey];
     }
