@@ -2623,6 +2623,15 @@ describe("harness HTTP API", () => {
       expect((await manage({ action: "set_bulletin", bulletin: "Updated brief ✓" })).status).toBe(200);
       const readRoom = async () => (await api("GET", "/api/bots?messages=20")).body.groups.find((group: { id: string }) => group.id === roomId);
       expect(await readRoom()).toMatchObject({ name: "Renamed room", bulletin: "Updated brief ✓", section, memberIds: [chief.id, peer.id], defaultResponder: { kind: "member", botId: chief.id }, messages: [] });
+      const opened = await manage({ action: "new_thread", name: "Launch plan" });
+      expect(opened.status).toBe(201);
+      expect(opened.body).toMatchObject({ ok: true, title: "Launch plan" });
+      expect(opened.body.message).toContain(String(opened.body.threadId));
+      expect(await readRoom()).toMatchObject({
+        threadId: opened.body.threadId,
+        tasks: expect.arrayContaining([expect.objectContaining({ threadId: opened.body.threadId, title: "Launch plan" })]),
+      });
+      expect((await manage({ action: "new_thread", name: "x".repeat(101) })).status).toBe(400);
       for (const memberId of [foreign.id, excluded.id, "missing-bot"]) {
         expect((await create({ name: "Forbidden room", memberIds: [memberId] })).status).toBe(403);
         expect((await manage({ action: "add_members", memberIds: [memberId] })).status).toBe(403);
@@ -2641,6 +2650,7 @@ describe("harness HTTP API", () => {
         const otherRoom = (await api("POST", "/api/groups", { name: "Unmanaged room", memberIds, section: roomSection })).body.group;
         roomIds.push(otherRoom.id);
         expect((await manage({ roomId: otherRoom.id, action: "rename", name: "Forbidden" })).status).toBe(403);
+        expect((await manage({ roomId: otherRoom.id, action: "new_thread" })).status).toBe(403);
       }
       expect(await readRoom()).toMatchObject({ name: "Renamed room", bulletin: "Updated brief ✓", memberIds: [chief.id, peer.id] });
       expect((await api("PATCH", `/api/bots/${second.id}`, { hidden: true })).status).toBe(200);
@@ -2648,6 +2658,7 @@ describe("harness HTTP API", () => {
       expect((await manage({ action: "add_members", memberIds: [second.id] })).status).toBe(403);
       expect((await api("PATCH", `/api/bots/${chief.id}`, { approvePeerComms: true })).status).toBe(200);
       expect((await manage({ action: "rename", name: "No review" })).body.error).toMatch(/peer approval is required/);
+      expect((await manage({ action: "new_thread" })).status).toBe(403);
       expect((await create({ name: "No review", memberIds: [peer.id] })).status).toBe(403);
       expect((await api("PATCH", `/api/bots/${chief.id}`, { approvePeerComms: false })).status).toBe(200);
       for (let count = 1; count < 4; count += 1) {
@@ -2656,6 +2667,8 @@ describe("harness HTTP API", () => {
         roomIds.push(String(created.body.id));
       }
       expect((await create({ name: "Fifth room", memberIds: [peer.id] })).status).toBe(429);
+      for (let count = 2; count <= 4; count += 1) expect((await manage({ action: "new_thread" })).status).toBe(201);
+      expect((await manage({ action: "new_thread", name: "Fifth thread" })).status).toBe(429);
       expect((await api("GET", "/api/bots?messages=0")).body.bots.find((bot: { id: string }) => bot.id === foreign.id).section).toBe(`${section} foreign`);
       expect((await api("PATCH", `/api/bots/${chief.id}`, { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).status).toBe(200);
       const busyToken = await mintTestCapability(BASE, chief.id, chief.threadId);

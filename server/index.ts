@@ -1639,6 +1639,7 @@ type InternalCapability = {
   skillAuthoring: boolean;
   createdBots: number;
   createdRooms?: number;
+  openedRoomThreads?: number;
   openedThreads: number;
   orphanExpiresAt: number;
   localVmTarget?: LocalVmTarget;
@@ -14483,7 +14484,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const parsed = z.object({
           fromBotId: z.string().optional(), fromThreadId: z.string().optional(),
-          roomId: z.string(), action: z.enum(["add_members", "remove_members", "set_members", "rename", "set_bulletin"]),
+          roomId: z.string(), action: z.enum(["add_members", "remove_members", "set_members", "rename", "set_bulletin", "new_thread"]),
           memberIds: z.array(z.string()).min(1).max(100).optional(),
           name: z.string().trim().min(1).max(100).optional(), bulletin: z.string().max(12_000).optional(),
         }).strict().safeParse(body);
@@ -14493,6 +14494,22 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 403, { error: "you can only manage rooms you belong to in your own department, whose members you can all reach; no bot needs adding to get work, since coordinate_bots reaches bots outside the room directly" });
         }
         const { action, memberIds, name, bulletin } = parsed.data;
+        if (action === "new_thread") {
+          // Same as the person's "New thread" in the room: it becomes the room's current thread.
+          if ((internalCapability.openedRoomThreads ?? 0) >= 4) {
+            return json(res, 429, { error: "you can open at most 4 room threads in one turn" });
+          }
+          if (phoneSecretSubmissions.hasGroup(room.id)) {
+            return json(res, 409, { error: "this room is securely saving a credential — try again when it finishes" });
+          }
+          const task = store.createGroupTask(room.id, name === undefined ? undefined : redactSecretsInText(name));
+          if (!task) return json(res, 500, { error: "couldn't open a thread in that room" });
+          internalCapability.openedRoomThreads = (internalCapability.openedRoomThreads ?? 0) + 1;
+          return json(res, 201, {
+            ok: true, threadId: task.threadId, title: task.title,
+            message: `Opened thread “${task.title}” [thread: ${task.threadId}] in room “${room.name}”. It is now the room's current thread, so post_to_room and coordinate_bots for this room go there.`,
+          });
+        }
         const patch: Record<string, unknown> = {};
         if (action === "rename") {
           if (name === undefined) return json(res, 400, { error: "rename requires a name" });
