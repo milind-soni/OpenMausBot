@@ -1103,6 +1103,11 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   ten minutes (which keeps both stall checks quiet), and the turn starts by
   itself. Stop ends the wait. A thread whose engine is still running never
   waits, and the only task is never held back.
+- **How many threads a bot may run.** No number decides on a Cloud: up to 16 per
+  bot unless one is saved, and this gate holds the rest. A Starter Cloud runs one
+  thread per bot for what a person or a routine starts; the Admin says so with its
+  signed `POST /api/cloud/plan` `{"v":1,"tier":"starter"}` (`server/host/cloud-plan-tier.ts`), and a
+  home it never told has no such limit. What a bot's own turn starts always goes through.
 - **OpenCode threads share a process.** Threads whose OpenCode would start
   the same way (same login, approval level and settings) run as sessions of one
   `opencode acp` process, up to six at a time and twelve over its life

@@ -2720,5 +2720,12 @@
   "botAccess.overview.botCount.other": "{count} बॉट",
   "botAccess.overview.noBotsForPerson": "{name} के पास अभी कोई बॉट नहीं है।",
   "botAccess.overview.allPeople": "सभी लोग",
-  "botAccess.overview.toastRemoved": "{bot}: {name} को हटाया"
+  "botAccess.overview.toastRemoved": "{bot}: {name} को हटाया",
+  "server.browser.waiting": "ब्राउज़र का इंतज़ार है: {name} इसका उपयोग कर रहा है। खाली होते ही यह अपने आप आगे बढ़ेगा।",
+  "server.browser.waitingTask": "ब्राउज़र का इंतज़ार है: {name} इसे {task} के लिए उपयोग कर रहा है। खाली होते ही यह अपने आप आगे बढ़ेगा।",
+  "server.browser.free": "ब्राउज़र खाली है। आगे बढ़ रहे हैं।",
+  "server.browser.stoppedWaiting": "ब्राउज़र का इंतज़ार बंद किया।",
+  "composer.queued.capacityStarter": "कतार में है। Starter हर बॉट के लिए एक समय में एक थ्रेड चलाता है, इसलिए यह चल रहे थ्रेड के खत्म होने पर शुरू होगा। बड़ा प्लान ज़्यादा चलाता है।",
+  "composer.queued.seePlans": "प्लान देखें",
+  "settings.threads.starter": "Starter हर बॉट के लिए एक समय में एक थ्रेड चलाता है, और बड़ा प्लान ज़्यादा चलाता है। बॉट का खुद शुरू किया काम फिर भी चलता है, और हर बॉट का अपना एक थ्रेड होता है।"
 }

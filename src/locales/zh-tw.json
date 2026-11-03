@@ -4546,5 +4546,12 @@
   "botAccess.overview.botCount.other": "{count} 個機器人",
   "botAccess.overview.noBotsForPerson": "{name} 還沒有機器人。",
   "botAccess.overview.allPeople": "所有人員",
-  "botAccess.overview.toastRemoved": "{bot}：已移除 {name}"
+  "botAccess.overview.toastRemoved": "{bot}：已移除 {name}",
+  "server.browser.waiting": "正在等待瀏覽器：{name} 正在使用。空閒後會自動繼續。",
+  "server.browser.waitingTask": "正在等待瀏覽器：{name} 正在用它處理「{task}」。空閒後會自動繼續。",
+  "server.browser.free": "瀏覽器已空閒，繼續進行。",
+  "server.browser.stoppedWaiting": "已停止等待瀏覽器。",
+  "composer.queued.capacityStarter": "排隊中。Starter 每個機器人一次執行一個對話，所以這則會在目前對話結束後開始。更大的方案可以執行更多。",
+  "composer.queued.seePlans": "查看方案",
+  "settings.threads.starter": "Starter 每個機器人一次執行一個對話，更大的方案可以執行更多。機器人自己發起的工作仍會執行，每個機器人各有一個。"
 }
