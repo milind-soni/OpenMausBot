@@ -1673,6 +1673,7 @@
   "sidebar.people.you": "{name} (tú)",
   "sidebar.people.yourInbox": "Tu bandeja de entrada: todo lo que te envían",
   "sidebar.people.yourInboxWaiting": "Tu bandeja de entrada: te esperan, {count}",
+  "sidebar.people.invite": "Invitar a alguien",
   "inbox.panel.title": "Bandeja de entrada",
   "inbox.empty": "Aún nada para ti.",
   "inbox.waitsOnYou": "Te espera",

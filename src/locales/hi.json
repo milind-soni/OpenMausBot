@@ -657,6 +657,7 @@
   "sidebar.people.you": "{name} (आप)",
   "sidebar.people.yourInbox": "आपका इनबॉक्स: आपको भेजा गया सब कुछ",
   "sidebar.people.yourInboxWaiting": "आपका इनबॉक्स: आपके इंतज़ार में, {count}",
+  "sidebar.people.invite": "किसी को आमंत्रित करें",
   "inbox.panel.title": "इनबॉक्स",
   "inbox.empty": "अभी आपके लिए कुछ नहीं है।",
   "inbox.waitsOnYou": "आपके इंतज़ार में",

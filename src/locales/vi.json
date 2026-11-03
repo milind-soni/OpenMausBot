@@ -1382,6 +1382,7 @@
   "sidebar.people.you": "{name} (bạn)",
   "sidebar.people.yourInbox": "Hộp thư của bạn: mọi thứ gửi cho bạn",
   "sidebar.people.yourInboxWaiting": "Hộp thư của bạn: đang chờ bạn, {count}",
+  "sidebar.people.invite": "Mời ai đó",
   "inbox.panel.title": "Hộp thư",
   "inbox.empty": "Chưa có gì cho bạn.",
   "inbox.waitsOnYou": "Đang chờ bạn",

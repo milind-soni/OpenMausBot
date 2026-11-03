@@ -746,6 +746,7 @@
   "sidebar.people.you": "{name} (du)",
   "sidebar.people.yourInbox": "Dein Posteingang: alles, was an dich geht",
   "sidebar.people.yourInboxWaiting": "Dein Posteingang: wartet auf dich, {count}",
+  "sidebar.people.invite": "Jemanden einladen",
   "inbox.panel.title": "Posteingang",
   "inbox.empty": "Noch nichts für dich.",
   "inbox.waitsOnYou": "Wartet auf dich",

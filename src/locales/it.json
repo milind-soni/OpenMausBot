@@ -6269,6 +6269,7 @@
   "sidebar.people.you": "{name} (tu)",
   "sidebar.people.yourInbox": "La tua posta in arrivo: tutto ciò che ti viene inviato",
   "sidebar.people.yourInboxWaiting": "La tua posta in arrivo: in attesa di te, {count}",
+  "sidebar.people.invite": "Invita qualcuno",
   "inbox.panel.title": "Posta in arrivo",
   "inbox.empty": "Ancora niente per te.",
   "inbox.waitsOnYou": "Ti aspetta",
