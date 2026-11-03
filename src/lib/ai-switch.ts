@@ -7,8 +7,10 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 
 import { askResetBridge } from "@/lib/desktop";
+import { t } from "@/lib/i18n";
 import { api } from "@/state/api";
-import type { Action, Bot, Message } from "@/state/store";
+import { currentTaskBot, type Action, type Bot, type Message } from "@/state/store";
+import { approvalModeFor } from "../../shared/approval-mode";
 import { turnStartCount } from "./stop-turn";
 
 /** How long the chat must stay idle before the switch lands: a queued message starts its turn right after the stop. */
@@ -123,7 +125,9 @@ export function useAiSwitch(input: {
       dispatch: (action: Action) => {
         const ours = action.type === "setModel" && action.botId === mine.botId && (action.threadId ?? bot.threadId) === mine.threadId;
         const switching = ours && !sameAi(action.selection, bot.modelSelection);
-        if (switching && busy) beginSwitch(mine, action, (message) => dispatch({ type: "error", message }));
+        // Leaving Custom needs the desktop bridge (a paired desktop has none): the host would refuse it after the Stop.
+        if (switching && busy && leavesCustomWithoutBridge(action, bot)) dispatch({ type: "error", message: t("model.customSwitchOnHost") });
+        else if (switching && busy) beginSwitch(mine, action, (message) => dispatch({ type: "error", message }));
         // The same AI mid-turn (a thinking level, say): the server refuses any change until the turn ends.
         else if (ours && busy) return;
         else dispatch(action);
@@ -168,6 +172,13 @@ function resendable(waiting: Pending, bot: Bot | undefined): Message | undefined
   const { dataContext } = last as Message & { dataContext?: unknown };
   const carried = !last.attachments?.length && !last.pointed?.length && !dataContext && !last.fromApp && last.via !== "call";
   return carried ? last : undefined;
+}
+
+/** A switch that resets Custom approval to Ask, from a client without the trusted desktop bridge: the server refuses it. */
+export function leavesCustomWithoutBridge(action: SetModel, bot: Bot): boolean {
+  if (!action.resetApprovalToAsk || askResetBridge()) return false;
+  const targets = action.updateBotDefault ? [currentTaskBot(bot, action.threadId), bot] : [currentTaskBot(bot, action.threadId)];
+  return targets.some((target) => approvalModeFor(target) === "custom");
 }
 
 /** Saves the new AI on the conversation the way the store does, so the keeper hears whether the server took it. */

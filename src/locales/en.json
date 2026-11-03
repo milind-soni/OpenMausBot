@@ -2816,6 +2816,7 @@
   "model.busy": "Stop this bot's turn before changing its model",
   "model.threadBusy": "Stop this thread's turn before changing its model",
   "model.choose": "Choose model",
+  "model.customSwitchOnHost": "This thread uses Custom approval. Switch its model in the app on the host computer, so leaving Custom can be confirmed there.",
   "model.providerSwitch.title": "Switch model with Ask permissions?",
   "model.providerSwitch.threadBody": "Switch this thread to {model} and reset its permissions to Ask. Existing tool approvals are cleared. Your bot default and other threads stay unchanged. You can review access for the new provider afterward.",
   "model.providerSwitch.botBody": "Switch the bot's model to {model}, with Ask permissions and existing tool approvals cleared for this thread and the bot. Every thread that uses the bot's model switches too, back to Ask where the new provider needs it. Threads with their own model stay as they are. You can review access for the new provider afterward.",

@@ -143,6 +143,22 @@ describe("Switch AI", () => {
     }
   });
 
+  it("on a paired desktop, refuses a switch that leaves Custom approval before stopping the turn", async () => {
+    window.ogb = { approvals: { setMode: vi.fn() }, remoteClient: { active: true } } as unknown as NonNullable<Window["ogb"]>;
+    try {
+      const custom = { ...bot(true), approvalMode: "custom" } as Bot;
+      noteRuntimeTurn(frame("turn.started", "turn-1"));
+      show(createElement(Picker, { bot: custom }), createElement(Row), createElement(Keeper, { bot: custom }));
+      act(() => requestAiSwitch(intent));
+      act(() => seen!.dispatch({ ...toClaude, resetApprovalToAsk: true } as Action));
+      await settle();
+      expect(api).not.toHaveBeenCalled();
+      expect(store).toHaveBeenCalledWith({ type: "error", message: expect.stringContaining("host computer") });
+    } finally {
+      delete window.ogb;
+    }
+  });
+
   it("counts the idle wait from the chat going idle, whatever else of the bot changes meanwhile", async () => {
     await pickClaude();
     show(createElement(Row), createElement(Keeper, { bot: bot(false) }));
