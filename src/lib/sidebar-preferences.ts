@@ -391,14 +391,13 @@ function onPlanUsageStorage(event: StorageEvent): void {
 
 function subscribePlanUsage(listener: () => void): () => void {
   planUsageListeners.add(listener);
-  if (planUsageListeners.size === 1 && typeof window !== "undefined") window.addEventListener("storage", onPlanUsageStorage);
+  if (planUsageListeners.size === 1 && typeof window !== "undefined" && typeof window.addEventListener === "function") window.addEventListener("storage", onPlanUsageStorage);
   return () => {
     planUsageListeners.delete(listener);
-    if (planUsageListeners.size === 0 && typeof window !== "undefined") window.removeEventListener("storage", onPlanUsageStorage);
+    if (planUsageListeners.size === 0 && typeof window !== "undefined" && typeof window.removeEventListener === "function") window.removeEventListener("storage", onPlanUsageStorage);
   };
 }
 
-/** Shown unless the person turned it off. */
 export function loadSidebarPlanUsage(storage?: Pick<Storage, "getItem"> | null): boolean {
   if (storage === undefined && sessionPlanUsage !== undefined) return sessionPlanUsage;
   try {

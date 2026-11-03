@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { api } from "@/state/store";
 import { t } from "@/lib/i18n";
@@ -259,11 +259,12 @@ export function PlanUsageSummary() {
 
 export function SidebarPlanUsageSwitch() {
   const shown = useSidebarPlanUsage();
+  const id = useId();
   return (
-    <label className="flex min-w-0 cursor-pointer items-center gap-2 text-[13px] text-ink-secondary">
-      <Switch checked={shown} aria-label={t("planUsage.inSidebar")} onClick={() => setSidebarPlanUsage(!shown)} />
-      <span className="truncate">{t("planUsage.inSidebar")}</span>
-    </label>
+    <div className="flex min-w-0 items-center gap-2 text-[13px] text-ink-secondary">
+      <Switch id={id} checked={shown} onClick={() => setSidebarPlanUsage(!shown)} />
+      <label htmlFor={id} className="cursor-pointer truncate">{t("planUsage.inSidebar")}</label>
+    </div>
   );
 }
 

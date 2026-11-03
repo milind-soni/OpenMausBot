@@ -119,4 +119,12 @@ describe("the sidebar switch on the plan usage card", () => {
     setSidebarPlanUsage(false);
     expect(switchOf(renderToStaticMarkup(createElement(PlanUsage)))).toBe("false");
   });
+
+  it("names the switch by its visible label", () => {
+    fixture.report = { fetchedAt: "2026-10-02T09:00:00Z", providers: [] };
+    const markup = renderToStaticMarkup(createElement(PlanUsage));
+    const id = /<button[^>]*id="([^"]+)"[^>]*role="switch"/.exec(markup)?.[1];
+    expect(id).toBeTruthy();
+    expect(markup).toContain(`<label for="${id}"`);
+  });
 });

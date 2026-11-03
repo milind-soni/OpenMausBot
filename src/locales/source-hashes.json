@@ -34512,7 +34512,9 @@
       "server.browser.stoppedWaiting": "0c6d8041de6e6077f9be0ddaddeebe4457e29a1231de7aa6a8b9288704e5ccb2",
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
-      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f"
+      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
+      "planUsage.monthly": "9b11f6b707d2a03e0265465f32520bc1bc213de121de958539662d0ec1453fcb",
+      "planUsage.inSidebar": "5b55843d5600926382d4002c3035e4632ee9754d23bf4d55adf1ee8ea0398920"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -79525,7 +79527,9 @@
       "server.browser.stoppedWaiting": "0c6d8041de6e6077f9be0ddaddeebe4457e29a1231de7aa6a8b9288704e5ccb2",
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
-      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f"
+      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
+      "planUsage.monthly": "9b11f6b707d2a03e0265465f32520bc1bc213de121de958539662d0ec1453fcb",
+      "planUsage.inSidebar": "5b55843d5600926382d4002c3035e4632ee9754d23bf4d55adf1ee8ea0398920"
     }
   }
 }
