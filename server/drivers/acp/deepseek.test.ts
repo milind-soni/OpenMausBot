@@ -423,7 +423,6 @@ describe("DeepSeek Harness when a turn's tools change", () => {
     expect(calls.filter((call) => call.method === "session/resume").map((call) => call.sessionId)).toEqual(["fake-acp-session"]);
     expect(calls.filter((call) => call.method === "session/prompt")).toHaveLength(2);
     expect(Number(readFileSync(join(scratch, "launches"), "utf8"))).toBe(2);
-    // The fresh process got the second turn's tools, not the first turn's.
     const servers = JSON.parse(readFileSync(join(scratch, "dump.mcp.json"), "utf8")) as Array<{ name: string }>;
     const agentsServer = JSON.stringify(servers.find((server) => server.name === "agents"));
     expect(agentsServer).toContain("OMB_COMMS_TOKEN");
