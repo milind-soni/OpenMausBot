@@ -38,12 +38,12 @@ describe("isHandedWork", () => {
 });
 
 describe("ownCloudStateWithin", () => {
-  it("answers with the cloud computer's state, or none when Boat fails or is too slow", async () => {
-    await expect(ownCloudStateWithin(Promise.resolve({ box: { state: "stopped" } }))).resolves.toBe("stopped");
-    await expect(ownCloudStateWithin(Promise.resolve({ box: null }))).resolves.toBeUndefined();
-    await expect(ownCloudStateWithin(Promise.reject(new Error("Boat is down")))).resolves.toBeUndefined();
+  it("answers with the cloud computer's state, and marks a failed or slow lookup as unavailable", async () => {
+    await expect(ownCloudStateWithin(Promise.resolve({ box: { state: "stopped" } }))).resolves.toEqual({ state: "stopped", unavailable: false });
+    await expect(ownCloudStateWithin(Promise.resolve({ box: null }))).resolves.toEqual({ state: undefined, unavailable: false });
+    await expect(ownCloudStateWithin(Promise.reject(new Error("Boat is down")))).resolves.toEqual({ state: undefined, unavailable: true });
     const started = Date.now();
-    await expect(ownCloudStateWithin(new Promise(() => {}), 20)).resolves.toBeUndefined();
+    await expect(ownCloudStateWithin(new Promise(() => {}), 20)).resolves.toEqual({ state: undefined, unavailable: true });
     expect(Date.now() - started).toBeLessThan(1_000);
   });
 });
