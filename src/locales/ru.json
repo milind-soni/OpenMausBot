@@ -1697,7 +1697,6 @@
   "orgLibrary.fromSelf": "Ваша организация",
   "orgLibrary.recommended": "Рекомендовано {name}",
   "orgLibrary.withdrawn": "Отозвано {name}",
-  "orgLibrary.newerRelease": "Доступна версия {version}. Обновления будут приходить автоматически в одном из ближайших обновлений {app}.",
   "orgLibrary.bots": "Боты: {count}",
   "orgLibrary.skills": "Навыки: {count}",
   "orgLibrary.presets": "Пресеты ботов: {count}",

@@ -1082,7 +1082,6 @@
   "orgLibrary.fromSelf": "你的組織",
   "orgLibrary.recommended": "{name} 推薦",
   "orgLibrary.withdrawn": "{name} 已撤回",
-  "orgLibrary.newerRelease": "已有 {version} 版。更新會在即將推出的 {app} 更新中自動套用。",
   "orgLibrary.bots": "機器人：{count}",
   "orgLibrary.skills": "技能：{count}",
   "orgLibrary.presets": "預設組態：{count}",

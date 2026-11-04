@@ -1698,7 +1698,6 @@
   "orgLibrary.fromSelf": "あなたの組織",
   "orgLibrary.recommended": "{name} のおすすめ",
   "orgLibrary.withdrawn": "{name} が公開を取り下げました",
-  "orgLibrary.newerRelease": "バージョン {version} が利用可能です。今後の {app} の更新時に自動で更新されます。",
   "orgLibrary.bots": "ボット: {count} 体",
   "orgLibrary.skills": "スキル: {count} 件",
   "orgLibrary.presets": "プリセットボット: {count} 件",

@@ -1247,7 +1247,6 @@
   "orgLibrary.fromSelf": "Organizasyonunuz",
   "orgLibrary.recommended": "{name} tarafından önerildi",
   "orgLibrary.withdrawn": "{name} tarafından geri çekildi",
-  "orgLibrary.newerRelease": "Sürüm {version} mevcut. Güncellemeler, gelecek bir {app} güncellemesinde otomatik olarak gelir.",
   "orgLibrary.bots": "Botlar: {count}",
   "orgLibrary.skills": "Beceriler: {count}",
   "orgLibrary.presets": "Ön ayarlı botlar: {count}",
