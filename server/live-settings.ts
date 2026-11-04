@@ -1,14 +1,15 @@
 import type { LiveKeySource, LiveSettings } from "../shared/wire.ts";
-import type { AppConfig } from "./config.ts";
+import { saveConfig, syncCredentialEnv, type AppConfig } from "./config.ts";
 import { azureLiveEndpoint, LIVE_NEEDS_AZURE, LIVE_NEEDS_KEY, openAiLiveEndpoint, type LiveEndpoint } from "./live-call.ts";
+import { liveSavePatch, usableLiveKey, type LiveConfig as LiveConfigSection } from "./live-config.ts";
 
 export const LIVE_IDLE_MINUTES_DEFAULT = 5;
 
 type LiveConfig = Pick<AppConfig, "live" | "openai">;
 
-/** An Azure resource key is never stood in for by the OpenAI API key, nor the other way round. */
+/** A saved Live key goes only to the provider and host it was saved for (`usableLiveKey`), and the OpenAI API key only ever to OpenAI. */
 export function liveCallKey(cfg: LiveConfig): { key: string; source: LiveKeySource } | null {
-  const live = cfg.live?.key?.trim();
+  const live = usableLiveKey(cfg.live);
   if (live) return { key: live, source: "live" };
   if (cfg.live?.provider === "azure") return null;
   const openai = cfg.openai?.key?.trim();
@@ -26,6 +27,13 @@ export function liveSetupProblem(cfg: LiveConfig): string | null {
   const azure = cfg.live?.provider === "azure";
   if (!liveCallKey(cfg)) return azure ? LIVE_NEEDS_AZURE : LIVE_NEEDS_KEY;
   return liveCallEndpoint(cfg) ? null : LIVE_NEEDS_AZURE;
+}
+
+/** The environment follows the save, as for PUT /api/config: loadConfig prefers it over the file. */
+export function saveLiveSettings(cfg: Pick<AppConfig, "live">, patch: LiveConfigSection): void {
+  const live = liveSavePatch(cfg.live, patch);
+  saveConfig({ live });
+  syncCredentialEnv({ live });
 }
 
 /** What a call start reads, once: its key, endpoint and provider all come from this one reading. */

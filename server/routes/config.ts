@@ -1,3 +1,4 @@
+import { liveSavePatch } from "../live-config.ts";
 import * as boat from "../boat.ts";
 import { boatCreateRecoverySnapshot, retireDeletedBoatCreate } from "../boat-create-idempotency.ts";
 import { boatDeletionSnapshot } from "../boat-delete-journal.ts";
@@ -513,6 +514,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       const enginesBefore = engineLaunches(providerConfigs());
       const externalSecretStorage = url.searchParams.get("secretStorage") === "external";
       try {
+        if (patch.live) patch.live = liveSavePatch(cfg.live, patch.live);
         // Before the provider commit, so a failed write never leaves a foreign voice id to speak.
         if (changingVoiceProvider) store.clearVoiceSelections();
         if (externalSecretStorage) {

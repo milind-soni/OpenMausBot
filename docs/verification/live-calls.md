@@ -61,11 +61,28 @@ GPT-Live session on the person's Azure OpenAI / Foundry resource:
 (`live.azureDeployment`, `OMB_AZURE_OPENAI_LIVE_DEPLOYMENT`, default
 `gpt-live-1`) as `session.model`, and the sideband attaches to
 `wss://{endpoint}/openai/v1/live/sessions/{id}/attach`. Both send the resource
-key as `api-key`, never as a bearer token. The key is only `live.key`; the
-OpenAI API key is never used for Azure. `live.azureEndpoint`
+key as `api-key`, never as a bearer token, and the session request refuses a
+redirect, since `fetch` would carry `api-key` to another host. The key is only
+`live.key`; the OpenAI API key is never used for Azure. `live.azureEndpoint`
 (`OMB_AZURE_OPENAI_LIVE_ENDPOINT`) must be `https` on an Azure OpenAI host
 (`azureOpenAiRoot` in `server/live-call.ts`), and `PATCH /api/live/settings`
-refuses any other. Without the key, or with a missing or invalid endpoint,
+refuses any other.
+
+`live.key` goes only where it was saved for. Saving a key records `live.keyFor`:
+`openai` or `azure:<host>` (`liveKeyTarget` in `server/live-config.ts`), and
+`usableLiveKey` hands the key out only while calls go there. Switching the
+Service or changing the endpoint's host, through `PATCH /api/live/settings` or
+`PUT /api/config`, forgets the key and asks for it again, even after changing
+back (`liveSavePatch`). A new path or deployment on the same host keeps it.
+`keyFor` is never taken from a request. A key saved with Azure chosen and no
+endpoint answers `400`. A key with no `keyFor` is from before Azure was offered,
+so OpenAI's. In the environment, `OMB_OPENAI_LIVE_KEY` with `OMB_LIVE_PROVIDER=azure`
+and `OMB_AZURE_OPENAI_LIVE_ENDPOINT` is the operator's own pairing, unless the
+file already says where the key may go. So a key the app forgot stays forgotten
+until one is saved again, including the desktop's copy in the OS store, and a
+different key in the environment takes no pairing from the file.
+
+Without the key, or with a missing or invalid endpoint,
 `POST /api/live/session` answers `409` with `needsKey` and the Azure setup
 sentence before anything leaves the harness. A call keeps the endpoint it
 started with even if the settings change mid-call.

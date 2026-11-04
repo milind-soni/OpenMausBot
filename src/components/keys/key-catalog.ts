@@ -193,6 +193,14 @@ export function keyEntry(id: KeyId): KeyEntry {
   return entry;
 }
 
+/** With Azure OpenAI chosen for Live calls, the row for their key is about the Azure resource: required, and no OpenAI key. */
+export function shownKeyEntry(id: KeyId, config: ConfigStatus | null | undefined): KeyEntry {
+  const entry = keyEntry(id);
+  if (id !== "liveKey" || config?.live?.provider !== "azure" || !entry.target) return entry;
+  const { shape: _openAiShape, ...target } = entry.target;
+  return { ...entry, name: "Azure OpenAI", labelKey: "call.live.azureKeyField", purposeKey: "keys.purpose.liveKeyAzure", target: { ...target, placeholder: "…", href: "https://portal.azure.com" } };
+}
+
 export function keySection(entry: KeyEntry) {
   return KEY_SECTIONS.find((section) => section.id === entry.section)!;
 }

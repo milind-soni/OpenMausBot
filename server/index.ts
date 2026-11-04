@@ -313,7 +313,7 @@ import { createDecider, deciderReady, describeDecider } from "./decider/index.ts
 import { decideRoomResponder } from "./decider/room-routing.ts"; import { roomRoutingInput } from "./host/room-routing-input.ts";
 import { createLiveSession, liveAttachUrl, liveHistoryFrom, LiveSessionError, type LiveBot, type LiveHistoryMessage } from "./live-call.ts";
 import { LiveCallController, LiveCallSignedOutError, openLiveSocket } from "./live-call-controller.ts";
-import { liveCallSettings, liveSettingsFor, liveSettingsForClient } from "./live-settings.ts"; import { azureLiveCallRefusal, liveScopeRefusal } from "./live-access.ts";
+import { liveCallSettings, liveSettingsFor, liveSettingsForClient, saveLiveSettings } from "./live-settings.ts"; import { azureLiveCallRefusal, liveScopeRefusal } from "./live-access.ts";
 import { recordLiveCall, spokenLineFields, titleLiveCall } from "./live-call-record.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { createTtsRoutes } from "./routes/tts.ts";
@@ -12671,7 +12671,7 @@ ROUTES.push(createLiveRoutes({
   settings: () => liveSettingsFor(cfg),
   saveSettings: async (patch) => {
     if (providerConfigBusy) throw Object.assign(new Error("Settings are already being updated. Try again in a moment."), { status: 409 });
-    saveConfig({ live: patch });
+    saveLiveSettings(cfg, patch);
     Object.assign(cfg, loadConfig());
     broadcast({ kind: "config", ...configStatus() });
     return liveSettingsFor(cfg);

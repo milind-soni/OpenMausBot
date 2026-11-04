@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { createServer, type IncomingMessage, type RequestListener, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import type { Duplex } from "node:stream";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { openLiveSocket } from "./live-call-controller.ts";
 import {
   azureLiveEndpoint,
   azureOpenAiRoot,
@@ -16,6 +20,7 @@ import {
   liveSessionsUrl,
   MAX_SDP_BYTES,
   openAiLiveEndpoint,
+  type LiveEndpoint,
 } from "./live-call.ts";
 import { CLOUD_HOME_PLACE } from "./system-prompt.ts";
 
@@ -273,6 +278,69 @@ describe("azureOpenAiRoot", () => {
   });
   it("refuses a deployment name Azure could not have", () => {
     expect(azureLiveEndpoint("https://my-res.openai.azure.com", "bad name/../x")).toBeNull();
+  });
+});
+
+describe("the key on real connections, to a loopback server", () => {
+  const servers: Server[] = [];
+  afterEach(() => {
+    for (const server of servers.splice(0)) {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+  const listen = async (onRequest: RequestListener, onUpgrade?: (req: IncomingMessage, socket: Duplex) => void) => {
+    const server = createServer(onRequest);
+    if (onUpgrade) server.on("upgrade", onUpgrade);
+    servers.push(server);
+    await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
+    return (server.address() as AddressInfo).port;
+  };
+  const azureAt = (port: number): LiveEndpoint => ({ provider: "azure", apiBase: `http://127.0.0.1:${port}/openai/v1`, model: "dep" });
+  const openAiAt = (port: number): LiveEndpoint => ({ provider: "openai", apiBase: `http://127.0.0.1:${port}/v1`, model: "dep" });
+  const sessionAt = (endpoint: LiveEndpoint) => createLiveSession({ key: "made-up-key", endpoint, sdp: OFFER, bot: BOT, history: [], cloudHome: false });
+
+  it("refuses a redirect on Azure, so api-key never reaches another host", async () => {
+    const reached: IncomingMessage[] = [];
+    const other = await listen((req, res) => { reached.push(req); res.end("{}"); });
+    const first = await listen((_req, res) => { res.writeHead(307, { location: `http://127.0.0.1:${other}/elsewhere` }).end(); });
+    await expect(sessionAt(azureAt(first))).rejects.toMatchObject({ status: 502 });
+    expect(reached).toEqual([]);
+  });
+
+  it("asks fetch to refuse redirects on Azure, and leaves OpenAI's request as it was", async () => {
+    const fetchImpl = okFetch();
+    const session = { key: "k", sdp: OFFER, bot: BOT, history: [], cloudHome: false, fetchImpl };
+    await createLiveSession({ ...session, endpoint: azureLiveEndpoint("https://my-res.openai.azure.com", "dep")! });
+    await createLiveSession({ ...session, endpoint: openAiLiveEndpoint({}) });
+    expect(fetchImpl.mock.calls.map(([, init]) => init?.redirect)).toEqual(["error", undefined]);
+  });
+
+  const attempt = (url: string, endpoint: LiveEndpoint) => new Promise<void>((settled) => {
+    const socket = openLiveSocket(url, "made-up-key", endpoint);
+    socket.onerror = () => settled();
+    socket.onclose = () => settled();
+  });
+
+  it("sends the sideband's key as api-key on Azure and as a bearer token on OpenAI", async () => {
+    const heard: IncomingMessage["headers"][] = [];
+    const port = await listen(() => {}, (req, socket) => {
+      heard.push(req.headers);
+      socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
+    });
+    await attempt(liveAttachUrl("sess_1", azureAt(port)), azureAt(port));
+    await attempt(liveAttachUrl("sess_1", openAiAt(port)), openAiAt(port));
+    expect(heard.map((headers) => [headers["api-key"], headers.authorization])).toEqual([["made-up-key", undefined], [undefined, "Bearer made-up-key"]]);
+  });
+
+  it("never follows a redirect on the sideband, so its api-key stays with the first host", async () => {
+    const reached: string[] = [];
+    const other = await listen((req, res) => { reached.push(String(req.url)); res.end(); }, (req, socket) => { reached.push(String(req.url)); socket.destroy(); });
+    const first = await listen(() => {}, (_req, socket) => {
+      socket.end(`HTTP/1.1 307 Temporary Redirect\r\nLocation: ws://127.0.0.1:${other}/elsewhere\r\nConnection: close\r\n\r\n`);
+    });
+    await attempt(liveAttachUrl("sess_1", azureAt(first)), azureAt(first));
+    expect(reached).toEqual([]);
   });
 });
 

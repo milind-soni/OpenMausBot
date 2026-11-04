@@ -145,7 +145,9 @@ export function KeysPage() {
     return () => window.cancelAnimationFrame(frame);
   }, [focus]);
 
-  const rows = KEY_CATALOG.filter((entry) => keyMatches(entry, q));
+  // With Azure chosen, Live calls do not use the OpenAI key that row points at.
+  const azureLive = state.config?.live?.provider === "azure";
+  const rows = KEY_CATALOG.filter((entry) => keyMatches(entry, q) && !(azureLive && entry.id === "liveCalls"));
   const sections = KEY_SECTIONS.flatMap((section) => {
     const own = rows.filter((entry) => entry.section === section.id);
     return own.length > 0 ? [{ id: section.id, rows: own }] : [];

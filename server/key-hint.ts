@@ -1,4 +1,5 @@
 import type { AppConfig } from "./config.ts";
+import { usableLiveKey } from "./live-config.ts";
 
 /** Security: a hint is the last four characters of a key long enough that four reveal nothing useful, and only admins
  * receive one; withoutKeyHints() takes every hint off what a client session is sent. */
@@ -22,7 +23,7 @@ export function nestedKeyStatus(cfg: AppConfig) {
     workersAiToken: keyStatus(cfg.decider?.workersAiToken),
     openaiImageApiKey: keyStatus(cfg.imageGen?.key),
     customImageApiKey: keyStatus(cfg.imageGen?.customApiKey),
-    openaiLiveKey: keyStatus(cfg.live?.key),
+    openaiLiveKey: keyStatus(usableLiveKey(cfg.live)),
   };
 }
 

@@ -53,3 +53,10 @@ it("with Azure chosen, asks for the endpoint, deployment and resource key in pla
   expect(html).not.toContain("Open API keys");
   expect(html).not.toContain("OpenAI key stays");
 });
+
+it("with Azure chosen and no endpoint yet, asks for the endpoint first: a key is tied to it", () => {
+  f.live = { configured: false, provider: "azure", voice: "", readTypedReplies: true, idleMinutes: 5 };
+  const html = renderToStaticMarkup(createElement(LiveKeyNeeded));
+  expect(html).toContain('placeholder="https://my-resource.openai.azure.com"');
+  expect(html).not.toContain('aria-label="Azure OpenAI key for Live calls"');
+});

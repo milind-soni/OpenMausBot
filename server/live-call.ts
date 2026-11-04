@@ -28,7 +28,7 @@ export const LIVE_DATA_CHANNEL = {
   ],
 };
 
-/** Hosts an Azure OpenAI or Foundry resource answers on, including Azure Government, Azure China and API Management gateways. The key is only ever sent to one of these. */
+/** The hosts an Azure call may use: Azure OpenAI and Foundry resources, Azure OpenAI on Azure Government (.us) and Azure China (.cn), and API Management gateways on .azure-api.net. The key is only ever sent to one of these, and to the one it was saved for. */
 const AZURE_HOST_SUFFIXES = [
   ".openai.azure.com",
   ".services.ai.azure.com",
@@ -231,6 +231,8 @@ export async function createLiveSession(input: CreateLiveSessionInput): Promise<
     response = await (input.fetchImpl ?? fetch)(liveSessionsUrl(endpoint), {
       method: "POST",
       headers: { ...liveAuthHeaders(endpoint.provider, key), "content-type": "application/json" },
+      // fetch drops `authorization` on a redirect to another host, but keeps `api-key`.
+      ...(endpoint.provider === "azure" ? { redirect: "error" as const } : {}),
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(input.timeoutMs ?? CREATE_TIMEOUT_MS),
     });
