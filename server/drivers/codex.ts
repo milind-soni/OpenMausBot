@@ -47,7 +47,8 @@ import { volatileContextNote, withContextNote } from "./prompt-split.ts";
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import { CodexDeviceAuthController } from "./codex-device-auth.ts";
 import { codexAccountEmail, codexHome } from "./codex-identity.ts";
-import { archivedNativeCodexThread, CODEX_MISSING_CREDENTIALS, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, CodexRpcError, codexSignInExpired, codexSignInRefused, codexUserError, missingNativeCodexThread, type CodexRoute } from "./codex-errors.ts";
+import { boundedLabel, containsControlCharacter, mcpAppApprovalForm, plainRecord } from "./codex-app-approval.ts";
+import { archivedNativeCodexThread, CODEX_MISSING_CREDENTIALS, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, CodexRpcError, codexSignInExpired, codexPlanModelRefused, codexSignInRefused, codexUserError, missingNativeCodexThread, type CodexRoute } from "./codex-errors.ts";
 import { codexLoginCheck, codexLoginStatus, storedCodexLogin } from "./codex-login.ts";
 import { keyRejected, noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
@@ -165,91 +166,6 @@ function additionalPermissionSummary(permissions: unknown, reason: unknown): str
   const exact = JSON.stringify(requested);
   const prefix = typeof reason === "string" && reason.trim() ? `${reason.trim()} — ` : "";
   return `${prefix}Requested permissions: ${exact}`;
-}
-
-type McpApprovalForm = {
-  tool: string;
-  summary: string;
-  allowResult: { action: "accept"; content: Record<string, string> };
-};
-
-const plainRecord = (value: unknown): Record<string, unknown> | null =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-
-const containsControlCharacter = (value: string): boolean => {
-  for (const character of value) {
-    const code = character.charCodeAt(0);
-    if (code <= 0x1f || code === 0x7f) return true;
-  }
-  return false;
-};
-
-function boundedLabel(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const label = value.trim();
-  return label && label.length <= 160 && !containsControlCharacter(label) ? label : null;
-}
-
-function ordinaryApprovalValue(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  if (/session|always|permanent|forever|persistent/.test(normalized)) return false;
-  return normalized === "once" || /^(?:accept|approve|allow)(?:ed|[-_]?once)?$/.test(normalized);
-}
-
-/** Only schema-backed app-access approvals; any other MCP form (credentials, free text, URLs) stays
- * user input and is declined, and Full access never fabricates one. */
-function mcpAppApprovalForm(params: unknown): McpApprovalForm | null {
-  const request = plainRecord(params);
-  if (!request || request.mode !== "form") return null;
-  const metadata = plainRecord(request._meta);
-  const target = plainRecord(metadata?.target);
-  const toolParams = plainRecord(metadata?.tool_params);
-  const message = boundedLabel(request.message) ?? "App access requested";
-  const appName = [
-    metadata?.app_name,
-    metadata?.appName,
-    metadata?.app,
-    target?.app,
-    target?.name,
-    toolParams?.app_name,
-    toolParams?.app,
-    metadata?.connector_name,
-    metadata?.connectorName,
-  ].map(boundedLabel).find(Boolean) ?? message.match(/^Allow ChatGPT to use (.+?)\?$/i)?.[1]?.trim();
-  if (!appName) return null;
-
-  const schema = plainRecord(request.requestedSchema);
-  const properties = plainRecord(schema?.properties);
-  const required = schema?.required;
-  if (
-    !properties ||
-    !Array.isArray(required) ||
-    required.length === 0 ||
-    required.length > 8 ||
-    !required.every((key) => typeof key === "string" && key.length > 0 && key.length <= 100)
-  ) return null;
-
-  const content: Record<string, string> = {};
-  for (const key of required as string[]) {
-    const field = plainRecord(properties[key]);
-    if (!field) return null;
-    const enumValues = Array.isArray(field.enum)
-      ? field.enum.filter((value): value is string => typeof value === "string")
-      : [];
-    const oneOfValues = Array.isArray(field.oneOf)
-      ? field.oneOf
-          .map((option) => boundedLabel(plainRecord(option)?.const))
-          .filter((value): value is string => Boolean(value))
-      : [];
-    const chosen = [...oneOfValues, ...enumValues].find(ordinaryApprovalValue);
-    if (!chosen) return null;
-    content[key] = chosen;
-  }
-
-  const tool = boundedLabel(appName) ?? boundedLabel(request.serverName) ?? "app_access";
-  return { tool, summary: message, allowResult: { action: "accept", content } };
 }
 
 /** Thread-config overrides adding `patterns` to the person's shell exclusions. Codex keeps two
@@ -521,6 +437,13 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       }
       try { writeStartupModelCache(instanceId, models); } catch {}
     };
+    // Only ChatGPT's refusal of a model for this account hides it from the account's list; other errors never do.
+    const hidePlanRefusedModel = (model: string | undefined, raw: string, route: CodexRoute) => {
+      if (!planAuth || !model || !codexPlanModelRefused(raw, route)) return;
+      const options = models.options.filter(option => option.id !== model);
+      models = { default: models.default === model ? options[0]?.id ?? "" : models.default, options };
+      void planAuth.refuseModel(model).then(() => refreshModels(true)).catch(() => {});
+    };
     // Codex's model list ships with the CLI: updating 0.155.1 to 0.162.1 in place adds gpt-6.1-sol.
     let modelsCliVersion: string | null = null;
     let startupModelRefresh: Promise<void> | null = null;
@@ -598,6 +521,13 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const planToken = planAuth ? await planAuth.accessToken() : undefined;
       assertPlanCurrent();
       if (planAuth) {
+        // ChatGPT refused this model for this account in an earlier turn: carry on with the account's first usable model.
+        const refused = planAuth.refusedModels();
+        if (turn.model && refused.includes(turn.model)) {
+          if (!models.options.length) { await refreshModels(); assertPlanCurrent(); }
+          const usable = models.options.find(option => !refused.includes(option.id));
+          if (usable) turn = { ...turn, model: usable.id };
+        }
         if (!turn.model || !models.options.some(model => model.id === turn.model)) {
           await refreshModels();
           assertPlanCurrent();
@@ -638,6 +568,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const chatgptTurn = ownLogin &&
         decodeCodexSelection(turn.model || models.default).modelProvider === OFFICIAL_CODEX_PROVIDER;
       const route: CodexRoute = plan ? "plan" : chatgptTurn ? "own" : "other";
+      const hideRefusedModel = (raw: string) => hidePlanRefusedModel(turn.model, raw, route);
       const signedOut = chatgptTurn && await loginCheck(childEnv()) === "missing";
       assertPlanCurrent();
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
@@ -1126,6 +1057,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (message === state.lastError && (state.lastErrorSetup || !setup)) return;
         state.lastError = message;
         state.lastErrorSetup ||= setup;
+        hideRefusedModel(raw);
         emit({ ...base(threadId, turnId), type: "runtime.error", message, ...(setup ? { setup: true } : {}), ...codexLimitFacts(raw, route, error.codexErrorInfo) });
       };
       const handleNotification = (msg: any) => {
@@ -1621,6 +1553,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const failure = e instanceof Error ? e : { text: String(e) };
         const raw = e instanceof Error ? e.message : String(e);
         const refused = chatgptTurn && loginMark() !== null && codexSignInRefused({ message: raw });
+        hideRefusedModel(raw);
         const message = refused ? codexSignInExpired(raw) : codexUserError(raw, route);
         const needsAuth = refused || /(?:\b401\b|unauthorized|missing bearer|authentication required)/i.test(raw);
         const verdict = classifyError(failure);
@@ -1705,7 +1638,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         model: selection.model ?? id,
         modelProvider: selection.modelProvider,
         providerArgs: planAuth || config.managed ? providerArgs : codexLocalProviderArgs(env, id),
-        describeError: (message) => codexUserError(message, planAuth ? "plan" : selection.modelProvider === OFFICIAL_CODEX_PROVIDER ? "own" : "other"),
+        describeError: (message) => {
+          const route: CodexRoute = planAuth ? "plan" : selection.modelProvider === OFFICIAL_CODEX_PROVIDER ? "own" : "other";
+          hidePlanRefusedModel(selection.model ?? id, message, route);
+          return codexUserError(message, route);
+        },
       });
     }, options);
   };
