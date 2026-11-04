@@ -15,6 +15,10 @@ let broker: Server;
 let admin: string;
 let member: string;
 let fullBot: any;
+let draftBot: any;
+let draftHelper: any;
+let outboundPolicyBot: any;
+const gmailDrafts = new Map<string, Record<string, unknown>>();
 let brokerOrigin = "";
 const relayed: unknown[] = [];
 const evidence: unknown[] = [];
@@ -31,7 +35,6 @@ const api = async (method: string, path: string, body?: unknown, token = admin) 
   evidence.push({ method, path, result });
   return result;
 };
-// Below Full access, so sends reach the outbound card and the daily allowance.
 const bot = async (name: string) => {
   const created = await api("POST", "/api/bots", { name });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
@@ -75,6 +78,17 @@ beforeAll(async () => {
     }
     if (req.url === "/mcp") {
       relayed.push(body);
+      const tools = body.params?.arguments?.tools ?? [{ tool_slug: body.params?.name, arguments: body.params?.arguments }];
+      if (tools.every((tool: any) => ["GMAIL_CREATE_EMAIL_DRAFT", "GMAIL_UPDATE_DRAFT"].includes(tool.tool_slug))) {
+        const results = tools.map((tool: any) => {
+          const args = tool.arguments;
+          const id = tool.tool_slug === "GMAIL_CREATE_EMAIL_DRAFT" ? `draft-${gmailDrafts.size + 1}` : args.draft_id;
+          if (tool.tool_slug === "GMAIL_UPDATE_DRAFT" && !gmailDrafts.has(id)) return { tool_slug: tool.tool_slug, response: { successful: false, error: "Draft not found" } };
+          gmailDrafts.set(id, args);
+          return { tool_slug: tool.tool_slug, response: { successful: true, data: { id, message: { threadId: args.thread_id, body: args.body } } } };
+        });
+        return res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: JSON.stringify({ successful: true, data: { results } }) }] } }));
+      }
       if (blockRelay) {
         relayEntered = true;
         await new Promise<void>(resolve => { blockRelay = resolve; });
@@ -91,13 +105,25 @@ beforeAll(async () => {
   const created = await fetch(fixture.info.url + "/api/bots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Existing Full grant" }) });
   expect(created.status).toBe(201);
   fullBot = (await created.json() as any).bot;
+  const draftCreated = await fetch(fixture.info.url + "/api/bots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Full Gmail draft fixture" }) });
+  expect(draftCreated.status).toBe(201);
+  draftBot = (await draftCreated.json() as any).bot;
+  const helperCreated = await fetch(fixture.info.url + "/api/bots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Full Gmail delegate fixture" }) });
+  expect(helperCreated.status).toBe(201);
+  draftHelper = (await helperCreated.json() as any).bot;
+  const policyCreated = await fetch(fixture.info.url + "/api/bots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Full outbound policy fixture" }) });
+  expect(policyCreated.status).toBe(201);
+  outboundPolicyBot = (await policyCreated.json() as any).bot;
   await waitForExit(fixture.child, { signal: "SIGTERM" });
   const botsFile = join(fixture.info.dataDir, "bots.json");
   const bots = JSON.parse(readFileSync(botsFile, "utf8"));
   const saved = bots.find((row: any) => row.id === fullBot.id);
-  saved.approvalMode = "full";
-  saved.autoApprove = false;
-  for (const task of saved.tasks) { task.approvalMode = "full"; task.autoApprove = false; }
+  for (const full of [saved, ...[draftBot, draftHelper, outboundPolicyBot].map(bot => bots.find((row: any) => row.id === bot.id))]) {
+    full.approvalMode = "full";
+    full.autoApprove = false;
+    for (const task of full.tasks) { task.approvalMode = "full"; task.autoApprove = false; }
+  }
+  bots.find((row: any) => row.id === outboundPolicyBot.id).outbound = { policy: "ask", dailyCap: 100 };
   writeFileSync(botsFile, JSON.stringify(bots));
   const configFile = join(fixture.info.dataDir, "config.json");
   const config = JSON.parse(readFileSync(configFile, "utf8"));
@@ -105,6 +131,8 @@ beforeAll(async () => {
   config.composio = { apiKey: "ak_isolated_fixture", userId: "fixture-user", sessionId: "fixture-session" };
   config.instances.activityFixture = { ...config.instances.claude, displayName: "Exact task activity fixture",
     environment: { FAKE_CLAUDE_MODE: "hang", FAKE_CLAUDE_RELEASE: join(fixture.info.dataDir, "activity-release") } };
+  config.instances.gmailFixture = { ...config.instances.claude, displayName: "Gmail continuation fixture",
+    environment: { FAKE_CLAUDE_ROOM_PLAN: join(fixture.info.dataDir, "gmail-plan.json") } };
   writeFileSync(configFile, JSON.stringify(config));
   const sessions = new SessionRegistry({ file: join(fixture.info.dataDir, "sessions.json"),
     emailScopes: email => email === "admin@fixture.test" ? ["admin", "client"] : ["client"] });
@@ -152,20 +180,199 @@ it("keeps activity, shared memory and policy changes admin-only", async () => {
   expect((await api("PATCH", `/api/bots/${b.id}`, { fallback: [{ instanceId: "claude", model: " " }] })).status).toBe(400);
 });
 
-it("sends in Full without a card, and still refuses an app outside the bot's scope", async () => {
+it("honors outbound approval and the daily allowance at Full access, and still refuses apps outside scope", async () => {
   const b = fullBot;
   const fleet = await api("GET", "/api/bots");
   expect(fleet.body.bots.find((row: any) => row.id === b.id).approvalMode).toBe("full");
   const token = await mint(b.id, b.threadId);
   const before = relayed.length;
-  expect((await relay(token, "GMAIL_SEND_EMAIL", { to: "first@fixture.test" })).body.result.isError).not.toBe(true);
-  expect((await relay(token, "COMPOSIO_REMOTE_WORKBENCH", { code_to_execute: "print(1)" })).body.result.isError).not.toBe(true);
+  const denied = relay(token, "GMAIL_SEND_EMAIL", { to: "first@fixture.test" });
+  const deniedCard = await pending(b.threadId);
+  expect(relayed).toHaveLength(before);
+  await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: deniedCard.card.requestId, behavior: "deny" });
+  expect((await denied).body.result.isError).toBe(true);
+  const allowed = relay(token, "GMAIL_SEND_EMAIL", { to: "first@fixture.test" });
+  const allowedCard = await pending(b.threadId);
+  expect(relayed).toHaveLength(before);
+  await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: allowedCard.card.requestId, behavior: "allow" });
+  expect((await allowed).body.result.isError).not.toBe(true);
+  expect(relayed).toHaveLength(before + 1);
+  await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow", dailyCap: 1 } });
+  const cardCount = (await cards(b.threadId)).filter(row => row.card?.outboundRequest).length;
+  expect((await relay(token, "SLACK_SEND_MESSAGE", { channel: "fixture", text: "Allowed once" })).body.result.isError).not.toBe(true);
+  expect((await api("GET", `/api/bots/${b.id}/outbound`)).body.today).toBe(1);
+  expect((await relay(token, "GMAIL_SEND_EMAIL", { to: "over-limit@fixture.test" })).body.result.isError).toBe(true);
+  expect((await cards(b.threadId)).filter(row => row.card?.outboundRequest)).toHaveLength(cardCount);
+  const opaque = relay(token, "COMPOSIO_REMOTE_WORKBENCH", { code_to_execute: "print(1)" });
+  const opaqueCard = await pending(b.threadId);
+  await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: opaqueCard.card.requestId, behavior: "deny" });
+  expect((await opaque).body.result.isError).toBe(true);
   expect(relayed).toHaveLength(before + 2);
-  expect((await cards(b.threadId)).some((row: any) => row.card?.outboundRequest)).toBe(false);
   await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "read" } } });
   expect((await relay(token, "GMAIL_SEND_EMAIL")).body.result.isError).toBe(true);
   expect(relayed).toHaveLength(before + 2);
 });
+
+it("honors Ask every time at Full access before the first send for any prompt language", async () => {
+  const b = outboundPolicyBot;
+  expect((await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === b.id).outbound.policy).toBe("ask");
+  expect((await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "invalid", dailyCap: 100 } })).status).toBe(400);
+  expect((await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow", dailyCap: 100 } }, member)).status).toBe(403);
+  const before = relayed.length;
+  for (const text of ["Responde a Sam, no lo envíes", "Sam को जवाब लिखो, भेजना मत", "Réponds à Sam sans envoyer", "Samに返信を書いて、送信しないで", "Send the email now"]) {
+    expect((await api("POST", `/api/bots/${b.id}/messages`, { text, threadId: b.threadId })).status).toBe(202);
+    await expect.poll(async () => (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === b.id).busy, { timeout: 10_000 }).toBe(false);
+    const token = await mint(b.id, b.threadId);
+    const send = relay(token, "GMAIL_REPLY_TO_THREAD", { thread_id: "ask-policy", body: "Never sent without consent" });
+    const card = await pending(b.threadId);
+    expect(relayed).toHaveLength(before);
+    await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: card.card.requestId, behavior: "deny" });
+    expect((await send).body.result.isError).toBe(true);
+  }
+  const token = await mint(b.id, b.threadId);
+  for (const name of ["GMAIL_SEND_EMAIL", "GMAIL_SEND_DRAFT", "GMAIL_FORWARD_MESSAGE", "SLACK_SEND_MESSAGE", "COMPOSIO_REMOTE_WORKBENCH"]) {
+    const send = relay(token, name);
+    const card = await pending(b.threadId);
+    expect(relayed).toHaveLength(before);
+    await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: card.card.requestId, behavior: "deny" });
+    expect((await send).body.result.isError).toBe(true);
+  }
+  const allowed = relay(token, "GMAIL_SEND_EMAIL", { to: "sam@example.test" });
+  const card = await pending(b.threadId);
+  await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: card.card.requestId, behavior: "allow" });
+  expect((await allowed).body.result.isError).not.toBe(true);
+  expect(relayed).toHaveLength(before + 1);
+  const repeated = relay(token, "GMAIL_SEND_EMAIL", { to: "sam@example.test" });
+  const repeatedCard = await pending(b.threadId);
+  expect(relayed).toHaveLength(before + 1);
+  await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: repeatedCard.card.requestId, behavior: "deny" });
+  expect((await repeated).body.result.isError).toBe(true);
+});
+
+it("honors the daily allowance for explicit draft-and-send requests without classifying their wording", async () => {
+  const b = outboundPolicyBot;
+  expect((await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow", dailyCap: 100 } })).status).toBe(200);
+  const before = relayed.length;
+  const cardCount = (await cards(b.threadId)).filter(row => row.card?.outboundRequest).length;
+  for (const text of ["Draft a reply to Sam and send it", "Edit the draft to fix the typo and send it", "Write a draft and then send it to the team"]) {
+    expect((await api("POST", `/api/bots/${b.id}/messages`, { text, threadId: b.threadId })).status).toBe(202);
+    await expect.poll(async () => (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === b.id).busy, { timeout: 10_000 }).toBe(false);
+    const token = await mint(b.id, b.threadId);
+    expect((await relay(token, "GMAIL_SEND_DRAFT", { draft_id: "fixture-draft" })).body.result.isError).not.toBe(true);
+  }
+  expect(relayed).toHaveLength(before + 3);
+  expect((await cards(b.threadId)).filter(row => row.card?.outboundRequest)).toHaveLength(cardCount);
+  expect((await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "ask", dailyCap: 100 } })).status).toBe(200);
+});
+
+it("holds sends under Ask every time at Full access and revises the same Gmail draft without another creation", async () => {
+  const b = draftBot;
+  const begin = async (text: string) => {
+    const previous = (await cards(b.threadId)).filter(row => row.role === "bot" && row.kind === "text").length;
+    expect((await api("POST", `/api/bots/${b.id}/messages`, { text, threadId: b.threadId })).status).toBe(202);
+    await expect.poll(async () => (await cards(b.threadId)).filter(row => row.role === "bot" && row.kind === "text").length, { timeout: 10_000 }).toBeGreaterThan(previous);
+    await expect.poll(async () => (await api("GET", "/api/bots")).body.bots.find((row: any) => row.id === b.id).busy, { timeout: 10_000 }).toBe(false);
+    return mint(b.id, b.threadId);
+  };
+  const token = await begin("Create exactly one reply draft for MEGA. If a draft already exists, update it instead of creating another. Do not send it.");
+  const before = relayed.length;
+  const deny = async (request: Promise<any>) => {
+    const card = await pending(b.threadId);
+    expect(relayed).toHaveLength(before);
+    await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: card.card.requestId, behavior: "deny" });
+    expect((await request).body.result.isError).toBe(true);
+  };
+  for (const name of ["GMAIL_SEND_EMAIL", "GMAIL_SEND_DRAFT", "GMAIL_REPLY_TO_THREAD", "GMAIL_FORWARD_MESSAGE", "COMPOSIO_REMOTE_WORKBENCH"]) {
+    await deny(relay(token, name));
+  }
+  const draft = { thread_id: "mega-thread", recipient_email: "support@example.test", subject: "Re: MEGA", body: "Original reply" };
+  const batch = (tools: any[]) => relay(token, "COMPOSIO_MULTI_EXECUTE_TOOL", { tools });
+  await deny(batch([{ tool_slug: "GMAIL_CREATE_EMAIL_DRAFT", arguments: draft }, { tool_slug: "GMAIL_SEND_EMAIL", arguments: draft }]));
+  expect(relayed).toHaveLength(before);
+  expect((await relay(token, "GMAIL_CREATE_EMAIL_DRAFT", draft)).body.result.isError).not.toBe(true);
+  expect((await relay(token, "GMAIL_CREATE_EMAIL_DRAFT", draft)).body.result.isError).toBe(true);
+  expect(gmailDrafts.size).toBe(1);
+  const draftId = [...gmailDrafts.keys()][0];
+  const revision = await begin("Update the existing MEGA reply draft. Do not create another. Do not send it.");
+  expect((await relay(revision, "GMAIL_UPDATE_DRAFT", { ...draft, draft_id: draftId, body: "Revised reply" })).body.result.isError).not.toBe(true);
+  expect(gmailDrafts.size).toBe(1);
+  expect(gmailDrafts.get(draftId)).toMatchObject({ body: "Revised reply", thread_id: "mega-thread" });
+  const reached = relayed.slice(before).flatMap((frame: any) => frame.params?.arguments?.tools ?? [{ tool_slug: frame.params?.name }]);
+  expect(reached.map((tool: any) => tool.tool_slug)).toEqual(["GMAIL_CREATE_EMAIL_DRAFT", "GMAIL_UPDATE_DRAFT"]);
+  await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow", dailyCap: 100 } });
+  const cardCount = (await cards(b.threadId)).filter(row => row.card?.outboundRequest).length;
+  expect((await relay(revision, "GMAIL_SEND_DRAFT", { draft_id: draftId })).body.result.isError).not.toBe(true);
+  expect(relayed).toHaveLength(before + 3);
+  expect((await cards(b.threadId)).filter(row => row.card?.outboundRequest)).toHaveLength(cardCount);
+});
+
+it("retains Gmail draft limits through delegated work and the requester's resumed turn", async () => {
+  const b = draftBot;
+  const helper = draftHelper;
+  for (const bot of [b, helper]) {
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "gmailFixture", model: "claude-sonnet-5" }, threadId: bot.threadId, peers: [b.id, helper.id].filter(id => id !== bot.id), acknowledgePeerScope: true, outbound: { policy: "ask", dailyCap: 100 } })).status).toBe(200);
+  }
+  const draft = { thread_id: "continued-thread", recipient_email: "sam@example.test", subject: "Re: Continuation", body: "Draft response" };
+  const write = { server: "composio", tool: "GMAIL_CREATE_EMAIL_DRAFT", arguments: draft };
+  const send = { server: "composio", tool: "GMAIL_REPLY_TO_THREAD", arguments: { thread_id: draft.thread_id }, expectError: true };
+  writeFileSync(join(fixture.info.dataDir, "gmail-plan.json"), JSON.stringify({
+    [b.id]: {
+      timeoutMs: 60_000,
+      steps: [write, { arguments: { bot_ids: [helper.id], message: "Check the proposed response", thread: "new" } }],
+      reply: "Waiting for a check", resumeSteps: [{ ...write, expectError: true }, send], resumeReply: "Draft remains unsent",
+    },
+    [helper.id]: { timeoutMs: 60_000, steps: [send], reply: "Checked the response" },
+  }));
+  const before = relayed.length;
+  expect((await api("POST", `/api/bots/${b.id}/messages`, { text: "Draft a reply. Do not send it. Ask your teammate to check it.", threadId: b.threadId })).status).toBe(202);
+  let delegatedThread = "";
+  await expect.poll(async () => {
+    const fresh = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === helper.id);
+    delegatedThread = fresh.tasks.find((task: any) => task.busy)?.threadId ?? "";
+    return Boolean(delegatedThread);
+  }, { timeout: 15_000 }).toBe(true);
+  for (const threadId of [delegatedThread, b.threadId]) {
+    const card = await pending(threadId);
+    const tools = relayed.slice(before).filter((frame: any) => frame.method === "tools/call")
+      .flatMap((frame: any) => frame.params?.arguments?.tools ?? [{ tool_slug: frame.params?.name }]);
+    expect(tools.map((tool: any) => tool.tool_slug)).toEqual(["GMAIL_CREATE_EMAIL_DRAFT"]);
+    await api("POST", `/api/threads/${threadId}/respond`, { requestId: card.card.requestId, behavior: "deny" });
+  }
+  await expect.poll(async () => (await cards(b.threadId)).some(row => row.text === "Draft remains unsent"), { timeout: 15_000 }).toBe(true);
+  const planEvidence = readFileSync(join(fixture.info.dataDir, "gmail-plan.json.evidence.jsonl"), "utf8");
+  evidence.push({ gmailContinuation: planEvidence });
+  expect(planEvidence).toContain("already attempted");
+  expect(gmailDrafts.size).toBe(2);
+}, 90_000);
+
+it("honors Ask every time on Full-access delegated and resumed turns without relying on wording or a draft write", async () => {
+  const b = outboundPolicyBot;
+  const helper = draftHelper;
+  for (const bot of [b, helper]) {
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "gmailFixture", model: "claude-sonnet-5" }, threadId: bot.threadId, peers: [b.id, helper.id].filter(id => id !== bot.id), acknowledgePeerScope: true, outbound: { policy: "ask", dailyCap: 100 } })).status).toBe(200);
+  }
+  const send = { server: "composio", tool: "GMAIL_REPLY_TO_THREAD", arguments: { thread_id: "ask-delegation" }, expectError: true };
+  writeFileSync(join(fixture.info.dataDir, "gmail-plan.json"), JSON.stringify({
+    [b.id]: { timeoutMs: 60_000, steps: [{ arguments: { bot_ids: [helper.id], message: "Check the response", thread: "new" } }],
+      reply: "Waiting for review", resumeSteps: [send], resumeReply: "Outbound policy retained" },
+    [helper.id]: { timeoutMs: 60_000, steps: [send], reply: "Reviewed" },
+  }));
+  const before = relayed.length;
+  expect((await api("POST", `/api/bots/${b.id}/messages`, { text: "Responde a Sam, no lo envíes", threadId: b.threadId })).status).toBe(202);
+  let delegatedThread = "";
+  await expect.poll(async () => {
+    const fresh = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === helper.id);
+    delegatedThread = fresh.tasks.find((task: any) => task.busy)?.threadId ?? "";
+    return Boolean(delegatedThread);
+  }, { timeout: 15_000 }).toBe(true);
+  for (const threadId of [delegatedThread, b.threadId]) {
+    const card = await pending(threadId);
+    expect(relayed.slice(before).filter((frame: any) => frame.method === "tools/call")).toEqual([]);
+    await api("POST", `/api/threads/${threadId}/respond`, { requestId: card.card.requestId, behavior: "deny" });
+  }
+  await expect.poll(async () => (await cards(b.threadId)).some(row => row.text === "Outbound policy retained"), { timeout: 15_000 }).toBe(true);
+  evidence.push({ outboundPolicyDelegation: readFileSync(join(fixture.info.dataDir, "gmail-plan.json.evidence.jsonl"), "utf8") });
+}, 90_000);
 
 it("shows each outbound batch recipient and amount with explicit preview truncation before consent", async () => {
   const b = await bot("Batch consent preview");
@@ -208,6 +415,73 @@ it.each(["scope", "turn"])("rechecks %s revocation after project-session metadat
   if (revocation === "scope") expect(result.body.result.isError).toBe(true);
   else expect(result.status).toBe(401);
   expect(relayed).toHaveLength(before);
+});
+
+it("does not consume a Gmail draft reservation when the fresh scope check refuses dispatch", async () => {
+  const b = await bot("Draft scope race");
+  const token = await mint(b.id, b.threadId);
+  const before = relayed.length;
+  sessionEntered = false;
+  blockSession = () => {};
+  const args = { thread_id: "scope-race", body: "Only a draft" };
+  const held = relay(token, "GMAIL_CREATE_EMAIL_DRAFT", args);
+  try {
+    await expect.poll(() => sessionEntered, { timeout: 5_000 }).toBe(true);
+    await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "read" } } });
+  } finally {
+    blockSession?.();
+    blockSession = undefined;
+  }
+  expect((await held).body.result.isError).toBe(true);
+  expect(relayed).toHaveLength(before);
+  await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "write" } } });
+  expect((await relay(token, "GMAIL_CREATE_EMAIL_DRAFT", args)).body.result.isError).not.toBe(true);
+  expect(relayed).toHaveLength(before + 1);
+});
+
+it("honors Ask every time enabled while a Full-access send is waiting for dispatch", async () => {
+  const b = fullBot;
+  await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow", dailyCap: 100 }, connectorScopes: { apps: { gmail: "write" } } });
+  const token = await mint(b.id, b.threadId);
+  const before = relayed.length;
+  sessionEntered = false;
+  blockSession = () => {};
+  const send = relay(token, "GMAIL_SEND_EMAIL", { to: "sam@example.test" });
+  try {
+    await expect.poll(() => sessionEntered, { timeout: 5_000 }).toBe(true);
+    expect((await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "ask", dailyCap: 100 } })).status).toBe(200);
+    await expect.poll(() => JSON.parse(readFileSync(join(fixture.info.dataDir, "bots.json"), "utf8"))
+      .find((bot: any) => bot.id === b.id).outbound?.policy).toBe("ask");
+  } finally {
+    blockSession?.();
+    blockSession = undefined;
+  }
+  expect((await send).body.result.isError).toBe(true);
+  expect(relayed).toHaveLength(before);
+  const nextSend = relay(token, "GMAIL_SEND_EMAIL", { to: "sam@example.test" });
+  const card = await pending(b.threadId);
+  expect(relayed).toHaveLength(before);
+  await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: card.card.requestId, behavior: "deny" });
+  expect((await nextSend).body.result.isError).toBe(true);
+  expect((await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow", dailyCap: 100 } })).status).toBe(200);
+  expect((await relay(token, "GMAIL_SEND_EMAIL", { to: "sam@example.test" })).body.result.isError).not.toBe(true);
+  expect(relayed).toHaveLength(before + 1);
+});
+
+it("does not consume the outbound allowance when a duplicate draft refuses a mixed batch", async () => {
+  const b = fullBot;
+  const token = await mint(b.id, b.threadId);
+  const draft = { thread_id: "reservation-cap", body: "Review this" };
+  const before = relayed.length;
+  const count = (await api("GET", `/api/bots/${b.id}/outbound`)).body.today;
+  expect((await relay(token, "GMAIL_CREATE_EMAIL_DRAFT", draft)).body.result.isError).not.toBe(true);
+  const duplicate = await relay(token, "COMPOSIO_MULTI_EXECUTE_TOOL", { tools: [
+    { tool_slug: "GMAIL_CREATE_EMAIL_DRAFT", arguments: draft },
+    { tool_slug: "GMAIL_SEND_EMAIL", arguments: { to: "sam@example.test" } },
+  ] });
+  expect(duplicate.body.result.isError).toBe(true);
+  expect((await api("GET", `/api/bots/${b.id}/outbound`)).body.today).toBe(count);
+  expect(relayed).toHaveLength(before + 1);
 });
 
 it("reserves a daily slot before provider await, so simultaneous calls cannot overspend", async () => {
