@@ -149,6 +149,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const sidePanelOpen = (Boolean(bot) && (state.settingsOpen || state.computerOpen || state.inspectorOpen || state.activityOpen)) || roomPanelOpen || (notificationFeed && state.notificationsOpen) || inboxShown;
   const collapseSidebar = sidePanelOpen && !sidebarAndPanelFit;
   const calendarFocus = state.activeView === "routines" && state.routinesFocus.view === "calendar";
+  const notificationTray = notificationFeed && !calendarFocus;
 
   const noEngines =
     state.connected &&
@@ -313,7 +314,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   </>;
   return (
     <div className={cn("flex h-full flex-col", framed && "bg-frame")}>
-      <WindowFrameBar />
+      <WindowFrameBar notifications={notificationTray} />
       {!framed && strips}
       <div className="relative flex min-h-0 flex-1">
       {!calendarFocus && <button
@@ -414,8 +415,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       {!remoteClient && state.inspectorOpen && bot && <InspectorPanel key={bot.threadId} bot={bot} />}
       {!remoteClient && state.activityOpen && bot && <ActivityPanel key={`activity:${bot.id}`} bot={bot} />}
       {inboxShown && <InboxPanel />}
-      {notificationFeed && !calendarFocus && state.notificationsOpen && <NotificationsPanel />}
-      {notificationFeed && !calendarFocus && <NotificationRail />}
+      {notificationTray && state.notificationsOpen && <NotificationsPanel />}
+      {notificationTray && !framed && <NotificationRail />}
       </div>
       </div>
       {state.appSettingsOpen && <SettingsModal />}
