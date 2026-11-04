@@ -2,7 +2,6 @@ import type { Bot } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { EffortRow } from "./ModelPicker";
 
-/** The model menu while the bot works: only the reasoning level can change, for the next turn. */
 export function BusyModelMenu({ bot, threadId, updateBotDefault, variants }: { bot: Bot; threadId?: string; updateBotDefault: boolean; variants: boolean }) {
   return (
     <div data-model-busy className="flex flex-col py-1">
