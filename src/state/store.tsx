@@ -1728,8 +1728,9 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     case "switchGroupTask":
       return state.selectedId === action.groupId && state.activeView === "chat" ? closeTrayUnlessShown(state, action.groupId, action.threadId) : state;
-    case "deleteTask":
     case "newGroupTask":
+      return state.selectedId === action.groupId && state.activeView === "chat" ? closeUnpinnedTray(state) : state;
+    case "deleteTask":
     case "deleteGroupTask":
     case "regenerateTaskTitle":
       return state;

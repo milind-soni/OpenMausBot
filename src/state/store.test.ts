@@ -3180,6 +3180,16 @@ describe("notifications feed", () => {
     expect(reducer({ ...inRoom, notificationsPinned: true }, roomSwitch).notificationsOpen).toBe(true);
   });
 
+  it("unpinned, a new thread in the room on screen closes it; a background room leaves it", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "room-1",
+      groups: [{ id: "room-1", threadId: "room-t" }] as AppState["groups"] };
+    const action = { type: "newGroupTask", groupId: "room-1" } as const;
+    expect(reducer(open, action).notificationsOpen).toBe(false);
+    expect(reducer({ ...open, notificationsPinned: true }, action).notificationsOpen).toBe(true);
+    expect(reducer({ ...open, selectedId: "bot-1" }, action).notificationsOpen).toBe(true);
+    expect(reducer({ ...open, activeView: "team-map" as const }, action).notificationsOpen).toBe(true);
+  });
+
   it("a thread switch in a room that is not on screen leaves the tray as it is", () => {
     const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1",
       groups: [{ id: "room-1", threadId: "room-t" }] as AppState["groups"] };
