@@ -778,6 +778,61 @@ describe("RuntimeCoordinator: stops", () => {
   });
 });
 
+describe("RuntimeCoordinator: a stop the person made is remembered", () => {
+  const tick = () => sleep(2);
+
+  it("keeps the work it stopped from coming back from that request, until the person asks again", async () => {
+    const w = world(hold);
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Build it");
+    begun(w, { botId: "tester", threadId: "tester-chat" }, "gen-2");
+    begun(w, { botId: "tester", threadId: "tester-other" }, "gen-4", "Order more paper", { origin: { kind: "user", request: "Order more paper" } });
+    w.coordinator.tick();
+    await tick();
+    w.coordinator.stopAwaitingDirect("builder-work");
+    expect(w.coordinator.node(node.id)?.status).toBe("cancelled");
+    await tick();
+    // The request that handed it out, in other words, and another conversation on the same line of the person's: refused.
+    expect(() => send(w, chief, "gen-1", undefined, builder, "Please build the CSV export after all")).toThrow("The person stopped this teammate's work on this request.");
+    expect(() => send(w, { botId: "tester", threadId: "tester-chat" }, "gen-2", undefined, builder, "Build it for me")).toThrow(/stopped this teammate's work/);
+    expect(w.coordinator.children("gen-2")).toEqual([]);
+    // Another request of the person's, other teammates, and the person asking again after the stop, go through.
+    expect(send(w, { botId: "tester", threadId: "tester-other" }, "gen-4", undefined, builder, "Order the paper").node).toMatchObject({ botId: "builder" });
+    expect(send(w, chief, "gen-1", undefined, tester, "Test it").node).toMatchObject({ botId: "tester", status: "queued" });
+    expect(send(w, { botId: "chief", threadId: "chief-2" }, "gen-3", undefined, builder, "Build it").node).toMatchObject({ botId: "builder", status: "queued" });
+  });
+
+  it("remembers every bot the stop ended, and nothing for a stop with another cause or work no person asked for", async () => {
+    const w = world(hold);
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Build it");
+    w.coordinator.tick();
+    begun(w, inRoom("other"), "gen-room");
+    await tick();
+    w.coordinator.stopAwaitingDirect("chief-chat");
+    expect(w.coordinator.node(node.id)?.status).toBe("cancelled");
+    await tick();
+    expect(() => send(w, inRoom("other"), "gen-room", undefined, builder, "Build it")).toThrow(/stopped this teammate's work/);
+    expect(() => send(w, inRoom("other"), "gen-room", undefined, chief, "Ship it")).toThrow(/stopped this teammate's work/);
+
+    const h = world(hold);
+    const first = send(h, chief, "gen-1", undefined, builder, "Build it");
+    h.coordinator.tick();
+    await tick();
+    h.coordinator.stopAwaitingDirect("builder-work", "Turn interrupted — provider settings changed");
+    expect(h.coordinator.node(first.node.id)?.status).toBe("cancelled");
+    expect(send(h, chief, "gen-1", undefined, builder, "Build it again").node).toMatchObject({ botId: "builder" });
+
+    const r = world(hold);
+    r.coordinator.beginTurn({ id: "gen-run", address: chief, brief: "Nightly export", level: "ask",
+      opener: { requester: { kind: "routine_run", runId: "run-1", botId: "chief", threadId: "chief-chat" }, origin: { kind: "routine", source: "routine", ref: "nightly" } } });
+    const nightly = r.coordinator.enqueue(chief, "gen-run", undefined, builder, "Export", {});
+    r.coordinator.tick();
+    await tick();
+    r.coordinator.stopAwaitingDirect("builder-work");
+    expect(r.coordinator.node(nightly.node.id)?.status).toBe("cancelled");
+    expect(r.coordinator.enqueue(chief, "gen-run", undefined, builder, "Export again", {}).node).toMatchObject({ botId: "builder" });
+  });
+});
+
 describe("RuntimeCoordinator: read models", () => {
   it("awaitingTeammateThreads answers, for every thread at once, what outstandingDirect and the parked roots answer per thread", async () => {
     const w = world(hold);
