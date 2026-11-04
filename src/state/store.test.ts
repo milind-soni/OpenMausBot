@@ -3186,6 +3186,15 @@ describe("notifications feed", () => {
     expect(reducer(open, { type: "switchTask", botId: "bot-1", threadId: "t-2" }).notificationsOpen).toBe(false);
   });
 
+  it("unpinned, re-selecting the open chat from another view closes it", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1", activeView: "team-map" as const,
+      bots: [{ id: "bot-1", threadId: "t-1" }] as AppState["bots"], groups: [{ id: "room-1", threadId: "room-t" }] as AppState["groups"] };
+    expect(reducer(open, { type: "select", id: "bot-1" }).notificationsOpen).toBe(false);
+    expect(reducer({ ...open, selectedId: "room-1" }, { type: "select", id: "room-1" }).notificationsOpen).toBe(false);
+    expect(reducer(open, { type: "switchTask", botId: "bot-1", threadId: "t-1" }).notificationsOpen).toBe(false);
+    expect(reducer({ ...open, notificationsPinned: true }, { type: "select", id: "bot-1" }).notificationsOpen).toBe(true);
+  });
+
   it("unpinned, starting a new chat closes it", () => {
     const open = reducer(initialState, { type: "toggleNotifications", open: true });
     expect(reducer(open, { type: "newTask", botId: "bot-1" }).notificationsOpen).toBe(false);

@@ -1081,7 +1081,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const room = state.groups.find((g) => g.id === action.id);
       if (room) {
         return {
-          ...(action.id === state.selectedId ? state : closeUnpinnedTray(state)),
+          ...(action.id === state.selectedId && state.activeView === "chat" ? state : closeUnpinnedTray(state)),
           unreadDivider: openedUnreadDivider(state, room.threadId, room.unread, room.messages, room.lastReadMessageId),
           activeView: "chat",
           selectedId: action.id,
@@ -1092,7 +1092,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return updateBot(
         withMascotMotion(
           {
-            ...(action.id === state.selectedId ? state : closeUnpinnedTray(state)),
+            ...(action.id === state.selectedId && state.activeView === "chat" ? state : closeUnpinnedTray(state)),
             unreadDivider: opened
               ? openedUnreadDivider(state, opened.threadId, threadOpensUnread(opened), visibleMessages(opened), threadReadCursor(opened))
               : state.unreadDivider,
