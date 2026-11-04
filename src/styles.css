@@ -1111,6 +1111,10 @@
 }
 
 .chat-text,
+/* A reply's long unbroken text (a URL, a run of letters) wraps inside its bubble instead of running past the window.
+   Code blocks keep scrolling sideways; table cells keep their widths. */
+.chat-md :is(p, li, h1, h2, h3, h4, blockquote) { overflow-wrap: anywhere; }
+
 .chat-md {
   line-height: 1.75;
   font-family: "omb-chat", var(--font-sans);
