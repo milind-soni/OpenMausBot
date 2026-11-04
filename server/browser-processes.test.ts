@@ -397,6 +397,7 @@ describe("a browser on Windows", () => {
     const browser = process.pid;
     let daemonRuns = true;
     let shellRuns = true;
+    let daemonStarted = "2026-11-03T08:59:59.0000000Z";
     const commands: string[][] = [];
     vi.mocked(execFile).mockImplementation(((file: string, args: string[], _options: unknown, done: (error: Error | null, stdout: string) => void) => {
       commands.push([file, ...args]);
@@ -407,7 +408,7 @@ describe("a browser on Windows", () => {
           ProcessId: browser, ParentProcessId: 4100, CommandLine: `"C:\\Chrome\\chrome.exe" "--user-data-dir=${dir}" --remote-debugging-port=0`,
           Name: "chrome.exe", Started: started, ParentName: shellRuns ? "cmd.exe" : null, ParentStarted: shellRuns ? "2026-11-03T08:59:59.5000000Z" : null,
           GrandparentId: daemonRuns ? 4000 : null, GrandparentName: daemonRuns ? "agent-browser.exe" : null,
-          GrandparentStarted: daemonRuns ? "2026-11-03T08:59:59.0000000Z" : null,
+          GrandparentStarted: daemonRuns ? daemonStarted : null,
         }]);
       } else if (file === "tasklist") {
         const image = daemonRuns && args[1] === "PID eq 4000" ? "agent-browser.exe" : shellRuns && args[1] === "PID eq 4100" ? "cmd.exe" : null;
@@ -434,6 +435,13 @@ describe("a browser on Windows", () => {
     daemonRuns = false;
     await releaseBrowserProfile(dir, engine, launcher);
     expect(killed()).toHaveLength(2);
+    expect(existsSync(join(dir, "lockfile"))).toBe(false);
+    // Windows gave the dead daemon's pid to a newer agent-browser, started after the shell: that one is not its daemon.
+    mkdirSync(join(dir, "lockfile"));
+    daemonRuns = true;
+    daemonStarted = "2026-11-03T09:00:01.0000000Z";
+    await releaseBrowserProfile(dir, engine, launcher);
+    expect(killed()).toHaveLength(3);
     expect(existsSync(join(dir, "lockfile"))).toBe(false);
   });
 
