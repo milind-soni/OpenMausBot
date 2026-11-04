@@ -61,7 +61,7 @@ describe("skills brought in from this computer", () => {
       expect(prompt).toContain("Skills from this computer:");
       expect(prompt).toContain(`- pdf: Works with pdf. Read ${JSON.stringify(join(IMPORTED_SKILLS_DIR, "pdf", "SKILL.md"))}.`);
       const files = new Map(skills.map((skill) => [skill.name, skill.file]));
-      expect(skillCommandTurnText("/review the diff", files)).toContain(`Read ${JSON.stringify(join(IMPORTED_SKILLS_DIR, "review", "SKILL.md"))}`);
+      expect(skillCommandTurnText("/review the diff", files, "", true)).toContain(`Read ${JSON.stringify(join(IMPORTED_SKILLS_DIR, "review", "SKILL.md"))}`);
       expect(skillCommandTurnText("/other thing", files)).toBe("/other thing");
       const folder = ensureTaskWorkspaceWithSkills(bot, "thread-1", skills);
       for (const family of [".claude", ".agents", ".grok"]) {
@@ -186,8 +186,8 @@ describe("skills brought in from this computer", () => {
     // The same set: listed in Bot Settings, readable, and run by /name.
     expect(host.listBotSkills(record).map((skill) => skill.name)).toEqual(["zeta-own", ...many.map((one) => one.name)]);
     expect(host.readBotSkillFile(record, "skill-03")).toBe(skillMd("skill-03"));
-    expect(host.expandSkillCommand(record, "thread", "/skill-03 go", { instanceId: "claude", driverKind: "claudeAgent" })).toContain(`Read ${JSON.stringify(join(IMPORTED_SKILLS_DIR, "skill-03", "SKILL.md"))}`);
-    expect(host.expandSkillCommand(record, "thread", "/zeta-own go")).toContain(JSON.stringify(join("workspaces", bot, "skills", "zeta-own", "SKILL.md")).slice(1, -1));
+    expect(host.expandSkillCommand(record, "thread", "/skill-03 go", { instanceId: "claude", driverKind: "claudeAgent" }, [], true)).toContain(`Read ${JSON.stringify(join(IMPORTED_SKILLS_DIR, "skill-03", "SKILL.md"))}`);
+    expect(host.expandSkillCommand(record, "thread", "/zeta-own go", undefined, [], true)).toContain(JSON.stringify(join("workspaces", bot, "skills", "zeta-own", "SKILL.md")).slice(1, -1));
     // One message reaches both kinds, whichever comes first.
     const sendId = randomUUID();
     const typed = "Two things: /skill-03 the diff, /zeta-own after it";

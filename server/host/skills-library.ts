@@ -257,9 +257,9 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
 
     /** Each `/name` called for one of the bot's own, library or imported skills, or one its engine loads by itself. `lines`
      * are the turn's own lines when it is a person's turn: only words they typed can call a skill past the start of the text. */
-    expandSkillCommand(bot: BotRecord, threadId: string, text: string, instance?: TurnInstance, lines: ReadonlyArray<{ sendId?: string; text?: string }> = []): string {
+    expandSkillCommand(bot: BotRecord, threadId: string, text: string, instance?: TurnInstance, lines: ReadonlyArray<{ sendId?: string; text?: string }> = [], ownStart = false): string {
       const typed = typedWords(threadId, lines);
-      const mentioned = skillCalls(text, typed);
+      const mentioned = skillCalls(text, typed, ownStart);
       if (!mentioned.length) return text;
       const assigned = skillsLibraryEnabled(cfg) ? liveAssigned(bot) : undefined;
       const files = enabledSkillFiles(bot.id, mentioned, assigned);
@@ -273,7 +273,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
           .filter((skill) => !skill.enabled).map((skill) => skill.name));
         add(nativesFor(bot, threadId, instance).filter((skill) => !switched.has(skill.name)));
       }
-      return skillCommandTurnText(text, files, typed);
+      return skillCommandTurnText(text, files, typed, ownStart);
     },
 
     shareNote(bot: BotRecord, threadId: string, enabled: boolean): TurnShareNote {

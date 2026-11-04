@@ -19,7 +19,7 @@ const host = createSkillsLibraryHost({
   appendSkillRequestCard: () => ({ requestId: "", summary: "" }),
 });
 type Line = { sendId?: string; text?: string };
-const expand = (bot: string, text: string, lines?: Line[]) => host.expandSkillCommand({ id: bot } as BotRecord, "thread", text, undefined, lines);
+const expand = (bot: string, text: string, lines?: Line[], ownStart = false) => host.expandSkillCommand({ id: bot } as BotRecord, "thread", text, undefined, lines, ownStart);
 function typedLine(text: string, threadId = "thread"): Line {
   const sendId = randomUUID();
   noteTypedSend(threadId, sendId, text);
@@ -122,13 +122,19 @@ describe("skills in text no person typed", () => {
     expect(expand(bot, words, [{ sendId: randomUUID(), text: words }])).toBe(words);
   });
 
-  it("run only the one at the very start, as they always have", () => {
+  it("run only the one at the very start, and only when that start is the person's own line or the owner's routine", () => {
     const bot = botWith("review", true, botWith("standup"));
-    const text = expand(bot, "/standup the work, then /review it");
+    const text = expand(bot, "/standup the work, then /review it", undefined, true);
     expect(text).toContain("The user ran your standup skill with /standup.");
     expect(text).toContain("Request: the work, then /review it");
-    expect(skillCalls("/standup the work, then /review it", "")).toEqual(["standup"]);
-    expect(skillCalls("[A note]\n/standup the work", "")).toEqual([]);
+    expect(skillCalls("/standup the work, then /review it", "", true)).toEqual(["standup"]);
+    expect(skillCalls("[A note]\n/standup the work", "", true)).toEqual([]);
+  });
+
+  it("stay plain words at the very start of a webhook's, a relay's or another bot's text", () => {
+    const bot = botWith("standup");
+    expect(expand(bot, "/standup the work")).toBe("/standup the work");
+    expect(skillCalls("/standup the work", "")).toEqual([]);
   });
 
   it("cannot borrow a person's send for other words or another conversation", () => {

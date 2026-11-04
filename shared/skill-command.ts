@@ -98,17 +98,18 @@ export function skillMentions(text: string): string[] {
 /**
  * The skills a turn calls. Security invariant: `typed` holds only words a person wrote themselves, and it is the one place
  * past the very start of the text that can call a skill. A webhook's payload and another bot's message reach the engine
- * after a note saying who they are from, so the start of `text` is never theirs.
+ * after a note saying who they are from. `ownStart`: whether the start of `text` is the person's own line or the owner's
+ * routine; a relayed, outside or bot-written start names no skill.
  */
-export function skillCalls(text: string, typed: string): string[] {
-  const leading = LEADING_COMMAND.exec(text.trimStart())?.[1];
+export function skillCalls(text: string, typed: string, ownStart = false): string[] {
+  const leading = ownStart ? LEADING_COMMAND.exec(text.trimStart())?.[1] : undefined;
   return [...new Set([...(leading && offersSkillCommand(leading) ? [leading] : []), ...skillMentions(typed)])];
 }
 
 /** What the engine reads for a message that ran skills with `/name`: which SKILL.md to read and follow, then the
  * request. `files` maps each skill the bot has to its SKILL.md; any other `/word` stays plain text. */
-export function skillCommandTurnText(text: string, files: ReadonlyMap<string, string>, typed = ""): string {
-  const names = skillCalls(text, typed).filter((name) => files.has(name));
+export function skillCommandTurnText(text: string, files: ReadonlyMap<string, string>, typed = "", ownStart = false): string {
+  const names = skillCalls(text, typed, ownStart).filter((name) => files.has(name));
   if (!names.length) return text;
   const read = (name: string) => JSON.stringify(files.get(name));
   const lead = names.length === 1
