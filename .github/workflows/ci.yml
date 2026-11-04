@@ -101,6 +101,10 @@ jobs:
       - name: Validate locale catalogs
         run: pnpm i18n:check
       - run: pnpm lint
+      - name: Source guards
+        # The tests that only read the source: seconds here, and they stay in the shards. On Nov 3-4 2026 one of them was
+        # red on main for 11 hours, and each PR heard about it after about 70 minutes, once its shards had found a runner.
+        run: pnpm exec vitest run src/locales/ scripts/testing/file-size-ratchet.test.ts scripts/testing/index-route-ratchet.test.ts scripts/testing/tighten-ratchets.test.ts scripts/testing/comment-history.test.ts scripts/testing/lazy-server-modules.test.ts scripts/testing/duration-sequencer.test.ts scripts/testing/host-e2e.test.ts scripts/testing/ci-retry-list.test.ts src/lib/copy-text.guard.test.ts src/components/Select.guard.test.ts --reporter=default --reporter=github-actions
       # A pull request that changes only docs, tests under scripts/ or the
       # control plane cannot change what these three check.
       - if: steps.scope.outputs.build == 'true'

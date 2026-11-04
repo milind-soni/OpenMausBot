@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { createElement } from "react";
+import { Component, createElement, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -188,6 +188,13 @@ describe("independent bot threads", () => {
     for (const action of actions) expect(pinBotThreadAction(action, [bot])).toMatchObject({ threadId: "first" });
     const pinned: Action = { type: "send", botId: bot.id, text: "Background", threadId: "second" };
     expect(pinBotThreadAction(pinned, [bot])).toBe(pinned);
+  });
+
+  it("a frame without onlyPeopleAdded clears it: the bot is back to everyone", () => {
+    const limited = reducer(start(), { type: "botPatched", bot: { ...bot, onlyPeopleAdded: true } });
+    expect(limited.bots[0]?.onlyPeopleAdded).toBe(true);
+    const open = reducer(limited, { type: "botPatched", bot: { ...bot, onlyPeopleAdded: undefined } });
+    expect(open.bots[0]?.onlyPeopleAdded).toBeUndefined();
   });
 
   it("keeps background bot frames from switching the visible transcript or clearing unread", () => {
@@ -2826,6 +2833,11 @@ describe("restoring the open conversation", () => {
   });
 
   describe("the provider's own effect", () => {
+    class TestErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+      state = { failed: false };
+      static getDerivedStateFromError() { return { failed: true }; }
+      render() { return this.state.failed ? createElement("div", { id: "snapshot-crash" }) : this.props.children; }
+    }
     // The provider opens the one stream and pulls the snapshot itself, so the fixture answers both.
     class FixtureEventSource {
       static opened: FixtureEventSource[] = [];
@@ -2885,7 +2897,7 @@ describe("restoring the open conversation", () => {
       container = document.createElement("div");
       document.body.append(container);
       root = createRoot(container);
-      flushSync(() => root!.render(createElement(StoreProvider, null, createElement(Probe))));
+      flushSync(() => root!.render(createElement(TestErrorBoundary, null, createElement(StoreProvider, null, createElement(Probe)))));
       await settle();
       const [stream] = FixtureEventSource.opened;
       expect(FixtureEventSource.opened).toHaveLength(1);
@@ -2893,6 +2905,45 @@ describe("restoring the open conversation", () => {
       return { stored, stream };
     };
     const hello = () => ({ kind: "hello", resumed: false, cursor: "run:0" });
+
+    it("keeps the UI mounted when a reconnect receives a malformed bots snapshot", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      expect(seen.selectedId).toBe("bot-1");
+      vi.stubGlobal("fetch", () => Promise.resolve(new Response("{}")));
+      stream.send(hello());
+      await settle();
+      expect(container?.querySelector("#snapshot-crash")).toBeNull();
+      expect(seen.selectedId).toBe("bot-1");
+    });
+
+    it("keeps the UI mounted when a reconnect receives a malformed routines snapshot", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      vi.stubGlobal("fetch", (path: string) => Promise.resolve(new Response(JSON.stringify(
+        path.startsWith("/api/bots?") ? { bots: [first, second], groups: [room] } : {},
+      ))));
+      stream.send(hello());
+      await settle();
+      expect(container?.querySelector("#snapshot-crash")).toBeNull();
+      expect(seen.routinesLoadState).toBe("error");
+    });
+
+    it("keeps the engines and webhooks it had when a reconnect receives empty answers for them", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      vi.stubGlobal("fetch", (path: string) => Promise.resolve(new Response(JSON.stringify(
+        path.startsWith("/api/bots?") ? { bots: [first, second], groups: [room] } : {},
+      ))));
+      stream.send(hello());
+      await settle();
+      expect(container?.querySelector("#snapshot-crash")).toBeNull();
+      expect(Array.isArray(seen.instances)).toBe(true);
+      expect(Array.isArray(seen.webhooks)).toBe(true);
+    });
 
     it("the provider remembers each non-empty selection and never an empty one", async () => {
       const { stored, stream } = await boot();
