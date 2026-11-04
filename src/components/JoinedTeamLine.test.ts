@@ -28,10 +28,11 @@ async function mount(line: unknown = null, cloudAccount: unknown = { state: asyn
 }
 beforeEach(() => {
   setLocale("en"); f.dispatch.mockClear(); f.api.mockClear(); f.config = {}; f.brand = "default"; account = signedOut; changed = null;
-  localStorage.clear();
+  const kept = new Map<string, string>();
+  vi.stubGlobal("localStorage", { getItem: (key: string) => kept.get(key) ?? null, setItem: (key: string, value: string) => void kept.set(key, value), clear: () => kept.clear() });
   host = document.createElement("div"); document.body.append(host);
 });
-afterEach(async () => { await act(async () => root?.unmount()); root = null; host.remove(); delete (window as { ogb?: unknown }).ogb; });
+afterEach(async () => { await act(async () => root?.unmount()); root = null; host.remove(); delete (window as { ogb?: unknown }).ogb; vi.unstubAllGlobals(); });
 
 it("signed out, with no other line: says what someone who joined a team needs, and Sign in opens the sign-in itself", async () => {
   await mount();
