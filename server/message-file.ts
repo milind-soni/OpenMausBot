@@ -17,6 +17,8 @@ export interface OpenedMessageFile {
   bytes: number;
   name: string;
   mime: string;
+  /** The canonical host path that was opened. */
+  path: string;
 }
 
 export function messageFileRoots(options: {
@@ -403,6 +405,7 @@ export async function openMessageFile(href: string, roots: readonly string[]): P
         bytes: opened.size,
         name: basename(canonicalAfter),
         mime: mimeFor(canonicalAfter),
+        path: canonicalAfter,
       };
     } catch (error) {
       await handle?.close().catch(() => undefined);

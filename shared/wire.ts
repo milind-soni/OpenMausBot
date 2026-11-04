@@ -467,8 +467,9 @@ export interface WireMessage extends HelperIntroField, SetupCardFields, WaitLine
   /** Renderers receive only the allowlisted /api/attachments URL. `file`
    * entries are opened through the message-scoped file route, never by path. */
   attachments?: Array<
-    | { kind: "image"; path: string; mime: string; name?: string }
-    | { kind: "file"; path: string; mime: string; name: string }
+    /** `source`: where a bot's attach-file copy came from on the server's computer, for the desktop app's Show in folder. */
+    | { kind: "image"; path: string; mime: string; name?: string; source?: string }
+    | { kind: "file"; path: string; mime: string; name: string; source?: string }
     /** `text` is the words the note speaks (secret-redacted when stored): clients show it behind a
      * collapsed transcript, never as message body, and the model's replay folds it back after `text`. */
     | { kind: "audio"; path: string; mime: string; durationMs?: number; text?: string }

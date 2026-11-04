@@ -293,7 +293,7 @@ function RoomTextMessage({
               ) : botText ? (
                 <div data-citation-source={m.id} data-citation-owner-type="group" data-citation-owner={group.id} data-citation-thread={group.threadId}><ChatMarkdown text={botText} mentionPeers={peers} everyone={!group.dm} mentionPerson={{ profileName: state.config?.profile?.name }} message={{ threadId: group.threadId, messageId: m.id }} delivered={replyGroup?.delivered} /></div>
               ) : null}
-              {replyGroup && <AttachmentGallery images={replyGroup.images} files={replyGroup.files} message={{ threadId: group.threadId, messageId: m.id }} eager={eager} beneath />}
+              {replyGroup && <AttachmentGallery images={replyGroup.images} files={replyGroup.files} originals={replyGroup.originals} message={{ threadId: group.threadId, messageId: m.id }} eager={eager} beneath />}
             </MessageBoundary>
           )}
         </div>
