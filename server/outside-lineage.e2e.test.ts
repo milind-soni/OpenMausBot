@@ -122,6 +122,39 @@ describe("a Team Cloud", () => {
     await finish(scout.id);
   }, hostTimeout(120_000));
 
+  it("keeps a routine outside work wrote outside, with what its runs write, a bot's change and a person's Undo, until a person saves it", async () => {
+    const scout = await newBot("Lineage scout");
+    const mate = await newBot("Lineage mate");
+    const soon = (ms: number) => new Date(Date.now() + ms).toISOString();
+    const runs = async () => (await team.as(ada, "GET", "/api/routines")).body.runs as any[];
+    const { thread } = await webhookTurn(scout.id, "Lineage hook", "marker-lineage");
+    const made = await internal(scout.id, thread, "/api/internal/trigger-requests", { action: "create", kind: "schedule", routine: { name: "Outside first", instructions: "lineage-first-run", schedule: { type: "interval", everyMinutes: 60 } } });
+    const first = made.body.result.resultId as string;
+    expect((await internal(scout.id, thread, "/api/internal/trigger-requests", { action: "run_now", triggerId: first })).status).toBe(201);
+    expect(confined(await turnWith("lineage-first-run"))).toBe(true);
+    const runThread = (await runs()).find((run) => run.routineId === first).threadId as string;
+    const made2 = await internal(scout.id, runThread, "/api/internal/trigger-requests", { action: "create", kind: "schedule", forBotId: mate.id,
+      routine: { name: "Outside second", instructions: "lineage-new-routine", schedule: { type: "once", at: soon(9_000) } } });
+    expect(made2.body?.state).toBe("applied");
+    await finish(scout.id, mate.id);
+    expect(confined(await turnWith("lineage-new-routine"))).toBe(true);
+    await finish(mate.id);
+    // A bot changing it from a person's own conversation is not the person saving it.
+    const changed = await internal(scout.id, scout.threadId, "/api/internal/trigger-requests", { action: "update", triggerId: first,
+      changes: { instructions: "lineage-after-change", schedule: { type: "once", at: soon(8_000) } } });
+    expect(changed.body?.state).toBe("applied");
+    await finish(scout.id);
+    expect(confined(await turnWith("lineage-after-change"))).toBe(true);
+    await finish(scout.id);
+    const deleted = await internal(scout.id, thread, "/api/internal/trigger-requests", { action: "delete", triggerId: first });
+    expect(deleted.body?.state).toBe("applied");
+    expect((await team.as(ada, "POST", `/api/threads/${thread}/undo`, { requestId: deleted.body.requestId })).status).toBe(200);
+    const restored = ((await team.as(ada, "GET", "/api/routines")).body.routines as any[]).find((one) => one.name === "Outside first" && one.id !== first);
+    expect((await team.as(ada, "POST", `/api/routines/${restored.id}/run`)).status).toBe(201);
+    expect(confined(await turnWith("lineage-after-change"))).toBe(true);
+    await finish(scout.id);
+  }, hostTimeout(150_000));
+
   it("keeps a confined turn from starting or changing a person's routine", async () => {
     const scout = await newBot("Routine starter");
     const mine = (await team.as(ada, "POST", "/api/routines", { name: "Ada's", prompt: "routine-of-a-person", botId: scout.id, enabled: false, schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } })).body.routine;
@@ -497,6 +530,14 @@ describe("a personal Cloud only its owner has used", () => {
     writeFileSync(release, "");
     await sleep(1_500);
     rmSync(release, { force: true });
+    rmSync(dump, { force: true });
+    const second = await call(runThread, "/api/internal/trigger-requests", { action: "create", kind: "schedule", forBotId: mate.id,
+      routine: { name: "Solo second", instructions: "solo-new-routine", schedule: { type: "once", at: new Date(Date.now() + 6_000).toISOString() } } });
+    expect(second.body?.state).toBe("applied");
+    expect(confined(await turnWith("solo-new-routine"))).toBe(true);
+    writeFileSync(release, "");
+    await sleep(1_500);
+    rmSync(release, { force: true });
   }, hostTimeout(120_000));
 });
 
@@ -510,16 +551,29 @@ describe("a personal Cloud someone else has used", () => {
     expect((await cloud("PATCH", `/api/bots/${mate.id}`, { approvalMode: "full", applyToAllThreads: true })).status).toBe(200);
     const room = (await cloud("POST", "/api/groups", { name: "Owner's room", memberIds: [chief.id, mate.id], setup: { bulletin: "as it was", defaultResponder: { kind: "member", botId: mate.id } } })).body.group;
     const theirs = (await cloud("POST", `/api/bots/${chief.id}/tasks`, { title: "Left behind" })).body.task.threadId as string;
-    markLeftBehind(join(fx.root, "cloud", ".openmausbot"), { threadIds: [theirs] });
-    await fx.relaunch({ kill: false, cloud: {} });
     const capabilityFor = async (botId: string, threadId: string) => ((await (await fetch(`${fx.cloudBase}/api/testing/internal-capability`, { method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-capability": KEY }, body: JSON.stringify({ botId, threadId }) })).json()) as any).token as string;
     const call = async (capability: string, from: string, path: string, body: object) => {
       const response = await fetch(`${fx.cloudBase}${path}?fromBotId=${chief.id}`, { method: "POST", headers: { authorization: `Bearer ${capability}`, "content-type": "application/json" }, body: JSON.stringify({ fromBotId: chief.id, fromThreadId: from, ...body }) });
       return { status: response.status, body: await response.json().catch(() => null) as any };
     };
+    // A page shown without its frame before outside work reached this conversation.
+    const page = await call(await capabilityFor(chief.id, theirs), theirs, "/api/internal/options-card", { tool: "show_html", html: "<p>Before</p>", title: "Before", frameless: true });
+    expect(page.status).toBe(201);
+    const borderOf = async () => ((await cloud("GET", `/api/threads/${theirs}/messages?limit=200`)).body.messages as any[]).find((line) => line.id === page.body.messageId).app.border;
+    expect(await borderOf()).toBe(false);
+    // A turn of the owner's ends the work that page came from, so nothing of it runs again after the restart.
+    expect((await cloud("POST", `/api/bots/${chief.id}/messages`, { text: "before-mark", threadId: theirs })).status).toBe(202);
+    await turnWith("before-mark");
+    writeFileSync(release, "");
+    await sleep(1_500);
+    for (const file of [release, dump]) rmSync(file, { force: true });
+    markLeftBehind(join(fx.root, "cloud", ".openmausbot"), { threadIds: [theirs] });
+    await fx.relaunch({ kill: false, cloud: {} });
     expect((await cloud("POST", `/api/bots/${chief.id}/messages`, { text: "their-line", threadId: theirs })).status).toBe(202);
     expect(confined(await turnWith("their-line"))).toBe(true);
     const capability = await capabilityFor(chief.id, theirs);
+    expect((await call(capability, theirs, "/api/internal/options-card", { tool: "update_html", app_id: page.body.messageId, html: "<p>After</p>" })).status).toBeLessThan(300);
+    expect(await borderOf()).toBe(true);
 
     expect(await call(capability, theirs, "/api/internal/retry-thread", { toBotId: mate.id, toThreadId: mate.threadId, note: "note-for-owner" })).toMatchObject({ status: 403, body: { error: OUTSIDE_STAYS_HERE } });
     await sleep(800);

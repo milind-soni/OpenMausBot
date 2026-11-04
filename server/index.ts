@@ -9544,7 +9544,7 @@ async function undoAppliedChange(res: ServerResponse, threadId: string, requestI
         else cloudRoutineAuthors.forget(undone.routineId);
       } else if (undone.action === "delete" && undone.restoredId) {
         if (undone.ownersBefore) cloudOwnersRoutine(undone.restoredId);
-        else cloudRoutineAuthors.wrote(undone.restoredId, CLOUD_NOBODY_KEY);
+        else cloudRoutineAuthors.wrote(undone.restoredId, cloudRoutineAuthors.writer(undone.routineId) === CLOUD_OUTSIDE_KEY ? CLOUD_OUTSIDE_KEY : CLOUD_NOBODY_KEY);
       }
     }
     result = undone;
@@ -13187,7 +13187,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           store,
           bot: internalSender, apps: chatApps, folders: async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }),
           threadId: internalCapability.threadId,
-          input: body?.frameless && cloudGuestDriven(internalCapability.threadId) ? { ...body, frameless: false } : body, authored: (id) => handoffs.authored(internalCapability.threadId, internalCapability.generation, id),
+          input: (body?.tool === "show_html" || body?.tool === "update_html") && cloudGuestDriven(internalCapability.threadId) ? { ...body, frameless: false } : body, authored: (id) => handoffs.authored(internalCapability.threadId, internalCapability.generation, id),
         });
         return result.ok
           ? json(res, 201, { messageId: result.messageId, ...("masked" in result && result.masked ? { masked: true } : {}) })
@@ -13510,7 +13510,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (proposedInput.action !== "create" && (proposedInput.action === "update" ? outsideWorkStaysHere(fromThreadId) : cloudGuestDriven(fromThreadId)) && !outsideLineage.routineRunsConfined(String(proposedInput.routineId))) return json(res, 403, { error: OUTSIDE_STAYS_HERE });
         const wasOwners = proposedInput.action !== "create" && typeof proposedInput.routineId === "string" ? cloudRoutineIsOwners(proposedInput.routineId) : false;
         const run = activeRoutineRunForThread(fromThreadId);
-        const outside = Boolean(CLOUD_HOME) && outsideDrivenThread(fromThreadId);
+        const outside = Boolean(CLOUD_HOME) && (outsideDrivenThread(fromThreadId) || outsideWorkStaysHere(fromThreadId));
         const ownersTurn = !outside && (cloudOwnerOnlyThread(fromThreadId) || cloudRoutineRunIsOwners(run, from.id, fromThreadId));
         const ownersLevel = !outside && CLOUD_HOME && !cloudGuestDriven(fromThreadId) && (proposedInput.action === "create" ||
           cloudRoutineAuthors?.writer(String(proposedInput.routineId)) === CLOUD_OWNER_KEY) && (run?.threadId === fromThreadId || ownerSpokeOnly(store.messagesFor(fromThreadId), cloudThreadStarters(fromThreadId), cloudProvenOwnerPerson, cloudCardAnswerer));
