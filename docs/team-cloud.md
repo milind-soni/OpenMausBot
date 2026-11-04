@@ -480,6 +480,7 @@ inbox is unread.
 | @Ben in a bot's settled reply, where Ben can see it | the same | that bot, in that conversation |
 | a question or approval routed to Ben (`ask-routing.ts`), from a shared chat, a room, a routine or work handed on | a copy of the card, `"ask"` | the card where it was asked: the copy's buttons answer it there (`answeredIn`) and the copy follows it |
 | a routine's report or a failure routed to Ben | the report, `"result"` / `"notice"` | nothing |
+| a routine Ben wrote that tried to hand work to a bot it may not reach | what was refused, `"notice"` | nothing |
 
 An ask in the person's own private chat, where they are, stays only there. The Admins' asks (a bot nobody owns) are not
 anyone's inbox. A member without any bot of their own gets the notification where it was written, as before.
