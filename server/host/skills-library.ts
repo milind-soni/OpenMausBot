@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { skillCommandTurnText, skillMentions } from "../../shared/skill-command.ts";
+import { skillCalls, skillCommandTurnText } from "../../shared/skill-command.ts";
 import type { SkillRequestCardData, SkillShareRecord } from "../../shared/skill-request.ts";
 import { narrowestAudience, intersectAudience } from "../bot-visibility.ts";
 import { DATA_DIR, type AppConfig } from "../config.ts";
@@ -28,6 +28,7 @@ import {
 import { enabledSkillFiles, listSkills, readSkillFile, resolveBotSkills, skillsSystemPrompt, type SkillListing } from "../skills.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
 import { claudeUserSkillsEnabled } from "../turn-settings.ts";
+import { typedWords } from "../typed-sends.ts";
 import { TASK_WORKSPACES_DIR } from "../workspace.ts";
 
 type ReceiptArgs = {
@@ -254,9 +255,11 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       return importsFor(bot, conversationSkills(bot, threadId), instance);
     },
 
-    /** Each `/name` in the message for one of the bot's own, library or imported skills, or one its engine loads by itself. */
-    expandSkillCommand(bot: BotRecord, threadId: string, text: string, instance?: TurnInstance): string {
-      const mentioned = skillMentions(text);
+    /** Each `/name` called for one of the bot's own, library or imported skills, or one its engine loads by itself. `lines`
+     * are the turn's own lines when it is a person's turn: only words they typed can call a skill past the start of the text. */
+    expandSkillCommand(bot: BotRecord, threadId: string, text: string, instance?: TurnInstance, lines: ReadonlyArray<{ sendId?: string; text?: string }> = [], ownStart = false): string {
+      const typed = typedWords(threadId, lines);
+      const mentioned = skillCalls(text, typed, ownStart);
       if (!mentioned.length) return text;
       const assigned = skillsLibraryEnabled(cfg) ? liveAssigned(bot) : undefined;
       const files = enabledSkillFiles(bot.id, mentioned, assigned);
@@ -270,7 +273,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
           .filter((skill) => !skill.enabled).map((skill) => skill.name));
         add(nativesFor(bot, threadId, instance).filter((skill) => !switched.has(skill.name)));
       }
-      return skillCommandTurnText(text, files);
+      return skillCommandTurnText(text, files, typed, ownStart);
     },
 
     shareNote(bot: BotRecord, threadId: string, enabled: boolean): TurnShareNote {

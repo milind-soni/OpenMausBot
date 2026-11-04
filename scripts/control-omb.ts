@@ -312,7 +312,8 @@ export async function launchVerificationServer(
       ...(extraProviders.includes("copilot") ? { githubCopilot: {
         driver: "copilotAgent", displayName: "Verification Copilot",
         config: { cli: fileURLToPath(new URL("../server/testing/fake-acp-cli.ts", import.meta.url)) },
-        environment: { FAKE_ACP_MODELS: "auto,claude-haiku-4.5,gpt-5.6-luna", FAKE_ACP_DUMP: join(dataDir, "copilot-launch.json") },
+        environment: { FAKE_ACP_MODELS: "auto,claude-haiku-4.5,gpt-5.6-luna", FAKE_ACP_REJECT_STDIO_MCP: "1",
+          FAKE_ACP_DUMP: join(dataDir, "copilot-launch.json") },
       } } : {}),
       ...(extraProviders.includes("customAcp") ? { myAgent: {
         driver: "customAcp", displayName: "Verification custom ACP",

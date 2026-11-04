@@ -509,6 +509,8 @@ export interface ResolveOptions {
   trustLocalBrowser?: boolean;
   /** Why a session made for one task may not make this request (a Team Cloud's sign-in that moves one bot in), else null. */
   restricted?(session: SessionRecord, method: string, path: string, url: URL): string | null;
+  /** The sentence a person reads when their session lacks the scope for this request; null keeps the bare refusal. */
+  scopeRefusal?(method: string, path: string): string | null;
 }
 
 const CLI_OWNER_HEADER = "x-openmausbot-cli-owner";
@@ -580,7 +582,7 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
     if (narrowed) return deny(403, narrowed);
     const needed = requiredScope(method, path, options.features ?? {});
     if (!session.scopes.includes(needed)) {
-      return deny(403, `forbidden: this session lacks the ${needed} scope`);
+      return deny(403, options.scopeRefusal?.(method, path) ?? `forbidden: this session lacks the ${needed} scope`);
     }
     // Redeeming a stream ticket does not renew: an unattended open stream must not keep a session alive.
     if (via !== "ticket") options.sessions.renew(session.id);

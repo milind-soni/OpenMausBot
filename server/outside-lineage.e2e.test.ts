@@ -336,7 +336,7 @@ describe("a Team Cloud", () => {
     rmSync(notes, { force: true });
   }, hostTimeout(120_000));
 
-  it("runs no skill named in outside words or a bot's message, where a person's own line runs it", async () => {
+  it("runs a skill by name only from a person's own line: never from outside words, a bot's message or a relayed line", async () => {
     const RAN = "The user ran your weekly-digest skill";
     const scout = await newBot("Skill scout");
     const mate = await newBot("Skill mate");
@@ -345,11 +345,18 @@ describe("a Team Cloud", () => {
     expect(JSON.stringify(turn.prompt)).not.toContain(RAN);
     await finish(scout.id);
     const person = (await team.as(ada, "POST", `/api/bots/${scout.id}/tasks`, { title: "Mine" })).body.task.threadId as string;
-    expect((await team.as(ada, "POST", `/api/bots/${scout.id}/messages`, { text: "person-skill please run /weekly-digest now", threadId: person })).status).toBe(202);
+    const sendId = () => `outside-skill-${randomBytes(8).toString("hex")}`;
+    expect((await team.as(ada, "POST", `/api/bots/${scout.id}/messages`, { text: "person-skill please run /weekly-digest now", threadId: person, sendId: sendId() })).status).toBe(202);
     expect(JSON.stringify((await turnWith("person-skill")).prompt)).toContain(RAN);
-    expect((await internal(scout.id, person, "/api/internal/coordinate-bots", { botIds: [mate.id], message: "brief-skill please run /weekly-digest now", reply: "none" })).status).toBe(200);
+    expect((await internal(scout.id, person, "/api/internal/coordinate-bots", { botIds: [mate.id], message: "/weekly-digest brief-skill, then /weekly-digest again", reply: "none" })).status).toBe(200);
     expect(JSON.stringify((await turnWith("brief-skill")).prompt)).not.toContain(RAN);
     await finish(scout.id, mate.id);
+    const relayedIn = (await team.as(ada, "POST", `/api/bots/${scout.id}/tasks`, { title: "Relayed" })).body.task.threadId as string;
+    const relayed = await team.as(ada, "POST", `/api/bots/${scout.id}/messages/guarded`, { threadId: relayedIn, sendId: sendId(), text: "/weekly-digest relayed-skill",
+      expectedActiveLeafId: null, expectedApprovalMode: "full", onBehalfOf: { email: "ada@acme.test" } });
+    expect(relayed.status).toBeLessThan(300);
+    expect(JSON.stringify((await turnWith("relayed-skill")).prompt)).not.toContain(RAN);
+    await finish(scout.id);
   }, hostTimeout(120_000));
 
   it("keeps the frame on a page outside work shows, where a person's own conversation may drop it", async () => {

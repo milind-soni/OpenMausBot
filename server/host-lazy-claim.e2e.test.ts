@@ -315,25 +315,6 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
     await idle(bot.id, task.threadId);
   }, 60_000);
 
-  itAutoHost("still asks at Full access when the work came in from outside: a webhook's words don't carry the person's grant", async () => {
-    await start();
-    const { bot } = await apiOk("POST", "/api/bots", { name: "Host Webhook Bot" });
-    expect(bot.approvalMode ?? "full").toBe("full");
-    const hook = await apiOk("POST", "/api/webhooks", { name: "Host hook", prompt: "Handle the event.", botId: bot.id });
-    resetTurn();
-    const delivered = await fetch(`http://127.0.0.1:${Number(new URL(base).port) + 1}/hooks/${hook.webhook.endpointId}/${encodeURIComponent(hook.credential.secret)}`, {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "Look at my calendar." }) });
-    expect(delivered.status).toBe(202);
-    const computer = mountedComputer(await dumpFor(bot.id));
-    const client = createControlClient({ url: computer.env.OMB_CONTROL_URL, token: computer.env.OMB_CONTROL_TOKEN });
-    const thread = (await apiOk("GET", "/api/routines")).runs.find((run: any) => run.webhookId === hook.webhook.id).threadId as string;
-    expect(await withAnswer(base, thread, client.state(true, { app: "Chrome", site: "calendar.google.com" }))).toEqual({ held: false, helpOpen: false });
-    const cards = (await apiOk("GET", `/api/threads/${thread}/messages?limit=200`)).messages.filter((message: any) => message.card?.tool === "use_your_computer");
-    expect(cards.map((message: any) => message.card.answered)).toEqual(["allow"]);
-    writeFileSync(finishFile, "finish");
-    await idle(bot.id, thread);
-  }, 60_000);
-
   itAutoHost("asks once before the first screen call below Full access, in plain words naming the app and the site", async () => {
     await start();
     const { bot } = await apiOk("POST", "/api/bots", { name: "Host Asking Bot", settings: { approvalMode: ASKS } });

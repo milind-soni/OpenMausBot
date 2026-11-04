@@ -123,7 +123,8 @@ beforeAll(async () => {
     full.autoApprove = false;
     for (const task of full.tasks) { task.approvalMode = "full"; task.autoApprove = false; }
   }
-  bots.find((row: any) => row.id === outboundPolicyBot.id).outbound = { policy: "ask", dailyCap: 100 };
+  // Full access asks only for a bot someone set a sending rule on.
+  for (const bot of [fullBot, draftBot, draftHelper, outboundPolicyBot]) bots.find((row: any) => row.id === bot.id).outbound = { policy: "ask", dailyCap: 100 };
   writeFileSync(botsFile, JSON.stringify(bots));
   const configFile = join(fixture.info.dataDir, "config.json");
   const config = JSON.parse(readFileSync(configFile, "utf8"));
