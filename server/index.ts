@@ -353,7 +353,7 @@ import {
   readSections,
   sectionContextKey,
   sectionContextSystemPrompt,
-  writeSectionContext,
+  readSectionContext, writeSectionContext,
 } from "./section-context.ts";
 import {
   applyStagedSkillWrite,
@@ -365,7 +365,7 @@ import {
   scanSkillText,
   listSkills,
   listStagedSkillWrites,
-  readSkillFile,
+  readSkillFile, removeSkill,
   rejectStagedSkillWrite,
   setSkillEnabled,
   skillPackageStamps,
@@ -9018,8 +9018,8 @@ orgLibrary = new OrgLibrary({
   dataDir: DATA_DIR,
   store,
   routines: routines!,
-  skills: { list: listSkills, stamps: skillPackageStamps, setEnabled: setSkillEnabled, installOrg: installOrgSkill },
-  presets: presetStore,
+  skills: { list: listSkills, stamps: skillPackageStamps, setEnabled: setSkillEnabled, installOrg: installOrgSkill, read: readSkillFile, remove: removeSkill },
+  presets: presetStore, sections: { read: (section) => readSectionContext(section)?.text ?? "", write: (section, text) => void writeSectionContext(section, text) },
   postState: (message) => utilityParentPort?.postMessage(message),
 });
 {

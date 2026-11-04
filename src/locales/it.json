@@ -1667,7 +1667,6 @@
   "orgLibrary.fromSelf": "La tua organizzazione",
   "orgLibrary.recommended": "Consigliato da {name}",
   "orgLibrary.withdrawn": "Ritirato da {name}",
-  "orgLibrary.newerRelease": "Versione {version} disponibile. Gli aggiornamenti arrivano in automatico con un prossimo aggiornamento di {app}.",
   "orgLibrary.bots": "Bot: {count}",
   "orgLibrary.skills": "Abilità: {count}",
   "orgLibrary.presets": "Bot preset: {count}",

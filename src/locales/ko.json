@@ -1786,7 +1786,6 @@
   "orgLibrary.fromSelf": "내 조직",
   "orgLibrary.recommended": "{name} 추천",
   "orgLibrary.withdrawn": "{name}이(가) 철회함",
-  "orgLibrary.newerRelease": "버전 {version} 출시. 다음 {app} 업데이트에서 자동으로 반영돼요.",
   "orgLibrary.bots": "봇: {count}개",
   "orgLibrary.skills": "스킬: {count}개",
   "orgLibrary.presets": "프리셋 봇: {count}개",

@@ -1898,7 +1898,7 @@
   "orgLibrary.fromSelf": "Your organization",
   "orgLibrary.recommended": "Recommended by {name}",
   "orgLibrary.withdrawn": "Withdrawn by {name}",
-  "orgLibrary.newerRelease": "Version {version} available. Updates arrive automatically in an upcoming {app} update.",
+  "orgLibrary.newerRelease": "Version {version} available. It comes over on its own once it's downloaded, and keeps your changes.",
   "orgLibrary.bots": "Bots: {count}",
   "orgLibrary.skills": "Skills: {count}",
   "orgLibrary.presets": "Preset bots: {count}",
