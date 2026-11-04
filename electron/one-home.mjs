@@ -28,6 +28,7 @@
 // computer no longer counts as moved. Choosing otherwise again moves it again, as anyone's first move.
 
 import { failureOf, rateLimited } from "./move-failure.mjs";
+import { gapKey, gapSummary, stayedBehind } from "./move-gaps.mjs";
 
 export { rateLimited };
 
@@ -40,8 +41,12 @@ const BUSY_POLL_MS = 5_000;
 /** The longest a timer waits before it looks again: longer ones overflow Node's timers. */
 const LONGEST_WAIT_MS = 6 * HOUR;
 export const CHECK_PASSES = 3;
-/** A failure while this computer's server is frozen: lifted, and tried again in an hour. */
+/** A failure while this computer's server is frozen: lifted, and tried again in an hour, then twice as long after each
+ * one that follows, up to FROZEN_RETRY_MAX_MS, so a move that keeps failing does not stop this computer every hour. */
 export const FROZEN_RETRY_MS = HOUR;
+export const FROZEN_RETRY_MAX_MS = 12 * HOUR;
+/** What the line and the Admin say when the check still found things missing after its passes. */
+export const INCOMPLETE = "Some things didn't reach My Cloud yet. It tries again by itself, and if they still can't go, the rest moves without them and you'll see what stayed here.";
 /** A failure before the freeze (no network, My Cloud asleep or updating): tried again sooner at first, then hourly. */
 export const COPY_RETRY_MS = [2 * MINUTE, 5 * MINUTE, 15 * MINUTE, 30 * MINUTE, HOUR];
 export const FAILING_LINE_MS = DAY;
@@ -255,8 +260,12 @@ export function createOneHome(deps) {
     log(`one home: ${journal.phase} failed (${said})`);
     const tries = (journal.tries ?? 0) + 1;
     const hourly = frozen && !rateLimited(error);
-    const next = write({ ...journal, phase: "copy", passes: 0, tries, error: said, failingSince: journal.failingSince ?? now(), failure: failureOf(error, journal.phase, journal.failure, now()),
-      retryAt: now() + (hourly ? FROZEN_RETRY_MS : COPY_RETRY_MS[Math.min(tries - 1, COPY_RETRY_MS.length - 1)]), hourly: hourly || undefined, ...(frozen ? { thaw: true } : {}) });
+    const frozenTries = hourly ? (journal.frozenTries ?? 0) + 1 : journal.frozenTries;
+    const wait = hourly ? Math.min(FROZEN_RETRY_MAX_MS, FROZEN_RETRY_MS * 2 ** Math.min(frozenTries - 1, 8)) : COPY_RETRY_MS[Math.min(tries - 1, COPY_RETRY_MS.length - 1)];
+    // A check's gaps are kept by key, so the next check can tell whether sending again carried any of them.
+    const next = write({ ...journal, phase: "copy", passes: 0, tries, frozenTries, error: said, failingSince: journal.failingSince ?? now(), failure: failureOf(error, journal.phase, journal.failure, now()),
+      gapKey: typeof error?.gapKey === "string" ? error.gapKey : undefined, gaps: typeof error?.gaps === "string" ? error.gaps : undefined,
+      retryAt: now() + wait, hourly: hourly || undefined, ...(frozen ? { thaw: true } : {}) });
     if (frozen) await thaw(next);
     return null;
   }
@@ -307,12 +316,22 @@ export function createOneHome(deps) {
     return write({ ...journal, phase: "check", passes: 1 });
   }
 
+  /** What arrived, against what is here. What sending again three times carried none of, which the try before this one
+   * also ended without (by the same gaps, or by any for a journal from before gaps were kept), never will go: it stays on
+   * this computer, the rest moves, and the done line says what stayed (`stuck`). Anything else fails, and goes again. */
   async function check(journal) {
-    let passes = journal.passes ?? 1;
+    let passes = journal.passes ?? 1, first = null, stuck = null;
     try {
       for (let report = await deps.send.check(); report?.ok !== true; report = await deps.send.check()) {
         log(`one home: the check found ${missingOf(report)} missing`);
-        if (passes >= CHECK_PASSES) throw tagged("Some of this computer's things did not reach My Cloud.", "incomplete");
+        const key = gapKey(report);
+        first ??= key;
+        if (passes >= CHECK_PASSES) {
+          const again = journal.failure?.code === "incomplete" && (journal.gapKey === undefined || journal.gapKey === key);
+          // Only what can be named stays behind: a check that can't say what it misses fails as before.
+          if (key === first && again && (stuck = stayedBehind(report)).length) { log(`one home: moving on without what never arrived (${gapSummary(report)})`); break; }
+          throw tagged(INCOMPLETE, "incomplete", { gapKey: key, gaps: gapSummary(report) });
+        }
         await deps.send.move({ final: true });
         passes += 1;
         write({ ...journal, passes });
@@ -324,7 +343,7 @@ export function createOneHome(deps) {
       try { counts = arrivedCounts(await deps.local.json("/api/cloud-send/manifest"), (await session.call("GET", "/api/cloud-send/manifest")).body); }
       finally { await session.close().catch(() => {}); }
     } catch {}
-    return write({ ...journal, phase: "switch", passes, checkedAt: now(), ...(counts ? { counts } : {}) });
+    return write({ ...journal, phase: "switch", passes, checkedAt: now(), ...(counts ? { counts } : {}), ...(stuck?.length ? { stuck } : {}) });
   }
 
   /** The point of no return: My Cloud switches on what was on here, and keeps which computer its bots came from. What was
@@ -357,9 +376,9 @@ export function createOneHome(deps) {
     } finally { await session?.close().catch(() => {}); }
     const sent = deps.send.snapshot?.();
     const held = (sent?.whole?.result?.notes ?? []).filter((note) => note?.kind === "held" && typeof note.connection === "string").map((note) => note.connection);
-    const left = notCarried(sent, true);
+    const left = [...notCarried(sent, true), ...(Array.isArray(journal.stuck) ? journal.stuck : [])];
     const done = write({ ...journal, phase: "done", switched, doneAt: now(), version: deps.version ?? null, phone: deps.phone?.paired() === true, held, ...(left.length ? { left } : {}),
-      error: undefined, failingSince: undefined, retryAt: undefined, tries: undefined, failure: undefined });
+      error: undefined, failingSince: undefined, retryAt: undefined, tries: undefined, failure: undefined, frozenTries: undefined, gapKey: undefined, gaps: undefined, stuck: undefined });
     await settle(done);
     deps.openHome?.();
     return null;
