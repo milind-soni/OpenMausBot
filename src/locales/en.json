@@ -1209,6 +1209,7 @@
   "cloudSend.move.failingPlainNamed": "Your bots couldn't move to {place} yet.",
   "cloudSend.move.done": "Everything from this computer is here: {list}.",
   "cloudSend.move.doneAll": "Everything from this computer is here.",
+  "cloudSend.move.doneLeft": "Everything else from this computer is here. These stayed on it:",
   "cloudSend.move.phone": "Pair your phone with My Cloud",
   "cloudSend.move.homeAgain": "My Cloud has ended, so your bots are back on this computer. What you did on My Cloud is on its way back too.",
   "cloudSend.move.back": "My Cloud has ended, so your bots are back on this computer, with what you did on My Cloud. Logins and keys you added on My Cloud didn't come back: add them here again if you need them.",
