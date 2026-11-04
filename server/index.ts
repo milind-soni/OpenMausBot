@@ -80,7 +80,7 @@ import { groupTurnCwd } from "./room-cwd.ts";
 import { RoomTurnDeadline, RoomTurnStallRegistry, effectiveRoomTurnTimeoutMinutes, parseConversationTurnTimeout, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
 import { roomTurnEnd, type RoomClaimEnd } from "./room-turn-end.ts";
 import { applyHoldDirective, classifyHoldDirective, heldMemberLine, rememberHeldMessage, stopWordPlacement } from "./room-holds.ts";
-import { createPersonStop } from "./host/person-stop.ts"; import type { DirectSendInput, DirectSendReceipt } from "./direct-send.ts";
+import { createPersonStop } from "./host/person-stop.ts"; import { settleParkedFiles, type ParkedTurnAttachment } from "./host/turn-attachments.ts"; import type { DirectSendInput, DirectSendReceipt } from "./direct-send.ts";
 import { finishedWithoutSummaryLine, ROOM_SUMMARY_REASK, roomTurnNarrationIds, roomTurnReply } from "./room-reply.ts";
 import { pickComputer } from "./computer-selection.ts";
 import * as boat from "./boat.ts"; import { keyHint, keyStatus, nestedKeyStatus, withoutKeyHints } from "./key-hint.ts";
@@ -2338,7 +2338,6 @@ async function interruptAllDirectThreads(botId: string): Promise<void> {
 }
 const retiredProviderTurns = new RetiredTurnRegistry();
 const pendingCancelledProviderHandshakes = new PendingTurnCancellations();
-type ParkedTurnAttachment = NonNullable<Message["attachments"]>[number];
 
 const turnAttachmentsByTurn = new Map<string, Array<ParkedTurnAttachment>>();
 
@@ -6452,6 +6451,16 @@ bus.subscribe((event: RuntimeEvent) => {
     pushMessage({ role: "bot", kind: "text", text: spoken.text, turnId });
     lastReply.set(event.threadId, spoken.text);
   };
+  const landParkedFiles = (stopped: boolean) => {
+    const key = turnAttachmentKey(event.threadId, event.turnId);
+    const { land, discard } = settleParkedFiles(turnAttachmentsByTurn.get(key) ?? [], stopped, redactSecretsInText);
+    turnAttachmentsByTurn.delete(key);
+    for (const file of discard) deleteAttachment(file.path);
+    if (!land.length) return;
+    const response = store.messagesFor(event.threadId).findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === completedTurnId);
+    if (response) store.patchMessage(event.threadId, response.id, { attachments: [...(response.attachments ?? []), ...land] });
+    else pushMessage({ role: "bot", kind: "text", text: "", attachments: land, turnId: completedTurnId });
+  };
 
   if (coordinatorVisibleText) pushAssistantText(coordinatorVisibleText, completedTurnId);
   if (bot) handoffs.onEvent(event); else roomSessions.onEvent(event);
@@ -6736,11 +6745,8 @@ bus.subscribe((event: RuntimeEvent) => {
         pushStoppedTurn(event.turnId);
         break;
       }
-      pushMessage({
-        role: "bot",
-        kind: "activity",
-        tool: failedTurnTool(event.message, event),
-      });
+      landParkedFiles(false); // above the failure row, which stays the last, retryable line
+      pushMessage({ role: "bot", kind: "activity", tool: failedTurnTool(event.message, event) });
       if (event.setup && bot) store.setTaskActivity(bot.id, event.threadId, "dead");
       break;
     case "thread.token-usage.updated":
@@ -6754,49 +6760,11 @@ bus.subscribe((event: RuntimeEvent) => {
       const internal = isInternalTurn(event.threadId);
       clearInternalTurn(event.threadId);
       const reviewAnswer = reviewAnswerThreads.delete(event.threadId);
-      const generatedKey = turnAttachmentKey(event.threadId, event.turnId);
-      const generated = turnAttachmentsByTurn.get(generatedKey) ?? [];
-      turnAttachmentsByTurn.delete(generatedKey);
-      for (const attachment of generated) {
-        if (event.ok || attachment.kind !== "audio") continue;
-        deleteAttachment(attachment.path);
-      }
-      const settled = event.ok || !generated.length
-        ? generated
-        : generated.filter((attachment) => attachment.kind !== "audio");
-      if (settled.length) {
-        const response = [...store.messagesFor(event.threadId)].reverse().find(
-          (message) =>
-            message.role === "bot" &&
-            message.kind === "text" &&
-            message.turnId === completedTurnId,
-        );
-        // A note's words stay on its attachment as the transcript, never appended to the reply: every client
-        // would otherwise read the reply twice. The model still sees them after the text (contextText).
-        const staged = settled.map((attachment) =>
-          attachment.kind === "audio"
-            ? {
-                kind: "audio" as const,
-                path: attachment.path,
-                mime: attachment.mime,
-                ...(attachment.text?.trim() ? { text: redactSecretsInText(attachment.text.trim()) } : {}),
-              }
-            : attachment,
-        );
-        if (response) {
-          store.patchMessage(event.threadId, response.id, {
-            attachments: [...(response.attachments ?? []), ...staged],
-          });
-        } else {
-          pushMessage({
-            role: "bot",
-            kind: "text",
-            text: "",
-            attachments: staged,
-            turnId: completedTurnId,
-          });
-        }
-      }
+      const stoppedTurnId = stoppedTurns.get(event.threadId);
+      const clientStopped = personStops.stopped(event.threadId, completedTurnId) || (stoppedTurns.has(event.threadId)
+        && (stoppedTurnId === undefined || completedTurnId === undefined || stoppedTurnId === completedTurnId));
+      const stopped = event.stopReason === "interrupted" || clientStopped;
+      landParkedFiles(!event.ok && stopped);
       if (completedTurnId) {
         const terminal = store.markTerminalAssistantMessage(event.threadId, completedTurnId);
         if (terminal) store.patchMessage(event.threadId, terminal.id, { turnSucceeded: event.ok });
@@ -6808,11 +6776,7 @@ bus.subscribe((event: RuntimeEvent) => {
       if (personStops.stopped(event.threadId, completedTurnId)) pushStoppedTurn(completedTurnId);
       personStops.turnEnded(event.threadId, completedTurnId);
       lastReply.delete(event.threadId);
-      const stoppedTurnId = stoppedTurns.get(event.threadId);
-      const clientStopped = stoppedTurns.has(event.threadId)
-        && (stoppedTurnId === undefined || completedTurnId === undefined || stoppedTurnId === completedTurnId);
       stoppedTurns.delete(event.threadId);
-      const stopped = event.stopReason === "interrupted" || clientStopped;
       // Claude settles a lazy-claim interrupt as exit_before_result, not "interrupted": this generation's marker keeps it from reporting a second incident.
       const lazyClaimAlreadyReported = event.stopReason === "exit_before_result" &&
         turnResourceOwners.get(event.threadId)?.lazyClaimFailureReported === true;
