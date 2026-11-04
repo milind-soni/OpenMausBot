@@ -29,7 +29,7 @@ import { bootFailureMessage, listeningSignal, pollServerIdentity, SERVER_BOOT_TI
 import { createServerSupervisor } from "./server-supervisor.mjs";
 import { serverChildLaunch } from "./server-child-launch.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
-import { chatLinkFrom, chatLinkFromCommandLine } from "./chat-link.mjs";
+import { chatLinkFrom, chatLinkFromCommandLine } from "./chat-link.mjs"; import { installDesktopNotifications } from "./desktop-notifications.mjs";
 import { createOrganizationEntry, isOrganizationDeepLink, takeOrganizationDeepLink, organizationRestartIntent, withOrganizationRestartIntent, withoutOrganizationRestartIntent } from "./organization-entry.mjs";
 import { windowBackground, windowChromeOptions } from "./window-chrome.mjs";
 import { createAllWindowsClosedQuit } from "./window-all-closed.mjs";
@@ -2124,7 +2124,7 @@ function createWindow({ deferNavigation = false } = {}) {
   // Not did-finish-load: Electron still reports the main frame as loading then.
   win.webContents.on("did-stop-loading", () => {
     deliverPackageInstall(win);
-    deliverChatLink(win);
+    deliverChatLink(win); desktopNotifications.arrived();
   });
   win.webContents.on("did-finish-load", () => void offerComputerSharing(win));
 
@@ -2697,7 +2697,7 @@ const rail = installCloudRail({ ipcMain, clipboard, openCloud: openOwnCloud, acc
   add: { choices: () => ({ cloud: cloudOffersAllowed(), link: !desktopRemoteAccess, address: !desktopRemoteAccess && !homeWindow.cloudOrigin() }),
     run: (choice, link) => (choice === "link" ? (link ? connectHostedWorkspace(link) : addServerFromClipboard()) : choice === "address" ? openWorkspaceSettings() : homeWindow.cloudOrigin() ? undefined : openCloudAdd("app_menu")) } });
 const announceAddedCloud = createAddedCloudNotice({ Notification, focused: () => Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()), sheetOpen: rail.sheetOpen,
-  open: id => { if (!desktopTray?.show()) activateExistingWindow(appWindows()); void openOwnCloud(id); }, shown: () => cloudAccount?.addDone() });
+  open: id => { if (!desktopTray?.show()) activateExistingWindow(appWindows()); void openOwnCloud(id); }, shown: () => cloudAccount?.addDone() }); const desktopNotifications = installDesktopNotifications({ ipcMain, Notification, nativeImage, fetch: (...args) => session.defaultSession.fetch(...args), window: () => mainWindow, mayNotify: (contents, url) => appPermissions?.check(contents, "notifications", url, { isMainFrame: true }) === true, reveal: revealForLink, openPlace: origin => (origin === homeWindow.cloudOrigin() ? showHome({ place: "cloud" }) : workspaceMenuAction(() => switchEnvironment(origin === rendererOrigin() ? LOCAL_ID : environmentsState.environments.find(entry => entry.origin === origin)?.id))) });
 // A place's colour (place-look.mjs): the Admin's for a Cloud, this app's for This computer and a server connected by
 // hand; changed on the place's own page or from the window's rail, whatever that server runs.
 installPlaceLook({ ipcMain, guard: workspaceOnly, place: () => savedPlace(environmentsState), session: () => ({ clouds: desktopRemoteAccess ? null : cloudAccount?.state().clouds ?? null, homeOrigin: myCloud() }),

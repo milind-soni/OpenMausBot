@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, AtSign, Bell, CheckCircle2, CircleHelp, HandHelping, Info, KeyRound, LogIn, Newspaper, Pin, RotateCcw, Wallet, X, type LucideIcon } from "lucide-react";
-import { api, useStore, openNotificationTarget, type Action } from "@/state/store";
+import { api, useStore, openThread, type Action } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useShowThreads } from "@/lib/thread-preferences";
@@ -124,7 +124,7 @@ export function NotificationsPanel() {
       dispatch({ type: "notificationRead", id: entry.id });
       void postNotificationRead(`/api/notifications/${entry.id}/read`, dispatch);
     }
-    openNotificationTarget(dispatch, { botId: entry.botId, threadId: entry.threadId }, state, showThreads);
+    openThread(dispatch, { botId: entry.botId, threadId: entry.threadId }, state, showThreads);
   };
 
   const markAllRead = () => {

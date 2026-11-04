@@ -6,6 +6,7 @@ import { api, useStore, formatTime, visibleMessages, currentTaskBot, botOpensTo,
 import { approvalModeFor } from "../../shared/approval-mode";
 import { liveActivityLabel } from "@/lib/live-activity";
 import { SidebarWorkingStep } from "./SidebarWorkingStep";
+import { openBotRow } from "@/state/thread-navigation";
 import { llmThreadTitlesEnabled } from "@/lib/feature-flags";
 
 import { BotAvatar } from "./Avatar";
@@ -625,7 +626,7 @@ export function BotThreadList({ bot, selected, query, pendingQueued, reveal, loc
       <span role="status" className="sr-only">{readStatus}</span>
       {projects.length > 0 && ungrouped.length > 0 && <div className="pl-6 pr-3 pb-1 pt-2 text-[11px] text-ink-tertiary">{t("task.list")}</div>}
       {ungrouped.map(renderThread)}
-      <HelperThreadGroup tasks={orderedThreadList(helpers)} busy={helpers.some((task) => currentTaskBot(bot, task.threadId).busy)} renderThread={renderThread} />
+      <HelperThreadGroup tasks={orderedThreadList(helpers)} renderThread={renderThread} />
       <ThreadListFooter bulk={bulk} rows={shownRows} selected={selection} total={ownTasks.length} canShowAll={!query && !showAll && ownTasks.length > visibleTasks.length} canSelect={tasks.length > 1}
         onShowAll={() => setShowAll(true)} freshConversation onDelete={(threadIds) => deleteThreadsInBulk({ botId: bot.id }, threadIds, dispatch)} />
       <LocalComputerAutoWarning
@@ -848,7 +849,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
     if (renaming) return;
     const insideRenameInput = event.target instanceof HTMLInputElement;
     if (botListItemPointerIntent(event.type, insideRenameInput) === "select") {
-      openBot(dispatch, bot, showThreads);
+      openBotRow(dispatch, bot, showThreads, selected);
     }
   };
 
@@ -877,7 +878,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           if (drag && stepKey(event)) { event.preventDefault(); drag.step(bot.id, stepKey(event)!); return; }
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
-            openBot(dispatch, bot, showThreads);
+            openBotRow(dispatch, bot, showThreads, selected);
           }
         }}
         onContextMenu={onContextMenu}
@@ -1381,7 +1382,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           )}
           {!q && <NeedsYouButton compact={rail} />}{!q && <SidebarPeople compact={rail} />}
           {unsectionedChief && (phone ? (
-            <PhoneHero bot={unsectionedChief} selected={botRow(unsectionedChief).selected} onOpen={() => openBot(dispatch, unsectionedChief, showThreads)} onMenu={setMenu} />
+            <PhoneHero bot={unsectionedChief} selected={botRow(unsectionedChief).selected} onOpen={() => openBotRow(dispatch, unsectionedChief, showThreads, botRow(unsectionedChief).selected)} onMenu={setMenu} />
           ) : (
             <div className="mb-1.5">
               <BotListItem {...botRow(unsectionedChief)} />

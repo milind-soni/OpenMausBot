@@ -19,7 +19,7 @@ import { DATA_ROUTES, type DataSheet, type DataTable } from "../../shared/data-s
 import type { NotificationLogEntry } from "../../shared/notification";
 import { isNotificationFeedAction, reduceNotificationFeed, type NotificationFeedAction } from "./notification-feed";
 import { bumpThreadUpdatedAt, mergeTaskStamps, rewindThreadUpdatedAt } from "./thread-stamps";
-import { botOpensTo, openBot, openNotificationTarget, visibleNotificationThread } from "./thread-navigation";
+import { botOpensTo, openBot, openThread, visibleNotificationThread } from "./thread-navigation";
 import { patchGroupTask } from "./thread-edits";
 import type { EngineInstall } from "./engine-install";
 import { optimisticMessageId, optimisticUserMessage, sendArrived, sendReconciled } from "./optimistic-send";
@@ -27,7 +27,7 @@ import { patchedGroups, roomAnswers, snapshotPatch } from "./room-frames";
 import { savedStateAction, type SavedOwner, type SavedSnapshot } from "./saved-state";
 import { keepBotNavigation, keepGroupNavigation, navigatedSince, visibleMessages } from "./snapshot-navigation";
 export { visibleMessages } from "./snapshot-navigation";
-export { awayFromMainThread, botOpensTo, openBot, openBotThread, openNotificationTarget, openThread, visibleNotificationThread, type ThreadTarget } from "./thread-navigation";
+export { awayFromMainThread, botOpensTo, markedThread, openBot, openBotRow, openBotThread, openRoomThread, openThread, visibleNotificationThread, type ThreadTarget } from "./thread-navigation";
 import type { TurnDigest } from "../../shared/digest";
 import type { ToolScope } from "../../shared/tool-scope";
 import type { ModelVariantOption, RuntimeEvent } from "../../shared/runtime-events";
@@ -1450,7 +1450,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "notice":
       return { ...state, notice: action.notice };
     case "revealThread":
-      return { ...state, revealThread: { threadId: action.threadId, nonce: (state.revealThread?.nonce ?? 0) + 1 } };
+      return { ...state, appSettingsOpen: false, shortcutsOpen: false, pluginsOpen: false, revealThread: { threadId: action.threadId, nonce: (state.revealThread?.nonce ?? 0) + 1 } };
     case "focusMessage":
       return {
         ...state,
@@ -1736,7 +1736,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return action.cwd !== undefined ? state : { ...state, selectedId: action.botId, activeView: "chat" };
     case "switchTask": {
       const { [action.threadId]: _old, ...backgroundThreadEvents } = state.backgroundThreadEvents;
-      return updateBot({ ...state, backgroundThreadEvents, selectedId: action.botId, activeView: "chat" }, action.botId,
+      return updateBot({ ...state, backgroundThreadEvents, selectedId: action.botId, activeView: "chat", revealThread: { threadId: action.threadId, nonce: (state.revealThread?.nonce ?? 0) + 1 } }, action.botId,
         (bot) => ({ ...bot, switchingTo: action.threadId }));
     }
     case "switchTaskFailed":
@@ -3179,7 +3179,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // The wrapped dispatch: only it PATCHes unread:false back to the server.
           showNotification(
             frame.notification,
-            (target) => openNotificationTarget(dispatch, target, stateRef.current, showThreadsRef.current),
+            (target) => openThread(dispatch, target, stateRef.current, showThreadsRef.current),
             stateRef.current.bots.find((bot) => bot.id === frame.notification.botId)?.avatarUrl,
             visibleNotificationThread(stateRef.current),
           );
