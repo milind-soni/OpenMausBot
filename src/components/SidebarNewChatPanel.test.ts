@@ -66,8 +66,8 @@ describe("SidebarNewChatPanel", () => {
     fixture.showThreads = true;
   });
 
-  function open() {
-    const props = { anchor: null, onClose: vi.fn(), onNewBot: vi.fn(), onNewGroup: vi.fn() };
+  function open(makesBots = true) {
+    const props = { anchor: null, onClose: vi.fn(), onNewBot: makesBots ? vi.fn() : undefined, onNewGroup: vi.fn() };
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -92,6 +92,14 @@ describe("SidebarNewChatPanel", () => {
     expect(text).not.toContain("Writes the newsletter");
     expect(container!.querySelector("[aria-label^='Quill, Writes the newsletter']")).not.toBeNull();
     expect(text).not.toContain("Ghost");
+  });
+
+  it("offers no new bot to someone who can't make one, and Enter still starts with the first bot", () => {
+    const { input } = open(false);
+    expect(container!.textContent).not.toContain("Create new bot");
+    expect(container!.textContent).toContain("Create group chat");
+    key(input, "Enter");
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "newTask", botId: "scout" });
   });
 
   it("starts a new thread with the first bot on Enter", () => {
