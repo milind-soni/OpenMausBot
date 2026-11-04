@@ -104,6 +104,11 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
         ?? waiting.find((one) => ownWork(one.node) && (one.card !== undefined || !one.node.cards?.length));
     const refused = () => input.answers === undefined ? undefined : peerDeliveryReceipt({ botId: target.id, botName: target.name, outcome: "failed",
       detail: `nothing of ${target.name}'s waits on an answer as ${input.answers}: it was answered or its work ended. Send it without answers if it still needs doing` });
+    // A question in words only the person can answer; a wait on a card (a sign-in) is still settled from elsewhere.
+    if (pick && personOnly(pick.question) && !pick.node?.cards?.length) {
+      return peerDeliveryReceipt({ botId: target.id, botName: target.name, outcome: "failed",
+        detail: `only the person can answer "${pick.question}": it waits on them where it was asked, and a teammate's answer doesn't settle it. Tell them where it is if they ask` });
+    }
     if (!pick) return refused() ?? await handOn(input, deps.active().find((node) => node.botId === target.id && node.status === "running" && ownWork(node)));
     const by: Answerer = { kind: "bot", botId: sender.id };
     if (pick.card) {

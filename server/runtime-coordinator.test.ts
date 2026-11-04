@@ -1711,6 +1711,21 @@ describe("RuntimeCoordinator: who answers a teammate's question", () => {
     expect(w.coordinator.node(node.id)?.status).toBe("completed");
   });
 
+  it("at Full access keeps a question about which of the person's accounts to use for the person, not its requester", async () => {
+    const w = world(asks("No mail account is connected.\nNEEDS INPUT: Which email account should be connected — Gmail or another provider?\nDefault: Gmail"));
+    w.host.levels.builder = { level: "full" };
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Get the mail working");
+    ended(w, "gen-1");
+    w.coordinator.tick(); await flush();
+    expect(w.coordinator.node(node.id)).toMatchObject({ status: "waiting", question: "Which email account should be connected — Gmail or another provider?\nDefault: Gmail" });
+    expect(w.coordinator.node(node.id)?.decide).toBeUndefined();
+    w.coordinator.tick(); await flush();
+    const resume = w.host.runs.find(run => run.node.id === "gen-1")!;
+    expect(resume.text).toContain("waiting on Milind");
+    expect(resume.text).toContain("Only Milind can answer it, there: do not answer it for them or pass an answer on.");
+    expect(resume.text).not.toContain("yours to answer");
+  });
+
   it("takes the requester's answer passed on by name over the default, and says which bot gave it", async () => {
     const w = world(asks("NEEDS INPUT: CSV or Excel?\nDefault: CSV"));
     w.host.levels.builder = { level: "full" };
