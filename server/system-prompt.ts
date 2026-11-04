@@ -1,6 +1,6 @@
 // One builder for every turn's system prompt, so what a bot receives and the "what the model sees" preview are the same bytes.
 import { soulSystemPrompt } from "./bot-folder.ts";
-import { deviceWord } from "./lent-computers.ts";
+import { theirComputer } from "./lent-computers.ts";
 import { agentsToolBridged } from "./drivers/agents-bridge.ts";
 import { teammateAvailabilityPrompt, type RosterMember } from "./peer-roster.ts";
 import type { ConnectorToolGrant } from "../shared/wire.ts";
@@ -136,16 +136,6 @@ export const CLOUD_HOME_PLACE = "the user's My Cloud, their always-on OpenMausBo
 
 // The Cloud prompt names the synced folders; index.ts reads the registry through here.
 export { syncedFolders } from "./cloud-sync-store.ts";
-
-/** Their computer as they know it: "their PC MILIND-PC" on Windows, "their Mac" only on a Mac, else "their own computer". */
-function theirComputer(lent: ReadonlyArray<{ name: string; platform: "darwin" | "win32" | "linux" | null }>): { theirs: string; device: "PC" | "Mac" | "computer" } {
-  const latest = lent[0];
-  if (!latest) return { theirs: "their own computer", device: "computer" };
-  const device = deviceWord(latest.platform);
-  // eslint-disable-next-line no-control-regex
-  const name = latest.name.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, " ").slice(0, 80);
-  return { theirs: `their ${device} (${name})`, device };
-}
 
 /** `asks`: the person's own Cloud, whose bots ask them to turn on what their computer doesn't give now (ask_for_computer). */
 export function cloudHomePrompt(sharedComputerTools: boolean, synced: ReadonlyArray<{ computerName: string; pcPath: string; cloudPath: string }> = [],
