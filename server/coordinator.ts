@@ -149,6 +149,8 @@ export interface CoordinatorHost {
   shareAnswer?(first: HandoffView, joiner: HandoffView): boolean;
   /** `node` waits for `first`'s answer instead of running its own turn (only ever a request outside a room). */
   joined?(node: HandoffView, first: HandoffView): void;
+  /** One word from a small model about `node`'s reply (runtime/status-reply.ts). Absent, undefined or a throw: its requester wakes. */
+  statusReply?(node: HandoffView, prompt: string, signal: AbortSignal): Promise<string | undefined>;
 }
 
 export interface Coordinator {

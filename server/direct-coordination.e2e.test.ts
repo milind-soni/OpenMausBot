@@ -1069,3 +1069,31 @@ it("tells the Chief a teammate's turn stopped because its engine's settings chan
   expect(resumed.prompt.message.content).toContain("Turn interrupted — provider settings changed.");
   expect(resumed.prompt.message.content).not.toContain("The coordinated turn was interrupted");
 }), 45_000);
+
+// The small model's word is the fixture's: what matters here is what the runtime does with it.
+const withStatusAnswer = (answer: string) => {
+  const routes = join(mkdtempSync(join(tmpdir(), "omb-status-reply-")), "routes.json");
+  writeFileSync(routes, JSON.stringify({ "<teammate_reply>": answer }));
+  return { FAKE_CLAUDE_TEXT_ROUTES: routes };
+};
+
+it("spends no requester turn on a reply that only acknowledged, and the reply stays in its thread", () => fixture(async f => {
+  f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], message: "FYI: the mailbox moved." } }], reply: "I told the lead.", resumeReply: "This is just a confirmation, no action needed." };
+  f.plan[f.lead.id] = { reply: "Noted, thanks." };
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id)).toHaveLength(1);
+  const messages = await f.messages(f.chief.activeTaskId);
+  expect(messages.some((message: any) => message.text === "This is just a confirmation, no action needed.")).toBe(false);
+  expect(messages.find((message: any) => message.roomRequest?.phase === "result")?.tool?.output).toBe("Noted, thanks.");
+  expect(f.nodes().every((node: any) => node.status === "completed")).toBe(true);
+}, withStatusAnswer("ACK")));
+
+it("wakes the requester for a reply that carries something, in any language", () => fixture(async f => {
+  f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Hast du die IMAP-Zugangsdaten?" } }], reply: "Ich habe gefragt.", resumeReply: "Es sind keine hinterlegt." };
+  f.plan[f.lead.id] = { reply: "Nein, ich habe nichts gespeichert." };
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id)).toHaveLength(2);
+  expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "Es sind keine hinterlegt.")).toBe(true);
+}, withStatusAnswer("NEEDS")));

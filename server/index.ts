@@ -23,7 +23,7 @@ import { LentComputers, provenRequestPerson, SharedComputers, sharedComputerOper
 import { cloudHomeLendingRefusal, createCloudRoutineAuthors, ownerOnlyConversation } from "./cloud-lending.ts"; import { createOwnHome } from "./own-home.ts"; import { createPlacesElsewhere } from "./places-elsewhere.ts"; import { createPlacesElsewhereRoutes } from "./routes/places-elsewhere.ts"; import { assertRoomFolder } from "./room-folder.ts"; import { cloudConnectedAppsBrokerUrl, startCloudHomeConnectedApps, stopCloudHomeConnectedApps } from "./cloud-connected-apps.ts"; import { createTeamConnectionsHost } from "./host/team-connections-host.ts"; import { createCloudLendingTurns } from "./host/cloud-lending-turns.ts"; import { createTeamConnectionRoutes } from "./routes/team-connections.ts";
 import { botMemoryFiles, createLendingMemory } from "./lending-memory.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
-import { createCoordinator, type ComposedTurn, type CoordinateBotsCall, type Coordinator, type HandoffOpener, type HandoffOptions, type HandoffView, type HostTurnResult } from "./coordinator.ts";
+import { STATUS_REPLY_TIMEOUT_MS } from "./runtime/status-reply.ts"; import { createCoordinator, type ComposedTurn, type CoordinateBotsCall, type Coordinator, type HandoffOpener, type HandoffOptions, type HandoffView, type HostTurnResult } from "./coordinator.ts";
 import { queuedBehindPersonText, UnansweredApprovals } from "./waiting-on-person.ts";
 import { askToolName, createAskCards } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { workThreadFor } from "./host/work-thread.ts"; import { closedByStop, resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts"; import { createMcpChat } from "./host/mcp-chat.ts"; import { isCardOwnerLive, isMcpSignInCard } from "./host/mcp-sign-in-cards.ts";
 import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput } from "./guarded-requests.ts";
@@ -3958,7 +3958,7 @@ const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoor
     standingThreadOf: botId => botMainThread(botId) ?? store.bot(botId)?.threadId,
     botOfThread: threadId => store.botByThread(threadId)?.id,
   },
-  host: {
+  host: { statusReply: (node, prompt, signal) => sideJobs.text("status-reply", node.botId)?.generateText(prompt, { signal, timeoutMs: STATUS_REPLY_TIMEOUT_MS }) ?? Promise.resolve(undefined),
     validate: (node, parent) => node.mode === "notify" && node.status !== "queued" ? undefined
       : !node.parentId && node.groupId ? roomRootProblem(node)
       : roomHandoffProblem(node, parent) ??

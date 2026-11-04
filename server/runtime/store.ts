@@ -64,6 +64,7 @@ const assignmentSchema = z.object({
   finishedAt: z.number().optional(),
   result: z.string(),
   evidence: evidenceSchema.optional(),
+  statusOnly: z.boolean().optional(),
   reportedAt: z.number().optional(),
   rework: z.boolean(),
   question: z.string().optional(),
