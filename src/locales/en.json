@@ -206,6 +206,7 @@
   "server.mcp.changed": "Changed MCP server {name}",
   "server.mcp.turnedOn": "Turned on MCP server {name}",
   "server.mcp.turnedOff": "Turned off MCP server {name}",
+  "server.mcp.restarted": "Restarted MCP server {name}",
   "server.mcp.tested": "Tested MCP server {name}",
   "server.mcp.signedOut": "Signed out of MCP server {name}",
   "server.mcp.removed": "Removed MCP server {name}",
