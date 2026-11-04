@@ -541,6 +541,7 @@ export type BotSettingsSection =
   | "soul"
   | "skills"
   | "memory"
+  | "library"
   | "routines"
   | "access"
   | "model"

@@ -64,7 +64,7 @@ function railKeepsItsSize() {
 if (typeof window !== "undefined") {
   for (const type of ["resize", "DOMContentLoaded"]) window.addEventListener(type, () => { leaveRailRoom(); railKeepsItsSize(); });
 }
-const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "desktopNotices", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame"]);
+const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "accountSheet", "desktopNotices", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
 const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
 function updaterOffered() {
@@ -497,6 +497,29 @@ const bridge = {
       return () => ipcRenderer.removeListener("two-places:changed", handler);
     },
   },
+  // Who is signed in on this device: this app's own pages only (main checks the sender). No token ever comes through here.
+  accounts: process.argv.includes("--omb-company-desktop=1") ? {
+    list: () => ipcRenderer.invoke("accounts:list"),
+    signOut: id => ipcRenderer.invoke("accounts:sign-out", String(id)),
+    sheetPending: () => ipcRenderer.invoke("accounts:sheet-pending"),
+    sheetClosed: () => ipcRenderer.invoke("accounts:sheet-closed"),
+    onChanged: cb => {
+      const handler = () => cb();
+      ipcRenderer.on("accounts:changed", handler);
+      return () => ipcRenderer.removeListener("accounts:changed", handler);
+    },
+    onOpenSheet: cb => {
+      const handler = () => cb();
+      ipcRenderer.on("accounts:open-sheet", handler);
+      return () => ipcRenderer.removeListener("accounts:open-sheet", handler);
+    },
+  } : undefined,
+  // Any place's page: opens the accounts sheet on the rail's page, from the person's click. The page learns nothing of them.
+  accountSheet: process.argv.includes("--omb-company-desktop=1") ? {
+    offered: () => ipcRenderer.invoke("accounts:offered"),
+    open: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("accounts:open") : Promise.reject(new Error("Choose your account to open it.")),
+  } : undefined,
   cloudPlan: process.argv.includes("--omb-company-desktop=1") ? {
     state: () => ipcRenderer.invoke("cloud-plan:state"),
     manage: () => isLocalPage || navigator.userActivation?.isActive === true
