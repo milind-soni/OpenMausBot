@@ -1,11 +1,12 @@
 // Per-turn MCP transport for the Chat Completions runtime: approval is the caller's, and only
 // registered, schema-validated calls arrive here.
 import { createHash, randomBytes } from "node:crypto";
-import { lstat, mkdir, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ValidateFunction } from "ajv";
 import { stripControlPlaneEnv } from "../config.ts";
 import type { SendTurnInput } from "../contracts.ts";
+import { redactSecretsInText } from "../redact.ts";
 import { augmentedPath } from "../env-path.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { AGENTS_TOOL_ALIASES } from "../../shared/agents-tool-names.ts";
@@ -284,8 +285,19 @@ function boundedText(value: string, bytes = Buffer.from(value)): string {
 
 /** Folder, inside the bot's working folder, that keeps tool results too big to show the model whole. */
 export const SAVED_RESULTS_FOLDER = "mcp-results";
+/** Only the newest saved results are kept, so repeated big results cannot fill the disk. */
+export const SAVED_RESULTS_KEPT = 20;
+const SAVED_RESULT_NAME = /-(\d+)-[0-9a-f]{6}\.txt$/;
 
-/** A result over the limit is kept whole in `folder`/mcp-results and the model reads its start and the file's path.
+async function pruneSavedResults(dir: string): Promise<void> {
+  const saved = (await readdir(dir)).flatMap((name) => {
+    const match = SAVED_RESULT_NAME.exec(name);
+    return match ? [{ name, at: Number(match[1]) }] : [];
+  }).sort((a, b) => b.at - a.at);
+  await Promise.all(saved.slice(SAVED_RESULTS_KEPT).map(({ name }) => unlink(join(dir, name))));
+}
+
+/** A result over the limit is kept whole (secrets masked) in `folder`/mcp-results and the model reads its start and the file's path.
  * Without a folder, or when the file cannot be written, it is cut as before. */
 async function savedOrBounded(value: string, tool: string, folder: string | undefined): Promise<string> {
   const bytes = Buffer.from(value);
@@ -296,7 +308,9 @@ async function savedOrBounded(value: string, tool: string, folder: string | unde
     // Security: never follow a link the folder's contents put here to write outside the working folder.
     if (!(await lstat(dir)).isDirectory()) throw new Error("not a folder");
     const file = join(dir, `${tool}-${Date.now()}-${randomBytes(3).toString("hex")}.txt`);
-    await writeFile(file, bytes, { flag: "wx", mode: 0o600 });
+    // Key-shaped values are masked before the result reaches disk, as for every other kept tool result.
+    await writeFile(file, redactSecretsInText(value), { flag: "wx", mode: 0o600 });
+    await pruneSavedResults(dir).catch(() => {});
     const kb = Math.ceil(bytes.length / 1024);
     return `${preview(bytes)}\n[MCP result is ${kb}KB; only the first 50KB is shown above. The full result is saved in ${file}]`;
   } catch {
