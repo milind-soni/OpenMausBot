@@ -20,6 +20,9 @@ export interface BotAccessFields {
   access?: BotAccess;
   /** Team Cloud only: what the person this copy was sent to may do with the bot. */
   yourAccess?: BotAccessLevel;
+  /** Team Cloud only, on everyone's copy: only the people added, whoever looks after the bot and the admins see it, so
+   * its shared chats reach no further. */
+  onlyPeopleAdded?: true;
 }
 
 export const levelRank = (level: BotAccessLevel | undefined): number => BOT_ACCESS_LEVELS.indexOf(level ?? "none");

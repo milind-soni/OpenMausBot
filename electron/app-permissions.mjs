@@ -79,10 +79,11 @@ export function appPermissionHandlers({ rendererOrigin, mainContents, cloudHomeO
   activeRemoteMicrophone = () => false, askRemoteMicrophone = () => null, homeOrigin = () => null }) {
   // Notifications for the main window's main frame on `origin`: My Cloud as home, or the remote server the person
   // switched to (Settings → Notifications there has no browser site settings to fall back on).
+  // Fullscreen too, so a chat video's own fullscreen button works there (it still needs the person's click).
   const notifiesAs = (origin, contents, permission, requesting, details) => {
     const page = webOrigin(origin);
-    return permission === "notifications" && Boolean(page) && Boolean(contents) && contents === mainContents() &&
-      details?.isMainFrame === true && webOrigin(requesting) === page;
+    return (permission === "notifications" || permission === "fullscreen") && Boolean(page) && Boolean(contents) &&
+      contents === mainContents() && details?.isMainFrame === true && webOrigin(requesting) === page;
   };
   const asksAsCloud = (contents, permission, requesting, details) =>
     Boolean(contents) && contents === mainContents() && mainFrameMicrophoneAllowed(permission, requesting, requesting, details);
