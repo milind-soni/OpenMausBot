@@ -132,20 +132,31 @@ describe("legacy function_call from OpenAI-compatible relays", () => {
     expect(calls.finish("tool_calls", false)).toEqual([completeCall]);
   });
 
-  it("still rejects a function_call finish with no named call", () => {
+  it.each(["function_call", "stop"])("rejects a nameless legacy call with arguments (finish %s)", (reason) => {
     const calls = new ChatToolCalls();
     calls.addLegacy({ arguments: "{}" });
-    expect(() => calls.finish("function_call", false)).toThrow(/without a complete call/);
+    expect(() => calls.finish(reason, false)).toThrow(/without a complete call/);
   });
 
   it.each(["call", [], { name: 1 }, { arguments: {} }])("rejects a malformed legacy call %j", (value) => {
-    expect(() => new ChatToolCalls().addLegacy(value)).toThrow();
+    const calls = new ChatToolCalls();
+    calls.addLegacy(value);
+    expect(() => calls.finish("function_call", false)).toThrow(/invalid function_call/);
+  });
+
+  it.each(["call", { name: 1 }, { name: "n".repeat(65) }])("ignores a malformed mirror %j next to structured calls", (value) => {
+    const calls = new ChatToolCalls();
+    calls.add([completeCall], false);
+    calls.addLegacy(value);
+    expect(calls.finish("tool_calls", false)).toEqual([completeCall]);
   });
 
   it("applies the name rules and size limits to legacy calls", () => {
     const named = new ChatToolCalls();
     named.addLegacy({ name: "bad name", arguments: "{}" });
     expect(() => named.finish("function_call", false)).toThrow();
-    expect(() => new ChatToolCalls().addLegacy({ name: "n".repeat(65) })).toThrow(/size limit/);
+    const long = new ChatToolCalls();
+    long.addLegacy({ name: "n".repeat(65) });
+    expect(() => long.finish("function_call", false)).toThrow(/size limit/);
   });
 });

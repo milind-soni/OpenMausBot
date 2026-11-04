@@ -41,18 +41,27 @@ export class ChatToolCalls {
   private argumentChars = 0;
   /** The pre-tools `function_call` field some OpenAI-compatible relays still answer with: one call, no ID. */
   private legacy = { name: "", arguments: "" };
+  /** Why the legacy call can't be used; reported only when it is the reply's call, so a mirror can't reject tool_calls. */
+  private legacyError = "";
 
   addLegacy(value: unknown): void {
-    if (value === undefined || value === null) return;
+    if (value === undefined || value === null || this.legacyError) return;
     const fn = object(value);
-    if (!fn) throw new ChatProtocolError("provider returned an invalid function_call");
+    if (!fn) {
+      this.legacyError = "provider returned an invalid function_call";
+      return;
+    }
     for (const field of ["name", "arguments"] as const) {
       if (fn[field] === undefined || fn[field] === null) continue;
-      if (typeof fn[field] !== "string") throw new ChatProtocolError("provider returned invalid function_call arguments or name");
+      if (typeof fn[field] !== "string") {
+        this.legacyError = "provider returned invalid function_call arguments or name";
+        return;
+      }
       this.legacy[field] += fn[field];
     }
     if (this.legacy.name.length > 64 || this.legacy.arguments.length > MAX_ARGUMENT_CHARS) {
-      throw new ChatProtocolError("provider tool calls exceeded the size limit");
+      this.legacyError = "provider tool calls exceeded the size limit";
+      this.legacy = { name: "", arguments: "" };
     }
   }
 
@@ -102,9 +111,14 @@ export class ChatToolCalls {
   finish(reason: string | null, malformedFrame: boolean): ChatToolCall[] {
     const calls = [...this.calls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call);
     if (malformedFrame) throw new ChatProtocolError("provider stream contained a malformed completion frame");
-    // A legacy call counts only alone and named: relays that mirror tool_calls or send an empty placeholder add nothing.
-    if (!calls.length && this.legacy.name) {
-      calls.push({ id: `call_${randomUUID().replaceAll("-", "")}`, type: "function", function: { ...this.legacy } });
+    // A legacy call counts only alone: relays that mirror tool_calls or send an empty placeholder add nothing.
+    if (!calls.length) {
+      if (this.legacyError) throw new ChatProtocolError(this.legacyError);
+      if (this.legacy.name) {
+        calls.push({ id: `call_${randomUUID().replaceAll("-", "")}`, type: "function", function: { ...this.legacy } });
+      } else if (this.legacy.arguments) {
+        throw new ChatProtocolError("provider ended for tool calls without a complete call");
+      }
     }
     if ((reason === "tool_calls" || reason === "function_call") && !calls.length) {
       throw new ChatProtocolError("provider ended for tool calls without a complete call");
