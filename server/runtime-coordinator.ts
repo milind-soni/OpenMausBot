@@ -334,6 +334,17 @@ export class RuntimeCoordinator implements Coordinator {
     return this.runtime.answer(id, text, by);
   }
 
+  followCard(threadId: string, from: string, to: string): void {
+    this.ready();
+    for (const n of this.live()) if (n.assignee.destination.threadId === threadId && n.cards?.includes(from)) this.runtime.followCard(n.id, from, to);
+  }
+
+  /** Nothing can answer what this parked turn waits on any more. */
+  releaseParked(id: string, reason: string): void {
+    this.ready();
+    if (this.store.get(id)?.status === "needs_input") this.runtime.cancel(id, reason, "stopped");
+  }
+
   parkedFor(botId: string): HandoffView[] {
     this.ready();
     return this.live().filter(n => n.status === "needs_input" && n.assignee.botId === botId).map(n => this.project(n));
