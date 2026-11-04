@@ -19,12 +19,13 @@ const SERVERS = {
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
-function fixture(bots: Array<{ id: string; name: string; threadId: string; chiefOfStaff?: boolean; mcpServers?: string[]; toolScope?: unknown }>, servers: Record<string, unknown> = SERVERS, file?: string) {
+function fixture(bots: Array<{ id: string; name: string; threadId: string; chiefOfStaff?: boolean; mcpServers?: string[]; toolScope?: unknown }>, servers: Record<string, unknown> = SERVERS, file?: string, mailConnected?: () => boolean) {
   const dir = mkdtempSync(join(tmpdir(), "omb-stayed-")); dirs.push(dir);
   const said: Array<{ threadId: string; text: string; kind: string }> = [];
   const notified: Array<{ text: string; bot: string; threadId: string }> = [];
   const notices = createStayedNotices({
-    file: file ?? join(dir, "told.json"), servers: () => servers, programs: () => ["npx", "node", "python3"], bots: () => bots, language: () => undefined,
+    file: file ?? join(dir, "told.json"), origin: "https://omb-u-1.fly.dev", servers: () => servers, programs: () => ["npx", "node", "python3"], bots: () => bots, language: () => undefined,
+    ...(mailConnected ? { mailConnected } : {}),
     say: (threadId, text, kind) => { said.push({ threadId, text, kind }); },
     notify: (text, bot, threadId) => { notified.push({ text, bot: bot.id, threadId }); },
   });
@@ -42,7 +43,7 @@ describe("what stayed on the person's computer", () => {
 
   it("says it in plain words: the program it needs, or that its mail stays there", () => {
     const [easy, fetch, notes] = stayedConnectors(SERVERS, ["npx", "node", "python3"]);
-    expect(stayedLine(undefined, easy!)).toBe("easy stayed on Mac mini when your bots moved to My Cloud, so bots here can't read or send mail through it. It keeps its accounts on Mac mini, and it can't reach a mail server from here.");
+    expect(stayedLine(undefined, easy!)).toBe("easy stayed on Mac mini when your bots moved to My Cloud, so bots here can't read or send mail through it. It keeps its accounts on Mac mini, and it can't reach a mail server from here. To read and send mail from My Cloud, connect your mailbox under Connected apps.");
     expect(stayedLine(undefined, fetch!)).toBe("fetch stayed on Mac mini when your bots moved to My Cloud, so bots here can't use it. It needs uvx, which My Cloud doesn't have.");
     expect(stayedLine(undefined, notes!)).toBe("notes stayed on Mac mini when your bots moved to My Cloud, so bots here can't use it. It uses files or an address only Mac mini has.");
   });
@@ -52,7 +53,7 @@ describe("what stayed on the person's computer", () => {
     notices.moved();
     expect(said).toHaveLength(1);
     expect(said[0]).toMatchObject({ threadId: "t-c", kind: "line" });
-    expect(said[0]!.text.split("\n\n").map((line) => line.split(" ")[0])).toEqual(["easy", "fetch", "notes"]);
+    expect(said[0]!.text.split("\n\n").map((line) => line.split(" ")[0])).toEqual(["easy", "fetch", "notes", "https://omb-u-1.fly.dev/?connect=email"]);
     expect(notified).toEqual([{ text: said[0]!.text, bot: "c", threadId: "t-c" }]);
     notices.moved();
     expect(said, "a move resumed after a crash says nothing twice").toHaveLength(1);
@@ -92,6 +93,12 @@ describe("what stayed on the person's computer", () => {
     const { notices, said } = fixture([{ id: "b", name: "Bea", threadId: "t-b" }, { id: "a", name: "Ada", threadId: "t-a", toolScope: { mode: "selected", mcp: {} } }], servers);
     notices.personTurn({ id: "b", name: "Bea", threadId: "t-b" }, "t-b");
     expect(said).toEqual([]);
+  });
+
+  it("a mail connector left behind isn't mentioned once a mailbox is connected here", () => {
+    const { notices, said } = fixture([{ id: "a", name: "Ada", threadId: "t-a" }], { easy: SERVERS.easy, fetch: SERVERS.fetch }, undefined, () => true);
+    notices.personTurn({ id: "a", name: "Ada", threadId: "t-a" }, "t-a");
+    expect(said.map((line) => line.text.split(" ")[0])).toEqual(["fetch"]);
   });
 
   it("nothing is said where nothing stayed", () => {

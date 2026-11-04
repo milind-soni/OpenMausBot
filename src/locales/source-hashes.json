@@ -2991,7 +2991,10 @@
       "server.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "server.queued.capacity": "5067f08fc0a464b92135c6e3137b08a93335b7c4d704e873b701ae162167ca91",
       "server.queued.groupTurn": "335e0a92b0e4ce091c947241c44146fe84734464ecee92bbf32b1d3fdf206e2e",
-      "server.moves.connectorStayedMail": "c3837676cc44408b44fe8ae7fe52c996f90fb3dc5975c518ba510b4fcf36020e",
+      "server.moves.connectorStayedMail": "998785d80d197e0c6e22d6038525a169905e24dc7fd60aa68b83635d1f8bbc8d",
+      "server.connect.emailLabel": "ba26d6d309e457ac4a1dd90f1895a60fa7482e5a004bc794eda5fb3d1701edeb",
+      "server.connect.emailNote": "897ae1836bf49d8c27055bea47976adba92a80bfbefa4000b1c9c61ee1a4aa9a",
+      "server.connect.emailPlaceholder": "b65e3389059fe3feff0c1e302450299bf24cdd7084ab32361eeaa35567d06b79",
       "server.moves.connectorStayedProgram": "64c1f5480ff4883da60905d87ec2e869a18bb9142ea66ff2757c982a21e3a733",
       "server.moves.connectorStayedHere": "b4c571fd7e50e8d32a4cf86bd39969e573c536e324bc142419612d1216ba31a6"
     },

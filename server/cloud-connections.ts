@@ -11,16 +11,17 @@ import { canonicalJson } from "../shared/package-format.ts";
 import { fingerprint } from "./cloud-send-verify.ts";
 import type { ComposioIdentity } from "./composio-share.ts";
 import type { AppConfig } from "./config.ts";
+import type { EmailAccount } from "./email/store.ts";
 import type { HighLevelConnection } from "./highlevel/store.ts";
 import type { McpOAuthRecord } from "./mcp-oauth-store.ts";
 import type { McpAuthState } from "./mcp-oauth.ts";
 import { isRemoteMcpServer, parseStoredMcpServer, type StoredMcpServer } from "./mcp-registry.ts";
 
-export type ConnectionKind = "mcp" | "key" | "composio" | "highlevel";
+export type ConnectionKind = "mcp" | "key" | "composio" | "highlevel" | "email";
 
 /** One connection, by name only. */
 export interface ConnectionListing {
-  /** "mcp:<name>", "key:<provider>", "composio" or "highlevel". */
+  /** "mcp:<name>", "key:<provider>", "composio", "highlevel" or "email". */
   id: string;
   kind: ConnectionKind;
   label: string;
@@ -142,6 +143,8 @@ export interface ConnectionSources {
   mcpAuth(name: string, url: string): McpAuthState;
   composio: ComposioIdentity | null;
   highlevel(): HighLevelConnection | null;
+  /** The person's mailboxes, by address only here. */
+  email?(): ReadonlyArray<{ address: string }>;
 }
 
 export function listConnections(sources: ConnectionSources): ConnectionListing[] {
@@ -167,6 +170,7 @@ export function listConnections(sources: ConnectionSources): ConnectionListing[]
   }
   const highlevel = sources.highlevel();
   if (highlevel) items.push({ id: "highlevel", kind: "highlevel", label: "HighLevel", ...(highlevel.kind === "oauth" ? { signIn: true as const } : {}) });
+  if (sources.email?.().length) items.push({ id: "email", kind: "email", label: "Email" });
   return items;
 }
 
@@ -175,13 +179,16 @@ export type ConnectionHandoff =
   | { mcp: { name: string; server: StoredMcpServer; signIn?: McpOAuthRecord } }
   | { config: Partial<AppConfig> }
   | { composio: { apiKey: string; userId: string } }
-  | { highlevel: HighLevelConnection };
+  | { highlevel: HighLevelConnection }
+  | { email: readonly EmailAccount[] };
 
 export interface HandoffSources {
   config: AppConfig;
   /** The sign-in kept for a server reached by URL, with its tokens. */
   mcpSignIn(name: string, url: string): McpOAuthRecord | undefined;
   highlevel(): HighLevelConnection | null;
+  /** The person's mailboxes with their passwords, which go only to the owner's session on their own Cloud. */
+  email?(): readonly EmailAccount[];
 }
 
 /** A sign-in's tokens in a digest: the same tokens give the same digest, so a sign-in that refreshed meanwhile is seen. */
@@ -226,6 +233,10 @@ export function answerConnection(id: string, sources: HandoffSources):
     const connection = sources.highlevel();
     if (!connection) return { ok: false, error: "HighLevel is not connected on this computer." };
     return { ok: true, connection: { highlevel: connection }, ...(connection.kind === "oauth" ? { digest: highlevelDigest(connection) } : {}) };
+  }
+  if (id === "email") {
+    const accounts = sources.email?.() ?? [];
+    return accounts.length ? { ok: true, connection: { email: accounts } } : { ok: false, error: "No mailbox is connected on this computer." };
   }
   return { ok: false, error: "This connection is not on this computer." };
 }
