@@ -2400,6 +2400,7 @@
   "attach.unavailable": "No disponible",
   "task.chip": "Hilo",
   "task.newShort": "Nuevo hilo",
+  "task.sharedChat": "Chat compartido",
   "task.matching": "{count} hilos coincidentes",
   "task.list": "Hilos",
   "task.namedList": "Hilos de {name}",

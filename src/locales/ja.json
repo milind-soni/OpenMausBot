@@ -2576,6 +2576,7 @@
   "attach.unavailable": "利用不可",
   "task.chip": "スレッド",
   "task.newShort": "新しいスレッド",
+  "task.sharedChat": "共有チャット",
   "task.matching": "一致するスレッド {count} 件",
   "task.list": "スレッド",
   "task.namedList": "{name} のスレッド",

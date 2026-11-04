@@ -214,7 +214,7 @@ export interface ModelSelection {
 }
 
 export interface Task extends Pick<WireTask, "private" | "setupRequest" | "inbox" | "openAsks"> {
-  waitingForTeammates?: boolean;
+  waitingForTeammates?: boolean; sharedChat?: true;
   threadId: string;
   routineRunId?: string;
   projectId?: string;

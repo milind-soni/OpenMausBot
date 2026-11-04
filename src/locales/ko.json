@@ -2720,6 +2720,7 @@
   "attach.unavailable": "사용 불가",
   "task.chip": "스레드",
   "task.newShort": "새 스레드",
+  "task.sharedChat": "공유 채팅",
   "task.untitledConversation": "새 대화",
   "task.matching": "일치하는 스레드 {count}개",
   "task.list": "스레드",

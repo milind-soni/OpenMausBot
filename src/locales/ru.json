@@ -2558,6 +2558,7 @@
   "attach.unavailable": "Недоступно",
   "task.chip": "Ветка",
   "task.newShort": "Новая ветка",
+  "task.sharedChat": "Общий чат",
   "task.matching": "{count} подходящих веток",
   "task.list": "Ветки",
   "task.namedList": "Ветки: {name}",

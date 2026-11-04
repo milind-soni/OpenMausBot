@@ -2885,6 +2885,7 @@
   "attach.unavailable": "Unavailable",
   "task.chip": "Thread",
   "task.newShort": "New thread",
+  "task.sharedChat": "Shared chat",
   "task.untitledConversation": "New conversation",
   "task.matching": "{count} matching threads",
   "task.list": "Threads",
