@@ -108,6 +108,13 @@ describe("a bot's backup AIs in Simple", () => {
     expect(onChange).toHaveBeenCalledWith([{ instanceId: "codex", model: "gpt-5.5-mini" }, { instanceId: "gemini", model: "gemini-3-pro" }]);
   });
 
+  it("keeps the row (and so the focus in it) when its model changes", () => {
+    render([{ instanceId: "codex", model: "gpt-5.5" }]);
+    const row = host.querySelector("[data-backup]");
+    render([{ instanceId: "codex", model: "gpt-5.5-mini" }]);
+    expect(host.querySelector("[data-backup]"), "the same row, not a new one").toBe(row);
+  });
+
   it("removes one and keeps the rest in order", () => {
     render([{ instanceId: "codex", model: "gpt-5.5" }, { instanceId: "gemini", model: "gemini-3-pro" }]);
     const remove = host.querySelector('[data-backup="codex"] [data-panel-action=backup-remove]');

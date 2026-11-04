@@ -104,6 +104,18 @@ describe("a bot's backup models", () => {
     expect(onChange).toHaveBeenCalledWith([{ instanceId: "codex", model: "gpt-a" }]);
   });
 
+  it("never saves a default the account cannot use now, and takes the next model it offers", () => {
+    const blocked = engine("codex", "Codex", ["gpt-a", "gpt-b"]);
+    blocked.models.options[0] = { ...blocked.models.options[0]!, orgBlocked: true } as never;
+    instances.splice(1, 1, blocked);
+    const onChange = vi.fn();
+    control(FallbackChain({ bot: bot([]), onChange }), "Add a backup AI")!.props.onChange({ target: { value: "codex" } });
+    expect(onChange).toHaveBeenCalledWith([{ instanceId: "codex", model: "gpt-b" }]);
+    instances.splice(1, 1, engine("codex", "Codex", ["gpt-a", "gpt-b"], false));
+    expect(renderToStaticMarkup(createElement(FallbackChain, { bot: bot([]), onChange: vi.fn() })), "a signed-out account is not offered").not.toContain('<option value="codex">');
+    instances.splice(1, 1, engine("codex", "Codex", ["gpt-a", "gpt-b"]));
+  });
+
   it("keeps showing a saved model the engine no longer lists", () => {
     const markup = renderToStaticMarkup(createElement(FallbackChain, { bot: bot([{ instanceId: "codex", model: "gpt-old" }]), onChange: vi.fn() }));
     expect(markup).toMatch(/aria-label="Model for Codex"[^>]*>.*<option value="gpt-old" selected="">gpt-old<\/option>/);

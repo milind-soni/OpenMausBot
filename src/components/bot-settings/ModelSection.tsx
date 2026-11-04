@@ -80,7 +80,12 @@ export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback
     || chain.some((entry, at) => at !== except && entry.instanceId === instanceId && entry.model === model);
   const offeredBy = (instance: InstanceInfo | undefined) =>
     instance?.models.options.filter((model) => !model.orgBlocked && (instance.snapshot.authenticated !== false || model.custom)) ?? [];
-  const freeModel = (instance: InstanceInfo) => [instance.models.default, ...offeredBy(instance).map((model) => model.id)]
+  // The default too must be one the account offers now: not blocked, and signed in unless it is a custom model.
+  const defaultOffered = (instance: InstanceInfo) => {
+    const listed = instance.models.options.find((model) => model.id === instance.models.default);
+    return listed ? offeredBy(instance).includes(listed) : instance.snapshot.authenticated !== false;
+  };
+  const freeModel = (instance: InstanceInfo) => [...(defaultOffered(instance) ? [instance.models.default] : []), ...offeredBy(instance).map((model) => model.id)]
     .find((model) => model.trim() && !taken(instance.instanceId, model));
   const available = state.instances.filter((instance) =>
     instance.snapshot.state === "available" && Boolean(instance.models.default.trim()) && freeModel(instance) !== undefined);
@@ -107,7 +112,7 @@ export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback
       {chain.length > 0 && (
         <ol className="mt-3 flex flex-col gap-1">
           {chain.map((entry, index) => (
-            <li key={`${entry.instanceId}\u0000${entry.model}`} className="flex items-center gap-2 rounded-lg bg-inset px-3 py-1.5 text-[13px]">
+            <li key={index} className="flex items-center gap-2 rounded-lg bg-inset px-3 py-1.5 text-[13px]">
               <span className="w-4 shrink-0 tabular-nums text-ink-secondary">{index + 1}.</span>
               <span className="min-w-0 flex-1 truncate text-ink">{nameOf(entry.instanceId)}</span>
               <Select size="sm" className="max-w-[45%] shrink-0" value={entry.model}

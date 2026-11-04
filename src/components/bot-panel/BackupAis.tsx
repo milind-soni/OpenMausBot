@@ -238,7 +238,7 @@ export function BackupAis({ bot, onChange }: { bot: Bot; onChange: (fallback: Ba
             {chain.map((entry, index) => {
               const { instance, name, short } = describe(entry);
               return (
-                <li key={modelKey(entry.instanceId, entry.model)} data-backup={entry.instanceId} className="flex min-w-0 items-center gap-1.5">
+                <li key={index} data-backup={entry.instanceId} className="flex min-w-0 items-center gap-1.5">
                   <span className="w-3 shrink-0 text-[12px] tabular-nums text-ink-tertiary" aria-hidden="true">{index + 1}</span>
                   <BackupChooser
                     bot={bot}
