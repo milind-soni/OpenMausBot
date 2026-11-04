@@ -1,6 +1,7 @@
 // The parts of a bot's page the person pointed at, waiting in the composer for their next message.
 import { useSyncExternalStore } from "react";
 import { POINT_LIMITS, type PointedElement } from "../../shared/app-frame/point";
+import { randomUuid } from "./random-uuid";
 
 export interface PointedChip extends PointedElement {
   id: string;
@@ -30,7 +31,7 @@ export function usePointedChips(threadId: string): readonly PointedChip[] {
 /** The same part picked twice stays one chip; past the limit the oldest goes. */
 export function addPointedChip(threadId: string, chip: Omit<PointedChip, "id">): void {
   const kept = (chips[threadId] ?? EMPTY).filter((each) => !(each.appId === chip.appId && each.selector === chip.selector));
-  set({ ...chips, [threadId]: [...kept, { ...chip, id: crypto.randomUUID() }].slice(-POINT_LIMITS.perMessage) });
+  set({ ...chips, [threadId]: [...kept, { ...chip, id: randomUuid() }].slice(-POINT_LIMITS.perMessage) });
 }
 
 export function removePointedChip(threadId: string, id: string): void {
