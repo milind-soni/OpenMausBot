@@ -7,7 +7,8 @@ export type HomeView = { name?: string } & (
   | { screen: "setup"; step?: import("./cloud-home.mjs").CloudSetupStep; slow?: true }
   | { screen: "offline"; reason?: string }
   | { screen: "signin"; other?: true }
-  | { screen: "plan"; machine: "stopped" | "payment-problem" | "failed" }
+  /** `member`: a team's User, who can't subscribe or pay for it and is sent to its owner. */
+  | { screen: "plan"; machine: "stopped" | "payment-problem" | "failed"; member?: true }
   /** A Cloud the session's list says isn't running, so nothing looks up its address: it has ended (`deleteAt`: when its kept
    * files are deleted), its checkout wasn't finished, or its payment has a problem; `removable` while its owner may take it
    * off their list. */
