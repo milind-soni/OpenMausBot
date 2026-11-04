@@ -29,18 +29,30 @@ export interface CloudLendingTurn {
 
 const personOf = (line: Line | undefined) => line?.role === "user" && !line.peerAsk ? line.sender?.id : undefined;
 
+/** This turn answers a line the owner wrote: no run of a routine or a webhook, and no line a bot handed in. */
+export function answersOwnersLine(turn: CloudLendingTurn): boolean {
+  const { request } = turn;
+  if (!request?.messageId || request.stopped || request.automation !== undefined || !request.generations.has(turn.generation)) return false;
+  return turn.ownerPerson(personOf(turn.thread.find((line) => line.id === request.messageId)));
+}
+
 export type CloudLendingRefusal = "unproven" | "not-owner" | "someone-else";
 
 /** What a refused call hears after the words for the person, since a bot told "start a new conversation" does it itself. */
 export const ONLY_THE_PERSON = "Only the person can change this. Stop trying to reach it: asking again, a conversation you open yourself and work you hand to another bot can't use it either. Tell them the above in their language, then end your turn.";
 
+/** What a refused call hears when a card in the chat lets the owner lift the refusal right there. */
+export const ON_THE_CARD = "Don't call this again or try another way. End your turn and say in one line that you're waiting for them: you carry on by itself once they allow it.";
+
 /** Why a turn can't use the lent computer, in the words its bot says and a refused call answers, once every gate is
  * checked: each way out it names works. `room`: a group chat. `fromBefore`: each line that is not the owner's is one of theirs
  * the Cloud cannot prove, written before My Cloud carried their name on their lines. `botOpened`: a bot opened it. `outside`: no other person wrote here,
- * a webhook or a routine they didn't write did. `memoryChanged`: this bot is locked whichever conversation asks. */
-export function cloudLendingRefusalText(why: CloudLendingRefusal | "memory-changed", { room, fromBefore, botOpened = false, outside = false, memoryChanged = false, device }: { room: boolean; fromBefore: boolean; botOpened?: boolean; outside?: boolean; memoryChanged?: boolean; device: "Mac" | "PC" | "computer" | "Chrome" }): string {
+ * a webhook or a routine they didn't write did. `memoryChanged`: this bot is locked whichever conversation asks. `onCard`: a
+ * card in this chat lets them lift it. */
+export function cloudLendingRefusalText(why: CloudLendingRefusal | "memory-changed", { room, fromBefore, botOpened = false, outside = false, memoryChanged = false, onCard = false, device }: { room: boolean; fromBefore: boolean; botOpened?: boolean; outside?: boolean; memoryChanged?: boolean; onCard?: boolean; device: "Mac" | "PC" | "computer" | "Chrome" }): string {
   const yours = `your ${device}`;
   const fresh = room ? "Start a new thread in this group chat to use it." : "Start a new conversation with this bot to use it.";
+  if (onCard) return `${why === "memory-changed" || memoryChanged ? "This bot's memory was changed in a conversation you didn't write" : botOpened ? "A bot opened this conversation" : "A webhook or a routine you didn't write posted in this conversation"}, so it can't use ${yours} until you allow it on the card in this chat.`;
   if (why === "memory-changed" || memoryChanged) {
     const next = why === "memory-changed" ? "ask again here"
       : room ? (why === "someone-else" ? "start a new thread in this group chat and ask there" : "ask here yourself")

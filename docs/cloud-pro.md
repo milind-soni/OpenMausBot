@@ -996,7 +996,24 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
     then start a new conversation, never the new conversation alone. What a
     refused call answers also tells the bot only the person can change this,
     so it stops instead of trying again, opening a conversation itself or
-    handing the work on. The bot's **Memory** panel shows the same notice,
+    handing the work on. When the turn answers the owner's own line, the refusal
+    raises a card in the chat instead (`server/host/lending-lifts.ts`): it
+    shows what changed, and **Allow** does what **Mark reviewed** does, for
+    exactly what it showed; if anything changed since, the card shows that and
+    waits. It is one card per line of theirs, written by the harness, answered
+    only on screen from one of the owner's own devices (not by a Live call, a
+    reaction or a process on the Cloud), and counted only while it records
+    the owner as its answerer; the request goes on by itself once they allow
+    it (in a group chat they ask again). **Not now** is
+    not asked again for that line. A webhook's or a routine's run, or a line a
+    bot handed in, never raises one. The same card lets the owner's own line
+    through the work a bot opened a conversation with, for that line alone:
+    work a bot hands into it after they allowed it (made or run then) shuts it
+    again. The same card lets a line of the owner's
+    through what a webhook or a routine they didn't write posted in that
+    conversation, for that line alone: another post, another person's words or
+    their next line shuts it again, what that turn says still feeds no memory, and if it changes the
+    bot's memory the bot is flagged as above. The bot's **Memory** panel shows the same notice,
     lists the files that changed, and **Mark reviewed** (one click, only from one of the
     owner's own devices, never a local process) accepts exactly what was
     shown: if anything changed since, the panel shows it again. The owner's

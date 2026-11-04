@@ -95,3 +95,96 @@ describe("what a turn hears when it can't use the lent Mac (server/host/cloud-le
     expect(host.cloudLendingRefusalForBot(turn)).toBe("Acme's bots never use anyone's own computer; they use Acme's cloud computer.");
   });
 });
+
+describe("a card lifts a lock only for the owner's own line (server/host/cloud-lending-turns.ts)", () => {
+  function withLifts(lines: Record<string, unknown>[], { flagged = false, allowedAt = -1, declined = false, directRequest = { messageId: "m1", generations: new Set(["g1"]) } as Record<string, unknown>, ownersRun = false, botOpened = false, handed = false } = {}) {
+    const raised: unknown[] = [];
+    const run = { id: "r1", threadId: "t1", routineId: "rt1", triggerSource: "manual" };
+    const host = createCloudLendingTurns({
+      store: { groupByThread: () => undefined, messagesFor: () => lines, botByThread: () => ({ id: "b1" }), taskByThread: () => ({ threadId: "t1", ...(ownersRun ? { routineRunId: "r1" } : {}), ...(botOpened ? { openedBy: { botId: "b2", name: "CoS", kind: "work", at: 1 } } : {}) }) } as never,
+      cloudHome: true, team: null, directRequest: () => directRequest as never, threadStarter: () => undefined, ownerPerson: (person) => person === OWNER, cardAnswerer: (card) => card.answeredBy?.person,
+      activeRoutineRun: () => (ownersRun ? run as never : null), ownerStartedRun: () => ownersRun, routineRunIsOwners: () => ownersRun, memoryChangedBySomeoneElse: () => flagged, routines: () => null, routineAuthors: null, lentPlatform: () => "darwin",
+      lifts: () => ({ raise: (input) => { raised.push(input); return "open" as const; }, declined: () => declined, outsideAllowed: () => (allowedAt < 0 ? null : { index: allowedAt, at: 100 }) }),
+      handedSince: (_, since) => { expect(since).toBe(100); return handed; },
+    });
+    return { host, raised };
+  }
+  it("his own line on a locked bot raises one for what's shut, and he's told about the card", () => {
+    const { host, raised } = withLifts([own], { flagged: true });
+    expect(host.cloudLendingRefusalNotice(turn)).toBe("This bot's memory was changed in a conversation you didn't write, so it can't use your Mac until you allow it on the card in this chat.");
+    expect(host.cloudLendingRefusalForBot(turn)).toContain("End your turn and say in one line that you're waiting for them");
+    expect(raised).toEqual([{ botId: "b1", threadId: "t1", requestMessageId: "m1", memoryChanged: true, outside: false, botOpened: false }]);
+  });
+  it("his own line in a webhook's thread raises one for that", () => {
+    const { host, raised } = withLifts([own, webhookPost]);
+    host.cloudLendingRefusalForBot(turn);
+    expect(raised).toEqual([{ botId: "b1", threadId: "t1", requestMessageId: "m1", memoryChanged: false, outside: true, botOpened: false }]);
+  });
+  it("a webhook's own run raises none and stays barred, whatever he allowed for his line", () => {
+    const run = { messageId: "m1", generations: new Set(["g1"]), automation: "webhook" };
+    const { host, raised } = withLifts([own, webhookPost], { directRequest: run, allowedAt: 1 });
+    expect(host.cloudLendingRefusal(turn)).toBe("not-owner");
+    expect(host.cloudLendingRefusalForBot(turn)).toContain("Only the person can change this");
+    expect(raised).toEqual([]);
+  });
+  it("a run of his own routine raises none, even one he started whose line carries his name: only a line he wrote now does", () => {
+    const { host, raised } = withLifts([own], { flagged: true, ownersRun: true, directRequest: { messageId: "m1", generations: new Set(["g1"]), automation: "manual" } });
+    expect(host.cloudLendingRefusal(turn)).toBe("memory-changed");
+    expect(host.cloudLendingRefusalNotice(turn)).toContain("tap Mark reviewed, then ask again here.");
+    expect(host.cloudLendingRefusalForBot(turn)).toContain("Only the person can change this");
+    expect(raised).toEqual([]);
+  });
+  it("his own line in a conversation a bot opened raises one for that, and he's told about the card", () => {
+    const { host, raised } = withLifts([own], { botOpened: true });
+    expect(host.cloudLendingRefusal(turn)).toBe("someone-else");
+    expect(host.cloudLendingRefusalNotice(turn)).toBe("A bot opened this conversation, so it can't use your Mac until you allow it on the card in this chat.");
+    host.cloudLendingRefusalForBot(turn);
+    expect(raised).toEqual([{ botId: "b1", threadId: "t1", requestMessageId: "m1", memoryChanged: false, outside: true, botOpened: true }]);
+  });
+  it("once he allowed it, the same judge lets that line through, until a bot hands in more work or a webhook posts", () => {
+    const allowed = { id: "c1", role: "bot", card: { requestId: "q1", answered: "allow", answeredBy: { kind: "session", person: OWNER } } };
+    expect(withLifts([own, allowed], { botOpened: true, allowedAt: 1 }).host.cloudLendingRefusal(turn)).toBeNull();
+    expect(withLifts([own, allowed], { botOpened: true, allowedAt: 1 }).host.cloudLendingView(turn)).toBe(true);
+    expect(withLifts([own, allowed], { botOpened: true }).host.cloudLendingRefusal(turn)).toBe("someone-else");
+    expect(withLifts([own, allowed], { botOpened: true, allowedAt: 1, handed: true }).host.cloudLendingRefusal(turn)).toBe("someone-else");
+    expect(withLifts([own, allowed, webhookPost], { botOpened: true, allowedAt: 1 }).host.cloudLendingRefusal(turn)).toBe("someone-else");
+  });
+  it("a conversation a bot opened that another person wrote in, or a line a bot handed into it, raises none", () => {
+    const withOther = withLifts([own, { id: "m2", role: "user", sender: { id: "p_other", name: "Other" } }], { botOpened: true });
+    withOther.host.cloudLendingRefusalForBot(turn);
+    expect(withOther.raised).toEqual([]);
+    const handedLine = withLifts([handedIn], { botOpened: true });
+    expect(handedLine.host.cloudLendingRefusalForBot(turn)).toContain("Only the person can change this");
+    expect(handedLine.raised).toEqual([]);
+  });
+  it("a line a bot handed in raises none", () => {
+    const { host, raised } = withLifts([handedIn], { flagged: true });
+    expect(host.cloudLendingRefusalForBot(turn)).toContain("Only the person can change this");
+    expect(raised).toEqual([]);
+  });
+  it("another person's words are never lifted, even on his own line beside a webhook's post", () => {
+    const { host, raised } = withLifts([own, webhookPost, { id: "m2", role: "user", sender: { id: "p_other", name: "Other" } }], { allowedAt: 1 });
+    expect(host.cloudLendingRefusal(turn)).toBe("someone-else");
+    host.cloudLendingRefusalForBot(turn);
+    expect(raised).toEqual([]);
+  });
+  it("what he allowed lets the same judge through; a post after that, or anyone else's answer, shuts it again", () => {
+    const allowed = { id: "c1", role: "bot", card: { requestId: "q1", answered: "allow", answeredBy: { kind: "session", person: OWNER } } };
+    expect(withLifts([webhookPost, own, allowed], { allowedAt: 2 }).host.cloudLendingRefusal(turn)).toBeNull();
+    expect(withLifts([webhookPost, own, allowed]).host.cloudLendingRefusal(turn)).toBe("someone-else");
+    expect(withLifts([webhookPost, own, allowed, webhookPost], { allowedAt: 2 }).host.cloudLendingRefusal(turn)).toBe("someone-else");
+    const notHis = { id: "c1", role: "bot", card: { requestId: "q1", answered: "allow", answeredBy: { kind: "session", person: "p_other" } } };
+    expect(withLifts([webhookPost, own, notHis], { allowedAt: 2 }).host.cloudLendingRefusal(turn)).toBe("someone-else");
+  });
+  it("after Not now the card isn't raised again for that line, and the settings way is named", () => {
+    const { host, raised } = withLifts([own], { flagged: true, declined: true });
+    expect(host.cloudLendingRefusalNotice(turn)).toContain("tap Mark reviewed, then ask again here.");
+    expect(host.cloudLendingRefusalForBot(turn)).toContain("Only the person can change this");
+    expect(raised).toEqual([]);
+  });
+  it("what's let through for the Mac still reads only the owner's conversations", () => {
+    const allowed = { id: "c1", role: "bot", card: { requestId: "q1", answered: "allow", answeredBy: { kind: "session", person: OWNER } } };
+    expect(withLifts([webhookPost, own, allowed], { allowedAt: 2 }).host.cloudLendingView(turn)).toBe(true);
+    expect(withLifts([webhookPost, own, allowed]).host.cloudLendingView(turn)).toBe(false);
+  });
+});
