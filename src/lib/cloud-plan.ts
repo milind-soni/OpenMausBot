@@ -201,7 +201,7 @@ export function trialTerms(days: number, price: string): string {
 function planCard(plan: CloudOfferPlan, recommended: string, current: string | null): CloudPlanCard {
   const name = offerPlanLabel(plan), price = usd(plan.amount / 100), mine = plan.tier === current;
   return { tier: plan.tier, name, price, popular: plan.tier === recommended, current: mine,
-    promise: Object.hasOwn(PROMISE, plan.tier) ? t(PROMISE[plan.tier]!) : null,
+    promise: Object.hasOwn(PROMISE, plan.tier) ? t(PROMISE[plan.tier]!) : plan.allowances?.seats ? t("cloudBuy.promise.team", { seats: plan.allowances.seats }) : null,
     action: mine ? null : plan.trialDays ? t("cloudIntro.start") : t("cloudBuy.card.get", { plan: name }),
     terms: mine ? null : plan.trialDays ? trialTerms(plan.trialDays, price) : t("cloudBuy.card.paid", { price }),
     rows: plan.allowances ? planCardRows(plan.allowances) : [] };
