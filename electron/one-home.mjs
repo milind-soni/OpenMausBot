@@ -381,7 +381,8 @@ export function createOneHome(deps) {
   async function steady(journal, cloud, waiting) {
     let next = await settle(journal, cloud);
     if (cloud?.ended) return ended(next, cloud);
-    if (!waiting && !next.forgot && deps.version && next.version !== deps.version && cloud?.ready) {
+    // Not while this computer's own copy isn't the server answering: it goes as soon as it is, rather than an hour later.
+    if (!waiting && !next.forgot && deps.version && next.version !== deps.version && cloud?.ready && deps.ownCopy?.() !== false) {
       try { await deps.send.move({ final: true }); next = write({ ...next, version: deps.version, retryAt: undefined }); }
       catch (error) { log(`one home: the top-up waits (${error?.message ?? error})`); next = write({ ...next, retryAt: now() + HOUR }); }
     }

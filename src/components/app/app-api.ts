@@ -2,6 +2,7 @@ import { api, ApiError } from "@/state/store";
 import type { AppBlockedReason, AppDocument } from "../../../shared/app";
 import type { PublishedPageCard } from "../../../shared/published-page";
 import { RPC_HOST_REFUSED, type AppContextUpdate, type AppRpcMethod, type JsonRpcError } from "../../../shared/app-frame/bridge";
+import { randomUuid } from "@/lib/random-uuid";
 
 export function appDocumentPath(threadId: string, messageId: string): string {
   return `/api/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/app`;
@@ -99,7 +100,7 @@ export async function postAppContext(args: { botId: string; threadId: string; me
   });
 }
 
-export const newAppSendId = (): string => crypto.randomUUID();
+export const newAppSendId = (): string => randomUuid();
 
 /** Rejects with the server's sentence, or "Offline". */
 export async function sendAppMessage(args: { botId: string; threadId: string; messageId: string; text: string; sendId: string }): Promise<void> {

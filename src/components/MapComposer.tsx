@@ -10,6 +10,7 @@ import { useShowThreads } from "@/lib/thread-preferences";
 import { MentionMenu, type MentionChoice } from "./MentionMenu";
 import { MentionTextarea } from "./MentionTextarea";
 import { useMenuMotion } from "./MenuMotion";
+import { randomUuid } from "@/lib/random-uuid";
 
 /** Message bots from the Team map: tag bots, a team or @everyone; each tagged bot gets it as a normal message in its own chat. */
 export function MapComposer({ bots, teams, onTagged, onSent }: {
@@ -70,7 +71,7 @@ export function MapComposer({ bots, teams, onTagged, onSent }: {
   const send = () => {
     if (!canSend) return;
     const message = text.trim();
-    for (const botId of targets.botIds) dispatch({ type: "send", botId, text: message, sendId: crypto.randomUUID() });
+    for (const botId of targets.botIds) dispatch({ type: "send", botId, text: message, sendId: randomUuid() });
     onSent(targets.botIds);
     setSent({ botIds: targets.botIds, expanded: false });
     setText("");
