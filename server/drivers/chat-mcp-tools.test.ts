@@ -73,9 +73,9 @@ function fixture(body = "", toolSchema: Record<string, unknown> = schema) {
   return {
     dir, receipt, controller, server,
     read: () => JSON.parse(readFileSync(receipt, "utf8")) as { pid: number; path: string; omb: Record<string, string>; calls: Array<{ method: string; params?: { name?: string; arguments?: unknown } }> },
-    async mount(computerUse = false, localComputer = false, toolScope?: ToolScope, resultFolder?: string, serverName = "audit") {
+    async mount(computerUse = false, localComputer = false, toolScope?: ToolScope, resultFolder?: string, serverName = "audit", scrub?: (text: string) => string) {
       const session = await mountChatTools(localComputer ? { localComputer: server } : { custom: { [serverName]: server } }, controller.signal, computerUse, toolScope,
-        undefined, undefined, resultFolder);
+        undefined, undefined, resultFolder, scrub);
       sessions.push(session);
       return session;
     },
@@ -434,7 +434,7 @@ describe("Chat MCP session", () => {
       expect(readFileSync(file, "utf8")).toBe(big);
       expect(result.ok).toBe(true);
       expect(result.text.startsWith(big.slice(0, 1000))).toBe(true);
-      expect(result.text).toContain(`The full result is saved in ${file}`);
+      expect(result.text).toContain(`The full result is saved in ${file}]`);
       expect(result.text).toContain(`${Math.ceil(Buffer.byteLength(big) / 1024)}KB`);
       expect(Buffer.byteLength(result.text)).toBeLessThan(52_000);
     });
@@ -467,6 +467,19 @@ describe("Chat MCP session", () => {
       const text = readFileSync(join(folder, SAVED_RESULTS_FOLDER, saved), "utf8");
       expect(text.startsWith(big)).toBe(true);
       expect(text).not.toContain(key);
+    });
+
+    it("masks the turn's own secrets too, and says so in the notice", async () => {
+      const secret = "plain-configured-api-key-value";
+      const f = fixture(`if (message.method === "tools/call") { reply(message,{content:[{type:"text",text:${JSON.stringify(`${big}auth ${secret} end`)}}]}); continue; }`);
+      const folder = workFolder();
+      const scrub = (text: string) => text.split(secret).join("[redacted]");
+      const result = await (await f.mount(false, false, undefined, folder, "audit", scrub)).execute("audit_write", { value: "test" }, f.controller.signal);
+      const [saved] = readdirSync(join(folder, SAVED_RESULTS_FOLDER));
+      const text = readFileSync(join(folder, SAVED_RESULTS_FOLDER, saved), "utf8");
+      expect(text).not.toContain(secret);
+      expect(text).toContain("auth [redacted] end");
+      expect(result.text).toContain("(secret-looking values in it are masked)");
     });
 
     it(`keeps only the newest ${SAVED_RESULTS_KEPT} saved results`, async () => {

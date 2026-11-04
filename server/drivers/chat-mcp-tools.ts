@@ -297,9 +297,9 @@ async function pruneSavedResults(dir: string): Promise<void> {
   await Promise.all(saved.slice(SAVED_RESULTS_KEPT).map(({ name }) => unlink(join(dir, name))));
 }
 
-/** A result over the limit is kept whole (secrets masked) in `folder`/mcp-results and the model reads its start and the file's path.
+/** A result over the limit is kept whole (secrets masked by `scrub`) in `folder`/mcp-results and the model reads its start and the file's path.
  * Without a folder, or when the file cannot be written, it is cut as before. */
-async function savedOrBounded(value: string, tool: string, folder: string | undefined): Promise<string> {
+async function savedOrBounded(value: string, tool: string, folder: string | undefined, scrub: (text: string) => string): Promise<string> {
   const bytes = Buffer.from(value);
   if (bytes.length <= OUTPUT_BYTES || !folder) return boundedText(value, bytes);
   try {
@@ -309,10 +309,11 @@ async function savedOrBounded(value: string, tool: string, folder: string | unde
     if (!(await lstat(dir)).isDirectory()) throw new Error("not a folder");
     const file = join(dir, `${tool}-${Date.now()}-${randomBytes(3).toString("hex")}.txt`);
     // Key-shaped values are masked before the result reaches disk, as for every other kept tool result.
-    await writeFile(file, redactSecretsInText(value), { flag: "wx", mode: 0o600 });
+    const kept = scrub(value);
+    await writeFile(file, kept, { flag: "wx", mode: 0o600 });
     await pruneSavedResults(dir).catch(() => {});
-    const kb = Math.ceil(bytes.length / 1024);
-    return `${preview(bytes)}\n[MCP result is ${kb}KB; only the first 50KB is shown above. The full result is saved in ${file}]`;
+    const kb = Math.ceil(bytes.length / 1024), masked = kept === value ? "" : " (secret-looking values in it are masked)";
+    return `${preview(bytes)}\n[MCP result is ${kb}KB; only the first 50KB is shown above. The full result is saved in ${file}${masked}]`;
   } catch {
     return boundedText(value, bytes);
   }
@@ -367,9 +368,9 @@ export function directServers(servers: ReadonlyArray<{ name: string; tools: numb
 }
 
 /** Under `schemaProfile` the model reads each tool's schema fitted to its provider; calls are still checked against the full one.
- * A tool result over 50KB is saved whole in `resultFolder`, the bot's working folder (see savedOrBounded). */
+ * A tool result over 50KB is saved whole in `resultFolder`, the bot's working folder, after `scrub` masks secrets (see savedOrBounded). */
 export async function mountChatTools(integrations: SendTurnInput["integrations"], signal: AbortSignal, computerUse = false, toolScope?: ToolScope, callTimeoutMs: number = DEFAULT_CALL_MS,
-  schemaProfile?: ToolSchemaProfile, resultFolder?: string): Promise<ChatToolSession> {
+  schemaProfile?: ToolSchemaProfile, resultFolder?: string, scrub: (text: string) => string = redactSecretsInText): Promise<ChatToolSession> {
   const parsed = parseToolScope(toolScope);
   if (!parsed.ok) throw new Error(parsed.error);
   const scope = parsed.scope;
@@ -603,7 +604,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       }
       if (result.structuredContent !== undefined) parts.push(JSON.stringify(result.structuredContent));
       if (unsupported) parts.unshift(`[${unsupported} unsupported MCP content item(s) omitted. The operation may have taken effect, but its full result cannot be represented; inspect its state before retrying.]`);
-      return { text: await savedOrBounded(parts.join("\n") || (images.length ? "Screenshot captured." : "(empty result)"), chatToolName(tool.server, tool.name), resultFolder), ok: result.isError !== true && unsupported === 0,
+      return { text: await savedOrBounded(parts.join("\n") || (images.length ? "Screenshot captured." : "(empty result)"), chatToolName(tool.server, tool.name), resultFolder, scrub), ok: result.isError !== true && unsupported === 0,
         ...(images.length ? { images } : {}) };
     } catch (error) {
       await close();
