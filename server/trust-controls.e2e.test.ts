@@ -18,6 +18,7 @@ let fullBot: any;
 let draftBot: any;
 let draftHelper: any;
 let outboundPolicyBot: any;
+let capBot: any;
 const gmailDrafts = new Map<string, Record<string, unknown>>();
 let brokerOrigin = "";
 const relayed: unknown[] = [];
@@ -114,11 +115,14 @@ beforeAll(async () => {
   const policyCreated = await fetch(fixture.info.url + "/api/bots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Full outbound policy fixture" }) });
   expect(policyCreated.status).toBe(201);
   outboundPolicyBot = (await policyCreated.json() as any).bot;
+  const capCreated = await fetch(fixture.info.url + "/api/bots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Full default cap fixture" }) });
+  expect(capCreated.status).toBe(201);
+  capBot = (await capCreated.json() as any).bot;
   await waitForExit(fixture.child, { signal: "SIGTERM" });
   const botsFile = join(fixture.info.dataDir, "bots.json");
   const bots = JSON.parse(readFileSync(botsFile, "utf8"));
   const saved = bots.find((row: any) => row.id === fullBot.id);
-  for (const full of [saved, ...[draftBot, draftHelper, outboundPolicyBot].map(bot => bots.find((row: any) => row.id === bot.id))]) {
+  for (const full of [saved, ...[draftBot, draftHelper, outboundPolicyBot, capBot].map(bot => bots.find((row: any) => row.id === bot.id))]) {
     full.approvalMode = "full";
     full.autoApprove = false;
     for (const task of full.tasks) { task.approvalMode = "full"; task.autoApprove = false; }
@@ -373,6 +377,34 @@ it("honors Ask every time on Full-access delegated and resumed turns without rel
   }
   await expect.poll(async () => (await cards(b.threadId)).some(row => row.text === "Outbound policy retained"), { timeout: 15_000 }).toBe(true);
   evidence.push({ outboundPolicyDelegation: readFileSync(join(fixture.info.dataDir, "gmail-plan.json.evidence.jsonl"), "utf8") });
+}, 90_000);
+
+it("sends 25 a day at Full access with no sending rule, refuses the 26th, and a routine at the cap reports it with no card", async () => {
+  const b = capBot;
+  const email = (to: string) => ({ recipient_email: to, subject: "Reminder", body: "See you at nine." });
+  const token = await mint(b.id, b.threadId);
+  const before = relayed.length;
+  for (let sent = 0; sent < 25; sent++) expect((await relay(token, "GMAIL_SEND_EMAIL", email(`person${sent}@example.test`))).body.result.isError).not.toBe(true);
+  expect(relayed).toHaveLength(before + 25);
+  expect((await api("GET", `/api/bots/${b.id}/outbound`)).body.today).toBe(25);
+  const refused = (await relay(token, "GMAIL_SEND_EMAIL", email("late@example.test"))).body.result;
+  expect(refused.isError).toBe(true);
+  expect(refused.content[0].text).toMatch(/did not send this\. Full default cap fixture has reached its daily limit of 25 outbound actions at Full access/);
+  expect(relayed, "nothing was sent").toHaveLength(before + 25);
+
+  expect((await api("PATCH", `/api/bots/${b.id}`, { modelSelection: { instanceId: "gmailFixture", model: "claude-sonnet-5" }, threadId: b.threadId })).status).toBe(200);
+  writeFileSync(join(fixture.info.dataDir, "gmail-plan.json"), JSON.stringify({ [b.id]: { timeoutMs: 60_000,
+    steps: [{ server: "composio", tool: "GMAIL_SEND_EMAIL", arguments: email("team@example.test"), expectError: true }],
+    reply: "Report: the reminder was not sent, the daily sending limit is reached." } }));
+  const created = await api("POST", "/api/routines", { name: "Morning reminder", prompt: "Send the morning reminder email to the team.", botId: b.id, schedule: { type: "interval", everyMinutes: 1440 } });
+  expect(created.status, JSON.stringify(created.body)).toBe(201);
+  const { run } = (await api("POST", `/api/routines/${created.body.routine.id}/run`)).body;
+  let finished: any;
+  await expect.poll(async () => (finished = (await api("GET", "/api/routines")).body.runs.find((item: any) => item.id === run.id))?.status, { timeout: 45_000 }).toBe("completed");
+  expect(finished.output).toContain("Report: the reminder was not sent");
+  expect(relayed).toHaveLength(before + 25);
+  const threads = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === b.id).tasks.map((task: any) => task.threadId);
+  for (const thread of threads) expect((await cards(thread)).filter((row: any) => row.card?.outboundRequest), "no card waits on anyone").toEqual([]);
 }, 90_000);
 
 it("shows each outbound batch recipient and amount with explicit preview truncation before consent", async () => {
