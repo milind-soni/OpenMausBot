@@ -148,13 +148,14 @@ it("where this app can keep another account beside this one, the other email is 
   vi.stubGlobal("window", { ogb: { cloudAccount: bridge, accounts: { addCancel: vi.fn(), list: vi.fn(), onChanged: vi.fn() } } });
   await ready(free);
   none(render({ onAddCloud: vi.fn() }).html, ["Sign out and use that email"]);
+  all(render({ onAddCloud: vi.fn() }).html, ["Bought a plan or joined a team with a different email?"]);
   button("Add that email")!.props.onClick!();
   all(render({ onAddCloud: vi.fn() }).html, ["data-accounts-sheet", "cloud-add-email"]);
   expect(bridge.signOut).not.toHaveBeenCalled();
 });
 it("a free account may add a Cloud, and is told what to do if it bought with another email", async () => {
   await ready(free);
-  all(render({ onAddCloud: vi.fn() }).html, ["No plan yet", ">Add a Cloud<", "Bought a plan or joined a team with a different email?"]);
+  all(render({ onAddCloud: vi.fn() }).html, ["No plan yet", ">Add a Cloud<", "Bought a plan with a different email?"]);
   none(render({ onAddCloud: vi.fn() }).html, ["Choose a Cloud plan", "Free account", "a checkout return alone"]);
   button("Sign out and use that email")!.props.onClick!();
   expect(render().html).toContain("does not cancel your subscription"); expect(bridge.signOut).not.toHaveBeenCalled();

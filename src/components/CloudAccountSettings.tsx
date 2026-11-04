@@ -306,7 +306,7 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamH
           {!confirm && <button type="button" disabled={busy} className="ui-button" onClick={() => setConfirm(true)}>{t("cloudAccount.signOut")}</button>}
         </div>
         {account.status === "connected" && account.renewal && <CloudCancelPlan renewal={account.renewal} actions={renewal} />}
-        {view.kind === "free" && !confirm && <p className="text-[12px] text-ink-secondary">{t("cloudAccount.otherEmail")}{" "}
+        {view.kind === "free" && !confirm && <p className="text-[12px] text-ink-secondary">{t(window.ogb?.accounts ? "cloudAccount.otherEmailOrTeam" : "cloudAccount.otherEmail")}{" "}
           <button type="button" data-cloud-other-email disabled={busy} className="underline hover:text-ink" onClick={() => (window.ogb?.accounts ? setAddingEmail(true) : setConfirm(true))}>{t(window.ogb?.accounts ? "cloudAccount.addOtherEmail" : "cloudAccount.useOtherEmail")}</button></p>}
         {addingEmail && <AccountsSheet adding="" onClose={() => setAddingEmail(false)} />}
         {confirm && <div role="group" aria-label={t("cloudAccount.signoutTitle")} className="rounded-lg border border-hairline/40 p-3">
