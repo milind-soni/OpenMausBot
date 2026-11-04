@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { boxUploadsDir } from "../bot-box/plan.ts";
 import { EmailError, openGuard } from "./client.ts";
-import { createEmailHost, emailAccess, emailAllowedFor, type EmailBot, type EmailHostDeps } from "./host.ts";
+import { outsideRouteRefused } from "../host/outside-fence.ts";
+import { createEmailHost, EMAIL_INTERNAL_MCP_PATH, emailAccess, emailAllowedFor, type EmailBot, type EmailHostDeps } from "./host.ts";
 import { createEmailService } from "./service.ts";
 import type { EmailToolResult } from "./tools.ts";
 import { EMAIL_READ_TOOL_NAMES, EMAIL_TOOL_NAMES } from "../../shared/email.ts";
@@ -120,6 +121,10 @@ describe("a turn's Email tools", () => {
     expect(emailAllowedFor({})).toBe(true);
     const list = await (await fixture({}, reader)).host.handle({ method: "tools/list" }, { botId: "b", threadId: "t" }, () => {}) as { tools: Array<{ name: string }> };
     expect(list.tools.map((tool) => tool.name)).toEqual(EMAIL_READ_TOOL_NAMES);
+  });
+
+  it("a confined turn still reaches its tools, which the engine asks a person about first", () => {
+    expect(outsideRouteRefused("POST", EMAIL_INTERNAL_MCP_PATH)).toBe(false);
   });
 
   it("each tool says whether it only reads, which is what an engine's normal approval goes by", async () => {

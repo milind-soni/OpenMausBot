@@ -152,6 +152,8 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     const listed = await mail.call("EMAIL_LIST_MESSAGES", { limit: 50 });
     expect(listed.isError, listed.text).toBe(false);
     const messages = JSON.parse(listed.text).messages as Array<{ uid: number; subject: string }>;
+    const tasks = (await api("GET", "/api/bots")).body.bots.find((one: { id: string }) => one.id === bot.id).tasks as Array<{ threadId: string; outside?: true }>;
+    expect(tasks.find((one) => one.threadId === task.threadId)?.outside, "reading mail makes the conversation outside work").toBe(true);
     expect(messages.map((one) => one.subject)).toEqual(expect.arrayContaining(["Rechnung für März – Überweisung ✓", ")"]));
     const withPdf = messages.find((one) => one.subject === "Rechnung März")!;
     const read = JSON.parse((await mail.call("EMAIL_READ_MESSAGE", { uid: withPdf.uid, save_attachments: true })).text);
