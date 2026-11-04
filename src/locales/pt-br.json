@@ -6369,6 +6369,8 @@
   "settings.recovery.ownBackups": "Bots com reservas próprias (Modelo → Modelos de reserva deste bot) usam essas, com isto ativado ou não.",
   "limits.windowAtLimit": "No limite",
   "limits.clearsOnReply": "Se resolve sozinho assim que {engine} voltar a responder.",
+  "limits.cardTitle": "Uso do {engine}",
+  "limits.checked": "verificado {when}",
   "botAccess.share": "Compartilhar",
   "botAccess.title": "Compartilhar {bot}",
   "botAccess.addPlaceholder": "Adicione pessoas por nome ou e-mail",

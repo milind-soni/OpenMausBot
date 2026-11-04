@@ -33,7 +33,7 @@ const { setLocale } = await import("@/lib/i18n");
 const limits = await import("@/lib/limit-resets");
 const { automationSentence, isDone, statusLine } = await import("@/lib/automations");
 const { LimitWarnings } = await import("./automations/LimitWarnings");
-const { UsageAlert, UsageBars } = await import("./EngineUsage");
+const { UsageAlert, UsageBars, UsageRows } = await import("./EngineUsage");
 const { FailedTurnRow } = await import("./ChatView");
 const { CalendarGrid } = await import("./RoutineCalendarPage");
 
@@ -209,7 +209,9 @@ describe("the bars", () => {
     hover(spot, "mouse");
     await wait(HOVER_MS);
     const card = document.querySelector<HTMLElement>("[data-usage-card]")!;
-    expect([...card.querySelectorAll("[data-usage-row]")].map((row) => row.textContent)).toEqual(["5-hour62% leftresets 3:40 PM", "Weekly20% leftresets Mon 9:00 AM"]);
+    expect(card.querySelector("[data-usage-rows] > div")?.textContent).toBe("Claude usagechecked just now");
+    expect([...card.querySelectorAll("[data-usage-row]")].map((row) => row.textContent)).toEqual(["5-hour62% left · resets 3:40 PM", "Weekly20% left · resets Mon 9:00 AM"]);
+    expect([...card.querySelectorAll<HTMLElement>("[data-usage-track]")].map((track) => track.style.width)).toEqual(["38%", "80%"]);
     expect(card.textContent).not.toContain("Check again");
     leave(spot);
     await wait(HOVER_MS);
@@ -219,13 +221,19 @@ describe("the bars", () => {
     hover(spot, "mouse");
     await wait(HOVER_MS);
     const blocked = document.querySelector<HTMLElement>("[data-usage-card]")!;
-    expect(blocked.querySelector('[data-usage-row="5-hour"]')?.textContent).toBe("5-hourAt its limitresets 3:40 PM");
+    expect(blocked.querySelector('[data-usage-row="5-hour"]')?.textContent).toBe("5-hourAt its limit · resets 3:40 PM");
+    expect(blocked.querySelector<HTMLElement>('[data-usage-row="5-hour"] [data-usage-track]')?.style.width).toBe("100%");
     expect(blocked.textContent).toContain("Clears by itself once Claude replies again.");
     fixture.api.mockClear();
     flushSync(() => blocked.querySelector<HTMLButtonElement>("[data-usage-check]")!.click());
     await settle();
     expect(fixture.api).toHaveBeenCalledWith("/api/limit-resets?refresh=1");
     expect(opened).not.toHaveBeenCalled();
+  });
+
+  it("say how long ago the usage was read", () => {
+    limits.rememberLimits({ checkedAt: NOW - 3 * 60_000, engines: [windows(38, 80)] });
+    expect(mount(createElement(UsageRows, { limit: windows(38, 80) })).querySelector("[data-usage-checked]")?.textContent).toBe("checked 3 min ago");
   });
 
   it("read limits on their own as a background poll, so a sleeping Cloud home stays asleep", async () => {

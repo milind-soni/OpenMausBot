@@ -7104,6 +7104,8 @@
   "settings.windowFrame.restartNow": "지금 다시 시작",
   "limits.windowAtLimit": "한도 도달",
   "limits.clearsOnReply": "{engine}이(가) 다시 답하면 알아서 풀려요.",
+  "limits.cardTitle": "{engine} 사용량",
+  "limits.checked": "{when} 확인",
   "botAccess.ask": "{name}님에게 대화 허락 요청",
   "botAccess.askAdmins": "관리자에게 대화 허락 요청",
   "botAccess.asked": "{name}님에게 요청함",

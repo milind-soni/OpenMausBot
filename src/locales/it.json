@@ -6350,6 +6350,8 @@
   "settings.recovery.ownBackups": "I bot con riserve proprie (Modello → Modelli di riserva per questo bot) usano quelle, che questa opzione sia attiva o no.",
   "limits.windowAtLimit": "Al limite",
   "limits.clearsOnReply": "Si risolve da solo appena {engine} torna a rispondere.",
+  "limits.cardTitle": "Utilizzo di {engine}",
+  "limits.checked": "controllato {when}",
   "botAccess.share": "Condividi",
   "botAccess.title": "Condividi {bot}",
   "botAccess.addPlaceholder": "Aggiungi persone per nome o email",

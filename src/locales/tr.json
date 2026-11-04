@@ -5187,6 +5187,8 @@
   "limits.resets": "{time} sıfırlanır",
   "limits.windowAtLimit": "Sınıra ulaştı",
   "limits.clearsOnReply": "{engine} yeniden yanıt verdiğinde kendiliğinden kalkar.",
+  "limits.cardTitle": "{engine} kullanımı",
+  "limits.checked": "{when} kontrol edildi",
   "botAccess.share": "Paylaş",
   "botAccess.title": "{bot} botunu paylaş",
   "botAccess.addPlaceholder": "Ada veya e-postaya göre kişi ekle",

@@ -4919,6 +4919,8 @@
   "limits.resets": "resets {time}",
   "limits.windowAtLimit": "At its limit",
   "limits.clearsOnReply": "Clears by itself once {engine} replies again.",
+  "limits.cardTitle": "{engine} usage",
+  "limits.checked": "checked {when}",
   "limits.dueOne": "1 automation runs before then",
   "limits.dueMany": "{count} automations run before then",
   "limits.moveAfterReset": "Move to after reset",

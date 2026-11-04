@@ -3198,6 +3198,8 @@
   "limits.resets": "скидання {time}",
   "limits.windowAtLimit": "Досягнуто ліміту",
   "limits.clearsOnReply": "Зніметься само, щойно {engine} знову відповість.",
+  "limits.cardTitle": "Використання {engine}",
+  "limits.checked": "перевірено {when}",
   "botAccess.share": "Поділитися",
   "botAccess.title": "Поділитися {bot}",
   "botAccess.addPlaceholder": "Додайте людей за ім’ям або email",

@@ -2757,6 +2757,8 @@
   "limits.resets": "{time} पर रीसेट",
   "limits.windowAtLimit": "सीमा पूरी",
   "limits.clearsOnReply": "{engine} के फिर से जवाब देते ही यह अपने आप हट जाएगा।",
+  "limits.cardTitle": "{engine} का उपयोग",
+  "limits.checked": "{when} जाँचा गया",
   "botAccess.share": "शेयर करें",
   "botAccess.title": "{bot} शेयर करें",
   "botAccess.addPlaceholder": "नाम या ईमेल से लोग जोड़ें",
