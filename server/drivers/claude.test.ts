@@ -2312,7 +2312,23 @@ describe("ClaudeDriver turns (fake CLI)", () => {
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv[seen.argv.indexOf("--tools") + 1]).toBe("Read,WebFetch");
+    // Its own list leaves the rest out already.
     expect(seen.argv[seen.argv.indexOf("--disallowedTools") + 1]).toBe("Bash(git *),Edit");
+  });
+
+  it("leaves out the built-ins no bot can use, unless the bot inherits the machine's own setup", async () => {
+    const dump = join(scratch, "built-ins.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump });
+    await instance.adapter.sendTurn({ threadId: "t-built-ins", text: "hi" });
+    await recorder.until((event) => event.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv[seen.argv.indexOf("--disallowedTools") + 1].split(",")).toEqual(["Workflow", "ScheduleWakeup", "ReportFindings", "ListAgents"]);
+
+    const inherited = join(scratch, "built-ins-inherit.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: inherited, OMB_CLAUDE_INHERIT_USER_CONFIG: "1" });
+    await instance.adapter.sendTurn({ threadId: "t-built-ins-inherit", text: "hi" });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(JSON.parse(readFileSync(inherited, "utf8")).argv).not.toContain("--disallowedTools");
   });
 
   it("passes an explicit empty available set to disable every Claude built-in", async () => {
