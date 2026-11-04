@@ -19,7 +19,7 @@ import { DATA_ROUTES, type DataSheet, type DataTable } from "../../shared/data-s
 import type { NotificationLogEntry } from "../../shared/notification";
 import { isNotificationFeedAction, reduceNotificationFeed, type NotificationFeedAction } from "./notification-feed";
 import { bumpThreadUpdatedAt, mergeTaskStamps, rewindThreadUpdatedAt } from "./thread-stamps";
-import { botOpensTo, closeUnpinnedTray, openBot, openNotificationTarget, visibleNotificationThread, withRememberedTrayPin } from "./thread-navigation";
+import { botOpensTo, closeTrayUnlessShown, closeUnpinnedTray, openBot, openNotificationTarget, visibleNotificationThread, withRememberedTrayPin } from "./thread-navigation";
 import { patchGroupTask } from "./thread-edits";
 import type { EngineInstall } from "./engine-install";
 import { optimisticMessageId, optimisticUserMessage, sendArrived, sendReconciled } from "./optimistic-send";
@@ -1727,17 +1727,17 @@ export function reducer(state: AppState, action: Action): AppState {
       })), threadId, message.at, true);
     }
     case "switchGroupTask":
-      return closeUnpinnedTray(state);
+      return closeTrayUnlessShown(state, action.groupId, action.threadId);
     case "deleteTask":
     case "newGroupTask":
     case "deleteGroupTask":
     case "regenerateTaskTitle":
       return state;
     case "newTask":
-      return action.cwd !== undefined ? state : { ...state, selectedId: action.botId, activeView: "chat" };
+      return action.cwd !== undefined ? state : { ...closeUnpinnedTray(state), selectedId: action.botId, activeView: "chat" };
     case "switchTask": {
       const { [action.threadId]: _old, ...backgroundThreadEvents } = state.backgroundThreadEvents;
-      return updateBot({ ...closeUnpinnedTray(state), backgroundThreadEvents, selectedId: action.botId, activeView: "chat" }, action.botId, (bot) => ({ ...bot, switchingTo: action.threadId }));
+      return updateBot({ ...closeTrayUnlessShown(state, action.botId, action.threadId), backgroundThreadEvents, selectedId: action.botId, activeView: "chat" }, action.botId, (bot) => ({ ...bot, switchingTo: action.threadId }));
     }
     case "switchTaskFailed":
       return updateBot(state, action.botId, (bot) => bot.switchingTo === action.threadId ? { ...bot, switchingTo: undefined } : bot);

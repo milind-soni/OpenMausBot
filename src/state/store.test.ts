@@ -3177,9 +3177,18 @@ describe("notifications feed", () => {
     for (const action of switches) expect(reducer(pinned, action).notificationsOpen).toBe(true);
   });
 
-  it("re-selecting the open chat leaves the tray as it is", () => {
-    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1" };
+  it("re-selecting the open chat or its open thread leaves the tray as it is", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1",
+      bots: [{ id: "bot-1", threadId: "t-1" }] as AppState["bots"], groups: [{ id: "room-1", threadId: "room-t" }] as AppState["groups"] };
     expect(reducer(open, { type: "select", id: "bot-1" }).notificationsOpen).toBe(true);
+    expect(reducer(open, { type: "switchTask", botId: "bot-1", threadId: "t-1" }).notificationsOpen).toBe(true);
+    expect(reducer({ ...open, selectedId: "room-1" }, { type: "switchGroupTask", groupId: "room-1", threadId: "room-t" }).notificationsOpen).toBe(true);
+    expect(reducer(open, { type: "switchTask", botId: "bot-1", threadId: "t-2" }).notificationsOpen).toBe(false);
+  });
+
+  it("unpinned, starting a new chat closes it", () => {
+    const open = reducer(initialState, { type: "toggleNotifications", open: true });
+    expect(reducer(open, { type: "newTask", botId: "bot-1" }).notificationsOpen).toBe(false);
   });
 
   it("pinned, the feed survives Computer/Inspector/Activity/AppSettings opening", () => {

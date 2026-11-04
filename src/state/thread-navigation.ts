@@ -121,12 +121,16 @@ export function openThread(
 
 type NotificationTray = Pick<AppState, "notificationsOpen" | "notificationsPinned">;
 
-/** Leaving a chat closes the notification tray unless the person pinned it. */
 export function closeUnpinnedTray<T extends NotificationTray>(state: T): T {
   return state.notificationsOpen && !state.notificationsPinned ? { ...state, notificationsOpen: false } : state;
 }
 
-/** The tray pin is remembered per device, so it holds after a restart. */
+/** Opening the chat already on screen is not leaving it. */
+export function closeTrayUnlessShown(state: AppState, id: string, threadId: string): AppState {
+  const shown = id === state.selectedId && [...state.bots, ...state.groups].find((chat) => chat.id === id)?.threadId === threadId;
+  return shown ? state : closeUnpinnedTray(state);
+}
+
 export function withRememberedTrayPin<T extends NotificationTray>(state: T): T {
   return notificationTrayPinned() ? { ...state, notificationsPinned: true } : state;
 }
