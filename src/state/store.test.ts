@@ -3191,6 +3191,15 @@ describe("notifications feed", () => {
     expect(reducer(open, { type: "newTask", botId: "bot-1" }).notificationsOpen).toBe(false);
   });
 
+  it("unpinned, adding a bot that takes the chat closes it; a background add keeps it", () => {
+    const open = reducer(initialState, { type: "toggleNotifications", open: true });
+    const bot = { id: "bot-new", threadId: "thread-new", name: "New", messages: [] } as never as Bot;
+    expect(reducer(open, { type: "botAdded", bot }).notificationsOpen).toBe(false);
+    expect(reducer(open, { type: "botAdded", bot, preserveSelection: true }).notificationsOpen).toBe(true);
+    const pinned = { ...open, notificationsPinned: true };
+    expect(reducer(pinned, { type: "botAdded", bot }).notificationsOpen).toBe(true);
+  });
+
   it("pinned, the feed survives Computer/Inspector/Activity/AppSettings opening", () => {
     const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), notificationsPinned: true };
     for (const action of [

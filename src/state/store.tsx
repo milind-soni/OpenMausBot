@@ -1143,7 +1143,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return state;
     case "botAdded":
       return withMascotMotion({
-        ...state,
+        ...(action.preserveSelection || action.bot.id === state.selectedId ? state : closeUnpinnedTray(state)),
         // The HTTP response and its SSE broadcast race; fold both without showing the bot twice.
         bots: [action.bot.messages ? action.bot : { ...action.bot, messages: [] }, ...state.bots.filter((bot) => bot.id !== action.bot.id)],
         ...(action.preserveSelection ? {} : { activeView: "chat" as const, selectedId: action.bot.id }),
