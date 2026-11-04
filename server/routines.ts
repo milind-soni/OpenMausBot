@@ -257,7 +257,7 @@ export interface RoutineManagerOptions {
   onRunDeferred?: (run: RoutineRun, alert?: RoutineAlert) => void;
   /** A run a restart cut off, before it starts again or fails: its old turn's work must not resume as well. */
   onRunCut?: (run: RoutineRun) => void;
-  hasPendingDelegations?: (threadId: string) => boolean;
+  hasPendingDelegations?: (threadId: string) => boolean; /** Why a run that ended well in this thread must say a hand-off was refused, once; null when none was. */ refusedHandoff?: (threadId: string) => string | null;
   /** The turn in this thread is a routine's own, not one a person started there while its run waits on teammates. */
   routineTurn?: (threadId: string) => boolean;
   /** When an engine's usage limit resets (epoch ms), or null while that is not known. */
@@ -1279,11 +1279,10 @@ export class RoutineManager {
         return cloneRun(run);
       }
       this.failureFacts.delete(run.id);
-      if (this.options.hasPendingDelegations?.(event.threadId) === true) this.wait(run, "Waiting for work it handed on to finish");
-      else {
-        Object.assign(run, { status: "completed", attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>);
-        this.ownerNotices = this.ownerNotices.filter((notice) => notice.botId !== run.botId);
-      }
+      const waitsOnTeammates = this.options.hasPendingDelegations?.(event.threadId) === true, handoffRefused = waitsOnTeammates ? null : this.options.refusedHandoff?.(event.threadId);
+      if (handoffRefused) { this.failRun(Object.assign(run, { partial: Boolean(run.output) || undefined }), handoffRefused); queueMicrotask(() => this.tickInBackground()); return cloneRun(run); }
+      if (waitsOnTeammates) this.wait(run, "Waiting for work it handed on to finish");
+      else { Object.assign(run, { status: "completed", attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>); this.ownerNotices = this.ownerNotices.filter((notice) => notice.botId !== run.botId); }
       run.error = undefined;
     } else {
       return null;

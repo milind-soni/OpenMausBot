@@ -27,6 +27,12 @@ describe("composer slash commands", () => {
     ).toEqual({ text: "use /standup  later", caret: 13 });
   });
 
+  it("does not open inside code, and opens again after it", () => {
+    expect(composerSlashTrigger("```\n/st", 7)).toBeNull();
+    expect(composerSlashTrigger("`a /st` b", 6)).toBeNull();
+    expect(composerSlashTrigger("```\nx\n```\n/st", 13)).toEqual({ query: "st", start: 10, end: 13 });
+  });
+
   it("replaces the active token without losing text after the caret", () => {
     expect(
       replaceComposerSlashTrigger("/go later", { query: "go", start: 0, end: 3 }, ""),
