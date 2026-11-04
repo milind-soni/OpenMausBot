@@ -5,14 +5,16 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { link, open, unlink } from "node:fs/promises";
-import { join, extname } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { FILE_MAX_BYTES } from "../shared/upload-limits.ts";
 import { DATA_DIR } from "./config.ts";
+import { boxUploadsDir } from "./bot-box/plan.ts";
 
 export { FILE_MAX_BYTES } from "../shared/upload-limits.ts";
 export const ATTACHMENTS_DIR = join(DATA_DIR, "attachments");
@@ -169,8 +171,24 @@ export function cleanupStaleAttachmentPartials(now = Date.now()): number {
   return removed;
 }
 
+/** A removed upload also goes from every conversation's box uploads folder, where box-attachments.ts linked it, so no box
+ * can still read it and its space comes back. */
+function dropBoxUploadCopies(names: readonly string[], dataDir = DATA_DIR): void {
+  if (!names.length) return;
+  const root = join(dataDir, "box-uploads");
+  const dirs = (path: string) => { try { return readdirSync(path); } catch { return []; } };
+  for (const bot of dirs(root)) {
+    for (const thread of dirs(join(root, bot))) {
+      for (const name of names) {
+        try { rmSync(join(boxUploadsDir(dataDir, bot, thread), name), { force: true }); } catch { /* best effort: a file still in use stays */ }
+      }
+    }
+  }
+}
+
 /** Every removal of a file saveImage/saveFile created must come through here, or the cache overcounts and rejects uploads. */
 export function deleteAttachment(path: string): void {
+  if (resolve(dirname(path)) === resolve(ATTACHMENTS_DIR)) dropBoxUploadCopies([basename(path)]);
   try {
     const size = committedAttachmentBytes !== null ? statSync(path).size : 0;
     unlinkSync(path);
@@ -215,6 +233,7 @@ export function clearAttachments(kept: ReadonlySet<string>, now = Date.now()): {
   let removed = 0;
   let freedBytes = 0;
   let failed = 0;
+  const gone: string[] = [];
   for (const entry of readdirSync(ATTACHMENTS_DIR, { withFileTypes: true })) {
     if (!entry.isFile() || PARTIAL_NAME.test(entry.name) || kept.has(entry.name)) continue;
     const path = join(ATTACHMENTS_DIR, entry.name);
@@ -222,6 +241,7 @@ export function clearAttachments(kept: ReadonlySet<string>, now = Date.now()): {
       const { mtimeMs, size } = statSync(path);
       if (now - mtimeMs < ATTACHMENT_CLEAR_MIN_AGE_MS) continue;
       unlinkSync(path);
+      gone.push(entry.name);
       removed += 1;
       freedBytes += size;
     } catch (error) {
@@ -229,6 +249,7 @@ export function clearAttachments(kept: ReadonlySet<string>, now = Date.now()): {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") failed += 1;
     }
   }
+  dropBoxUploadCopies(gone);
   invalidateAttachmentAccounting();
   return { removed, freedBytes, failed };
 }

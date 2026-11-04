@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { link, unlink } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -685,6 +685,23 @@ describe("clearing attachments from Settings", () => {
     expect(existsSync(fresh.path)).toBe(true);
     expect(attachmentStorageUsage()).toEqual({ usedBytes: "avatar".length + "fresh".length, maxBytes: ATTACHMENTS_MAX_BYTES });
     expect(() => saveImage(Buffer.from("x".repeat(100)), "image/png")).not.toThrow();
+  });
+
+  it("removes a deleted or cleared upload from every conversation's box uploads folder too, so no box can still read it", () => {
+    const deleted = saveImage(Buffer.from("deleted"), "image/png");
+    const cleared = saveImage(Buffer.from("cleared"), "image/png");
+    const kept = saveImage(Buffer.from("kept"), "image/png");
+    const boxUploads = join(dirname(ATTACHMENTS_DIR), "box-uploads");
+    const shown = [join(boxUploads, "bot-a", "thread-1"), join(boxUploads, "bot-b", "thread-2")];
+    for (const dir of shown) {
+      mkdirSync(dir, { recursive: true });
+      for (const upload of [deleted, cleared, kept]) writeFileSync(join(dir, nameOf(upload.path)), "copy");
+    }
+    deleteAttachment(deleted.path);
+    age(cleared.path, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
+    clearAttachments(new Set([nameOf(kept.path)]));
+    for (const dir of shown) expect(readdirSync(dir)).toEqual([nameOf(kept.path)]);
+    rmSync(boxUploads, { recursive: true, force: true });
   });
 
   it("does not point a Team Cloud, which has no clear, to Settings", () => {
