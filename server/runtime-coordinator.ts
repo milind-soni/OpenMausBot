@@ -20,6 +20,13 @@ const ROOM_ANCESTOR = "A room request cannot return to an ancestor room; results
 const DEPTH = "Room handoff depth limit reached";
 const BUDGET = "Room handoff budget exhausted";
 const NO_TURN = "The requesting turn has no root (no turn)";
+/** A stop with no other cause is the person's own. */
+const STOPPED_BY_USER = "Stopped by user";
+/** How long a person's stop holds against the same request coming back. */
+const STOP_MEMORY_MS = 24 * 60 * 60_000;
+const STOPPED_AGAIN = "The person stopped this teammate's work on this request. It isn't handed out again until the person asks again: tell them what you still wanted done, and don't send it another way.";
+/** The person's request a tree traces to, as one key: their own words, harness-quoted. Empty when no person's line started it. */
+const requestKey = (root: Assignment): string => root.origin.kind === "person" ? (root.origin.quote ?? "").replace(/\s+/g, " ").trim().toLowerCase() : "";
 
 const BRIEF_MAX = 12_000;
 const RUNTIME_DEPTH = /^Assignment depth limit reached/;
@@ -127,6 +134,8 @@ export class RuntimeCoordinator implements Coordinator {
   private readonly legacyThreads: LegacyThreadResolver | undefined;
   private readonly now: () => number;
   private readonly log: (line: string) => void;
+  /** The person's stops, remembered: which bots' work on which request they stopped, and when. */
+  private readonly stops: Array<{ at: number; request: string; bots: Set<string> }> = [];
   private opened = false;
   private prunedAt: number | undefined;
 
@@ -220,6 +229,7 @@ export class RuntimeCoordinator implements Coordinator {
     const lineage = path(this.store, parent);
     const root = lineage[0]!;
     if (!answersSender(parent, mode, target) && lineage.some(n => ancestorOf(address(n), target))) throw new Error(ANCESTOR);
+    if (this.stoppedFor(root, target.botId)) throw new Error(STOPPED_AGAIN);
     const siblings = this.store.children(parent.id);
     const existing = siblings.findLast(c => c.assignee.botId === target.botId && c.assignee.destination.groupId === target.groupId && c.brief === brief && c.mode === mode);
     if (existing && !(rework && isTerminal(existing))) return { node: view(existing, parent), duplicate: true };
@@ -388,9 +398,28 @@ export class RuntimeCoordinator implements Coordinator {
     for (const n of this.live()) if (this.direct(n, threadId)) this.runtime.cancel(n.id, reason, "stopped");
   }
 
-  stopAwaitingDirect(threadId: string, reason = "Stopped by user"): void {
+  stopAwaitingDirect(threadId: string, reason = STOPPED_BY_USER): void {
     this.ready();
+    const stopping = reason === STOPPED_BY_USER ? this.live().filter(n => n.assignee.destination.threadId === threadId) : [];
+    const trees = stopping.map(n => ({ root: this.store.get(n.rootId), work: this.subtree(n).filter(a => !isTerminal(a)) }));
     this.runtime.stopRequester({ threadId }, reason);
+    for (const { root, work } of trees) if (root) this.rememberStop(root, work);
+  }
+
+  /** The person's stop, remembered (scoped to that request): the bots whose work on it the stop ended don't take the same
+   * request from another bot again, unless the person asked again after the stop. In memory only, for a day. */
+  private rememberStop(root: Assignment, work: readonly Assignment[]): void {
+    const request = requestKey(root);
+    const bots = new Set(work.filter(a => this.store.get(a.id)?.status === "cancelled").map(a => a.assignee.botId));
+    const at = this.now();
+    while (this.stops.length && at - this.stops[0]!.at > STOP_MEMORY_MS) this.stops.shift();
+    if (request && bots.size) this.stops.push({ at, request, bots });
+  }
+
+  /** Work for `root`'s request was stopped for `botId`, and this request is not one the person made after that stop. */
+  private stoppedFor(root: Assignment, botId: string): boolean {
+    const request = requestKey(root);
+    return request !== "" && this.stops.some(stop => stop.request === request && stop.bots.has(botId) && root.createdAt <= stop.at && this.now() - stop.at <= STOP_MEMORY_MS);
   }
 
   activeDirect(threadId: string): boolean {
