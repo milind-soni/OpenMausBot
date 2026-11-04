@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, Search } from "lucide-react";
 
-import { sharedLevel, type BotAccess, type BotAccessLevel, type GrantedLevel, type GroupMembers } from "../../../shared/bot-access";
+import { sharedLevel, type BotAccess, type GroupMembers } from "../../../shared/bot-access";
 import { botOwner } from "../../../shared/bot-owner";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -10,11 +10,11 @@ import { membersOf, useTeamGroups, type TeamGroup } from "@/state/team-groups";
 import { ownerOf, useTeamPeople, type TeamPeople, type TeamPerson } from "@/state/team-people";
 import { BotAvatar } from "../Avatar";
 import { PersonFace } from "../TeamOwner";
-import { accessOfBot, floorFor, levelLabel, nameOf, personOf, saveAccess, withPerson } from "./access";
+import { accessOfBot, floorFor, nameOf, personOf, saveAccess, withPerson } from "./access";
 import { PeopleGroups } from "./PeopleGroups";
 import { UndoToast, useTeamName } from "./ShareBotButton";
 import { ShareBotDialog } from "./ShareBotDialog";
-import { EntryFace, LevelMenu } from "./ShareControls";
+import { EntryFace } from "./ShareControls";
 
 type Change = { botId: string; before: BotAccess; after: BotAccess; text: string };
 type Listing = "bot" | "person";
@@ -22,12 +22,6 @@ type Listing = "bot" | "person";
 const STACK_SHOWN = 4;
 const ROW = "flex w-full min-w-0 items-center gap-3 px-3 py-2 text-start";
 const LIST = "flex flex-col divide-y divide-hairline/30 overflow-hidden rounded-xl border border-hairline/40 bg-card";
-const SUMMARY = {
-  none: "botAccess.onlyAdded",
-  view: "botAccess.overview.everyoneView",
-  chat: "botAccess.overview.everyoneChat",
-  edit: "botAccess.overview.everyoneEdit",
-} as const satisfies Record<BotAccessLevel, string>;
 
 /** The team's bots a person shares: each person's own MausBot is theirs alone and stays out. */
 export const sharedBots = (bots: readonly Bot[]): Bot[] =>
@@ -38,12 +32,13 @@ const hasAccess = (bot: Bot, email: string, groupMembers: GroupMembers): boolean
 
 const ownerLine = (bot: Bot, team: TeamPeople): string => {
   const owner = ownerOf(bot, team);
-  return owner ? t("botAccess.overview.ownedBy", { name: owner.name }) : t("botAccess.overview.noOwner");
+  return owner ? t("lookedAfter.line", { name: owner.name }) : t("lookedAfter.nobody");
 };
 
 const includes = (wanted: string, ...parts: Array<string | undefined>): boolean => parts.some((part) => part?.toLowerCase().includes(wanted));
 
-/** Settings → Bot access on a team, for its admins: the team's bots, or its people, each opening what can change there. */
+/** Settings → Bot access on a team, for its admins: the team's bots, or its people, each opening what can change there.
+ * A person's stored level stays as it is; the page shows who is added and lets them be removed. */
 export function AccessOverview() {
   const { state } = useStore();
   const team = useTeamPeople();
@@ -88,7 +83,7 @@ export function AccessOverview() {
         <PersonBots person={person} bots={bots.filter((bot) => hasAccess(bot, person.email, groupMembers))} team={team} teamName={teamName} apply={apply} groups={groups ?? []}
           onBack={() => { cameFrom.current = person.email; setPersonEmail(null); }} />
       ) : <>
-        <p className="ps-4 text-[13px] leading-relaxed text-ink-secondary">{t("botAccess.overview.intro", { team: teamName })}</p>
+        <p className="ps-4 text-[13px] leading-relaxed text-ink-secondary">{t("botAccess.overview.introUse", { team: teamName })}</p>
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[180px] flex-1">
             <Search size={14} aria-hidden="true" className="pointer-events-none absolute start-2.5 top-1/2 -translate-y-1/2 text-ink-secondary" />
@@ -138,7 +133,7 @@ function BotList({ bots, anyBots, team, onOpen }: { bots: Bot[]; anyBots: boolea
                 <span className="block truncate text-[14px] leading-[18px] text-ink">{bot.name}</span>
                 <span className="block truncate text-[12px] leading-4 text-ink-secondary">{ownerLine(bot, team)}</span>
               </span>
-              <span className="min-w-0 max-w-[40%] truncate text-[13px] text-ink-secondary" data-access-summary>{t(SUMMARY[access.everyone])}</span>
+              <span className="min-w-0 max-w-[40%] truncate text-[13px] text-ink-secondary" data-access-summary>{access.everyone === "none" ? t("botAccess.onlyAdded") : t("botAccess.overview.everyoneUses")}</span>
               <PeopleStack entries={Object.keys(access.people).filter((entry) => entry !== owner)} team={team} />
             </button>
           </li>
@@ -187,8 +182,8 @@ function PeopleList({ people, anyPeople, bots, groupMembers, onOpen }: { people:
 }
 
 function PersonBots({ person, bots, team, teamName, apply, onBack, groups }: {
-  person: TeamPerson; bots: Bot[]; team: TeamPeople; teamName: string; groups: readonly TeamGroup[];
-  apply: (bot: Bot, after: BotAccess, text: string) => Promise<void>; onBack: () => void;
+  person: TeamPerson; bots: Bot[]; team: TeamPeople; teamName: string;
+  apply: (bot: Bot, after: BotAccess, text: string) => Promise<void>; onBack: () => void; groups: readonly TeamGroup[];
 }) {
   return (
     <>
@@ -220,22 +215,20 @@ function PersonBotRow({ bot, person, team, teamName, apply, groups }: {
   const owns = botOwner(bot) === person.email;
   const own = access.people[person.email];
   const floor = floorFor(access, person.email, membersOf(groups));
-  const level = sharedLevel(access, person.email, membersOf(groups));
   const through = floor.group ? groups.find((group) => group.id === floor.group)?.name : undefined;
   return (
     <li className={ROW} data-access-person-bot={bot.id}>
       <BotAvatar bot={bot} size={32} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[14px] leading-[18px] text-ink">{bot.name}</span>
-        <span className="block truncate text-[12px] leading-4 text-ink-secondary">{!own && !owns && level === floor.level ? (through ? t("botAccess.throughGroup", { group: through }) : t("botAccess.everyone", { team: teamName })) : ownerLine(bot, team)}</span>
+        <span className="block truncate text-[12px] leading-4 text-ink-secondary">{!own && !owns ? (through ? t("botAccess.throughGroup", { group: through }) : t("botAccess.everyoneUse", { team: teamName })) : ownerLine(bot, team)}</span>
       </span>
-      <span className="min-w-0 shrink-0">
-        {owns ? <span className="px-2 text-[13px] text-ink-secondary">{t("botAccess.owner")}</span> : (
-          <LevelMenu value={level as GrantedLevel} floor={floor.level} removable={Boolean(own)} label={t("botAccess.overview.cell", { name: person.name, bot: bot.name })}
-            onChange={(next) => void apply(bot, withPerson(access, person.email, next), next
-              ? t("botAccess.overview.toastPerson", { name: person.name, bot: bot.name, level: levelLabel(next) })
-              : t("botAccess.overview.toastRemoved", { name: person.name, bot: bot.name }))} />
-        )}
+      <span className="min-w-0 shrink-0 text-[13px] text-ink-secondary">
+        {owns ? <span className="px-2">{t("lookedAfter.badge")}</span> : own ? (
+          <button type="button" data-access-remove={bot.id} aria-label={t("botAccess.overview.removeFrom", { name: person.name, bot: bot.name })}
+            onClick={() => void apply(bot, withPerson(access, person.email, null), t("botAccess.overview.toastRemoved", { name: person.name, bot: bot.name }))}
+            className="rounded-md px-2 py-1 hover:bg-ink/[0.06] hover:text-ink">{t("botAccess.remove")}</button>
+        ) : null}
       </span>
     </li>
   );

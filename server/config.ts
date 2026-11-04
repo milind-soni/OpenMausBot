@@ -7,6 +7,7 @@ import { z } from "zod";
 import { normalizeImageGenerationUrl, type ImageGenerationConfig } from "../shared/image-generation.ts";
 import { botAvatarUrlSchema } from "../shared/bot-avatar.ts";
 import { writeFileAtomic } from "./atomic.ts";
+import { defaultBotThreads, MAX_CONCURRENT_BOT_THREADS } from "./bot-thread-limits.ts";
 import { anthropicKeyEnv } from "./anthropic-key-env.ts";
 import { withoutComputerEngine } from "./computer-engine-removal.ts";
 import { newBotDefaultsSchema, type NewBotDefaults } from "./new-bot-defaults.ts";
@@ -44,8 +45,6 @@ export const MAX_ROOM_TURN_TIMEOUT_MINUTES = 1_440;
 export const DEFAULT_MCP_CALL_TIMEOUT_MINUTES = 10;
 export const MIN_MCP_CALL_TIMEOUT_MINUTES = 1;
 export const MAX_MCP_CALL_TIMEOUT_MINUTES = 60;
-export const DEFAULT_MAX_CONCURRENT_BOT_THREADS = 3;
-export const MAX_CONCURRENT_BOT_THREADS = 16;
 /** The floor keeps a log tail large enough for the event inspector's recent-line window. */
 export const MIN_THREAD_EVENT_LOG_BYTES = 256 * 1024;
 export const MAX_THREAD_EVENT_LOG_BYTES = 4 * 1024 * 1024 * 1024;
@@ -278,7 +277,7 @@ const instanceConfigSchema = z.object({
       .refine((icon) => providerIconError(icon) === null, { message: "Invalid provider icon" }),
   ]).optional(),
   environment: z.record(z.string(), z.string()).optional(),
-  enabled: z.boolean().optional(),
+  enabled: z.boolean().optional(), hidden: z.boolean().optional(),
   access: z.enum(["subscription", "custom", "api"]).optional(),
   config: z.json().optional(),
 });
@@ -423,8 +422,8 @@ const appConfigSchema = z.object({
   }).optional(),
   /** Non-secret profile details; aboutMe is shared with every bot. */
   profile: z.object({ name: optionalText, email: optionalText, aboutMe: z.string().max(24_000).optional(), avatarUrl: z.union([z.literal(""), botAvatarUrlSchema]).optional() }).optional(),
-  /** UI language override (BCP-47, lowercase); absent follows the system. */
-  language: optionalText,
+  /** UI language override (BCP-47, lowercase), absent follows the system; what a paired phone calls this computer, "" for the default. */
+  language: optionalText, computerName: z.string().trim().max(63).optional(),
   rooms: roomConfigSchema.optional(),
   mcp: mcpConfigSchema.optional(),
   context: z.object({
@@ -483,7 +482,7 @@ export interface AppConfig extends HelperConfig {
     phone?: "ios" | "android";
   };
   mcpServers?: Record<string, unknown>;
-  language?: string;
+  language?: string; computerName?: string;
   xai?: { key?: string; url?: string };
   mistral?: { key?: string };
   cerebras?: { key?: string }; treg?: { key?: string }; /** Postiz: an organisation API key and the server it belongs to (blank: Postiz Cloud). */ postiz?: { key?: string; url?: string };
@@ -637,10 +636,6 @@ export function mcpCallTimeoutMinutes(cfg: AppConfig): number {
 
 export function cacheKeepWarmSettings(cfg: AppConfig): { enabled: boolean; windowMinutes: number } {
   return { enabled: cfg.cacheKeepWarm?.enabled === true, windowMinutes: cfg.cacheKeepWarm?.windowMinutes ?? DEFAULT_WINDOW_MINUTES };
-}
-
-export function maxConcurrentBotThreads(cfg: { threads?: { maxConcurrentPerBot?: number } }): number {
-  return cfg.threads?.maxConcurrentPerBot ?? DEFAULT_MAX_CONCURRENT_BOT_THREADS;
 }
 
 export function threadEventLogMaxBytes(cfg: AppConfig): number | null {
@@ -952,15 +947,15 @@ export function saveConfig(
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
     const merged: JsonObject = current.success ? { ...current.data } : {};
-    if (key === "threads" && !current.success) merged.maxConcurrentPerBot = DEFAULT_MAX_CONCURRENT_BOT_THREADS;
-    Object.assign(merged, section);
+    if (key === "threads" && !current.success) merged.maxConcurrentPerBot = defaultBotThreads();
+    Object.assign(merged, section, key === "browserEngine" && checkedPatch.browserEngine?.egress ? { egress: { ...jsonObjectSchema.safeParse(merged.egress).data, ...checkedPatch.browserEngine.egress } } : {}); // a partial egress patch keeps the stored allow-list
     for (const [sectionKey, sectionValue] of Object.entries(section as Record<string, unknown>)) {
       if (sectionValue === null) delete merged[sectionKey];
     }
     disk[key] = merged;
   }
   if (checkedPatch.vps !== undefined) disk.vps = normalizeVpsConfig(checkedPatch.vps);
-  if (checkedPatch.language !== undefined) disk.language = checkedPatch.language;
+  for (const key of ["language", "computerName"] as const) if (checkedPatch[key] !== undefined) disk[key] = checkedPatch[key];
   if (checkedPatch.customDomain !== undefined) disk.customDomain = checkedPatch.customDomain;
   if (checkedPatch.signIn !== undefined) disk.signIn = checkedPatch.signIn;
   // Replace the section so clearing a backup cannot revive the old selection.

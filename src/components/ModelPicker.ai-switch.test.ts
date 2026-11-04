@@ -106,6 +106,20 @@ describe("the header model chip and Switch AI", () => {
     expect(document.querySelector("[data-simple-effort]")).not.toBeNull();
   });
 
+  it("asks before a thread-only switch when the thread, not the bot, is on Custom permissions", () => {
+    const bot = { ...busyBot, busy: false, approvalMode: "ask",
+      tasks: [{ threadId: "thread-1", approvalMode: "custom", modelSelection: busyBot.modelSelection }] } as unknown as Bot;
+    act(() => root.render(createElement(ModelPicker, { bot, threadId: "thread-1" })));
+    act(() => trigger().click());
+    act(() => buttonNamed("OpenAI")!.click());
+    act(() => buttonNamed("GPT-5.6")!.click());
+    expect(document.body.textContent).toContain("Switch model with Ask permissions?");
+    const setModels = () => vi.mocked(fixture.dispatch).mock.calls.filter(([action]) => (action as { type: string }).type === "setModel");
+    expect(setModels()).toEqual([]);
+    act(() => buttonNamed("Switch with Ask")!.click());
+    expect(setModels()).toEqual([[expect.objectContaining({ threadId: "thread-1", resetApprovalToAsk: true })]]);
+  });
+
   it("ignores an intent for another place", () => {
     act(() => requestAiSwitch({ botId: "maus", threadId: "thread-1", turnId: "turn-1", place: "panel" }));
     expect(trigger().disabled).toBe(true);

@@ -11,7 +11,7 @@ import { toolUiResource, toolVisibility, uiMeta } from "./mcp-app-observer.ts";
 import { McpHttpError, McpRpcError } from "./mcp-http.ts";
 import type { McpOAuthManager } from "./mcp-oauth.ts";
 import { withMcpSignIn } from "./mcp-oauth.ts";
-import { probeMcpServer, type McpProbeOptions } from "./mcp-probe.ts";
+import { probeMcpServer, sendsCredentials, type McpProbeOptions } from "./mcp-probe.ts";
 import { isRemoteMcpServer, parseStoredMcpServer, type StoredMcpServer } from "./mcp-registry.ts";
 import { lenientToolValidator, schemaProblems } from "./mcp-schema-validator.ts";
 import { redactSecretsInText } from "./redact.ts";
@@ -36,7 +36,7 @@ function isRecord(value: unknown): value is Json {
 
 export type ChatAppsMcpStore = Pick<Store, "bot" | "botByThread" | "groupByThread" | "messagesFor" | "appendMessage" | "patchMessage" | "projectBotForTask">;
 
-export type ChatAppsMcpOAuth = Pick<McpOAuthManager, "authState" | "accessToken">;
+export type ChatAppsMcpOAuth = Pick<McpOAuthManager, "authState" | "accessToken" | "requireSignIn">;
 
 export interface ChatAppsMcpDeps {
   store: ChatAppsMcpStore;
@@ -378,8 +378,10 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
       if (isRemoteMcpServer(stored) && deps.oauth.authState(name, stored.url) === "needs-sign-in") return;
       const target = isRemoteMcpServer(stored) ? await signedIn(name, stored) : stored;
       if (!target) return;
-      const result = await probe({ ...target, enabled: true } as StoredMcpServer, BACKGROUND_PROBE_MS, undefined, probeOptions(name, stored));
-      log(`probed ${name}: ${result.ok ? `apps=${catalog.get(name, stored)?.apps === true}` : "failed"}`);
+      const probed = { ...target, enabled: true } as StoredMcpServer;
+      const result = await probe(probed, BACKGROUND_PROBE_MS, undefined, probeOptions(name, stored));
+      if (!result.ok && result.auth === "required" && isRemoteMcpServer(probed) && !sendsCredentials(probed)) deps.oauth.requireSignIn(name, probed.url);
+      log(`probed ${name}: ${result.ok ? `apps=${catalog.get(name, stored)?.apps === true}` : result.auth === "required" ? "needs sign-in" : "failed"}`);
     }).catch((error: unknown) => log(`probe of ${name} failed: ${String(error)}`));
   }
 

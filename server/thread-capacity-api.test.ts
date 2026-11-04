@@ -106,6 +106,7 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
     expect((await api("PATCH", "/api/instances/claude", { cli: wrapper })).status).toBe(200);
     const instance = (await api("GET", "/api/instances")).body.instances.find((candidate: any) => candidate.instanceId === "claude");
     model = instance.models.options[0].id;
+    await limit(3);
   }, 30_000);
 
   afterEach(async () => {
@@ -118,7 +119,7 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
     for (const project of projectDirs.splice(0)) await removeTempDir(project);
   });
 
-  it("defaults to three, runs ten real turns after raising the limit, and safely queues and cancels overflow", async () => {
+  it("keeps a saved limit, runs ten real turns after raising the limit, and safely queues and cancels overflow", async () => {
     expect((await api("GET", "/api/config")).body.threads).toEqual({ maxConcurrentPerBot: 3 });
     for (const maxConcurrentPerBot of [0, 17, 1.5, "2", null]) {
       expect((await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot } })).status).toBe(400);
@@ -493,7 +494,7 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
       const reply = String(replies.at(-1)?.text ?? "");
       expect(reply.startsWith((await runState(turn.runId)).output)).toBe(true);
       expect(reply).toContain("Your downstream room requests have settled.");
-      expect(reply).toContain("[OpenMausBot report from @Capacity fixture on assignment");
+      expect(reply).toContain("[From @Capacity fixture (bot) · report on assignment");
       expect(reply).toContain("What @Capacity fixture said:");
       expect((await messages(turn.threadId)).some((message) => message.tool?.name === "Capacity fixture replied")).toBe(true);
     };
@@ -518,7 +519,7 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
       expect(held.workThread).not.toBe(queued.workThread);
       finish(second.threadId);
       await expect.poll(async () => (await runState(second.runId))?.status, { timeout: 15_000 }).toBe("waiting");
-      expect((await runState(second.runId)).attention).toContain("delegated");
+      expect((await runState(second.runId)).attention).toContain("handed on");
       expect((await busyThreads(target.botId)).sort()).toEqual([target.threads[0], queued.workThread].sort());
       expect(existsSync(threadFile(held.workThread, "json"))).toBe(false);
 

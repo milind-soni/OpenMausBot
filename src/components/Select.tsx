@@ -26,10 +26,11 @@ export function Select({
 }: Omit<ComponentProps<"select">, "size"> & { variant?: keyof typeof VARIANTS; size?: keyof typeof SIZES }) {
   return (
     <div className={cn("relative inline-flex min-w-0", className)}>
+      {/* The platform draws the open list (white by default) while the options inherit the skin's ink, so they get the menu colour. */}
       <select
         {...props}
         className={cn(
-          "peer w-full min-w-0 cursor-pointer appearance-none truncate disabled:cursor-default disabled:opacity-50",
+          "peer w-full min-w-0 cursor-pointer appearance-none truncate [color-scheme:var(--code-color-scheme)] [&_option]:bg-menu [&_option]:text-ink disabled:cursor-default disabled:opacity-50",
           VARIANTS[variant],
           variant === "ghost" ? GHOST.select : SIZES[size].select,
         )}

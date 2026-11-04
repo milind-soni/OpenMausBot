@@ -625,6 +625,12 @@ export class BrowserService {
     return this.#bySession(session)?.control.owner ?? null;
   }
 
+  /** A bot call or a person's hold is under way in this session's browser. */
+  working(session: string): boolean {
+    const profile = this.#bySession(session);
+    return Boolean(profile && (profile.calls > 0 || profile.control.owner !== null || profile.control.agents > 0 || this.#lanes.held(profile.key)));
+  }
+
   /** Whether the page's open picker was offered to `owner`'s view as `chooserId`: an upload for any other is refused unread. */
   fileChooserOffered(session: string, owner: string, chooserId: string): boolean {
     return this.#bySession(session)?.hub.fileChooserOffered(owner, chooserId) ?? false;

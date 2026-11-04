@@ -205,3 +205,29 @@ describe("a server's reply wait", () => {
   });
 });
 
+describe("hiding a provider", () => {
+  it("hides a built-in provider, lists it apart, refuses while a bot uses it, and unhides", async () => {
+    const persisted: Array<Record<string, { driver: string; hidden?: boolean }>> = [];
+    const cfg = { instances: { a: { driver: "fake" }, hermes: { driver: "fake", displayName: "Hermes" } } };
+    const bots = [{ id: "pen", modelSelection: { instanceId: "a", model: "m" } }];
+    const { call, base } = await serve({
+      cfg: cfg as unknown as AppConfig,
+      store: { bots, tasks: () => [] } as never,
+      persistProviderInstance: async (_id: string, instances: typeof persisted[number]) => {
+        persisted.push(structuredClone(instances));
+        (cfg as { instances: unknown }).instances = instances;
+      },
+    });
+    const status = async (id: string, body: unknown) => (await fetch(`${base}/api/instances/${id}`, {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    })).status;
+    expect(await status("a", { hidden: true })).toBe(409);
+    await call("PATCH", "/api/instances/hermes", { hidden: true });
+    expect(persisted.at(-1)!.hermes).toMatchObject({ driver: "fake", hidden: true });
+    expect((await call("GET", "/api/instances/hidden")).instances).toEqual([{ instanceId: "hermes", driverKind: "fake", displayName: "Hermes" }]);
+    await call("PATCH", "/api/instances/hermes", { hidden: false });
+    expect(persisted.at(-1)!.hermes).not.toHaveProperty("hidden");
+    expect((await call("GET", "/api/instances/hidden")).instances).toEqual([]);
+  });
+});
+

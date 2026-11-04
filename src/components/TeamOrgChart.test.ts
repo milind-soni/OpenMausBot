@@ -24,11 +24,11 @@ const render = (node: ReturnType<typeof createElement>) => renderToStaticMarkup(
 
 afterEach(() => { setTeamPeople(null); setMapMode("departments"); });
 
-describe("the Team map's Who reports to whom", () => {
-  it("shows each person with their Chief and the bots that report to them, by department", () => {
+describe("the Team map's Who looks after what", () => {
+  it("shows each person with their Chief, if they have one by that title, and the bots they look after, by department", () => {
     setTeamPeople(asBob());
     const chart = render(createElement(TeamOrgChart, { bots }));
-    expect(chart).toMatch(/data-org-person="bob@acme.test"[\s\S]*Bob \(you\)[\s\S]*No Chief of Staff[\s\S]*data-org-department="Product A"[\s\S]*data-org-bot="Fox"/);
+    expect(chart).toMatch(/data-org-person="bob@acme.test"[\s\S]*Bob \(you\)[\s\S]*data-org-department="Product A"[\s\S]*data-org-bot="Fox"/);
     expect(chart).toMatch(/data-org-person="ada@acme.test"[\s\S]*Chief of Staff[\s\S]*data-org-bot="Ada&#x27;s Chief"[\s\S]*data-org-bot="Tech Lead"/);
   });
 
@@ -57,11 +57,11 @@ describe("the Team map's Who reports to whom", () => {
     const dispatch = vi.fn();
     showWhoReportsToWhom(dispatch);
     expect(dispatch).toHaveBeenCalledWith({ type: "showTeamMap" });
-    expect(renderToStaticMarkup(createElement(MapModeToggle))).toMatch(/aria-pressed="true"[^>]*>Who reports to whom</);
+    expect(renderToStaticMarkup(createElement(MapModeToggle))).toMatch(/aria-pressed="true"[^>]*>Who looks after what</);
     const Probe = () => useMapMode();
     expect(renderToStaticMarkup(createElement(Probe))).toBe("people");
     const items = (onSeeReports?: () => void) => renderToStaticMarkup(createElement(TeamMenuItems, { onAddBots: vi.fn(), onRename: vi.fn(), onShare: vi.fn(), onDelete: vi.fn(), onSeeReports }));
-    expect(items(vi.fn())).toContain("See who reports to whom");
-    expect(items()).not.toContain("See who reports to whom");
+    expect(items(vi.fn())).toContain("See who looks after what");
+    expect(items()).not.toContain("See who looks after what");
   });
 });
