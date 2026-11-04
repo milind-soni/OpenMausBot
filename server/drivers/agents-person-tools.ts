@@ -16,7 +16,7 @@ export async function callPersonTool(_name: string, args: Json, context: ToolCal
 export const PERSON_TOOL_DEFINITIONS = [
   {
     name: "message_person",
-    description: "Send a person a message in their Inbox; their answer comes back here. For news they may miss here, or when asked to tell someone. Only your message goes.",
+    description: "Reach a person in their Inbox, with news they may miss here or when asked to tell someone something. Their answer comes back here. Only what you write goes.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
