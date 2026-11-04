@@ -787,6 +787,28 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       let codexTurnId: string | null = null;
       let startingNativeTurn = false;
       const earlyNotifications: any[] = [];
+      // MCP servers start with the thread; a turn submitted before they finish sees a
+      // tool list without them (#4342). The first startupStatus notification proves
+      // this CLI reports MCP startup; from then on a turn waits until every mount
+      // reached ready/failed, bounded by Codex's own 30 s startup budget. CLIs that
+      // never report (old versions, the fake in tests) get the old behavior.
+      const mcpStartup = new Map<string, string>();
+      let mcpStartupSeen = false;
+      const expectedMcpMounts = new Set(selectedMcp.keys());
+      const waitForMcpStartup = async (): Promise<void> => {
+        if (!mcpStartupSeen || expectedMcpMounts.size === 0) return;
+        const settleMs = Math.max(1, Number(process.env.OMB_CODEX_MCP_STARTUP_WAIT_MS ?? 30_000) || 30_000);
+        const deadline = Date.now() + settleMs;
+        while (Date.now() < deadline) {
+          if (abandoned || stopRequested || state.settled) return;
+          const settled = [...expectedMcpMounts].every((name) => {
+            const status = mcpStartup.get(name);
+            return status === "ready" || status === "failed";
+          });
+          if (settled) return;
+          await new Promise((wake) => setTimeout(wake, 25));
+        }
+      };
       const state = {
         settled: false,
         lastError: "",
@@ -1132,6 +1154,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const p = msg.params ?? {};
         // MCP servers start with the thread, before it has an id; this process serves this turn alone.
         if (msg.method === "mcpServer/startupStatus/updated") {
+          mcpStartupSeen = true;
+          if (typeof p.name === "string") mcpStartup.set(p.name, p.status);
           if (!teamToolsNoticed && teamToolsFailed(p)) {
             teamToolsNoticed = true;
             emit({ ...base(threadId, turnId), type: "runtime.notice", message: TEAM_TOOLS_FAILED });
@@ -1592,6 +1616,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           ...(promptText ? [{ type: "text" as const, text: promptText }] : []),
           ...await codexImageInputs(turn.images),
         ];
+        // The mounted MCP servers must have finished starting before the first model
+        // request, or the model sees a tool list without them and skips the call (#4342).
+        await waitForMcpStartup();
         const startTurn = () => {
           promptSubmitted = true;
           startingNativeTurn = true;

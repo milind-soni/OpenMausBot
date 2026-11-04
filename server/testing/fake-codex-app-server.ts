@@ -212,6 +212,8 @@ const resolvedSandbox = (params: Record<string, unknown>) => {
 
 type McpStartup = { status: "ready"; tools: string[] } | { status: "failed"; error: string };
 let mcpStartup: Record<string, McpStartup> | undefined;
+// Whether `turn/start` arrived with every mounted MCP server already started (#4342): undefined until a turn starts.
+let turnStartMcpReady: boolean | undefined;
 /** codex-cli 0.160.1's initialize for every server it connects. */
 const CODEX_MCP_HANDSHAKE = { protocolVersion: "2025-06-18", capabilities: { elicitation: { form: {}, url: {} } }, clientInfo: { name: "codex-mcp-client", title: "Codex", version: "0.160.1" } };
 const mcpMounts = (): Record<string, Record<string, unknown>> => {
@@ -318,7 +320,7 @@ const dump = () => {
   if (process.env.FAKE_CODEX_DUMP) {
     writeDumpAtomic(
       process.env.FAKE_CODEX_DUMP,
-      JSON.stringify({ pid: process.pid, argv: process.argv.slice(2), env: process.env, calls, decision, ...(mcpStartup ? { mcpStartup } : {}) }, null, 2),
+      JSON.stringify({ pid: process.pid, argv: process.argv.slice(2), env: process.env, calls, decision, ...(turnStartMcpReady !== undefined ? { turnStartMcpReady } : {}), ...(mcpStartup ? { mcpStartup } : {}) }, null, 2),
     );
   }
 };
@@ -601,14 +603,28 @@ process.stdin.on("data", (chunk) => {
         } else if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
         } else if (process.env.FAKE_CODEX_MCP_START === "1") {
-          // Codex starts MCP servers with the thread; one that fails leaves the thread without its tools.
-          const reply = { jsonrpc: "2.0", id: msg.id, result: { thread: { id: "codex-thread-1" }, model: "fake-codex-model", sandbox: resolvedSandbox(msg.params ?? {}) } };
-          void startMcpServers().then((startup) => { mcpStartup = startup; dump(); threadReply(reply); });
+          // Codex starts MCP servers with the thread, replying to thread/start at once while
+          // the mounts start in the background; one that fails leaves the thread without its tools.
+          const mounts = Object.keys(mcpMounts());
+          for (const name of mounts) {
+            out({ jsonrpc: "2.0", method: "mcpServer/startupStatus/updated", params: { threadId: null, name, status: "starting", failureReason: null } });
+          }
+          threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: "codex-thread-1" }, model: "fake-codex-model", sandbox: resolvedSandbox(msg.params ?? {}) } });
+          void startMcpServers().then((startup) => {
+            for (const [name, state] of Object.entries(startup)) {
+              const { error, ...rest } = state as typeof state & { error?: string };
+              out({ jsonrpc: "2.0", method: "mcpServer/startupStatus/updated", params: { threadId: null, name, ...("error" in state ? { error } : {}), ...rest, failureReason: null } });
+            }
+            mcpStartup = startup;
+            dump();
+          });
         } else {
           threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: "codex-thread-1", ...(process.env.FAKE_CODEX_ROLLOUT ? { path: process.env.FAKE_CODEX_ROLLOUT } : {}) }, model: "fake-codex-model", sandbox: resolvedSandbox(msg.params ?? {}) } });
         }
         break;
       case "turn/start": {
+        // Recorded before the dump: with the #4342 wait, every mount has reported by now.
+        turnStartMcpReady = mcpStartup !== undefined && Object.values(mcpStartup).every((state) => state.status === "ready");
         dump();
         logStartup("turn/start");
         nativeThreadId = msg.params?.threadId ?? nativeThreadId;

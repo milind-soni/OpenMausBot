@@ -1289,7 +1289,23 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       expect(seen.mcpStartup.voluum).toEqual({ status: "ready", tools: ["report"] });
       expect(strict.initializes).toEqual([{ protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "OpenMausBot tool proxy", version: "1" } }]);
     });
+
+  it("waits for the mounted MCP servers to finish starting before the first model request (#4342)", async () => {
+    // The mount answers tools/list slowly: a turn submitted before it finishes sees a
+    // tool list without it, so the model calls nothing and the connector "isn't available".
+    strict = await startFakeHttpMcp({ strictInitialize: "http-400", tools: STRICT_TOOLS, toolsDelayMs: 600 });
+    process.env.FAKE_CODEX_MCP_START = "1";
+    await create();
+    const dump = join(scratch, "mcp-wait.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-mcp-wait", text: "go", integrations: { custom: { voluum: { type: "http", url: strict.url, headers: {} } } } });
+    expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.turnStartMcpReady).toBe(true);
+    expect(seen.mcpStartup.voluum.status).toBe("ready");
   });
+  });
+
 
   it("keeps URL servers' connector records out of the shell, preserving the person's own exclusions", async () => {
     const dump = join(scratch, "header-shell.json"); process.env.FAKE_CODEX_DUMP = dump;
