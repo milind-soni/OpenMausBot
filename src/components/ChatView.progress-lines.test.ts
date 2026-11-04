@@ -50,7 +50,7 @@ function mount(showToolCalls: boolean) {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
-  const value = { state, dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+  const value = { state, dispatch: vi.fn(), navigationRevision: { current: 0 }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   flushSync(() => root.render(createElement(BotEditorStore, { value, children: createElement(ChatView, { bot }) })));
   return { container, unmount: () => { root.unmount(); container.remove(); } };
 }

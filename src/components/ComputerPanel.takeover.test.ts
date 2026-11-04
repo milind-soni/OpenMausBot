@@ -105,7 +105,7 @@ const draw = () => flushSync(() => root!.render(createElement(BotEditorStore, {
       state = { ...state, computerControl: { ...state.computerControl, [action.botId]: { held: action.held, helpReason: action.helpReason, help: action.help } } };
       queueMicrotask(draw);
     },
-    flushBotPatches: async () => null,
+    navigationRevision: { current: 0 }, flushBotPatches: async () => null,
     refreshInstances: async () => {},
     refreshModels: async () => {},
   },

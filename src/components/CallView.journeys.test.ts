@@ -105,7 +105,7 @@ const APP_REFUSED = "The app didn't let this page use the microphone. Open it in
 
 function Page({ config, children }: { config: AppState["config"]; children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, { ...initialState, config, bots: [ada] });
-  const value = { state, dispatch, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+  const value = { state, dispatch, navigationRevision: { current: 0 }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   return createElement(BotEditorStore, { value, children });
 }
 

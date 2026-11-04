@@ -24,6 +24,28 @@ export function optimisticUserMessage(
   };
 }
 
+type Transcript = { threadId: string; messages?: Message[]; activeLeafId?: string | null };
+
+/** A snapshot of the thread `held` shows, plus its sends the snapshot does not carry yet; a kept send stays the leaf. */
+export function keepSendsInFlight<T extends Transcript>(snapshot: T, held: Transcript & { awaitingThreadSnapshot?: boolean }): T {
+  if (held.threadId !== snapshot.threadId || held.awaitingThreadSnapshot) return snapshot;
+  const confirmed = new Set(snapshot.messages?.flatMap((message) => (message.sendId ? [message.sendId] : [])));
+  const waiting = held.messages?.filter((message) =>
+    message.sendId !== undefined && message.id === optimisticMessageId(message.sendId) && !confirmed.has(message.sendId)) ?? [];
+  if (waiting.length === 0) return snapshot;
+  const leaf = waiting.some((message) => message.id === held.activeLeafId) ? { activeLeafId: held.activeLeafId } : {};
+  return { ...snapshot, messages: [...(snapshot.messages ?? []), ...parentOnConfirmedSends(waiting, snapshot.messages ?? [])], ...leaf };
+}
+
+/** Moves rows hung on a send's optimistic id onto the server's copy of that send. */
+export function parentOnConfirmedSends(rows: readonly Message[], confirmed: readonly Message[]): Message[] {
+  const canonical = new Map(confirmed.flatMap((message) => (message.sendId ? [[optimisticMessageId(message.sendId), message.id] as const] : [])));
+  return rows.map((message) => {
+    const parentId = message.parentId ? canonical.get(message.parentId) : undefined;
+    return parentId ? { ...message, parentId } : message;
+  });
+}
+
 /** Whether the server's copy of a send is in these messages. */
 export function sendArrived(messages: readonly Message[] | undefined, sendId: string): boolean {
   return Boolean(messages?.some((message) => message.sendId === sendId && message.id !== optimisticMessageId(sendId)));

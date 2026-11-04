@@ -46,7 +46,7 @@ beforeAll(async () => {
   const container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  const value = { state, dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+  const value = { state, dispatch: vi.fn(), navigationRevision: { current: 0 }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   flushSync(() => root.render(createElement(BotEditorStore, { value, children: createElement(ChatView, { bot: pepper }) })));
   await settle();
 });

@@ -88,7 +88,7 @@ const dispatch = vi.fn();
 let root: Root;
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 async function draw() {
-  const value = { state, dispatch, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+  const value = { state, dispatch, navigationRevision: { current: 0 }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   const children = createElement(ChatView, { bot: state.bots.find((bot) => bot.id === "pepper")! });
   flushSync(() => root.render(createElement(BotEditorStore, { value, children })));
   await settle();

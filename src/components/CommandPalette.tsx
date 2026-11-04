@@ -21,7 +21,7 @@ export function openCommandPalette() {
 }
 
 export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean) => void }) {
-  const { state, dispatch } = useStore();
+  const { state, dispatch, navigationRevision } = useStore();
   const showThreads = useShowThreads();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -97,7 +97,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
     if (entry.kind === "message") {
       const hit = entry.hit;
       try {
-        await landOnSearchHit(hit, state, dispatch, showThreads);
+        await landOnSearchHit(hit, state, dispatch, showThreads, navigationRevision);
       } catch (error) {
         dispatch({ type: "error", message: error instanceof Error ? error.message : String(error) });
       }
