@@ -273,6 +273,11 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (typeof body.voiceNotes !== "boolean") return json(res, 400, { error: "voiceNotes must be true or false" });
         patch.voiceNotes = body.voiceNotes;
       }
+      // null: follow the Voice setting again.
+      if (body.voiceNoteEveryReply !== undefined) {
+        if (body.voiceNoteEveryReply !== null && typeof body.voiceNoteEveryReply !== "boolean") return json(res, 400, { error: "voiceNoteEveryReply must be true, false or null" });
+        patch.voiceNoteEveryReply = body.voiceNoteEveryReply ?? undefined;
+      }
       // Spends the Cloud plan's monthly X research calls: an admin decision too.
       if (body.xResearch !== undefined) {
         if (typeof body.xResearch !== "boolean") return json(res, 400, { error: "xResearch must be true or false" });

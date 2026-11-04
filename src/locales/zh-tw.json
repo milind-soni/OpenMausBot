@@ -4630,5 +4630,14 @@
   "server.browser.stoppedWaiting": "已停止等待瀏覽器。",
   "composer.queued.capacityStarter": "排隊中。Starter 每個機器人一次執行一個對話，所以這則會在目前對話結束後開始。更大的方案可以執行更多。",
   "composer.queued.seePlans": "查看方案",
-  "settings.threads.starter": "Starter 每個機器人一次執行一個對話，更大的方案可以執行更多。機器人自己發起的工作仍會執行，每個機器人各有一個。"
+  "settings.threads.starter": "Starter 每個機器人一次執行一個對話，更大的方案可以執行更多。機器人自己發起的工作仍會執行，每個機器人各有一個。",
+  "voice.everyReply": "每則回覆都附語音留言",
+  "voice.everyReply.allHelp": "每個機器人都會把每則回覆也發成語音留言。想單獨為某個機器人開關，可在它的設定裡調整。",
+  "voice.everyReply.followsOn": "跟隨你的語音設定（開）",
+  "voice.everyReply.followsOff": "跟隨你的語音設定（關）",
+  "voice.everyReply.own": "已為此機器人單獨設定。",
+  "voice.everyReply.follow": "改為跟隨你的語音設定",
+  "voice.yourVoice": "你的 {provider} 聲音",
+  "voice.usesYours": "這個機器人用你的 {provider} 聲音說話。在上方另選一個，就能給它專屬聲音。",
+  "voice.usesOwn": "這個機器人用自己的聲音說話。"
 }

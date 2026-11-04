@@ -2859,5 +2859,14 @@
   "server.browser.stoppedWaiting": "Warten auf den Browser beendet.",
   "composer.queued.capacityStarter": "In der Warteschlange. Starter führt pro Bot einen Thread gleichzeitig aus, das hier startet also, sobald der laufende fertig ist. Ein größerer Plan führt mehr aus.",
   "composer.queued.seePlans": "Pläne ansehen",
-  "settings.threads.starter": "Starter führt pro Bot einen Thread gleichzeitig aus, ein größerer Plan führt mehr aus. Arbeit, die ein Bot selbst startet, läuft trotzdem, und jeder Bot hat seinen eigenen Thread."
+  "settings.threads.starter": "Starter führt pro Bot einen Thread gleichzeitig aus, ein größerer Plan führt mehr aus. Arbeit, die ein Bot selbst startet, läuft trotzdem, und jeder Bot hat seinen eigenen Thread.",
+  "voice.everyReply": "Sprachnachricht zu jeder Antwort",
+  "voice.everyReply.allHelp": "Jeder Bot schickt jede Antwort auch als Sprachnachricht. In den Einstellungen eines Bots kannst du das nur für ihn ein- oder ausschalten.",
+  "voice.everyReply.followsOn": "Folgt deiner Spracheinstellung (an)",
+  "voice.everyReply.followsOff": "Folgt deiner Spracheinstellung (aus)",
+  "voice.everyReply.own": "Für diesen Bot festgelegt.",
+  "voice.everyReply.follow": "Deiner Spracheinstellung folgen",
+  "voice.yourVoice": "Deine {provider}-Stimme",
+  "voice.usesYours": "Dieser Bot spricht mit deiner {provider}-Stimme. Wähl oben eine andere, um ihm eine eigene zu geben.",
+  "voice.usesOwn": "Dieser Bot spricht mit seiner eigenen Stimme."
 }

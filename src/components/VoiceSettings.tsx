@@ -36,7 +36,7 @@ export function VoiceSettings({
   workspaceConfigurationLocked = false,
 }: {
   bot: Bot;
-  onPatch: (patch: Partial<Pick<Bot, "voice" | "speakReplies" | "voiceNotes">>) => void;
+  onPatch: (patch: Partial<Pick<Bot, "voice" | "speakReplies" | "voiceNotes" | "voiceNoteEveryReply">>) => void;
   workspaceConfigurationLocked?: boolean;
 }) {
   const { state, dispatch } = useStore();
@@ -262,6 +262,8 @@ export function VoiceSettings({
   const selectedVoice = usesLocalSystem ? deviceVoice : (bot.voice ?? "");
   const ready = usesLocalSystem || (hostConfigured && Boolean(selectedVoice || tts.voice));
   const selectedDescription = voices.find((voice) => voice.id === selectedVoice)?.description;
+  const providerName = cloudProvider?.name ?? (provider === "xai" ? "Grok" : provider === "chatterbox" ? "Chatterbox" : t("voice.macBuiltIn"));
+  const everyReply = bot.voiceNoteEveryReply ?? tts?.everyReply === true;
 
   return (
     <div className="rounded-xl bg-card p-4">
@@ -489,7 +491,7 @@ export function VoiceSettings({
                 onQuery={setVoiceQuery}
                 onPick={pickVoice}
                 pending={addingVoice ?? undefined}
-                defaultLabel={tts.voice ? t("voice.installDefault") : t("voice.pick")}
+                defaultLabel={tts.voice ? t("voice.yourVoice", { provider: providerName }) : t("voice.pick")}
                 ariaLabel={`${bot.name}'s voice`}
               />
             ) : (
@@ -506,7 +508,7 @@ export function VoiceSettings({
                     : usesLocalSystem
                       ? t("voice.macDefault")
                       : tts.voice
-                        ? t("voice.installDefault")
+                        ? t("voice.yourVoice", { provider: providerName })
                         : t("voice.pick")}
                 </option>
                 {selectedVoice && !voices.some((voice) => voice.id === selectedVoice) && (
@@ -533,6 +535,11 @@ export function VoiceSettings({
           {addError && <div role="alert" className="mt-1.5 text-[12px] text-danger">{addError}</div>}
           {!searchable && selectedDescription && (
             <div className="mt-1.5 text-[12px] leading-relaxed text-ink-secondary">{selectedDescription}</div>
+          )}
+          {!usesLocalSystem && (selectedVoice || tts.voice) && (
+            <div data-voice-whose className="mt-1.5 text-[12px] leading-relaxed text-ink-secondary">
+              {selectedVoice ? t("voice.usesOwn") : t("voice.usesYours", { provider: providerName })}
+            </div>
           )}
         </div>
       )}
@@ -563,6 +570,21 @@ export function VoiceSettings({
           aria-label={t("voice.notes")}
           onClick={() => onPatch({ voiceNotes: bot.voiceNotes === false })}
         />
+      </div>
+
+      <div data-voice-every-reply className="mt-4 flex items-center justify-between gap-4">
+        <div>
+          <div className="text-[13px] font-medium text-ink">{t("voice.everyReply")}</div>
+          <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
+            {bot.voiceNoteEveryReply == null
+              ? t(tts?.everyReply ? "voice.everyReply.followsOn" : "voice.everyReply.followsOff")
+              : <>{t("voice.everyReply.own")}{" "}
+                  <button type="button" className="font-medium text-accent hover:underline" onClick={() => onPatch({ voiceNoteEveryReply: null })}>
+                    {t("voice.everyReply.follow")}
+                  </button></>}
+          </div>
+        </div>
+        <Switch checked={everyReply} aria-label={t("voice.everyReply")} onClick={() => onPatch({ voiceNoteEveryReply: !everyReply })} />
       </div>
 
       {error && <div role="alert" className="mt-2 text-[12px] text-danger">{error}</div>}

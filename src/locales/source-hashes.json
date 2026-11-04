@@ -2832,7 +2832,16 @@
       "server.browser.stoppedWaiting": "0c6d8041de6e6077f9be0ddaddeebe4457e29a1231de7aa6a8b9288704e5ccb2",
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
-      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f"
+      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
+      "voice.everyReply": "147a060e53ed5651b2c03842d2a4933952ec6d0f9ad6809569222fce96f83365",
+      "voice.everyReply.allHelp": "b0f0c844acb9e4f8f253a54af763bb10b0c6a9a815b6b0e9ee57cf7cce85d7f2",
+      "voice.everyReply.followsOn": "49dba5f4412bca88a992f8642dd852f4cd1cf35acd7012ef53d50fde117ad436",
+      "voice.everyReply.followsOff": "7f5ccbffe7fd69044fe419f8dfcbc45f8ea193f1971c580ae72556d318c08f81",
+      "voice.everyReply.own": "a0cd84d7adda1f43d4b2a16e2219f5da3dbee3c366021bc41868e260dcf8cba7",
+      "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
+      "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
+      "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -8554,7 +8563,16 @@
       "server.browser.stoppedWaiting": "0c6d8041de6e6077f9be0ddaddeebe4457e29a1231de7aa6a8b9288704e5ccb2",
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
-      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f"
+      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
+      "voice.everyReply": "147a060e53ed5651b2c03842d2a4933952ec6d0f9ad6809569222fce96f83365",
+      "voice.everyReply.allHelp": "b0f0c844acb9e4f8f253a54af763bb10b0c6a9a815b6b0e9ee57cf7cce85d7f2",
+      "voice.everyReply.followsOn": "49dba5f4412bca88a992f8642dd852f4cd1cf35acd7012ef53d50fde117ad436",
+      "voice.everyReply.followsOff": "7f5ccbffe7fd69044fe419f8dfcbc45f8ea193f1971c580ae72556d318c08f81",
+      "voice.everyReply.own": "a0cd84d7adda1f43d4b2a16e2219f5da3dbee3c366021bc41868e260dcf8cba7",
+      "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
+      "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
+      "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
     },
     "fr": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -11333,7 +11351,16 @@
       "server.browser.stoppedWaiting": "0c6d8041de6e6077f9be0ddaddeebe4457e29a1231de7aa6a8b9288704e5ccb2",
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
-      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f"
+      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
+      "voice.everyReply": "147a060e53ed5651b2c03842d2a4933952ec6d0f9ad6809569222fce96f83365",
+      "voice.everyReply.allHelp": "b0f0c844acb9e4f8f253a54af763bb10b0c6a9a815b6b0e9ee57cf7cce85d7f2",
+      "voice.everyReply.followsOn": "49dba5f4412bca88a992f8642dd852f4cd1cf35acd7012ef53d50fde117ad436",
+      "voice.everyReply.followsOff": "7f5ccbffe7fd69044fe419f8dfcbc45f8ea193f1971c580ae72556d318c08f81",
+      "voice.everyReply.own": "a0cd84d7adda1f43d4b2a16e2219f5da3dbee3c366021bc41868e260dcf8cba7",
+      "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
+      "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
+      "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
     },
     "hi": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -14112,7 +14139,16 @@
       "server.browser.stoppedWaiting": "0c6d8041de6e6077f9be0ddaddeebe4457e29a1231de7aa6a8b9288704e5ccb2",
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
-      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f"
+      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
+      "voice.everyReply": "147a060e53ed5651b2c03842d2a4933952ec6d0f9ad6809569222fce96f83365",
+      "voice.everyReply.allHelp": "b0f0c844acb9e4f8f253a54af763bb10b0c6a9a815b6b0e9ee57cf7cce85d7f2",
+      "voice.everyReply.followsOn": "49dba5f4412bca88a992f8642dd852f4cd1cf35acd7012ef53d50fde117ad436",
+      "voice.everyReply.followsOff": "7f5ccbffe7fd69044fe419f8dfcbc45f8ea193f1971c580ae72556d318c08f81",
+      "voice.everyReply.own": "a0cd84d7adda1f43d4b2a16e2219f5da3dbee3c366021bc41868e260dcf8cba7",
+      "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
+      "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
+      "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -14390,7 +14426,6 @@
       "voice.chatterboxHowTo": "2d2bcb228675e2ab5207c510cc5a578c5d5e01d7276055c27c04c0e2425fe3df",
       "voice.loading": "cb5620abfd32ba40aba14e1197512cef960721361620a49f954eafa8acc7c7d5",
       "voice.macDefault": "f3f7a6130aae35c820c468f4def83c36402d06530b7e8fc9633abd34c4ab7da9",
-      "voice.installDefault": "8ef3f9c126446610c9e2a886c1045af392608c687f7a27ac52f2da6bdcefd6ce",
       "voice.search": "54d604082572db0f187d14212e4d42d056f47343d6228bf2086459ecd6c4797c",
       "voice.noMatches": "1ff74c5dc45faf16e0fe1c8fe2577b1d6ae8afeb981b3b2cc9bd461cbdea6094",
       "voice.noMatchesHint": "c96ff14899c691ce7114c67eb32fa7bb9748d8687ce676385abfcb35391e2185",
@@ -20719,7 +20754,16 @@
       "server.browser.stoppedWaiting": "0c6d8041de6e6077f9be0ddaddeebe4457e29a1231de7aa6a8b9288704e5ccb2",
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
-      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f"
+      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
+      "voice.everyReply": "147a060e53ed5651b2c03842d2a4933952ec6d0f9ad6809569222fce96f83365",
+      "voice.everyReply.allHelp": "b0f0c844acb9e4f8f253a54af763bb10b0c6a9a815b6b0e9ee57cf7cce85d7f2",
+      "voice.everyReply.followsOn": "49dba5f4412bca88a992f8642dd852f4cd1cf35acd7012ef53d50fde117ad436",
+      "voice.everyReply.followsOff": "7f5ccbffe7fd69044fe419f8dfcbc45f8ea193f1971c580ae72556d318c08f81",
+      "voice.everyReply.own": "a0cd84d7adda1f43d4b2a16e2219f5da3dbee3c366021bc41868e260dcf8cba7",
+      "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
+      "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
+      "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
     },
     "pt-br": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -20982,7 +21026,6 @@
       "voice.chatterboxHowTo": "2d2bcb228675e2ab5207c510cc5a578c5d5e01d7276055c27c04c0e2425fe3df",
       "voice.loading": "cb5620abfd32ba40aba14e1197512cef960721361620a49f954eafa8acc7c7d5",
       "voice.macDefault": "f3f7a6130aae35c820c468f4def83c36402d06530b7e8fc9633abd34c4ab7da9",
-      "voice.installDefault": "8ef3f9c126446610c9e2a886c1045af392608c687f7a27ac52f2da6bdcefd6ce",
       "voice.pick": "81a82c1726ebce7057e38f0e02aa52f7ed25e366d5094f1ee2420db0ae06bcf1",
       "voice.current": "006c76db103c50d280b28e80d41583713bf70e747ed4cace512d0d134f16a454",
       "voice.hear": "d03e7675ca9ae71d5e2327a4736afcbeba247f375c9ec3a37b087b95c2ee2058",
@@ -27120,7 +27163,16 @@
       "server.browser.stoppedWaiting": "0c6d8041de6e6077f9be0ddaddeebe4457e29a1231de7aa6a8b9288704e5ccb2",
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
-      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f"
+      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
+      "voice.everyReply": "147a060e53ed5651b2c03842d2a4933952ec6d0f9ad6809569222fce96f83365",
+      "voice.everyReply.allHelp": "b0f0c844acb9e4f8f253a54af763bb10b0c6a9a815b6b0e9ee57cf7cce85d7f2",
+      "voice.everyReply.followsOn": "49dba5f4412bca88a992f8642dd852f4cd1cf35acd7012ef53d50fde117ad436",
+      "voice.everyReply.followsOff": "7f5ccbffe7fd69044fe419f8dfcbc45f8ea193f1971c580ae72556d318c08f81",
+      "voice.everyReply.own": "a0cd84d7adda1f43d4b2a16e2219f5da3dbee3c366021bc41868e260dcf8cba7",
+      "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
+      "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
+      "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
     },
     "zh": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -30912,7 +30964,6 @@
       "voice.chatterboxHowTo": "2d2bcb228675e2ab5207c510cc5a578c5d5e01d7276055c27c04c0e2425fe3df",
       "voice.loading": "cb5620abfd32ba40aba14e1197512cef960721361620a49f954eafa8acc7c7d5",
       "voice.macDefault": "f3f7a6130aae35c820c468f4def83c36402d06530b7e8fc9633abd34c4ab7da9",
-      "voice.installDefault": "8ef3f9c126446610c9e2a886c1045af392608c687f7a27ac52f2da6bdcefd6ce",
       "voice.pick": "81a82c1726ebce7057e38f0e02aa52f7ed25e366d5094f1ee2420db0ae06bcf1",
       "voice.current": "006c76db103c50d280b28e80d41583713bf70e747ed4cace512d0d134f16a454",
       "voice.hear": "d03e7675ca9ae71d5e2327a4736afcbeba247f375c9ec3a37b087b95c2ee2058",
@@ -34427,7 +34478,16 @@
       "server.browser.stoppedWaiting": "0c6d8041de6e6077f9be0ddaddeebe4457e29a1231de7aa6a8b9288704e5ccb2",
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
-      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f"
+      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
+      "voice.everyReply": "147a060e53ed5651b2c03842d2a4933952ec6d0f9ad6809569222fce96f83365",
+      "voice.everyReply.allHelp": "b0f0c844acb9e4f8f253a54af763bb10b0c6a9a815b6b0e9ee57cf7cce85d7f2",
+      "voice.everyReply.followsOn": "49dba5f4412bca88a992f8642dd852f4cd1cf35acd7012ef53d50fde117ad436",
+      "voice.everyReply.followsOff": "7f5ccbffe7fd69044fe419f8dfcbc45f8ea193f1971c580ae72556d318c08f81",
+      "voice.everyReply.own": "a0cd84d7adda1f43d4b2a16e2219f5da3dbee3c366021bc41868e260dcf8cba7",
+      "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
+      "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
+      "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -39032,7 +39092,16 @@
       "server.browser.stoppedWaiting": "0c6d8041de6e6077f9be0ddaddeebe4457e29a1231de7aa6a8b9288704e5ccb2",
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
-      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f"
+      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
+      "voice.everyReply": "147a060e53ed5651b2c03842d2a4933952ec6d0f9ad6809569222fce96f83365",
+      "voice.everyReply.allHelp": "b0f0c844acb9e4f8f253a54af763bb10b0c6a9a815b6b0e9ee57cf7cce85d7f2",
+      "voice.everyReply.followsOn": "49dba5f4412bca88a992f8642dd852f4cd1cf35acd7012ef53d50fde117ad436",
+      "voice.everyReply.followsOff": "7f5ccbffe7fd69044fe419f8dfcbc45f8ea193f1971c580ae72556d318c08f81",
+      "voice.everyReply.own": "a0cd84d7adda1f43d4b2a16e2219f5da3dbee3c366021bc41868e260dcf8cba7",
+      "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
+      "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
+      "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
     },
     "uk": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -42252,7 +42321,16 @@
       "server.browser.stoppedWaiting": "0c6d8041de6e6077f9be0ddaddeebe4457e29a1231de7aa6a8b9288704e5ccb2",
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
-      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f"
+      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
+      "voice.everyReply": "147a060e53ed5651b2c03842d2a4933952ec6d0f9ad6809569222fce96f83365",
+      "voice.everyReply.allHelp": "b0f0c844acb9e4f8f253a54af763bb10b0c6a9a815b6b0e9ee57cf7cce85d7f2",
+      "voice.everyReply.followsOn": "49dba5f4412bca88a992f8642dd852f4cd1cf35acd7012ef53d50fde117ad436",
+      "voice.everyReply.followsOff": "7f5ccbffe7fd69044fe419f8dfcbc45f8ea193f1971c580ae72556d318c08f81",
+      "voice.everyReply.own": "a0cd84d7adda1f43d4b2a16e2219f5da3dbee3c366021bc41868e260dcf8cba7",
+      "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
+      "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
+      "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -47465,7 +47543,16 @@
       "server.browser.stoppedWaiting": "0c6d8041de6e6077f9be0ddaddeebe4457e29a1231de7aa6a8b9288704e5ccb2",
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
-      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f"
+      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
+      "voice.everyReply": "147a060e53ed5651b2c03842d2a4933952ec6d0f9ad6809569222fce96f83365",
+      "voice.everyReply.allHelp": "b0f0c844acb9e4f8f253a54af763bb10b0c6a9a815b6b0e9ee57cf7cce85d7f2",
+      "voice.everyReply.followsOn": "49dba5f4412bca88a992f8642dd852f4cd1cf35acd7012ef53d50fde117ad436",
+      "voice.everyReply.followsOff": "7f5ccbffe7fd69044fe419f8dfcbc45f8ea193f1971c580ae72556d318c08f81",
+      "voice.everyReply.own": "a0cd84d7adda1f43d4b2a16e2219f5da3dbee3c366021bc41868e260dcf8cba7",
+      "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
+      "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
+      "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -52678,7 +52765,16 @@
       "server.browser.stoppedWaiting": "0c6d8041de6e6077f9be0ddaddeebe4457e29a1231de7aa6a8b9288704e5ccb2",
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
-      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f"
+      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
+      "voice.everyReply": "147a060e53ed5651b2c03842d2a4933952ec6d0f9ad6809569222fce96f83365",
+      "voice.everyReply.allHelp": "b0f0c844acb9e4f8f253a54af763bb10b0c6a9a815b6b0e9ee57cf7cce85d7f2",
+      "voice.everyReply.followsOn": "49dba5f4412bca88a992f8642dd852f4cd1cf35acd7012ef53d50fde117ad436",
+      "voice.everyReply.followsOff": "7f5ccbffe7fd69044fe419f8dfcbc45f8ea193f1971c580ae72556d318c08f81",
+      "voice.everyReply.own": "a0cd84d7adda1f43d4b2a16e2219f5da3dbee3c366021bc41868e260dcf8cba7",
+      "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
+      "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
+      "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -52956,7 +53052,6 @@
       "voice.chatterboxHowTo": "2d2bcb228675e2ab5207c510cc5a578c5d5e01d7276055c27c04c0e2425fe3df",
       "voice.loading": "cb5620abfd32ba40aba14e1197512cef960721361620a49f954eafa8acc7c7d5",
       "voice.macDefault": "f3f7a6130aae35c820c468f4def83c36402d06530b7e8fc9633abd34c4ab7da9",
-      "voice.installDefault": "8ef3f9c126446610c9e2a886c1045af392608c687f7a27ac52f2da6bdcefd6ce",
       "voice.pick": "81a82c1726ebce7057e38f0e02aa52f7ed25e366d5094f1ee2420db0ae06bcf1",
       "voice.current": "006c76db103c50d280b28e80d41583713bf70e747ed4cace512d0d134f16a454",
       "voice.hear": "d03e7675ca9ae71d5e2327a4736afcbeba247f375c9ec3a37b087b95c2ee2058",
@@ -59201,7 +59296,16 @@
       "server.browser.stoppedWaiting": "0c6d8041de6e6077f9be0ddaddeebe4457e29a1231de7aa6a8b9288704e5ccb2",
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
-      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f"
+      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
+      "voice.everyReply": "147a060e53ed5651b2c03842d2a4933952ec6d0f9ad6809569222fce96f83365",
+      "voice.everyReply.allHelp": "b0f0c844acb9e4f8f253a54af763bb10b0c6a9a815b6b0e9ee57cf7cce85d7f2",
+      "voice.everyReply.followsOn": "49dba5f4412bca88a992f8642dd852f4cd1cf35acd7012ef53d50fde117ad436",
+      "voice.everyReply.followsOff": "7f5ccbffe7fd69044fe419f8dfcbc45f8ea193f1971c580ae72556d318c08f81",
+      "voice.everyReply.own": "a0cd84d7adda1f43d4b2a16e2219f5da3dbee3c366021bc41868e260dcf8cba7",
+      "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
+      "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
+      "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -59479,7 +59583,6 @@
       "voice.chatterboxHowTo": "2d2bcb228675e2ab5207c510cc5a578c5d5e01d7276055c27c04c0e2425fe3df",
       "voice.loading": "cb5620abfd32ba40aba14e1197512cef960721361620a49f954eafa8acc7c7d5",
       "voice.macDefault": "f3f7a6130aae35c820c468f4def83c36402d06530b7e8fc9633abd34c4ab7da9",
-      "voice.installDefault": "8ef3f9c126446610c9e2a886c1045af392608c687f7a27ac52f2da6bdcefd6ce",
       "voice.search": "54d604082572db0f187d14212e4d42d056f47343d6228bf2086459ecd6c4797c",
       "voice.noMatches": "1ff74c5dc45faf16e0fe1c8fe2577b1d6ae8afeb981b3b2cc9bd461cbdea6094",
       "voice.noMatchesHint": "c96ff14899c691ce7114c67eb32fa7bb9748d8687ce676385abfcb35391e2185",
@@ -65786,7 +65889,16 @@
       "server.browser.stoppedWaiting": "0c6d8041de6e6077f9be0ddaddeebe4457e29a1231de7aa6a8b9288704e5ccb2",
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
-      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f"
+      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
+      "voice.everyReply": "147a060e53ed5651b2c03842d2a4933952ec6d0f9ad6809569222fce96f83365",
+      "voice.everyReply.allHelp": "b0f0c844acb9e4f8f253a54af763bb10b0c6a9a815b6b0e9ee57cf7cce85d7f2",
+      "voice.everyReply.followsOn": "49dba5f4412bca88a992f8642dd852f4cd1cf35acd7012ef53d50fde117ad436",
+      "voice.everyReply.followsOff": "7f5ccbffe7fd69044fe419f8dfcbc45f8ea193f1971c580ae72556d318c08f81",
+      "voice.everyReply.own": "a0cd84d7adda1f43d4b2a16e2219f5da3dbee3c366021bc41868e260dcf8cba7",
+      "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
+      "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
+      "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -66055,7 +66167,6 @@
       "voice.chatterboxHowTo": "2d2bcb228675e2ab5207c510cc5a578c5d5e01d7276055c27c04c0e2425fe3df",
       "voice.loading": "cb5620abfd32ba40aba14e1197512cef960721361620a49f954eafa8acc7c7d5",
       "voice.macDefault": "f3f7a6130aae35c820c468f4def83c36402d06530b7e8fc9633abd34c4ab7da9",
-      "voice.installDefault": "8ef3f9c126446610c9e2a886c1045af392608c687f7a27ac52f2da6bdcefd6ce",
       "voice.search": "54d604082572db0f187d14212e4d42d056f47343d6228bf2086459ecd6c4797c",
       "voice.noMatches": "1ff74c5dc45faf16e0fe1c8fe2577b1d6ae8afeb981b3b2cc9bd461cbdea6094",
       "voice.noMatchesHint": "c96ff14899c691ce7114c67eb32fa7bb9748d8687ce676385abfcb35391e2185",
@@ -72169,7 +72280,16 @@
       "server.browser.stoppedWaiting": "0c6d8041de6e6077f9be0ddaddeebe4457e29a1231de7aa6a8b9288704e5ccb2",
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
-      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f"
+      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
+      "voice.everyReply": "147a060e53ed5651b2c03842d2a4933952ec6d0f9ad6809569222fce96f83365",
+      "voice.everyReply.allHelp": "b0f0c844acb9e4f8f253a54af763bb10b0c6a9a815b6b0e9ee57cf7cce85d7f2",
+      "voice.everyReply.followsOn": "49dba5f4412bca88a992f8642dd852f4cd1cf35acd7012ef53d50fde117ad436",
+      "voice.everyReply.followsOff": "7f5ccbffe7fd69044fe419f8dfcbc45f8ea193f1971c580ae72556d318c08f81",
+      "voice.everyReply.own": "a0cd84d7adda1f43d4b2a16e2219f5da3dbee3c366021bc41868e260dcf8cba7",
+      "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
+      "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
+      "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -72589,7 +72709,6 @@
       "voice.chatterboxHowTo": "2d2bcb228675e2ab5207c510cc5a578c5d5e01d7276055c27c04c0e2425fe3df",
       "voice.loading": "cb5620abfd32ba40aba14e1197512cef960721361620a49f954eafa8acc7c7d5",
       "voice.macDefault": "f3f7a6130aae35c820c468f4def83c36402d06530b7e8fc9633abd34c4ab7da9",
-      "voice.installDefault": "8ef3f9c126446610c9e2a886c1045af392608c687f7a27ac52f2da6bdcefd6ce",
       "voice.search": "54d604082572db0f187d14212e4d42d056f47343d6228bf2086459ecd6c4797c",
       "voice.noMatches": "1ff74c5dc45faf16e0fe1c8fe2577b1d6ae8afeb981b3b2cc9bd461cbdea6094",
       "voice.noMatchesHint": "c96ff14899c691ce7114c67eb32fa7bb9748d8687ce676385abfcb35391e2185",
@@ -79277,7 +79396,16 @@
       "server.browser.stoppedWaiting": "0c6d8041de6e6077f9be0ddaddeebe4457e29a1231de7aa6a8b9288704e5ccb2",
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
-      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f"
+      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
+      "voice.everyReply": "147a060e53ed5651b2c03842d2a4933952ec6d0f9ad6809569222fce96f83365",
+      "voice.everyReply.allHelp": "b0f0c844acb9e4f8f253a54af763bb10b0c6a9a815b6b0e9ee57cf7cce85d7f2",
+      "voice.everyReply.followsOn": "49dba5f4412bca88a992f8642dd852f4cd1cf35acd7012ef53d50fde117ad436",
+      "voice.everyReply.followsOff": "7f5ccbffe7fd69044fe419f8dfcbc45f8ea193f1971c580ae72556d318c08f81",
+      "voice.everyReply.own": "a0cd84d7adda1f43d4b2a16e2219f5da3dbee3c366021bc41868e260dcf8cba7",
+      "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
+      "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
+      "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
     }
   }
 }

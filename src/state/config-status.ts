@@ -74,6 +74,8 @@ export interface ConfigStatus {
     provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini";
     baseUrl?: string;
     model?: string;
+    /** Voice note with every reply, for every bot without its own choice. Absent from older servers. */
+    everyReply?: boolean;
     /** Fish Audio speech model; present only while Fish is the provider. */
     fishModel?: "s2.1-pro" | "s2.1-pro-free";
     /** ElevenLabs voice comes with Cloud Pro; no key is saved. */

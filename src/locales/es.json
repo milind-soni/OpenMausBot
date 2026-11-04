@@ -5747,5 +5747,14 @@
   "server.browser.stoppedWaiting": "Se dejó de esperar el navegador.",
   "composer.queued.capacityStarter": "En cola. Starter ejecuta un hilo a la vez por bot, así que este empieza cuando termine el que está en marcha. Un plan mayor ejecuta más.",
   "composer.queued.seePlans": "Ver planes",
-  "settings.threads.starter": "Starter ejecuta un hilo a la vez por bot, y un plan mayor ejecuta más. El trabajo que un bot inicia por su cuenta se ejecuta igualmente, y cada bot tiene el suyo."
+  "settings.threads.starter": "Starter ejecuta un hilo a la vez por bot, y un plan mayor ejecuta más. El trabajo que un bot inicia por su cuenta se ejecuta igualmente, y cada bot tiene el suyo.",
+  "voice.everyReply": "Nota de voz con cada respuesta",
+  "voice.everyReply.allHelp": "Cada bot también envía cada respuesta como nota de voz. Puedes activarlo o desactivarlo para un solo bot en sus ajustes.",
+  "voice.everyReply.followsOn": "Usa tu ajuste de voz (activado)",
+  "voice.everyReply.followsOff": "Usa tu ajuste de voz (desactivado)",
+  "voice.everyReply.own": "Configurado para este bot.",
+  "voice.everyReply.follow": "Usar tu ajuste de voz",
+  "voice.yourVoice": "Tu voz de {provider}",
+  "voice.usesYours": "Este bot habla con tu voz de {provider}. Elige otra arriba para darle una propia.",
+  "voice.usesOwn": "Este bot habla con su propia voz."
 }

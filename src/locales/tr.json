@@ -5238,5 +5238,14 @@
   "server.browser.stoppedWaiting": "Tarayıcı beklemesi durduruldu.",
   "composer.queued.capacityStarter": "Sırada. Starter, bot başına aynı anda bir konu çalıştırır; bu, çalışan bitince başlar. Daha büyük bir plan daha fazlasını çalıştırır.",
   "composer.queued.seePlans": "Planları gör",
-  "settings.threads.starter": "Starter, bot başına aynı anda bir konu çalıştırır, daha büyük bir plan daha fazlasını çalıştırır. Botun kendi başlattığı iş yine çalışır ve her botun kendi konusu vardır."
+  "settings.threads.starter": "Starter, bot başına aynı anda bir konu çalıştırır, daha büyük bir plan daha fazlasını çalıştırır. Botun kendi başlattığı iş yine çalışır ve her botun kendi konusu vardır.",
+  "voice.everyReply": "Her yanıtla sesli not",
+  "voice.everyReply.allHelp": "Her bot her yanıtını sesli not olarak da gönderir. Tek bir bot için bunu o botun ayarlarından açıp kapatabilirsiniz.",
+  "voice.everyReply.followsOn": "Ses ayarınızı kullanır (açık)",
+  "voice.everyReply.followsOff": "Ses ayarınızı kullanır (kapalı)",
+  "voice.everyReply.own": "Bu bot için ayarlandı.",
+  "voice.everyReply.follow": "Ses ayarınızı kullan",
+  "voice.yourVoice": "{provider} sesiniz",
+  "voice.usesYours": "Bu bot {provider} sesinizle konuşur. Ona kendi sesini vermek için yukarıdan başka bir ses seçin.",
+  "voice.usesOwn": "Bu bot kendi sesiyle konuşur."
 }
