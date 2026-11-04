@@ -544,6 +544,15 @@ export class Runtime {
     return true;
   }
 
+  /** A newer card replaced one this parked turn waits on: it waits on the newer one. */
+  followCard(id: string, from: string, to: string): void {
+    const n = this.store.get(id);
+    if (!n || n.status !== "needs_input" || !n.cards?.includes(from)) return;
+    n.cards = [...new Set(n.cards.map(card => card === from ? to : card))];
+    this.store.update(n);
+    this.touch(n);
+  }
+
   /** Cancel this node and everything under it; abort running turns. */
   cancel(id: string, reason = "Stopped by user", outcome: "stopped" | "failed" = "stopped"): void {
     const n = this.store.get(id);
