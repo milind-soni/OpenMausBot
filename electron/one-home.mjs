@@ -214,7 +214,7 @@ export function createOneHome(deps) {
     const journal = read();
     if (!journal || journal.paused || (journal.told && journal.phase !== "keeping")) return null;
     if (journal.phase === "done") return { phase: "done", ...(Number.isSafeInteger(journal.doneAt) ? { at: journal.doneAt } : {}), ...(journal.counts ? { counts: journal.counts } : {}), phone: journal.phone === true, held: journal.held ?? [],
-      ...(journal.left?.length ? { left: journal.left } : {}) };
+      ...(journal.left?.length ? { left: journal.left } : {}), ...(journal.stayed?.length ? { stayed: journal.stayed } : {}) };
     if (journal.phase === "keeping") return { phase: "keeping", ...(journal.updating ? { updating: true } : {}) };
     if (journal.phase === "home-again" || journal.phase === "back") {
       return { phase: journal.phase, ...(journal.lost ? { lost: true } : {}), ...(journal.elsewhere ? { elsewhere: journal.elsewhere } : {}), ...(journal.kept ? { kept: true } : {}),
@@ -358,7 +358,9 @@ export function createOneHome(deps) {
     const sent = deps.send.snapshot?.();
     const held = (sent?.whole?.result?.notes ?? []).filter((note) => note?.kind === "held" && typeof note.connection === "string").map((note) => note.connection);
     const left = notCarried(sent, true);
-    const done = write({ ...journal, phase: "done", switched, doneAt: now(), version: deps.version ?? null, phone: deps.phone?.paired() === true, held, ...(left.length ? { left } : {}),
+    const stayed = (sent?.whole?.result?.notes ?? []).filter((note) => note?.kind === "stayed" && typeof note.connection === "string").slice(0, NAMED_MAX)
+      .map((note) => ({ name: note.connection, ...(typeof note.needs === "string" ? { needs: note.needs } : {}) }));
+    const done = write({ ...journal, phase: "done", switched, doneAt: now(), version: deps.version ?? null, phone: deps.phone?.paired() === true, held, ...(left.length ? { left } : {}), ...(stayed.length ? { stayed } : {}),
       error: undefined, failingSince: undefined, retryAt: undefined, tries: undefined, failure: undefined });
     await settle(done);
     deps.openHome?.();

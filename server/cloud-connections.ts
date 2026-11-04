@@ -103,10 +103,20 @@ export function launcherOf(command: string): string {
   return basename(command.replaceAll("\\", "/")).toLowerCase().replace(/\.(?:exe|cmd|bat|ps1)$/u, "");
 }
 
-/** A server that needs this computer: it starts a program by path, reads a file or folder here, or calls an address
- * only this computer reaches. */
+const MAIL_PROGRAM = /(?:^|[^a-z])(?:imap|smtp|e-?mail|himalaya)(?:[^a-z]|$)/iu;
+
+/** A command-line connector that talks to a mail server itself. It keeps its accounts on the computer it was set up on,
+ * outside anything its command line names, and in a bot's box a mail server is out of reach: the box's only way out is
+ * its HTTP proxy, which such a program does not use. So it starts on My Cloud, lists its tools, and reads no mail. */
+export function isMailConnector(server: StoredMcpServer): boolean {
+  return !isRemoteMcpServer(server) && [server.command, ...server.args].some((value) => MAIL_PROGRAM.test(value));
+}
+
+/** A server that needs this computer: it starts a program by path, reads a file or folder here, calls an address only
+ * this computer reaches, or is a mail connector. */
 export function runsHere(server: StoredMcpServer): boolean {
   if (isRemoteMcpServer(server)) return addressHere(server.url);
+  if (isMailConnector(server)) return true;
   const command = server.command.trim();
   if (/[\\/]/u.test(command) || command.startsWith("~") || command.startsWith(".")) return true;
   return [...server.args, ...Object.values(server.env)].some(pathHere);

@@ -461,6 +461,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     result.connections += moved.moved.length + moved.runsHere.length;
     for (const failure of moved.failed) failed(failure.id, failure.label, failure.message, failure.final);
     for (const held of moved.held ?? []) result.notes.push({ kind: "held", connection: held.label });
+    for (const stayed of moved.runsHere) if (!stayed.off) result.notes.push({ kind: "stayed", connection: stayed.label, ...(stayed.needs ? { needs: stayed.needs } : {}) });
     if (moved.release.length) {
       kept.release = [...kept.release.filter((held) => !moved.release.some((next) => next.id === held.id)), ...moved.release];
       persist();

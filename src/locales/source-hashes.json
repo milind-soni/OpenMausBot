@@ -2990,7 +2990,10 @@
       "server.teammates.queued.room": "db3ebc646dcf65d4d79ef6639d8c7c65eb46a9bfefe3b70b0258ed19c7401d8d",
       "server.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "server.queued.capacity": "5067f08fc0a464b92135c6e3137b08a93335b7c4d704e873b701ae162167ca91",
-      "server.queued.groupTurn": "335e0a92b0e4ce091c947241c44146fe84734464ecee92bbf32b1d3fdf206e2e"
+      "server.queued.groupTurn": "335e0a92b0e4ce091c947241c44146fe84734464ecee92bbf32b1d3fdf206e2e",
+      "server.moves.connectorStayedMail": "c3837676cc44408b44fe8ae7fe52c996f90fb3dc5975c518ba510b4fcf36020e",
+      "server.moves.connectorStayedProgram": "64c1f5480ff4883da60905d87ec2e869a18bb9142ea66ff2757c982a21e3a733",
+      "server.moves.connectorStayedHere": "b4c571fd7e50e8d32a4cf86bd39969e573c536e324bc142419612d1216ba31a6"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",

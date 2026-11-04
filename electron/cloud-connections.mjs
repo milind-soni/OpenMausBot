@@ -153,7 +153,7 @@ export async function adoptComposioId(target, { local, here, there, managedApps 
  * With `signIns: false`, a sign-in that refreshes itself stays here for a later pass (`later`), and the rest goes.
  *
  * Returns { moved, runsHere, kept, missing, failed, release, later, held }: what My Cloud has now; what went marked as
- * running here (`needs`: a program My Cloud lacks); what My Cloud kept of its own (its own sign-in, its own connected
+ * running here (`needs`: a program My Cloud lacks; `off`: it was switched off here too); what My Cloud kept of its own (its own sign-in, its own connected
  * apps); the connected apps of this computer's that My Cloud then lacks; what failed (`final`: trying again can't fix
  * it); the sign-ins My Cloud took that this computer still holds; the sign-ins left for a later pass; and the keys a
  * trial's Cloud keeps unused while its Claude credit lasts.
@@ -202,7 +202,7 @@ export async function sendConnections(collected, target, { local, release = true
         if (saved.ok && enabled === true) saved = await target.call("PATCH", `/api/mcp/servers/${name}`, { enabled: true });
       }
       if (!saved.ok) throw refused(saved, `My Cloud did not take ${item.label}.`);
-      if (runsOn) return void result.runsHere.push({ id: item.id, label: item.label, ...(missing && !item.runsHere && !record(marked) ? { needs: missing } : {}) });
+      if (runsOn) return void result.runsHere.push({ id: item.id, label: item.label, ...(missing && !item.runsHere && !record(marked) ? { needs: missing } : {}), ...(enabled === true ? {} : { off: true }) });
       done(item);
       if (record(signIn)) {
         if (!digest) throw new ConnectionMoveError("local", `${item.label}'s sign-in could not be read on this computer.`);
