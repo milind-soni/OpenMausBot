@@ -29,6 +29,7 @@ export function homeScreenText(view: HomeView | null, now = Date.now()): { title
   // It didn't answer: said once, with Try again, never a spinner that goes on for ever (it still looks again by itself).
   if (view?.screen === "offline") return { title: named("homeScreen.offline", "homeScreen.offlineNamed"), body: t("homeScreen.offlineBack"), reason: view.reason ?? null, action: "retry", busy: false };
   if (view?.screen === "signin") return { title: named("homeScreen.signIn", "homeScreen.signInNamed"), body: t(view.other ? "homeScreen.signInOther" : "homeScreen.signInEnded"), reason: null, action: "sign-in", busy: false };
+  if (view?.screen === "plan" && view.member && view.machine !== "failed") return { title: named("homeScreen.plan", "homeScreen.planNamed"), body: t("cloudHome.stoppedMember"), reason: null, action: null, busy: false };
   if (view?.screen === "plan") return { title: named("homeScreen.plan", "homeScreen.planNamed"), body: t(MACHINE[view.machine] ?? "cloudHome.failed"), reason: null, action: view.machine === "failed" ? null : "manage", busy: false };
   // A Cloud the Admin's list says isn't running: what it is in plain words, with its one fitting action.
   if (view?.screen === "ended") return { title: named("cloudHome.ended", "cloudHome.endedNamed"), body: view.deleteAt ? t("cloudHome.endedFiles", { date: homeDay(view.deleteAt, now) }) : null,

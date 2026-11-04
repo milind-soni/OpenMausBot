@@ -10,7 +10,8 @@ export const CALL_MODES: ReadonlyArray<{ id: CallMode; label: LocaleKey }> = [
   { id: "live", label: "call.mode.live" },
 ];
 
-export function liveDisclosure({ cloudHome = false }: { cloudHome?: boolean } = {}): string {
+export function liveDisclosure({ cloudHome = false, azure = false }: { cloudHome?: boolean; azure?: boolean } = {}): string {
+  if (azure) return t(cloudHome ? "call.live.disclosureAzureCloud" : "call.live.disclosureAzure");
   return t(cloudHome ? "call.live.disclosureCloud" : "call.live.disclosure");
 }
 
