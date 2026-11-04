@@ -189,6 +189,7 @@
   "server.rooms.finishingElsewhere": "{bot} başka bir konuşmayı bitiriyor; boşalınca burada yanıt verecek",
   "server.rooms.finishingElsewhereSpoken": "{bot} başka bir konuşmayı bitiriyor",
   "server.rooms.unavailable": "{bot} artık müsait değil; bu tur atlandı",
+  "server.stop.nothingRunning": "Burada çalışan bir şey yoktu, bu yüzden durdurulacak bir şey de yoktu.",
   "server.rooms.stayedBusy.one": "{bot} {count} dakika boyunca başka bir konuşmayla meşguldü; bu tur atlandı",
   "server.rooms.stayedBusy.many": "{bot} {count} dakika boyunca başka bir konuşmayla meşguldü; bu tur atlandı",
   "server.rooms.busyElsewhere": "{bot} başka bir konuşmayla meşgul; bu tur atlandı",

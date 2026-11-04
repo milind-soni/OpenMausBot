@@ -288,4 +288,4 @@ engines. What stays one at a time, and what the person sees:
 - One bot's browser: a call from another thread waits, the row says who has it, and a holder quiet for a minute gives it
   to the waiter. The holder's next call is refused once, so nothing lands on a page it did not open.
 - One computer: a turn takes it at its first screen call, not when it starts, and keeps it until it ends.
-- Memory on a Linux Cloud: a turn that would run the machine out says "Waiting for memory" and starts by itself.
+- Memory on a Linux Cloud: a turn that would run the machine out says "Waiting for memory" and starts by itself. `OMB_TEST_MEMORY_GATE=1` runs the gate in a fixture on any OS, on the memory `<data dir>/host-memory.json` says; `server/memory-order.e2e.test.ts` shows whose turn goes next.

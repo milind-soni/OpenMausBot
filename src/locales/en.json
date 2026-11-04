@@ -262,6 +262,7 @@
   "server.rooms.finishingElsewhere": "{bot} is finishing another conversation — will reply here when free",
   "server.rooms.finishingElsewhereSpoken": "{bot} is finishing another conversation",
   "server.rooms.unavailable": "{bot} is no longer available — skipped this round",
+  "server.stop.nothingRunning": "Nothing was running here, so nothing needed stopping.",
   "server.rooms.stayedBusy.one": "{bot} stayed busy in another conversation for {count} minute — skipped this round",
   "server.rooms.stayedBusy.many": "{bot} stayed busy in another conversation for {count} minutes — skipped this round",
   "server.rooms.busyElsewhere": "{bot} is busy in another conversation — skipped this round",

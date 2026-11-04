@@ -20,6 +20,8 @@ export const BROWSER_BYTES = 400 * MB;
 /** A new engine's share is held back this long while it starts and grows; it is measured once it has run this long. */
 const RESERVE_MS = 90_000, SETTLED_MS = 30_000;
 const TICK_MS = 2_000, RELIEF_COOLDOWN_MS = 15_000, NOTICE_REPEAT_MS = 10 * 60_000, STOP_GRACE_MS = 5_000;
+/** How long a bot's turn lets a person's own work go first. Past this it takes its place by arrival, so it is never starved. */
+export const BOT_TURN_GIVES_WAY_MS = 5 * 60_000;
 /** A minute counts as stalled on memory when every task that could run waited on memory this much of ten seconds (the
  * kernel's `full avg10`, in percent). */
 const STALL_PERCENT = 20;
@@ -129,7 +131,7 @@ export interface EngineBrowsers {
 
 /** An engine process and the threads whose sessions it runs: one, or several when the driver shares processes. */
 interface Engine { child: ChildProcess; threads: Set<string>; startedAt: number; stopping: boolean }
-interface Waiter { wake: () => void }
+interface Waiter { wake: () => void; threadId: string; since: number }
 
 export interface EngineMemoryOptions {
   enabled: boolean;
@@ -166,6 +168,7 @@ export class EngineMemory {
   private lastRelief = -Infinity;
   private timer: ReturnType<typeof setInterval> | null = null;
   private browsers: EngineBrowsers | null = null;
+  private personsOwn: (threadId: string) => boolean = () => false;
 
   constructor(options: EngineMemoryOptions) {
     this.enabled = options.enabled;
@@ -178,6 +181,9 @@ export class EngineMemory {
   }
 
   useBrowsers(browsers: EngineBrowsers): void { this.browsers = browsers; }
+
+  /** Whether this thread's turn is a person's own work, which goes first when memory holds several. */
+  useTurnOrder(personsOwn: (threadId: string) => boolean): void { this.personsOwn = personsOwn; }
 
   /** Runs `start` with the engine processes it spawns counted as this thread's (procs.ts spawnCli calls `track`). */
   within<T>(threadId: string, start: () => T): T {
@@ -247,13 +253,13 @@ export class EngineMemory {
     joining?: number): Promise<boolean> {
     if (!this.enabled) return true;
     if (joining !== undefined) this.engines.get(joining)?.threads.add(threadId);
-    const waiter: Waiter = { wake: () => {} };
+    const waiter: Waiter = { wake: () => {}, threadId, since: this.now() };
     this.queue.push(waiter);
     let announced: number | null = null;
     try {
       for (;;) {
         if (abort.aborted) return false;
-        if (this.queue[0] === waiter) {
+        if (this.next() === waiter) {
           const room = this.room(start, threadId);
           if (room === "admit") {
             this.reserved.set(threadId, { at: this.now(), start, browser: this.browserStarts(threadId) });
@@ -418,6 +424,11 @@ export class EngineMemory {
       if (!this.stops.has(threadId)) this.ledger.note(this.now(), "stopped");
       this.stops.set(threadId, { count: count(threadId), browser: this.browsers?.running(threadId) === true });
     }
+  }
+
+  private next(): Waiter | undefined {
+    const at = this.now();
+    return this.queue.find((waiter) => this.personsOwn(waiter.threadId) || at - waiter.since >= BOT_TURN_GIVES_WAY_MS) ?? this.queue[0];
   }
 
   private wake(): void { for (const waiter of this.queue) waiter.wake(); }

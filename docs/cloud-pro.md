@@ -1107,7 +1107,13 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   bot unless one is saved, and this gate holds the rest. A Starter Cloud runs one
   thread per bot for what a person or a routine starts; the Admin says so with its
   signed `POST /api/cloud/plan` `{"v":1,"tier":"starter"}` (`server/host/cloud-plan-tier.ts`), and a
-  home it never told has no such limit. What a bot's own turn starts always goes through.
+  home it never told has no such limit. What a bot's own turn starts always goes through,
+  and a teammate's hand-off never takes that one thread from the person.
+- **Who goes first.** The gate only changes the order, never how much it lets in. A
+  person's own work goes first: their line, or a turn going on from what they answered.
+  Bot work that has waited 5 minutes takes its place by arrival, so it is never starved
+  (`server/host/turn-order.ts`). A stop never waits: a line made only of stop words stops
+  running work at once in any of the app's languages, and an `@everyone` stop starts no engine on a bot with nothing running.
 - **OpenCode threads share a process.** Threads whose OpenCode would start
   the same way (same login, approval level and settings) run as sessions of one
   `opencode acp` process, up to six at a time and twelve over its life

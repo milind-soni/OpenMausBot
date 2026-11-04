@@ -158,6 +158,7 @@
   "server.rooms.finishingElsewhere": "{bot} завершує іншу розмову й відповість тут, щойно звільниться",
   "server.rooms.finishingElsewhereSpoken": "{bot} завершує іншу розмову",
   "server.rooms.unavailable": "{bot} більше недоступний, тому пропущений у цьому раунді",
+  "server.stop.nothingRunning": "Тут нічого не виконувалося, тож зупиняти було нічого.",
   "server.rooms.stayedBusy.one": "{bot} був зайнятий в іншій розмові {count} хвилину, тому пропущений у цьому раунді",
   "server.rooms.stayedBusy.many": "{bot} був зайнятий в іншій розмові {count} хв, тому пропущений у цьому раунді",
   "server.rooms.busyElsewhere": "{bot} зайнятий в іншій розмові, тому пропущений у цьому раунді",

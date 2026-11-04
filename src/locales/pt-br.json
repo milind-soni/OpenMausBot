@@ -203,6 +203,7 @@
   "server.rooms.finishingElsewhere": "{bot} está terminando outra conversa e vai responder aqui quando ficar livre",
   "server.rooms.finishingElsewhereSpoken": "{bot} está terminando outra conversa",
   "server.rooms.unavailable": "{bot} não está mais disponível; pulado nesta rodada",
+  "server.stop.nothingRunning": "Nada estava em execução aqui, então não havia o que parar.",
   "server.rooms.stayedBusy.one": "{bot} ficou ocupado em outra conversa por {count} minuto; pulado nesta rodada",
   "server.rooms.stayedBusy.many": "{bot} ficou ocupado em outra conversa por {count} minutos; pulado nesta rodada",
   "server.rooms.busyElsewhere": "{bot} está ocupado em outra conversa; pulado nesta rodada",

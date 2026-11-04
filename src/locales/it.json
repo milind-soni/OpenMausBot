@@ -209,6 +209,7 @@
   "server.rooms.finishingElsewhere": "{bot} sta finendo un'altra conversazione: risponderà qui appena è libero",
   "server.rooms.finishingElsewhereSpoken": "{bot} sta finendo un'altra conversazione",
   "server.rooms.unavailable": "{bot} non è più disponibile: turno saltato",
+  "server.stop.nothingRunning": "Qui non era in corso nulla, quindi non c'era niente da interrompere.",
   "server.rooms.stayedBusy.one": "{bot} è rimasto occupato in un'altra conversazione per {count} minuto: turno saltato",
   "server.rooms.stayedBusy.many": "{bot} è rimasto occupato in un'altra conversazione per {count} minuti: turno saltato",
   "server.rooms.busyElsewhere": "{bot} è occupato in un'altra conversazione: turno saltato",

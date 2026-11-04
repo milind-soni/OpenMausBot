@@ -211,6 +211,7 @@
   "server.rooms.finishingElsewhere": "{bot} заканчивает другой разговор и ответит здесь, когда освободится",
   "server.rooms.finishingElsewhereSpoken": "{bot} заканчивает другой разговор",
   "server.rooms.unavailable": "{bot} больше недоступен, поэтому пропущен в этом раунде",
+  "server.stop.nothingRunning": "Здесь ничего не выполнялось, так что останавливать было нечего.",
   "server.rooms.stayedBusy.one": "{bot} был занят в другом разговоре {count} минуту, поэтому пропущен в этом раунде",
   "server.rooms.stayedBusy.many": "{bot} был занят в другом разговоре {count} мин, поэтому пропущен в этом раунде",
   "server.rooms.busyElsewhere": "{bot} занят в другом разговоре, поэтому пропущен в этом раунде",
