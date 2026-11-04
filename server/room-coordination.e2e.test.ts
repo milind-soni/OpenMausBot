@@ -432,7 +432,10 @@ it("resolves a unique teammate name in a bot_ids slot, and refuses an ambiguous 
   expect((await f.wait()).status).toBe("settled");
   const refused = f.provider().filter((turn: any) => turn.botId === f.sender.id).at(-1)
     .evidence.find((entry: any) => entry.step).response.result.content[0].text;
-  expect(refused).toBe(`2 reachable teammates are named "${f.target.name}" — call list_bots and use the id of the one you mean`);
+  expect(refused).toContain(`2 teammates you can reach are named "${f.target.name}", so nothing was sent:`);
+  expect(refused).toContain(`(id ${f.target.id})`);
+  expect(refused).toContain(`(id ${twin.id})`);
+  expect(refused).toContain("Send it again with the id of the one you mean.");
 }), 60_000);
 
 it("does not repeat a shared brief or rerun recipients on an identical tool retry", () => withRooms(async f => {

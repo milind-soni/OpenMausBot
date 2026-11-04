@@ -167,6 +167,56 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(recorder.events.filter((e) => e.type === "runtime.notice").map((e) => (e as { message: string }).message)).toEqual([TEAM_TOOLS_FAILED]);
   });
 
+  const startupMounts = {
+    composio: { command: process.execPath, args: ["connector-proxy.js"], env: {} },
+    agents: { command: process.execPath, args: ["agents-proxy.js"], env: {} },
+  };
+
+  it("starts a new thread's turn only once the MCP servers it mounted finished starting", async () => {
+    const dump = join(scratch, "mcp-ready.json"); process.env.FAKE_CODEX_DUMP = dump;
+    await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"), FAKE_CODEX_MCP_READY_MS: "400", FAKE_CODEX_MCP_STAGGER: "1" } });
+    await instance.adapter.sendTurn({ threadId: "mcp-ready", text: "Fixture", integrations: startupMounts });
+    await recorder.until((event) => event.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).toContain(`mcp_servers.openmausbot_connectors.command=${JSON.stringify(process.execPath)}`);
+    expect(seen.mcpReadyAtTurnStart).toBe(true);
+    expect(recorder.events.find((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+  });
+
+  it("does not wait for startup notifications on older Codex", async () => {
+    const dump = join(scratch, "mcp-old.json"); process.env.FAKE_CODEX_DUMP = dump;
+    await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"), FAKE_CODEX_USER_AGENT: "codex_cli_rs/0.116.0", FAKE_CODEX_MCP_READY_MS: "600000" } });
+    await instance.adapter.sendTurn({ threadId: "mcp-old", text: "Fixture", integrations: startupMounts });
+    await recorder.until((event) => event.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.mcpReadyAtTurnStart).toBe(false);
+  });
+
+  it("waits for the MCP servers of a resumed thread too", async () => {
+    const dump = join(scratch, "mcp-ready-resume.json"); process.env.FAKE_CODEX_DUMP = dump;
+    await create({ mode: "resume", environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"), FAKE_CODEX_MCP_READY_MS: "400" } });
+    await instance.adapter.sendTurn({ threadId: "mcp-ready-resume", text: "Continue", resumeCursor: "codex-thread-1", integrations: startupMounts });
+    await recorder.until((event) => event.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.calls.map((call: { method: string }) => call.method)).toContain("thread/resume");
+    expect(seen.mcpReadyAtTurnStart).toBe(true);
+  });
+
+  it("stops a turn still waiting for its MCP servers without starting it", async () => {
+    mkdirSync(NATIVE_DIR, { recursive: true });
+    await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"), FAKE_CODEX_MCP_READY_MS: "600000" } });
+    await instance.adapter.sendTurn({ threadId: "mcp-stop", text: "Fixture", integrations: startupMounts });
+    await recorder.until((event) => event.type === "session.started");
+    await instance.adapter.interruptTurn("mcp-stop");
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(recorder.events.find((event) => event.type === "turn.completed")).toMatchObject({ ok: false, stopReason: "interrupted" });
+    flushNativeLog("mcp-stop");
+    const sent = readFileSync(join(NATIVE_DIR, "mcp-stop.ndjson"), "utf8").trim().split("\n").map((line) => JSON.parse(line))
+      .filter((entry) => entry.dir === "out").map((entry) => entry.msg?.method);
+    expect(sent).toContain("thread/start");
+    expect(sent).not.toContain("turn/start");
+  });
+
   it("says which tool calls codex refused as unsupported this turn, and not the ones from earlier turns", async () => {
     const rollout = join(scratch, "rollout.jsonl");
     // An earlier turn's refusal is already in the rollout: it was reported then.
@@ -3038,6 +3088,14 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     });
   });
 
+  it("counts an API-key login as signed in", async () => {
+    await create({ mode: "api-key-configured" });
+    await expect(instance.snapshot()).resolves.toMatchObject({
+      state: "available",
+      authenticated: true,
+    });
+  });
+
   it("also accepts login status from older Codex versions that used stdout", async () => {
     await create({ mode: "logged-in-stdout" });
     await expect(instance.snapshot()).resolves.toMatchObject({
@@ -3306,6 +3364,22 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       expect(errors).toEqual([expect.objectContaining({ message: codexNotSignedIn(), setup: true })]);
       expect(done).toMatchObject({ ok: false });
       expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
+    });
+
+    it.each([
+      ["ran the turn", "api-key-configured", { FAKE_CODEX_MISSING_BEARER: "1" }],
+      ["refused turn/start", "unauthorized", {}],
+    ])("asks Codex about its login again once Codex %s without the login it reported", async (_failed, mode, failure) => {
+      const codexHome = join(scratch, ".codex");
+      mkdirSync(codexHome, { recursive: true });
+      await create({ mode, environment: { HOME: scratch, USERPROFILE: scratch, CODEX_HOME: codexHome, FAKE_CODEX_STATE: join(scratch, "launches"), ...failure } });
+      await expect(runTurn("t-login-gone")).resolves.toMatchObject({ errors: [expect.objectContaining({ message: codexNotSignedIn() })] });
+      process.env.FAKE_CODEX_MODE = "logged-out";
+      const spawn = vi.spyOn(procs, "spawnCli");
+      const { done, errors } = await runTurn("t-after-login-gone");
+      expect(errors).toEqual([expect.objectContaining({ message: codexNotSignedIn(), setup: true })]);
+      expect(done).toMatchObject({ ok: false, stopReason: "auth_required" });
+      expect(spawn).not.toHaveBeenCalled();
     });
 
     it("runs the turn again once when Codex started without the login it has now", async () => {
