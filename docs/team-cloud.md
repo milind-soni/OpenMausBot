@@ -86,9 +86,12 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
 The team's rules live on the Admin (openmaus-cloud `docs/team-cloud.md` "Rules"): one document, `{ schema: 1, limits }`, that
 only restricts. `server/cloud-team-policy.ts` fetches it at boot, every 5 minutes and when the Admin's signed `POST
 /api/cloud/team/policy-changed` nudges it, signed with the bootstrap secret (`POST /api/cloud/machines/team-policy`), and each
-request reports the fingerprint in force here. A change applies without a restart, to the next thing each bot does: a turn
-already running finishes with what it had (its engine process and the servers mounted when it began), and every turn that
-starts after the change, a hand-off's included, gets the new rules.
+request reports the fingerprint in force here. A change applies without a restart. A turn already running keeps its engine
+process and the servers it mounted when it began, HighLevel included, and finishes with them. What it reaches for through this
+machine is refused from that moment, mid-turn too: a connected-apps tool (the turn carries on without it) and the first claim on
+a computer (the turn stops there, in the rule's words; a computer it already holds stays with it until it ends). Every turn that
+starts after the change, a hand-off's included, gets the new rules, even in a chat whose engine process is still warm: that
+process restarts without what is now blocked.
 
 - **One enforcement.** The document is projected into the one policy object (`server/managed-policy.ts`) every refusal site
   and every "Managed by" screen already reads. Nothing restricted: no object at all, as on a team with no rules. Admins are not exempt.

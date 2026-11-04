@@ -1922,7 +1922,7 @@ async function asPlaceFailure(
   if (error instanceof DirectTurnSetupCancelled || error instanceof ComputerWaitParked || error instanceof PlaceUnavailableError) return error;
   const failure = error instanceof Error ? error : new Error(String(error));
   const cause = failure.message.trim().replace(/[\s.]+$/, "");
-  if (place !== "cloud" || backend === "vps") {
+  if (place !== "cloud" || backend === "vps" || (failure as { code?: unknown }).code === "managed_policy") {
     return placeUnavailable(place, {
       state: "place-failed", params: { bot: bot.name, cause: `${cause.charAt(0).toUpperCase()}${cause.slice(1)}.` }, source,
     }, Boolean(CLOUD_HOME));
