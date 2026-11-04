@@ -828,6 +828,7 @@ export interface GroupTask {
   turnTimeoutMinutes?: number;
   /** Epoch ms when the person archived this thread; absent while it is in the list. */
   archivedAt?: number;
+  /** A card in this thread waits on the person, with no turn running. */ activity?: "waiting-on-you";
   /** Epoch ms of the newest message, or createdAt when the thread has none. */
   updatedAt?: number;
   lastThreadOrderAt?: number;

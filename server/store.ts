@@ -108,7 +108,7 @@ const TASK_PATCH_FIELDS = [
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
 
-export type GroupTaskPatch = Partial<Pick<GroupTaskRecord, "title" | "pinned">> & { turnTimeoutMinutes?: number | null; archivedAt?: number | null };
+export type GroupTaskPatch = Partial<Pick<GroupTaskRecord, "title" | "pinned">> & { turnTimeoutMinutes?: number | null; archivedAt?: number | null; activity?: "waiting-on-you" | null };
 
 function mirrorActiveGroupTask(group: GroupRecord, task: GroupTaskRecord): void {
   Object.assign(group, { threadId: task.threadId, pinnedCwd: task.pinnedCwd, pinnedMessageId: task.pinnedMessageId });
@@ -1049,8 +1049,8 @@ export class Store {
     if (!group || !task) return null;
     this.commitGroupChange(group, "the thread change", () => {
       if (patch.title !== undefined) task.title = patch.title.trim().slice(0, 80) || UNTITLED_TASK;
-      if (patch.pinned) task.pinned = true;
-      else if (patch.pinned === false) delete task.pinned;
+      if (patch.pinned) task.pinned = true; else if (patch.pinned === false) delete task.pinned;
+      if (patch.activity) task.activity = patch.activity; else if (patch.activity === null) delete task.activity;
       for (const key of ["turnTimeoutMinutes", "archivedAt"] as const) if (patch[key] === null) delete task[key]; else if (patch[key] !== undefined) task[key] = patch[key];
     });
     this.emit({ type: "group", groupId });
@@ -1670,11 +1670,11 @@ export class Store {
     return bot;
   }
 
-  setTaskActivity(botId: string, threadId: string, activity: BotActivity): BotRecord | null {
+  setTaskActivity(botId: string, threadId: string, activity: BotActivity, noTurnRunning = false): BotRecord | null {
     const bot = this.bot(botId);
     const task = this.taskByThread(botId, threadId);
     if (!bot || !task) return null;
-    const busy = ACTIVITY_BUSY.has(activity);
+    const busy = ACTIVITY_BUSY.has(activity) && !noTurnRunning;
     if ((task.activity ?? "idle") === activity && Boolean(task.busy) === busy) return bot;
     const wasBusy = Boolean(task.busy);
     task.activity = activity;
@@ -1694,7 +1694,7 @@ export class Store {
     const activities = [this.legacyActivities.get(bot.id), ...(bot.tasks ?? []).map((task) => task.activity)];
     bot.activity = (["waiting-on-you", "no-signal", "working", "dead"] as const)
       .find((activity) => activities.includes(activity)) ?? "idle";
-    bot.busy = ACTIVITY_BUSY.has(bot.activity);
+    bot.busy = ACTIVITY_BUSY.has(this.legacyActivities.get(bot.id) ?? "idle") || (bot.tasks ?? []).some((task) => task.busy);
   }
 
   /** Makes `id` its scope's one Chief (its owner's on a Team Cloud, else its department's), or with no `id` leaves

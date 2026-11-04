@@ -157,6 +157,8 @@
   "server.notify.approval": "{who} braucht eine Freigabe",
   "server.notify.question": "{who} hat eine Frage",
   "server.notify.signIn": "{who} braucht deine Anmeldung bei {site}",
+  "server.notify.secret": "{who} braucht von dir: {label}",
+  "server.notify.connect": "{who} möchte, dass du {app} verbindest",
   "server.notify.signInWebsite": "{who} braucht deine Anmeldung bei einer Website",
   "server.notify.routineFailed": "Routine von {who} ist fehlgeschlagen",
   "server.notify.routineDeferred": "Routine von {who} wartet",

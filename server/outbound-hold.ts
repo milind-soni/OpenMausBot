@@ -8,6 +8,7 @@ import type { OutboundCounts } from "./outbound-counts.ts";
 import type { OutboundRequestService } from "./outbound-requests.ts";
 import { outboundCard } from "./outbound-requests.ts";
 import type { BotRecord, GroupRecord, Store } from "./store.ts";
+import { turnWaitedOnPerson } from "./waiting-on-person.ts";
 
 /** How long a "Send on your behalf?" card waits on the person before it times out. */
 export const OUTBOUND_HOLD_MS = 9 * 60_000;
@@ -91,8 +92,8 @@ export function createOutboundHold(deps: OutboundHoldDeps): OutboundHold {
         if (active()) {
           const waiting = store.bot(currentSender.id);
           if (owner?.group) {
-            if (activeGroupTurnForBot(currentSender.id)?.threadId === threadId && waiting?.activity === "waiting-on-you") store.setActivity(waiting.id, "working");
-          } else if (store.taskByThread(currentSender.id, threadId)?.activity === "waiting-on-you") {
+            if (activeGroupTurnForBot(currentSender.id)?.threadId === threadId && turnWaitedOnPerson(waiting)) store.setActivity(waiting.id, "working");
+          } else if (turnWaitedOnPerson(store.taskByThread(currentSender.id, threadId))) {
             store.setTaskActivity(currentSender.id, threadId, "working");
           }
         }

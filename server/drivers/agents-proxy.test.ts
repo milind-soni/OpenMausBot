@@ -1164,7 +1164,7 @@ describe("agents-proxy MCP surface", () => {
   it("asks for any other secret by its name, reason and delivery, never its value", async () => {
     const res = await callTool("request_credential", { label: "Stripe secret key", reason: "To create test charges.", placeholder: "sk_test_…", delivery: "file" });
     expect(res.result.isError).toBeFalsy();
-    expect(res.result.content[0].text).toMatch(/^A secure card for OpenCode API key is ready in OpenMausBot, on the computer and on a freshly QR-paired phone\. End this turn now/u);
+    expect(res.result.content[0].text).toMatch(/^A secure card for OpenCode API key is now in this conversation, in the app and on a QR-paired phone, and the person was notified\. If they can't find it, tell them it is in this conversation, and the notification opens it\. End this turn now/u);
     expect(lastCredentialBody).toEqual({
       fromBotId: "bot-asker",
       fromThreadId: "thread-asker-routine",

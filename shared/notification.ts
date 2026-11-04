@@ -13,6 +13,9 @@ export type NotifyKind =
   /** A bot asked the person to sign in to a website themselves
    * (request_sign_in): it waits on their hands, at the place it works. */
   | "sign-in"
+  /** A bot asked the person for a password or key on a secure card (request_credential): its work rests on them until
+   * they save it or say no. */
+  | "secret"
   /** A delegated room request settled and the coordinator auto-resumed with
    * the results; both are internal, so without this the parent conversation
    * sits silent until the resume's first token. */
