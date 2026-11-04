@@ -57,7 +57,7 @@ describe("the server's other overview lines", () => {
       "As aprovações de comandos seguem a configuração personalizada do provedor.",
       "Pergunta antes de entrar em contato com outros bots.",
       "Não pode usar um computador.",
-      "Os cartões de proposta de perfil precisam da sua aprovação.",
+      "Você precisa aprovar os cartões com propostas de perfil.",
       "Habilidade: triage incoming bug reports.",
       "Recebe webhooks “Orders”.",
     ]);

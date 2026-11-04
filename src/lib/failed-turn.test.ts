@@ -95,7 +95,7 @@ describe("a failed turn the server words as a notice", () => {
   it("previews in the person's language with its code, and in English without one", () => {
     setLocale("pt-br");
     try {
-      expect(activityPreview(restarted, undefined)).toBe("Turno interrompido: o OpenMausBot reiniciou.");
+      expect(activityPreview(restarted, undefined)).toBe("Sessão interrompida: o OpenMausBot reiniciou.");
       expect(activityPreview({ name: restarted.name, ok: false }, undefined)).toBe("turn interrupted — OpenMausBot restarted");
     } finally {
       setLocale("en");

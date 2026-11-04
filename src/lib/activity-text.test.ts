@@ -17,9 +17,9 @@ describe("a delegating bot's resumed line", () => {
     const tool = { nameCode: "chat.notice.resumedQuestionAfterRestart", nameParams: { names: "Scout, Ada" } };
     expect(activityText(tool, english)).toBe(english);
     setLocale("pt-br");
-    expect(activityText(tool, english)).toBe("Retomando após uma reinicialização com uma pergunta de Scout, Ada para revisar");
+    expect(activityText(tool, english)).toBe("Trabalho retomado após uma reinicialização; revisando uma pergunta de Scout, Ada");
     expect(activityText({ nameCode: "chat.notice.resumedWork" }, "Resumed with delegated work results, reviewing"))
-      .toBe("Retomando com os resultados do trabalho delegado para revisar");
+      .toBe("Trabalho retomado; revisando os resultados do trabalho delegado");
     expect(activityText({ nameCode: "chat.notice.resumedResults" }, "Resumed with Scout results, reviewing")).toBe("Resumed with Scout results, reviewing");
   });
 });
@@ -34,7 +34,7 @@ describe("server notices", () => {
 
   it("word the parts they name and the moment they reset, in the reader's language", () => {
     setLocale("pt-br");
-    expect(activityText(resets, english)).toBe("Esta conta do Claude atingiu o limite semanal, que será renovado em 22 de out., 15:00 (UTC). Até lá, troque este bot para outra IA ou outra conta do Claude.");
+    expect(activityText(resets, english)).toBe("Esta conta do Claude atingiu o limite semanal, que será renovado em 22 de out., 15:00 (UTC). Até lá, use outra IA ou outra conta do Claude para este bot.");
     expect(activityText({ nameCode: "chat.notice.usageLimit", nameParams: { provider: "Grok", detail: " (Grok says: \"quota\")" } }, "x"))
       .toBe("Esta conta de Grok atingiu o limite de uso (Grok says: \"quota\"). Espere o limite ser renovado ou troque a IA deste bot.");
   });
@@ -49,7 +49,7 @@ describe("server notices", () => {
   it("word a bot's fixed line, and leave its other lines as written", () => {
     setLocale("pt-br");
     expect(botLineText({ text: "English", textCode: "chat.notice.webhookHome", textParams: { name: "Orders" } }))
-      .toBe("Voltei para este computador, então meu webhook “Orders” tem um endereço aqui de novo. Abra Automações, escolha “Copiar endereço” em “Orders” e cole no app que envia para ele.");
+      .toBe("Voltei para este computador, então meu webhook “Orders” tem um endereço aqui novamente. Abra Automações, escolha “Copiar endereço” em “Orders” e cole no app que envia para ele.");
     expect(botLineText({ text: "Hello" })).toBe("Hello");
   });
 });
@@ -65,14 +65,25 @@ describe("a routine's fixed lines", () => {
 });
 
 describe("a routine run's coded error and attention", () => {
+  it.each([
+    ["stalled", "the AI stalled", "um travamento da IA"],
+    ["rateLimited", "a rate limit", "atingir um limite de requisições"],
+    ["provider", "a temporary error", "um erro temporário"],
+    ["failed", "a failure", "um problema"],
+  ])("composes the %s retry reason as a complete sentence", (part, english, portuguese) => {
+    setLocale("pt-br");
+    expect(routineLineText("routines.server.retryAfter", `Starting again shortly after ${english}: 429`, { why: `routines.server.part.${part}`, failure: "429" }))
+      .toBe(`Vai começar novamente em instantes, depois de ${portuguese}. Detalhe: 429`);
+  });
+
   const limitWait = "Waiting for the AI's usage limit to reset; this run starts again at Oct 22, 3:00 PM (UTC)";
   const params = { resets: "Oct 22, 3:00 PM (UTC)", resetsAt: Date.UTC(2026, 9, 22, 15), timeZone: "UTC" };
 
   it("words parts and moments, and only while the field still reads as the line's English", () => {
     setLocale("pt-br");
-    expect(routineLineText("routines.server.limitWait", limitWait, params)).toBe("Esperando a renovação do limite de uso da IA. Esta execução começa de novo em 22 de out., 15:00 (UTC)");
+    expect(routineLineText("routines.server.limitWait", limitWait, params)).toBe("Esperando a renovação do limite de uso da IA. Esta execução começa novamente em 22 de out., 15:00 (UTC)");
     expect(routineLineText("routines.server.retryAfter", "Starting again shortly after a rate limit: 429", { why: "routines.server.part.rateLimited", failure: "429" }))
-      .toBe("Vai começar de novo em instantes, depois de um limite de requisições. Detalhe: 429");
+      .toBe("Vai começar novamente em instantes, depois de atingir um limite de requisições. Detalhe: 429");
     expect(routineLineText("routines.server.limitWait", "The routine was paused before this run started", params)).toBe("The routine was paused before this run started");
     expect(routineLineText("settings.title", "Settings")).toBe("Settings");
   });
@@ -105,7 +116,7 @@ describe("what a reader is shown of a stored line", () => {
     const params = { why: "routines.server.part.provider", failure: `${"x".repeat(450)}…` };
     const english = formatServerText(en["routines.server.retryAfter"], { ...params, why: en["routines.server.part.provider"] });
     expect(english.length).toBeLessThanOrEqual(500);
-    expect(routineLineText("routines.server.retryAfter", english, params)).toMatch(/^Vai começar de novo em instantes, depois de um erro temporário\. Detalhe: x+…$/);
+    expect(routineLineText("routines.server.retryAfter", english, params)).toMatch(/^Vai começar novamente em instantes, depois de um erro temporário\. Detalhe: x+…$/);
   });
 });
 
@@ -116,7 +127,7 @@ describe("a run's coded engine error as the routine page shows it", () => {
   it("is worded while it is whole, and shown in English once the server cut it and dropped its code", () => {
     setLocale("pt-br");
     expect(routineRunText({ error: whole, errorCode: "chat.notice.claudeLimitSaid", errorParams: params } as unknown as RoutineRun, "error"))
-      .toBe("Esta conta do Claude atingiu o limite de uso (o Claude diz: “Weekly limit reached”). Por enquanto, troque este bot para outra IA ou outra conta do Claude.");
+      .toBe("Esta conta do Claude atingiu o limite de uso (o Claude diz: “Weekly limit reached”). Por enquanto, use outra IA ou outra conta do Claude para este bot.");
     const cut = `This Claude account has reached its usage limit (Claude says: "${"x".repeat(500)}`.slice(0, 500);
     expect(routineRunText({ error: cut } as unknown as RoutineRun, "error")).toBe(cut);
     expect(routineRunText({ error: cut, errorCode: "chat.notice.claudeLimitSaid", errorParams: { ...params, said: "x".repeat(500) } } as unknown as RoutineRun, "error")).toBe(cut);

@@ -79,7 +79,7 @@ describe("fixed runtime notices", () => {
   it.each([
     ["chat.notice.acpEmpty", { provider: "Grok" }, "Grok finished without replying.", "Grok terminou sem responder."],
     ["chat.notice.piSessionSlow", undefined, "Pi is taking longer than usual to start this conversation's session. The turn goes on when Pi answers. Press Stop to cancel it.", "Clique em “Parar” para cancelar."],
-    ["chat.notice.unreadMessage", undefined, "This turn ended before the model read a message sent while it ran. Send that message again.", "Envie essa mensagem de novo."],
+    ["chat.notice.unreadMessage", undefined, "This turn ended before the model read a message sent while it ran. Send that message again.", "Envie essa mensagem novamente."],
   ] as const)("persists and renders %s", (key, params, english, portuguese) => {
     const failed = noticeFailure(key, params);
     expect(failed.message).toBe(english);
@@ -120,8 +120,8 @@ describe("report receipts", () => {
       expect(line.line).toContain("the MausBot team's server");
     }
     expect(refusedReportLine("too large. \n")).toEqual({ line: "The MausBot team's server refused this bug report, so nothing was sent: too large.", text: undefined });
-    expect(words(fullReportLine(40))).toContain("40 relatórios de problemas");
-    expect(words(droppedReportLine())).toContain("durante uma semana");
+    expect(words(fullReportLine(40))).toBe("Não foi enviado: já há 40 relatórios de problemas na fila para a equipe do MausBot. Aguarde o envio e digite @devs novamente.");
+    expect(words(droppedReportLine())).toBe("Um relatório de problema desta conversa ficou uma semana sem chegar à equipe do MausBot e, por isso, foi descartado. Digite @devs novamente para enviar outro.");
     expect(JSON.stringify(sentReportLine("r", secret))).not.toContain(secret);
   });
 });

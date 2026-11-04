@@ -132,8 +132,8 @@ describe("the overview's reach and limits in the person's language", () => {
       const shown = html();
       expect(shown).toContain("Pode falar com 1 outro bot da equipe.");
       expect(shown).toContain("Pode falar com 3 outros bots nas equipes permitidas.");
-      expect(shown).toContain("Não inicia contato com outros bots.");
-      expect(shown).toContain("As aprovações de comandos usam o modo “Pedir”.");
+      expect(shown).toContain("Não pode iniciar contato com outros bots.");
+      expect(shown).toContain("A aprovação de comandos está no modo “Pedir”. As permissões salvas e as regras do provedor continuam valendo.");
     } finally {
       setLocale("en");
     }

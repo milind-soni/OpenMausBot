@@ -440,5 +440,5 @@ test("turning the switch back while the bots are on their way home is refused in
   const home = (t) => createOneHome({ journal: { read: () => journal, write: () => {} }, cloud: () => null, send: {}, local: {}, session: async () => ({}), keep: { read: () => null, write: () => {} }, ...(t ? { t } : {}) });
   assert.throws(() => home().keep(false), { message: "This computer's bots are on their way back. Try again once they're here." });
   const { t } = nativeText.createNativeText({ saved: "pt-br" });
-  assert.throws(() => home(t).keep(false), { message: "Os bots deste computador estão voltando. Tente de novo quando eles chegarem." });
+  assert.throws(() => home(t).keep(false), { message: "Os bots deste computador estão voltando. Tente novamente quando eles chegarem." });
 });

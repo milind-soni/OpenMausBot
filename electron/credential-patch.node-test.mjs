@@ -14,7 +14,7 @@ test("fixed decider refusals use native words before Electron serializes the err
   const cases = [
     ["accountRequired", "Add your Cloudflare account ID with the token.", "Adicione o ID da conta da Cloudflare junto com o token."],
     ["jevRejected", "Jev rejected this key. Check it at typesafe.ai and paste it again.", "O Jev recusou esta chave. Confira em typesafe.ai e cole novamente."],
-    ["workersRejected", "Cloudflare rejected this token. Check that it has Workers AI permission and belongs to this account ID.", "A Cloudflare recusou este token. Confira se ele tem permissão para Workers AI e pertence a este ID de conta."],
+    ["workersRejected", "Cloudflare rejected this token. Check that it has Workers AI permission and belongs to this account ID.", "A Cloudflare recusou este token. Confira se ele tem permissão para Workers AI e pertence à conta com este ID."],
     ["routerRejected", "OpenRouter rejected this key. Check it at openrouter.ai/keys and paste it again.", "O OpenRouter recusou esta chave. Confira em openrouter.ai/keys e cole novamente."],
   ];
   for (const [suffix, english, portuguese] of cases) {

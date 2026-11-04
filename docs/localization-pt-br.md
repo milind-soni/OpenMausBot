@@ -130,11 +130,11 @@ logs, developer or CLI errors, emails sent by the control plane, the docs site
 Masculine: `o bot`, `o app`, `o Cloud`, `o MausBot Cloud`, `o desktop`, `o
 navegador`, `o backup`, `o login`, `o webhook`, `o playbook`, `o plugin`, `o
 Marketplace`, `o gatilho`, `o modelo`, `o provedor`, `o plano`, `o
-servidor`, `o turno`.
+servidor`.
 
 Feminine: `a IA`, `a conversa`, `a habilidade`, `a rotina`, `a automação`, `a
 equipe`, `a instalação`, `a VM local`, `a chave de API`, `a conta`, `a
-ferramenta`, `a memória`, `a predefinição`, `a chamada`.
+ferramenta`, `a memória`, `a predefinição`, `a chamada`, `a sessão`.
 
 Pronouns for a bot follow `o bot`: “ele”, “dele”, “as conversas dele”.
 
@@ -258,7 +258,7 @@ the whole catalog in the same change.
 | private desktop | desktop privado | |
 | Quit (app menu, tray) | Sair do OpenMausBot | The same label on every platform. Menus use sentence case, like the rest of the app. |
 | remove | remover | Takes something out without destroying it. |
-| retry, try again | Tentar novamente | On buttons. In prose, “tente de novo” is fine. |
+| retry, try again | Tentar novamente | Use “novamente” in labels and prose. If it would repeat in one sentence, use “de novo” for the first occurrence. |
 | room | grupo | “group chat” → “chat em grupo”. Not `sala`. |
 | routine | rotina | Scheduled work. Distinct from automation. |
 | run | rodar or executar | Bots and routines `rodam`; commands, code and tools are `executados`; the noun “a run” → “execução”. |
@@ -282,7 +282,7 @@ the whole catalog in the same change.
 | trace (usage) | rastreamento | “View trace” → “Ver rastreamento”. |
 | trial | teste | “free trial” → “teste grátis”; “trial credit” → “crédito do teste”. |
 | trigger | gatilho | |
-| turn (a bot's turn) | turno | |
+| turn (a bot's turn) | sessão | Feminine. Use “sessão de trabalho” only when the sentence also mentions a browser, sign-in or provider session. Calls where people take turns keep “por turnos”. |
 | turn on, turn off | ligar, desligar | Follow the English verb. |
 | upload | enviar | Never `upload` or `carregar`. |
 | wake, asleep | acordar, dormindo | Used for desktops and computers. |

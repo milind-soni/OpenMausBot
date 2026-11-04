@@ -191,7 +191,7 @@ describe("Brazilian Portuguese approval cards", () => {
     expect(markup).toContain('aria-label="Aprovação pendente"');
     expect(markup).toContain("Aprovação pendente");
     expect(markup).toContain("2 de 3");
-    expect(markup).toContain("Aprovação de comando solicitada");
+    expect(markup).toContain("Pedido de aprovação: comando");
     expect(markup).toContain('aria-label="Detalhes da aprovação para revisar"');
   });
 
@@ -228,7 +228,7 @@ describe("Brazilian Portuguese approval cards", () => {
       }),
     ));
 
-    expect(markup).toContain("Cancelar turno");
+    expect(markup).toContain("Cancelar sessão");
     expect(markup).toContain("Negar");
     expect(markup).toContain("Sempre permitir");
     expect(markup).toContain("Permitir uma vez");

@@ -213,8 +213,8 @@ describe("describeRun", () => {
     const resumed: Message = { ...tool("Resuming after a restart"), tool: { name: "Resuming after a restart", ok: true, nameCode: "chat.notice.resumingAfterRestart" } };
     setLocale("pt-br");
     try {
-      expect(describeRun([resumed, tool("Bash")])).toBe("2 passos · Retomando após uma reinicialização, Bash");
-      expect(describeRun([resumed, tool("Bash")], toolStepLabel)).toBe("2 passos · Retomando após uma reinicialização, Executar um comando");
+      expect(describeRun([resumed, tool("Bash")])).toBe("Passos: 2 · Retomando após uma reinicialização, Bash");
+      expect(describeRun([resumed, tool("Bash")], toolStepLabel)).toBe("Passos: 2 · Retomando após uma reinicialização, Executar um comando");
     } finally {
       setLocale("en");
     }

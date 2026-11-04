@@ -80,6 +80,7 @@ export const VITEST_SUBSETS = {
       "server/cloud-team-requests.e2e.test.ts",
       "server/cloud-team-setup-request.e2e.test.ts",
       "server/cloud-team.e2e.test.ts",
+      "server/host/brief-words.test.ts",
       "server/lent-folders.e2e.test.ts",
       "server/one-home-keep.e2e.test.ts",
       "server/one-home-outdated.e2e.test.ts",

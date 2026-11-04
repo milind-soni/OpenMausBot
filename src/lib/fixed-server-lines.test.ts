@@ -60,7 +60,10 @@ describe("fixed server words", () => {
     const line = noticeLine("chat.notice.goalRetry", { name: "Scout", why: "chat.notice.part.dispatchFailed" });
     expect(line.text).toBe("Scout's turn did not settle (dispatch failed) — retrying once.");
     setLocale("pt-br");
-    expect(noticeText(line.textCode, line.text, line.textParams)).toBe("O turno de Scout não terminou (não foi possível iniciar) — tentando mais uma vez.");
+    expect(noticeText(line.textCode, line.text, line.textParams)).toBe("A sessão de Scout não terminou como esperado (não foi possível iniciar) — tentando mais uma vez.");
+    const providerFailure = noticeLine("chat.notice.goalRetry", { name: "Scout", why: "chat.notice.part.providerFailed" });
+    expect(noticeText(providerFailure.textCode, providerFailure.text, providerFailure.textParams))
+      .toBe("A sessão de Scout não terminou como esperado (o provedor falhou) — tentando mais uma vez.");
     expect(chatNotice("chat.notice.goalWaiting", { name: "chat.notice.part.dispatchFailed" })).toContain("chat.notice.part.dispatchFailed");
     for (const line of [noticeLine("chat.notice.goalWorking", { name: secret, turn: "1", max: "13" }), noticeFailure("chat.notice.acpRestarted", { provider: secret })]) {
       expect(JSON.stringify(line)).not.toContain(secret);
@@ -130,7 +133,7 @@ describe("fixed server words", () => {
       expect((error as { status: number }).status).toBe(400);
       expect(userErrorFields(error)).toEqual({ errorKey: "serverError.decider.accountFormat" });
       setLocale("pt-br");
-      expect(serverErrorText(userErrorFields(error), original!.message)).toBe("O ID de uma conta da Cloudflare tem 32 letras e números");
+      expect(serverErrorText(userErrorFields(error), original!.message)).toBe("decider.workersAiAccountId: o ID de uma conta da Cloudflare tem 32 letras e números");
     }
     expect(() => parseConfigPatchForPerson({ decider: { workersAiBaseUrl: "bad" } })).toThrow();
     expect(USER_ERROR["serverError.decider.accountFormat"]).toBe("decider.workersAiAccountId a Cloudflare account ID is 32 letters and digits");
@@ -226,7 +229,7 @@ describe("phone summaries", () => {
     expect(written.summary).toBe("Create event on iPhone");
     setLocale("pt-br");
     expect(routineLineText(allowed.summaryCode, allowed.summary!, allowed.summaryParams)).toBe("permitido: PHONE_CREATE_EVENT");
-    expect(routineLineText(denied.summaryCode, denied.summary!, denied.summaryParams)).toBe("O Calendário não está permitido no celular");
+    expect(routineLineText(denied.summaryCode, denied.summary!, denied.summaryParams)).toBe("Sem permissão para acessar o Calendário no celular");
     expect(routineLineText(written.summaryCode, written.summary, written.summaryParams)).toBe("Criar evento em iPhone");
     expect(routineLineText(written.summaryCode, "Later summary", written.summaryParams)).toBe("Later summary");
   });
@@ -255,7 +258,7 @@ describe("exported goal history", () => {
 
   it.each([
     ["working", "em andamento"], ["completed", "concluído"], ["needs-input", "aguardando resposta"], ["blocked", "bloqueado"],
-    ["limit-reached", "limite atingido"], ["paused", "em pausa"], ["stopped", "interrompido"], ["failed", "não concluído"],
+    ["limit-reached", "limite atingido"], ["paused", "em pausa"], ["stopped", "interrompido"], ["failed", "falhou"],
   ] as const)("words the %s marker after import without translating the saved content", (status, portuguese) => {
     const text = `[Goal: ${status}]\nFree text\nModel's words`;
     const goalRun = { runId: "r", goal: "Free text", detail: "Model's words", status, coordinatorBotId: "b", coordinatorName: "Bot", turnCount: 1, maxTurns: 13, startedAt: 1 };

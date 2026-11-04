@@ -47,7 +47,7 @@ describe("a server notice on a step", () => {
   it("is worded in the person's language with its code, and stays English without one", () => {
     setLocale("pt-br");
     try {
-      expect(toolStepLabel(answered)).toBe("Resposta entregue ao trabalho que estava esperando");
+      expect(toolStepLabel(answered)).toBe("Resposta entregue à tarefa em espera");
       expect(toolStepLabel({ name: answered.name })).toBe(answered.name);
       expect(toolStepLabel({ name: "Answer passed", nameCode: "toolStep.runCommand" })).toBe("Answer passed");
     } finally {

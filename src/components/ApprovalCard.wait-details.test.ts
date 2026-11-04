@@ -48,7 +48,7 @@ describe.each(["en", "pt-br"] as const)("%s wait details", (locale) => {
     await act(async () => details!.click());
     const content = host.querySelector("pre")?.textContent;
     const localizedName = persistedAuthor ? "Pepper" : bot?.name ?? "Alguém";
-    expect(content).toBe(locale === "en" ? message.card!.subtitle : `Próxima ação de ${localizedName}: Deploy it.`);
+    expect(content).toBe(locale === "en" ? message.card!.subtitle : `Depois da espera, ${localizedName} fará o seguinte: Deploy it.`);
     expect(message.card!.subtitle).toBe("Then Pepper will: Deploy it.");
   });
 });

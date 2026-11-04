@@ -176,7 +176,7 @@ test("nothing to open is said in the app's language, and in English exactly as b
   await assert.rejects(world({ state: signedOut }).home.openCloud(), { message: "My Cloud is not ready to connect yet." });
   const { t } = nativeText.createNativeText({ saved: "pt-br" });
   await assert.rejects(world({ state: signedOut, t }).home.openCloud(), { message: t("native.cloud.notReady") });
-  assert.equal(t("native.cloud.notReady"), "O Cloud ainda não está pronto para conectar.");
+  assert.equal(t("native.cloud.notReady"), "Ainda não é possível se conectar ao Cloud.");
 });
 
 test("going somewhere else from the setup screen lets My Cloud go: the Server menu's choice stands when it becomes ready", async () => {

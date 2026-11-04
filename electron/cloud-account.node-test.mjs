@@ -744,7 +744,7 @@ test("connecting before My Cloud is ready is refused in the app's language", asy
   await assert.rejects(english.client.pairHome(), { message: "My Cloud is not ready to connect yet." });
   const { t: words } = nativeText.createNativeText({ saved: "pt-br" });
   const translated = await fixture(t, { t: words });
-  await assert.rejects(translated.client.pairHome(), { message: "O Cloud ainda não está pronto para conectar." });
+  await assert.rejects(translated.client.pairHome(), { message: "Ainda não é possível se conectar ao Cloud." });
 });
 
 test("usage meter: the session's usage reaches the state and the Cloud page's snapshot, checked; Upgrade sends a change only with this app's own preview", async t => {

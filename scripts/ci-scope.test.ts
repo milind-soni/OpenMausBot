@@ -181,7 +181,7 @@ describe("CI outputs", () => {
         + "server/cloud-team-inbox.e2e.test.ts server/cloud-team-open-reach.e2e.test.ts server/cloud-team-owners.e2e.test.ts "
         + "server/cloud-team-people.e2e.test.ts server/cloud-team-phones.e2e.test.ts server/cloud-team-pictures.e2e.test.ts "
         + "server/cloud-team-private.e2e.test.ts server/cloud-team-profile.e2e.test.ts server/cloud-team-requests.e2e.test.ts "
-        + "server/cloud-team-setup-request.e2e.test.ts server/cloud-team.e2e.test.ts server/lent-folders.e2e.test.ts "
+        + "server/cloud-team-setup-request.e2e.test.ts server/cloud-team.e2e.test.ts server/host/brief-words.test.ts server/lent-folders.e2e.test.ts "
         + "server/one-home-keep.e2e.test.ts server/one-home-outdated.e2e.test.ts server/one-home-retry.e2e.test.ts "
         + "server/one-home-session.e2e.test.ts server/one-home-trial-key.e2e.test.ts server/one-home-two-desks.e2e.test.ts "
         + "server/one-home.e2e.test.ts server/question-cards.e2e.test.ts server/shared-computers.e2e.test.ts "
@@ -312,6 +312,7 @@ describe("the repository's import graph", () => {
       .filter((file) => importClosure([file]).some((loaded) => /^src\/locales\/(?!en\.json$)/.test(loaded) || readers.has(join(ROOT, loaded))))
       .map((file) => relative(ROOT, file).split("\\").join("/"));
     expect(affected).toContain("scripts/generate-locale.test.mjs");
+    expect(affected).toContain("server/host/brief-words.test.ts");
     // The Electron node tests, which compare their own copy of some strings with every catalog, run on the locale tests' first shard.
     expect(affected.filter((file) => !VITEST_SUBSETS["locale-tests"].files.some((filter) => file.includes(filter)))).toEqual([]);
   });

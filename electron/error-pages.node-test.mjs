@@ -24,6 +24,6 @@ test("the page speaks the app's language, with the log's link where the sentence
   const html = page(buildErrorPage({ allPortsOccupied: true, logDir }, text));
   assert.ok(html.includes(">Não foi possível iniciar o servidor dos bots</h2>"));
   assert.equal(html.slice(html.indexOf("<p "), html.indexOf("</p>") + 4),
-    '<p style="color:#fcfcfc99;line-height:1.5">Outro processo respondeu às verificações de integridade em todas as portas do OpenMausBot — provavelmente uma segunda cópia do app ou outro programa nas portas 8799–28799. Feche esse programa e depois saia e abra o OpenMausBot de novo. '
+    '<p style="color:#fcfcfc99;line-height:1.5">Outro processo respondeu às verificações de integridade em todas as portas do OpenMausBot — provavelmente uma segunda cópia do app ou outro programa nas portas 8799–28799. Feche esse programa. Depois, saia do OpenMausBot e abra novamente. '
     + `Se isso continuar acontecendo, confira ${logLink}.</p>`);
 });

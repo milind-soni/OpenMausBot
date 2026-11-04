@@ -51,7 +51,7 @@ describe("a server card in the person's language", () => {
       const translated = localizedCard(payload, true);
       expect(translated.root.title).toBe("Seu resumo");
       expect(nodes(translated.root).some((node) => node.value === "Ideias")).toBe(true);
-      expect(nodes(translated.root).some((node) => node.value === "Percebido em 3 conversas")).toBe(true);
+      expect(nodes(translated.root).some((node) => node.value === "Percebido em conversas: 3")).toBe(true);
       expect(nodes(translated.root).some((node) => node.value === idea)).toBe(true);
       expect(JSON.stringify(payload)).toBe(original);
       setLocale("en");
@@ -75,7 +75,7 @@ describe("a server card in the person's language", () => {
     setLocale("pt-br");
     expect(localizedCard(card(i18n), false).root.children![0]!.value).toBe("8:30 AM · Standup");
     expect(localizedCard(card({ value: { key: "settings.title" } }), true).root.children![0]!.value).toBe("8:30 AM · Standup");
-    expect(localizedCard(card({ value: { key: "chat.notice.answerPassed" } }), true).root.children![0]!.value).toBe("Resposta entregue ao trabalho que estava esperando");
+    expect(localizedCard(card({ value: { key: "chat.notice.answerPassed" } }), true).root.children![0]!.value).toBe("Resposta entregue à tarefa em espera");
     expect(localizedCard(card({ value: { key: "brief.card.meetingLine", params: { title: "Standup" } } }), true).root.children![0]!.value).toBe("8:30 AM · Standup");
     expect(localizedCard(card({ value: { key: "brief.card.meetingLine", params: { time: { at, style: "clock" }, title: "<b>x</b>" } } }), true).root.children![0]!.value).toBe("11:30 UTC · <b>x</b>");
   });

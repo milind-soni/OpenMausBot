@@ -27,7 +27,7 @@ test("main's Cloud account factory keeps the same client in the current app lang
   });
   await assert.rejects(client.pairHome(), { message: "My Cloud is not ready to connect yet." });
   text.set("pt-br");
-  await assert.rejects(client.pairHome(), { message: "O Cloud ainda não está pronto para conectar." });
+  await assert.rejects(client.pairHome(), { message: "Ainda não é possível se conectar ao Cloud." });
   text.set("en");
   await assert.rejects(client.pairHome(), { message: "My Cloud is not ready to connect yet." });
 });

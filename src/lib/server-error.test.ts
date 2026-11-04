@@ -42,7 +42,7 @@ describe("a refusal the server names by key", () => {
       errorKey: "serverError.department.shareSkillClash", errorParams: { skill: "pricing" } };
     const gone = { error: "That version of the page is no longer kept.", errorKey: "serverError.page.versionGone" };
     setLocale("pt-br");
-    expect(serverErrorText(clash, clash.error)).toBe("Dois bots desta equipe têm habilidades diferentes chamadas “pricing”. Deixe essa habilidade de fora e tente de novo.");
+    expect(serverErrorText(clash, clash.error)).toBe("Dois bots desta equipe têm habilidades diferentes chamadas “pricing”. Deixe essa habilidade de fora e tente novamente.");
     expect(serverErrorText(gone, gone.error)).toBe(ptBr["serverError.page.versionGone"]);
     expect(serverErrorText({ ...clash, errorParams: undefined }, clash.error)).toBe(clash.error);
     setLocale("en");
