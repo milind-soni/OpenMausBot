@@ -67,6 +67,10 @@ describe("skills the engine loads by itself", () => {
     expect(host.expandSkillCommand(bot, "main", "/growth-data-expert find churn")).toContain(`Read ${JSON.stringify(shared)}`);
     expect(host.expandSkillCommand(bot, "main", "/bot-notes")).toContain(`Read ${JSON.stringify(own)}`);
     expect(host.expandSkillCommand(bot, "main", "/mine go")).toContain(JSON.stringify(join("workspaces", bot.id, "skills", "mine")).slice(1, -1));
+    const both = host.expandSkillCommand(bot, "main", "find churn with /growth-data-expert, then /mine");
+    expect(both).toContain(`${JSON.stringify(shared)} for /growth-data-expert`);
+    expect(both).toMatch(new RegExp(`workspaces.${bot.id}.skills.mine.SKILL\\.md" for /mine`));
+    expect(both).toContain("Request: find churn with /growth-data-expert, then /mine");
   });
 
   it("stay out of a bot or team package, which carries only the bot's own, library and imported skills", () => {
