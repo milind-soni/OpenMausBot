@@ -6,6 +6,7 @@ export const CREDENTIAL_PATCH = {
   opencodeGoApiKey: (value) => ({ opencodeGo: { apiKey: value } }),
   ttsKey: (value) => ({ tts: { key: value } }),
   fishAudioKey: (value) => ({ tts: { fishKey: value } }),
+  geminiTtsKey: (value) => ({ tts: { geminiKey: value } }),
   jevApiKey: (value) => ({ decider: { key: value } }),
   openrouterDeciderKey: (value) => ({ decider: { openrouterKey: value } }),
   workersAiToken: (value) => ({ decider: { workersAiToken: value } }),
