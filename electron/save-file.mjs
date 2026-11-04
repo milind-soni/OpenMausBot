@@ -142,12 +142,13 @@ export async function openLogsFolder(folder, { open, fsp = fs.promises }) {
 
 export const OPEN_HTML_MAX_BYTES = 2 * 1024 * 1024;
 
-/** A file name safe to write in our own folder: no folders, control or reserved characters, and a .html/.htm end. */
+/** A file name safe to write in our own folder: no folders, control or reserved characters, no Windows device name
+ * (CON, NUL, COM1…, which would open the device, not a file), and a .html/.htm end. */
 export function htmlCopyName(name) {
   const kept = [...String(name ?? "").split(/[\\/]/).pop()].filter((ch) => ch > "\u001f" && ch !== "\u007f" && !'<>:"|?*'.includes(ch));
   const base = kept.join("").replace(/^[.\s]+|[.\s]+$/g, "");
   const stem = (base.replace(/\.html?$/i, "") || "page").slice(0, 80);
-  return `${stem}${/\.htm$/i.test(base) ? ".htm" : ".html"}`;
+  return `${/^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i.test(stem) ? "_" : ""}${stem}${/\.htm$/i.test(base) ? ".htm" : ".html"}`;
 }
 
 /** Opens HTML the page already showed in the default browser: a fresh copy in our own temp folder, never a path a page
@@ -163,7 +164,8 @@ export async function openHtmlCopy(source, name, { dir, open, fsp = fs.promises,
     if (stat && now - stat.mtimeMs > 24 * 60 * 60 * 1000) await fsp.rm(old, { recursive: true, force: true }).catch(() => undefined);
   }
   const file = path.join(await fsp.mkdtemp(path.join(dir, "p-")), htmlCopyName(name));
-  await fsp.writeFile(file, source, { encoding: "utf8", flag: "wx", mode: 0o600 });
+  // The byte order mark tells every browser (Safari reads a bare file: page as Latin-1) that the copy is UTF-8.
+  await fsp.writeFile(file, `\ufeff${source}`, { encoding: "utf8", flag: "wx", mode: 0o600 });
   const error = await open(file);
   if (error) throw new Error(String(error).slice(0, 300));
   return true;

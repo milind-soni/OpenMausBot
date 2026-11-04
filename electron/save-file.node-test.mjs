@@ -300,7 +300,7 @@ describe("openHtmlCopy (#4406)", () => {
       assert.equal(opened.length, 1);
       assert.equal(path.dirname(path.dirname(opened[0])), dir);
       assert.equal(path.basename(opened[0]), "report.html");
-      assert.equal(fs.readFileSync(opened[0], "utf8"), "<h1>hi</h1>");
+      assert.equal(fs.readFileSync(opened[0], "utf8"), "\ufeff<h1>hi</h1>");
       if (process.platform !== "win32") assert.equal(fs.statSync(opened[0]).mode & 0o777, 0o600);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -337,10 +337,11 @@ describe("openHtmlCopy (#4406)", () => {
     assert.equal(htmlCopyName("a<b>:c?.txt"), "abc.txt.html");
     assert.equal(htmlCopyName(".."), "page.html");
     assert.equal(htmlCopyName(undefined), "page.html");
+    assert.deepEqual(["CON.html", "nul", "com1.report.htm", "Lpt9.HTML", "console.html"].map(htmlCopyName), ["_CON.html", "_nul.html", "_com1.report.htm", "_Lpt9.html", "console.html"]);
   });
 
   it("is wired in main for this computer's page only, with main's own temp folder", () => {
     const main = fs.readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
-    assert.match(main, /ipcMain\.handle\("desktop:open-html", localOnly\("desktop:open-html", \(_event, source, name\) =>\s*openHtmlCopy\(source, name, \{ dir: path\.join\(app\.getPath\("temp"\), "openmausbot-open"\)/);
+    assert.match(main, /ipcMain\.handle\("desktop:open-html", localOnly\("desktop:open-html", \(_event, source, name\) =>\s*openHtmlCopy\(source, name, \{ dir: path\.join\(app\.getPath\("userData"\), "open-html"\)/);
   });
 });
