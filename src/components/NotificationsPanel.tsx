@@ -63,8 +63,7 @@ export function filterNotifications<T extends { botId: string }>(entries: T[], b
   return botId === ALL_BOTS ? entries : entries.filter((entry) => entry.botId === botId);
 }
 
-/** The bell that opens and closes the Notifications tray, with the unread count. `bar` puts it in the window's top bar
- * (WindowFrameBar) at that bar's button size; otherwise it is the tab on the window's right edge (NotificationRail). */
+/** `bar` is the top bar's button class, which also selects the top-bar layout. */
 export function NotificationBell({ bar }: { bar?: string }) {
   const { state, dispatch } = useStore();
   const unread = state.notifications.reduce((count, n) => count + (n.read ? 0 : 1), 0);
