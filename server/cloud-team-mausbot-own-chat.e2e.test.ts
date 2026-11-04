@@ -57,6 +57,9 @@ it("is the person's own: private on the wire, its notes in their layer, and nobo
   const maus = await ownMausBot(mira);
   expect(maus.tasks!.find((task) => task.threadId === maus.threadId)?.private, "her main chat is marked hers").toBe(true);
   expect((maus as Bot & { mainThreadId?: string }).mainThreadId, "and it is still her MausBot's main chat").toBe(maus.threadId);
+  const other = await team.as(mira, "POST", `/api/bots/${maus.id}/tasks`, { title: "Another chat" });
+  expect(other.status).toBe(201);
+  expect(((await botsOf(mira)).find((bot) => bot.id === maus.id) as Bot & { mainThreadId?: string }).mainThreadId, "a newer chat of hers doesn't become it").toBe(maus.threadId);
   writeFileSync(planPath(), JSON.stringify({ [maus.id]: { script: [
     { key: "M-NOTE", repeat: true, match: ["MAIN-CHAT-LINE"], reply: "Noted Kestrel19.", steps: [{ tool: "memory_update", arguments: { action: "append", text: NOTE } }] },
   ] } }));
