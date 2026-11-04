@@ -21,6 +21,8 @@ export interface OneOnOneGoalDeps {
     requestMessageId: string;
     origin: WorkOrigin;
     unattended: boolean;
+    /** The goal run this step belongs to: the step is its own turn, so it can hand work to teammates. */
+    goalRunId: string;
     onSettled: (outcome: HostTurnResult) => void;
   }): Promise<unknown>;
   isUnattended(botId: string, threadId: string): boolean;
@@ -115,6 +117,7 @@ export function createOneOnOneGoals(deps: OneOnOneGoalDeps) {
             requestMessageId: request.id,
             origin: request.origin,
             unattended: deps.isUnattended(bot.id, threadId),
+            goalRunId: run.runId,
             onSettled: settle,
           });
         } catch (error) {
