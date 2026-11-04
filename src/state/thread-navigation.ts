@@ -127,7 +127,9 @@ export function closeUnpinnedTray<T extends NotificationTray>(state: T): T {
 
 /** Opening the chat already on screen is not leaving it. */
 export function closeTrayUnlessShown(state: AppState, id: string, threadId: string): AppState {
-  const shown = state.activeView === "chat" && id === state.selectedId && [...state.bots, ...state.groups].find((chat) => chat.id === id)?.threadId === threadId;
+  const chat = [...state.bots, ...state.groups].find((candidate) => candidate.id === id);
+  const shownThreadId = chat && "switchingTo" in chat ? chat.switchingTo ?? chat.threadId : chat?.threadId;
+  const shown = state.activeView === "chat" && id === state.selectedId && shownThreadId === threadId;
   return shown ? state : closeUnpinnedTray(state);
 }
 

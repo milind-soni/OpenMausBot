@@ -583,7 +583,7 @@ export interface AppState {
   computerOpen: boolean;
   inspectorOpen: boolean;
   activityOpen: boolean;
-  /** Cross-bot, so a bot switch leaves it open; pinned, opening another side panel leaves it open too. */
+  /** Shared across bots. Unpinned, it closes on a chat switch and when another side panel opens; pinned, it stays open. */
   notificationsOpen: boolean;
   notificationsPinned: boolean;
   notifications: NotificationLogEntry[];
@@ -1727,7 +1727,7 @@ export function reducer(state: AppState, action: Action): AppState {
       })), threadId, message.at, true);
     }
     case "switchGroupTask":
-      return closeTrayUnlessShown(state, action.groupId, action.threadId);
+      return state.selectedId === action.groupId && state.activeView === "chat" ? closeTrayUnlessShown(state, action.groupId, action.threadId) : state;
     case "deleteTask":
     case "newGroupTask":
     case "deleteGroupTask":

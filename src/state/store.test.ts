@@ -3170,11 +3170,27 @@ describe("notifications feed", () => {
     const switches = [
       { type: "select", id: "other-bot" } as const,
       { type: "switchTask", botId: "other-bot", threadId: "other-thread" } as const,
-      { type: "switchGroupTask", groupId: "room-1", threadId: "room-thread" } as const,
     ];
     for (const action of switches) expect(reducer(open, action).notificationsOpen).toBe(false);
     const pinned = reducer(open, { type: "toggleNotificationsPinned" });
     for (const action of switches) expect(reducer(pinned, action).notificationsOpen).toBe(true);
+    const inRoom = { ...open, selectedId: "room-1", groups: [{ id: "room-1", threadId: "room-t" }] as AppState["groups"] };
+    const roomSwitch = { type: "switchGroupTask", groupId: "room-1", threadId: "room-thread" } as const;
+    expect(reducer(inRoom, roomSwitch).notificationsOpen).toBe(false);
+    expect(reducer({ ...inRoom, notificationsPinned: true }, roomSwitch).notificationsOpen).toBe(true);
+  });
+
+  it("a thread switch in a room that is not on screen leaves the tray as it is", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1",
+      groups: [{ id: "room-1", threadId: "room-t" }] as AppState["groups"] };
+    expect(reducer(open, { type: "switchGroupTask", groupId: "room-1", threadId: "room-thread" }).notificationsOpen).toBe(true);
+  });
+
+  it("re-selecting a thread the bot is already switching to leaves the tray as it is", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1",
+      bots: [{ id: "bot-1", threadId: "t-1", switchingTo: "t-2" }] as AppState["bots"] };
+    expect(reducer(open, { type: "switchTask", botId: "bot-1", threadId: "t-2" }).notificationsOpen).toBe(true);
+    expect(reducer(open, { type: "switchTask", botId: "bot-1", threadId: "t-3" }).notificationsOpen).toBe(false);
   });
 
   it("re-selecting the open chat or its open thread leaves the tray as it is", () => {
