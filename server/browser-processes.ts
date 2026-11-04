@@ -250,7 +250,7 @@ function lockReleased(lock: string): boolean {
   catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT"; }
 }
 
-const heldWindowsProfiles = new Map<string, { browser: number; daemon: number; image: string }>();
+const heldWindowsProfiles = new Map<string, { browser: number; daemon: number; image: string; shell?: number }>();
 
 /** Windows Chrome keeps `lockfile` in its profile open and undeletable while it runs. One whose daemon was killed keeps running
  * and makes every later launch on the profile exit with code 21 (profile in use), even after the app restarts, so it is
@@ -261,7 +261,7 @@ async function releaseWindowsProfile(dir: string, binaryPath?: string, chromePat
   if (lockReleased(lock)) { heldWindowsProfiles.delete(dir); return; }
   // The Chrome kept last time still runs under the same daemon: every process is not listed again on each turn.
   const held = heldWindowsProfiles.get(dir);
-  if (held && processAlive(held.browser) && await imageOf(held.daemon) === held.image) return;
+  if (held && processAlive(held.browser) && await imageOf(held.daemon) === held.image && (held.shell === undefined || await imageOf(held.shell) === "cmd.exe")) return;
   heldWindowsProfiles.delete(dir);
   const listing = await execText("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_PROFILE_BROWSERS], { OMB_BROWSER_PROFILE: dir }, 15_000);
   let rows: unknown;
@@ -273,7 +273,7 @@ async function releaseWindowsProfile(dir: string, binaryPath?: string, chromePat
   // A parent started after its child holds a reused pid: the child's own parent is gone.
   const parentOf = (name: unknown, parentStarted: unknown, started: unknown) =>
     text(name) && text(parentStarted) && text(parentStarted) <= text(started) ? text(name).toLowerCase() : "";
-  const browsers = (Array.isArray(rows) ? rows : [rows]).flatMap((row) => {
+  const browsers = (Array.isArray(rows) ? rows : [rows]).flatMap((row): { pid: number; started: string; daemonPid: number; shell?: number; daemon: string }[] => {
     const {
       ProcessId: pid, ParentProcessId: ppid, CommandLine: line, Name: name, Started: started, ParentName: parent, ParentStarted: parentStarted,
       GrandparentId: gppid, GrandparentName: grandparent, GrandparentStarted: grandparentStarted,
@@ -283,15 +283,16 @@ async function releaseWindowsProfile(dir: string, binaryPath?: string, chromePat
     const args = windowsArgs(line).map((arg) => arg.toLowerCase());
     if (!args.includes(flag) || args.some((arg) => arg.startsWith("--type="))) return [];
     const daemon = parentOf(parent, parentStarted, started);
-    // Rust's Command runs a .cmd launcher through cmd.exe, so that Chrome's daemon is the shell's parent.
+    // Rust's Command runs a .cmd launcher through cmd.exe, so that Chrome's daemon is the shell's parent. agent-browser 0.36
+    // stops only its child on Windows: a Chrome whose shell it stopped is orphaned under a daemon that still runs.
     if (daemon === "cmd.exe") {
-      return [{ pid: pid as number, started: started as string, daemonPid: gppid as number, daemon: Number.isInteger(gppid) ? parentOf(grandparent, grandparentStarted, parentStarted) : "" }];
+      return [{ pid: pid as number, started: started as string, daemonPid: gppid as number, shell: ppid as number, daemon: Number.isInteger(gppid) ? parentOf(grandparent, grandparentStarted, parentStarted) : "" }];
     }
     return [{ pid: pid as number, started: started as string, daemonPid: ppid as number, daemon }];
   });
-  for (const { pid, started, daemonPid, daemon } of browsers) {
+  for (const { pid, started, daemonPid, shell, daemon } of browsers) {
     if (daemon.startsWith("agent-browser") || (binaryPath && daemon === win32.basename(binaryPath).toLowerCase())) {
-      heldWindowsProfiles.set(dir, { browser: pid, daemon: daemonPid, image: daemon });
+      heldWindowsProfiles.set(dir, { browser: pid, daemon: daemonPid, image: daemon, shell });
       return;
     }
     // Between the listing and now the pid may have gone to another program: only the same Chrome is stopped.
