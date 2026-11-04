@@ -447,6 +447,7 @@ describe("while the bot is working", () => {
     expect(panel.textContent).toContain("Reasoning level applies from the next message");
     expect(panel.textContent).toContain("Stop this thread's turn before changing its model");
     expect(panel.textContent).toContain("The bot's model: this thread, groups, and every thread that uses the bot's model.");
+    expect(menu()!.querySelector("[data-simple-models]")).toBeNull();
     for (const option of three) expect(menu()!.textContent).not.toContain(option.label);
     const effort = panel.querySelector<HTMLSelectElement>("select")!;
     effort.value = "high";
