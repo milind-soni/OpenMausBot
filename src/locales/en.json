@@ -7157,6 +7157,8 @@
   "team.sharedHeader": "Shared · everyone in {team} can see",
   "team.sharedHeaderPeople": "Shared · only people added and admins can see",
   "liveConnection.reconnecting": "Reconnecting… New replies show up once the connection is back.",
+  "liveConnection.help": "Still unable to connect. Check your connection, sign-in, and any ad or tracker blocker for this site, then retry.",
+  "liveConnection.retry": "Try again",
   "liveConnection.offline": "You're offline. New replies show up once you're back online.",
   "team.ownHelperHeader": "Own helper · other members can't see it",
   "chat.page.usage": "{pages} of {limit} pages",
