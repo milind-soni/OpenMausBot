@@ -440,9 +440,9 @@ describe("a Starter Cloud", () => {
     expect(opened.body.state).toBe("running");
     await whenStarted(opened.body.threadId);
     expect((await busyThreads(f, botId)).sort(), "parent and child run at once").toEqual([main, opened.body.threadId].sort());
+    // A job the bot opened on itself opens no more (self-threads.e2e): only the person's own request does.
     const grandchild = await startThread(opened.body.threadId, "Own grandchild");
-    expect(grandchild.body.state).toBe("running");
-    await whenStarted(grandchild.body.threadId);
+    expect(grandchild.status, JSON.stringify(grandchild.body)).toBe(409);
   }, 90_000);
 
   it("lets a hand-off through to a busy bot, and one from it back to a bot whose turn is still running", async () => {
