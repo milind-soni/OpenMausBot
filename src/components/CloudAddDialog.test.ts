@@ -677,6 +677,12 @@ describe("the sheet", () => {
     inOrder(shown, ["Your team's Cloud is ready", "Open Acme"]);
     expect(shown).toContain("Acme didn't open. Try again in a minute.");
     expect(bridge.openTeam).toHaveBeenCalledOnce();
+    const setting = teammate({ teams: [{ id: "team-acme", name: "Acme", role: "member", machine: { status: "provisioning" } as never }] });
+    push(setting); account = setting;
+    expect(await settle()).toContain("Setting up your team's Cloud");
+    push(teammate()); account = teammate();
+    await settle();
+    expect(bridge.openTeam, "ready again: its button, not another try by itself").toHaveBeenCalledOnce();
     await press("Open Acme");
     expect(bridge.openTeam).toHaveBeenCalledTimes(2);
   });
