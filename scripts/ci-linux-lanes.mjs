@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 export function vitestLane(entry, retryLog) {
   return {
     name: `vitest (ubuntu-latest, ${entry.part})`,
-    env: { OMB_VITEST_RETRY_LOG: retryLog, OMB_VITEST_E2E: entry.e2e, OMB_VITEST_SUBSET: entry.files },
+    env: { OMB_VITEST_RETRY_LOG: retryLog, OMB_VITEST_E2E: entry.e2e, OMB_VITEST_SUBSET: entry.files, OMB_VITEST_WORKERS: entry.workers },
     commands: [
       `pnpm exec vitest run ${entry.files} --shard=${entry.shard}/${entry.shards} --reporter=default --reporter=github-actions`,
       ...(entry.node_tests ? ["pnpm broker:test && pnpm test:electron"] : []),
