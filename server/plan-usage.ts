@@ -6,9 +6,16 @@ import { join } from "node:path";
 import type { InstanceConfigMap } from "./contracts.ts";
 import { resolveClaudeConfigDir } from "./drivers/claude.ts";
 import { codexHome } from "./drivers/codex-identity.ts";
+import { botBox } from "./bot-box/box.ts";
 import { harnessHome, sealedFixture } from "./env-path.ts";
+import { copilotUserUrl, githubHost, githubRateLimited, readGhCliToken } from "./github-token.ts";
+import { asRecord, closedWindow, extraLine, finiteNumber, isoOrNull, openWindow, planLabel, secretString, timeMs, titleWords } from "./plan-usage-values.ts";
+import { parseCopilotUsage } from "./plan-usage-copilot.ts";
+export { parseCopilotUsage } from "./plan-usage-copilot.ts";
 
-export type PlanDriver = "claude" | "codex" | "grok";
+export type PlanDriver = "claude" | "codex" | "grok" | "copilot";
+
+export type PlanFailure = "signedOut" | "noPlan" | "failed";
 
 export interface PlanWindow {
   available: boolean;
@@ -27,6 +34,8 @@ export interface PlanSpend {
 
 export interface PlanExtra {
   label: string;
+  /** Set on the window that resets each month, so clients need not match the label. */
+  kind?: "monthly";
   remainingPercent: number;
   usedPercent: number;
   resetsAt: string | null;
@@ -54,6 +63,8 @@ export interface PlanProviderRow {
   plan: string | null;
   ok: boolean;
   error: string | null;
+  /** Why `ok` is false: no usable sign-in, an account without this plan, or the check itself failed. */
+  reason: PlanFailure | null;
   fiveHour: PlanWindow;
   weekly: PlanWindow;
   extra: PlanExtra[];
@@ -79,6 +90,8 @@ export interface PlanCredential {
   token: string | null;
   accountId: string | null;
   expired: boolean;
+  /** The GitHub host a Copilot token belongs to; github.com when absent. */
+  host?: string;
 }
 
 export interface CredentialReader {
@@ -108,6 +121,9 @@ export interface CredentialSource {
   env?: NodeJS.ProcessEnv;
   now?: () => number;
   readClaudeKeychain?: (service: string) => string | null | Promise<string | null>;
+  readGitHubToken?: (env: NodeJS.ProcessEnv, host: string) => string | null | Promise<string | null>;
+  /** Whether engines run in the bot box, which passes them only the environment set on the engine. */
+  enginesBoxed?: () => boolean;
 }
 
 const PROVIDER_TIMEOUT_MS = 8_000;
@@ -137,12 +153,14 @@ const DRIVER_OF: Record<string, PlanDriver> = {
   claudeAgent: "claude",
   codex: "codex",
   grokAgent: "grok",
+  copilotAgent: "copilot",
 };
 
 const PRODUCT_NAME: Record<PlanDriver, string> = {
   claude: "Claude",
   codex: "Codex",
   grok: "Grok",
+  copilot: "GitHub Copilot",
 };
 
 export function planAccountsFromInstances(instances: InstanceConfigMap): PlanAccount[] {
@@ -220,7 +238,7 @@ export function parseGrokUsage(credits: unknown, billing?: unknown, settings?: u
     } else if (sample.slot === "monthly") {
       if (!sawMonthly) {
         sawMonthly = true;
-        extra.push(extraLine("Monthly", window));
+        extra.push({ ...extraLine("Monthly", window), kind: "monthly" });
       }
     } else {
       extra.push(extraLine(sample.seconds == null ? "Credits" : durationLabel(sample.seconds), window));
@@ -244,6 +262,7 @@ export function fileCredentialReader(source: CredentialSource): CredentialReader
       const at = now();
       if (account.driver === "claude") return readClaudeCredential(account, merged, source, at);
       if (account.driver === "codex") return readCodexCredential(merged, source.readText, at);
+      if (account.driver === "copilot") return readCopilotCredential(account, merged, source);
       return readGrokCredential(merged, source.readText, at);
     },
   };
@@ -262,6 +281,8 @@ export function defaultCredentialReader(env: NodeJS.ProcessEnv = process.env): C
       }
     },
     ...(process.platform === "darwin" && !sealedFixture() ? { readClaudeKeychain: readDarwinClaudeKeychain } : {}),
+    ...(sealedFixture() ? {} : { readGitHubToken: readGhCliToken }),
+    enginesBoxed: () => botBox.enabled(),
   });
 }
 
@@ -299,78 +320,6 @@ export async function loadPlanUsage(input: {
   });
   cachedReport = { at: now, key, report };
   return report;
-}
-
-function closedWindow(): PlanWindow {
-  return { available: false, remainingPercent: null, usedPercent: null, resetsAt: null };
-}
-
-function openWindow(usedPercent: number, resetsAt: string | null): PlanWindow {
-  const used = clampPercent(usedPercent);
-  return {
-    available: true,
-    usedPercent: used,
-    remainingPercent: clampPercent(100 - used),
-    resetsAt,
-  };
-}
-
-function extraLine(label: string, window: PlanWindow): PlanExtra {
-  return {
-    label,
-    remainingPercent: window.remainingPercent ?? 0,
-    usedPercent: window.usedPercent ?? 0,
-    resetsAt: window.resetsAt,
-  };
-}
-
-function clampPercent(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(100, Math.max(0, value));
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  return value as Record<string, unknown>;
-}
-
-function finiteNumber(value: unknown): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  return value;
-}
-
-function timeMs(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return Math.abs(value) >= 1e12 ? value : value * 1000;
-  }
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed || trimmed.length > 80) return null;
-  if (/^\d+(\.\d+)?$/.test(trimmed)) return timeMs(Number(trimmed));
-  const parsed = Date.parse(trimmed);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function isoOrNull(value: unknown): string | null {
-  const ms = timeMs(value);
-  if (ms == null) return null;
-  const date = new Date(ms);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
-function planLabel(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed || trimmed.length > 80 || /[\r\n]/.test(trimmed)) return null;
-  if (/bearer\s|access_token|refresh_token|sk-ant-|eyJ[a-zA-Z0-9_-]{8,}/i.test(trimmed)) return null;
-  return trimmed;
-}
-
-function secretString(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed || trimmed.length > 16_000 || /[\r\n]/.test(trimmed)) return null;
-  return trimmed;
 }
 
 function parseJson(text: string | null): unknown {
@@ -469,7 +418,8 @@ function currencyDigits(currency: string): number | null {
 /** A plan with no rolling windows lives on its monthly budget (Claude Enterprise); on others that budget is the extra usage
  * bought on top of them. */
 function readClaudeBudget(root: Record<string, unknown>, hasWindows: boolean): PlanExtra | null {
-  return readSpendBudget(root.spend) ?? readExtraUsage(root.extra_usage, hasWindows ? EXTRA_USAGE : MONTHLY_SPEND);
+  const budget = readSpendBudget(root.spend) ?? readExtraUsage(root.extra_usage, hasWindows ? EXTRA_USAGE : MONTHLY_SPEND);
+  return budget?.label === MONTHLY_SPEND ? { ...budget, kind: "monthly" } : budget;
 }
 
 function claudeExtraLabel(key: string): string {
@@ -477,12 +427,6 @@ function claudeExtraLabel(key: string): string {
     ? key.slice("seven_day_".length)
     : key.replace(/^five_hour_/, "");
   return titleWords(suffix);
-}
-
-function titleWords(suffix: string): string {
-  const words = suffix.split("_").filter((part) => part.length > 0);
-  if (words.length === 0) return "Window";
-  return words.map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()).join(" ");
 }
 
 function claudeModelWindow(key: string): { name: string; window: string } | null {
@@ -828,7 +772,38 @@ function readGrokCredential(
   return sawExpired ? expiredCredential() : missingCredential();
 }
 
-function errorRow(account: PlanAccount, error: string): PlanProviderRow {
+/** Copilot CLI 1.0.105's own token precedence, except that GH_TOKEN and GITHUB_TOKEN count only when set on the engine,
+ * as its driver drops the server's. The CLI's stored login sits in the OS credential store, out of reach, so the
+ * GitHub CLI's login stands in for it. */
+async function readCopilotCredential(
+  account: PlanAccount,
+  env: NodeJS.ProcessEnv,
+  source: CredentialSource,
+): Promise<PlanCredential> {
+  const pick = (from: Record<string, string | undefined>, name: string) => secretString(Object.entries(from).find(([key]) => key.toUpperCase() === name)?.[1]);
+  const own = (name: string) => pick(account.environment, name);
+  // Windows names are case-insensitive; a boxed engine gets only its own environment.
+  const effective = (name: string) => own(name) ?? (source.enginesBoxed?.() ? null : pick(env, name));
+  const host = githubHost(effective("GH_HOST") ?? undefined);
+  if (!host) return missingCredential();
+  const token = effective("COPILOT_GITHUB_TOKEN") ?? own("GH_TOKEN") ?? own("GITHUB_TOKEN");
+  if (token) return { token, accountId: null, expired: false, host };
+  if (!source.readGitHubToken) return missingCredential();
+  let raw: string | null = null;
+  try {
+    raw = (await source.readGitHubToken(env, host)) ?? null;
+  } catch {
+    raw = null;
+  }
+  const gh = secretString(raw);
+  return gh ? { token: gh, accountId: null, expired: false, host } : missingCredential();
+}
+
+function signedOutRow(account: PlanAccount, driver: PlanDriver): PlanProviderRow {
+  return errorRow(account, signInAgain(driver), "signedOut");
+}
+
+function errorRow(account: PlanAccount, error: string, reason: PlanFailure = "failed"): PlanProviderRow {
   return {
     id: account.id,
     name: account.name,
@@ -836,6 +811,7 @@ function errorRow(account: PlanAccount, error: string): PlanProviderRow {
     plan: null,
     ok: false,
     error,
+    reason,
     fiveHour: closedWindow(),
     weekly: closedWindow(),
     extra: [],
@@ -851,6 +827,7 @@ function okRow(account: PlanAccount, windows: PlanWindows): PlanProviderRow {
     plan: windows.plan,
     ok: true,
     error: null,
+    reason: null,
     fiveHour: windows.fiveHour,
     weekly: windows.weekly,
     extra: windows.extra,
@@ -863,12 +840,13 @@ async function fetchProvider(account: PlanAccount, deps: PlanUsageDeps): Promise
   try {
     credential = await deps.credentials.read(account);
   } catch {
-    return errorRow(account, signInAgain(account.driver));
+    return signedOutRow(account, account.driver);
   }
-  if (credential.expired || !credential.token) return errorRow(account, signInAgain(account.driver));
+  if (credential.expired || !credential.token) return signedOutRow(account, account.driver);
   try {
     if (account.driver === "claude") return await fetchClaude(account, credential.token, deps);
     if (account.driver === "codex") return await fetchCodex(account, credential.token, credential.accountId, deps);
+    if (account.driver === "copilot") return await fetchCopilot(account, credential.token, credential.host, deps);
     return await fetchGrok(account, credential.token, deps);
   } catch {
     return errorRow(account, couldNotReach(account.driver));
@@ -919,7 +897,7 @@ async function fetchClaude(account: PlanAccount, token: string, deps: PlanUsageD
     Accept: "application/json",
     "anthropic-beta": "oauth-2025-04-20",
   }, deps.timeoutMs ?? PROVIDER_TIMEOUT_MS);
-  if (authRejected(result.status)) return errorRow(account, signInAgain("claude"));
+  if (authRejected(result.status)) return signedOutRow(account, "claude");
   if (!result.ok || result.body === null || typeof result.body !== "object") {
     return errorRow(account, result.status === 0 || result.status >= 500 ? couldNotReach("claude") : unexpectedUsage("claude"));
   }
@@ -938,7 +916,7 @@ async function fetchCodex(
   };
   if (accountId) headers["ChatGPT-Account-Id"] = accountId;
   const result = await fetchJson(deps.fetch, CODEX_USAGE_URL, headers, deps.timeoutMs ?? PROVIDER_TIMEOUT_MS);
-  if (authRejected(result.status)) return errorRow(account, signInAgain("codex"));
+  if (authRejected(result.status)) return signedOutRow(account, "codex");
   if (!result.ok || result.body === null || typeof result.body !== "object") {
     return errorRow(account, result.status === 0 || result.status >= 500 ? couldNotReach("codex") : unexpectedUsage("codex"));
   }
@@ -958,7 +936,7 @@ async function fetchGrok(account: PlanAccount, token: string, deps: PlanUsageDep
     fetchJson(deps.fetch, GROK_SETTINGS_URL, headers, timeout),
   ]);
   if (authRejected(credits.status) || (authRejected(billing.status) && !credits.ok)) {
-    return errorRow(account, signInAgain("grok"));
+    return signedOutRow(account, "grok");
   }
   const creditsBody = credits.ok ? credits.body : null;
   const billingBody = billing.ok && !authRejected(billing.status) ? billing.body : null;
@@ -969,4 +947,19 @@ async function fetchGrok(account: PlanAccount, token: string, deps: PlanUsageDep
   }
   const windows = parseGrokUsage(creditsBody, billingBody ?? undefined, settings.ok ? settings.body : undefined);
   return okRow(account, windows);
+}
+
+async function fetchCopilot(account: PlanAccount, token: string, host: string | undefined, deps: PlanUsageDeps): Promise<PlanProviderRow> {
+  const result = await fetchJson(deps.fetch, copilotUserUrl(host), {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/json",
+    "User-Agent": "OpenMausBot",
+  }, deps.timeoutMs ?? PROVIDER_TIMEOUT_MS);
+  if (result.status === 429 || (result.status === 403 && githubRateLimited(result.body))) return errorRow(account, couldNotReach("copilot"));
+  if (authRejected(result.status)) return signedOutRow(account, "copilot");
+  if (result.status === 404) return errorRow(account, "This GitHub account has no Copilot plan", "noPlan");
+  if (!result.ok || !asRecord(asRecord(result.body)?.quota_snapshots)) {
+    return errorRow(account, result.status === 0 || result.status >= 500 ? couldNotReach("copilot") : unexpectedUsage("copilot"));
+  }
+  return okRow(account, parseCopilotUsage(result.body));
 }

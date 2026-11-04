@@ -3221,6 +3221,8 @@
   "planUsage.subtitle": "Saldo restante em cada provedor com login. Janelas de 5 horas e semanais, quando o plano tem.",
   "planUsage.fiveHour": "5 horas",
   "planUsage.weekly": "Semanal",
+  "planUsage.monthly": "Mensal",
+  "planUsage.inSidebar": "Mostrar na barra lateral",
   "planUsage.left": "{remaining}% restantes",
   "planUsage.used": "{used}% usados",
   "planUsage.byModel": "Por modelo",

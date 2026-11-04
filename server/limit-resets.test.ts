@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { codexLimitResetsAt } from "./drivers/codex-errors.ts";
 import { engineLimitFromUsage, LimitResetClock, nearLimitNote, UNNAMED_LIMIT_MS } from "./limit-resets.ts";
 import type { RuntimeEvent } from "../shared/runtime-events.ts";
-import { parseClaudeUsage, parseCodexUsage, type PlanProviderRow, type PlanUsageReport, type PlanWindows } from "./plan-usage.ts";
+import { parseClaudeUsage, parseCodexUsage, parseCopilotUsage, type PlanProviderRow, type PlanUsageReport, type PlanWindows } from "./plan-usage.ts";
 
 const NOW = Date.parse("2026-10-19T10:00:00Z");
 const HOUR = 3_600_000;
@@ -14,8 +14,8 @@ const HOUR = 3_600_000;
 const REFUSAL_GRACE_FOR_TEST = 10 * 60_000 + 1;
 const iso = (at: number) => new Date(at).toISOString();
 
-function row(id: string, driver: "claude" | "codex", windows: PlanWindows): PlanProviderRow {
-  return { id, name: driver === "claude" ? "Claude" : "Codex", driver, ok: true, error: null, ...windows };
+function row(id: string, driver: "claude" | "codex" | "copilot", windows: PlanWindows): PlanProviderRow {
+  return { id, name: { claude: "Claude", codex: "Codex", copilot: "GitHub Copilot" }[driver], driver, ok: true, error: null, reason: null, ...windows };
 }
 /** As the Claude usage endpoint answers (utilization, resets_at). */
 const claude = (fiveHour: [number, number | null], weekly: [number, number | null]) => row("claude", "claude", parseClaudeUsage({
@@ -56,6 +56,11 @@ describe("engineLimitFromUsage", () => {
   it("has nothing to say for a row that could not be read, and no time for a row without windows", () => {
     expect(engineLimitFromUsage({ ...claude([1, NOW], [1, NOW]), ok: false, error: "Sign in again in Claude" })).toBeNull();
     expect(engineLimitFromUsage(row("claude", "claude", parseClaudeUsage({})))).toMatchObject({ usedPercent: null, resetsAt: null, blocked: false });
+  });
+
+  it("does not hold Copilot when its premium requests run out, since it keeps answering with included models", () => {
+    const spent = parseCopilotUsage({ quota_reset_date_utc: iso(NOW + 300 * HOUR), quota_snapshots: { premium_interactions: { percent_remaining: 0 } } });
+    expect(engineLimitFromUsage(row("githubCopilot", "copilot", spent))).toBeNull();
   });
 });
 

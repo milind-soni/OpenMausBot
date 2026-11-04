@@ -30,7 +30,7 @@ export interface EngineLimit {
   engine: string;
   /** The engine's display name ("Claude", "Codex", or the instance's own name). */
   name: string;
-  driver: "claude" | "codex" | "grok";
+  driver: "claude" | "codex" | "grok" | "copilot";
   /** The window that decides the reset: the fullest, or the one refusing work. */
   window: LimitWindowName | null;
   /** 0–100, or null when the engine reported no window. */
