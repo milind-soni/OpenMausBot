@@ -10,7 +10,8 @@ import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
 import { openStartupModelCatalog, unconfirmedModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
 import { writeFileAtomicIfChanged } from "../atomic.ts";
 import { augmentedPath } from "../env-path.ts";
-import { brokerSocketPath, cliVersionReader, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
+import { brokerSocketPath, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
+import { cliVersionProbe } from "../cli-version-probe.ts";
 import { claudeAuthStatus } from "./claude-auth-status.ts";
 import { projectMcpServers } from "./claude-project-mcp.ts";
 import { botSettingsFor, withBotSettings } from "./claude-bot-settings.ts";
@@ -809,10 +810,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     // Whether `claude --help` lists --autocompact: 2.1.129 rejects it despite the floor.
     let cliHasAutocompact: boolean | null = null;
     let cliHelpVersion: string | null = null;
-    const versionOf = cliVersionReader(config.cli);
-    const readCliVersion = (env: NodeJS.ProcessEnv) => new Promise<ReturnType<typeof versionOf>>((resolve) => {
-      execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout) => resolve(versionOf(err, stdout)));
-    });
+    const readCliVersion = cliVersionProbe(config.cli);
     const ensureCliVersion = async (env: NodeJS.ProcessEnv): Promise<void> => {
       if (cliVersionChecked) return;
       const probe = await readCliVersion(env);

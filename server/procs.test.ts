@@ -111,7 +111,7 @@ describe("CLI version probes", () => {
     const timedOut = await new Promise<Error | null>((resolve) => {
       execCli(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { timeout: 200 }, (error) => resolve(error));
     });
-    expect(cliVersionReader("claude")(timedOut, "")).toEqual({ reason: expect.stringContaining("took longer than 8 seconds") });
+    expect(cliVersionReader("claude")(timedOut, "")).toEqual({ reason: expect.stringContaining("took longer than 30 seconds") });
     const read = cliVersionReader("claude");
     expect(read(null, " 2.1.302\n")).toEqual({ version: "2.1.302" });
     expect(read(timedOut, "")).toEqual({ version: "2.1.302" });
@@ -127,7 +127,7 @@ describe("CLI version probes", () => {
       execCli(process.execPath, ["-e", "process.stdout.write('2.1.302')"], { timeout: 100 }, (err, stdout) => resolve({ err, stdout }));
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_500);
     });
-    expect(cliVersionReader("claude")(late.err, late.stdout)).toEqual({ reason: expect.stringContaining("took longer than 8 seconds") });
+    expect(cliVersionReader("claude")(late.err, late.stdout)).toEqual({ reason: expect.stringContaining("took longer than 30 seconds") });
     const read = cliVersionReader("claude");
     expect(read(null, "2.1.302")).toEqual({ version: "2.1.302" });
     expect(read(late.err, late.stdout)).toEqual({ version: "2.1.302" });
