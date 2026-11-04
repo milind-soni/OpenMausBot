@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { InstanceInfo, ModelSelection } from "@/state/store";
-import { choiceIsSelected, modelChoices, withTypedModels } from "./model-choices";
+import { choiceIsSelected, modelChoices, modelSelectionForPick, withTypedModels } from "./model-choices";
 import { simpleModelMenu } from "./simple-model-menu";
 
 vi.hoisted(() => {
@@ -59,5 +59,18 @@ describe("OpenCode models typed by hand", () => {
     }
     expect(withTypedModels([opencode], { instanceId: "opencode", model: "venice/retired" }, "")[0]).toBe(opencode);
     expect(withTypedModels([antigravity], { instanceId: "google", model: `typed::${typed}` }, typed)[0]).toBe(antigravity);
+  });
+});
+
+describe("modelSelectionForPick", () => {
+  const claude = { instanceId: "claude", capabilities: { effortLevels: ["high"] }, models: { default: "opus", options: [
+    { id: "opus", label: "Opus", fastMode: true }, { id: "sonnet", label: "Sonnet" },
+  ] } } as unknown as InstanceInfo;
+  const selection: ModelSelection = { instanceId: "claude", model: "opus", effort: "high", fast: true };
+
+  it("keeps fast mode only on a model of the same engine that offers it", () => {
+    expect(modelSelectionForPick(selection, claude, "opus").fast).toBe(true);
+    expect(modelSelectionForPick(selection, claude, "sonnet").fast).toBeUndefined();
+    expect(modelSelectionForPick(selection, { ...claude, instanceId: "other" }, "opus").fast).toBeUndefined();
   });
 });

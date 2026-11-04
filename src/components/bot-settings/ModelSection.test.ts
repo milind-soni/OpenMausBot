@@ -14,6 +14,7 @@ vi.mock("@/state/store", async (importOriginal) => {
 vi.mock("../ModelPicker", () => ({
   ModelPicker: ({ label }: { label: ReactNode }) => label,
   EffortRow: () => null,
+  FastModeRow: () => null,
 }));
 
 const { FallbackChain, ModelSection } = await import("./ModelSection");

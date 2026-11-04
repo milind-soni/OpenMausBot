@@ -34,6 +34,7 @@ export interface SimpleModelMenuProps extends SimpleMenuActions {
   bot: Pick<Bot, "name" | "color" | "avatarUrl" | "avatarCrop" | "avatarZoom" | "avatarFocusX" | "avatarFocusY" | "mascotBody">;
   botModel: { label: string; title: string };
   thinking?: SimpleThinking | null;
+  fast?: ReactNode;
   idPrefix: string;
 }
 
@@ -293,6 +294,7 @@ export function SimpleModelMenu(props: SimpleModelMenuProps) {
           {props.thinking && (
             <>
               <Thinking thinking={props.thinking} labelId={`${idPrefix}-thinking`} />
+              {props.fast}
               {(props.onResetVariant || props.onManage) && <div role="separator" className={MENU_SEPARATOR} />}
             </>
           )}

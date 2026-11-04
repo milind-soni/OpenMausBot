@@ -288,6 +288,7 @@ const defaultModelSelectionSchema = z.object({
   model: z.string().trim().min(1).max(500),
   effort: z.enum(EFFORT_LEVELS).optional(),
   variant: z.string().refine(isModelVariant, "invalid model variant").optional(),
+  fast: z.literal(true).optional(),
 }).refine((selection) => selection.variant === undefined || selection.effort === undefined,
   "choose either a model variant or an effort level");
 const automaticRecoverySchema = z.object({

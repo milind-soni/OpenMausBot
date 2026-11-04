@@ -212,6 +212,7 @@ export interface ModelSelection {
   model: string;
   effort?: EffortLevel;
   variant?: string;
+  fast?: true;
 }
 
 export interface Task extends Pick<WireTask, "private" | "setupRequest" | "inbox" | "openAsks"> {
@@ -482,7 +483,7 @@ export interface InstanceInfo {
   aiTest?: import("../../shared/ai-ranking").AiTestState;
   /** Why it didn't answer, in plain words, when it said (signed out, a used-up limit…). */
   aiTestError?: string;
-  models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean; provider?: string; variants?: ModelVariantOption[]; orgBlocked?: true }> };
+  models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean; provider?: string; variants?: ModelVariantOption[]; orgBlocked?: true; fastMode?: true }> };
   capabilities?: {
     computerMcp?: boolean;
     agentsMcp?: boolean;
@@ -2196,7 +2197,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           persisted.modelSelection.instanceId !== expectedSelection.instanceId ||
           persisted.modelSelection.model !== expectedSelection.model ||
           persisted.modelSelection.effort !== expectedSelection.effort ||
-          persisted.modelSelection.variant !== expectedSelection.variant
+          persisted.modelSelection.variant !== expectedSelection.variant ||
+          persisted.modelSelection.fast !== expectedSelection.fast
         ) {
           throw new Error("The approval level, memory setting, or model could not be saved, so this work was not started");
         }

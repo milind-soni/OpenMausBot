@@ -1823,6 +1823,36 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(existsSync(settingsPath)).toBe(false);
   });
 
+  it("asks for fast mode through its settings file and restarts the retained session to change it", async () => {
+    const dump = join(scratch, "fast.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_SPEED: "fast" });
+    const first = await instance.adapter.sendTurn({ threadId: "t-fast", text: "hi", fast: true });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const before = JSON.parse(readFileSync(dump, "utf8"));
+    expect(before.settings.fastMode).toBe(true);
+    expect(before.argv).not.toContain("--fast-mode");
+    expect(recorder.events.filter((e) => e.type === "runtime.notice")).toEqual([]);
+    const second = await instance.adapter.sendTurn({ threadId: "t-fast", text: "again" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    const after = JSON.parse(readFileSync(dump, "utf8"));
+    expect(after.pid).not.toBe(before.pid);
+    expect(after.settings).not.toHaveProperty("fastMode");
+  });
+
+  it("says once when a fast turn ran at standard speed, and never for a turn that did not ask", async () => {
+    await create(undefined, { FAKE_CLAUDE_SPEED: "standard" });
+    const notices = () => recorder.events.filter((e) => e.type === "runtime.notice");
+    const plain = await instance.adapter.sendTurn({ threadId: "t-plain", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === plain.turnId);
+    expect(notices()).toEqual([]);
+    for (const text of ["hi", "again"]) {
+      const turn = await instance.adapter.sendTurn({ threadId: "t-refused", text, fast: true });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === turn.turnId);
+    }
+    expect(notices()).toHaveLength(1);
+    expect((notices()[0] as { message: string }).message).toContain("ran at standard speed");
+  });
+
   it("restarts a retained session when the selected account's auth changes", async () => {
     const account = join(scratch, "account");
     mkdirSync(account);

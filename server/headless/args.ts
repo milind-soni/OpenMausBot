@@ -74,7 +74,7 @@ const VERBS: Record<string, { options: ParseArgsOptionsConfig; positionals: numb
     positionals: 1,
   },
   "new-channel": { options: { name: { type: "string" }, members: { type: "string" }, team: { type: "string" }, section: { type: "string" } }, positionals: 1 },
-  "set-model": { options: { ...TARGET, model: { type: "string" }, instance: { type: "string" }, effort: { type: "string" }, "dry-run": { type: "boolean" } }, positionals: 1 },
+  "set-model": { options: { ...TARGET, model: { type: "string" }, instance: { type: "string" }, effort: { type: "string" }, fast: { type: "boolean" }, "dry-run": { type: "boolean" } }, positionals: 1 },
   edit: { options: { ...TARGET, ...TEXT, message: { type: "string" }, "dry-run": { type: "boolean" } }, positionals: 2 },
   export: {
     options: { ...TARGET, out: { type: "string" }, root: { type: "string" }, since: { type: "string" }, "max-files": { type: "string" },

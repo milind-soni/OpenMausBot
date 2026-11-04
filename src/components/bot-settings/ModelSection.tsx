@@ -1,4 +1,4 @@
-import { EffortRow, ModelPicker } from "../ModelPicker";
+import { EffortRow, FastModeRow, ModelPicker } from "../ModelPicker";
 import { X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useStore, type Bot } from "@/state/store";
@@ -43,6 +43,16 @@ export function ModelSection({ bot }: { bot: Bot }) {
               {modelVariants ? (draft ? t("model.section.startingReasoning") : t("model.section.threads")) : t(bot.modelSelection.effort ? "model.section.effortHelp" : "model.section.effortHelpDefault")}
             </div>
             <ProposalStatus bot={bot} kind="chief" />
+          </div>
+        }
+      />
+      <FastModeRow
+        bot={bot}
+        className="rounded-xl bg-card p-4"
+        label={
+          <div>
+            <div className="text-[15px] font-medium text-ink">{t("model.fast.label")}</div>
+            <div className="mt-0.5 text-[13px] text-ink-secondary">{t("model.fast.help")}</div>
           </div>
         }
       />

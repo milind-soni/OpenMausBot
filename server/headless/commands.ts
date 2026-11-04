@@ -156,7 +156,7 @@ function modelArgs(ctx: VerbContext, required: boolean): Rec {
     instanceId = model.slice(0, slash);
     modelId = model.slice(slash + 1);
   }
-  return { instance_id: instanceId, model: modelId, ...(effort ? { effort } : {}) };
+  return { instance_id: instanceId, model: modelId, ...(effort ? { effort } : {}), ...(ctx.flags.fast === true ? { fast: true } : {}) };
 }
 
 export async function newBot(ctx: VerbContext): Promise<VerbOutcome> {

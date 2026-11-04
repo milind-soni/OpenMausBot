@@ -35,7 +35,7 @@ vi.mock("@/state/store", async (original) => ({
   useStore: () => ({ state: { instances: fixture.instances, bots: [], modelVariantSessions: fixture.modelVariantSessions }, dispatch: fixture.dispatch,
     refreshInstances: vi.fn(() => Promise.resolve()), refreshModels: vi.fn(() => Promise.resolve()) }),
 }));
-const { ModelPicker, ModelVariantRow, modelSelectionForPick } = await import("./ModelPicker");
+const { FastModeRow, ModelPicker, ModelVariantRow, modelSelectionForPick } = await import("./ModelPicker");
 const { SimpleModelMenu } = await import("./SimpleModelMenu");
 
 let home: string;
@@ -109,6 +109,23 @@ it("offers the picked Copilot model's own effort levels", () => {
   select.props.onChange!({ target: { value: "1" } } as ChangeEvent<HTMLSelectElement>);
   expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "setModel", botId: selected.id, threadId: selected.threadId,
     updateBotDefault: true, selection: { instanceId: "githubCopilot", model: "gpt-5.6-luna", variant: "high" } });
+});
+
+it("offers fast mode only on a model that has it, and turns it on and off", () => {
+  const options = [{ id: "claude-opus-5-5", label: "Opus", fastMode: true as const }, { id: "claude-sonnet-5", label: "Sonnet" }];
+  fixture.instances = [{ ...claude(), models: { default: "claude-sonnet-5", options } }];
+  const row = (selected: Bot) => FastModeRow({ bot: selected, label: "Fast mode" });
+  expect(row(bot("claude", "claude-sonnet-5"))).toBeNull();
+
+  const on = { ...bot("claude", "claude-opus-5-5"), modelSelection: { instanceId: "claude", model: "claude-opus-5-5", effort: "high" as const } };
+  const toggle = (selected: Bot) => elements(row(selected)).find((element) => "checked" in element.props)!;
+  (toggle(on).props.onClick as () => void)();
+  expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ selection: { instanceId: "claude", model: "claude-opus-5-5", effort: "high", fast: true } }));
+
+  const fast = { ...on, modelSelection: { ...on.modelSelection, fast: true as const } };
+  expect(toggle(fast).props.checked).toBe(true);
+  (toggle(fast).props.onClick as () => void)();
+  expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ selection: { instanceId: "claude", model: "claude-opus-5-5", effort: "high" } }));
 });
 
 it("moves between Claude and Copilot without an approval reset", () => {

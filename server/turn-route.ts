@@ -57,6 +57,7 @@ export interface RouteInput {
   model: string;
   effort?: EffortLevel;
   variant?: string;
+  fast?: true;
   catalog?: ModelCatalog;
   /** Quick models this engine instance refused before. */
   refused?: ReadonlySet<string>;
@@ -68,12 +69,13 @@ export interface RouteResult {
   model: string;
   effort?: EffortLevel;
   variant?: string;
+  fast?: true;
   /** The picker label of the quick model when the turn was moved to it. */
   quickModel?: string;
 }
 
 export function routeTurn(input: RouteInput): RouteResult {
-  const keep: RouteResult = { tier: null, model: input.model, effort: input.effort, variant: input.variant };
+  const keep: RouteResult = { tier: null, model: input.model, effort: input.effort, variant: input.variant, fast: input.fast };
   if (!input.conversational || !input.followsBotModel || input.automated) return keep;
   const tier = classifyTurn(input.signals);
   if (tier === "complex") return { ...keep, tier };
@@ -84,7 +86,7 @@ export function routeTurn(input: RouteInput): RouteResult {
   }
   const option = input.catalog?.options.find((candidate) => candidate.id === fast);
   if (option?.contextWindow && (input.contextTokens ?? 0) > option.contextWindow * QUICK_CONTEXT_SHARE) return { ...keep, tier };
-  // Effort and variant belong to the configured model; the quick model runs on its engine's defaults.
+  // Effort, variant and speed belong to the configured model; the quick model runs on its engine's defaults.
   return { tier, model: fast, quickModel: option?.label ?? fast };
 }
 
@@ -111,6 +113,7 @@ export function routeDirectTurn(
     model: bot.modelSelection.model,
     effort: bot.modelSelection.effort,
     variant: bot.modelSelection.variant,
+    fast: bot.modelSelection.fast,
     catalog: instance.quickModelsUsable?.() === false ? undefined : instance.models,
     refused,
     effortLevels: instance.adapter.capabilities.effortLevels,

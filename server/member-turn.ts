@@ -18,10 +18,12 @@ export function memberTurnSelection(selection: ModelSelection): {
   model: string;
   effort?: EffortLevel;
   variant?: string;
+  fast?: true;
 } {
   return {
     model: selection.model,
     ...(selection.effort ? { effort: selection.effort } : {}),
     ...(selection.variant !== undefined ? { variant: selection.variant } : {}),
+    ...(selection.fast ? { fast: true as const } : {}),
   };
 }

@@ -3,7 +3,6 @@ import { createPortal } from "react-dom";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, KeyRound, Loader2, RefreshCw, X } from "lucide-react";
 import { useStore, currentTaskBot, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
 import type { EffortLevel } from "../../shared/wire";
-import type { ModelVariantOption } from "../../shared/runtime-events";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
 import { configuredModelInstances, isClaudeAccount, isCustomOnly, modelsAwaitEngine, SIGN_IN_FAMILY_LABEL, signInFamily } from "@/lib/engine-rail";
 import { modelName, simpleModelMenu } from "@/lib/simple-model-menu";
@@ -25,6 +24,8 @@ import { SimpleModelMenu, type SimpleThinking } from "./SimpleModelMenu";
 import { apiKeysLabel, ClaudeAccountSelect, engineStatus, FollowBotModelRow, ModelEngineRail, ModelRow, ModelSearch } from "./ModelPickerFull";
 import { MENU_LABEL, MENU_LINE, MENU_ROW, MENU_SEPARATOR, MENU_STROKE, MENU_TRAILING } from "./menu-recipe";
 import { modelMenuKey, modelMenuPointerMove } from "./model-menu-keys";
+import { EffortRow, FastModeRow, ModelVariantRow, effortLabel, variantLabel } from "./ModelRows";
+export { EffortRow, FastModeRow, ModelVariantRow, effortLabel };
 import { offersReasoning, useRefocusAfterPick, variantChoices } from "./model-picker-reasoning";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
@@ -35,7 +36,6 @@ import { useAiSwitch } from "@/lib/ai-switch";
 import { usePickerPane } from "@/lib/model-picker-pane";
 import { threadsOnOwnModel } from "../../shared/thread-model";
 import { ThreadModelsLine } from "./ThreadModelsLine";
-import { Select } from "./Select";
 
 const COMPACT_MODEL_COUNT = 5;
 
@@ -45,162 +45,6 @@ function modelLabel(instance: InstanceInfo | undefined, model: string): string {
 
 function modelProvider(instance: InstanceInfo | undefined, model: string): string | undefined {
   return instance?.models.options.find((option) => option.id === model)?.provider;
-}
-
-export function effortLabel(level: EffortLevel): string {
-  return t(`model.effort.${level}` as Parameters<typeof t>[0]);
-}
-
-/**
- * Default (undefined) sends nothing and lets the engine decide; `none` is a level the engine is told to use. Only pi
- * offers both.
- */
-export function EffortRow({
-  bot,
-  threadId,
-  updateBotDefault,
-  className,
-  label,
-  compact = false,
-}: {
-  bot: Bot;
-  threadId?: string;
-  updateBotDefault?: boolean;
-  className?: string;
-  label?: ReactNode;
-  compact?: boolean;
-}) {
-  const { state, dispatch } = useStore();
-  const selection = bot.modelSelection;
-  const instance = state.instances.find((candidate) => candidate.instanceId === selection.instanceId);
-  if (instance?.capabilities?.modelVariants) {
-    return <ModelVariantRow bot={bot} threadId={threadId} updateBotDefault={updateBotDefault} className={className} label={label} compact={compact} quiet={compact} />;
-  }
-  const levels = instance?.capabilities?.effortLevels;
-  if (!levels?.length) return null;
-
-  if (compact) return (
-    <label className={cn("flex items-center justify-between gap-3", className)}>
-      {label}
-      <Select size="sm" variant="quiet" className="max-w-[65%]" aria-label={t("model.effort.label")} value={selection.effort ?? ""}
-        onChange={(event) => dispatch({ type: "setModel", botId: bot.id, threadId, ...(updateBotDefault ? { updateBotDefault: true } : {}),
-          selection: { ...selection, effort: levels.find((level) => level === event.target.value) } })}>
-        <option value="">{t("model.effort.default")}</option>
-        {levels.map((level) => <option key={level} value={level}>{effortLabel(level)}</option>)}
-      </Select>
-    </label>
-  );
-
-  return (
-    <div className={className}>
-      {label}
-      <div className="mt-2 flex flex-wrap gap-1" role="group" aria-label={t("model.effort.label")}>
-        {[undefined, ...levels].map((level) => (
-          <button
-            key={level ?? "default"}
-            type="button"
-            aria-pressed={selection.effort === level}
-            title={
-              level === undefined
-                ? t("model.effort.noLevel")
-                : t("model.effort.ask", { level: effortLabel(level) })
-            }
-            onClick={() => dispatch({ type: "setModel", botId: bot.id, threadId, ...(updateBotDefault ? { updateBotDefault: true } : {}), selection: { ...selection, effort: level } })}
-            className={cn(
-              "rounded-full border px-2.5 py-1 text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70",
-              selection.effort === level
-                ? "border-accent/60 bg-control text-ink"
-                : "border-hairline/40 text-ink-secondary hover:bg-control/60 hover:text-ink",
-            )}
-          >
-            {level === undefined ? t("model.effort.default") : effortLabel(level)}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-const variantLabel = (option: ModelVariantOption, driverKind?: string): string =>
-  option.id === "default" && driverKind === "opencodeGo" ? t("model.variant.openCodeDefault") : option.label;
-
-export function ModelVariantRow({ bot, threadId, updateBotDefault, className, label, compact = false, wide = false, quiet = false }: {
-  bot: Bot;
-  threadId?: string;
-  updateBotDefault?: boolean;
-  className?: string;
-  label?: ReactNode;
-  compact?: boolean;
-  wide?: boolean;
-  quiet?: boolean;
-}) {
-  const { state, dispatch } = useStore();
-  const selection = bot.modelSelection;
-  const choices = variantChoices(state, selection, threadId ?? bot.threadId);
-  if (!choices) return null;
-  const { instance, reported, options } = choices;
-  const missing = selection.variant !== undefined && !options.some((option) => option.id === selection.variant);
-  const unavailable = missing && reported !== undefined;
-  const current = reported?.currentValue;
-  const choose = (variant?: string) => {
-    const { effort: _effort, variant: _variant, ...model } = selection;
-    dispatch({ type: "setModel", botId: bot.id, threadId, ...(updateBotDefault ? { updateBotDefault: true } : {}),
-      selection: { ...model, ...(variant !== undefined ? { variant } : {}) } });
-  };
-  if (compact) return (
-    <div className={className}>
-      <label className="flex items-center justify-between gap-3">
-        {label}
-        <Select size="sm" variant={quiet ? "quiet" : "field"} aria-label={t("model.variant.label")} disabled={bot.busy} className={wide ? "flex-1" : "max-w-[65%]"}
-          value={selection.variant === undefined ? "unset" : missing ? "missing" : String(options.findIndex((option) => option.id === selection.variant))}
-          onChange={(event) => choose(options[Number(event.target.value)]?.id)}>
-          <option value="unset">{t("model.variant.session")}</option>
-          {missing && <option value="missing" disabled>{selection.variant} ({unavailable ? t("model.variant.unavailable") : t("model.variant.unverified")})</option>}
-          {options.map((option, index) => <option key={option.id} value={String(index)}>{variantLabel(option, instance.driverKind)}</option>)}
-        </Select>
-      </label>
-      {missing && <p className={cn("mt-1 text-ink-secondary", quiet ? "text-[12px] leading-4 text-ink-tertiary" : "text-[11px]")}>{unavailable ? t("model.variant.unavailableHelp") : t("model.variant.unverifiedHelp")}</p>}
-    </div>
-  );
-  return (
-    <div className={className}>
-      {label}
-      {(selection.variant === undefined || missing) && (
-        <p className="mt-2 text-[12px] text-ink-secondary">
-          {unavailable ? t("model.variant.unavailableChoice", { variant: selection.variant ?? "" })
-            : missing ? t("model.variant.unverifiedChoice", { variant: selection.variant ?? "" }) : t("model.variant.none")}
-          {current !== undefined && ` ${t("model.variant.sessionValue", { variant: variantLabel(options.find((option) => option.id === current) ?? { id: current, label: current }, instance.driverKind) })}`}
-        </p>
-      )}
-      {selection.variant !== undefined && (
-        <button type="button" disabled={bot.busy} onClick={() => choose()}
-          title={t("model.variant.clearHint")}
-          className="mt-2 block text-[12px] text-ink-secondary underline underline-offset-2 hover:text-ink disabled:opacity-50">
-          {t("model.variant.clear")}
-        </button>
-      )}
-      {options.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1" role="group" aria-label={t("model.variant.label")}>
-          {options.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              disabled={bot.busy}
-              aria-pressed={selection.variant === option.id}
-              title={t("model.variant.use", { variant: variantLabel(option, instance.driverKind) })}
-              onClick={() => choose(option.id)}
-              className={cn(
-                "rounded-full border px-2.5 py-1 text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 disabled:opacity-50",
-                selection.variant === option.id ? "border-accent/60 bg-control text-ink" : "border-hairline/40 text-ink-secondary hover:bg-control/60 hover:text-ink",
-              )}
-            >
-              {variantLabel(option, instance.driverKind)}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
 }
 
 const POPOVER_WIDTH = 420;
@@ -581,7 +425,7 @@ export function ModelPicker({
     ? `${active.displayName} · ${modelLabel(active, selection.model)}${
         modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""
       }${selectedVariantLabel ? ` · ${selectedVariantLabel}` : selection.effort
-        ? ` · ${t(advanced ? "model.effort.summary" : "model.simple.thinkingSummary", { level: effortLabel(selection.effort) })}` : ""}`
+        ? ` · ${t(advanced ? "model.effort.summary" : "model.simple.thinkingSummary", { level: effortLabel(selection.effort) })}` : ""}${selection.fast ? ` · ${t("model.fast.short")}` : ""}`
     : selection.model;
   const followLine = follows === true ? `\n${t("model.followsBot", { name: profile.name })}` : follows === false ? `\n${t("model.ownModel")}` : "";
   const attentionLine = !advanced && attention ? `\n${attention}` : "";
@@ -643,6 +487,7 @@ export function ModelPicker({
             · {effortLabel(selection.effort)}
           </span>
         )}
+        {selection.fast && <span data-model-fast className="shrink-0 text-ink-secondary">· {t("model.fast.short")}</span>}
       </span>
       <ChevronDown
         size={12}
@@ -671,6 +516,7 @@ export function ModelPicker({
         {attention && <span data-model-attention className="absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-warning ring-[1.5px] ring-app" />}
       </span>
       <span className="min-w-0 max-w-[160px] truncate">{modelName(active, selection.model)}</span>
+      {selection.fast && <span data-model-fast className="ml-1 shrink-0">· {t("model.fast.short")}</span>}
       <ChevronDown size={12} strokeWidth={2} aria-hidden="true" className="ml-1 shrink-0 text-ink-tertiary group-hover:text-ink-secondary" />
     </button>
   );
@@ -895,6 +741,15 @@ export function ModelPicker({
                   label={<span className="text-[13px] leading-[18px] text-ink">{active?.capabilities?.modelVariants ? t("model.simple.reasoning") : t("model.section.effort")}</span>}
                 />
               )}
+              {!contained && (
+                <FastModeRow
+                  bot={shown}
+                  threadId={threadId}
+                  updateBotDefault={Boolean(threadId && scope === "bot")}
+                  className="shrink-0 border-t-[0.5px] border-ink/10 px-3.5 py-[5px]"
+                  label={<span className="text-[13px] leading-[18px] text-ink">{t("model.fast.label")}</span>}
+                />
+              )}
 
               {pane === "main" && offersLocalModels(railInstance, custom.length) && (
                 <button
@@ -972,6 +827,8 @@ export function ModelPicker({
           bot={profile}
           botModel={{ label: modelName(botModelInstance, profile.modelSelection.model), title: botModelName }}
           thinking={thinking}
+          fast={<FastModeRow bot={shown} threadId={threadId} updateBotDefault={Boolean(threadId) && simpleUpdatesBotDefault} className="px-2 py-1"
+            label={<span className="text-[12px] font-medium leading-4 text-ink-tertiary">{t("model.fast.label")}</span>} />}
           idPrefix={menuId}
           onQuery={setQuery}
           onPick={pick}

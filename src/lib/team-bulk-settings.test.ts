@@ -103,6 +103,16 @@ describe("team-wide settings", () => {
     expect(planNeedsLocalAutoConsent(planTeamChange([bot("a", { computer: "local" })], instances, { kind: "approval", mode: "ask" }))).toBe(false);
   });
 
+  it("keeps a bot's fast mode through an effort change, and drops it on a model without one", () => {
+    const fastOpus = { models: { default: "opus", options: [{ id: "opus", label: "Opus", fastMode: true as const }, { id: "sonnet", label: "Sonnet" }] } };
+    const engines = instances.map((instance) => instance.instanceId === "claude" ? { ...instance, ...fastOpus } : instance);
+    const fast = [bot("claude", { modelSelection: { instanceId: "claude", model: "opus", effort: "low", fast: true } })];
+    expect(planTeamChange(fast, engines, { kind: "model", effort: "high" })[0]).toMatchObject({ patch: { modelSelection: { model: "opus", effort: "high", fast: true } } });
+    const moved = planTeamChange(fast, engines, { kind: "model", model: "sonnet" })[0]!;
+    expect(moved).toMatchObject({ status: "apply", patch: { modelSelection: { model: "sonnet" } } });
+    expect(moved.status === "apply" && moved.patch.modelSelection).not.toHaveProperty("fast");
+  });
+
   it("keeps each bot on its own engine and skips models and efforts that engine does not offer", () => {
     const bots = [
       bot("claude", { modelSelection: { instanceId: "claude", model: "sonnet", effort: "low" } }),

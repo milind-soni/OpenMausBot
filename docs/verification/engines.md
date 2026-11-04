@@ -43,6 +43,33 @@ save the selection. Reload and revisit both bots. Confirm the account labels per
 including at narrow window widths. Use synthetic accounts only; this does not
 prove real OAuth login or native Windows execution.
 
+## Fast mode
+
+Claude's fast mode is a per-bot switch beside Effort, offered for Opus 5.5 and
+Opus 5. The driver sends `fastMode: true` in its `--settings` file, which is
+also what clears the CLI's headless block.
+
+Start the launcher with the fake engine serving standard speed:
+
+```sh
+FAKE_CLAUDE_SPEED=standard node --experimental-strip-types scripts/control-omb.ts launch
+```
+
+```sh
+pnpm control:omb new-bot --name Quick --url http://127.0.0.1:PORT
+pnpm control:omb set-model Quick --model claude/claude-opus-5-5 --effort high --fast --url http://127.0.0.1:PORT
+pnpm control:omb send Quick "hello" --url http://127.0.0.1:PORT
+```
+
+`fake-claude-dump.json` in the printed data directory has `settings.fastMode`
+true, and the chat shows one notice that the turn ran at standard speed. With
+`FAKE_CLAUDE_SPEED=fast` there is no notice. `--model claude/claude-sonnet-5 --fast` is refused.
+
+Trust `usage.speed` in a real run, never `fast_mode_state`. Claude Code 2.1.318
+reports `on` after the API answers 429 "Usage credits are required for fast
+mode" and it retries at standard speed. Finding that needs a logging proxy
+against the live API, which a fixture cannot show.
+
 ## Gotchas
 
 - Doctor proves server/engine readiness, not authentication against a real

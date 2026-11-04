@@ -91,6 +91,11 @@ describe("routeTurn", () => {
     expect(routeTurn(base)).toEqual({ tier: "simple", model: "claude-haiku-4-5", quickModel: "Claude Haiku 4.5" });
   });
 
+  it("keeps fast mode with the configured model and leaves it behind on the quick model", () => {
+    expect(routeTurn({ ...base, fast: true, signals: { ...base.signals, text: "deploy the app" } }).fast).toBe(true);
+    expect(routeTurn({ ...base, fast: true }).fast).toBeUndefined();
+  });
+
   it("keeps the configured model and effort for complex work", () => {
     expect(routeTurn({ ...base, signals: { ...base.signals, text: "deploy the app" } })).toEqual({ tier: "complex", model: "claude-opus-5", effort: "high", variant: "v" });
   });

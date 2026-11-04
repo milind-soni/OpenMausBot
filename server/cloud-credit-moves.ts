@@ -30,10 +30,10 @@ type Plan = { kind: "onto"; target: ModelSelection } | { kind: "off"; own: Selec
 const FIELD = /^[\w.:/@+-]{1,200}$/;
 const selection = (value: unknown): ModelSelection | null => {
   if (!value || typeof value !== "object") return null;
-  const { instanceId, model, effort, variant } = value as Record<string, unknown>;
+  const { instanceId, model, effort, variant, fast } = value as Record<string, unknown>;
   if (typeof instanceId !== "string" || !FIELD.test(instanceId) || typeof model !== "string" || !FIELD.test(model)) return null;
   return { instanceId, model, ...(typeof effort === "string" && FIELD.test(effort) ? { effort: effort as ModelSelection["effort"] } : {}),
-    ...(typeof variant === "string" && FIELD.test(variant) ? { variant } : {}) };
+    ...(typeof variant === "string" && FIELD.test(variant) ? { variant } : {}), ...(fast === true ? { fast } : {}) };
 };
 
 export function createCreditMoves(options: CreditMovesOptions) {

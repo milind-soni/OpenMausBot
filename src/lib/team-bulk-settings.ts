@@ -81,6 +81,7 @@ export function planTeamChange(bots: readonly Bot[], instances: readonly Instanc
     if (!offered) return { bot, status: "skip", reason: t("teamSettings.skip.modelUnsupported", { engine: engineName, model }) };
     const next: ModelSelection = { instanceId: current.instanceId, model };
     if (current.variant && model === current.model) next.variant = current.variant;
+    if (current.fast && engine.models.options.some((option) => option.id === model && option.fastMode)) next.fast = true;
     if (change.effort === undefined) {
       if (current.effort) next.effort = current.effort;
     } else if (change.effort !== null) {

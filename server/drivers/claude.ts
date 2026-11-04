@@ -16,7 +16,8 @@ import { projectMcpServers } from "./claude-project-mcp.ts";
 import { botSettingsFor, withBotSettings } from "./claude-bot-settings.ts";
 import { claudeBilling, claudeCallUsage } from "./claude-billing.ts";
 import { claudeAuthFailure, claudeAuthRecovery } from "./claude-auth-recovery.ts";
-import { claudeModelExtras } from "./claude-model-extras.ts";
+import { claudeModelExtras, STATIC_CLAUDE_MODELS } from "./claude-model-extras.ts";
+export { STATIC_CLAUDE_MODELS };
 import { claudeToolSearchSetting } from "./claude-tool-search.ts";
 import { claudeElicitations } from "./claude-elicitation.ts";
 import { readCostHistory, recordCostState } from "./claude-cost-history.ts";
@@ -25,7 +26,6 @@ import { ClaudeLoginController } from "./claude-login-auth.ts";
 
 import type {
   DriverCreateInput,
-  ModelCatalog,
   ProviderDriver,
   ProviderInstance,
   ProviderSnapshot,
@@ -260,6 +260,8 @@ export function claudeCliUpdate(version: string | null, cli: string): ProviderSn
 
 const DRIVER_KIND = "claudeAgent";
 
+const FAST_MODE_NOT_APPLIED = "Fast mode is on, but this turn ran at standard speed. Fast mode needs usage credits on this Claude account, and pauses after a rate limit.";
+
 const NO_ANTHROPIC_KEY = "No Anthropic API key — open Settings → API keys.";
 
 export interface ClaudeConfig {
@@ -272,20 +274,6 @@ export interface ClaudeConfig {
   disallowedTools?: string[];
   requireApiKey?: boolean;
 }
-
-export const STATIC_CLAUDE_MODELS: ModelCatalog = {
-  default: "claude-sonnet-5",
-  options: [
-    { id: "claude-fable-5-1", label: "Claude Fable 5.1" },
-    { id: "claude-fable-5", label: "Claude Fable 5" },
-    { id: "claude-opus-5-5", label: "Claude Opus 5.5", contextWindow: 1_000_000 },
-    { id: "claude-opus-5", label: "Claude Opus 5" },
-    { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", contextWindow: 1_000_000 },
-    { id: "claude-sonnet-5", label: "Claude Sonnet 5" },
-    { id: "claude-haiku-5-5", label: "Claude Haiku 5.5", contextWindow: 1_000_000 },
-    { id: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
-  ],
-};
 
 /** Maps an API slug a local host serves to `host::model`, so the turn injects instead of asking
  *  for /login. */
@@ -856,6 +844,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
        * "default" silently where auto is unavailable (Haiku 4.5, Sonnet 4.5, an org that disabled it) */
       nativePermissionMode: string | null;
       replaysUserMessages: boolean;
+      fastNoticeShown?: boolean;
       turn: {
         turnId: string;
         input: SendTurnInput;
@@ -1175,6 +1164,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (turn.guestConfined) own.permissions = GUEST_CLAUDE_PERMISSIONS;
       // Approvals and browser credentials expire at the turn boundary; native background workers must not outlive it.
       env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = "1";
+      if (turn.fast) own.fastMode = true;
       // Never for a guest: --restricted leaves project settings out, and a hook is a command.
       const botSettings = turn.guestConfined ? {} : botSettingsFor(turn.botSettingsFile, cwd, env);
       const settings = withBotSettings(botSettings, own);
@@ -1194,6 +1184,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         configDir: env.CLAUDE_CONFIG_DIR ?? null,
         hooks: Boolean(hooks),
         toolSearch,
+        fast: turn.fast === true,
         botSettings: createHash("sha256").update(JSON.stringify(botSettings)).digest("hex"),
         // Rotating an account's key/helper must not reuse the old process.
         auth: createHash("sha256").update(JSON.stringify({
@@ -1616,6 +1607,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               cacheWrite: o.usage?.cache_creation_input_tokens || 0,
               output: o.usage?.output_tokens || 0,
             });
+            // 2.1.318 reports fast_mode_state "on" after the API refuses fast (429, no usage credits) and it retries at standard speed: only usage.speed says what ran.
+            if (session.turn?.input.fast && o.is_error !== true && o.usage?.speed !== "fast" && !session.fastNoticeShown) {
+              session.fastNoticeShown = true;
+              emit({ ...base(threadId, currentTurnId()), type: "runtime.notice", message: FAST_MODE_NOT_APPLIED });
+            }
             const native: NativeTurnResult = {
               ok: o.is_error !== true,
                 // An error result's stop_reason ("stop_sequence" or none) says nothing; its

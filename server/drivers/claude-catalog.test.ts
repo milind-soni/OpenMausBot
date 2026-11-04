@@ -25,6 +25,7 @@ describe("readClaudeModelCatalog", () => {
       id: "claude-opus-5-5",
       label: "Claude Opus 5.5",
       contextWindow: 1_000_000,
+      fastMode: true,
     });
     expect(ids.indexOf("claude-opus-5-5")).toBe(ids.indexOf("claude-opus-5") - 1);
     expect(STATIC_CLAUDE_MODELS.options[ids.indexOf("claude-sonnet-5-5")]).toEqual({

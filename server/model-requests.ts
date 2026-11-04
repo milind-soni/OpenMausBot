@@ -75,7 +75,7 @@ export type UndoModelRequestResult =
   | { claimed: true; state: "undone"; targetBotId: string };
 
 const sameSelection = (a: ModelSelection, b: ModelSelection) =>
-  a.instanceId === b.instanceId && a.model === b.model && a.effort === b.effort && a.variant === b.variant;
+  a.instanceId === b.instanceId && a.model === b.model && a.effort === b.effort && a.variant === b.variant && a.fast === b.fast;
 
 function reasonText(value: unknown): string {
   if (typeof value !== "string") throw new ModelRequestError("reason is required");

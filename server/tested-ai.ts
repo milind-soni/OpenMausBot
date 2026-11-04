@@ -78,7 +78,7 @@ type Follower = { botId: string; selection: ModelSelection };
 type Saved = { results: Record<string, Result>; follower?: Follower };
 
 const same = (a: ModelSelection, b: ModelSelection) => a.instanceId === b.instanceId && a.model === b.model;
-const exactly = (a: ModelSelection, b: ModelSelection) => same(a, b) && a.effort === b.effort && a.variant === b.variant;
+const exactly = (a: ModelSelection, b: ModelSelection) => same(a, b) && a.effort === b.effort && a.variant === b.variant && a.fast === b.fast;
 const empty = (selection: ModelSelection | undefined) => !selection?.instanceId && !selection?.model;
 const hasModel = (instance: SelectableInstance) =>
   Boolean(instance.models.default.trim() || instance.models.options.some((option) => option.id.trim()));

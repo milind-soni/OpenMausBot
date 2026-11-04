@@ -29,6 +29,7 @@ export function modelSelectionForPick(selection: ModelSelection, instance: Insta
   if (instance.instanceId === selection.instanceId) {
     if (instance.capabilities?.modelVariants && model === selection.model && selection.variant !== undefined) next.variant = selection.variant;
     else if (!instance.capabilities?.modelVariants && selection.effort) next.effort = selection.effort;
+    if (selection.fast && instance.models.options.some((option) => option.id === model && option.fastMode)) next.fast = true;
   }
   return next;
 }

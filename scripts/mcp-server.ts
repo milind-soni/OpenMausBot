@@ -420,6 +420,7 @@ export const TOOLS: McpToolDefinition[] = [
         instance_id: { type: "string", description: "The configured provider instance ID." },
         model: { type: "string", description: "The exact model ID exposed by that instance." },
         effort: { type: "string", enum: ["none", "low", "medium", "high", "xhigh", "max"] },
+        fast: { type: "boolean", description: "Run at the model's fast speed, for models that offer it. Omit for standard speed." },
       },
       required: ["bot_id", "instance_id", "model"],
       additionalProperties: false,
@@ -724,7 +725,7 @@ async function checkedModelSelection(
   if (effort && !efforts.includes(effort)) {
     throw new ToolInputError(`effort '${effort}' is not offered by instance '${instanceId}'`);
   }
-  return { instanceId, model, ...(effort ? { effort } : {}) };
+  return { instanceId, model, ...(effort ? { effort } : {}), ...(args.fast === true ? { fast: true } : {}) };
 }
 
 function taskRoute(targetType: unknown, targetId: string): string {
@@ -1104,19 +1105,17 @@ export async function handleToolCall(
         const taskId = idArg(args, "task_id");
         if (!taskBelongsTo(bot, taskId)) throw new Error(`Task '${taskId}' does not belong to bot '${botId}'`);
         if (botTaskState(bot, taskId).busy) throw new Error("Interrupt the task or let it finish before changing its model");
-        const selection = await checkedModelSelection(args, fetcher);
         const res = await fetcher(`${taskRoute("bot", botId)}/${encodeURIComponent(taskId)}`, {
           method: "PATCH",
-          body: JSON.stringify({ modelSelection: selection, requireAvailableModel: true }),
+          body: JSON.stringify({ modelSelection: await checkedModelSelection(args, fetcher), requireAvailableModel: true }),
         });
         if (!isRecord(res?.task)) throw new Error("OpenMausBot did not return the updated task");
         return { success: true, botId, task: projectTask(res.task, bot.threadId) };
       }
       if (bot.busy) throw new Error("Interrupt the bot or let it finish before changing its model");
-      const selection = await checkedModelSelection(args, fetcher);
       const res = await fetcher(`/api/bots/${encodeURIComponent(botId)}`, {
         method: "PATCH",
-        body: JSON.stringify({ modelSelection: selection, requireAvailableModel: true }),
+        body: JSON.stringify({ modelSelection: await checkedModelSelection(args, fetcher), requireAvailableModel: true }),
       });
       return { success: true, bot: projectBot(res.bot) };
     }

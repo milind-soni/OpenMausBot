@@ -134,6 +134,7 @@ export interface SendTurnInput {
   model?: string;
   effort?: EffortLevel;
   variant?: string;
+  fast?: true;
   resumeCursor?: unknown;
   /** Start without the previous native context or retained process; wins over resumeCursor. */
   sessionReset?: boolean;
@@ -466,6 +467,8 @@ export interface ModelCatalog {
     variants?: ModelVariantOption[];
     /** The organization of the signed-in account turned this model off: the engine would answer with another. */
     orgBlocked?: true;
+    /** The engine can run this model at its fast speed. */
+    fastMode?: true;
   }>;
 }
 

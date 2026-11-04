@@ -54,6 +54,7 @@ export interface ModelSelection {
   effort?: EffortLevel;
   /** Explicit model-specific variant. Omitted leaves the native session alone. */
   variant?: string;
+  /** Run at the model's fast speed, where the catalog marks it `fastMode`. Independent of effort and variant. */ fast?: true;
 }
 
 /** Which cloud computer backs computer: "cloud"; absent means Boat. */

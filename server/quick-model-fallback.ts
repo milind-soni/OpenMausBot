@@ -18,7 +18,7 @@ export function refusesModel(message: string | null | undefined, model: string):
 
 export interface QuickRoute {
   model: string;
-  own: { model: string; effort?: EffortLevel; variant?: string };
+  own: { model: string; effort?: EffortLevel; variant?: string; fast?: true };
   /** The conversation stops saying the quick model answered. */
   onFallback: () => void;
 }
@@ -160,11 +160,11 @@ export class QuickModelFallback {
     } catch (error) {
       console.warn(`quick model note left on ${threadId}: ${error instanceof Error ? error.message : String(error)}`);
     }
-    const { model, effort, variant } = armed.quick.own;
+    const { model, effort, variant, fast } = armed.quick.own;
     // After the adapter that emitted the refusal has finished settling the quick turn.
     setImmediate(() => {
       if (this.armed.get(threadId) !== armed) return;
-      armed.engine.adapter.sendTurn({ ...armed.input, model, effort, variant }).then((sent) => {
+      armed.engine.adapter.sendTurn({ ...armed.input, model, effort, variant, fast }).then((sent) => {
         armed.retryTurnId ??= sent.turnId;
         if (this.deps.stopped(threadId)) void armed.engine.adapter.interruptTurn(threadId).catch(() => {});
       }, (error: unknown) => {
