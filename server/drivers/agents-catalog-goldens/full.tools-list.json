@@ -343,13 +343,6 @@
             "type": "string",
             "description": "The complete first message of the thread — everything the run needs, since it will not see this conversation."
           },
-          "bot_id": {
-            "type": "string",
-            "enum": [
-              "bot-golden"
-            ],
-            "description": "Leave out, or use your own bot ID. For teammates use coordinate_bots."
-          },
           "folder": {
             "type": "string",
             "description": "Optional: the name of one of your existing folders to file the thread under. Leave out unless the person named one."

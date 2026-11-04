@@ -229,8 +229,17 @@ describe("agents proxy tools/list golden", () => {
       expect(coordinate.thread!.enum).toBeUndefined();
       expect(coordinate.reply!.enum).toEqual(["resume", "none"]);
       expect(Object.keys(tools.get("assignment_status")!.inputSchema.properties)).toEqual(["id", "wait_ms"]);
-      expect(tools.get("start_thread")!.inputSchema.properties.bot_id!.enum).toEqual(["bot-golden"]);
+      expect(tools.get("start_thread")!.inputSchema.properties.bot_id).toBeUndefined();
       expect(wire).not.toMatch(/Brief synchronous consultation|DEFAULT FOR ASSIGNING WORK|BLOCKING status tool/);
+    }
+  });
+
+  // Providers cache a prompt from its start, tools first: one bot's id in a schema makes every other bot rewrite the whole list.
+  it("lists the same bytes for two bots of the same role", () => {
+    for (const chief of [true, false]) {
+      const lists = ["bot-one", "bot-two"].map((botId) => JSON.stringify(availableTools({ ...catalogProfileFromEnv({}), chief, botId })));
+      expect(lists[1]).toBe(lists[0]);
+      expect(lists[0]).not.toContain("bot-one");
     }
   });
 

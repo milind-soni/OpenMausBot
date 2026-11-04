@@ -163,7 +163,6 @@ const TRIGGER_FIELDS_SCHEMA = {
 const CHIEF_PROFILE_TARGET = " A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section.";
 const APPLIES_OUTCOME = " Read the result: it applies immediately at every access level, and the person sees it with an Undo where possible. If applied, continue the work without another confirmation. Only a pending result (a Cloud conversation its owner did not drive) means ending the turn to wait for the owner. Never claim success without an applied result; report failures honestly. This does not elevate another bot's execution permissions.";
 
-const START_THREAD_SELF_ID = "Leave out, or use your own bot ID. For teammates use coordinate_bots.";
 
 const TOOL_DEFINITIONS = [
   {
@@ -300,7 +299,6 @@ const TOOL_DEFINITIONS = [
       properties: {
         title: { type: "string", description: "The thread's name: one short line, at most 80 characters, specific enough to tell it apart from the others (for example \"QA: PR #412 login fix\")." },
         message: { type: "string", description: "The complete first message of the thread — everything the run needs, since it will not see this conversation." },
-        bot_id: { type: "string", description: START_THREAD_SELF_ID },
         folder: { type: "string", description: "Optional: the name of one of your existing folders to file the thread under. Leave out unless the person named one." },
         model_selection: {
           type: "object",
@@ -934,10 +932,5 @@ function catalogTools(profile: CatalogProfile) {
       const properties = Object.fromEntries(Object.entries(tool.inputSchema.properties).filter(([key]) => key !== "for_bot_id"));
       return { ...tool, description: tool.description.replace(CHIEF_PROFILE_TARGET, ""), inputSchema: { ...tool.inputSchema, properties } };
     });
-  return [...ROLE_TOOLS, ...(profile.mausbot === true ? MAUSBOT_TOOL_DEFINITIONS : [])].map(tool => tool.name === "start_thread" ? {
-    ...tool,
-    inputSchema: { ...tool.inputSchema, properties: { ...tool.inputSchema.properties,
-      bot_id: { type: "string", enum: [profile.botId], description: START_THREAD_SELF_ID },
-    } },
-  } : tool);
+  return [...ROLE_TOOLS, ...(profile.mausbot === true ? MAUSBOT_TOOL_DEFINITIONS : [])];
 }
