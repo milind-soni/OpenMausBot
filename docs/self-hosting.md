@@ -894,7 +894,8 @@ curl -H "Authorization: Bearer $TOKEN" -o usage.csv \
 ```
 
 Dates are inclusive, UTC, at most a year apart; without them you get the
-current month to date.
+current month to date. Add `splitBy=model` to a grouping to get each group's
+model breakdown, largest share first, as `segments`.
 
 ### When an engine runs out
 
