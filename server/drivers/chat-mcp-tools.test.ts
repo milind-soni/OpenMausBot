@@ -1,10 +1,10 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { crc32 } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { augmentedPath } from "../env-path.ts";
-import { ChatToolSessionError, chatToolNotices, directServers, mountChatTools, trimmedToolsNotice, type ChatToolSession } from "./chat-mcp-tools.ts";
+import { ChatToolSessionError, SAVED_RESULTS_FOLDER, chatToolNotices, directServers, mountChatTools, trimmedToolsNotice, type ChatToolSession } from "./chat-mcp-tools.ts";
 import type { ToolScope } from "../../shared/tool-scope.ts";
 import { catalogServer, CUA_DRIVER_WINDOWS_TOOLS, syntheticToolNames } from "../testing/cua-driver-tools.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
@@ -73,8 +73,9 @@ function fixture(body = "", toolSchema: Record<string, unknown> = schema) {
   return {
     dir, receipt, controller, server,
     read: () => JSON.parse(readFileSync(receipt, "utf8")) as { pid: number; path: string; omb: Record<string, string>; calls: Array<{ method: string; params?: { name?: string; arguments?: unknown } }> },
-    async mount(computerUse = false, localComputer = false, toolScope?: ToolScope) {
-      const session = await mountChatTools(localComputer ? { localComputer: server } : { custom: { audit: server } }, controller.signal, computerUse, toolScope);
+    async mount(computerUse = false, localComputer = false, toolScope?: ToolScope, resultFolder?: string, serverName = "audit") {
+      const session = await mountChatTools(localComputer ? { localComputer: server } : { custom: { [serverName]: server } }, controller.signal, computerUse, toolScope,
+        undefined, undefined, resultFolder);
       sessions.push(session);
       return session;
     },
@@ -415,6 +416,56 @@ describe("Chat MCP session", () => {
     expect(Buffer.byteLength(result.text)).toBeLessThan(52_000);
     expect(result.text).toContain("truncated");
     expect(result.text).not.toContain("�");
+  });
+
+  describe("a result over 50KB with a working folder", () => {
+    const big = "line of a big kDrive file as base64 text ".repeat(5000);
+    const bigFixture = () => fixture(`if (message.method === "tools/call") { reply(message,{content:[{type:"text",text:${JSON.stringify(big)}}]}); continue; }`);
+    const workFolder = () => { const dir = mkdtempSync(join(tmpdir(), "omb-chat-mcp-work-")); dirs.push(dir); return dir; };
+
+    it("is saved whole to a file there, and the model gets its start and the path", async () => {
+      const f = bigFixture();
+      const folder = workFolder();
+      const result = await (await f.mount(false, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
+      const saved = readdirSync(join(folder, SAVED_RESULTS_FOLDER));
+      expect(saved).toHaveLength(1);
+      expect(saved[0]).toMatch(/^audit_write-\d+-[0-9a-f]{6}\.txt$/);
+      const file = join(folder, SAVED_RESULTS_FOLDER, saved[0]);
+      expect(readFileSync(file, "utf8")).toBe(big);
+      expect(result.ok).toBe(true);
+      expect(result.text.startsWith(big.slice(0, 1000))).toBe(true);
+      expect(result.text).toContain(`The full result is saved in ${file}`);
+      expect(result.text).toContain(`${Math.ceil(Buffer.byteLength(big) / 1024)}KB`);
+      expect(Buffer.byteLength(result.text)).toBeLessThan(52_000);
+    });
+
+    it("stays inside the folder whatever the server is called", async () => {
+      const f = bigFixture();
+      const folder = workFolder();
+      const session = await f.mount(false, false, undefined, folder, "../../escape");
+      await session.execute(session.definitions[0].function.name, { value: "test" }, f.controller.signal);
+      expect(readdirSync(folder)).toEqual([SAVED_RESULTS_FOLDER]);
+      expect(readdirSync(join(folder, SAVED_RESULTS_FOLDER))[0]).toMatch(/^[a-z0-9_]+-\d+-[0-9a-f]{6}\.txt$/);
+    });
+
+    it("is cut as before when the results folder is a link elsewhere", async () => {
+      const f = bigFixture();
+      const folder = workFolder();
+      const elsewhere = workFolder();
+      symlinkSync(elsewhere, join(folder, SAVED_RESULTS_FOLDER));
+      const result = await (await f.mount(false, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
+      expect(readdirSync(elsewhere)).toEqual([]);
+      expect(result.text).toContain("[MCP result truncated at 50KB; request less output.]");
+    });
+
+    it("leaves a result under 50KB as it is, with no file", async () => {
+      const f = fixture(`if (message.method === "tools/call") { reply(message,{content:[{type:"text",text:"small"}]}); continue; }`);
+      const folder = workFolder();
+      mkdirSync(join(folder, "keep"));
+      const result = await (await f.mount(false, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
+      expect(result.text).toBe("small");
+      expect(readdirSync(folder)).toEqual(["keep"]);
+    });
   });
 
   it.each(["initialize", "tools/list", "tools/call"])("cancels %s and awaits its owned process tree", async (method) => {

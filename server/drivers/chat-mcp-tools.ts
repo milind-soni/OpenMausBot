@@ -1,6 +1,8 @@
 // Per-turn MCP transport for the Chat Completions runtime: approval is the caller's, and only
 // registered, schema-validated calls arrive here.
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { lstat, mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { ValidateFunction } from "ajv";
 import { stripControlPlaneEnv } from "../config.ts";
 import type { SendTurnInput } from "../contracts.ts";
@@ -269,12 +271,37 @@ export function chatToolNotices(session: Pick<ChatToolSession, "skipped" | "trim
   ].filter((line): line is string => line !== undefined);
 }
 
-function boundedText(value: string): string {
-  const bytes = Buffer.from(value);
-  if (bytes.length <= OUTPUT_BYTES) return value;
+function preview(bytes: Buffer): string {
   let end = OUTPUT_BYTES;
   while ((bytes[end] & 0xc0) === 0x80) end -= 1;
-  return `${bytes.subarray(0, end).toString()}\n[MCP result truncated at 50KB; request less output.]`;
+  return bytes.subarray(0, end).toString();
+}
+
+function boundedText(value: string, bytes = Buffer.from(value)): string {
+  if (bytes.length <= OUTPUT_BYTES) return value;
+  return `${preview(bytes)}\n[MCP result truncated at 50KB; request less output.]`;
+}
+
+/** Folder, inside the bot's working folder, that keeps tool results too big to show the model whole. */
+export const SAVED_RESULTS_FOLDER = "mcp-results";
+
+/** A result over the limit is kept whole in `folder`/mcp-results and the model reads its start and the file's path.
+ * Without a folder, or when the file cannot be written, it is cut as before. */
+async function savedOrBounded(value: string, tool: string, folder: string | undefined): Promise<string> {
+  const bytes = Buffer.from(value);
+  if (bytes.length <= OUTPUT_BYTES || !folder) return boundedText(value, bytes);
+  try {
+    const dir = join(folder, SAVED_RESULTS_FOLDER);
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    // Security: never follow a link the folder's contents put here to write outside the working folder.
+    if (!(await lstat(dir)).isDirectory()) throw new Error("not a folder");
+    const file = join(dir, `${tool}-${Date.now()}-${randomBytes(3).toString("hex")}.txt`);
+    await writeFile(file, bytes, { flag: "wx", mode: 0o600 });
+    const kb = Math.ceil(bytes.length / 1024);
+    return `${preview(bytes)}\n[MCP result is ${kb}KB; only the first 50KB is shown above. The full result is saved in ${file}]`;
+  } catch {
+    return boundedText(value, bytes);
+  }
 }
 
 /** Smaller models fill optional fields with "" instead of omitting them; for these a blank means omitted. */
@@ -325,9 +352,10 @@ export function directServers(servers: ReadonlyArray<{ name: string; tools: numb
   return direct;
 }
 
-/** Under `schemaProfile` the model reads each tool's schema fitted to its provider; calls are still checked against the full one. */
+/** Under `schemaProfile` the model reads each tool's schema fitted to its provider; calls are still checked against the full one.
+ * A tool result over 50KB is saved whole in `resultFolder`, the bot's working folder (see savedOrBounded). */
 export async function mountChatTools(integrations: SendTurnInput["integrations"], signal: AbortSignal, computerUse = false, toolScope?: ToolScope, callTimeoutMs: number = DEFAULT_CALL_MS,
-  schemaProfile?: ToolSchemaProfile): Promise<ChatToolSession> {
+  schemaProfile?: ToolSchemaProfile, resultFolder?: string): Promise<ChatToolSession> {
   const parsed = parseToolScope(toolScope);
   if (!parsed.ok) throw new Error(parsed.error);
   const scope = parsed.scope;
@@ -561,7 +589,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       }
       if (result.structuredContent !== undefined) parts.push(JSON.stringify(result.structuredContent));
       if (unsupported) parts.unshift(`[${unsupported} unsupported MCP content item(s) omitted. The operation may have taken effect, but its full result cannot be represented; inspect its state before retrying.]`);
-      return { text: boundedText(parts.join("\n") || (images.length ? "Screenshot captured." : "(empty result)")), ok: result.isError !== true && unsupported === 0,
+      return { text: await savedOrBounded(parts.join("\n") || (images.length ? "Screenshot captured." : "(empty result)"), chatToolName(tool.server, tool.name), resultFolder), ok: result.isError !== true && unsupported === 0,
         ...(images.length ? { images } : {}) };
     } catch (error) {
       await close();
