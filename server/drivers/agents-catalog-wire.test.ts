@@ -97,8 +97,8 @@ const BUDGET_BASELINE: Record<string, number> = {
   "skills+voice+non-chief": 52793,
   "skills+shared+non-chief": 53965,
   "skills+shared+voice+non-chief": 55058,
-  "skills+shared+voice+cloud-home": 63096,
-  "skills+shared+voice+non-chief+cloud-home": 55117,
+  "skills+shared+voice+cloud-home": 63839,
+  "skills+shared+voice+non-chief+cloud-home": 55860,
   "default+legacy-switches": 58250,
   "default+mausbot": 58901,
   "skills+shared+voice+mausbot": 64766,
@@ -251,12 +251,9 @@ describe("agents proxy tools/list golden", () => {
     }
   });
 
-  it("mounts message_person only on a Team Cloud, and adds nothing else", () => {
+  it("mounts message_person everywhere: every plan's bots can reach the person's Inbox", () => {
     const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
-    expect(names(wires[FULL]!).filter((tool) => tool !== "message_person")).toEqual(names(wires["skills+shared+voice+escalations+x"]!));
-    for (const [name, profile] of Object.entries(PROFILES)) {
-      expect(names(wires[name]!).includes("message_person"), name).toBe(profile.env.OMB_TEAM_PEOPLE === "1");
-    }
+    for (const name of Object.keys(PROFILES)) expect(names(wires[name]!), name).toContain("message_person");
   });
 
   it("mounts ask_for_computer only on a person's own Cloud that is lent their computer, never a Team Cloud", () => {
