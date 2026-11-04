@@ -89,7 +89,6 @@ const support: AcpSupport = {
   clientFileSystem: true,
   redactStderr: true,
   sanitizeToolPayload: true,
-  resolveModelsOnCreate: false,
 
   resolveCommand: async (env, config, instanceId) => {
     const runtime = await resolveAntigravityRuntime(config.cli, env);
@@ -167,7 +166,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
     const base = await AcpAntigravityDriver.create(input);
     scheduleAntigravityTempSweep(input.instanceId);
     scheduleAntigravityTempSweep(VERIFICATION_TEMP_KEY);
-    const auth = new AntigravityAuthController();
+    const auth = new AntigravityAuthController(() => void base.refreshModels?.());
     let installFailure: string | undefined;
     const runtimeAndProfile = async () => {
       // A GUI launch's raw PATH may omit the official runtime the model picker found.
@@ -184,6 +183,9 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       ...base,
       get models() {
         return base.models;
+      },
+      get modelsUnconfirmed() {
+        return base.modelsUnconfirmed;
       },
       snapshot: async () => {
         const snapshot = await base.snapshot();

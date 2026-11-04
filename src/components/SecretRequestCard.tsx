@@ -27,10 +27,15 @@ export function SecretRequestCard({
 }) {
   const { dispatch } = useStore();
   const secret = message.secret!;
-  const greenference = secret.target === "greenferenceApiKey";
-  const label = greenference ? t("keys.greenference.label") : secret.label;
-  const placeholder = greenference ? t("keys.greenference.placeholder") : secret.placeholder;
-  const suppliedDescription = greenference ? t("secretCard.greenference.description") : secret.description;
+  const localize = activeLocale() !== "en";
+  const greenference = localize && secret.target === "greenferenceApiKey";
+  const gemini = localize && secret.target === "geminiTtsKey";
+  const label = greenference ? t("keys.greenference.label") : gemini ? t("keys.label.geminiTts") : secret.label;
+  const placeholder = greenference ? t("keys.greenference.placeholder") : gemini ? t("voice.gemini.keyPlaceholder") : secret.placeholder;
+  const parts = secret.descriptionParts;
+  const suppliedDescription = localize && parts
+    ? [t(parts.baseCode), parts.reason, t("server.connect.secretNeverRead", { bot: parts.bot })].filter(Boolean).join(" ")
+    : secret.description;
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);

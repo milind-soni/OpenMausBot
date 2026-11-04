@@ -125,6 +125,11 @@ export function redactBotAuthored<T extends Omit<WireMessage, "id" | "at"> & { a
       ...out.secret,
       label: redactSecretsInText(out.secret.label),
       description: redactSecretsInText(out.secret.description),
+      ...(out.secret.descriptionParts ? { descriptionParts: {
+        ...out.secret.descriptionParts,
+        reason: redactSecretsInText(out.secret.descriptionParts.reason),
+        bot: redactSecretsInText(out.secret.descriptionParts.bot),
+      } } : {}),
       ...(out.secret.reason !== undefined ? { reason: redactSecretsInText(out.secret.reason) } : {}),
       error: out.secret.error ? redactSecretsInText(out.secret.error) : undefined,
     };

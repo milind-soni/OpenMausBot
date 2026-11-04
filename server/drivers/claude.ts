@@ -418,15 +418,16 @@ export function hookTokenFile(threadId: string, botId?: string): string {
   return join(DATA_DIR, "hook-tokens", digest, "token");
 }
 
-/** Hooks for the private --settings file. Claude Code runs each command as a shell line with the
- * event JSON on stdin and applies any hookSpecificOutput it prints. */
-export function claudeHookSettings(helperPath: string): Record<string, unknown> {
+/** Hooks for the private --settings file. Claude Code runs each command with the event JSON on
+ * stdin and applies any hookSpecificOutput it prints. */
+export function claudeHookSettings(helperPath: string, platform: NodeJS.Platform = process.platform): Record<string, unknown> {
+  // Claude Code runs `command` as a shell line: sh on macOS and Linux; on Windows Git Bash, or PowerShell
+  // when Git Bash is missing, and the two quote differently. Given `args` (2.1.139), it starts `command` itself.
   // JSON quoting is not shell quoting: $(), backticks and $names expand inside double quotes.
-  // Windows paths go through env so their backslashes are not JSON-escaped.
-  const command = process.platform === "win32"
-    ? '"%OMB_HOOK_NODE%" "%OMB_HOOK_HELPER%"'
-    : [process.execPath, helperPath].map(path => `'${path.replace(/'/g, "'\\''")}'`).join(" ");
-  const entry = [{ matcher: "", hooks: [{ type: "command", command, timeout: 5 }] }];
+  const hook = platform === "win32"
+    ? { type: "command", command: process.execPath, args: [helperPath], timeout: 5 }
+    : { type: "command", command: [process.execPath, helperPath].map(path => `'${path.replace(/'/g, "'\\''")}'`).join(" "), timeout: 5 };
+  const entry = [{ matcher: "", hooks: [hook] }];
   return { PostToolUse: entry, PostToolUseFailure: entry, PreCompact: entry, SessionStart: entry, Stop: entry };
 }
 
@@ -1161,8 +1162,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         writeFileAtomicIfChanged(hookTokenPath, hooks.token, { mode: 0o600, durable: false });
         env.OMB_HOOK_URL = hooks.url;
         env.OMB_HOOK_TOKEN_FILE = hookTokenPath;
-        env.OMB_HOOK_NODE = process.execPath;
-        env.OMB_HOOK_HELPER = HOOK_HELPER_PATH;
         // in the packaged app process.execPath is Electron — run the helper as node
         if (process.versions.electron) env.ELECTRON_RUN_AS_NODE = "1";
       }

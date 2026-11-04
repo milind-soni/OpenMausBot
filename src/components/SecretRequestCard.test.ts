@@ -53,6 +53,21 @@ const view = (secret: Record<string, unknown>) => renderToStaticMarkup(createEle
   message: secretCard(secret),
 }));
 
+function namedCard(target: "greenferenceApiKey" | "geminiTtsKey", reason: string): Message {
+  return secretCard({
+    target,
+    ...CREDENTIAL_TARGETS[target],
+    description: `${CREDENTIAL_TARGETS[target].description} ${reason} Scout can use it but never read it back.`,
+    descriptionParts: {
+      baseCode: target === "greenferenceApiKey" ? "secretCard.greenference.description" : "secretCard.geminiTts.description",
+      reason,
+      bot: "Scout",
+    },
+  });
+}
+
+const escapedText = (text: string) => renderToStaticMarkup(createElement("span", null, text)).slice(6, -7);
+
 beforeEach(() => {
   vi.stubGlobal("window", {});
   dispatch.mockReset();
@@ -106,19 +121,20 @@ describe("SecretRequestCard ask card", () => {
 
 describe("SecretRequestCard Greenference copy", () => {
   it("localizes the Greenference title, description and password field without changing the saved card", () => {
-    const message = secretCard({ target: "greenferenceApiKey", ...CREDENTIAL_TARGETS.greenferenceApiKey });
+    const message = namedCard("greenferenceApiKey", "Para preparar o resumo solicitado.");
     const render = () => renderToStaticMarkup(createElement(SecretRequestCard, { botId: "bot-1", threadId: "thread-1", message }));
     const english = render();
     expect(english).toContain('aria-label="Greenference API key"');
     expect(english).toContain("Runs Greenference models with your own key.");
     expect(english).toContain('placeholder="Paste your Greenference API key"');
+    expect(english).toContain(escapedText(message.secret!.description));
     setLocale("pt-br");
     const portuguese = render();
     expect(portuguese).toContain('aria-label="Chave de API do Greenference"');
-    expect(portuguese).toContain("Roda modelos do Greenference com sua própria chave.");
+    expect(portuguese).toContain("Roda modelos do Greenference com sua própria chave. Para preparar o resumo solicitado. Scout pode usar o valor, mas nunca consegue lê-lo.");
     expect(portuguese).toContain('placeholder="Cole sua chave de API do Greenference"');
     expect(portuguese).toContain(CREDENTIAL_TARGETS.greenferenceApiKey.helpUrl);
-    expect(message.secret).toMatchObject({ target: "greenferenceApiKey", ...CREDENTIAL_TARGETS.greenferenceApiKey });
+    expect(message.secret).toMatchObject({ target: "greenferenceApiKey", description: `${CREDENTIAL_TARGETS.greenferenceApiKey.description} Para preparar o resumo solicitado. Scout can use it but never read it back.` });
     setLocale("en");
     expect(render()).toBe(english);
   });
@@ -133,6 +149,40 @@ describe("SecretRequestCard Greenference copy", () => {
     expect(html).toContain('data-ask-card="settled"');
     expect(html).toContain('aria-label="Chave de API do Greenference"');
     expect(html).not.toContain('aria-label="Greenference API key"');
+    expect(html).not.toContain("<input");
+  });
+});
+
+describe("SecretRequestCard Gemini copy", () => {
+  it("localizes the Gemini title, description and password field without changing the saved card", () => {
+    const message = namedCard("geminiTtsKey", "Para preparar o resumo solicitado.");
+    const render = () => renderToStaticMarkup(createElement(SecretRequestCard, { botId: "bot-1", threadId: "thread-1", message }));
+    const english = render();
+    expect(english).toContain('aria-label="Gemini speech API key"');
+    expect(english).toContain(CREDENTIAL_TARGETS.geminiTtsKey.description);
+    expect(english).toContain('placeholder="Paste your Google AI Studio API key"');
+    expect(english).toContain(escapedText(message.secret!.description));
+    setLocale("pt-br");
+    const portuguese = render();
+    expect(portuguese).toContain('aria-label="Chave de API de voz do Gemini"');
+    expect(portuguese).toContain("Gera respostas faladas, mensagens de voz e a fala das chamadas com o Gemini. Para preparar o resumo solicitado. Scout pode usar o valor, mas nunca consegue lê-lo.");
+    expect(portuguese).toContain('placeholder="Cole sua chave de API do Google AI Studio"');
+    expect(portuguese).toContain(CREDENTIAL_TARGETS.geminiTtsKey.helpUrl);
+    expect(message.secret).toMatchObject({ target: "geminiTtsKey", description: `${CREDENTIAL_TARGETS.geminiTtsKey.description} Para preparar o resumo solicitado. Scout can use it but never read it back.` });
+    setLocale("en");
+    expect(render()).toBe(english);
+  });
+
+  it.each([
+    { stopped: true },
+    { superseded: true },
+    { provided: true, resumed: true },
+  ])("localizes the Gemini label in settled states %j", (state) => {
+    setLocale("pt-br");
+    const html = view({ target: "geminiTtsKey", ...CREDENTIAL_TARGETS.geminiTtsKey, ...state });
+    expect(html).toContain('data-ask-card="settled"');
+    expect(html).toContain('aria-label="Chave de API de voz do Gemini"');
+    expect(html).not.toContain('aria-label="Gemini speech API key"');
     expect(html).not.toContain("<input");
   });
 });
