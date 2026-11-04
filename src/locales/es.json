@@ -5756,5 +5756,7 @@
   "voice.everyReply.follow": "Usar tu ajuste de voz",
   "voice.yourVoice": "Tu voz de {provider}",
   "voice.usesYours": "Este bot habla con tu voz de {provider}. Elige otra arriba para darle una propia.",
-  "voice.usesOwn": "Este bot habla con su propia voz."
+  "voice.usesOwn": "Este bot habla con su propia voz.",
+  "server.voice.noNoteNoVoice": "Sin nota de voz en esta respuesta: este bot todavía no tiene una voz configurada.",
+  "server.voice.noNoteFailed": "Sin nota de voz en esta respuesta: no se pudo generar la voz ({reason})."
 }

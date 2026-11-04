@@ -4639,5 +4639,7 @@
   "voice.everyReply.follow": "改為跟隨你的語音設定",
   "voice.yourVoice": "你的 {provider} 聲音",
   "voice.usesYours": "這個機器人用你的 {provider} 聲音說話。在上方另選一個，就能給它專屬聲音。",
-  "voice.usesOwn": "這個機器人用自己的聲音說話。"
+  "voice.usesOwn": "這個機器人用自己的聲音說話。",
+  "server.voice.noNoteNoVoice": "這則回覆沒有語音留言：這個機器人還沒有設定聲音。",
+  "server.voice.noNoteFailed": "這則回覆沒有語音留言：無法產生聲音（{reason}）。"
 }

@@ -2814,5 +2814,7 @@
   "voice.everyReply.follow": "अपनी वॉइस सेटिंग अपनाएँ",
   "voice.yourVoice": "आपकी {provider} आवाज़",
   "voice.usesYours": "यह बॉट आपकी {provider} आवाज़ में बोलता है। इसे अपनी अलग आवाज़ देने के लिए ऊपर कोई दूसरी चुनें।",
-  "voice.usesOwn": "यह बॉट अपनी आवाज़ में बोलता है।"
+  "voice.usesOwn": "यह बॉट अपनी आवाज़ में बोलता है।",
+  "server.voice.noNoteNoVoice": "इस जवाब के साथ वॉइस नोट नहीं: इस बॉट के लिए अभी कोई आवाज़ सेट नहीं है।",
+  "server.voice.noNoteFailed": "इस जवाब के साथ वॉइस नोट नहीं: आवाज़ नहीं बन सकी ({reason})।"
 }

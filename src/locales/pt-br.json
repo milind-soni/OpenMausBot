@@ -6432,5 +6432,7 @@
   "server.browser.stoppedWaiting": "Parou de aguardar o navegador.",
   "composer.queued.capacityStarter": "Na fila. O Starter executa uma conversa por vez em cada bot, então esta começa quando a atual terminar. Um plano maior executa mais.",
   "composer.queued.seePlans": "Ver planos",
-  "settings.threads.starter": "O Starter executa uma conversa por vez em cada bot, e um plano maior executa mais. O trabalho que um bot inicia por conta própria ainda é executado, e cada bot tem a sua."
+  "settings.threads.starter": "O Starter executa uma conversa por vez em cada bot, e um plano maior executa mais. O trabalho que um bot inicia por conta própria ainda é executado, e cada bot tem a sua.",
+  "server.voice.noNoteNoVoice": "Sem nota de voz nesta resposta: este bot ainda não tem uma voz configurada.",
+  "server.voice.noNoteFailed": "Sem nota de voz nesta resposta: não foi possível gerar a voz ({reason})."
 }

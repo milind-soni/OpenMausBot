@@ -7359,5 +7359,7 @@
   "server.browser.stoppedWaiting": "已停止等待浏览器。",
   "composer.queued.capacityStarter": "排队中。Starter 每个机器人一次运行一个对话，所以这条会在当前对话结束后开始。更大的方案可以运行更多。",
   "composer.queued.seePlans": "查看方案",
-  "settings.threads.starter": "Starter 每个机器人一次运行一个对话，更大的方案可以运行更多。机器人自己发起的工作仍会运行，每个机器人各有一个。"
+  "settings.threads.starter": "Starter 每个机器人一次运行一个对话，更大的方案可以运行更多。机器人自己发起的工作仍会运行，每个机器人各有一个。",
+  "server.voice.noNoteNoVoice": "这条回复没有语音留言：这个机器人还没有设置声音。",
+  "server.voice.noNoteFailed": "这条回复没有语音留言：无法生成声音（{reason}）。"
 }

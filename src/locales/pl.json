@@ -6554,5 +6554,7 @@
   "server.browser.stoppedWaiting": "Przestano czekać na przeglądarkę.",
   "composer.queued.capacityStarter": "W kolejce. Starter uruchamia jeden wątek naraz na bota, więc ten ruszy, gdy skończy się bieżący. Większy plan uruchamia więcej.",
   "composer.queued.seePlans": "Zobacz plany",
-  "settings.threads.starter": "Starter uruchamia jeden wątek naraz na bota, a większy plan więcej. Praca, którą bot zaczyna sam, i tak się wykonuje, a każdy bot ma swój wątek."
+  "settings.threads.starter": "Starter uruchamia jeden wątek naraz na bota, a większy plan więcej. Praca, którą bot zaczyna sam, i tak się wykonuje, a każdy bot ma swój wątek.",
+  "server.voice.noNoteNoVoice": "Brak notatki głosowej do tej odpowiedzi: ten bot nie ma jeszcze ustawionego głosu.",
+  "server.voice.noNoteFailed": "Brak notatki głosowej do tej odpowiedzi: nie udało się wygenerować głosu ({reason})."
 }

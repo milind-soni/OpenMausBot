@@ -5247,5 +5247,7 @@
   "voice.everyReply.follow": "Dùng cài đặt giọng nói của bạn",
   "voice.yourVoice": "Giọng {provider} của bạn",
   "voice.usesYours": "Bot này nói bằng giọng {provider} của bạn. Chọn giọng khác ở trên để bot có giọng riêng.",
-  "voice.usesOwn": "Bot này nói bằng giọng riêng."
+  "voice.usesOwn": "Bot này nói bằng giọng riêng.",
+  "server.voice.noNoteNoVoice": "Không có ghi chú thoại cho câu trả lời này: bot này chưa được thiết lập giọng nói.",
+  "server.voice.noNoteFailed": "Không có ghi chú thoại cho câu trả lời này: không tạo được giọng nói ({reason})."
 }

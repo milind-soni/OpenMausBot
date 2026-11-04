@@ -5247,5 +5247,7 @@
   "voice.everyReply.follow": "Ses ayarınızı kullan",
   "voice.yourVoice": "{provider} sesiniz",
   "voice.usesYours": "Bu bot {provider} sesinizle konuşur. Ona kendi sesini vermek için yukarıdan başka bir ses seçin.",
-  "voice.usesOwn": "Bu bot kendi sesiyle konuşur."
+  "voice.usesOwn": "Bu bot kendi sesiyle konuşur.",
+  "server.voice.noNoteNoVoice": "Bu yanıt için sesli not yok: bu botun henüz ayarlanmış bir sesi yok.",
+  "server.voice.noNoteFailed": "Bu yanıt için sesli not yok: ses oluşturulamadı ({reason})."
 }

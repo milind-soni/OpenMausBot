@@ -2868,5 +2868,7 @@
   "voice.everyReply.follow": "Deiner Spracheinstellung folgen",
   "voice.yourVoice": "Deine {provider}-Stimme",
   "voice.usesYours": "Dieser Bot spricht mit deiner {provider}-Stimme. Wähl oben eine andere, um ihm eine eigene zu geben.",
-  "voice.usesOwn": "Dieser Bot spricht mit seiner eigenen Stimme."
+  "voice.usesOwn": "Dieser Bot spricht mit seiner eigenen Stimme.",
+  "server.voice.noNoteNoVoice": "Keine Sprachnachricht zu dieser Antwort: Für diesen Bot ist noch keine Stimme eingerichtet.",
+  "server.voice.noNoteFailed": "Keine Sprachnachricht zu dieser Antwort: Die Stimme konnte nicht erzeugt werden ({reason})."
 }

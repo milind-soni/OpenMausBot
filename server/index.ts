@@ -2853,7 +2853,7 @@ const store = new Store(
   () => sharedMembership() ? undefined : cfg.profile?.name,
 );
 const { messagePage, messageWindow } = messagePages(store);
-const replyVoiceNotes = createReplyVoiceNotes({ store, config: () => cfg, voiceReady: tts.voiceReady, speak: tts.speak, save: saveAudio, remove: deleteAttachment, redact: redactSecretsInText });
+const replyVoiceNotes = createReplyVoiceNotes({ store, config: () => cfg, voiceReady: tts.voiceReady, speak: tts.speak, save: saveAudio, remove: deleteAttachment, redact: redactSecretsInText, language: threadLanguage });
 const { cloudLendingTurn, cloudLendingRefusalNotice, cloudLendingRefusal, cloudThreadStarters, cloudLendingView, cloudReportFromOthers, roomTurnStarted, roomTurnEnded, roomRun } = createCloudLendingTurns({
   store, cloudHome: CLOUD_HOME !== null, team: CLOUD_TEAM?.name ?? null, directRequest: (threadId) => directRequestOwners.get(threadId), threadStarter: (threadId) => threadStarters.get(threadId),
   ownerPerson: cloudProvenOwnerPerson, cardAnswerer: cloudCardAnswerer, activeRoutineRun: activeRoutineRunForThread, ownerStartedRun: (runId) => ownerStartedRoutineRuns.has(runId),

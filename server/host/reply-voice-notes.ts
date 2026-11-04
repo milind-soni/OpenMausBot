@@ -2,6 +2,7 @@
 // it the way a send_voice_note clip lands, so every engine gets it.
 import type { AppConfig } from "../config.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
+import { serverLine, type ServerLineKey } from "../server-lines.ts";
 import { speakable } from "../tts/speech-text.ts";
 
 /** The longest note, the same bound send_voice_note keeps. */
@@ -31,6 +32,8 @@ export interface ReplyVoiceNoteDeps {
   save(bytes: Buffer, mime: string): { path: string; mime: string };
   remove(path: string): void;
   redact(text: string): string;
+  /** The language a line in this conversation is written in. */
+  language(threadId: string): string | undefined;
 }
 
 export interface SettledTurn {
@@ -48,11 +51,11 @@ const audio = (message: Message) => message.attachments?.some((file) => file.kin
 export function createReplyVoiceNotes(deps: ReplyVoiceNoteDeps) {
   const told = new Set<string>();
   // Quiet and once per bot and cause: a missing voice must not add a line to every reply.
-  const tellOnce = (bot: BotRecord, threadId: string, why: string) => {
+  const tellOnce = (bot: BotRecord, threadId: string, why: ServerLineKey, params?: Record<string, string>) => {
     const key = `${bot.id}:${why}`;
     if (told.has(key)) return;
     told.add(key);
-    deps.store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `notice: No voice note with this reply — ${why}`, ok: true } });
+    deps.store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${serverLine(deps.language(threadId), why, params)}`, ok: true } });
   };
 
   /** Resolves once the note is attached or skipped; never throws. */
@@ -64,13 +67,13 @@ export function createReplyVoiceNotes(deps: ReplyVoiceNoteDeps) {
     const reply = lines.findLast((message) => message.turnTerminal) ?? lines.at(-1);
     const words = replyNoteWords(reply?.text ?? "");
     if (!reply || !words) return;
-    if (!deps.voiceReady(cfg, turn.bot.voice)) return tellOnce(turn.bot, turn.threadId, "no voice is set up in Settings → Voice.");
+    if (!deps.voiceReady(cfg, turn.bot.voice)) return tellOnce(turn.bot, turn.threadId, "server.voice.noNoteNoVoice");
     let saved: { path: string; mime: string } | undefined;
     try {
       const spoken = await deps.speak(cfg, words, turn.bot.voice);
       saved = deps.save(Buffer.from(spoken.bytes), spoken.mime);
     } catch (error) {
-      return tellOnce(turn.bot, turn.threadId, `the voice could not be made (${error instanceof Error ? error.message : String(error)}).`.slice(0, 240));
+      return tellOnce(turn.bot, turn.threadId, "server.voice.noNoteFailed", { reason: (error instanceof Error ? error.message : String(error)).slice(0, 200) });
     }
     const current = deps.store.messagesFor(turn.threadId).find((message) => message.id === reply.id);
     if (!current || audio(current)) return deps.remove(saved.path);

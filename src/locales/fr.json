@@ -2814,5 +2814,7 @@
   "voice.everyReply.follow": "Suivre votre réglage Voix",
   "voice.yourVoice": "Votre voix {provider}",
   "voice.usesYours": "Ce bot parle avec votre voix {provider}. Choisissez-en une autre ci-dessus pour lui donner la sienne.",
-  "voice.usesOwn": "Ce bot parle avec sa propre voix."
+  "voice.usesOwn": "Ce bot parle avec sa propre voix.",
+  "server.voice.noNoteNoVoice": "Pas de note vocale pour cette réponse : ce bot n’a pas encore de voix configurée.",
+  "server.voice.noNoteFailed": "Pas de note vocale pour cette réponse : la voix n’a pas pu être générée ({reason})."
 }

@@ -7476,5 +7476,7 @@
   "grokMove.alreadyHere": "Already here: {names}",
   "grokMove.unreadable": "Couldn't be read: {names}",
   "grokMove.notAdded": "Couldn't be added: {names}",
-  "grokMove.isHere": "{name} is here"
+  "grokMove.isHere": "{name} is here",
+  "server.voice.noNoteNoVoice": "No voice note with this reply: this bot has no voice set up yet.",
+  "server.voice.noNoteFailed": "No voice note with this reply: the voice couldn't be made ({reason})."
 }

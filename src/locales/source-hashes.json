@@ -2841,7 +2841,9 @@
       "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
       "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
       "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
-      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f",
+      "server.voice.noNoteNoVoice": "1fb14aae422d7adc8da5c5b630687004182e41df6a9b542c34ed4dc9c6ec5843",
+      "server.voice.noNoteFailed": "08294ebbdaa0d2d5bd7c479e6d8619c8d11b6d4a5e967ceace37f9df860a4c87"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -8572,7 +8574,9 @@
       "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
       "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
       "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
-      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f",
+      "server.voice.noNoteNoVoice": "1fb14aae422d7adc8da5c5b630687004182e41df6a9b542c34ed4dc9c6ec5843",
+      "server.voice.noNoteFailed": "08294ebbdaa0d2d5bd7c479e6d8619c8d11b6d4a5e967ceace37f9df860a4c87"
     },
     "fr": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -11360,7 +11364,9 @@
       "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
       "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
       "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
-      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f",
+      "server.voice.noNoteNoVoice": "1fb14aae422d7adc8da5c5b630687004182e41df6a9b542c34ed4dc9c6ec5843",
+      "server.voice.noNoteFailed": "08294ebbdaa0d2d5bd7c479e6d8619c8d11b6d4a5e967ceace37f9df860a4c87"
     },
     "hi": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -14148,7 +14154,9 @@
       "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
       "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
       "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
-      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f",
+      "server.voice.noNoteNoVoice": "1fb14aae422d7adc8da5c5b630687004182e41df6a9b542c34ed4dc9c6ec5843",
+      "server.voice.noNoteFailed": "08294ebbdaa0d2d5bd7c479e6d8619c8d11b6d4a5e967ceace37f9df860a4c87"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -20763,7 +20771,9 @@
       "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
       "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
       "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
-      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f",
+      "server.voice.noNoteNoVoice": "1fb14aae422d7adc8da5c5b630687004182e41df6a9b542c34ed4dc9c6ec5843",
+      "server.voice.noNoteFailed": "08294ebbdaa0d2d5bd7c479e6d8619c8d11b6d4a5e967ceace37f9df860a4c87"
     },
     "pt-br": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -27172,7 +27182,9 @@
       "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
       "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
       "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
-      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f",
+      "server.voice.noNoteNoVoice": "1fb14aae422d7adc8da5c5b630687004182e41df6a9b542c34ed4dc9c6ec5843",
+      "server.voice.noNoteFailed": "08294ebbdaa0d2d5bd7c479e6d8619c8d11b6d4a5e967ceace37f9df860a4c87"
     },
     "zh": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -34487,7 +34499,9 @@
       "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
       "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
       "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
-      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f",
+      "server.voice.noNoteNoVoice": "1fb14aae422d7adc8da5c5b630687004182e41df6a9b542c34ed4dc9c6ec5843",
+      "server.voice.noNoteFailed": "08294ebbdaa0d2d5bd7c479e6d8619c8d11b6d4a5e967ceace37f9df860a4c87"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -39101,7 +39115,9 @@
       "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
       "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
       "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
-      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f",
+      "server.voice.noNoteNoVoice": "1fb14aae422d7adc8da5c5b630687004182e41df6a9b542c34ed4dc9c6ec5843",
+      "server.voice.noNoteFailed": "08294ebbdaa0d2d5bd7c479e6d8619c8d11b6d4a5e967ceace37f9df860a4c87"
     },
     "uk": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -42330,7 +42346,9 @@
       "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
       "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
       "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
-      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f",
+      "server.voice.noNoteNoVoice": "1fb14aae422d7adc8da5c5b630687004182e41df6a9b542c34ed4dc9c6ec5843",
+      "server.voice.noNoteFailed": "08294ebbdaa0d2d5bd7c479e6d8619c8d11b6d4a5e967ceace37f9df860a4c87"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -47552,7 +47570,9 @@
       "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
       "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
       "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
-      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f",
+      "server.voice.noNoteNoVoice": "1fb14aae422d7adc8da5c5b630687004182e41df6a9b542c34ed4dc9c6ec5843",
+      "server.voice.noNoteFailed": "08294ebbdaa0d2d5bd7c479e6d8619c8d11b6d4a5e967ceace37f9df860a4c87"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -52774,7 +52794,9 @@
       "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
       "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
       "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
-      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f",
+      "server.voice.noNoteNoVoice": "1fb14aae422d7adc8da5c5b630687004182e41df6a9b542c34ed4dc9c6ec5843",
+      "server.voice.noNoteFailed": "08294ebbdaa0d2d5bd7c479e6d8619c8d11b6d4a5e967ceace37f9df860a4c87"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -59305,7 +59327,9 @@
       "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
       "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
       "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
-      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f",
+      "server.voice.noNoteNoVoice": "1fb14aae422d7adc8da5c5b630687004182e41df6a9b542c34ed4dc9c6ec5843",
+      "server.voice.noNoteFailed": "08294ebbdaa0d2d5bd7c479e6d8619c8d11b6d4a5e967ceace37f9df860a4c87"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -65898,7 +65922,9 @@
       "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
       "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
       "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
-      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f",
+      "server.voice.noNoteNoVoice": "1fb14aae422d7adc8da5c5b630687004182e41df6a9b542c34ed4dc9c6ec5843",
+      "server.voice.noNoteFailed": "08294ebbdaa0d2d5bd7c479e6d8619c8d11b6d4a5e967ceace37f9df860a4c87"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -72289,7 +72315,9 @@
       "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
       "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
       "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
-      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f",
+      "server.voice.noNoteNoVoice": "1fb14aae422d7adc8da5c5b630687004182e41df6a9b542c34ed4dc9c6ec5843",
+      "server.voice.noNoteFailed": "08294ebbdaa0d2d5bd7c479e6d8619c8d11b6d4a5e967ceace37f9df860a4c87"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -79405,7 +79433,9 @@
       "voice.everyReply.follow": "90c662ed6b80a99a0a0a2b5f878515ff0348b94d5e99549a94275823a6d71294",
       "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
       "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
-      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f"
+      "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f",
+      "server.voice.noNoteNoVoice": "1fb14aae422d7adc8da5c5b630687004182e41df6a9b542c34ed4dc9c6ec5843",
+      "server.voice.noNoteFailed": "08294ebbdaa0d2d5bd7c479e6d8619c8d11b6d4a5e967ceace37f9df860a4c87"
     }
   }
 }

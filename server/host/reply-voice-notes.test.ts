@@ -38,6 +38,7 @@ function harness(messages: Message[], cfg: AppConfig = { tts: { everyReply: true
     save: vi.fn(() => ({ path: "/a/note.mp3", mime: "audio/mpeg" })),
     remove: vi.fn(),
     redact: (text: string) => text,
+    language: () => undefined,
   };
   return { deps, appended, notes: createReplyVoiceNotes(deps as any) };
 }

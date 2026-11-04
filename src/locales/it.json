@@ -6414,5 +6414,7 @@
   "server.browser.stoppedWaiting": "Attesa del browser interrotta.",
   "composer.queued.capacityStarter": "In coda. Starter esegue un thread alla volta per bot, quindi questo parte quando finisce quello in corso. Un piano più grande ne esegue di più.",
   "composer.queued.seePlans": "Vedi i piani",
-  "settings.threads.starter": "Starter esegue un thread alla volta per bot, un piano più grande ne esegue di più. Il lavoro che un bot avvia da solo viene comunque eseguito, e ogni bot ha il suo."
+  "settings.threads.starter": "Starter esegue un thread alla volta per bot, un piano più grande ne esegue di più. Il lavoro che un bot avvia da solo viene comunque eseguito, e ogni bot ha il suo.",
+  "server.voice.noNoteNoVoice": "Nessuna nota vocale con questa risposta: questo bot non ha ancora una voce impostata.",
+  "server.voice.noNoteFailed": "Nessuna nota vocale con questa risposta: non è stato possibile creare la voce ({reason})."
 }
