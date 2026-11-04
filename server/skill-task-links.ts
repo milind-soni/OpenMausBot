@@ -1,6 +1,14 @@
-import { syncImportedSkillLinks, type ImportedSkillView } from "./imported-skills.ts";
-import { syncSkillLinks } from "./skills.ts";
+import { join } from "node:path";
+
+import { IMPORTED_SKILLS_DIR, readImportedSkills, syncImportedSkillLinks, type ImportedSkillView } from "./imported-skills.ts";
+import type { HarnessSkillLinks } from "./lending-memory.ts";
+import { ownSkillLinks, syncSkillLinks } from "./skills.ts";
 import { ensureTaskWorkspace } from "./workspace.ts";
+
+/** Every link this file's two syncs may put in a bot's folders. */
+export function harnessSkillLinks(botId: string): HarnessSkillLinks {
+  return { own: ownSkillLinks(botId), imported: new Map(Object.keys(readImportedSkills()).map((name) => [name, join(IMPORTED_SKILLS_DIR, name)])) };
+}
 
 export function syncTaskSkillLinks(
   botId: string,

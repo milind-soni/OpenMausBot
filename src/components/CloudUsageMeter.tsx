@@ -99,7 +99,7 @@ export async function confirmUpgrade(bridge: CloudPlanBridge, preview: CloudUpgr
 }
 
 /** `onUpgraded`: the plan the person's Cloud is on now, once an upgrade went through. */
-export function useUpgrade(bridge: CloudPlanBridge | undefined, usage: CloudUsage | null, source: UpgradeSource, onUpgraded?: (tier: string) => void) {
+export function useUpgrade(bridge: CloudPlanBridge | undefined, usage: CloudUsage | null, source: UpgradeSource, onUpgraded?: (tier: string) => void, dialogLayer?: string) {
   const [busy, setBusy] = useState<"preview" | "change" | null>(null);
   const [preview, setPreview] = useState<CloudUpgradePreview | null>(null);
   const [note, setNote] = useState<UpgradeNote | null>(null);
@@ -133,6 +133,7 @@ export function useUpgrade(bridge: CloudPlanBridge | undefined, usage: CloudUsag
       confirmLabel={preview ? t("usageMeter.confirm.action", { plan: cloudPlanLabel(preview.plan) }) : ""}
       cancelLabel={t("usageMeter.confirm.cancel")}
       pending={busy === "change"}
+      layer={dialogLayer}
       onCancel={() => { if (busy !== "change") setPreview(null); }}
       onConfirm={confirm}
     />

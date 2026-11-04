@@ -234,3 +234,32 @@ describe("the person's line about an incident", () => {
     expect(f.turnsOf("chief")[0]!.text).toContain("Ada's run in its thread #Invoices stopped after showing no activity");
   });
 });
+
+describe("a problem in a conversation that runs confined", () => {
+  it("reaches a person, never a Chief's turn at the Chief's own level", () => {
+    const notify = vi.fn();
+    const f = fixture({ confined: (threadId) => threadId === "ada-job", notify });
+    f.notices.reportIncident({ kind: "failed", bot: f.ada as never, threadId: "ada-job", detail: "the turn stopped" });
+    expect(f.startTurn).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledOnce();
+  });
+
+  it("is not started again by itself through a Chief", () => {
+    const f = fixture({ confined: (threadId) => threadId === "ada-job" });
+    f.notices.reportIncident({ kind: "failed", bot: f.ada as never, threadId: "ada-job", detail: "the turn stopped" });
+    expect(f.turnsOf("ada")).toEqual([]);
+  });
+
+  it("leaves an escalation with a person too", () => {
+    const notify = vi.fn();
+    const f = fixture({ confined: (threadId) => threadId === "ada-job", notify });
+    expect(f.notices.reportEscalation({ kind: "needs-input", bot: f.ada as never, threadId: "ada-job", gate: "a card", reason: "waiting", alreadyNotified: false })).toBe("person");
+    expect(f.startTurn).not.toHaveBeenCalled();
+  });
+
+  it("a conversation that is not confined still reaches its Chief", () => {
+    const f = fixture({ confined: () => false });
+    f.notices.reportIncident({ kind: "stalled", bot: f.ada as never, threadId: "ada-job", detail: "no activity" });
+    expect(f.turnsOf("chief")).toHaveLength(1);
+  });
+});

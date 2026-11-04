@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { queuedBehindPersonText, settledWaitingChip, UnansweredApprovals } from "./waiting-on-person.ts";
+import { queuedBehindPersonText, settledWaitingChip, turnWaitedOnPerson, UnansweredApprovals } from "./waiting-on-person.ts";
 
 describe("the waiting-on-you chip once its card settles", () => {
   it.each([
@@ -17,6 +17,15 @@ describe("the waiting-on-you chip once its card settles", () => {
     ["answer", "answer", "system", "@Mira's turn ended before anyone answered its question", false],
   ] as const)("a %s settled %s by %s reads %j", (kind, behavior, source, name, ok) => {
     expect(settledWaitingChip("Mira", kind, behavior, source)).toEqual({ name, ok });
+  });
+});
+
+describe("an answer the person gives", () => {
+  it("sets a running turn that waited on them working again, and leaves a conversation resting on a card waiting", () => {
+    expect(turnWaitedOnPerson({ activity: "waiting-on-you", busy: true })).toBe(true);
+    expect(turnWaitedOnPerson({ activity: "waiting-on-you", busy: false })).toBe(false);
+    expect(turnWaitedOnPerson({ activity: "idle", busy: false })).toBe(false);
+    expect(turnWaitedOnPerson(undefined)).toBe(false);
   });
 });
 

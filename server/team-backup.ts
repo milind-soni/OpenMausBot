@@ -55,6 +55,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
     return tasks.filter((task) => shown(task.threadId)).map((task) => ({
       key: task.threadId, title: task.title, createdAt: task.createdAt,
       titleFromFirstMessage: "titleFromFirstMessage" in task && task.titleFromFirstMessage || undefined,
+      outside: "outside" in task && task.outside || undefined,
       openedBy: "openedBy" in task && task.openedBy
         ? { botId: task.openedBy.botId, name: task.openedBy.name, at: task.openedBy.at,
             ...(task.openedBy.kind ? { kind: task.openedBy.kind } : {}) }
@@ -192,7 +193,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
         const record: TaskRecord = {
           threadId: i === 0 ? bot.threadId : newId(), title: task.title, createdAt: task.createdAt, resumeCursors: {},
           activity: "idle" as const, busy: false, unread: false,
-          ...(task.titleFromFirstMessage ? { titleFromFirstMessage: true } : {}),
+          ...(task.titleFromFirstMessage ? { titleFromFirstMessage: true } : {}), ...(task.outside ? { outside: true } : {}),
         };
         const opener = task.openedBy && botIds.get(task.openedBy.botId);
         if (task.openedBy && opener) record.openedBy = { botId: opener, name: task.openedBy.name, at: task.openedBy.at, ...(task.openedBy.kind ? { kind: task.openedBy.kind } : {}) };
