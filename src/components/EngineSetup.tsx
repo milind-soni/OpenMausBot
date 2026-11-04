@@ -428,6 +428,22 @@ export function ApiKeyHint({ instance }: { instance: InstanceInfo }) {
   );
 }
 
+export function InstanceAccountNotes({ instance, listsModels }: { instance: InstanceInfo; listsModels: boolean }) {
+  const account = instance.snapshot.authenticated && instance.snapshot.account
+    ? [instance.snapshot.account.email, instance.snapshot.account.organization].filter(Boolean).join(" · ")
+    : null;
+  return (
+    <>
+      {account !== null && <p className="mt-1 truncate text-[12px] leading-4 text-ink-tertiary" title={account}>{account}</p>}
+      {instance.modelsUnconfirmed && listsModels && (
+        <p data-models-unconfirmed className="mt-1 text-[12px] leading-4 text-ink-tertiary">
+          {t("model.unconfirmed", { name: instance.displayName })}
+        </p>
+      )}
+    </>
+  );
+}
+
 function GrokKeyInstead({ className, unframed }: { className?: string; unframed: boolean }) {
   const remote = window.ogb?.remoteClient?.active === true;
   return (

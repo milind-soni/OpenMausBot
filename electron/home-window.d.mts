@@ -7,7 +7,8 @@ export type HomeView = { name?: string } & (
   | { screen: "setup"; step?: import("./cloud-home.mjs").CloudSetupStep; slow?: true }
   | { screen: "offline"; reason?: string }
   | { screen: "signin"; other?: true }
-  | { screen: "plan"; machine: "stopped" | "payment-problem" | "failed" }
+  /** `member`: a team's User, who can't subscribe or pay for it and is sent to its owner. */
+  | { screen: "plan"; machine: "stopped" | "payment-problem" | "failed"; member?: true }
   /** A Cloud the session's list says isn't running, so nothing looks up its address: it has ended (`deleteAt`: when its kept
    * files are deleted), its checkout wasn't finished, or its payment has a problem; `removable` while its owner may take it
    * off their list. */
@@ -61,6 +62,7 @@ export function splashText(status: "opening" | "waking", name?: string | null): 
 export function placeOf(input: { ask?: HomeAsk; remembered?: RememberedPlace; state?: any }): { kind: "cloud"; left?: string | null } | { kind: "team" | "own"; id: string; name: string; role: string | null; origin: string | null; machine: any };
 
 export function homeOf(input: { journal?: any; frozenCloud?: string | true | null; state?: any }): Home;
+export function noWayHome(worked: Home, state?: any): boolean;
 export function routeOf(url: string, origin: string): string | null;
 
 interface WindowLike { isDestroyed(): boolean; webContents: { id: number; getURL(): string; reload(): void; mainFrame?: unknown } }
@@ -109,6 +111,7 @@ export function createHomeWindow(deps: {
   power: { asleep(): boolean; hold(): void; woke(): void };
   go(url: string, origin: string | null, place: HomePlace | null): unknown;
   showLocal(leaving: boolean): unknown;
+  clean?: import("./clean-workspace.mjs").CleanWorkspace | null;
   remembered?(): RememberedPlace;
   remember?(place: { team: string } | { cloud: string } | null): void;
   left?(name: string): void;

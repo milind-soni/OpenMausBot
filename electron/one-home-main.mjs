@@ -117,7 +117,9 @@ async function answer(response) {
  *   keep?: { read(): unknown, write(value: unknown): void },
  *   reportTimers?: { set(work: () => void, ms: number): unknown, clear(timer: unknown): void },
  *   other?(): null | { view(): unknown, seen(): unknown, retry(): Promise<unknown>, active(): boolean },
- * }} deps `localRequest`: this computer's server, as its owner (main adds the owner's header). `account`: the MausBot
+ *   clean?: import("./clean-workspace.mjs").CleanWorkspace | null,
+ * }} deps `localRequest`: this computer's server, as its owner (main adds the owner's header), and only its own copy while `clean`
+ * (the clean workspace) runs. `account`: the MausBot
  * Cloud sign-in (cloud-account.mjs). `journal`: where the move's journal is kept, journalFile by default; `keep`: the
  * person's choice to keep this computer's bots here, one-home-keep.json beside it by default. `openTeam`:
  * shows a team's page, where a bot moved into it from My Cloud now lives (team-move-main.mjs, whose journal is
@@ -126,9 +128,11 @@ async function answer(response) {
  * while it is chosen no move to My Cloud starts, and its line is the one this computer's page shows. The rest are
  * installCloudSend's.
  */
-export function installOneHome({ localRequest, account, journalFile, tempRoot, lend, phone, openHome, openLocal, restart, version, log = () => {}, journal: kept, keep: keptChoice, openTeam, teamJournal,
+export function installOneHome({ localRequest: anyServer, clean = null, account, journalFile, tempRoot, lend, phone, openHome, openLocal, restart, version, log = () => {}, journal: kept, keep: keptChoice, openTeam, teamJournal,
   reportTimers, other = () => null, ...sendDeps }) {
   const fetchImpl = sendDeps.fetch ?? globalThis.fetch;
+  const localRequest = clean ? clean.realCopy(anyServer) : anyServer;
+  const onOwnCopy = (work) => (clean ? clean.holding(work) : work());
   let home = null;
   let lastInput = 0;
   const watched = new WeakSet();
@@ -225,13 +229,13 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
       ...local,
       freeze: async (origin) => freezeAnswer(await local.call("POST", "/api/move/freeze", { cloud: origin })),
       async unfreeze(options) {
-        const got = await local.call("DELETE", "/api/move/freeze", options?.automations === "off" ? { automations: "off" } : undefined);
+        const got = await onOwnCopy(() => local.call("DELETE", "/api/move/freeze", options?.automations === "off" ? { automations: "off" } : undefined));
         if (!got.ok) throw Object.assign(new Error("OpenMausBot on this computer could not go on again."), { status: got.status });
       },
       frozen: async () => (await local.json("/api/move/freeze"))?.frozen === true,
       marker: () => local.json("/api/move/freeze"),
       async forget() {
-        const got = await local.call("POST", "/api/move/forget");
+        const got = await onOwnCopy(() => local.call("POST", "/api/move/forget"));
         if (!got.ok) throw Object.assign(new Error("This computer's copy could not be deleted."), { status: got.status });
       },
     },
@@ -252,6 +256,7 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
       return Boolean(client?.reportKept && mine && await client.reportKept({ installation: mine }));
     },
     lastInput: typed,
+    ownCopy: () => clean?.ownCopy() ?? true,
     onChange: () => { send.publish(); report.changed(); },
   });
 

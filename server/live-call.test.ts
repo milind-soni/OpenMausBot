@@ -1,6 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { createServer, type IncomingMessage, type RequestListener, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import type { Duplex } from "node:stream";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { openLiveSocket } from "./live-call-controller.ts";
 import {
+  azureLiveEndpoint,
+  azureOpenAiRoot,
   createLiveSession,
   DEFAULT_LIVE_VOICE,
   LIVE_MODEL,
@@ -13,6 +19,9 @@ import {
   liveInstructions,
   liveSessionsUrl,
   MAX_SDP_BYTES,
+  spokenHangUp,
+  openAiLiveEndpoint,
+  type LiveEndpoint,
 } from "./live-call.ts";
 import { CLOUD_HOME_PLACE } from "./system-prompt.ts";
 
@@ -222,17 +231,143 @@ describe("session config for the untrusted client", () => {
 
 describe("live URLs", () => {
   it("uses OpenAI unless a loopback test server is set", () => {
-    expect(liveSessionsUrl({})).toBe("https://api.openai.com/v1/live/sessions");
-    expect(liveAttachUrl("sess_1", {})).toBe("wss://api.openai.com/v1/live/sessions/sess_1/attach");
+    expect(liveSessionsUrl(openAiLiveEndpoint({}))).toBe("https://api.openai.com/v1/live/sessions");
+    expect(liveAttachUrl("sess_1", openAiLiveEndpoint({}))).toBe("wss://api.openai.com/v1/live/sessions/sess_1/attach");
     const env = { OMB_OPENAI_LIVE_URL: "http://127.0.0.1:4555" };
-    expect(liveSessionsUrl(env)).toBe("http://127.0.0.1:4555/v1/live/sessions");
-    expect(liveAttachUrl("sess_1", env)).toBe("ws://127.0.0.1:4555/v1/live/sessions/sess_1/attach");
+    expect(liveSessionsUrl(openAiLiveEndpoint(env))).toBe("http://127.0.0.1:4555/v1/live/sessions");
+    expect(liveAttachUrl("sess_1", openAiLiveEndpoint(env))).toBe("ws://127.0.0.1:4555/v1/live/sessions/sess_1/attach");
   });
   it("ignores an override that is not loopback", () => {
     expect(liveBaseUrl({ OMB_OPENAI_LIVE_URL: "http://evil.example:80" })).toBe("https://api.openai.com");
   });
   it("escapes the session id", () => {
-    expect(liveAttachUrl("a/b", {})).toBe("wss://api.openai.com/v1/live/sessions/a%2Fb/attach");
+    expect(liveAttachUrl("a/b", openAiLiveEndpoint({}))).toBe("wss://api.openai.com/v1/live/sessions/a%2Fb/attach");
+  });
+  it("points an Azure call at the resource's v1 API with the deployment as the model", () => {
+    const endpoint = azureLiveEndpoint("https://my-res.openai.azure.com", "my-live")!;
+    expect(endpoint).toEqual({ provider: "azure", apiBase: "https://my-res.openai.azure.com/openai/v1", model: "my-live" });
+    expect(liveSessionsUrl(endpoint)).toBe("https://my-res.openai.azure.com/openai/v1/live/sessions");
+    expect(liveAttachUrl("s/1", endpoint)).toBe("wss://my-res.openai.azure.com/openai/v1/live/sessions/s%2F1/attach");
+    expect(azureLiveEndpoint("https://my-res.openai.azure.com", "")?.model).toBe(LIVE_MODEL);
+  });
+});
+
+describe("azureOpenAiRoot", () => {
+  it("accepts a resource URL however it is pasted", () => {
+    for (const url of [
+      "https://my-res.openai.azure.com",
+      " https://my-res.openai.azure.com/ ",
+      "https://my-res.openai.azure.com/openai/v1",
+      "https://my-res.openai.azure.com/openai/v1/live/sessions?api-version=preview",
+    ]) expect(azureOpenAiRoot(url), url).toBe("https://my-res.openai.azure.com/openai");
+    expect(azureOpenAiRoot("https://proj.services.ai.azure.com")).toBe("https://proj.services.ai.azure.com/openai");
+    expect(azureOpenAiRoot("https://res.cognitiveservices.azure.com/")).toBe("https://res.cognitiveservices.azure.com/openai");
+    expect(azureOpenAiRoot("https://gw.azure-api.net/team-a/openai/v1")).toBe("https://gw.azure-api.net/team-a/openai");
+  });
+  it("refuses anything the key must not be sent to", () => {
+    for (const url of [
+      undefined,
+      "",
+      "my-res.openai.azure.com",
+      "http://my-res.openai.azure.com",
+      "https://openai.azure.com",
+      "https://my-res.openai.azure.com.evil.example",
+      "https://evil.example/my-res.openai.azure.com",
+      "https://user:pw@my-res.openai.azure.com",
+      "https://api.openai.com",
+    ]) expect(azureOpenAiRoot(url), String(url)).toBeNull();
+  });
+  it("refuses a deployment name Azure could not have", () => {
+    expect(azureLiveEndpoint("https://my-res.openai.azure.com", "bad name/../x")).toBeNull();
+  });
+});
+
+describe("the key on real connections, to a loopback server", () => {
+  const servers: Server[] = [];
+  afterEach(() => {
+    for (const server of servers.splice(0)) {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+  const listen = async (onRequest: RequestListener, onUpgrade?: (req: IncomingMessage, socket: Duplex) => void) => {
+    const server = createServer(onRequest);
+    if (onUpgrade) server.on("upgrade", onUpgrade);
+    servers.push(server);
+    await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
+    return (server.address() as AddressInfo).port;
+  };
+  const azureAt = (port: number): LiveEndpoint => ({ provider: "azure", apiBase: `http://127.0.0.1:${port}/openai/v1`, model: "dep" });
+  const openAiAt = (port: number): LiveEndpoint => ({ provider: "openai", apiBase: `http://127.0.0.1:${port}/v1`, model: "dep" });
+  const sessionAt = (endpoint: LiveEndpoint) => createLiveSession({ key: "made-up-key", endpoint, sdp: OFFER, bot: BOT, history: [], cloudHome: false });
+
+  it("refuses a redirect on Azure, so api-key never reaches another host", async () => {
+    const reached: IncomingMessage[] = [];
+    const other = await listen((req, res) => { reached.push(req); res.end("{}"); });
+    const first = await listen((_req, res) => { res.writeHead(307, { location: `http://127.0.0.1:${other}/elsewhere` }).end(); });
+    await expect(sessionAt(azureAt(first))).rejects.toMatchObject({ status: 502 });
+    expect(reached).toEqual([]);
+  });
+
+  it("asks fetch to refuse redirects on Azure, and leaves OpenAI's request as it was", async () => {
+    const fetchImpl = okFetch();
+    const session = { key: "k", sdp: OFFER, bot: BOT, history: [], cloudHome: false, fetchImpl };
+    await createLiveSession({ ...session, endpoint: azureLiveEndpoint("https://my-res.openai.azure.com", "dep")! });
+    await createLiveSession({ ...session, endpoint: openAiLiveEndpoint({}) });
+    expect(fetchImpl.mock.calls.map(([, init]) => init?.redirect)).toEqual(["error", undefined]);
+  });
+
+  const attempt = (url: string, endpoint: LiveEndpoint) => new Promise<void>((settled) => {
+    const socket = openLiveSocket(url, "made-up-key", endpoint);
+    socket.onerror = () => settled();
+    socket.onclose = () => settled();
+  });
+
+  it("sends the sideband's key as api-key on Azure and as a bearer token on OpenAI", async () => {
+    const heard: IncomingMessage["headers"][] = [];
+    const port = await listen(() => {}, (req, socket) => {
+      heard.push(req.headers);
+      socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
+    });
+    await attempt(liveAttachUrl("sess_1", azureAt(port)), azureAt(port));
+    await attempt(liveAttachUrl("sess_1", openAiAt(port)), openAiAt(port));
+    expect(heard.map((headers) => [headers["api-key"], headers.authorization])).toEqual([["made-up-key", undefined], [undefined, "Bearer made-up-key"]]);
+  });
+
+  it("never follows a redirect on the sideband, so its api-key stays with the first host", async () => {
+    const reached: string[] = [];
+    const other = await listen((req, res) => { reached.push(String(req.url)); res.end(); }, (req, socket) => { reached.push(String(req.url)); socket.destroy(); });
+    const first = await listen(() => {}, (_req, socket) => {
+      socket.end(`HTTP/1.1 307 Temporary Redirect\r\nLocation: ws://127.0.0.1:${other}/elsewhere\r\nConnection: close\r\n\r\n`);
+    });
+    await attempt(liveAttachUrl("sess_1", azureAt(first)), azureAt(first));
+    expect(reached).toEqual([]);
+  });
+});
+
+describe("createLiveSession on Azure", () => {
+  it("sends the resource key as api-key, never as a bearer token, and the deployment as the model", async () => {
+    const fetchImpl = okFetch();
+    const endpoint = azureLiveEndpoint("https://my-res.openai.azure.com", "live-prod")!;
+    const result = await createLiveSession({ key: " azure-secret ", endpoint, sdp: OFFER, bot: BOT, history: [], cloudHome: false, fetchImpl });
+    expect(result).toEqual({ sessionId: "live_123", sdp: "v=0 answer" });
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe("https://my-res.openai.azure.com/openai/v1/live/sessions");
+    const headers = init!.headers as Record<string, string>;
+    expect(headers["api-key"]).toBe("azure-secret");
+    expect(headers.authorization).toBeUndefined();
+    const body = JSON.parse(String(init?.body));
+    expect(body.session.model).toBe("live-prod");
+    expect(body.session.delegation).toEqual({ type: "client" });
+    expect(body.session.client).toBeUndefined();
+    expect(String(init?.body)).not.toContain("azure-secret");
+  });
+  it("names Azure in its errors", async () => {
+    const endpoint = azureLiveEndpoint("https://my-res.openai.azure.com", undefined)!;
+    const refuse = vi.fn(async () => new Response("{}", { status: 404 }));
+    await expect(createLiveSession({ key: "k", endpoint, sdp: OFFER, bot: BOT, history: [], cloudHome: false, fetchImpl: refuse }))
+      .rejects.toMatchObject({ status: 502, message: expect.stringContaining("deployment") });
+    expect(liveErrorMessage(401, undefined, "azure")).toMatch(/^Azure OpenAI rejected the API key/);
   });
 });
 
@@ -241,5 +376,22 @@ describe("liveErrorMessage", () => {
     expect(liveErrorMessage(400, "session.audio.output.voice")).toMatch(/voice/);
     expect(liveErrorMessage(400, "session.client")).not.toMatch(/voice/);
     expect(liveErrorMessage(400)).toMatch(/call settings/);
+  });
+});
+
+describe("spokenHangUp", () => {
+  it("accepts only a whole, clear request to end the call", () => {
+    for (const text of ["hang up", "Hang up.", "please hang up", "you can hang up now", "okay, bye, hang up", "thanks, you can end the call now",
+      "end the call", "End call please", "can you hang up?", "go ahead and end this call", "let's end the call. Bye!", "um, hang up the call", "that\u2019s all, let\u2019s end the call"]) {
+      expect(spokenHangUp(text), text).toBe(true);
+    }
+    for (const text of ["", "bye", "goodbye", "thanks", "don't hang up", "please don't end the call", "no, hang up", "how do I end the call?",
+      "hang up the poster", "hang up on him", "end the call with Sam", "what's the weather, then hang up", "end it", "should I hang up?"]) {
+      expect(spokenHangUp(text), text).toBe(false);
+    }
+  });
+
+  it("tells the voice to delegate a hang-up request and never to end a call on its own", () => {
+    expect(liveInstructions({ name: "Rigel" })).toContain("- The user clearly asks you to hang up or end the call. Never end or offer to end the call on your own.");
   });
 });

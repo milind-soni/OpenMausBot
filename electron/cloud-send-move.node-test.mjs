@@ -352,6 +352,19 @@ test("a move sends what only it carries last, after the chats and their settings
   assert.deepEqual(move.deps.store.value.clouds[CLOUD].on, { "routine:r1": true, "app-event:e1": false }, "what was on here is kept for the switch, after this computer let go");
 });
 
+test("an app event My Cloud refuses for good is left behind as final, and this computer keeps collecting it", async () => {
+  const event = { key: "app-event:e1", kind: "app-event", label: "Reply to email", id: "e1", bot: "ember", parts: { def: "d2" } };
+  const error = "This app automation stays on the computer it came from: connected apps are not set up on My Cloud. Set them up here, then make it again.";
+  const refusing = (body) => sides({ here: [bot("ember", { soul: "s" }), event], there: [bot("ember", { soul: "s" })], bots: { ember: { soul: "s" } },
+    onCall: (method, route) => method === "PUT" && route === "/api/cloud-send/kind" ? reply(409, body) : null });
+  const move = refusing({ error, final: true });
+  const final = await createCloudSend(move.deps).send({ reason: "move", final: true });
+  assert.deepEqual(final.result.failed, [{ key: "app-event:e1", kind: "app-event", label: "Reply to email", error: `My Cloud said: ${error}`, final: true }]);
+  assert.ok(!move.calls.some((call) => call.startsWith("HERE DELETE")), "this computer did not let go of it");
+  const busy = refusing({ error: "busy" });
+  assert.equal((await createCloudSend(busy.deps).send({ reason: "move", final: true })).result.failed[0].final, undefined, "a refusal that may pass is tried again");
+});
+
 test("what a move carries last is never taken for removed on My Cloud, so a routine changed here before the final pass still goes", async () => {
   // Seen in the real app on Oct 22: after a plain move, cloud-send.json had every routine and webhook it had just carried
   // as "removed", because the pass's closing plan read My Cloud before the automations went.
