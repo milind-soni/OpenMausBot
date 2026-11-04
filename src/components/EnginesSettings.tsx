@@ -359,7 +359,6 @@ function AntigravityAccountAction({ instance, action }: { instance: InstanceInfo
   </>;
 }
 
-/** Adds another Google account and keeps its sign-in under this card until it is signed in; on its own, an unsigned account only shows among the providers still to set up. */
 function AntigravityAddAccount({ source }: { source: InstanceInfo }) {
   const { state } = useStore();
   const [addedId, setAddedId] = useState<string | null>(null);
