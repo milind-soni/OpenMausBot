@@ -11,6 +11,8 @@ import { afterEach, expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
 import { botApiCurl } from "../shared/bot-api.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
+import { BOT_API_REFUSAL } from "./bot-api-fence.ts";
+import { INCIDENTS_THREAD_TITLE } from "./incidents.ts";
 
 let fixture: VerificationServer | undefined;
 let socket: Socket | undefined;
@@ -210,6 +212,46 @@ it("tells the model nothing about the person or their work, works in no folder o
   expect(JSON.stringify(next.systemPrompt)).not.toContain("api-call-marker");
   expect(JSON.stringify(next.prompt)).not.toContain("api-call-marker");
 }, hostTimeout(120_000));
+
+it("a failed call reports to no Chief, whose turn has tools, while a person's own failed turn still does", async () => {
+  fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_VERSION: "2.1.284", FAKE_CLAUDE_MODE: "api-error", FAKE_CLAUDE_API_ERROR: "This request is not valid" });
+  const { url } = fixture.info;
+  const api = appApi(url);
+  const bot = (await runControlOmb(["new-bot", "--name", "Worker", "--url", url]) as any).bot;
+  const on = await api("POST", `/api/bots/${bot.id}/bot-api`, { enabled: true });
+  const bots = async () => (await api("GET", "/api/bots")).bots as any[];
+  const chief = (await bots()).find((one) => one.chiefOfStaff);
+  expect(chief, "the fixture has a Chief").toBeTruthy();
+  const reports = async () => (await bots()).find((one) => one.id === chief.id).tasks.filter((task: any) => task.title === INCIDENTS_THREAD_TITLE);
+
+  const failed = await call(on.url, on.key, { message: "caller-words-marker", wait: 20 });
+  expect(failed.status).toBe(502);
+  await new Promise((resolve) => setTimeout(resolve, 1_500));
+  expect(await reports()).toEqual([]);
+
+  // The control: the same failure from a person reaches the Chief, so the silence above means something.
+  await api("POST", `/api/bots/${bot.id}/messages`, { text: "persons-own-words" });
+  await expect.poll(async () => (await reports()).length, { timeout: hostTimeout(45_000) }).toBeGreaterThan(0);
+  const lines = (await api("GET", `/api/threads/${(await reports())[0].threadId}/messages`)).messages;
+  expect(JSON.stringify(lines)).not.toContain("caller-words-marker");
+}, hostTimeout(120_000));
+
+it("gives a caller fixed words and a person the Bot API's reason when the engine is too old to confine the call", async () => {
+  fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_VERSION: "2.1.200" });
+  const { url } = fixture.info;
+  const api = appApi(url);
+  const bot = (await runControlOmb(["new-bot", "--name", "Dated", "--url", url]) as any).bot;
+  const on = await api("POST", `/api/bots/${bot.id}/bot-api`, { enabled: true });
+  const failed = await call(on.url, on.key, { message: "Hello", wait: 20 });
+  expect(failed.status).toBe(502);
+  expect(JSON.stringify(failed.body)).not.toContain("too old");
+  const { bots } = await api("GET", "/api/bots");
+  const thread = bots.find((one: any) => one.id === bot.id).tasks.find((task: any) => task.botApi).threadId;
+  const said = async () => JSON.stringify((await api("GET", `/api/threads/${thread}/messages`)).messages);
+  await expect.poll(said, { timeout: hostTimeout(15_000) }).toContain("too old to run this turn");
+  expect(await said()).toContain(BOT_API_REFUSAL);
+  expect(await said()).not.toContain("My Cloud");
+}, hostTimeout(60_000));
 
 it("says it is still working when the reply takes longer than the caller will wait", async () => {
   fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_VERSION: "2.1.284", FAKE_CLAUDE_MODE: "hang" });

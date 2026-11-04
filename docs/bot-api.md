@@ -72,7 +72,8 @@ saved memory and the thread itself, whoever writes there next:
   teammate, make a routine or webhook, change the bot, write its memory or search
   other conversations.
 - It works in the thread's own empty folder, and its words stay out of the person's
-  other conversations.
+  other conversations. A call that fails shows on the card and in its thread, and
+  reports to no Chief.
 
 A key is like a password: whoever holds it can read what this bot can read, which
 here means its instructions and memory, through its replies. A bot whose AI can't run

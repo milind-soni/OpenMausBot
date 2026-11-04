@@ -469,7 +469,7 @@ import { createOutboundHold, OUTBOUND_HOLD_MS, type OutboundHoldAnswer } from ".
 import { connectorCallsIn, outboundCallsIn } from "../shared/outbound.ts";
 import { connectorAccessDecision, describeConnectorScopes } from "../shared/connector-scopes.ts";
 import { bindThreadLogCapProvider } from "./thread-log-rotation.ts";
-import { listenWebhookIngress, type WebhookIngress } from "./webhook-ingress.ts"; import { createBotApiHost } from "./bot-api-host.ts"; import { BOT_API_PARTS, BOT_API_REFUSAL, BOT_API_TOOLS, botApiRouteRefused } from "./bot-api-fence.ts";
+import { listenWebhookIngress, type WebhookIngress } from "./webhook-ingress.ts"; import { createBotApiHost } from "./bot-api-host.ts"; import { BOT_API_ENGINE_REFUSAL, BOT_API_PARTS, BOT_API_REFUSAL, BOT_API_TOOLS, botApiRouteRefused } from "./bot-api-fence.ts";
 import { addressFor } from "./webhook-address.ts";
 import { assertModelVariantSupported, memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
@@ -7071,7 +7071,7 @@ function runtimeWorkPending(threadId: string): boolean {
 }
 
 const { reportIncident, reportEscalation, incidentRefused, retryThread } = createChiefNotices({
-  store, notify, threadBusy, botAtThreadCapacity, startTurn, quietThread: (_botId, threadId) => proactive.fence.confines(threadId), privateThread: (threadId) => teamHost.ownTurn(threadId), threadLanguage,
+  store, notify, threadBusy, botAtThreadCapacity, startTurn, quietThread: (_botId, threadId) => proactive.fence.confines(threadId) || botApiThread(threadId), privateThread: (threadId) => teamHost.ownTurn(threadId), threadLanguage,
   assignerOf: (threadId) => coordinator.assignerOf(threadId),
   threadSettling: (threadId) => settlingTurns.has(threadId), threadQueued: (botId, threadId) => queuedThreadPosition(botId, threadId) !== null,
   groupTurnActive: (botId) => Boolean(activeGroupTurnForBot(botId)),
@@ -7756,7 +7756,7 @@ async function beginTurn(
   guestDrivenTurns.delete(threadId);
   const guestConfined = cloudGuestDriven(threadId) || cloudGuestDrivenHandoff(opts?.coordination?.id) || botApiDriven(threadId);
   if (guestConfined && instance.adapter.capabilities.guestTurns !== "confined") {
-    throw Object.assign(new Error(guestEngineRefusal(threadId)), { status: 409, code: "guest_engine" });
+    throw Object.assign(new Error(botApiDriven(threadId) ? BOT_API_ENGINE_REFUSAL : guestEngineRefusal(threadId)), { status: 409, code: "guest_engine" });
   }
   const resolvedImages = extractTurnImages(text);
   const usesNativeImageInput = instance.adapter.capabilities.nativeImageInput === true;
@@ -8578,7 +8578,7 @@ async function beginTurn(
         approvalMode: approvalModeForTurn(bot, commsDepth > 0, threadId),
         approvalModeNow: () => liveApprovalMode(bot, threadId, commsDepth > 0),
         toolScope,
-        ...(guestConfined ? { guestConfined: true, confinedWhy: confinedWhy(threadId) } : {}),
+        ...(guestConfined ? { guestConfined: true, confinedWhy: botApiDriven(threadId) ? BOT_API_REFUSAL : confinedWhy(threadId) } : {}),
         model,
         effort,
         variant,
