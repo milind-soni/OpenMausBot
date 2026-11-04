@@ -155,6 +155,21 @@ describe("an answer passed on by another bot", () => {
     expect(w.settled).toEqual([]);
   });
 
+  it("refuses a teammate's answer to which of the person's own accounts to use: only the person settles it, where it was asked", async () => {
+    const w = world();
+    const node = parked(w, { question: "Which email account should be connected — Gmail or another provider?" });
+    const named = await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Gmail, the person's address", answers: node.id });
+    expect(named).toMatchObject({ botId: "dachs", outcome: "failed" });
+    expect(named?.detail).toContain("only the person can answer");
+    // Unnamed too: from the turn that was resumed with it, and to the thread the requester's earlier work waits in.
+    expect(await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", senderNode: { id: "root", carrying: [node.id] } as HandoffView, target: DACHS, message: "Gmail" }))
+      .toMatchObject({ outcome: "failed" });
+    expect(await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", senderNode: { id: "root-2" } as HandoffView, target: DACHS, message: "Gmail", threadId: "work" }))
+      .toMatchObject({ outcome: "failed" });
+    expect(w.answeredNodes).toEqual([]);
+    expect(w.rows("work")[0]!.card?.answered).toBeUndefined();
+  });
+
   it("answers the question card the turn of the requester's earlier work waits on, from a later turn, unnamed", async () => {
     const w = world({ live: ["req-1"] });
     w.node({ id: "as_live", status: "running" });
