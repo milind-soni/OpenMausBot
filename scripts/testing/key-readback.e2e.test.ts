@@ -74,6 +74,7 @@ beforeAll(async () => {
       wav.writeUInt16LE(16, 34); wav.write("data", 36); wav.writeUInt32LE(2, 40);
       return reply(200, { steps: [{ type: "model_output", content: [{ type: "audio", mime_type: "audio/wav", data: wav.toString("base64") }] }] });
     }
+    if (url.startsWith("/gemini/models")) return reply(200, { models: [] });
     if (url.startsWith("/eleven/voices")) return reply(200, { voices: [] });
     if (url.startsWith("/fish/model")) return reply(200, { items: [], total: 0 });
     return reply(404, { error: "not in the stand-in" });

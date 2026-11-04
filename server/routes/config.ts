@@ -103,6 +103,11 @@ export interface ConfigRouteDeps {
   postiz?: Pick<Postiz, "configCheck" | "configSaved">;
 }
 
+/**
+ * Creates configuration and key management HTTP routes.
+ * @param deps Injected dependencies for configuration management.
+ * @returns Configured route handler function.
+ */
 export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
   const {
     store, cfg, registry, sessions, browserCleanup, browserLive, browserRuntime, usedBrowserSessions, decider,
@@ -448,6 +453,10 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       }
       if (newTts?.fishKey?.trim()) {
         const check = await tts.verifyKey("fish", newTts.fishKey.trim());
+        if (!check.ok) return json(res, 400, { error: check.message });
+      }
+      if (newTts?.geminiKey?.trim()) {
+        const check = await tts.verifyKey("gemini", newTts.geminiKey.trim());
         if (!check.ok) return json(res, 400, { error: check.message });
       }
       const deciderKey = patch.decider ? deciderPatchKey(patch.decider, cfg.decider) : null;
