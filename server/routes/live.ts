@@ -1,8 +1,8 @@
-// The OpenAI key is never read or written here; without one a start answers 409 `needsKey`. A phone can never send device-revoked.
+// The provider key is never read or written here; without one a start answers 409 `needsKey`. A phone can never send device-revoked.
 import type { IncomingMessage } from "node:http";
 import { z } from "zod";
-import type { LiveSettings } from "../../shared/wire.ts";
-import { LiveSessionError, MAX_SDP_BYTES } from "../live-call.ts";
+import type { LiveProvider, LiveSettings } from "../../shared/wire.ts";
+import { azureLiveDeployment, azureOpenAiRoot, LiveSessionError, MAX_SDP_BYTES } from "../live-call.ts";
 import { LiveCallBusyError, type LiveCallController } from "../live-call-controller.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 
@@ -10,7 +10,7 @@ export interface LiveRouteDeps {
   calls: Pick<LiveCallController, "start" | "end" | "current" | "deviceRevoked">;
   resolveTarget(botId: string, threadId: string | undefined): { botId: string; botName: string; threadId: string } | null;
   settings(): LiveSettings;
-  saveSettings(patch: { voice?: string; readTypedReplies?: boolean; idleMinutes?: number }): Promise<LiveSettings>;
+  saveSettings(patch: { provider?: LiveProvider; azureEndpoint?: string; azureDeployment?: string; voice?: string; readTypedReplies?: boolean; idleMinutes?: number }): Promise<LiveSettings>;
 }
 
 const id = z.string().regex(/^[\w-]{1,120}$/);
@@ -24,6 +24,10 @@ const sessionBody = z.object({
 const endBody = z.object({ callId: z.string().min(1).max(120) }).strict();
 // Strict, so `key` is refused rather than ignored: the key is saved only through the credential store or PUT /api/config.
 const settingsBody = z.object({
+  provider: z.enum(["openai", "azure"]).optional(),
+  // "" clears the field. Anything else must be an https Azure OpenAI host, since the key is sent there.
+  azureEndpoint: z.string().trim().max(300).refine((url) => url === "" || azureOpenAiRoot(url) !== null).optional(),
+  azureDeployment: z.string().trim().max(64).refine((name) => name === "" || azureLiveDeployment(name) === name).optional(),
   voice: z.string().trim().max(40).regex(/^[a-z]*$/).optional(),
   readTypedReplies: z.boolean().optional(),
   idleMinutes: z.number().int().min(1).max(60).optional(),
@@ -87,6 +91,9 @@ export function createLiveRoutes(deps: LiveRouteDeps): RouteHandler {
     if (method === "PATCH" && path === "/api/live/settings") {
       const parsed = settingsBody.safeParse(await bodyOf(req, readBody));
       if (!parsed.success) {
+        const field = parsed.error.issues[0]?.path[0];
+        if (field === "azureEndpoint") return json(res, 400, { error: "The Azure endpoint must be the https address of an Azure OpenAI resource, like https://my-resource.openai.azure.com." });
+        if (field === "azureDeployment") return json(res, 400, { error: "The Azure deployment name may use letters, digits, '-', '_' and '.', up to 64 characters." });
         return json(res, 400, { error: "Those Live settings are not valid." });
       }
       if (!Object.keys(parsed.data).length) return json(res, 400, { error: "nothing to save" });
