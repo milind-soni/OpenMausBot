@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { composeEnvelope } from "./envelope.ts";
 import { assignmentLevel } from "./level.ts";
 import type { RuntimeStore } from "./store.ts";
-import { answersSender, asking, awaited, childrenSince, clip, continuations, CUT_TWICE, duration, isTerminal, loopStop, nextGuard, outwardDetail, ownsConversation, path, restartNote, wakeOwner } from "./tree.ts";
+import { answersSender, asking, awaited, childrenSince, settledSince, clip, continuations, CUT_TWICE, duration, isTerminal, loopStop, nextGuard, outwardDetail, ownsConversation, path, restartNote, wakeOwner } from "./tree.ts";
 import { DEFAULT_LIMITS, type Answerer, type Assignment, type Assignee, type Clock, type EndResult, type EnqueueRequest, type EnqueueResult, type EnvelopeNames,
   type EventKind, type InboxItem, type InboxKind, type Level, type Limits, type LiveEdge, type Origin, type Outcome, type Owner,
   type Reply, type Requester, type RunInput, type RunResult, type StatusView, type TurnRunner } from "./types.ts";
@@ -299,7 +299,7 @@ export class Runtime {
       if (!n || n.status !== "waiting") continue;
       const due = this.resumeReason(n);
       if (!due) continue;
-      if (due === "settled" && !n.parentId && n.reply === "poll") {
+      if (due === "settled" && !n.parentId && (n.reply === "poll" || this.nothingToAnswer(n))) {
         this.settle(n, "completed", "done");
       } else {
         n.status = "resume";
@@ -498,6 +498,7 @@ export class Runtime {
       return;
     }
     n.result = clip(result.text, RESULT_MAX);
+    if (result.kind === "completed" && result.statusOnly) n.statusOnly = true;
     const kids = awaited(this.store.children(n.id));
     const unseen = live !== undefined && kids.some(c => isTerminal(c) && !live.carried.has(c.id));
     const outstanding = unseen || kids.some(c => !isTerminal(c)) || awaited(childrenSince(this.store, n)).length > 0;
@@ -704,6 +705,14 @@ export class Runtime {
 
   /** Each needs_input inbox item resumes its waiting requester at most once: dispatch marks it delivered in the
    * same transaction that starts the turn, and a delivered item never counts again, across restarts too. */
+  /** A root's teammates only said "noted": a turn would read that and do nothing, and no assignment above it waits on its answer.
+   * A routine's run and an outside runtime always take their turn: their last words are what they report. */
+  private nothingToAnswer(n: Assignment): boolean {
+    if (n.requester.kind !== "person" && n.requester.kind !== "bot_turn") return false;
+    const news = settledSince(this.store, n);
+    return news.length > 0 && news.every(c => c.status === "completed" && c.statusOnly === true);
+  }
+
   private resumeReason(n: Assignment): "settled" | "asked" | undefined {
     const kids = awaited(this.store.children(n.id));
     if (kids.length === 0) return undefined;

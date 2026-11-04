@@ -439,6 +439,85 @@ describe("Runtime: one tree, one lane", () => {
     invariants(w);
   });
 
+  it("takes no turn for a teammate's reply that only acknowledged, and keeps it in the report", async () => {
+    const w = world(a => a.assignee.botId === "builder" ? { kind: "completed", text: "Noted.", statusOnly: true } : undefined);
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.end(root.id, { ok: true, text: "I told the builder." });
+    w.runtime.tick(); await flush(); w.runtime.tick();
+    expect(w.runner.runs.map(r => r.a.id)).toEqual([child.id]);
+    expect(w.store.get(root.id)).toMatchObject({ status: "completed", outcome: "done", result: "I told the builder.", executions: 1 });
+    expect(w.runner.reports.map(r => r.a.id)).toEqual([child.id, root.id]);
+    invariants(w);
+  });
+
+  it("wakes the requester for a reply nobody marked, or a failure even if marked", async () => {
+    for (const result of [{ kind: "completed", text: "The host is imap.example.com." }, { kind: "failed", outcome: "provider_error", text: "It broke." }] as RunResult[]) {
+      const w = world(a => a.assignee.botId === "builder" ? result : undefined);
+      const root = w.runtime.begin(beginReq());
+      const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+      w.runtime.end(root.id, { ok: true, text: "I asked." });
+      w.runtime.tick(); await flush(); w.runtime.tick();
+      expect(w.runner.runs.map(r => r.a.id)).toEqual([child.id, root.id]);
+      expect(w.runner.runs[1]!.input.resumed).toBe(true);
+    }
+  });
+
+  it("wakes the requester when any new result needs it, and it reads the marked one too", async () => {
+    const w = world(a => a.assignee.botId === "builder" ? { kind: "completed", text: "Noted.", statusOnly: true } : a.assignee.botId === "tester" ? { kind: "completed", text: "Two tests fail." } : undefined);
+    const root = w.runtime.begin(beginReq());
+    const noted = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    const real = ok(w.runtime.enqueue(toBot("tester", root.id)));
+    w.runtime.end(root.id, { ok: true, text: "Asked both." });
+    w.runtime.tick(); await flush(); w.runtime.tick();
+    const resume = w.runner.runs.find(r => r.a.id === root.id)!;
+    expect(resume.input.resumed).toBe(true);
+    expect(resume.input.settled?.map(s => s.id).sort()).toEqual([noted.id, real.id].sort());
+  });
+
+  it("wakes a requester that owes an answer: an assignment under someone, or a routine's run", async () => {
+    let leadTurns = 0;
+    const lead = world(a => {
+      if (a.assignee.botId === "builder") return { kind: "completed", text: "Noted.", statusOnly: true };
+      return a.assignee.botId === "lead" && ++leadTurns === 1 ? "hold" : undefined;
+    });
+    const root = lead.runtime.begin(beginReq());
+    const middle = ok(lead.runtime.enqueue(toBot("lead", root.id)));
+    lead.runtime.end(root.id, { ok: true, text: "Asked the lead." });
+    lead.runtime.tick();
+    const below = ok(lead.runtime.enqueue(toBot("builder", middle.id, "FYI", { requester: { kind: "bot_turn", botId: "lead", threadId: "lead-work" } })));
+    await lead.runner.release(middle.id, { kind: "completed", text: "Told the builder." });
+    lead.runtime.tick(); await flush(); lead.runtime.tick();
+    expect(lead.runner.runs.map(r => r.a.id).slice(0, 3)).toEqual([middle.id, below.id, middle.id]);
+
+    const routine = world(a => a.assignee.botId === "builder" ? { kind: "completed", text: "Noted.", statusOnly: true } : undefined);
+    const run = routine.runtime.begin(beginReq({ requester: { kind: "routine_run", runId: "run-1", botId: "chief", threadId: "chief-chat" }, origin: { kind: "routine", source: "routine" } }));
+    const asked = ok(routine.runtime.enqueue(toBot("builder", run.id)));
+    routine.runtime.end(run.id, { ok: true, text: "Asked." });
+    routine.runtime.tick(); await flush(); routine.runtime.tick();
+    expect(routine.runner.runs.map(r => r.a.id)).toEqual([asked.id, run.id]);
+  });
+
+  it("takes no third turn for an acknowledgement of what its second turn said, though its first result was real", async () => {
+    let thanked: Assignment | undefined;
+    const w = world((a, input) => {
+      if (a.assignee.botId === "tester") return { kind: "completed", text: "Two tests fail." };
+      if (a.assignee.botId === "builder") return { kind: "completed", text: "Noted.", statusOnly: true };
+      return input.resumed ? "hold" : undefined;
+    });
+    const root = w.runtime.begin(beginReq());
+    ok(w.runtime.enqueue(toBot("tester", root.id)));
+    w.runtime.end(root.id, { ok: true, text: "Asked the tester." });
+    w.runtime.tick(); await flush(); w.runtime.tick();
+    expect(w.runner.runs.at(-1)!.a.id).toBe(root.id);
+    thanked = ok(w.runtime.enqueue(toBot("builder", root.id, "FYI: two tests fail.")));
+    await w.runner.release(root.id, { kind: "completed", text: "Told the builder. Two tests fail." });
+    w.runtime.tick(); await flush(); w.runtime.tick();
+    expect(w.runner.runs.filter(r => r.a.id === root.id)).toHaveLength(1);
+    expect(w.runner.runs.map(r => r.a.id)).toContain(thanked.id);
+    expect(w.store.get(root.id)).toMatchObject({ status: "completed", result: "Told the builder. Two tests fail." });
+  });
+
   it("completes a poll root without a turn and hands its children's lane to poll()", async () => {
     const w = world();
     const ext = { kind: "external_runtime" as const, runId: "run-1" };

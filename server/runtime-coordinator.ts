@@ -7,6 +7,7 @@ import { Runtime } from "./runtime/runtime.ts";
 import { importLegacyDelegations, importLegacyHandoffs, type LegacyThreadResolver } from "./runtime/import-legacy.ts";
 import { openRuntimeStore, type RuntimeStore } from "./runtime/store.ts";
 import { personOnly, requesterDecides, withDefault } from "./runtime/questions.ts";
+import { isStatusOnly, mayBeStatusOnly, statusReplyPrompt } from "./runtime/status-reply.ts";
 import { answersSender, childrenSince, clip, isTerminal, path } from "./runtime/tree.ts";
 import type { Answerer, Assignment, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
 import { sameRequest } from "./same-request.ts";
@@ -510,6 +511,16 @@ export class RuntimeCoordinator implements Coordinator {
     };
   }
 
+  private async statusOnly(a: Assignment, parent: Assignment | undefined, turn: RunInput["turn"], result: HostTurnResult, node: HandoffView, signal: AbortSignal): Promise<boolean> {
+    if (turn !== "first" || !this.host.statusReply || !mayBeStatusOnly(a, parent, result.text, result.evidence)) return false;
+    try {
+      return isStatusOnly(await this.host.statusReply(node, statusReplyPrompt(a.brief, result.text), signal));
+    } catch (error) {
+      this.log(`status reply check failed: ${String(error)}`);
+      return false;
+    }
+  }
+
   private async run(a: Assignment, input: RunInput, signal: AbortSignal): Promise<RunResult> {
     const first = input.turn === "first" || input.turn === "rerun" ? this.answeredElsewhere(a) : undefined;
     if (first && input.turn === "first") this.host.joined?.(this.project(a), this.project(first));
@@ -538,7 +549,7 @@ export class RuntimeCoordinator implements Coordinator {
     if (result.cards) return { kind: "needs_input", question: result.cards.question, cards: result.cards.ids, ...evidence(result) };
     if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...evidence(result) };
     const question = root ? undefined : needsInputQuestion(result.text);
-    if (question === undefined) return { kind: "completed", text: result.text, ...evidence(result) };
+    if (question === undefined) return { kind: "completed", text: result.text, ...(await this.statusOnly(a, parent, input.turn, result, node, signal) ? { statusOnly: true } : {}), ...evidence(result) };
     const named = withDefault(question);
     const decide = requesterDecides(a) && !result.privateQuestion && !personOnly(named.question) ? { decide: named.default ? { default: named.default } : {} } : {};
     return { kind: "needs_input", question, ...decide, ...evidence(result) };
