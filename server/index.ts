@@ -2682,7 +2682,6 @@ function checkedModelSelection(
     }
     selection.variant = value.variant;
   }
-  // Each turn reads its reasoning level when it starts, so effort or variant may change while the bot works; the model may not.
   const modelChanged = current && (selection.instanceId !== current.selection.instanceId || selection.model !== current.selection.model);
   if (current?.busy && modelChanged) {
     return { ok: false, status: 409, error: "the bot is working — stop it before changing models" };

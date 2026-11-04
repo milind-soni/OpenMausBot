@@ -446,14 +446,31 @@ describe("while the bot is working", () => {
     const panel = menu()!.querySelector<HTMLElement>("[data-model-busy]")!;
     expect(panel.textContent).toContain("Reasoning level applies from the next message");
     expect(panel.textContent).toContain("Stop this thread's turn before changing its model");
-    expect(menu()!.textContent).not.toContain("Claude Sonnet 5.5");
+    expect(panel.textContent).toContain("The bot's model: this thread, groups, and every thread that uses the bot's model.");
+    for (const option of three) expect(menu()!.textContent).not.toContain(option.label);
     const effort = panel.querySelector<HTMLSelectElement>("select")!;
     effort.value = "high";
     flushSync(() => effort.dispatchEvent(new Event("change", { bubbles: true })));
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
-      type: "setModel", botId: "scout", threadId: "thread-scout",
+      type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true,
       selection: { instanceId: "claude", model: "claude-opus-5-5", effort: "high" },
     }));
+  });
+
+  it("keeps a reasoning pick on a thread with its own model to that thread, so the bot's model is not overwritten", async () => {
+    const busy = { ...ownModelThread("claude-sonnet-5-5", "claude-opus-5-5"), busy: true };
+    fixture.bots = fixture.bots.map((bot) => ({ ...bot, busy: true }));
+    render(busy);
+    await openWith("click");
+    const panel = menu()!.querySelector<HTMLElement>("[data-model-busy]")!;
+    expect(panel.textContent).toContain("This thread only. It keeps this model when the bot's model changes.");
+    const effort = panel.querySelector<HTMLSelectElement>("select")!;
+    effort.value = "high";
+    flushSync(() => effort.dispatchEvent(new Event("change", { bubbles: true })));
+    const sent = fixture.dispatch.mock.lastCall![0];
+    expect(sent).toMatchObject({ type: "setModel", botId: "scout", threadId: "thread-scout",
+      selection: { instanceId: "claude", model: "claude-sonnet-5-5", effort: "high" } });
+    expect(sent.updateBotDefault).toBeUndefined();
   });
 
   it("stays locked when the engine has no reasoning level to change", () => {
