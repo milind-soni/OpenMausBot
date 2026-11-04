@@ -219,6 +219,20 @@ describe("what is for sale, as the Admin says", () => {
     expect(bare.map(card => keys(card.shown)), "a plan without allowances sets nothing apart").toEqual([[], ["hours", "storage", "voice"]]);
   });
 
+  it("says a 1-day trial in the singular, in English and every language, and leaves other lengths as they read", () => {
+    const allowances = { cpus: 8, cpuKind: "shared" as const, memoryMb: 8192, diskGb: 10, maxDiskGb: 100, computers: 15, computerHours: 800, voiceCharacters: 90_000, snapshotDays: 14 };
+    const terms = (trialDays: number) => planCards({ plans: [{ tier: "team", amount: 16900, trialDays, allowances }], recommended: "team" })[0]!.terms;
+    expect(terms(1)).toBe("Free for 1 day, then $169/month + tax");
+    expect(terms(3)).toBe("Free for 3 days, then $169/month + tax");
+    const badge = (trialDays: number) => cloudIntroView({ plans: [{ tier: "team", amount: 16900, trialDays }], recommended: "team" })!.badge;
+    expect(badge(1)).toBe("Free for 1 day");
+    expect(badge(3)).toBe("Free for 3 days");
+    setLocale("de");
+    expect(terms(1)).toBe("1 Tag kostenlos, dann $169/Monat zzgl. Steuern");
+    expect(badge(3)).toBe("3 Tage kostenlos");
+    setLocale("en");
+  });
+
   it("speaks the reader's language, numbers included", () => {
     setLocale("de");
     const [card] = planCards({ plans: [{ tier: "max", amount: 9900, trialDays: 3, allowances: { cpus: 8, cpuKind: "shared", memoryMb: 8192, diskGb: 10, maxDiskGb: 100, computers: 15,
