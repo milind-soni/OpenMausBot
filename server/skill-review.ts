@@ -7,7 +7,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 import type { WireMessage } from "../shared/wire.ts";
-import type { SkillRequestAction } from "../shared/skill-request.ts";
+import { isSkillSwitchAction, skillSwitchVerb, type SkillRequestAction } from "../shared/skill-request.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { MAX_SKILL_REVIEW_STEPS } from "./config.ts";
 import { AUTHORING_STANDARDS } from "./skill-learn.ts";
@@ -91,7 +91,7 @@ function entriesFor(messages: readonly ReviewMessage[], bot: { id: string; name:
       entries.push({ role: "tool", speaker: bot.name, text: `${message.tool.name}${message.tool.ok === false ? " (failed)" : ""}${detail ? `: ${detail}` : ""}` });
     } else if (message.kind === "options" && message.card?.skillRequest && (message.card.skillRequest.botId === bot.id)) {
       const request = message.card.skillRequest;
-      const state = message.card.answered === "allow" ? SKILL_DONE[request.action] : `${request.action} proposed`;
+      const state = message.card.answered === "allow" ? SKILL_DONE[request.action] : isSkillSwitchAction(request.action) ? `${skillSwitchVerb(request.action)} proposed` : "proposed";
       entries.push({ role: "skill", speaker: bot.name, text: `skill "${request.name}" ${state}` });
     }
   }

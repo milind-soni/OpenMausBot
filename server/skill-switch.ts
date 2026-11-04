@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { redactSecretsInText } from "./redact.ts";
+import { STAGED_GIST_MAX } from "./skills.ts";
 import type { SkillSwitchAction } from "../shared/skill-request.ts";
 
 /** own: in this bot's own skills; imported: brought in from this computer for every bot, switched per bot;
@@ -37,6 +38,10 @@ export function skillSwitchTarget(
   if (action === "delete" && skill.kind === "imported") {
     return { error: `skill "${name}" comes from this computer and can't be deleted from one bot; turn it off instead (action "disable")` };
   }
+  // Its scan warnings and helper files are reviewed in Settings, not on this card.
+  if (action === "enable" && skill.kind === "imported") {
+    return { error: `skill "${name}" comes from this computer; only the person can turn it on, in the bot's Skills settings` };
+  }
   if (action === "enable" && skill.enabled) return { error: `skill "${name}" is already on` };
   if (action === "disable" && !skill.enabled) return { error: `skill "${name}" is already off` };
   if (skill.text === null) {
@@ -46,8 +51,8 @@ export function skillSwitchTarget(
   return {
     preview,
     sha256: createHash("sha256").update(preview).digest("hex"),
-    ...(skill.source ? { source: skill.source } : {}),
-    gist: redactSecretsInText(skill.description ?? "").replace(/\s+/g, " ").trim(),
+    ...(skill.source ? { source: redactSecretsInText(skill.source) } : {}),
+    gist: redactSecretsInText(skill.description ?? "").replace(/\s+/g, " ").trim().slice(0, STAGED_GIST_MAX),
   };
 }
 
@@ -81,5 +86,5 @@ export function skillSwitchCardCopy(action: SkillSwitchAction, name: string, gis
       subtitle: `${lead}The bot stops using this skill until it is turned on again. Nothing is deleted.` };
   }
   return { title: `Delete skill "${name}"?`, option: "Delete", done: `Skill "${name}" deleted`,
-    subtitle: `${lead}Removes this skill from the bot for good. Its SKILL.md is shown below if you want to keep a copy.` };
+    subtitle: `${lead}Removes this skill and all its files from the bot for good. Its SKILL.md is shown below, with any secrets hidden.` };
 }

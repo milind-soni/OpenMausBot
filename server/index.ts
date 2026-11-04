@@ -11335,14 +11335,14 @@ function proposalPersistence(botId: string, threadId: string, opensCard = true) 
     : { ok: true as const };
 }
 
-function skillProposalPersistence(botId: string, threadId: string, opensCard = true) {
+function skillProposalPersistence(botId: string, threadId: string, opensCard = true, cardEvenWithFullAccess = false) {
   if (!store.bot(botId)) {
     return { ok: false as const, status: 403, error: "unknown sender" };
   }
   if (!connectorThread(botId, threadId)) {
     return { ok: false as const, status: 403, error: "source conversation does not belong to sender" };
   }
-  if (!opensCard || fullAccessForSource(botId, threadId)) return { ok: true as const };
+  if (!opensCard || (!cardEvenWithFullAccess && fullAccessForSource(botId, threadId))) return { ok: true as const };
   const openRequests = store.activePath(threadId).filter(
     (message) =>
       message.card?.skillRequest?.botId === botId &&
@@ -11458,7 +11458,8 @@ function appendSkillRequestCard(args: {
 /** The skill a bot asked to turn on, turn off or delete, as it is now. */
 function switchableSkill(bot: BotRecord, name: string): SwitchableSkill | undefined {
   const own = listSkills(bot.id).find((skill) => skill.name === name);
-  if (own) return { kind: "own", enabled: own.enabled, text: readSkillFile(bot.id, name), source: own.source, description: own.description };
+  // Org skills an Admin pushed stay the person's to change, like library skills.
+  if (own) return { kind: own.source.startsWith("org:") ? "fixed" : "own", enabled: own.enabled, text: readSkillFile(bot.id, name), source: own.source, description: own.description };
   const seen = listBotSkills(bot).find((skill) => skill.name === name);
   if (!seen) return undefined;
   const imported = (seen as { origin?: string }).origin === "imported";
@@ -11469,7 +11470,7 @@ function switchableSkill(bot: BotRecord, name: string): SwitchableSkill | undefi
 function stageSkillSwitch(res: ServerResponse, from: BotRecord, threadId: string, action: SkillSwitchAction, body: Record<string, unknown>) {
   const name = typeof body.skill_name === "string" ? body.skill_name.trim() : "";
   if (!name) return json(res, 400, { error: `skill_name is required when action is ${action}` });
-  const persistence = skillProposalPersistence(from.id, threadId);
+  const persistence = skillProposalPersistence(from.id, threadId, true, true);
   if (!persistence.ok) return json(res, persistence.status, { error: persistence.error });
   const target = skillSwitchTarget(name, action, switchableSkill(from, name));
   if ("error" in target) return json(res, 422, { error: target.error });
@@ -11508,6 +11509,11 @@ function appendSkillSwitchCard(args: { botId: string; threadId: string; action: 
   return { requestId, summary: copy.title };
 }
 
+function applySkillSwitch(botId: string, name: string, action: SkillSwitchAction, kind: SwitchableSkill["kind"] | undefined) {
+  if (action === "delete") return removeSkill(botId, name);
+  return (kind === "imported" ? setImportedSkillEnabled : setSkillEnabled)(botId, name, action === "enable");
+}
+
 function resolveSkillSwitch(
   args: Parameters<typeof resolveSkillRequest>[0],
   messageId: string,
@@ -11533,9 +11539,7 @@ function resolveSkillSwitch(
   const bot = store.bot(args.botId);
   const current = bot ? switchableSkill(bot, request.name) : undefined;
   const still = skillSwitchStillMatches(request.name, request.action, current, request.sha256);
-  const applied = "error" in still ? still
-    : request.action === "delete" ? removeSkill(args.botId, request.name)
-    : (current?.kind === "imported" ? setImportedSkillEnabled : setSkillEnabled)(args.botId, request.name, request.action === "enable");
+  const applied = "error" in still ? still : applySkillSwitch(args.botId, request.name, request.action, current?.kind);
   if ("error" in applied) {
     store.patchMessage(args.threadId, messageId, { card: { ...card, held: applied.error } });
     return { claimed: true, status: 422, error: applied.error };

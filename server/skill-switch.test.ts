@@ -20,6 +20,7 @@ describe("skillSwitchTarget", () => {
     expect(skillSwitchTarget("lib", "disable", { kind: "fixed", enabled: true, text: null })).toEqual({ error: expect.stringContaining("only the person can change it") });
     expect(skillSwitchTarget("imp", "delete", { kind: "imported", enabled: true, text })).toEqual({ error: expect.stringContaining("turn it off instead") });
     expect(skillSwitchTarget("imp", "disable", { kind: "imported", enabled: true, text })).toMatchObject({ sha256: hash(text) });
+    expect(skillSwitchTarget("imp", "enable", { kind: "imported", enabled: false, text })).toEqual({ error: expect.stringContaining("only the person can turn it on") });
   });
 
   it("refuses a switch that would change nothing", () => {

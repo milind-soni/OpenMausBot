@@ -77,7 +77,6 @@ const PROFILE_FIELD_LABEL: Record<ProfileRequestField, LocaleKey> = {
 /** A routine card no one answered is from before Triggers v2 applied changes on their own: nothing can confirm it now. */
 const staleRoutineCard = (card: OptionCardData) => Boolean(card.routineRequest && !card.answered);
 
-/** The card brings its own question and answer words (its title and first option): team setup and MCP server changes. */
 /** Cards whose server-written title and first option say what approving does. */
 export const titledCard = (card: OptionCardData | undefined) =>
   Boolean(card?.teamSetupRequest || card?.mcpRequest || isSkillSwitchAction(card?.skillRequest?.action));

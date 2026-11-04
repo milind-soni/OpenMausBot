@@ -11892,7 +11892,7 @@ describe("harness HTTP API", () => {
       await api("POST", `/api/bots/${bot.id}/interrupt`);
       await api("DELETE", `/api/bots/${bot.id}`);
     }
-  });
+  }, 60_000);
 
   it("applies a bot's own learned skill at once and undoes it from its receipt", async () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;

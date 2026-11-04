@@ -1,6 +1,5 @@
 // Half-duplex like CallView: the native recognizer has no echo cancellation. Replies are queued so a fast second member
 // never cuts off the first.
-import { isSkillSwitchAction, skillSwitchVerb } from "../../shared/skill-request";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, PhoneOff, X } from "lucide-react";
 
@@ -18,6 +17,7 @@ import { CallTargetButton, type CallButtonPlacement } from "./CallView";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
+import { titledCard } from "./ApprovalCard";
 
 const YES = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|allow|approve|approved|fine|please do)\b/i;
 const NO = /^(no|nope|don'?t|do not|stop|deny|denied|cancel|never|skip it)\b/i;
@@ -369,13 +369,10 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       };
       spokenIds.current.add(approval.message.id);
       const name = member?.name ?? approval.message.from?.name ?? "A group member";
-      const skill = approval.message.card?.skillRequest;
-      const skillPrompt = skill && isSkillSwitchAction(skill.action)
-        ? `${name} wants to ${skillSwitchVerb(skill.action)} the skill "${skill.name}". Open the group thread to review it. You can say no to deny it.`
-        : skill?.action === "update"
+      const skillPrompt = approval.message.card?.skillRequest?.action === "update"
         ? `${name} wants to update a learned skill. Open the group thread to review the complete skill before replacing the current version. You can say no to deny it.`
         : `${name} wants to enable a new learned skill. Open the group thread to review the complete skill before enabling it. You can say no to deny it.`;
-      enqueueSpeech(isSkillApproval(approval) ? skillPrompt : spokenApprovalPrompt(approval, name), member, true);
+      enqueueSpeech(isSkillApproval(approval) && !titledCard(approval.message.card) ? skillPrompt : spokenApprovalPrompt(approval, name), member, true);
     }
 
     if (question?.card?.requestId && askedQuestion.current?.requestId !== question.card.requestId) {
