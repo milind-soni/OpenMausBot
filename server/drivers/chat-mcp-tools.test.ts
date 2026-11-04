@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { augmentedPath } from "../env-path.ts";
+import { MESSAGE_FILE_MAX_BYTES } from "../message-file.ts";
 import { ChatToolSessionError, SAVED_RESULTS_FOLDER, SAVED_RESULTS_KEPT, chatToolNotices, directServers, mountChatTools, trimmedToolsNotice, type ChatToolSession } from "./chat-mcp-tools.ts";
 import type { ToolScope } from "../../shared/tool-scope.ts";
 import { catalogServer, CUA_DRIVER_WINDOWS_TOOLS, syntheticToolNames } from "../testing/cua-driver-tools.ts";
@@ -436,6 +437,16 @@ describe("Chat MCP session", () => {
       expect(result.text.startsWith(big.slice(0, 1000))).toBe(true);
       expect(result.text).toContain(`The full result is saved in ${file}]`);
       expect(result.text).toContain(`${Math.ceil(Buffer.byteLength(big) / 1024)}KB`);
+      expect(Buffer.byteLength(result.text)).toBeLessThan(52_000);
+    });
+
+    // Only computer-use servers may send a frame this big (32 MiB).
+    it("is cut as before when it is over the attach limit", async () => {
+      const f = fixture(`if (message.method === "tools/call") { reply(message,{content:[{type:"text",text:"a".repeat(${MESSAGE_FILE_MAX_BYTES + 1})}]}); continue; }`);
+      const folder = workFolder();
+      const result = await (await f.mount(true, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
+      expect(existsSync(join(folder, SAVED_RESULTS_FOLDER)) ? readdirSync(join(folder, SAVED_RESULTS_FOLDER)) : []).toEqual([]);
+      expect(result.text).toContain("truncated");
       expect(Buffer.byteLength(result.text)).toBeLessThan(52_000);
     });
 

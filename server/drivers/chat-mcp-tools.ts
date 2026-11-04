@@ -7,6 +7,7 @@ import type { ValidateFunction } from "ajv";
 import { stripControlPlaneEnv } from "../config.ts";
 import type { SendTurnInput } from "../contracts.ts";
 import { redactSecretsInText } from "../redact.ts";
+import { MESSAGE_FILE_MAX_BYTES } from "../message-file.ts";
 import { augmentedPath } from "../env-path.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { AGENTS_TOOL_ALIASES } from "../../shared/agents-tool-names.ts";
@@ -299,7 +300,7 @@ async function pruneSavedResults(dir: string, keep: string): Promise<void> {
 }
 
 /** A result over the limit is kept whole (secrets masked by `scrub`) in `folder`/mcp-results and the model reads its start and the file's path.
- * Without a folder, or when the file cannot be written, it is cut as before. */
+ * Without a folder, when the file cannot be written, or when it is over the attach limit, it is cut as before. */
 async function savedOrBounded(value: string, tool: string, folder: string | undefined, scrub: (text: string) => string): Promise<string> {
   const bytes = Buffer.from(value);
   if (bytes.length <= OUTPUT_BYTES || !folder) return boundedText(value, bytes);
@@ -311,6 +312,8 @@ async function savedOrBounded(value: string, tool: string, folder: string | unde
     const name = `result-${tool}-${Date.now()}-${randomBytes(3).toString("hex")}.txt`, file = join(dir, name);
     // Key-shaped values are masked before the result reaches disk, as for every other kept tool result.
     const kept = scrub(value);
+    // A file over the attach limit could not be attached, so it is cut as before.
+    if (Buffer.byteLength(kept) > MESSAGE_FILE_MAX_BYTES) return boundedText(value, bytes);
     await writeFile(file, kept, { flag: "wx", mode: 0o600 });
     await pruneSavedResults(dir, name).catch(() => {});
     const kb = Math.ceil(bytes.length / 1024), masked = kept === value ? "" : " (secret-looking values in it are masked)";
