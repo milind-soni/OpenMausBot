@@ -155,6 +155,8 @@
   "server.mcp.signIn.adminOnly": "Nur ein Admin dieser Installation kann sich bei {label} anmelden.",
   "server.mcp.signIn.expired": "Das Anmeldefenster ist abgelaufen. Versuch es noch einmal.",
   "server.mcp.signIn.failed": "Die Anmeldung wurde nicht abgeschlossen. Versuch es noch einmal.",
+  "server.notify.message": "Nachricht von {who}",
+  "server.notify.workingFor": "{who}, arbeitet für {other}",
   "server.notify.approval": "{who} braucht eine Freigabe",
   "server.notify.question": "{who} hat eine Frage",
   "server.notify.signIn": "{who} braucht deine Anmeldung bei {site}",

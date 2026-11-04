@@ -561,6 +561,15 @@ export function attentionRows(since: number): AttentionRow[] {
   ).all(since, since, since) as unknown as AttentionRow[];
 }
 
+/** Every card still open, oldest first, whenever it was asked. */
+export function openCardRows(): Array<{ threadId: string; id: string; at: number; card: string | null; fromBotId: string | null }> {
+  return db().prepare(
+    `SELECT thread_id AS threadId, id, at, json_extract(json, '$.card') AS card, json_extract(json, '$.from.botId') AS fromBotId FROM messages INDEXED BY messages_work_at WHERE ${WORK_KINDS} AND kind = 'options' ` +
+    "AND json_extract(json, '$.card.requestId') IS NOT NULL AND json_extract(json, '$.card.answered') IS NULL AND coalesce(json_extract(json, '$.card.dismissed'), 0) = 0 " +
+    "AND coalesce(json_extract(json, '$.card.expired'), 0) = 0 AND json_extract(json, '$.helperIntro') IS NULL AND json_extract(json, '$.inbox') IS NULL ORDER BY at",
+  ).all() as Array<{ threadId: string; id: string; at: number; card: string | null; fromBotId: string | null }>;
+}
+
 /** The conversations with a card asked since `since` that has not been answered, oldest first; the caller reads each card. */
 export function threadsWithCardsSince(since: number): string[] {
   const rows = db().prepare(

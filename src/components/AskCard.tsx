@@ -276,7 +276,7 @@ const ASK_SHAPE =
 /** A card's answers: at least 36px tall, 44 on a touch screen, and a label that wraps rather than being cut. */
 export const ASK_BUTTON_SHAPE =
   "inline-flex min-h-9 shrink-0 items-center justify-center gap-1.5 rounded-full px-4 py-1.5 text-center text-[14px] font-medium leading-5 transition-colors [&>svg]:shrink-0 disabled:cursor-not-allowed pointer-coarse:min-h-11";
-const ASK_ICON_SHAPE = "inline-flex size-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed pointer-coarse:size-9";
+export const ASK_ICON_SHAPE = "inline-flex size-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed pointer-coarse:size-9";
 const ASK_LOOK = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-40";
 const ASK_CONTROL = `${ASK_SHAPE} ${ASK_LOOK}`;
 const ASK_PRIMARY_LOOK = `${ASK_LOOK} ui-button-primary bg-accent text-accent-ink hover:brightness-110`;

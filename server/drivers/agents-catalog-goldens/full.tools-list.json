@@ -1086,22 +1086,21 @@
     },
     {
       "name": "message_person",
-      "description": "Pass a message to a person on this team, when someone asks you to tell them something (\"tell Bob the launch moved\"). Only your message goes, never this conversation. Someone who can see this conversation is tagged here; anyone else gets it in a new private conversation with you, and their answer can come back here.",
+      "description": "Reach a person in their Inbox, with news they may miss here or when asked to tell someone something. Their answer comes back here. Only what you write goes.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
           "to": {
             "type": "string",
-            "description": "Their name or email address."
+            "description": "On a team: their name or email."
           },
           "message": {
             "type": "string",
-            "description": "What to tell them, in your words, complete on its own."
+            "description": "Complete on its own."
           }
         },
         "required": [
-          "to",
           "message"
         ]
       }
