@@ -184,4 +184,12 @@ describe("intakeFiles", () => {
   it("keeps the image cap in step with the server", () => {
     expect(TURN_IMAGE_MAX_COUNT).toBe(SERVER_TURN_IMAGE_MAX_COUNT);
   });
+
+  it("lets an empty draft take ten images and names the eleventh", () => {
+    expect(imageSlotsLeft([])).toBe(10);
+    const notices: string[] = [];
+    const pasted = Array.from({ length: 11 }, (_, index) => file(`${index + 1}.png`, "image/png"));
+    expect(imagesThatFit(pasted, imageSlotsLeft([]), (notice) => notices.push(notice))).toHaveLength(10);
+    expect(notices).toEqual(["A message takes up to 10 images. 11.png wasn't attached."]);
+  });
 });

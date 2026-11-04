@@ -106,7 +106,7 @@ export function fileAttachment(name: string, path: string, size: number): FileAt
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 export const FILE_MAX_BYTES = 25 * 1024 * 1024;
 /** Must match the server's TURN_IMAGE_MAX_COUNT: a message carrying more images is refused at send. */
-export const TURN_IMAGE_MAX_COUNT = 4;
+export const TURN_IMAGE_MAX_COUNT = 10;
 
 export function imageLimitNotice(leftOut: readonly string[]): string {
   return `A message takes up to ${TURN_IMAGE_MAX_COUNT} images. ${leftOut.join(", ")} ${leftOut.length === 1 ? "wasn't" : "weren't"} attached.`;
