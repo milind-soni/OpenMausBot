@@ -15,6 +15,7 @@ const { version } = JSON.parse(
 ) as { version: string };
 
 const root = fileURLToPath(new URL(".", import.meta.url));
+const workers = Number(process.env.OMB_VITEST_WORKERS) || 1;
 const page = (file: string) => fileURLToPath(new URL(file, import.meta.url));
 
 /** The window's rail of places loads /rail: rail.html, its own small page, in development as from the server. */
@@ -57,9 +58,10 @@ export default defineConfig({
     // OMB_VITEST_E2E=host (CI's Windows and macOS shards) leaves the e2e files that run on Linux only.
     exclude: [...configDefaults.exclude, ...(hostE2eOnly() ? portableE2eFiles(root, include) : [])],
     setupFiles: ["server/testing/setup.ts", "src/testing/all-locales.ts"],
-    // the suite spawns fake provider CLIs and a real harness server;
-    // parallel files introduce load-sensitive flakes for no win
-    fileParallelism: false,
+    // One file at a time by default: the suite spawns fake provider CLIs and real
+    // harness servers, which a laptop feels. CI sets its runner's count (scripts/ci-scope.mjs).
+    fileParallelism: workers > 1,
+    maxWorkers: workers,
     // --shard splits the files by recorded CI seconds, not count
     sequence: { sequencer: DurationSequencer },
     // Known flakes in scripts/testing/ci-retry-list.json get two retries in

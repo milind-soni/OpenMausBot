@@ -91,6 +91,7 @@ describe("CI concurrency", () => {
     expect(run.run).toContain("pnpm exec vitest run ${{ matrix.files }} --shard=${{ matrix.shard }}/${{ matrix.shards }} ");
     expect(run.env?.OMB_VITEST_E2E).toBe("${{ matrix.e2e }}");
     expect(run.env?.OMB_VITEST_SUBSET).toBe("${{ matrix.files }}");
+    expect(run.env?.OMB_VITEST_WORKERS).toBe("${{ matrix.workers }}");
     const { include } = vitestMatrix(["macos-latest", "ubuntu-latest", "windows-latest"]);
     for (const os of ["macos-latest", "ubuntu-latest", "windows-latest"]) {
       const shards = include.filter((entry) => entry.os === os);
