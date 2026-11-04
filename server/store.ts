@@ -256,7 +256,8 @@ export function roomResponders<T extends { id: string; name: string; hidden?: bo
       return available;
     }
   }
-  const mentioned = mentionedBots(text, available, picked);
+  const { bots, ambiguous } = resolveMentions(text, available, picked);
+  const mentioned = bots.filter((bot) => !ambiguous.some((sharing) => sharing.includes(bot)));
   if (mentioned.length) return mentioned;
   if (defaultResponder.kind === "everyone") return available;
   if (defaultResponder.kind === "member") {

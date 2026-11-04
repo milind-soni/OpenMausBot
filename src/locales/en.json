@@ -278,6 +278,7 @@
   "server.rooms.sameName.many": "{count} bots here are named \"{name}\": {choices}. Pick the one you mean from the @ list.",
   "server.rooms.sameName.choice": "{name}, {role}",
   "server.rooms.sameName.chief": "Chief of Staff",
+  "server.rooms.sameNameMissed": "More than one bot here is named \"{name}\", so that mention reached none of them.",
   "server.rooms.noneActive": "No active room members can respond — restore an archived bot or add an active member.",
   "server.rooms.stillStopping": "{bot} is still stopping — this message was not dispatched",
   "server.rooms.someoneStillStopping": "A room member is still stopping — this message was not dispatched",

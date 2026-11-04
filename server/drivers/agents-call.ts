@@ -358,7 +358,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     }
     const r = await api("/api/internal/post-to-room", {
       method: "POST",
-      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, groupId, message, attachVoiceNote }),
+      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, groupId, message, attachVoiceNote, ...(args.mention_ids !== undefined ? { mentionIds: args.mention_ids } : {}) }),
     });
     if (r.error) return { text: String(r.error), isError: true };
     return {

@@ -29,7 +29,7 @@ import type { ThreadStarters } from "../thread-starters.ts";
 import { extractSteerImages } from "../turn-images.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
 import { parseMentionPicks } from "../../shared/room-mentions.ts";
-import { sameNameRefusal } from "../same-name-mentions.ts";
+import { sameNameRefusal, sameNameRefusalForBots } from "../same-name-mentions.ts";
 import { conversationLanguage } from "../server-lines.ts";
 import { bulkDeleteThreadIds, type BulkDeleteRefusal } from "./bulk-delete.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -394,7 +394,10 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
             });
           }
           const members = current.memberIds.map((id) => store.bot(id)).filter((bot): bot is BotRecord => Boolean(bot));
-          const sameName = sameNameRefusal(text, members, mentions, conversationLanguage(threadId));
+          // A program on this machine (a bot's shell, a script) reads the ids it can send again with; a person never sees them.
+          const sameName = auth.kind === "loopback" && !browserOrigin
+            ? sameNameRefusalForBots(text, members, mentions, current.name, "sent")
+            : sameNameRefusal(text, members, mentions, conversationLanguage(threadId));
           if (sameName) throw Object.assign(new Error(sameName), { status: 409 });
           if (channelMode === "chat") applyRoomHoldsFromMessage(current.id, text, mentions);
           const threadWorking = groupThreadIsWorking(current.id, threadId);

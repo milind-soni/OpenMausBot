@@ -121,7 +121,7 @@ import { createSideJobs, helperSelection } from "./side-jobs.ts";
 import type { CaptureTurn, RoomLine } from "./memory-capture.ts";
 import { createAboutMe } from "./about-me.ts"; import { createPersonPreference } from "./host/person-preference.ts";
 import { botMemoryUpdate, ownersOwnAsk } from "./memory-forget.ts";
-import { canManage, canReach, hasTeamAuthority, livePeerRoster, livePeerRosterBlock, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts";
+import { canManage, canReach, hasTeamAuthority, livePeerRoster, livePeerRosterBlock, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts"; import { roomPostRefusal, sharedNamesNote, unreachedMentionLines } from "./same-name-mentions.ts";
 import {
   containerComputerAction,
   containerComputerFrame,
@@ -10211,11 +10211,10 @@ async function runClaimedGroupMemberTurn(
     throw await asPlaceFailure(error, place, "room", readyBot, turnProvider(readyBot) === "vps" ? "vps" : "box");
   }
 
-  const roster = readyGroup.memberIds
+  const roomMembers = readyGroup.memberIds
     .map((id) => store.bot(id))
-    .filter((b): b is NonNullable<typeof b> => Boolean(b))
-    .map(roomRosterLine)
-    .join(", ");
+    .filter((b): b is NonNullable<typeof b> => Boolean(b));
+  const roster = roomMembers.map(roomRosterLine).join(", ");
   const roomHandoff = orchestration?.roomHandoffId ? coordinator.node(orchestration.roomHandoffId) : undefined;
   const roomRequester = roomHandoff?.parentId ? store.bot(coordinator.node(roomHandoff.parentId)?.botId ?? "")?.name : undefined;
   const requesterRule = roomRequester
@@ -10231,7 +10230,7 @@ async function runClaimedGroupMemberTurn(
     `Room members: ${roster}, and ${typeof userName === "string" ? `${userName} (the human)` : roomPeople(threadId, userName)}.`,
     readyGroup.bulletin.trim() && `Room bulletin (shared instructions for everyone):\n${readyGroup.bulletin.trim()}`,
     `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.${readyGroup.dm ? "" : ` To get ${typeof userName === "string" ? `${userName}'s` : "a person's"} attention or ask them something blocking, write @you.`} A "[reacted 👍 to …]" line is that person's whole reply to the message it names: 👍 means yes, go ahead, and 👎 means no.`,
-    outsideRoom.length > 0 && roomPeerRosterSystemPrompt(outsideRoom),
+    outsideRoom.length > 0 && roomPeerRosterSystemPrompt(outsideRoom), sharedNamesNote(roomMembers.filter((member) => member.id !== bot.id), Boolean(integrations.agents)),
     integrations.agents && (CREDENTIAL_PROMPT + (orchestration && !orchestration.roomHandoffId ? THREADS_PROMPT : "")).trim(),
     integrations.agents && (!orchestration || orchestration.roomHandoffId) && "For actual OpenMausBot teamwork, discover IDs with list_room_targets and use coordinate_bots for advice or work in this or another room. Do not substitute native coding helpers for these named bots. Consult only when needed to make a decision; no discussion step is mandatory. Give concrete responsibilities, exact accessible paths and acceptance checks. End your turn after assigning; busy teammates queue and results automatically resume you. When they return, finish the requested verification and give the user one final answer. Native helper names are not evidence that an OpenMausBot teammate participated. Plain @mentions are only for conversational replies in this room." + requesterRule,
     integrations.agents && TRIGGER_PROMPT.trim(),
@@ -10641,16 +10640,16 @@ async function runClaimedGroupMemberTurn(
     const members = group.memberIds
       .map((id) => store.bot(id))
       .filter((b): b is NonNullable<typeof b> => Boolean(b) && b!.id !== bot.id);
-    const missed = mentionedBots(
-      replyText,
-      reachablePeers(store.bots, bot).filter((peer) => !group.memberIds.includes(peer.id)),
+    const missed = unreachedMentionLines(
+      replyText, members,
+      reachablePeers(store.bots, bot).filter((peer) => !group.memberIds.includes(peer.id)), threadLanguage(threadId),
     ); for (const line of placesElsewhere.missed(replyText, store.bots)) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: line, ok: false } });
-    for (const peer of missed.filter((one, at) => missed.findIndex((other) => other.name === one.name) === at)) {
+    for (const line of missed) {
       store.appendMessage(threadId, {
         role: "bot",
         kind: "activity",
         tool: {
-          name: serverLine(threadLanguage(threadId), "server.rooms.mentionMissed", { bot: peer.name }),
+          name: line,
           ok: false,
         },
       });
@@ -14165,6 +14164,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const eligibility = roomPostEligibility(from, room, fromThreadId);
         if (!eligibility.ok) return json(res, eligibility.status, { error: eligibility.error });
+        const sameName = roomPostRefusal(body.mentionIds, message, room, (id) => store.bot(id)); if (sameName) return json(res, sameName.status, { error: sameName.error });
         // The budget is read BEFORE any approval card and CHARGED only on the path that actually appends.
         const askBudget = (bot: BotRecord, group: GroupRecord) => {
           const attempt: RoomPostAttempt = {

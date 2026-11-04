@@ -186,6 +186,7 @@
   "server.rooms.sameName.many": "{count} Bots hier heißen „{name}“: {choices}. Wähle in der @-Liste den aus, den du meinst.",
   "server.rooms.sameName.choice": "{name}, {role}",
   "server.rooms.sameName.chief": "Stabschef",
+  "server.rooms.sameNameMissed": "Mehrere Bots hier heißen „{name}“, die Erwähnung hat also keinen von ihnen erreicht.",
   "server.rooms.noneActive": "Kein aktives Raummitglied kann antworten. Stelle einen archivierten Bot wieder her oder füge ein aktives Mitglied hinzu.",
   "server.rooms.stillStopping": "{bot} wird noch gestoppt, diese Nachricht wurde nicht zugestellt",
   "server.rooms.someoneStillStopping": "Ein Raummitglied wird noch gestoppt, diese Nachricht wurde nicht zugestellt",
