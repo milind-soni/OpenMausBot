@@ -170,6 +170,8 @@ export interface ShowHtmlInput {
   title: string;
   height?: number;
   fallbackText?: string;
+  /** Show the page without the card frame (still in its sandboxed frame). */
+  frameless?: boolean;
 }
 
 export interface UpdateHtmlInput {
@@ -178,6 +180,8 @@ export interface UpdateHtmlInput {
   jsx?: string;
   path?: string;
   title?: string;
+  /** Change whether the page has the card frame; kept as it was when omitted. */
+  frameless?: boolean;
 }
 
 export type AppInputResult<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -254,6 +258,12 @@ function checkTitle(value: unknown): AppInputResult<string> {
   return { ok: true, value: title };
 }
 
+function checkFrameless(value: unknown): AppInputResult<boolean | undefined> {
+  if (value === undefined || value === null) return { ok: true, value: undefined };
+  if (typeof value !== "boolean") return { ok: false, error: "frameless: must be true or false." };
+  return { ok: true, value };
+}
+
 export function parseShowHtmlInput(input: unknown): AppInputResult<ShowHtmlInput> {
   if (!isRecord(input)) return { ok: false, error: "show_html needs {html, jsx or path, title, height?, fallback_text?}." };
   const page = checkPage(input);
@@ -261,6 +271,9 @@ export function parseShowHtmlInput(input: unknown): AppInputResult<ShowHtmlInput
   const title = checkTitle(input.title);
   if (!title.ok) return title;
   const out: ShowHtmlInput = { ...page.value, title: title.value };
+  const frameless = checkFrameless(input.frameless);
+  if (!frameless.ok) return frameless;
+  if (frameless.value) out.frameless = true;
   if (input.height !== undefined && input.height !== null) {
     if (typeof input.height !== "number" || !Number.isFinite(input.height)) return { ok: false, error: "height: must be a number of pixels, 80 to 720." };
     out.height = Math.round(Math.min(APP_LIMITS.heightMax, Math.max(APP_LIMITS.heightMin, input.height)));
@@ -282,6 +295,9 @@ export function parseUpdateHtmlInput(input: unknown): AppInputResult<UpdateHtmlI
   const page = checkPage(input);
   if (!page.ok) return page;
   const out: UpdateHtmlInput = { appId: input.app_id.trim(), ...page.value };
+  const frameless = checkFrameless(input.frameless);
+  if (!frameless.ok) return frameless;
+  if (frameless.value !== undefined) out.frameless = frameless.value;
   if (input.title !== undefined && input.title !== null) {
     const title = checkTitle(input.title);
     if (!title.ok) return title;

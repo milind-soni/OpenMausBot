@@ -44,7 +44,7 @@ function world({ cloud = {}, switches = { "routine:r1": true, "routine:r2": fals
           },
           async check() { w.checked++; return { ok: checks.shift() ?? true }; },
           switches: () => switches,
-          snapshot: () => ({ running: w.running ?? null, whole: { result: { notes: [{ kind: "held", connection: "OpenRouter" }] } } }),
+          snapshot: () => ({ running: w.running ?? null, whole: { result: { notes: [{ kind: "held", connection: "OpenRouter" }], failed: w.failed ?? [] } } }),
         },
         local: {
           async freeze() {
@@ -189,6 +189,28 @@ test("a check's log line names the rooms and conversations it found missing by i
   assert.doesNotMatch(said, /Client|Ember|openrouter/u);
   assert.equal(missingOf({ gaps: { rooms } }), "12 rooms (room-0, room-1, room-2, room-3, room-4, room-5, room-6, room-7, room-8, room-9, 2 more)");
   assert.equal(missingOf({}), "something");
+});
+
+test("a check that still finds things missing after three passes says so at once, naming what did not go and why", async () => {
+  const w = world({ checks: [false, false, false] });
+  w.failed = [{ key: "skill:b1:tidy", kind: "skill", label: "tidy", error: "OpenMausBot on this computer did not answer. Try again in a moment." },
+    { key: "app-event:e1", kind: "app-event", label: "Reply to email", error: "This app automation stays on the computer it came from.", final: true }];
+  await w.home.kick();
+  assert.equal(w.journal.failure.code, "incomplete");
+  assert.ok(w.now() - w.journal.failingSince < FAILING_LINE_MS, "not a day later");
+  assert.deepEqual(w.home.view(), { phase: "copy", failing: { error: "Some of this computer's things did not reach My Cloud.", items: [
+    { label: "tidy", error: "OpenMausBot on this computer did not answer. Try again in a moment." },
+    { label: "Reply to email", error: "This app automation stays on the computer it came from." }] } });
+});
+
+test("a move done without what My Cloud refused for good names it on the done line", async () => {
+  const w = world();
+  w.failed = [{ key: "app-event:e1", kind: "app-event", label: "Reply to email", error: "This app automation stays on the computer it came from.", final: true }];
+  await w.home.kick();
+  assert.equal(w.journal.phase, "done");
+  assert.deepEqual(w.home.view().left, [{ label: "Reply to email", error: "This app automation stays on the computer it came from." }]);
+  w.failed = [];
+  assert.deepEqual(w.home.view().left, [{ label: "Reply to email", error: "This app automation stays on the computer it came from." }], "kept with the move, not read again");
 });
 
 test("a check that still fails after three passes lifts the freeze and tries again in an hour; a day of it shows Try again", async () => {

@@ -3,6 +3,7 @@ import { api, type Bot, type ModelSelection } from "@/state/store";
 import type { BotUpdatePatch } from "@/state/bot-patch-queue";
 import type { Routine, RoutineInput } from "./routines";
 import type { ChosenPreset } from "./bot-presets";
+import { randomUuid } from "./random-uuid";
 
 export const EMPTY_BOT_DEFAULTS: NewBotDefaults = { profile: {}, memory: {}, skills: [], routines: [] };
 
@@ -14,7 +15,7 @@ const routineTemplate = (routine: Routine): BotRoutineTemplate => ({
 });
 
 export class BotCreationDraft {
-  readonly id = `draft-${crypto.randomUUID()}`;
+  readonly id = `draft-${randomUuid()}`;
   template: NewBotDefaults;
   consent: Pick<BotUpdatePatch, "acknowledgeLocalAuto"> & { acknowledgePeerScope?: boolean } = {};
   routines: Routine[];
@@ -97,7 +98,7 @@ export class BotCreationDraft {
       window: schedule.window ?? undefined, endsAt: schedule.endsAt ?? undefined,
     } : schedule.type === "limit_reset" ? { ...schedule, repeat: schedule.repeat ?? "once", at: schedule.at ?? null } : schedule;
     return {
-      id: previous?.id ?? `draft-${crypto.randomUUID()}`, createdAt: previous?.createdAt ?? Date.now(),
+      id: previous?.id ?? `draft-${randomUuid()}`, createdAt: previous?.createdAt ?? Date.now(),
       updatedAt: Date.now(), nextRunAt: null, runOn: "maus", ...previous, ...fields,
       enabled: input.enabled ?? previous?.enabled ?? true, target: "bot", botId: this.id,
       timeoutMinutes: input.timeoutMinutes ?? undefined,
