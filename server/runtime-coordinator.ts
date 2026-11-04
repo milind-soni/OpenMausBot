@@ -19,6 +19,13 @@ const ROOM_ANCESTOR = "A room request cannot return to an ancestor room; results
 const DEPTH = "Room handoff depth limit reached";
 const BUDGET = "Room handoff budget exhausted";
 const NO_TURN = "The requesting turn has no root (no turn)";
+/** A request back to a bot that waits on the asker's answer would leave each waiting on the other, as two bots did on a real
+ * day, each then working the same problem with its own plan. The ancestor rule covers this within one request; this covers
+ * two requests. The waiting request's words are not repeated: it may come from another person's private chat. */
+const crossed = (asker: string, request: Assignment): string => `@${asker} is already waiting on you: it handed you a request (assignment ${
+  request.id}), and ${request.status === "queued" ? "that has not reached you yet" : request.status === "running" ? "you are answering it in another conversation now"
+  : "you have not finished it yet"}. Asking @${asker} for something now would leave each of you waiting on the other, so this was not sent. Answer the person here from what you know; @${
+  asker}'s request reaches you in its own thread, and your answer there goes back to it. Once @${asker} has that answer, you can ask it again.`;
 
 const BRIEF_MAX = 12_000;
 const RUNTIME_DEPTH = /^Assignment depth limit reached/;
@@ -225,6 +232,8 @@ export class RuntimeCoordinator implements Coordinator {
     if (mode === "work" && !rework && siblings.some(c => c.mode === "work" && kindOf(c.assignee.destination.groupId, parent) === kind &&
       c.assignee.destination.groupId === target.groupId && c.assignee.botId === target.botId && c.status === "completed")) throw new Error(ALREADY_COMPLETED);
     if (kind === "work" && target.groupId && lineage.some(n => n.assignee.destination.groupId === target.groupId)) throw new Error(ROOM_ANCESTOR);
+    const waiting = mode === "notify" || target.groupId !== undefined ? undefined : this.waitingOn(source.botId, target.botId);
+    if (waiting) throw new Error(crossed(this.host.names(this.project(waiting.request), this.project(waiting.parent)).requester, waiting.request));
     const wanted: Reply = mode === "notify" ? "none" : options.reply ?? "resume";
     const reply: Reply = wanted === "none" ? "none" : root.reply === "poll" ? "poll" : wanted;
     const requester: Requester = { kind: "bot_turn", botId: parent.assignee.botId, threadId: parent.assignee.destination.threadId,
@@ -583,6 +592,16 @@ export class RuntimeCoordinator implements Coordinator {
       this.runtime.progress(a.id);
       await Promise.race([stopped, new Promise<void>(resolve => setTimeout(resolve, JOIN_POLL_MS))]);
     }
+  }
+
+  /** Direct work `asker` handed to `botId` and still waits on: an open request whose requesting turn is still open. */
+  private waitingOn(botId: string, asker: string): { request: Assignment; parent: Assignment } | undefined {
+    for (const request of this.live()) {
+      if (request.assignee.botId !== botId || request.requester.botId !== asker || request.reply === "none" || request.assignee.destination.groupId !== undefined) continue;
+      const parent = request.parentId ? this.store.get(request.parentId) : undefined;
+      if (parent && !isTerminal(parent)) return { request, parent };
+    }
+    return undefined;
   }
 
   private parkedIn(threadId: string): Assignment | undefined {
