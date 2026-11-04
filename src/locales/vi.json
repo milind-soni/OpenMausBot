@@ -92,7 +92,6 @@
   "server.runs.didNotFinishWhy": "Lượt chạy này chưa hoàn tất: {detail}",
   "server.runs.partlyDoneWhy": "Lần chạy này chỉ xong một phần: {detail}",
   "server.runs.handoffApart": "{bot} không thể chuyển việc này cho {target} vì chúng được chia sẻ với những người khác nhau. Chưa có gì được gửi.",
-  "server.runs.handoffNotListed": "{bot} không thể chuyển việc này cho {target} vì chưa được thiết lập để nói chuyện với bot đó. Chưa có gì được gửi.",
   "server.runs.handoffRefusedTitle": "Quy trình của {bot} không thể chuyển việc",
   "server.runs.recovered": "Đã ổn trở lại: {name} đã chạy xong bình thường lúc {time}",
   "server.runs.card.line": "Tác vụ định kỳ “{name}” {state}",

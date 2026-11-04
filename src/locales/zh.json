@@ -160,7 +160,6 @@
   "server.runs.didNotFinishWhy": "这次执行没有完成：{detail}",
   "server.runs.partlyDoneWhy": "这次运行只完成了一部分：{detail}",
   "server.runs.handoffApart": "{bot} 无法将这项工作交给 {target}，因为它们共享的对象不同。没有发送任何内容。",
-  "server.runs.handoffNotListed": "{bot} 无法将这项工作交给 {target}，因为它未设置为可与对方沟通。没有发送任何内容。",
   "server.runs.handoffRefusedTitle": "{bot} 的例行任务无法交接工作",
   "server.runs.recovered": "已恢复：{name} 已于 {time} 正常完成",
   "server.runs.card.line": "例行任务「{name}」{state}",

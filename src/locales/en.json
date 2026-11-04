@@ -159,7 +159,6 @@
   "server.runs.didNotFinishWhy": "This run didn't finish: {detail}",
   "server.runs.partlyDoneWhy": "This run was partly done: {detail}",
   "server.runs.handoffApart": "{bot} couldn't hand this to {target}, because they're shared with different people. Nothing was sent.",
-  "server.runs.handoffNotListed": "{bot} couldn't hand this to {target}, because it isn't set to talk to it. Nothing was sent.",
   "server.runs.handoffRefusedTitle": "{bot}'s routine couldn't hand off its work",
   "server.runs.recovered": "Recovered: {name} finished OK at {time}",
   "server.runs.card.line": "Routine “{name}” {state}",

@@ -61,7 +61,6 @@
   "server.runs.didNotFinishWhy": "Цей запуск не завершився: {detail}",
   "server.runs.partlyDoneWhy": "Цей запуск виконано частково: {detail}",
   "server.runs.handoffApart": "{bot} не зміг передати це {target}: вони доступні різним людям. Нічого не надіслано.",
-  "server.runs.handoffNotListed": "{bot} не зміг передати це {target}: він не налаштований на спілкування з ним. Нічого не надіслано.",
   "server.runs.handoffRefusedTitle": "Розклад {bot} не зміг передати роботу",
   "server.runs.recovered": "Знову все гаразд: рутина «{name}» успішно завершилася о {time}",
   "server.runs.card.line": "Рутина «{name}» {state}",
