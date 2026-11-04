@@ -3,7 +3,6 @@ import { createPortal } from "react-dom";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, KeyRound, Loader2, RefreshCw, X } from "lucide-react";
 import { useStore, currentTaskBot, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
 import type { EffortLevel } from "../../shared/wire";
-import type { ModelVariantOption } from "../../shared/runtime-events";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
 import { configuredModelInstances, isClaudeAccount, isCustomOnly, SIGN_IN_FAMILY_LABEL, signInFamily } from "@/lib/engine-rail";
 import { modelName, simpleModelMenu } from "@/lib/simple-model-menu";
@@ -25,7 +24,8 @@ import { SimpleModelMenu, type SimpleThinking } from "./SimpleModelMenu";
 import { apiKeysLabel, ClaudeAccountSelect, engineStatus, FollowBotModelRow, ModelEngineRail, ModelRow, ModelSearch } from "./ModelPickerFull";
 import { MENU_LABEL, MENU_LINE, MENU_ROW, MENU_SEPARATOR, MENU_STROKE, MENU_TRAILING } from "./menu-recipe";
 import { modelMenuKey, modelMenuPointerMove } from "./model-menu-keys";
-import { offersReasoning, useRefocusAfterPick, variantChoices } from "./model-picker-reasoning";
+import { lockedWhileBusy, offersReasoning, useRefocusAfterPick, variantChoices, variantLabel } from "./model-picker-reasoning";
+import { BusyModelMenu } from "./ModelPickerBusyMenu";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 
@@ -120,9 +120,6 @@ export function EffortRow({
     </div>
   );
 }
-
-const variantLabel = (option: ModelVariantOption, driverKind?: string): string =>
-  option.id === "default" && driverKind === "opencodeGo" ? t("model.variant.openCodeDefault") : option.label;
 
 export function ModelVariantRow({ bot, threadId, updateBotDefault, className, label, compact = false, wide = false, quiet = false }: {
   bot: Bot;
@@ -225,8 +222,7 @@ export function ModelPicker({
   const { state, dispatch: storeDispatch, refreshInstances, refreshModels: refreshInstanceModels } = useStore();
   const [open, setOpen] = useState(false);
   const { bot, dispatch } = useAiSwitch({ bot: shown, threadId, contained, dispatch: storeDispatch, setOpen: (next) => (next ? openMenu() : setOpen(false)) });
-  const busyInstance = bot.busy && !contained ? state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId) : undefined;
-  const locked = Boolean(bot.busy) && !(busyInstance && offersReasoning(state, busyInstance, bot.modelSelection, threadId ?? bot.threadId));
+  const locked = lockedWhileBusy(state, bot, contained, threadId);
   const motion = useMenuMotion(open && !locked);
   const [railId, setRailId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -972,25 +968,7 @@ export function ModelPicker({
       } : { width: popoverWidth }}
       className={cn("menu-surface z-[80] flex flex-col overflow-hidden", motion.className)}
     >
-      {bot.busy ? (
-        <div data-model-busy className="flex flex-col py-1">
-          <EffortRow
-            compact
-            bot={shown}
-            threadId={threadId}
-            updateBotDefault={busyUpdatesBotDefault}
-            className="px-3.5 py-[5px]"
-            label={<span className="text-[13px] leading-[18px] text-ink">{active?.capabilities?.modelVariants ? t("model.simple.reasoning") : t("model.section.effort")}</span>}
-          />
-          {threadId && (
-            <p data-model-busy-scope className="px-3.5 py-1 text-[12px] leading-4 text-ink-tertiary">
-              {t(busyUpdatesBotDefault ? "model.scope.botHelp" : "model.scope.threadHelp")}
-            </p>
-          )}
-          <p className="px-3.5 py-1 text-[12px] leading-4 text-ink-tertiary">{t("model.reasoningNextTurn")}</p>
-          <p className="px-3.5 py-1 text-[12px] leading-4 text-ink-tertiary">{t(threadId ? "model.threadBusy" : "model.busy")}</p>
-        </div>
-      ) : simpleMenu ? (
+      {bot.busy ? <BusyModelMenu bot={shown} threadId={threadId} updateBotDefault={busyUpdatesBotDefault} variants={Boolean(active?.capabilities?.modelVariants)} /> : simpleMenu ? (
         <SimpleModelMenu
           menu={simpleMenu}
           query={query}
