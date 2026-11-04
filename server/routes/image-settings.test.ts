@@ -103,6 +103,16 @@ describe("testing an image provider from Settings, without making an image", () 
     expect((await test(openrouter("acme/nope-9"), "openrouter", fetchImpl)).verdict).toEqual({ ok: false, reason: "model_missing", model: "acme/nope-9" });
   });
 
+  it("says OpenRouter was unreachable when the model check gets no answer, never that the model is there", async () => {
+    for (const endpoints of [() => new Response("{}", { status: 503 }), () => { throw new TypeError("fetch failed"); }]) {
+      const fetchImpl = answers({
+        "https://openrouter.ai/api/v1/key": () => Response.json({ data: { is_free_tier: false } }),
+        "https://openrouter.ai/api/v1/models/google/gemini-2.5-flash-image/endpoints": endpoints,
+      });
+      expect((await test(openrouter(), "openrouter", fetchImpl)).verdict).toEqual({ ok: false, reason: "unreachable" });
+    }
+  });
+
   it("reports a refused key, and a missing key without calling anyone", async () => {
     const refused = answers({ "https://api.openai.com/v1/models": () => new Response("{}", { status: 401 }) });
     expect((await test({ imageGen: { key: "sk-wrong" } }, "openai", refused)).verdict).toEqual({ ok: false, reason: "rejected", status: 401 });

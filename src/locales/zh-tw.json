@@ -4605,7 +4605,7 @@
   "imageGen.intro": "你在聊天中要求產生圖像時，機器人會用到這裡的設定，機器人頭像也一樣。只有主要供應商無法啟動時才會嘗試備用供應商：沒有金鑰、沒有額度、被限流或無法連線。",
   "imageGen.status.ready": "已就緒 · 圖像由 {provider} 產生",
   "imageGen.status.backupOnly": "僅備用已就緒 · 圖像由 {provider} 產生",
-  "imageGen.status.notReady": "尚未設定 · 請為主要供應商或備用供應商新增金鑰",
+  "imageGen.status.notReady": "未設定 · 為基礎或備用提供者新增金鑰；Custom 還需要基礎 URL 和模型 ID",
   "imageGen.primary.label": "主要供應商",
   "imageGen.primary.help": "每張圖像都優先使用。",
   "imageGen.fallback.label": "備用供應商",

@@ -7287,7 +7287,7 @@
   "imageGen.intro": "你在聊天中要求生成图像时，机器人会用到这里的设置，机器人头像也一样。只有主提供方无法启动时才会尝试备用提供方：没有密钥、没有额度、被限流或无法连接。",
   "imageGen.status.ready": "已就绪 · 图像由 {provider} 生成",
   "imageGen.status.backupOnly": "仅备用已就绪 · 图像由 {provider} 生成",
-  "imageGen.status.notReady": "尚未设置 · 请为主提供方或备用提供方添加密钥",
+  "imageGen.status.notReady": "未设置 · 为基础或备用提供商添加密钥；Custom 还需要基础 URL 和模型 ID",
   "imageGen.primary.label": "主提供方",
   "imageGen.primary.help": "每张图像都优先使用。",
   "imageGen.fallback.label": "备用提供方",

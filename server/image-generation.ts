@@ -227,6 +227,13 @@ export async function generateImageWith(
     fail(`Could not reach ${provider.name} image generation`, 502, unreached(error));
   }
 
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    // Upstream errors can repeat authorization headers or signed URLs: return only the provider and status, never the body.
+    fail(`${provider.name} image generation failed (HTTP ${response.status}, model ${slot.model})`, response.status === 401 ? 401 : 502,
+      NOT_STARTED_STATUSES.has(response.status));
+  }
+
   let text: string;
   try {
     text = await boundedResponseText(response);
@@ -237,11 +244,6 @@ export async function generateImageWith(
       fail("Image generation timed out", 502);
     }
     throw error;
-  }
-  if (!response.ok) {
-    // Upstream errors can repeat authorization headers or signed URLs: return only the provider and status, never the body.
-    fail(`${provider.name} image generation failed (HTTP ${response.status}, model ${slot.model})`, response.status === 401 ? 401 : 502,
-      NOT_STARTED_STATUSES.has(response.status));
   }
 
   let parsedJson: unknown;

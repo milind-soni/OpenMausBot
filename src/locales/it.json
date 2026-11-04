@@ -6363,7 +6363,7 @@
   "imageGen.intro": "I bot lo usano quando chiedi un'immagine in una chat, e anche gli avatar dei bot. Il provider di riserva viene provato solo se quello base non è potuto partire: nessuna chiave, nessun credito, limite di richieste o non raggiungibile.",
   "imageGen.status.ready": "Pronto · le immagini sono create con {provider}",
   "imageGen.status.backupOnly": "Pronto solo con la riserva · le immagini sono create con {provider}",
-  "imageGen.status.notReady": "Non configurato · aggiungi una chiave per il provider base o quello di riserva",
+  "imageGen.status.notReady": "Non configurato · aggiungi una chiave per il provider base o quello di riserva; Custom richiede anche un URL di base e un ID modello",
   "imageGen.primary.label": "Provider base",
   "imageGen.primary.help": "Usato per primo per ogni immagine.",
   "imageGen.fallback.label": "Provider di riserva",

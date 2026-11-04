@@ -5213,7 +5213,7 @@
   "imageGen.intro": "Bot dùng mục này khi bạn nhờ tạo ảnh trong trò chuyện, và ảnh đại diện của bot cũng vậy. Nhà cung cấp dự phòng chỉ được thử khi nhà cung cấp chính không khởi động được: không có khóa, hết tín dụng, bị giới hạn tốc độ hoặc không truy cập được.",
   "imageGen.status.ready": "Sẵn sàng · ảnh được tạo bằng {provider}",
   "imageGen.status.backupOnly": "Chỉ sẵn sàng với dự phòng · ảnh được tạo bằng {provider}",
-  "imageGen.status.notReady": "Chưa thiết lập · thêm khóa cho nhà cung cấp chính hoặc dự phòng",
+  "imageGen.status.notReady": "Chưa thiết lập · thêm khóa cho nhà cung cấp chính hoặc dự phòng; Custom còn cần URL gốc và ID mô hình",
   "imageGen.primary.label": "Nhà cung cấp chính",
   "imageGen.primary.help": "Được dùng trước cho mọi ảnh.",
   "imageGen.fallback.label": "Nhà cung cấp dự phòng",

@@ -96,6 +96,14 @@ describe("generateImage with a backup", () => {
     expect(fetchMock.mock.calls.map(hostOf)).toEqual(["api.openai.com", "api.x.ai"]);
   });
 
+  it("moves to the backup when the base refuses with a body that breaks mid-stream", async () => {
+    const broken = new ReadableStream<Uint8Array>({ pull: (controller) => controller.error(new Error("socket hang up")) });
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(broken, { status: 429 }))
+      .mockResolvedValueOnce(imageResponse());
+    await expect(generateImage(BOTH, { prompt: "owl" }, { fetchImpl: fetchMock })).resolves.toMatchObject({ provider: "xai", usedFallback: true });
+  });
+
   it("moves to the backup when the base refuses the connection", async () => {
     const refused = Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("connect"), { code: "ECONNREFUSED" }) });
     const fetchMock = vi.fn<typeof fetch>().mockRejectedValueOnce(refused).mockResolvedValueOnce(imageResponse());

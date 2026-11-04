@@ -783,6 +783,23 @@ describe("saving the image providers", () => {
     }
   });
 
+  it("drops a model that was a key once that key is replaced, and refuses a model equal to a saved key", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({ imageGen: { customApiKey: "gateway-old", customUrl: "http://127.0.0.1:4000/v1", customModel: "gateway-old",
+      primary: { provider: "custom", model: "gateway-old" }, fallback: { provider: "openai", model: "gateway-old" } } }));
+    try {
+      saveConfig(parseConfigPatch({ imageGen: { customApiKey: "gateway-new" } }));
+      const saved = readFileSync(path, "utf8");
+      expect(saved).not.toContain("gateway-old");
+      expect(imageSlots(JSON.parse(saved)).primary.model).not.toBe("gateway-old");
+      expect(() => saveConfig(parseConfigPatch({ imageGen: { primary: { provider: "custom", model: "gateway-new" } } }))).toThrow("API key");
+      expect(() => saveConfig(parseConfigPatch({ imageGen: { fallback: { provider: "openrouter", model: "gateway-new" } } }))).toThrow("API key");
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
   it("keeps the base and the keys when the backup is cleared", () => {
     const path = join(DATA_DIR, "config.json");
     mkdirSync(DATA_DIR, { recursive: true });

@@ -36,3 +36,38 @@ export const imageGenPatchSchema = imageGenConfigSchema.extend({ primary: savedI
   });
 
 export type ImageGenCredentialPatch = Pick<ImageGenerationConfig, "key" | "customApiKey" | "geminiKey">;
+
+const keyed = z.object({ key: z.string().optional() }).catch({});
+const imageKeysOnly = z.object({ key: z.string().optional(), geminiKey: z.string().optional(), customApiKey: z.string().optional() }).catch({});
+
+/** Every key `imageProviderKey` reads (importing it here would loop back through config.ts). */
+function storedImageKeys(disk: Record<string, unknown>): string[] {
+  const image = imageKeysOnly.parse(disk.imageGen ?? {});
+  return [image.key, image.geminiKey, image.customApiKey, keyed.parse(disk.xai ?? {}).key, keyed.parse(disk.openrouter ?? {}).key]
+    .map((key) => key?.trim() ?? "").filter(Boolean);
+}
+
+/** `saveConfig` around a save: a model equal to a key, before or after it, is refused when typed and dropped when stored, since
+ * reads hide such a model only while that key stays configured. */
+export function keepKeysOutOfImageModels(disk: Record<string, unknown>, patch: z.output<typeof imageGenPatchSchema> | undefined): () => void {
+  const before = storedImageKeys(disk);
+  return () => {
+    const keys = new Set([...before, ...storedImageKeys(disk)]);
+    const isKey = (model: unknown) => typeof model === "string" && keys.has(model.trim());
+    if ([patch?.primary?.model, patch?.fallback?.model, patch && "customModel" in patch ? patch.customModel : undefined].some(isKey)) {
+      throw Object.assign(new Error("This is an API key, not a model ID: paste the key in the key field instead"), { status: 400 });
+    }
+    const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+    if (!isRecord(disk.imageGen)) return;
+    const next = { ...disk.imageGen };
+    for (const name of ["primary", "fallback"]) {
+      const slot = next[name];
+      if (isRecord(slot) && isKey(slot.model)) {
+        const { model: _dropped, ...kept } = slot;
+        next[name] = kept;
+      }
+    }
+    if (isKey(next.customModel)) delete next.customModel;
+    disk.imageGen = next;
+  };
+}

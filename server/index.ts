@@ -6779,13 +6779,10 @@ bus.subscribe((event: RuntimeEvent) => {
       const generatedKey = turnAttachmentKey(event.threadId, event.turnId);
       const generated = turnAttachmentsByTurn.get(generatedKey) ?? [];
       turnAttachmentsByTurn.delete(generatedKey);
-      for (const attachment of generated) {
-        if (event.ok || attachment.kind !== "audio") continue;
-        deleteAttachment(attachment.path);
-      }
-      const settled = event.ok || !generated.length
-        ? generated
-        : generated.filter((attachment) => attachment.kind !== "audio");
+      // A failed turn's audio is dropped, and a goal coordinator's image: its artifacts never reach the public room.
+      const dropped = (attachment: ParkedTurnAttachment) => attachment.kind === "audio" ? !event.ok : attachment.kind === "image" && Boolean(goalCoordinatorTurn || ambiguousCoordinatorText);
+      for (const attachment of generated) if (dropped(attachment)) deleteAttachment(attachment.path);
+      const settled = generated.filter((attachment) => !dropped(attachment));
       if (settled.length) {
         const response = [...store.messagesFor(event.threadId)].reverse().find(
           (message) =>

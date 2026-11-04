@@ -2780,7 +2780,7 @@
   "imageGen.intro": "Les bots l'utilisent quand vous demandez une image dans un chat, et les avatars des bots aussi. Le secours n'est essayé que si le fournisseur de base n'a pas pu démarrer : pas de clé, plus de crédit, limite de débit ou injoignable.",
   "imageGen.status.ready": "Prêt · les images sont créées avec {provider}",
   "imageGen.status.backupOnly": "Prêt avec le secours uniquement · les images sont créées avec {provider}",
-  "imageGen.status.notReady": "Non configuré · ajoutez une clé pour le fournisseur de base ou de secours",
+  "imageGen.status.notReady": "Non configuré · ajoutez une clé pour le fournisseur principal ou celui de secours ; Custom a aussi besoin d'une URL de base et d'un ID de modèle",
   "imageGen.primary.label": "Fournisseur de base",
   "imageGen.primary.help": "Utilisé en premier pour chaque image.",
   "imageGen.fallback.label": "Fournisseur de secours",

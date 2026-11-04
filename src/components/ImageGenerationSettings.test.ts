@@ -150,6 +150,20 @@ describe("Image generation settings", () => {
     expect(sentPatches()).toEqual([]);
   });
 
+  it("hides an OpenRouter Test verdict once the image models it checked change", async () => {
+    fixture.api.mockImplementation(async (path: string) => {
+      if (path === "/api/images/test") return { ok: false, reason: "model_missing", model: "acme/nope-9" };
+      return path === "/api/images/openrouter-models" ? LIVE : {};
+    });
+    const tested = { configured: true, ready: true, openrouterConfigured: true, primary: { provider: "openrouter" as const, model: "acme/nope-9", configured: true }, fallback: null };
+    const view = await mount(tested);
+    await act(async () => { [...view.querySelectorAll("button")].find((item) => item.textContent === "Test")!.click(); });
+    expect(view.textContent).toContain("OpenRouter has no model acme/nope-9.");
+    fixture.config = { imageGen: { ...tested, primary: { ...tested.primary, model: "acme/painter-9" } } } as ConfigStatus;
+    await act(async () => { root!.render(createElement(ImageGenerationSettings)); });
+    expect(view.textContent).not.toContain("OpenRouter has no model acme/nope-9.");
+  });
+
   it("offers no Test before a key is saved", async () => {
     const view = await mount({ configured: false, ready: false, primary: { provider: "openai", model: "gpt-image-2", configured: false }, fallback: null });
     expect([...view.querySelectorAll("button")].some((item) => item.textContent === "Test")).toBe(false);

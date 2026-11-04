@@ -252,7 +252,11 @@ function ProviderKeyCard({ provider, status }: { provider: ImageProvider; status
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
-  const [verdict, setVerdict] = useState<{ ok: boolean; text: string } | null>(null);
+  const [tested, setTested] = useState<{ ok: boolean; text: string; models: string } | null>(null);
+  // OpenRouter's verdict also covers the models it checked; once they change it no longer applies. Others check only the key.
+  const models = provider === "openrouter" ? [status?.primary, status?.fallback].filter((slot) => slot?.provider === provider).map((slot) => slot?.model).join(" ") : "";
+  const verdict = tested?.models === models ? tested : null;
+  const setVerdict = (next: { ok: boolean; text: string } | null) => setTested(next && { ...next, models });
   const configured = keyConfigured(status, provider);
   const own = provider === "openai" || provider === "gemini" || provider === "custom" ? OWN_KEYS[provider] : null;
   const shared = provider === "xai" || provider === "openrouter" ? SHARED_KEYS[provider] : null;

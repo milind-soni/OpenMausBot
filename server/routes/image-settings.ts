@@ -46,7 +46,11 @@ export async function testImageProvider(cfg: ImageCredentials, provider: ImagePr
   if (provider === "openrouter") {
     const { primary, fallback } = imageSlots(cfg);
     for (const slot of [primary, fallback]) {
-      if (slot?.provider === provider && (await openrouterHasModel(slot.model, fetchImpl)) === false) return { ok: false, reason: "model_missing", model: slot.model };
+      if (slot?.provider !== provider) continue;
+      const found = await openrouterHasModel(slot.model, fetchImpl);
+      if (found === false) return { ok: false, reason: "model_missing", model: slot.model };
+      // A 5xx, a timeout or no network leaves the model unchecked: never answer that it is there.
+      if (found === null) return { ok: false, reason: "unreachable" };
     }
   }
   return { ok: true, check: verdict.check, ...(verdict.freeTier !== undefined ? { freeTier: verdict.freeTier } : {}) };

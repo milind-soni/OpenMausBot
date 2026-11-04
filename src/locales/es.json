@@ -5722,7 +5722,7 @@
   "imageGen.intro": "Los bots lo usan cuando pides una imagen en un chat, y los avatares de los bots también. El respaldo solo se prueba cuando el base no pudo empezar: sin clave, sin crédito, con límite de uso o inaccesible.",
   "imageGen.status.ready": "Listo · las imágenes se crean con {provider}",
   "imageGen.status.backupOnly": "Listo solo con el respaldo · las imágenes se crean con {provider}",
-  "imageGen.status.notReady": "Sin configurar · añade una clave para el proveedor base o el de respaldo",
+  "imageGen.status.notReady": "Sin configurar · añade una clave para el proveedor base o el de respaldo; Custom también necesita una URL base y un ID de modelo",
   "imageGen.primary.label": "Proveedor base",
   "imageGen.primary.help": "Se usa primero para cada imagen.",
   "imageGen.fallback.label": "Proveedor de respaldo",

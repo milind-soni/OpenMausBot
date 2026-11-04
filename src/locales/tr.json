@@ -5213,7 +5213,7 @@
   "imageGen.intro": "Botlar, bir sohbette görsel istediğinizde bunu kullanır; bot avatarları da kullanır. Yedek sağlayıcı yalnızca ana sağlayıcı başlayamadığında denenir: anahtar yok, kredi yok, hız sınırı veya erişilemiyor.",
   "imageGen.status.ready": "Hazır · görseller {provider} ile oluşturulur",
   "imageGen.status.backupOnly": "Yalnızca yedekle hazır · görseller {provider} ile oluşturulur",
-  "imageGen.status.notReady": "Ayarlanmadı · ana veya yedek sağlayıcı için bir anahtar ekleyin",
+  "imageGen.status.notReady": "Ayarlanmadı · temel veya yedek sağlayıcı için bir anahtar ekleyin; Custom ayrıca bir temel URL ve model kimliği gerektirir",
   "imageGen.primary.label": "Ana sağlayıcı",
   "imageGen.primary.help": "Her görsel için önce bu kullanılır.",
   "imageGen.fallback.label": "Yedek sağlayıcı",

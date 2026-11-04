@@ -6381,7 +6381,7 @@
   "imageGen.intro": "Os bots usam isto quando você pede uma imagem no chat, e os avatares dos bots também. A reserva só entra quando a base não conseguiu começar: sem chave, sem crédito, limite de uso ou fora do ar.",
   "imageGen.status.ready": "Pronto · as imagens são feitas com {provider}",
   "imageGen.status.backupOnly": "Pronto só com a reserva · as imagens são feitas com {provider}",
-  "imageGen.status.notReady": "Não configurado · adicione uma chave para o provedor base ou o de reserva",
+  "imageGen.status.notReady": "Não configurado · adicione uma chave para o provedor base ou o de reserva; o Custom também precisa de uma URL base e de um ID de modelo",
   "imageGen.primary.label": "Provedor base",
   "imageGen.primary.help": "Usado primeiro em toda imagem.",
   "imageGen.fallback.label": "Provedor de reserva",

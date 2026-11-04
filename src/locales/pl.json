@@ -6503,7 +6503,7 @@
   "imageGen.intro": "Boty używają tego, gdy prosisz o obraz w czacie, a awatary botów też. Zapasowy dostawca jest próbowany tylko wtedy, gdy podstawowy nie mógł wystartować: brak klucza, brak środków, limit zapytań lub brak połączenia.",
   "imageGen.status.ready": "Gotowe · obrazy tworzy {provider}",
   "imageGen.status.backupOnly": "Gotowe tylko z zapasowym · obrazy tworzy {provider}",
-  "imageGen.status.notReady": "Nie skonfigurowano · dodaj klucz dla dostawcy podstawowego lub zapasowego",
+  "imageGen.status.notReady": "Nieskonfigurowane · dodaj klucz dla dostawcy bazowego lub zapasowego; Custom wymaga też bazowego adresu URL i ID modelu",
   "imageGen.primary.label": "Dostawca podstawowy",
   "imageGen.primary.help": "Używany jako pierwszy przy każdym obrazie.",
   "imageGen.fallback.label": "Dostawca zapasowy",

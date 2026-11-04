@@ -6587,7 +6587,7 @@
   "imageGen.intro": "チャットで画像を頼んだときにボットがこれを使い、ボットのアバターも同じです。バックアップは、基本のプロバイダーが開始できなかったときだけ試されます。キーなし、クレジットなし、レート制限、または接続不能の場合です。",
   "imageGen.status.ready": "準備完了 · 画像は {provider} で作成されます",
   "imageGen.status.backupOnly": "バックアップのみ準備完了 · 画像は {provider} で作成されます",
-  "imageGen.status.notReady": "未設定 · 基本またはバックアップのプロバイダーのキーを追加してください",
+  "imageGen.status.notReady": "未設定 · ベースまたはバックアップのプロバイダーにキーを追加してください。Custom にはベース URL とモデル ID も必要です",
   "imageGen.primary.label": "基本プロバイダー",
   "imageGen.primary.help": "すべての画像でまず使われます。",
   "imageGen.fallback.label": "バックアッププロバイダー",

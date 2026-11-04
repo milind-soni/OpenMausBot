@@ -7412,7 +7412,7 @@
   "imageGen.intro": "Bots use this when you ask for an image in a chat, and bot avatars use it too. The backup is tried only when the base could not start: no key, no credit, rate limited or unreachable.",
   "imageGen.status.ready": "Ready · images are made with {provider}",
   "imageGen.status.backupOnly": "Ready with the backup only · images are made with {provider}",
-  "imageGen.status.notReady": "Not set up · add a key for the base or the backup provider",
+  "imageGen.status.notReady": "Not set up · add a key for the base or the backup provider; Custom also needs a base URL and a model ID",
   "imageGen.primary.label": "Base provider",
   "imageGen.primary.help": "Used first for every image.",
   "imageGen.fallback.label": "Backup provider",

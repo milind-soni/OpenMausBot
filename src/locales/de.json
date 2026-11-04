@@ -2834,7 +2834,7 @@
   "imageGen.intro": "Bots nutzen das, wenn Sie in einem Chat ein Bild anfordern, und Bot-Avatare ebenfalls. Der Ersatzanbieter wird nur versucht, wenn der Basisanbieter nicht starten konnte: kein Schlüssel, kein Guthaben, Ratenlimit oder nicht erreichbar.",
   "imageGen.status.ready": "Bereit · Bilder werden mit {provider} erstellt",
   "imageGen.status.backupOnly": "Nur mit dem Ersatzanbieter bereit · Bilder werden mit {provider} erstellt",
-  "imageGen.status.notReady": "Nicht eingerichtet · Schlüssel für den Basis- oder den Ersatzanbieter hinzufügen",
+  "imageGen.status.notReady": "Nicht eingerichtet · füge einen Schlüssel für den Basis- oder den Ersatzanbieter hinzu; Custom braucht außerdem eine Basis-URL und eine Modell-ID",
   "imageGen.primary.label": "Basisanbieter",
   "imageGen.primary.help": "Wird für jedes Bild zuerst verwendet.",
   "imageGen.fallback.label": "Ersatzanbieter",
