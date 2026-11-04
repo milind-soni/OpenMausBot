@@ -1,7 +1,5 @@
-// Gemini CLI (`gemini --acp`). Retired from the default fleet: since 2026-06-18 Google serves the
-// Gemini CLI only to enterprise licences (consumer tiers route through Antigravity); opt in with
-// {"instances": {"gemini": {"driver": "geminiAgent"}}} in config.json. Remaining auth: GEMINI_API_KEY,
-// Vertex, or an enterprise Code Assist licence. Untested against a live CLI: the flag and auth ids
+// Gemini CLI (`gemini --acp`). Since 2026-06-18 Google serves the Gemini CLI to consumer Google sign-ins
+// no longer (those route through Antigravity); it runs on GEMINI_API_KEY, Vertex, or an enterprise Code Assist licence. Untested against a live CLI: the flag and auth ids
 // follow the published Gemini CLI ACP contract.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -61,7 +59,16 @@ const support: AcpSupport = {
   defaultCli: "gemini",
   nativeSource: "gemini.acp",
   loginNote:
-    "Gemini CLI needs a GEMINI_API_KEY, a Vertex AI setup, or an enterprise Code Assist login — consumer Google logins stopped working on 2026-06-18 (use the Antigravity engine for those accounts)",
+    "Gemini CLI needs a Gemini API key — paste one under Settings → Connections → Model providers, or set GEMINI_API_KEY. Personal Google sign-ins stopped working on 2026-06-18 (use the Antigravity engine for those accounts)",
+  install: {
+    command: {
+      darwin: "npm install -g @google/gemini-cli",
+      linux: "npm install -g @google/gemini-cli",
+      win32: "npm install -g @google/gemini-cli",
+    },
+    npmPackage: "@google/gemini-cli",
+    docsUrl: "https://github.com/google-gemini/gemini-cli",
+  },
 
   // --acp is stable; --experimental-acp still works but warns.
   spawnArgs: (config, turn) => ["--acp", ...geminiApprovalArgs(config.fullAuto, turn.approvalMode), ...(turn.model ? ["-m", turn.model] : [])],
