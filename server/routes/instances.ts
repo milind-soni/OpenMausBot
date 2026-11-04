@@ -347,7 +347,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         }
         if (body.replyWaitMinutes !== undefined) {
           if (entry.driver !== "openai-compat") return json(res, 400, { error: "The reply wait is available for OpenAI-compatible servers only." });
-          const { replyWaitMinutes: _previous, ...rest } = entry.config as Record<string, unknown>;
+          const { replyWaitMinutes: _previous, ...rest } = (entry.config ?? {}) as Record<string, unknown>;
           entry.config = body.replyWaitMinutes === null ? rest : { ...rest, replyWaitMinutes: body.replyWaitMinutes };
         }
         if (body.displayName !== undefined) entry.displayName = body.displayName;

@@ -736,6 +736,14 @@ process.stdin.on("data", (chunk) => {
             break;
           }
         }
+        if (mode === "plan-model-refused") {
+          out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+          // The reporter's words (2026-11-03): ChatGPT lists gpt-6.1-sol, then refuses it for a ChatGPT account.
+          const error = { message: "unexpected status 400 Bad Request: invalid_request_error model_not_found: The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.", codexErrorInfo: null, additionalDetails: null };
+          notify("error", { willRetry: false, error });
+          notify("turn/completed", { turn: { status: "failed", error } });
+          break;
+        }
         if (mode === "usage-limit") {
           out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
           const error = { message: "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 5:23 PM.", codexErrorInfo: "usageLimitExceeded", additionalDetails: null };
