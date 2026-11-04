@@ -108,7 +108,8 @@ export function boxUploadsDir(dataDir: string, botId: string, threadId: string):
 export function argvPaths(args: readonly string[]): string[] {
   const paths: string[] = [];
   for (const arg of args) {
-    const value = arg.startsWith("--") && arg.includes("=") ? arg.slice(arg.indexOf("=") + 1) : arg;
+    const optionValue = arg.startsWith("--") && arg.includes("=") ? arg.slice(arg.indexOf("=") + 1) : arg;
+    const value = optionValue.startsWith("@") ? optionValue.slice(1) : optionValue;
     if (isAbsolute(value) && value.length > 1 && !paths.includes(value)) paths.push(resolve(value));
   }
   return paths;
