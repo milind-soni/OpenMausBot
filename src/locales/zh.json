@@ -5894,6 +5894,8 @@
   "mapComposer.sendTo": "发送给 {count} 个标记的机器人",
   "mapComposer.willSendOne": "会发送给 1 个标记的机器人，在它自己的聊天中",
   "mapComposer.willSend": "会发送给 {count} 个标记的机器人，各自在独立的聊天中",
+  "mapComposer.willSendViaChief": "发送给 {name}，由它转给相关的机器人",
+  "mapComposer.sentViaChief": "已发送给 {name}，由它转交",
   "mapComposer.sentTo": "已发送给",
   "mapComposer.andMore": "以及另外 {count} 个",
   "team.instructionsPlaceholder": "目标\n- 完成 Windows 新手指引改版\n\n决策\n- 客户数据保留在本地\n\n偏好\n- 每周简报保持简洁",

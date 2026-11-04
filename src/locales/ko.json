@@ -5710,6 +5710,8 @@
   "mapComposer.sendTo": "태그한 봇 {count}개에게 보내기",
   "mapComposer.willSendOne": "태그한 봇 1개에게 그 봇의 채팅으로 가요",
   "mapComposer.willSend": "태그한 봇 {count}개에게 각자의 채팅으로 가요",
+  "mapComposer.willSendViaChief": "{name}에게 가고, 관련된 봇에게 전달돼요",
+  "mapComposer.sentViaChief": "{name}에게 보냈어요. 관련된 봇에게 전달해요",
   "mapComposer.sentTo": "보낸 대상",
   "mapComposer.andMore": "외 {count}개",
   "team.instructionsPlaceholder": "목표\n- Windows 온보딩 개편 출시\n\n결정 사항\n- 고객 데이터는 로컬에 보관\n\n선호\n- 주간 업데이트는 간결하게",

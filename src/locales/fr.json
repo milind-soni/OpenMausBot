@@ -2811,5 +2811,7 @@
   "server.browser.stoppedWaiting": "Attente du navigateur arrêtée.",
   "composer.queued.capacityStarter": "En file d'attente. Starter exécute un fil à la fois par bot : celui-ci démarrera quand le fil en cours sera terminé. Un plan supérieur en exécute davantage.",
   "composer.queued.seePlans": "Voir les plans",
-  "settings.threads.starter": "Starter exécute un fil à la fois par bot, un plan supérieur en exécute davantage. Le travail qu'un bot lance lui-même s'exécute quand même, et chaque bot a le sien."
+  "settings.threads.starter": "Starter exécute un fil à la fois par bot, un plan supérieur en exécute davantage. Le travail qu'un bot lance lui-même s'exécute quand même, et chaque bot a le sien.",
+  "mapComposer.willSendViaChief": "Va à {name}, qui transmet aux bots concernés",
+  "mapComposer.sentViaChief": "Envoyé à {name}, qui transmet"
 }

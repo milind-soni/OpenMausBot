@@ -2833,7 +2833,9 @@
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
       "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
-      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c"
+      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c",
+      "mapComposer.willSendViaChief": "002eb9ef4efe4459e760b645a541b65592a3c706eb9f1fe606bd88a601270f92",
+      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -8556,7 +8558,19 @@
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
       "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
-      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c"
+      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c",
+      "mapComposer.label": "7c178541b31b3154d22ec1c9948bde70b01522216b10642e738bad7bf8c84725",
+      "mapComposer.placeholder": "715aef017b23153206b6af1538c56c3559220f651ce0be386429b5b73ded4533",
+      "mapComposer.tagHint": "0b999067617a440b7375c46c91710c569881b99f4c479e71f70f3961b87490ff",
+      "mapComposer.send": "f669e4960e0460df62a3260519d459644ae3b9a8c9ccff0428e01e0ed4a1bbe4",
+      "mapComposer.sendToOne": "a7df8c6376deb90b55ed27594b8bf732bb8c6ed3616bb2578a400ba82338d379",
+      "mapComposer.sendTo": "71489b1332e89820b77a95f0f96815d2a91f9d8a1f800e73f8977f8504634a62",
+      "mapComposer.willSendOne": "1e9fa8f51fca18b21b66e1834b1011f8bb06c3ebb635822479e17410aff2a6f1",
+      "mapComposer.willSend": "7916e7e6c727a0dd9b7e68b652986df2a643723555d5192e5322f0118a871742",
+      "mapComposer.willSendViaChief": "002eb9ef4efe4459e760b645a541b65592a3c706eb9f1fe606bd88a601270f92",
+      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1",
+      "mapComposer.sentTo": "4e7201c7b8985a987b6e199e81503cd1b05d9b6304e4e3a1d72724bdda9baaf9",
+      "mapComposer.andMore": "1a2612705dd797842beda42948a2979b5b6c763ee71acf4f87868f5c2c254420"
     },
     "fr": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -11336,7 +11350,9 @@
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
       "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
-      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c"
+      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c",
+      "mapComposer.willSendViaChief": "002eb9ef4efe4459e760b645a541b65592a3c706eb9f1fe606bd88a601270f92",
+      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1"
     },
     "hi": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -20724,7 +20740,9 @@
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
       "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
-      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c"
+      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c",
+      "mapComposer.willSendViaChief": "002eb9ef4efe4459e760b645a541b65592a3c706eb9f1fe606bd88a601270f92",
+      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1"
     },
     "pt-br": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -27126,7 +27144,19 @@
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
       "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
-      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c"
+      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c",
+      "mapComposer.label": "7c178541b31b3154d22ec1c9948bde70b01522216b10642e738bad7bf8c84725",
+      "mapComposer.placeholder": "715aef017b23153206b6af1538c56c3559220f651ce0be386429b5b73ded4533",
+      "mapComposer.tagHint": "0b999067617a440b7375c46c91710c569881b99f4c479e71f70f3961b87490ff",
+      "mapComposer.send": "f669e4960e0460df62a3260519d459644ae3b9a8c9ccff0428e01e0ed4a1bbe4",
+      "mapComposer.sendToOne": "a7df8c6376deb90b55ed27594b8bf732bb8c6ed3616bb2578a400ba82338d379",
+      "mapComposer.sendTo": "71489b1332e89820b77a95f0f96815d2a91f9d8a1f800e73f8977f8504634a62",
+      "mapComposer.willSendOne": "1e9fa8f51fca18b21b66e1834b1011f8bb06c3ebb635822479e17410aff2a6f1",
+      "mapComposer.willSend": "7916e7e6c727a0dd9b7e68b652986df2a643723555d5192e5322f0118a871742",
+      "mapComposer.willSendViaChief": "002eb9ef4efe4459e760b645a541b65592a3c706eb9f1fe606bd88a601270f92",
+      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1",
+      "mapComposer.sentTo": "4e7201c7b8985a987b6e199e81503cd1b05d9b6304e4e3a1d72724bdda9baaf9",
+      "mapComposer.andMore": "1a2612705dd797842beda42948a2979b5b6c763ee71acf4f87868f5c2c254420"
     },
     "zh": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -34434,7 +34464,9 @@
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
       "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
-      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c"
+      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c",
+      "mapComposer.willSendViaChief": "002eb9ef4efe4459e760b645a541b65592a3c706eb9f1fe606bd88a601270f92",
+      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -59213,7 +59245,9 @@
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
       "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
-      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c"
+      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c",
+      "mapComposer.willSendViaChief": "002eb9ef4efe4459e760b645a541b65592a3c706eb9f1fe606bd88a601270f92",
+      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -65799,7 +65833,9 @@
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
       "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
-      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c"
+      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c",
+      "mapComposer.willSendViaChief": "002eb9ef4efe4459e760b645a541b65592a3c706eb9f1fe606bd88a601270f92",
+      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -72183,7 +72219,9 @@
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
       "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
-      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c"
+      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c",
+      "mapComposer.willSendViaChief": "002eb9ef4efe4459e760b645a541b65592a3c706eb9f1fe606bd88a601270f92",
+      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -79292,7 +79330,9 @@
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
       "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
-      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c"
+      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c",
+      "mapComposer.willSendViaChief": "002eb9ef4efe4459e760b645a541b65592a3c706eb9f1fe606bd88a601270f92",
+      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1"
     }
   }
 }
