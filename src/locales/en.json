@@ -5928,6 +5928,8 @@
   "mapComposer.sendTo": "Send to {count} tagged bots",
   "mapComposer.willSendOne": "Goes to 1 tagged bot, in its own chat",
   "mapComposer.willSend": "Goes to {count} tagged bots, each in its own chat",
+  "mapComposer.willSendViaChief": "Goes to {name}, who passes it on to the bots it concerns",
+  "mapComposer.sentViaChief": "Sent to {name}, who passes it on",
   "mapComposer.sentTo": "Sent to",
   "mapComposer.andMore": "and {count} more",
   "team.instructionsPlaceholder": "Goals\n- Ship the Windows onboarding refresh\n\nDecisions\n- Keep customer data local\n\nPreferences\n- Use concise weekly updates",

@@ -5350,6 +5350,8 @@
   "mapComposer.sendTo": "指定した {count} 体のボットに送信",
   "mapComposer.willSendOne": "指定した 1 体のボットに、そのボットのチャットで送信されます",
   "mapComposer.willSend": "指定した {count} 体のボットに、それぞれのチャットで送信されます",
+  "mapComposer.willSendViaChief": "{name} に届き、関係するボットに引き継がれます",
+  "mapComposer.sentViaChief": "{name} に送信しました。関係するボットに引き継がれます",
   "mapComposer.sentTo": "送信先",
   "mapComposer.andMore": "ほか {count} 体",
   "team.instructionsPlaceholder": "目標\n- Windowsオンボーディングの刷新をリリースする\n\n決定事項\n- 顧客データはローカルに保持する\n\n方針\n- 週次の更新は簡潔にまとめる",

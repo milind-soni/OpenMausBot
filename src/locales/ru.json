@@ -5319,6 +5319,8 @@
   "mapComposer.sendTo": "Отправить {count} отмеченным ботам",
   "mapComposer.willSendOne": "Дойдёт до 1 отмеченного бота в его чате",
   "mapComposer.willSend": "Дойдёт до {count} отмеченных ботов, каждому в отдельный чат",
+  "mapComposer.willSendViaChief": "Уйдёт к {name}, а дальше — к ботам, которых это касается",
+  "mapComposer.sentViaChief": "Отправлено {name}, дальше — к нужным ботам",
   "mapComposer.sentTo": "Отправлено",
   "mapComposer.andMore": "и ещё {count}",
   "team.instructionsPlaceholder": "Цели\n- Выпустить обновление онбординга для Windows\n\nРешения\n- Данные клиентов храним локально\n\nПредпочтения\n- Краткие еженедельные отчёты",

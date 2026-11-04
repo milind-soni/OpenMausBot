@@ -5266,6 +5266,8 @@
   "mapComposer.sendTo": "Wyślij do oznaczonych botów: {count}",
   "mapComposer.willSendOne": "Trafi do 1 oznaczonego bota, w jego własnym czacie",
   "mapComposer.willSend": "Trafi do oznaczonych botów: {count}, każdy w swoim czacie",
+  "mapComposer.willSendViaChief": "Trafi do: {name}, a stamtąd do botów, których dotyczy",
+  "mapComposer.sentViaChief": "Wysłano do: {name}, a stamtąd dalej",
   "mapComposer.sentTo": "Wysłano do",
   "mapComposer.andMore": "i {count} więcej",
   "team.instructionsPlaceholder": "Cele\n- Wdrożyć odświeżenie pierwszych kroków w Windows\n\nDecyzje\n- Dane klientów pozostają lokalnie\n\nPreferencje\n- Zwięzłe cotygodniowe aktualizacje",

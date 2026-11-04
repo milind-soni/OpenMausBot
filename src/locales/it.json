@@ -5125,6 +5125,8 @@
   "mapComposer.sendTo": "Invia a {count} bot menzionati",
   "mapComposer.willSendOne": "Va a 1 bot menzionato, nella sua chat",
   "mapComposer.willSend": "Va a {count} bot menzionati, ognuno nella propria chat",
+  "mapComposer.willSendViaChief": "Va a {name}, che lo passa ai bot che riguarda",
+  "mapComposer.sentViaChief": "Inviato a {name}, che lo passa avanti",
   "mapComposer.sentTo": "Inviato a",
   "mapComposer.andMore": "e altri {count}",
   "team.instructionsPlaceholder": "Obiettivi\n- Consegna l'aggiornamento della prima configurazione per Windows\n\nDecisioni\n- Tieni i dati dei clienti in locale\n\nPreferenze\n- Usa aggiornamenti settimanali concisi",
