@@ -1070,6 +1070,7 @@
   "attach.unavailable": "Indisponible",
   "task.chip": "Fil",
   "task.newShort": "Nouveau fil",
+  "task.sharedChat": "Conversation partagée",
   "task.matching": "{count} fils correspondants",
   "task.list": "Fils",
   "task.noMatch": "Rien ne correspond à « {query} »",

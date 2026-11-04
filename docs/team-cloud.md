@@ -352,6 +352,12 @@ On a My Cloud and on a desktop there is one person: every audience is the team's
 every browser keeps its old name and Chrome its old launcher, every engine keeps the server's HOME, and nothing here
 changes what those do.
 
+## The shared chat's name
+
+A team bot's main chat is called *"Shared chat"* on every person's copy (`WireTask.sharedChat`), whatever its stored title,
+so nobody takes it for one of their own, and it can't be renamed. A member's own MausBot has none. Clicking a bot still
+opens the person's own private chat.
+
 ## Who looks after a bot
 
 Every team bot is **looked after by** one member, its owner in the data: `reportsTo` (an email) names them; without it

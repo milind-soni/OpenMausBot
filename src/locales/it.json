@@ -2464,6 +2464,7 @@
   "attach.unavailable": "Non disponibile",
   "task.chip": "Conversazione",
   "task.newShort": "Nuova conversazione",
+  "task.sharedChat": "Chat condivisa",
   "task.matching": "{count} conversazioni corrispondenti",
   "task.list": "Conversazioni",
   "task.namedList": "Conversazioni di {name}",

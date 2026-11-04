@@ -1,3 +1,4 @@
+import { localizedTaskTitle } from "@/lib/task-title";
 import { ChevronRight, Lock, UserRound, Users } from "lucide-react";
 import type { ComponentProps } from "react";
 
@@ -44,8 +45,8 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
   const PrivacyIcon = privacy ? PRIVACY_ICONS[privacy.kind] : Users;
   const title = bot.tasks?.find((task) => task.threadId === bot.threadId)?.title;
   // Simple mode calls an untitled conversation what it is, never a "thread".
-  const conversation = !awayFromMainThread(bot, false) ? null
-    : !title || title === UNTITLED ? t("task.untitledConversation") : title;
+  const conversation = !awayFromMainThread(bot, false) ? (privacy?.kind === "shared" ? t("task.sharedChat") : null)
+    : !title || title === UNTITLED ? t("task.untitledConversation") : localizedTaskTitle(title);
   const label = t("chat.openProfileAria", { name: bot.name });
   return (
     <button

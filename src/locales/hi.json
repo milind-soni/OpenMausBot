@@ -1070,6 +1070,7 @@
   "attach.unavailable": "उपलब्ध नहीं",
   "task.chip": "थ्रेड",
   "task.newShort": "नया थ्रेड",
+  "task.sharedChat": "साझा चैट",
   "task.matching": "{count} मिलते-जुलते थ्रेड",
   "task.list": "थ्रेड",
   "task.noMatch": "“{query}” से कुछ मेल नहीं खाता",

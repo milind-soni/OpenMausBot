@@ -9,6 +9,7 @@ import { accessFromVisibility, entryMatches, higherLevel, sharedLevel, type BotA
 import { botOwner, type OwnedBot } from "../shared/bot-owner.ts";
 import type { BotVisibility } from "../shared/wire.ts";
 import { audienceIncludes, type Audience } from "./audience.ts";
+import { SHARED_CHAT_TITLE } from "../shared/wire.ts";
 
 export type { BotVisibility };
 
@@ -430,7 +431,14 @@ function shownConversations<T extends object>(bot: T, visible: VisibleSet): T {
     if (main) next.threadId = main; else delete next.threadId;
     out = next;
   }
-  return out as T;
+  return namedSharedChat(out) as T;
+}
+
+/** A team bot's main chat goes by what it is, so nobody takes it for one of their own. A member's own MausBot has none. */
+function namedSharedChat(bot: Record<string, unknown>): Record<string, unknown> {
+  const main = bot.mainThreadId, tasks = bot.tasks;
+  if (typeof main !== "string" || !Array.isArray(tasks) || (bot.defaultBot as { person?: unknown } | undefined)?.person) return bot;
+  return { ...bot, tasks: tasks.map((task: { threadId?: unknown; private?: unknown } | null) => (task?.threadId === main && task.private !== true ? { ...task, title: SHARED_CHAT_TITLE, sharedChat: true } : task)) };
 }
 
 function teamConversation(tasks: readonly unknown[]): string | undefined {

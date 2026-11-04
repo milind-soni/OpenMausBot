@@ -2519,6 +2519,7 @@
   "attach.unavailable": "Niedostępne",
   "task.chip": "Wątek",
   "task.newShort": "Nowy wątek",
+  "task.sharedChat": "Czat wspólny",
   "task.matching": "Pasujące wątki: {count}",
   "task.list": "Wątki",
   "task.namedList": "Wątki: {name}",

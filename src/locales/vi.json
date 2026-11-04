@@ -2109,6 +2109,7 @@
   "attach.unavailable": "Không khả dụng",
   "task.chip": "Luồng",
   "task.newShort": "Luồng mới",
+  "task.sharedChat": "Trò chuyện chung",
   "task.matching": "{count} luồng phù hợp",
   "task.list": "Luồng",
   "task.namedList": "Luồng của {name}",

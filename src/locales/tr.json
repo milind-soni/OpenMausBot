@@ -2109,6 +2109,7 @@
   "attach.unavailable": "Kullanılamıyor",
   "task.chip": "Konu",
   "task.newShort": "Yeni konu",
+  "task.sharedChat": "Paylaşılan sohbet",
   "task.matching": "{count} eşleşen konu",
   "task.list": "Konular",
   "task.namedList": "{name} konuları",

@@ -1166,6 +1166,7 @@
   "attach.unavailable": "Nicht verfügbar",
   "task.chip": "Thread",
   "task.newShort": "Neuer Thread",
+  "task.sharedChat": "Gemeinsamer Chat",
   "task.matching": "{count} passende Threads",
   "task.list": "Threads",
   "task.waitingOnTeammate": "Wartet auf Kollegen",
