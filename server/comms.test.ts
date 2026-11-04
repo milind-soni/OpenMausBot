@@ -12,11 +12,12 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { mentionedBots, normalizeGroupDefaultResponder, roomResponders } from "./store.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
+import { workerPort } from "./testing/worker-port.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
 const TEST_CAPABILITY_KEY = "comms-test-capability-key-0123456789abcdef";
-const PORT = 18800 + Math.floor(Math.random() * 10_000);
+const PORT = workerPort(18800, 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 // A fresh connection per request: a request sent on an idle kept-alive socket while the server's event loop is busy
 // (seconds, on a Windows runner) is reset when Node's keep-alive timeout fires before the server reads it (Node 24).

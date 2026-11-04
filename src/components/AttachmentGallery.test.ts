@@ -60,7 +60,7 @@ describe("audio attachments", () => {
     const signal = new AbortController().signal;
     const blob = await loadMessageAudio(clip, message, signal);
     expect(fetcher).toHaveBeenCalledWith("/api/threads/thread%2Fone/messages/message%20two/file", {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: clip.path }), signal,
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: clip.path }), signal: expect.any(AbortSignal),
     });
     expect(blob.type).toBe("audio/mpeg");
     expect(await blob.text()).toBe("audio bytes");
@@ -178,7 +178,7 @@ describe("explicit local video preview", () => {
     const signal = new AbortController().signal;
     const blob = await loadMessageVideo(file, message, signal);
     expect(fetcher).toHaveBeenCalledWith("/api/threads/thread%2Fone/messages/message%20two/file", {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: file.path }), signal,
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: file.path }), signal: expect.any(AbortSignal),
     });
     expect(blob.type).toBe("video/mp4");
     expect(await blob.text()).toBe("video bytes");
@@ -220,5 +220,43 @@ describe("explicit local video preview", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(stream, { headers: { "content-type": "video/mp4" } })));
     await expect(loadMessageVideo(file, message, request.signal)).rejects.toMatchObject({ name: "AbortError" });
     expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("retries a download that stops sending bytes instead of loading forever", async () => {
+    vi.useFakeTimers();
+    try {
+      const stuck = (signal: AbortSignal) => new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1]));
+          signal.addEventListener("abort", () => controller.error(new DOMException("Aborted", "AbortError")));
+        },
+      }), { headers: { "content-type": "video/mp4" } });
+      const fetcher = vi.fn(async (_url: string, init: RequestInit) => fetcher.mock.calls.length === 1
+        ? stuck(init.signal!)
+        : new Response("video bytes", { headers: { "content-type": "video/mp4" } }));
+      vi.stubGlobal("fetch", fetcher);
+      const pending = loadMessageVideo(file, message, new AbortController().signal);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(await (await pending).text()).toBe("video bytes");
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives up with a retryable error after repeated stalls", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetcher = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+        init.signal!.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+      }));
+      vi.stubGlobal("fetch", fetcher);
+      const pending = expect(loadMessageVideo(file, message, new AbortController().signal)).rejects.toThrow("cannot be played");
+      await vi.advanceTimersByTimeAsync(45_000);
+      await pending;
+      expect(fetcher).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

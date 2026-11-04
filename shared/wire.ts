@@ -32,7 +32,10 @@ import type { WebhookAttempt, WebhookTrigger } from "./webhooks.ts";
 import type { PublishedPageCard } from "./published-page.ts";
 import type { InboxItem, InboxTask } from "./inbox.ts";
 import type { LiveCallRecord, LiveCallState } from "./live-call-wire.ts";
-export type { LiveCallRecord, LiveCallState, LiveCallStatus, LiveClient, LiveEndReason, LiveKeySource, LiveSettings } from "./live-call-wire.ts";
+/** What a team bot's main chat is called, beside each person's own chats. */
+export const SHARED_CHAT_TITLE = "Shared chat";
+
+export type { LiveCallRecord, LiveCallState, LiveCallStatus, LiveClient, LiveEndReason, LiveKeySource, LiveProvider, LiveSettings } from "./live-call-wire.ts";
 
 /** Reasoning-effort levels, ascending: a union of what any engine accepts;
  * each driver declares the subset its CLI will take. */
@@ -139,6 +142,9 @@ export interface WireTask extends InboxTask {
   /** The first message already drove a title attempt for this thread, so a
    * later one does not rename a thread the person may have retitled. */
   titleFromFirstMessage?: true;
+  /** Team Cloud only: this is the bot's main chat, everyone's who sees the bot. Its title is SHARED_CHAT_TITLE on every
+   * person's copy, whatever is stored, and it can't be renamed. */
+  sharedChat?: true;
   /** Organizational grouping only; never a directory or provider context. */
   projectId?: string;
   /** Detached routine execution, reachable through its visible results card. */
