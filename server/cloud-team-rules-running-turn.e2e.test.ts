@@ -63,7 +63,7 @@ async function fullTurn(threadId: string, text: string) {
   return dump();
 }
 /** Starts a turn that waits inside itself, with no rules in force; the rule lands while it waits; then it carries on. */
-async function ruleLandsMidTurn(limits: Record<string, unknown>, calls: unknown[], title: string, ended = FINISHED) {
+async function ruleLandsMidTurn(limits: Record<string, unknown>, calls: unknown[], title: string, { ended = FINISHED, ready = () => true }: { ended?: string; ready?: () => boolean } = {}) {
   await rules(null);
   const threadId = await newThread(title);
   script(calls);
@@ -71,6 +71,7 @@ async function ruleLandsMidTurn(limits: Record<string, unknown>, calls: unknown[
   expect(sent.status, JSON.stringify(sent.body)).toBe(202);
   await expect.poll(() => existsSync(dumpPath()), { timeout: 60_000, interval: 50 }).toBe(true);
   const launched = dump();
+  await expect.poll(ready, { timeout: 60_000, interval: 50 }).toBe(true);
   await rules(limits);
   writeFileSync(join(team.home, "release"), "");
   await expect.poll(async () => (await thread(threadId)).includes(ended) && await idle(), { timeout: 60_000, interval: 100 }).toBe(true);
@@ -165,7 +166,7 @@ it("a hand-off it starts after the change gets the new rules", async () => {
 it("a connected-app tool is refused from the moment the rule lands, mid-turn, and the turn still finishes", async () => {
   const callsBy = () => broker.mcpCalls.filter((call) => call.method === "tools/call" && call.user === teamUser).length;
   const before = callsBy();
-  const { launched, words } = await ruleLandsMidTurn({ allowedApps: ["slack"] }, [GMAIL, WAIT, GMAIL], "uses an app");
+  const { launched, words } = await ruleLandsMidTurn({ allowedApps: ["slack"] }, [GMAIL, WAIT, GMAIL], "uses an app", { ready: () => callsBy() === before + 1 });
   expect(Object.keys(launched.mcpConfig?.mcpServers ?? {})).toContain("composio");
   expect(callsBy()).toBe(before + 1);
   expect(words).toMatch(/Acme does not allow bots to use Gmail\. Ask a team admin\./);
@@ -175,7 +176,7 @@ it("a computer it has not claimed yet is refused from the moment the rule lands:
   const refusal = "Acme does not allow bots to use cloud computers. Ask a team admin.";
   expect((await team.as(owner, "PATCH", `/api/bots/${botId}`, { computer: "cloud" })).status).toBe(200);
   try {
-    const { launched, words } = await ruleLandsMidTurn({ allowedComputers: ["vps"] }, [WAIT, { name: "screenshot", server: "computer", input: {} }], "uses a computer", refusal);
+    const { launched, words } = await ruleLandsMidTurn({ allowedComputers: ["vps"] }, [WAIT, { name: "screenshot", server: "computer", input: {} }], "uses a computer", { ended: refusal });
     expect(Object.keys(launched.mcpConfig?.mcpServers ?? {})).toContain("computer");
     expect(words).not.toMatch(/didn't start/);
     expect(words).not.toContain(FINISHED);
