@@ -7,10 +7,11 @@ import { skillSwitchCardCopy, skillSwitchStillMatches, skillSwitchTarget, type S
 const text = "---\nname: notes\ndescription: Keeps notes\n---\n# Notes\n";
 const own = (enabled: boolean): SwitchableSkill => ({ kind: "own", enabled, text, description: "Keeps  notes" });
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+const pinned = (kind: SwitchableSkill["kind"], value = text) => hash(`${kind}\0${value}`);
 
 describe("skillSwitchTarget", () => {
   it("shows the current SKILL.md and binds the card to its hash", () => {
-    expect(skillSwitchTarget("notes", "disable", own(true))).toEqual({ preview: text, sha256: hash(text), contentSha256: hash(text), gist: "Keeps notes" });
+    expect(skillSwitchTarget("notes", "disable", own(true))).toEqual({ preview: text, sha256: hash(text), contentSha256: pinned("own"), gist: "Keeps notes" });
     expect(skillSwitchTarget("notes", "enable", own(false))).toMatchObject({ sha256: hash(text) });
     expect(skillSwitchTarget("notes", "delete", own(false))).toMatchObject({ sha256: hash(text) });
   });
@@ -35,10 +36,14 @@ describe("skillSwitchTarget", () => {
 
 describe("skillSwitchStillMatches", () => {
   it("passes only for the same skill in the same state", () => {
-    expect(skillSwitchStillMatches("notes", "disable", own(true), hash(text))).toEqual({ ok: true });
-    expect(skillSwitchStillMatches("notes", "disable", { ...own(true), text: `${text}more\n` }, hash(text))).toEqual({ error: expect.stringContaining("changed after this card was shown") });
-    expect(skillSwitchStillMatches("notes", "disable", own(false), hash(text))).toEqual({ error: "skill \"notes\" is already off" });
-    expect(skillSwitchStillMatches("notes", "delete", undefined, hash(text))).toHaveProperty("error");
+    expect(skillSwitchStillMatches("notes", "disable", own(true), pinned("own"))).toEqual({ ok: true });
+    expect(skillSwitchStillMatches("notes", "disable", { ...own(true), text: `${text}more\n` }, pinned("own"))).toEqual({ error: expect.stringContaining("changed after this card was shown") });
+    expect(skillSwitchStillMatches("notes", "disable", own(false), pinned("own"))).toEqual({ error: "skill \"notes\" is already off" });
+    expect(skillSwitchStillMatches("notes", "delete", undefined, pinned("own"))).toHaveProperty("error");
+  });
+
+  it("refuses an imported skill with the same SKILL.md as the own skill the card showed", () => {
+    expect(skillSwitchStillMatches("notes", "disable", { ...own(true), kind: "imported" }, pinned("own"))).toEqual({ error: expect.stringContaining("changed after this card was shown") });
   });
 
   it("binds to the full SKILL.md, not only its redacted preview", () => {

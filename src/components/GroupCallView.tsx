@@ -240,7 +240,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
           if (allow && openApproval.skill) {
             setHeard("");
             enqueueSpeech(
-              "Open the group thread to review the complete skill before enabling it. You can say no now to deny it.",
+              "Open the group thread to review the complete skill before approving it. You can say no now to deny it.",
               openApproval.member,
               true,
             );

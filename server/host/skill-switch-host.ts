@@ -100,7 +100,13 @@ export function createSkillSwitchHost(deps: SkillSwitchHostDeps) {
     const requestId = randomUUID();
     mkdirSync(dirname(pinPath(requestId)), { recursive: true, mode: 0o700 });
     writeFileAtomic(pinPath(requestId), target.contentSha256, { mode: 0o600 });
-    const summary = appendCard({ requestId, botId: from.id, threadId, action, name, target });
+    let summary: string;
+    try {
+      summary = appendCard({ requestId, botId: from.id, threadId, action, name, target });
+    } catch (error) {
+      dropPin(requestId);
+      throw error;
+    }
     appendDecision(deps.dataDir, { threadId, requestId, botId: from.id, botName: from.name,
       tool: "stage_skill", summary, decision: "card-shown", source: "skill" });
     return { status: 201, body: { state: "pending", name, action, gist: target.gist, warnings: [], summary } };
@@ -140,9 +146,9 @@ export function createSkillSwitchHost(deps: SkillSwitchHostDeps) {
     store.patchMessage(args.threadId, messageId, {
       card: { ...card, answered: "allow", held: undefined, title: skillSwitchCardCopy(request.action, request.name, "").done },
     });
-    dropPin(request.requestId);
     deps.noteSkillChange(args.botId, args.threadId);
     decided("user-approved");
+    dropPin(request.requestId);
     return { claimed: true, outcome: "allowed-once" };
   }
 

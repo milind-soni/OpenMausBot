@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SkillRequestCardData, SkillSwitchAction } from "../../shared/skill-request.ts";
 import type { OptionCardData } from "../../shared/wire.ts";
+import { flushDecisionLog } from "../decision-log.ts";
 import type { BotRecord } from "../store.ts";
 
 const mocks = vi.hoisted(() => ({ setImportedSkillEnabled: vi.fn() }));
@@ -27,10 +28,11 @@ function setup() {
   const bot = { id: "b1", name: "Bot", color: "blue" } as BotRecord;
   const messages: Array<{ id: string; card: OptionCardData }> = [];
   let file = skillMd("A");
+  let appendFails = false;
   const host = createSkillSwitchHost({
     store: {
       bot: () => bot,
-      appendMessage: ((_threadId: string, message: { card: OptionCardData }) => { messages.push({ id: `m${messages.length}`, card: message.card }); }) as never,
+      appendMessage: ((_threadId: string, message: { card: OptionCardData }) => { if (appendFails) throw new Error("disk full"); messages.push({ id: `m${messages.length}`, card: message.card }); }) as never,
       patchMessage: ((_threadId: string, id: string, patch: { card: OptionCardData }) => { messages.find((message) => message.id === id)!.card = patch.card; }) as never,
     },
     dataDir,
@@ -46,14 +48,17 @@ function setup() {
     return host.resolve({ botId: bot.id, threadId: "t1", requestId: request.requestId, behavior: "allow", reviewedSha256: request.sha256 }, id, shown, request);
   };
   const pins = () => readdirSync(join(dataDir, "skill-switch"));
-  return { bot, host, card, approve, pins, edit: (next: string) => { file = next; } };
+  return { bot, host, card, approve, pins, edit: (next: string) => { file = next; }, failAppend: () => { appendFails = true; } };
 }
 
 beforeEach(() => {
   mocks.setImportedSkillEnabled.mockReset().mockReturnValue({ name: "lookup", enabled: false });
 });
-afterEach(() => {
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+afterEach(async () => {
+  for (const dir of dirs.splice(0)) {
+    await flushDecisionLog(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 describe("skill switch cards", () => {
@@ -81,5 +86,12 @@ describe("skill switch cards", () => {
     expect(card().skillRequest?.sha256).toBe(shown);
     expect(card().held).toContain("changed after this card was shown");
     expect(mocks.setImportedSkillEnabled).not.toHaveBeenCalled();
+  });
+
+  it("leaves no digest pin behind when the card can't be added", () => {
+    const { bot, host, pins, failAppend } = setup();
+    failAppend();
+    expect(() => host.stage(bot, "t1", "disable", { skill_name: "lookup" })).toThrow("disk full");
+    expect(pins()).toHaveLength(0);
   });
 });

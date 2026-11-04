@@ -586,7 +586,7 @@ function Call({ bot }: { bot: Bot }) {
           const allow = YES.test(said);
           if (allow && open.skill) {
             setHeard("");
-            void sayThenListen("Open this chat to review the complete skill before enabling it. You can say no now to deny it.");
+            void sayThenListen("Open this chat to review the complete skill before approving it. You can say no now to deny it.");
             return;
           }
           // Stay claimed until the server's card patch arrives, or a render in that gap submits the same approval

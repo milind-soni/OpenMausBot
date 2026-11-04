@@ -21,7 +21,8 @@ export interface SkillSwitchTarget {
   /** The current SKILL.md as the card shows it; approval binds to its hash. */
   preview: string;
   sha256: string;
-  /** Digest of the full SKILL.md, secrets included. Approval binds to this one; it stays on the server, never on the card. */
+  /** Digest of the skill's kind and full SKILL.md, secrets included, so an imported skill with the same text never stands in
+   * for the bot's own. Approval binds to this one; it stays on the server, never on the card. */
   contentSha256: string;
   source?: string;
   gist: string;
@@ -53,7 +54,7 @@ export function skillSwitchTarget(
   return {
     preview,
     sha256: createHash("sha256").update(preview).digest("hex"),
-    contentSha256: createHash("sha256").update(skill.text).digest("hex"),
+    contentSha256: createHash("sha256").update(`${skill.kind}\0${skill.text}`).digest("hex"),
     ...(skill.source ? { source: redactSecretsInText(skill.source) } : {}),
     gist: redactSecretsInText(skill.description ?? "").replace(/\s+/g, " ").trim().slice(0, STAGED_GIST_MAX),
   };
