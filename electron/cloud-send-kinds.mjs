@@ -103,7 +103,7 @@ export function createMoveKinds({ localJson, localBytes, localSend, entry, persi
     if (!record(held) || !("record" in held)) throw Object.assign(new Error("It could not be read on this computer."), { code: "local" });
     const sent = row.kind === "routine" && ctx.ownMove ? await routineDefinition(ctx, row, held) : held.record;
     const answer = await ctx.session.call("PUT", "/api/cloud-send/kind", { v: 1, key: row.key, dataDir: held.dataDir, record: sent, ...(Array.isArray(held.runs) ? { runs: held.runs } : {}) });
-    if (!answer.ok) throw Object.assign(new Error(refusal(answer, "My Cloud could not take it.")), answer.status === 400 || answer.status === 403 ? { final: true } : {});
+    if (!answer.ok) throw Object.assign(new Error(refusal(answer, "My Cloud could not take it.")), answer.status === 400 || answer.status === 403 || answer.body?.final === true ? { final: true } : {});
     if (AUTOMATIONS.has(row.kind) && record(held.record)) {
       entry(ctx.origin).on[row.key] = row.kind === "call" ? held.record.nextRunAt !== null && held.record.nextRunAt !== undefined : held.record.enabled === true;
       persist();

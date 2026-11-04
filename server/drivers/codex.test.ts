@@ -53,6 +53,9 @@ describe("CodexDriver.decodeConfig", () => {
     expect(codexUserError("provider_not_configured", "own")).toContain("Continue with ChatGPT");
     expect(codexUserError("provider_not_configured", "plan")).toContain("API billing will not be used");
     expect(codexUserError("x".repeat(500) + "subscription_sharing_usage_limit_exceeded", "plan")).toMatch(/^subscription_sharing_usage_limit_exceeded:/);
+    const refusal = "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.";
+    expect(codexUserError(refusal, "plan")).toBe("This model isn't available on your ChatGPT plan, so it's now hidden from this account's model list. Pick another model.");
+    expect(codexUserError(refusal, "own")).toBe(refusal);
     expect(() => CodexDriver.decodeConfig({ authMode: "chatgpt-plan", managed: {} })).toThrow("cannot be combined");
   });
   it("defaults to the codex binary with fullAuto off", () => {
@@ -1395,6 +1398,52 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       const thread = seen.calls.find((call: { method: string }) => call.method === "thread/start");
       expect(thread.params.config["shell_environment_policy.exclude"]).toEqual(["OPENMAUSBOT_CHATGPT_TOKEN", "OMB_REMOTE_MCP_CONFIG_*", "ELECTRON_RUN_AS_NODE"]);
       expect(argv).not.toContain("mcp_servers.whop.default_tools_approval_mode");
+    });
+
+    it("hides a model ChatGPT refuses for this account and runs later turns on the account's next model", async () => {
+      plan();
+      vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockResolvedValue({ default: "gpt-6.1-sol", options: [{ id: "gpt-6.1-sol", label: "GPT-6.1 Sol" }, { id: "gpt-fixture", label: "Fixture" }] });
+      let refused: string[] = [];
+      vi.spyOn(ChatGptPlanAuthController.prototype, "refusedModels").mockImplementation(() => refused);
+      const refuse = vi.spyOn(ChatGptPlanAuthController.prototype, "refuseModel").mockImplementation(async (slug) => { refused = [...refused, slug]; });
+      await create({ mode: "plan-model-refused", authMode: "chatgpt-plan" });
+      const first = await instance.adapter.sendTurn({ threadId: "t-plan-refused", text: "go", model: "gpt-6.1-sol" });
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === first.turnId);
+      const errors = recorder.events.filter((event) => event.type === "runtime.error" && event.turnId === first.turnId);
+      expect(errors).toHaveLength(1);
+      expect((errors[0] as { message: string }).message).toContain("isn't available on your ChatGPT plan");
+      expect(refuse).toHaveBeenCalledExactlyOnceWith("gpt-6.1-sol");
+      const dump = join(scratch, "plan-refused.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      const next = await instance.adapter.sendTurn({ threadId: "t-plan-refused-next", text: "go", model: "gpt-6.1-sol" });
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === next.turnId);
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.calls.find((call: { method: string }) => call.method === "thread/start").params.model).toBe("gpt-fixture");
+    });
+
+    it("takes the refused model off the menu at once, even when it was the account's only model", async () => {
+      plan();
+      let refused: string[] = [];
+      vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockImplementation(async () => {
+        const options = [{ id: "gpt-6.1-sol", label: "GPT-6.1 Sol" }].filter((option) => !refused.includes(option.id));
+        return { default: options[0]?.id ?? "", options };
+      });
+      vi.spyOn(ChatGptPlanAuthController.prototype, "refusedModels").mockImplementation(() => refused);
+      vi.spyOn(ChatGptPlanAuthController.prototype, "refuseModel").mockImplementation(async (slug) => { refused = [...refused, slug]; });
+      await create({ mode: "plan-model-refused", authMode: "chatgpt-plan" });
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "t-plan-only-refused", text: "go", model: "gpt-6.1-sol" });
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      expect(instance.models).toEqual({ default: "", options: [] });
+    });
+
+    it("never hides a model for a ChatGPT plan error that isn't ChatGPT refusing that model", async () => {
+      plan();
+      const refuse = vi.spyOn(ChatGptPlanAuthController.prototype, "refuseModel").mockResolvedValue();
+      await create({ mode: "usage-limit", authMode: "chatgpt-plan" });
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "t-plan-limit", text: "go", model: "gpt-6.1-sol" });
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      expect(recorder.events.some((event) => event.type === "runtime.error" && event.turnId === turnId)).toBe(true);
+      expect(refuse).not.toHaveBeenCalled();
     });
 
     it("passes the person's proxy settings to the proxy, which Codex would otherwise drop", async () => {

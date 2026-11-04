@@ -68,6 +68,16 @@ describe("soft line breaks", () => {
   });
 });
 
+describe("spoilers", () => {
+  it("hides only double-tilde spans, not text between ranges written with a single tilde", () => {
+    const ranges = renderToStaticMarkup(createElement(ChatMarkdown, { text: "Episodes 77~82 first, then 77~80." }));
+    expect(ranges).not.toContain("Reveal spoiler");
+    expect(ranges).toContain("Episodes 77~82 first, then 77~80.");
+    const spoiler = renderToStaticMarkup(createElement(ChatMarkdown, { text: "The answer is ~~42~~." }));
+    expect(spoiler).toContain("Reveal spoiler");
+  });
+});
+
 describe("mention highlighting", () => {
   const mentionPeers = [{ name: "Atlas" }, { name: "調査担当" }];
   it("carries bot colors into Markdown without coloring everyone as a bot", () => {

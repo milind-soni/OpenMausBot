@@ -89,6 +89,7 @@ export function liveInstructions(bot: LiveBot, { cloudHome = false }: { cloudHom
     "- The user asks something about you that this conversation does not already answer, for example which AI model you run on.",
     "- The user answers a question you asked, including yes or no to a permission request.",
     "- A correction or a new detail changes work already requested.",
+    "- The user clearly asks you to hang up or end the call. Never end or offer to end the call on your own.",
     "Do not delegate to the backend when:",
     "- You can answer from this conversation or from a result that is still current.",
     "- The user only greets you, thanks you, or asks you to repeat something you already said.",
@@ -100,6 +101,17 @@ export function liveInstructions(bot: LiveBot, { cloudHome = false }: { cloudHom
     "Never say that an action happened until the result reports it.",
     "When a permission question comes up, ask it clearly and wait for a clear yes or no. Never answer it yourself.",
   ].join("\n");
+}
+
+// Words that may open or close a hang-up request ("okay, bye, hang up now").
+const HANG_UP_LEAD = /^(?:(?:um+|uh+|er+|so|well|ok|okay|alright|all right|great|thanks|thank you|bye|goodbye|that's all|that is all)(?:[\s,.!?-]+|$))+/i;
+// The whole utterance must be the request: "don't hang up", "how do I end the call?" or
+// "hang up the poster" never match, and neither does anything a page, file or bot said.
+const HANG_UP = /^(?:(?:please|you can|you may|go ahead and|can you|could you|would you|will you|let's|let us)[\s,]+)*(?:hang\s+up(?:\s+(?:the|this)\s+(?:call|phone))?|end\s+(?:(?:the|this|our)\s+)?call)(?:[\s,.!]+(?:now|please|thanks|thank you|bye|goodbye))*[\s.!?]*$/i;
+
+/** True only when the person's own words on a Live call are a clear request to hang up. */
+export function spokenHangUp(text: string): boolean {
+  return HANG_UP.test(text.trim().replace(/[\u2018\u2019]/g, "'").replace(HANG_UP_LEAD, ""));
 }
 
 export function liveInitialInput(history: LiveHistoryMessage[]) {
