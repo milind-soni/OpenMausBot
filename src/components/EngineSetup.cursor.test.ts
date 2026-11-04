@@ -72,7 +72,7 @@ describe("Cursor on a Cloud", () => {
 describe("an engine a Cloud can't install", () => {
   it("says so in one line: no command to copy, no CLI path to set, no terminal guide", () => {
     const html = render(cursor(missing, false), true);
-    expect(html).toContain("Cursor can’t be installed on your Cloud yet. Choose another AI in the model picker.");
+    expect(html).toContain("Cursor can’t be installed on the Cloud yet. Choose another AI in the model picker.");
     expect(html).not.toContain(CURL);
     expect(html).not.toContain("Set CLI");
     expect(html).not.toContain("computer running");
@@ -83,6 +83,6 @@ describe("an engine a Cloud can't install", () => {
     const html = render(cursor(missing, false), false);
     expect(html).toContain(CURL);
     expect(html).toContain("Set CLI");
-    expect(html).not.toContain("can’t be installed on your Cloud");
+    expect(html).not.toContain("can’t be installed on the Cloud");
   });
 });
