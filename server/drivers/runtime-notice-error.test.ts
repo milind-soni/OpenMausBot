@@ -3,9 +3,24 @@ import { chatNotice } from "../chat-notices.ts";
 import { codexActionFailure } from "./codex-action-notice.ts";
 import { piModelId } from "./pi-model-id.ts";
 import { RuntimeNoticeError, runtimeErrorText } from "./runtime-notice-error.ts";
+import { acpRuntimeFailure } from "./acp/failure-words.ts";
+import { engineFailure } from "./engine-errors.ts";
 import { describeQuiet, quietNoticeText, quietVerdict } from "./acp/quiet-status.ts";
 
 describe("runtime notice provenance", () => {
+  it("retains engine classifications and app-owned codes at the ACP runtime boundary", () => {
+    const message = "maximum 128 tools";
+    expect(acpRuntimeFailure(new Error(message), "Grok")).toEqual(engineFailure("Grok", message));
+    const error = new RuntimeNoticeError("Pi did not confirm the selected model", "chat.notice.piModelNotConfirmed");
+    expect(acpRuntimeFailure(error, "Pi")).toEqual({ message: error.message, text: error.text });
+    const account = { message: "Account refused", text: { key: "chat.notice.copilotAccountRefused" } };
+    expect(acpRuntimeFailure(new Error(message), "Grok", account)).toEqual(account);
+    expect(acpRuntimeFailure(new Error("Provider's own words"), "Grok", { text: account.text })).toEqual({ message: "Provider's own words", text: account.text });
+    expect(acpRuntimeFailure(new Error(message), "Grok", {})).toEqual(engineFailure("Grok", message));
+    const limited = quietVerdict({ name: "Custom ACP", next: { kind: "provider-error", message: "HTTP 429" }, logged: { signal: { kind: "provider-error", message: "HTTP 429" }, at: 0 }, now: 600_000, quietMs: 600_000, noSignsSince: null, stuckAfterMs: 600_000 }).stop!;
+    expect(acpRuntimeFailure(limited, "Custom ACP")).toEqual({ ...engineFailure("Custom ACP", limited.message), text: runtimeErrorText(limited) });
+  });
+
   it("keeps only an app-owned error's code and redacts its params centrally", () => {
     const secret = `sk-ant-${"Ab1c".repeat(9)}`;
     const error = new RuntimeNoticeError("Pi did not confirm the selected model", "chat.notice.piModelNotConfirmed", { detail: secret });

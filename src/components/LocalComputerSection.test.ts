@@ -297,6 +297,9 @@ describe("cloud computer inventory UI", () => {
     const disconnected = renderCard({ configured: false });
     expect(disconnected).toContain("Boat is not connected");
     expect(disconnected).not.toContain("No cloud desktops found");
+    expect(disconnected.match(/Boat is not connected/g)).toHaveLength(1);
+    expect(disconnected).toContain("Connect your Boat account");
+    expect(disconnected).not.toContain("aria-busy");
 
     const unavailable = renderCard({ unavailableReason: "boat.dev is unavailable" });
     expect(unavailable).toContain("boat.dev is unavailable");
@@ -507,7 +510,10 @@ describe("VPS computer inventory UI", () => {
   });
 
   it("keeps disconnected, unavailable, and empty states distinct", () => {
-    expect(renderCard({ configured: false, aliases: [] })).toContain("No VPS is set up yet");
+    const disconnected = renderCard({ configured: false, aliases: [] });
+    expect(disconnected).toContain("To use your own VPS, add its SSH alias");
+    expect(disconnected.match(/No VPS is set up yet/g)).toHaveLength(1);
+    expect(disconnected).not.toContain("aria-busy");
     expect(renderCard({ unavailableReason: "SSH host cannot be reached" })).toContain("SSH host cannot be reached");
     expect(renderCard()).toContain("No MausBot desktops found on your VPS");
   });

@@ -13,8 +13,10 @@ The guide covers every string a person reads in pt-BR:
 - the interface catalog, `src/locales/pt-br.json`;
 - text in the Electron shell that appears outside the window: the menu bar,
   the tray, dialogs and system notifications;
-- server messages people see, delivered as a code with parameters and an
-  English fallback that the client translates with `tFromServer`.
+- server messages people see: `errorKey` and `textCode` messages carry
+  parameters and an English fallback for client translation; `serverLine`
+  messages arrive already localized for the person or conversation and must not
+  be translated again by the client.
 
 It does not cover bot or system prompts, tool descriptions written for models,
 logs, developer or CLI errors, emails sent by the control plane, the docs site

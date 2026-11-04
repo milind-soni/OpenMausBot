@@ -2,6 +2,7 @@
 import type { Message } from "./store.ts";
 import { redactSecretsInText } from "./redact.ts";
 import type { RoutineRun } from "./routines.ts";
+import { serverLine, type ServerLineKey } from "./server-lines.ts";
 
 export function routineRunCard(run: RoutineRun): NonNullable<Message["routineRun"]> {
   const visibleSummary = run.status === "waiting" ? run.attention : run.output;
@@ -22,33 +23,31 @@ export function routineRunCard(run: RoutineRun): NonNullable<Message["routineRun
   return card;
 }
 
-export function routineRunFallbackText(card: NonNullable<Message["routineRun"]>): string {
-  const goalState = card.goalStatus === "needs-input"
-    ? "needs your input"
-    : card.goalStatus === "blocked"
-      ? "was blocked"
-      : card.goalStatus === "limit-reached"
-        ? "reached its limit"
-        : card.goalStatus === "stopped"
-          ? "was stopped"
-          : card.goalStatus === "failed"
-            ? "failed"
-            : undefined;
-  const state = goalState ?? (
-    card.status === "waiting"
-      ? "needs your attention"
-      : card.status === "completed"
-        ? "completed"
-        : card.status === "failed"
-          ? "failed"
-          : card.status === "cancelled"
-            ? "was cancelled"
-            : card.status === "missed"
-              ? "was missed"
-              : card.status === "queued" && card.deferredAt != null
-                ? "deferred: target busy"
-              : card.status
-  );
+/** The words for where the run stands; null for a status with none. */
+function stateKey(card: NonNullable<Message["routineRun"]>): ServerLineKey | null {
+  switch (card.goalStatus) {
+    case "needs-input": return "server.runs.state.needsInput";
+    case "blocked": return "server.runs.state.blocked";
+    case "limit-reached": return "server.runs.state.limitReached";
+    case "stopped": return "server.runs.state.stopped";
+    case "failed": return "server.runs.state.failed";
+  }
+  switch (card.status) {
+    case "waiting": return "server.runs.state.waiting";
+    case "completed": return "server.runs.state.completed";
+    case "failed": return "server.runs.state.failed";
+    case "cancelled": return "server.runs.state.cancelled";
+    case "missed": return "server.runs.state.missed";
+    case "queued": return card.deferredAt != null ? "server.runs.state.deferred" : "server.runs.state.queued";
+    case "running": return "server.runs.state.running";
+  }
+  return null;
+}
+
+/** In the language of the conversation's person (server/server-lines.ts). */
+export function routineRunFallbackText(card: NonNullable<Message["routineRun"]>, language?: string): string {
+  const key = stateKey(card);
+  const state = key ? serverLine(language, key) : card.status;
   const detail = card.summary ?? card.error;
-  return `Routine “${card.routineName}” ${state}${detail ? `\n\n${detail}` : ""}`;
+  return `${serverLine(language, "server.runs.card.line", { name: card.routineName, state })}${detail ? `\n\n${detail}` : ""}`;
 }

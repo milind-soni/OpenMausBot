@@ -156,6 +156,25 @@ describe("Settings → Engines → setup cards", () => {
     expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain(">Remove<");
   });
 
+  it("offers Sign out for a signed-in Antigravity account, including the first one", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.bots = [];
+    const account = (instanceId: string, authenticated: boolean, signOut: boolean): InstanceInfo => ({
+      instanceId, driverKind: "antigravityAgent", displayName: "Google account", cliDefault: "agy_acp_server",
+      snapshot: { state: "available", authenticated }, models: { default: "gemini", options: [] },
+      authentication: { method: "browser", signOut },
+    });
+    fixture.instances = [account("antigravity", true, true)];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain(">Sign out<");
+    fixture.instances = [account("antigravity-work", true, true)];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain(">Sign out<");
+    fixture.instances = [account("antigravity", false, true)];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain(">Sign out<");
+    fixture.instances = [account("antigravity", true, false)];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain(">Sign out<");
+  });
+
   it("shows every Company provider as read-only while preserving personal controls", () => {
     vi.stubGlobal("window", {});
     fixture.bots = [];

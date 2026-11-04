@@ -28,12 +28,14 @@ export interface FailedTurnTool {
   nameCode?: string;
   /** Values for the placeholders of `nameCode`. */
   nameParams?: ServerTextParams;
+  /** the turn's reply came back; only a step it ran failed or wasn't allowed */
+  partial?: boolean;
 }
 
 /** The activity row a failed turn is stored as. */
 export function failedTurnTool(
   cause: string,
-  flags: { setup?: boolean; terminal?: boolean; claudeUpdate?: boolean; place?: PlaceRow; limitResetsAt?: number; text?: ServerText } = {},
+  flags: { setup?: boolean; terminal?: boolean; claudeUpdate?: boolean; place?: PlaceRow; limitResetsAt?: number; partial?: boolean; text?: ServerText } = {},
 ): FailedTurnTool {
   const words = cause.length > FAILED_TURN_MAX_CHARS ? `${cause.slice(0, FAILED_TURN_MAX_CHARS - 1)}…` : cause;
   return {
@@ -45,6 +47,7 @@ export function failedTurnTool(
     ...(flags.place ? { place: flags.place } : {}),
     ...(flags.limitResetsAt ? { limitResetsAt: flags.limitResetsAt } : {}),
     ...(flags.text ? { nameCode: flags.text.key, ...(flags.text.params ? { nameParams: flags.text.params } : {}) } : {}),
+    ...(flags.partial ? { partial: true } : {}),
   };
 }
 

@@ -7,11 +7,13 @@ import { answerConnection, connectionFingerprints, highlevelDigest, launchersOnP
 import { createConnectionPrompt, type ConnectionPromptBot } from "./cloud-connections-prompt.ts";
 import { movedFrom } from "./cloud-send-arrived.ts";
 import * as composio from "./composio.ts";
+import { brokerAccess } from "./composio-broker-access.ts";
 import { adoptComposioShare, adoptOwnComposio, composioIdentity, composioShareCode } from "./composio-share.ts";
 import type { AppConfig } from "./config.ts";
 import type { HighLevelService } from "./highlevel/service.ts";
 import type { ConnectionHandoffAnswer, ConnectionHandoffWhat } from "./login-handoff.ts";
 import type { McpOAuthManager } from "./mcp-oauth.ts";
+import type { RequestAuth } from "./request-auth.ts";
 import { isRemoteMcpServer, parseStoredMcpServer, type McpRunsOn } from "./mcp-registry.ts";
 import { personalConnectionRefusal, type CloudTeam } from "./cloud-team.ts";
 import { createCloudConnectionRoutes } from "./routes/cloud-connections.ts";
@@ -19,6 +21,8 @@ import { createCloudConnectionRoutes } from "./routes/cloud-connections.ts";
 export interface CloudConnectionsHostDeps {
   /** This server is the person's Cloud home, reached at this public origin. */
   cloudHome: { publicOrigin: string; team?: CloudTeam | null } | null;
+  /** A server of one person's own takes that person's connections as a Cloud home does. */
+  ownHome?(auth: RequestAuth): boolean;
   config(): AppConfig;
   /** This server's own environment id: the computer a server that needs it is marked as running on. */
   environmentId: string;
@@ -31,6 +35,8 @@ export interface CloudConnectionsHostDeps {
   /** This server's data folder, where a Cloud home keeps the computer its bots moved from. */
   dataDir?: string;
 }
+
+const managedService = (): boolean => { try { return brokerAccess() !== null; } catch { return false; } };
 
 export function createCloudConnectionsHost(deps: CloudConnectionsHostDeps) {
   const label = (process.env.OMB_ENVIRONMENT_LABEL?.trim() || hostname()).slice(0, 120).trim() || "the person's computer";
@@ -52,9 +58,11 @@ export function createCloudConnectionsHost(deps: CloudConnectionsHostDeps) {
     fingerprints: (nonce: string) => connectionFingerprints(nonce, sources()),
     routes: createCloudConnectionRoutes({
       cloudHome: deps.cloudHome !== null,
+      ...(deps.ownHome ? { ownHome: deps.ownHome } : {}),
       ...(deps.cloudHome?.team ? { personalRefusal: (what: string) => personalConnectionRefusal(deps.cloudHome!.team!, what) } : {}),
       async list() {
-        return { computer, connections: await connections(), engines: await deps.engines().catch((): string[] => []), commands: commands ??= launchersOnPath() };
+        return { computer, connections: await connections(), engines: await deps.engines().catch((): string[] => []), commands: commands ??= launchersOnPath(),
+          ...(deps.cloudHome === null && !managedService() ? { managedApps: false as const } : {}) };
       },
       adoptShare: adoptComposioShare,
       adoptOwn: (apiKey, userId) => adoptOwnComposio(deps.config(), apiKey, userId),

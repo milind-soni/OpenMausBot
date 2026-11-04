@@ -10,7 +10,6 @@ import {
   fetchMemoryJournal,
   fetchMemoryOverview,
   formatBytes,
-  localizedRelativeTime,
   journalSource,
   journalSourceKey,
   fileLabel,
@@ -30,6 +29,7 @@ import {
   type LendingReview,
   markMemoryReviewed,
 } from "@/lib/memory";
+import { localizedRelativeTime } from "@/lib/relative-time";
 import { shortPath } from "@/lib/short-path";
 import { activeLocale, t } from "@/lib/i18n";
 import { roomMemoryCaptureEnabled } from "@/lib/feature-flags";

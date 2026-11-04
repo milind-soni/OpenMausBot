@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { briefCrossingTool, claimRecallCrossings, forgetRecallCrossings, recallCrossingTool } from "./recall-disclosure.ts";
+import { briefCrossingLabel, claimRecallCrossings, forgetRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
+
+import "./server-line-packs.ts";
 
 beforeEach(() => forgetRecallCrossings());
 
@@ -39,10 +41,14 @@ describe("claimRecallCrossings", () => {
 });
 
 describe("the crossing notices", () => {
-  it("say what crossed, count in plain words, and carry a code per count", () => {
-    expect(recallCrossingTool("Cia", 1)).toEqual({ ok: true, name: "Cia recalled 1 message from its private chat with you", nameCode: "chat.notice.recallCrossingOne", nameParams: { name: "Cia", count: 1 } });
-    expect(recallCrossingTool("Cia", 3).name).toBe("Cia recalled 3 messages from its private chat with you");
-    expect(briefCrossingTool("Cia", 1)).toEqual({ ok: true, name: "Cia's recent-work brief covers 1 private chat with you", nameCode: "chat.notice.briefCrossingOne", nameParams: { name: "Cia", count: 1 } });
-    expect(briefCrossingTool("Cia", 2)).toMatchObject({ name: "Cia's recent-work brief covers 2 private chats with you", nameCode: "chat.notice.briefCrossingMany" });
+  it("says what crossed in the room's language, with singular and plural counts", () => {
+    expect(recallCrossingLabel("Cia", 1)).toBe("Cia recalled 1 message from its private chat with you");
+    expect(recallCrossingLabel("Cia", 3)).toBe("Cia recalled 3 messages from its private chat with you");
+    expect(briefCrossingLabel("Cia", 1)).toBe("Cia's recent-work brief covers 1 private chat with you");
+    expect(briefCrossingLabel("Cia", 2)).toBe("Cia's recent-work brief covers 2 private chats with you");
+    expect(recallCrossingLabel("Cia", 1, "pt-br")).toBe("Cia relembrou 1 mensagem da conversa privada com você");
+    expect(recallCrossingLabel("Cia", 3, "pt-br")).toBe("Cia relembrou 3 mensagens da conversa privada com você");
+    expect(briefCrossingLabel("Cia", 1, "pt-br")).toBe("O resumo do trabalho recente de Cia inclui 1 conversa privada com você");
+    expect(briefCrossingLabel("Cia", 2, "pt-br")).toBe("O resumo do trabalho recente de Cia inclui 2 conversas privadas com você");
   });
 });

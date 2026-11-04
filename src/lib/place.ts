@@ -16,6 +16,11 @@ export function effectivePlace(bot: Pick<Bot, "computer">, task?: Pick<Task, "su
   return task?.surface ?? bot.computer ?? "auto";
 }
 
+/** The place the person pinned this conversation to; a place Auto picked and recorded for it is not their pin. */
+export function personPin(task?: Pick<Task, "surface" | "surfaceAuto"> | null): Place | undefined {
+  return task?.surfaceAuto ? undefined : task?.surface;
+}
+
 export function isComputerPlace(place: EffectivePlace): place is "cloud" | "vm" | "local" {
   return place === "cloud" || place === "vm" || place === "local";
 }

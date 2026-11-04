@@ -9,6 +9,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import type { RoutineRunOn } from "./routines.ts";
 import { parseJson, schemaIssue, type JsonValue } from "./schema.ts";
+import { AUTHORITY, fromNote, webhookWho } from "./provenance-label.ts";
 
 export type WebhookTriggerInput = z.input<typeof triggerInputSchema>;
 export type WebhookVerificationSample = z.output<typeof verificationSampleSchema>;
@@ -287,6 +288,7 @@ function taskFromPayload(payload: JsonValue): string {
 }
 
 export const WEBHOOK_EVENT_DATA = "[UNTRUSTED WEBHOOK EVENT DATA]";
+export const webhookNote = (name: string): string => fromNote(webhookWho(name), "event", AUTHORITY.info);
 
 function eventPrompt(trigger: StoredWebhookTrigger, event: WebhookEvent, receivedAt: number, deliveryId: string): string {
   const metadata = [
@@ -309,6 +311,7 @@ function eventPrompt(trigger: StoredWebhookTrigger, event: WebhookEvent, receive
         ];
   // The payload and its headers are the sender's: they never close the data block or open an instructions block.
   return [
+    webhookNote(trigger.name),
     ...instructionBlock,
     "",
     WEBHOOK_EVENT_DATA,

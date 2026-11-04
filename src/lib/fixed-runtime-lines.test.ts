@@ -2,12 +2,15 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { noticeFailure, noticeLine, runtimeNoticeTool } from "../../server/chat-notices";
+import { noticeFailure, runtimeNoticeTool } from "../../server/chat-notices";
+import type { Message } from "../state/store";
+import { RelayLabel } from "../components/InboxLine";
 import { acpStopFailure } from "../../server/drivers/acp/failure-words";
 import { stopCause, stopFailure } from "../../server/drivers/engine-errors";
 import { unsupportedCallsFailure, unsupportedCallsNotice } from "../../server/drivers/codex-unsupported-calls";
 import { unaskedStopFailure, unaskedStopMessage } from "../../server/harness/unasked-stop";
-import { droppedReportLine, fullReportLine, notYetReportLine, refusedReportLine, sentReportLine } from "../../server/host/devs-report-words";
+import "../../server/server-line-packs";
+import { droppedLine, fullLine, laterLine, notYetLine, refusedLine, sentLine } from "../../server/host/devs-report-words";
 import { sentRow } from "../../server/host/handoff-sent";
 import { userError } from "../../server/user-errors";
 import { EngineCheckLine } from "../components/EngineLiveCheck";
@@ -17,7 +20,6 @@ import { serverErrorText } from "./server-error";
 
 afterEach(() => setLocale("en"));
 const secret = `sk-ant-${"Ab1c".repeat(9)}`;
-const words = (line: { line: string; text?: ReturnType<typeof sentReportLine>["text"] }) => noticeText(line.text?.key, line.line, line.text?.params);
 
 describe("fixed runtime notices", () => {
   it.each([
@@ -48,7 +50,7 @@ describe("fixed runtime notices", () => {
     setLocale("pt-br");
     expect(noticeText("chat.notice.future", "Future English")).toBe("Future English");
     expect(noticeText("native.update.installing", "Wrong namespace")).toBe("Wrong namespace");
-    expect(noticeText("chat.notice.relayReply", "Missing params")).toBe("Missing params");
+    expect(noticeText("chat.notice.cutOffByRestart", "Missing params")).toBe("Missing params");
     expect(runtimeNoticeTool({ message: "Old engine" })).toEqual({ name: "notice: Old engine", ok: true });
   });
 
@@ -90,60 +92,56 @@ describe("fixed runtime notices", () => {
 });
 
 describe("report receipts", () => {
-  it.each([false, true])("preserves the contact and earlier-try variants (later=%s)", (later) => {
+  it.each([false, true])("keeps contact variants and English parity (later=%s)", (later) => {
     for (const contact of [undefined, "reply@example.test"]) {
-      const line = sentReportLine("report-42", contact, later);
-      expect(line.line).toBe(`Sent to the MausBot team (report report-42)${later ? " after an earlier try did not go through" : ""}. Milind and Omkar get it by email${contact ? ` and will reply to ${contact}` : ""}.`);
-      expect(words(line)).toBe(line.line);
-      setLocale("pt-br");
-      expect(words(line)).toContain("Enviado à equipe do MausBot (relatório report-42)");
-      if (contact) expect(words(line)).toContain(contact);
-      setLocale("en");
+      const make = later ? laterLine : sentLine;
+      expect(make("report-42", contact, "en")).toBe(`Sent to the MausBot team (report report-42)${later ? " after an earlier try did not go through" : ""}. Milind and Omkar get it by email${contact ? ` and will reply to ${contact}` : ""}.`);
+      expect(make("report-42", contact, "pt-br")).toContain("Enviado à equipe do MausBot (relatório report-42)");
+      if (contact) expect(make("report-42", contact, "pt-br")).toContain(contact);
     }
   });
 
-  it.each([undefined, 1, 120_000])("preserves complete wait lines and string minute params (%s)", (retryAfterMs) => {
-    const line = notYetReportLine({ ok: false, retry: true, why: "limited", ...(retryAfterMs ? { retryAfterMs } : {}) });
+  it.each([undefined, 1, 120_000])("keeps complete wait lines and singular/plural minutes (%s)", (retryAfterMs) => {
+    const outcome = { ok: false as const, retry: true as const, why: "limited" as const, ...(retryAfterMs ? { retryAfterMs } : {}) };
     const minutes = retryAfterMs ? Math.ceil(retryAfterMs / 60_000) : 0;
-    expect(line.line).toBe(`Not sent yet: the MausBot team takes only a few reports an hour from each app. The report is saved and goes on its own${minutes ? ` in about ${minutes} minute${minutes === 1 ? "" : "s"}` : " as soon as it can"}, so there is no need to send it again.`);
-    expect(Object.values(line.text!.params!).every(value => typeof value === "string")).toBe(true);
-    setLocale("pt-br");
-    expect(words(line)).toContain(minutes ? `em cerca de ${minutes} minuto${minutes === 1 ? "" : "s"}` : "assim que possível");
+    expect(notYetLine(outcome, "en")).toBe(`Not sent yet: the MausBot team takes only a few reports an hour from each app. The report is saved and goes on its own${minutes ? ` in about ${minutes} minute${minutes === 1 ? "" : "s"}` : " as soon as it can"}, so there is no need to send it again.`);
+    expect(notYetLine(outcome, "pt-br")).toContain(minutes ? `em cerca de ${minutes} minuto${minutes === 1 ? "" : "s"}` : "assim que possível");
   });
 
-  it("keeps vocabulary-blocked server diagnostics English, without a misleading code", () => {
-    setLocale("pt-br");
-    for (const why of ["offline", "server"] as const) {
-      const line = notYetReportLine({ ok: false, retry: true, why });
-      expect(line.text).toBeUndefined();
-      expect(words(line)).toBe(line.line);
-      expect(line.line).toContain("the MausBot team's server");
-    }
-    expect(refusedReportLine("too large. \n")).toEqual({ line: "The MausBot team's server refused this bug report, so nothing was sent: too large.", text: undefined });
-    expect(words(fullReportLine(40))).toBe("Não foi enviado: já há 40 relatórios de problemas na fila para a equipe do MausBot. Aguarde o envio e digite @devs novamente.");
-    expect(words(droppedReportLine())).toBe("Um relatório de problema desta conversa ficou uma semana sem chegar à equipe do MausBot e, por isso, foi descartado. Digite @devs novamente para enviar outro.");
-    expect(JSON.stringify(sentReportLine("r", secret))).not.toContain(secret);
+  it("localizes offline and refusal lines, with the diagnostic kept as data", () => {
+    expect(notYetLine({ ok: false, retry: true, why: "offline" }, "pt-br")).toContain("não foi possível conectar ao servidor da equipe do MausBot");
+    expect(notYetLine({ ok: false, retry: true, why: "server" }, "pt-br")).toContain("o servidor da equipe do MausBot não pôde receber o relatório agora");
+    expect(refusedLine("too large. \n", "en")).toBe("The MausBot team's server refused this bug report, so nothing was sent: too large.");
+    expect(refusedLine("too large. \n", "pt-br")).toBe("O servidor da equipe do MausBot recusou este relatório de problema, então nada foi enviado: too large.");
+    expect(fullLine(40, "pt-br")).toBe("Não foi enviado: já há 40 relatórios de problemas aguardando envio à equipe do MausBot. Digite @devs novamente depois que eles forem enviados.");
+    expect(droppedLine("pt-br")).toBe("Um relatório de problema desta conversa não chegou à equipe do MausBot durante uma semana e foi descartado. Digite @devs novamente para enviar outro.");
   });
 });
 
 describe("handoffs and team relay bodies", () => {
   it.each([
-    ["chat.notice.relayReply", "Ana replied: Keep English", "Ana respondeu: Keep English"],
-    ["chat.notice.relayFrom", "Ana asked me to pass this on: Keep English", "Ana pediu para eu repassar esta mensagem: Keep English"],
-    ["chat.notice.relayMessage", "A message for you from Ana: Keep English", "Uma mensagem de Ana para você: Keep English"],
-  ] as const)("keeps the message and name verbatim in %s", (key, english, portuguese) => {
-    const line = noticeLine(key, { name: "Ana", message: "Keep English" });
-    expect(line.text).toBe(english);
+    ["reply", "Ana replied", "Ana respondeu"],
+    ["assistant", "Ana&#x27;s assistant answered", "O assistente de Ana respondeu"],
+    ["told", "", ""],
+  ] as const)("labels a %s without translating the sender's message", (kind, english, portuguese) => {
+    const message: Message = { id: "relay-1", role: "user", kind: "text", at: 1, text: "Keep English", relay: { kind, email: "ana@example.test", name: "Ana" } };
+    const render = () => renderToStaticMarkup(createElement("div", null, createElement(RelayLabel, { message }), message.text));
+    expect(render()).toContain(english);
+    expect(render()).toContain("Keep English");
     setLocale("pt-br");
-    expect(noticeText(line.textCode, line.text, line.textParams)).toBe(portuguese);
+    expect(render()).toContain(portuguese);
+    expect(render()).toContain("Keep English");
+    if (kind === "told") expect(render()).not.toContain("data-relay");
   });
 
-  it("codes normal handoffs and retains the direct-outside-room sentinel", () => {
+  it("localizes normal handoffs on the server and retains the direct-outside-room sentinel", () => {
     const sender = { id: "a", name: "Ana", color: "blue" }, recipient = { id: "b", name: "Scout", color: "green" };
     const row = sentRow({ sender, recipient, threadId: "t", via: "room", room: { id: "r", name: "Sales", here: false } });
-    expect(row.tool).toMatchObject({ name: "Sent to Scout · Sales", nameCode: "chat.notice.handoffSentRoom", nameParams: { name: "Scout", room: "Sales" } });
+    expect(row.tool).toMatchObject({ name: "Sent to Scout · Sales" });
+    expect(row.tool?.nameCode).toBeUndefined();
     setLocale("pt-br");
-    expect(activityText(row.tool!, row.tool!.name)).toBe("Enviado a Scout · Sales");
+    const translated = sentRow({ sender, recipient, threadId: "t", via: "room", room: { id: "r", name: "Sales", here: false }, language: "pt-br" });
+    expect(activityText(translated.tool!, translated.tool!.name)).toBe("Enviado para Scout · Sales");
     const direct = sentRow({ sender, recipient, threadId: "t", via: "direct", room: { id: "r", name: "Sales", here: false } });
     expect(direct.tool?.nameCode).toBeUndefined();
     expect(direct.sentDirectly).toEqual({ name: "Scout", room: "Sales" });

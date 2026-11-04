@@ -4,12 +4,13 @@ import { cronPresetText, cronText } from "@/lib/cron-text";
 import { clockOptions } from "@/lib/clock-time";
 import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import type { Routine, RoutineRun, RoutineSchedule } from "@/lib/routines";
+import { isRoutineProblemRun, type Routine, type RoutineRun, type RoutineSchedule } from "@/lib/routines";
 import type { WebhookAttempt, WebhookTrigger } from "@/lib/webhooks";
 import type { AppTrigger } from "@/lib/app-triggers";
 import { appProblem, appStatusParts, appWhen, skippedToday } from "@/lib/app-automations";
 import { limitResetWhen } from "@/lib/limit-resets";
 import { routineLineText } from "@/lib/activity-text";
+import { partlyDone } from "@/lib/routine-display";
 import type { OptionCardData } from "@/state/store";
 
 export type AutomationKind = "schedule" | "webhook" | "app";
@@ -59,6 +60,12 @@ export function automationsFrom(sources: { routines: readonly Routine[]; webhook
       appTrigger: trigger, nextRunAt: null, runs: runsOf(trigger.id),
     })),
   ].filter((automation) => !botIds || botIds.has(automation.botId));
+}
+
+/** An unseen failed or missed run the person can clear: it belongs to an automation in `automations`, and opening that
+ * automation marks it seen. A run whose automation or bot was deleted has nothing to open, so it never asks for attention. */
+export function hasUnseenProblemRun(automations: readonly Automation[]): boolean {
+  return automations.some((automation) => automation.runs.some((run) => isRoutineProblemRun(run) && !run.seenAt));
 }
 
 export function automationFor(ref: { kind: AutomationKind; id: string }, sources: Parameters<typeof automationsFrom>[0]): Automation | null {
@@ -300,7 +307,7 @@ export function statusLine(automation: Automation, now = Date.now()): string {
   const parts = [t(STATUS_WORD[status.state])];
   if (latest?.status === "running") parts.push(t("automations.runningNow"));
   else if (automation.checkedAt !== undefined && (!latest || automation.checkedAt >= (latest.finishedAt ?? runTime(latest)))) parts.push(t("automations.checkedNothingNew", { when: lastWhen(automation.checkedAt, now) }));
-  else if (latest) parts.push(`${t("automations.lastRan", { when: lastWhen(runTime(latest), now) })}${isProblem(latest) ? " ✗" : ""}`);
+  else if (latest) parts.push(`${t("automations.lastRan", { when: lastWhen(runTime(latest), now) })}${partlyDone(latest) ? " !" : isProblem(latest) ? " ✗" : ""}`);
   else if (!automation.appTrigger) parts.push(t("automations.notRunYet"));
   if (automation.appTrigger) parts.push(...appStatusParts(automation.appTrigger, Boolean(latest)), ...[skippedToday(automation.appTrigger, now) ?? []].flat());
   if (automation.nextRunAt != null) parts.push(t("automations.next", { when: nextWhen(automation.nextRunAt, now) }));
@@ -321,7 +328,9 @@ export function runLine(run: RoutineRun, now = Date.now()): { when: string; mark
     const reason = short(firstLine(run.error && routineLineText(run.errorCode, run.error, run.errorParams)));
     return { when, mark: "✗", text: reason ? t("automations.run.stoppedBecause", { reason }) : t("automations.run.stopped") };
   }
-  return { when, mark: "✗", text: ownerFix(run)?.reason ?? (short(firstLine(run.error && routineLineText(run.errorCode, run.error, run.errorParams))) || t("automations.run.failed")) };
+  const reason = short(firstLine(run.error && routineLineText(run.errorCode, run.error, run.errorParams)));
+  if (partlyDone(run)) return { when, mark: "!", text: t("automations.run.partial", { reason }) };
+  return { when, mark: "✗", text: ownerFix(run)?.reason ?? (reason || t("automations.run.failed")) };
 }
 
 export const AUTOMATION_FIX_LABEL: Record<AutomationFix, LocaleKey> = {

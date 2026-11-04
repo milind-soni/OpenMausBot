@@ -47,6 +47,7 @@ let assignmentStatusResponse: unknown = DONE_ASSIGNMENT;
 let assignmentStatusCode = 200;
 let lastThreadBody: any = null;
 let threadCalls = 0;
+let threadsList: unknown = { threads: [] };
 let threadResponse: unknown = { threadId: "thread-new", title: "QA: PR #1", botId: "bot-asker", botName: "Asker", self: true, state: "running", limit: 3 };
 let computerRequests: { method: string; url: string; body: unknown }[] = [];
 let computerResponse: unknown = { current: "local", available: ["local", "vm"] };
@@ -257,6 +258,11 @@ beforeAll(async () => {
       lastAssignmentStatusUrl = req.url;
       res.writeHead(assignmentStatusCode, { "content-type": "application/json" });
       res.end(JSON.stringify(assignmentStatusResponse));
+      return;
+    }
+    if (req.method === "GET" && req.url?.startsWith("/api/internal/threads?")) {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(threadsList));
       return;
     }
     if (req.method === "POST" && req.url === "/api/internal/threads") {
@@ -628,6 +634,7 @@ describe("agents-proxy MCP surface", () => {
       "coordinate_bots",
       "assignment_status",
       "list_bots",
+      "usage_limits",
       "list_rooms",
       "select_computer",
       "list_threads",
@@ -667,7 +674,7 @@ describe("agents-proxy MCP surface", () => {
       "propose_team_memory",
       "skills_list",
       "skill_manage",
-      "add_mcp_server",
+      "mcp_server",
     ]);
     const tool = (name: string) => list.result.tools.find((entry: { name: string }) => entry.name === name);
     const coordinate = tool("coordinate_bots");
@@ -675,8 +682,8 @@ describe("agents-proxy MCP surface", () => {
     expect(coordinate.description).toContain("consult true asks a question");
     expect(coordinate.description).toContain('reply "none" is a one-way notice');
     expect(coordinate.description).toContain("never call assignment_status in the same turn");
-    expect(Object.keys(coordinate.inputSchema.properties)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "title", "in_my_folder", "reply", "consult", "done_when"]);
-    expect(coordinate.inputSchema.properties.thread.enum).toEqual(["standing", "new"]);
+    expect(Object.keys(coordinate.inputSchema.properties)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "title", "in_my_folder", "reply", "consult", "done_when", "answers"]);
+    expect(coordinate.inputSchema.properties.thread).toEqual({ type: "string", description: expect.stringContaining("new: a new thread on the teammate") });
     expect(coordinate.inputSchema.properties.reply.enum).toEqual(["resume", "none"]);
     expect(coordinate.inputSchema.properties.consult.type).toBe("boolean");
     const status = tool("assignment_status");
@@ -748,7 +755,7 @@ describe("agents-proxy MCP surface", () => {
     const readNames = [
       "tool_result_read",
       "list_shared_computers",
-      "assignment_status", "list_bots", "list_rooms", "list_threads",
+      "assignment_status", "list_bots", "usage_limits", "list_rooms", "list_threads",
       "list_team_setup",
       "session_search", "trigger_info", "list_waits", "skills_list",
     ];
@@ -960,7 +967,7 @@ describe("agents-proxy MCP surface", () => {
     const list = await rpc("tools/list");
     const start = list.result.tools.find((tool: { name: string }) => tool.name === "start_thread");
     expect(start.inputSchema.required).toEqual(["title", "message"]);
-    expect(Object.keys(start.inputSchema.properties)).toEqual(["title", "message", "bot_id", "folder"]);
+    expect(Object.keys(start.inputSchema.properties)).toEqual(["title", "message", "bot_id", "folder", "model_selection"]);
     expect(start.inputSchema.properties.bot_id).toEqual({ type: "string", enum: ["bot-asker"], description: "Leave out, or use your own bot ID. For teammates use coordinate_bots." });
     expect(start.description).toContain("Open a separate job on yourself");
     expect(start.description).toContain('use coordinate_bots for teammates (thread "new" opens a fresh thread on them)');
@@ -1236,6 +1243,19 @@ describe("agents-proxy MCP surface", () => {
     assignmentStatusResponse = { outstanding: [] };
     expect((await callTool("assignment_status", {})).result.content[0].text).toBe("Nothing outstanding: no assignment of this conversation is still open.");
     assignmentStatusResponse = DONE_ASSIGNMENT;
+  });
+
+  it("assignment_status and list_threads say why a queued handoff has not started, with its handoff id", async () => {
+    const waiting = "waiting for a free thread slot: Ops is already running 3 of 3 threads at once";
+    assignmentStatusResponse = { outstanding: [{ id: "asg-q", botId: "bot-ops", botName: "Ops", status: "queued", waiting }] };
+    threadsList = { threads: [{ threadId: "t-q", botId: "bot-ops", botName: "Ops", title: "Export CSV", state: "queued", waiting, delegationId: "asg-q", own: false, unread: false, openedAt: 1 }] };
+    try {
+      expect((await callTool("assignment_status", {})).result.content[0].text).toContain(`- asg-q → @Ops: queued, not started yet: ${waiting}`);
+      expect((await callTool("list_threads", {})).result.content[0].text).toContain(`#Export CSV (on @Ops, queued: ${waiting}) [thread id: t-q] [delegation id: asg-q]`);
+    } finally {
+      assignmentStatusResponse = DONE_ASSIGNMENT;
+      threadsList = { threads: [] };
+    }
   });
 
   it("assignment_status with an id renders status, outcome, the result head and the assignment's own hand-offs", async () => {
@@ -2261,11 +2281,13 @@ describe("coordinate_bots arguments", () => {
     });
     await callTool("coordinate_bots", { bot_ids: ["bot-helper"], message: "notice", reply: "none", doneWhen: "  ", reason: " " });
     expect(lastCoordinateBody).toEqual({ botIds: ["bot-helper"], message: "notice", reply: "none" });
+    await callTool("coordinate_bots", { bot_ids: ["bot-helper"], message: "add a chart", thread: "8d3a9fd7-f6bb-4e7b-9e36-153c6e520728" });
+    expect(lastCoordinateBody).toEqual({ botIds: ["bot-helper"], message: "add a chart", thread: "8d3a9fd7-f6bb-4e7b-9e36-153c6e520728" });
   });
 
   it("refuses a thread, reply or consult value outside the contract before contacting the server", async () => {
     for (const args of [
-      { bot_ids: ["bot-helper"], message: "m", thread: "fresh" },
+      { bot_ids: ["bot-helper"], message: "m", thread: "a fresh one" },
       { bot_ids: ["bot-helper"], message: "m", reply: "poll" },
       { bot_ids: ["bot-helper"], message: "m", consult: "yes" },
       { bot_ids: ["bot-helper"], message: "m", done_when: ["x"] },
@@ -2273,7 +2295,7 @@ describe("coordinate_bots arguments", () => {
       lastCoordinateBody = null;
       const res = await callTool("coordinate_bots", args);
       expect(res.result.isError, JSON.stringify(args)).toBe(true);
-      expect(res.result.content[0].text).toContain('thread ("standing" or "new"), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false) and done_when are optional');
+      expect(res.result.content[0].text).toContain('thread ("standing", "new" or the id of a thread you opened on that teammate), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false), done_when and answers are optional');
       expect(lastCoordinateBody).toBeNull();
     }
   });
@@ -2299,7 +2321,7 @@ describe("coordinate_bots arguments", () => {
     });
     expect(res.result.isError).toBe(true);
     const text = res.result.content[0].text;
-    for (const field of ["bot_ids", "message", "group_id", "reason", "rework", "thread", "reply", "consult", "in_my_folder", "done_when"]) {
+    for (const field of ["bot_ids", "message", "group_id", "reason", "rework", "thread", "reply", "consult", "in_my_folder", "done_when", "answers"]) {
       expect(text).toContain(field);
     }
     expect(text).toContain("botIds");

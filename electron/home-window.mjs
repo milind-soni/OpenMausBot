@@ -9,7 +9,7 @@
 // shown place's verified origin, nothing else. A team is only ever one the Admin's session lists, paired through the
 // Admin's team pairing (its claims are the Admin's), never an address a page supplied.
 import { cloudHomeConnectUrl, cloudSetupOf, cloudUnreachableCause, cloudUnreachableText, machineSetup, readyCloudOrigin } from "./cloud-home.mjs";
-import { cloudMachine, cloudState, otherOwnClouds } from "./cloud-list.mjs";
+import { cloudMachine, cloudState, otherOwnClouds, ownCloud } from "./cloud-list.mjs";
 import { asleepAnswer, BACKGROUND_HEADERS, openSleepingCloud, SIGNED_IN_MS } from "./cloud-power.mjs";
 import nativeText from "./native-text.cjs";
 import { awayIn, parseJournal } from "./one-home.mjs";
@@ -67,7 +67,9 @@ const originOf = (url) => { try { return new URL(url).origin; } catch { return n
 
 /**
  * Who the window opens. `journal`: one-home.json read back; `frozenCloud`: this computer's freeze marker when there is no
- * journal (its Cloud's origin, or true when it names none); `state`: the MausBot Cloud sign-in's state.
+ * journal (its Cloud's origin, or true when it names none); `state`: the MausBot Cloud sign-in's state. An ended My Cloud
+ * sends home only a computer that moved to that Cloud; a freeze that names another Cloud of the signed-in person's own list
+ * is theirs, and opens that Cloud.
  * @returns {{ kind: "computer" } | { kind: "cloud", origin: string } | { kind: "signin", other?: true }}
  */
 export function homeOf({ journal = null, frozenCloud = null, state = null }) {
@@ -75,15 +77,24 @@ export function homeOf({ journal = null, frozenCloud = null, state = null }) {
     : frozenCloud ? { origin: typeof frozenCloud === "string" ? frozenCloud : null, account: null } : null;
   if (!moved) return { kind: "computer" };
   const connected = state?.status === "connected";
-  if (connected && state.machine?.hold) return { kind: "computer" };
+  if (connected && state.machine?.hold && (!moved.origin || !state.machine.origin || state.machine.origin === moved.origin)) return { kind: "computer" };
   const signedIn = state?.account?.id ?? null;
   if (!signedIn || state.status === "signed-out" || state.status === "connecting") return { kind: "signin" };
   if (moved.account && moved.account !== signedIn) return { kind: "signin", other: true };
   const theirs = connected ? state.machine?.origin ?? null : null;
   const origin = moved.origin ?? theirs;
   if (!origin) return { kind: "signin" };
-  if (!moved.account && theirs && theirs !== origin) return { kind: "signin", other: true };
+  const listed = connected && Array.isArray(state.clouds) && state.clouds.some((cloud) => ownCloud(cloud) && cloud.origin === origin);
+  if (!moved.account && theirs && theirs !== origin && !listed) return { kind: "signin", other: true };
   return { kind: "cloud", origin };
+}
+
+/** Nobody here can reach the bots: nobody is signed in, or the account signed in has no way to their Cloud, so the clean
+ * workspace opens (clean-workspace.mjs). An account the Admin can't be asked about isn't that, nor a sign-in still being read:
+ * those are a Cloud that can't be reached yet, never an empty workspace that reads as their bots being gone. */
+export function noWayHome(worked, state) {
+  if (worked.kind !== "signin" || state?.message === "restoring") return false;
+  return worked.other === true || !state?.account?.id || ["signed-out", "connecting", "connected"].includes(state.status);
 }
 
 /** A place besides My Cloud: a team's Cloud, or another Cloud of the person's own (`own`), each the session's. */
@@ -171,7 +182,7 @@ export function routeOf(url, origin) {
  *   journal(): unknown,
  *   frozen(): Promise<{ frozen: boolean, cloud?: string } | null>,
  *   account(): { state(): any, power(): any, wakeHome(): Promise<unknown>, setWaking(on: boolean): void, pairHome(cloudId?: string | null): Promise<{ origin: string, code: string, expiresAt: number }>,
- *     pairTeam?(teamId: string): Promise<{ origin: string, code: string, expiresAt: number }>, signInAgain(): Promise<unknown>, begin(): Promise<unknown> } | null,
+ *     pairTeam?(teamId: string): Promise<{ origin: string, code: string, expiresAt: number }>, signInAgain(): Promise<unknown>, begin(): Promise<unknown>, signOut?(): Promise<unknown>, reopen?(): Promise<unknown> } | null,
  *   restored?(): Promise<unknown>,
  *   window(): { isDestroyed(): boolean, webContents: { id: number, getURL(): string, reload(): void } } | null,
  *   ensureWindow(): void,
@@ -194,9 +205,11 @@ export function routeOf(url, origin) {
  *   timers?: { set(work: () => void, ms: number): unknown, clear(timer: unknown): void, every(work: () => void, ms: number): unknown },
  *   hosts?(): { clearHostResolverCache(): Promise<void>, resolveHost(host: string, options?: { cacheUsage?: "allowed" | "staleAllowed" | "disallowed" }): Promise<{ endpoints: unknown[] }> } | null,
  *   readyStore?: { read(): unknown, write(value: unknown): void },
+ *   ownMove?(): { phase: string, name: string } | null,
  *   log?(line: string): void,
  *   t?(key: string, params?: Record<string, string | number>): string,
- * }} deps `hosts`: the window's Electron session, for its own resolver and host cache. `readyStore`: when My Cloud
+ * }} deps `ownMove()`: the move to a server of the person's own (own-home-main.mjs), whose freeze is never My Cloud's.
+ * `hosts`: the window's Electron session, for its own resolver and host cache. `readyStore`: when My Cloud
  * became ready (createReadyClock). `go(url, origin, place)`: main's one way to move the window, to My Cloud or a team's Cloud (`origin`, with the
  * `place` it is) or this computer's screen (null). `showLocal(leaving)`: the window as it was before the move (this computer's page, or a saved server it
  * shows); `leaving`: it showed a place or this computer's screen until now, so it goes back to this computer's page.
@@ -207,10 +220,10 @@ export function routeOf(url, origin) {
  * out changed.
  */
 export function createHomeWindow(deps) {
-  const { journal, frozen, account, restored = async () => {}, window, ensureWindow, localOrigin, cookieFetch, power, go, showLocal,
+  const { journal, frozen, account, restored = async () => {}, window, ensureWindow, localOrigin, cookieFetch, power, go, showLocal, clean = null,
     remembered = () => null, remember = () => {}, left = () => {}, drop = (place) => { if (place.kind === "team") left(place.name); remember(null); },
     splash = () => null, lastInput = () => 0, publish = () => {}, rehomed = () => {}, versionEveryMs = VERSION_EVERY_MS, quietMs = QUIET_MS,
-    now = Date.now, timers = DEFAULT_TIMERS, hosts = () => null, readyStore = null, log = () => {}, t = nativeText.englishText.t } = deps;
+    now = Date.now, timers = DEFAULT_TIMERS, hosts = () => null, readyStore = null, ownMove = () => null, log = () => {}, t = nativeText.englishText.t } = deps;
   let home = { kind: "computer" }, screen = null, status = null, opens = 0, retry = null, tries = 0, loaded = null, newer = false, repairing = null;
   /** My Cloud asked for before the move made it home (`{ open }`), until its page loads or the person goes elsewhere;
    * `naming`: since when, and how often, a brand-new My Cloud's name was not found. */
@@ -240,12 +253,15 @@ export function createHomeWindow(deps) {
     let frozenCloud = null;
     if (!kept) {
       const marker = await frozen().catch(() => null);
-      if (marker?.frozen) frozenCloud = typeof marker.cloud === "string" ? marker.cloud : true;
+      // A freeze for a server of the person's own names it (`place`): home is that server, shown as any saved server is.
+      if (marker?.frozen && !marker.place) frozenCloud = typeof marker.cloud === "string" ? marker.cloud : true;
     }
     if (frozenCloud || awayIn(kept)) await restored();
     const before = home;
-    home = homeOf({ journal: kept, frozenCloud, state: state() });
-    if (home.kind !== before.kind || home.origin !== before.origin) {
+    const worked = homeOf({ journal: kept, frozenCloud, state: state() });
+    // Home is this computer then, in its clean workspace, so a Cloud of this account's own opens from it as for anyone.
+    home = clean && noWayHome(worked, state()) ? { kind: "computer", clean: true, ...(worked.other ? { other: true } : {}) } : worked;
+    if (home.kind !== before.kind || home.origin !== before.origin || home.clean !== before.clean) {
       try { rehomed(home); } catch {}
     }
     return home;
@@ -258,6 +274,8 @@ export function createHomeWindow(deps) {
     if (screen) return named(screen);
     if (status) return named({ screen: status });
     if (home.kind === "signin" && !name) return { screen: "signin" };
+    const own = ownMove();
+    if (own && MOVING.has(own.phase)) return { screen: "moving", name: own.name };
     return named({ screen: MOVING.has(parseJournal(journal())?.phase ?? "") ? "moving" : "opening" });
   }
   const tell = () => { try { publish(view()); } catch {} };
@@ -483,7 +501,10 @@ export function createHomeWindow(deps) {
     const token = ++opens;
     const current = await refresh();
     if (!wanted(token)) return;
-    const target = placeOf({ ask: place, remembered: remembered(), state: state() });
+    // This computer's own copy is the server again before anything of the person's Cloud opens.
+    if (!current.clean && clean?.active()) { await clean.leave(); if (!wanted(token)) return; }
+    // Nobody signed in has nothing to open but the clean workspace; the place stays remembered for when they're back.
+    const target = current.clean && signedOut() ? { kind: "cloud" } : placeOf({ ask: place, remembered: remembered(), state: state() });
     if (target.kind === "cloud" && target.left) { left(target.left); remember(null); }
     if (otherPlace(target)) {
       ensureWindow();
@@ -512,6 +533,8 @@ export function createHomeWindow(deps) {
       asked = null; naming = null;
     }
     if (current.kind === "computer") {
+      if (current.clean && !(await clean.enter())) { if (wanted(token)) { ensureWindow(); clearRetry(); toScreen({ screen: "signin", ...(current.other ? { other: true } : {}) }); } return; }
+      if (!wanted(token)) return;
       clearRetry(); screen = null; status = null; shown = null;
       const win = window();
       const leaving = away || Boolean(win && !win.isDestroyed() && !originOf(win.webContents.getURL()));
@@ -612,11 +635,21 @@ export function createHomeWindow(deps) {
     shown: () => shown,
     /** The person asked again (the screen's timer, back online, or the window focused). */
     retry: () => show(),
-    /** The screen's one button: this device's MausBot Cloud sign-in, again. */
+    /** The screen's one button: this device's MausBot Cloud sign-in, again. A sign-in already open in the browser opens
+     * again; one with an account My Cloud isn't (`other`) ends first, so the browser can sign in another; one that is still
+     * good only looks again. */
     async signIn() {
       const client = account();
       if (!client) return;
-      await (client.state().status === "reauth-required" ? client.signInAgain() : client.begin());
+      const status = client.state().status;
+      if (status === "reauth-required") return void await client.signInAgain();
+      if (status === "connecting") return void await client.reopen?.();
+      if (status !== "signed-out") {
+        const current = await refresh();
+        if (!current.other) return void await show();
+        await client.signOut?.();
+      }
+      await client.begin();
     },
     repair,
     /** The MausBot Cloud sign-in changed: a window that waits on it, a home that changed, or a team shown that the
@@ -626,7 +659,15 @@ export function createHomeWindow(deps) {
       const after = await refresh();
       const next = shown && shows(shown.origin) ? placeOf({ remembered: remembered(), state: state() }) : null;
       const moved = Boolean(next && (next.kind !== shown.kind || (next.origin ?? null) !== (shown.origin ?? null) || (next.id ?? null) !== (shown.id ?? null)));
-      if (moved || after.kind !== before.kind || after.origin !== before.origin || screen || status) await show();
+      if (moved || after.kind !== before.kind || after.origin !== before.origin || after.clean !== before.clean || screen || status) await show();
+    },
+    /** The signed-in account is about to change: nothing under way for the one leaving goes on, and the next show() takes
+     * the window off whatever it shows of that account. */
+    accountLeaving() {
+      opens++;
+      clearRetry(); clearRenewal();
+      asked = null; naming = null; shown = null; opening = null; screen = null; status = null;
+      away = away || !shows(localOrigin());
     },
     /** A response the window got (Electron's webRequest): a 401 from the place's API means its session ended. */
     responded({ url, statusCode, webContentsId }) {

@@ -1,5 +1,5 @@
 import { createManagedDesktopStore, retryDelay, unreadableRecord } from "./managed-desktop.mjs";
-import { CLOUD_MACHINE_CONNECTABLE, cloudUnreachableText, parseCloudCredit, parseCloudOffer, parseCloudPurchase, parseCloudSummary, parseCloudTeams, parseCloudTrial, parseCloudUsage, parsePairingGrant, parsePublicOffer, withoutTrial } from "./cloud-home.mjs";
+import { CLOUD_MACHINE_CONNECTABLE, cloudUnreachableText, parseCloudCredit, parseCloudOffer, parseCloudPurchase, parseCloudSummary, parseCloudTeams, parseCloudRoom, parseCloudTrial, parseCloudUsage, parsePairingGrant, parsePublicOffer, withoutTrial } from "./cloud-home.mjs";
 import { CLOUD_ID, CLOUD_SWATCHES, cleanCloudListName, ORGANIZATION_BLOCKS, otherOwnClouds, ownCloud, parseCloudList, parseCloudRenewal, parseOrganizations, releaseVersion } from "./cloud-list.mjs";
 import { planTeam, teamPlan } from "./cloud-team-plan.mjs";
 import { cleanCode, cleanEmail, parseSignInStart, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
@@ -20,6 +20,8 @@ export function cloudTarget(env = process.env) {
 const TOKEN = /^omc_[A-Za-z0-9_-]{43}$/;
 const CODE = /^[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/;
 const PRIVATE_CODE = /^[A-Za-z0-9_-]{43}$/;
+/** What the Admin says of a Cloud of this account's a computer moved to (POST moved-to). */
+const MOVED_TO = Object.freeze(["deleted", "ended", "live", "unknown"]);
 const TIER = /^[a-z][a-z0-9-]{0,23}$/;
 const REFRESH_MS = 60_000;
 const STEADY_MS = 15 * 60_000;
@@ -33,8 +35,8 @@ const CHECKING_AFTER = 2;
 const MAX_ENROLL_SECONDS = 1800;
 const OFFER_MS = 10 * 60_000, OFFER_RETRY_MS = 30_000;
 const CHECKOUT_WATCH_MS = 30 * 60_000, CHECKOUT_KEPT_MS = 24 * 3600_000;
-export const CHECKOUT_SOURCES = Object.freeze(["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "app_pages", "update_popup", "app_onboarding"]);
-export const UPGRADE_SOURCES = Object.freeze(["app_usage", "app_settings"]);
+export const CHECKOUT_SOURCES = Object.freeze(["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "app_pages", "app_whats_new_pro", "app_whats_new_team", "app_onboarding"]);
+export const UPGRADE_SOURCES = Object.freeze(["app_usage", "app_settings", "app_room"]);
 const UPGRADE_TIERS = Object.freeze(["starter", "personal", "pro", "max"]);
 const UPGRADE_REFUSALS = Object.freeze(["payment_failed", "not_subscribed", "already_on_plan", "plan_change_unavailable", "confirmation_required", "price_changed", "rate_limited"]);
 const CONFIRMATION = /^[A-Za-z0-9_-]{43}$/;
@@ -259,7 +261,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       const machine = parseCloudSummary(result.cloud), teams = parseCloudTeams(result.teams);
       const purchase = parseCloudPurchase(result.cloud?.purchase);
       const trial = parseCloudTrial(result.cloud?.trial), credit = parseCloudCredit(result.cloud?.credit), offer = parseCloudOffer(result.offer);
-      const usage = access.status === "active" ? parseCloudUsage(result.cloud?.usage) : null;
+      const usage = access.status === "active" ? parseCloudUsage(result.cloud?.usage) : null, room = usage ? parseCloudRoom(result.cloud?.room) : null;
       const clouds = parseCloudList(result.clouds), more = clouds ? addOffer(result) : null, latest = clouds ? releaseVersion(result.latestVersion) : null;
       const organizations = clouds ? parseOrganizations(result.organizations) : null;
       const { cloudId: renewingCloud = null, ...renewal } = parseCloudRenewal(result.clouds) ?? {};
@@ -290,7 +292,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       verifiedUntil = Math.min(grant.expiresAt, now() + STEADY_MS,
         access.status === "active" && access.expiresAt !== null ? access.expiresAt : Infinity);
       publish({ ...view("connected"), entitlement: access, ...(machine ? { machine } : {}), ...(teams.length ? { teams } : {}), ...(purchase ? { purchase } : {}),
-        ...(trial ? { trial } : {}), ...(credit ? { credit } : {}), ...(offer ? { offer } : {}), ...(usage ? { usage } : {}), ...(renewingCloud ? { renewal } : {}),
+        ...(trial ? { trial } : {}), ...(credit ? { credit } : {}), ...(offer ? { offer } : {}), ...(usage ? { usage } : {}), ...(room ? { room } : {}), ...(renewingCloud ? { renewal } : {}),
         ...(clouds ? { clouds, addCloud: more } : {}), ...(organizations ? { organizations } : {}), ...(latest ? { latestVersion: latest } : {}), verifiedAt: now(), verifiedUntil });
       const planCloud = teamPlan(value) ? planTeam(value)?.machine ?? null : machine;
       const settingUp = planCloud?.status === "provisioning" || (access.status === "active" && !planCloud) || Boolean(purchase) || otherOwnClouds(clouds).some(cloud => cloud.status === "setting_up");
@@ -578,6 +580,25 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       }
       return current.status === "connected" ? withoutTrial(offerCache.value) : offerCache.value;
     },
+    /** Not now on the room card: the Admin offers this Cloud nothing more for two weeks. The Cloud is the session's own. */
+    async roomNotNow(id) {
+      const signedIn = grant;
+      if (!signedIn || state().status !== "connected") return false;
+      try { await request("room", { method: "POST", body: { ...(typeof id === "string" ? { id } : {}), answer: "not_now" }, token: signedIn.token }); }
+      catch { return false; }
+      await refresh().catch(() => {});
+      return true;
+    },
+    /** Restart now, after an upgrade: the bigger size goes at once instead of the next idle moment (`restarting`), or the
+     * Cloud already has it (`current`); `failed` when the Admin couldn't be asked. */
+    async restartNow() {
+      const signedIn = grant;
+      if (!signedIn || state().status !== "connected") return "failed";
+      try {
+        const result = await request("resize-now", { method: "POST", body: {}, token: signedIn.token, timeoutMs: 30_000 });
+        return ["restarting", "current"].includes(result?.state) ? result.state : "failed";
+      } catch { return "failed"; }
+    },
     async interest(kind) {
       if (kind !== "another_cloud") throw new Error("Invalid Cloud interest.");
       const signedIn = grant;
@@ -667,9 +688,10 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
      * Admin's checkout opens in the browser and its page is kept here for Reopen and Copy link, as the first Cloud's is;
      * the session is then read every few seconds until the Cloud is paid for. `unsupported`: this Admin sells one Cloud
      * per account; `blocked` with the Admin's reason. */
-    async addCloud({ tier, interval = "month", name, color = null } = {}) {
+    async addCloud({ tier, interval = "month", name, color = null, source = null } = {}) {
       const cleanName = cleanCloudListName(name);
-      if (typeof tier !== "string" || !TIER.test(tier) || !ADD_INTERVALS.includes(interval) || !cleanName || !(color === null || CLOUD_SWATCHES.includes(color))) {
+      if (typeof tier !== "string" || !TIER.test(tier) || !ADD_INTERVALS.includes(interval) || !cleanName || !(color === null || CLOUD_SWATCHES.includes(color))
+        || !(source === null || CHECKOUT_SOURCES.includes(source))) {
         throw new Error(t("native.cloud.invalidAdd"));
       }
       const signedIn = grant;
@@ -677,7 +699,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       if (!value.clouds) return { outcome: "unsupported" };
       if (value.addCloud?.canAdd === false) return { outcome: "blocked", blocked: value.addCloud.blocked };
       let result;
-      try { result = await request("clouds", { method: "POST", body: { tier, interval, name: cleanName, ...(color ? { color } : {}) }, token: signedIn.token }); } catch (error) {
+      try { result = await request("clouds", { method: "POST", body: { tier, interval, name: cleanName, ...(color ? { color } : {}), ...(source ? { source } : {}) }, token: signedIn.token }); } catch (error) {
         if (signInEnded(error)) { await refresh().catch(() => {}); return { outcome: "failed" }; }
         // The Admin's own reason wins, whatever the status (409 cap or open checkout, 429 rate, 503 sign-ups closed).
         const blocked = !error?.opaque && ADD_BLOCKS.includes(error?.blocked) ? error.blocked : null;
@@ -830,6 +852,17 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       try { await request("kept", { method: "POST", body: { installation }, token: current.token }); return true; }
       catch (error) { if (error?.status === 404 && !error.opaque) return false; throw error; }
     },
+    /** The Admin's word on this account's own Cloud at `origin` (POST /api/cloud/desktop/moved-to), for a computer frozen
+     * for a Cloud that is not My Cloud now: "deleted", "ended" (stopped and kept only until it is deleted), "live", or
+     * "unknown" (none of this account's ever was). Null without a verified sign-in, or from an Admin that doesn't say (404). */
+    async movedTo(cloudOrigin) {
+      const current = grant;
+      if (!current || value.status !== "connected" || typeof cloudOrigin !== "string") return null;
+      let result;
+      try { result = await request("moved-to", { method: "POST", body: { origin: cloudOrigin }, token: current.token }); }
+      catch (error) { if (error?.status === 404 && !error.opaque) return null; throw error; }
+      return grant === current && result?.cloudContractVersion === 1 && MOVED_TO.includes(result.state) ? result.state : null;
+    },
     /** Tells the Admin where this computer's move to My Cloud stands (POST /api/cloud/desktop/move-status; move-status.mjs
      * builds `report`). False when there is no sign-in or the Admin doesn't take it yet (404). */
     async reportMoveStatus(report) {
@@ -914,7 +947,8 @@ export function cloudPlanSnapshot(state, { notice = null } = {}) {
   const named = typeof tier === "string" ? { tier } : {};
   const trial = state?.status === "connected"
     ? { ...(state.trial ? { trial: state.trial } : {}), ...(state.credit ? { credit: state.credit } : {}), ...(notice && state.trial ? { notice } : {}),
-      ...(state.machine?.power?.sleeps ? { sleeps: true } : {}), ...(state.usage ? { usage: state.usage } : {}), ...(state.renewal ? { renewal: state.renewal } : {}) } : {};
+      ...(state.machine?.power?.sleeps ? { sleeps: true } : {}), ...(state.usage ? { usage: state.usage } : {}), ...(state.room ? { room: state.room } : {}),
+      ...(state.renewal ? { renewal: state.renewal } : {}) } : {};
   if (state?.status === "connected" && state.entitlement?.plan === "pro") return { status: state.entitlement.status === "active" ? "paid" : "attention", ...named, ...trial };
   if (state?.status === "reauth-required") return { status: "signin", ...(state.lastPlan ? { tier: state.lastPlan.tier ?? "pro" } : {}) };
   if (state?.status !== "connected" && state?.lastPlan) return { status: "checking", ...named };

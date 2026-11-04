@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import englishCatalog from "../src/locales/en.json" with { type: "json" };
 import { failedTurnCause } from "../shared/failed-turn.ts";
-import { CHAT_NOTICE, failedNoticeTool, noticeTool, resumedTool } from "./chat-notices.ts";
+import { CHAT_NOTICE, failedNoticeTool, noticeTool } from "./chat-notices.ts";
+import "./server-line-packs.ts";
+import { serverLine } from "./server-lines.ts";
 import { heldMemberLine, isHeldMemberLine } from "./room-holds.ts";
 
 describe("chat notices", () => {
@@ -19,8 +21,8 @@ describe("chat notices", () => {
       nameCode: "chat.notice.cutOffByRestart",
       nameParams: { name: "Scout" },
     });
-    expect(noticeTool("chat.notice.answerPassed", undefined, { ok: true })).toEqual({
-      ok: true, name: "Answer passed to the waiting work", nameCode: "chat.notice.answerPassed",
+    expect(noticeTool("chat.notice.resumingAfterRestart", undefined, { ok: true })).toEqual({
+      ok: true, name: "Resuming after a restart", nameCode: "chat.notice.resumingAfterRestart",
     });
   });
 
@@ -35,23 +37,20 @@ describe("chat notices", () => {
     expect(failedTurnCause(tool.name)).toBe("no activity for 20 minutes — the turn was stopped");
   });
 
-  it("words a resumed turn as the English line it replaces, in all its forms", () => {
-    const upstream = (asking: boolean, who: string, restart: boolean) =>
-      `${asking ? `Resumed with a question from ${who}` : `Resumed with ${who} results`}${restart ? " after a restart" : ""}, reviewing`;
-    for (const restart of [false, true]) {
-      expect(resumedTool(true, ["Scout", "Ada"], restart).name).toBe(upstream(true, "Scout, Ada", restart));
-      expect(resumedTool(false, ["Scout"], restart).name).toBe(upstream(false, "Scout", restart));
-      expect(resumedTool(false, [], restart).name).toBe(upstream(false, "delegated work", restart));
-    }
-    expect(resumedTool(true, ["Scout", "Ada"], true)).toEqual({
-      ok: true, name: "Resumed with a question from Scout, Ada after a restart, reviewing",
-      nameCode: "chat.notice.resumedQuestionAfterRestart", nameParams: { names: "Scout, Ada" },
-    });
-    expect(resumedTool(false, [], false)).toEqual({ ok: true, name: "Resumed with delegated work results, reviewing", nameCode: "chat.notice.resumedWork" });
+  it.each([
+    ["server.teammates.resumedQuestion", "Resumed with a question from Scout, reviewing", "Retomou o trabalho com uma pergunta de Scout e está revisando"],
+    ["server.teammates.resumedQuestionRestart", "Resumed with a question from Scout after a restart, reviewing", "Após reiniciar, retomou o trabalho com uma pergunta de Scout e está revisando"],
+    ["server.teammates.resumedResults", "Resumed with Scout results, reviewing", "Retomou o trabalho com os resultados de Scout e está revisando"],
+    ["server.teammates.resumedResultsRestart", "Resumed with Scout results after a restart, reviewing", "Após reiniciar, retomou o trabalho com os resultados de Scout e está revisando"],
+    ["server.teammates.backWithResults", "Back with the work it handed on, reviewing", "Voltou com o trabalho que repassou e está revisando"],
+    ["server.teammates.backWithResultsRestart", "Back with the work it handed on after a restart, reviewing", "Após reiniciar, voltou com o trabalho que repassou e está revisando"],
+  ] as const)("words %s on the server, preserving English and Portuguese", (key, english, portuguese) => {
+    expect(serverLine(undefined, key, { who: "Scout" })).toBe(english);
+    expect(serverLine("pt-br", key, { who: "Scout" })).toBe(portuguese);
   });
 
   it("words the held line the sentinel still recognises", () => {
     expect(heldMemberLine("Reviewer")).toBe("Reviewer is held (stopped by you) — @mention it or say resume");
-    expect(isHeldMemberLine(noticeTool("chat.notice.roomHeld", { name: "Reviewer" }, { ok: false }).name)).toBe(true);
+    expect(isHeldMemberLine(heldMemberLine("Reviewer", "pt-br"))).toBe(true);
   });
 });

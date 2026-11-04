@@ -95,6 +95,16 @@ export function claudeLimitError(limit: ClaudeLimit | null, said?: string, now =
   return quoted ? coded("chat.notice.claudeLimitSaid", { ...parts, said: quoted }, { ...words, said: quoted }) : coded("chat.notice.claudeLimit", parts, words);
 }
 
+/** The API refusing a model newer than the installed CLI, relayed as an api-error frame ("Claude
+ * Code 2.1.268 does not support this model; version 2.1.280 or newer is required…"); it names no model. */
+export function claudeVersionTooOld(
+  frame: { error?: unknown; is_api_error_message?: unknown },
+  text: string,
+): boolean {
+  if (frame.is_api_error_message !== true && typeof frame.error !== "string") return false;
+  return /\bClaude Code v?\d+(?:\.\d+)+ does not support this model\b/i.test(text);
+}
+
 /** Claude Code 2.1.295's api-error kinds (the assistant frame's `error`) that say the cause outright. */
 const CLAUDE_ERROR_KINDS: Record<string, EngineFailureKind> = {
   billing_error: "credits",

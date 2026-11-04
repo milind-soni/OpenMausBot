@@ -46,7 +46,7 @@ describe("user errors", () => {
   });
 
   it("forwards only a key it knows", () => {
-    expect(refusalBody({ error: "boom", errorKey: "chat.notice.answerPassed" })).toEqual({ error: "boom" });
+    expect(refusalBody({ error: "boom", errorKey: "chat.notice.resumingAfterRestart" })).toEqual({ error: "boom" });
     expect(userErrorFields(new Error("plain"))).toEqual({});
     const thrown = Object.assign(new Error("x"), { errorKey: "serverError.chat.busyInRoom", errorParams: { room: "Launch" } });
     expect(userErrorFields(thrown)).toEqual({ errorKey: "serverError.chat.busyInRoom", errorParams: { room: "Launch" } });

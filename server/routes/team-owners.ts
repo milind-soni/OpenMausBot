@@ -5,6 +5,7 @@ import { userError } from "../user-errors.ts";
 // sets a whole department's at once, for an Admin.
 // Security: all but the last are client-scoped, so the checks here are the gate. A member's name and picture are shown
 // to the team's signed-in members and nobody else; nothing else of their profile (About you) is ever served here.
+import type { AdminActionRow } from "../admin-activity.ts";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
@@ -37,6 +38,8 @@ export interface TeamOwnerRouteDeps {
   /** Whether the session may see this bot at all. */
   sees(auth: RequestAuth, botId: string): boolean;
   publicBot(bot: BotRecord): unknown;
+  /** Settings → Activity: who a bot reports to decides who edits it. */
+  record?(auth: RequestAuth, row: Omit<AdminActionRow, "at" | "actor">): void;
 }
 
 /** The address a session speaks for: a team member's, or none (a loopback service, a session the Admin never signed). */
@@ -58,6 +61,11 @@ function teamPictureUrl(email: string, avatarUrl: string): string {
 }
 
 export function createTeamOwnerRoutes(deps: TeamOwnerRouteDeps): RouteHandler {
+  const recordOwner = (auth: RequestAuth, bot: BotRecord, previous: string | null | undefined) => {
+    const now = botOwner(bot);
+    if ((previous ?? null) === (now ?? null)) return;
+    deps.record?.(auth, { category: "bot", action: "owner.update", target: { kind: "bot", id: bot.id, name: bot.name }, before: { owner: previous ?? null }, after: { owner: now ?? null } });
+  };
   const profileOf = (email: string) => deps.profileOf?.(email) ?? {};
   const nameOf = (email: string) => profileOf(email).name?.trim() || nameFromEmail(email);
   return async ({ req, res, path, method, auth, json, readBody }) => {
@@ -113,8 +121,10 @@ export function createTeamOwnerRoutes(deps: TeamOwnerRouteDeps): RouteHandler {
       const { email } = parsed.data;
       if (unknownPerson(email)) return json(res, 400, userError("serverError.owner.choose", { team: team.name }));
       const botIds = parsed.data.botIds.filter((id) => !deps.store.bot(id)?.defaultBot?.person);
+      const owners = new Map(botIds.map((id) => { const one = deps.store.bot(id); return [id, one && botOwner(one)]; }));
       const changed = setReportsTo(deps.store, botIds, email);
       if (!changed.ok) return changed.reason === "chief-conflict" ? conflict(email) : json(res, 404, userError("serverError.owner.unavailable"));
+      for (const updated of changed.bots) recordOwner(auth, updated, owners.get(updated.id));
       return json(res, 200, { bots: changed.bots.map((bot) => deps.publicBot(bot)) });
     }
 
@@ -130,8 +140,10 @@ export function createTeamOwnerRoutes(deps: TeamOwnerRouteDeps): RouteHandler {
     }
     const { email } = parsed.data;
     if (unknownPerson(email)) return json(res, 400, userError("serverError.owner.choose", { team: team.name }));
+    const previous = botOwner(bot);
     const changed = setReportsTo(deps.store, [bot.id], email);
     if (!changed.ok) return changed.reason === "chief-conflict" ? conflict(email) : json(res, 404, userError("serverError.bot.missing"));
+    recordOwner(auth, changed.bots[0]!, previous);
     return json(res, 200, { bot: deps.publicBot(changed.bots[0]!) });
   };
 }

@@ -16,6 +16,7 @@ import type { MausMotion, MausState } from "@/lib/mascot";
 import type { OnboardingStatus } from "@/lib/onboarding";
 import type { LocaleKey } from "@/locales";
 import { api, useStore, type Action, type AppState } from "@/state/store";
+import { randomUuid } from "@/lib/random-uuid";
 
 const IDEAS: Array<{ id: string; icon: LucideIcon; label: LocaleKey; text: LocaleKey }> = [
   { id: "digest", icon: Newspaper, label: "cloudIntent.idea.digest", text: "cloudIntent.idea.digestText" },
@@ -44,7 +45,7 @@ export function startCloudSetup(job: string, state: Pick<AppState, "bots" | "sel
     dispatch({ type: "showChat" });
     dispatch({ type: "select", id: bot.id });
     dispatch({
-      type: "send", botId: bot.id, text, sendId: crypto.randomUUID(), threadId: bot.threadId,
+      type: "send", botId: bot.id, text, sendId: randomUuid(), threadId: bot.threadId,
       onError: () => restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text, attachments: [] }),
     });
   });

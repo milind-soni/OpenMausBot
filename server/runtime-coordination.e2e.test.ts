@@ -13,7 +13,7 @@ import { ownTurnText } from "./testing/room-handoff-agent.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SETTLED = "Your downstream room requests have settled.";
-const REPORT_FROM_MIRA = "[OpenMausBot report from @Mira";
+const REPORT_FROM_MIRA = "[From @Mira (bot) · report on assignment";
 const RERUN_NOTE = "OpenMausBot restarted while your previous turn here was running";
 const TEAMMATES_CUT = "A restart cut these teammates' turns";
 
@@ -173,11 +173,17 @@ it("S1 assigns a teammate under the envelope and resumes the Chief once with the
   expect(f.eventsOf(child.id).map((event: any) => event.kind)).toEqual(expect.arrayContaining(["enqueued", "started", "settled", "reported"]));
 }), hostTimeout(60_000));
 
+/** A question reaches the person on "Ask me first"; at Full access, the default, the Chief answers it instead. */
+const askMeFirst = async (f: any) => {
+  for (const id of [f.clive.id, f.mira.id]) expect((await f.api("PATCH", `/api/bots/${id}`, { approvalMode: "ask", applyToAllThreads: true })).status).toBe(200);
+};
+
 it("S2 parks a teammate on NEEDS INPUT, passes her question to the Chief once, carries the person's answer into her next turn, and resumes the Chief with the result", () => scenario(async (f) => {
+  await askMeFirst(f);
   const brief = "S2-BRIEF: tag the release in the repository and report the tag.";
   f.script(f.clive.id,
     { key: "C0", match: ["S2-JOB"], steps: [{ arguments: { bot_ids: [f.mira.id], message: brief } }], reply: "C0: Mira is tagging it." },
-    { key: "C-ASKED", match: ["stopped on a question for", "[OpenMausBot question from @Mira", "which repository?"], reply: "C-ASKED: Mira needs the repository." },
+    { key: "C-ASKED", match: ["stopped on a question for", "[From @Mira (bot) · question on assignment", "which repository?"], reply: "C-ASKED: Mira needs the repository." },
     { key: "C1", match: [SETTLED, REPORT_FROM_MIRA], reply: "S2-FINAL: the release is tagged." });
   f.script(f.mira.id,
     { key: "M2", match: ["S2-BRIEF", "The person answered"], reply: "S2-RESULT: tagged v1.2.0 in the main repository." },
@@ -207,7 +213,7 @@ it("S2 parks a teammate on NEEDS INPUT, passes her question to the Chief once, c
   await expect.poll(() => f.roots()[0]?.status, { timeout: 15_000 }).toBe("completed");
   expect(f.turns(f.mira.id).map((record: any) => record.planKey)).toEqual(["M1", "M2"]);
   expect(chiefTurns()).toEqual([["C0", false], ["C-ASKED", false], ["C1", true]]);
-  expect(f.told(f.turn("C1"))).not.toContain("[OpenMausBot question from @Mira");
+  expect(f.told(f.turn("C1"))).not.toContain("[From @Mira (bot) · question on assignment");
   expect(f.told(f.turn("C1"))).toContain(REPORT_FROM_MIRA);
   expect(f.told(f.turn("C1"))).toContain("S2-RESULT: tagged v1.2.0");
   expect(f.children()[0]).toMatchObject({ status: "completed", outcome: "done", executions: 2 });
@@ -218,10 +224,11 @@ it("S2 parks a teammate on NEEDS INPUT, passes her question to the Chief once, c
 }), hostTimeout(60_000));
 
 it("S2b resumes the Chief once with a parked question, keeps one question chip across a restart and names the parked thread as waiting on the person", () => scenario(async (f) => {
+  await askMeFirst(f);
   const brief = "S2B-BRIEF: tag the release in the repository and report the tag.";
   f.script(f.clive.id,
     { key: "C0", match: ["S2B-JOB"], steps: [{ arguments: { bot_ids: [f.mira.id], message: brief } }], reply: "C0: Mira is tagging it." },
-    { key: "C-ASKED", match: ["stopped on a question for", "[OpenMausBot question from @Mira", "which repository?"], reply: "C-ASKED: Mira needs the repository." });
+    { key: "C-ASKED", match: ["stopped on a question for", "[From @Mira (bot) · question on assignment", "which repository?"], reply: "C-ASKED: Mira needs the repository." });
   f.script(f.mira.id, { key: "M1", match: ["S2B-BRIEF"], reply: "I can tag it once I know where.\nNEEDS INPUT: which repository?" });
   const job = f.clive.activeTaskId;
   await f.say(f.clive.id, job, "S2B-JOB: have Mira tag the release and own the result.");

@@ -8,7 +8,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { PROVIDER_CREDENTIAL_ENV, stripWorkspaceCredentialEnv } from "../config.ts";
-import { openStartupModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
+import { openStartupModelCatalog, unconfirmedModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
 import { augmentedPath } from "../env-path.ts";
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
 import {
@@ -33,7 +33,6 @@ import type {
   RuntimeEventListener,
   SendTurnInput,
   SteerOutcome,
-  TurnImageInput,
 } from "../contracts.ts";
 import { EFFORT_LEVELS } from "../../shared/wire.ts";
 import { newEventId, newId } from "../contracts.ts";
@@ -50,7 +49,8 @@ import { allowsTool, parseToolScope } from "../../shared/tool-scope.ts";
 import { buildMcpServers } from "./pi-mcp-servers.ts";
 import { noticeFailure } from "../chat-notices.ts";
 
-import { decodePiFrame, PiRpcChunks, piLineReader } from "./pi-rpc.ts";
+import { decodePiFrame, PiRpcChunks, piLineReader, readPiPromptImages } from "./pi-rpc.ts";
+import { PiRunUsage, type PiUsage, type TurnUsage } from "./pi-usage.ts";
 export { decodePiFrame, PiRpcChunks, piLineReader } from "./pi-rpc.ts";
 
 const DRIVER_KIND = "piAgent";
@@ -68,20 +68,6 @@ const PI_SESSION_SLOW_MS = 20_000;
 
 /** pi answered success:false: an explicit refusal from a live runtime, not a transport failure. */
 class PiRpcRefusalError extends Error {}
-
-type PiPromptImage = {
-  type: "image";
-  data: string;
-  mimeType: TurnImageInput["mime"];
-};
-
-function readPiPromptImages(turn: SendTurnInput): PiPromptImage[] {
-  return (turn.images ?? []).map((image) => ({
-    type: "image",
-    data: readFileSync(image.path).toString("base64"),
-    mimeType: image.mime,
-  }));
-}
 
 /** Native logs go into bug reports: keep the RPC shape and size, never image bytes. */
 function piNativeLogMessage(message: Record<string, unknown>): Record<string, unknown> {
@@ -354,8 +340,8 @@ interface PiEvent {
   args?: unknown;
   result?: unknown;
   isError?: boolean;
-  message?: { stopReason?: string; errorMessage?: string; usage?: { input?: number; output?: number } };
-  usage?: { input?: number; output?: number };
+  message?: { role?: string; stopReason?: string; errorMessage?: string; usage?: PiUsage };
+  usage?: PiUsage;
   isTerminal?: boolean;
   willRetry?: boolean;
   id?: string;
@@ -394,10 +380,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
     const catalogEnv = piEnvironment({ ...process.env, ...input.environment });
     let models = EMPTY;
     const readModels = async () => {
-      let base = models;
+      let base = models, listed = false;
       try {
         const resolved = await fetchPiModels(config.cli, catalogEnv);
-        if (resolved.options.length) base = resolved;
+        if (resolved.options.length) [base, listed] = [resolved, true];
       } catch {}
       try {
         const next = await applyPiLocalCatalog(base, catalogEnv);
@@ -405,7 +391,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       } catch {
         if (base.options.length) models = base;
       }
-      try { writeStartupModelCache(instanceId, models); } catch {}
+      try { if (!listed) unconfirmedModelCatalog(models); writeStartupModelCache(instanceId, models); } catch {}
     };
     const refreshModels = async () => {
       await updatePiModelCatalog(config.cli, catalogEnv);
@@ -464,8 +450,8 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       let settled = false;
       let completion: Promise<void> | null = null;
       let endStopReason: string | undefined;
-      let endUsage: { input?: number; output?: number } | undefined;
-      let completionOutcome: { ok: boolean; stopReason: string; usage?: { input: number; output: number } } | null = null;
+      const runUsage = new PiRunUsage();
+      let completionOutcome: { ok: boolean; stopReason: string; cost?: number; usage?: TurnUsage } | null = null;
       let endErrorMessage: string | undefined;
       let agentEndTimer: ReturnType<typeof setTimeout> | null = null;
       const images = readPiPromptImages(turn);
@@ -547,11 +533,12 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
       };
 
-      const settle = (ok: boolean, stopReason?: string | null, usage = endUsage): Promise<void> => {
+      const settle = (ok: boolean, stopReason?: string | null, usage = runUsage.usage): Promise<void> => {
         if (completion) return completion;
         const outcome = completionOutcome ??= {
           ok, stopReason: stopReason ?? (ok ? "end_turn" : "failed"),
-          ...(usage ? { usage: { input: usage.input ?? 0, output: usage.output ?? 0 } } : {}),
+          ...(usage ? { usage } : {}),
+          ...(runUsage.cost === undefined ? {} : { cost: runUsage.cost }),
         };
         settled = true;
         if (agentEndTimer) {
@@ -594,10 +581,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             type: "runtime.error",
             message: String(endErrorMessage ?? "pi turn failed").slice(0, 2_000),
           });
-          settle(false, "failed", endUsage);
+          settle(false, "failed", runUsage.usage);
           return;
         }
-        settle(true, sr === "cancelled" || sr === "aborted" ? "cancelled" : "end_turn", endUsage);
+        settle(true, sr === "cancelled" || sr === "aborted" ? "cancelled" : "end_turn", runUsage.usage);
       };
 
       const stop = () => {
@@ -750,6 +737,9 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             }
             return;
           }
+          case "message_end":
+            if (evt.message?.role === "assistant") runUsage.add(evt.message.usage);
+            return;
           case "turn_end":
           {
             // A killed child can still flush one buffered frame after the turn settled.
@@ -757,8 +747,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             if (agentEndTimer) clearTimeout(agentEndTimer);
             agentEndTimer = null;
             const sr = evt.message?.stopReason;
-            const usage = evt.usage ?? evt.message?.usage;
-            if (usage) endUsage = { input: (endUsage?.input ?? 0) + (usage.input ?? 0), output: (endUsage?.output ?? 0) + (usage.output ?? 0) };
+            runUsage.endTurn(evt.usage ?? evt.message?.usage);
             // toolUse: pi ran a tool and auto-continues; the next turn_end carries the outcome.
             if (sr === "toolUse" || sr === "tool_use" || sr === "tool_calls") return;
             endStopReason = sr;

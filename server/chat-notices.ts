@@ -10,14 +10,6 @@ export const CHAT_NOTICE = {
   "chat.notice.stalled": "no activity for {minutes} minutes — the turn was stopped",
   "chat.notice.followupInterrupted":
     "Queued follow-up interrupted by restart or restore — it may have already run. Review the result before sending it again.",
-  "chat.notice.roomHeld": "{name} is held (stopped by you) — @mention it or say resume",
-  "chat.notice.answerPassed": "Answer passed to the waiting work",
-  "chat.notice.recallCrossingOne": "{name} recalled {count} message from its private chat with you",
-  "chat.notice.recallCrossingMany": "{name} recalled {count} messages from its private chat with you",
-  "chat.notice.briefCrossingOne": "{name}'s recent-work brief covers {count} private chat with you",
-  "chat.notice.briefCrossingMany": "{name}'s recent-work brief covers {count} private chats with you",
-  "chat.notice.webhookMoved":
-    "Now that I live on My Cloud, my webhook \"{name}\" has a new address. Open Automations, choose Copy address on \"{name}\", and paste it into the app that sends to it.",
   "chat.notice.usageLimit": "This {provider} account has reached its usage limit{detail}. Wait for it to reset, or switch this bot to another AI.",
   "chat.notice.claudeExtraUsage":
     "Claude refused this turn because this model runs on extra usage for your account, and those credits are used up. Your plan's own usage is not affected: switch this bot to a model your plan includes, or add extra usage in your Claude account.",
@@ -33,12 +25,6 @@ export const CHAT_NOTICE = {
   "chat.notice.part.switchAccount": "switch this bot to another AI or Claude account",
   "chat.notice.webhookHome":
     "I'm back on this computer, so my webhook \"{name}\" has an address here again. Open Automations, choose Copy address on \"{name}\", and paste it into the app that sends to it.",
-  "chat.notice.resumedQuestion": "Resumed with a question from {names}, reviewing",
-  "chat.notice.resumedQuestionAfterRestart": "Resumed with a question from {names} after a restart, reviewing",
-  "chat.notice.resumedResults": "Resumed with {names} results, reviewing",
-  "chat.notice.resumedResultsAfterRestart": "Resumed with {names} results after a restart, reviewing",
-  "chat.notice.resumedWork": "Resumed with delegated work results, reviewing",
-  "chat.notice.resumedWorkAfterRestart": "Resumed with delegated work results after a restart, reviewing",
   "chat.notice.acpRestarted": "{provider} was restarted because a session sharing its process ignored Stop",
   "chat.notice.acpStopFailed": "{provider} ignored Stop and its process could not be ended",
   "chat.notice.toolCount": "{provider} refused this turn because this model takes at most {limit} tools and this bot offers more, even with its tool lists trimmed, so nothing ran. Turn off some of this bot's apps or MCP servers, or switch the bot to another model.",
@@ -57,7 +43,6 @@ export const CHAT_NOTICE = {
   "chat.notice.goalEnded": "The goal run ended before the bot reported an outcome.",
   "chat.notice.teammateWorking": "Stopped here — {name} is still working; open to stop it too",
   "chat.notice.unknownTeammateWorking": "Stopped here — A teammate is still working; open to stop it too",
-  "chat.notice.automationRecovered": "Recovered: {name} finished OK at {time}",
   "chat.notice.approve": "Approve: {what}",
   "chat.notice.exportedGoal.working": "{before}[Goal: working]{content}",
   "chat.notice.exportedGoal.completed": "{before}[Goal: completed]{content}",
@@ -103,22 +88,6 @@ export const CHAT_NOTICE = {
   "chat.notice.codexUnsupportedOne": "Codex could not run the tool {tools} (\"unsupported call\"): the AI provider sent the call back without the tool's app name, so it never reached the tool. Pick a model for this bot whose provider handles tool calls fully.",
   "chat.notice.codexUnsupportedMany": "Codex could not run the tools {tools} (\"unsupported call\"): the AI provider sent the call back without the tool's app name, so it never reached the tool. Pick a model for this bot whose provider handles tool calls fully.",
   "chat.notice.codexUnsupportedMore": "Codex could not run the tools {tools} and {count} more (\"unsupported call\"): the AI provider sent the call back without the tool's app name, so it never reached the tool. Pick a model for this bot whose provider handles tool calls fully.",
-  "chat.notice.toldPerson": "Told {name}",
-  "chat.notice.handoffSent": "Sent to {name}",
-  "chat.notice.handoffSentRoom": "Sent to {name} · {room}",
-  "chat.notice.relayReply": "{name} replied: {message}",
-  "chat.notice.relayFrom": "{name} asked me to pass this on: {message}",
-  "chat.notice.relayMessage": "A message for you from {name}: {message}",
-  "chat.notice.reportSent": "Sent to the MausBot team (report {id}). Milind and Omkar get it by email.",
-  "chat.notice.reportSentContact": "Sent to the MausBot team (report {id}). Milind and Omkar get it by email and will reply to {contact}.",
-  "chat.notice.reportLater": "Sent to the MausBot team (report {id}) after an earlier try did not go through. Milind and Omkar get it by email.",
-  "chat.notice.reportLaterContact": "Sent to the MausBot team (report {id}) after an earlier try did not go through. Milind and Omkar get it by email and will reply to {contact}.",
-  "chat.notice.part.reportLimited": "the MausBot team takes only a few reports an hour from each app",
-  "chat.notice.reportWaiting": "Not sent yet: {why}. The report is saved and goes on its own as soon as it can, so there is no need to send it again.",
-  "chat.notice.reportWaitingOne": "Not sent yet: {why}. The report is saved and goes on its own in about {minutes} minute, so there is no need to send it again.",
-  "chat.notice.reportWaitingMany": "Not sent yet: {why}. The report is saved and goes on its own in about {minutes} minutes, so there is no need to send it again.",
-  "chat.notice.reportFull": "Not sent: {count} bug reports are already waiting to go to the MausBot team. Type @devs again once they have gone.",
-  "chat.notice.reportDropped": "A bug report from this conversation could not reach the MausBot team for a week, so it was dropped. Type @devs again to send a new one.",
 
   "chat.notice.copilotAccountRefused": "GitHub Copilot refused this request for the signed-in account. Check its Copilot plan and premium request allowance, then try again.",
   "chat.notice.acpQuietUsageLimit": "{name} reached a usage limit{said} and is waiting it out without replying, so this turn was stopped.",
@@ -132,8 +101,6 @@ export const CHAT_NOTICE = {
   "chat.notice.waitingAnswerElsewhere": "Waiting on your answer in @{name}",
   "chat.notice.teammateNeedsInput": "{name} needs your input: {question}",
   "chat.notice.relayCouldNotContinue": "this conversation could not carry on — {error}",
-  "chat.notice.provideSecretSecurely": "Securely provide the {label} from OpenMausBot on your phone or computer. It is never added to chat.",
-  "chat.notice.inboxNotPassed": "Not passed to {from}",
   "chat.notice.engineSignedOut": "{name} is signed out.",
   "chat.notice.failoverSignedInAgain": "{engine} is signed in again, so this conversation is back on {engine}.",
   "chat.notice.failoverSignedOut": "{from} is signed out, so {to} took over.",
@@ -199,17 +166,6 @@ export function noticeTool<T extends object>(
 ): T & { name: string; nameCode: ChatNoticeKey; nameParams?: ServerTextParams } {
   const safe = params && redactParams(params);
   return { ...extra, name: chatNotice(key, safe), nameCode: key, ...(safe ? { nameParams: safe } : {}) };
-}
-
-const RESUMED = {
-  question: ["chat.notice.resumedQuestion", "chat.notice.resumedQuestionAfterRestart"],
-  results: ["chat.notice.resumedResults", "chat.notice.resumedResultsAfterRestart"],
-  work: ["chat.notice.resumedWork", "chat.notice.resumedWorkAfterRestart"],
-} as const satisfies Record<string, readonly [ChatNoticeKey, ChatNoticeKey]>;
-
-export function resumedTool(question: boolean, from: readonly string[], restart: boolean) {
-  const keys = !from.length ? RESUMED.work : question ? RESUMED.question : RESUMED.results;
-  return noticeTool(keys[restart ? 1 : 0], from.length ? { names: from.join(", ") } : undefined, { ok: true });
 }
 
 export function failedNoticeTool(key: ChatNoticeKey, params?: ServerTextParams): FailedTurnTool {

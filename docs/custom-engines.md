@@ -6,17 +6,19 @@ after editing (instance entries are read at boot).
 
 ## Provider icons
 
-In **Settings → Engines**, expand an instance and choose its **Provider icon**.
-The built-in choices include OpenAI, Anthropic, Google Gemini, Microsoft Azure,
-Amazon Bedrock (AWS), xAI, DeepSeek, Meta, Mistral AI, Qwen, Moonshot AI,
-Cohere, and OpenRouter. You can also upload a PNG, JPEG, or WebP image up to
-128 KB and 1024 × 1024 pixels. **Reset** restores the default icon.
+Each instance shows its driver's mark. An OpenAI-compatible server shows the
+mark of whoever runs it, read from the host in its address: `api.deepseek.com`
+shows DeepSeek, `<resource>.openai.azure.com` Microsoft Azure,
+`dashscope-intl.aliyuncs.com` Qwen, `openrouter.ai` OpenRouter, and so on
+(the list is `SERVER_HOSTS` in `server/provider-icon.ts`). A server without a
+mark of its own, such as Groq, Together, Ollama or LM Studio, keeps the default.
 
-Each instance has its own icon, independent of its driver or API protocol.
-Changes made in Settings apply immediately without restarting the engine.
-For file-based configuration, add `"icon": { "kind": "preset", "preset": "azure" }`
-alongside `driver` and `displayName`. Custom uploads are stored as embedded image
-data; the app does not fetch remote icon URLs.
+An icon stored on the instance still wins: add
+`"icon": { "kind": "preset", "preset": "azure" }` alongside `driver` and
+`displayName`. The presets are OpenAI, Anthropic, Google Gemini, Microsoft
+Azure, Amazon Bedrock (AWS), xAI, DeepSeek, Meta, Mistral AI, Qwen, Moonshot
+AI, Cohere and OpenRouter. Custom images saved before v0.1.102 keep rendering;
+the app never fetches remote icon URLs.
 
 ## Any ACP agent (a CLI you spawn)
 
@@ -58,6 +60,81 @@ instance at it:
 - **Permissions** ride ACP's own `session/request_permission` — if your agent
   asks, the request becomes a normal approval card in chat.
 - Multiple instances are fine — one per agent.
+
+### Example: Mistral Vibe
+
+[Mistral Vibe](https://github.com/mistralai/mistral-vibe) ships an ACP entry
+point, `vibe-acp`, so it runs as a custom ACP engine with your Mistral account's
+own sign-in, not a Mistral API key saved in OpenMausBot.
+
+1. Install it: `uv tool install mistral-vibe` (or `pipx install mistral-vibe`).
+   This puts `vibe` and `vibe-acp` in `~/.local/bin`.
+2. Sign in once from a terminal: run `vibe --setup` and sign in with your
+   Mistral account (Vibe offers a browser sign-in through Mistral AI Studio, or
+   an API key). Vibe uses the first credential it finds in the shell
+   environment, `~/.vibe/.env`, or the OS keyring, and `vibe-acp` uses it too.
+3. Add the instance and restart OpenMausBot:
+
+   ```json
+   {
+     "instances": {
+       "mistral-vibe": {
+         "driver": "customAcp",
+         "displayName": "Mistral Vibe",
+         "icon": { "kind": "preset", "preset": "mistral" },
+         "config": { "cli": "/home/you/.local/bin/vibe-acp" }
+       }
+     }
+   }
+   ```
+
+   Use the full path when `~/.local/bin` is not on the app's `PATH` (a desktop
+   app started from the dock often doesn't have it).
+4. Pick **Mistral Vibe** for a bot. Its model menu shows **Agent default**,
+   which runs the model Vibe itself uses by default.
+
+OpenMausBot never passes its own `MISTRAL_API_KEY` to the CLI, so turns use the
+Vibe sign-in from step 2. Without it, the chat shows `Missing API key for
+mistral provider`: sign in again from a terminal (step 2).
+
+### Example: Command Code
+
+[Command Code](https://commandcode.ai) has an ACP mode, `cmd acp`, so it runs as
+a custom ACP engine with your own Command Code sign-in. (Checked with
+`command-code` 1.88.2.)
+
+1. Install it: `npm install -g command-code`. This puts `cmd` on your `PATH`;
+   on Windows the command is `cmdc`, because `cmd` is the Windows command
+   prompt.
+2. Sign in once from a terminal: run `cmd login` (`cmdc login` on Windows).
+   On a server without a browser, create an API key in Command Code Studio
+   instead and put it in the instance's `environment` as
+   `COMMAND_CODE_API_KEY`; OpenMausBot passes it to the CLI.
+3. Add the instance and restart OpenMausBot:
+
+   ```json
+   {
+     "instances": {
+       "command-code": {
+         "driver": "customAcp",
+         "displayName": "Command Code",
+         "config": { "cli": "cmd acp" }
+       }
+     }
+   }
+   ```
+
+   Use `"cmdc acp"` on Windows, and the full path when the npm global folder
+   is not on the app's `PATH`: `which cmd` on macOS or Linux, or
+   `where.exe cmdc` on Windows.
+4. Pick **Command Code** for a bot. Its model menu shows **Agent default**,
+   which runs Command Code's own default model; **Re-detect** lists the models
+   it advertises once you're signed in.
+
+Without a sign-in the chat shows ``Not authenticated. Run `cmd login` in a
+terminal first.``: sign in from a terminal (step 2). A wrong
+`COMMAND_CODE_API_KEY` shows `401 error: Invalid 'Authorization' header or
+token.`
 
 ## Any OpenAI-compatible endpoint (no process at all)
 

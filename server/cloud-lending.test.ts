@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { cloudHomeLendingRefusal, cloudLendingRefusalText, createCloudRoutineAuthors, ownerOnlyConversation, routineFingerprint, type CloudLendingTurn } from "./cloud-lending.ts";
+import { cloudHomeLendingRefusal, cloudLendingRefusalText, createCloudRoutineAuthors, ownerOnlyConversation, routineFingerprint, teamLendingRefusal, type CloudLendingTurn } from "./cloud-lending.ts";
 
 const OWNER = "p_owner", GUEST = "p_guest";
 const ownerPerson = (person: string | undefined) => person === OWNER;
@@ -159,5 +159,12 @@ describe("cloudLendingRefusalText", () => {
   it("calls the computer what it is", () => {
     expect(cloudLendingRefusalText("unproven", { ...room, device: "PC" })).toContain("your PC");
     expect(cloudLendingRefusalText("unproven", { ...mac, device: "computer" })).not.toMatch(/\bMac\b/u);
+  });
+});
+
+describe("a team's one line about lent computers", () => {
+  it("says plainly that nobody's own computer serves the team, in the team's name, with no personal-Cloud words", () => {
+    expect(teamLendingRefusal("Acme")).toBe("Acme's bots never use anyone's own computer; they use Acme's cloud computer.");
+    expect(teamLendingRefusal("Acme")).not.toMatch(/conversations you start|My Cloud|server/i);
   });
 });

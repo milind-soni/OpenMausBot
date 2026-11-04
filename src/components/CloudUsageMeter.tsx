@@ -19,7 +19,7 @@ import type { LocaleKey } from "@/locales";
 import { useStore } from "@/state/store";
 
 const TEAM_TIERS: readonly string[] = ["team", "business"];
-export type UpgradeSource = "app_usage" | "app_settings";
+export type UpgradeSource = "app_usage" | "app_settings" | "app_room";
 
 export function usageBridge(cloudHome: boolean): CloudPlanBridge | undefined {
   if (window.ogb?.remoteClient?.active === true) return undefined;
@@ -68,8 +68,9 @@ const failed = (): UpgradeNote => ({ tone: "bad", text: t("usageMeter.err.failed
 const done = (tier: string): UpgradeNote => ({ tone: "good", text: t("usageMeter.done", { plan: cloudPlanLabel(tier) }) });
 const pending = (): UpgradeNote => ({ tone: "info", text: t("usageMeter.pending") });
 
+/** `upgraded`: a change already going through settled on this plan, which may not be the one asked for. */
 export async function previewUpgrade(bridge: CloudPlanBridge, usage: CloudUsage, source: UpgradeSource, tier: string | undefined = nextPlan(usage)?.tier):
-  Promise<{ preview: CloudUpgradePreview } | { note: UpgradeNote }> {
+  Promise<{ preview: CloudUpgradePreview } | { note: UpgradeNote; upgraded?: string }> {
   if (upgradePath(usage) !== "app" || !tier || !bridge.upgradePreview) {
     await bridge.manage();
     return { note: { tone: "info", text: t("usageMeter.browser") } };
@@ -77,7 +78,7 @@ export async function previewUpgrade(bridge: CloudPlanBridge, usage: CloudUsage,
   const shown = await bridge.upgradePreview(tier, source);
   switch (shown.outcome) {
     case "preview": return { preview: shown.preview };
-    case "settled": return { note: shown.status === "upgraded" ? done(shown.tier) : pending() };
+    case "settled": return shown.status === "upgraded" ? { note: done(shown.tier), upgraded: shown.tier } : { note: pending() };
     case "browser": return { note: { tone: "info", text: t("usageMeter.browser") } };
     case "refused": return { note: { tone: "bad", text: t(REFUSAL[shown.code]) } };
     default: return { note: failed() };
@@ -97,7 +98,8 @@ export async function confirmUpgrade(bridge: CloudPlanBridge, preview: CloudUpgr
   }
 }
 
-export function useUpgrade(bridge: CloudPlanBridge | undefined, usage: CloudUsage | null, source: UpgradeSource) {
+/** `onUpgraded`: the plan the person's Cloud is on now, once an upgrade went through. */
+export function useUpgrade(bridge: CloudPlanBridge | undefined, usage: CloudUsage | null, source: UpgradeSource, onUpgraded?: (tier: string) => void) {
   const [busy, setBusy] = useState<"preview" | "change" | null>(null);
   const [preview, setPreview] = useState<CloudUpgradePreview | null>(null);
   const [note, setNote] = useState<UpgradeNote | null>(null);
@@ -110,11 +112,16 @@ export function useUpgrade(bridge: CloudPlanBridge | undefined, usage: CloudUsag
   const start = (tier?: string) => run("preview", async () => {
     if (!usage) return;
     const next = await previewUpgrade(bridge!, usage, source, tier ?? nextPlan(usage)?.tier);
-    if ("preview" in next) setPreview(next.preview); else { setNote(next.note); cloudPlanChanged(); }
+    if ("preview" in next) setPreview(next.preview);
+    else { setNote(next.note); if (next.upgraded) onUpgraded?.(next.upgraded); cloudPlanChanged(); }
   });
   const confirm = () => run("change", async () => {
     if (!preview) return;
-    try { setNote(await confirmUpgrade(bridge!, preview, source)); } finally { setPreview(null); cloudPlanChanged(); }
+    try {
+      const note = await confirmUpgrade(bridge!, preview, source);
+      setNote(note);
+      if (note.tone === "good") onUpgraded?.(preview.plan);
+    } finally { setPreview(null); cloudPlanChanged(); }
   });
   const dialog = (
     <ConfirmDialog

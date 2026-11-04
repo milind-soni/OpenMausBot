@@ -99,6 +99,11 @@ export function taskWorkspaceIds(cwd: string, dataDir: string): { botId: string;
   return { botId: rel[0]!, threadId: rel[1]! };
 }
 
+/** The server-owned folder holding a conversation's uploads for its boxes (server/box-attachments.ts), bound read-only. */
+export function boxUploadsDir(dataDir: string, botId: string, threadId: string): string {
+  return join(dataDir, "box-uploads", botId, threadId);
+}
+
 /** Absolute paths on the command line (`/x/y` or `--flag=/x/y`), which the engine must be able to read. */
 export function argvPaths(args: readonly string[]): string[] {
   const paths: string[] = [];
@@ -186,6 +191,11 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   for (const root of setup.engineRoots) {
     const engines = resolve(root);
     mounts.push({ kind: mutate.has("engines-rw") ? "bind" : "ro", source: engines, target: engines, optional: true });
+  }
+  // The person's uploads for this conversation, after every read-write line: readable, but never writable or swappable.
+  if (ids) {
+    const shown = boxUploadsDir(dataDir, ids.botId, ids.threadId);
+    mounts.push({ kind: "ro", source: shown, target: shown, optional: true });
   }
   const readOnly = new Set<string>();
   for (const path of [...(request.ro ?? []), ...argvPaths(request.args), ...(botId && ID.test(botId) ? [join(dataDir, "bots", botId, "SOUL.md")] : [])]) {

@@ -1,27 +1,31 @@
 // The engines' own prompts stay the only gates: nothing here answers, holds or grants anything.
 import type { RuntimeEvent } from "./contracts.ts";
 import { redactSecretsInText } from "./redact.ts";
+import { serverLine } from "./server-lines.ts";
 
 type Resolved = Extract<RuntimeEvent, { type: "request.resolved" }>;
 
-export function settledWaitingChip(name: string, kind: string, behavior: Resolved["behavior"], source: Resolved["source"]): { name: string; ok: boolean } {
+/** `language`: the conversation's where the row is shown. */
+export function settledWaitingChip(name: string, kind: string, behavior: Resolved["behavior"], source: Resolved["source"], language?: string): { name: string; ok: boolean } {
   const who = `@${name}`;
   const question = kind === "answer";
+  const line = (key: Parameters<typeof serverLine>[1]) => serverLine(language, key, { who });
   // A timeout or closed turn says so even when the engine filed it as an answer (Claude's note for an unanswered question).
   if (source === "timeout") return question
-    ? { name: `Nobody answered ${who}'s question in time`, ok: false }
-    : { name: `Nobody answered ${who}'s approval in time — that step did not run`, ok: false };
+    ? { name: line("server.teammates.noAnswerInTime"), ok: false }
+    : { name: line("server.teammates.noApprovalInTime"), ok: false };
   if (source === "system" || source === "unavailable") return question
-    ? { name: `${who}'s turn ended before anyone answered its question`, ok: false }
-    : { name: `${who}'s approval closed before anyone answered — that step did not run`, ok: false };
-  if (behavior === "deny") return { name: question ? `${who}'s question was dismissed` : `${who}'s request was denied`, ok: false };
+    ? { name: line("server.teammates.turnEndedBeforeAnswer"), ok: false }
+    : { name: line("server.teammates.approvalClosed"), ok: false };
+  if (behavior === "deny") return { name: line(question ? "server.teammates.questionDismissed" : "server.teammates.requestDenied"), ok: false };
   return source === "user"
-    ? { name: `${who} got your ${question ? "answer" : "approval"}`, ok: true }
-    : { name: question ? `${who}'s question was answered` : `${who}'s request was approved`, ok: true };
+    ? { name: line(question ? "server.teammates.gotYourAnswer" : "server.teammates.gotYourApproval"), ok: true }
+    : { name: line(question ? "server.teammates.questionAnswered" : "server.teammates.requestApproved"), ok: true };
 }
 
-export function queuedBehindPersonText(name: string, kind: "approval" | "question" | "review", title: string): string {
-  return `Queued for @${name} behind your ${kind === "question" ? "answer" : kind} in “${title}”`;
+export function queuedBehindPersonText(name: string, kind: "approval" | "question" | "review", title: string, language?: string): string {
+  return serverLine(language, kind === "question" ? "server.teammates.queuedBehind.answer" : kind === "approval" ? "server.teammates.queuedBehind.approval"
+    : "server.teammates.queuedBehind.review", { bot: name, title });
 }
 
 const MAX_ACTIONS = 10;

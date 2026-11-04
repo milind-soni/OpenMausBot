@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { EventEmitter } from "node:events";
 import test from "node:test";
 
-import { createUpdaterCoordinator } from "./updater-coordinator.mjs";
+import { deferred, downloadInto, elevatedHarness, errorStates, found, harness, settle, SUM } from "./updater-test-fixture.mjs";
 import { installDetail } from "./update-words.mjs";
 
 test("elevated-install wording survives terminal handoff and its staged card", async () => {
@@ -37,56 +36,6 @@ test("unclassified install details carry their words, while checksum classificat
     assert.deepEqual(calls.handOff, []);
   }
 });
-
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
-
-function harness(options) {
-  const updater = new EventEmitter();
-  // electron-updater has its own error listener; model that without routing it.
-  updater.on("error", () => {});
-  let state = { status: "idle" };
-  const states = [];
-  const coordinator = createUpdaterCoordinator(
-    updater,
-    (patch) => {
-      state = { ...state, ...patch };
-      states.push({ ...state });
-    },
-    options,
-  );
-  return { updater, coordinator, states, getState: () => state };
-}
-
-const settle = () => new Promise((resolve) => setImmediate(resolve));
-
-async function found(h, { manual = false, version = "2.0.0" } = {}) {
-  h.updater.checkForUpdates = async () => {
-    h.updater.emit("checking-for-update");
-    h.updater.emit("update-available", { version });
-  };
-  await h.coordinator.check(manual);
-}
-
-async function downloadInto(h, files = ["/tmp/OpenMausBot-2.0.0-amd64.deb"]) {
-  h.updater.downloadUpdate = () => {
-    h.updater.emit("update-downloaded", { version: "2.0.0" });
-    return Promise.resolve(files);
-  };
-  await found(h);
-  await settle();
-}
-
-function errorStates(states) {
-  return states.filter((entry) => entry.status === "error");
-}
 
 test("automatic check rejection is handled and returns to idle", async () => {
   const { updater, coordinator, getState } = harness();
@@ -752,28 +701,6 @@ test("carries the release notes with the version, as one capped string", async (
 
 // ---- Ubuntu .deb: install behind a password prompt, then reopen ----------
 
-const SUM = "c2hhNTEy";
-function elevatedHarness(elevatedInstall, extra = {}) {
-  const calls = { elevated: [], handOff: [], relaunch: 0 };
-  const h = harness({
-    elevatedInstall: (files, info) => {
-      calls.elevated.push({ files, info });
-      return elevatedInstall(files, info);
-    },
-    relaunch: () => {
-      calls.relaunch += 1;
-    },
-    handOffInstall: (files) => {
-      calls.handOff.push(files);
-      return Promise.resolve({ command: "sudo apt-get install -y '/tmp/x.deb'", terminalOpened: true });
-    },
-    ...extra,
-  });
-  h.updater.quitAndInstall = () => assert.fail("a system package must not be installed by quitAndInstall");
-  h.updater.downloadedUpdateHelper = { downloadedFileInfo: { sha512: SUM } };
-  return { h, calls };
-}
-
 test("elevated install: one click installs the staged package and reopens", async () => {
   const { h, calls } = elevatedHarness(() => Promise.resolve({ ok: true }));
   await downloadInto(h);
@@ -958,4 +885,44 @@ test("the check-failure notice never covers a staged update: hourly re-checks th
   };
   for (let i = 0; i < 4; i++) await h.coordinator.check();
   assert.deepEqual(h.getState(), staged);
+});
+
+test("a check that emits an error and rejects with a different one counts as one quiet failure", async () => {
+  const h = harness();
+  h.updater.checkForUpdates = () => {
+    h.updater.emit("error", new Error("offline"));
+    return Promise.reject(new Error("offline"));
+  };
+
+  await h.coordinator.check();
+  await h.coordinator.check();
+  assert.equal(h.getState().status, "idle");
+  assert.equal(errorStates(h.states).length, 0);
+
+  await h.coordinator.check();
+  assert.equal(h.getState().status, "error");
+  assert.match(h.getState().message, /Couldn't check for updates/);
+});
+
+test("the check-failure notice stays up while the next hourly check runs, and a manual retry still shows checking", async () => {
+  const h = harness();
+  h.updater.checkForUpdates = () => Promise.reject(new Error("offline"));
+  for (let i = 0; i < 3; i++) await h.coordinator.check();
+  assert.equal(h.getState().status, "error");
+
+  let before = h.states.length;
+  h.updater.checkForUpdates = () => {
+    h.updater.emit("checking-for-update");
+    return Promise.reject(new Error("offline"));
+  };
+  await h.coordinator.check();
+  assert.deepEqual(h.states.slice(before).map((entry) => entry.status), ["error"]);
+
+  before = h.states.length;
+  h.updater.checkForUpdates = async () => {
+    h.updater.emit("checking-for-update");
+    h.updater.emit("update-not-available");
+  };
+  await h.coordinator.check(true);
+  assert.deepEqual(h.states.slice(before).map((entry) => entry.status), ["checking", "idle"]);
 });

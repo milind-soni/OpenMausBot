@@ -20,6 +20,8 @@ export function localComputerSelectable({
 }): boolean {
   if (!providerSupportsLocal) return false;
   if (capabilities.localComputer.available) return true;
+  // The desktop app's own computer can't serve bots running on another server; no permission fixes that.
+  if (capabilities.localComputer.reasonCode === "remote-server") return false;
   return capabilities.host.platform === "darwin" || capabilities.host.platform === "win32";
 }
 
@@ -33,6 +35,7 @@ export function localComputerDisabledReason({
 }): string | null {
   if (!providerSupportsLocal) return t("computer.problem.localAiCannot");
   if (capabilities.localComputer.available) return null;
+  if (capabilities.localComputer.reasonCode === "remote-server") return t("computer.problem.localRemoteServer");
   if (capabilities.host.platform === "linux") {
     if (capabilities.localComputer.reasonCode === "linux-wayland-seat-safety-blocked") return t("computer.problem.localWaylandBlocked");
     if (capabilities.localComputer.reasonCode === "wayland-compositor-unsupported") return t("computer.problem.localWaylandDesktop");

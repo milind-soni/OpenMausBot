@@ -4,7 +4,7 @@ import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import type { Message } from "@/state/store";
 
-type StepTool = Pick<NonNullable<Message["tool"]>, "name" | "summary" | "nameCode" | "nameParams" | "whose">;
+type StepTool = Pick<NonNullable<Message["tool"]>, "name" | "summary" | "nameCode" | "nameParams" | "whose" | "label">;
 
 const STEP_KEYS: Record<string, LocaleKey> = {
   bash: "toolStep.runCommand",
@@ -71,6 +71,7 @@ export function toolStepLabel(tool: StepTool): string {
 
 function stepWords(tool: StepTool): string {
   const { name } = tool;
+  if (tool.label) return tool.label;
   // Codex and ACP title a command's chip with the command line; only a command carries a summary.
   if (tool.summary) return t("toolStep.runCommand");
   if (isNoticeCode(tool.nameCode)) return activityText(tool, name);

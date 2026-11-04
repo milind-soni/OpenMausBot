@@ -3,13 +3,13 @@ import { modelLabel, modelProvider } from "@/lib/model-label";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, KeyRound, Loader2, RefreshCw, X } from "lucide-react";
-import { useStore, currentTaskBot, type AppState, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
+import { useStore, currentTaskBot, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
 import type { EffortLevel } from "../../shared/wire";
 import type { ModelVariantOption } from "../../shared/runtime-events";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
 import { configuredModelInstances, isClaudeAccount, isCustomOnly, SIGN_IN_FAMILY_LABEL, signInFamily } from "@/lib/engine-rail";
 import { modelName, simpleModelMenu } from "@/lib/simple-model-menu";
-import { choiceIsSelected, modelChoices, modelSelectionForPick, type ModelChoice } from "@/lib/model-choices";
+import { choiceIsSelected, modelChoices, modelSelectionForPick, takesTypedModels, withTypedModels, type ModelChoice } from "@/lib/model-choices";
 export { modelSelectionForPick } from "@/lib/model-choices";
 import { pickerPlacement, type PickerPlacement } from "@/lib/picker-placement";
 import type { Typeahead } from "@/lib/menu-keys";
@@ -27,6 +27,7 @@ import { SimpleModelMenu, type SimpleThinking } from "./SimpleModelMenu";
 import { apiKeysLabel, ClaudeAccountSelect, engineStatus, FollowBotModelRow, ModelEngineRail, ModelRow, ModelSearch } from "./ModelPickerFull";
 import { MENU_LABEL, MENU_LINE, MENU_ROW, MENU_SEPARATOR, MENU_STROKE, MENU_TRAILING } from "./menu-recipe";
 import { modelMenuKey, modelMenuPointerMove } from "./model-menu-keys";
+import { offersReasoning, useRefocusAfterPick, variantChoices } from "./model-picker-reasoning";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 
@@ -117,17 +118,6 @@ export function EffortRow({
 
 const variantLabel = (option: ModelVariantOption, driverKind?: string): string =>
   option.id === "default" && driverKind === "opencodeGo" ? t("model.variant.openCodeDefault") : option.label;
-
-/** ACP variant ids are opaque; their model/session declares the available choices. */
-function variantChoices(state: Pick<AppState, "instances" | "modelVariantSessions">, selection: ModelSelection, threadId: string | undefined) {
-  const instance = state.instances.find((candidate) => candidate.instanceId === selection.instanceId);
-  if (!instance?.capabilities?.modelVariants) return null;
-  const session = threadId === undefined ? undefined : state.modelVariantSessions[threadId];
-  const reported = session?.instanceId === selection.instanceId && session.model === selection.model ? session.variants : undefined;
-  const options = reported?.options ?? instance.models.options.find((option) => option.id === selection.model)?.variants ?? [];
-  if (!options.length && selection.variant === undefined) return null;
-  return { instance, reported, options };
-}
 
 export function ModelVariantRow({ bot, threadId, updateBotDefault, className, label, compact = false, wide = false, quiet = false }: {
   bot: Bot;
@@ -242,8 +232,7 @@ export function ModelPicker({
   const [scope, setScope] = useState<"bot" | "thread">("thread");
   const advanced = useAdvancedMode();
   const ownerOrAdmin = useOwnerOrAdmin();
-  // A guest changes only their own conversation's model, never the shared bot's default; thread-only until
-  // authority loads.
+  // A guest changes only their own conversation's model, never the shared bot's default; thread-only until authority loads.
   const simpleUpdatesBotDefault = ownerOrAdmin === true;
   const [fullView, setFullView] = useState(false);
   const [pendingSwitch, setPendingSwitch] = useState<{ botId: string; threadId: string;
@@ -296,14 +285,16 @@ export function ModelPicker({
     focusOnPlace.current = null;
     const find = (selector: string) => (selector ? menu?.querySelector<HTMLElement>(selector) : null);
     const target = wanted === MENU_ITSELF ? menu
-      : find(wanted) ?? find("[data-menu-search]") ?? find("[data-current-model]") ?? find("[data-menu-row]:not(:disabled)") ?? menu;
+      : find(wanted) ?? find("[data-menu-search]") ?? find("[data-current-model]:not(:disabled)") ?? find("[data-menu-row]:not(:disabled)") ?? menu;
     target?.focus({ preventScroll: true });
     target?.scrollIntoView?.({ block: "nearest" });
   }, [open, placement]);
 
   const selection = bot.modelSelection;
-  const active = state.instances.find((instance) => instance.instanceId === selection.instanceId);
-  const pickerInstances = configuredModelInstances(state.instances, selection.instanceId);
+  const refocusAfterPick = useRefocusAfterPick(menuRef, open, selection, query);
+  const instances = withTypedModels(state.instances, selection, query);
+  const active = instances.find((instance) => instance.instanceId === selection.instanceId);
+  const pickerInstances = configuredModelInstances(instances, selection.instanceId);
   const selectedVariantLabel = selection.variant === undefined ? undefined : variantLabel(
     active?.models.options.find((option) => option.id === selection.model)?.variants?.find((option) => option.id === selection.variant)
       ?? { id: selection.variant, label: selection.variant },
@@ -332,7 +323,7 @@ export function ModelPicker({
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     setLoadingInstances(true);
-    void refreshInstances()
+    void refreshInstances({ cached: true })
       .catch(() => {})
       .finally(() => {
         refreshingRef.current = false;
@@ -478,7 +469,7 @@ export function ModelPicker({
     const nextSelection = modelSelectionForPick(selection, instance, model);
     if (variant !== undefined) nextSelection.variant = variant;
     const updateBotDefault = !threadId || (simpleView ? simpleUpdatesBotDefault : scope === "bot");
-    const targets = updateBotDefault ? [currentTaskBot(profile, threadId ?? bot.threadId), profile] : [bot];
+    const targets = [currentTaskBot(profile, threadId ?? bot.threadId), ...(updateBotDefault ? [profile] : [])];
     if (targets.some((target) => modelSwitchNeedsAsk(approvalModeFor(target),
       state.instances.find((candidate) => candidate.instanceId === target.modelSelection.instanceId)?.driverKind,
       instance.driverKind))) {
@@ -495,7 +486,10 @@ export function ModelPicker({
       selection: nextSelection,
     });
     if (updateBotDefault && threadId) setChangedBotModel(true);
-    close(true);
+    // A model with reasoning levels keeps the menu open, so its level can be set next without opening it again;
+    // picking a variant row already sets that level.
+    if (variant !== undefined || contained || !offersReasoning(state, instance, nextSelection, threadId ?? bot.threadId)) close(true);
+    else refocusAfterPick();
   };
 
   const resetVariant = contained && selection.variant !== undefined ? () => {
@@ -565,8 +559,10 @@ export function ModelPicker({
     if (event.key !== "Escape") return modelMenuKey(event, { query, typed, close: () => close(true) });
     event.preventDefault();
     event.stopPropagation();
-    if (query) setQuery("");
-    else if (!simpleView && pane === "custom" && canReturnToOfficial) setPane("main");
+    if (query) {
+      setQuery("");
+      refocusAfterPick();
+    } else if (!simpleView && pane === "custom" && canReturnToOfficial) setPane("main");
     else if (fullView && !advanced) backToList(true);
     else close(true);
   };
@@ -575,7 +571,7 @@ export function ModelPicker({
   const attention = !active ? undefined
     : active.policy ? t("policy.managedBy", { organization: active.policy.organizationName })
       : needsCli(active) ? t("model.setupRequired")
-        : needsSignIn(active) && !isCustomOnly(active) && !currentOption?.custom ? t("model.signInRequired") : undefined;
+        : needsSignIn(active) && !isCustomOnly(active) && !currentOption?.custom ? t("model.signInRequired") : currentOption?.orgBlocked ? t("model.orgBlocked") : undefined;
   const summary = active
     ? `${engineDisplayName(active)} · ${modelLabel(active, selection.model)}${
         modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""
@@ -675,7 +671,7 @@ export function ModelPicker({
   );
 
   const simpleMenu = simpleView ? simpleModelMenu({
-    instances: state.instances,
+    instances,
     listed: pickerInstances,
     selection,
     bot: { name: profile.name, selection: profile.modelSelection, follows },
@@ -794,12 +790,12 @@ export function ModelPicker({
               {railInstance.policy ? (
                 <div data-policy-blocked className="min-h-0 flex-1 overflow-y-auto px-3.5 pb-3 pt-1 text-[13px] leading-[18px] text-ink-secondary">
                   <p className="font-medium text-ink">{t("policy.managedBy", { organization: railInstance.policy.organizationName })}</p>
-                  <p className="mt-1">{t("policy.modelBlocked", { organization: railInstance.policy.organizationName })}</p>
+                  <p className="mt-1">{t(railInstance.policy.team ? "policy.teamModelBlocked" : "policy.modelBlocked", { organization: railInstance.policy.organizationName })}</p>
                 </div>
               ) : blocked ? (
                 <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3 pt-1">
-                  <EngineSetup instance={railInstance} intent={pane === "custom" ? "inject" : "cloud"} quiet={!advanced} />
-                  {railInstance.claudeAccount && needsSignIn(railInstance) && pane !== "custom" && (
+                  <EngineSetup instance={railInstance} intent={pane === "custom" ? "inject" : "cloud"} quiet={!advanced} onHost={remote} />
+                  {!remote && railInstance.claudeAccount && needsSignIn(railInstance) && pane !== "custom" && (
                     <p className="mt-2 px-1.5 text-[12px] leading-4 text-ink-tertiary">
                       {railInstance.claudeAccount.signInShell === "powershell" && `${t("engines.account.powershell")} `}
                       {t("engines.account.signInHint")}
@@ -815,7 +811,7 @@ export function ModelPicker({
                 </div>
               ) : (
                 <>
-                  {((pane === "main" && official.length > COMPACT_MODEL_COUNT) ||
+                  {((pane === "main" && (official.length > COMPACT_MODEL_COUNT || takesTypedModels(railInstance))) ||
                     (pane === "custom" && custom.length > COMPACT_MODEL_COUNT)) && (
                     <ModelSearch
                       value={query}
@@ -926,19 +922,19 @@ export function ModelPicker({
           ) : (
             <div className="px-3.5 py-5 text-[13px] leading-[18px] text-ink-secondary">{t("model.noProviders")}</div>
           )}
-          <div className="flex h-9 shrink-0 items-center gap-1 border-t-[0.5px] border-ink/10 px-1.5">
-            <button type="button" onClick={openEngines}
-              className="h-7 min-w-0 flex-1 truncate rounded-md px-2 text-left text-[12px] leading-4 text-ink-secondary hover:bg-ink/[0.06] hover:text-ink">
-              {t("settings.engines.title")}
-            </button>
-            {!remote && (
+          {!remote && (
+            <div className="flex h-9 shrink-0 items-center gap-1 border-t-[0.5px] border-ink/10 px-1.5">
+              <button type="button" onClick={openEngines}
+                className="h-7 min-w-0 flex-1 truncate rounded-md px-2 text-left text-[12px] leading-4 text-ink-secondary hover:bg-ink/[0.06] hover:text-ink">
+                {t("settings.engines.title")}
+              </button>
               <button type="button" data-model-add-api-keys onClick={openApiKeys}
                 className="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] leading-4 text-ink-secondary hover:bg-ink/[0.06] hover:text-ink">
                 <KeyRound size={14} strokeWidth={MENU_STROKE} aria-hidden="true" />
                 {apiKeysLabel(pickerInstances)}
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </>
@@ -992,7 +988,7 @@ export function ModelPicker({
           }}
           onSetUp={openFull}
           onCheckAgain={(instance) => refreshModels(instance.instanceId)}
-          onManage={openEngines}
+          onManage={remote ? undefined : openEngines}
           onResetVariant={resetVariant}
         />
       ) : fullPane}

@@ -75,7 +75,7 @@ describe("a server card in the person's language", () => {
     setLocale("pt-br");
     expect(localizedCard(card(i18n), false).root.children![0]!.value).toBe("8:30 AM · Standup");
     expect(localizedCard(card({ value: { key: "settings.title" } }), true).root.children![0]!.value).toBe("8:30 AM · Standup");
-    expect(localizedCard(card({ value: { key: "chat.notice.answerPassed" } }), true).root.children![0]!.value).toBe("Resposta entregue à tarefa em espera");
+    expect(localizedCard(card({ value: { key: "chat.notice.resumingAfterRestart" } }), true).root.children![0]!.value).toBe("Retomando após uma reinicialização");
     expect(localizedCard(card({ value: { key: "brief.card.meetingLine", params: { title: "Standup" } } }), true).root.children![0]!.value).toBe("8:30 AM · Standup");
     expect(localizedCard(card({ value: { key: "brief.card.meetingLine", params: { time: { at, style: "clock" }, title: "<b>x</b>" } } }), true).root.children![0]!.value).toBe("11:30 UTC · <b>x</b>");
   });

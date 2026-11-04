@@ -73,8 +73,8 @@ describe("app language preference", () => {
     local.setItem("omb-language", "pt-br");
     const preference = await import("./language-preference");
     expect(preference.startupLocaleTag("en-US")).toBe("pt-br");
-    const { setLocale, t } = await import("./i18n");
-    expect(setLocale(preference.startupLocaleTag("en-US"))).toBe("pt-br");
+    const { loadLocale, setLocale, t } = await import("./i18n");
+    expect(await loadLocale(preference.startupLocaleTag("en-US"))).toBe("pt-br");
     expect(t("pair.signIn")).toBe("Entrar");
     setLocale("en");
   });

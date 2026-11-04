@@ -20,7 +20,7 @@ async function admin(t) {
   const f = { requests: [], browsers: [], timer: null, delay: null,
     session: { cloud: { state: "ready", origin: HOME, pairingAvailable: true } },
     pairing: () => [200, grant(HOME)], add: () => [404, { error: "not_found" }], patch: () => [404, { error: "not_found" }], organization: () => [404, { error: "not_found" }],
-    hide: () => [404, { error: "Not found." }] };
+    hide: () => [404, { error: "Not found." }], movedTo: () => [404, { error: "not_found" }] };
   const server = createServer(async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
     const parsed = body ? JSON.parse(body) : undefined;
@@ -34,6 +34,7 @@ async function admin(t) {
     if (req.url === "/api/cloud/desktop/organizations" && req.method === "POST") return send(f.organization(parsed));
     if (req.url.startsWith("/api/cloud/desktop/clouds/") && req.method === "PATCH") return send(f.patch(decodeURIComponent(req.url.slice("/api/cloud/desktop/clouds/".length)), parsed));
     if (req.url.startsWith("/api/cloud/desktop/clouds/") && req.url.endsWith("/hide") && req.method === "POST") return send(f.hide(decodeURIComponent(req.url.slice("/api/cloud/desktop/clouds/".length, -"/hide".length)), parsed));
+    if (req.url === "/api/cloud/desktop/moved-to" && req.method === "POST") return send(f.movedTo(parsed));
     if (req.url === "/api/public/config") return send([200, { plans: [{ tier: "pro", price: { currency: "USD", interval: "month", amount: 4900 } }], trial: { days: 7 } }]);
     send([404, { error: "not_found" }]);
   });
@@ -109,6 +110,7 @@ test("buying another Cloud: the plan, the name and the swatch go to the Admin, i
   await assert.rejects(f.client.addCloud({ tier: "pro", name: "" }), /Invalid Cloud/);
   await assert.rejects(f.client.addCloud({ tier: "pro", name: "Client B", color: "url(x)" }), /Invalid Cloud/);
   await assert.rejects(f.client.addCloud({ tier: "pro", interval: "week", name: "Client B" }), /Invalid Cloud/);
+  await assert.rejects(f.client.addCloud({ tier: "pro", name: "Client B", source: "https://evil.example.test" }), /Invalid Cloud/, "a source is one of the app's own");
   f.add = () => [200, { cloudId: "c-b", checkoutUrl: "https://evil.example.test/pay" }];
   assert.deepEqual(await f.client.addCloud({ tier: "pro", name: "Client B", color: "rose" }), { outcome: "failed" }, "only Dodo's own checkout ever opens");
   assert.deepEqual(f.browsers, []);
@@ -121,6 +123,9 @@ test("buying another Cloud: the plan, the name and the swatch go to the Admin, i
   assert.equal(JSON.stringify(opened.state).includes(CHECKOUT), false, "the checkout page stays in main");
   assert.equal(f.client.addLink(), CHECKOUT);
   assert.equal(f.delay, 3_000);
+  f.add = () => [409, { error: "checkout_conflict", addBlocked: "cap" }];
+  await f.client.addCloud({ tier: "pro", name: "Client C", source: "app_whats_new_team" });
+  assert.deepEqual(f.requests.at(-1).body, { tier: "pro", interval: "month", name: "Client C", source: "app_whats_new_team" }, "where the person started, for the Admin's funnel");
   f.session = { ...f.session, clouds: [PRIMARY, entry({ id: "c-b", name: "Client B", status: "checkout", origin: null })] };
   f.timer(); await new Promise(resolve => setTimeout(resolve, 50));
   assert.equal(f.delay, 3_000, "still waiting for the payment");
@@ -288,4 +293,30 @@ test("the Admin's word on a new organization: the name is taken, the plan has as
     assert.deepEqual(await f.client.addOrganization({ name: "Client B" }), outcome, JSON.stringify(answer));
   }
   assert.deepEqual(f.browsers, []);
+});
+
+test("the Admin's word on a Cloud this computer moved to: only a word it knows, none signed out or from an Admin that can't say", async t => {
+  const f = await admin(t), gone = "https://omb-trial-1.fly.dev";
+  assert.equal(await f.client.movedTo(gone), null, "not verified yet: nothing is asked");
+  assert.equal(f.requests.some(row => row.route === "/api/cloud/desktop/moved-to"), false);
+  await f.client.start();
+  assert.equal(await f.client.movedTo(gone), null, "an Admin that can't say yet");
+  for (const state of ["deleted", "ended", "live", "unknown"]) {
+    f.movedTo = () => [200, { cloudContractVersion: 1, state }];
+    assert.equal(await f.client.movedTo(gone), state);
+  }
+  assert.deepEqual(f.requests.at(-1), { route: "/api/cloud/desktop/moved-to", method: "POST", body: { origin: gone } });
+  f.movedTo = () => [200, { cloudContractVersion: 1, state: "gone-ish" }];
+  assert.equal(await f.client.movedTo(gone), null, "a word this app doesn't know is no word");
+  f.movedTo = () => [429, { error: "rate_limited" }];
+  await assert.rejects(f.client.movedTo(gone), { status: 429 });
+});
+
+test("starting a sign-in over a good one is refused, and goes once that one has ended: what the home screen's Sign in does for another account", async t => {
+  const f = await admin(t);
+  await f.client.start();
+  await assert.rejects(f.client.begin(), /Sign out before/);
+  await f.client.signOut();
+  await f.client.begin();
+  assert.equal(f.requests.some(row => row.route === "/api/cloud/desktop/authorize"), true);
 });

@@ -7,20 +7,21 @@ import en from "@/locales/en.json";
 import { botLineText } from "./transcript-derivations";
 import { routineRunText } from "./routine-display";
 import type { RoutineRun } from "./routines";
+import { serverLine } from "../../server/server-lines";
+import "../../server/server-line-packs";
 import { setLocale } from "./i18n";
 
 afterEach(() => setLocale("en"));
 
 describe("a delegating bot's resumed line", () => {
-  it("names the teammates in pt-BR and keeps the English exactly in English", () => {
-    const english = "Resumed with a question from Scout, Ada after a restart, reviewing";
-    const tool = { nameCode: "chat.notice.resumedQuestionAfterRestart", nameParams: { names: "Scout, Ada" } };
-    expect(activityText(tool, english)).toBe(english);
+  it("shows the line in the language the server used without translating it twice", () => {
+    const english = serverLine(undefined, "server.teammates.resumedQuestionRestart", { who: "Scout, Ada" });
+    expect(english).toBe("Resumed with a question from Scout, Ada after a restart, reviewing");
+    expect(activityText({}, english)).toBe(english);
     setLocale("pt-br");
-    expect(activityText(tool, english)).toBe("Trabalho retomado após uma reinicialização; revisando uma pergunta de Scout, Ada");
-    expect(activityText({ nameCode: "chat.notice.resumedWork" }, "Resumed with delegated work results, reviewing"))
-      .toBe("Trabalho retomado; revisando os resultados do trabalho delegado");
-    expect(activityText({ nameCode: "chat.notice.resumedResults" }, "Resumed with Scout results, reviewing")).toBe("Resumed with Scout results, reviewing");
+    const portuguese = serverLine("pt-br", "server.teammates.resumedQuestionRestart", { who: "Scout, Ada" });
+    expect(activityText({}, portuguese)).toBe("Após reiniciar, retomou o trabalho com uma pergunta de Scout, Ada e está revisando");
+    expect(activityText({}, english)).toBe(english);
   });
 });
 
@@ -59,7 +60,7 @@ describe("a routine's fixed lines", () => {
     expect(routineLineText("routines.server.nothingNew", "Nothing new since the last check")).toBe("Nothing new since the last check");
     setLocale("pt-br");
     expect(routineLineText("routines.server.nothingNew", "Nothing new since the last check")).toBe("Nada novo desde a última verificação");
-    expect(routineLineText("chat.notice.answerPassed", "x")).toBe("x");
+    expect(routineLineText("chat.notice.resumingAfterRestart", "x")).toBe("x");
     expect(routineLineText(undefined, "x")).toBe("x");
   });
 });
@@ -108,7 +109,7 @@ describe("what a reader is shown of a stored line", () => {
     setLocale("pt-br");
     const textParams = redactParams({ name: SECRET });
     expect(botLineText({ text: "x", textCode: "chat.notice.webhookHome", textParams })).not.toContain(SECRET);
-    expect(activityText({ nameCode: "chat.notice.roomHeld", nameParams: redactParams({ name: SECRET }) }, "x")).not.toContain(SECRET);
+    expect(activityText({ nameCode: "chat.notice.goalWaiting", nameParams: redactParams({ name: SECRET }) }, "x")).not.toContain(SECRET);
   });
 
   it("is worded at the length limit, where the server cut the quoted failure to fit", () => {

@@ -10,8 +10,9 @@ import {
   CLOUD_SECRETS_FD_ENV, cloudHomeConfiguration, cloudHomeHost, cloudHomeSecrets, prepareCloudHomeVolume,
   withoutCloudSecrets, withoutIgnoredCloudKeys, type CloudHomeConfig,
 } from "./cloud-home.ts";
+import { boxMemory, heapSizeArgs } from "./box-memory.ts";
 import { clearRecordsFromOtherMachines } from "./data-dir-lease.ts";
-import { OOM_SCORE, spawnWithOomScore } from "./oom-score.ts";
+import { OOM_SCORE, protectSupervisor, spawnWithOomScore } from "./oom-score.ts";
 import { restartPolicy } from "./restart.ts";
 
 const SERVICE_USER = "maus";
@@ -196,6 +197,7 @@ export function startCloudHome(env: NodeJS.ProcessEnv = process.env) {
     ids = passwdIds(readFileSync("/etc/passwd", "utf8"), SERVICE_USER);
     if (!ids) throw new Error(`The ${SERVICE_USER} user is missing from this image.`);
     if (process.platform === "linux") for (const note of hardenHost(env)) console.log(`cloud home: ${note}`);
+    if (protectSupervisor()) console.log("cloud home: the supervisor is never stopped for memory");
     // Only the mount point changes owner; anything inside keeps its owner.
     const stat = statSync(home);
     if (stat.uid !== ids.uid || stat.gid !== ids.gid) chownSync(home, ids.uid, ids.gid);
@@ -241,7 +243,7 @@ export function startCloudHome(env: NodeJS.ProcessEnv = process.env) {
   };
   const policy = restartPolicy();
   const runServer = () => {
-    watch(spawnWithOomScore(OOM_SCORE.server, () => spawnWithSecrets(process.execPath, [join(here, "index.js")], server, secrets, ids)), (code) => {
+    watch(spawnWithOomScore(OOM_SCORE.server, () => spawnWithSecrets(process.execPath, [...heapSizeArgs(boxMemory().cgroupLimit, server.NODE_OPTIONS), join(here, "index.js")], server, secrets, ids)), (code) => {
       if (!policy.again(code, stopping)) return false;
       runServer();
       return true;

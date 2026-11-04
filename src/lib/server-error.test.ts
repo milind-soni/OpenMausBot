@@ -53,7 +53,7 @@ describe("a refusal the server names by key", () => {
   it("stays English without a key, with a key outside serverError., or with a param missing", () => {
     setLocale("pt-br");
     expect(serverErrorText({ error: "boom" }, "boom")).toBe("boom");
-    expect(serverErrorText({ errorKey: "chat.notice.answerPassed" }, "boom")).toBe("boom");
+    expect(serverErrorText({ errorKey: "chat.notice.resumingAfterRestart" }, "boom")).toBe("boom");
     expect(serverErrorText({ errorKey: "serverError.inventedLater" }, "boom")).toBe("boom");
     expect(serverErrorText({ errorKey: "serverError.chat.busyInRoom" }, "boom")).toBe("boom");
     expect(serverErrorText({ errorKey: "serverError.chat.busyInRoom", errorParams: { room: { name: "x" } } }, "boom")).toBe("boom");

@@ -80,7 +80,7 @@ export type RuntimeEvent = RuntimeEventBase &
       }
     | {
         type: "turn.wait_started";
-        /** The computer resource this turn queued behind (e.g. "computer:box:bx_…"). */
+        /** The computer or browser this turn queued behind (e.g. "computer:box:bx_…", "browser:bot-…"). */
         resource: string;
         /** Where this turn sat in the resource's arrival-ordered waitlist when
          * the wait began. */
@@ -192,7 +192,7 @@ export type RuntimeEvent = RuntimeEventBase &
     // `limitResetsAt`: epoch ms when the usage limit refusing this account resets, when the engine says.
     // `limit`: a usage limit refused this turn: the account's on this engine ("engine"), one model's own window
     // ("model"), or that model's extra usage credits ("credits"); the engine's other models still work for the last two.
-    | { type: "runtime.error"; message: string; setup?: boolean; terminal?: boolean; claudeUpdate?: boolean; trialCredit?: "used_up" | "ended" | "paused" | "too_low";
+    | { type: "runtime.error"; message: string; partial?: boolean; setup?: boolean; terminal?: boolean; claudeUpdate?: boolean; trialCredit?: "used_up" | "ended" | "paused" | "too_low";
         stalled?: boolean; limitResetsAt?: number; limit?: "engine" | "model" | "credits";
         /** `message` as a `chat.notice.*` key and params, when it is one of the server's fixed sentences. */
         text?: ServerText }

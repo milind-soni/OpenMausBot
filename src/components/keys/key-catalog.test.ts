@@ -57,7 +57,7 @@ describe("every credential has one home on the keys page", () => {
       xaiApiKey: "xai", boxToken: "box", opencodeGoApiKey: "opencodeGo", ttsKey: "elevenlabs", fishAudioKey: "fishAudio",
       openaiImageApiKey: "imageOpenai", onePasswordToken: "onePassword", composioApiKey: "composio", openaiApiKey: "openai",
       anthropicApiKey: "anthropic", openrouterApiKey: "openrouter", mistralApiKey: "mistral", cerebrasApiKey: "cerebras", groqApiKey: "groq",
-      metaApiKey: "meta", deepseekApiKey: "deepseek",
+      greenferenceApiKey: "greenference", metaApiKey: "meta", deepseekApiKey: "deepseek",
     };
     expect(Object.keys(homes).sort()).toEqual(Object.keys(CREDENTIAL_TARGETS).sort());
     for (const [name, id] of Object.entries(homes) as Array<[keyof typeof CREDENTIAL_TARGETS, KeyId]>) {
@@ -107,6 +107,7 @@ describe("searching the keys", () => {
     expect(found("voice")).toEqual(expect.arrayContaining(["liveCalls", "liveKey", "elevenlabs", "fishAudio"]));
     expect(found("openai")).toEqual(expect.arrayContaining(["openai", "liveCalls", "liveKey", "imageOpenai"]));
     expect(found("gmail")).toEqual(["composio"]);
+    expect(found("gemini")).toEqual(["openaiCompat"]);
     expect(found("no such key anywhere")).toEqual([]);
   });
 });

@@ -1,6 +1,6 @@
-import { NOTIFY_IN_ROOM_KEY, NOTIFY_TITLE_KEY, type Notification, type NotifyKind } from "../shared/notification.ts";
+import type { Notification, NotifyKind } from "../shared/notification.ts";
 import { personMentionExcerpt } from "../shared/person-mention.ts";
-import { formatServerText } from "../shared/server-text.ts";
+import { conversationLanguage, serverLine, type ServerLineKey } from "./server-lines.ts";
 
 export type { Notification, NotifyKind } from "../shared/notification.ts";
 
@@ -24,24 +24,23 @@ export function buildSpendNotification(
   return { kind: "spend", botId: bot.id, botName: bot.name, threadId, title: text.title, body: summarize(text.body, 200) };
 }
 
-/** The client words each title by key and falls back to this English, which the server keeps sending for older clients. */
-export const NOTIFICATION_TITLE = {
-  "notifications.banner.approval": "{who} needs approval",
-  "notifications.banner.question": "{who} has a question",
-  "notifications.banner.done": "{who} finished",
-  "notifications.banner.wait": "{who}'s wait is over",
-  "notifications.banner.mention": "{who} mentioned you",
-  "notifications.banner.turnFailed": "{who} couldn't start",
-  "notifications.banner.routineFailed": "{who}'s routine failed",
-  "notifications.banner.routineDeferred": "{who}'s routine is waiting",
-  "notifications.banner.incident": "{who} hit a problem",
-  "notifications.banner.delegationSettled": "{who} resumed with results",
-  "notifications.banner.inRoom": "{name} in {room}",
-} as const;
 /** Something OpenMausBot did on its own about `bot` that the person hears once, in one plain line. */
 export function buildNoticeNotification(bot: Pick<NotifyBot, "id" | "name">, threadId: string, text: string): Notification {
   return { kind: "notice", botId: bot.id, botName: bot.name, threadId, title: bot.name, body: summarize(text, 240) };
 }
+
+
+const TITLE: Partial<Record<NotifyKind, ServerLineKey>> = {
+  approval: "server.notify.approval",
+  question: "server.notify.question",
+  "routine-failed": "server.notify.routineFailed",
+  "routine-deferred": "server.notify.routineDeferred",
+  "turn-failed": "server.notify.turnFailed",
+  incident: "server.notify.incident",
+  "delegation-settled": "server.notify.delegationSettled",
+  mention: "server.notify.mention",
+  wait: "server.notify.wait",
+};
 
 export function buildNotification(
   kind: NotifyKind,
@@ -53,12 +52,11 @@ export function buildNotification(
   if (bot.notifications === false) return null;
 
   const body = summarize(detail);
-  const who = extra?.group
-    ? formatServerText(NOTIFICATION_TITLE[NOTIFY_IN_ROOM_KEY], { name: bot.name, room: extra.group.name })
-    : bot.name;
+  const language = conversationLanguage(threadId);
+  const who = extra?.group ? serverLine(language, "server.notify.inRoom", { bot: bot.name, room: extra.group.name }) : bot.name;
   const title = kind === "sign-in"
-    ? `${who} needs you to sign in to ${extra?.site ?? "a website"}`
-    : formatServerText(NOTIFICATION_TITLE[kind === "spend" || kind === "brief" || kind === "notice" ? NOTIFY_TITLE_KEY.done : NOTIFY_TITLE_KEY[kind]], { who });
+    ? extra?.site ? serverLine(language, "server.notify.signIn", { who, site: extra.site }) : serverLine(language, "server.notify.signInWebsite", { who })
+    : serverLine(language, TITLE[kind] ?? "server.notify.done", { who });
 
   if ((kind === "done" || kind === "mention") && !body) return null;
 

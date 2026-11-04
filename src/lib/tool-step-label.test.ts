@@ -21,6 +21,7 @@ describe("toolStepLabel", () => {
     [{ name: "mcp__notes__query_database" }, "Query database"],
     [{ name: "NotebookRead" }, "Notebook read"],
     [{ name: "tool" }, "Use a tool"],
+    [{ name: "mcp__agents__mcp_server", label: "Removed MCP server linear" }, "Removed MCP server linear"],
   ])("names %o as %s", (tool, label) => {
     expect(toolStepLabel(tool)).toBe(label);
   });
@@ -43,12 +44,12 @@ describe("toolStepLabel", () => {
 });
 
 describe("a server notice on a step", () => {
-  const answered = { name: "Answer passed to the waiting work", nameCode: "chat.notice.answerPassed" };
-  it("is worded in the person's language with its code, and stays English without one", () => {
+  const answered = { name: "Resposta entregue à tarefa em espera" };
+  it("preserves the server's localized title and still words client-coded notices", () => {
     setLocale("pt-br");
     try {
-      expect(toolStepLabel(answered)).toBe("Resposta entregue à tarefa em espera");
-      expect(toolStepLabel({ name: answered.name })).toBe(answered.name);
+      expect(toolStepLabel(answered)).toBe(answered.name);
+      expect(toolStepLabel({ name: "Resuming after a restart", nameCode: "chat.notice.resumingAfterRestart" })).toBe("Retomando após uma reinicialização");
       expect(toolStepLabel({ name: "Answer passed", nameCode: "toolStep.runCommand" })).toBe("Answer passed");
     } finally {
       setLocale("en");

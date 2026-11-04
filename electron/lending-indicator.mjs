@@ -1,4 +1,5 @@
 import nativeText from "./native-text.cjs";
+import { screenFixLabel, screenLine } from "./screen-words.mjs";
 
 /** The device word the person knows this computer by. */
 export const deviceWord = (platform = process.platform) => platform === "darwin" ? "Mac" : platform === "win32" ? "PC" : "computer";
@@ -6,34 +7,46 @@ export const deviceWord = (platform = process.platform) => platform === "darwin"
 const listed = (names, t) => names.length < 3 ? names.join(t("native.lendTray.and")) : `${names.slice(0, -1).join(", ")}${t("native.lendTray.and")}${names.at(-1)}`;
 const short = (names, t) => names.length < 3 ? listed(names, t) : t("native.lendTray.clouds", { count: names.length });
 
-export function indicatorText({ clouds, using, paused }, device, t = nativeText.englishText.t) {
+/** `screen`: computer control's state; while it isn't ready the line says what the Clouds
+ * can't use, and `screen` why. */
+export function indicatorText({ clouds, using, paused, screen = null }, device, t = nativeText.englishText.t) {
   const named = device === "computer" ? t("native.lendTray.computer") : device;
-  if (paused) return { line: t("native.lendTray.pausedLine", { clouds: listed(clouds, t), device: named }), title: t("native.lendTray.paused") };
+  if (paused) return { line: t("native.lendTray.pausedLine", { clouds: listed(clouds, t), device: named }), title: t("native.lendTray.paused"), screen: null };
+  const why = screenLine(screen, device);
   if (using.length) {
     const key = using.length > 1 ? "native.lendTray.usingMany" : "native.lendTray.usingOne";
-    return { line: t(key, { clouds: listed(using, t), device: named }), title: t(key, { clouds: short(using, t), device: named }) };
+    return { line: t(key, { clouds: listed(using, t), device: named }), title: t(key, { clouds: short(using, t), device: named }), screen: why };
   }
-  return { line: t("native.lendTray.canUse", { clouds: listed(clouds, t), device: named }), title: "" };
+  const line = t("native.lendTray.canUse", { clouds: listed(clouds, t), device: named });
+  return { line: why ? `${line}, but not its apps and screen` : line, title: "", screen: why };
 }
 
-export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPause, onResume, onActivity, device = deviceWord(), t = nativeText.englishText.t }) {
+export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPause, onResume, onActivity, onTerminal, onStartScreen = () => {}, device = deviceWord(), t = nativeText.englishText.t }) {
   let tray = null;
   let shown = null;
   const draw = view => {
-    const { line, title } = indicatorText(view, device, t);
-    tray.setToolTip(`OpenMausBot: ${line}`);
+    if (!tray || tray.isDestroyed()) return;
+    const { line, title, screen } = indicatorText(view, device, t);
+    const fix = screen ? screenFixLabel(view.screen) : null;
+    tray.setToolTip(`OpenMausBot: ${line}${screen ? `. ${screen}` : ""}`);
     // Electron shows a tray title beside the icon on macOS only.
     tray.setTitle?.(title);
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: line, enabled: false },
+      ...screen ? [{ label: screen, enabled: false }] : [],
+      ...fix ? [{ label: fix, click: () => onStartScreen() }] : [],
       { type: "separator" },
       view.paused ? { label: t("native.lendTray.resume"), click: () => onResume() } : { label: t("native.lendTray.pause"), click: () => onPause() },
+      ...view.paused ? [] : [{ label: `Let Clouds run commands on this ${device}`, type: "checkbox", checked: view.terminal,
+        // Electron 43 ticks a checkbox on click by itself: the menu keeps the saved choice until the person confirms one.
+        click: () => { draw(view); onTerminal(!view.terminal); } }],
       { label: t("native.lendTray.activity"), click: () => onActivity() },
     ]));
   };
   return {
-    update({ clouds = [], using = [], paused = false }) {
-      const next = { clouds: [...clouds], using: paused ? [] : [...using], paused: paused === true };
+    update({ clouds = [], using = [], paused = false, terminal = false, screen = null }) {
+      const next = { clouds: [...clouds], using: paused ? [] : [...using], paused: paused === true, terminal: terminal === true,
+        screen: screen ? { ready: screen.ready === true, reason: screen.reason ?? null, fix: screen.fix ?? null, ...(screen.message ? { message: screen.message } : {}) } : null };
       if (shown && JSON.stringify(next) === JSON.stringify(shown)) return;
       shown = next;
       if (!next.clouds.length) { if (tray && !tray.isDestroyed()) tray.destroy(); tray = null; return; }

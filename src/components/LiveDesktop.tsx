@@ -28,7 +28,7 @@ export function LiveDesktop({ target, threadId, name, poster, expanded, onExpand
   const [attempt, setAttempt] = useState(0);
   const [text, setText] = useState("");
   const live = useRef(false);
-  const { dragProps, noDragStyle, padClass } = useCaptionChrome();
+  const { dragProps, noDragStyle } = useCaptionChrome();
   const macInset = useDesktopCapabilities().capabilities.windowChrome === "mac-inset";
   const unreachable = useRef(onUnreachable);
   unreachable.current = onUnreachable;
@@ -90,7 +90,7 @@ export function LiveDesktop({ target, threadId, name, poster, expanded, onExpand
       }}
     >
       {expanded && (
-        <header {...dragProps} className={cn("flex shrink-0 flex-wrap items-center gap-2 border-b border-hairline/40 bg-panel px-3 py-2", macInset && "pl-[86px]", padClass)}>
+        <header {...dragProps} className={cn("flex shrink-0 flex-wrap items-center gap-2 border-b border-hairline/40 bg-panel px-3 py-2", macInset && "pl-[86px]")}>
           <span className="min-w-0 truncate text-[13px] font-medium text-ink">{label}</span>
           {pill}
           <form

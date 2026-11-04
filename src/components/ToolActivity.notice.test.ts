@@ -11,9 +11,9 @@ const { setLocale } = await import("@/lib/i18n");
 const render = (tool: Parameters<typeof ToolActivity>[0]["tool"]) => renderToStaticMarkup(createElement(ToolActivity, { tool }));
 
 const resumed = { name: "Resuming after a restart", ok: true, nameCode: "chat.notice.resumingAfterRestart" };
-const held = (name: string) => ({
-  name: `${name} is held (stopped by you) — @mention it or say resume`, ok: false, nameCode: "chat.notice.roomHeld", nameParams: { name },
-});
+const { heldMemberLine } = await import("../../server/room-holds");
+await import("../../server/server-line-packs");
+const held = (name: string, language?: string) => ({ name: heldMemberLine(name, language), ok: false });
 
 afterEach(() => {
   mode.advanced = false;
@@ -33,22 +33,22 @@ describe("a server notice in ToolActivity", () => {
 
   it("fills its params", () => {
     setLocale("pt-br");
-    expect(render(held("Scout"))).toContain("Você parou Scout. Mencione com @ ou escreva “retomar”.");
+    expect(render(held("Scout", "pt-br"))).toContain("O bot Scout está pausado (você o interrompeu) — mencione-o com @ ou diga retomar");
   });
 
   it("keeps the English for a code this build does not know or a param that is missing", () => {
     setLocale("pt-br");
     const unknown = render({ name: "A notice from a newer server", ok: true, nameCode: "chat.notice.inventedLater" });
     expect(unknown).toContain("A notice from a newer server");
-    const missing = render({ ...held("Scout"), nameParams: undefined });
+    const missing = render(held("Scout"));
     expect(missing).toContain("Scout is held (stopped by you) — @mention it or say resume");
     expect(missing).not.toContain("{name}");
   });
 
   it("shows markup in a param as text", () => {
     setLocale("pt-br");
-    const html = render(held("<img src=x onerror=alert(1)>"));
-    expect(html).toContain("Você parou &lt;img src=x onerror=alert(1)&gt;.");
+    const html = render(held("<img src=x onerror=alert(1)>", "pt-br"));
+    expect(html).toContain("O bot &lt;img src=x onerror=alert(1)&gt; está pausado");
     expect(html).not.toContain("<img");
   });
 });

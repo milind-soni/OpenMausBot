@@ -1,27 +1,17 @@
-import { noticeFailure, type ChatNoticeKey } from "../chat-notices.ts";
+import { serverLine } from "../server-lines.ts";
 import type { SendOutcome } from "../devs-report-send.ts";
 
-function reportLine(key: ChatNoticeKey, params?: Record<string, string>) {
-  const { message: line, text } = noticeFailure(key, params);
-  return { line, text };
-}
-
-export function sentReportLine(id: string, contact?: string, later = false) {
-  const key = later ? contact ? "chat.notice.reportLaterContact" : "chat.notice.reportLater"
-    : contact ? "chat.notice.reportSentContact" : "chat.notice.reportSent";
-  return reportLine(key, { id, ...(contact ? { contact } : {}) });
-}
-
-export function notYetReportLine(outcome: Extract<SendOutcome, { retry: true }>) {
+export const sentLine = (reportId: string, contact?: string, language?: string) => contact
+  ? serverLine(language, "server.reports.sentReply", { report: reportId, contact }) : serverLine(language, "server.reports.sent", { report: reportId });
+export const laterLine = (reportId: string, contact: string | undefined, language: string | undefined) => contact
+  ? serverLine(language, "server.reports.sentLaterReply", { report: reportId, contact }) : serverLine(language, "server.reports.sentLater", { report: reportId });
+export function notYetLine(outcome: Extract<SendOutcome, { retry: true }>, language: string | undefined): string {
   const minutes = outcome.retryAfterMs ? Math.max(1, Math.ceil(outcome.retryAfterMs / 60_000)) : 0;
-  if (outcome.why !== "limited") {
-    const why = outcome.why === "offline" ? "the MausBot team's server could not be reached" : "the MausBot team's server could not take it right now";
-    return { line: `Not sent yet: ${why}. The report is saved and goes on its own${minutes ? ` in about ${minutes} minute${minutes === 1 ? "" : "s"}` : " as soon as it can"}, so there is no need to send it again.`, text: undefined };
-  }
-  return reportLine(minutes ? minutes === 1 ? "chat.notice.reportWaitingOne" : "chat.notice.reportWaitingMany" : "chat.notice.reportWaiting",
-    { why: "chat.notice.part.reportLimited", ...(minutes ? { minutes: String(minutes) } : {}) });
+  const why = serverLine(language, outcome.why === "limited" ? "server.reports.why.limited" : outcome.why === "offline" ? "server.reports.why.offline" : "server.reports.why.busy");
+  const when = minutes ? serverLine(language, minutes === 1 ? "server.reports.when.minute" : "server.reports.when.minutes", { count: minutes })
+    : serverLine(language, "server.reports.when.soon");
+  return serverLine(language, "server.reports.notYet", { why, when });
 }
-
-export const refusedReportLine = (detail: string) => ({ line: `The MausBot team's server refused this bug report, so nothing was sent: ${detail.replace(/[.\s]+$/, "")}.`, text: undefined });
-export const fullReportLine = (count: number) => reportLine("chat.notice.reportFull", { count: String(count) });
-export const droppedReportLine = () => reportLine("chat.notice.reportDropped");
+export const refusedLine = (detail: string, language: string | undefined) => serverLine(language, "server.reports.refused", { detail: detail.replace(/[.\s]+$/, "") });
+export const fullLine = (count: number, language: string | undefined) => serverLine(language, "server.reports.full", { count });
+export const droppedLine = (language: string | undefined) => serverLine(language, "server.reports.dropped");

@@ -1,9 +1,10 @@
 // On a Team Cloud: the person's inbox as its panel and its card in the chat show it. One copy of the server's list, read
-// again whenever their inbox's task says what it lists changed, and the panel's own place (open, tab, the line read).
+// again whenever their inbox's task says what it lists changed, and the panel's own place (open, the line read).
 // Null anywhere but a team's Cloud, where no task is anyone's inbox.
 import { useEffect, useSyncExternalStore } from "react";
-import type { InboxRow, InboxTab, InboxView } from "../../shared/inbox";
+import type { InboxRow, InboxView } from "../../shared/inbox";
 import { api } from "./api";
+import { randomUuid } from "../lib/random-uuid";
 
 type InboxTaskLike = { threadId: string; inbox?: true; openAsks?: number; inboxChangedAt?: number };
 
@@ -85,20 +86,19 @@ export function doneInboxRow(row: Pick<InboxRow, "id">): void {
 
 /** A reply to a line of news that waits on one: it goes back where the line came from, as a Reply in the chat does. */
 export async function replyToInboxRow(view: Pick<InboxView, "botId" | "threadId">, row: Pick<InboxRow, "id">, text: string): Promise<void> {
-  await api(`/api/bots/${view.botId}/messages`, { method: "POST", body: JSON.stringify({ text, threadId: view.threadId, replyToId: row.id, sendId: crypto.randomUUID() }) });
+  await api(`/api/bots/${view.botId}/messages`, { method: "POST", body: JSON.stringify({ text, threadId: view.threadId, replyToId: row.id, sendId: randomUuid() }) });
   void refreshInbox();
 }
 
-export interface InboxPanelState { open: boolean; tab: InboxTab; reading: string | null }
-const panel = store<InboxPanelState>({ open: false, tab: "needs-you", reading: null });
+export interface InboxPanelState { open: boolean; reading: string | null }
+const panel = store<InboxPanelState>({ open: false, reading: null });
 export const useInboxPanel = (): InboxPanelState => useSyncExternalStore(panel.subscribe, panel.get, panel.get);
 export const currentInboxPanel = panel.get;
 
-/** Opens the inbox in the right panel: on a tab, or straight on one line. */
-export function openInbox(at: { tab?: InboxTab; reading?: string } = {}): void {
-  panel.set({ open: true, tab: at.tab ?? panel.get().tab, reading: at.reading ?? null });
+/** Opens the inbox in the right panel: its list, or straight on one line. */
+export function openInbox(at: { reading?: string } = {}): void {
+  panel.set({ open: true, reading: at.reading ?? null });
   void refreshInbox();
 }
 export const closeInbox = (): void => panel.set({ ...panel.get(), open: false, reading: null });
-export const showInboxTab = (tab: InboxTab): void => panel.set({ ...panel.get(), tab, reading: null });
 export const readInboxLine = (id: string | null): void => panel.set({ ...panel.get(), reading: id });

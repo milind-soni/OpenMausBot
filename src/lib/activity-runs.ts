@@ -177,7 +177,7 @@ export function groupTranscript(messages: Message[]): TranscriptItem[] {
 
 const MAX_NAMES = 3;
 
-export function describeRun(messages: Message[], label: (tool: NonNullable<Message["tool"]>) => string = (tool) => activityText(tool, tool.name)): string {
+export function describeRun(messages: Message[], label: (tool: NonNullable<Message["tool"]>) => string = (tool) => tool.label ?? activityText(tool, tool.name)): string {
   const counts = new Map<string, number>();
   for (const message of messages) {
     const name = message.tool ? label(message.tool) : "";

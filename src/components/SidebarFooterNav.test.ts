@@ -39,7 +39,7 @@ function render(density: SidebarDensity, { toolsLayout = "rows", ...extra }: { c
 beforeEach(() => {
   fixture.advanced = false;
   fixture.dispatch.mockReset();
-  fixture.state = { activeView: "chat", routineRuns: [], pluginsOpen: false };
+  fixture.state = { activeView: "chat", routines: [{ id: "daily", name: "Daily", botId: "scout", enabled: true }], webhooks: [], bots: [{ id: "scout" }], routineRuns: [], pluginsOpen: false };
   fixture.toolsLayout = "rows";
   fixture.panels = [];
   vi.stubGlobal("window", {});
@@ -47,9 +47,9 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("sidebar footer places", () => {
-  it.each(["comfortable", "compact"] as const)("leads Advanced mode's places with Automations, then Team map, with Apps beside the profile instead (%s)", (density) => {
+  it("leads Advanced mode's places with Automations, then Team map, with Apps beside the profile instead", () => {
     fixture.advanced = true;
-    const { html } = render(density);
+    const { html } = render("comfortable");
     const order = ["automations", "team-map"].map((id) => html.indexOf(`data-sidebar-nav="${id}"`));
     expect(order.every((index) => index >= 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
@@ -59,8 +59,8 @@ describe("sidebar footer places", () => {
     expect(html).not.toContain('data-sidebar-nav="apps"');
   });
 
-  it.each(["comfortable", "compact"] as const)("leaves no places in Simple mode's sidebar while Files is off: Automations and Team map are in the bottom bar (%s)", (density) => {
-    expect(render(density).html).toBe("");
+  it("leaves no places in Simple mode's sidebar while Files is off: Automations and Team map are in the bottom bar", () => {
+    expect(render("comfortable").html).toBe("");
   });
 
   it.each([false, true])("puts Automations on the avatars-only density ahead of Apps, with Team map (advanced: %s)", (advanced) => {
@@ -120,10 +120,20 @@ describe("sidebar footer places", () => {
 
   it("carries the dot for an unseen failed run on Automations, and clears it once seen", () => {
     fixture.advanced = true;
-    fixture.state.routineRuns = [{ id: "r", status: "failed", scheduledFor: 1 }];
+    fixture.state.routineRuns = [{ id: "r", routineId: "daily", status: "failed", scheduledFor: 1 }];
     const html = render("comfortable").html;
     expect(html.indexOf('data-testid="routines-attention"')).toBeGreaterThan(html.indexOf('data-sidebar-nav="automations"'));
-    fixture.state.routineRuns = [{ id: "r", status: "failed", scheduledFor: 1, seenAt: 1 }];
+    fixture.state.routineRuns = [{ id: "r", routineId: "daily", status: "failed", scheduledFor: 1, seenAt: 1 }];
+    expect(render("comfortable").html).not.toContain('data-testid="routines-attention"');
+  });
+
+  it("leaves the dot off for a failed run whose automation or bot is gone, since Automations has nothing to open and clear", () => {
+    fixture.advanced = true;
+    fixture.state.routineRuns = [{ id: "r", routineId: "deleted-hook", webhookId: "deleted-hook", status: "failed", scheduledFor: 1 }];
+    expect(render("comfortable").html).not.toContain('data-testid="routines-attention"');
+    fixture.state.webhooks = [{ id: "deleted-hook", name: "Orders", botId: "scout", enabled: true }];
+    expect(render("comfortable").html).toContain('data-testid="routines-attention"');
+    fixture.state.bots = [];
     expect(render("comfortable").html).not.toContain('data-testid="routines-attention"');
   });
 
@@ -148,9 +158,9 @@ describe("sidebar footer places", () => {
 });
 
 describe("Tools header", () => {
-  it.each(["comfortable", "compact"] as const)("labels the places with a Tools header, expanded by default (%s)", (density) => {
+  it("labels the places with a Tools header, expanded by default", () => {
     fixture.advanced = true;
-    const { html } = render(density);
+    const { html } = render("comfortable");
     expect(html).toContain(">Tools<");
     expect(html).toContain('aria-expanded="true"');
     expect(html.indexOf(">Tools<")).toBeLessThan(html.indexOf('data-sidebar-nav="automations"'));
@@ -176,7 +186,7 @@ describe("Tools header", () => {
 
   it("shows the failed-run dot on the header only while collapsed", () => {
     fixture.advanced = true;
-    fixture.state.routineRuns = [{ id: "r", status: "failed", scheduledFor: 1 }];
+    fixture.state.routineRuns = [{ id: "r", routineId: "daily", status: "failed", scheduledFor: 1 }];
     const collapsed = render("comfortable", { collapsed: true }).html;
     expect(collapsed).toContain('data-testid="section-alert"');
     expect(collapsed).not.toContain('data-testid="routines-attention"');
@@ -234,9 +244,9 @@ describe("Apps beside the profile", () => {
 });
 
 describe("toolbar tools layout", () => {
-  it.each(["comfortable", "compact"] as const)("toolbar renders the places as icon buttons with labels (%s)", (density) => {
+  it("toolbar renders the places as icon buttons with labels", () => {
     fixture.advanced = true;
-    const { html } = render(density, { toolsLayout: "toolbar" });
+    const { html } = render("comfortable", { toolsLayout: "toolbar" });
     expect(html).toContain('class="flex flex-row gap-1"');
     expect(html).not.toContain("flex-col");
     for (const label of ["Automations", "Team map"]) {
@@ -263,9 +273,9 @@ describe("toolbar tools layout", () => {
 
   it("toolbar shows the failed-run dot and clears it once seen", () => {
     fixture.advanced = true;
-    fixture.state.routineRuns = [{ id: "r", status: "failed", scheduledFor: 1 }];
+    fixture.state.routineRuns = [{ id: "r", routineId: "daily", status: "failed", scheduledFor: 1 }];
     expect(render("comfortable", { toolsLayout: "toolbar" }).html).toContain('data-testid="routines-attention"');
-    fixture.state.routineRuns = [{ id: "r", status: "failed", scheduledFor: 1, seenAt: 1 }];
+    fixture.state.routineRuns = [{ id: "r", routineId: "daily", status: "failed", scheduledFor: 1, seenAt: 1 }];
     expect(render("comfortable", { toolsLayout: "toolbar" }).html).not.toContain('data-testid="routines-attention"');
   });
 

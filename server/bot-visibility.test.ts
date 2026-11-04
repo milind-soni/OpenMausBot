@@ -372,21 +372,23 @@ describe("a Team Cloud's audiences", () => {
     const bot = { id: "pub", threadId: "t-pub-2", mainThreadId: "t-pub", visibility: "everyone", vpsAlias: "box", unread: true,
       messages: [{ text: "Kumquat" }], hasMore: true, pinnedMessageId: "m1", tasks: [{ threadId: "t-pub" }, { threadId: "t-pub-2", unread: true }] };
     const sent = memberBot(bot, admin) as Record<string, unknown>;
-    expect(sent).toEqual({ id: "pub", threadId: "t-pub", mainThreadId: "t-pub", visibility: "everyone", vpsAlias: "box", unread: false, tasks: [{ threadId: "t-pub" }] });
+    // It also says what they may do (an admin edits every bot) and carries the bot's sharing.
+    expect(sent).toEqual({ id: "pub", threadId: "t-pub", mainThreadId: "t-pub", visibility: "everyone", vpsAlias: "box", unread: false, tasks: [{ threadId: "t-pub" }],
+      access: { everyone: "chat", people: {} }, yourAccess: "edit" });
     expect(JSON.stringify(memberBody({ bots: [bot], bot }, admin))).not.toContain("Kumquat");
     // A room keeps its audience floor for an admin.
     const room = { id: "room-pub", audienceFloor: "admins" };
     expect((memberBody({ group: room }, admin) as { group: unknown }).group).toBe(room);
     // The selected chat with no main chat to name instead: the field goes, never the hidden id.
-    expect(memberBot({ id: "pub", threadId: "t-pub-2" }, admin)).toEqual({ id: "pub" });
+    expect(memberBot({ id: "pub", threadId: "t-pub-2" }, admin)).toEqual({ id: "pub", access: { everyone: "chat", people: {} }, yourAccess: "edit" });
   });
 
   it("a main chat named as another person's private chat is replaced by a conversation the viewer reads, never sent", () => {
     const admin = new VisibleSet(open, openGroups, BEN_ADMIN, undefined, { of: audienceOf, person: BEN_KEY });
     const bot = { id: "pub", threadId: "t-pub-2", mainThreadId: "t-pub-2", tasks: [{ threadId: "t-pub-2" }, { threadId: "t-pub" }] };
     const sent = memberBot(bot, admin) as Record<string, unknown>;
-    expect(sent).toEqual({ id: "pub", threadId: "t-pub", mainThreadId: "t-pub", tasks: [{ threadId: "t-pub" }] });
-    expect(memberBot({ ...bot, threadId: "t-pub" }, admin)).toEqual({ id: "pub", threadId: "t-pub", mainThreadId: "t-pub", tasks: [{ threadId: "t-pub" }] });
+    expect(sent).toEqual({ id: "pub", threadId: "t-pub", mainThreadId: "t-pub", tasks: [{ threadId: "t-pub" }], access: { everyone: "chat", people: {} }, yourAccess: "edit" });
+    expect(memberBot({ ...bot, threadId: "t-pub" }, admin)).toEqual({ id: "pub", threadId: "t-pub", mainThreadId: "t-pub", tasks: [{ threadId: "t-pub" }], access: { everyone: "chat", people: {} }, yourAccess: "edit" });
   });
 
   it("a live frame from another person's private chat never reaches an admin's stream", () => {
@@ -406,7 +408,7 @@ describe("a Team Cloud's audiences", () => {
     const queued = frameForMember({ kind: "bot.queued", queues: { "t-pub": [1], "t-pub-2": [2] } }, ctx, seen);
     expect(queued).toEqual({ kind: "bot.queued", queues: { "t-pub": [1] } });
     const bot = frameForMember({ kind: "bot", bot: { id: "pub", threadId: "t-pub", visibility: "everyone", tasks: [{ threadId: "t-pub" }, { threadId: "t-pub-2" }] } }, ctx, seen);
-    expect(bot).toEqual({ kind: "bot", bot: { id: "pub", threadId: "t-pub", visibility: "everyone", tasks: [{ threadId: "t-pub" }] } });
+    expect(bot).toEqual({ kind: "bot", bot: { id: "pub", threadId: "t-pub", visibility: "everyone", tasks: [{ threadId: "t-pub" }], access: { everyone: "chat", people: {} }, yourAccess: "edit" } });
     const group = { kind: "group", group: { id: "room-pub", audienceFloor: "admins" } };
     expect(frameForMember(group, ctx, seen)).toBe(group);
     // A plea for a hand from Ada's chat: the computer is held, nothing more.
@@ -456,7 +458,7 @@ describe("a Team Cloud's audiences", () => {
   it("a bot sent to a member lists only the conversations that member may see", () => {
     const ben = new VisibleSet(open, openGroups, BOB, undefined, { of: audienceOf, person: BEN_KEY });
     const sent = memberBot({ id: "pub", tasks: [{ threadId: "t-pub" }, { threadId: "t-pub-2" }], vpsAlias: "x" }, ben);
-    expect(sent).toEqual({ id: "pub", tasks: [{ threadId: "t-pub" }] });
+    expect(sent).toEqual({ id: "pub", tasks: [{ threadId: "t-pub" }], yourAccess: "chat" });
     const ada = new VisibleSet(open, openGroups, ADA, undefined, { of: audienceOf, person: ADA_KEY });
     expect(memberBot({ id: "pub", tasks: [{ threadId: "t-pub" }, { threadId: "t-pub-2" }] }, ada).tasks).toHaveLength(2);
     // Off a team the list is untouched.

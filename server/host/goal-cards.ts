@@ -7,6 +7,7 @@ import { GROUP_GOAL_MAX_TURNS } from "../group-goal-run.ts";
 import { buildNotification, type Notification } from "../notify.ts";
 import type { RoutineManager, RoutineRun } from "../routines.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
+import { conversationLanguage, serverLine, type ServerLineKey } from "../server-lines.ts";
 
 export interface LiveGoalRun {
   runId: string;
@@ -33,16 +34,28 @@ function detailFields(detail: string, text?: ServerText) {
   return { detail: safe, detailCode: codes.attentionCode, detailParams: codes.attentionParams };
 }
 
+/** A goal card's text for clients that show no cards, by how the goal stands. */
+const GOAL_STATE: Record<GroupGoalRunStatus, ServerLineKey> = {
+  working: "server.teammates.goal.working",
+  completed: "server.teammates.goal.completed",
+  "needs-input": "server.teammates.goal.needsInput",
+  blocked: "server.teammates.goal.blocked",
+  "limit-reached": "server.teammates.goal.limitReached",
+  paused: "server.teammates.goal.paused",
+  stopped: "server.teammates.goal.stopped",
+  failed: "server.teammates.goal.failed",
+};
+
 export function createGoalCards(deps: GoalCardDeps) {
   const { store } = deps;
 
   function start(threadId: string, coordinator: Pick<BotRecord, "id" | "name" | "color">, goal: string, runId: string): LiveGoalRun {
-    const startedAt = Date.now();
-    const detail = `${coordinator.name} is coordinating this goal.`;
+    const startedAt = Date.now(), language = conversationLanguage(threadId);
+    const detail = serverLine(language, "server.teammates.goalCoordinating", { bot: coordinator.name });
     const card = store.appendMessage(threadId, {
       role: "bot",
       kind: "goal.run",
-      text: `Goal in progress: ${detail}`,
+      text: serverLine(language, "server.teammates.goal.working", { detail }),
       from: { botId: coordinator.id, name: coordinator.name, color: coordinator.color },
       goalRun: {
         runId,
@@ -123,15 +136,8 @@ export function createGoalCards(deps: GoalCardDeps) {
       }
     }
     if (!stillHere()) return;
-    const fallbackState = status === "completed"
-      ? "completed"
-      : status === "needs-input"
-        ? "needs your input"
-        : status === "limit-reached"
-          ? "reached its limit"
-          : status;
     store.patchMessage(threadId, run.cardMessageId, {
-      text: `Goal ${fallbackState}: ${card.detail || card.goal}`,
+      text: serverLine(conversationLanguage(threadId), GOAL_STATE[status] ?? "server.teammates.goal.failed", { detail: card.detail || card.goal }),
       goalRun: card,
     });
   }
@@ -144,7 +150,7 @@ export function createGoalCards(deps: GoalCardDeps) {
     if (current?.goalRun?.status === "working" && current.goalRun.detail === safeDetail && current.goalRun.detailCode === fields.detailCode
       && JSON.stringify(current.goalRun.detailParams) === JSON.stringify(fields.detailParams)) return;
     store.patchMessage(threadId, run.cardMessageId, {
-      text: `Goal in progress: ${safeDetail || redactSecretsInText(run.goal)}`,
+      text: serverLine(conversationLanguage(threadId), "server.teammates.goal.working", { detail: safeDetail || redactSecretsInText(run.goal) }),
       goalRun: {
         runId: run.runId,
         goal: redactSecretsInText(run.goal),

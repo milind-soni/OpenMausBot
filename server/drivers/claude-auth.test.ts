@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import { claudeSignedIn } from "./claude-auth-status.ts";
 import { claudeAuthFailure } from "./claude-auth-recovery.ts";
-import { claudeResultError, claudeVersionTooOld } from "./claude.ts";
-import { claudeApiErrorMessage, claudeEngineReset, claudeLimitFacts, claudeLimitError, claudeLimitMessage, claudeLimitRefusal, claudeUsageLimit } from "./claude-limits.ts";
+import { claudeResultError } from "./claude.ts";
+import { claudeApiErrorMessage, claudeEngineReset, claudeLimitFacts, claudeLimitError, claudeLimitMessage, claudeLimitRefusal, claudeUsageLimit, claudeVersionTooOld } from "./claude-limits.ts";
 import { classifyError } from "./retry.ts";
 
 describe("claudeSignedIn", () => {

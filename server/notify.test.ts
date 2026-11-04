@@ -1,18 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import englishCatalog from "../src/locales/en.json" with { type: "json" };
-import { NOTIFY_IN_ROOM_KEY, NOTIFY_TITLE_KEY } from "../shared/notification.ts";
-import { NOTIFICATION_TITLE, buildNotification, buildSpendNotification, summarize } from "./notify.ts";
+import { buildNotification, buildSpendNotification, summarize } from "./notify.ts";
+import { conversationLanguage, setConversationLanguage } from "./server-lines.ts";
+import "./server-line-packs.ts";
 
 const bot = { id: "bot-1", name: "Scout", threadId: "thread-1" };
 
 describe("buildNotification", () => {
-  it("the catalog's banner titles are exactly the ones the server words", () => {
-    const catalog = Object.fromEntries(Object.entries(englishCatalog).filter(([key]) => key.startsWith("notifications.banner.")));
-    expect(catalog).toEqual(NOTIFICATION_TITLE);
-    expect(Object.keys(NOTIFICATION_TITLE).sort()).toEqual([...Object.values(NOTIFY_TITLE_KEY), NOTIFY_IN_ROOM_KEY].sort());
-  });
-
   it("words a room banner with the room's name", () => {
     expect(buildNotification("question", bot, "thread-1", "Which file?", { group: { id: "g1", name: "Launch" } })?.title)
       .toBe("Scout in Launch has a question");
@@ -136,5 +130,31 @@ describe("buildSpendNotification", () => {
       kind: "spend", botId: "bot-1", botName: "Scout", threadId: "thread-9",
       title: "Monthly spend limit reached", body: "$100.00 of $100.00 spent this month (2026-09).",
     });
+  });
+});
+
+describe("a notification's title", () => {
+  afterEach(() => setConversationLanguage(() => undefined));
+
+  it("uses Brazilian Portuguese once on the server and leaves other conversations in English", () => {
+    setConversationLanguage((threadId) => threadId === "thread-1" ? "pt-BR" : undefined);
+    expect(buildNotification("question", bot, "thread-1", "Which file?", { group: { id: "g1", name: "Launch" } })?.title)
+      .toBe("Scout em Launch tem uma pergunta");
+    expect(buildNotification("routine-failed", bot, "thread-1", "Signed out.")?.title).toBe("A rotina de Scout falhou");
+    expect(buildNotification("sign-in", bot, "thread-1", "", { site: "github.com" })?.title).toBe("Scout precisa que você faça login em github.com");
+    expect(buildNotification("done", bot, "thread-1", "Done.")?.title).toBe("Scout terminou");
+    expect(buildNotification("question", bot, "other", "Which file?")?.title).toBe("Scout has a question");
+  });
+
+  it("is in the language of the conversation's person", () => {
+    setConversationLanguage((threadId) => (threadId === "beaver-main" ? "de" : undefined));
+    const bot = { id: "beaver", name: "Biber", threadId: "beaver-main" };
+    expect(conversationLanguage("beaver-main")).toBe("de");
+    expect(buildNotification("routine-failed", bot, "beaver-main", "Nightly report: signed out")?.title).toBe("Routine von Biber ist fehlgeschlagen");
+    expect(buildNotification("question", bot, "beaver-main", "Send it?", { group: { id: "launch", name: "Launch" } })?.title).toBe("Biber in Launch hat eine Frage");
+    expect(buildNotification("sign-in", bot, "beaver-main", "", { site: "github.com" })?.title).toBe("Biber braucht deine Anmeldung bei github.com");
+    expect(buildNotification("sign-in", bot, "beaver-main", "")?.title).toBe("Biber braucht deine Anmeldung bei einer Website");
+    expect(buildNotification("done", bot, "beaver-main", "Done.")?.title).toBe("Biber ist fertig");
+    expect(buildNotification("routine-failed", bot, "other", "x")?.title).toBe("Biber's routine failed");
   });
 });

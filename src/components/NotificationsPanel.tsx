@@ -4,7 +4,6 @@ import { api, useStore, openNotificationTarget, type Action } from "@/state/stor
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { notificationTitle } from "@/lib/notify";
 import type { LocaleKey } from "@/locales";
 import { BotAvatar, type BotAvatarProps } from "./Avatar";
 import { threadUpdatedLabel } from "./SidebarThreadRow";
@@ -18,7 +17,7 @@ const KIND_LOOK: Record<NotifyKind, { Icon: LucideIcon; className: string; statu
   question: { Icon: CircleHelp, className: "text-warning", status: "notifications.status.question" },
   "sign-in": { Icon: LogIn, className: "text-warning", status: "notifications.status.signIn" },
   mention: { Icon: AtSign, className: "text-accent", status: "notifications.status.mention" },
-  incident: { Icon: AlertTriangle, className: "text-danger", status: "notifications.status.incident" },
+  incident: { Icon: AlertTriangle, className: "text-danger", status: "notifications.status.problem" },
   "turn-failed": { Icon: AlertTriangle, className: "text-danger", status: "notifications.status.failed" },
   "routine-failed": { Icon: AlertTriangle, className: "text-danger", status: "notifications.status.failed" },
   "routine-deferred": { Icon: RotateCcw, className: "text-accent", status: "notifications.status.deferred" },
@@ -185,7 +184,7 @@ export function NotificationsPanel() {
           <div className="px-3.5 py-6 text-[13px] text-ink-secondary">{state.notifications.length === 0 ? t("notifications.empty") : t("notifications.emptyForBot")}</div>
         )}
         {visible.map((entry) => (
-          <NotificationRow key={entry.id} entry={entry} title={notificationTitle(entry, state.groups)} now={now} bot={notificationBotForAvatar(entry, state.bots)} threadName={notificationThreadName(entry, state)} onOpen={() => openRow(entry)} />
+          <NotificationRow key={entry.id} entry={entry} title={entry.title} now={now} bot={notificationBotForAvatar(entry, state.bots)} threadName={notificationThreadName(entry, state)} onOpen={() => openRow(entry)} />
         ))}
       </div>
       <div className="border-t border-hairline/40 px-3.5 py-2 text-center text-[12px] text-ink-tertiary">

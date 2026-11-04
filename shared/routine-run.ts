@@ -36,6 +36,8 @@ export interface AutomationLine {
   /** The run needs the person: it asked them something or cannot go on without them. */
   needsYou?: true;
   failed?: true;
+  /** With `failed`: the run's reply came back; only a step it ran failed or wasn't allowed. */
+  partial?: true;
   /** A run that had nothing new, posted only because this automation's line before it in the chat said a run failed. */
   recovered?: true;
   /** The card in the run's conversation this line stands for: an option card

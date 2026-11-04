@@ -1,8 +1,8 @@
 import { chmodSync, existsSync, readFileSync, mkdirSync, rmSync, statSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { join } from "node:path"; import { isDeepStrictEqual } from "node:util";
 
-import { writeFileAtomic, writeFileAtomicIfChanged } from "./atomic.ts";
-import { commitRegistryChange, keptRevocation, saveRegistryFor } from "./registry-save.ts";
+import { OwnedFile, writeFileAtomic } from "./atomic.ts"; import { saveSoon } from "./save-batch.ts"; import { discardNativeLog } from "./drivers/native.ts";
+import { commitRegistryChange, keptRevocation, saveRegistryFor, touchesPermissions } from "./registry-save.ts";
 import { parseToolScope, toolScopeWidens } from "../shared/tool-scope.ts"; import { grantScopedApps } from "../shared/connector-scopes.ts";
 import { reorderStable } from "../shared/bot-order.ts";
 import { botOwner, chiefConflict, chiefScope, ownerEmail } from "../shared/bot-owner.ts";
@@ -42,7 +42,7 @@ import { initialGreetingMessage } from "./initial-greeting.ts"; import { createD
 import { appsFromCreator } from "./inherited-apps.ts";
 import { ThreadCache, type ThreadState } from "./thread-cache.ts";
 export type {
-  BotActivity, ConnectorCardData, GroupDefaultResponder, OptionCardData,
+  BotActivity, GroupDefaultResponder, OptionCardData,
   SecretRequestCardData, Surface, TaskClosedBy, TaskOpenedBy, TaskUsage,
 } from "../shared/wire.ts";
 export type { GroupTask as GroupTaskRecord, BotProject as BotProjectRecord } from "../shared/wire.ts";
@@ -108,7 +108,7 @@ const TASK_PATCH_FIELDS = [
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
 
-export type GroupTaskPatch = Partial<Pick<GroupTaskRecord, "title" | "pinned">> & { turnTimeoutMinutes?: number | null };
+export type GroupTaskPatch = Partial<Pick<GroupTaskRecord, "title" | "pinned">> & { turnTimeoutMinutes?: number | null; archivedAt?: number | null };
 
 function mirrorActiveGroupTask(group: GroupRecord, task: GroupTaskRecord): void {
   Object.assign(group, { threadId: task.threadId, pinnedCwd: task.pinnedCwd, pinnedMessageId: task.pinnedMessageId });
@@ -168,7 +168,7 @@ export function titleFromLlm(raw: string): string | null {
 export interface BotRecord extends Omit<WireBot, "avatarUrl" | "tasks"> {
   tasks?: TaskRecord[];
   avatarUrl?: string;
-  resumeCursors: Record<string, unknown>;
+  resumeCursors: Record<string, unknown>; mainThreadChoice?: string; // mainThreadChoice ("Set as main thread") is host-only; clients get mainThreadId.
   /** Elevation journal: Full/Custom runs as Ask until Electron confirms the prepared reply; a marker surviving a restart is revoked on load. */
   approvalGrant?: {
     requestId: string;
@@ -185,7 +185,7 @@ export interface BotRecord extends Omit<WireBot, "avatarUrl" | "tasks"> {
   assignedSkills?: string[];
 }
 
-export type BotWirePrivateKeys = "resumeCursors" | "tasks" | "avatarUrl" | "approvalGrant" | "lastProfileRequestId" | "lastTeamSetupReceipt" | "packageBase" | "assignedSkills";
+export type BotWirePrivateKeys = "resumeCursors" | "mainThreadChoice" | "tasks" | "avatarUrl" | "approvalGrant" | "lastProfileRequestId" | "lastTeamSetupReceipt" | "packageBase" | "assignedSkills";
 export type BotWireProjection = Pick<BotRecord, Exclude<keyof BotRecord, BotWirePrivateKeys>>;
 export type BotWireProjectionIsExact = AssertExact<Omit<WireBot, "avatarUrl" | "tasks">, BotWireProjection> & AssertSameKeys<Omit<WireBot, "avatarUrl" | "tasks">, BotWireProjection>;
 export const botWireProjectionIsExact: BotWireProjectionIsExact = true;
@@ -310,6 +310,7 @@ export class Store {
   private personName: () => string | undefined;
   private listeners = new Set<(change: StoreChange) => void>();
   private registeringInitialSections = true;
+  private readonly botsFile = new OwnedFile(BOTS_FILE, { mode: 0o600 }); private readonly groupsFile = new OwnedFile(GROUPS_FILE, { mode: 0o600 });
   /** Clearing this slot must not clear a concurrently running task's activity. */
   private legacyActivities = new Map<string, BotActivity>();
 
@@ -333,13 +334,12 @@ export class Store {
     // An unreadable bots.json must never read as "every member was deleted".
     let botsLoaded = false;
     try {
-      this.bots = JSON.parse(readFileSync(BOTS_FILE, "utf8"));
-      botsLoaded = Array.isArray(this.bots);
+      const text = readFileSync(BOTS_FILE, "utf8"); this.bots = JSON.parse(text); this.botsFile.loaded(text); botsLoaded = Array.isArray(this.bots);
     } catch {
       this.bots = [];
     }
     try {
-      this.groups = JSON.parse(readFileSync(GROUPS_FILE, "utf8"));
+      const text = readFileSync(GROUPS_FILE, "utf8"); this.groups = JSON.parse(text); this.groupsFile.loaded(text);
     } catch {
       this.groups = [];
     }
@@ -698,28 +698,28 @@ export class Store {
     if (botsDirty) this.saveBots();
   }
 
-  private commitBotChange(bot: BotRecord, action: string, change: () => void, onRollback?: () => void) {
-    commitRegistryChange(bot, "bots.json", action, () => this.saveBots(), change, onRollback);
+  private commitBotChange(bot: BotRecord, action: string, change: () => void, onRollback?: () => void, bookkeeping = false) {
+    commitRegistryChange(bot, "bots.json", action, bookkeeping ? () => this.saveBotsSoon() : () => this.saveBots(), change, onRollback);
   }
 
   private commitGroupChange(group: GroupRecord, action: string, change: () => void) {
     commitRegistryChange(group, "groups.json", action, () => this.saveGroups(), change);
   }
 
+  private saveBotsSoon() { saveSoon(this.botsFile, () => this.saveBots()); }
   private saveBots(bots: BotRecord[] = this.bots, registerSections = true) {
     if (registerSections) this.rememberSections([...this.bots, ...bots].map((bot) => bot.section));
-    writeFileAtomicIfChanged(BOTS_FILE, JSON.stringify(bots.map(({ busy: _busy, activity: _activity, ...bot }) => ({
-      ...bot,
+    this.botsFile.write(JSON.stringify(bots.map(({ busy: _busy, activity: _activity, ...bot }) => ({ ...bot,
       tasks: bot.tasks?.map(({ busy: _taskBusy, activity: _taskActivity, turnStartedAt: _taskTurnStarted, ...task }) => persistedPin(task)),
-    })), null, 2), { mode: 0o600 });
+    }))));
   }
 
   private saveGroups(groups: GroupRecord[] = this.groups, registerSections = true) {
     if (registerSections) this.rememberSections(groups.map((group) => group.section));
-    writeFileAtomicIfChanged(GROUPS_FILE, JSON.stringify(groups.map(({ busyBotId: _busyBotId, turnStartedAt: _turnStartedAt, ...g }) => ({
+    this.groupsFile.write(JSON.stringify(groups.map(({ busyBotId: _busyBotId, turnStartedAt: _turnStartedAt, ...g }) => ({
       ...g,
       ...(g.tasks ? { tasks: g.tasks.map((task) => persistedPin(task)) } : {}),
-    })), null, 2), { mode: 0o600 });
+    }))));
   }
 
   get sections(): string[] { return readSections(); }
@@ -928,7 +928,7 @@ export class Store {
   }
 
   private deleteThreadRecord(threadId: string, dbAlreadyDeleted = false) {
-    this.threads.delete(threadId);
+    this.threads.delete(threadId); discardNativeLog(threadId);
     if (!dbAlreadyDeleted) mdb.deleteThread(threadId);
     for (const file of [
       messagesFile(threadId),
@@ -1051,8 +1051,7 @@ export class Store {
       if (patch.title !== undefined) task.title = patch.title.trim().slice(0, 80) || UNTITLED_TASK;
       if (patch.pinned) task.pinned = true;
       else if (patch.pinned === false) delete task.pinned;
-      if (patch.turnTimeoutMinutes === null) delete task.turnTimeoutMinutes;
-      else if (patch.turnTimeoutMinutes !== undefined) task.turnTimeoutMinutes = patch.turnTimeoutMinutes;
+      for (const key of ["turnTimeoutMinutes", "archivedAt"] as const) if (patch[key] === null) delete task[key]; else if (patch[key] !== undefined) task[key] = patch[key];
     });
     this.emit({ type: "group", groupId });
     return task;
@@ -1843,10 +1842,10 @@ export class Store {
   setResumeCursor(botId: string, instanceId: string, cursor: unknown, threadId?: string) {
     const bot = this.bot(botId);
     if (!bot) return;
-    const task = threadId ? this.taskByThread(botId, threadId) : this.activeTask(botId);
-    if (task) task.resumeCursors[instanceId] = cursor;
-    if (!threadId || bot.threadId === threadId) bot.resumeCursors[instanceId] = cursor;
-    saveRegistryFor("bots.json", "the conversation's engine session", () => this.saveBots());
+    const task = threadId ? this.taskByThread(botId, threadId) : this.activeTask(botId), mirrored = !threadId || bot.threadId === threadId;
+    if (isDeepStrictEqual(task?.resumeCursors[instanceId], cursor) && (!mirrored || isDeepStrictEqual(bot.resumeCursors[instanceId], cursor))) return;
+    if (task) task.resumeCursors[instanceId] = cursor; if (mirrored) bot.resumeCursors[instanceId] = cursor;
+    saveRegistryFor("bots.json", "the conversation's engine session", () => this.saveBotsSoon());
     this.emit({ type: "bot", botId });
   }
 
@@ -1854,7 +1853,7 @@ export class Store {
     const task = this.taskByThread(botId, threadId);
     if (!task || task.lastInstanceId === instanceId) return;
     task.lastInstanceId = instanceId;
-    saveRegistryFor("bots.json", "which engine has this conversation", () => this.saveBots());
+    saveRegistryFor("bots.json", "which engine has this conversation", () => this.saveBotsSoon());
   }
 
   setHandedMessages(botId: string, threadId: string, instanceId: string, state: HandedState) {
@@ -1863,7 +1862,7 @@ export class Store {
     const live = Object.entries(task.handedMessages ?? {})
       .filter(([id, record]) => id !== instanceId && record.session !== undefined && record.session === task.resumeCursors[id]);
     task.handedMessages = { ...Object.fromEntries(live), [instanceId]: state };
-    saveRegistryFor("bots.json", "what this conversation handed its engine", () => this.saveBots());
+    saveRegistryFor("bots.json", "what this conversation handed its engine", () => this.saveBotsSoon());
   }
 
   addTaskUsage(
@@ -1900,7 +1899,7 @@ export class Store {
         ? { context: { tokens: contextTokens, ...(contextWindow > 0 ? { window: contextWindow } : {}) } }
         : prev.context ? { context: prev.context } : {}),
     };
-    saveRegistryFor("bots.json", "the thread's usage", () => this.saveBots());
+    saveRegistryFor("bots.json", "the thread's usage", () => this.saveBotsSoon());
     this.emit({ type: "bot", botId });
     return task.usage;
   }
@@ -2045,9 +2044,9 @@ export class Store {
     return this.bot(botId)?.tasks?.find((t) => t.threadId === threadId);
   }
 
-  workThread(botId: string, fromBotId: string, fromThreadId: string, roomLane = false): TaskRecord | undefined {
+  workThread(botId: string, fromBotId: string, fromThreadId: string, roomLane = false, also: (task: TaskRecord) => boolean = () => true): TaskRecord | undefined {
     return this.tasks(botId).find((t) => t.openedBy?.kind === "work" && t.openedBy.botId === fromBotId &&
-      t.openedBy.threadId === fromThreadId && Boolean(t.openedBy.roomLane) === roomLane && t.archivedAt === undefined);
+      t.openedBy.threadId === fromThreadId && Boolean(t.openedBy.roomLane) === roomLane && t.archivedAt === undefined && also(t));
   }
 
   projectBotForTask(botId: string, threadId: string): BotRecord | null {
@@ -2087,7 +2086,7 @@ export class Store {
       if (task.routineRunId) task.unread = false;
       if (bot.threadId === threadId) this.mirrorActiveTask(bot, task);
       bot.unread = bot.tasks!.some(taskCountsAsBotUnread);
-    }, revocation && (() => Object.assign(task, revocation)));
+    }, revocation && (() => Object.assign(task, revocation)), !touchesPermissions(patch));
     this.emit({ type: "bot", botId });
     return task;
   }
@@ -2236,7 +2235,7 @@ export class Store {
     const task = this.taskByThread(botId, threadId);
     if (!task || !Number.isFinite(at) || (task.askedAt ?? -1) >= at) return task ?? null;
     task.askedAt = at;
-    saveRegistryFor("bots.json", "when you last wrote in this thread", () => this.saveBots());
+    saveRegistryFor("bots.json", "when you last wrote in this thread", () => this.saveBotsSoon());
     this.emit({ type: "bot", botId });
     return task;
   }
@@ -2274,7 +2273,7 @@ export class Store {
     this.commitBotChange(bot, "the thread's title", () => {
       task.title = titleFromMessage(text);
       task.titleFromFirstMessage = true;
-    });
+    }, undefined, true);
     this.emit({ type: "bot", botId });
     return task;
   }

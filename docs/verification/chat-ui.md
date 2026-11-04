@@ -227,7 +227,7 @@ pnpm exec vitest run src/state/store.test.ts src/components/ChatView.follow.test
 ## What a bot is doing right now
 
 While a step runs, the working line names it ("Running scrape.py", "Searching the
-web for “Biber Dammbau”", "Reading linkedin.com"), with the whole command on
+web for “Acme construction leads”", "Reading linkedin.com"), with the whole command on
 hover. Once the step has run past the quiet notice it adds how it is doing: the
 time since its last output, or what its own processes show ("waiting on the
 network", "busy, no output yet", "idle, no output yet"). A click on the line,
@@ -245,13 +245,13 @@ seconds:
 ```sh
 OMB_ACP_QUIET_NOTICE_MS=10000 OMB_ACP_QUIET_TICK_MS=2000 FAKE_CLAUDE_RELEASE=/tmp/release \
 node --experimental-strip-types scripts/control-omb.ts ui launch --tool-calls \
-  '[{"name":"WebSearch","input":{"query":"Biber Dammbau"},"ok":true},
-    {"name":"Bash","input":{"command":"cd ~/biber && python3 scrape.py --pages 40"},"hold":"busy"}]'
+  '[{"name":"WebSearch","input":{"query":"Acme construction leads"},"ok":true},
+    {"name":"Bash","input":{"command":"cd ~/acme && python3 scrape.py --pages 40"},"hold":"busy"}]'
 ```
 
 Expected after a sent message: `Working · 15s · Running scrape.py · busy, no
 output yet`, the button `What Pepper is doing` with `aria-expanded="false"`,
-and, once clicked, a card listing `Searched the web for “Biber Dammbau”` and
+and, once clicked, a card listing `Searched the web for “Acme construction leads”` and
 `Running scrape.py`. Claude Code prints a command's output only when it ends,
 so streamed output needs an engine that sends it: `--engine codex` adds the
 fake Codex app-server, and `FAKE_CODEX_COMMAND`, `FAKE_CODEX_COMMAND_OUTPUT`
@@ -259,9 +259,9 @@ fake Codex app-server, and `FAKE_CODEX_COMMAND`, `FAKE_CODEX_COMMAND_OUTPUT`
 script its command. A bot moved to the `codex` instance then shows `last
 output just now` and the command's last two lines in the card.
 
-| Before | After |
-| --- | --- |
-| ![Working · 1m 06s · Running a command](evidence/live-step/before-command-advanced-midnight.jpg) | ![Working · 1m 05s · Running scrape.py · busy, no output yet](evidence/live-step/after-command-advanced-midnight.jpg) |
+The before-and-after screenshots were removed because they showed real example
+data; run the `scripts/control-omb.ts ui launch` command above to see the
+working line and the Now card.
 
 The checks are `server/step-summary.test.ts` (the words and their redaction),
 `server/harness/live-steps.test.ts` and `server/harness/bus.test.ts` (one path

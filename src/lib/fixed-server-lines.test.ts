@@ -7,6 +7,8 @@ import { serverErrorText } from "./server-error";
 import { modelOptionLabel } from "./model-label";
 import { localizedCard } from "./widget-text";
 import { CHAT_NOTICE, chatNotice, noticeFailure, noticeLine } from "../../server/chat-notices";
+import { recoveredText } from "../../server/automation-reports";
+import "../../server/server-line-packs";
 import { USER_ERROR, userError, userErrorFields } from "../../server/user-errors";
 import { parseConfigPatch } from "../../server/config";
 import { parseConfigPatchForPerson } from "../../server/decider/config-errors";
@@ -78,14 +80,11 @@ describe("fixed server words", () => {
     }
   });
 
-  it("words the recovery time in the recorded host zone, independent of the viewer's zone", () => {
+  it("words recovery on the server in the host's clock and the person's language", () => {
     const at = Date.UTC(2026, 9, 26, 15, 30);
-    const line = noticeLine("chat.notice.automationRecovered", { name: "Check", time: "12:30 PM GMT-3", recoveredAt: String(at), timeZone: "America/Sao_Paulo" });
-    expect(noticeText(line.textCode, line.text, line.textParams)).toBe("Recovered: Check finished OK at 12:30 PM GMT-3");
-    setLocale("pt-br");
-    const time = new Intl.DateTimeFormat("pt-BR", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: "America/Sao_Paulo" }).format(at).replace(/\s/g, " ");
-    expect(noticeText(line.textCode, line.text, line.textParams)).toBe(`Recuperação concluída: Check terminou sem problemas às ${time}`);
-    expect(noticeText(line.textCode, line.text, { ...line.textParams, timeZone: "Bad/Zone" })).toBe(line.text);
+    expect(recoveredText("Check", at)).toMatch(/^Recovered: Check finished OK at /);
+    const time = new Intl.DateTimeFormat("pt-BR", { hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(at).replace(/\s/g, " ");
+    expect(recoveredText("Check", at, "pt-br")).toBe(`Voltou a funcionar: Check terminou com sucesso às ${time}`);
   });
 
   it("does not leave an English generic teammate inside a translated line", () => {

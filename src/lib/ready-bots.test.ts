@@ -92,6 +92,7 @@ describe("the social media manager", () => {
     expect(social).toMatchObject({ title: "Social media manager", category: "work", apps: ["postiz"] });
     expect(social.soul).toContain("Add every post to Postiz as a draft, unless the user gave it a time to go out: then schedule it for that time.");
     expect(social.soul).toContain("Never publish a post straight away (type now) unless the user asks for that post to go out now.");
+    expect(social.soul).toContain("show a preview of it with show_html, then add it to Postiz without waiting for a reply.");
     expect(social.routines).toEqual([expect.objectContaining({ name: "Weekly post plan", enabled: false })]);
     expect(social.routines![0]!.prompt).toContain("as drafts");
   });

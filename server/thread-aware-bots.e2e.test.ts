@@ -320,6 +320,40 @@ describe("start_thread on yourself", () => {
     }
   }, 60_000);
 
+  it("opens the thread on the model the bot picks, refuses one it cannot use, and leaves teammates on their own", async () => {
+    const pm = await createBot("Pam", "gated");
+    const qa = await createBot("Quinn", "gated");
+    const sonnet = { instanceId: "gated", model: "claude-sonnet-5" };
+    const opus = { instanceId: "gated", model: "claude-opus-5" };
+    try {
+      const token = await heldTurn(pm, "Run the deep review on a stronger model.");
+      const picked = await api("POST", "/api/internal/threads", { title: "Deep review", message: "go", modelSelection: opus }, token);
+      expect(picked.status, JSON.stringify(picked.body)).toBe(201);
+      release(picked.body.threadId);
+      expect(await taskOf(pm.id, picked.body.threadId)).toMatchObject({ modelSelection: opus });
+      expect((await botState(pm.id)).modelSelection).toMatchObject(sonnet);
+      const unknown = await api("POST", "/api/internal/threads", { title: "Nowhere", message: "go", modelSelection: { instanceId: "retired", model: "old-model" } }, token);
+      expect(unknown.status).toBe(400);
+      expect(unknown.body.error).toContain("retired");
+      const notOffered = await api("POST", "/api/internal/threads", { title: "Nowhere", message: "go", modelSelection: { instanceId: "gated", model: "no-such-model" } }, token);
+      expect(notOffered.status).toBe(400);
+      const teammate = await api("POST", "/api/internal/threads", { toBotId: qa.id, title: "Job", message: "go", modelSelection: opus }, token);
+      expect(teammate.status).toBe(400);
+      expect((await botState(pm.id)).tasks.filter((task: any) => task.title === "Nowhere")).toHaveLength(0);
+      release(pm.threadId);
+      await expect.poll(async () => (await botState(pm.id))?.busy, { timeout: 15_000 }).toBe(false);
+      await heldTurn({ id: pm.id, threadId: picked.body.threadId }, "Open one more on the stronger model.");
+      const viaTool = await proxyCall(picked.body.threadId, "start_thread", { title: "Second pass", message: "go", model_selection: opus });
+      expect(viaTool.isError, JSON.stringify(viaTool)).not.toBe(true);
+      const second = (await botState(pm.id)).tasks.find((task: any) => task.title === "Second pass");
+      expect(second).toMatchObject({ modelSelection: opus });
+      release(second.threadId);
+      release(picked.body.threadId);
+    } finally {
+      await cleanup([pm.id, qa.id]);
+    }
+  }, 60_000);
+
   it("starts on the model of the thread it was opened from, never on a teammate's", async () => {
     const pm = await createBot("Pam", "gated");
     const qa = await createBot("Quinn", "gated");
@@ -522,6 +556,8 @@ describe("coordinate_bots on a teammate", () => {
   it("still buzzes when a coordinated thread asks the person a question, deep-linked to that thread", async () => {
     const pm = await createBot("Pam", "gated");
     const sage = await createBot("Sage", "curious", "fake-model");
+    // On "Ask me first" a teammate's question is the person's; at Full access the bot that handed the work on answers it.
+    for (const bot of [pm, sage]) expect((await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask", applyToAllThreads: true })).status).toBe(200);
     const stream = await openSse(`${base}/api/events`);
     try {
       const token = await heldTurn(pm, "Ask Sage.");

@@ -62,6 +62,7 @@ export function splashText(status: "opening" | "waking", name?: string | null, t
 export function placeOf(input: { ask?: HomeAsk; remembered?: RememberedPlace; state?: any }): { kind: "cloud"; left?: string | null } | { kind: "team" | "own"; id: string; name: string; role: string | null; origin: string | null; machine: any };
 
 export function homeOf(input: { journal?: any; frozenCloud?: string | true | null; state?: any }): Home;
+export function noWayHome(worked: Home, state?: any): boolean;
 export function routeOf(url: string, origin: string): string | null;
 
 interface WindowLike { isDestroyed(): boolean; webContents: { id: number; getURL(): string; reload(): void; mainFrame?: unknown } }
@@ -100,7 +101,7 @@ export function createHomeWindow(deps: {
   journal(): unknown;
   frozen(): Promise<{ frozen: boolean; cloud?: string } | null>;
   account(): { state(): any; power(): any; wakeHome(): Promise<unknown>; setWaking(on: boolean): void; pairHome(cloudId?: string | null): Promise<{ origin: string; code: string; expiresAt: number }>;
-    pairTeam?(teamId: string): Promise<{ origin: string; code: string; expiresAt: number }>; signInAgain(): Promise<unknown>; begin(): Promise<unknown>;
+    pairTeam?(teamId: string): Promise<{ origin: string; code: string; expiresAt: number }>; signInAgain(): Promise<unknown>; begin(): Promise<unknown>; signOut?(): Promise<unknown>; reopen?(): Promise<unknown>;
     hideCloud?(cloudId: string): Promise<{ outcome: import("./cloud-account.mjs").CloudRemoveOutcome }> } | null;
   restored?(): Promise<unknown>;
   window(): WindowLike | null;
@@ -110,6 +111,7 @@ export function createHomeWindow(deps: {
   power: { asleep(): boolean; hold(): void; woke(): void };
   go(url: string, origin: string | null, place: HomePlace | null): unknown;
   showLocal(leaving: boolean): unknown;
+  clean?: import("./clean-workspace.mjs").CleanWorkspace | null;
   remembered?(): RememberedPlace;
   remember?(place: { team: string } | { cloud: string } | null): void;
   left?(name: string): void;

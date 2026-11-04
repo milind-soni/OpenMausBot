@@ -22,11 +22,6 @@ function wordedParams(params: ServerTextParams | undefined): ServerTextParams | 
     const when = new Intl.DateTimeFormat(intlLocale(), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: params.timeZone }).format(params.resetsAt);
     worded.resets = `${when} (${params.timeZone})`;
   }
-  if (typeof params.recoveredAt === "string" && typeof params.timeZone === "string") {
-    const at = Number(params.recoveredAt);
-    if (!Number.isFinite(at)) throw new Error("invalid recovery time");
-    worded.time = new Intl.DateTimeFormat(intlLocale(), { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: params.timeZone }).format(at).replace(/\s/g, " ");
-  }
   return worded;
 }
 
