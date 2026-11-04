@@ -573,7 +573,7 @@ export function memorySystemPrompt(botId: string, opts: { managedWrites?: boolea
   const topicDir = join(workspaceDir(botId), "memory");
   if (opts.writesRefused || (opts.fileTools === false && !opts.managedWrites)) {
     const lead = opts.writesRefused ? NOTES_IN_RESULT : " Your saved memory is supplied as context; this turn has no memory editing tools.";
-    if (!memory) return opts.writesRefused ? lead : "";
+    if (!memory) return opts.writesRefused ? `${lead}${topicIndexBlock(botId, opts.fileTools !== false)}` : "";
     return `${lead}\n\nYour memory (MEMORY.md):\n${memory.text}${memory.truncated ? " [Only the initial memory excerpt is visible.]" : ""}${topicIndexBlock(botId, opts.fileTools !== false)}`;
   }
   const writeGuidance = opts.managedWrites
@@ -596,8 +596,9 @@ export function memorySystemPrompt(botId: string, opts: { managedWrites?: boolea
 function topicIndexBlock(botId: string, fileTools: boolean): string {
   const index = memoryTopicIndex(botId);
   if (!index) return "";
+  // Every turn reaches this, including one whose prompt names no other memory path, and a turn runs in a task folder.
   const how = fileTools
-    ? "when a request touches one of these topics, read that file with your file tools before you answer"
+    ? `paths are relative to ${JSON.stringify(workspaceDir(botId))}, not your working folder; when a request touches one of these topics, read that file with your file tools before you answer`
     : "when a request touches one of these topics, look it up with session_search before you answer";
   return `\n\nYour topic notes (not loaded; ${how}):\n${index}`;
 }
