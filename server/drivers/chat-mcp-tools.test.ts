@@ -429,7 +429,7 @@ describe("Chat MCP session", () => {
       const result = await (await f.mount(false, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
       const saved = readdirSync(join(folder, SAVED_RESULTS_FOLDER));
       expect(saved).toHaveLength(1);
-      expect(saved[0]).toMatch(/^audit_write-\d+-[0-9a-f]{6}\.txt$/);
+      expect(saved[0]).toMatch(/^result-audit_write-\d+-[0-9a-f]{6}\.txt$/);
       const file = join(folder, SAVED_RESULTS_FOLDER, saved[0]);
       expect(readFileSync(file, "utf8")).toBe(big);
       expect(result.ok).toBe(true);
@@ -445,7 +445,7 @@ describe("Chat MCP session", () => {
       const session = await f.mount(false, false, undefined, folder, "../../escape");
       await session.execute(session.definitions[0].function.name, { value: "test" }, f.controller.signal);
       expect(readdirSync(folder)).toEqual([SAVED_RESULTS_FOLDER]);
-      expect(readdirSync(join(folder, SAVED_RESULTS_FOLDER))[0]).toMatch(/^[a-z0-9_]+-\d+-[0-9a-f]{6}\.txt$/);
+      expect(readdirSync(join(folder, SAVED_RESULTS_FOLDER))[0]).toMatch(/^result-[a-z0-9_]+-\d+-[0-9a-f]{6}\.txt$/);
     });
 
     it("is cut as before when the results folder is a link elsewhere", async () => {
@@ -487,15 +487,31 @@ describe("Chat MCP session", () => {
       const folder = workFolder();
       const results = join(folder, SAVED_RESULTS_FOLDER);
       mkdirSync(results);
-      const old = Array.from({ length: SAVED_RESULTS_KEPT }, (_, i) => `audit_write-${1_700_000_000_000 + i}-abcdef.txt`);
+      const old = Array.from({ length: SAVED_RESULTS_KEPT }, (_, i) => `result-audit_write-${1_700_000_000_000 + i}-abcdef.txt`);
       for (const name of old) writeFileSync(join(results, name), "old");
       writeFileSync(join(results, "notes.md"), "not a saved result");
+      writeFileSync(join(results, "export-1700000000000-abcdef.txt"), "the person's own file with a look-alike name");
       await (await f.mount(false, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
       const left = readdirSync(results);
-      expect(left).toHaveLength(SAVED_RESULTS_KEPT + 1);
+      expect(left).toHaveLength(SAVED_RESULTS_KEPT + 2);
       expect(left).toContain("notes.md");
+      expect(left).toContain("export-1700000000000-abcdef.txt");
       expect(left).not.toContain(old[0]);
       expect(left).toContain(old[1]);
+    });
+
+    it("never removes the file it just wrote, even when the clock went back", async () => {
+      const f = bigFixture();
+      const folder = workFolder();
+      const results = join(folder, SAVED_RESULTS_FOLDER);
+      mkdirSync(results);
+      const later = Array.from({ length: SAVED_RESULTS_KEPT }, (_, i) => `result-audit_write-${Date.now() + 3_600_000 + i}-abcdef.txt`);
+      for (const name of later) writeFileSync(join(results, name), "later");
+      const result = await (await f.mount(false, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
+      const file = /saved in (\S+?)\]/.exec(result.text)?.[1] ?? "";
+      expect(readFileSync(file, "utf8")).toBe(big);
+      expect(readdirSync(results)).toHaveLength(SAVED_RESULTS_KEPT);
+      expect(readdirSync(results)).not.toContain(later[0]);
     });
 
     it("leaves a result under 50KB as it is, with no file", async () => {

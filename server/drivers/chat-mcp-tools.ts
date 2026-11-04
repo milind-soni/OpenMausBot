@@ -287,14 +287,15 @@ function boundedText(value: string, bytes = Buffer.from(value)): string {
 export const SAVED_RESULTS_FOLDER = "mcp-results";
 /** Only the newest saved results are kept, so repeated big results cannot fill the disk. */
 export const SAVED_RESULTS_KEPT = 20;
-const SAVED_RESULT_NAME = /-(\d+)-[0-9a-f]{6}\.txt$/;
+const SAVED_RESULT_NAME = /^result-.+-(\d+)-[0-9a-f]{6}\.txt$/;
 
-async function pruneSavedResults(dir: string): Promise<void> {
+/** The file just written (`keep`) is never removed, even if the clock went back. */
+async function pruneSavedResults(dir: string, keep: string): Promise<void> {
   const saved = (await readdir(dir)).flatMap((name) => {
-    const match = SAVED_RESULT_NAME.exec(name);
+    const match = name === keep ? null : SAVED_RESULT_NAME.exec(name);
     return match ? [{ name, at: Number(match[1]) }] : [];
   }).sort((a, b) => b.at - a.at);
-  await Promise.all(saved.slice(SAVED_RESULTS_KEPT).map(({ name }) => unlink(join(dir, name))));
+  await Promise.all(saved.slice(SAVED_RESULTS_KEPT - 1).map(({ name }) => unlink(join(dir, name))));
 }
 
 /** A result over the limit is kept whole (secrets masked by `scrub`) in `folder`/mcp-results and the model reads its start and the file's path.
@@ -307,11 +308,11 @@ async function savedOrBounded(value: string, tool: string, folder: string | unde
     await mkdir(dir, { recursive: true, mode: 0o700 });
     // Security: never follow a link the folder's contents put here to write outside the working folder.
     if (!(await lstat(dir)).isDirectory()) throw new Error("not a folder");
-    const file = join(dir, `${tool}-${Date.now()}-${randomBytes(3).toString("hex")}.txt`);
+    const name = `result-${tool}-${Date.now()}-${randomBytes(3).toString("hex")}.txt`, file = join(dir, name);
     // Key-shaped values are masked before the result reaches disk, as for every other kept tool result.
     const kept = scrub(value);
     await writeFile(file, kept, { flag: "wx", mode: 0o600 });
-    await pruneSavedResults(dir).catch(() => {});
+    await pruneSavedResults(dir, name).catch(() => {});
     const kb = Math.ceil(bytes.length / 1024), masked = kept === value ? "" : " (secret-looking values in it are masked)";
     return `${preview(bytes)}\n[MCP result is ${kb}KB; only the first 50KB is shown above. The full result is saved in ${file}${masked}]`;
   } catch {
