@@ -47,6 +47,7 @@ let assignmentStatusResponse: unknown = DONE_ASSIGNMENT;
 let assignmentStatusCode = 200;
 let lastThreadBody: any = null;
 let threadCalls = 0;
+let threadsList: unknown = { threads: [] };
 let threadResponse: unknown = { threadId: "thread-new", title: "QA: PR #1", botId: "bot-asker", botName: "Asker", self: true, state: "running", limit: 3 };
 let computerRequests: { method: string; url: string; body: unknown }[] = [];
 let computerResponse: unknown = { current: "local", available: ["local", "vm"] };
@@ -257,6 +258,11 @@ beforeAll(async () => {
       lastAssignmentStatusUrl = req.url;
       res.writeHead(assignmentStatusCode, { "content-type": "application/json" });
       res.end(JSON.stringify(assignmentStatusResponse));
+      return;
+    }
+    if (req.method === "GET" && req.url?.startsWith("/api/internal/threads?")) {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(threadsList));
       return;
     }
     if (req.method === "POST" && req.url === "/api/internal/threads") {
@@ -1237,6 +1243,19 @@ describe("agents-proxy MCP surface", () => {
     assignmentStatusResponse = { outstanding: [] };
     expect((await callTool("assignment_status", {})).result.content[0].text).toBe("Nothing outstanding: no assignment of this conversation is still open.");
     assignmentStatusResponse = DONE_ASSIGNMENT;
+  });
+
+  it("assignment_status and list_threads say why a queued handoff has not started, with its handoff id", async () => {
+    const waiting = "waiting for a free thread slot: Ops is already running 3 of 3 threads at once";
+    assignmentStatusResponse = { outstanding: [{ id: "asg-q", botId: "bot-ops", botName: "Ops", status: "queued", waiting }] };
+    threadsList = { threads: [{ threadId: "t-q", botId: "bot-ops", botName: "Ops", title: "Export CSV", state: "queued", waiting, delegationId: "asg-q", own: false, unread: false, openedAt: 1 }] };
+    try {
+      expect((await callTool("assignment_status", {})).result.content[0].text).toContain(`- asg-q → @Ops: queued, not started yet: ${waiting}`);
+      expect((await callTool("list_threads", {})).result.content[0].text).toContain(`#Export CSV (on @Ops, queued: ${waiting}) [thread id: t-q] [delegation id: asg-q]`);
+    } finally {
+      assignmentStatusResponse = DONE_ASSIGNMENT;
+      threadsList = { threads: [] };
+    }
   });
 
   it("assignment_status with an id renders status, outcome, the result head and the assignment's own hand-offs", async () => {
