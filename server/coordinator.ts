@@ -130,6 +130,8 @@ export interface CoordinatorHost {
   /** Recheck addresses and route permission immediately before every dispatch. */
   validate(node: HandoffView, parent?: HandoffView): string | undefined;
   busy(node: HandoffView): boolean;
+  /** Why a busy node waits, in words for the record. */
+  holdReason?(node: HandoffView): string;
   /** For a root this is the person's own conversation continuing: person-visible, never internal. */
   run(node: HandoffView, resumed: boolean, signal: AbortSignal, composed: ComposedTurn): Promise<HostTurnResult>;
   report(child: HandoffView, parent?: HandoffView): void;
@@ -197,6 +199,8 @@ export interface Coordinator {
   pace(): "busy" | "parked" | "idle";
   close(): void;
   progress(threadId: string): void;
+  /** What the turn this thread is running waits for, for the record. */
+  held(threadId: string, why: string): void;
   /** True when a parked assignment took the text as its answer: the host must not start an ordinary turn. */
   answer(threadId: string, text: string): boolean;
   awaitingAnswer(threadId: string): boolean;

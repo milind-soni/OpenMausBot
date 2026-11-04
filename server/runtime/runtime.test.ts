@@ -227,8 +227,12 @@ describe("Runtime: one tree, one lane", () => {
     w.runner.canStartAnswer = "builder is busy on another thread";
     const stuck = ok(w.runtime.enqueue(toBot("builder", root.id)));
     w.runtime.tick(); w.runtime.tick();
-    expect(w.store.events(stuck.id).filter(e => e.kind === "admitted")).toHaveLength(1);
-    expect(w.store.events(stuck.id).at(-1)?.detail).toBe("waiting: builder is busy on another thread");
+    expect(w.store.events(stuck.id).filter(e => e.kind === "held")).toHaveLength(1);
+    expect(w.store.events(stuck.id).filter(e => e.kind === "admitted")).toHaveLength(0);
+    expect(w.store.events(stuck.id).at(-1)?.detail).toBe("builder is busy on another thread");
+    w.runner.canStartAnswer = "builder's room turn is running";
+    w.runtime.tick();
+    expect(w.store.events(stuck.id).filter(e => e.kind === "held").map(e => e.detail)).toEqual(["builder is busy on another thread", "builder's room turn is running"]);
     w.clock.advance(1_001);
     w.runtime.tick();
     expect(w.store.get(stuck.id)).toMatchObject({ status: "failed", outcome: "expired", outcomeDetail: "never started" });
@@ -503,6 +507,7 @@ describe("Runtime: one tree, one lane", () => {
     w.runtime.tick();
     expect(w.runner.changes.length - before).toBe(1);
     expect(w.runner.runs.map(r => r.a.id)).toEqual([one.id, notice.id]);
+    expect(w.store.events(two.id).filter(e => e.kind === "held").map(e => e.detail)).toEqual(["an earlier turn in its conversation is running"]);
     await w.runner.release(one.id, { kind: "completed", text: "one" });
     w.runtime.tick();
     expect(w.runner.runs.map(r => r.a.id)).toEqual([one.id, notice.id, two.id]);

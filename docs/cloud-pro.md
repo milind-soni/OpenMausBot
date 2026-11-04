@@ -1114,6 +1114,13 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   Bot work that has waited 5 minutes takes its place by arrival, so it is never starved
   (`server/host/turn-order.ts`). A stop never waits: a line made only of stop words stops
   running work at once in any of the app's languages, and an `@everyone` stop starts no engine on a bot with nothing running.
+- **Saying why.** A turn waiting for memory writes one row naming what runs and
+  what is ahead of it; on Starter it adds that a bigger plan runs more. Its record
+  (`assignment_events`) gets a `held` row with the same facts, as does a hand-off
+  the coordinator holds, each time the reason changes. A hand-off held 30 seconds
+  writes one row in the chat that sent it, naming the limit (`server/host/wait-words.ts`).
+  While something waits for memory `GET /api/config` says `waitingForRoom`, and the
+  room card may show though a turn runs; at any other time it waits for the turn to end.
 - **OpenCode threads share a process.** Threads whose OpenCode would start
   the same way (same login, approval level and settings) run as sessions of one
   `opencode acp` process, up to six at a time and twelve over its life
