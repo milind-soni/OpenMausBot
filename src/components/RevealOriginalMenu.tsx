@@ -39,6 +39,14 @@ export async function revealOriginal(source: string, reveal: Reveal): Promise<st
 export function useRevealOriginalMenu() {
   const [at, setAt] = useState<{ left: number; top: number; source: string; problem?: string } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  // Escape or a successful reveal removes the menu while its button has focus: give focus back to where it was.
+  const returnFocus = useRef<HTMLElement | null>(null);
+  const closeAndRestoreFocus = () => {
+    setAt(null);
+    const target = returnFocus.current;
+    returnFocus.current = null;
+    if (target?.isConnected) target.focus();
+  };
   useEffect(() => {
     if (!at) return;
     menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
@@ -51,6 +59,7 @@ export function useRevealOriginalMenu() {
   const label = revealOriginalLabel(typeof window === "undefined" ? undefined : window.ogb?.platform);
   const show = async (source: string) => {
     const problem = reveal ? await revealOriginal(source, reveal) : t("attach.revealFailed");
+    if (!problem && menuRef.current?.contains(document.activeElement)) return closeAndRestoreFocus();
     setAt((current) => current?.source !== source ? current : problem ? { ...current, problem } : null);
   };
   return {
@@ -59,13 +68,15 @@ export function useRevealOriginalMenu() {
       onContextMenu: (event: MouseEvent<HTMLElement>) => {
         event.preventDefault();
         event.stopPropagation();
+        const active = document.activeElement;
+        returnFocus.current = active instanceof HTMLElement && active !== document.body ? active : event.currentTarget;
         setAt({ left: Math.max(8, Math.min(event.clientX, window.innerWidth - 268)), top: Math.max(8, Math.min(event.clientY, window.innerHeight - 110)), source });
       },
     },
     menu: at && createPortal(
       <div ref={menuRef} role="group" aria-label={label} style={{ left: at.left, top: at.top }}
         className={cn("fixed z-50 w-[260px]", MENU_SHEET)}
-        onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setAt(null); } }}>
+        onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeAndRestoreFocus(); } }}>
         <button type="button" onClick={() => void show(at.source)} title={at.source} className={ITEM_CLASS}>
           <FolderOpen size={16} />{label}
         </button>
