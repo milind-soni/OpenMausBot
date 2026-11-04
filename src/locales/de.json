@@ -107,6 +107,7 @@
   "server.mcp.changed": "MCP-Server {name} geändert",
   "server.mcp.turnedOn": "MCP-Server {name} eingeschaltet",
   "server.mcp.turnedOff": "MCP-Server {name} ausgeschaltet",
+  "server.mcp.restarted": "MCP-Server {name} neu gestartet",
   "server.mcp.tested": "MCP-Server {name} getestet",
   "server.mcp.signedOut": "Von MCP-Server {name} abgemeldet",
   "server.mcp.removed": "MCP-Server {name} entfernt",

@@ -26,7 +26,7 @@ export interface McpConfigDeps {
   appCatalog?: Pick<ChatAppsMcp, "probeOptions" | "serverChanged" | "forgetServer"> & Partial<Pick<ChatAppsMcp, "hasApps">>;
   /** A Team Cloud: each member's own key and sign-in for a removed server go with it. */
   forgetPeople?(name: string): void;
-  /** Whether each command server starts for each bot: checked again when one is added, changed or turned on. */
+  /** Whether each command server starts for each bot: checked again when one is added, changed, turned on or restarted. */
   health?: { changed(name: string): void };
   /** A server was added or removed on purpose: a Cloud home's routines wait while every connection is gone. */
   connectionsChanged?(change: "added" | "removed"): void;
@@ -46,6 +46,8 @@ export interface McpConfig {
    * refused for the whole request, its body included. */
   addMany(read: () => Promise<{ servers: Record<string, StoredMcpServer> } | McpConfigRefusal>): Promise<McpConfigResult>;
   setEnabled(name: string, enabled: boolean): McpConfigResult;
+  /** The next turn of every bot that uses it starts a new process, with what is saved today: keys, sign-in and all. */
+  restart(name: string): McpConfigResult;
   setApps(name: string, apps: boolean): McpConfigResult;
   remove(name: string): McpConfigResult;
   /** A 200 carries the probe result as its body, failures included: only a refusal to probe is an error. */
@@ -193,6 +195,12 @@ export function createMcpConfig(deps: McpConfigDeps & { changed(): void }): McpC
       }
       persistMcpServers({ ...found.current, [name]: { ...found.existing, enabled } });
       if (enabled) appCatalog?.serverChanged(name);
+      health?.changed(name);
+      return saved(200);
+    }),
+    restart: (name) => write(() => {
+      const found = stored(name);
+      if (!found.existing) return found.result!;
       health?.changed(name);
       return saved(200);
     }),
