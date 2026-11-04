@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { reorderStable } from "./bot-order.ts";
+import { recentBotsFirst, reorderStable } from "./bot-order.ts";
 
 const items = (...ids: string[]) => ids.map((id) => ({ id }));
 const ids = (list: ReadonlyArray<{ id: string }>) => list.map((item) => item.id);
@@ -29,5 +29,28 @@ describe("reorderStable", () => {
   it("returns the same order for an empty or unchanged list", () => {
     expect(ids(reorderStable(items("a", "b"), []))).toEqual(["a", "b"]);
     expect(ids(reorderStable(items("a", "b"), ["a", "b"]))).toEqual(["a", "b"]);
+  });
+});
+
+describe("recentBotsFirst", () => {
+  const order = (activity: Record<string, number>, placed: Record<string, number> = {}, list = ["a", "b", "c", "d"]) =>
+    ids(recentBotsFirst(items(...list), (bot) => activity[bot.id] ?? 0, (bot) => placed[bot.id] ?? 0));
+
+  it("leaves the order alone with no activity", () => {
+    expect(order({})).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("puts bots active since they were placed first, newest first, and keeps the rest in order", () => {
+    expect(order({ c: 5, d: 9 })).toEqual(["d", "c", "a", "b"]);
+    expect(order({ c: 5, d: 5 })).toEqual(["c", "d", "a", "b"]);
+  });
+
+  it("keeps a bot where it was placed when its activity is older", () => {
+    expect(order({ c: 5, d: 9 }, { c: 7 })).toEqual(["d", "a", "b", "c"]);
+  });
+
+  it("gives the same order when applied to its own output", () => {
+    const once = order({ b: 3, d: 9 }, { a: 1 });
+    expect(order({ b: 3, d: 9 }, { a: 1 }, once)).toEqual(once);
   });
 });

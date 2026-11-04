@@ -10,3 +10,11 @@ export function reorderStable<T extends { id: string }>(items: readonly T[], ids
   slots.forEach((slot, index) => { out[slot] = moved[index]!; });
   return out;
 }
+
+/** Move-to-front: bots whose activity is newer than when a person last placed them come first, newest first; every other bot keeps its given order.
+ * Idempotent, so any later save of the in-memory order and a re-derive on boot agree. */
+export function recentBotsFirst<T extends { id: string }>(bots: readonly T[], activeAt: (bot: T) => number, placedAt: (bot: T) => number): T[] {
+  const fresh = bots.filter((bot) => activeAt(bot) > placedAt(bot)).sort((a, b) => activeAt(b) - activeAt(a));
+  const stale = bots.filter((bot) => activeAt(bot) <= placedAt(bot));
+  return [...fresh, ...stale];
+}

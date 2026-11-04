@@ -4,7 +4,7 @@ import { join } from "node:path"; import { isDeepStrictEqual } from "node:util";
 import { OwnedFile, writeFileAtomic } from "./atomic.ts"; import { saveSoon } from "./save-batch.ts"; import { discardNativeLog } from "./drivers/native.ts";
 import { commitRegistryChange, keptRevocation, saveRegistryFor, touchesPermissions } from "./registry-save.ts";
 import { parseToolScope, toolScopeWidens } from "../shared/tool-scope.ts"; import { grantScopedApps } from "../shared/connector-scopes.ts";
-import { reorderStable } from "../shared/bot-order.ts";
+import { applyRecentBotOrder, placeBots, placeExistingBots, stampPlaced } from "./bot-recency.ts";
 import { botOwner, chiefConflict, chiefScope, ownerEmail } from "../shared/bot-owner.ts";
 import { ensureSections, readSections, changeEmptySection } from "./section-context.ts";
 import type { TeamComputers } from "./team-computers.ts";
@@ -182,10 +182,10 @@ export interface BotRecord extends Omit<WireBot, "avatarUrl" | "tasks"> {
   lastProfileRequestId?: string;
   lastTeamSetupReceipt?: { requestId: string; result: TeamSetupResult };
   packageBase?: Partial<Record<AgentPart, PartPair>>;
-  assignedSkills?: string[];
+  assignedSkills?: string[]; placedAt?: number; // placedAt: when a person last put this bot in place by hand; later activity moves it to the front (server/bot-recency.ts)
 }
 
-export type BotWirePrivateKeys = "resumeCursors" | "mainThreadChoice" | "tasks" | "avatarUrl" | "approvalGrant" | "lastProfileRequestId" | "lastTeamSetupReceipt" | "packageBase" | "assignedSkills";
+export type BotWirePrivateKeys = "resumeCursors" | "mainThreadChoice" | "tasks" | "avatarUrl" | "approvalGrant" | "lastProfileRequestId" | "lastTeamSetupReceipt" | "packageBase" | "assignedSkills" | "placedAt";
 export type BotWireProjection = Pick<BotRecord, Exclude<keyof BotRecord, BotWirePrivateKeys>>;
 export type BotWireProjectionIsExact = AssertExact<Omit<WireBot, "avatarUrl" | "tasks">, BotWireProjection> & AssertSameKeys<Omit<WireBot, "avatarUrl" | "tasks">, BotWireProjection>;
 export const botWireProjectionIsExact: BotWireProjectionIsExact = true;
@@ -608,6 +608,7 @@ export class Store {
     }
     // After the transcript migration, so each stamp sees its thread's newest message.
     this.repairThreadUpdatedAts();
+    placeExistingBots(this.bots, botsLoaded, () => this.saveBots());
     if (fillAskedAts) this.fillTaskAskedAts();
     // After the roster loads, so identity resolution sees which opener ids are live.
     this.repairDuplicatePairConversations();
@@ -622,6 +623,7 @@ export class Store {
       task.updatedAt = Math.max(task.updatedAt ?? 0, at);
       if (forOrder) task.lastThreadOrderAt = Math.max(task.lastThreadOrderAt ?? 0, orderAt);
     }
+    if (forOrder && applyRecentBotOrder(this.bots)) this.emit({ type: "bots.order" });
   }
 
   /** Never moves a stamp backwards: a clock skew must not reshuffle the list on every boot. */
@@ -1371,7 +1373,7 @@ export class Store {
       busy: false,
     }];
     // Persist before publishing or greeting, so an interrupted creation cannot inherit tools.
-    this.saveBots([bot, ...this.bots]);
+    const all = [bot, ...this.bots]; stampPlaced(all); this.saveBots(all); // the new bot and everyone else are placed together
     this.bots.unshift(bot);
     try {
       writeSoulMirror(bot.id, bot.soul ?? "");
@@ -2006,9 +2008,7 @@ export class Store {
     if (!botIds.length || new Set(botIds).size !== botIds.length) return null;
     const byId = new Map(this.bots.map((bot) => [bot.id, bot]));
     if (botIds.some((id) => !byId.has(id))) return null;
-    const next = reorderStable(this.bots, botIds);
-    // Mutate in place: schedulers and other consumers hold this array and its records.
-    this.bots.splice(0, this.bots.length, ...next);
+    placeBots(this.bots, botIds);
     this.saveBots();
     this.emit({ type: "bots.order" });
     return this.bots;

@@ -3,7 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { soulFile, soulHash } from "./bot-folder.ts";
 import { flushProfileHistory, readHistory, recordProfileChange } from "./profile-versions.ts";
@@ -2795,5 +2795,90 @@ describe("soul", () => {
     } finally {
       rmSync(folder, { force: true });
     }
+  });
+});
+
+describe("Store bot order follows activity", () => {
+  beforeEach(() => {
+    rmSync(DATA_DIR, { recursive: true, force: true });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(1_000_000);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const tick = () => vi.setSystemTime(Date.now() + 1000);
+  const say = (store: Store, botId: string) => { tick(); store.appendMessage(store.bot(botId)!.threadId, { role: "user", kind: "text", text: "hi" }); };
+  const order = (store: Store) => store.bots.map((bot) => bot.name);
+  const make = () => {
+    const store = new Store(selection);
+    // createBot puts the newest first, so this lists A, B, C, D.
+    const [d, c, b, a] = ["D", "C", "B", "A"].map((name) => store.createBot({ name }));
+    return { store, a: a!, b: b!, c: c!, d: d! };
+  };
+
+  it("moves a bot to the front on a message, announces it, and does not rewrite bots.json", () => {
+    const { store, b } = make();
+    const events: string[] = [];
+    store.onChange((e) => events.push(e.type));
+    const before = readFileSync(join(DATA_DIR, "bots.json"), "utf8");
+    say(store, b.id);
+    expect(order(store).slice(0, 2)).toEqual(["B", "A"]);
+    expect(events).toContain("bots.order");
+    expect(readFileSync(join(DATA_DIR, "bots.json"), "utf8")).toBe(before);
+  });
+
+  it("puts a dragged bot where asked until its next activity, with newer-active bots staying above", () => {
+    const { store, a, b, c, d } = make();
+    say(store, a.id); say(store, c.id);
+    expect(order(store)).toEqual(["C", "A", "B", "D"]);
+    tick();
+    store.reorderBots([d.id, b.id]);
+    expect(order(store)).toEqual(["C", "A", "D", "B"]);
+    tick();
+    store.reorderBots(store.bots.map((bot) => bot.id).reverse());
+    expect(order(store)).toEqual(["B", "D", "A", "C"]);
+    say(store, c.id);
+    expect(order(store)).toEqual(["C", "B", "D", "A"]);
+  });
+
+  it("a new bot stays above a bot that was active before it was created, until the next activity", () => {
+    const { store, a, c } = make();
+    say(store, c.id); tick();
+    store.createBot({ name: "N" });
+    say(store, a.id);
+    expect(order(store)).toEqual(["A", "N", "C", "B", "D"]);
+  });
+
+  it("a partial reorder places the whole list, so older-active bots outside it do not jump above after an unrelated message", () => {
+    const { store, a, b, c, d } = make();
+    say(store, c.id); tick();
+    store.reorderBots([d.id, b.id]);
+    expect(order(store)).toEqual(["C", "A", "D", "B"]);
+    say(store, a.id);
+    expect(order(store)).toEqual(["A", "C", "D", "B"]);
+  });
+
+  it("restores the same order after a restart", () => {
+    const { store, a, d } = make();
+    say(store, d.id); say(store, a.id);
+    store.reorderBots([d.id, a.id]);
+    say(store, d.id);
+    const expected = order(store);
+    store.patchBot(a.id, { name: "A" });
+    expect(order(new Store(selection))).toEqual(expected);
+  });
+
+  it("keeps the saved order of a bots.json from before this feature, even when later bots were more recent", () => {
+    make();
+    const file = join(DATA_DIR, "bots.json");
+    const rows = JSON.parse(readFileSync(file, "utf8")) as BotRecord[];
+    for (const row of rows) { delete row.placedAt; row.tasks![0]!.lastThreadOrderAt = 2_000_000 + rows.indexOf(row); }
+    writeFileSync(file, JSON.stringify(rows));
+    rmSync(join(DATA_DIR, "bots-placed"), { force: true });
+    vi.setSystemTime(3_000_000);
+    const loaded = new Store(selection);
+    expect(order(loaded)).toEqual(["A", "B", "C", "D"]);
+    say(loaded, loaded.bots[3]!.id);
+    expect(order(loaded)[0]).toBe("D");
   });
 });
