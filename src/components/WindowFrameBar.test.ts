@@ -182,5 +182,7 @@ describe("Simple's sidebar corner", () => {
     expect(tilesClearCorner([...row(2), ...row(1, 106)], 280), "a second row under it changes nothing").toBe(true);
     expect(tilesClearCorner(row(2), 240), "a narrower sidebar").toBe(false);
     expect(tilesClearCorner([], 280)).toBe(false);
+    expect(tilesClearCorner(row(2), 280, 3), "Active Threads beside them while anything is active").toBe(false);
+    expect(tilesClearCorner(row(1), 280, 3)).toBe(true);
   });
 });

@@ -6,7 +6,7 @@ import { t } from "@/lib/i18n";
 import { useLiveMedia } from "@/lib/live-call-media";
 import { stateForBot } from "@/lib/mascot";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { api, openBot, useStore, type Bot } from "@/state/store";
+import { api, openBotRow, useStore, type Bot } from "@/state/store";
 import { useChiefStepOpen } from "@/lib/default-bot";
 
 import { BotAvatar } from "./Avatar";
@@ -37,7 +37,7 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
   const status = waiting ? t("sidebar.preview.waiting") : working ? t("chat.activity.working") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued ? t("task.queued") : "";
   const label = [bot.name, bot.chiefOfStaff ? t("sidebar.bot.chiefOfStaff") : "", onLiveCall ? t("call.live.badge") : "", status, unread ? t("task.unread") : ""].filter(Boolean).join(" · ");
   const reorder = pinnedCircleDragHandlers(bot.id, { drag, dragging, prevId, nextId });
-  const open = () => openBot(dispatch, bot, showThreads);
+  const open = () => openBotRow(dispatch, bot, showThreads, selected);
   const rename = (name: string) => {
     if (!remoteClient) return dispatch({ type: "updateBot", botId: bot.id, patch: { name } });
     void api(`/api/bots/${bot.id}/profile`, { method: "PATCH", body: JSON.stringify({ name }) })
@@ -134,19 +134,19 @@ export function SidebarNoBots() {
   return <p data-sidebar-empty="" className="px-5 pt-4 text-[13px] leading-[18px] text-ink-tertiary">{t("onboarding.shell.noBots")}</p>;
 }
 
-/** How much of the grid's right end Search and New take in a framed window's corner (Sidebar's corner row). */
-const CORNER_CLEAR = 60;
+/** How much of the grid's right end each button takes in a framed window's corner (Sidebar's corner row). */
+const CORNER_BUTTON = 30;
 
 /** Whether the tiles' first row, as laid out, ends before the corner's buttons: the sidebar's width and the number of
  * tiles decide it. */
-export function tilesClearCorner(tiles: { top: number; right: number }[], gridRight: number): boolean {
+export function tilesClearCorner(tiles: { top: number; right: number }[], gridRight: number, buttons = 2): boolean {
   if (!tiles.length) return false;
   const top = tiles[0]!.top;
-  return Math.max(...tiles.filter((tile) => Math.abs(tile.top - top) < 1).map((tile) => tile.right)) <= gridRight - CORNER_CLEAR;
+  return Math.max(...tiles.filter((tile) => Math.abs(tile.top - top) < 1).map((tile) => tile.right)) <= gridRight - buttons * CORNER_BUTTON;
 }
 
 /** While the tiles clear the corner they rise beside its buttons (styles.css); else they start under them. */
-function useBesideCorner(corner: boolean, count: number) {
+function useBesideCorner(corner: boolean, count: number, buttons: number) {
   const ref = useRef<HTMLDivElement>(null);
   const [beside, setBeside] = useState(false);
   useLayoutEffect(() => {
@@ -154,20 +154,20 @@ function useBesideCorner(corner: boolean, count: number) {
     if (!corner || !grid) { setBeside(false); return; }
     const measure = () => {
       const tiles = [...grid.querySelectorAll<HTMLElement>("[data-sidebar-tile]")].map((tile) => tile.getBoundingClientRect());
-      setBeside(tilesClearCorner(tiles, grid.getBoundingClientRect().right));
+      setBeside(tilesClearCorner(tiles, grid.getBoundingClientRect().right, buttons));
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(grid);
     return () => observer.disconnect();
-  }, [corner, count]);
+  }, [corner, count, buttons]);
   return { ref, beside };
 }
 
-export function SidebarTileGrid({ primary, pinned, row, corner = false }: { primary: Bot | null; pinned: Bot[]; row: (bot: Bot) => BotRowProps; corner?: boolean }) {
+export function SidebarTileGrid({ primary, pinned, row, corner = false, cornerButtons = 2 }: { primary: Bot | null; pinned: Bot[]; row: (bot: Bot) => BotRowProps; corner?: boolean; cornerButtons?: number }) {
   const order = usePinnedCircleDrag(pinned);
-  const besideCorner = useBesideCorner(corner, (primary ? 1 : 0) + order.ranked.length);
+  const besideCorner = useBesideCorner(corner, (primary ? 1 : 0) + order.ranked.length, cornerButtons);
   if (!primary && order.ranked.length === 0) return null;
   return (
     <div ref={besideCorner.ref} data-sidebar-tiles="" data-beside-corner={besideCorner.beside ? "" : undefined}

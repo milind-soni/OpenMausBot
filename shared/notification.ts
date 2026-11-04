@@ -13,9 +13,10 @@ export type NotifyKind =
   /** A bot asked the person to sign in to a website themselves
    * (request_sign_in): it waits on their hands, at the place it works. */
   | "sign-in"
-  /** A delegated room request settled and the coordinator auto-resumed with
-   * the results; both are internal, so without this the parent conversation
-   * sits silent until the resume's first token. */
+  /** A delegated request settled and the coordinator auto-resumed the person's
+   * own conversation with the results; both are internal, so without this it
+   * sits silent until the resume's first token. A teammate's own step in a
+   * longer chain sends none: nothing there waits on the person. */
   | "delegation-settled"
   /** A bot's settled room reply tagged the person (`@you` or their profile name). Rooms only. On a Team Cloud also
    * a teammate tagged by name, or a message a bot passed on to them, with `forPerson`. */
