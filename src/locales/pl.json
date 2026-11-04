@@ -6406,6 +6406,7 @@
   "sidebar.people.you": "{name} (ty)",
   "sidebar.people.yourInbox": "Twoja skrzynka: wszystko, co do ciebie trafia",
   "sidebar.people.yourInboxWaiting": "Twoja skrzynka: czeka na ciebie, {count}",
+  "sidebar.people.invite": "Zaproś kogoś",
   "inbox.panel.title": "Skrzynka",
   "inbox.empty": "Na razie nic dla ciebie.",
   "inbox.waitsOnYou": "Czeka na ciebie",

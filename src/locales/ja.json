@@ -1838,6 +1838,7 @@
   "sidebar.people.you": "{name}（あなた）",
   "sidebar.people.yourInbox": "あなたの受信箱：あなた宛てのものがすべて届きます",
   "sidebar.people.yourInboxWaiting": "あなたの受信箱：あなたの対応待ち、{count} 件",
+  "sidebar.people.invite": "メンバーを招待",
   "inbox.panel.title": "受信箱",
   "inbox.empty": "あなた宛てのものはまだありません。",
   "inbox.waitsOnYou": "あなたの対応待ち",

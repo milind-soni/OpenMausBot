@@ -657,6 +657,7 @@
   "sidebar.people.you": "{name} (vous)",
   "sidebar.people.yourInbox": "Votre boîte de réception : tout ce qu'on vous envoie",
   "sidebar.people.yourInboxWaiting": "Votre boîte de réception : en attente de vous, {count}",
+  "sidebar.people.invite": "Inviter quelqu'un",
   "inbox.panel.title": "Boîte de réception",
   "inbox.empty": "Rien pour vous pour l'instant.",
   "inbox.waitsOnYou": "Vous attend",

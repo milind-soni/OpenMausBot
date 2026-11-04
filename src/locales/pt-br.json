@@ -1733,6 +1733,7 @@
   "sidebar.people.you": "{name} (você)",
   "sidebar.people.yourInbox": "Sua caixa de entrada: tudo o que é enviado para você",
   "sidebar.people.yourInboxWaiting": "Sua caixa de entrada: esperando por você, {count}",
+  "sidebar.people.invite": "Convidar alguém",
   "inbox.panel.title": "Caixa de entrada",
   "inbox.empty": "Nada para você ainda.",
   "inbox.waitsOnYou": "Esperando por você",

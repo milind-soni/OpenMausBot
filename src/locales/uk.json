@@ -774,6 +774,7 @@
   "sidebar.people.you": "{name} (ви)",
   "sidebar.people.yourInbox": "Ваші вхідні: усе, що вам надіслали",
   "sidebar.people.yourInboxWaiting": "Ваші вхідні: чекає на вас, {count}",
+  "sidebar.people.invite": "Запросити когось",
   "inbox.panel.title": "Вхідні",
   "inbox.empty": "Поки що для вас нічого немає.",
   "inbox.waitsOnYou": "Чекає на вас",

@@ -1921,6 +1921,7 @@
   "sidebar.people.you": "{name}(나)",
   "sidebar.people.yourInbox": "받은편지함: 나에게 온 모든 것",
   "sidebar.people.yourInboxWaiting": "받은편지함: 나를 기다리는 것 {count}개",
+  "sidebar.people.invite": "다른 사람 초대",
   "inbox.panel.title": "받은편지함",
   "inbox.empty": "아직 나에게 온 것이 없어요.",
   "inbox.waitsOnYou": "나를 기다리고 있어요",
