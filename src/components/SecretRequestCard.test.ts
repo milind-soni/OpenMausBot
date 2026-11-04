@@ -73,6 +73,30 @@ describe("SecretRequestCard superseded requests", () => {
   });
 });
 
+describe("SecretRequestCard on a page reached through a desktop paired to another computer", () => {
+  const remote = (secret: Record<string, unknown>) => {
+    vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
+    return view(secret);
+  };
+
+  it("offers the field for a secret the server keeps: a custom one, or a provider key", () => {
+    for (const secret of [
+      { target: "customSecret", label: "Mailbox password", delivery: "ref", placeholder: "", helpUrl: "" },
+      { target: "openaiApiKey", label: "OpenAI API key" },
+    ]) {
+      const html = remote(secret);
+      expect(html, secret.target).toContain('type="password"');
+      expect(html, secret.target).not.toContain("must be saved on the host computer");
+    }
+  });
+
+  it("sends a key the host computer keeps in its own encrypted store to that computer", () => {
+    const html = remote({ target: "boxToken", label: "Boat token" });
+    expect(html).toContain("must be saved on the host computer");
+    expect(html).not.toContain('type="password"');
+  });
+});
+
 describe("SecretRequestCard ask card", () => {
   it("waits as a compact ask card with a masked field", () => {
     const html = view({});
