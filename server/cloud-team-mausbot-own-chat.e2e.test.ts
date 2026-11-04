@@ -56,6 +56,7 @@ afterAll(async () => {
 it("is the person's own: private on the wire, its notes in their layer, and nobody else reads it through any route", async () => {
   const maus = await ownMausBot(mira);
   expect(maus.tasks!.find((task) => task.threadId === maus.threadId)?.private, "her main chat is marked hers").toBe(true);
+  expect((maus as Bot & { mainThreadId?: string }).mainThreadId, "and it is still her MausBot's main chat").toBe(maus.threadId);
   writeFileSync(planPath(), JSON.stringify({ [maus.id]: { script: [
     { key: "M-NOTE", repeat: true, match: ["MAIN-CHAT-LINE"], reply: "Noted Kestrel19.", steps: [{ tool: "memory_update", arguments: { action: "append", text: NOTE } }] },
   ] } }));
