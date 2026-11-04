@@ -25,6 +25,7 @@ import type { BotRecord, GroupRecord, Message, Store, StoreChange } from "../sto
 import type { TeamPeople } from "../team-people.ts";
 import { currentTimeZone } from "../time-zone.ts";
 import { loadMemory } from "../workspace.ts";
+import { OUTSIDE_REFUSAL } from "./outside-fence.ts";
 import type { PlaceInbox } from "./place-inbox.ts";
 import { createPersonInbox, type Delivery, type Item, type Passed, type PersonInbox, type PersonInboxDeps } from "./person-inbox.ts";
 import { createRepresentative, type RepresentativeDeps } from "./representative.ts";
@@ -319,6 +320,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
         return ctx.json(ctx.res, sent.status, sent.status === 200 ? { text: sent.text } : { error: sent.text });
       }
       if (!team || !deps.people) return ctx.json(ctx.res, 404, { error: "Passing a message to a person works only on a team's Cloud." });
+      if (deps.confined?.(ctx.threadId)) return ctx.json(ctx.res, 403, { error: OUTSIDE_REFUSAL });
       const body = bodySchema.safeParse(await ctx.readBody());
       if (!body.success) return ctx.json(ctx.res, 400, { error: `message_person needs to (a teammate's name or email) and message (up to ${MESSAGE_PERSON_MAX} characters).` });
       const passed = pass(ctx.botId, ctx.threadId, body.data.to, body.data.message);
