@@ -163,7 +163,7 @@ async function fixture(desktopManaged = true) {
 }
 
 describe("POST /api/bots/:id/messages and who typed it", () => {
-  const words = "Look at this\n/standup it";
+  const words = "Look at this and /standup it";
 
   it("takes a plain send from the desktop's own page as a person's", async () => {
     const { threadId, post } = await fixture();

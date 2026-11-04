@@ -7,44 +7,30 @@ import {
   slashCommandMatches,
   type ComposerSlashCommandId,
 } from "./composer-commands";
-import { findSkillCommands } from "../../shared/skill-command";
 import { enabledSlashSkills } from "./use-slash-skills";
 
 describe("composer slash commands", () => {
-  it("opens command search for the unfinished token at the start", () => {
-    expect(composerSlashTrigger("/", 1)).toEqual({ query: "", start: 0, end: 1, atStart: true });
-    expect(composerSlashTrigger("/go", 3)).toEqual({ query: "go", start: 0, end: 3, atStart: true });
-    expect(composerSlashTrigger("  /go", 5)).toEqual({ query: "go", start: 2, end: 5, atStart: true });
+  it("opens command search for the unfinished slash token at the caret", () => {
+    expect(composerSlashTrigger("/", 1)).toEqual({ query: "", start: 0, end: 1 });
+    expect(composerSlashTrigger("/go", 3)).toEqual({ query: "go", start: 0, end: 3 });
     expect(composerSlashTrigger("/goal write", 11)).toBeNull();
   });
 
-  it("opens skill search for a token later in the message, after a space or a line break", () => {
-    expect(composerSlashTrigger("hello /go", 9)).toEqual({ query: "go", start: 6, end: 9, atStart: false });
-    expect(composerSlashTrigger("/standup billing\n/rev", 21)).toEqual({ query: "rev", start: 17, end: 21, atStart: false });
-    expect(composerSlashTrigger("hello /go there", 9)).toEqual({ query: "go", start: 6, end: 9, atStart: false });
-  });
-
-  it("does not open inside a path, a link or a finished word", () => {
-    expect(composerSlashTrigger("src/standup", 11)).toBeNull();
-    expect(composerSlashTrigger("see https://example.com/a", 25)).toBeNull();
-    expect(composerSlashTrigger("hello /go ", 10)).toBeNull();
+  it("opens command search for a slash token later in the message", () => {
+    expect(composerSlashTrigger("hello /go", 9)).toEqual({ query: "go", start: 6, end: 9 });
+    expect(composerSlashTrigger("first line\n/", 12)).toEqual({ query: "", start: 11, end: 12 });
+    expect(composerSlashTrigger("use /stand later", 10)).toEqual({ query: "stand", start: 4, end: 10 });
+    expect(composerSlashTrigger("a/b", 3)).toBeNull();
+    expect(composerSlashTrigger("see http://x/", 13)).toBeNull();
+    expect(
+      replaceComposerSlashTrigger("use /stand later", { query: "stand", start: 4, end: 10 }, "/standup "),
+    ).toEqual({ text: "use /standup  later", caret: 13 });
   });
 
   it("does not open inside code, and opens again after it", () => {
     expect(composerSlashTrigger("```\n/st", 7)).toBeNull();
     expect(composerSlashTrigger("`a /st` b", 6)).toBeNull();
-    expect(composerSlashTrigger("```\nx\n```\n/st", 13)).toEqual({ query: "st", start: 10, end: 13, atStart: false });
-  });
-
-  it("moves a skill picked later in a line onto a line of its own, where the server reads it", () => {
-    const pick = (text: string, start: number, end: number) => replaceComposerSlashTrigger(text, { query: "", start, end }, "/standup ");
-    expect(pick("hello /go", 6, 9)).toEqual({ text: "hello\n/standup ", caret: 15 });
-    expect(pick("hello /go there", 6, 9)).toEqual({ text: "hello\n/standup  there", caret: 15 });
-    expect(findSkillCommands(pick("hello /go there", 6, 9).text, ["standup"])).toEqual(["standup"]);
-    expect(pick("hello\n/go", 6, 9)).toEqual({ text: "hello\n/standup ", caret: 15 });
-    expect(pick("  /go", 2, 5)).toEqual({ text: "  /standup ", caret: 11 });
-    expect(pick("     /go", 5, 8)).toEqual({ text: "/standup ", caret: 9 });
-    expect(replaceComposerSlashTrigger("hello /go", { query: "go", start: 6, end: 9 }, "")).toEqual({ text: "hello ", caret: 6 });
+    expect(composerSlashTrigger("```\nx\n```\n/st", 13)).toEqual({ query: "st", start: 10, end: 13 });
   });
 
   it("replaces the active token without losing text after the caret", () => {
@@ -74,7 +60,7 @@ describe("composer slash commands", () => {
   });
 
   it("opens on a skill name with digits", () => {
-    expect(composerSlashTrigger("/weekly-2", 9)).toEqual({ query: "weekly-2", start: 0, end: 9, atStart: true });
+    expect(composerSlashTrigger("/weekly-2", 9)).toEqual({ query: "weekly-2", start: 0, end: 9 });
   });
 
   it("lists enabled skills as rows after the built-ins, never shadowing one", () => {

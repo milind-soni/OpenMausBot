@@ -256,6 +256,7 @@ export function installOneHome({ localRequest: anyServer, clean = null, account,
       return Boolean(client?.reportKept && mine && await client.reportKept({ installation: mine }));
     },
     lastInput: typed,
+    ownCopy: () => clean?.ownCopy() ?? true,
     onChange: () => { send.publish(); report.changed(); },
   });
 

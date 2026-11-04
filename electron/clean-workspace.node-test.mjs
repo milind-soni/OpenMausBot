@@ -170,18 +170,34 @@ const ready = (extra = {}) => ({ status: "connected", account: owner, deviceId: 
 const done = (extra = {}) => ({ v: 1, phase: "done", cloud: { origin: CLOUD, account: owner.id, machine: CLOUD }, startedAt: 1, doneAt: 2, frozenAt: 2, version: "0.1.140", reported: "d1", lent: true, phoneStopped: true, ...extra });
 const onClean = (w) => w.requests.filter(([folder]) => folder === w.cleanDir);
 
-test("a top-up can't read the clean workspace: it waits, and nothing of it reaches the person's Cloud", async (t) => {
-  const w = moved(t, { state: ready(), journal: done() });
+test("a top-up can't read the clean workspace: it waits, with no hour's penalty, and goes once this computer's own copy answers", async (t) => {
+  const w = moved(t, { state: ready(), journal: done({ doneAt: Date.now() }) });
   await w.clean.enter();
   await w.main.kick();
   assert.deepEqual(onClean(w), []);
   assert.equal(w.journal.version, "0.1.140", "the top-up didn't count as made");
-  assert.ok(w.journal.retryAt, "and goes again later");
+  assert.equal(w.journal.retryAt, undefined, "and isn't put off");
   await w.clean.leave();
   w.requests.length = 0;
-  w.journal = done();
   await w.main.kick();
   assert.deepEqual(w.requests[0], [w.dataDir, "GET", "/api/cloud-send?move=1"], "its own copy running, the same top-up does read this computer's server");
+});
+
+test("while the server is on its way between the two, nothing reaches it, and a top-up waits for it", async (t) => {
+  const w = moved(t, { state: ready(), journal: done() });
+  let finish;
+  const started = new Promise((resolve) => { finish = resolve; });
+  const clean = createCleanWorkspace({ dataDir: () => w.dataDir, running: () => w.running, swap: async (dir) => { await started; w.running = dir; return { ok: true }; } });
+  const entering = clean.enter();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(clean.ownCopy(), false, "its server is stopped, or starting");
+  await assert.rejects(clean.realCopy(w.request)("/api/bots?messages=0"), { code: "clean-workspace" });
+  assert.deepEqual(w.requests, []);
+  finish();
+  await entering;
+  assert.equal(clean.ownCopy(), false, "the clean workspace runs");
+  await clean.leave();
+  assert.equal(clean.ownCopy(), true);
 });
 
 test("settling can't record this computer as lent from the clean workspace's empty bot list", async (t) => {
@@ -246,6 +262,13 @@ test("forgetting the copy reaches the frozen copy only, and never empties the cl
 test("a clean workspace's first config carries the language and that the setup was seen, nothing else", () => {
   assert.deepEqual(Object.keys(cleanWorkspaceConfig("en")).sort(), ["language", "onboarding"]);
   assert.equal(cleanWorkspaceConfig().language, undefined);
+});
+
+test("nothing pops up to bring bots here beside a line saying they're safe in the Cloud: the hint is the one that popup looks for", () => {
+  const notices = readFileSync(new URL("../src/lib/notices.ts", import.meta.url), "utf8");
+  const popup = /GROK_MOVE_NOTICE = "([^"]+)"/u.exec(notices)?.[1];
+  assert.ok(popup);
+  assert.equal(cleanWorkspaceConfig().onboarding.hintsSeen.includes(popup), true);
 });
 
 test("no lending from the clean workspace: nothing is lent or asked while it runs, and a grant only pauses, so it goes on after", async (t) => {

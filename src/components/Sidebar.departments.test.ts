@@ -1,6 +1,6 @@
 import { Children, isValidElement, type EffectCallback, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Action, AppState, Bot, Group } from "@/state/store";
+import type { Action, AppState, Bot, Group, Task } from "@/state/store";
 
 const fixture = vi.hoisted(() => ({
   values: [] as unknown[], index: 0, advanced: false, phone: false, admin: null as boolean | null,
@@ -290,6 +290,41 @@ describe("dragging a bot", () => {
     drag("dodo");
     row("atlas").botDrag!.row("atlas").onDrop(at() as never);
     expect(header(NEW_DEPARTMENT).naming!.value).toBe("New department");
+  });
+});
+
+describe("bots that are working or waiting on the person", () => {
+  const busy = (id: string, extra: Partial<Bot>) => {
+    fixture.state = { ...fixture.state, bots: fixture.state.bots.map((item) => (item.id === id ? { ...item, ...extra } : item)) };
+  };
+
+  it("move to the top of their own list, in the person's order, and go back when done", () => {
+    busy("cleo", { busy: true });
+    busy("bea", { activity: "waiting-on-you" });
+    busy("echo", { busy: true });
+    expect(listed()).toEqual(["bea", "cleo", "atlas", "echo", "dodo"]);
+    busy("cleo", { busy: false });
+    busy("bea", { activity: "idle" });
+    busy("echo", { busy: false });
+    expect(listed()).toEqual(["atlas", "bea", "cleo", "dodo", "echo"]);
+  });
+
+  it("count a working thread, but not a wait on a teammate", () => {
+    busy("cleo", { tasks: [{ threadId: "c1", title: "Run", createdAt: 1, busy: true } as Task] });
+    busy("bea", { waitingForTeammates: true });
+    expect(listed()).toEqual(["cleo", "atlas", "bea", "dodo", "echo"]);
+  });
+
+  it("never store the shown order: Alt+Up/Down and drops use the person's own order", () => {
+    busy("cleo", { busy: true });
+    row("atlas").botDrag!.step("atlas", 1);
+    expect(actions()).toEqual([{ type: "botsOrdered", botIds: ["bea", "atlas", "cleo"] }]);
+    fixture.dispatch.mockClear();
+    // A drop on the list itself finds its row in the shown order (cleo first) and places it by the person's own order.
+    drag("atlas");
+    laidOut("cleo", "atlas", "bea");
+    section(BOTS_SECTION_ID).onDrop(at(190) as never);
+    expect(actions()).toEqual([{ type: "botsOrdered", botIds: ["bea", "atlas", "cleo"] }]);
   });
 });
 
