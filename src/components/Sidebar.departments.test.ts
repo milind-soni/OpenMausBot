@@ -319,6 +319,12 @@ describe("bots that are working or waiting on the person", () => {
     busy("cleo", { busy: true });
     row("atlas").botDrag!.step("atlas", 1);
     expect(actions()).toEqual([{ type: "botsOrdered", botIds: ["bea", "atlas", "cleo"] }]);
+    fixture.dispatch.mockClear();
+    // A drop on the list itself finds its row in the shown order (cleo first) and places it by the person's own order.
+    drag("atlas");
+    laidOut("cleo", "atlas", "bea");
+    section(BOTS_SECTION_ID).onDrop(at(190) as never);
+    expect(actions()).toEqual([{ type: "botsOrdered", botIds: ["bea", "atlas", "cleo"] }]);
   });
 });
 

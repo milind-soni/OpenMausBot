@@ -316,5 +316,7 @@ describe("active bots first", () => {
       unsectionedBots: ["b", "c", "a"],
     });
     expect(parts.unsectionedBots).toEqual(["a", "b", "c"]);
+    expect(parts.pinnedBots).toEqual(["p1", "p2", "p3"]);
+    expect(parts.sectionedBots).toEqual(["w1", "h1", "w2"]);
   });
 });
