@@ -416,7 +416,7 @@ describe("what the harness puts in a bot's folders, and what a bot writes there 
     memory.noteForeignTurn("bot1");
     plant(join(opened("handed-in"), file));
     expect(memory.reconcile("bot1", false).changedBySomeoneElse).toBe(true);
-    expect(memory.reviewInfo("bot1").changed.some((name) => name.includes(file))).toBe(true);
+    expect(memory.reviewInfo("bot1").changed.some((name) => name.split(sep).join("/").includes(file))).toBe(true);
   });
   it("a harness skill's name is no cover: a real folder or any other link under it is a change", () => {
     const { ws, skill, opened, fingerprint } = harness();
