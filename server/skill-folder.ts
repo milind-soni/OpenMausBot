@@ -6,6 +6,7 @@ import { join, relative, resolve } from "node:path";
 import { z } from "zod";
 
 import type { SkillImportSummary, SkippedSkillFile, SkippedSkillFileReason } from "../shared/skill-import.ts";
+export type { GitHubSkillOrigin } from "../shared/skill-import.ts";
 import { parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
 import { directoryEntryState } from "./skill-storage.ts";
 
