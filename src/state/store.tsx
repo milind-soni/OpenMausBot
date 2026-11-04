@@ -19,7 +19,7 @@ import { DATA_ROUTES, type DataSheet, type DataTable } from "../../shared/data-s
 import type { NotificationLogEntry } from "../../shared/notification";
 import { isNotificationFeedAction, reduceNotificationFeed, type NotificationFeedAction } from "./notification-feed";
 import { bumpThreadUpdatedAt, mergeTaskStamps, rewindThreadUpdatedAt } from "./thread-stamps";
-import { botOpensTo, openBot, openNotificationTarget, visibleNotificationThread } from "./thread-navigation";
+import { botOpensTo, closeUnpinnedTray, openBot, openNotificationTarget, visibleNotificationThread, withRememberedTrayPin } from "./thread-navigation";
 import { patchGroupTask } from "./thread-edits";
 import type { EngineInstall } from "./engine-install";
 import { optimisticMessageId, optimisticUserMessage, sendArrived, sendReconciled } from "./optimistic-send";
@@ -1081,7 +1081,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const room = state.groups.find((g) => g.id === action.id);
       if (room) {
         return {
-          ...state,
+          ...(action.id === state.selectedId ? state : closeUnpinnedTray(state)),
           unreadDivider: openedUnreadDivider(state, room.threadId, room.unread, room.messages, room.lastReadMessageId),
           activeView: "chat",
           selectedId: action.id,
@@ -1092,7 +1092,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return updateBot(
         withMascotMotion(
           {
-            ...state,
+            ...(action.id === state.selectedId ? state : closeUnpinnedTray(state)),
             unreadDivider: opened
               ? openedUnreadDivider(state, opened.threadId, threadOpensUnread(opened), visibleMessages(opened), threadReadCursor(opened))
               : state.unreadDivider,
@@ -1726,9 +1726,10 @@ export function reducer(state: AppState, action: Action): AppState {
         activeLeafId: message.id,
       })), threadId, message.at, true);
     }
+    case "switchGroupTask":
+      return closeUnpinnedTray(state);
     case "deleteTask":
     case "newGroupTask":
-    case "switchGroupTask":
     case "deleteGroupTask":
     case "regenerateTaskTitle":
       return state;
@@ -1736,8 +1737,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return action.cwd !== undefined ? state : { ...state, selectedId: action.botId, activeView: "chat" };
     case "switchTask": {
       const { [action.threadId]: _old, ...backgroundThreadEvents } = state.backgroundThreadEvents;
-      return updateBot({ ...state, backgroundThreadEvents, selectedId: action.botId, activeView: "chat" }, action.botId,
-        (bot) => ({ ...bot, switchingTo: action.threadId }));
+      return updateBot({ ...closeUnpinnedTray(state), backgroundThreadEvents, selectedId: action.botId, activeView: "chat" }, action.botId, (bot) => ({ ...bot, switchingTo: action.threadId }));
     }
     case "switchTaskFailed":
       return updateBot(state, action.botId, (bot) => bot.switchingTo === action.threadId ? { ...bot, switchingTo: undefined } : bot);
@@ -2111,7 +2111,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     ...bot,
     tasks: bot.tasks?.map((task) => ({ ...task, ...taskPatchFields(taskWrites.get(task.threadId)?.patch ?? {}) })),
   });
-  const [state, rawDispatch] = useReducer(reducer, initialState, restoreBotSettingsSection);
+  const [state, rawDispatch] = useReducer(reducer, initialState, (initial) => withRememberedTrayPin(restoreBotSettingsSection(initial)));
   const stateRef = useRef(state), selectionRevision = useRef(0);
   stateRef.current = state;
   const showThreads = useShowThreads();

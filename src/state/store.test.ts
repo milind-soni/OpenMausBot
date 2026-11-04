@@ -38,6 +38,7 @@ import {
 import { LAST_CONVERSATION_KEY } from "@/lib/last-conversation";
 import { cacheDesktopCapabilities, desktopCapabilitiesNow } from "@/lib/desktop";
 import { LAST_BOT_SECTION_KEY } from "@/lib/last-bot-section";
+import { NOTIFICATION_TRAY_PINNED_KEY } from "@/lib/notification-preferences";
 import { transcriptLookups } from "@/lib/transcript-derivations";
 import { openLiveEvents, type LiveEventSourceLike, type LiveEventsPlatform } from "../lib/live-events";
 import type { ModelVariantState, RuntimeEvent } from "../../shared/runtime-events";
@@ -3019,6 +3020,13 @@ describe("restoring the open conversation", () => {
       expect(stored.get(LAST_CONVERSATION_KEY)).toBe("room-1");
     });
 
+    it("the provider restores the notification tray pin remembered on this device (email 1a1a4fb0)", async () => {
+      const { stream } = await boot({ [NOTIFICATION_TRAY_PINNED_KEY]: "1" });
+      stream.send(hello());
+      await settle();
+      expect(seen.notificationsPinned).toBe(true);
+    });
+
     it("the provider remembers a section only while it is expanded", async () => {
       const { stored, stream } = await boot({ [LAST_BOT_SECTION_KEY]: "model" });
       stream.send(hello());
@@ -3157,10 +3165,21 @@ describe("notifications feed", () => {
     expect(state).toMatchObject({ notificationsPinned: true, notificationsOpen: false });
   });
 
-  it("survives a bot switch: select/switchTask never reset it", () => {
-    const withOpen = reducer(initialState, { type: "toggleNotifications", open: true });
-    const afterSwitch = reducer(withOpen, { type: "switchTask", botId: "other-bot", threadId: "other-thread" });
-    expect(afterSwitch.notificationsOpen).toBe(true);
+  it("unpinned, switching chats closes it; pinned, it stays open (email 1a1a4fb0)", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1" };
+    const switches = [
+      { type: "select", id: "other-bot" } as const,
+      { type: "switchTask", botId: "other-bot", threadId: "other-thread" } as const,
+      { type: "switchGroupTask", groupId: "room-1", threadId: "room-thread" } as const,
+    ];
+    for (const action of switches) expect(reducer(open, action).notificationsOpen).toBe(false);
+    const pinned = reducer(open, { type: "toggleNotificationsPinned" });
+    for (const action of switches) expect(reducer(pinned, action).notificationsOpen).toBe(true);
+  });
+
+  it("re-selecting the open chat leaves the tray as it is", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1" };
+    expect(reducer(open, { type: "select", id: "bot-1" }).notificationsOpen).toBe(true);
   });
 
   it("pinned, the feed survives Computer/Inspector/Activity/AppSettings opening", () => {

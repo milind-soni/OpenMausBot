@@ -1,3 +1,4 @@
+import { notificationTrayPinned } from "@/lib/notification-preferences";
 import type { NotificationTarget } from "@/lib/notify";
 import type { Action, AppState } from "./store";
 import { openOwnTeamChat } from "./team-chats";
@@ -116,4 +117,16 @@ export function openThread(
   if (bot) openBot(dispatch, bot, threadsShown);
   dispatch({ type: "notice", notice: { kind: "thread-gone", botName: bot?.name ?? null } });
   return false;
+}
+
+type NotificationTray = Pick<AppState, "notificationsOpen" | "notificationsPinned">;
+
+/** Leaving a chat closes the notification tray unless the person pinned it. */
+export function closeUnpinnedTray<T extends NotificationTray>(state: T): T {
+  return state.notificationsOpen && !state.notificationsPinned ? { ...state, notificationsOpen: false } : state;
+}
+
+/** The tray pin is remembered per device, so it holds after a restart. */
+export function withRememberedTrayPin<T extends NotificationTray>(state: T): T {
+  return notificationTrayPinned() ? { ...state, notificationsPinned: true } : state;
 }

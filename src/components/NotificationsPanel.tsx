@@ -3,6 +3,7 @@ import { AlertTriangle, AtSign, Bell, CheckCircle2, CircleHelp, HandHelping, Inf
 import { api, useStore, openNotificationTarget, type Action } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { setNotificationTrayPinned } from "@/lib/notification-preferences";
 import { useShowThreads } from "@/lib/thread-preferences";
 import type { LocaleKey } from "@/locales";
 import { BotAvatar, type BotAvatarProps } from "./Avatar";
@@ -124,6 +125,13 @@ export function NotificationsPanel() {
       void postNotificationRead(`/api/notifications/${entry.id}/read`, dispatch);
     }
     openNotificationTarget(dispatch, { botId: entry.botId, threadId: entry.threadId }, state, showThreads);
+    if (!state.notificationsPinned) dispatch({ type: "toggleNotifications", open: false });
+  };
+
+  const togglePinned = () => {
+    const pinned = !state.notificationsPinned;
+    dispatch({ type: "toggleNotificationsPinned", pinned });
+    setNotificationTrayPinned(pinned);
   };
 
   const markAllRead = () => {
@@ -146,7 +154,7 @@ export function NotificationsPanel() {
         </button>
         <button
           type="button"
-          onClick={() => dispatch({ type: "toggleNotificationsPinned" })}
+          onClick={togglePinned}
           aria-label={state.notificationsPinned ? t("notifications.unpin") : t("notifications.pin")}
           aria-pressed={state.notificationsPinned}
           title={state.notificationsPinned ? t("notifications.unpin") : t("notifications.pin")}
