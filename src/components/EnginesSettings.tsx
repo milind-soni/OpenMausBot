@@ -520,8 +520,10 @@ export function EnginesSettings({ simple = false, more }: { simple?: boolean; mo
     return group && groups.get(group)?.[0] === instance ? group : null;
   };
   const rows = listed.filter((instance) => !accountGroupOf(instance) || groupOf(instance));
-  // A hidden ordinary Claude instance takes its card, and the endpoint section inside it, away.
-  const orphanEndpoints = !groups.has("claude");
+  // A hidden ordinary Claude instance takes its card, and the endpoint section inside it, away. A hosted
+  // workspace lists every engine read-only and refuses instance changes, so there the section has no Add.
+  const hostedWorkspace = rows.length > 0 && rows.every((instance) => instance.readOnly);
+  const orphanEndpoints = !groups.has("claude") && !hostedWorkspace;
   const isReady = (instance: InstanceInfo) => { const group = groupOf(instance); return group ? accountsReady(groups.get(group)!) : engineReady(instance); };
   const renderEngine = (instance: InstanceInfo, bare = false) => {
     const group = groupOf(instance);
