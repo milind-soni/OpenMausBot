@@ -486,6 +486,11 @@ const bridge = {
     teamRetry: () => navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-send:team-retry") : Promise.reject(new Error("Choose Try again to move.")),
     openTeam: teamId => ipcRenderer.invoke("cloud-send:team-open", String(teamId)),
+    // A team's own page: its person's bots on My Cloud, and one moved in once they agree in main's own confirm.
+    teamBring: () => ipcRenderer.invoke("cloud-send:team-bring"),
+    teamBringMove: botId => navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-send:team-bring-move", String(botId)) : Promise.reject(new Error("Choose Move to move the bot.")),
+    teamBringStatus: () => ipcRenderer.invoke("cloud-send:team-bring-status"),
     // Settings → MausBot Cloud, Advanced: "Keep this computer's bots on this computer".
     keepHere: () => ipcRenderer.invoke("one-home:keep"),
     setKeepHere: on => isLocalPage || navigator.userActivation?.isActive === true
