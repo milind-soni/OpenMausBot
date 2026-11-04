@@ -770,8 +770,14 @@ describe("Gemini", () => {
         "Raw PCM test",
       );
       expect(audio.mime).toBe("audio/wav");
-      expect(Buffer.from(audio.bytes).subarray(0, 4).toString("ascii")).toBe("RIFF");
-      expect(Buffer.from(audio.bytes).subarray(8, 12).toString("ascii")).toBe("WAVE");
+      const wav = Buffer.from(audio.bytes);
+      expect(wav.subarray(0, 4).toString("ascii")).toBe("RIFF");
+      expect(wav.readUInt32LE(4)).toBe(36 + 4);
+      expect(wav.subarray(8, 12).toString("ascii")).toBe("WAVE");
+      expect(wav.readUInt16LE(20)).toBe(1);
+      expect(wav.readUInt32LE(24)).toBe(24000);
+      expect(wav.readUInt32LE(40)).toBe(4);
+      expect(wav.subarray(44)).toEqual(Buffer.from([0x00, 0x00, 0x01, 0x00]));
     } finally {
       geminiRawPcm = false;
     }

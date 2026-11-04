@@ -114,6 +114,14 @@ describe("every credential has one home on the keys page", () => {
     } as unknown as ConfigStatus;
     expect(savedState(gemini, config)).toEqual({ configured: false });
   });
+
+  it("reports the Gemini row as configured when Gemini is the active provider without a saved key", () => {
+    const gemini = keyEntry("geminiTts");
+    const config = {
+      tts: { provider: "gemini", configured: true },
+    } as unknown as ConfigStatus;
+    expect(savedState(gemini, config)).toEqual({ configured: true });
+  });
 });
 
 describe("searching the keys", () => {
