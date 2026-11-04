@@ -50,6 +50,8 @@ const NO_DRAG = "* { -webkit-app-region: no-drag !important; }";
  */
 export function createChromeRail({ createView, preload, args, url, wanted, listable = () => true, prefs = () => null, changed = () => {}, log = () => {} }) {
   let view = null, win = null, shown = false, expanded = false, held = false, beside = false, listAsked = false, dragLifted = null, skinBeside = null;
+  // The rail's page didn't load (this app's server was restarting): it loads again at the next refresh, or it stays a blank strip.
+  let unloaded = false;
   // Whether the page beside draws the frame; the window opens as if it does (windowChromeOptions).
   let framed = true, frameGrace = null;
   // The document beside the rail offered its button; a new one may still (`grace`); the page stopped responding.
@@ -116,6 +118,7 @@ export function createChromeRail({ createView, preload, args, url, wanted, lista
   };
   /** The page beside the rail asks: the window's own page, in its main frame (never a frame inside it). */
   const pageBeside = (event) => Boolean(page() && event?.sender === win.webContents && event.senderFrame === win.webContents.mainFrame);
+  const load = (contents) => { void contents.loadURL(url()).catch((error) => log(`chrome rail: ${error?.message ?? error}`)); };
   const ensureView = () => {
     if (view) return view;
     view = createView({ webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, preload, additionalArguments: args() } });
@@ -131,9 +134,14 @@ export function createChromeRail({ createView, preload, args, url, wanted, lista
       // A view that came up for a sheet missed the page's skin: this page's own may be another place's.
       if (skinBeside) contents.send("rail:skin", skinBeside);
     });
-    // A sheet can't come up on a page that didn't load: the view doesn't stay over the window for it.
-    contents.on("did-fail-load", (_event, code, _description, _url, mainFrame) => { if (mainFrame && code !== ABORTED && held) rail.holdOpen(false); });
-    void contents.loadURL(url()).catch((error) => log(`chrome rail: ${error?.message ?? error}`));
+    // Only a load's failing says so: the error page that replaces it finishes loading too. A sheet can't come up on a page that
+    // didn't load, so the view doesn't stay over the window for it; the next ask loads the page again.
+    contents.on("did-fail-load", (_event, code, _description, _url, mainFrame) => {
+      if (!mainFrame || code === ABORTED) return;
+      unloaded = true;
+      if (held) rail.holdOpen(false);
+    });
+    load(contents);
     return view;
   };
   const rail = {
@@ -169,6 +177,7 @@ export function createChromeRail({ createView, preload, args, url, wanted, lista
      * whole window otherwise. */
     refresh() {
       const standing = stands(), on = standing || (alive() && held);
+      if (view && unloaded && on) { unloaded = false; load(view.webContents); }
       if (on === shown) layout();
       else {
         shown = on;

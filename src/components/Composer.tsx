@@ -95,6 +95,7 @@ import {
   type ComposerSlashCommand,
 } from "@/lib/composer-commands";
 import { useSlashSkills } from "@/lib/use-slash-skills";
+import { randomUuid } from "@/lib/random-uuid";
 
 const supportsAgents = (instances: InstanceInfo[], candidate?: Bot) =>
   Boolean(candidate && instances.find((instance) => instance.instanceId === candidate.modelSelection.instanceId)?.capabilities?.agentsMcp);
@@ -579,7 +580,7 @@ export function Composer({
     const sentDraft: ComposerDraftSnapshot = {
       draftId,
       revision: draftRevision(draftId),
-      sendId: restoredSendId(draftId) ?? crypto.randomUUID(),
+      sendId: restoredSendId(draftId) ?? randomUuid(),
       text,
       requestText: body,
       attachments: [...attachments],
