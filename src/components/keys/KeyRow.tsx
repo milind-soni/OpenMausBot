@@ -7,7 +7,7 @@ import { t } from "@/lib/i18n";
 import type { KeyResult, KeyVia } from "@/lib/analytics-allowlist";
 import { keyRemoved, keySaved, keySaveFailure, savedKeyResult } from "@/lib/product-events";
 import { InstanceProviderMark } from "../ProviderIcons";
-import { keyEntry, keyForInstance, looksLikeOtherKey, savedState, type KeyEntry, type KeyId, type SavedState } from "./key-catalog";
+import { keyEntry, keyForInstance, looksLikeOtherKey, savedState, shownKeyEntry, type KeyEntry, type KeyId, type SavedState } from "./key-catalog";
 import { checkKey, cleanKey, looksLikeKey, saveKey } from "./key-save";
 
 export const KEY_FIELD = "h-8 w-full min-w-0 rounded-lg border border-hairline/60 bg-inset px-3 font-mono text-[13px] leading-8 text-ink placeholder:text-ink-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-focus/60 disabled:opacity-60";
@@ -123,8 +123,8 @@ export function KeyRow({
     (goal === "input" ? inputRef.current : replaceRef.current)?.focus();
   });
 
-  const entry = keyEntry(id);
-  const row = rowId ? keyEntry(rowId) : entry;
+  const entry = shownKeyEntry(id, state.config);
+  const row = rowId ? shownKeyEntry(rowId, state.config) : entry;
   const target = entry.target;
   if (!target) throw new Error(`${id} is not saved by a key row`);
   const pointer = row.id !== entry.id;
