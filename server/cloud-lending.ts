@@ -83,7 +83,7 @@ export function cloudHomeLendingRefusal(turn: CloudLendingTurn): CloudLendingRef
     owner = turn.ownerPerson(personOf(turn.thread[index]));
   } else {
     const run = turn.routineRun();
-    owner = request.automation !== "webhook" && Boolean(run) && run!.triggerSource !== "webhook" &&
+    owner = request.automation !== "webhook" && request.automation !== "api" && Boolean(run) && run!.triggerSource !== "webhook" &&
       run!.ownerAuthored && (run!.triggerSource !== "manual" || run!.ownerStarted);
   }
   if (!owner) return "not-owner";

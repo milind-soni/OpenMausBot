@@ -21,6 +21,12 @@ describe("who may use a Mac lent to a Cloud home (review: guests, webhooks)", ()
   it("the owner's own conversation from one of their devices may", () => {
     expect(mayLend(turn({}))).toBe(true);
   });
+  it("a turn an outside caller started through the bot's API may not, whoever's line it reads", () => {
+    const apiLine = said("m1", undefined, { via: "api" });
+    expect(mayLend(turn({ request: request("m1", { automation: "api" }), thread: [apiLine] }))).toBe(false);
+    expect(cloudHomeLendingRefusal(turn({ request: request("m1", { automation: "api" }), thread: [said("m1", OWNER, { via: "api" })] }))).toBe("not-owner");
+    expect(cloudHomeLendingRefusal(turn({ request: request("m1", { automation: "api" }), thread: [said("m1", OWNER)], routineRun: run({ ownerStarted: true }) }))).toBe("not-owner");
+  });
   it("a conversation a bot opened may not, even for the owner's line: another bot's words start its session", () => {
     expect(cloudHomeLendingRefusal(turn({ botOpened: true }))).toBe("someone-else");
     expect(mayLend(turn({ botOpened: false }))).toBe(true);

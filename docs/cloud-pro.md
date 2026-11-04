@@ -1750,8 +1750,11 @@ before the engines are read again.
 
 **`POST /api/cloud/plan`**, signed over its JSON body like the sleep request:
 `{"v":1,"cancelled":true}` when the customer cancels, `{"v":1,"cancelled":false}`
-when renewal is back on. `200 {"ok":true}`; `400 {"error":"invalid_plan"}`
-without a boolean `cancelled`. The Admin does not send it yet.
+when renewal is back on, and `{"v":1,"tier":"starter"}` for which plan this Cloud
+is on now (either or both). `200 {"ok":true}`; `400 {"error":"invalid_plan"}`
+without one of them, or with a malformed one. The tier is kept across restarts
+(`server/host/cloud-plan-tier.ts`) and counts at once; a home that was never told
+is not Starter. Bot API uses it. The Admin does not send any of this yet.
 
 ## What the desktop reads from the Admin
 

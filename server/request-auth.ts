@@ -419,6 +419,9 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["PUT"], path: /^\/api\/bots\/[\w-]+\/reports-to$/ },
   // a Team Cloud bot's sharing: the handler lets only someone who can edit the bot change it
   { methods: ["PUT"], path: /^\/api\/bots\/[\w-]+\/access$/ },
+  // a bot's API: anyone who sees the bot reads whether it is on; the handler lets only someone who can edit the bot change it
+  { methods: ["GET", "POST"], path: /^\/api\/bots\/[\w-]+\/bot-api$/ },
+  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/bot-api\/new-key$/ },
   // asking to chat with a team bot one can view: the handler puts a card in the inbox of whoever can let them in
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/access-request$/ },
 ];
