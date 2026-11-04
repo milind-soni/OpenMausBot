@@ -3071,7 +3071,7 @@
   "permissions.approval.helpHanded": "Default for new threads, routines and work handed to it. Full access also applies at once to every existing thread. Use Refresh permissions on a thread to apply the current level to that conversation.",
   "permissions.approval.applyFull": "Apply Full access to all threads",
   "permissions.outbound.title": "Sending on your behalf",
-  "permissions.outbound.help": "Emails, messages, posts, invites, and payments through connected apps. Reading and drafting never count. Full access sends without asking.",
+  "permissions.outbound.help": "Emails, messages, posts, invites, and payments through connected apps. Reading and drafting never count. These sending rules also apply at Full access.",
   "permissions.outbound.ask": "Ask every time",
   "permissions.outbound.askHint": "Every send waits for your tap.",
   "permissions.outbound.allow": "Allow a daily amount",

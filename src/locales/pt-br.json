@@ -2635,7 +2635,6 @@
   "permissions.approval.helpHanded": "Padrão para novas conversas, rotinas e trabalhos repassados a ele. O acesso total também se aplica imediatamente a todas as conversas existentes. Use Atualizar permissões em uma conversa para aplicar o nível atual a ela.",
   "permissions.approval.applyFull": "Aplicar acesso total a todas as conversas",
   "permissions.outbound.title": "Enviar em seu nome",
-  "permissions.outbound.help": "E-mails, mensagens, publicações, convites e pagamentos por aplicativos conectados. Ler e redigir nunca contam. O acesso total envia sem perguntar.",
   "permissions.outbound.ask": "Perguntar sempre",
   "permissions.outbound.askHint": "Cada envio espera seu toque.",
   "permissions.outbound.allow": "Permitir uma quantidade diária",

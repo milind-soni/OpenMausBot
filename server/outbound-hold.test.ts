@@ -61,7 +61,7 @@ function setup(bot: HoldBot) {
     activeGroupTurnForBot: () => null,
     notify: (notification) => notified.push(notification),
   };
-  const input = { bot, threadId: "t1", tool: "GMAIL_SEND_EMAIL", calls, opaque: false, fullAccess: false };
+  const input = { bot, threadId: "t1", tool: "GMAIL_SEND_EMAIL", calls, opaque: false };
   return { hold: createOutboundHold(deps), dataDir, appended, patches, activity, notified, outboundRequests, input };
 }
 
@@ -147,12 +147,8 @@ describe("createOutboundHold", () => {
   });
 
   it("reserve refuses when the hold was not approved and the policy is ask", async () => {
-    const { hold, dataDir, input } = setup(bot({ policy: "ask", dailyCap: 10 }));
-    expect(() => hold.reserve({ ...input, fullAccess: false, approved: false })).toThrow(/outbound policy changed/);
-
-    // Full access sends freely and logs it.
-    expect(() => hold.reserve({ ...input, fullAccess: true, approved: false })).not.toThrow();
-    await flushDecisionLog(dataDir);
-    expect(readDecisions(dataDir, 10)).toMatchObject([{ decision: "auto-approved", source: "outbound", rule: "full-access" }]);
+    const { hold, input } = setup(bot({ policy: "ask", dailyCap: 10 }));
+    expect(() => hold.reserve({ ...input, approved: false })).toThrow(/outbound policy changed/);
+    expect(() => hold.reserve({ ...input, approved: true })).not.toThrow();
   });
 });

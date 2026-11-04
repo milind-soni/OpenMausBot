@@ -1,6 +1,6 @@
 // Import first: it reads a Cloud home's secrets off the launcher's pipe before any module can start a process.
 import { BOOT_CLOUD_SECRETS } from "./cloud-secrets-boot.ts";
-import { gmailDraftRefusal, reserveGmailDrafts } from "./gmail-draft-policy.ts";
+import { reserveGmailDrafts } from "./gmail-draft-policy.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, realpathSync, rmSync } from "node:fs";
@@ -1665,6 +1665,8 @@ const MAX_CREATED_BOT_INSTRUCTIONS = 4_000;
 // Only an orphan backstop: normal terminal paths revoke a capability synchronously.
 const INTERNAL_CAPABILITY_ORPHAN_MS = 30 * 24 * 60 * 60_000;
 const internalCapabilities = new Map<string, InternalCapability>();
+const gmailDraftsByGeneration = new Map<string, Set<string>>();
+const gmailDraftsByNode = new Map<string, Set<string>>();
 const activeInternalGenerationByThread = new Map<string, string>();
 const internalGenerationByProviderTurn = new ProviderTurnGenerationRegistry();
 const computerSelectionTurns = new Map<string, {
@@ -1742,6 +1744,7 @@ function mintInternalCapability(capability: Omit<InternalCapability, "orphanExpi
   if (internalCapabilities.get(token)?.generation !== capability.generation) {
     internalCapabilities.set(token, {
       ...capability,
+      ...(capability.kind === "connectors" ? { gmailDrafts: gmailDraftsForTurn(capability.threadId, capability.generation, capability.roomHandoffId) } : {}),
       orphanExpiresAt: Date.now() + INTERNAL_CAPABILITY_ORPHAN_MS,
       turnStartedAt: Date.now(),
     });
@@ -1760,6 +1763,7 @@ function endForeignTurns(threadId: string, generation?: string): void {
 }
 
 function revokeInternalCapabilityGeneration(threadId: string, generation: string): void {
+  gmailDraftsByGeneration.delete(generation);
   if (standInRoots.delete(generation)) coordinator.endTurn(generation, { ok: true, text: "" });
   endForeignTurns(threadId, generation);
   if (guestDrivenTurns.get(threadId) === generation) guestDrivenTurns.delete(threadId);
@@ -1954,7 +1958,34 @@ const directRequestOwners = new Map<string, {
   generation: string; messageId?: string; generations: Set<string>; turnId: string | null; stopped?: boolean;
   automation?: RoutineRunTrigger;
   origin?: WorkOrigin; personLine?: true; kind?: TurnKind;
+  gmailDrafts?: Set<string>;
 }>();
+
+function gmailDraftsForNode(id: string): Set<string> | undefined {
+  for (const cachedId of gmailDraftsByNode.keys()) {
+    const node = coordinator.node(cachedId);
+    if (!node || ENDED.has(node.status)) gmailDraftsByNode.delete(cachedId);
+  }
+  const node = coordinator.node(id);
+  if (!node) return undefined;
+  const cached = gmailDraftsByNode.get(id);
+  if (cached) return cached;
+  const owner = directRequestOwners.get(node.threadId);
+  const reserved = owner?.generations.has(id) && owner.gmailDrafts ? owner.gmailDrafts :
+    (node.parentId ? gmailDraftsForNode(node.parentId) : undefined) ?? new Set<string>();
+  gmailDraftsByNode.set(id, reserved);
+  return reserved;
+}
+
+function gmailDraftsForTurn(threadId: string, generation: string, handoffId?: string): Set<string> {
+  const cached = gmailDraftsByGeneration.get(generation);
+  if (cached) return cached;
+  const owner = directRequestOwners.get(threadId);
+  const reserved = owner?.generation === generation && owner.gmailDrafts ? owner.gmailDrafts :
+    gmailDraftsForNode(handoffId ?? generation) ?? new Set<string>();
+  gmailDraftsByGeneration.set(generation, reserved);
+  return reserved;
+}
 type DirectTurnOutcome = HostTurnResult;
 const directFollowupTurns = new ProviderTurnGenerationRegistry<DirectTurnOutcome>();
 const directFollowupSettlers = new Map<string, { threadId: string; settle?: () => void }>();
@@ -7862,6 +7893,9 @@ async function beginTurn(
   const requestOrigin = requestWorkOrigin({ trigger: opts?.automationSource, guest: guestConfined, handed: opts?.origin, continued,
     line: !continuation && requestMessageId === userMessage.id ? userMessage : undefined });
   directRequestOwners.set(threadId, { generation: dispatchClaimId, messageId: requestMessageId,
+    gmailDrafts: opts?.coordination ? gmailDraftsForNode(opts.coordination.id) :
+      continuation && previousRequest && !previousRequest.stopped && (!requestMessageId || previousRequest.messageId === requestMessageId)
+        ? previousRequest.gmailDrafts ?? new Set<string>() : new Set<string>(),
     generations: requestGenerations, turnId: null, ...(opts?.automationSource ? { automation: opts.automationSource } : {}), origin: requestOrigin, ...(personLine || (continued && previousRequest?.personLine) ? { personLine: true as const } : {}),
     kind: directTurnKind({ ...opts, peerAsk: opts?.peerAsk ?? userMessage.peerAsk }) });
   const notesRefused = CLOUD_PERSONAL && cloudHomeLendingRefusal(cloudLendingTurn({ botId, threadId, generation: dispatchClaimId })) !== null;
@@ -9844,6 +9878,8 @@ async function runClaimedGroupMemberTurn(
     return true;
   }
   const internalGeneration = beginInternalCapabilityGeneration(threadId);
+  if (orchestration?.roomHandoffId) gmailDraftsByGeneration.set(internalGeneration,
+    gmailDraftsForNode(orchestration.roomHandoffId) ?? new Set<string>());
   if (operation) roomTurnStarted(internalGeneration, operation);
   if (roomGuestConfined) guestDrivenTurns.set(threadId, internalGeneration);
   // Only a personal Cloud's owner answering their own line in a room they alone wrote in is theirs.
@@ -14637,7 +14673,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             rule: verdict.rule,
           });
         }
-        // Below Full access, a tools/call that sends something waits on a card or spends the daily allowance.
         const rpc = body && typeof body === "object" && !Array.isArray(body)
           ? (body as { id?: unknown; method?: unknown; params?: unknown })
           : null;
@@ -14656,12 +14691,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const connectorCalls = rpc?.method === "tools/call" && typeof rpcParams?.name === "string"
           ? connectorCallsIn(rpcParams.name, rpcParams.arguments)
           : [];
-        const draftRefusal = gmailDraftRefusal(coordinator.node(internalCapability.generation)?.text ?? "", connectorCalls);
-        if (draftRefusal) {
-          appendDecision(DATA_DIR, { threadId: internalCapability.threadId, botId: currentSender.id, botName: currentSender.name,
-            tool: connectorCalls.map(call => call.slug).join(", "), decision: "auto-denied", source: "connector-scope", rule: "gmail-drafts", summary: draftRefusal });
-          return refuseOutbound(draftRefusal);
-        }
         if (proactive.fence.refusesConnectorCall(currentSender, internalCapability.threadId, body)) return refuseOutbound(READ_AND_DRAFT_REFUSAL);
         const scopeRefusal = managedPolicy.appsCallRefusal(connectorCalls, serviceSlugs) ?? await teamConnections.callRefusal(internalCapability, connectorCalls); if (scopeRefusal) return refuseOutbound(scopeRefusal);
         const access = connectorAccessDecision(currentSender.connectorScopes, connectorCalls, serviceSlugs);
@@ -14676,13 +14705,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const opaque = connectorCalls.some(call => call.slug === "COMPOSIO_PROXY_EXECUTE");
         if (opaque && currentSender.connectorTools !== undefined) return refuseOutbound("OpenMausBot cannot verify this code against this bot's tool grants. Use a direct app tool.");
-        // A room turn can run at a Chief's delegated level, which only the room handoff carries.
-        const sendsFreely = () => roomTurnLevels.forRequest(internalCapability.threadId, internalCapability.botId,
-          () => sourceApprovalMode(internalCapability.botId, internalCapability.threadId)) === "full";
-        const fullAccess = outboundTool !== null && sendsFreely();
-        const held: OutboundHoldAnswer = outboundTool && !fullAccess
+        const held: OutboundHoldAnswer = outboundTool
           ? await outboundHold.hold({
-            bot: currentSender, threadId: internalCapability.threadId, tool: outboundTool, calls: outboundCalls, opaque, fullAccess,
+            bot: currentSender, threadId: internalCapability.threadId, tool: outboundTool, calls: outboundCalls, opaque,
             active: () => internalCapabilityIsActive(internalCapability),
           })
           : { ok: true, approved: false };
@@ -14703,8 +14728,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             : req.headers["mcp-session-id"],
           () => {
             requireActiveInternalCapability();
-            const draftReservation = reserveGmailDrafts(connectorCalls, internalCapability.gmailDrafts ??= new Set());
-            if (draftReservation) refuseDispatch(draftReservation);
             const fresh = store.bot(internalCapability.botId);
             if (!fresh || fresh.composio === false || !composio.configured(cfg) || managedPolicy.appsCallRefusal(connectorCalls, serviceSlugs)) refuseDispatch("Connected apps were disabled while this call waited.");
             const freshAccess = connectorAccessDecision(fresh.connectorScopes, connectorCalls, serviceSlugs);
@@ -14713,16 +14736,21 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 (call.kind === "unrecognized" && fresh.connectorTools !== undefined)) {
               refuseDispatch("This bot's connected-app permissions changed. The call was not run.");
             }
+            const reservedDrafts = internalCapability.gmailDrafts ??= new Set();
+            const nextDrafts = new Set(reservedDrafts);
+            const draftReservation = reserveGmailDrafts(connectorCalls, nextDrafts);
+            if (draftReservation) refuseDispatch(draftReservation);
             if (outboundTool) {
               try {
                 outboundHold.reserve({
                   bot: fresh, threadId: internalCapability.threadId, tool: outboundTool, calls: outboundCalls, opaque,
-                  fullAccess: fullAccess && sendsFreely(), approved: outboundApproved,
+                  approved: outboundApproved,
                 });
               } catch (error) {
                 refuseDispatch(error instanceof Error ? error.message : String(error));
               }
             }
+            for (const key of nextDrafts) reservedDrafts.add(key);
           }, undefined, actor.access,
         ); } catch (error) {
           if (dispatchRefusal) return refuseOutbound(dispatchRefusal);

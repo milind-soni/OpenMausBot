@@ -2750,7 +2750,6 @@
   "permissions.approval.helpHanded": "新しいスレッド、ルーティン、このボットに任された作業の既定値です。フルアクセスは、既存のすべてのスレッドにも即座に適用されます。現在のレベルを特定の会話に適用するには、そのスレッドで「権限を更新」を使用してください。",
   "permissions.approval.applyFull": "すべてのスレッドにフルアクセスを適用",
   "permissions.outbound.title": "代理での送信",
-  "permissions.outbound.help": "接続したアプリを通じた、メール、メッセージ、投稿、招待、支払いが対象です。閲覧と下書きは含まれません。フルアクセスでは、確認なしで送信されます。",
   "permissions.outbound.ask": "毎回確認する",
   "permissions.outbound.askHint": "送信のたびに、あなたの操作を待ちます。",
   "permissions.outbound.allow": "1日の上限まで許可",

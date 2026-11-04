@@ -3027,7 +3027,6 @@
   "permissions.approval.helpHanded": "新建对话、例行任务以及转交给它的工作的默认值。完全访问权限也会立即应用到所有现有对话。如需将当前层级应用到某段对话，请在对话中使用「刷新权限」。",
   "permissions.approval.applyFull": "对所有对话应用完全访问权限",
   "permissions.outbound.title": "代你发送内容",
-  "permissions.outbound.help": "通过已连接的应用发送邮件、消息、帖子、邀请和付款。读取和起草不计入。完全访问权限会直接发送，无需询问。",
   "permissions.outbound.ask": "每次都询问",
   "permissions.outbound.askHint": "每次发送都需要你确认。",
   "permissions.outbound.allow": "允许每日额度",

@@ -2902,7 +2902,6 @@
   "permissions.approval.helpHanded": "새 스레드, 루틴, 이 봇에게 맡긴 작업의 기본값이에요. 전체 접근은 기존 스레드 모두에도 바로 적용돼요. 스레드에서 권한 새로고침을 쓰면 그 대화에 현재 수준이 적용돼요.",
   "permissions.approval.applyFull": "모든 스레드에 전체 접근 적용",
   "permissions.outbound.title": "대신 보내기",
-  "permissions.outbound.help": "연결된 앱을 통한 이메일, 메시지, 게시물, 초대, 결제예요. 읽기와 초안 작성은 포함되지 않아요. 전체 접근에서는 묻지 않고 보내요.",
   "permissions.outbound.ask": "매번 묻기",
   "permissions.outbound.askHint": "보낼 때마다 내가 누르기를 기다려요.",
   "permissions.outbound.allow": "하루 허용량 정하기",

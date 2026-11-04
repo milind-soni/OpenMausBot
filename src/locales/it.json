@@ -2637,7 +2637,6 @@
   "permissions.approval.helpHanded": "Predefinito per le nuove conversazioni, le routine e il lavoro che gli viene affidato. Accesso completo si applica subito anche a ogni conversazione già presente. Usa «Aggiorna permessi» su una conversazione per applicarle il livello attuale.",
   "permissions.approval.applyFull": "Applica Accesso completo a tutte le conversazioni",
   "permissions.outbound.title": "Invii per tuo conto",
-  "permissions.outbound.help": "Email, messaggi, post, inviti e pagamenti tramite le app collegate. La lettura e le bozze non contano mai. Accesso completo invia senza chiedere.",
   "permissions.outbound.ask": "Chiedi ogni volta",
   "permissions.outbound.askHint": "Ogni invio aspetta un tuo clic.",
   "permissions.outbound.allow": "Consenti una quota giornaliera",

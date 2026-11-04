@@ -2694,7 +2694,6 @@
   "permissions.approval.helpHanded": "Domyślne dla nowych wątków, rutyn i przekazanej mu pracy. Pełny dostęp obowiązuje też od razu we wszystkich istniejących wątkach. Użyj opcji Odśwież uprawnienia w wątku, aby zastosować bieżący poziom do tej rozmowy.",
   "permissions.approval.applyFull": "Zastosuj pełny dostęp do wszystkich wątków",
   "permissions.outbound.title": "Wysyłanie w twoim imieniu",
-  "permissions.outbound.help": "E-maile, wiadomości, posty, zaproszenia i płatności przez połączone aplikacje. Czytanie i tworzenie szkiców nigdy się nie liczą. Pełny dostęp wysyła bez pytania.",
   "permissions.outbound.ask": "Pytaj za każdym razem",
   "permissions.outbound.askHint": "Każde wysłanie czeka na twoje kliknięcie.",
   "permissions.outbound.allow": "Zezwól na dzienny limit",
