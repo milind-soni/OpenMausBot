@@ -92,7 +92,7 @@ describe("the inbox's words", () => {
   });
 
   it("keys a password, a sign-in and an app to connect by what the line waits on the person for", () => {
-    const secret: InboxRow = { ...news, kind: "ask", tab: "needs-you", secret: { target: "custom", label: "Stripe key", description: "", placeholder: "", helpUrl: "", requestKey: "k" } as InboxRow["secret"] };
+    const secret: InboxRow = { ...news, kind: "ask", tab: "needs-you", secret: { target: "custom", label: "Stripe key", description: "", placeholder: "", helpUrl: "", requestKey: "k" } as unknown as InboxRow["secret"] };
     const signIn: InboxRow = { ...news, kind: "ask", tab: "needs-you", signIn: { url: "https://shop.test", site: "shop.test", place: "browser" } as InboxRow["signIn"] };
     const connect: InboxRow = { ...news, kind: "ask", tab: "needs-you", connector: { label: "Gmail", description: "Read mail", resumeKey: "r1" } as InboxRow["connector"] };
     expect(answerKindOf(secret)).toBe("password");
@@ -193,7 +193,7 @@ describe("a line read in full", () => {
   it("answers a password, a sign-in and an app to connect with the chat's own card for each", async () => {
     const base = { ...news, kind: "ask" as const, tab: "needs-you" as const };
     const rows: InboxRow[] = [
-      { ...base, id: "pw", secret: { target: "custom", label: "Stripe key", description: "For the billing report", placeholder: "sk_live_…", helpUrl: "", requestKey: "k", reason: "To read invoices" } as InboxRow["secret"] },
+      { ...base, id: "pw", secret: { target: "custom", label: "Stripe key", description: "For the billing report", placeholder: "sk_live_…", helpUrl: "", requestKey: "k", reason: "To read invoices" } as unknown as InboxRow["secret"] },
       { ...base, id: "si", signIn: { url: "https://shop.test", site: "shop.test", place: "browser", reason: "To see the order" } as InboxRow["signIn"] },
       { ...base, id: "co", connector: { label: "Gmail", description: "Read mail", resumeKey: "r1", status: "required" } as InboxRow["connector"] },
     ];
