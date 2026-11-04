@@ -734,6 +734,16 @@ describe("createOpenAIChatRuntime stream termination", () => {
     expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
   });
 
+  it("finishes a plain reply from a relay that adds an empty legacy function_call", async () => {
+    const events = await runTurn(
+      'data: {"choices":[{"index":0,"delta":{"content":"OK","function_call":{"name":"","arguments":""}}}]}\n\n'
+        + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+    );
+    expect(events.find((event) => event.type === "runtime.error")).toBeUndefined();
+    expect(events.find((event) => event.type === "item.completed")).toMatchObject({ text: "OK" });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+  });
+
   it("still honors data: [DONE]", async () => {
     const events = await runTurn('data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n');
     expect(events.find((event) => event.type === "item.completed")).toMatchObject({ text: "hi" });

@@ -1,4 +1,6 @@
 // Structured chat-completions calls. Assistant content becomes a tool call only for a local model, in chat-text-tool-calls.ts.
+import { randomUUID } from "node:crypto";
+
 export interface ChatToolCall {
   id: string;
   type: "function";
@@ -37,6 +39,22 @@ export class ChatReasoningDetails {
 export class ChatToolCalls {
   private calls = new Map<number, ChatToolCall>();
   private argumentChars = 0;
+  /** The pre-tools `function_call` field some OpenAI-compatible relays still answer with: one call, no ID. */
+  private legacy = { name: "", arguments: "" };
+
+  addLegacy(value: unknown): void {
+    if (value === undefined || value === null) return;
+    const fn = object(value);
+    if (!fn) throw new ChatProtocolError("provider returned an invalid function_call");
+    for (const field of ["name", "arguments"] as const) {
+      if (fn[field] === undefined || fn[field] === null) continue;
+      if (typeof fn[field] !== "string") throw new ChatProtocolError("provider returned invalid function_call arguments or name");
+      this.legacy[field] += fn[field];
+    }
+    if (this.legacy.name.length > 64 || this.legacy.arguments.length > MAX_ARGUMENT_CHARS) {
+      throw new ChatProtocolError("provider tool calls exceeded the size limit");
+    }
+  }
 
   add(value: unknown, streaming: boolean): void {
     if (value === undefined || value === null) return;
@@ -84,10 +102,15 @@ export class ChatToolCalls {
   finish(reason: string | null, malformedFrame: boolean): ChatToolCall[] {
     const calls = [...this.calls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call);
     if (malformedFrame) throw new ChatProtocolError("provider stream contained a malformed completion frame");
-    if (reason === "function_call") throw new ChatProtocolError("legacy function_call is unsupported; use structured tool_calls");
-    if (reason === "tool_calls" && !calls.length) throw new ChatProtocolError("provider ended for tool calls without a complete call");
+    // A legacy call counts only alone and named: relays that mirror tool_calls or send an empty placeholder add nothing.
+    if (!calls.length && this.legacy.name) {
+      calls.push({ id: `call_${randomUUID().replaceAll("-", "")}`, type: "function", function: { ...this.legacy } });
+    }
+    if ((reason === "tool_calls" || reason === "function_call") && !calls.length) {
+      throw new ChatProtocolError("provider ended for tool calls without a complete call");
+    }
     if (!calls.length) return calls;
-    if (reason !== null && reason !== "tool_calls" && reason !== "stop") {
+    if (reason !== null && reason !== "tool_calls" && reason !== "function_call" && reason !== "stop") {
       throw new ChatProtocolError("provider tool calls were truncated or malformed");
     }
     const ids = new Set<string>();
