@@ -2,6 +2,7 @@
 // per-turn limits are the harness's, since one proxy can serve many turns of a warm engine.
 import { agentsCallMember, resolveAgentsCall } from "../../shared/agents-tool-names.ts";
 import { CREDENTIAL_TARGETS, isCredentialTargetId } from "../../shared/credential-request.ts";
+import { isSkillSwitchAction, skillSwitchVerb } from "../../shared/skill-request.ts";
 
 import { peerName } from "../peer-roster.ts";
 import { callCardTool, CARD_TOOL_NAMES } from "./agents-call-cards.ts";
@@ -830,8 +831,22 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     return { text: `Imported skills:\n${live}\n\nStaged (waiting for the user's decision):\n${pending}` };
   }
   if (name === "skill_manage") {
+    if (isSkillSwitchAction(args.action)) {
+      const skillName = typeof args.skill_name === "string" ? args.skill_name.trim() : "";
+      const verb = skillSwitchVerb(args.action);
+      if (!skillName) return { text: `skill_manage needs skill_name to ${verb} a skill. Copy the exact name from skills_list.`, isError: true };
+      const r = await api("/api/internal/skills/stage", {
+        method: "POST",
+        body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, action: args.action, skill_name: skillName }),
+      });
+      const completed = completedProposalResult(r, `a request to ${verb} skill “${skillName}”`);
+      if (completed) return completed;
+      return {
+        text: `A confirmation card is now visible to the user to ${verb} skill “${skillName}”. Nothing changes until they approve it. End this turn and wait for the decision.`,
+      };
+    }
     if (args.action !== "create" && args.action !== "update") {
-      return { text: 'skill_manage action must be "create" or "update".', isError: true };
+      return { text: 'skill_manage action must be "create", "update", "enable", "disable" or "delete".', isError: true };
     }
     const skillMd = typeof args.skill_md === "string" ? args.skill_md : "";
     if (!skillMd.trim()) {

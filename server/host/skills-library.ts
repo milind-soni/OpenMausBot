@@ -361,7 +361,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
 
     shareFromBot,
 
-    undoReceipt(botId: string, threadId: string, message: Message, request: SkillRequestCardData & { shared: SkillShareRecord }): UndoResult {
+    undoReceipt(botId: string, threadId: string, message: Message, request: SkillRequestCardData & { action: "create" | "update"; shared: SkillShareRecord }): UndoResult {
       const undone = undoSharedLearnedSkill({
         authorId: botId,
         name: request.name,

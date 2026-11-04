@@ -99,7 +99,7 @@ import { createDataRoutes } from "./data/routes.ts";
 import { DataSheetRegistry } from "./data/sheet.ts";
 import { DataFailure } from "./data/types.ts";
 import { TeamComputers, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
-import { isEffortLevel, type CardAnswerer, type ResolvedSender, type SignInRequestCardData, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
+import { isEffortLevel, type CardAnswerer, type OptionCardData, type ResolvedSender, type SignInRequestCardData, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
 import { isPersistentQuestionCard, shouldSettleRequestCard } from "../shared/ask-question.ts";
 import { parseToolScope } from "../shared/tool-scope.ts";
 import type { TeamComputersPayload } from "../shared/team-computer.ts";
@@ -384,7 +384,9 @@ import { pickBotName } from "./names.ts";
 import { botSkillTemplateSchema, newBotDefaultsSchema } from "./new-bot-defaults.ts";
 import { expandLearnTurnText, learnSource } from "./skill-learn.ts";
 import { connectedAppsForSetup, expandSetupTurnText, setupModeActive, setupSystemPrompt, type SetupConnectedApps } from "./setup-mode.ts"; import { forgetSetupPresser, setupPresser, setupTurnText, takeSetupRequest } from "./setup-request.ts"; import { setupSuggestionsFor } from "./setup-suggestions.ts"; import { createSetupRequestRoutes } from "./routes/setup-request.ts";
-import type { SkillRequestCardData } from "../shared/skill-request.ts";
+import { isSkillSwitchAction, type SkillRequestCardData, type SkillSwitchAction } from "../shared/skill-request.ts";
+import { setImportedSkillEnabled } from "./imported-skills.ts";
+import { skillSwitchCardCopy, skillSwitchStillMatches, skillSwitchTarget, type SwitchableSkill, type SkillSwitchTarget } from "./skill-switch.ts";
 import { checkSoulDrift, readSoulDrift, soulFile, writeSoulMirror } from "./bot-folder.ts";
 import {
   botPersona,
@@ -9569,11 +9571,14 @@ function undoSkillCard(botId: string, threadId: string, messageId: string): Undo
   if (request.botId !== botId || request.threadId !== threadId) {
     return { claimed: true, state: "invalid", error: "this skill request belongs to a different bot", status: 403 };
   }
-  if (request.shared) return skillsHost.undoReceipt(botId, threadId, message, { ...request, shared: request.shared });
+  const action = request.action;
+  // A switch or delete always waited for the person, so it never has an undo.
+  if (isSkillSwitchAction(action)) return { claimed: true, state: "invalid", error: "This change was approved on its card and can't be undone here.", status: 409 };
+  if (request.shared) return skillsHost.undoReceipt(botId, threadId, message, { ...request, action, shared: request.shared });
   const undone = undoSkillWrite(botId, {
     stagedId: request.stagedId,
     name: request.name,
-    action: request.action,
+    action,
     ...(request.previous ? { previous: { skillMd: request.previous.preview, source: request.previous.source, references: request.previous.references ?? [] } } : {}),
   });
   if ("stale" in undone) return { claimed: true, state: "invalid", error: UNDO_STALE, status: 409, stale: true };
@@ -11450,6 +11455,99 @@ function appendSkillRequestCard(args: {
   };
 }
 
+/** The skill a bot asked to turn on, turn off or delete, as it is now. */
+function switchableSkill(bot: BotRecord, name: string): SwitchableSkill | undefined {
+  const own = listSkills(bot.id).find((skill) => skill.name === name);
+  if (own) return { kind: "own", enabled: own.enabled, text: readSkillFile(bot.id, name), source: own.source, description: own.description };
+  const seen = listBotSkills(bot).find((skill) => skill.name === name);
+  if (!seen) return undefined;
+  const imported = (seen as { origin?: string }).origin === "imported";
+  return { kind: imported ? "imported" : "fixed", enabled: seen.enabled, text: imported ? readBotSkillFile(bot, name) : null, source: seen.source, description: seen.description };
+}
+
+/** Turning a skill on or off, or deleting it, always waits for the person, even with Full Access. */
+function stageSkillSwitch(res: ServerResponse, from: BotRecord, threadId: string, action: SkillSwitchAction, body: Record<string, unknown>) {
+  const name = typeof body.skill_name === "string" ? body.skill_name.trim() : "";
+  if (!name) return json(res, 400, { error: `skill_name is required when action is ${action}` });
+  const persistence = skillProposalPersistence(from.id, threadId);
+  if (!persistence.ok) return json(res, persistence.status, { error: persistence.error });
+  const target = skillSwitchTarget(name, action, switchableSkill(from, name));
+  if ("error" in target) return json(res, 422, { error: target.error });
+  const card = appendSkillSwitchCard({ botId: from.id, threadId, action, name, target });
+  appendDecision(DATA_DIR, { threadId, requestId: card.requestId, botId: from.id, botName: from.name,
+    tool: "stage_skill", summary: card.summary, decision: "card-shown", source: "skill" });
+  return json(res, 201, { state: "pending", name, action, gist: target.gist, warnings: [], summary: card.summary });
+}
+
+function appendSkillSwitchCard(args: { botId: string; threadId: string; action: SkillSwitchAction; name: string; target: SkillSwitchTarget }): { requestId: string; summary: string } {
+  const requestId = randomUUID();
+  const copy = skillSwitchCardCopy(args.action, args.name, args.target.gist);
+  const payload: SkillRequestCardData = {
+    version: 1,
+    requestId,
+    botId: args.botId,
+    threadId: args.threadId,
+    // Nothing is staged: approval binds to the current SKILL.md through sha256.
+    stagedId: `switch-${requestId}`,
+    action: args.action,
+    name: args.name,
+    gist: args.target.gist,
+    ...(args.target.source ? { source: args.target.source } : {}),
+    preview: args.target.preview,
+    sha256: args.target.sha256,
+    warnings: [],
+    createdAt: Date.now(),
+  };
+  const from = store.bot(args.botId);
+  store.appendMessage(args.threadId, {
+    role: "bot",
+    kind: "options",
+    from: from ? { botId: from.id, name: from.name, color: from.color } : undefined,
+    card: { title: copy.title, subtitle: copy.subtitle, options: [copy.option, "Deny"], requestId, tool: "stage_skill", skillRequest: payload },
+  });
+  return { requestId, summary: copy.title };
+}
+
+function resolveSkillSwitch(
+  args: Parameters<typeof resolveSkillRequest>[0],
+  messageId: string,
+  card: OptionCardData,
+  request: SkillRequestCardData & { action: SkillSwitchAction },
+): ReturnType<typeof resolveSkillRequest> {
+  if (card.answered || card.dismissed) {
+    return { claimed: true, outcome: card.answered === "allow" ? "allowed-once" : "rejected", alreadySettled: true };
+  }
+  const decided = (decision: "user-approved" | "user-denied") => appendDecision(DATA_DIR, { threadId: args.threadId,
+    requestId: args.requestId, botId: args.botId, botName: args.botName, tool: card.tool, summary: card.subtitle, decision, source: "user" });
+  if (args.behavior !== "allow") {
+    store.patchMessage(args.threadId, messageId, { card: { ...card, answered: "deny", dismissed: true, held: undefined } });
+    decided("user-denied");
+    return { claimed: true, outcome: "rejected" };
+  }
+  if (!request.sha256 || args.reviewedSha256 !== request.sha256) {
+    return { claimed: true, status: 409, error: "reviewedSha256 must match the skill shown on the approval card" };
+  }
+  if (request.requestId !== args.requestId || request.threadId !== args.threadId) {
+    return { claimed: true, status: 422, error: "this approval card no longer matches its skill" };
+  }
+  const bot = store.bot(args.botId);
+  const current = bot ? switchableSkill(bot, request.name) : undefined;
+  const still = skillSwitchStillMatches(request.name, request.action, current, request.sha256);
+  const applied = "error" in still ? still
+    : request.action === "delete" ? removeSkill(args.botId, request.name)
+    : (current?.kind === "imported" ? setImportedSkillEnabled : setSkillEnabled)(args.botId, request.name, request.action === "enable");
+  if ("error" in applied) {
+    store.patchMessage(args.threadId, messageId, { card: { ...card, held: applied.error } });
+    return { claimed: true, status: 422, error: applied.error };
+  }
+  store.patchMessage(args.threadId, messageId, {
+    card: { ...card, answered: "allow", held: undefined, title: skillSwitchCardCopy(request.action, request.name, "").done },
+  });
+  skillReview.noteSkillChange(args.botId, args.threadId);
+  decided("user-approved");
+  return { claimed: true, outcome: "allowed-once" };
+}
+
 function resolveSkillRequest(args: {
   botId: string;
   botName?: string;
@@ -11470,6 +11568,7 @@ function resolveSkillRequest(args: {
   if (request.botId !== args.botId) {
     return { claimed: true, status: 403, error: "this skill request belongs to a different bot" };
   }
+  if (isSkillSwitchAction(request.action)) return resolveSkillSwitch(args, message.id, card, { ...request, action: request.action });
   if (card.answered || card.dismissed) {
     const cleanup = rejectStagedSkillWrite(args.botId, request.stagedId);
     if ("applied" in cleanup && cleanup.applied && card.answered !== "allow") {
@@ -13822,6 +13921,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!connectorThread(from.id, fromThreadId)) {
           return json(res, 403, { error: "source conversation does not belong to sender" });
         }
+        if (isSkillSwitchAction(body.action)) return stageSkillSwitch(res, from, fromThreadId, body.action, body);
         const direct = appliesDirectly(from.id, fromThreadId);
         const persistence = skillProposalPersistence(from.id, fromThreadId, !direct);
         if (!persistence.ok) return json(res, persistence.status, { error: persistence.error });

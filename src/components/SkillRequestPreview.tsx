@@ -1,4 +1,12 @@
-import { reviewedSkillSha256, type SkillRequestCardData } from "../../shared/skill-request";
+import { reviewedSkillSha256, type SkillRequestAction, type SkillRequestCardData } from "../../shared/skill-request";
+
+const REVIEW_BEFORE: Record<SkillRequestAction, string> = {
+  create: "enabling",
+  update: "replacing the current version",
+  enable: "turning it on",
+  disable: "turning it off",
+  delete: "deleting it",
+};
 
 /**
  * Security: learned instructions render as inert plain text; the approval hash binds this exact preview to the staged
@@ -10,7 +18,7 @@ export function SkillRequestPreview({ request }: { request: SkillRequestCardData
     return (
       <div className="mt-3 rounded-lg border border-danger/30 bg-danger/5 p-3 text-[12px] leading-relaxed text-danger">
         This proposal was created by an older build and cannot be safely applied. Deny it, then ask the bot to
-        {request.action === "update" ? " propose the update again." : " create the skill again."}
+        {request.action === "create" ? " create the skill again." : request.action === "update" ? " propose the update again." : " ask again."}
       </div>
     );
   }
@@ -18,7 +26,7 @@ export function SkillRequestPreview({ request }: { request: SkillRequestCardData
     <div className="mt-3 rounded-lg border border-hairline/40 bg-inset p-3">
       <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-ink-secondary">
         <span>
-          Review the complete SKILL.md{request.references?.length ? " and its reference files" : ""} before {request.action === "update" ? "replacing the current version" : "enabling"}
+          Review the complete SKILL.md{request.references?.length ? " and its reference files" : ""} before {REVIEW_BEFORE[request.action]}
         </span>
         <span className="font-mono" title={`sha256 ${reviewedSha256}`}>
           sha256 {reviewedSha256.slice(0, 8)}

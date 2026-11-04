@@ -3,7 +3,19 @@
  * SKILL.md reaches the bot's enabled skill index until the user confirms; during
  * an update the approved version stays live.
  */
-export type SkillRequestAction = "create" | "update";
+export type SkillRequestAction = "create" | "update" | SkillSwitchAction;
+
+/** Turning one of the bot's existing skills on or off, or deleting it: no new
+ * SKILL.md, so the card shows the current one and approval binds to it. */
+export type SkillSwitchAction = "enable" | "disable" | "delete";
+
+export function isSkillSwitchAction(action: unknown): action is SkillSwitchAction {
+  return action === "enable" || action === "disable" || action === "delete";
+}
+
+export function skillSwitchVerb(action: SkillSwitchAction): string {
+  return action === "enable" ? "turn on" : action === "disable" ? "turn off" : "delete";
+}
 
 /** Kept on the receipt so Undo reverts the library write and the assignments together. */
 export interface SkillShareRecord {
@@ -55,7 +67,7 @@ export function reviewedSkillSha256(request: SkillRequestCardData): string | und
  * an unknown or corrupted card answer into approval. */
 export function skillRequestBehavior(answer: string): "allow" | "deny" {
   const normalized = answer.trim().toLowerCase();
-  return ["enable", "update", "apply", "allow", "allow once", "confirm", "yes"].includes(normalized)
+  return ["enable", "turn on", "turn off", "delete", "update", "apply", "allow", "allow once", "confirm", "yes"].includes(normalized)
     ? "allow"
     : "deny";
 }

@@ -1,5 +1,6 @@
 // Half-duplex like CallView: the native recognizer has no echo cancellation. Replies are queued so a fast second member
 // never cuts off the first.
+import { isSkillSwitchAction, skillSwitchVerb } from "../../shared/skill-request";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, PhoneOff, X } from "lucide-react";
 
@@ -368,7 +369,10 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       };
       spokenIds.current.add(approval.message.id);
       const name = member?.name ?? approval.message.from?.name ?? "A group member";
-      const skillPrompt = approval.message.card?.skillRequest?.action === "update"
+      const skill = approval.message.card?.skillRequest;
+      const skillPrompt = skill && isSkillSwitchAction(skill.action)
+        ? `${name} wants to ${skillSwitchVerb(skill.action)} the skill "${skill.name}". Open the group thread to review it. You can say no to deny it.`
+        : skill?.action === "update"
         ? `${name} wants to update a learned skill. Open the group thread to review the complete skill before replacing the current version. You can say no to deny it.`
         : `${name} wants to enable a new learned skill. Open the group thread to review the complete skill before enabling it. You can say no to deny it.`;
       enqueueSpeech(isSkillApproval(approval) ? skillPrompt : spokenApprovalPrompt(approval, name), member, true);

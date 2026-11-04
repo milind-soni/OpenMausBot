@@ -1,6 +1,7 @@
 // Half-duplex: the dictation helper is Apple's SFSpeechRecognizer on raw AVAudioEngine input with no echo cancellation,
 // so a mic open during playback transcribes the bot's own voice back. The buffer-backed recognizer does not finalize on
 // silence; the helper ends the stream.
+import { isSkillSwitchAction, skillSwitchVerb } from "../../shared/skill-request";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { AudioLines, Check, ChevronDown, Loader2, Phone, PhoneOff, X } from "lucide-react";
 
@@ -692,7 +693,10 @@ function Call({ bot }: { bot: Bot }) {
         submitted: false,
       };
       spokenIds.current.add(approval.message.id);
-      const skillPrompt = approval.message.card?.skillRequest?.action === "update"
+      const skill = approval.message.card?.skillRequest;
+      const skillPrompt = skill && isSkillSwitchAction(skill.action)
+        ? `${bot.name} wants to ${skillSwitchVerb(skill.action)} the skill "${skill.name}". Open this chat to review it. You can say no to deny it.`
+        : skill?.action === "update"
         ? `${bot.name} wants to update a learned skill. Open this chat to review the complete skill before replacing the current version. You can say no to deny it.`
         : `${bot.name} wants to enable a new learned skill. Open this chat to review the complete skill before enabling it. You can say no to deny it.`;
       void sayThenListen(isSkillApproval(approval) ? skillPrompt : spokenApprovalPrompt(approval, bot.name));

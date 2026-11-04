@@ -746,24 +746,24 @@ const TOOL_DEFINITIONS = [
   {
     name: "skill_manage",
     description:
-      "Submit a new or updated reusable SKILL.md. Never update unless the user explicitly asked to revise that named skill. If the result is pending, a create stays inactive and an update leaves the current version unchanged." + APPLIES_OUTCOME,
+      "Submit a new or updated reusable SKILL.md, or turn one of your own skills on, off, or delete it (always after the person approves). Never change a skill unless the user explicitly asked for that named skill. If the result is pending, a create stays inactive and an update leaves the current version unchanged." + APPLIES_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         action: {
           type: "string",
-          enum: ["create", "update"],
-          description: "Create a uniquely named skill, or update one existing learned skill.",
+          enum: ["create", "update", "enable", "disable", "delete"],
+          description: "Create a uniquely named skill, update a learned one, or switch or delete one of your own.",
         },
         skill_name: {
           type: "string",
-          description: "Required for update: the exact existing name from skills_list. Omit for create.",
+          description: "Required for every action but create: the exact existing name from skills_list.",
         },
         skill_md: {
           type: "string",
           description:
-            "The full SKILL.md including YAML frontmatter. Example: ---\\nname: file-expense\\ndescription: Files an expense in the company portal.\\n---\\n\\n# File expense\\n",
+            "Create/update: the full SKILL.md including YAML frontmatter. Example: ---\\nname: file-expense\\ndescription: Files an expense in the company portal.\\n---\\n\\n# File expense\\n",
         },
         references: {
           type: "array",
@@ -790,10 +790,10 @@ const TOOL_DEFINITIONS = [
         },
         source: {
           type: "string",
-          description: "Required provenance label: the URL, folder, or 'conversation' used to author the skill.",
+          description: "Create/update: provenance label: the URL, folder, or 'conversation' used to author the skill.",
         },
       },
-      required: ["action", "skill_md", "source"],
+      required: ["action"],
     },
   },
   {

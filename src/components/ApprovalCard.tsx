@@ -11,7 +11,7 @@ import { niceDate, niceTime, scheduleLabel } from "@/lib/schedule-label";
 import { cronScheduleLabel } from "../../shared/cron-label";
 import { PROFILE_REQUEST_FIELDS, type ProfileRequestField } from "../../shared/profile-request";
 import type { RoutineRequestSchedule } from "../../shared/routine-request";
-import type { SkillShareRecord } from "../../shared/skill-request";
+import { isSkillSwitchAction, type SkillShareRecord } from "../../shared/skill-request";
 import { cardAutomation } from "@/lib/automations";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { yourComputerAsk } from "@/lib/your-computer";
@@ -35,6 +35,9 @@ const ROUTINE_SETTLED_LABEL = {
 const SKILL_SETTLED_LABEL = {
   create: "approval.status.skillEnabled",
   update: "approval.status.skillUpdated",
+  enable: "approval.status.skillTurnedOn",
+  disable: "approval.status.skillTurnedOff",
+  delete: "approval.status.skillDeleted",
 } as const;
 
 /** Schedules and webhooks alike are "automations" to a person. */
@@ -56,6 +59,9 @@ const WAIT_APPLIED_LINE = {
 const SKILL_APPLIED_LINE = {
   create: "approval.applied.skill.create",
   update: "approval.applied.skill.update",
+  enable: "approval.applied.skill.enable",
+  disable: "approval.applied.skill.disable",
+  delete: "approval.applied.skill.delete",
 } as const;
 
 const PROFILE_FIELD_LABEL: Record<ProfileRequestField, LocaleKey> = {
@@ -72,7 +78,9 @@ const PROFILE_FIELD_LABEL: Record<ProfileRequestField, LocaleKey> = {
 const staleRoutineCard = (card: OptionCardData) => Boolean(card.routineRequest && !card.answered);
 
 /** The card brings its own question and answer words (its title and first option): team setup and MCP server changes. */
-export const titledCard = (card: OptionCardData | undefined) => Boolean(card?.teamSetupRequest || card?.mcpRequest);
+/** Cards whose server-written title and first option say what approving does. */
+export const titledCard = (card: OptionCardData | undefined) =>
+  Boolean(card?.teamSetupRequest || card?.mcpRequest || isSkillSwitchAction(card?.skillRequest?.action));
 
 export function approvalCardOutcome(card: OptionCardData): string | undefined {
   const isProposal = Boolean(card.routineRequest || card.skillRequest || card.profileRequest || card.modelRequest || titledCard(card));
