@@ -36,6 +36,7 @@ export interface BeginRequest {
 
 const BRIEF_MAX = 12_000;
 const RESULT_MAX = 12_000;
+const STOPPED_WITH_REQUEST = "Stopped with the request it was for";
 const DETAIL_MAX = 400;
 
 const defaultClock: Clock = { now: () => Date.now(), monotonic: () => performance.now() };
@@ -571,10 +572,10 @@ export class Runtime {
     this.withBatch(() => outcome === "failed" ? this.cancelTree(n, reason, "failed", "interrupted") : this.cancelTree(n, reason, "cancelled", "stopped"));
   }
 
-  /** The person stopped the requester's conversation: work that never started is dropped, a teammate
-   * mid-turn still reports, and nothing resumes the stopped conversation. */
-  stopRequester(owner: Owner, reason = "Stopped by user"): Assignment[] {
-    const left: Assignment[] = [];
+  /** The person stopped the requester's conversation, and stop means stop: everything it handed out ends with it, work
+   * that never started and teammates mid-turn alike (and what they handed on), and nothing resumes the stopped
+   * conversation. */
+  stopRequester(owner: Owner, reason = "Stopped by user"): void {
     this.withBatch(() => {
       for (const snapshot of this.store.all({ nonTerminal: true })) {
         if (!ownsConversation(snapshot, owner)) continue;
@@ -582,14 +583,13 @@ export class Runtime {
         if (!n || isTerminal(n)) continue;
         for (const child of this.store.children(n.id)) {
           if (isTerminal(child)) continue;
-          if (child.status === "queued" && (child.executions === 0 || child.restart === "rerun")) {
-            this.cancelTree(child, child.restart === "rerun" ? "Stopped before it resumed" : "Stopped before it started", "cancelled", "stopped");
-          } else left.push(child);
+          const unstarted = child.status === "queued" && (child.executions === 0 || child.restart === "rerun");
+          this.cancelTree(child, !unstarted ? STOPPED_WITH_REQUEST : child.restart === "rerun" ? "Stopped before it resumed" : "Stopped before it started",
+            "cancelled", "stopped");
         }
         this.settle(n, "cancelled", "stopped", reason);
       }
     });
-    return left;
   }
 
   status(id: string): StatusView | undefined {

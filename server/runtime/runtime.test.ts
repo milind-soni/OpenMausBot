@@ -420,7 +420,7 @@ describe("Runtime: one tree, one lane", () => {
     invariants(w);
   });
 
-  it("stops awaiting: queued work is dropped, a teammate mid-turn keeps its process and still reports", async () => {
+  it("stops awaiting, and stop means stop: queued work is dropped and a teammate mid-turn is stopped too", async () => {
     const w = world(() => "hold");
     const root = w.runtime.begin(beginReq());
     const running = ok(w.runtime.enqueue(toBot("running", root.id)));
@@ -428,18 +428,18 @@ describe("Runtime: one tree, one lane", () => {
     w.runner.canStartAnswer = false;
     const queued = ok(w.runtime.enqueue(toBot("queued", root.id)));
     w.runtime.tick();
-    const left = w.runtime.stopRequester({ threadId: "chief-chat" });
-    expect(left.map(a => a.id)).toEqual([running.id]);
+    w.runtime.stopRequester({ threadId: "chief-chat" });
     expect(w.store.get(queued.id)).toMatchObject({ status: "cancelled", outcomeDetail: "Stopped before it started" });
+    expect(w.store.get(running.id)).toMatchObject({ status: "cancelled", outcome: "stopped", outcomeDetail: "Stopped with the request it was for" });
     expect(w.store.get(root.id)).toMatchObject({ status: "cancelled", outcome: "stopped" });
-    expect(w.runner.runs[0]!.signal.aborted).toBe(false);
+    expect(w.runner.runs[0]!.signal.aborted).toBe(true);
     await w.runner.release(running.id, { kind: "completed", text: "finished anyway" });
-    expect(w.store.get(running.id)).toMatchObject({ status: "completed", result: "finished anyway" });
-    expect(w.runner.reports.map(r => r.a.id)).toEqual([queued.id, root.id, running.id]);
+    expect(w.store.get(running.id)).toMatchObject({ status: "cancelled", result: "Stopped with the request it was for" });
+    expect(w.runner.reports.map(r => r.a.id).sort()).toEqual([queued.id, running.id, root.id].sort());
     w.runtime.tick();
     expect(w.store.get(root.id)?.status).toBe("cancelled");
     expect(w.runner.runs).toHaveLength(1);
-    expect(w.runtime.stopRequester({ threadId: "chief-chat" })).toEqual([]);
+    expect(w.store.all({ nonTerminal: true })).toEqual([]);
     invariants(w);
   });
 
@@ -732,7 +732,7 @@ describe("Runtime: what the host relies on for the new modes and openers", () =>
     expect(w.runtime.poll({ runId: "run-9" }).items).toEqual([]);
     expect(w.store.inbox({ threadId: "chief-chat" }).map(i => i.assignmentId)).toEqual([a.id]);
     expect(w.runtime.outstanding({ runId: "run-9" }).map(x => x.id)).toEqual([root.id]);
-    expect(w.runtime.stopRequester({ runId: "run-9" })).toEqual([]);
+    w.runtime.stopRequester({ runId: "run-9" });
     expect(w.store.get(b.id)).toMatchObject({ status: "cancelled", outcomeDetail: "Stopped before it started" });
     expect(w.store.get(root.id)).toMatchObject({ status: "cancelled", outcome: "stopped" });
     expect(w.runtime.outstanding({ runId: "run-9" })).toEqual([]);

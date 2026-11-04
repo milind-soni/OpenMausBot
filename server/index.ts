@@ -2266,7 +2266,7 @@ async function interruptDirectThread(botId: string, threadId: string, cause?: st
     if (requestOwner.messageId) store.patchMessage(threadId, requestOwner.messageId, { requestCancelled: true });
   }
   stopParkedCards(threadId);
-  noteTeammatesLeftRunning(threadId, coordinator.stopAwaitingDirect(threadId, cause));
+  coordinator.stopAwaitingDirect(threadId, cause);
   const owner = botForThread(botId, threadId);
   const generation = directTurnGenerationByThread.get(threadId);
   cancelDirectTurnDispatch(botId, threadId);
@@ -2826,7 +2826,7 @@ const { cloudLendingTurn, cloudLendingRefusalNotice, cloudLendingRefusalForBot, 
 const actingPeople = createActingPeople({ store, direct: (threadId) => directRequestOwners.get(threadId), roomRun, handed: new HandedPeople(join(DATA_DIR, HANDED_PEOPLE_FILE)) }); const lendingLifts = lendingMemory ? createLendingLifts({ store, stopped: (threadId) => directRequestOwners.get(threadId)?.stopped === true, threadBusy, queued: hasQueuedSteeredMessages, continueRequest: startTurn, notify, language: (threadId) => threadLanguage(threadId), device: () => deviceWord(sharedComputers.known(CLOUD_HOME_LENDER)[0]?.platform), decide: (row) => appendDecision(DATA_DIR, row), words: changedWords, ownersAnswer: (card) => cloudProvenOwnerPerson(cloudCardAnswerer(card)), memory: { info: (botId) => lendingMemory.reviewInfo(botId), accept: (botId, token) => lendingMemory.review(botId, foreignTurnRunning(botId), token).ok } }) : null;
 const computerAsks = CLOUD_PERSONAL ? createComputerAsksHost({ store, notify, lending: sharedComputers, principal: CLOUD_HOME_LENDER, threadBusy, queued: hasQueuedSteeredMessages, continueRequest: startTurn,
   refusal: (turn) => sharedComputerPrincipal(turn) ? null : cloudLendingRefusalForBot(turn) ?? "This conversation can't use your computer.", request: (threadId) => directRequestOwners.get(threadId), active: (turn) => internalCapabilityIsActive(turn as InternalCapability) }) : null;
-const { stopThreadForPerson, stopOnTypedCommand, restartForPerson, noteTeammatesLeftRunning } = createPersonStop({
+const { stopThreadForPerson, stopOnTypedCommand, restartForPerson } = createPersonStop({
   store, routines: () => routines, handoffs: () => handoffs, interruptDirectThread, clearUnattended,
   stopGoal: (threadId) => oneOnOneGoals.stop(threadId), markStopped: (threadId) => personStops.stop(threadId, liveTurns.running(threadId), directTurnDispatchClaims.has(threadId)), working: (botId, threadId) => threadBusy(botId, threadId) || coordinator.activeDirect(threadId), asking: (threadId) => coordinator.awaitingAnswer(threadId) || Boolean(openPersonCard(threadId)), language: threadLanguage,
 }); const teamMessages = createTeamMessages({ place: CLOUD_TEAM ? null : createPlaceInbox({ dataDir: DATA_DIR, store, openCards: openCardRows, waiting: () => personWaits.waiting(), send: (notification) => { broadcast({ kind: "notify", notification: logNotification(notification) }); }, sees: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), mayAnswer: (auth, threadId, requestId) => cardAnswerRefusal(auth, threadId, requestId, "allow") === null, viewer: (auth) => placeInboxViewer(auth, { personal: CLOUD_PERSONAL, owner: cloudOwnerSession, personOf: personKey }), guestOf: (threadId) => { if (!CLOUD_PERSONAL || !cloudGuestDriven(threadId)) return null; const person = [...cloudThreadStarters(threadId), threadPersonKey(threadId)].find((one) => one && one !== CLOUD_OUTSIDE_KEY && !cloudOwnerPerson(one)); return person ?? null; }, guestName: (threadId) => guestNameIn(store.messagesFor(threadId)), handedBy: (threadId) => { const from = delegatorOf(threadId); return from && from.threadId !== threadId ? from.botId ?? store.botByThread(from.threadId)?.id ?? null : null; } }), team: CLOUD_TEAM, dataDir: DATA_DIR, store, confined: (threadId) => cloudGuestDriven(threadId), people: teamOwners.people, personName: teamHost.personName, audienceOf: teamHost.audienceOf, starters: threadStarters, notify, sees: (person) => visibleTo(person.role === "member" ? { kind: "member", email: person.email } : { kind: "all", email: person.email }), inbox: { askedPerson: teamOwners.routing.askedPerson, changed: (threadId) => { const bot = store.botByThread(threadId); if (bot) broadcast({ kind: "bot", bot: wireBot(bot) }); }, ensureOwnBot: (email) => { ensureDefaultBot(store, { dataDir: DATA_DIR, person: email, team: CLOUD_TEAM?.name ?? null }); }, handedFrom: (threadId) => { const from = delegatorOf(threadId); return from && from.threadId !== threadId ? from.threadId : null; }, continueTurn: relayedTurn({ store, startTurn, state: (botId, threadId) => ({ atCapacity: botAtThreadCapacity(botId, threadId), threadBusy: threadBusy(botId, threadId), groupTurn: roomTurnHolds(activeGroupTurnForBot(botId), threadId, false), parksBehindCoordination: parksBehindCoordination(botId, threadId) }) }), representative: { generate: async (botId, prompt) => (await sideJobs.text("representative", botId)?.generateText(prompt, { timeoutMs: 60_000 })) ?? null, busy: createPersonCalendar({ access: (person) => teamConnections.personApps().includes("googlecalendar") ? teamConnections.people.appsAccess(person) : null, connected: async (access) => (await composio.connectedServices(cfg, access)).googlecalendar?.connected === true, relay: (payload, session, signal, access) => composio.relayMcp(cfg, payload as never, session, undefined, signal, access) }).busy } } });
@@ -3816,7 +3816,7 @@ function noteQueuedBehindPerson(node: HandoffView): void {
 function runRoomNode(node: HandoffView, group: GroupRecord, bot: BotRecord, signal: AbortSignal, parent: HandoffView | undefined,
   turn: (operation: GroupTurnOperation, result: GroupTurnOrchestration["result"], coordination: NonNullable<GroupTurnOrchestration["coordination"]>) => Promise<unknown>,
 ): Promise<HostTurnResult> {
-  const operation = Object.assign(beginGroupTurnOperation(group.id, node.threadId, [bot.id]), { handedFor: actingPeople.handedRun(node.id) });
+  const operation = Object.assign(beginGroupTurnOperation(group.id, node.threadId, [bot.id]), { handedFor: actingPeople.handedRun(node.id), speaking: false });
   return new Promise<HostTurnResult>(resolve => {
     let done = false;
     const finish = (outcome: HostTurnResult) => {
@@ -3824,7 +3824,7 @@ function runRoomNode(node: HandoffView, group: GroupRecord, bot: BotRecord, sign
       done = true; resolve(outcome);
     };
     const result: GroupTurnOrchestration["result"] = {};
-    const abort = () => { operation.cancelled = true; operation.cancellation.abort(); };
+    const abort = () => { operation.cancelled = true; operation.cancellation.abort(); if (operation.speaking) void runningTurnInstance(bot, node.threadId)?.adapter.interruptTurn(node.threadId).catch(() => {}); };
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     const run = (groupQueues.get(node.threadId) ?? Promise.resolve()).catch(() => {}).then(async () => {
@@ -3833,7 +3833,7 @@ function runRoomNode(node: HandoffView, group: GroupRecord, bot: BotRecord, sign
       if (problem) throw new Error(problem);
       const available = await waitForChatRoomMember(operation, node.threadId, bot);
       if (available !== "run") { result.outcome = "cancelled"; return; }
-      await turn(operation, result, { id: node.id, settle: finish });
+      operation.speaking = true; await turn(operation, result, { id: node.id, settle: finish });
     });
     const tracked = run.finally(() => {
       signal.removeEventListener("abort", abort);
@@ -4459,7 +4459,7 @@ function cancelGroupTurnOperations(
   if (outcome.byHarness) coordinator.cancelRoom(groupId, threadId, outcome.detail, "failed");
   else {
     stopParkedCards(threadId);
-    noteTeammatesLeftRunning(threadId, coordinator.stopAwaitingDirect(threadId));
+    coordinator.stopAwaitingDirect(threadId);
     coordinator.cancelRoom(groupId, threadId);
   }
   roomMemberLock.releaseThread(threadId);
@@ -8887,7 +8887,7 @@ routines = new RoutineManager({
     cancelDirectTurnDispatch(botId, threadId);
     revokeInternalCapabilitiesForThread(threadId);
     stopParkedCards(threadId);
-    noteTeammatesLeftRunning(threadId, coordinator.stopAwaitingDirect(threadId));
+    coordinator.stopAwaitingDirect(threadId);
     try {
       await runningTurnInstance(bot, threadId)?.adapter.interruptTurn(threadId);
     } finally {

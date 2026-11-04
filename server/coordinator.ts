@@ -198,7 +198,8 @@ export interface Coordinator {
   /** Direct conversations whose turn waits on teammates: an open handoff it made that owes a reply, or a root parked to resume with no question for the person. */
   awaitingTeammateThreads(): Set<string>;
   liveEdges(): LiveHandoffEdge[];
-  stopAwaitingDirect(threadId: string, reason?: string): HandoffView[];
+  /** The conversation stopped: its work and everything that work handed out end, and nothing resumes it. */
+  stopAwaitingDirect(threadId: string, reason?: string): void;
   /** The next start goes on with this thread's turn, so a shutdown's "cut" line would be false. */
   continuesAfterRestart(threadId: string): boolean;
   note(id: string): string | undefined;
