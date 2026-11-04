@@ -155,7 +155,7 @@ export function createAskCards(deps: AskCardsDeps) {
       store.appendMessage(liveParent.threadId, {
         role: "bot", kind: "activity",
         from: { botId: bot.id, name: bot.name, color: bot.color },
-        tool: { name: chip, ok: true, nameCode: "chat.notice.teammateNeedsInput", nameParams: { name: bot.name, question: question.slice(0, 180) } },
+        tool: { name: chip, ok: true, nameCode: "chat.notice.teammateNeedsInput", nameParams: { name: bot.name, question: withDefault(question).question.slice(0, 180) } },
         ...(node.groupId ? { comm: { groupId: node.groupId, threadId: node.threadId, withBotId: bot.id, withName: bot.name, withColor: bot.color } }
           : { threadRef: { botId: bot.id, threadId: node.threadId, title } }),
       });

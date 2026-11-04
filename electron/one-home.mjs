@@ -243,7 +243,7 @@ export function createOneHome(deps) {
   function notCarried(sent, onlyFinal) {
     const failed = sent?.whole?.result?.failed;
     return (Array.isArray(failed) ? failed : []).filter((entry) => typeof entry?.label === "string" && (!onlyFinal || entry.final === true))
-      .slice(0, NAMED_MAX).map((entry) => ({ label: entry.label, error: sentence(entry.error) ?? "It did not move." }));
+      .slice(0, NAMED_MAX).map((entry) => ({ label: entry.label, error: sentence(entry.error) ?? t("native.home.itemDidNotMove") }));
   }
 
   /** Lifts this computer's freeze; true once it is lifted. */

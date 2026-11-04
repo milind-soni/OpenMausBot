@@ -1,7 +1,7 @@
 /** Canonical runtime-event shapes, as they ride the live wire and the
  * inspector log. */
 import type { AskQuestion } from "./ask-question.ts";
-import type { ServerText } from "./server-text.ts";
+import type { ServerText, ServerTextParams } from "./server-text.ts";
 import type { LiveStep, TurnProgressFields } from "./turn-progress.ts";
 
 export type DriverKind = string;
@@ -130,6 +130,9 @@ export type RuntimeEvent = RuntimeEventBase &
         requestType: "permission" | "question";
         tool: string;
         summary: string;
+        /** Fixed `chat.notice.*` summary words beside their English fallback; absent for provider-authored text. */
+        summaryCode?: string;
+        summaryParams?: ServerTextParams;
         /** Complete native shell input and its effective working directory.
          * Used for exact-command grants; never reconstructed from a display
          * summary, tool title, or argv. Absent when either value is unknown. */

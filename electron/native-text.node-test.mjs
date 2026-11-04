@@ -53,6 +53,14 @@ test("a key a language lacks reads in English, parameters fill in, and only main
   assert.equal(text.t("chat.other"), "chat.other", "the renderer's own keys are not held in main");
 });
 
+test("shared native controls reuse the renderer's catalog in the current language", () => {
+  const text = createNativeText({ saved: "en" });
+  const controls = ["rail.thisComputer", "rail.remove", "cloudHome.tryAgain", "computer.windows.start", "mcp.turnOn", "cloudSetup.myCloud", "computer.badge.local"];
+  assert.deepEqual(controls.map(key => text.t(key)), ["This computer", "Remove from list", "Try again", "Start screen control", "Turn on", "My Cloud", "this computer"]);
+  text.set("pt-br");
+  assert.deepEqual(controls.map(key => text.t(key)), ["Este computador", "Remover da lista", "Tentar novamente", "Iniciar o controle de tela", "Ligar", "My Cloud", "este computador"]);
+});
+
 test("the saved language wins over the system's, \"\" follows the system again, and set says when the words change", (t) => {
   const dir = packs(t, { "en.json": { "native.x": "en" }, "pt-br.json": { "native.x": "pt" }, "de.json": { "native.x": "de" } });
   let system = "";

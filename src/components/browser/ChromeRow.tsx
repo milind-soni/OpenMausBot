@@ -109,8 +109,8 @@ export const ChromeRow = forwardRef<HTMLInputElement, {
           <span className="truncate">{PILL_TEXT[pill](botName)}</span>
           {pill === "bot" || pill === "watching" ? <span className="shrink-0 text-ink">· {t("browser.control.take")}</span> : handsBack ? <span className="shrink-0">· {t("browser.control.handBack")}</span> : null}
         </button>
-        <button className={button} title={props.maximized ? t("browser.panel.restore") : "Maximize (fill the app window)"} aria-label={t(props.maximized ? "browser.panel.restore" : "browser.panel.maximize")} onClick={props.onMaximize}>{props.maximized ? <Shrink size={15} /> : <AppWindow size={15} />}</button>
-        <button className={button} title={props.fullscreen ? t("browser.panel.exitFullscreen") : "Full screen (whole display)"} aria-label={t(props.fullscreen ? "browser.panel.exitFullscreen" : "browser.panel.fullscreen")} onClick={props.onFullscreen}>{props.fullscreen ? <Minimize size={15} /> : <Maximize size={15} />}</button>
+        <button className={button} title={t(props.maximized ? "browser.panel.restore" : "browser.panel.maximizeHint")} aria-label={t(props.maximized ? "browser.panel.restore" : "browser.panel.maximize")} onClick={props.onMaximize}>{props.maximized ? <Shrink size={15} /> : <AppWindow size={15} />}</button>
+        <button className={button} title={t(props.fullscreen ? "browser.panel.exitFullscreen" : "browser.panel.fullscreenHint")} aria-label={t(props.fullscreen ? "browser.panel.exitFullscreen" : "browser.panel.fullscreen")} onClick={props.onFullscreen}>{props.fullscreen ? <Minimize size={15} /> : <Maximize size={15} />}</button>
         <button className={`${button} rounded-xl bg-inset p-1.5`} title={t("browser.panel.profileTitle", { name: props.profileName })} aria-label={t("browser.panel.profiles")} onClick={props.onProfiles}><UserRound size={15} /></button>
       </div>
       <form

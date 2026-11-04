@@ -922,7 +922,7 @@ export function EventEditor({
                   <div>
                     <label htmlFor="routine-goal-room" className="mb-2 block text-[13px] font-medium text-ink">{t("routines.editor.goalWhere")}</label>
                     <Select id="routine-goal-room" value={groupId} onChange={(event) => selectRoom(event.target.value)} className="w-full">
-                      {groupId && !selectedRoom && <option value={groupId} disabled>Room no longer exists. Choose another.</option>}<option value="">{t("routines.editor.goalOneOnOne")}</option>
+                      {groupId && !selectedRoom && <option value={groupId} disabled>{t("routines.editor.roomMissing")}</option>}<option value="">{t("routines.editor.goalOneOnOne")}</option>
                       {rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}
                     </Select>
                   </div>

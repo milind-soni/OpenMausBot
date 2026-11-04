@@ -159,7 +159,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
 
     m = path.match(/^\/api\/threads\/([\w-]+)\/messages\/([\w-]+)\/tool$/);
     if (m && method === "GET") {
-      if (!store.botByThread(m[1]) && !store.groupByThread(m[1])) return json(res, 404, { error: "no such conversation" });
+      if (!store.botByThread(m[1]) && !store.groupByThread(m[1])) return json(res, 404, userError("serverError.chat.missingConversation"));
       const message = readMessage(m[1], m[2]);
       if (message?.tool?.output === undefined) return json(res, 404, { error: "no tool output on that message" });
       return json(res, 200, { output: message.tool.output });

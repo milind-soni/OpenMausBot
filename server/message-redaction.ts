@@ -41,6 +41,7 @@ export function redactBotAuthored<T extends Omit<WireMessage, "id" | "at"> & { a
     const card = { ...out.card } as OptionCardData & { summary?: string };
     card.title = redactSecretsInText(card.title);
     if (typeof card.subtitle === "string") card.subtitle = redactSecretsInText(card.subtitle);
+    if (card.summaryParams) card.summaryParams = redactParams(card.summaryParams);
     if (typeof card.summary === "string") card.summary = redactSecretsInText(card.summary);
     if (typeof card.held === "string") card.held = redactSecretsInText(card.held);
     if (typeof card.answeredText === "string") card.answeredText = redactSecretsInText(card.answeredText);

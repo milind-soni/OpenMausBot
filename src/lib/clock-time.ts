@@ -1,4 +1,4 @@
-import { activeLocale, intlLocale } from "@/lib/i18n";
+import { activeLocale, intlLocale, t } from "@/lib/i18n";
 
 const twentyFourHour = new Map<string, boolean>();
 
@@ -19,7 +19,7 @@ let timeFormat: { locale: string; clock: Intl.DateTimeFormat } | undefined;
 export function formatTime(at: number) {
   const date = new Date(at);
   // toLocaleTimeString's output, where Intl.DateTimeFormat.format would throw
-  if (Number.isNaN(date.getTime())) return "Invalid Date";
+  if (Number.isNaN(date.getTime())) return t("time.invalid");
   const locale = intlLocale();
   if (timeFormat?.locale !== locale) timeFormat = { locale, clock: new Intl.DateTimeFormat(locale, clockOptions(locale)) };
   return timeFormat.clock.format(date);

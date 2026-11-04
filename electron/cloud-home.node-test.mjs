@@ -8,6 +8,7 @@ import { CLOUD_HOME_NAME, cloudHomeConnectUrl, cloudPlanDisk, cloudUnreachableTe
 import environments from "./environments.cjs";
 import { handSaved } from "./own-home-main.mjs";
 import { homeLook, withoutOldCloudHome } from "./cloud-list.mjs";
+import nativeText from "./native-text.cjs";
 
 const NOW = 1_800_000_000_000;
 const origin = "https://omb-u-1a2b3c4d5e6f.fly.dev";
@@ -433,7 +434,7 @@ test("the Server menu opens My Cloud through the Cloud's own connection, never a
   const entry = { id: "cloud", name: CLOUD_HOME_NAME, origin }, other = { id: "vps", kind: "remote", name: "VPS", origin: "https://vps.example.test" };
   const context = vm.createContext({
     environmentsState: { environments: [entry, other], activeId: environments.LOCAL_ID }, LOCAL_ID: environments.LOCAL_ID,
-    cloudAccount: { homeTarget: () => ({ origin }), state: () => ({}) }, isCloudHomeEntry, slog: () => {},
+    cloudAccount: { homeTarget: () => ({ origin }), state: () => ({}) }, isCloudHomeEntry, slog: () => {}, nativeT: nativeText.englishText.t,
     connectCloudHome: (...args) => connect(...args), cloudHomeSignedIn: async () => signedIn,
     openCloudSettings: async () => { calls.push("settings"); },
     persistEnvironments: next => { calls.push(`active:${next.activeId}`); context.environmentsState = next; }, withActive: environments.withActive,

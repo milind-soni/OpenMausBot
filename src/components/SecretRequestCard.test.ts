@@ -26,6 +26,7 @@ vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
 
 import { SecretRequestCard } from "./SecretRequestCard";
 import { setLocale } from "@/lib/i18n";
+import { CREDENTIAL_TARGETS } from "../../shared/credential-request";
 
 afterEach(() => setLocale("en"));
 
@@ -100,6 +101,39 @@ describe("SecretRequestCard ask card", () => {
     expect(html).toContain("Try again");
     expect(html).toContain("The bot could not be resumed.");
     expect(html).not.toContain('type="password"');
+  });
+});
+
+describe("SecretRequestCard Greenference copy", () => {
+  it("localizes the Greenference title, description and password field without changing the saved card", () => {
+    const message = secretCard({ target: "greenferenceApiKey", ...CREDENTIAL_TARGETS.greenferenceApiKey });
+    const render = () => renderToStaticMarkup(createElement(SecretRequestCard, { botId: "bot-1", threadId: "thread-1", message }));
+    const english = render();
+    expect(english).toContain('aria-label="Greenference API key"');
+    expect(english).toContain("Runs Greenference models with your own key.");
+    expect(english).toContain('placeholder="Paste your Greenference API key"');
+    setLocale("pt-br");
+    const portuguese = render();
+    expect(portuguese).toContain('aria-label="Chave de API do Greenference"');
+    expect(portuguese).toContain("Roda modelos do Greenference com sua própria chave.");
+    expect(portuguese).toContain('placeholder="Cole sua chave de API do Greenference"');
+    expect(portuguese).toContain(CREDENTIAL_TARGETS.greenferenceApiKey.helpUrl);
+    expect(message.secret).toMatchObject({ target: "greenferenceApiKey", ...CREDENTIAL_TARGETS.greenferenceApiKey });
+    setLocale("en");
+    expect(render()).toBe(english);
+  });
+
+  it.each([
+    { stopped: true },
+    { superseded: true },
+    { provided: true, resumed: true },
+  ])("localizes the Greenference label in settled states %j", (state) => {
+    setLocale("pt-br");
+    const html = view({ target: "greenferenceApiKey", ...CREDENTIAL_TARGETS.greenferenceApiKey, ...state });
+    expect(html).toContain('data-ask-card="settled"');
+    expect(html).toContain('aria-label="Chave de API do Greenference"');
+    expect(html).not.toContain('aria-label="Greenference API key"');
+    expect(html).not.toContain("<input");
   });
 });
 

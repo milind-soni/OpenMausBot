@@ -113,8 +113,8 @@ describe("report receipts", () => {
     expect(notYetLine({ ok: false, retry: true, why: "server" }, "pt-br")).toContain("o servidor da equipe do MausBot não pôde receber o relatório agora");
     expect(refusedLine("too large. \n", "en")).toBe("The MausBot team's server refused this bug report, so nothing was sent: too large.");
     expect(refusedLine("too large. \n", "pt-br")).toBe("O servidor da equipe do MausBot recusou este relatório de problema, então nada foi enviado: too large.");
-    expect(fullLine(40, "pt-br")).toBe("Não foi enviado: já há 40 relatórios de problemas aguardando envio à equipe do MausBot. Digite @devs novamente depois que eles forem enviados.");
-    expect(droppedLine("pt-br")).toBe("Um relatório de problema desta conversa não chegou à equipe do MausBot durante uma semana e foi descartado. Digite @devs novamente para enviar outro.");
+    expect(fullLine(40, "pt-br")).toBe("Não foi enviado: já há 40 relatórios de problemas na fila para a equipe do MausBot. Aguarde o envio e digite @devs novamente.");
+    expect(droppedLine("pt-br")).toBe("Um relatório de problema desta conversa ficou uma semana sem chegar à equipe do MausBot e, por isso, foi descartado. Digite @devs novamente para enviar outro.");
   });
 });
 

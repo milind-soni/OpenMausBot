@@ -114,6 +114,10 @@ describe("errorReplyFailure", () => {
     const reply = `${anthropic(429, "rate_limit_error", "[1308][Usage limit reached for 5 hour. Your limit will reset at 2026-10-27 15:22:19][2026]")} retry-after-ms=4171000`;
     expect(errorReplyFailure("omp", reply, NOW, "UTC")).toEqual({
       message: 'This omp account has reached its usage limit (omp says: "[1308][Usage limit reached for 5 hour"), which resets Oct 27, 7:22 AM (UTC). Until then, switch this bot to another AI.',
+      text: { key: "chat.notice.usageLimitResets", params: {
+        provider: "omp", detail: ' (omp says: "[1308][Usage limit reached for 5 hour")',
+        resetsAt: NOW + 4_171_000, timeZone: "UTC", resets: "Oct 27, 7:22 AM (UTC)",
+      } },
       stopReason: "quota",
       limit: "engine",
       limitResetsAt: NOW + 4_171_000,
@@ -218,6 +222,19 @@ describe("stopCause", () => {
 });
 
 describe("engineFailure", () => {
+  it("carries the reset instant and zone for the reader's language, with the same English fallback", () => {
+    const resetsAt = Date.UTC(2026, 9, 27, 7, 22);
+    const failure = engineFailure("Grok", "usage limit", { resetsAt, timeZone: "UTC" })!;
+    expect(failure.message).toBe('This Grok account has reached its usage limit (Grok says: "usage limit"), which resets Oct 27, 7:22 AM (UTC). Until then, switch this bot to another AI.');
+    expect(failure.text).toEqual({ key: "chat.notice.usageLimitResets", params: {
+      provider: "Grok", detail: ' (Grok says: "usage limit")', resetsAt, timeZone: "UTC", resets: "Oct 27, 7:22 AM (UTC)",
+    } });
+    const unknownZone = engineFailure("Grok", "usage limit", { resetsAt, timeZone: "not-a-zone" })!;
+    expect(unknownZone.message).toContain("2026-10-27 07:22 UTC");
+    expect(unknownZone.text?.params).toMatchObject({ resetsAt, timeZone: "UTC" });
+    expect(classifyError({ text: failure.message })).toEqual({ transient: false, reason: "quota" });
+  });
+
   it("names a usage limit by its catalog key, its provider's quoted words kept raw", () => {
     const failure = engineFailure("Grok", "Internal error: API error (status 429): You have reached your usage limit for this month (session/prompt)", { kind: "usage_limit" });
     expect(failure?.text?.key).toBe("chat.notice.usageLimit");

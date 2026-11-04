@@ -48,8 +48,8 @@ import { volatileContextNote, withContextNote } from "./prompt-split.ts";
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import { CodexDeviceAuthController } from "./codex-device-auth.ts";
 import { codexAccountEmail, codexHome } from "./codex-identity.ts";
-import { boundedLabel, containsControlCharacter, mcpAppApprovalForm, plainRecord } from "./codex-app-approval.ts";
-import { archivedNativeCodexThread, CODEX_MISSING_CREDENTIALS, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, CodexRpcError, codexSignInExpired, codexPlanModelRefused, codexSignInRefused, codexUserError, missingNativeCodexThread, type CodexRoute } from "./codex-errors.ts";
+import { containsControlCharacter, mcpAppApprovalForm, mcpAppApprovalText, mcpElicitationDeclined, plainRecord } from "./codex-app-approval.ts";
+import { archivedNativeCodexThread, CODEX_MISSING_CREDENTIALS, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, CodexRpcError, codexSignInExpired, codexPlanModelRefused, codexSignInRefused, codexUserError, codexUserFailure, missingNativeCodexThread, type CodexRoute } from "./codex-errors.ts";
 import { codexLoginCheck, codexLoginStatus, storedCodexLogin } from "./codex-login.ts";
 import { keyRejected, noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
@@ -899,7 +899,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (!isQuestion && !isPermission) {
           if (isMcpElicitation) {
             send({ jsonrpc: "2.0", id: msg.id, result: { action: "decline" } });
-            emit({ ...base(threadId, turnId), type: "runtime.notice", message: `${boundedLabel(params.serverName) ?? "An MCP server"} asked for input OpenMausBot can't show yet, so the request was declined.` });
+            emit({ ...base(threadId, turnId), type: "runtime.notice", ...mcpElicitationDeclined(params.serverName) });
           } else {
             send({
               jsonrpc: "2.0",
@@ -1004,6 +1004,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           requestType: isQuestion ? "question" : "permission",
           tool,
           summary,
+          ...mcpAppApprovalText(mcpAppApproval),
           ...shellRequest(shell, params.cwd ?? (
             !params.threadId || params.threadId === codexThreadId ? commandCwd : undefined
           )),
@@ -1053,13 +1054,13 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           (state.authRecovery && !/\b403\b|forbidden/i.test(raw) && /\b401\b|unauthorized/i.test(raw)));
         if (retryLoginRace(raw, refused)) return;
         if (refused) loginRefused();
-        const message = refused ? codexSignInExpired(raw) : codexUserError(raw, route, error.codexErrorInfo);
+        const reported: ReturnType<typeof codexUserFailure> = refused ? { message: codexSignInExpired(raw) } : codexUserFailure(raw, route, error.codexErrorInfo);
         const setup = refused || classifyError({ text: raw }).reason === "auth";
-        if (message === state.lastError && (state.lastErrorSetup || !setup)) return;
-        state.lastError = message;
+        if (reported.message === state.lastError && (state.lastErrorSetup || !setup)) return;
+        state.lastError = reported.message;
         state.lastErrorSetup ||= setup;
         hideRefusedModel(raw);
-        emit({ ...base(threadId, turnId), type: "runtime.error", message, ...(setup ? { setup: true } : {}), ...codexLimitFacts(raw, route, error.codexErrorInfo) });
+        emit({ ...base(threadId, turnId), type: "runtime.error", ...reported, ...(setup ? { setup: true } : {}), ...codexLimitFacts(raw, route, error.codexErrorInfo) });
       };
       const handleNotification = (msg: any) => {
         const p = msg.params ?? {};
@@ -1555,17 +1556,17 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const raw = e instanceof Error ? e.message : String(e);
         const refused = chatgptTurn && loginMark() !== null && codexSignInRefused({ message: raw });
         hideRefusedModel(raw);
-        const message = refused ? codexSignInExpired(raw) : codexUserError(raw, route);
+        const reported: ReturnType<typeof codexUserFailure> = refused ? { message: codexSignInExpired(raw) } : codexUserFailure(raw, route);
         const needsAuth = refused || /(?:\b401\b|unauthorized|missing bearer|authentication required)/i.test(raw);
         const verdict = classifyError(failure);
         if (!state.settled && !abandoned && !recoveredMissingSession && !stopRequested && !needsAuth && codexTurnId === null && earlyNotifications.length === 0 && verdict.transient && attempt < RETRY_MAX_ATTEMPTS - 1 && state.sawStreamDelta === false) {
-          return relaunch(verdict.reason, message, "rpc_error");
+          return relaunch(verdict.reason, reported.message, "rpc_error");
         }
         if (!state.settled && !abandoned) {
           if (refused) loginRefused();
           emit({
             ...base(threadId, turnId), type: "runtime.error",
-            ...codexActionFailure(message, earlyNotifications.some((event) => ["commandExecution", "fileChange", "mcpToolCall", "webSearch"].includes(event.params?.item?.type))),
+            ...codexActionFailure(reported.message, earlyNotifications.some((event) => ["commandExecution", "fileChange", "mcpToolCall", "webSearch"].includes(event.params?.item?.type)), reported.text),
             ...(needsAuth ? { setup: true } : codexLimitFacts(raw, route)),
           });
           await settle(false, needsAuth ? "auth_required" : verdict.reason === "provider_safety" ? "provider_safety" : "rpc_error");

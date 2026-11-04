@@ -191,6 +191,7 @@ export const USER_ERROR = {
   "serverError.mcp.addressChanged": "The MCP server address changed. Reload the server and try again.",
   "serverError.attachment.alreadyInMessage": "This file is already in a message, so it stays.",
   "serverError.engine.signedOut": "{name} is signed out.",
+  "serverError.bot.viewOnly": "You can view {bot}, not chat with it.",
 } as const;
 
 export type UserErrorKey = keyof typeof USER_ERROR;

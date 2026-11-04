@@ -610,8 +610,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         session.current = null;
         active.delete(threadId);
         const end = endTurn(current, ok, stopReason, support.displayName);
-        if (end.error) emit({ ...base(threadId, current.turnId), type: "runtime.error", ...end.error,
-          ...(end.stopReason === "empty_turn" ? noticeFailure("chat.notice.acpEmpty", { provider: support.displayName }) : {}) });
+        if (end.error) emit({ ...base(threadId, current.turnId), type: "runtime.error", ...end.error });
         emit({ ...base(threadId, current.turnId), type: "turn.completed", ok: end.ok, stopReason: end.stopReason, cost: null });
         if (session.child.exitCode === null && !session.closing && !session.dead) {
           armIdle(threadId);

@@ -34,9 +34,9 @@ export function createLendingDialogs({ dialog, window, validate, isHome = async 
         askingTerminal = true;
         try {
           const { response } = await dialog.showMessageBox({
-            type: "warning", buttons: ["Let them run commands", "Cancel"], defaultId: 1, cancelId: 1,
-            message: "Let your Clouds run commands on this computer?",
-            detail: "Bots on your own Clouds could run any command on this computer as you, including reading and changing any file you can. You can turn this off from the OpenMausBot icon's menu.",
+            type: "warning", buttons: [t("native.lend.terminalAllow"), t("native.common.cancel")], defaultId: 1, cancelId: 1,
+            message: t("native.lend.terminalTitle"),
+            detail: t("native.lend.terminalDetail"),
           });
           if (response !== 0) return false;
         } finally { askingTerminal = false; }

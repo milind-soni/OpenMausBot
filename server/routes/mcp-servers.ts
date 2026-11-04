@@ -1,4 +1,4 @@
-import { userErrorFields } from "../user-errors.ts";
+import { userError, userErrorFields } from "../user-errors.ts";
 import { hostedWorkspaceConfiguration } from "../enterprise.ts";
 import { runsElsewhere, type McpConfig, type McpConfigDeps, type McpConfigResult } from "../host/mcp-config.ts";
 import { McpOAuthError, McpSignInError, mcpCallbackOrigin } from "../mcp-oauth.ts";
@@ -59,14 +59,14 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
 
     const budgetOf = /^\/api\/bots\/([\w-]+)\/tool-budget$/.exec(path);
     if (method === "GET" && budgetOf) {
-      if (!deps.bot(budgetOf[1]!)) return json(res, 404, { error: "no such bot" });
+      if (!deps.bot(budgetOf[1]!)) return json(res, 404, userError("serverError.bot.missing"));
       return json(res, 200, { budget: toolBudgetOf(budgetOf[1]!) ?? null });
     }
 
     const ofBot = /^\/api\/bots\/([\w-]+)\/mcp-servers$/.exec(path);
     if (method === "GET" && ofBot) {
       const bot = deps.bot(ofBot[1]!);
-      if (!bot) return json(res, 404, { error: "no such bot" });
+      if (!bot) return json(res, 404, userError("serverError.bot.missing"));
       return json(res, 200, { servers: botMcpServers(mcpServerResponse().servers, bot) });
     }
 

@@ -85,6 +85,7 @@ import { chatNotice, failedNoticeTool, noticeTool, runtimeNoticeTool } from "./c
 import type { ServerErrorBody } from "../shared/server-text.ts";
 import { emailSignInRoute } from "./routes/email-sign-in.ts";
 import { createPersonStop } from "./host/person-stop.ts";
+import { runtimeRequestCardFields } from "./request-card.ts";
 import type { DirectSendInput, DirectSendReceipt } from "./direct-send.ts";
 import { finishedWithoutSummaryLine, ROOM_SUMMARY_REASK, roomTurnNarrationIds, roomTurnReply } from "./room-reply.ts";
 import { pickComputer } from "./computer-selection.ts";
@@ -6658,7 +6659,6 @@ bus.subscribe((event: RuntimeEvent) => {
         break;
       }
       const heldContext = { source: verdict?.source, permission };
-      const questions = event.questions?.length ? event.questions : undefined;
       const message = pushMessage({
         role: "bot",
         kind: "options",
@@ -6669,21 +6669,11 @@ bus.subscribe((event: RuntimeEvent) => {
               : permission
                 ? "Approval needed"
                 : "Your bot has a question",
-          subtitle: event.summary,
-          options: event.choices?.length ? event.choices : permission ? ["Allow", "Deny"] : [],
-          requestId: event.requestId,
-          requestType: permission ? "permission" : "question",
-          tool: permission ? event.tool : undefined,
-          questionRequest: questions
-            ? { version: 1, questions, ...(event.origin === "output" ? { origin: "output" as const } : {}) }
-            : undefined,
-          commandAllowlist: command ?? undefined,
-          allowKey: toolAllowKey ?? undefined,
-          // Never on a guest's turn: an "always" would outlive it.
-          allowSession: permission && event.allowSession && !event.requiresExplicitApproval && !guestDriven ? true : undefined,
-          held: approvalHeldReason(heldContext) ?? (permission && guestDriven && routineRun ? confinedWhy(event.threadId) : undefined),
-          heldCode: approvalHeldNote(heldContext),
-          approvalScope: event.approvalScope,
+          ...runtimeRequestCardFields(event, {
+            permission, guestDriven, commandAllowlist: command ?? undefined, allowKey: toolAllowKey ?? undefined,
+            held: approvalHeldReason(heldContext) ?? (permission && guestDriven && routineRun ? confinedWhy(event.threadId) : undefined),
+            heldCode: approvalHeldNote(heldContext),
+          }),
         },
       });
       if (event.requestId) { askMessageByRequest.set(`${event.threadId}:${event.requestId}`, message.id); if (!permission && asker) askCards.askedAgain(event.threadId, event.requestId, asker.id); }
@@ -12864,7 +12854,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     const viewer = viewerFor(auth), visible = visibleTo(viewer);
     const subject = visible.everything ? null : pathSubject(path);
     const hidden = subject && !subjectVisible(subject, visible) ? notFoundFor(subject) : hiddenThreadRefusal(req, path, url.searchParams, visible, (botId) => store.bot(botId)?.threadId);
-    if (hidden) return json(res, 404, { error: hidden }); const refused = botAccess.accessRefusal(req, auth, method, path, visible); if (refused) return json(res, 403, { error: refused });
+    if (hidden) return json(res, 404, { error: hidden }); const refused = botAccess.accessRefusal(req, auth, method, path, visible); if (refused) return json(res, 403, refused);
     // Every bot a member is sent (on a Team Cloud an admin's too) comes narrowed to what they may see (memberBot).
     if (viewer.kind === "member" || visible.filtersThreads) onJsonBody(res, (body) => memberBody(body, visible));
     beginAdminAudit(req, res, method, path, auth);

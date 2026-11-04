@@ -91,6 +91,16 @@ describe("a teammate's NEEDS INPUT question", () => {
     expect(w.notified.map((notification) => [notification.kind, notification.threadId])).toEqual([["question", "work"]]);
   });
 
+  it("keeps the localized chip's question identical to its English fallback, without the default answer", () => {
+    const w = world();
+    w.cards.park(w.node(), "CSV or Excel?\nDefault: CSV");
+    expect(w.rows("inbox")[0]?.tool).toMatchObject({
+      name: "Ledger needs your input: CSV or Excel?",
+      nameCode: "chat.notice.teammateNeedsInput",
+      nameParams: { name: "Ledger", question: "CSV or Excel?" },
+    });
+  });
+
   it("turns a reply that is only the question into the card itself", () => {
     const w = world();
     w.say("work", `NEEDS INPUT: ${QUESTION}`);

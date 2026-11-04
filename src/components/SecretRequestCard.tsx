@@ -27,6 +27,10 @@ export function SecretRequestCard({
 }) {
   const { dispatch } = useStore();
   const secret = message.secret!;
+  const greenference = secret.target === "greenferenceApiKey";
+  const label = greenference ? t("keys.greenference.label") : secret.label;
+  const placeholder = greenference ? t("keys.greenference.placeholder") : secret.placeholder;
+  const suppliedDescription = greenference ? t("secretCard.greenference.description") : secret.description;
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
@@ -42,7 +46,7 @@ export function SecretRequestCard({
   const stopped = secret.stopped === true;
   const authorName = message.from?.name ?? botName;
   const deliveryDescription = custom && authorName ? t(secret.delivery === "file" ? "secretCard.delivery.fileNamed" : "secretCard.delivery.refNamed", { botName: authorName }) : null;
-  const customDescription = activeLocale() !== "en" && deliveryDescription ? [secret.reason, deliveryDescription].filter(Boolean).join(" ") : secret.description;
+  const customDescription = activeLocale() !== "en" && deliveryDescription ? [secret.reason, deliveryDescription].filter(Boolean).join(" ") : suppliedDescription;
   const description = superseded
     ? t("chat.secret.superseded")
     : provided
@@ -150,8 +154,8 @@ export function SecretRequestCard({
 
   if (superseded) {
     return (
-      <AskSettledLine icon={<X size={13} />} ariaLabel={secret.label}>
-        <span className="text-ink-secondary" title={description}>{secret.label}</span>
+      <AskSettledLine icon={<X size={13} />} ariaLabel={label}>
+        <span className="text-ink-secondary" title={description}>{label}</span>
         <span> · {t("chat.secret.supersededShort")}</span>
       </AskSettledLine>
     );
@@ -159,8 +163,8 @@ export function SecretRequestCard({
 
   if (stopped && !provided) {
     return (
-      <AskSettledLine icon={<X size={13} />} ariaLabel={secret.label}>
-        <span className="text-ink-secondary" title={customDescription}>{secret.label}</span>
+      <AskSettledLine icon={<X size={13} />} ariaLabel={label}>
+        <span className="text-ink-secondary" title={customDescription}>{label}</span>
         <span> · {t("chat.secret.stopped")}</span>
       </AskSettledLine>
     );
@@ -175,7 +179,7 @@ export function SecretRequestCard({
     ) : undefined;
     return (
       <AskSettledLine
-        ariaLabel={secret.label}
+        ariaLabel={label}
         icon={secret.resumed || stopped
           ? undefined
           : declined
@@ -186,7 +190,7 @@ export function SecretRequestCard({
         action={retry}
         detail={error && <p role="alert" className="ms-[19px] mt-1 text-[12px] text-danger">{error}</p>}
       >
-        <span className="text-ink-secondary" title={description}>{provided ? t("chat.secret.labelSaved", { label: secret.label }) : secret.label}</span>
+        <span className="text-ink-secondary" title={description}>{provided ? t("chat.secret.labelSaved", { label }) : label}</span>
         <span className={declined ? "text-danger" : undefined}> · {footerLabel}</span>
       </AskSettledLine>
     );
@@ -194,9 +198,9 @@ export function SecretRequestCard({
 
   return (
     <AskCard
-      ariaLabel={secret.label}
+      ariaLabel={label}
       icon={<KeyRound size={15} />}
-      title={secret.label}
+      title={label}
       explanation={description}
       onDismiss={dismiss}
       dismissLabel={t("notice.notNow")}
@@ -215,9 +219,9 @@ export function SecretRequestCard({
               dir="ltr"
               value={value}
               onChange={(event) => setValue(event.target.value)}
-              placeholder={secret.placeholder}
+              placeholder={placeholder}
               disabled={saving || savedLocally}
-              aria-label={secret.label}
+              aria-label={label}
               className={cn(ASK_FIELD, "min-w-[10rem] flex-1")}
             />
             <button type="submit" disabled={saving || (!value.trim() && !savedLocally)} {...askPrimary(color)}>

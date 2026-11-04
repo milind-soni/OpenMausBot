@@ -59,6 +59,23 @@ test("the terminal is lent only after its warning's own yes, one question at a t
   assert.deepEqual([stopped, off.calls.length], [1, 0]);
 });
 
+test("the terminal warning follows the app's language and keeps Cancel as its default", async () => {
+  const text = nativeText.createNativeText({ saved: "en" });
+  const { dialog, calls } = fakeDialog();
+  const dialogs = createLendingDialogs({ dialog, window: liveWindow, validate: named, t: text.t });
+  for (const [language, message, buttons] of [
+    ["en", "Let your Clouds run commands on this computer?", ["Let them run commands", "Cancel"]],
+    ["pt-br", "Permitir que seus Clouds executem comandos neste computador?", ["Permitir que executem comandos", "Cancelar"]],
+  ]) {
+    text.set(language);
+    assert.equal(await dialogs.lendTerminal(true, () => assert.fail("Cancel never grants access")), false);
+    const options = calls.at(-1)[1];
+    assert.equal(options.message, message);
+    assert.deepEqual(options.buttons, buttons);
+    assert.deepEqual([options.defaultId, options.cancelId], [1, 1]);
+  }
+});
+
 test("the whole home folder is lent only after its own warning, and is named in the access dialog", async () => {
   const win = liveWindow(), isHome = async (path) => path === "/Users/me";
   for (const [response, lent] of [[0, true], [1, false], [-1, false]]) {

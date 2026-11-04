@@ -20,6 +20,7 @@ import { collectConnections, releaseConnections, sendConnections } from "./cloud
 import { createMoveKinds, mergeRoutines } from "./cloud-send-kinds.mjs";
 import { botsOnCloud } from "./cloud-logins.mjs";
 import { checkChats, checkPassed, checkSecrets, manifestGaps, missingAttachments, roomsRemovedThere, roomsThatGo, rowIdChunks } from "./cloud-send-check.mjs";
+import nativeText from "./native-text.cjs";
 
 const LOCAL_ROUTE = /^\/api\/(?:cloud-send|cloud-send\?move=1|cloud-send\/manifest|cloud-send\/chats|cloud-send\/chats\?attachments=1|cloud-send\/kind\?key=[\w%.-]{1,300}|cloud-send\/memory|cloud-send\/memory\?bot=[\w-]{1,128}|cloud-send\/files|cloud-send\/files\?path=[\w%.()~!*'-]{1,12000}&offset=\d{1,16}&length=\d{1,9}|cloud-send\/chats\/rows\?thread=[\w-]{1,200}&after=\d{1,16}&id=[\w%.-]{0,600}|cloud-send\/chats\/ids\?thread=[\w-]{1,200}&from=\d{1,9}|cloud-send\/chats\/attachment\/[A-Za-z0-9-]{1,80}\.[A-Za-z0-9]{1,10}|cloud-connections|connectors\/connected|config|bots\?messages=0|bots\/[\w-]{1,128}\/(?:skills|skills\/[a-z0-9-]{1,64}|memory|memory\/file\?path=[\w%.-]{1,200})|attachments\/[A-Za-z0-9-]{1,80}\.(?:png|jpg|gif|webp))$/u;
 /** One request's chats: a few conversations' rows, well under My Cloud's body limit. */
@@ -210,7 +211,7 @@ const movedResult = () => ({ moved: 0, memory: 0, files: { sent: 0, kept: 0 }, c
  * name the team gave it; never apps, keys, logins, settings or its notes about the person. `local` is then the bot's
  * own Cloud, and `label` names the person beside a file or bot of the same name.
  */
-export function createCloudSend({ local, cloud, handoff, store, onChange = () => {}, now = Date.now, engineWaitMs, space, team = null }) {
+export function createCloudSend({ local, cloud, handoff, store, onChange = () => {}, now = Date.now, engineWaitMs, space, team = null, t = nativeText.englishText.t }) {
   let saved = parseSendState(safeRead(store));
   let view = { cloud: "none", plan: null, local: null, theirs: null, chats: null };
   let running = null, progress = null;
@@ -462,7 +463,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
    * could not let go of yet is kept and let go of on the next final pass. */
   async function moveConnections(origin, session, result, final) {
     const kept = entry(origin);
-    const failed = (id, label, error, last) => result.failed.push({ key: id, kind: "connection", label, error: sentence(error) ?? "It did not move.", ...(last ? { final: true } : {}) });
+    const failed = (id, label, error, last) => result.failed.push({ key: id, kind: "connection", label, error: sentence(error) ?? t("native.home.itemDidNotMove"), ...(last ? { final: true } : {}) });
     if (final && kept.release.length) {
       kept.release = await releaseConnections(kept.release, { local: connectionLocal, target: session }).catch(() => kept.release);
       persist();
@@ -470,7 +471,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     let collected;
     try { collected = await collectConnections(connectionLocal); }
     catch (error) { failed("connections", "Apps and keys", error?.message, false); return null; }
-    const moved = await sendConnections(collected, session, { local: connectionLocal, signIns: final, ...(engineWaitMs !== undefined ? { waitMs: engineWaitMs } : {}),
+    const moved = await sendConnections(collected, session, { local: connectionLocal, signIns: final, t, ...(engineWaitMs !== undefined ? { waitMs: engineWaitMs } : {}),
       onProgress: (step) => { progress = { done: step.done, total: step.total }; publish(); } });
     result.connections += moved.moved.length + moved.runsHere.length;
     for (const failure of moved.failed) failed(failure.id, failure.label, failure.message, failure.final);

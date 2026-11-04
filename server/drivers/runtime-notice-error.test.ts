@@ -38,6 +38,12 @@ describe("runtime notice provenance", () => {
     expect("text" in failure ? failure.text?.key : undefined).toBe(mayHaveRun ? "chat.notice.codexActionMayHaveRun" : undefined);
   });
 
+  it("keeps a coded Codex failure when no tool action may have run", () => {
+    const text = { key: "chat.notice.codexModelUnavailable" };
+    expect(codexActionFailure("Model unavailable", false, text)).toEqual({ message: "Model unavailable", text });
+    expect(codexActionFailure("Model unavailable", true, text).text?.key).toBe("chat.notice.codexActionMayHaveRun");
+  });
+
   it.each([1_000, 89_000, 90_000, 180_000])("keeps the provider error's quiet duration at %i ms", (quietMs) => {
     const state = { kind: "provider-error", message: "Provider's own words" } as const;
     const words = quietNoticeText("Custom ACP", state, quietMs)!;

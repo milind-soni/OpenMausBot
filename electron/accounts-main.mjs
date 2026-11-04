@@ -2,6 +2,7 @@
 // rail's. A Cloud's or a server's page never reads it, because it would learn the addresses of the person's other accounts;
 // it may only ask main, from the person's click, to open the sheet on the rail's page.
 import { accountPlaces, clearPlaceStorage, withoutPlaces } from "./account-places.mjs";
+import nativeText from "./native-text.cjs";
 
 /** The sign-in as the You menu shows it: never a token, and no account while none is signed in. */
 export function accountsView(state) {
@@ -45,7 +46,7 @@ export function createAccountLeave({ saved, persist, session, mine, leaveWindow,
  * the rail. `leaving`: the home window lets go of what it was doing for this account; `leave`: createAccountLeave's;
  * `show`: the window goes where it belongs now; `tell`: this app's pages read the list again.
  */
-export function installAccounts({ ipcMain, ownPage, placePage, account, client, holdSheet, tellSheet, leaving, leave, show, tell }) {
+export function installAccounts({ ipcMain, ownPage, placePage, account, client, holdSheet, tellSheet, leaving, leave, show, tell, t = nativeText.englishText.t }) {
   let sheetPending = false, queue = Promise.resolve();
   const view = () => accountsView(account()?.state());
   const serial = (work) => { const run = queue.then(work, work); queue = run.catch(() => {}); return run; };
@@ -64,7 +65,7 @@ export function installAccounts({ ipcMain, ownPage, placePage, account, client, 
   });
   own("accounts:list", view);
   own("accounts:sign-out", async (id) => {
-    if (view().active?.id !== id) throw new Error("That account isn't signed in here any more.");
+    if (view().active?.id !== id) throw new Error(t("native.accounts.notSignedIn"));
     await signOutActive();
     return view();
   });

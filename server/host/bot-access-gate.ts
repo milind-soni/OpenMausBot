@@ -11,6 +11,7 @@ import { personKey } from "../person-key.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
 import type { Store } from "../store.ts";
+import { userError, userErrorFields, type UserError } from "../user-errors.ts";
 
 type Target = { botId?: unknown; groupId?: unknown };
 
@@ -40,8 +41,8 @@ export function levelNeeded(method: string, path: string): Exclude<BotAccessLeve
   return "chat";
 }
 
-export function refusalFor(name: string, needed: BotAccessLevel): string {
-  return needed === "edit" ? `Only people who can edit ${name} can change this.` : `You can view ${name}, not chat with it.`;
+export function refusalFor(name: string, needed: BotAccessLevel): UserError | { error: string } {
+  return needed === "edit" ? { error: `Only people who can edit ${name} can change this.` } : userError("serverError.bot.viewOnly", { bot: name });
 }
 
 export function createBotAccessGate(deps: BotAccessGateDeps) {
@@ -52,7 +53,7 @@ export function createBotAccessGate(deps: BotAccessGateDeps) {
       : typeof target?.botId === "string" ? [target.botId] : [];
 
   /** The first of these bots the member sees but may not do this with. A bot they cannot see is the visibility gate's. */
-  function short(visible: VisibleSet, botIds: readonly string[], needed: BotAccessLevel): string | null {
+  function short(visible: VisibleSet, botIds: readonly string[], needed: BotAccessLevel): ReturnType<typeof refusalFor> | null {
     for (const id of botIds) {
       const level = visible.level(id);
       if (level !== "none" && !atLeast(level, needed)) return refusalFor(deps.botName(id) ?? "this bot", needed);
@@ -61,7 +62,7 @@ export function createBotAccessGate(deps: BotAccessGateDeps) {
   }
 
   /** Null to let the request through; else why a member may not. Body fields are checked as the route reads them. */
-  return function accessRefusal(req: IncomingMessage, auth: RequestAuth, method: string, path: string, visible: VisibleSet): string | null {
+  return function accessRefusal(req: IncomingMessage, auth: RequestAuth, method: string, path: string, visible: VisibleSet): ReturnType<typeof refusalFor> | null {
     if (auth.kind !== "session" || !visible.member || !visible.filtersThreads) return null;
     const needed = levelNeeded(method, path);
     const subject = pathSubject(path);
@@ -80,7 +81,8 @@ export function createBotAccessGate(deps: BotAccessGateDeps) {
       const targeted = path === "/api/routines" || routine !== null ? targetBots(record) : [];
       const threads = bodyThreadIds(body).flatMap((threadId) => ownerBots(deps.threadOwner(threadId)));
       const error = short(visible, [...added, ...targeted, ...threads], bodyNeeds);
-      return error ? { status: 403, error } : null;
+      if (error) throw Object.assign(new Error(error.error), { status: 403 }, userErrorFields(error));
+      return null;
     });
     return null;
   };
@@ -94,7 +96,7 @@ export function setupCardRefusal(card: SetupCard | undefined, bot: { id: string;
   if (!card || !bot) return null;
   const changesBot = card.profileRequest !== undefined || card.modelRequest !== undefined || card.skillRequest !== undefined ||
     card.teamSetupRequest !== undefined || card.webhookRequest !== undefined || card.appTriggerRequest !== undefined || card.mcpRequest !== undefined;
-  return changesBot && !atLeast(level(bot.id), "edit") ? refusalFor(bot.name, "edit") : null;
+  return changesBot && !atLeast(level(bot.id), "edit") ? refusalFor(bot.name, "edit").error : null;
 }
 
 /** A message another app relays for a person (the guarded route's onBehalfOf) needs that person to be able to chat with

@@ -177,7 +177,7 @@ export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, bes
   // Make … my home, from a circle's menu: only a server main listed with it, by main's own word for it.
   listed("workspaces:make-home", (_event, id) => {
     const place = places().find(entry => entry.id === plain(id) && entry.makeHome);
-    if (!place || !makeHome) throw new Error("That server can't be your bots' home now.");
+    if (!place || !makeHome) throw new Error(t("native.home.notAvailable"));
     return makeHome(place.id);
   });
   // A link pasted on ＋'s sheet goes to main's own Connect dialog, which checks it and names its host before connecting.

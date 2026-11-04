@@ -184,6 +184,7 @@ export function createCloudSend(deps: {
   /** Bring newer chats' copy, for a Cloud too old to take chats by row. */
   store: { read(): unknown; write(value: unknown): void };
   onChange?(snapshot: CloudSendSnapshot): void;
+  t?(key: string, params?: Record<string, string | number>): string;
   now?(): number;
   /** How long a move waits for My Cloud to run the engines whose keys it just took. */
   engineWaitMs?: number;

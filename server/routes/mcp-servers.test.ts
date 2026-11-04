@@ -199,7 +199,7 @@ describe("a bot's MCP servers, as a phone reads them", () => {
     const { base } = await serve({ bots: [{ id: "ada" }] });
     const response = await fetch(`${base}/api/bots/nobody/mcp-servers`);
     expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ error: "no such bot" });
+    expect(await response.json()).toEqual({ error: "no such bot", errorKey: "serverError.bot.missing" });
   });
 });
 

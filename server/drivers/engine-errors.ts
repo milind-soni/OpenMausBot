@@ -105,8 +105,13 @@ export function engineFailure(
   const detail = (...parts: Array<string | null>) => parts.some(Boolean) ? ` (${parts.filter(Boolean).join("; ")})` : "";
   const code = http ? `HTTP ${http}` : null;
   if (what === "usage_limit") {
-    if (resetsAt) return { message: `This ${provider} account has reached its usage limit${detail(says)}, which resets ${limitResetTime(resetsAt, timeZone)}. Until then, switch this bot to another AI.` };
     const params = { provider, detail: detail(says) };
+    if (resetsAt) {
+      let zone = timeZone ?? hostTimeZone();
+      try { new Intl.DateTimeFormat("en-US", { timeZone: zone }); } catch { zone = "UTC"; }
+      const resets = limitResetTime(resetsAt, timeZone);
+      return noticeFailure("chat.notice.usageLimitResets", { ...params, resetsAt, timeZone: zone, resets });
+    }
     return { message: chatNotice("chat.notice.usageLimit", params), text: { key: "chat.notice.usageLimit", params } };
   }
   switch (what) {
@@ -154,6 +159,7 @@ function isErrorBody(body: string): boolean {
 
 export interface ErrorReplyFailure {
   message: string;
+  text?: ServerText;
   stopReason: "quota" | "auth_required" | "rpc_error";
   setup?: true;
   limit?: "engine";
@@ -172,10 +178,10 @@ export function errorReplyFailure(provider: string, text: string, now = Date.now
   const said = engineFailureKind(body, status);
   const kind = said !== "credits" && usageLimitWait(status, waitMs) ? "usage_limit" : said;
   const resetsAt = kind === "usage_limit" && waitMs > 0 ? now + waitMs : undefined;
-  const message = engineFailureMessage(provider, body, { kind, status, resetsAt, timeZone })!;
-  if (kind === "credits") return { message, stopReason: "auth_required", setup: true };
-  if (kind !== "usage_limit") return { message, stopReason: "rpc_error" };
-  return { message, stopReason: "quota", limit: "engine", ...(resetsAt ? { limitResetsAt: resetsAt } : {}) };
+  const failure = engineFailure(provider, body, { kind, status, resetsAt, timeZone })!;
+  if (kind === "credits") return { ...failure, stopReason: "auth_required", setup: true };
+  if (kind !== "usage_limit") return { ...failure, stopReason: "rpc_error" };
+  return { ...failure, stopReason: "quota", limit: "engine", ...(resetsAt ? { limitResetsAt: resetsAt } : {}) };
 }
 
 /** Only an out-of-credits failure or a refused tool schema or tool count in plain words; any other text stays as it is. */

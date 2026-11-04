@@ -16,7 +16,7 @@ import type { RoutineRequestCardData } from "./routine-request.ts"; import type 
 import type { WebhookRequestCardData } from "./webhook-request.ts"; import type { WaitCardField, WaitLineField } from "./wait-request.ts"; import type { ComputerAskField } from "./computer-ask.ts";
 import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTriggerService } from "./app-triggers.ts";
 import type { ProfileRequestCardData } from "./profile-request.ts";
-import type { ServerTextLine } from "./server-text.ts";
+import type { ServerTextLine, ServerTextParams } from "./server-text.ts";
 import type { WireTool } from "./wire-tool.ts";
 import type { ModelRequestCardData } from "./model-request.ts";
 import type { ConnectorCardData } from "./connector-card.ts"; import type { McpChangeRequest } from "./mcp-request.ts";
@@ -644,6 +644,9 @@ export interface OptionCardData extends WaitCardField, ComputerAskField, AccessR
   teamMemoryRequest?: { section: string; entryId: string; kind: string; revision?: string };
   title: string;
   subtitle: string;
+  /** Fixed `chat.notice.*` words for `subtitle`; the English fallback stays stored in `subtitle`. */
+  summaryCode?: string;
+  summaryParams?: ServerTextParams;
   options: string[];
   /** Distinguishes a provider question from an approval after its live run ends. */
   requestType?: "permission" | "question";

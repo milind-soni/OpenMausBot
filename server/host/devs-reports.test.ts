@@ -220,7 +220,7 @@ describe("what the person is told, in their language", () => {
     fx.person("scout-main", "@devs o botão travou");
     fx.advance(NO_ANSWER_MS);
     await fx.settle();
-    expect(fx.notices("scout-main")).toEqual(["notice: Enviado à equipe do MausBot (relatório report-1). Milind e Omkar recebem por e-mail e responderão para ada@example.com."]);
+    expect(fx.notices("scout-main")).toEqual(["notice: Enviado à equipe do MausBot (relatório report-1). Milind e Omkar recebem por e-mail e vão responder para ada@example.com."]);
     expect(fx.store.activePath("scout-main").at(-1)?.tool?.nameCode).toBeUndefined();
     fx.stop();
   });

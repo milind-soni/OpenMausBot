@@ -204,6 +204,53 @@ describe("Brazilian Portuguese approval cards", () => {
     );
   });
 
+  it.each([
+    ["enable", "Turn on", "Ligar"],
+    ["update", "Change", "Alterar"],
+    ["remove", "Remove", "Remover"],
+  ] as const)("localizes the spoken and visible MCP %s actions while preserving wire options", (action, english, portuguese) => {
+    const { pending } = commandApproval();
+    const card = pending.message.card!;
+    card.title = `${english} linear?`;
+    card.options = [english];
+    card.mcpRequest = { requestId: "mcp-request", botId: "bot-1", threadId: "thread-1", action, name: "linear", targetHash: "0".repeat(64) };
+    expect(spokenApprovalPrompt(pending, "Mochi")).toBe(`Mochi: ${english} linear? Review the details and choose ${english} or Cancel.`);
+    setLocale("pt-br");
+    card.title = `${portuguese} linear?`;
+    expect(spokenApprovalPrompt(pending, "Mochi")).toBe(`Mochi: ${portuguese} linear? Confira os detalhes e escolha ${portuguese} ou Cancelar.`);
+    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(PendingApprovalActions, {
+      pending, threadId: "thread-1", onCancelTurn: () => undefined,
+    })));
+    expect(markup).toContain(`>${portuguese}</button>`);
+    expect(markup).toContain(">Cancelar</button>");
+    expect(card.options).toEqual([english]);
+  });
+
+  it.each([
+    [false, "Apply setup", "Aplicar configuração"],
+    [true, "Delete bot", "Excluir bot"],
+  ] as const)("localizes team setup actions with deletion=%s without translating wire options", (deletion, english, portuguese) => {
+    const { pending } = commandApproval();
+    const card = pending.message.card!;
+    card.title = "Review this change?";
+    card.options = [english, "Cancel"];
+    card.teamSetupRequest = {
+      version: 1, requestId: "team-request", botId: "bot-1", threadId: "thread-1", reason: "Team update", createdAt: 1,
+      requesterRevision: "rev-1", operations: [], newTeams: [],
+      ...(deletion ? { deletion: { botId: "bot-2", name: "Scout", expectedRevision: "rev-2" } } : {}),
+    };
+    expect(spokenApprovalPrompt(pending, "Mochi")).toBe(`Mochi: Review this change? Review the details and choose ${english} or Cancel.`);
+    setLocale("pt-br");
+    card.title = "Revisar esta alteração?";
+    expect(spokenApprovalPrompt(pending, "Mochi")).toBe(`Mochi: Revisar esta alteração? Confira os detalhes e escolha ${portuguese} ou Cancelar.`);
+    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(PendingApprovalActions, {
+      pending, threadId: "thread-1", onCancelTurn: () => undefined,
+    })));
+    expect(markup).toContain(`>${portuguese}</button>`);
+    expect(markup).toContain(">Cancelar</button>");
+    expect(card.options).toEqual([english, "Cancel"]);
+  });
+
   it("speaks a skill approval with the pronoun attached to the verb", () => {
     setLocale("pt-BR");
 

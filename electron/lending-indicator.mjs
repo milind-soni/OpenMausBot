@@ -12,13 +12,13 @@ const short = (names, t) => names.length < 3 ? listed(names, t) : t("native.lend
 export function indicatorText({ clouds, using, paused, screen = null }, device, t = nativeText.englishText.t) {
   const named = device === "computer" ? t("native.lendTray.computer") : device;
   if (paused) return { line: t("native.lendTray.pausedLine", { clouds: listed(clouds, t), device: named }), title: t("native.lendTray.paused"), screen: null };
-  const why = screenLine(screen, device);
+  const why = screenLine(screen, device, t);
   if (using.length) {
     const key = using.length > 1 ? "native.lendTray.usingMany" : "native.lendTray.usingOne";
     return { line: t(key, { clouds: listed(using, t), device: named }), title: t(key, { clouds: short(using, t), device: named }), screen: why };
   }
-  const line = t("native.lendTray.canUse", { clouds: listed(clouds, t), device: named });
-  return { line: why ? `${line}, but not its apps and screen` : line, title: "", screen: why };
+  const line = t(why ? "native.lendTray.canUseWithoutScreen" : "native.lendTray.canUse", { clouds: listed(clouds, t), device: named });
+  return { line, title: "", screen: why };
 }
 
 export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPause, onResume, onActivity, onTerminal, onStartScreen = () => {}, device = deviceWord(), t = nativeText.englishText.t }) {
@@ -27,7 +27,7 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPa
   const draw = view => {
     if (!tray || tray.isDestroyed()) return;
     const { line, title, screen } = indicatorText(view, device, t);
-    const fix = screen ? screenFixLabel(view.screen) : null;
+    const fix = screen ? screenFixLabel(view.screen, t) : null;
     tray.setToolTip(`OpenMausBot: ${line}${screen ? `. ${screen}` : ""}`);
     // Electron shows a tray title beside the icon on macOS only.
     tray.setTitle?.(title);
@@ -37,7 +37,7 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPa
       ...fix ? [{ label: fix, click: () => onStartScreen() }] : [],
       { type: "separator" },
       view.paused ? { label: t("native.lendTray.resume"), click: () => onResume() } : { label: t("native.lendTray.pause"), click: () => onPause() },
-      ...view.paused ? [] : [{ label: `Let Clouds run commands on this ${device}`, type: "checkbox", checked: view.terminal,
+      ...view.paused ? [] : [{ label: t("native.lendTray.terminal", { device: device === "computer" ? t("native.lendTray.computer") : device }), type: "checkbox", checked: view.terminal,
         // Electron 43 ticks a checkbox on click by itself: the menu keeps the saved choice until the person confirms one.
         click: () => { draw(view); onTerminal(!view.terminal); } }],
       { label: t("native.lendTray.activity"), click: () => onActivity() },

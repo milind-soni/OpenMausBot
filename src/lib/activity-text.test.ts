@@ -20,7 +20,7 @@ describe("a delegating bot's resumed line", () => {
     expect(activityText({}, english)).toBe(english);
     setLocale("pt-br");
     const portuguese = serverLine("pt-br", "server.teammates.resumedQuestionRestart", { who: "Scout, Ada" });
-    expect(activityText({}, portuguese)).toBe("Após reiniciar, retomou o trabalho com uma pergunta de Scout, Ada e está revisando");
+    expect(activityText({}, portuguese)).toBe("Após uma reinicialização, retomou o trabalho com uma pergunta de Scout, Ada e está revisando");
     expect(activityText({}, english)).toBe(english);
   });
 });
@@ -50,7 +50,7 @@ describe("server notices", () => {
   it("word a bot's fixed line, and leave its other lines as written", () => {
     setLocale("pt-br");
     expect(botLineText({ text: "English", textCode: "chat.notice.webhookHome", textParams: { name: "Orders" } }))
-      .toBe("Voltei para este computador, então meu webhook “Orders” tem um endereço aqui novamente. Abra Automações, escolha “Copiar endereço” em “Orders” e cole no app que envia para ele.");
+      .toBe("Voltei para este computador, então meu webhook “Orders” tem um endereço aqui novamente. Abra “Automações”, escolha “Copiar endereço” em “Orders” e cole no app que envia para ele.");
     expect(botLineText({ text: "Hello" })).toBe("Hello");
   });
 });

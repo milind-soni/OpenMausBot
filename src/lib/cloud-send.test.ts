@@ -55,9 +55,9 @@ describe("the one-time move's line", () => {
       text: "Your bots couldn't move to Garage server yet: Sign in to Garage server in the app first.", reason: failing.error,
     });
     setLocale("pt-br");
-    expect(moveLine({ phase: "copy", failing }, "local")?.reason).toBe("Entre em Garage server no app primeiro.");
+    expect(moveLine({ phase: "copy", failing }, "local")?.reason).toBe("Primeiro, faça login em Garage server no app.");
     expect(moveLine({ phase: "copy", failing, place }, "local")).toMatchObject({
-      text: "Seus bots ainda não conseguiram ir para Garage server: Entre em Garage server no app primeiro.", reason: "Entre em Garage server no app primeiro.",
+      text: "Seus bots ainda não conseguiram ir para Garage server: Primeiro, faça login em Garage server no app.", reason: "Primeiro, faça login em Garage server no app.",
     });
   });
 

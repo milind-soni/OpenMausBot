@@ -363,7 +363,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   const cloudIdentity = async env => {
     const { auth, info, details, link, chrome: takesChrome, timeouts, long, edits } = await describe(env);
     const own = ownHomeId(env);
-    if (own !== null && (auth.own !== true || info.environmentId !== own)) throw Object.assign(new Error("This server is not your bots' home any more"), { problem: "not-cloud" });
+    if (own !== null && (auth.own !== true || info.environmentId !== own)) throw Object.assign(new Error(t("native.lend.homeChanged")), { problem: "not-cloud" });
     if ((own === null && auth.cloudHome !== true) || !Array.isArray(auth.scopes) || !auth.scopes.includes("admin")) throw Object.assign(new Error("This server is not My Cloud"), { problem: "not-cloud" });
     if (details) supportsDetails.add(env.id); else supportsDetails.delete(env.id);
     if (link) supportsLink.add(env.id); else supportsLink.delete(env.id);
@@ -502,8 +502,8 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
                   const connection = await cuaConnection();
                   jobSignal.throwIfAborted();
                   const mcp = sharedCuaConnection(connection);
-                  if (!mcp) { if (grant.cloud) try { askForScreen(connection); } catch {} throw new Error(cuaUnavailable(connection?.reason)); }
-                  live.cua = createSharedCua(mcp);
+                  if (!mcp) { if (grant.cloud) try { askForScreen(connection); } catch {} throw new Error(cuaUnavailable(connection?.reason, process.platform, t)); }
+                  live.cua = createSharedCua(mcp, { t });
                 }
                 return live.cua;
               });
@@ -647,7 +647,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   /** This computer as the person's own Clouds hear it: paused, and why apps and screen or commands aren't lent. */
   const thisComputer = async () => {
     const status = await Promise.resolve().then(screen).then(value => value && typeof value === "object" ? value : null, () => null);
-    return { name: os.hostname().slice(0, 120) || "This computer", platform: LENT_PLATFORMS.has(process.platform) ? process.platform : null, paused,
+    return { name: os.hostname().slice(0, 120) || t("rail.thisComputer"), platform: LENT_PLATFORMS.has(process.platform) ? process.platform : null, paused,
       screen: { ready: status?.ready === true, reason: status && !status.ready ? status.reason ?? null : null }, terminal: terminalAccount !== null && terminalAccount === signedInAccount() };
   };
   /** Every Cloud of the person's own may use this computer again. */
@@ -799,7 +799,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     lendTerminal(on) {
       const account = on === true ? signedInAccount() : null;
       if (closed || terminalAccount === account) return;
-      if (on === true && !account) throw new Error("Sign in to the Cloud before lending it the terminal.");
+      if (on === true && !account) throw new Error(t("native.lend.terminalSignIn"));
       const before = terminalAccount;
       terminalAccount = account;
       try { store(records); } catch (error) { terminalAccount = before; throw error; }

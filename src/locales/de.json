@@ -2849,5 +2849,10 @@
   "server.routines.cron.nthWeekend.third": "Monatlich am dritten {weekday} um {time}",
   "server.routines.cron.nthWeekend.fourth": "Monatlich am vierten {weekday} um {time}",
   "server.routines.cron.nthWeekend.fifth": "Monatlich am fünften {weekday} um {time}",
-  "server.routines.cron.nthWeekend.last": "Monatlich am letzten {weekday} um {time}"
+  "server.routines.cron.nthWeekend.last": "Monatlich am letzten {weekday} um {time}",
+  "server.personFirst.stoppedSeconds": "Ein Schritt, der seit {seconds} s lief, wurde gestoppt, um dir zuerst zu antworten",
+  "server.personFirst.stoppedMinutes": "Ein Schritt, der seit {minutes} min lief, wurde gestoppt, um dir zuerst zu antworten",
+  "server.routines.held.planCancelled": "Deine Routinen sind pausiert, weil der Tarif gekündigt wurde. Damit eine bis zum Ende des Tarifs weiterläuft, schalte sie unter Routines wieder ein.",
+  "server.routines.held.noEngine": "Deine Routinen sind pausiert: Keines deiner KI-Konten ist hier noch angemeldet. Sie schalten sich von selbst wieder ein, wenn du dich erneut anmeldest.",
+  "server.routines.held.noConnections": "Deine Routinen sind pausiert: Alle verbundenen Apps und MCP-Server wurden entfernt. Sie schalten sich wieder ein, wenn du eine App oder einen MCP-Server verbindest oder eine Routine unter Routines wieder einschaltest."
 }

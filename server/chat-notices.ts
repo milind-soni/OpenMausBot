@@ -1,9 +1,11 @@
 import { failedTurnTool, type FailedTurnTool } from "../shared/failed-turn.ts";
 import { formatServerText, isReferenceParam, type ServerText, type ServerTextParams } from "../shared/server-text.ts";
 import { redactParams } from "../shared/redact.ts";
+import { DRIVER_NOTICE } from "./drivers/driver-notices.ts";
 
 /** The client translates by key and falls back to this English, which the row keeps for phones, exports and older clients. */
 export const CHAT_NOTICE = {
+  ...DRIVER_NOTICE,
   "chat.notice.restartInterrupted": "turn interrupted — OpenMausBot restarted",
   "chat.notice.resumingAfterRestart": "Resuming after a restart",
   "chat.notice.cutOffByRestart": "{name} was cut off by a restart; resuming",
@@ -129,6 +131,10 @@ export const CHAT_NOTICE = {
   "chat.notice.computerNotReadyMacPermission": "OpenMausBot can't use this computer yet — {reason}. Relaunch OpenMausBot after granting the missing macOS permission.",
   "chat.notice.computerSystemUnsupported": "bots can't use this computer on this system — choose another place for this bot to work",
   "chat.notice.computerAiUnsupported": "this bot's AI can't use this computer — pick another AI for this bot, or choose another place for it to work",
+  "chat.notice.memoryReclaimedBrowser": "Ran out of room, so I closed the browser to keep everything else running.",
+  "chat.notice.memoryReclaimedTask": "Ran out of room, so I stopped this task to keep everything else running.",
+  "chat.notice.memoryReclaimedBrowserDetail": "Ran out of room, so I closed the browser to keep everything else running. ({detail})",
+  "chat.notice.memoryReclaimedTaskDetail": "Ran out of room, so I stopped this task to keep everything else running. ({detail})",
 } as const;
 
 export type ChatNoticeKey = keyof typeof CHAT_NOTICE;
@@ -139,7 +145,7 @@ export function chatNotice(key: ChatNoticeKey, params?: ServerTextParams): strin
   return formatServerText(CHAT_NOTICE[key], words);
 }
 
-export function noticeLine<Key extends ChatNoticeKey>(key: Key, params?: Record<string, string>) {
+export function noticeLine<Key extends ChatNoticeKey, Params extends ServerTextParams = ServerTextParams>(key: Key, params?: Params) {
   const safe = params && redactParams(params);
   return { text: chatNotice(key, safe), textCode: key, ...(safe ? { textParams: safe } : {}) };
 }
@@ -149,12 +155,12 @@ export function runtimeNoticeTool(event: { message: string; text?: ServerText })
     ...(event.text ? { nameCode: event.text.key, ...(event.text.params ? { nameParams: redactParams(event.text.params) } : {}) } : {}) };
 }
 
-export function noticeSummary(key: ChatNoticeKey, params?: Record<string, string>) {
+export function noticeSummary<Params extends ServerTextParams = ServerTextParams>(key: ChatNoticeKey, params?: Params) {
   const line = noticeLine(key, params);
   return { summary: line.text, summaryCode: key, ...(line.textParams ? { summaryParams: line.textParams } : {}) };
 }
 
-export function noticeFailure(key: ChatNoticeKey, params?: Record<string, string>): { message: string; text: ServerText } {
+export function noticeFailure(key: ChatNoticeKey, params?: ServerTextParams): { message: string; text: ServerText } {
   const line = noticeLine(key, params);
   return { message: line.text, text: { key, ...(line.textParams ? { params: line.textParams } : {}) } };
 }
