@@ -134,13 +134,12 @@ export function useAvatarImage(bot: Bot, onPatch: (patch: AvatarPatch) => void) 
   const { request: api, uploadAvatar } = useBotEditor();
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
-  const [savingConnection, setSavingConnection] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const crop = bot.avatarCrop ?? "mascot";
   const cropRef = useRef(crop);
   cropRef.current = crop;
-  const busy = uploading || generating || savingConnection;
+  const busy = uploading || generating;
 
   const upload = async (file: File | undefined) => {
     if (!file || busy) return;
@@ -205,5 +204,5 @@ export function useAvatarImage(bot: Bot, onPatch: (patch: AvatarPatch) => void) 
     }
   };
 
-  return { fileRef, crop, uploading, generating, setSavingConnection, busy, error, upload, removeImage, generate };
+  return { fileRef, crop, uploading, generating, busy, error, upload, removeImage, generate };
 }

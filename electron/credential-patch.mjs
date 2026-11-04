@@ -11,6 +11,7 @@ export const CREDENTIAL_PATCH = {
   workersAiToken: (value) => ({ decider: { workersAiToken: value } }),
   openaiImageApiKey: (value) => ({ imageGen: { key: value } }),
   customImageApiKey: (value) => ({ imageGen: { customApiKey: value } }),
+  geminiImageApiKey: (value) => ({ imageGen: { geminiKey: value } }),
   openaiLiveKey: (value) => ({ live: { key: value } }),
   tregApiKey: (value) => ({ treg: { key: value } }),
   postizApiKey: (value) => ({ postiz: { key: value } }),

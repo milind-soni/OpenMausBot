@@ -41,7 +41,7 @@ export interface KeyTarget {
 export type KeyId =
   | "openai" | "anthropic" | "xai" | "openrouter" | "mistral" | "cerebras" | "groq" | "greenference" | "meta" | "deepseek" | "opencodeGo" | "opencodeProviders"
   | "lmStudio" | "openaiCompat" | "liveCalls" | "liveKey" | "elevenlabs" | "fishAudio" | "box" | "vps" | "onePassword" | "composio" | "treg" | "postiz"
-  | "jev" | "openrouterHelper" | "workersAi" | "imageOpenai" | "imageCustom";
+  | "jev" | "openrouterHelper" | "workersAi" | "imageOpenai" | "imageGemini" | "imageCustom";
 
 export type KeyMark = { driverKind: string; preset?: ProviderIconPreset } | { icon: LucideIcon };
 
@@ -182,8 +182,13 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
     target: { patch: (value) => ({ imageGen: { key: value } }), slot: "openaiImageApiKey",
       saved: (config) => flag(config.savedKeys?.openaiImageApiKey ?? { configured: config.imageGen?.openaiConfigured === true }),
       placeholder: "sk-…", href: "https://platform.openai.com/api-keys", analytics: "openai_image", shape: OPENAI_SHAPE } },
+  { id: "imageGemini", section: "helpers", labelKey: "keys.label.imageGemini", purposeKey: "keys.purpose.imageGemini", name: "Gemini", env: ["OMB_GEMINI_IMAGE_KEY"],
+    words: ["gemini", "google", "nano banana", "image", "images", "pictures"], mark: { icon: Image }, kind: "elsewhere",
+    opens: "imageGeneration", whereKey: "keys.where.imageGeneration",
+    status: (config) => flag(config.savedKeys?.geminiImageApiKey ?? { configured: config.imageGen?.geminiConfigured === true }) },
   { id: "imageCustom", section: "helpers", labelKey: "keys.label.imageCustom", purposeKey: "keys.purpose.imageCustom", name: "Custom", env: ["OMB_CUSTOM_IMAGE_KEY"],
-    words: ["image", "images", "pictures", "avatar", "custom"], mark: { icon: Fingerprint }, kind: "elsewhere", whereKey: "keys.where.pictures",
+    words: ["image", "images", "pictures", "avatar", "custom"], mark: { icon: Fingerprint }, kind: "elsewhere",
+    opens: "imageGeneration", whereKey: "keys.where.imageGeneration",
     status: (config) => flag(config.savedKeys?.customImageApiKey ?? { configured: config.imageGen?.customKeyConfigured === true }) },
 ];
 
