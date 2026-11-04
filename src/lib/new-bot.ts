@@ -69,6 +69,7 @@ async function createNewBot(section: string | undefined, bots: readonly Bot[], t
 /** New bot: a bot made at once from the New bot defaults, with its chat open and ready for the first message. */
 export async function makeNewBot(action: Extract<Action, { type: "newBot" }>, bots: readonly Bot[], dispatch: (action: Action) => void,
   showThreads: boolean, request: typeof api = api): Promise<void> {
+  if (currentTeamPeople()?.admin === false) return;
   let made: Awaited<ReturnType<typeof createNewBot>>;
   try {
     made = await createNewBot(action.section, bots, currentTeamPeople(), request);

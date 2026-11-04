@@ -5,7 +5,7 @@ import {
   LiveCallBusyError, LiveCallController, LiveCallSignedOutError, type LiveActivity, type LiveCallDeps, type LiveSocket,
 } from "./live-call-controller.ts";
 import { LIVE_COPY } from "../shared/live-approval.ts";
-import { LIVE_NEEDS_KEY, LiveSessionError } from "./live-call.ts";
+import { LIVE_NEEDS_AZURE, LIVE_NEEDS_KEY, LiveSessionError, type LiveEndpoint } from "./live-call.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Message, StoreChange } from "./store.ts";
 
@@ -30,6 +30,7 @@ class FakeSocket implements LiveSocket {
 
 const owner: RequestAuth = { kind: "loopback", scopes: ["admin", "client"] };
 const BOT = { botId: "bot1", botName: "Ada", threadId: "t1" };
+const ENDPOINT: LiveEndpoint = { provider: "openai", apiBase: "https://api.openai.com/v1", model: "gpt-live-1" };
 
 function setup(overrides: Partial<LiveCallDeps> = {}) {
   const listeners = new Set<(change: StoreChange) => void>();
@@ -37,7 +38,7 @@ function setup(overrides: Partial<LiveCallDeps> = {}) {
   const frames: Array<LiveCallState | null> = [];
   const logs: string[] = [];
   let activity: LiveActivity = "idle";
-  const settings = { key: "sk-test", voice: "sol", readTypedReplies: true, idleMinutes: 5 };
+  const settings: ReturnType<LiveCallDeps["settings"]> = { key: "sk-test", endpoint: ENDPOINT, voice: "sol", readTypedReplies: true, idleMinutes: 5 };
   const queue = new Set<string>();
   let messageCounter = 0;
   const deps: LiveCallDeps = {
@@ -48,6 +49,7 @@ function setup(overrides: Partial<LiveCallDeps> = {}) {
     activity: () => activity,
     broadcast: (frame) => frames.push(frame.call),
     settings: () => settings,
+    azureRefusal: vi.fn(() => null),
     createSession: vi.fn(async () => ({ sessionId: "sess_1", sdp: "answer-sdp" })),
     openSocket: (url, key) => { const socket = new FakeSocket(url, key); sockets.push(socket); return socket; },
     attachUrl: (id) => `ws://fake/${id}/attach`,
@@ -76,7 +78,7 @@ describe("LiveCallController lifecycle", () => {
   it("creates the session with the key and voice, attaches the sideband and goes live", async () => {
     const t = setup();
     const result = await t.controller.start({ auth: owner, ...BOT, client: "ios", sdp: "offer-sdp" });
-    expect(t.deps.createSession).toHaveBeenCalledWith({ key: "sk-test", sdp: "offer-sdp", botId: "bot1", threadId: "t1", voice: "sol" });
+    expect(t.deps.createSession).toHaveBeenCalledWith({ key: "sk-test", endpoint: ENDPOINT, sdp: "offer-sdp", botId: "bot1", threadId: "t1", voice: "sol" });
     expect(result.sdp).toBe("answer-sdp");
     expect(result.call).toMatchObject({ botId: "bot1", threadId: "t1", client: "ios", voice: "sol", status: "connecting" });
     expect(t.socket().url).toBe("ws://fake/sess_1/attach");
@@ -104,6 +106,92 @@ describe("LiveCallController lifecycle", () => {
       expect(t.controller.current()).toBeNull();
     }
     expect(LIVE_NEEDS_KEY).toBe("Live calls use your own OpenAI key. Add it in Settings → API keys.");
+  });
+
+  it("refuses an Azure call whose setup is incomplete with the setup message, before reaching Azure", async () => {
+    const t = setup();
+    t.settings.endpoint = null;
+    t.settings.provider = "azure";
+    t.settings.setupProblem = LIVE_NEEDS_AZURE;
+    await expect(t.controller.start({ auth: owner, ...BOT, client: "desktop", sdp: "a" })).rejects.toMatchObject({ status: 409, message: LIVE_NEEDS_AZURE });
+    expect(t.deps.createSession).not.toHaveBeenCalled();
+    expect(t.controller.current()).toBeNull();
+  });
+
+  it("creates and attaches an Azure call on the Azure endpoint it started with, even if settings change mid-call", async () => {
+    const azure: LiveEndpoint = { provider: "azure", apiBase: "https://res.openai.azure.com/openai/v1", model: "live-dep" };
+    const attachUrl = vi.fn((id: string, endpoint: LiveEndpoint) => `${endpoint.apiBase}/live/sessions/${id}/attach`);
+    const t = setup({ attachUrl });
+    t.settings.endpoint = azure;
+    const pending = t.controller.start({ auth: owner, ...BOT, client: "web", sdp: "offer-sdp" });
+    t.settings.endpoint = ENDPOINT;
+    await pending;
+    expect(t.deps.createSession).toHaveBeenCalledWith(expect.objectContaining({ endpoint: azure }));
+    expect(attachUrl).toHaveBeenCalledWith("sess_1", azure);
+    expect(t.socket().url).toBe("https://res.openai.azure.com/openai/v1/live/sessions/sess_1/attach");
+    t.socket().open();
+    expect(t.controller.current()).toMatchObject({ status: "live" });
+  });
+
+  describe("with Azure chosen", () => {
+    const AZURE: LiveEndpoint = { provider: "azure", apiBase: "https://res.openai.azure.com/openai/v1", model: "live-dep" };
+    const REFUSED = "only an admin, in these words";
+    const member: RequestAuth = { kind: "loopback", scopes: ["client"], trust: "service" };
+    const azure = (overrides: Partial<LiveCallDeps> = {}) => {
+      const t = setup(overrides);
+      t.settings.endpoint = AZURE;
+      t.settings.provider = "azure";
+      return t;
+    };
+
+    it("asks who is calling, with their own sign-in, and goes ahead when they may", async () => {
+      const t = azure();
+      await t.controller.start({ auth: owner, ...BOT, client: "web", sdp: "a" });
+      expect(t.deps.azureRefusal).toHaveBeenCalledWith(owner);
+      expect(t.deps.createSession).toHaveBeenCalledOnce();
+    });
+
+    it("refuses with the reason as a 403, never a setup prompt, before any session, socket or line is taken", async () => {
+      const t = azure({ azureRefusal: () => REFUSED });
+      await expect(t.controller.start({ auth: member, ...BOT, client: "ios", sdp: "a" })).rejects.toMatchObject({ status: 403, message: REFUSED });
+      expect(t.deps.createSession).not.toHaveBeenCalled();
+      expect(t.sockets).toHaveLength(0);
+      expect(t.frames).toEqual([]);
+      expect(t.controller.current()).toBeNull();
+      expect(t.logs.join("\n")).toContain("[live] call refused bot=bot1 client=ios provider=azure");
+    });
+
+    it("refuses a person who may not call even while Azure is not set up yet, rather than sending them to set it up", async () => {
+      const t = azure({ azureRefusal: () => REFUSED });
+      t.settings.endpoint = null;
+      t.settings.key = "";
+      t.settings.setupProblem = LIVE_NEEDS_AZURE;
+      await expect(t.controller.start({ auth: member, ...BOT, client: "web", sdp: "a" })).rejects.toMatchObject({ status: 403, message: REFUSED });
+    });
+
+    it("asks too when only the endpoint says Azure, so no reading of the settings slips past it", async () => {
+      const t = azure({ azureRefusal: () => REFUSED });
+      delete t.settings.provider;
+      await expect(t.controller.start({ auth: member, ...BOT, client: "web", sdp: "a" })).rejects.toMatchObject({ status: 403 });
+      expect(t.deps.createSession).not.toHaveBeenCalled();
+    });
+
+    it("tells a refused caller nothing about a call already running", async () => {
+      let asked = 0;
+      const t = azure({ azureRefusal: () => (asked++ === 0 ? null : REFUSED) });
+      await t.start();
+      const second = t.controller.start({ auth: member, ...BOT, client: "web", sdp: "a" });
+      await expect(second).rejects.toMatchObject({ status: 403, message: REFUSED });
+      await expect(second).rejects.not.toBeInstanceOf(LiveCallBusyError);
+    });
+
+  });
+
+  it("asks nothing of the Azure limit for a call through OpenAI", async () => {
+    const t = setup({ azureRefusal: vi.fn(() => "never asked") });
+    await t.controller.start({ auth: owner, ...BOT, client: "desktop", sdp: "a" });
+    expect(t.deps.azureRefusal).not.toHaveBeenCalled();
+    expect(t.deps.createSession).toHaveBeenCalledOnce();
   });
 
   it("starts a phone's call with no plan at all once a key exists, through the companion or by the phone's own client", async () => {

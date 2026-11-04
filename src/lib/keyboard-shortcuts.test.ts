@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  botCycleStep,
   filterShortcutGroups,
   isSidebarToggle,
   SHORTCUT_GROUPS,
@@ -141,5 +142,22 @@ describe("keyboard shortcut opening guard", () => {
     }
     expect(shouldOpenKeyboardShortcuts(event("?", { ctrlKey: true }))).toBe(false);
     expect(shouldOpenKeyboardShortcuts(event("/", { metaKey: true, shiftKey: true }))).toBe(false);
+  });
+});
+
+describe("botCycleStep", () => {
+  it("steps forward on ] and back on [, as macOS reports them with ⌘⇧", () => {
+    expect(botCycleStep({ key: "]" })).toBe(1);
+    expect(botCycleStep({ key: "[" })).toBe(-1);
+  });
+
+  it("also steps on } and {, which Ctrl+Shift reports on Windows and Linux", () => {
+    expect(botCycleStep({ key: "}" })).toBe(1);
+    expect(botCycleStep({ key: "{" })).toBe(-1);
+  });
+
+  it("ignores other keys", () => {
+    expect(botCycleStep({ key: "+" })).toBeNull();
+    expect(botCycleStep({ key: "1" })).toBeNull();
   });
 });

@@ -176,8 +176,8 @@ export const COMPOSIO_PROMPT =
   " The user's connected apps (Gmail, Calendar, Slack, Notion, and the rest) are reachable through the composio tools — find the right one with COMPOSIO_SEARCH_TOOLS, read its arguments with COMPOSIO_GET_TOOL_SCHEMAS, then run it with COMPOSIO_MULTI_EXECUTE_TOOL. Reach for them before telling the user you have no access to a service.";
 
 /** The app tools a bot with these apps can call by name, on every engine. */
-const APP_TOOLS_PROMPT: Record<string, { label: string; tools: string }> = {
-  gmail: { label: "Gmail", tools: "gmail.search_emails, gmail.read_email, gmail.read_email_thread, gmail.create_draft, gmail.list_drafts, gmail.read_draft and gmail.update_draft. Draft requests never authorize sending. Revisions update the existing draft ID; creation always makes another draft. If an action fails or accidentally sends, report that fact accurately; a later draft does not undo a send" },
+const APP_TOOLS_PROMPT: Record<string, { label: string; tools: string; note?: string }> = {
+  gmail: { label: "Gmail", tools: "gmail.search_emails, gmail.read_email, gmail.read_email_thread, gmail.create_draft, gmail.list_drafts, gmail.read_draft and gmail.update_draft", note: "Draft requests never authorize sending. Revisions update the existing draft ID; creation always makes another draft. If an action fails or accidentally sends, report that fact accurately; a later draft does not undo a send" },
   googlecalendar: { label: "Google Calendar", tools: "googlecalendar.list_events and googlecalendar.list_calendars" },
 };
 
@@ -185,7 +185,7 @@ function appToolsPrompt(apps: readonly string[]): string {
   const named = apps.filter((app) => Object.hasOwn(APP_TOOLS_PROMPT, app)).map((app) => APP_TOOLS_PROMPT[app]!);
   if (!named.length) return "";
   const one = named.length === 1;
-  return ` ${named.map((app) => app.label).join(" and ")}, when connected, ${one ? "has tools of its" : "have tools of their"} own: call ${named.map((app) => app.tools).join(", and ")} directly (your engine may show them behind its own prefix, with _ for the dot), and use the composio tools for everything else.`;
+  return ` ${named.map((app) => app.label).join(" and ")}, when connected, ${one ? "has tools of its" : "have tools of their"} own: call ${named.map((app) => app.tools).join(", and ")} directly (your engine may show them behind its own prefix, with _ for the dot), and use the composio tools for everything else.${named.map((app) => (app.note ? ` ${app.note}` : "")).join("")}`;
 }
 
 export function composioSystemPrompt(grants: Record<string, ConnectorToolGrant> | undefined): string {
