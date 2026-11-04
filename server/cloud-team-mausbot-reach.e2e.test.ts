@@ -225,9 +225,9 @@ it("outside-driven: a line another app relays into her private chat cannot hand 
   expect(steps(turn("M-RELAYED"))[0]!.response?.result?.isError).toBe(true);
 }, hostTimeout(90_000));
 
-it("outside-driven: once work from outside reached a chat of the person's, their own later line there cannot hand work on", async () => {
+it("outside-driven: the chat outside work reached is not the person's own, so their later line there hands nothing on", async () => {
   await expect.poll(settled, { timeout: 30_000 }).toBe(true);
-  // Only an admin makes a webhook, so this is the Owner's own MausBot: its results chat is hers, and outside work reached it.
+  // Only an admin makes a webhook. Its results chat is not private to her, and outside work reached it: two reasons to refuse.
   const own = (await botsOf(olive)).find((bot) => bot.defaultBot?.person === OLIVE.email)!;
   const plan = JSON.parse(readFileSync(planPath(), "utf8"));
   plan[own.id] = { script: [
