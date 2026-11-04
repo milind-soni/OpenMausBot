@@ -40,7 +40,7 @@ class DirectSendRefused extends Error {
 
 type AcceptInput = Parameters<BotMessageRouteDeps["acceptDirectSend"]>[0];
 
-async function fixture() {
+async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>> = {}) {
   const store = new Store(() => sonnet);
   const bot = store.createBot({ name: "Scout" });
   const threadId = bot.threadId;
@@ -123,6 +123,7 @@ async function fixture() {
       state.serverPresses.push({ threadId: thread, messageId, type: action.type });
       return state.serverAnswer;
     },
+    ...over,
   } as unknown as BotMessageRouteDeps;
   const routes = [createBotMessageRoutes(deps)];
   const server = createServer(async (req, res) => {
@@ -160,6 +161,22 @@ async function fixture() {
   const sent = (thread = threadId): Message[] => store.messagesFor(thread).filter((message) => message.role === "user");
   return { store, bot, threadId, state, post, edit, cancelQueued, show, row, sent, patches: vi.spyOn(store, "patchMessage") };
 }
+
+describe("editing a message with no AI", () => {
+  it("says what a Send says on a team, and starts no turn", async () => {
+    const line = "Olive needs to connect an AI before bots can answer. I've told them.";
+    const { store, threadId, state, edit } = await fixture({ registry: { get: () => undefined }, noAiRefusal: () => Object.assign(new Error(line), { status: 409, code: "no_ai" }) });
+    const sent = store.appendMessage(threadId, { role: "user", kind: "text", text: "Hello" });
+    expect(await edit(sent.id, { threadId, text: "Hello again" })).toMatchObject({ status: 409, body: { error: line } });
+    expect(state.started).toEqual([]);
+  });
+
+  it("keeps its own words off a team", async () => {
+    const { store, threadId, edit } = await fixture({ registry: { get: () => undefined }, noAiRefusal: () => null });
+    const sent = store.appendMessage(threadId, { role: "user", kind: "text", text: "Hello" });
+    expect((await edit(sent.id, { threadId, text: "Hello again" })).body.error).toContain("is unavailable");
+  });
+});
 
 describe("POST /api/bots/:id/messages with widgetAction", () => {
   it("lets the server answer a press on its own card with no turn, refuses it for someone else, and reads no widget in another bot's chat", async () => {

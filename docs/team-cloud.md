@@ -458,6 +458,16 @@ allow, folders), where it runs, its department, whom it answers to or directs, c
   Not now changes nothing and tells nobody; they can ask again. The card is a set-answer question card
   (`card.accessRequest`), shown in each person's language, and its answer is always its own option.
 
+## A team with no AI
+
+Until someone connects an AI, a bot has nothing to answer with. A Send from a User comes back as `409` with `code: "no_ai"`:
+*"Olive needs to connect an AI before bots can answer. I've told them."*, and the app keeps their message in the box for
+them to send again. The owner gets one line in their inbox, naming who tried and never their words, at most once a day
+for each person (`server/host/no-ai-notice.ts`). The machine learns who the owner is only when they first open the team, so
+until then the User reads that the owner will be told, and the line goes when the owner first opens it
+(`no-ai-notices.json`). An Admin reads *"Connect an AI first, so bots can answer."* and nobody is told; a run nobody
+started by hand reads *"No AI is connected yet, so nothing can run."*
+
 ## One inbox per person
 
 Everything addressed to a person reaches one place, their **inbox** (`server/host/person-inbox.ts`): their own private
