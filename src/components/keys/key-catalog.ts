@@ -123,7 +123,7 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
   { id: "liveCalls", section: "voice", labelKey: "call.live.key", purposeKey: "keys.purpose.liveCalls", name: "OpenAI", env: [],
     words: ["openai", "live calls", "calls", "voice", "talk", "gpt-live"], mark: { icon: Phone }, kind: "uses", uses: "openai" },
   { id: "liveKey", section: "voice", labelKey: "keys.label.liveKey", purposeKey: "keys.purpose.liveKey", name: "OpenAI", env: ["OMB_OPENAI_LIVE_KEY"],
-    words: ["openai", "live calls", "calls", "voice", "gpt-live"], mark: { icon: Phone }, kind: "key",
+    words: ["openai", "live calls", "calls", "voice", "gpt-live", "azure", "foundry"], mark: { icon: Phone }, kind: "key",
     target: { patch: (value) => ({ live: { key: value } }), slot: "openaiLiveKey",
       saved: (config) => flag(config.savedKeys?.openaiLiveKey ?? { configured: config.live?.keySource === "live" }),
       placeholder: "sk-…", href: "https://platform.openai.com/api-keys", analytics: "openai_live", shape: OPENAI_SHAPE } },
@@ -196,6 +196,14 @@ export function keyEntry(id: KeyId): KeyEntry {
   const entry = KEY_CATALOG.find((candidate) => candidate.id === id);
   if (!entry) throw new Error(`no key ${id}`);
   return entry;
+}
+
+/** With Azure OpenAI chosen for Live calls, the row for their key is about the Azure resource: required, and no OpenAI key. */
+export function shownKeyEntry(id: KeyId, config: ConfigStatus | null | undefined): KeyEntry {
+  const entry = keyEntry(id);
+  if (id !== "liveKey" || config?.live?.provider !== "azure" || !entry.target) return entry;
+  const { shape: _openAiShape, ...target } = entry.target;
+  return { ...entry, name: "Azure OpenAI", labelKey: "call.live.azureKeyField", purposeKey: "keys.purpose.liveKeyAzure", target: { ...target, placeholder: "…", href: "https://portal.azure.com" } };
 }
 
 export function keySection(entry: KeyEntry) {
