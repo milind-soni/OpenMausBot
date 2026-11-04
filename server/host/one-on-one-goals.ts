@@ -212,7 +212,12 @@ export function createOneOnOneGoals(deps: OneOnOneGoalDeps) {
     return true;
   }
 
-  return { start, stop };
+  function isLive(threadId: string, runId: string): boolean {
+    const goal = live.get(threadId);
+    return Boolean(goal && !goal.cancelled && goal.run.runId === runId);
+  }
+
+  return { start, stop, isLive };
 }
 
 export type OneOnOneGoals = ReturnType<typeof createOneOnOneGoals>;

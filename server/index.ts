@@ -293,7 +293,7 @@ import { createDelegatedLevel } from "./host/delegated-level.ts";
 import { createLiveApprovalMode } from "./host/live-approval.ts";
 import { CONSENT_RULE, escapeNotes, labelledLine, OUTSIDE, peerLineText, peerProvenanceNote, reportNote, requestWorkOrigin, type WorkOrigin } from "./peer-provenance.ts"; import { lineNote, PROVENANCE_PROMPT } from "./provenance-label.ts"; import { openRoomThread } from "./host/room-new-thread.ts"; import { createLineLabels } from "./host/line-labels.ts";
 import { decideRoomPost, emptyRoomPostBudget, type RoomPostAttempt, type RoomPostBudget } from "./room-post-budget.ts";
-import { pageMessage, pageSize, slimMessage } from "./host/message-pages.ts";
+import { messagePages, pageSize, slimMessage } from "./host/message-pages.ts";
 import { createTeammatePrompts } from "./host/teammate-prompts.ts";
 import { ReplayBuffer } from "./host/sse-replay.ts";
 import {
@@ -2051,7 +2051,6 @@ function settleDirectCoordination(generation: string | undefined, outcome: Direc
   const result = hostTurnResult(node, generation, outcome);
   if (settler) {
     settler.settle(result);
-    // A one-on-one goal step began its own root (startTurn), so its root ends with it.
     if (settler.nodeId !== generation || !node?.goalRunId) return;
   }
   if (node && !node.parentId && (node.status === "source" || node.status === "running")) coordinator.endTurn(generation, result);
@@ -2845,6 +2844,7 @@ const store = new Store(
   () => appLanguage() ?? Intl.DateTimeFormat().resolvedOptions().locale,
   () => sharedMembership() ? undefined : cfg.profile?.name,
 );
+const { messagePage, messageWindow } = messagePages(store);
 const { cloudLendingTurn, cloudLendingRefusalNotice, cloudLendingRefusal, cloudThreadStarters, cloudLendingView, cloudReportFromOthers, roomTurnStarted, roomTurnEnded, roomRun } = createCloudLendingTurns({
   store, cloudHome: CLOUD_HOME !== null, team: CLOUD_TEAM?.name ?? null, directRequest: (threadId) => directRequestOwners.get(threadId), threadStarter: (threadId) => threadStarters.get(threadId),
   ownerPerson: cloudProvenOwnerPerson, cardAnswerer: cloudCardAnswerer, activeRoutineRun: activeRoutineRunForThread, ownerStartedRun: (runId) => ownerStartedRoutineRuns.has(runId),
@@ -3891,6 +3891,9 @@ function runRoomRootTurn(node: HandoffView, group: GroupRecord, bot: BotRecord, 
 }
 
 function runRootTurn(node: HandoffView, bot: BotRecord, signal: AbortSignal, composed: ComposedTurn): Promise<HostTurnResult> {
+  if (composed.turn === "rerun" && node.goalRunId && !oneOnOneGoals.isLive(node.threadId, node.goalRunId)) {
+    return Promise.resolve({ ok: false, text: "The goal run this step belonged to ended with the restart." });
+  }
   if (composed.turn === "rerun") store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: "Resuming after a restart", ok: true } });
   parkedSeats.delete(node.id);
   const owner = directRequestOwners.get(node.threadId);
@@ -4608,25 +4611,6 @@ store.onChange((change) => {
 
 const DEFAULT_PAGE = 50;
 
-function messagePage(threadId: string, limit: number | undefined, before?: string | null) {
-  if (limit === undefined) {
-    return { messages: store.messagesFor(threadId), activeLeafId: store.activeLeaf(threadId) };
-  }
-  if (!before) {
-    const tail = store.messagesTail(threadId, limit);
-    return { messages: tail.messages.map(pageMessage), hasMore: tail.hasMore, activeLeafId: tail.activeLeafId };
-  }
-  const all = store.messagesFor(threadId);
-  const end = all.findIndex((msg) => msg.id === before);
-  const stop = end === -1 ? all.length : end;
-  const start = Math.max(0, stop - limit);
-  return {
-    messages: all.slice(start, stop).map(pageMessage),
-    hasMore: start > 0,
-    activeLeafId: store.activeLeaf(threadId),
-  };
-}
-
 function guardedRequestSnapshot(botId: string, threadId: string, sendId: string) {
   if (!store.taskByThread(botId, threadId)) throw requestConflict("No such conversation for this bot");
   const activeLeafId = store.activeLeaf(threadId);
@@ -4674,16 +4658,6 @@ function settleTrackedRequest(threadId: string, incoming: ReadonlySet<string> = 
       terminal.turnId !== owner.turnId || messages.findLast(message => message.turnId)?.turnId !== terminal.turnId ||
       messages.findLast(message => message.turnSucceeded !== undefined)?.turnSucceeded !== true) return;
   store.patchMessage(threadId, source.id, { requestPending: false }); savedSteps.requestSettled({ botId: bot.id, threadId, request: source, reply: terminal, after: messages, generations: owner.generations, automated: !personRequest(owner) });
-}
-
-function messageWindow(threadId: string, messageId: string, limit: number) {
-  const all = store.messagesFor(threadId);
-  const index = all.findIndex((message) => message.id === messageId);
-  if (index < 0) return null;
-  const before = Math.floor((limit - 1) / 2);
-  const start = Math.max(0, Math.min(index - before, all.length - limit));
-  const stop = Math.min(all.length, start + limit);
-  return { messages: all.slice(start, stop).map(pageMessage), hasMore: start > 0 };
 }
 
 interface SseClient {
