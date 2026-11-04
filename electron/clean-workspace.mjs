@@ -18,6 +18,8 @@ import { WELCOME_VERSION } from "./onboarding-record.mjs";
 
 /** This first conversation stays quiet: no corner notices until a reply, no spotlights (src/lib/onboarding.ts MET_CHIEF_HINT). */
 const QUIET_HINT = "met-chief-v1";
+/** The popup that offers to bring bots here (src/lib/notices.ts GROK_MOVE_NOTICE) would read badly beside a line saying they're safe in the Cloud. */
+const NO_MOVE_POPUP = "grok-move-2026-11";
 const CLEAN = "clean-workspace";
 
 export const cleanWorkspaceDir = (dataDir) => `${dataDir}-clean`;
@@ -25,7 +27,7 @@ export const cleanWorkspaceDir = (dataDir) => `${dataDir}-clean`;
 /** A clean workspace's first config: never the new-user setup, which would read as the person's bots being gone. Connecting
  * an AI isn't part of this: the page's line offers it while none works (HomeLine). */
 export function cleanWorkspaceConfig(language = null, now = new Date()) {
-  return { ...(typeof language === "string" && language ? { language } : {}), onboarding: { completedAt: now.toISOString(), version: WELCOME_VERSION, hintsSeen: [QUIET_HINT] } };
+  return { ...(typeof language === "string" && language ? { language } : {}), onboarding: { completedAt: now.toISOString(), version: WELCOME_VERSION, hintsSeen: [QUIET_HINT, NO_MOVE_POPUP] } };
 }
 
 /**
@@ -44,7 +46,9 @@ export function cleanWorkspaceConfig(language = null, now = new Date()) {
 export function createCleanWorkspace({ dataDir, running, swap, allowed = () => true, changed = () => {}, log = () => {}, fs = nodeFs }) {
   const folder = () => cleanWorkspaceDir(dataDir());
   const active = () => running() === folder();
-  let held = 0;
+  let held = 0, swapping = false;
+  /** This computer's own copy is the server that answers now: not the clean workspace, and not on its way between them. */
+  const ownCopy = () => !active() && !swapping;
   let queue = Promise.resolve();
   /** One swap at a time: a second would stop the server the first just started. */
   const inTurn = (work) => {
@@ -62,7 +66,8 @@ export function createCleanWorkspace({ dataDir, running, swap, allowed = () => t
     catch (error) { if (error?.code !== "EEXIST") throw error; }
   }
   async function swapTo(dir) {
-    const done = await swap(dir).catch((error) => ({ ok: false, error }));
+    swapping = true;
+    const done = await swap(dir).catch((error) => ({ ok: false, error })).finally(() => { swapping = false; });
     if (done?.ok !== true) { log(`clean workspace: could not start on ${dir} (${done?.error?.message ?? done?.error ?? "no answer"})`); return false; }
     changed();
     return true;
@@ -80,6 +85,7 @@ export function createCleanWorkspace({ dataDir, running, swap, allowed = () => t
 
   return {
     active,
+    ownCopy,
     marker,
     /** Opens the clean workspace; true once it runs. False when it can't, and the window says why as before. A named local
      * environment the person chose is no frozen copy, so it stays. */
@@ -103,7 +109,7 @@ export function createCleanWorkspace({ dataDir, running, swap, allowed = () => t
      * files say, and everything else refused. */
     realCopy(request) {
       return async (route, init) => {
-        if (!active()) return request(route, init);
+        if (ownCopy()) return request(route, init);
         if ((init?.method ?? "GET").toUpperCase() === "GET") {
           if (route === "/api/move/freeze") return Response.json(marker());
           if (route === "/.well-known/openmausbot/environment") {
