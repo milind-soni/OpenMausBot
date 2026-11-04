@@ -885,13 +885,16 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
   write, or one message a webhook posted (a webhook that posts to chat
   writes into the bot's Updates conversation), takes that conversation out
   of lending for good, because a resumed session carries everything said in
-  it. A conversation a guest opened (and
+  it. A conversation a bot opened (a hand-off's work thread, one a bot
+  started itself, a Chief's notices) starts with that bot's words, which are
+  no line in it, so it is never the owner's either: not for the Mac, and not
+  for memory capture, the daily log, recall or the brief. A conversation a guest opened (and
   named) is never the owner's, whoever writes in it. Whenever a computer is lent but a turn can't use it,
   `list_shared_computers` answers why in `unavailable` and `say` (`cloudLendingRefusalText` in
   `server/cloud-lending.ts`), and a refused `shared_computer` call answers the same, so the bot says the reason instead
   of asking the person to open OpenMausBot: lines from before My Cloud carried the owner's name, someone else's words ("Someone else
   wrote in this conversation, so it can't use your Mac. Start a new conversation to use it."; in a room, "Start a new
-  thread in this group chat to use it."), a changed memory, a room turn no line of the owner's started, or any other
+  thread in this group chat to use it."), a webhook's or another's routine's post where no other person wrote, a changed memory, a room turn no line of the owner's started, or any other
   turn that isn't provably the owner's. A move marks the lines and answers the owner wrote in a room as theirs, as in
   a bot conversation (`stampOwner`, `stampHeld`); a room moved before that keeps naming nobody, so a new thread in it
   is the way to use the Mac there. The owner's own edits count as theirs,
@@ -967,7 +970,15 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
     or a daily log, or to an instruction file its engine reads in the folder
     of a conversation the owner opened, the bot's own folder, or a folder
     above one (`CLAUDE.md`, `AGENTS.md`, `.mcp.json`,
-    `.claude/settings.json`, skills, agents and commands). A guest's own
+    `.claude/settings.json`, skills, agents and commands). The folder of a
+    new conversation and the skill links the harness makes in it are not a
+    change: a link counts for nothing only when it is named for a skill and
+    points exactly where the harness would point it, a skill the bot has
+    switched on or one from the person's computer, and each switched-on skill's
+    `SKILL.md` counts once, whatever links to it. Anything else there is
+    judged as above, a real folder under a skill's name included. A skill
+    going away from a bot's own folder or a conversation's flags nothing: it
+    plants nothing, and the harness takes back links this way. A guest's own
     folder is not watched: nothing there reaches the owner's turns. A skills,
     agents or commands folder of more than 200 entries is judged as a whole
     (any entry added or removed there, or an edit to an entry or its
@@ -978,9 +989,15 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
     count as theirs from then on. A link is judged by where it points, and
     on a Cloud home memory is never read through one. A flagged bot's turns
     cannot use the Mac, and the bot says "This bot's memory was changed in a
-    conversation you didn't write. Review it in Memory to use your Mac
-    again." The bot's **Memory** panel shows the same notice, lists the files
-    that changed, and **Mark reviewed** (one click, only from one of the
+    conversation you didn't write, so it can't use your Mac. In this bot's
+    settings, open Memory, check what changed and tap Mark reviewed, then ask
+    again here." A refusal checks every gate first and names only ways out
+    that work: where the conversation is refused too, it says to review and
+    then start a new conversation, never the new conversation alone. What a
+    refused call answers also tells the bot only the person can change this,
+    so it stops instead of trying again, opening a conversation itself or
+    handing the work on. The bot's **Memory** panel shows the same notice,
+    lists the files that changed, and **Mark reviewed** (one click, only from one of the
     owner's own devices, never a local process) accepts exactly what was
     shown: if anything changed since, the panel shows it again. The owner's
     own turns, their edits in the Memory panel (save, delete, undo), upkeep

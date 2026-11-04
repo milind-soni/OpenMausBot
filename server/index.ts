@@ -376,7 +376,7 @@ import {
   undoSkillWrite,
 } from "./skills.ts";
 import { fetchSkillFromSource } from "./skill-fetch.ts";
-import { ensureTaskWorkspaceWithSkills } from "./skill-task-links.ts";
+import { ensureTaskWorkspaceWithSkills, harnessSkillLinks } from "./skill-task-links.ts";
 import { parseSkillManageReferences, previousSkillVersion, skillCardCopy, skillRequestReferences } from "./skill-request-card.ts";
 import { skillReferencesSha256 } from "./skill-storage.ts";
 import { createSkillsLibraryHost } from "./host/skills-library.ts";
@@ -702,7 +702,7 @@ const lendingMemory = CLOUD_PERSONAL ? createLendingMemory({
     // Only folders of conversations the owner opened: a guest's private folder reaches no owner turn.
     const ownerOpened = (threadId: string) => { const starter = threadStarters.get(threadId); return starter === undefined || cloudOwnerPerson(starter); };
     return botMemoryFiles(bot ? { id: bot.id, cwd: bot.cwd, tasks: store.tasks(bot.id).filter((task) => ownerOpened(task.threadId)) } : undefined,
-      { workspace: ensureWorkspace, taskWorkspaces: TASK_WORKSPACES_DIR });
+      { workspace: ensureWorkspace, taskWorkspaces: TASK_WORKSPACES_DIR, skillLinks: harnessSkillLinks });
   },
   knownBots: () => store.bots.map((bot) => bot.id),
   log: (line) => console.warn(line),
@@ -895,7 +895,7 @@ function sharedComputerPrincipal(capability: Pick<InternalCapability, "botId" | 
 /** The only conversations that may feed a bot's memory, daily log, recall or brief; dropped whenever a session is revoked. */
 const ownerOnlyCache = new Map<string, { length: number; last?: string; owner: boolean }>();
 function cloudOwnerOnlyThread(threadId: string): boolean {
-  if (cloudThreadStarters(threadId).some((person) => person !== undefined && !cloudProvenOwnerPerson(person))) return false;
+  if (cloudBotOpened(threadId) || cloudThreadStarters(threadId).some((person) => person !== undefined && !cloudProvenOwnerPerson(person))) return false;
   const thread = store.messagesFor(threadId);
   const last = thread.at(-1);
   const cached = ownerOnlyCache.get(threadId);
@@ -2854,14 +2854,14 @@ const store = new Store(
   () => sharedMembership() ? undefined : cfg.profile?.name,
 );
 const { messagePage, messageWindow } = messagePages(store);
-const { cloudLendingTurn, cloudLendingRefusalNotice, cloudLendingRefusal, cloudThreadStarters, cloudLendingView, cloudReportFromOthers, roomTurnStarted, roomTurnEnded, roomRun } = createCloudLendingTurns({
+const { cloudLendingTurn, cloudLendingRefusalNotice, cloudLendingRefusalForBot, cloudLendingRefusal, cloudThreadStarters, cloudBotOpened, cloudLendingView, cloudReportFromOthers, roomTurnStarted, roomTurnEnded, roomRun } = createCloudLendingTurns({
   store, cloudHome: CLOUD_HOME !== null, team: CLOUD_TEAM?.name ?? null, directRequest: (threadId) => directRequestOwners.get(threadId), threadStarter: (threadId) => threadStarters.get(threadId),
   ownerPerson: cloudProvenOwnerPerson, cardAnswerer: cloudCardAnswerer, activeRoutineRun: activeRoutineRunForThread, ownerStartedRun: (runId) => ownerStartedRoutineRuns.has(runId),
   routineRunIsOwners: cloudRoutineRunIsOwners, routines: () => routines, routineAuthors: cloudRoutineAuthors, lentPlatform: () => sharedComputers.known(CLOUD_HOME_LENDER)[0]?.platform,
   memoryChangedBySomeoneElse: (botId) => lendingMemory?.reconcile(botId, foreignTurnRunning(botId), { cached: true }).changedBySomeoneElse === true });
 const actingPeople = createActingPeople({ store, direct: (threadId) => directRequestOwners.get(threadId), roomRun, handed: new HandedPeople(join(DATA_DIR, HANDED_PEOPLE_FILE)) });
 const computerAsks = CLOUD_PERSONAL ? createComputerAsksHost({ store, notify, lending: sharedComputers, principal: CLOUD_HOME_LENDER, threadBusy, queued: hasQueuedSteeredMessages, continueRequest: startTurn,
-  refusal: (turn) => sharedComputerPrincipal(turn) ? null : cloudLendingRefusalNotice(turn) ?? "This conversation can't use your computer.", request: (threadId) => directRequestOwners.get(threadId), active: (turn) => internalCapabilityIsActive(turn as InternalCapability) }) : null;
+  refusal: (turn) => sharedComputerPrincipal(turn) ? null : cloudLendingRefusalForBot(turn) ?? "This conversation can't use your computer.", request: (threadId) => directRequestOwners.get(threadId), active: (turn) => internalCapabilityIsActive(turn as InternalCapability) }) : null;
 const { stopThreadForPerson, stopOnTypedCommand, restartForPerson, noteTeammatesLeftRunning } = createPersonStop({
   store, routines: () => routines, handoffs: () => handoffs, interruptDirectThread, clearUnattended,
   stopGoal: (threadId) => oneOnOneGoals.stop(threadId), markStopped: (threadId) => personStops.stop(threadId, liveTurns.running(threadId), directTurnDispatchClaims.has(threadId)),
@@ -13351,7 +13351,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const principal = sharedComputerPrincipal(internalCapability);
         // `say` too: the bot says why instead of asking the person to open OpenMausBot, which can't help while the computer is lent already.
         const why = CLOUD_HOME && !principal && (CLOUD_TEAM || sharedComputers.status(CLOUD_HOME_LENDER).length > 0) ? cloudLendingRefusalNotice(internalCapability) : null;
-        return json(res, 200, { computers: sharedComputers.list(principal), ...sharedComputers.away(principal), ...sharedComputers.screenNotLent(principal), ...(why ? { unavailable: why, say: why } : {}) });
+        return json(res, 200, { computers: sharedComputers.list(principal), ...sharedComputers.away(principal), ...sharedComputers.screenNotLent(principal), ...(why ? { unavailable: cloudLendingRefusalForBot(internalCapability), say: why } : {}) });
       }
       if (method === "POST" && path === "/api/internal/shared-computers" && lendingEnabled()) {
         const parsed = sharedComputerOperation.safeParse(await readInternalBody());
@@ -13362,7 +13362,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 403, { error: "This bot has no computer. Change its Computer setting to use a shared computer's apps and screen." });
         }
         const principal = sharedComputerPrincipal(internalCapability);
-        const why = (CLOUD_TEAM ? managedPolicy.computerRefusal("thisComputer") : null) ?? (CLOUD_HOME && !principal ? cloudLendingRefusalNotice(internalCapability) : null);
+        const why = (CLOUD_TEAM ? managedPolicy.computerRefusal("thisComputer") : null) ?? (CLOUD_HOME && !principal ? cloudLendingRefusalForBot(internalCapability) : null);
         if (why) return json(res, 403, { error: why });
         return json(res, 200, { result: lentScreenResult(parsed.data, await sharedComputers.request(parsed.data, principal, () => lendingEnabled() && internalCapabilityIsActive(internalCapability))) });
       }

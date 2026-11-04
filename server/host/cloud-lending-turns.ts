@@ -1,7 +1,7 @@
 // Which turns on a Cloud home may use the Mac lent to it, read from the harness's own records (server/cloud-lending.ts
 // decides), and the plain words a turn that can't is told. A room member turn acts for the person's line that started
 // its run, for that turn generation alone, while the run lasts.
-import { cloudHomeLendingRefusal, cloudLendingRefusalText, teamLendingRefusal, type CloudLendingTurn } from "../cloud-lending.ts";
+import { cloudHomeLendingRefusal, cloudLendingRefusalText, ONLY_THE_PERSON, teamLendingRefusal, type CloudLendingRefusal, type CloudLendingTurn } from "../cloud-lending.ts";
 import { unstamped } from "../cloud-owner-lines.ts";
 import { deviceWord } from "../lent-computers.ts";
 import type { Routine, RoutineManager, RoutineRun } from "../routines.ts";
@@ -11,7 +11,7 @@ import type { RoomRun } from "./acting-person.ts";
 type Turn = { botId: string; threadId: string; generation: string };
 
 export interface CloudLendingTurnsDeps {
-  store: Pick<Store, "groupByThread" | "messagesFor" | "taskByThread">;
+  store: Pick<Store, "botByThread" | "groupByThread" | "messagesFor" | "taskByThread">;
   cloudHome: boolean;
   /** The team whose Cloud this is; null on a person's own. */
   team?: string | null;
@@ -48,6 +48,7 @@ export function createCloudLendingTurns(deps: CloudLendingTurnsDeps) {
       thread: store.messagesFor(capability.threadId),
       starters: cloudThreadStarters(capability.threadId),
       reportsFromOthers: store.messagesFor(capability.threadId).some(cloudReportFromOthers),
+      botOpened: cloudBotOpened(capability.threadId),
       ownerPerson: deps.ownerPerson,
       cardAnswerer: deps.cardAnswerer,
       routineRun: () => {
@@ -62,20 +63,38 @@ export function createCloudLendingTurns(deps: CloudLendingTurnsDeps) {
     };
   }
 
-  /** Why this turn can't use the lent computer, in plain words; null when it can or nothing is lent. */
-  function cloudLendingRefusalNotice(capability: Turn): string | null {
-    const why = cloudLendingRefusal(capability);
-    if (!why) return null;
-    if (deps.team) return teamLendingRefusal(deps.team);
-    const others = store.messagesFor(capability.threadId).filter((line) => line.role === "user" && !deps.ownerPerson(line.peerAsk ? undefined : line.sender?.id));
-    return cloudLendingRefusalText(why, { room: Boolean(store.groupByThread(capability.threadId)), fromBefore: others.length > 0 && others.every(unstamped),
-      device: deviceWord(deps.lentPlatform()) });
+  /** Every gate, so what a turn hears never names a way out another gate closes. */
+  function gates(capability: Turn): { conversation: CloudLendingRefusal | null; memoryChanged: boolean } {
+    return { conversation: cloudHomeLendingRefusal(cloudLendingTurn(capability)), memoryChanged: deps.memoryChangedBySomeoneElse(capability.botId) };
   }
 
-  function cloudLendingRefusal(capability: Turn): "unproven" | "not-owner" | "someone-else" | "memory-changed" | null {
-    const refusal = cloudHomeLendingRefusal(cloudLendingTurn(capability));
-    if (refusal) return refusal;
-    return deps.memoryChangedBySomeoneElse(capability.botId) ? "memory-changed" : null;
+  /** Why this turn can't use the lent computer, in plain words for the person; null when it can or nothing is lent. */
+  function cloudLendingRefusalNotice(capability: Turn): string | null {
+    const { conversation, memoryChanged } = gates(capability);
+    if (!conversation && !memoryChanged) return null;
+    if (deps.team) return teamLendingRefusal(deps.team);
+    const thread = store.messagesFor(capability.threadId);
+    const others = thread.filter((line) => line.role === "user" && !deps.ownerPerson(line.peerAsk ? undefined : line.sender?.id));
+    return cloudLendingRefusalText(conversation ?? "memory-changed", { room: Boolean(store.groupByThread(capability.threadId)), fromBefore: others.length > 0 && others.every(unstamped),
+      botOpened: others.length === 0 && cloudBotOpened(capability.threadId), outside: others.length === 0 && thread.some(cloudReportFromOthers), memoryChanged, device: deviceWord(deps.lentPlatform()) });
+  }
+
+  /** What a refused call answers: the notice, and that the bot should stop, unless there's something else it should use. */
+  function cloudLendingRefusalForBot(capability: Turn): string | null {
+    const notice = cloudLendingRefusalNotice(capability);
+    return notice && !deps.team ? `${notice} ${ONLY_THE_PERSON}` : notice;
+  }
+
+  function cloudLendingRefusal(capability: Turn): CloudLendingRefusal | "memory-changed" | "memory-changed-here" | null {
+    const { conversation, memoryChanged } = gates(capability);
+    if (memoryChanged) return conversation ? "memory-changed-here" : "memory-changed";
+    return conversation;
+  }
+
+  /** A bot opened this conversation (a hand-off's work thread, one a bot started itself, a Chief's notices). */
+  function cloudBotOpened(threadId: string): boolean {
+    const bot = store.botByThread(threadId);
+    return Boolean(bot && store.taskByThread(bot.id, threadId)?.openedBy);
   }
 
   function cloudThreadStarters(threadId: string): (string | undefined)[] {
@@ -98,7 +117,7 @@ export function createCloudLendingTurns(deps: CloudLendingTurnsDeps) {
   }
 
   return {
-    cloudLendingTurn, cloudLendingRefusalNotice, cloudLendingRefusal, cloudThreadStarters, cloudLendingView, cloudReportFromOthers,
+    cloudLendingTurn, cloudLendingRefusalNotice, cloudLendingRefusalForBot, cloudLendingRefusal, cloudThreadStarters, cloudBotOpened, cloudLendingView, cloudReportFromOthers,
     /** A room member turn of this run started: its generation acts for the line the run answers. */
     roomTurnStarted(generation: string, run: RoomRun): void { roomTurnOperations.set(generation, run); },
     /** The run ended: none of its turn generations act for anyone any more. */
