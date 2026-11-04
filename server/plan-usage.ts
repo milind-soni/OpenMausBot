@@ -248,8 +248,7 @@ export function parseOpenCodeUsage(body: unknown): PlanWindows {
     plan: rolling || weekly || monthly ? "Go" : null,
     fiveHour: rolling ?? closedWindow(),
     weekly: weekly ?? closedWindow(),
-    extra: monthly ? [extraLine("Monthly", monthly)] : [],
-    models: [],
+    extra: monthly ? [extraLine("Monthly", monthly)] : [], models: [],
   };
 }
 
@@ -855,7 +854,7 @@ function readGrokCredential(
   return sawExpired ? expiredCredential() : missingCredential();
 }
 
-/** The key saved in Settings, or the login `opencode auth login` keeps in the CLI's data folder. */
+/** The key saved in Settings, or the login `opencode auth login` keeps. `auth.json` is where OpenCode v1 wrote one; v2 keeps credentials in its own database, so this path covers installs migrated from v1 (the saved key covers v2). */
 function readOpenCodeCredential(
   env: NodeJS.ProcessEnv,
   readText: (path: string) => string | null,
@@ -863,7 +862,7 @@ function readOpenCodeCredential(
 ): PlanCredential {
   const key = secretString(env.OPENCODE_API_KEY);
   if (key) return { token: key, accountId: null, expired: false };
-  const raw = env.OPENCODE_AUTH_CONTENT ?? openCodeAuthText(env, readText);
+  const raw = env.OPENCODE_AUTH_CONTENT?.trim() || openCodeAuthText(env, readText);
   const stored = asRecord(parseJson(raw));
   // A Go login lives under "opencode-go", a Zen one under "opencode"; the CLI lists Go first too.
   const entry = [stored?.["opencode-go"], stored?.opencode].map((value) => asRecord(value))
@@ -1045,5 +1044,7 @@ async function fetchOpenCode(account: PlanAccount, token: string, deps: PlanUsag
   if (!result.ok || result.body === null || typeof result.body !== "object") {
     return errorRow(account, result.status === 0 || result.status >= 500 ? couldNotReach("opencode") : unexpectedUsage("opencode"));
   }
-  return okRow(account, parseOpenCodeUsage(result.body));
+  const windows = parseOpenCodeUsage(result.body);
+  // A 200 with no meter at all is not an allowance: it is an answer this row cannot read.
+  return windows.plan ? okRow(account, windows) : errorRow(account, unexpectedUsage("opencode"));
 }

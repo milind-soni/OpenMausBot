@@ -32,6 +32,7 @@ function jsonResponse(body: unknown, status = 200): PlanResponse {
   };
 }
 
+/** A plan account for one driver, named as the panel names it. */
 function account(driver: PlanAccount["driver"], extras: Partial<PlanAccount> = {}): PlanAccount {
   const name = driver === "claude" ? "Claude" : driver === "codex" ? "Codex" : driver === "opencode" ? "OpenCode" : "Grok";
   return {
@@ -499,12 +500,14 @@ describe("plan usage fetcher", () => {
     ]);
   });
 
+/** An OpenCode instance becomes an account under the driver the panel knows. */
   it("lists an OpenCode instance under the key its environment carries", () => {
     expect(planAccountsFromInstances({
       open: { driver: "opencodeGo", environment: { OPENCODE_API_KEY: SECRET } },
     })).toEqual([{ id: "open", name: "OpenCode", driver: "opencode", environment: { OPENCODE_API_KEY: SECRET } }]);
   });
 
+/** The saved key is the Bearer, and the three meters land in their slots. */
   it("reads OpenCode Go's allowance with the key saved on the instance", async () => {
     const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({
       usage: {
@@ -532,6 +535,7 @@ describe("plan usage fetcher", () => {
     expect(JSON.stringify(report)).not.toContain(SECRET);
   });
 
+/** With no key, the CLI login is used, and the Go entry wins over the Zen one. */
   it("takes the CLI's OpenCode Go login when no key is saved, before the Zen one", async () => {
     const goLogin = "opencode-go-fixture-login";
     const zenLogin = "opencode-zen-fixture-login";
@@ -548,6 +552,29 @@ describe("plan usage fetcher", () => {
     expect(fetchImpl.mock.calls.map((call) => call[1].headers.Authorization)).toEqual([`Bearer ${goLogin}`, `Bearer ${zenLogin}`]);
   });
 
+  /** The row reads the login the CLI keeps when the environment carries no key and no auth content. */
+  it("falls back to the CLI's auth.json when OPENCODE_AUTH_CONTENT is empty", async () => {
+    const login = "opencode-file-fixture-login";
+    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({ usage: { rolling: { status: "ok", percent: 2, resetsAt: null } } }));
+    await fetchPlanUsage([account("opencode", { environment: { OPENCODE_AUTH_CONTENT: "   " } })], {
+      fetch: fetchImpl,
+      now: () => NOW,
+      credentials: fileCredentialReader({ now: () => NOW, env: { HOME: tmpdir() }, readText: () => JSON.stringify({ "opencode-go": { access: login } }) }),
+    });
+    expect(fetchImpl.mock.calls[0]?.[1].headers.Authorization).toBe(`Bearer ${login}`);
+  });
+
+  /** A 200 that carries no meter is an unreadable answer, not an empty allowance. */
+  it("does not call a 200 without meters a working row", async () => {
+    const report = await fetchPlanUsage([account("opencode", { environment: { OPENCODE_API_KEY: SECRET } })], {
+      fetch: async () => jsonResponse({}),
+      now: () => NOW,
+      credentials: fileCredentialReader({ now: () => NOW, env: {}, readText: () => null }),
+    });
+    expect(report.providers[0]).toMatchObject({ ok: false, error: "OpenCode returned an unexpected usage response" });
+  });
+
+/** No Go plan is a quiet row; a refused key is named. */
   it("keeps the OpenCode row when there is no Go plan, and names a refused key", async () => {
     const credentials = fileCredentialReader({ now: () => NOW, env: {}, readText: () => null });
     const instances = [account("opencode", { environment: { OPENCODE_API_KEY: SECRET } })];
