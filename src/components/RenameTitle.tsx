@@ -45,6 +45,7 @@ export function RenameTitle({
   useEffect(() => {
     if (editRequest === handledRequest.current) return;
     handledRequest.current = editRequest;
+    if (editRequest === 0) return;
     setDraft(value);
     setMode(true);
   }, [editRequest]);

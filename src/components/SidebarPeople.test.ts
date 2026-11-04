@@ -40,6 +40,34 @@ describe("the team's people in the sidebar", () => {
     expect(render(createElement(SidebarPeople, { compact: false }))).toBe("");
   });
 
+  it("gives a team's admins Invite someone under People, opening the team's People page, even alone on a new team", () => {
+    const team = { id: "team-acme", name: "Acme", cloudPage: "https://cloud.example.test/cloud" };
+    const config = { team } as AppState["config"];
+    const invite = 'href="https://cloud.example.test/cloud/team/team-acme/people"';
+    setTeamPeople({ ...asBen, admin: true });
+    const listed = render(createElement(SidebarPeople, { compact: false }), { config });
+    expect(listed).toContain(invite);
+    expect(listed).toContain("Invite someone</span>");
+    expect(listed.indexOf("cleo@acme.test")).toBeLessThan(listed.indexOf(invite));
+    setTeamPeople({ ...asBen, people: [BEN], admin: true });
+    const alone = render(createElement(SidebarPeople, { compact: false }), { config });
+    expect(alone).toContain(">People<");
+    expect(alone).toContain(invite);
+    const rail = render(createElement(SidebarPeople, { compact: true }), { config });
+    expect(rail).toContain(invite);
+    expect(rail).toContain('aria-label="Invite someone"');
+  });
+
+  it("offers Invite someone to nobody else, and not where no Cloud page runs the team", () => {
+    const config = { team: { id: "team-acme", name: "Acme", cloudPage: "https://cloud.example.test/cloud" } } as AppState["config"];
+    setTeamPeople(asBen);
+    expect(render(createElement(SidebarPeople, { compact: false }), { config })).not.toContain("Invite someone");
+    setTeamPeople({ ...asBen, people: [BEN] });
+    expect(render(createElement(SidebarPeople, { compact: false }), { config })).toBe("");
+    setTeamPeople({ ...asBen, admin: true });
+    expect(render(createElement(SidebarPeople, { compact: false }), { config: { team: { id: "team-acme", name: "Acme" } } as AppState["config"] })).not.toContain("Invite someone");
+  });
+
   it("counts the asks waiting on you on your inbox row, and shows no count when none wait", () => {
     setTeamPeople(asBen);
     const inbox = (openAsks?: number) => bot({ id: "mc", name: "Ben's Chief", chiefOfStaff: true, reportsTo: BEN.email,

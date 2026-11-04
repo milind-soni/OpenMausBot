@@ -40,7 +40,7 @@ export interface KeyTarget {
 
 export type KeyId =
   | "openai" | "anthropic" | "xai" | "openrouter" | "mistral" | "cerebras" | "groq" | "greenference" | "meta" | "deepseek" | "opencodeGo" | "opencodeProviders"
-  | "lmStudio" | "openaiCompat" | "liveCalls" | "liveKey" | "elevenlabs" | "fishAudio" | "box" | "vps" | "onePassword" | "composio" | "treg" | "postiz"
+  | "lmStudio" | "openaiCompat" | "liveCalls" | "liveKey" | "elevenlabs" | "fishAudio" | "geminiTts" | "box" | "vps" | "onePassword" | "composio" | "treg" | "postiz"
   | "jev" | "openrouterHelper" | "workersAi" | "imageOpenai" | "imageCustom";
 
 export type KeyMark = { driverKind: string; preset?: ProviderIconPreset } | { icon: LucideIcon };
@@ -123,7 +123,7 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
   { id: "liveCalls", section: "voice", labelKey: "call.live.key", purposeKey: "keys.purpose.liveCalls", name: "OpenAI", env: [],
     words: ["openai", "live calls", "calls", "voice", "talk", "gpt-live"], mark: { icon: Phone }, kind: "uses", uses: "openai" },
   { id: "liveKey", section: "voice", labelKey: "keys.label.liveKey", purposeKey: "keys.purpose.liveKey", name: "OpenAI", env: ["OMB_OPENAI_LIVE_KEY"],
-    words: ["openai", "live calls", "calls", "voice", "gpt-live"], mark: { icon: Phone }, kind: "key",
+    words: ["openai", "live calls", "calls", "voice", "gpt-live", "azure", "foundry"], mark: { icon: Phone }, kind: "key",
     target: { patch: (value) => ({ live: { key: value } }), slot: "openaiLiveKey",
       saved: (config) => flag(config.savedKeys?.openaiLiveKey ?? { configured: config.live?.keySource === "live" }),
       placeholder: "sk-…", href: "https://platform.openai.com/api-keys", analytics: "openai_live", shape: OPENAI_SHAPE } },
@@ -133,6 +133,11 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
       saved: (config) => ({ ...flag(config.savedKeys?.ttsKey ?? { configured: config.tts?.provider === "elevenlabs" && config.tts.configured && !config.tts.included }),
         ...(config.tts?.included ? { included: true } : {}) }),
       placeholder: "sk_…", href: "https://elevenlabs.io/app/settings/api-keys", analytics: "elevenlabs", shape: /^sk_/ } },
+  { id: "geminiTts", section: "voice", labelKey: "keys.label.geminiTts", purposeKey: "keys.purpose.geminiTts", name: "Gemini", env: ["OMB_GEMINI_API_KEY"],
+    words: ["google", "gemini", "speech", "voice", "tts"], mark: { icon: AudioLines }, kind: "key",
+    target: { patch: (value) => ({ tts: { geminiKey: value } }), slot: "geminiTtsKey",
+      saved: (config) => flag(config.savedKeys?.geminiTtsKey), placeholderKey: "voice.gemini.keyPlaceholder", placeholder: "...",
+      href: "https://aistudio.google.com/api-keys", analytics: "gemini_tts" } },
   { id: "fishAudio", section: "voice", labelKey: "keys.label.fishAudio", purposeKey: "keys.purpose.fishAudio", name: "Fish Audio", env: ["OMB_FISH_AUDIO_API_KEY"],
     words: ["fish", "fish audio", "voice", "voices", "speech", "tts"], mark: { icon: AudioLines }, kind: "key",
     target: { patch: (value) => ({ tts: { fishKey: value } }), slot: "fishAudioKey", verifiedOnSave: true,
@@ -191,6 +196,14 @@ export function keyEntry(id: KeyId): KeyEntry {
   const entry = KEY_CATALOG.find((candidate) => candidate.id === id);
   if (!entry) throw new Error(`no key ${id}`);
   return entry;
+}
+
+/** With Azure OpenAI chosen for Live calls, the row for their key is about the Azure resource: required, and no OpenAI key. */
+export function shownKeyEntry(id: KeyId, config: ConfigStatus | null | undefined): KeyEntry {
+  const entry = keyEntry(id);
+  if (id !== "liveKey" || config?.live?.provider !== "azure" || !entry.target) return entry;
+  const { shape: _openAiShape, ...target } = entry.target;
+  return { ...entry, name: "Azure OpenAI", labelKey: "call.live.azureKeyField", purposeKey: "keys.purpose.liveKeyAzure", target: { ...target, placeholder: "…", href: "https://portal.azure.com" } };
 }
 
 export function keySection(entry: KeyEntry) {
