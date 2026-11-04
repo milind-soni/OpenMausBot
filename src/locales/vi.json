@@ -196,6 +196,7 @@
   "server.rooms.finishingElsewhere": "{bot} đang hoàn tất một cuộc trò chuyện khác và sẽ trả lời ở đây khi rảnh",
   "server.rooms.finishingElsewhereSpoken": "{bot} đang hoàn tất một cuộc trò chuyện khác",
   "server.rooms.unavailable": "{bot} không còn khả dụng; đã bỏ qua lượt này",
+  "server.stop.nothingRunning": "Ở đây không có gì đang chạy nên không cần dừng gì cả.",
   "server.rooms.stayedBusy.one": "{bot} bận ở một cuộc trò chuyện khác trong {count} phút; đã bỏ qua lượt này",
   "server.rooms.stayedBusy.many": "{bot} bận ở một cuộc trò chuyện khác trong {count} phút; đã bỏ qua lượt này",
   "server.rooms.busyElsewhere": "{bot} đang bận ở một cuộc trò chuyện khác; đã bỏ qua lượt này",

@@ -1124,7 +1124,8 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   bot unless one is saved, and this gate holds the rest. A Starter Cloud runs one
   thread per bot for what a person or a routine starts; the Admin says so with its
   signed `POST /api/cloud/plan` `{"v":1,"tier":"starter"}` (`server/host/cloud-plan-tier.ts`), and a
-  home it never told has no such limit. What a bot's own turn starts always goes through.
+  home it never told has no such limit. What a bot's own turn starts always goes through,
+  and a teammate's hand-off never takes that one thread from the person.
 - **How many bots a Starter Cloud makes.** Five beside its MausBot, one number in
   `server/host/starter-bot-limit.ts`, from the same signed plan. An archived bot or one
   that moved away takes no room. Making one past it answers `409` with
@@ -1135,6 +1136,11 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   a Cloud over the limit (a downgrade, a move) keeps every one and only making a new one stops.
   A bot arriving with its own id (a move) and a backup restored are never refused. The limit
   lifts as soon as the Admin tells the home its new plan, with no restart.
+- **Who goes first.** The gate only changes the order, never how much it lets in. A
+  person's own work goes first: their line, or a turn going on from what they answered.
+  Bot work that has waited 5 minutes takes its place by arrival, so it is never starved
+  (`server/host/turn-order.ts`). A stop never waits: a line made only of stop words stops
+  running work at once in any of the app's languages, and an `@everyone` stop starts no engine on a bot with nothing running.
 - **OpenCode threads share a process.** Threads whose OpenCode would start
   the same way (same login, approval level and settings) run as sessions of one
   `opencode acp` process, up to six at a time and twelve over its life

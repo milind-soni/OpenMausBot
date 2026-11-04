@@ -218,6 +218,7 @@
   "server.rooms.finishingElsewhere": "{bot} kończy inną rozmowę i odpowie tutaj, gdy będzie wolny",
   "server.rooms.finishingElsewhereSpoken": "{bot} kończy inną rozmowę",
   "server.rooms.unavailable": "{bot} nie jest już dostępny; pominięty w tej rundzie",
+  "server.stop.nothingRunning": "Nic tu nie działało, więc nie było czego zatrzymywać.",
   "server.rooms.stayedBusy.one": "{bot} był zajęty inną rozmową przez {count} minutę; pominięty w tej rundzie",
   "server.rooms.stayedBusy.many": "{bot} był zajęty inną rozmową przez {count} min; pominięty w tej rundzie",
   "server.rooms.busyElsewhere": "{bot} jest zajęty inną rozmową; pominięty w tej rundzie",

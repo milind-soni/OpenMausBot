@@ -266,6 +266,7 @@
   "server.rooms.finishingElsewhere": "{bot} 正在结束另一个对话，空闲后会在这里回复",
   "server.rooms.finishingElsewhereSpoken": "{bot} 正在结束另一个对话",
   "server.rooms.unavailable": "{bot} 已不可用，本轮已跳过",
+  "server.stop.nothingRunning": "这里没有正在运行的内容，所以无需停止。",
   "server.rooms.stayedBusy.one": "{bot} 在另一个对话中忙了 {count} 分钟，本轮已跳过",
   "server.rooms.stayedBusy.many": "{bot} 在另一个对话中忙了 {count} 分钟，本轮已跳过",
   "server.rooms.busyElsewhere": "{bot} 正在另一个对话中忙碌，本轮已跳过",

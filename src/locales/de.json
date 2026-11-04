@@ -173,6 +173,7 @@
   "server.rooms.finishingElsewhere": "{bot} beendet gerade eine andere Unterhaltung und antwortet hier, sobald er frei ist",
   "server.rooms.finishingElsewhereSpoken": "{bot} beendet gerade eine andere Unterhaltung",
   "server.rooms.unavailable": "{bot} ist nicht mehr verfügbar, daher diese Runde übersprungen",
+  "server.stop.nothingRunning": "Hier lief nichts, es gab also nichts zu stoppen.",
   "server.rooms.stayedBusy.one": "{bot} war {count} Minute lang in einer anderen Unterhaltung beschäftigt, daher diese Runde übersprungen",
   "server.rooms.stayedBusy.many": "{bot} war {count} Minuten lang in einer anderen Unterhaltung beschäftigt, daher diese Runde übersprungen",
   "server.rooms.busyElsewhere": "{bot} ist in einer anderen Unterhaltung beschäftigt, daher diese Runde übersprungen",

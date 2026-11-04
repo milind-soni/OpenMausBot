@@ -195,6 +195,7 @@
   "server.rooms.finishingElsewhere": "{bot} 正在結束另一段對話，空閒後會在這裡回覆",
   "server.rooms.finishingElsewhereSpoken": "{bot} 正在結束另一段對話",
   "server.rooms.unavailable": "{bot} 已無法使用，本輪已略過",
+  "server.stop.nothingRunning": "這裡沒有正在執行的內容，所以不需要停止。",
   "server.rooms.stayedBusy.one": "{bot} 在另一段對話中忙了 {count} 分鐘，本輪已略過",
   "server.rooms.stayedBusy.many": "{bot} 在另一段對話中忙了 {count} 分鐘，本輪已略過",
   "server.rooms.busyElsewhere": "{bot} 正在另一段對話中忙碌，本輪已略過",

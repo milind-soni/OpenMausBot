@@ -165,6 +165,7 @@
   "server.rooms.finishingElsewhere": "{bot} एक दूसरी बातचीत पूरी कर रहा है; फ़्री होते ही यहाँ जवाब देगा",
   "server.rooms.finishingElsewhereSpoken": "{bot} एक दूसरी बातचीत पूरी कर रहा है",
   "server.rooms.unavailable": "{bot} अब उपलब्ध नहीं है; यह दौर छोड़ दिया गया",
+  "server.stop.nothingRunning": "यहाँ कुछ नहीं चल रहा था, इसलिए कुछ रोकने की ज़रूरत नहीं थी।",
   "server.rooms.stayedBusy.one": "{bot} {count} मिनट तक दूसरी बातचीत में व्यस्त रहा; यह दौर छोड़ दिया गया",
   "server.rooms.stayedBusy.many": "{bot} {count} मिनट तक दूसरी बातचीत में व्यस्त रहा; यह दौर छोड़ दिया गया",
   "server.rooms.busyElsewhere": "{bot} दूसरी बातचीत में व्यस्त है; यह दौर छोड़ दिया गया",

@@ -218,6 +218,7 @@
   "server.rooms.finishingElsewhere": "{bot} は別の会話を終えるところです。空き次第ここで返信します",
   "server.rooms.finishingElsewhereSpoken": "{bot} は別の会話を終えるところです",
   "server.rooms.unavailable": "{bot} は利用できなくなったため、この回はスキップしました",
+  "server.stop.nothingRunning": "ここでは何も実行されていなかったので、停止するものはありませんでした。",
   "server.rooms.stayedBusy.one": "{bot} は {count} 分間ほかの会話で手が離せなかったため、この回はスキップしました",
   "server.rooms.stayedBusy.many": "{bot} は {count} 分間ほかの会話で手が離せなかったため、この回はスキップしました",
   "server.rooms.busyElsewhere": "{bot} はほかの会話で手が離せないため、この回はスキップしました",

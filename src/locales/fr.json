@@ -165,6 +165,7 @@
   "server.rooms.finishingElsewhere": "{bot} termine une autre conversation et répondra ici dès qu'il sera libre",
   "server.rooms.finishingElsewhereSpoken": "{bot} termine une autre conversation",
   "server.rooms.unavailable": "{bot} n'est plus disponible : tour passé",
+  "server.stop.nothingRunning": "Rien n'était en cours ici, il n'y avait donc rien à arrêter.",
   "server.rooms.stayedBusy.one": "{bot} est resté occupé dans une autre conversation pendant {count} minute : tour passé",
   "server.rooms.stayedBusy.many": "{bot} est resté occupé dans une autre conversation pendant {count} minutes : tour passé",
   "server.rooms.busyElsewhere": "{bot} est occupé dans une autre conversation : tour passé",
