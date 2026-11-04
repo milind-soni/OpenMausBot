@@ -293,7 +293,7 @@ import { createDelegatedLevel } from "./host/delegated-level.ts";
 import { createLiveApprovalMode } from "./host/live-approval.ts";
 import { CONSENT_RULE, escapeNotes, labelledLine, OUTSIDE, peerLineText, peerProvenanceNote, reportNote, requestWorkOrigin, type WorkOrigin } from "./peer-provenance.ts"; import { lineNote, PROVENANCE_PROMPT } from "./provenance-label.ts"; import { openRoomThread } from "./host/room-new-thread.ts"; import { createLineLabels } from "./host/line-labels.ts";
 import { decideRoomPost, emptyRoomPostBudget, type RoomPostAttempt, type RoomPostBudget } from "./room-post-budget.ts";
-import { pageMessage, pageSize, slimMessage } from "./host/message-pages.ts";
+import { messagePages, pageSize, slimMessage } from "./host/message-pages.ts";
 import { createTeammatePrompts } from "./host/teammate-prompts.ts";
 import { createQueuedReason } from "./host/queued-reason.ts";
 import { ReplayBuffer } from "./host/sse-replay.ts";
@@ -2050,7 +2050,10 @@ function settleDirectCoordination(generation: string | undefined, outcome: Direc
   directCoordinationSettlers.delete(generation);
   const node = coordinator.node(settler?.nodeId ?? generation);
   const result = hostTurnResult(node, generation, outcome);
-  if (settler) { settler.settle(result); return; }
+  if (settler) {
+    settler.settle(result);
+    if (settler.nodeId !== generation || !node?.goalRunId) return;
+  }
   if (node && !node.parentId && (node.status === "source" || node.status === "running")) coordinator.endTurn(generation, result);
 }
 
@@ -2842,6 +2845,7 @@ const store = new Store(
   () => appLanguage() ?? Intl.DateTimeFormat().resolvedOptions().locale,
   () => sharedMembership() ? undefined : cfg.profile?.name,
 );
+const { messagePage, messageWindow } = messagePages(store);
 const { cloudLendingTurn, cloudLendingRefusalNotice, cloudLendingRefusal, cloudThreadStarters, cloudLendingView, cloudReportFromOthers, roomTurnStarted, roomTurnEnded, roomRun } = createCloudLendingTurns({
   store, cloudHome: CLOUD_HOME !== null, team: CLOUD_TEAM?.name ?? null, directRequest: (threadId) => directRequestOwners.get(threadId), threadStarter: (threadId) => threadStarters.get(threadId),
   ownerPerson: cloudProvenOwnerPerson, cardAnswerer: cloudCardAnswerer, activeRoutineRun: activeRoutineRunForThread, ownerStartedRun: (runId) => ownerStartedRoutineRuns.has(runId),
@@ -3885,6 +3889,9 @@ function runRoomRootTurn(node: HandoffView, group: GroupRecord, bot: BotRecord, 
 }
 
 function runRootTurn(node: HandoffView, bot: BotRecord, signal: AbortSignal, composed: ComposedTurn): Promise<HostTurnResult> {
+  if (composed.turn === "rerun" && node.goalRunId && !oneOnOneGoals.isLive(node.threadId, node.goalRunId)) {
+    return Promise.resolve({ ok: false, text: "The goal run this step belonged to ended with the restart." });
+  }
   if (composed.turn === "rerun") store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: "Resuming after a restart", ok: true } });
   parkedSeats.delete(node.id);
   const owner = directRequestOwners.get(node.threadId);
@@ -4602,25 +4609,6 @@ store.onChange((change) => {
 
 const DEFAULT_PAGE = 50;
 
-function messagePage(threadId: string, limit: number | undefined, before?: string | null) {
-  if (limit === undefined) {
-    return { messages: store.messagesFor(threadId), activeLeafId: store.activeLeaf(threadId) };
-  }
-  if (!before) {
-    const tail = store.messagesTail(threadId, limit);
-    return { messages: tail.messages.map(pageMessage), hasMore: tail.hasMore, activeLeafId: tail.activeLeafId };
-  }
-  const all = store.messagesFor(threadId);
-  const end = all.findIndex((msg) => msg.id === before);
-  const stop = end === -1 ? all.length : end;
-  const start = Math.max(0, stop - limit);
-  return {
-    messages: all.slice(start, stop).map(pageMessage),
-    hasMore: start > 0,
-    activeLeafId: store.activeLeaf(threadId),
-  };
-}
-
 function guardedRequestSnapshot(botId: string, threadId: string, sendId: string) {
   if (!store.taskByThread(botId, threadId)) throw requestConflict("No such conversation for this bot");
   const activeLeafId = store.activeLeaf(threadId);
@@ -4668,16 +4656,6 @@ function settleTrackedRequest(threadId: string, incoming: ReadonlySet<string> = 
       terminal.turnId !== owner.turnId || messages.findLast(message => message.turnId)?.turnId !== terminal.turnId ||
       messages.findLast(message => message.turnSucceeded !== undefined)?.turnSucceeded !== true) return;
   store.patchMessage(threadId, source.id, { requestPending: false }); savedSteps.requestSettled({ botId: bot.id, threadId, request: source, reply: terminal, after: messages, generations: owner.generations, automated: !personRequest(owner) });
-}
-
-function messageWindow(threadId: string, messageId: string, limit: number) {
-  const all = store.messagesFor(threadId);
-  const index = all.findIndex((message) => message.id === messageId);
-  if (index < 0) return null;
-  const before = Math.floor((limit - 1) / 2);
-  const start = Math.max(0, Math.min(index - before, all.length - limit));
-  const stop = Math.min(all.length, start + limit);
-  return { messages: all.slice(start, stop).map(pageMessage), hasMore: start > 0 };
 }
 
 interface SseClient {
@@ -7672,6 +7650,8 @@ async function beginTurn(
     onTurnSettled?: () => void;
     /** The turn's outcome, for a caller that runs it outside any coordinated work. */
     onSettled?: (outcome: HostTurnResult) => void;
+    /** A one-on-one goal step: a card continuation that is still its own turn, as a room goal step is. */
+    goalRunId?: string;
     coordination?: { id: string; resumed: boolean; settle: (outcome: HostTurnResult) => void };
     /** A person's own send: it may run beside a room turn on another thread. */ allowRoomTurnElsewhere?: boolean;
   },
@@ -7871,10 +7851,11 @@ async function beginTurn(
   directTurnDispatchClaims.set(threadId, { id: dispatchClaimId, botId, threadId, phase: "setup" }); liveTurns.dispatchStarted(threadId);
   directTurnBots.set(threadId, bot);
   beginInternalCapabilityGeneration(threadId, dispatchClaimId);
-  if (!opts?.coordination && !opts?.compactOnly && !opts?.cardContinuation) {
+  if (!opts?.coordination && !opts?.compactOnly && (!opts?.cardContinuation || opts.goalRunId)) {
     const opener = handoffOpener({ botId: bot.id, threadId }, threadId);
     coordinator.beginTurn({ id: dispatchClaimId, address: { botId: bot.id, threadId }, brief: resolvedImages.text,
-      level: approvalModeForTurn(bot, commsDepth > 0, threadId), ...(opener ? { opener } : {}), origin: requestOrigin });
+      level: approvalModeForTurn(bot, commsDepth > 0, threadId), ...(opener ? { opener } : {}), origin: requestOrigin,
+      ...(opts?.goalRunId ? { goalRunId: opts.goalRunId } : {}) });
   }
   if (!opts?.computerSelectionContinuation && !opts?.cardContinuation && !opts?.automationSource && !opts?.unattended &&
       !opts?.commsDepth && !opts?.coordination && !inheritedTeamComputer(bot) && bot.computer !== "off" && agentsMounted) {
@@ -8708,8 +8689,11 @@ async function beginTurn(
             });
             const rows = takeoverScope ? limitTakeover.carriedOn(current, threadId, current.modelSelection, checked.selection, { scope: takeoverScope, ...(e instanceof TurnUsageLimitRefusedError && e.resetsAt ? { resetsAt: e.resetsAt } : {}) })
               : [{ name: `recovery: Automatic recovery: ${instance.displayName || instance.driverKind} could not start. Trying ${target.displayName || target.driverKind} · ${checked.selection.model} once in this thread.`, ok: true }]; for (const tool of rows) store.appendMessage(threadId, { role: "bot", kind: "activity", tool });
-            if (opts?.coordination || opts?.onSettled) directCoordinationSettlers.delete(dispatchClaimId);
-            else settleDirectCoordination(dispatchClaimId, { ok: false, text: message });
+            if (opts?.coordination || opts?.onSettled) {
+              directCoordinationSettlers.delete(dispatchClaimId);
+              // The backup begins a new root for a goal step; this attempt's root ends here.
+              if (opts.goalRunId) coordinator.endTurn(dispatchClaimId, { ok: false, text: message });
+            } else settleDirectCoordination(dispatchClaimId, { ok: false, text: message });
             await startTurn(bot.id, text, { ...opts, threadId, userMessage, editedMessageId: undefined,
               automaticRecoveryAttempted: true, automaticRecoveryIndex: nextIndex + 1 });
             // The backup now owns these callbacks: publish no failed result and release no queued receipt in between.
