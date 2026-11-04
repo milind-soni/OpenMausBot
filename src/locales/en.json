@@ -2844,6 +2844,7 @@
   "model.searchLocal": "Search local models",
   "model.busy": "Stop this bot's turn before changing its model",
   "model.threadBusy": "Stop this thread's turn before changing its model",
+  "model.reasoningNextTurn": "Reasoning level applies from the next message",
   "model.choose": "Choose model",
   "model.customSwitchOnHost": "This thread uses Custom approval. Switch its model in the app on the host computer, so leaving Custom can be confirmed there.",
   "model.providerSwitch.title": "Switch model with Ask permissions?",

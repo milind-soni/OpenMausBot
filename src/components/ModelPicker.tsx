@@ -151,7 +151,7 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
     <div className={className}>
       <label className="flex items-center justify-between gap-3">
         {label}
-        <Select size="sm" variant={quiet ? "quiet" : "field"} aria-label={t("model.variant.label")} disabled={bot.busy} className={wide ? "flex-1" : "max-w-[65%]"}
+        <Select size="sm" variant={quiet ? "quiet" : "field"} aria-label={t("model.variant.label")} className={wide ? "flex-1" : "max-w-[65%]"}
           value={selection.variant === undefined ? "unset" : missing ? "missing" : String(options.findIndex((option) => option.id === selection.variant))}
           onChange={(event) => choose(options[Number(event.target.value)]?.id)}>
           <option value="unset">{t("model.variant.session")}</option>
@@ -173,9 +173,9 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
         </p>
       )}
       {selection.variant !== undefined && (
-        <button type="button" disabled={bot.busy} onClick={() => choose()}
+        <button type="button" onClick={() => choose()}
           title={t("model.variant.clearHint")}
-          className="mt-2 block text-[12px] text-ink-secondary underline underline-offset-2 hover:text-ink disabled:opacity-50">
+          className="mt-2 block text-[12px] text-ink-secondary underline underline-offset-2 hover:text-ink">
           {t("model.variant.clear")}
         </button>
       )}
@@ -185,12 +185,11 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
             <button
               key={option.id}
               type="button"
-              disabled={bot.busy}
               aria-pressed={selection.variant === option.id}
               title={t("model.variant.use", { variant: variantLabel(option, instance.driverKind) })}
               onClick={() => choose(option.id)}
               className={cn(
-                "rounded-full border px-2.5 py-1 text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 disabled:opacity-50",
+                "rounded-full border px-2.5 py-1 text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70",
                 selection.variant === option.id ? "border-accent/60 bg-control text-ink" : "border-hairline/40 text-ink-secondary hover:bg-control/60 hover:text-ink",
               )}
             >
@@ -226,7 +225,10 @@ export function ModelPicker({
   const { state, dispatch: storeDispatch, refreshInstances, refreshModels: refreshInstanceModels } = useStore();
   const [open, setOpen] = useState(false);
   const { bot, dispatch } = useAiSwitch({ bot: shown, threadId, contained, dispatch: storeDispatch, setOpen: (next) => (next ? openMenu() : setOpen(false)) });
-  const motion = useMenuMotion(open && !bot.busy);
+  // While the bot works the menu still opens to its reasoning level, which applies from the next turn; the model stays locked.
+  const busyInstance = bot.busy && !contained ? state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId) : undefined;
+  const locked = Boolean(bot.busy) && !(busyInstance && offersReasoning(state, busyInstance, bot.modelSelection, threadId ?? bot.threadId));
+  const motion = useMenuMotion(open && !locked);
   const [railId, setRailId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
@@ -417,7 +419,7 @@ export function ModelPicker({
   };
 
   const openMenu = () => {
-    if (bot.busy) return;
+    if (locked) return;
     if (active && isClaudeAccount(active)) lastClaudeIdRef.current = active.instanceId;
     if (active && signInFamily(active) === "openai") lastOpenaiIdRef.current = active.instanceId;
     const initial = pickerInstances.find((instance) => instance.instanceId === selection.instanceId) ?? pickerInstances[0];
@@ -591,7 +593,7 @@ export function ModelPicker({
     ref: triggerRef,
     "data-tour": "model",
     type: "button" as const,
-    disabled: Boolean(bot.busy),
+    disabled: locked,
     onClick: () => (open ? close(false) : openMenu()),
     onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => {
       if (event.key === "Escape" && open) {
@@ -603,7 +605,7 @@ export function ModelPicker({
         openMenu();
       }
     },
-    "aria-expanded": open && !bot.busy,
+    "aria-expanded": open && !locked,
     "aria-haspopup": "dialog" as const,
     "aria-controls": open ? menuId : undefined,
     title: `${summary}${followLine}${attentionLine}${busyLine}`,
@@ -969,7 +971,20 @@ export function ModelPicker({
       } : { width: popoverWidth }}
       className={cn("menu-surface z-[80] flex flex-col overflow-hidden", motion.className)}
     >
-      {simpleMenu ? (
+      {bot.busy ? (
+        <div data-model-busy className="flex flex-col py-1">
+          <EffortRow
+            compact
+            bot={shown}
+            threadId={threadId}
+            updateBotDefault={Boolean(threadId) && (simpleView ? simpleUpdatesBotDefault : scope === "bot")}
+            className="px-3.5 py-[5px]"
+            label={<span className="text-[13px] leading-[18px] text-ink">{active?.capabilities?.modelVariants ? t("model.simple.reasoning") : t("model.section.effort")}</span>}
+          />
+          <p className="px-3.5 py-1 text-[12px] leading-4 text-ink-tertiary">{t("model.reasoningNextTurn")}</p>
+          <p className="px-3.5 py-1 text-[12px] leading-4 text-ink-tertiary">{t(threadId ? "model.threadBusy" : "model.busy")}</p>
+        </div>
+      ) : simpleMenu ? (
         <SimpleModelMenu
           menu={simpleMenu}
           query={query}

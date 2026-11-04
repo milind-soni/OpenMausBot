@@ -435,3 +435,32 @@ describe("a model the organization turned off", () => {
     expect((focused() as HTMLButtonElement).disabled).toBe(false);
   });
 });
+
+describe("while the bot is working", () => {
+  it("opens to the reasoning level only, saves a pick for the next message, and keeps the model locked", async () => {
+    const busy = { ...scout(), busy: true };
+    fixture.bots = [busy];
+    render(busy);
+    expect(chip().disabled).toBe(false);
+    await openWith("click");
+    const panel = menu()!.querySelector<HTMLElement>("[data-model-busy]")!;
+    expect(panel.textContent).toContain("Reasoning level applies from the next message");
+    expect(panel.textContent).toContain("Stop this thread's turn before changing its model");
+    expect(menu()!.textContent).not.toContain("Claude Sonnet 5.5");
+    const effort = panel.querySelector<HTMLSelectElement>("select")!;
+    effort.value = "high";
+    flushSync(() => effort.dispatchEvent(new Event("change", { bubbles: true })));
+    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "setModel", botId: "scout", threadId: "thread-scout",
+      selection: { instanceId: "claude", model: "claude-opus-5-5", effort: "high" },
+    }));
+  });
+
+  it("stays locked when the engine has no reasoning level to change", () => {
+    fixture.instances = [{ ...claude(three), capabilities: {} }];
+    const busy = { ...scout(), busy: true };
+    fixture.bots = [busy];
+    render(busy);
+    expect(chip().disabled).toBe(true);
+  });
+});
