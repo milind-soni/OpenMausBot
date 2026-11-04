@@ -124,8 +124,9 @@ a custom ACP engine with your own Command Code sign-in. (Checked with
    }
    ```
 
-   Use `"cmdc acp"` on Windows, and the full path (from `which cmd`) when the
-   npm global folder is not on the app's `PATH`.
+   Use `"cmdc acp"` on Windows, and the full path when the npm global folder
+   is not on the app's `PATH`: `which cmd` on macOS or Linux, or
+   `where.exe cmdc` on Windows.
 4. Pick **Command Code** for a bot. Its model menu shows **Agent default**,
    which runs Command Code's own default model; **Re-detect** lists the models
    it advertises once you're signed in.
