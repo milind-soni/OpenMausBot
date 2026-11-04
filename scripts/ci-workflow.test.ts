@@ -7,7 +7,7 @@ import { SELECTABLE_JOBS, vitestMatrix } from "./ci-scope.mjs";
 import { interpolate } from "./testing/github-expression.ts";
 
 const workflow = parse(readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"));
-const requiredRuntimeJobs = ["vitest", "behavior-evals", "packaged-server", "windows-cua", "electron-smokes"];
+const requiredRuntimeJobs = ["build", "vitest", "behavior-evals", "packaged-server", "windows-cua", "electron-smokes"];
 
 function runGate(needs: Record<string, unknown>) {
   // Execute the actual gate, not a duplicate of its success/failure logic.
@@ -237,13 +237,14 @@ describe("CI concurrency", () => {
       vitest_matrix: "${{ steps.scope.outputs.vitest_matrix }}",
       packaged_server_os: "${{ steps.scope.outputs.packaged_server_os }}",
     });
-    // Only these three static steps depend on the scope's build flag; the rest always run, or run only on Boat.
-    const built = (workflow.jobs.static.steps as { if?: string; run?: string }[]).filter((step) => step.if?.includes("outputs.build"));
-    expect(built.map((step) => [step.if, step.run])).toEqual([
-      ["steps.scope.outputs.build == 'true'", "pnpm typecheck"],
-      ["steps.scope.outputs.build == 'true'", "pnpm check:electron"],
-      ["steps.scope.outputs.build == 'true'", "pnpm exec vite build"],
-    ]);
+    // The build job runs where the scope selects it, and static holds only what is quick and always runs.
+    expect(workflow.jobs.build.if).toBe(`contains(needs.static.outputs.jobs, '"build"')`);
+    expect((workflow.jobs.build.steps as { run?: string }[]).map((step) => step.run).filter(Boolean))
+      .toEqual(["pnpm install --frozen-lockfile", "pnpm typecheck", "pnpm check:electron", "pnpm exec vite build"]);
+    for (const run of ["pnpm typecheck", "pnpm check:electron", "pnpm exec vite build"]) {
+      expect((workflow.jobs.static.steps as { run?: string }[]).some((step) => step.run === run), run).toBe(false);
+    }
+    expect((workflow.jobs.static.steps as { if?: string }[]).some((step) => step.if?.includes("outputs.build"))).toBe(false);
     expect(workflow.jobs.static.steps.some((step: { run?: string }) =>
       step.run === "pnpm exec vitest run scripts/ci-scope.test.ts scripts/ci-linux-lanes.test.ts scripts/ci-workflow.test.ts scripts/testing/verification-docs.test.ts",
     )).toBe(true);
@@ -316,8 +317,8 @@ describe("CI on Boat", () => {
     name: interpolate(workflow.jobs.static.name, context),
     timeout: interpolate(String(workflow.jobs.static["timeout-minutes"]), context),
   });
-  const boat = { runsOn: "boat-xlarge", name: "typecheck + lint + Linux tests (Boat)", timeout: 45 };
-  const github = (timeout: number) => ({ runsOn: "ubuntu-latest", name: "typecheck + lint", timeout });
+  const boat = { runsOn: "boat-xlarge", name: "preflight + Linux tests (Boat)", timeout: 45 };
+  const github = (timeout: number) => ({ runsOn: "ubuntu-latest", name: "preflight", timeout });
 
   it.each([
     ["the owner's pull request", {}],
@@ -345,7 +346,7 @@ describe("CI on Boat", () => {
 
   it("does the Linux work in the static job only where ci-scope moved it there, without Boat's extra rights or desktop", () => {
     const steps = workflow.jobs.static.steps as Step[];
-    const boatOnly = steps.slice(steps.findIndex((step) => step.name === "production UI build") + 1);
+    const boatOnly = steps.slice(steps.findIndex((step) => step.name === "Remove what Boat installs and GitHub's runners lack"));
     expect(boatOnly.map((step) => step.if)).toEqual([
       "steps.scope.outputs.linux_lanes", "steps.scope.outputs.linux_lanes", "steps.scope.outputs.linux_lanes",
       "${{ !cancelled() && steps.scope.outputs.linux_lanes }}", "failure() && steps.scope.outputs.linux_lanes",
