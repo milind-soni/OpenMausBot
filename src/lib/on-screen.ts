@@ -38,11 +38,9 @@ export function useOnScreen(ref: RefObject<Element | null>): boolean {
   return onScreen;
 }
 
-/** How far from the screen, in pixels, an element counts as near it. */
 const NEAR_SCREEN_MARGIN = 800;
 
-/** Whether the element has come within NEAR_SCREEN_MARGIN of the screen yet. It stays true once it has, and is true at
- * once where the browser cannot tell. */
+/** Stays true once the element has come near the screen; true at once where the browser has no IntersectionObserver. */
 export function useNearScreen(ref: RefObject<Element | null>): boolean {
   const [near, setNear] = useState(() => typeof IntersectionObserver === "undefined");
   useEffect(() => {

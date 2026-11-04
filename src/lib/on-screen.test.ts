@@ -7,7 +7,6 @@ import { useNearScreen } from "./on-screen";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-// The module makes its observer once, on first use, so only the first test that watches sees this fake's reports.
 class FakeObserver {
   static last: FakeObserver | undefined;
   watched = new Set<Element>();
@@ -49,7 +48,7 @@ describe("useNearScreen", () => {
     const watcher = FakeObserver.last!;
     const element = host.firstElementChild!;
     expect([...watcher.watched]).toEqual([element]);
-    expect(watcher.options).toMatchObject({ rootMargin: "800px 0px" });
+    expect(watcher.options).toMatchObject({ rootMargin: "800px 0px", scrollMargin: "800px 0px" });
     act(() => watcher.report([{ target: element, isIntersecting: false }]));
     expect(near()).toBe("false");
     act(() => watcher.report([{ target: element, isIntersecting: true }]));

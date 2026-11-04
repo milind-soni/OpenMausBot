@@ -59,7 +59,7 @@ vi.mock("shiki/engine/javascript", () => ({
   createJavaScriptRegexEngine: () => ({}),
 }));
 // These tests pin how a block is coloured, not when: without an observer a block counts as near the screen at once.
-// (Removed outright rather than stubbed, since tests below undo every stubbed global.)
+// Tests below undo every stubbed global, so the observer is deleted instead.
 delete (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver;
 
 describe("soft line breaks", () => {
