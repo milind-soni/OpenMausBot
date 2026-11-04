@@ -46,7 +46,7 @@ import { createOrgModelBlocks, modelSwapNotice, withOrgBlocks } from "./claude-m
 import { engineHomes } from "../engine-homes/engine-homes.ts";
 import { TEAM_TOOLS_FAILED, failedCustomMcp, teamToolsFailed } from "./team-tools.ts";
 import { armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose } from "./session-idle.ts";
-import { promptHalves, withVolatileNote } from "./prompt-split.ts";
+import { promptHalves, withVolatileNote } from "./prompt-split.ts"; import { CLAUDE_OWN_MEMORY_OFF } from "./claude-own-memory.ts";
 import { parseVersionTriple, versionAtLeast } from "./acp/version-probe.ts";
 import {
   applyClaudeInject,
@@ -1169,7 +1169,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const cwd = turn.cwd ?? homedir();
       // Every MCP server without alwaysLoad loads on demand behind ToolSearch (claude-tool-search.ts).
       const toolSearch = claudeToolSearchSetting(cwd, env);
-      const own: Record<string, unknown> = { ...authSettings, env: { ...authSettings.env, ENABLE_TOOL_SEARCH: toolSearch } };
+      const own: Record<string, unknown> = { ...authSettings, env: { ...authSettings.env, ENABLE_TOOL_SEARCH: toolSearch, ...(isolated ? CLAUDE_OWN_MEMORY_OFF : {}) } };
       // Project-only settings still find the personal memory via ancestors when the bot lives under HOME.
       if (isolated) own.claudeMdExcludes = [join(homedir(), ".claude", "CLAUDE.md")];
       if (hooks) own.hooks = claudeHookSettings(HOOK_HELPER_PATH);
