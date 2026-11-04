@@ -145,7 +145,7 @@ describe("bringing in another AI tool's setup through the desktop app's own serv
     expect(told.linked(".claude", "review-pr")).toBe(copyOf("review-pr"));
   });
 
-  it("switches a skill from this computer off for one bot only, with the skills library off or on", async () => {
+  it("switches a skill from this computer off for one bot only", async () => {
     const bots = (JSON.parse((await api("GET", "/api/bots")).text) as { bots: Array<{ id: string; threadId: string; name: string }> }).bots;
     const later = bots.find((bot) => bot.name === "Later Bot")!;
     const starter = bots.find((bot) => bot !== later)!;
@@ -161,7 +161,6 @@ describe("bringing in another AI tool's setup through the desktop app's own serv
     expect(told.linked(".agents", "review-pr")).toBeNull();
     // There is one copy for all bots: nothing here deletes it.
     expect((await api("DELETE", `/api/bots/${later.id}/skills/review-pr`)).status).toBe(404);
-    expect((await api("PATCH", "/api/config", { features: { skillsLibrary: true } })).status).toBe(200);
     expect(await enabled(starter.id)).toEqual({ "release-notes": true, "review-pr": true });
     expect((await api("PATCH", `/api/bots/${later.id}/skills/review-pr`, { enabled: true })).status).toBe(200);
     expect(await enabled(later.id)).toEqual({ "release-notes": true, "review-pr": true });

@@ -10,6 +10,7 @@ import {
   readSkillLibraryIndex,
   skillsLibraryRoot,
 } from "./skill-library.ts";
+import { LEARN_SOURCE_PREFIX } from "./skill-learn.ts";
 import { listMigratableSkills, removeManifestEntry } from "./skills.ts";
 
 export interface SkillMigrationOutcome {
@@ -50,10 +51,16 @@ export function archiveSkillDirectory(source: string, archive: string, expectSha
   }
 }
 
-export function migrateBotSkillsToLibrary(botId: string, root: string = skillsLibraryRoot()): SkillsMigrationReport {
+/** `only` moves just that skill, as when a person widens who can use one bot's skill. */
+export function migrateBotSkillsToLibrary(botId: string, root: string = skillsLibraryRoot(), only?: string): SkillsMigrationReport {
   const outcomes: SkillMigrationOutcome[] = [];
   const assigned: string[] = [];
-  for (const copy of listMigratableSkills(botId)) {
+  for (const copy of listMigratableSkills(botId).filter((skill) => only === undefined || skill.name === only)) {
+    // The organization's releases update and withdraw the copy on its bot.
+    if (copy.source.startsWith("org:")) {
+      outcomes.push({ botId, name: copy.name, outcome: "skipped", detail: "an organization's skill stays with its bot" });
+      continue;
+    }
     if (!copy.intact || !copy.directory) {
       outcomes.push({ botId, name: copy.name, outcome: "skipped", detail: "stored SKILL.md is missing or changed after review" });
       continue;
@@ -102,6 +109,7 @@ export function migrateBotSkillsToLibrary(botId: string, root: string = skillsLi
         license: copy.license,
         compatibility: copy.compatibility,
         reviewState: copy.enabled ? "approved" : "disabled",
+        ...(copy.source.startsWith(LEARN_SOURCE_PREFIX) ? { learnedBy: botId } : {}),
         package: copy.package,
         root,
       });

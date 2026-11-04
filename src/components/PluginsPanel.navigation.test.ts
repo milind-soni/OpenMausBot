@@ -499,7 +499,8 @@ describe("Apps pop-up", () => {
 
   it("is titled Apps and shows app tiles and the MCP servers section on one view", () => {
     const { html } = render();
-    expect(html).toContain(">Apps</h2>");
+    expect(html).toContain('id="plugins-title" data-screen-tab="apps" aria-selected="true"');
+    expect(html).toContain('data-screen-tab="skills" aria-selected="false"');
     expect(html).toContain("Connect an app or your own MCP server once. Then choose which bots may use it.");
     expect(html).toContain("glass-surface");
     expect(html).toContain("@container");

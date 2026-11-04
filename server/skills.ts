@@ -1,4 +1,4 @@
-// Per-bot Agent Skills: imports keep SKILL.md only and land disabled; learned skills may add reviewed references/<topic>.md files.
+// Per-bot Agent Skills: imports keep SKILL.md only; learned skills may add reviewed references/<topic>.md files.
 import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
@@ -25,7 +25,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { LEARN_SOURCE_PREFIX } from "./skill-learn.ts";
-import { libraryDescriptionsAt, librarySkillFilePath, listLibrarySkills, type LibrarySkillListing } from "./skill-library.ts";
+import { libraryDescriptionsAt, librarySkillFilePath, listLibrarySkills } from "./skill-library.ts";
 import { readManagedLinks, writeManagedLinks } from "./skill-link-registry.ts";
 import {
   directoryEntryState, entryExistsWithoutFollowing, formatKb, isSkillReferencePath, learnedSkillDirectoryMatches, publishReviewedRevision,
@@ -1313,9 +1313,8 @@ export function expandSkillCommandTurnText(botId: string, text: string, assigned
   return skillCommandTurnText(text, enabledSkillFiles(botId, skillMentions(text), assignedLibrary));
 }
 
-export function resolveBotSkills(botId: string, assignedLibrary: readonly string[] | undefined): SkillListing[] {
+export function resolveBotSkills(botId: string, assignedLibrary: readonly string[] = []): SkillListing[] {
   const own = listSkills(botId);
-  if (assignedLibrary === undefined) return own; // the library is off: no every-bot skills either
   const ownNames = new Set(own.map((skill) => skill.name));
   const assigned = new Set(assignedLibrary);
   return [...own, ...listLibrarySkills().filter((skill) => (skill.everyBot || assigned.has(skill.name)) && !ownNames.has(skill.name))];
@@ -1325,19 +1324,12 @@ export interface BotSkillWithOrigin extends SkillListing {
   origin: "private" | "library";
 }
 
-export function listBotSkillsWithOrigin(
-  botId: string,
-  assignedLibrary: readonly string[] | undefined,
-): { skills: BotSkillWithOrigin[]; library: LibrarySkillListing[] } {
-  const own = listSkills(botId);
-  const ownNames = new Set(own.map((skill) => skill.name));
-  const assigned = new Set(assignedLibrary ?? []);
-  const skills = resolveBotSkills(botId, assignedLibrary ?? []).map((skill) => ({
+export function listBotSkillsWithOrigin(botId: string, assignedLibrary: readonly string[] = []): BotSkillWithOrigin[] {
+  const ownNames = new Set(listSkills(botId).map((skill) => skill.name));
+  return resolveBotSkills(botId, assignedLibrary).map((skill) => ({
     ...skill,
     origin: ownNames.has(skill.name) ? ("private" as const) : ("library" as const),
   }));
-  const library = listLibrarySkills().filter((entry) => !ownNames.has(entry.name) && !entry.everyBot && !assigned.has(entry.name));
-  return { skills, library };
 }
 
 export interface MigratableSkillCopy {

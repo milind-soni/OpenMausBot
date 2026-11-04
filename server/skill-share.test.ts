@@ -132,11 +132,10 @@ describe("sharing learned skills with the team", () => {
     expect(library.readLibrarySkillFile("rough-cut", root)).toBe(SKILL("rough-cut", "mate's v3"));
   });
 
-  it("asks by default and is off while the skills library is off", () => {
-    expect(share.shareLearnedSkillsMode({})).toBe("off");
-    expect(share.shareLearnedSkillsMode({ features: { shareLearnedSkills: "auto" } })).toBe("off");
-    expect(share.shareLearnedSkillsMode({ features: { skillsLibrary: true } })).toBe("ask");
-    expect(share.shareLearnedSkillsMode({ features: { skillsLibrary: true, shareLearnedSkills: "auto" } })).toBe("auto");
+  it("asks by default", () => {
+    expect(share.shareLearnedSkillsMode({})).toBe("ask");
+    expect(share.shareLearnedSkillsMode({ features: { shareLearnedSkills: "auto" } })).toBe("auto");
+    expect(share.shareLearnedSkillsMode({ features: { shareLearnedSkills: "off" } })).toBe("off");
   });
 
   it("skips a teammate more people can see than could see where the skill was learned", () => {

@@ -2,10 +2,8 @@ import { useState, type ReactNode } from "react";
 import { FolderOpen, Plus } from "lucide-react";
 
 import { appSwitchPatch } from "@/lib/bot-app-access";
-import { skillsLibraryEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 import { deleteMemoryDoc, MEMORY_INDEX, saveMemoryDoc, type MemoryDoc } from "@/lib/memory";
-import { openExternalLink } from "@/lib/app-links";
 import type { Routine } from "@/lib/routines";
 import { shortPath } from "@/lib/short-path";
 import { useStore, type Bot } from "@/state/store";
@@ -13,17 +11,16 @@ import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { ServiceIcon } from "../ServiceIcon";
 import { RoutineEditor } from "../RoutinesPage";
 import { useWorkingFolder } from "../bot-settings/AccessSection";
-import { useBotEditor } from "../bot-settings/BotEditorContext";
-import { SkillReviewDialog, useManagedSkills, type ManagedSkill } from "../bot-settings/SkillsSection";
 import { useBotApps, type BotApp } from "../bot-settings/useBotApps";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import { RoutineList } from "../routines/RoutineList";
+import { BotSkills } from "../skills/BotSkills";
 import { BrowserLogins } from "./browser-logins";
 import { useOpenComputer, WherePage } from "./ComputerTab";
 import { SettingsPage } from "./SettingsPage";
 import { panelMemoryNotes, withMemoryNote, withoutMemoryNote, type PanelMemoryNote } from "./memory-notes";
 import type { SimplePageId } from "./page-registry";
-import { BotSwitch, buttonCls, Card, LinkRow, NoteRow, RadioRow, rowCls, SwitchRow, TextRow, TrashButton } from "./rows";
+import { BotSwitch, buttonCls, Card, LinkRow, NoteRow, RadioRow, rowCls, TextRow, TrashButton } from "./rows";
 import { useMemoryDoc } from "./use-memory-doc";
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
@@ -34,8 +31,6 @@ export interface PageContext {
 }
 
 export const pageSurfaceCls = "flex flex-col gap-3";
-
-const SKILLS_SITE = "https://skills.sh";
 
 function errorText(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -213,102 +208,7 @@ export function MemoryPage({ bot }: PageContext) {
 }
 
 export function SkillsPage({ bot }: PageContext) {
-  const { request: api } = useBotEditor();
-  const { state, dispatch } = useStore();
-  const skills = useManagedSkills(bot);
-  const [source, setSource] = useState("");
-  const [importing, setImporting] = useState(false);
-  const libraryOn = skillsLibraryEnabled(state.config);
-
-  const remove = async (skill: ManagedSkill) => {
-    if (skills.working) return;
-    if (!window.confirm(t("botPanel.skills.removeConfirm", { name: skill.name }))) return;
-    skills.setWorking(skill.name);
-    skills.setError("");
-    try {
-      if (skill.origin === "library") await skills.putAssignments(skill.name, true);
-      else {
-        await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, { method: "DELETE" });
-        await skills.refresh();
-      }
-    } catch (cause) {
-      skills.setError(errorText(cause, t("botPanel.skills.removeFailed")));
-    } finally {
-      skills.setWorking("");
-    }
-  };
-  const importSkill = async () => {
-    const trimmed = source.trim();
-    if (!trimmed || importing) return;
-    setImporting(true);
-    skills.setError("");
-    try {
-      await api(`/api/bots/${bot.id}/skills`, { method: "POST", body: JSON.stringify({ source: trimmed }) });
-      setSource("");
-      await skills.refresh();
-    } catch (cause) {
-      skills.setError(errorText(cause, t("botPanel.skills.importFailed")));
-    } finally {
-      setImporting(false);
-    }
-  };
-  const browse = () => {
-    if (libraryOn) {
-      dispatch({ type: "toggleSettings", open: false });
-      dispatch({ type: "toggleAppSettings", open: true, section: "skills" });
-      return;
-    }
-    void openExternalLink(SKILLS_SITE);
-  };
-
-  return (
-    <>
-      <Card>
-        {skills.loading ? (
-          <NoteRow>{t("skills.loading")}</NoteRow>
-        ) : skills.skills.length === 0 ? (
-          <NoteRow>{t("botSettings.simple.noSkills")}</NoteRow>
-        ) : skills.skills.map((skill) => (
-          <SwitchRow
-            key={skill.name}
-            data-panel-row={`skill:${skill.name}`}
-            title={skill.name}
-            hint={skill.description || skill.source}
-            label={t("botSettings.simple.skillToggle", { name: skill.name })}
-            color={bot.color}
-            checked={skill.enabled}
-            disabled={Boolean(skills.working)}
-            onChange={() => void skills.toggle(skill)}
-            extra={<TrashButton data-panel-action={`remove-skill:${skill.name}`} label={t("botPanel.skills.remove", { name: skill.name })} disabled={Boolean(skills.working)} onClick={() => void remove(skill)} />}
-          />
-        ))}
-        {skills.error && !skills.reviewing && <NoteRow tone="warn">{skills.error}</NoteRow>}
-      </Card>
-      <Card>
-        <TextRow
-          data-panel-form="skill-import"
-          value={source}
-          placeholder={t("botPanel.skills.importPlaceholder")}
-          label={t("skills.import.label")}
-          action={importing ? t("skills.import.importing") : t("common.add")}
-          disabled={importing}
-          onChange={setSource}
-          onSubmit={() => void importSkill()}
-        />
-        <LinkRow data-panel-link="browse-skills" onClick={browse}>{t("botPanel.skills.browse")}</LinkRow>
-      </Card>
-      {skills.reviewing && (
-        <SkillReviewDialog
-          skill={skills.reviewing.skill}
-          text={skills.reviewing.text}
-          error={skills.error}
-          working={skills.working === skills.reviewing.skill.name}
-          onCancel={() => skills.setReviewing(null)}
-          onEnable={() => void skills.enableReviewed()}
-        />
-      )}
-    </>
-  );
+  return <BotSkills bot={bot} />;
 }
 
 export function FolderPage({ bot }: PageContext) {

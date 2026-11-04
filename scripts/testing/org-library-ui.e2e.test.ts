@@ -134,9 +134,9 @@ describe("the organization library in the real renderer", () => {
     await click("Identity");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("From Sales desk 1.3.0 · Acme Partners");
     await click("Skills");
-    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Skills your organization shares");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Follow up");
     await evidence("org-library-bot-skills.png");
-    await click("Add follow-up to this bot");
+    await click("Use Follow up");
     const selected = bots.find((bot: { name: string }) => profile![1].name.includes(bot.name));
     await expect.poll(async () => ((await api(`/api/bots/${selected.id}/skills`)).skills as Array<{ name: string; enabled: boolean }>)
       .find((skill) => skill.name === "follow-up")?.enabled, { timeout: 10_000 }).toBe(true);

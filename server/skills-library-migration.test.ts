@@ -153,16 +153,22 @@ describe("skills library migration", () => {
     expect(reportB.assignments[botB]).toBeUndefined();
   });
 
-  it("maps organization stamps onto library entries so org installs become a source", () => {
+  it("leaves an organization's skill with its bot, where the organization's releases keep updating it", () => {
     const content = SKILL("org-playbook");
     const stamp = { installId: "a".repeat(32), key: "org-playbook", release: "2.0.1", r: "b".repeat(64), w: "c".repeat(64) };
     skills.installOrgSkill(botA, "org:acme/sales-skills@2.0.1", content, stamp);
-    migration.migrateBotSkillsToLibrary(botA);
+    expect(migration.migrateBotSkillsToLibrary(botA).outcomes).toEqual([expect.objectContaining({ name: "org-playbook", outcome: "skipped" })]);
 
-    const entry = library.readSkillLibraryIndex()["org-playbook"]!;
-    expect(entry.source).toBe("org:acme/sales-skills@2.0.1");
-    expect(entry.package).toEqual(stamp);
-    expect(entry.reviewState).toBe("approved");
+    expect(library.readSkillLibraryIndex()["org-playbook"]).toBeUndefined();
+    expect(skills.skillPackageStamps(botA)).toEqual([{ name: "org-playbook", enabled: true, stamp }]);
+  });
+
+  it("records which bot learned a skill it moves", () => {
+    skills.installSkill(botA, "learn:weekly notes", [{ path: "SKILL.md", content: SKILL("learned-notes") }]);
+    skills.setSkillEnabled(botA, "learned-notes", true);
+    migration.migrateBotSkillsToLibrary(botA);
+    expect(library.readSkillLibraryIndex()["learned-notes"]).toMatchObject({ learnedBy: botA, reviewState: "approved" });
+    migration.writePendingAssignments({});
   });
 
   it("keeps a deduplicated copy whose on/off differs from the library entry", () => {

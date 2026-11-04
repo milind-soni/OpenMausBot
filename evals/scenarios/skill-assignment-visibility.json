@@ -1,7 +1,7 @@
 {
   "id": "skill-assignment-visibility",
   "title": "Assigning a library skill changes what the next turn sees",
-  "behavior": "With features.skillsLibrary on, a turn before assignment omits the library skill from its system prompt; after the Skills surface's assignment PUT, the next turn's system prompt carries the skill.",
+  "behavior": "A turn before the bot may use a library skill omits it from its system prompt; after the Skills page switches it on for the bot, the next turn's system prompt carries the skill.",
   "issue": 1803,
   "world": "coordination",
   "gates": [],
@@ -22,7 +22,6 @@
     }
   ],
   "steps": [
-    { "kind": "setConfig", "config": { "features": { "skillsLibrary": true } } },
     { "kind": "send", "bot": "shop", "text": "Handle order 1001." },
     { "kind": "waitForTurns", "bot": "shop", "count": 1, "timeoutMs": 20000 },
     { "kind": "setSkillAssignment", "bot": "shop", "skills": ["order-audit"] },
