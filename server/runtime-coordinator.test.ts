@@ -697,7 +697,7 @@ describe("RuntimeCoordinator: stops", () => {
     expect(w.host.reports.map(r => r.child.id).sort()).toEqual([b.id, other.id, t.id].sort());
   });
 
-  it("stopAwaitingDirect drops what never started, leaves a working teammate, and stops the requester", async () => {
+  it("stopAwaitingDirect stops the requester and everything it handed out: what never started, and a teammate at work", async () => {
     const w = world(hold);
     const { node: b } = send(w, chief, "gen-1", undefined, builder, "Build it");
     const { node: t } = send(w, chief, "gen-1", undefined, tester, "Test it");
@@ -707,16 +707,14 @@ describe("RuntimeCoordinator: stops", () => {
     expect(w.coordinator.node(t.id)?.status).toBe("queued");
     expect(w.coordinator.outstandingDirect("chief-chat").map(n => n.id).sort()).toEqual([b.id, t.id].sort());
     expect(w.coordinator.assignerOf("builder-work")?.id).toBe("gen-1");
-    const left = w.coordinator.stopAwaitingDirect("chief-chat");
-    expect(left.map(n => n.id)).toEqual([b.id]);
+    w.coordinator.stopAwaitingDirect("chief-chat");
     expect(w.coordinator.node(t.id)).toMatchObject({ status: "cancelled", result: "Stopped before it started" });
+    expect(w.coordinator.node(b.id)).toMatchObject({ status: "cancelled", result: "Stopped with the request it was for", reported: true });
     expect(w.coordinator.node("gen-1")).toMatchObject({ status: "cancelled", result: "Stopped by user" });
-    expect(w.host.runs[0]!.signal.aborted).toBe(false);
+    expect(w.host.runs[0]!.signal.aborted).toBe(true);
     expect(w.coordinator.outstandingDirect("chief-chat")).toEqual([]);
     expect(w.coordinator.assignerOf("builder-work")).toBeUndefined();
-    await w.host.release(b.id, { ok: true, text: "built anyway" });
-    expect(w.coordinator.node(b.id)).toMatchObject({ status: "completed", result: "built anyway", reported: true });
-    expect(w.host.reports.at(-1)).toMatchObject({ child: { id: b.id }, parent: { id: "gen-1", status: "cancelled" } });
+    expect(w.coordinator.active()).toEqual([]);
   });
 });
 

@@ -388,9 +388,9 @@ export class RuntimeCoordinator implements Coordinator {
     for (const n of this.live()) if (this.direct(n, threadId)) this.runtime.cancel(n.id, reason, "stopped");
   }
 
-  stopAwaitingDirect(threadId: string, reason = "Stopped by user"): HandoffView[] {
+  stopAwaitingDirect(threadId: string, reason = "Stopped by user"): void {
     this.ready();
-    return this.runtime.stopRequester({ threadId }, reason).map(a => this.project(a));
+    this.runtime.stopRequester({ threadId }, reason);
   }
 
   activeDirect(threadId: string): boolean {
