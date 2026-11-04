@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { redactSecretsInText } from "./redact.ts";
+import { serverLine, type ServerLineKey } from "./server-lines.ts";
 import { STAGED_GIST_MAX } from "./skills.ts";
 import type { SkillSwitchAction } from "../shared/skill-request.ts";
 
@@ -74,21 +75,25 @@ export function skillSwitchStillMatches(
     : { error: `skill "${name}" changed after this card was shown; ask the bot to propose it again` };
 }
 
-export function skillSwitchCardCopy(action: SkillSwitchAction, name: string, gist: string): {
+const CARD_LINES = {
+  enable: { option: "Turn on", title: "server.skillSwitch.enable.title", body: "server.skillSwitch.enable.body", done: "server.skillSwitch.enable.done" },
+  disable: { option: "Turn off", title: "server.skillSwitch.disable.title", body: "server.skillSwitch.disable.body", done: "server.skillSwitch.disable.done" },
+  delete: { option: "Delete", title: "server.skillSwitch.delete.title", body: "server.skillSwitch.delete.body", done: "server.skillSwitch.delete.done" },
+} as const satisfies Record<SkillSwitchAction, { option: string; title: ServerLineKey; body: ServerLineKey; done: ServerLineKey }>;
+
+/** The card's words in the person's language. The option is the answer the card sends back, so it stays as written. */
+export function skillSwitchCardCopy(action: SkillSwitchAction, name: string, gist: string, language?: string): {
   title: string;
   subtitle: string;
   option: string;
   done: string;
 } {
+  const lines = CARD_LINES[action];
   const lead = gist ? `${gist}\n\n` : "";
-  if (action === "enable") {
-    return { title: `Turn on skill "${name}"?`, option: "Turn on", done: `Skill "${name}" turned on`,
-      subtitle: `${lead}The bot can use this skill again.` };
-  }
-  if (action === "disable") {
-    return { title: `Turn off skill "${name}"?`, option: "Turn off", done: `Skill "${name}" turned off`,
-      subtitle: `${lead}The bot stops using this skill until it is turned on again. Nothing is deleted.` };
-  }
-  return { title: `Delete skill "${name}"?`, option: "Delete", done: `Skill "${name}" deleted`,
-    subtitle: `${lead}Removes this skill and all its files from the bot for good. Its SKILL.md is shown below, with any secrets hidden.` };
+  return {
+    title: serverLine(language, lines.title, { name }),
+    subtitle: `${lead}${serverLine(language, lines.body)}`,
+    option: lines.option,
+    done: serverLine(language, lines.done, { name }),
+  };
 }

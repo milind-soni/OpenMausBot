@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
+import de from "../src/locales/de.json" with { type: "json" };
+import { addServerLinePacks } from "./server-lines.ts";
 import { skillSwitchCardCopy, skillSwitchStillMatches, skillSwitchTarget, type SwitchableSkill } from "./skill-switch.ts";
 
 const text = "---\nname: notes\ndescription: Keeps notes\n---\n# Notes\n";
@@ -60,5 +62,10 @@ describe("skillSwitchCardCopy", () => {
     expect(skillSwitchCardCopy("enable", "notes", "")).toMatchObject({ title: "Turn on skill \"notes\"?", option: "Turn on", done: "Skill \"notes\" turned on" });
     expect(skillSwitchCardCopy("disable", "notes", "Keeps notes")).toMatchObject({ option: "Turn off", subtitle: expect.stringMatching(/^Keeps notes\n\n.*Nothing is deleted\.$/) });
     expect(skillSwitchCardCopy("delete", "notes", "")).toMatchObject({ title: "Delete skill \"notes\"?", option: "Delete", done: "Skill \"notes\" deleted" });
+  });
+
+  it("writes the card in the person's language but keeps the answer it sends back", () => {
+    addServerLinePacks({ de });
+    expect(skillSwitchCardCopy("disable", "notes", "", "de")).toMatchObject({ title: "Skill „notes“ ausschalten?", option: "Turn off", done: "Skill „notes“ ausgeschaltet" });
   });
 });

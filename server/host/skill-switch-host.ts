@@ -11,6 +11,7 @@ import { appendDecision } from "../decision-log.ts";
 import { setImportedSkillEnabled } from "../imported-skills.ts";
 import { listSkills, readSkillFile, removeSkill, setSkillEnabled } from "../skills.ts";
 import { skillSwitchCardCopy, skillSwitchStillMatches, skillSwitchTarget, type SkillSwitchTarget, type SwitchableSkill } from "../skill-switch.ts";
+import { conversationLanguage } from "../server-lines.ts";
 import type { BotRecord, Store } from "../store.ts";
 
 export interface SkillSwitchHostDeps {
@@ -57,7 +58,7 @@ export function createSkillSwitchHost(deps: SkillSwitchHostDeps) {
 
   function appendCard(args: { requestId: string; botId: string; threadId: string; action: SkillSwitchAction; name: string; target: SkillSwitchTarget }): string {
     const { requestId } = args;
-    const copy = skillSwitchCardCopy(args.action, args.name, args.target.gist);
+    const copy = skillSwitchCardCopy(args.action, args.name, args.target.gist, conversationLanguage(args.threadId));
     const payload: SkillRequestCardData = {
       version: 1,
       requestId,
@@ -144,7 +145,7 @@ export function createSkillSwitchHost(deps: SkillSwitchHostDeps) {
       return { claimed: true, status: 422, error: applied.error };
     }
     store.patchMessage(args.threadId, messageId, {
-      card: { ...card, answered: "allow", held: undefined, title: skillSwitchCardCopy(request.action, request.name, "").done },
+      card: { ...card, answered: "allow", held: undefined, title: skillSwitchCardCopy(request.action, request.name, "", conversationLanguage(args.threadId)).done },
     });
     deps.noteSkillChange(args.botId, args.threadId);
     decided("user-approved");
