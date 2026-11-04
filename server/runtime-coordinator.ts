@@ -477,6 +477,11 @@ export class RuntimeCoordinator implements Coordinator {
     for (const n of this.live()) if (n.status === "running" && n.assignee.destination.threadId === threadId) this.runtime.progress(n.id);
   }
 
+  held(threadId: string, why: string): void {
+    this.ready();
+    for (const n of this.live()) if (n.status === "running" && n.assignee.destination.threadId === threadId) this.runtime.held(n.id, why);
+  }
+
   answer(threadId: string, text: string): boolean {
     this.ready();
     const parked = this.live().find(n => n.parentId !== undefined && n.status === "needs_input" && !(n.cards && n.cards.length > 0) &&
@@ -493,7 +498,10 @@ export class RuntimeCoordinator implements Coordinator {
     const host = this.host;
     return {
       validate: (a, parent) => host.validate(view(a, parent), parent && this.project(parent)),
-      canStart: a => !host.busy(this.project(a)),
+      canStart: a => {
+        const node = this.project(a);
+        return host.busy(node) ? host.holdReason?.(node) ?? false : true;
+      },
       run: (a, input, signal) => this.run(a, input, signal),
       park: (a, question, restored) => host.park(this.project(a), question, restored),
       report: (a, parent) => host.report(view(a, parent), parent && this.project(parent)),

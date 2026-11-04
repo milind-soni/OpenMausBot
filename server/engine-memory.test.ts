@@ -272,6 +272,30 @@ describe("who goes first when memory holds several", () => {
     expect(order).toEqual(["first", "second"]);
   });
 
+  it("says what runs and what is ahead in the order they will go, and whether anything waits", async () => {
+    const h = await full(["person"]);
+    const said: string[] = [], began: string[] = [];
+    let changes = 0;
+    h.memory.useWaits({ text: (threadId, wait) => `${threadId} ${wait.first ? "first" : "again"} ${wait.running} ${wait.ahead}`, began: (threadId, wait) => began.push(`${threadId} ${wait.ahead}`), changed: () => { changes += 1; } });
+    const order: string[] = [];
+    void h.memory.admit("handoff", new AbortController().signal, (text) => said.push(text)).then(() => order.push("handoff"));
+    await settle();
+    void h.memory.admit("person", new AbortController().signal, (text) => said.push(text)).then(() => order.push("person"));
+    await settle();
+    expect(said).toEqual(["handoff first 1 0", "person first 1 0"]);
+    expect(began).toEqual(["handoff 0", "person 0"]);
+    expect(h.memory.waiting()).toBe(true);
+    expect(changes).toBe(1);
+    h.advance(10 * 60_000);
+    await settle();
+    expect(said.at(-1)).toMatch(/again 1 [01]$/);
+    await finish(h, "running");
+    await finish(h, "person");
+    await finish(h, "handoff");
+    expect(h.memory.waiting()).toBe(false);
+    expect(changes).toBe(2);
+  });
+
   it("does not starve bot work: past its wait it goes ahead of a person's newer line", async () => {
     const h = await full(["person"]);
     const order: string[] = [];

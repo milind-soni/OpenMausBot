@@ -1,6 +1,7 @@
 // A 2 GB Starter-sized machine that fits one turn at a time, on the fake engine: whose turn goes next, and what a stop does.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { request } from "../scripts/mcp-server.ts";
@@ -39,8 +40,12 @@ it("starts the person's own line ahead of a hand-off that was already waiting fo
   await expect.poll(() => nodes().length, { timeout: 30_000 }).toBe(2);
   const held = nodes().find((node: any) => node.botId === second.id)!;
   await expect.poll(async () => (await f.messages(held.threadId)).some((message: any) => message.tool?.name?.includes("Waiting for memory")), { timeout: 30_000 }).toBe(true);
-  // Memory, not the plan's thread limit or anything before the gate: the hand-off itself has started.
+  // Memory, not the plan's thread limit or anything before the gate: the hand-off itself has started, and its record says why it waits.
   expect(nodes().find((node: any) => node.id === held.id)!.status).toBe("running");
+  const db = new DatabaseSync(join(f.dataDir, "runtime.db"), { readOnly: true });
+  try {
+    expect((db.prepare("SELECT kind, detail FROM assignment_events WHERE assignment_id = ? AND kind = 'held'").all(held.id) as Array<{ detail: string }>).map((row) => row.detail)[0]).toMatch(/^memory: \d+ running, \d+ ahead$/);
+  } finally { db.close(); }
 
   await f.cli("send", "--bot", person.id, "--task", person.activeTaskId, "--text", "My own question.");
   await expect.poll(async () => (await f.messages(person.activeTaskId)).some((message: any) => message.tool?.name?.includes("Waiting for memory")), { timeout: 30_000 }).toBe(true);

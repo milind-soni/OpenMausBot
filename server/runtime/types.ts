@@ -174,7 +174,7 @@ export interface TurnEvidence {
 export type EventKind =
   | "enqueued" | "refused" | "admitted" | "started" | "progress" | "parked" | "answered"
   | "waiting" | "resume_due" | "settled" | "reported" | "woken" | "cancelled"
-  | "restart_reconciled" | "budget" | "stalled" | "continued";
+  | "restart_reconciled" | "budget" | "stalled" | "continued" | "held";
 
 export interface AssignmentEvent {
   id: number;

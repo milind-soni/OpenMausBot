@@ -59,7 +59,7 @@ export class Runtime {
   private ticking = false;
   private readonly turns = new Map<string, LiveTurn>();
   private readonly rootActivity = new Map<string, number>();
-  private readonly admissionNoted = new Set<string>();
+  private readonly heldFor = new Map<string, string>();
   private readonly reportDue = new Set<string>();
   private batch: Map<string, Assignment> | null = null;
   private lastThrew = false;
@@ -325,10 +325,10 @@ export class Runtime {
       }
       const thread = n.assignee.destination.threadId;
       // Same-conversation turns never overlap; same-room speakers take turns.
-      if (busyThreads.has(thread)) continue;
+      if (busyThreads.has(thread)) { this.heldBehindTurn(n, "an earlier turn in its conversation is running"); continue; }
       const parent = n.parentId ? this.store.get(n.parentId) : undefined;
       const group = n.assignee.destination.groupId;
-      if (parent?.status === "running" && group !== undefined && parent.assignee.destination.groupId === group) continue;
+      if (parent?.status === "running" && group !== undefined && parent.assignee.destination.groupId === group) { this.heldBehindTurn(n, "its requester's turn in the room is running"); continue; }
       const resumed = n.status === "resume";
       if (!resumed) {
         const root = n.parentId ? this.store.get(n.rootId) : n;
@@ -342,11 +342,7 @@ export class Runtime {
       if (problem) { this.cancelTree(n, problem, "failed", "refused"); continue; }
       const can = this.safe("canStart", () => this.runner.canStart(n));
       if (can !== true) {
-        if (typeof can === "string" && !this.admissionNoted.has(n.id)) {
-          this.admissionNoted.add(n.id);
-          this.store.update(n, { kind: "admitted", at: this.clock.now(), detail: `waiting: ${can}` });
-          this.touch(n);
-        }
+        if (typeof can === "string") this.held(n.id, can);
         continue;
       }
       if (this.dispatch(n, parent, resumed)) busyThreads.add(thread);
@@ -409,7 +405,7 @@ export class Runtime {
       this.log(`dispatch(${n.id}) not written, nothing started: ${String(error)}`);
       return false;
     }
-    this.admissionNoted.delete(n.id);
+    this.heldFor.delete(n.id);
     this.touch(n, root);
     const controller = new AbortController();
     const live: LiveTurn = { controller, rootId: root.id, activeAt: this.clock.monotonic(), interruption, carried };
@@ -515,6 +511,20 @@ export class Runtime {
     const ownTurn = !n.parentId;
     if (result.kind === "completed") this.settle(n, "completed", "done", undefined, ownTurn);
     else this.settle(n, "failed", result.outcome, undefined, ownTurn);
+  }
+
+  /** Held by a turn this tick already knows of: the host's words for it when it has any, as it may know more. */
+  private heldBehindTurn(n: Assignment, otherwise: string): void {
+    const can = this.safe("canStart", () => this.runner.canStart(n));
+    this.held(n.id, typeof can === "string" ? can : otherwise);
+  }
+
+  /** Why this assignment is not moving now, recorded each time the reason changes. */
+  held(id: string, why: string): void {
+    const n = this.store.get(id);
+    if (!n || isTerminal(n) || this.heldFor.get(id) === why) return;
+    this.heldFor.set(id, why);
+    this.store.update(n, { kind: "held", at: this.clock.now(), detail: clip(why, DETAIL_MAX) });
   }
 
   /** The host saw activity on this running turn: its stall window restarts. */
@@ -649,7 +659,7 @@ export class Runtime {
     });
     this.turns.get(n.id)?.controller.abort();
     this.turns.delete(n.id);
-    this.admissionNoted.delete(n.id);
+    this.heldFor.delete(n.id);
     if (root?.id === n.id) this.rootActivity.delete(n.id);
     this.touch(n, ...root && root.id !== n.id ? [root] : []);
     this.report(n, ownTurn);

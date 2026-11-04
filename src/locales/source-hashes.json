@@ -2981,7 +2981,16 @@
       "teamMemory.you": "bb0347a468d97e98a9c00e37cebec1ab930f6f1221cae0f1fbb92b07e1900ba2",
       "teamSettings.general": "c910d474dcd724bff83ddedeb06bf1eceaf9fb3af7c76bb282be057f36e6dffa",
       "canvas.botCount": "fc1da572d3f0b2c7e2cdfa7f85a2c1f6b2aceb1969b9cac6ec4391422887a64b",
-      "canvas.botCountOne": "ba521a424af39db3760405fe7d15f30a2639067b0d8b8049be65cddbeba65140"
+      "canvas.botCountOne": "ba521a424af39db3760405fe7d15f30a2639067b0d8b8049be65cddbeba65140",
+      "server.memory.wait": "e1fd6ee64c4bc4ea9d890801de899209932b13eaaae60934b477981a8fd2ecbd",
+      "server.memory.still": "625014d9b0b289c26cf7144a9bca85151ef9bfccf4ae87f2c7c2cb43b2cac98c",
+      "server.memory.starter": "edbec2242e449822dc3c7bd220bd3eadcd6b355de511714c872f945b848ab24a",
+      "server.teammates.queued.thread": "7d4802edac8e162df6544bcd3a2a0f543c7dd881cf2f272941c3473142da0d81",
+      "server.teammates.queued.slots": "7e0e179a02f4c91f4de63459274edc1eb66235b575ca250bab6e634f20cc652e",
+      "server.teammates.queued.room": "db3ebc646dcf65d4d79ef6639d8c7c65eb46a9bfefe3b70b0258ed19c7401d8d",
+      "server.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
+      "server.queued.capacity": "5067f08fc0a464b92135c6e3137b08a93335b7c4d704e873b701ae162167ca91",
+      "server.queued.groupTurn": "335e0a92b0e4ce091c947241c44146fe84734464ecee92bbf32b1d3fdf206e2e"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -8716,7 +8725,16 @@
       "mapComposer.willSendViaChief": "002eb9ef4efe4459e760b645a541b65592a3c706eb9f1fe606bd88a601270f92",
       "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1",
       "mapComposer.sentTo": "4e7201c7b8985a987b6e199e81503cd1b05d9b6304e4e3a1d72724bdda9baaf9",
-      "mapComposer.andMore": "1a2612705dd797842beda42948a2979b5b6c763ee71acf4f87868f5c2c254420"
+      "mapComposer.andMore": "1a2612705dd797842beda42948a2979b5b6c763ee71acf4f87868f5c2c254420",
+      "server.memory.wait": "e1fd6ee64c4bc4ea9d890801de899209932b13eaaae60934b477981a8fd2ecbd",
+      "server.memory.still": "625014d9b0b289c26cf7144a9bca85151ef9bfccf4ae87f2c7c2cb43b2cac98c",
+      "server.memory.starter": "edbec2242e449822dc3c7bd220bd3eadcd6b355de511714c872f945b848ab24a",
+      "server.teammates.queued.thread": "7d4802edac8e162df6544bcd3a2a0f543c7dd881cf2f272941c3473142da0d81",
+      "server.teammates.queued.slots": "7e0e179a02f4c91f4de63459274edc1eb66235b575ca250bab6e634f20cc652e",
+      "server.teammates.queued.room": "db3ebc646dcf65d4d79ef6639d8c7c65eb46a9bfefe3b70b0258ed19c7401d8d",
+      "server.queued.capacity": "5067f08fc0a464b92135c6e3137b08a93335b7c4d704e873b701ae162167ca91",
+      "server.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
+      "server.queued.groupTurn": "335e0a92b0e4ce091c947241c44146fe84734464ecee92bbf32b1d3fdf206e2e"
     },
     "fr": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -11644,7 +11662,14 @@
       "teamMemory.you": "bb0347a468d97e98a9c00e37cebec1ab930f6f1221cae0f1fbb92b07e1900ba2",
       "teamSettings.general": "c910d474dcd724bff83ddedeb06bf1eceaf9fb3af7c76bb282be057f36e6dffa",
       "canvas.botCount": "fc1da572d3f0b2c7e2cdfa7f85a2c1f6b2aceb1969b9cac6ec4391422887a64b",
-      "canvas.botCountOne": "ba521a424af39db3760405fe7d15f30a2639067b0d8b8049be65cddbeba65140"
+      "canvas.botCountOne": "ba521a424af39db3760405fe7d15f30a2639067b0d8b8049be65cddbeba65140",
+      "server.memory.wait": "e1fd6ee64c4bc4ea9d890801de899209932b13eaaae60934b477981a8fd2ecbd",
+      "server.memory.still": "625014d9b0b289c26cf7144a9bca85151ef9bfccf4ae87f2c7c2cb43b2cac98c",
+      "server.memory.starter": "edbec2242e449822dc3c7bd220bd3eadcd6b355de511714c872f945b848ab24a",
+      "server.teammates.queued.thread": "7d4802edac8e162df6544bcd3a2a0f543c7dd881cf2f272941c3473142da0d81",
+      "server.teammates.queued.slots": "7e0e179a02f4c91f4de63459274edc1eb66235b575ca250bab6e634f20cc652e",
+      "server.teammates.queued.room": "db3ebc646dcf65d4d79ef6639d8c7c65eb46a9bfefe3b70b0258ed19c7401d8d",
+      "server.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88"
     },
     "hi": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -14424,7 +14449,14 @@
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
       "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
-      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c"
+      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c",
+      "server.memory.wait": "e1fd6ee64c4bc4ea9d890801de899209932b13eaaae60934b477981a8fd2ecbd",
+      "server.memory.still": "625014d9b0b289c26cf7144a9bca85151ef9bfccf4ae87f2c7c2cb43b2cac98c",
+      "server.memory.starter": "edbec2242e449822dc3c7bd220bd3eadcd6b355de511714c872f945b848ab24a",
+      "server.teammates.queued.thread": "7d4802edac8e162df6544bcd3a2a0f543c7dd881cf2f272941c3473142da0d81",
+      "server.teammates.queued.slots": "7e0e179a02f4c91f4de63459274edc1eb66235b575ca250bab6e634f20cc652e",
+      "server.teammates.queued.room": "db3ebc646dcf65d4d79ef6639d8c7c65eb46a9bfefe3b70b0258ed19c7401d8d",
+      "server.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -21034,7 +21066,16 @@
       "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
       "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c",
       "mapComposer.willSendViaChief": "002eb9ef4efe4459e760b645a541b65592a3c706eb9f1fe606bd88a601270f92",
-      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1"
+      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1",
+      "server.memory.wait": "e1fd6ee64c4bc4ea9d890801de899209932b13eaaae60934b477981a8fd2ecbd",
+      "server.memory.still": "625014d9b0b289c26cf7144a9bca85151ef9bfccf4ae87f2c7c2cb43b2cac98c",
+      "server.memory.starter": "edbec2242e449822dc3c7bd220bd3eadcd6b355de511714c872f945b848ab24a",
+      "server.teammates.queued.thread": "7d4802edac8e162df6544bcd3a2a0f543c7dd881cf2f272941c3473142da0d81",
+      "server.teammates.queued.slots": "7e0e179a02f4c91f4de63459274edc1eb66235b575ca250bab6e634f20cc652e",
+      "server.teammates.queued.room": "db3ebc646dcf65d4d79ef6639d8c7c65eb46a9bfefe3b70b0258ed19c7401d8d",
+      "server.queued.capacity": "5067f08fc0a464b92135c6e3137b08a93335b7c4d704e873b701ae162167ca91",
+      "server.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
+      "server.queued.groupTurn": "335e0a92b0e4ce091c947241c44146fe84734464ecee92bbf32b1d3fdf206e2e"
     },
     "pt-br": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -27448,7 +27489,16 @@
       "mapComposer.willSendViaChief": "002eb9ef4efe4459e760b645a541b65592a3c706eb9f1fe606bd88a601270f92",
       "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1",
       "mapComposer.sentTo": "4e7201c7b8985a987b6e199e81503cd1b05d9b6304e4e3a1d72724bdda9baaf9",
-      "mapComposer.andMore": "1a2612705dd797842beda42948a2979b5b6c763ee71acf4f87868f5c2c254420"
+      "mapComposer.andMore": "1a2612705dd797842beda42948a2979b5b6c763ee71acf4f87868f5c2c254420",
+      "server.memory.wait": "e1fd6ee64c4bc4ea9d890801de899209932b13eaaae60934b477981a8fd2ecbd",
+      "server.memory.still": "625014d9b0b289c26cf7144a9bca85151ef9bfccf4ae87f2c7c2cb43b2cac98c",
+      "server.memory.starter": "edbec2242e449822dc3c7bd220bd3eadcd6b355de511714c872f945b848ab24a",
+      "server.teammates.queued.thread": "7d4802edac8e162df6544bcd3a2a0f543c7dd881cf2f272941c3473142da0d81",
+      "server.teammates.queued.slots": "7e0e179a02f4c91f4de63459274edc1eb66235b575ca250bab6e634f20cc652e",
+      "server.teammates.queued.room": "db3ebc646dcf65d4d79ef6639d8c7c65eb46a9bfefe3b70b0258ed19c7401d8d",
+      "server.queued.capacity": "5067f08fc0a464b92135c6e3137b08a93335b7c4d704e873b701ae162167ca91",
+      "server.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
+      "server.queued.groupTurn": "335e0a92b0e4ce091c947241c44146fe84734464ecee92bbf32b1d3fdf206e2e"
     },
     "zh": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -34758,7 +34808,16 @@
       "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
       "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c",
       "mapComposer.willSendViaChief": "002eb9ef4efe4459e760b645a541b65592a3c706eb9f1fe606bd88a601270f92",
-      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1"
+      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1",
+      "server.memory.wait": "e1fd6ee64c4bc4ea9d890801de899209932b13eaaae60934b477981a8fd2ecbd",
+      "server.memory.still": "625014d9b0b289c26cf7144a9bca85151ef9bfccf4ae87f2c7c2cb43b2cac98c",
+      "server.memory.starter": "edbec2242e449822dc3c7bd220bd3eadcd6b355de511714c872f945b848ab24a",
+      "server.teammates.queued.thread": "7d4802edac8e162df6544bcd3a2a0f543c7dd881cf2f272941c3473142da0d81",
+      "server.teammates.queued.slots": "7e0e179a02f4c91f4de63459274edc1eb66235b575ca250bab6e634f20cc652e",
+      "server.teammates.queued.room": "db3ebc646dcf65d4d79ef6639d8c7c65eb46a9bfefe3b70b0258ed19c7401d8d",
+      "server.queued.capacity": "5067f08fc0a464b92135c6e3137b08a93335b7c4d704e873b701ae162167ca91",
+      "server.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
+      "server.queued.groupTurn": "335e0a92b0e4ce091c947241c44146fe84734464ecee92bbf32b1d3fdf206e2e"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -39364,7 +39423,16 @@
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
       "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
-      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c"
+      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c",
+      "server.memory.wait": "e1fd6ee64c4bc4ea9d890801de899209932b13eaaae60934b477981a8fd2ecbd",
+      "server.memory.still": "625014d9b0b289c26cf7144a9bca85151ef9bfccf4ae87f2c7c2cb43b2cac98c",
+      "server.memory.starter": "edbec2242e449822dc3c7bd220bd3eadcd6b355de511714c872f945b848ab24a",
+      "server.teammates.queued.thread": "7d4802edac8e162df6544bcd3a2a0f543c7dd881cf2f272941c3473142da0d81",
+      "server.teammates.queued.slots": "7e0e179a02f4c91f4de63459274edc1eb66235b575ca250bab6e634f20cc652e",
+      "server.teammates.queued.room": "db3ebc646dcf65d4d79ef6639d8c7c65eb46a9bfefe3b70b0258ed19c7401d8d",
+      "server.queued.capacity": "5067f08fc0a464b92135c6e3137b08a93335b7c4d704e873b701ae162167ca91",
+      "server.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
+      "server.queued.groupTurn": "335e0a92b0e4ce091c947241c44146fe84734464ecee92bbf32b1d3fdf206e2e"
     },
     "uk": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -42585,7 +42653,15 @@
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
       "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
-      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c"
+      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c",
+      "server.memory.wait": "e1fd6ee64c4bc4ea9d890801de899209932b13eaaae60934b477981a8fd2ecbd",
+      "server.memory.still": "625014d9b0b289c26cf7144a9bca85151ef9bfccf4ae87f2c7c2cb43b2cac98c",
+      "server.memory.starter": "edbec2242e449822dc3c7bd220bd3eadcd6b355de511714c872f945b848ab24a",
+      "server.teammates.queued.thread": "7d4802edac8e162df6544bcd3a2a0f543c7dd881cf2f272941c3473142da0d81",
+      "server.teammates.queued.slots": "7e0e179a02f4c91f4de63459274edc1eb66235b575ca250bab6e634f20cc652e",
+      "server.teammates.queued.room": "db3ebc646dcf65d4d79ef6639d8c7c65eb46a9bfefe3b70b0258ed19c7401d8d",
+      "server.queued.capacity": "5067f08fc0a464b92135c6e3137b08a93335b7c4d704e873b701ae162167ca91",
+      "server.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -47799,7 +47875,16 @@
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
       "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
-      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c"
+      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c",
+      "server.memory.wait": "e1fd6ee64c4bc4ea9d890801de899209932b13eaaae60934b477981a8fd2ecbd",
+      "server.memory.still": "625014d9b0b289c26cf7144a9bca85151ef9bfccf4ae87f2c7c2cb43b2cac98c",
+      "server.memory.starter": "edbec2242e449822dc3c7bd220bd3eadcd6b355de511714c872f945b848ab24a",
+      "server.teammates.queued.thread": "7d4802edac8e162df6544bcd3a2a0f543c7dd881cf2f272941c3473142da0d81",
+      "server.teammates.queued.slots": "7e0e179a02f4c91f4de63459274edc1eb66235b575ca250bab6e634f20cc652e",
+      "server.teammates.queued.room": "db3ebc646dcf65d4d79ef6639d8c7c65eb46a9bfefe3b70b0258ed19c7401d8d",
+      "server.queued.capacity": "5067f08fc0a464b92135c6e3137b08a93335b7c4d704e873b701ae162167ca91",
+      "server.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
+      "server.queued.groupTurn": "335e0a92b0e4ce091c947241c44146fe84734464ecee92bbf32b1d3fdf206e2e"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -53013,7 +53098,16 @@
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
       "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
-      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c"
+      "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c",
+      "server.memory.wait": "e1fd6ee64c4bc4ea9d890801de899209932b13eaaae60934b477981a8fd2ecbd",
+      "server.memory.still": "625014d9b0b289c26cf7144a9bca85151ef9bfccf4ae87f2c7c2cb43b2cac98c",
+      "server.memory.starter": "edbec2242e449822dc3c7bd220bd3eadcd6b355de511714c872f945b848ab24a",
+      "server.teammates.queued.thread": "7d4802edac8e162df6544bcd3a2a0f543c7dd881cf2f272941c3473142da0d81",
+      "server.teammates.queued.slots": "7e0e179a02f4c91f4de63459274edc1eb66235b575ca250bab6e634f20cc652e",
+      "server.teammates.queued.room": "db3ebc646dcf65d4d79ef6639d8c7c65eb46a9bfefe3b70b0258ed19c7401d8d",
+      "server.queued.capacity": "5067f08fc0a464b92135c6e3137b08a93335b7c4d704e873b701ae162167ca91",
+      "server.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
+      "server.queued.groupTurn": "335e0a92b0e4ce091c947241c44146fe84734464ecee92bbf32b1d3fdf206e2e"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -59539,7 +59633,16 @@
       "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
       "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c",
       "mapComposer.willSendViaChief": "002eb9ef4efe4459e760b645a541b65592a3c706eb9f1fe606bd88a601270f92",
-      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1"
+      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1",
+      "server.memory.wait": "e1fd6ee64c4bc4ea9d890801de899209932b13eaaae60934b477981a8fd2ecbd",
+      "server.memory.still": "625014d9b0b289c26cf7144a9bca85151ef9bfccf4ae87f2c7c2cb43b2cac98c",
+      "server.memory.starter": "edbec2242e449822dc3c7bd220bd3eadcd6b355de511714c872f945b848ab24a",
+      "server.teammates.queued.thread": "7d4802edac8e162df6544bcd3a2a0f543c7dd881cf2f272941c3473142da0d81",
+      "server.teammates.queued.slots": "7e0e179a02f4c91f4de63459274edc1eb66235b575ca250bab6e634f20cc652e",
+      "server.teammates.queued.room": "db3ebc646dcf65d4d79ef6639d8c7c65eb46a9bfefe3b70b0258ed19c7401d8d",
+      "server.queued.capacity": "5067f08fc0a464b92135c6e3137b08a93335b7c4d704e873b701ae162167ca91",
+      "server.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
+      "server.queued.groupTurn": "335e0a92b0e4ce091c947241c44146fe84734464ecee92bbf32b1d3fdf206e2e"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -66127,7 +66230,16 @@
       "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
       "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c",
       "mapComposer.willSendViaChief": "002eb9ef4efe4459e760b645a541b65592a3c706eb9f1fe606bd88a601270f92",
-      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1"
+      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1",
+      "server.memory.wait": "e1fd6ee64c4bc4ea9d890801de899209932b13eaaae60934b477981a8fd2ecbd",
+      "server.memory.still": "625014d9b0b289c26cf7144a9bca85151ef9bfccf4ae87f2c7c2cb43b2cac98c",
+      "server.memory.starter": "edbec2242e449822dc3c7bd220bd3eadcd6b355de511714c872f945b848ab24a",
+      "server.teammates.queued.thread": "7d4802edac8e162df6544bcd3a2a0f543c7dd881cf2f272941c3473142da0d81",
+      "server.teammates.queued.slots": "7e0e179a02f4c91f4de63459274edc1eb66235b575ca250bab6e634f20cc652e",
+      "server.teammates.queued.room": "db3ebc646dcf65d4d79ef6639d8c7c65eb46a9bfefe3b70b0258ed19c7401d8d",
+      "server.queued.capacity": "5067f08fc0a464b92135c6e3137b08a93335b7c4d704e873b701ae162167ca91",
+      "server.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
+      "server.queued.groupTurn": "335e0a92b0e4ce091c947241c44146fe84734464ecee92bbf32b1d3fdf206e2e"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -72513,7 +72625,16 @@
       "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
       "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c",
       "mapComposer.willSendViaChief": "002eb9ef4efe4459e760b645a541b65592a3c706eb9f1fe606bd88a601270f92",
-      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1"
+      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1",
+      "server.memory.wait": "e1fd6ee64c4bc4ea9d890801de899209932b13eaaae60934b477981a8fd2ecbd",
+      "server.memory.still": "625014d9b0b289c26cf7144a9bca85151ef9bfccf4ae87f2c7c2cb43b2cac98c",
+      "server.memory.starter": "edbec2242e449822dc3c7bd220bd3eadcd6b355de511714c872f945b848ab24a",
+      "server.teammates.queued.thread": "7d4802edac8e162df6544bcd3a2a0f543c7dd881cf2f272941c3473142da0d81",
+      "server.teammates.queued.slots": "7e0e179a02f4c91f4de63459274edc1eb66235b575ca250bab6e634f20cc652e",
+      "server.teammates.queued.room": "db3ebc646dcf65d4d79ef6639d8c7c65eb46a9bfefe3b70b0258ed19c7401d8d",
+      "server.queued.capacity": "5067f08fc0a464b92135c6e3137b08a93335b7c4d704e873b701ae162167ca91",
+      "server.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
+      "server.queued.groupTurn": "335e0a92b0e4ce091c947241c44146fe84734464ecee92bbf32b1d3fdf206e2e"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -79624,7 +79745,16 @@
       "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
       "server.stop.nothingRunning": "8cbd379640801817f0cfa32bc247147eaaa69428cb572512971e7091f4ca7d0c",
       "mapComposer.willSendViaChief": "002eb9ef4efe4459e760b645a541b65592a3c706eb9f1fe606bd88a601270f92",
-      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1"
+      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1",
+      "server.memory.wait": "e1fd6ee64c4bc4ea9d890801de899209932b13eaaae60934b477981a8fd2ecbd",
+      "server.memory.still": "625014d9b0b289c26cf7144a9bca85151ef9bfccf4ae87f2c7c2cb43b2cac98c",
+      "server.memory.starter": "edbec2242e449822dc3c7bd220bd3eadcd6b355de511714c872f945b848ab24a",
+      "server.teammates.queued.thread": "7d4802edac8e162df6544bcd3a2a0f543c7dd881cf2f272941c3473142da0d81",
+      "server.teammates.queued.slots": "7e0e179a02f4c91f4de63459274edc1eb66235b575ca250bab6e634f20cc652e",
+      "server.teammates.queued.room": "db3ebc646dcf65d4d79ef6639d8c7c65eb46a9bfefe3b70b0258ed19c7401d8d",
+      "server.queued.capacity": "5067f08fc0a464b92135c6e3137b08a93335b7c4d704e873b701ae162167ca91",
+      "server.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
+      "server.queued.groupTurn": "335e0a92b0e4ce091c947241c44146fe84734464ecee92bbf32b1d3fdf206e2e"
     }
   }
 }
