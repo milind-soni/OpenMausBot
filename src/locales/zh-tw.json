@@ -1,4 +1,8 @@
 {
+  "voice.gemini.keyPlaceholder": "貼上你的 Google AI Studio API 金鑰",
+  "voice.gemini.model": "Gemini 語音合成模型",
+  "keys.label.geminiTts": "Gemini 語音合成 API 金鑰",
+  "keys.purpose.geminiTts": "用於朗讀回覆、語音備忘錄和通話的 Gemini 語音",
   "whop.description": "透過 Whop 官方整合管理商品、結帳連結、會員資格與付款。",
   "hostedMcp.connect": "連線 {service}",
   "hostedMcp.disconnect": "中斷 {service} 連線",

@@ -380,12 +380,13 @@ const appConfigSchema = z.object({
   vps: vpsConfigSchema.optional(),
   /** OpenCode key, plus `providerKeys` for its other providers by the env name OpenCode reads; both write-only and only for its child. */
   opencodeGo: z.object({ apiKey: optionalText, providerKeys: z.record(z.string(), z.string()).optional() }).optional(),
-  /** `provider`: "elevenlabs" (default, `key`), "fish" (`fishKey`, `fishModel`), "system", "xai" (`xai.key`) or "chatterbox" (local; `baseUrl`, `model`). */
+  /** `provider`: "elevenlabs" (default, `key`), "fish" (`fishKey`, `fishModel`), "system", "xai" (`xai.key`), "gemini" (`geminiKey`, `model`) or "chatterbox" (local; `baseUrl`, `model`). */
   tts: z.object({
     key: optionalText,
     fishKey: optionalText,
+    geminiKey: optionalText,
     voice: optionalText,
-    provider: z.enum(["elevenlabs", "fish", "system", "chatterbox", "xai"]).optional(),
+    provider: z.enum(["elevenlabs", "fish", "system", "chatterbox", "xai", "gemini"]).optional(),
     baseUrl: z
       .string()
       .trim()
@@ -507,7 +508,7 @@ export interface AppConfig extends HelperConfig {
   /** A named host from the user's SSH config. Authentication stays with SSH. */
   vps?: { sshAlias?: string };
   opencodeGo?: { apiKey?: string; providerKeys?: Record<string, string> };
-  tts?: { key?: string; fishKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai"; baseUrl?: string; model?: string; fishModel?: FishTtsModel };
+  tts?: { key?: string; fishKey?: string; geminiKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini"; baseUrl?: string; model?: string; fishModel?: FishTtsModel };
   decider?: DeciderConfig;
   imageGen?: ImageGenerationConfig;
   live?: { key?: string; voice?: string; readTypedReplies?: boolean; idleMinutes?: number };
@@ -794,6 +795,7 @@ export function loadConfig(): AppConfig {
   const presetVoice = process.env.OMB_TTS_DEFAULT_VOICE?.trim();
   if (presetVoice && !cfg.tts.voice?.trim() && (cfg.tts.provider ?? "elevenlabs") === "elevenlabs") cfg.tts.voice = presetVoice;
   if (process.env.OMB_FISH_AUDIO_API_KEY !== undefined) cfg.tts.fishKey = process.env.OMB_FISH_AUDIO_API_KEY;
+  if (process.env.OMB_GEMINI_API_KEY !== undefined) cfg.tts.geminiKey = process.env.OMB_GEMINI_API_KEY;
   cfg.decider = { ...cfg.decider };
   if (process.env.OMB_JEV_API_KEY !== undefined) cfg.decider.key = process.env.OMB_JEV_API_KEY;
   if (process.env.OMB_OPENROUTER_DECIDER_KEY !== undefined) cfg.decider.openrouterKey = process.env.OMB_OPENROUTER_DECIDER_KEY; if (process.env.OMB_WORKERS_AI_TOKEN !== undefined) cfg.decider.workersAiToken = process.env.OMB_WORKERS_AI_TOKEN;
@@ -842,6 +844,7 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.opencodeGo?.apiKey, "OPENCODE_API_KEY"],
     [patch.tts?.key, "OMB_TTS_KEY"],
     [patch.tts?.fishKey, "OMB_FISH_AUDIO_API_KEY"],
+    [patch.tts?.geminiKey, "OMB_GEMINI_API_KEY"],
     [patch.decider?.key, "OMB_JEV_API_KEY"],
     [patch.decider?.openrouterKey, "OMB_OPENROUTER_DECIDER_KEY"], [patch.decider?.workersAiToken, "OMB_WORKERS_AI_TOKEN"],
     [patch.imageGen?.key, "OMB_OPENAI_IMAGE_KEY"],
