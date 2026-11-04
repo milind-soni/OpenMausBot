@@ -704,6 +704,20 @@ describe("clearing attachments from Settings", () => {
     rmSync(boxUploads, { recursive: true, force: true });
   });
 
+  it("keeps an upload's box copies while the upload itself could not be deleted", () => {
+    const busy = saveImage(Buffer.from("busy"), "image/png");
+    const dir = join(dirname(ATTACHMENTS_DIR), "box-uploads", "bot-a", "thread-1");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, nameOf(busy.path)), "copy");
+    vi.mocked(unlinkSync).mockImplementationOnce(() => {
+      throw Object.assign(new Error("resource busy"), { code: "EBUSY" });
+    });
+    deleteAttachment(busy.path);
+    expect(existsSync(busy.path)).toBe(true);
+    expect(readdirSync(dir)).toEqual([nameOf(busy.path)]);
+    rmSync(join(dirname(ATTACHMENTS_DIR), "box-uploads"), { recursive: true, force: true });
+  });
+
   it("does not point a Team Cloud, which has no clear, to Settings", () => {
     const full = saveImage(Buffer.from("x"), "image/png");
     truncateSync(full.path, ATTACHMENTS_MAX_BYTES);

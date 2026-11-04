@@ -188,15 +188,17 @@ function dropBoxUploadCopies(names: readonly string[], dataDir = DATA_DIR): void
 
 /** Every removal of a file saveImage/saveFile created must come through here, or the cache overcounts and rejects uploads. */
 export function deleteAttachment(path: string): void {
-  if (resolve(dirname(path)) === resolve(ATTACHMENTS_DIR)) dropBoxUploadCopies([basename(path)]);
   try {
     const size = committedAttachmentBytes !== null ? statSync(path).size : 0;
     unlinkSync(path);
     if (committedAttachmentBytes !== null) {
       committedAttachmentBytes = Math.max(0, committedAttachmentBytes - size);
     }
-  } catch {
+  } catch (error) {
+    // An upload still on disk (a busy file on Windows) keeps its box copies; one already gone loses them.
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
   }
+  if (resolve(dirname(path)) === resolve(ATTACHMENTS_DIR)) dropBoxUploadCopies([basename(path)]);
 }
 
 /** Settings → General: what the store holds against its ceiling, rescanned so files removed outside the app count. */
