@@ -2478,7 +2478,6 @@
   "settings.profiles.own": "Trình duyệt riêng",
   "settings.profiles.temporary": "Tạm thời — không lưu thông tin đăng nhập",
   "settings.profiles.temporaryHint": "Các phiên tạm thời chỉ duy trì đăng nhập trong khi ứng dụng đang chạy. Chúng không được lưu vào ổ đĩa.",
-  "settings.profiles.sharedHint": "Trình duyệt riêng giữ thông tin đăng nhập riêng tư cho bot này. Các bot trên một hồ sơ dùng chung sẽ sử dụng cùng thông tin đăng nhập.",
   "settings.profiles.stopToSwitch": "Hãy dừng lượt chạy của bot này trước khi chuyển đổi hồ sơ trình duyệt.",
   "settings.profiles.manage": "Quản lý hồ sơ",
   "settings.profiles.newName": "Tên hồ sơ mới",

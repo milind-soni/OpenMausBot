@@ -428,7 +428,7 @@ import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
 import { BROWSER_UPLOAD_TOOL, browserRuntimeEnv } from "./browser-runtime.ts";
 import { BrowserUploadRefusal, uploadableFiles } from "./browser-upload.ts";
 import { listSignedInSites, signOutOfSites } from "./browser-sites.ts";
-import { HeldSecrets, LoginStore } from "./login-store.ts"; import { browserMatesOf } from "../shared/logins.ts";
+import { HeldSecrets, LoginStore } from "./login-store.ts";
 import { OnePasswordLogins, onePasswordUnavailable, sdkOnePasswordClient, type OnePasswordSdk } from "./onepassword.ts";
 import { nativeRequire } from "./data/engine.ts";
 import { createFillLoginTurn } from "./host/fill-login-turn.ts";
@@ -736,7 +736,7 @@ const onePassword = new OnePasswordLogins({
   },
 });
 if (logins.onePasswordToken()) void onePassword.refresh();
-const botLogins = new BotLogins(logins, onePassword, (botId) => browserMatesOf(store.bots, botId));
+const botLogins = new BotLogins(logins, onePassword, () => store.bots);
 const SESSION_COOKIE = sessionCookieName(PORT, ENVIRONMENT_ID);
 const HOSTED_WORKSPACE = hostedWorkspaceConfigured();
 let workspaceAccess: WorkspaceAccess | null = null;
@@ -11757,7 +11757,7 @@ async function saveLoginFromCard(botId: string, threadId: string, messageId: str
   const current = signInMessage(botId, threadId, messageId)?.signIn;
   if (!current || current.superseded || signInOutcome(current)) return { status: 409, body: { error: "this sign-in request was answered or replaced while the login was being saved" } };
   const place = cardLoginPlace(page.cardHost, page.observed, body.signInHost);
-  logins.create({ ...place, username: fields.value.username ?? "", password: fields.value.password!, totp: totp.value ?? null, source: "card", bots: [botId] });
+  logins.create({ ...place, username: fields.value.username ?? "", password: fields.value.password!, totp: totp.value ?? null, source: "card", bots: botLogins.cardBots(botId) });
   const elsewhere = place.hosts.filter((host) => loginSite(host) !== place.site);
   return signInSettle.settle(botId, threadId, messageId, "done", { site: [place.site, ...elsewhere].join(" and ") });
 }

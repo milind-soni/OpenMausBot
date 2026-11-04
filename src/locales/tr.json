@@ -2478,7 +2478,6 @@
   "settings.profiles.own": "Kendi tarayıcısı",
   "settings.profiles.temporary": "Geçici — girişleri kaydetme",
   "settings.profiles.temporaryHint": "Geçici oturumlar girişleri yalnızca uygulama çalışırken saklar. Diske kaydedilmezler.",
-  "settings.profiles.sharedHint": "Kendi tarayıcısı girişleri bu bota özel tutar. Paylaşılan bir profildeki botlar aynı girişleri kullanır.",
   "settings.profiles.stopToSwitch": "Tarayıcı profillerini değiştirmeden önce bu botun turunu durdurun.",
   "settings.profiles.manage": "Profilleri yönet",
   "settings.profiles.newName": "Yeni profil adı",

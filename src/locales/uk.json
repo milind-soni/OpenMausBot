@@ -1482,7 +1482,6 @@
   "settings.profiles.own": "Власний браузер",
   "settings.profiles.temporary": "Тимчасовий — не зберігати логіни",
   "settings.profiles.temporaryHint": "Тимчасові сесії тримають логіни лише поки працює застосунок. Вони не зберігаються на диск.",
-  "settings.profiles.sharedHint": "Ваш власний браузер тримає логіни приватними для цього бота. Боти на спільному профілі користуються тими самими логінами.",
   "settings.profiles.stopToSwitch": "Зупиніть запит цього бота, перш ніж переключати профілі браузера.",
   "settings.profiles.manage": "Керувати профілями",
   "settings.profiles.newName": "Назва нового профілю",

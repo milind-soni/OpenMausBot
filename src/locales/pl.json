@@ -3034,7 +3034,6 @@
   "settings.profiles.own": "Własna przeglądarka",
   "settings.profiles.temporary": "Tymczasowy — nie zapisuj logowań",
   "settings.profiles.temporaryHint": "Sesje tymczasowe zachowują logowania tylko podczas działania aplikacji. Nie są zapisywane na dysku.",
-  "settings.profiles.sharedHint": "Własna przeglądarka zachowuje logowania prywatnie dla tego bota. Boty na współdzielonym profilu używają tych samych logowań.",
   "settings.profiles.stopToSwitch": "Zatrzymaj turę tego bota przed przełączeniem profili przeglądarki.",
   "settings.profiles.manage": "Zarządzaj profilami",
   "settings.profiles.newName": "Nazwa nowego profilu",

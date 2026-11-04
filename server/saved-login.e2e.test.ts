@@ -203,7 +203,7 @@ it.skipIf(process.platform === "win32")("fills a login saved for example.com on 
   }
 }, 120_000);
 
-it.skipIf(process.platform === "win32")("keeps a login kept to one bot out of a browser another bot shares, and fills it once that bot has its own", async () => {
+it.skipIf(process.platform === "win32")("fills a login kept to one bot on its guest browser even while another bot uses guest too, since each guest browser is its own", async () => {
   const browser = await browserFixture("https://accounts.example.com/login");
   const { page, api, evidence, answered } = browser;
   try {
@@ -212,28 +212,15 @@ it.skipIf(process.platform === "win32")("keeps a login kept to one bot out of a 
     const costs = (await api("POST", "/api/bots", { name: "Costs" })).body.bot;
     for (const bot of [capacity, costs]) expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "browser", browserProfile: "guest" })).status).toBe(200);
     expect((await api("POST", "/api/logins", { site: "example.com", username: USERNAME, password: PASSWORD, bots: [capacity.id] })).status).toBe(201);
-    writeFileSync(browser.planPath, JSON.stringify({ [capacity.id]: { turns: [
-      { steps: [{ tool: "fill_login", arguments: { submit: false }, expectError: true }], reply: "No login I may fill here." },
-      { steps: [{ tool: "fill_login", arguments: { submit: false } }], reply: "Filled." },
-    ] } }));
-    const turn = async (count: number) => {
-      await runControlOmb(["send", "--bot", capacity.id, "--task", capacity.threadId, "--text", "Sign in to example.com.", "--url", browser.base]);
-      await expect.poll(() => evidence().length, { timeout: 20_000 }).toBe(count);
-      expect(await runControlOmb(["wait", "--bot", capacity.id, "--task", capacity.threadId, "--timeout", "20", "--url", browser.base])).toMatchObject({ status: "settled" });
-    };
+    const logins = (await api("GET", "/api/logins")).body.logins as Array<{ bots: unknown }>;
+    expect(logins).toEqual([expect.objectContaining({ bots: [capacity.id] })]);
+    writeFileSync(browser.planPath, JSON.stringify({ [capacity.id]: { turns: [{ steps: [{ tool: "fill_login", arguments: { submit: false } }], reply: "Filled." }] } }));
 
-    // Costs signs in through the same browser, so a sign-in there would reach it too.
-    await turn(1);
-    expect(answered(0, "fill_login")[0].isError).toBe(true);
-    expect(evidence()[0].system).not.toContain(`example.com (${USERNAME})`);
+    await runControlOmb(["send", "--bot", capacity.id, "--task", capacity.threadId, "--text", "Sign in to example.com.", "--url", browser.base]);
+    await expect.poll(() => evidence().length, { timeout: 20_000 }).toBe(1);
+    expect(answered(0, "fill_login")[0].isError).toBeFalsy();
+    expect(evidence()[0].system).toContain(`example.com (${USERNAME})`);
     expect(page.sent).toEqual([]);
-
-    // Costs goes back to a browser of its own.
-    const own = await api("PATCH", `/api/bots/${costs.id}`, { browserProfile: null });
-    expect(own.status, JSON.stringify(own.body)).toBe(200);
-    await turn(2);
-    expect(answered(1, "fill_login")[0].isError).toBeFalsy();
-    expect(evidence()[1].system).toContain(`example.com (${USERNAME})`);
     expect(JSON.stringify(evidence())).not.toContain(PASSWORD);
   } finally {
     await browser.close();

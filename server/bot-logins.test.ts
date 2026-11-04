@@ -50,20 +50,42 @@ describe("the bot's open page", () => {
 });
 
 describe("a login kept to some bots, and bots that share a browser", () => {
-  // Payroll and Infra share the "finance" browser profile; Notes has its own.
-  const bots = [{ id: "payroll", browserProfile: "finance" }, { id: "infra", browserProfile: "finance" }, { id: "notes" }, { id: "audit", browserProfile: null }];
+  // Payroll and Infra share the "finance" browser profile; Notes and Audit have their own; each guest bot gets its own
+  // temporary browser.
+  const bots = [
+    { id: "payroll", browserProfile: "finance" }, { id: "infra", browserProfile: "finance" }, { id: "notes" }, { id: "audit", browserProfile: null },
+    { id: "scout", browserProfile: "guest" }, { id: "visitor", browserProfile: "guest" },
+  ];
   const onePassword = { fresh: async () => {}, sitesFor: () => [], candidates: () => [], markUsed: () => {} } as unknown as OnePasswordLogins;
   const world = () => {
     const store = new LoginStore({ dataDir: mkdtempSync(join(tmpdir(), "omb-bot-logins-")) });
-    const logins = new BotLogins(store, onePassword, (botId) => browserMatesOf(bots, botId));
+    const logins = new BotLogins(store, onePassword, () => bots);
     const place = { site: "capacity.example", hosts: ["capacity.example"], exactHost: false };
     return { store, logins, place };
   };
 
-  it("finds the bots on the same named profile, and none for a bot on its own", () => {
+  it("finds the bots on the same named profile, and none for a bot on its own or a guest browser", () => {
     expect(browserMatesOf(bots, "payroll")).toEqual(["infra"]);
     expect(browserMatesOf(bots, "notes")).toEqual([]);
     expect(browserMatesOf(bots, "audit")).toEqual([]);
+    expect(browserMatesOf(bots, "scout")).toEqual([]);
+  });
+
+  it("keeps a login saved from a sign-in card to every bot that browser signs in, so it fills for the bot that asked", async () => {
+    const { store, logins, place } = world();
+    expect(logins.cardBots("payroll")).toEqual(["payroll", "infra"]);
+    expect(logins.cardBots("notes")).toEqual(["notes"]);
+    expect(logins.cardBots("scout")).toEqual(["scout"]);
+    store.create({ ...place, username: "from-card", password: "x", source: "card", bots: logins.cardBots("payroll") });
+    expect((await logins.candidates("payroll", "capacity.example")).map((login) => login.username)).toEqual(["from-card"]);
+  });
+
+  it("fills a login kept to one guest bot for that bot alone", async () => {
+    const { store, logins, place } = world();
+    store.create({ ...place, username: "guest-only", password: "x", source: "settings", bots: ["scout"] });
+    expect(logins.sitesFor("scout").map((login) => login.username)).toEqual(["guest-only"]);
+    expect(logins.sitesFor("visitor")).toEqual([]);
+    expect(loginHeldBackFor({ bots: ["scout"] }, bots)).toEqual([]);
   });
 
   it("is never filled into a browser a bot it isn't kept to also signs in through", async () => {

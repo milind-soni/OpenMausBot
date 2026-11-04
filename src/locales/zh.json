@@ -3398,7 +3398,6 @@
   "settings.profiles.own": "自己的浏览器",
   "settings.profiles.temporary": "暂时——不保存登录信息",
   "settings.profiles.temporaryHint": "临时会话只会在应用运行期间保留登录信息。它们不会保存到磁盘。",
-  "settings.profiles.sharedHint": "使用自己的浏览器可让登录信息仅限此机器人。使用同一个共享配置的机器人则会共用相同的登录信息。",
   "settings.profiles.stopToSwitch": "请先停止此机器人的回合，再切换浏览器配置。",
   "settings.profiles.manage": "管理配置",
   "settings.profiles.newName": "新设置文件名称",
