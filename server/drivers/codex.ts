@@ -47,7 +47,7 @@ import { volatileContextNote, withContextNote } from "./prompt-split.ts";
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import { CodexDeviceAuthController } from "./codex-device-auth.ts";
 import { codexAccountEmail, codexHome } from "./codex-identity.ts";
-import { archivedNativeCodexThread, CODEX_MISSING_CREDENTIALS, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, CodexRpcError, codexSignInExpired, codexSignInRefused, codexUserError, missingNativeCodexThread, type CodexRoute } from "./codex-errors.ts";
+import { archivedNativeCodexThread, CODEX_MISSING_CREDENTIALS, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, CodexRpcError, codexSignInExpired, codexPlanModelRefused, codexSignInRefused, codexUserError, missingNativeCodexThread, type CodexRoute } from "./codex-errors.ts";
 import { codexLoginCheck, codexLoginStatus, storedCodexLogin } from "./codex-login.ts";
 import { keyRejected, noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
@@ -598,6 +598,13 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const planToken = planAuth ? await planAuth.accessToken() : undefined;
       assertPlanCurrent();
       if (planAuth) {
+        // ChatGPT refused this model for this account in an earlier turn: carry on with the account's first usable model.
+        const refused = planAuth.refusedModels();
+        if (turn.model && refused.includes(turn.model)) {
+          if (!models.options.length) { await refreshModels(); assertPlanCurrent(); }
+          const usable = models.options.find(option => !refused.includes(option.id));
+          if (usable) turn = { ...turn, model: usable.id };
+        }
         if (!turn.model || !models.options.some(model => model.id === turn.model)) {
           await refreshModels();
           assertPlanCurrent();
@@ -638,6 +645,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const chatgptTurn = ownLogin &&
         decodeCodexSelection(turn.model || models.default).modelProvider === OFFICIAL_CODEX_PROVIDER;
       const route: CodexRoute = plan ? "plan" : chatgptTurn ? "own" : "other";
+      // Only ChatGPT's refusal of this model for this account hides it from the account's list; other errors never do.
+      const hideRefusedModel = (raw: string) => {
+        const model = turn.model;
+        if (planAuth && model && codexPlanModelRefused(raw, route)) void planAuth.refuseModel(model).then(() => refreshModels(true)).catch(() => {});
+      };
       const signedOut = chatgptTurn && await loginCheck(childEnv()) === "missing";
       assertPlanCurrent();
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
@@ -1126,6 +1138,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (message === state.lastError && (state.lastErrorSetup || !setup)) return;
         state.lastError = message;
         state.lastErrorSetup ||= setup;
+        hideRefusedModel(raw);
         emit({ ...base(threadId, turnId), type: "runtime.error", message, ...(setup ? { setup: true } : {}), ...codexLimitFacts(raw, route, error.codexErrorInfo) });
       };
       const handleNotification = (msg: any) => {
@@ -1621,6 +1634,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const failure = e instanceof Error ? e : { text: String(e) };
         const raw = e instanceof Error ? e.message : String(e);
         const refused = chatgptTurn && loginMark() !== null && codexSignInRefused({ message: raw });
+        hideRefusedModel(raw);
         const message = refused ? codexSignInExpired(raw) : codexUserError(raw, route);
         const needsAuth = refused || /(?:\b401\b|unauthorized|missing bearer|authentication required)/i.test(raw);
         const verdict = classifyError(failure);
