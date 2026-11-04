@@ -97,11 +97,14 @@ beforeAll(async () => {
       { key: "M-NONE-ID", match: ["HAND-TO-PAYROLL-ID"], reply: "M-NONE-ID done", steps: [{ arguments: { bot_ids: [payroll.id], message: "Pull the payroll", reason: "Mira asked" }, expectError: true }] },
       handOn("M-ROOM", "HAND-INTO-ROOM", "Sales", { group_id: room }, true),
       handOn("M-MAIN", "HAND-TO-MAIN-THREAD", "Sales", { thread: sales.threadId }, true),
-      handOn("M-SHARED", "FROM-MY-MAIN-CHAT", "Sales", {}, true),
+      handOn("M-SHARED", "FROM-MY-MAIN-CHAT", "Sales"),
+      handOn("M-HELD-RELAY", "HELD-RELAY", "Sales", {}, true),
+      handOn("M-HELD-LATER", "HELD-LATER", "Sales", {}, true),
       handOn("M-RELAYED", "RELAYED-LINE", "Sales", {}, true),
       handOn("M-ROUTINE", "ROUTINE-LINE", "Sales", {}, true),
     ] },
     [sales.id]: { script: [
+      { key: "S-SHARED", match: ["M-SHARED"], reply: "Sales: done from her main chat." },
       { key: "S-WORK", match: ["M-SALES"], reply: "Sales: Q3 was 120k.", steps: [
         { tool: "memory_update", arguments: { action: "append", text: PRIVATE_NOTE } },
         { tool: "propose_team_memory", arguments: { kind: "decision", name: "Commission", detail: PRIVATE_NOTE }, expectError: true },
@@ -193,15 +196,20 @@ it("sharing level: a bot she can only view, or isn't shared with, is refused by 
   expect(turns().filter((one) => one.botId === archive.id || one.botId === payroll.id)).toEqual([]);
 }, hostTimeout(120_000));
 
-it("audience: not from her MausBot's main chat, which isn't private to her", async () => {
+it("audience: from her MausBot's main chat too, which is hers alone", async () => {
   await expect.poll(settled, { timeout: 30_000 }).toBe(true);
   const main = ((await team.as(mira, "GET", "/api/bots")).body.bots as Bot[]).find((bot) => bot.id === mausbot.id)!.mainThreadId;
-  expect(main).toBeTruthy();
+  expect(main).toBe(mausbot.threadId);
   expect(main).not.toBe(inbox);
   await say("FROM-MY-MAIN-CHAT", main);
   await ran("M-SHARED");
-  expect(steps(turn("M-SHARED"))[0]!.response?.result?.isError).toBe(true);
-  expect(turn("M-SHARED").system).toContain("start a new conversation with you");
+  expect(steps(turn("M-SHARED"))[0]!.response?.result?.isError).toBeFalsy();
+  expect(turn("M-SHARED").system).not.toContain("start a new conversation with you");
+  await ran("S-SHARED");
+  const work = turn("S-SHARED");
+  expect(await status(mira, work.threadId)).toBe(200);
+  expect(await status(olive, work.threadId), "the Owner").toBe(404);
+  expect(await status(ben, work.threadId), "another member").toBe(404);
 }, hostTimeout(90_000));
 
 it("outside-driven: a line another app relays into her private chat cannot hand work on", async () => {
@@ -216,6 +224,31 @@ it("outside-driven: a line another app relays into her private chat cannot hand 
   await ran("M-RELAYED");
   expect(steps(turn("M-RELAYED"))[0]!.response?.result?.isError).toBe(true);
 }, hostTimeout(90_000));
+
+it("outside-driven: once work from outside reached a chat of the person's, their own later line there cannot hand work on", async () => {
+  await expect.poll(settled, { timeout: 30_000 }).toBe(true);
+  // Only an admin makes a webhook, so this is the Owner's own MausBot: its results chat is hers, and outside work reached it.
+  const own = (await botsOf(olive)).find((bot) => bot.defaultBot?.person === OLIVE.email)!;
+  const plan = JSON.parse(readFileSync(planPath(), "utf8"));
+  plan[own.id] = { script: [
+    { key: "O-HOOK", repeat: true, match: ["hook-payload-77"], reply: "Handled the event." },
+    handOn("O-LATER", "OLIVE-LATER", "Sales", {}, true),
+  ] };
+  writeFileSync(planPath(), JSON.stringify(plan));
+  const hook = (await team.as(olive, "POST", "/api/webhooks", { name: "Inbound", prompt: "Handle the event.", botId: own.id })).body;
+  const receiver = team.base.replace(/:(\d+)$/, (_: string, port: string) => `:${Number(port) + 1}`);
+  const delivered = await fetch(`${receiver}/hooks/${hook.webhook.endpointId}/${encodeURIComponent(hook.credential.secret)}`, { method: "POST",
+    headers: { "content-type": "application/json", "idempotency-key": randomBytes(6).toString("hex") }, body: JSON.stringify({ text: "hook-payload-77" }) });
+  expect(delivered.status).toBe(202);
+  await ran("O-HOOK");
+  await expect.poll(settled, { timeout: 60_000 }).toBe(true);
+  const results = await expect.poll(async () => (await botsOf(olive)).find((bot) => bot.id === own.id)?.tasks?.find((task) => task.title === "Inbound · Results")?.threadId,
+    { timeout: 30_000 }).toBeTruthy().then(async () => (await botsOf(olive)).find((bot) => bot.id === own.id)!.tasks!.find((task) => task.title === "Inbound · Results")!.threadId);
+  await say("OLIVE-LATER", results, olive, own);
+  await ran("O-LATER");
+  expect(steps(turn("O-LATER"))[0]!.response?.result?.isError).toBe(true);
+  expect(turns().filter((one) => one.botId === sales.id && sent(one).includes("O-LATER"))).toEqual([]);
+}, hostTimeout(150_000));
 
 it("outside-driven: her routine, with nobody present, cannot hand work on", async () => {
   await expect.poll(settled, { timeout: 30_000 }).toBe(true);
