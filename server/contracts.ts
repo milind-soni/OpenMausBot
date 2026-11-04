@@ -574,6 +574,8 @@ export interface ProviderDriver<Config = unknown> {
     displayName: string;
     supportsMultipleInstances?: boolean;
     access?: EngineAccess;
+    /** What the engine's own CLI answers to `--version`; another answer means the CLI path runs another program. */
+    cliVersion?: RegExp;
   };
   /** Omit for engines that need no local binary (API-key drivers). */
   readonly install?: EngineInstall;

@@ -357,14 +357,14 @@ jobs:
         # Caddy must not carry the privileged-port capability (it runs as maus
         # on :8080), which Docker's default capabilities would hide at runtime.
         # Its Grok is one root-owned binary, with nothing from the installer's
-        # throwaway home left in the image.
+        # throwaway home left in the image, and Cursor's build is root's alone.
         run: |
           set -euo pipefail
           docker save openmausbot:ci -o "$RUNNER_TEMP/server.tar"
           docker save omb-cloud-home:ci -o "$RUNNER_TEMP/home.tar"
           python3 - "$RUNNER_TEMP/server.tar" "$RUNNER_TEMP/home.tar" <<'PY'
           import json, re, sys, tarfile
-          cache = re.compile(r"^(root/\.npm|tmp/(npm-cache|omb-build-home|node-compile-cache|grok-install))/")
+          cache = re.compile(r"^(root/\.npm|tmp/(npm-cache|omb-build-home|node-compile-cache|grok-install|cursor-install))/")
           for path in sys.argv[1:]:
               files = {}
               with tarfile.open(path) as image:
@@ -388,6 +388,12 @@ jobs:
                   assert len(grok) == 1 and grok[0].uid == 0 and grok[0].mode & 0o7777 == 0o755, "Grok is not one root-owned 0755 binary"
                   installer = sorted(name for name in files if re.match(r"(data|root)/\.grok/|usr/local/bin/agent$", name))
                   assert not installer, f"Grok's installer left files behind: {installer[:5]}"
+                  cursor = files["usr/local/bin/cursor-agent"]
+                  assert len(cursor) == 1 and cursor[0].issym() and cursor[0].linkname.startswith("/opt/cursor-agent/"), "Cursor's CLI is not one link into /opt"
+                  owned = [name for name in files if name.startswith("opt/cursor-agent/") and (files[name][-1].uid != 0 or files[name][-1].mode & 0o022)]
+                  assert not owned, f"Cursor's files are not root's alone: {owned[:5]}"
+                  leftover = sorted(name for name in files if re.match(r"(data|root)/\.(cursor|local)/|tmp/cursor-agent-logs", name))
+                  assert not leftover, f"Cursor's version check left files behind: {leftover[:5]}"
               print(f"{path}: {len(files)} files, each once; no build cache; {native[0]}")
           PY
 

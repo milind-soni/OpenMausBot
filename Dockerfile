@@ -151,6 +151,31 @@ RUN if [ -n "$GROK_VERSION" ]; then \
       && HOME=/tmp/grok-install grok --version | grep -qF "grok $GROK_VERSION " \
       && rm -rf /tmp/grok-install; \
     fi
+# Cursor, the cursor.com subscription engine: Cursor's own build of its CLI
+# (what https://cursor.com/install downloads), pinned to the version the
+# Cursor driver is verified against (server/drivers/acp/cursor.ts) and checked
+# against its SHA-256, measured on two downloads. A Cloud has no terminal, so
+# without it Cursor's setup card could only offer an install nobody can run.
+# People sign it in from the app with a link (cursor-agent login); the login
+# lands in their home on the volume. The build is root's, under /opt, which
+# every bot's box sees read-only; only the launcher's link goes on PATH.
+# CURSOR_VERSION= (empty) leaves Cursor out on purpose.
+ARG CURSOR_VERSION=2026.10.22-27dcf5f
+ARG CURSOR_SHA256_X64=85296944e4600a83c4b764f578d1502bf9c416db200d33a593e8f3ecabfdc294
+ARG CURSOR_SHA256_ARM64=22a36df9720830668ccd4d707e5190204ab9c8a0efb2f068cc914895f804d3ec
+ARG TARGETARCH
+RUN if [ -n "$CURSOR_VERSION" ]; then \
+      arch=x64 && sum=$CURSOR_SHA256_X64 \
+      && if [ "$TARGETARCH" = arm64 ]; then arch=arm64 && sum=$CURSOR_SHA256_ARM64; fi \
+      && mkdir -p /tmp/cursor-install "/opt/cursor-agent/$CURSOR_VERSION" \
+      && curl -fsSL "https://downloads.cursor.com/lab/$CURSOR_VERSION/linux/$arch/agent-cli-package.tar.gz" -o /tmp/cursor-install/cli.tar.gz \
+      && echo "$sum  /tmp/cursor-install/cli.tar.gz" | sha256sum -c - \
+      && tar -xzf /tmp/cursor-install/cli.tar.gz -C "/opt/cursor-agent/$CURSOR_VERSION" --strip-components=1 --no-same-owner \
+      && chmod -R u=rwX,go=rX /opt/cursor-agent \
+      && ln -s "/opt/cursor-agent/$CURSOR_VERSION/cursor-agent" /usr/local/bin/cursor-agent \
+      && test "$(HOME=/tmp/cursor-install TMPDIR=/tmp/cursor-install cursor-agent --version)" = "$CURSOR_VERSION" \
+      && rm -rf /tmp/cursor-install; \
+    fi
 # Engine CLIs baked into the image (space-separated npm packages). The publish
 # job passes each one's current version, or names only and today's date as
 # ENGINES_CACHE_TAG when it cannot look them up. Build-time CLI caches must
