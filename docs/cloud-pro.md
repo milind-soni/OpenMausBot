@@ -1108,6 +1108,16 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   thread per bot for what a person or a routine starts; the Admin says so with its
   signed `POST /api/cloud/plan` `{"v":1,"tier":"starter"}` (`server/host/cloud-plan-tier.ts`), and a
   home it never told has no such limit. What a bot's own turn starts always goes through.
+- **How many bots a Starter Cloud makes.** Five beside its MausBot, one number in
+  `server/host/starter-bot-limit.ts`, from the same signed plan. An archived bot or one
+  that moved away takes no room. Making one past it answers `409` with
+  `{"code":"bot_limit","error":"…"}` from `POST /api/bots`, `POST /api/teams/import`,
+  `POST /api/org-library/add` and a Chief's `create_bot` and `propose_team_setup`; a group that
+  doesn't fit is refused whole, before anything is written. The app opens its upgrade popup
+  when a create button is pressed with no room, and on that refusal. A bot is never taken away:
+  a Cloud over the limit (a downgrade, a move) keeps every one and only making a new one stops.
+  A bot arriving with its own id (a move) and a backup restored are never refused. The limit
+  lifts as soon as the Admin tells the home its new plan, with no restart.
 - **OpenCode threads share a process.** Threads whose OpenCode would start
   the same way (same login, approval level and settings) run as sessions of one
   `opencode acp` process, up to six at a time and twelve over its life
