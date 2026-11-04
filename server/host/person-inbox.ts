@@ -5,7 +5,8 @@
 // Replying to a line answers it: the answer goes back to the bot that asked, which carries on, or to the teammate's own
 // inbox. A question that a fact the person shares with the team answers, their assistant may answer (representative.ts).
 // Security: a line carries only what was addressed to the person, and links its conversation only when they may read
-// it. The state is ids, names and short excerpts, in person-inbox.json. Off a team nothing here exists.
+// it. The state is ids, names and short excerpts, in person-inbox.json. Off a team nothing here exists: place-inbox.ts is
+// the inbox there.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";

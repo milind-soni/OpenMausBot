@@ -5,7 +5,7 @@ import { chatFollowups, saveChatFollowup, settleChatFollowups } from "./message-
 import { drainCoalesceHead } from "./admission.ts";
 import { spokenLineFields } from "./live-call-record.ts";
 import { workOriginSchema, type WorkOrigin } from "./peer-provenance.ts";
-import type { ResolvedSender, SteerQueueReason } from "../shared/wire.ts";
+import type { BotQueuedMessages, ResolvedSender, SteerQueueReason } from "../shared/wire.ts";
 import type { BotRecord, Message } from "./store.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
 
@@ -83,12 +83,12 @@ const changed = () => {
 };
 
 /** Public pending chips only: never expose provider prompts or reply context. */
-export function queuedSteerSnapshot(ownsThread: (botId: string, threadId: string) => boolean):
-  Record<string, Array<{ queueId: string; text: string; reason?: SteerQueueReason }>> {
+export function queuedSteerSnapshot(ownsThread: (botId: string, threadId: string) => boolean, whyHeld: (threadId: string, reason: SteerQueueReason | undefined) => string | undefined = () => undefined):
+  BotQueuedMessages {
   return Object.fromEntries([...queues]
     .filter(([threadId, entry]) => ownsThread(entry.botId, threadId))
     .map(([threadId, entry]) => [threadId, entry.items.filter((item) => !item.rowId).map((item) => ({
-      queueId: item.messageId, text: item.text, ...(item.reason ? { reason: item.reason } : {}),
+      queueId: item.messageId, text: item.text, ...(item.reason ? { reason: item.reason, why: whyHeld(threadId, item.reason) } : {}),
     }))]));
 }
 

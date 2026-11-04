@@ -2,13 +2,14 @@
 // while the bot works (acceptDirectSend), "Restart turn" from the send menu, and the pills for teammates a stop leaves running.
 import type { HandoffView } from "../coordinator.ts";
 import type { Handoffs } from "../delta-context.ts";
-import { isStopCommand } from "../room-holds.ts";
+import { addressesEveryone, isStopCommand } from "../room-holds.ts";
 import type { RoutineManager } from "../routines.ts";
+import { serverLine } from "../server-lines.ts";
 import type { Message, Store } from "../store.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
 
 export interface PersonStopDeps {
-  store: Pick<Store, "appendMessage" | "bot" | "botByThread" | "groupByThread" | "taskByThread">;
+  store: Pick<Store, "appendMessage" | "bot" | "botByThread" | "groupByThread" | "taskByThread" | "tasks">;
   routines(): Pick<RoutineManager, "activeBotRunForBot" | "cancelRun"> | null;
   handoffs(): Pick<Handoffs, "stoppedByPerson">;
   interruptDirectThread(botId: string, threadId: string): Promise<void>;
@@ -17,6 +18,11 @@ export interface PersonStopDeps {
   markStopped(threadId: string): void;
   /** Ends a goal running in this one-on-one chat, so the interrupted turn is its last. */
   stopGoal(threadId: string): void;
+  /** A turn runs, or teammates are at work, for this thread. */
+  working(botId: string, threadId: string): boolean;
+  /** The bot waits for the person's answer here: a parked question or an open card. */
+  asking(threadId: string): boolean;
+  language(threadId: string): string | undefined;
 }
 
 export interface TypedStop {
@@ -27,6 +33,8 @@ export interface TypedStop {
   personPresent: boolean;
   /** A message an app sent on the person's behalf is never a stop. */
   fromApp: boolean;
+  /** This thread's turn is running now. */
+  busy: boolean;
   /** The rest of the person's message row, as the busy branch would have recorded it. */
   row: Pick<Message, "replyToId" | "sendId" | "sender" | "via" | "callId">;
 }
@@ -47,13 +55,19 @@ export function createPersonStop(deps: PersonStopDeps) {
     await deps.interruptDirectThread(botId, threadId);
   }
 
-  /** Only a message made of stop words, from a person, acts as Stop: it is recorded, and never reaches the turn it ends. */
+  /** Only a message made of stop words, from a person, acts as Stop: it is recorded, and never reaches the turn it ends. With no
+   * work to stop it goes to the bot as any line does ("stop" may mean the reminders it just set up), unless it is the Team map's
+   * @everyone: that goes to every bot, working or not, and starts no engine. */
   async function stopOnTypedCommand(input: TypedStop): Promise<{ ok: true; threadId: string; message: Message } | null> {
-    const { botId, threadId, text, trigger } = input;
-    if (input.fromApp || (trigger.kind !== "user" && trigger.kind !== "owner") || !isStopCommand(text)) return null;
+    const { botId, threadId, text, trigger, busy } = input;
+    if (input.fromApp || (trigger.kind !== "user" && trigger.kind !== "owner") || !isStopCommand(text, store.bot(botId)?.name)) return null;
+    const everyone = addressesEveryone(text);
+    if (!busy && !everyone && (input.row.via || deps.asking(threadId) || !deps.working(botId, threadId))) return null;
     if (input.personPresent) deps.clearUnattended(threadId);
     const message = store.appendMessage(threadId, { role: "user", kind: "text", text, ...input.row });
-    await stopThreadForPerson(botId, threadId);
+    const stopping = (everyone ? store.tasks(botId).map((task) => task.threadId) : [threadId]).filter((id) => (id === threadId && busy) || deps.working(botId, id));
+    for (const id of stopping) await stopThreadForPerson(botId, id);
+    if (!stopping.length) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: serverLine(deps.language(threadId), "server.stop.nothingRunning"), ok: true } });
     return { ok: true as const, threadId, message };
   }
 
