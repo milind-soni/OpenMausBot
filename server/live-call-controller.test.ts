@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LiveCallState } from "../shared/wire.ts";
 import {
-  ATTACH_TIMEOUT_MS, CLOSE_TIMEOUT_MS, CONSENT_SETTLE_MS, DELEGATION_SETTLE_MS, IDLE_CHECK_MS, PROGRESS_INTERVAL_MS,
+  ATTACH_TIMEOUT_MS, CLOSE_TIMEOUT_MS, CONSENT_SETTLE_MS, DELEGATION_SETTLE_MS, GOODBYE_MS, IDLE_CHECK_MS, PROGRESS_INTERVAL_MS,
   LiveCallBusyError, LiveCallController, LiveCallSignedOutError, type LiveActivity, type LiveCallDeps, type LiveSocket,
 } from "./live-call-controller.ts";
 import { LIVE_COPY } from "../shared/live-approval.ts";
@@ -474,6 +474,107 @@ describe("LiveCallController relay", () => {
     });
   });
 
+  describe("a spoken request to hang up", () => {
+    const closes = (t: ReturnType<typeof setup>) => t.socket().sent.filter((e) => e.type === "session.close");
+
+    it("says goodbye, then ends the call the way the End button does", async () => {
+      const t = await live();
+      hear(t, "okay, thanks, you can hang up now.", 100);
+      await delegate(t, "del_1", 400);
+      expect(t.deps.send).not.toHaveBeenCalled();
+      expect(t.socket().appends("instructions").at(-1)).toMatchObject({ delegation_id: "del_1", content: LIVE_COPY.goodbye });
+      expect(closes(t)).toHaveLength(0);
+      hear(t, "wait", 1_000);
+      await delegate(t, "del_2", 1_200);
+      expect(t.deps.send).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(GOODBYE_MS);
+      expect(closes(t)).toHaveLength(1);
+      t.socket().receive({ type: "session.closed", reason: "close_requested" });
+      expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "hung-up" });
+      expect(t.controller.current()).toBeNull();
+    });
+
+    it("says nothing about a request that fails to send after the goodbye", async () => {
+      let fail: (error: Error) => void = () => {};
+      const t = await live({ send: vi.fn(() => new Promise<never>((_resolve, reject) => { fail = reject; })) });
+      hear(t, "check my mail", 100);
+      await delegate(t, "del_1", 400);
+      hear(t, "hang up", 1_000);
+      await delegate(t, "del_2", 1_200);
+      fail(new Error("offline"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(t.socket().appends("commentary")).toHaveLength(0);
+    });
+
+    it("never says an answer is missing when the bot stops during the goodbye", async () => {
+      const t = await live();
+      hear(t, "check my mail", 100);
+      await delegate(t, "del_1", 400);
+      t.setActivity("working");
+      await vi.advanceTimersByTimeAsync(0);
+      hear(t, "hang up", 2_000);
+      await delegate(t, "del_2", 2_200);
+      t.setActivity("idle");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(t.socket().appends("commentary").map((e) => e.content)).not.toContain(LIVE_COPY.noAnswer);
+    });
+
+    it("keeps the call for anything that is not a clear request to hang up", async () => {
+      for (const text of ["don't hang up", "how do I end the call?", "hang up the poster in my room", "end the call with Sam on my calendar", "bye"]) {
+        const t = await live();
+        hear(t, text, 100);
+        await delegate(t, "del_1", 400);
+        expect(vi.mocked(t.deps.send).mock.calls.map(([input]) => input.text), text).toEqual([text]);
+        await vi.advanceTimersByTimeAsync(GOODBYE_MS + CLOSE_TIMEOUT_MS);
+        expect(closes(t), text).toHaveLength(0);
+        expect(t.controller.current()?.status, text).toBe("live");
+      }
+    });
+
+    it("never hangs up on the voice's own words heard back through a speaker", async () => {
+      const t = await live();
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "Should I hang up?", start_ms: 1_000, end_ms: 2_000 });
+      hear(t, "hang up", 1_200, 1_400);
+      await delegate(t, "del_1", 1_500);
+      await vi.advanceTimersByTimeAsync(GOODBYE_MS + CLOSE_TIMEOUT_MS);
+      expect(closes(t)).toHaveLength(0);
+      expect(t.socket().appends("instructions").some((e) => e.content === LIVE_COPY.goodbye)).toBe(false);
+    });
+
+    it("keeps the call when the words before \"hang up\" were heard over the voice", async () => {
+      const t = await live();
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "Here is what I found.", start_ms: 1_000, end_ms: 2_000 });
+      hear(t, "don't", 1_200, 1_400);
+      hear(t, "hang up", 2_100, 2_300);
+      await delegate(t, "del_1", 2_500);
+      await vi.advanceTimersByTimeAsync(GOODBYE_MS + CLOSE_TIMEOUT_MS);
+      expect(closes(t)).toHaveLength(0);
+      expect(t.socket().appends("instructions").some((e) => e.content === LIVE_COPY.goodbye)).toBe(false);
+    });
+
+    it("speaks no more of the bot's answers once the goodbye starts", async () => {
+      const t = await live();
+      hear(t, "check my mail", 100);
+      await delegate(t, "del_1", 300);
+      hear(t, "okay, thanks, you can hang up now.", 1_000);
+      await delegate(t, "del_2", 1_200);
+      t.patch({ id: "b1", text: "You have two new emails.", requestMessageId: "m1", turnTerminal: true });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(t.socket().appends("instructions").at(-1)).toMatchObject({ content: LIVE_COPY.goodbye });
+      expect(t.socket().appends("commentary")).toHaveLength(0);
+    });
+
+    it("keeps the real end reason when the call drops during the goodbye", async () => {
+      const t = await live();
+      hear(t, "hang up", 100);
+      await delegate(t, "del_1", 400);
+      t.socket().drop();
+      expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "sideband-lost" });
+      await vi.advanceTimersByTimeAsync(GOODBYE_MS);
+      expect(closes(t)).toHaveLength(0);
+    });
+  });
+
   it("sends the words since the last request to the bot, as the call's starter", async () => {
     const t = await live();
     const callId = t.controller.current()!.callId;
@@ -892,6 +993,32 @@ describe("LiveCallController relay", () => {
       await delegate(t, "del_ambiguous", 5_200);
       expect(t.deps.respond).not.toHaveBeenCalled();
       expect(t.socket().appends("instructions").at(-1)).toMatchObject({ content: LIVE_COPY.notClear });
+    });
+
+    it("says nothing about a failed save once the person asked to hang up", async () => {
+      let finish: (result: { ok: false; error: string }) => void = () => {};
+      const t = await live({ respond: vi.fn(() => new Promise<{ ok: false; error: string }>((resolve) => { finish = resolve; })) });
+      t.message(approval());
+      await vi.advanceTimersByTimeAsync(0);
+      hear(t, "yes go ahead", 5_000);
+      await delegate(t, "del_2", 5_200);
+      expect(t.deps.respond).toHaveBeenCalled();
+      hear(t, "hang up", 6_000);
+      await delegate(t, "del_3", 6_200);
+      finish({ ok: false, error: "disk full" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(t.socket().appends("commentary").map((e) => e.content)).not.toContain(LIVE_COPY.saveFailed("disk full"));
+    });
+
+    it("grants nothing heard after the person asked to hang up", async () => {
+      const t = await live();
+      t.message(approval());
+      await vi.advanceTimersByTimeAsync(0);
+      hear(t, "hang up", 5_000);
+      await delegate(t, "del_2", 5_200);
+      hear(t, "yes", 5_400);
+      await vi.advanceTimersByTimeAsync(CONSENT_SETTLE_MS + 1);
+      expect(t.deps.respond).not.toHaveBeenCalled();
     });
 
     it("accepts a yes heard in a quiet moment, without a delegation", async () => {

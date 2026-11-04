@@ -3,7 +3,7 @@
 import { cronScheduleLabel } from "../../shared/cron-label";
 import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import type { Routine, RoutineRun, RoutineSchedule } from "@/lib/routines";
+import { isRoutineProblemRun, type Routine, type RoutineRun, type RoutineSchedule } from "@/lib/routines";
 import type { WebhookAttempt, WebhookTrigger } from "@/lib/webhooks";
 import type { AppTrigger } from "@/lib/app-triggers";
 import { appProblem, appStatusParts, appWhen, skippedToday } from "@/lib/app-automations";
@@ -57,6 +57,12 @@ export function automationsFrom(sources: { routines: readonly Routine[]; webhook
       appTrigger: trigger, nextRunAt: null, runs: runsOf(trigger.id),
     })),
   ].filter((automation) => !botIds || botIds.has(automation.botId));
+}
+
+/** An unseen failed or missed run the person can clear: it belongs to an automation in `automations`, and opening that
+ * automation marks it seen. A run whose automation or bot was deleted has nothing to open, so it never asks for attention. */
+export function hasUnseenProblemRun(automations: readonly Automation[]): boolean {
+  return automations.some((automation) => automation.runs.some((run) => isRoutineProblemRun(run) && !run.seenAt));
 }
 
 export function automationFor(ref: { kind: AutomationKind; id: string }, sources: Parameters<typeof automationsFrom>[0]): Automation | null {

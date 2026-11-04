@@ -1,4 +1,4 @@
-import type { Message } from "../store.ts";
+import type { Message, Store } from "../store.ts";
 import { toolResultPrefix } from "../tool-results.ts";
 
 const MESSAGE_PAGE_MAX = 200;
@@ -30,4 +30,38 @@ export function pageMessage(message: Message): Message | Record<string, unknown>
   const output = tool.output;
   if (output === undefined || output.length <= TOOL_OUTPUT_PREVIEW) return slim;
   return { ...slim, tool: { ...tool, output: toolResultPrefix(output, TOOL_OUTPUT_PREVIEW), clipped: true } };
+}
+
+/** A conversation's messages one page at a time (newest first when `before` is absent), and the page around one message. */
+export function messagePages(store: Pick<Store, "messagesFor" | "messagesTail" | "activeLeaf">) {
+  function messagePage(threadId: string, limit: number | undefined, before?: string | null) {
+    if (limit === undefined) {
+      return { messages: store.messagesFor(threadId), activeLeafId: store.activeLeaf(threadId) };
+    }
+    if (!before) {
+      const tail = store.messagesTail(threadId, limit);
+      return { messages: tail.messages.map(pageMessage), hasMore: tail.hasMore, activeLeafId: tail.activeLeafId };
+    }
+    const all = store.messagesFor(threadId);
+    const end = all.findIndex((msg) => msg.id === before);
+    const stop = end === -1 ? all.length : end;
+    const start = Math.max(0, stop - limit);
+    return {
+      messages: all.slice(start, stop).map(pageMessage),
+      hasMore: start > 0,
+      activeLeafId: store.activeLeaf(threadId),
+    };
+  }
+
+  function messageWindow(threadId: string, messageId: string, limit: number) {
+    const all = store.messagesFor(threadId);
+    const index = all.findIndex((message) => message.id === messageId);
+    if (index < 0) return null;
+    const before = Math.floor((limit - 1) / 2);
+    const start = Math.max(0, Math.min(index - before, all.length - limit));
+    const stop = Math.min(all.length, start + limit);
+    return { messages: all.slice(start, stop).map(pageMessage), hasMore: start > 0 };
+  }
+
+  return { messagePage, messageWindow };
 }

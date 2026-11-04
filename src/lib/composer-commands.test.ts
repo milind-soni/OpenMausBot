@@ -10,11 +10,21 @@ import {
 import { enabledSlashSkills } from "./use-slash-skills";
 
 describe("composer slash commands", () => {
-  it("opens command search only for the first unfinished token", () => {
+  it("opens command search for the unfinished slash token at the caret", () => {
     expect(composerSlashTrigger("/", 1)).toEqual({ query: "", start: 0, end: 1 });
     expect(composerSlashTrigger("/go", 3)).toEqual({ query: "go", start: 0, end: 3 });
-    expect(composerSlashTrigger("hello /go", 9)).toBeNull();
     expect(composerSlashTrigger("/goal write", 11)).toBeNull();
+  });
+
+  it("opens command search for a slash token later in the message", () => {
+    expect(composerSlashTrigger("hello /go", 9)).toEqual({ query: "go", start: 6, end: 9 });
+    expect(composerSlashTrigger("first line\n/", 12)).toEqual({ query: "", start: 11, end: 12 });
+    expect(composerSlashTrigger("use /stand later", 10)).toEqual({ query: "stand", start: 4, end: 10 });
+    expect(composerSlashTrigger("a/b", 3)).toBeNull();
+    expect(composerSlashTrigger("see http://x/", 13)).toBeNull();
+    expect(
+      replaceComposerSlashTrigger("use /stand later", { query: "stand", start: 4, end: 10 }, "/standup "),
+    ).toEqual({ text: "use /standup  later", caret: 13 });
   });
 
   it("replaces the active token without losing text after the caret", () => {
