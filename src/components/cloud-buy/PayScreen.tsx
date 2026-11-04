@@ -11,7 +11,8 @@ export function PayScreen({ plan, offer, browser, late, link, email, busy, copie
 }) {
   const sold = offer?.plans.find(entry => entry.tier === plan) ?? null;
   const name = sold ? offerPlanLabel(sold) : cloudPlanLabel(plan);
-  const detail = sold?.trialDays ? t("cloudBuy.pay.planTrial", { plan: name, days: sold.trialDays, due: dueToday(0) })
+  const detail = sold?.trialDays === 1 ? t("cloudBuy.pay.planTrial.one", { plan: name, due: dueToday(0) })
+    : sold?.trialDays ? t("cloudBuy.pay.planTrial.many", { plan: name, days: sold.trialDays, due: dueToday(0) })
     : sold ? t("cloudBuy.pay.planPaid", { plan: name, price: usd(sold.amount / 100) }) : name;
   return <div data-cloud-add={late ? "waiting-late" : browser === "signin" ? "waiting-signin" : "waiting"} className={SCREEN}>
     <Heading title={late ? t("cloudBuy.pay.lateTitle") : t("cloudAdd.browserTitle")}

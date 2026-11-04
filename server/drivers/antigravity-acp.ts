@@ -676,6 +676,11 @@ interface AuthFlow {
 
 export class AntigravityAuthController {
   private flow: AuthFlow | null = null;
+  private readonly onSignedIn: () => void;
+
+  constructor(onSignedIn: () => void = () => {}) {
+    this.onSignedIn = onSignedIn;
+  }
 
   async start(runtime: AntigravityRuntime, profile: AntigravityProfile): Promise<AntigravityAuthStart> {
     this.cancel();
@@ -706,6 +711,7 @@ export class AntigravityAuthController {
       });
       if (outcome.kind === "done") {
         client.close();
+        this.onSignedIn();
         return { phase: "succeeded", flowId: null, authorizationUrl: null, expiresAt: null };
       }
       const flow: AuthFlow = {
@@ -716,10 +722,10 @@ export class AntigravityAuthController {
         expiresAt: Date.now() + AUTH_TIMEOUT_MS,
       };
       this.flow = flow;
-      void authenticated.finally(() => {
+      void authenticated.then(() => this.onSignedIn(), () => {}).finally(() => {
         if (this.flow === flow) this.flow = null;
         client.close();
-      }).catch(() => {});
+      });
       return {
         phase: "waiting",
         flowId: flow.id,
