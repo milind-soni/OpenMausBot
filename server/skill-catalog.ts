@@ -222,9 +222,7 @@ export function setBotSkill(deps: SkillCatalogDeps, botId: string, id: string, o
   const row = listSkillCatalog(deps).find((candidate) => candidate.id === id);
   if (!row) return NOT_FOUND;
   if (row.bots.includes(botId) === on) return { ok: true };
-  if (on) return setSkillAccess(deps, id, "bots", [...row.bots, botId]);
-  if (row.who === "all") return setSkillAccess(deps, id, "bots", deps.bots().map((bot) => bot.id).filter((other) => other !== botId));
-  return setSkillAccess(deps, id, "bots", row.bots.filter((other) => other !== botId));
+  return setSkillAccess(deps, id, "bots", on ? [...row.bots, botId] : row.bots.filter((other) => other !== botId));
 }
 
 export function removeCatalogSkill(deps: SkillCatalogDeps, id: string): CatalogResult {

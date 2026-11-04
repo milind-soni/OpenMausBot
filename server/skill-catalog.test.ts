@@ -62,6 +62,7 @@ describe("who can use a library skill", () => {
     expect(bots.map((bot) => bot.assignedSkills)).toEqual([[], [], ["weekly-report"]]);
     expect(setSkillAccess(deps, "library:weekly-report", "bots", [])).toEqual({ ok: true });
     expect(row("library:weekly-report")).toMatchObject({ who: "off", bots: [] });
+    expect(bots.map((bot) => bot.assignedSkills)).toEqual([[], [], []]);
     expect(readSkillLibraryIndex(root)["weekly-report"]?.reviewState).toBe("disabled");
     expect(setSkillAccess(deps, "library:nope", "all")).toMatchObject({ status: 404 });
   });
