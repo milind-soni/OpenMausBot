@@ -8,6 +8,7 @@ import { launcherOf } from "../cloud-connections.ts";
 import { customMcpServers } from "../config.ts";
 import type { McpServerSpec, StdioMcpSpec } from "../contracts.ts";
 import { addBotMcpServer, claimBotMcpServers, keepForBot, withoutBotMcpServers, type BotKept, type BotMcpServerAdd } from "../mcp-bot-servers.ts";
+import { MCP_RESTART_ENV } from "../mcp-app-catalog.ts";
 import { createMcpHealth, nameList, toolLabel, type McpHealthDeps } from "../mcp-health.ts";
 import { probeMcpServer } from "../mcp-probe.ts";
 import { isRemoteMcpServer, parseStoredMcpServer, type StoredStdioMcpServer } from "../mcp-registry.ts";
@@ -63,7 +64,7 @@ export function enabledCommandServers(cfg: AppConfig): Record<string, StdioMcpSp
 function withRestarts(servers: Record<string, McpServerSpec>, restarts: ReadonlyMap<string, number>): Record<string, McpServerSpec> {
   return Object.fromEntries(Object.entries(servers).map(([name, server]) => {
     const count = restarts.get(name);
-    return [name, count && "command" in server ? { ...server, env: { ...server.env, OMB_MCP_RESTART: String(count) } } : server];
+    return [name, count && "command" in server ? { ...server, env: { ...server.env, [MCP_RESTART_ENV]: String(count) } } : server];
   }));
 }
 
