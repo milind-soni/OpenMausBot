@@ -129,7 +129,7 @@ export function useUpgrade(bridge: CloudPlanBridge | undefined, usage: CloudUsag
       tone="neutral"
       icon={<Gauge size={18} className="text-accent" />}
       title={preview ? t("usageMeter.confirm.title", { plan: cloudPlanLabel(preview.plan) }) : ""}
-      body={preview ? upgradeConfirmBody(preview) : ""}
+      body={preview ? upgradeConfirmBody(preview, { trialEndsAt: usage?.trialEndsAt }) : ""}
       confirmLabel={preview ? t("usageMeter.confirm.action", { plan: cloudPlanLabel(preview.plan) }) : ""}
       cancelLabel={t("usageMeter.confirm.cancel")}
       pending={busy === "change"}
