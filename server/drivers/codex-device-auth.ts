@@ -2,6 +2,7 @@
 import { stripVTControlCharacters } from "node:util";
 import { deviceSignInPrompt } from "../../shared/device-sign-in.ts";
 import { DeviceAuthController, type DeviceAuthOptions, type DeviceSignIn } from "./device-auth.ts";
+import { codexReportsLogin } from "./codex-login.ts";
 
 export function codexDevicePrompt(output: string): { authorizationUrl: string; userCode: string } | null {
   return deviceSignInPrompt("codex", stripVTControlCharacters(output));
@@ -33,7 +34,7 @@ export const CODEX_DEVICE_SIGN_IN: DeviceSignIn = {
     args: ["login", "status"],
     read: (code, output) =>
       code === 0 && /^logged in.*chatgpt\b/im.test(output) ? "signed-in"
-      : code === 0 && /^logged in\b/im.test(output) ? "other"
+      : code === 0 && codexReportsLogin(output) ? "other"
       : code !== 0 && /^not logged in\b/im.test(output) ? "signed-out"
       : "unknown",
   },

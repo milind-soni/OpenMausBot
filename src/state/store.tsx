@@ -1,5 +1,5 @@
 import { cloudAsleep, onCloudPower } from "../lib/cloud-power";
-import { api, ApiError } from "./api";
+import { api, ApiError, snapshotArrays } from "./api";
 import {
   createContext,
   useCallback,
@@ -59,12 +59,13 @@ import { forgetLiveTurns, noteRuntimeTurn, sendStop } from "@/lib/stop-turn";
 import { readLastConversation, rememberConversation } from "@/lib/last-conversation";
 import { readLastBotSection, rememberBotSection } from "@/lib/last-bot-section";
 import { showNotification } from "@/lib/notify";
+import { randomUuid } from "@/lib/random-uuid";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { speechOwner, spokenReplyStream } from "@/lib/spoken-reply-stream";
 import { t } from "@/lib/i18n";
 import { createBotPatchQueue, flushWhenLeaving, keepaliveFits, type BotUpdatePatch } from "./bot-patch-queue"; import { createNewTaskOnce } from "./new-task-once";
 import { liveCallFromFrame, nextLiveCallLookup } from "./live-call";
-import { useChatErrorClear } from "./chat-error";
+import { isNoAiRefusal, useChatErrorClear } from "./chat-error";
 import { openLiveEvents, publishLiveFrame, publishMissedFrames, withoutScreenPixels } from "@/lib/live-events";
 import { unlessRefused } from "@/lib/admin-scope";
 import { olderRunsSince, ROUTINE_RUNS_WINDOW_MS, trimRoutineRuns, withOlderRoutineRuns } from "./routine-runs";
@@ -211,7 +212,7 @@ export interface ModelSelection {
 }
 
 export interface Task extends Pick<WireTask, "private" | "setupRequest" | "inbox" | "openAsks"> {
-  waitingForTeammates?: boolean;
+  waitingForTeammates?: boolean; sharedChat?: true;
   threadId: string;
   routineRunId?: string;
   projectId?: string;
@@ -266,7 +267,7 @@ export interface TaskUsage {
   context?: { tokens: number; window?: number };
 }
 
-export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor" | "access" | "yourAccess"> {
+export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor" | "access" | "yourAccess" | "onlyPeopleAdded"> {
   toolScope?: ToolScope;
   waitingForTeammates?: boolean;
   id: string;
@@ -501,7 +502,7 @@ export interface InstanceInfo {
   cliDefault?: string;
   cliCandidates?: string[];
   claudeAccount?: { configDir: string; signInCommand: string; signInShell: "powershell" | "sh"; isDefault: boolean };
-  freeUpSpace?: boolean; replyWaitMinutes?: number;
+  freeUpSpace?: boolean; replyWaitMinutes?: number; modelsUnconfirmed?: true;
 }
 
 export type AppSettingsSection =
@@ -1194,7 +1195,7 @@ export function reducer(state: AppState, action: Action): AppState {
       if ((switchedThread || (before.awaitingThreadSnapshot && action.bot.threadId === before.threadId)) &&
           Array.isArray(action.bot.messages)) {
         // The slim deletion broadcast can beat the full snapshot; later duplicate snapshots must not overwrite newer messages.
-        return reducer(switching, { type: "taskSwitched", bot: { ...before, ...action.bot, computer: action.bot.computer, section: action.bot.section, toolScope: action.bot.toolScope, managedSections: action.bot.managedSections, messages: action.bot.messages, browserProfile: action.bot.browserProfile, vpsAlias: action.bot.vpsAlias, phoneApps: action.bot.phoneApps } });
+        return reducer(switching, { type: "taskSwitched", bot: { ...before, ...action.bot, computer: action.bot.computer, section: action.bot.section, toolScope: action.bot.toolScope, managedSections: action.bot.managedSections, messages: action.bot.messages, browserProfile: action.bot.browserProfile, vpsAlias: action.bot.vpsAlias, phoneApps: action.bot.phoneApps, onlyPeopleAdded: action.bot.onlyPeopleAdded } });
       }
       const patched = updateBot(switching, action.bot.id, (b) => ({
         ...b,
@@ -1207,7 +1208,7 @@ export function reducer(state: AppState, action: Action): AppState {
         computer: action.bot.computer,
         toolScope: action.bot.toolScope,
         section: action.bot.section, managedSections: action.bot.managedSections,
-        vpsAlias: action.bot.vpsAlias, phoneApps: action.bot.phoneApps,
+        vpsAlias: action.bot.vpsAlias, phoneApps: action.bot.phoneApps, onlyPeopleAdded: action.bot.onlyPeopleAdded,
         tasks: action.bot.tasks ? mergeTaskStamps(b.tasks, action.bot.tasks) : b.tasks,
         // Old approvals must never be sent to the replacement thread while its transcript loads.
         messages: switchedThread ? [] : b.messages,
@@ -2155,9 +2156,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const olderPagesInFlight = new Set<string>();
     const newTaskOnce = createNewTaskOnce();
     let creatingBot = false;
-    const showError = (e: unknown) => {
-      rawDispatch({ type: "error", message: e instanceof Error ? e.message : String(e) });
-    };
+    const showError = (e: unknown) => { if (isNoAiRefusal(e)) wrapped({ type: "notice", notice: { kind: "note", botName: null, text: e.message } }); else rawDispatch({ type: "error", message: e instanceof Error ? e.message : String(e) }); };
     const showSavedState = (owner: SavedOwner) => (error: unknown) => {
       showError(error);
       void api<SavedSnapshot>("/api/bots?messages=0").then((snapshot) => {
@@ -2262,9 +2261,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       action = pinBotThreadAction(action, stateRef.current.bots);
       if (action.type === "taskSwitched") action = { ...action, bot: withTaskWrites(action.bot) as Bot };
       if (action.type === "botPatched") action = { ...action, bot: withTaskWrites(action.bot) };
-      if ((action.type === "send" || action.type === "sendGroup" || action.type === "editMessage") && !action.sendId) {
-        action = { ...action, sendId: crypto.randomUUID() };
-      }
+      if ((action.type === "send" || action.type === "sendGroup" || action.type === "editMessage") && !action.sendId) action = { ...action, sendId: randomUuid() };
       const botBeforeUpdate =
         action.type === "updateBot" || action.type === "setModel"
           ? stateRef.current.bots.find((candidate) => candidate.id === action.botId)
@@ -2446,7 +2443,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (quizBeforeSend) persistCard(action.botId, quizBeforeSend.id, { dismissed: true });
           const threadId =
             action.threadId ?? stateRef.current.bots.find((bot) => bot.id === action.botId)?.threadId;
-          const sendId = action.sendId ?? crypto.randomUUID();
+          const sendId = action.sendId ?? randomUuid();
           const arrived = () => sendArrived(stateRef.current.bots.find((bot) => bot.id === action.botId && bot.threadId === threadId)?.messages, sendId);
           void waitForExecutionSettings(botBeforeSend ? [botBeforeSend] : [], threadId)
             .then(() => sendReconciled(() => api(`/api/bots/${action.botId}/messages`, {
@@ -2490,7 +2487,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "editMessage": {
           const threadId =
             action.threadId ?? stateRef.current.bots.find((bot) => bot.id === action.botId)?.threadId;
-          const sendId = action.sendId ?? crypto.randomUUID();
+          const sendId = action.sendId ?? randomUuid();
           void waitForExecutionSettings(executionBotsBeforeAction, threadId)
             .then(() => api(`/api/bots/${action.botId}/messages/${action.messageId}/edit`, {
               method: "POST",
@@ -2692,7 +2689,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "sendGroup": {
           const threadId =
             action.threadId ?? stateRef.current.groups.find((group) => group.id === action.groupId)?.threadId;
-          const sendId = action.sendId ?? crypto.randomUUID();
+          const sendId = action.sendId ?? randomUuid();
           void waitForExecutionSettings(executionBotsBeforeAction)
             .then(() => api(`/api/groups/${action.groupId}/messages`, {
               method: "POST",
@@ -2959,7 +2956,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       {
         key: "instances",
         request: async () => {
-          const answer = await unlessRefused<{ instances: InstanceInfo[] } | null>("/api/instances", () => api("/api/instances"), null);
+          const answer = await unlessRefused<{ instances: InstanceInfo[] } | null>("/api/instances", async () => snapshotArrays<{ instances: InstanceInfo[] }>(await api("/api/instances"), "instances"), null);
           return () => { if (answer) rawDispatch({ type: "instances", instances: answer.instances }); };
         },
       },
@@ -2973,7 +2970,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       {
         key: "routines",
         request: async () => {
-          const since = Date.now() - ROUTINE_RUNS_WINDOW_MS, { routines, runs } = await api(`/api/routines?since=${since}`);
+          const since = Date.now() - ROUTINE_RUNS_WINDOW_MS, { routines, runs } = snapshotArrays(await api(`/api/routines?since=${since}`), "routines", "runs");
           return () => rawDispatch({ type: "routinesHydrated", routines, runs, since });
         },
       },
@@ -2987,7 +2984,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ...(window.ogb?.remoteClient?.active ? [] : [{
         key: "webhooks",
         request: async () => {
-          const { webhooks, attempts, ingress } = await api("/api/webhooks");
+          const { webhooks, attempts, ingress } = snapshotArrays(await api("/api/webhooks"), "webhooks");
           return () =>
             rawDispatch({ type: "webhooksHydrated", webhooks, attempts: attempts ?? [], ingress });
         },
@@ -3052,7 +3049,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         })
         .catch(() => {});
       const chat = () =>
-        api(`/api/bots?messages=${MESSAGE_PAGE_SIZE}`).then(({ bots, groups, sections, computerControl, botQueuedMessages }) => {
+        api(`/api/bots?messages=${MESSAGE_PAGE_SIZE}`).then((answer) => snapshotArrays(answer, "bots")).then(({ bots, groups, sections, computerControl, botQueuedMessages }) => {
           if (!alive) return;
           rawDispatch({
             type: "hydrate",

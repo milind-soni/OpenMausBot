@@ -45,6 +45,17 @@ describe("the one-time move's line", () => {
     expect(moveLine({ phase: "finishing", failing: { error: null } }, "local")?.text).toBe("Your bots couldn't move to My Cloud yet.");
   });
 
+  it("names what did not move and why, on a failing line and on the done line, for My Cloud and a server of the person's own", () => {
+    const items = [{ label: "tidy", error: "OpenMausBot on this computer did not answer." }, { label: "Reply to email", error: "This app automation stays on the computer it came from." }];
+    const lines = ["tidy: OpenMausBot on this computer did not answer.", "Reply to email: This app automation stays on the computer it came from."];
+    expect(moveLine({ phase: "copy", failing: { error: "Some of this computer's things did not reach My Cloud.", items } }, "local")).toMatchObject({ kind: "failed", retry: true, extra: lines });
+    expect(moveLine({ phase: "copy", failing: { error: null, items }, place: "Garage server" }, "local")).toMatchObject({ kind: "failed", retry: true, extra: lines, place: "Garage server" });
+    const left = items.slice(1);
+    expect(moveLine({ phase: "done", phone: false, held: [], left }, "cloud")).toMatchObject({ kind: "done", text: "Everything else from this computer is here. These stayed on it:", extra: lines.slice(1) });
+    expect(moveLine({ phase: "done", phone: false, held: [], left, place: "Garage server" }, "cloud")).toMatchObject({ kind: "done", extra: lines.slice(1), place: "Garage server" });
+    expect(moveLine({ phase: "done", phone: false, held: [], left, place: "Garage server" }, "local")).toBeNull();
+  });
+
   it("says once on My Cloud's page what arrived, a key kept for after the trial, and the phone to pair; on this computer, coming home", () => {
     const done = moveLine({ phase: "done", counts: { bots: 4, skills: 2, logins: 2, onePassword: true, chats: 148, routines: 2 }, phone: true, held: ["OpenRouter"] }, "cloud");
     expect(done).toMatchObject({ kind: "done", text: "Everything from this computer is here: 4 bots, 2 skills, 2 logins, 1Password, 148 chats, and 2 routines.", phone: true,

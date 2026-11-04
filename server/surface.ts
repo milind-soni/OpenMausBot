@@ -161,7 +161,7 @@ export function surfaceLabel(surface: Surface): string {
 /** This computer is the person's own: web work goes elsewhere first, and their first-use question is the harness's to ask. */
 const WEB_WORK_ORDER = "For web work such as finding, booking or looking something up, use, in this order:";
 const YOUR_COMPUTER_LAST =
-  " Use their own browser or screen only when the task needs their own signed-in session and nothing else works. Before your first action on it in a request, OpenMausBot asks them once whether you may, at every approval level: do not ask in chat yourself, and if they say no, finish another way. " + PLAIN_WORDS;
+  " Use their own browser or screen only when the task needs their own signed-in session and nothing else works. Before your first action on it in a request, OpenMausBot asks them once whether you may, at every approval level except Full access: do not ask in chat yourself, and if they say no, finish another way. " + PLAIN_WORDS;
 const YOUR_COMPUTER_BESIDE_BROWSER =
   ` This computer is the person's own: their screen, their apps and the browsers they are signed in to. ${WEB_WORK_ORDER} a connected app that does it, your built-in browser, a cloud computer if select_computer offers one.${YOUR_COMPUTER_LAST}`;
 const YOUR_COMPUTER_ALONE =

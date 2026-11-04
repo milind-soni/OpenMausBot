@@ -33,7 +33,9 @@ describe("the card", () => {
     expect(view({ room: room({ plan: { ...max, memoryMb: 8192, fromMemoryMb: 3072 } }) })?.offer?.text).toBe("Max has 8 GB of memory.");
     expect(view({ room: room({ cause: { kind: "disk", usedGb: 9, capGb: 10 } }) })).toMatchObject({ kind: "disk", title: "This Cloud is almost out of space",
       cause: "9 GB of 10 GB used.", offer: { text: "Pro has room for 100 GB." } });
-    expect(view({ usage: { ...usage, trialEndsAt: Date.UTC(2026, 10, 3) } })?.offer?.price).toBe("$49 a month once your trial ends. Nothing is charged today.");
+    const now = Date.UTC(2026, 10, 4, 9), DAY = 86_400_000;
+    expect(view({ usage: { ...usage, trialEndsAt: now + 3 * DAY }, now })?.offer?.price).toBe("$49 a month once your trial ends. Nothing is charged today.");
+    expect(view({ usage: { ...usage, trialEndsAt: now + DAY }, now })?.offer?.price, "a 1-day trial can charge hours later").toBe("$49 a month once your trial ends.");
   });
 
   it("gives the top plan a tip instead of an offer", () => {

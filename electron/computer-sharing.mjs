@@ -561,10 +561,14 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     return { enabled: grant?.enabled === true, folders: Array.isArray(grant?.folders) ? grant.folders : [], terminal: grant?.terminal === true, computer: grant?.computer === true, ...status.get(id) };
   };
   // `resumes`: lending waits (for the Cloud sign-in, say) and resumes by itself, so the server keeps it as lent, not stopped.
+  /** Disconnects still waiting for their Cloud's answer. */
+  const goodbyes = new Set();
   const disconnect = (env, grant, resumes = false) => {
     stop(env.id);
     if (resumes && sleepsHere(env) && sleepGate(env).asleep()) return;
-    if (grant?.secret) void request(env, `/api/shared-computers/${grant.id}/disconnect`, resumes ? { paused: true } : {}, undefined, grant.secret).catch(() => {});
+    if (!grant?.secret) return;
+    const told = request(env, `/api/shared-computers/${grant.id}/disconnect`, resumes ? { paused: true } : {}, undefined, grant.secret).catch(() => {}).finally(() => { goodbyes.delete(told); });
+    goodbyes.add(told);
   };
   const cloudState = env => {
     const grant = env ? records[env.id] : undefined;
@@ -773,6 +777,9 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       if (records[env.id]?.enabled !== true) throw new Error("Lending to My Cloud did not start.");
     },
     paused: () => paused,
+    /** Lending's last requests have been answered or have timed out (10 s at most). Security: a Cloud re-issues its session
+     * cookie in the answer to any request that carried one, so that answer must land before the window's session is cleared. */
+    goodbyesDone: () => Promise.allSettled([...goodbyes, passing]),
     /** Every Cloud of the person's own stops using this computer, across restarts too, until resume(). */
     pause() {
       if (paused || closed) return;

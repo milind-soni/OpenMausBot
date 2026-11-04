@@ -278,7 +278,7 @@ For eligible owner runs on Boat, the static job also runs the selected Linux
 test lanes; their logs appear in groups named for each lane. Fork PRs use
 GitHub-hosted jobs. See [Linux on Boat](docs/ci.md#linux-on-boat).
 
-A `pre-push` hook installed by `pnpm install` runs lint, typecheck and the locale check before a push (about a minute). `git push --no-verify` skips it once; `OMB_SKIP_HOOKS=1` skips it for a session.
+A `pre-push` hook installed by `pnpm install` checks the files a push changes, in seconds: lint, the locale check when a catalog changed, and the size and vocabulary guards when a source they read changed. Typecheck and the suite stay in CI. A checkout without dependencies checks nothing and lets the push go. `git push --no-verify` skips it once; `OMB_SKIP_HOOKS=1` skips it for a session.
 
 Provider fakes under `server/testing/fake-*.ts` must stay dependency-free: they run as bare subprocesses and at least one is copied out of the repo by a test, so a relative import from the repo dies at link time. `server/testing/fakes-self-contained.test.ts` enforces it.
 

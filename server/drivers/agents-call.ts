@@ -76,7 +76,8 @@ function assignmentLine(a: Json): string {
     : typeof a.botId === "string" && a.botId ? a.botId : "a teammate";
   const status = String(a.status ?? "unknown");
   const outcome = typeof a.outcome === "string" && a.outcome && a.outcome !== "done" && a.outcome !== status ? ` (${a.outcome})` : "";
-  const detail = typeof a.outcomeDetail === "string" && a.outcomeDetail.trim() ? `: ${a.outcomeDetail.trim()}` : "";
+  const detail = typeof a.outcomeDetail === "string" && a.outcomeDetail.trim() ? `: ${a.outcomeDetail.trim()}`
+    : typeof a.waiting === "string" && a.waiting ? `: ${a.waiting}` : "";
   return `${id} → ${who}: ${STATUS_WORDS[status] ?? status}${outcome}${detail}`;
 }
 
@@ -385,7 +386,8 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       const state = stateWord[String(thread.state)] ?? String(thread.state);
       const unread = thread.unread === true ? ", unread for the person" : "";
       const handoff = typeof thread.delegationId === "string" && thread.delegationId ? ` [delegation id: ${thread.delegationId}]` : "";
-      return `- #${String(thread.title)} (${where}, ${state}${unread}) [thread id: ${String(thread.threadId)}]${handoff}`;
+      const waiting = typeof thread.waiting === "string" && thread.waiting ? `: ${thread.waiting}` : "";
+      return `- #${String(thread.title)} (${where}, ${state}${waiting}${unread}) [thread id: ${String(thread.threadId)}]${handoff}`;
     });
     return { text: `Threads, newest first:\n${lines.join("\n")}` };
   }

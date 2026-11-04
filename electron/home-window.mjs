@@ -84,8 +84,19 @@ export function homeOf({ journal = null, frozenCloud = null, state = null }) {
   return { kind: "cloud", origin };
 }
 
+/** Nobody here can reach the bots: nobody is signed in, or the account signed in has no way to their Cloud, so the clean
+ * workspace opens (clean-workspace.mjs). An account the Admin can't be asked about isn't that, nor a sign-in still being read:
+ * those are a Cloud that can't be reached yet, never an empty workspace that reads as their bots being gone. */
+export function noWayHome(worked, state) {
+  if (worked.kind !== "signin" || state?.message === "restoring") return false;
+  return worked.other === true || !state?.account?.id || ["signed-out", "connecting", "connected"].includes(state.status);
+}
+
 /** A place besides My Cloud: a team's Cloud, or another Cloud of the person's own (`own`), each the session's. */
 export const otherPlace = (place) => place?.kind === "team" || place?.kind === "own";
+
+/** A place's plan problem. A team's User can't do anything about it, so the screen sends them to its owner (`member`). */
+const planScreen = (machine, place) => ({ screen: "plan", machine, ...(place?.kind === "team" && place.role === "member" ? { member: true } : {}) });
 
 /**
  * This computer's screen for a Cloud the session's list says isn't running, so its address is never looked up: it has ended
@@ -206,7 +217,7 @@ export function routeOf(url, origin) {
  * out changed.
  */
 export function createHomeWindow(deps) {
-  const { journal, frozen, account, restored = async () => {}, window, ensureWindow, localOrigin, cookieFetch, power, go, showLocal,
+  const { journal, frozen, account, restored = async () => {}, window, ensureWindow, localOrigin, cookieFetch, power, go, showLocal, clean = null,
     remembered = () => null, remember = () => {}, left = () => {}, drop = (place) => { if (place.kind === "team") left(place.name); remember(null); },
     splash = () => null, lastInput = () => 0, publish = () => {}, rehomed = () => {}, versionEveryMs = VERSION_EVERY_MS, quietMs = QUIET_MS,
     now = Date.now, timers = DEFAULT_TIMERS, hosts = () => null, readyStore = null, ownMove = () => null, log = () => {} } = deps;
@@ -244,8 +255,10 @@ export function createHomeWindow(deps) {
     }
     if (frozenCloud || awayIn(kept)) await restored();
     const before = home;
-    home = homeOf({ journal: kept, frozenCloud, state: state() });
-    if (home.kind !== before.kind || home.origin !== before.origin) {
+    const worked = homeOf({ journal: kept, frozenCloud, state: state() });
+    // Home is this computer then, in its clean workspace, so a Cloud of this account's own opens from it as for anyone.
+    home = clean && noWayHome(worked, state()) ? { kind: "computer", clean: true, ...(worked.other ? { other: true } : {}) } : worked;
+    if (home.kind !== before.kind || home.origin !== before.origin || home.clean !== before.clean) {
       try { rehomed(home); } catch {}
     }
     return home;
@@ -424,7 +437,7 @@ export function createHomeWindow(deps) {
     const listed = place.kind === "cloud" ? cloudScreen(myListed()) : null;
     if (listed && NOT_RUNNING.has(listed.screen)) { clearRetry(); return toScreen(listed); }
     if (machine && (PLAN_PROBLEMS.has(machine.status) || (place.kind === "team" && machine.hold))) {
-      toScreen({ screen: "plan", machine: PLAN_PROBLEMS.has(machine.status) ? machine.status : "stopped" }); later(); return;
+      toScreen(planScreen(PLAN_PROBLEMS.has(machine.status) ? machine.status : "stopped", place)); later(); return;
     }
     // Its address is never looked up while it is set up: the session's next word (changed()) opens it.
     const setup = machineSetup(machine);
@@ -485,7 +498,10 @@ export function createHomeWindow(deps) {
     const token = ++opens;
     const current = await refresh();
     if (!wanted(token)) return;
-    const target = placeOf({ ask: place, remembered: remembered(), state: state() });
+    // This computer's own copy is the server again before anything of the person's Cloud opens.
+    if (!current.clean && clean?.active()) { await clean.leave(); if (!wanted(token)) return; }
+    // Nobody signed in has nothing to open but the clean workspace; the place stays remembered for when they're back.
+    const target = current.clean && signedOut() ? { kind: "cloud" } : placeOf({ ask: place, remembered: remembered(), state: state() });
     if (target.kind === "cloud" && target.left) { left(target.left); remember(null); }
     if (otherPlace(target)) {
       ensureWindow();
@@ -498,7 +514,7 @@ export function createHomeWindow(deps) {
       if (listed && NOT_RUNNING.has(listed.screen)) { clearRetry(); return toScreen(listed); }
       const setup = machineSetup(target.machine);
       if (setup) { clearRetry(); return toScreen({ screen: "setup", ...setup }); }
-      if (!target.origin) { toScreen({ screen: "plan", machine: target.machine?.status ?? "stopped" }); later(); return; }
+      if (!target.origin) { toScreen(planScreen(target.machine?.status ?? "stopped", target)); later(); return; }
       return connect(target, token, open);
     }
     if (place === "cloud" || target.left) remember(null);
@@ -514,6 +530,8 @@ export function createHomeWindow(deps) {
       asked = null; naming = null;
     }
     if (current.kind === "computer") {
+      if (current.clean && !(await clean.enter())) { if (wanted(token)) { ensureWindow(); clearRetry(); toScreen({ screen: "signin", ...(current.other ? { other: true } : {}) }); } return; }
+      if (!wanted(token)) return;
       clearRetry(); screen = null; status = null; shown = null;
       const win = window();
       const leaving = away || Boolean(win && !win.isDestroyed() && !originOf(win.webContents.getURL()));
@@ -625,7 +643,7 @@ export function createHomeWindow(deps) {
       if (status === "connecting") return void await client.reopen?.();
       if (status !== "signed-out") {
         const current = await refresh();
-        if (!(current.kind === "signin" && current.other)) return void await show();
+        if (!current.other) return void await show();
         await client.signOut?.();
       }
       await client.begin();
@@ -638,7 +656,7 @@ export function createHomeWindow(deps) {
       const after = await refresh();
       const next = shown && shows(shown.origin) ? placeOf({ remembered: remembered(), state: state() }) : null;
       const moved = Boolean(next && (next.kind !== shown.kind || (next.origin ?? null) !== (shown.origin ?? null) || (next.id ?? null) !== (shown.id ?? null)));
-      if (moved || after.kind !== before.kind || after.origin !== before.origin || screen || status) await show();
+      if (moved || after.kind !== before.kind || after.origin !== before.origin || after.clean !== before.clean || screen || status) await show();
     },
     /** The signed-in account is about to change: nothing under way for the one leaving goes on, and the next show() takes
      * the window off whatever it shows of that account. */

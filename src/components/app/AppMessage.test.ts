@@ -155,6 +155,15 @@ describe("a bot's page", () => {
     expect(pool.live()).toEqual(["t1:a1"]);
   });
 
+  it("shows a frameless page as part of the chat: no card around it, still in the sandboxed frame, with its title and tools", async () => {
+    await mount(row(htmlPayload({ border: false })));
+    expect(find("[data-app] > div")!.className).not.toContain("rounded-3xl");
+    expect(find("[data-app-box]")!.className).not.toContain("border-t");
+    expect(frame().getAttribute("sandbox")).toBe("allow-scripts allow-forms");
+    expect(find("[data-app]")!.textContent).toContain("Coffee counter");
+    expect(button("Reload app")).toBeTruthy();
+  });
+
   it("lists what the frame may reach, its size, and what is always off", async () => {
     await mount(row(htmlPayload()));
     await act(async () => button("About this app")!.click());
