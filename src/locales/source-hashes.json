@@ -2832,7 +2832,9 @@
       "server.browser.stoppedWaiting": "0c6d8041de6e6077f9be0ddaddeebe4457e29a1231de7aa6a8b9288704e5ccb2",
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
-      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f"
+      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
+      "mapComposer.willSendViaChief": "002eb9ef4efe4459e760b645a541b65592a3c706eb9f1fe606bd88a601270f92",
+      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -11345,7 +11347,9 @@
       "server.browser.stoppedWaiting": "0c6d8041de6e6077f9be0ddaddeebe4457e29a1231de7aa6a8b9288704e5ccb2",
       "composer.queued.capacityStarter": "b04ed386a880964a1438f12746471df1a3f2dd4894ca97dcb3fbd22b1834da88",
       "composer.queued.seePlans": "d989893356eeff0f22804648f79ee465c509800917fe8d64ec31ab5aa6557220",
-      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f"
+      "settings.threads.starter": "8837e4531b35bb772dcbdd6067cf3a494bca815a6620e7319bd01d9af0e1574f",
+      "mapComposer.willSendViaChief": "002eb9ef4efe4459e760b645a541b65592a3c706eb9f1fe606bd88a601270f92",
+      "mapComposer.sentViaChief": "d041c2b20ba17c607f7195d1a40a4dfbac05e9749aa2471de3341e70d7f0aae1"
     },
     "hi": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
