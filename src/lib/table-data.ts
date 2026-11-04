@@ -52,6 +52,9 @@ export function tableRowOrder(rows: readonly (readonly string[])[], query: strin
   return order;
 }
 
+/** A cell a spreadsheet would read as a formula; a plain number such as -12.50 is a number, not a formula. */
+const FORMULA = /^(?![+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$)[=+\-@\t\r]/i;
+
 export function tableCsv(headers: readonly string[], rows: readonly (readonly string[])[]): string {
-  return Papa.unparse([headers, ...rows], { newline: "\r\n", escapeFormulae: true });
+  return Papa.unparse([headers, ...rows], { newline: "\r\n", escapeFormulae: FORMULA });
 }

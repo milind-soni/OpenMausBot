@@ -15,6 +15,13 @@ it("names a team's Cloud on every screen that waits on it, and keeps My Cloud's 
   expect(homeScreenText({ screen: "signin", name: "Acme" })).toMatchObject({ title: "Sign in to open Acme", action: "sign-in" });
   expect(homeScreenText({ screen: "plan", machine: "stopped", name: "Acme" })).toMatchObject({ title: "Acme isn't running", action: "manage" });
   expect(homeScreenText({ screen: "plan", machine: "stopped" }).title).toBe("My Cloud isn't running");
+  for (const machine of ["stopped", "payment-problem"] as const) {
+    const told = homeScreenText({ screen: "plan", machine, name: "Acme", member: true });
+    expect(told, "a team's User asks its owner, and has nothing to press").toMatchObject({ title: "Acme isn't running", body: "Ask its owner to start it again. Its files are kept for a while.", action: null });
+  }
+  expect(homeScreenText({ screen: "plan", machine: "stopped", name: "Acme" }).body, "whoever pays is told how").toContain("Subscribe again on your Plan page");
+  expect(homeScreenText({ screen: "plan", machine: "payment-problem", name: "Acme" }).action).toBe("manage");
+  expect(homeScreenText({ screen: "plan", machine: "failed", name: "Acme", member: true }).body, "a failed machine isn't anyone's plan").not.toContain("owner");
   expect(homeScreenText({ screen: "waking", name: "Acme" }).title, "only My Cloud is woken").toBe("Waking My Cloud…");
   expect(homeScreenText(null).title).toBe("Opening My Cloud…");
   expect(homeScreenText({ screen: "moving" }).title).toBe("Moving to My Cloud… almost done");

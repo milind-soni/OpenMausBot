@@ -95,6 +95,37 @@ describe("the keys page", () => {
     expect(rowsShown()).not.toContain("elevenlabs");
   });
 
+  it("offers the Live calls service, OpenAI or Azure OpenAI, on the separate live key row", () => {
+    setConfig({ ...fx.config, live: { configured: false, provider: "azure", voice: "", readTypedReplies: true, idleMinutes: 5 } });
+    page();
+    const select = row("liveKey")!.querySelector<HTMLSelectElement>("select")!;
+    expect([...select.options].map((option) => option.value)).toEqual(["openai", "azure"]);
+    expect(select.value).toBe("azure");
+    expect(row("liveKey")!.querySelector('input[type="url"]')).not.toBeNull();
+  });
+
+  it("with Azure chosen, the Live key row asks for an Azure key: required, no OpenAI wording, and no row saying Live uses the OpenAI key", () => {
+    const live = { configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live: { ...live, provider: "azure", azureEndpoint: "https://my-res.openai.azure.com" } });
+    page();
+    const azure = row("liveKey")!;
+    expect(azure.textContent).toContain("Azure OpenAI key for Live calls");
+    expect(azure.textContent).toContain("Required");
+    expect(azure.textContent).not.toContain("Optional");
+    expect(azure.textContent).not.toContain("Separate key");
+    expect(azure.textContent).not.toContain("instead of your OpenAI key");
+    expect([...azure.querySelectorAll("input")].map((input) => input.placeholder)).not.toContain("sk-…");
+    expect(azure.querySelector<HTMLAnchorElement>('a[href*="platform.openai.com"]')).toBeNull();
+    expect(row("liveCalls")).toBeNull();
+
+    setConfig({ ...fx.config, live });
+    page();
+    const openAi = row("liveKey")!;
+    expect(openAi.textContent).toContain("Optional");
+    expect([...openAi.querySelectorAll("input")].map((input) => input.placeholder)).toContain("sk-…");
+    expect(row("liveCalls")).not.toBeNull();
+  });
+
   it("opens a section that holds a saved key, and counts what is connected", () => {
     setConfig({ ...fx.config, box: { configured: true, last4: "c3d4" } });
     page();
