@@ -177,7 +177,7 @@ export const COMPOSIO_PROMPT =
 
 /** The app tools a bot with these apps can call by name, on every engine. */
 const APP_TOOLS_PROMPT: Record<string, { label: string; tools: string }> = {
-  gmail: { label: "Gmail", tools: "gmail.search_emails, gmail.read_email and gmail.read_email_thread" },
+  gmail: { label: "Gmail", tools: "gmail.search_emails, gmail.read_email, gmail.read_email_thread, gmail.create_draft, gmail.list_drafts, gmail.read_draft and gmail.update_draft. Draft requests never authorize sending. Revisions update the existing draft ID; creation always makes another draft. If an action fails or accidentally sends, report that fact accurately; a later draft does not undo a send" },
   googlecalendar: { label: "Google Calendar", tools: "googlecalendar.list_events and googlecalendar.list_calendars" },
 };
 

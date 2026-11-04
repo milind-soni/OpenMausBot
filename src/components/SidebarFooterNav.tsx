@@ -1,13 +1,13 @@
 import { FolderOpen, Globe, Puzzle, UsersRound, Zap } from "lucide-react";
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 
 import { useAppTriggers } from "@/lib/app-triggers";
+import { automationsFrom, hasUnseenProblemRun } from "@/lib/automations";
 import { cn } from "@/lib/cn";
 import { useCloudFilesReady } from "@/lib/cloud-files";
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useWebPanels } from "@/lib/web-panel-preferences";
-import { isRoutineProblemRun } from "@/lib/routines";
 import { useSidebarToolsLayout, type SidebarDensity } from "@/lib/sidebar-preferences";
 import { useStore } from "@/state/store";
 
@@ -85,11 +85,15 @@ export function SidebarAppsButton() {
   );
 }
 
-/** An unseen failed run, or an app trigger in trouble. */
+/** An unseen failed run of an automation the Automations page lists (the same list, so opening it clears the dot), or an app trigger in trouble. */
 export function useAutomationsNeedYou(): boolean {
   const { state } = useStore();
   const appTriggers = useAppTriggers();
-  return state.routineRuns.some((run) => isRoutineProblemRun(run) && !run.seenAt) || appTriggers.triggers.some((trigger) => trigger.enabled && trigger.problem);
+  const routinesOnly = typeof window !== "undefined" && window.ogb?.remoteClient?.active === true;
+  const unseenProblem = useMemo(() => hasUnseenProblemRun(automationsFrom({
+    routines: state.routines, webhooks: routinesOnly ? [] : state.webhooks, appTriggers: appTriggers.triggers, runs: state.routineRuns, bots: state.bots,
+  })), [state.routines, state.webhooks, appTriggers.triggers, state.routineRuns, state.bots, routinesOnly]);
+  return unseenProblem || appTriggers.triggers.some((trigger) => trigger.enabled && trigger.problem);
 }
 
 export function SidebarBottomButtons() {

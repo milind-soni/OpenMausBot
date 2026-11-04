@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
+import { skillCommandTurnText, skillMentions } from "../../shared/skill-command.ts";
 import type { SkillRequestCardData, SkillShareRecord } from "../../shared/skill-request.ts";
 import { narrowestAudience, intersectAudience } from "../bot-visibility.ts";
 import { DATA_DIR, type AppConfig } from "../config.ts";
 import { appendDecision } from "../decision-log.ts";
 import { UNDO_STALE, type DirectApply } from "../direct-apply.ts";
 import {
-  expandImportedSkillCommand, importedSkillListings, importedSkillsFor, importedSkillsPrompt, nativeSkillFolders, readImportedSkillFile, readImportedSkills,
+  importedSkillListings, importedSkillsFor, importedSkillsPrompt, nativeSkillFolders, readImportedSkillFile, readImportedSkills,
   type ImportedSkillView, type SkillTurnEngine,
 } from "../imported-skills.ts";
 import { nativeSkillListing, nativeSkills, readNativeSkillFile } from "../native-skills.ts";
@@ -24,7 +25,7 @@ import {
   updateSharedLearnedSkill,
   type ShareBot,
 } from "../skill-share.ts";
-import { expandSkillCommandTurnText, listSkills, readSkillFile, resolveBotSkills, skillsSystemPrompt, type SkillListing } from "../skills.ts";
+import { enabledSkillFiles, listSkills, readSkillFile, resolveBotSkills, skillsSystemPrompt, type SkillListing } from "../skills.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
 import { claudeUserSkillsEnabled } from "../turn-settings.ts";
 import { TASK_WORKSPACES_DIR } from "../workspace.ts";
@@ -253,17 +254,23 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       return importsFor(bot, conversationSkills(bot, threadId), instance);
     },
 
-    /** `/name` for one of the bot's own, library or imported skills, or one its engine loads by itself. */
+    /** Each `/name` in the message for one of the bot's own, library or imported skills, or one its engine loads by itself. */
     expandSkillCommand(bot: BotRecord, threadId: string, text: string, instance?: TurnInstance): string {
+      const mentioned = skillMentions(text);
+      if (!mentioned.length) return text;
       const assigned = skillsLibraryEnabled(cfg) ? liveAssigned(bot) : undefined;
-      const own = expandSkillCommandTurnText(bot.id, text, assigned);
-      if (own !== text || !text.trimStart().startsWith("/")) return own;
-      const imported = expandImportedSkillCommand(text, importsFor(bot, assigned, instance));
-      if (imported !== text) return imported;
-      // A skill switched off on the Skills page stays off, even when the engine holds one of the same name.
-      const switched = new Set([...resolveBotSkills(bot.id, assigned), ...importedSkillListings(bot.id, new Set())]
-        .filter((skill) => !skill.enabled).map((skill) => skill.name));
-      return expandImportedSkillCommand(text, nativesFor(bot, threadId, instance).filter((skill) => !switched.has(skill.name)));
+      const files = enabledSkillFiles(bot.id, mentioned, assigned);
+      const add = (skills: readonly ImportedSkillView[]) => {
+        for (const skill of skills) if (mentioned.includes(skill.name) && !files.has(skill.name)) files.set(skill.name, skill.file);
+      };
+      if (files.size < mentioned.length) add(importsFor(bot, assigned, instance));
+      if (files.size < mentioned.length) {
+        // A skill switched off on the Skills page stays off, even when the engine holds one of the same name.
+        const switched = new Set([...resolveBotSkills(bot.id, assigned), ...importedSkillListings(bot.id, new Set())]
+          .filter((skill) => !skill.enabled).map((skill) => skill.name));
+        add(nativesFor(bot, threadId, instance).filter((skill) => !switched.has(skill.name)));
+      }
+      return skillCommandTurnText(text, files);
     },
 
     shareNote(bot: BotRecord, threadId: string, enabled: boolean): TurnShareNote {

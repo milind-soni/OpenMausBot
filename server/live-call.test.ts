@@ -13,6 +13,7 @@ import {
   liveInstructions,
   liveSessionsUrl,
   MAX_SDP_BYTES,
+  spokenHangUp,
 } from "./live-call.ts";
 import { CLOUD_HOME_PLACE } from "./system-prompt.ts";
 
@@ -241,5 +242,22 @@ describe("liveErrorMessage", () => {
     expect(liveErrorMessage(400, "session.audio.output.voice")).toMatch(/voice/);
     expect(liveErrorMessage(400, "session.client")).not.toMatch(/voice/);
     expect(liveErrorMessage(400)).toMatch(/call settings/);
+  });
+});
+
+describe("spokenHangUp", () => {
+  it("accepts only a whole, clear request to end the call", () => {
+    for (const text of ["hang up", "Hang up.", "please hang up", "you can hang up now", "okay, bye, hang up", "thanks, you can end the call now",
+      "end the call", "End call please", "can you hang up?", "go ahead and end this call", "let's end the call. Bye!", "um, hang up the call", "that\u2019s all, let\u2019s end the call"]) {
+      expect(spokenHangUp(text), text).toBe(true);
+    }
+    for (const text of ["", "bye", "goodbye", "thanks", "don't hang up", "please don't end the call", "no, hang up", "how do I end the call?",
+      "hang up the poster", "hang up on him", "end the call with Sam", "what's the weather, then hang up", "end it", "should I hang up?"]) {
+      expect(spokenHangUp(text), text).toBe(false);
+    }
+  });
+
+  it("tells the voice to delegate a hang-up request and never to end a call on its own", () => {
+    expect(liveInstructions({ name: "Rigel" })).toContain("- The user clearly asks you to hang up or end the call. Never end or offer to end the call on your own.");
   });
 });

@@ -53,6 +53,7 @@ import {
   composerShouldRefocus,
   composerTakesFocusOnOpen,
   imageAttachmentFromFile,
+  imageBytesLeft,
   imageSlotsLeft,
   imagesThatFit,
   replyTargetTakesFocus,
@@ -95,6 +96,7 @@ import {
   type ComposerSlashCommand,
 } from "@/lib/composer-commands";
 import { useSlashSkills } from "@/lib/use-slash-skills";
+import { randomUuid } from "@/lib/random-uuid";
 
 const supportsAgents = (instances: InstanceInfo[], candidate?: Bot) =>
   Boolean(candidate && instances.find((instance) => instance.instanceId === candidate.modelSelection.instanceId)?.capabilities?.agentsMcp);
@@ -302,13 +304,14 @@ export function Composer({
   const commandCandidates = useMemo(() => {
     if (!slash || slash.start === dismissedSlashAt) return [];
     const available: ComposerSlashCommand[] = [];
-    if (!group?.dm) available.push({
+    const builtIns = slash.start === 0; // Built-in commands only work at the start of a message; skills can be named anywhere.
+    if (builtIns && !group?.dm) available.push({
       kind: "command",
       id: "goal",
       label: "/goal",
       description: t(group ? "composer.command.goalDesc" : "composer.command.goalBotDesc"),
     });
-    if (canLearn) {
+    if (builtIns && canLearn) {
       available.push({
         kind: "command",
         id: "learn",
@@ -316,7 +319,7 @@ export function Composer({
         description: t("composer.command.learnDesc"),
       });
     }
-    if (!group && supportsAgents(state.instances, bot)) available.push({
+    if (builtIns && !group && supportsAgents(state.instances, bot)) available.push({
       kind: "command",
       id: "setup",
       label: "/setup",
@@ -385,7 +388,8 @@ export function Composer({
 
   const pickCommand = (command: ComposerSlashCommand | undefined) => {
     if (!slash || !command) return;
-    const replacement = command.kind === "skill" ? `${command.label} `
+    const spaceAfter = /^\s/.test(text.slice(slash.end)) ? "" : " ";
+    const replacement = command.kind === "skill" ? `${command.label}${spaceAfter}`
       : command.id === "learn" ? "/learn " : command.id === "setup" ? "/setup " : "";
     const next = replaceComposerSlashTrigger(text, slash, replacement);
     editText(next.text);
@@ -510,6 +514,7 @@ export function Composer({
         getPath: pathForFile,
         uploadImage,
         imageSlots: imageSlotsLeft(attachments),
+        imageBytes: imageBytesLeft(attachments),
       });
       if (added.length) addAttachments(added);
       if (notice) setAttachmentNotice(notice);
@@ -579,7 +584,7 @@ export function Composer({
     const sentDraft: ComposerDraftSnapshot = {
       draftId,
       revision: draftRevision(draftId),
-      sendId: restoredSendId(draftId) ?? crypto.randomUUID(),
+      sendId: restoredSendId(draftId) ?? randomUuid(),
       text,
       requestText: body,
       attachments: [...attachments],
@@ -630,7 +635,7 @@ export function Composer({
         dispatch({ type: "error", message: t("composer.error.clipboardImage") });
         return;
       }
-      const kept = imagesThatFit(imageFiles, imageSlotsLeft(attachments), setAttachmentNotice);
+      const kept = imagesThatFit(imageFiles, imageSlotsLeft(attachments), setAttachmentNotice, imageBytesLeft(attachments));
       changeDraftAttachmentPending(draftId, true);
       void (async () => {
         try {
