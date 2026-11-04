@@ -6403,6 +6403,7 @@
   "imageGen.test.rejected": "O provedor recusou esta chave. Confira ou cole uma nova.",
   "imageGen.test.unreachable": "Não foi possível falar com o provedor. Confira a conexão ou a URL.",
   "imageGen.test.unexpected": "O provedor deu uma resposta inesperada.",
+  "imageGen.test.noUrl": "Adicione a URL base primeiro, para que a chave vá só para o seu endpoint.",
   "imageGen.maxPerTurn.label": "Imagens por resposta",
   "imageGen.maxPerTurn.help": "O máximo de imagens que um bot pode criar numa resposta.",
   "imageGen.key.openai": "Chave de API da OpenAI",

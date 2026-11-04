@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { generateImage, imageSlots } from "./image-generation.ts";
+import { IMAGE_DEFAULT_MODELS } from "../shared/image-generation.ts";
+import { generateImage, imageGenerationReady, imageSlots } from "./image-generation.ts";
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
 const BOTH = {
@@ -183,5 +184,14 @@ describe("what the person learns when a provider fails", () => {
     expect(imageSlots({ imageGen: { customModel: "local/image", primary: { provider: "custom" } } }).primary).toEqual({ provider: "custom", model: "local/image" });
     expect(imageSlots({ imageGen: { customModel: "local/image", primary: { provider: "openai" }, fallback: { provider: "custom" } } }).fallback).toEqual({ provider: "custom", model: "local/image" });
     expect(imageSlots({ imageGen: { customModel: "local/image", primary: { provider: "custom", model: "other/image" } } }).primary.model).toBe("other/image");
+  });
+
+  it("never uses an API key that was saved as a model, so it is never sent or shown as one", () => {
+    const gateway = { customUrl: "http://127.0.0.1:4000/v1", customApiKey: "my-private-gateway-key" };
+    const pasted = imageSlots({ imageGen: { ...gateway, customModel: "my-private-gateway-key", primary: { provider: "custom" } } });
+    expect(pasted.primary).toEqual({ provider: "custom", model: "" });
+    expect(imageGenerationReady({ imageGen: { ...gateway, customModel: "my-private-gateway-key", primary: { provider: "custom" } } })).toBe(false);
+    expect(imageSlots({ imageGen: { ...gateway, primary: { provider: "custom", model: "sk-proj-abcdefghijklmnop" } } }).primary.model).toBe("");
+    expect(imageSlots({ openrouter: { key: "or-key" }, imageGen: { primary: { provider: "openrouter", model: "or-key" } } }).primary.model).toBe(IMAGE_DEFAULT_MODELS.openrouter);
   });
 });

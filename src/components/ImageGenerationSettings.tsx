@@ -45,6 +45,7 @@ function imageTestText(provider: ImageProvider, result: ImageProviderTest): { ok
   if (result.reason === "rejected") return { ok: false, text: t("imageGen.test.rejected") };
   if (result.reason === "unreachable") return { ok: false, text: t("imageGen.test.unreachable") };
   if (result.reason === "no_key") return { ok: false, text: t("imageGen.key.missing") };
+  if (result.reason === "no_url") return { ok: false, text: t("imageGen.test.noUrl") };
   return { ok: false, text: t("imageGen.test.unexpected") };
 }
 type ImageGenStatus = NonNullable<ConfigStatus["imageGen"]>;

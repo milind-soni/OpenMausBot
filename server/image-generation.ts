@@ -1,7 +1,7 @@
 import type { ReadableStreamReadResult } from "node:stream/web";
 import { z } from "zod";
 
-import { IMAGE_DEFAULT_MODELS, normalizeImageGenerationUrl, type ImageGenerationConfig, type ImageProvider } from "../shared/image-generation.ts";
+import { IMAGE_DEFAULT_MODELS, IMAGE_PROVIDERS, looksLikeApiKey, normalizeImageGenerationUrl, type ImageGenerationConfig, type ImageProvider } from "../shared/image-generation.ts";
 import { decodeGeneratedImage } from "./generated-image.ts";
 
 export const IMAGE_GENERATION_TIMEOUT_MS = 120_000;
@@ -118,10 +118,16 @@ export function customImageUrl(cfg: ImageCredentials): string {
 }
 
 export function imageSlots(cfg: ImageCredentials): { primary: ImageSlot; fallback: ImageSlot | null } {
+  // A key saved as a model before saves were checked is never sent or shown: the slot acts as if no model was typed.
+  const keys = new Set(IMAGE_PROVIDERS.map((provider) => imageProviderKey(cfg, provider)).filter(Boolean));
+  const usable = (model?: string) => {
+    const id = model?.trim() ?? "";
+    return id && !keys.has(id) && !looksLikeApiKey(id) ? id : "";
+  };
   // Custom has no default model, so a Custom slot saved without one uses the last model typed for Custom.
   const resolveSlot = (provider: ImageProvider, model?: string): ImageSlot => ({
     provider,
-    model: model?.trim() || (provider === "custom" ? cfg.imageGen?.customModel?.trim() : "") || IMAGE_DEFAULT_MODELS[provider],
+    model: usable(model) || (provider === "custom" ? usable(cfg.imageGen?.customModel) : "") || IMAGE_DEFAULT_MODELS[provider],
   });
   const saved = cfg.imageGen?.primary;
   const primary = saved ? resolveSlot(saved.provider, saved.model) : resolveSlot(cfg.imageGen?.provider ?? "openai");

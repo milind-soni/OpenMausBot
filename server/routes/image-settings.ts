@@ -12,9 +12,13 @@ import { PASS, type RouteHandler } from "./table.ts";
 const GEMINI_OPENAI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai";
 const testSchema = z.object({ provider: z.enum(IMAGE_PROVIDERS) });
 
-function keyCheckTarget(cfg: ImageCredentials, provider: ImageProvider): { provider: ProviderKeyKind; url?: string } {
+/** Every openaiCompat target carries its own URL: without one, the key check would fall back to OpenRouter. */
+function keyCheckTarget(cfg: ImageCredentials, provider: ImageProvider): { provider: ProviderKeyKind; url?: string } | null {
   if (provider === "gemini") return { provider: "openaiCompat", url: GEMINI_OPENAI_BASE };
-  if (provider === "custom") return { provider: "openaiCompat", url: customImageUrl(cfg) };
+  if (provider === "custom") {
+    const url = customImageUrl(cfg);
+    return url ? { provider: "openaiCompat", url } : null;
+  }
   return { provider };
 }
 
@@ -33,9 +37,11 @@ async function openrouterHasModel(model: string, fetchImpl: typeof fetch): Promi
 }
 
 export async function testImageProvider(cfg: ImageCredentials, provider: ImageProvider, fetchImpl: typeof fetch = fetch): Promise<ImageProviderTest> {
+  const target = keyCheckTarget(cfg, provider);
+  if (!target) return { ok: false, reason: "no_url" };
   const key = imageProviderKey(cfg, provider);
   if (!key) return { ok: false, reason: "no_key" };
-  const verdict = await checkProviderKey({ ...keyCheckTarget(cfg, provider), key }, fetchImpl);
+  const verdict = await checkProviderKey({ ...target, key }, fetchImpl);
   if (!verdict.ok) return verdict;
   if (provider === "openrouter") {
     const { primary, fallback } = imageSlots(cfg);
@@ -58,7 +64,7 @@ export function createImageSettingsRoutes(deps: { config: () => ImageCredentials
       if (!checked.success) return json(res, 400, { error: checked.error.message });
       const generated = await generateAvatarImage(deps.config(), {
         name: profile.patch.name ?? "", title: profile.patch.title ?? "", description: profile.patch.description ?? "",
-      }, checked.data.prompt);
+      }, checked.data.prompt, deps.fetch);
       return json(res, 200, { dataUrl: `data:${generated.mime};base64,${generated.bytes.toString("base64")}` });
     }
     if (path === "/api/images/openrouter-models" && method === "GET") {

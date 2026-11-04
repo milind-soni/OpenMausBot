@@ -7431,6 +7431,7 @@
   "imageGen.test.rejected": "The provider refused this key. Check it or paste a new one.",
   "imageGen.test.unreachable": "Could not reach the provider. Check the connection or the URL.",
   "imageGen.test.unexpected": "The provider gave an unexpected answer.",
+  "imageGen.test.noUrl": "Add the base URL first, so the key is only sent to your endpoint.",
   "imageGen.maxPerTurn.label": "Images per reply",
   "imageGen.maxPerTurn.help": "The most images a bot may create in one reply.",
   "imageGen.key.openai": "OpenAI API key",

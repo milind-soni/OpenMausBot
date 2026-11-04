@@ -23,7 +23,6 @@ export async function startFakeImageApi(options: { port?: number } = {}): Promis
       let parsed: Record<string, unknown> = {};
       try { parsed = JSON.parse(body) as Record<string, unknown>; } catch {}
       requests.push(parsed);
-      process.stderr.write(`${JSON.stringify(parsed)}\n`);
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ data: [{ b64_json: PNG_1X1 }] }));
     });
   });

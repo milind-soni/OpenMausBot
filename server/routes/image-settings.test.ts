@@ -66,6 +66,18 @@ describe("the OpenRouter image model list in Settings", () => {
   });
 });
 
+describe("previewing a bot avatar from Settings", () => {
+  it("draws the avatar with the image provider and answers it as a data URL", async () => {
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ data: [{ b64_json: png.toString("base64") }] }));
+    const route = createImageSettingsRoutes({ config: () => ({ imageGen: { key: "openai-image-key", primary: { provider: "openai" } } }), fetch: fetchImpl });
+    const { answer } = await call(route, "/api/bot-defaults/avatar", "POST", { profile: { name: "Scout" }, prompt: "a blue owl" });
+    expect(answer).toEqual({ status: 200, body: { dataUrl: `data:image/png;base64,${png.toString("base64")}` } });
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toBe("https://api.openai.com/v1/images/generations");
+    expect(String(fetchImpl.mock.calls[0]?.[1]?.body)).toContain("a blue owl");
+  });
+});
+
 describe("testing an image provider from Settings, without making an image", () => {
   const openrouter = (model?: string): ImageCredentials => ({ openrouter: { key: "or-key" }, imageGen: { primary: { provider: "openrouter", ...(model ? { model } : {}) } } });
   const answers = (routes: Record<string, () => Response>) => vi.fn<typeof fetch>(async (url) => {
@@ -102,6 +114,15 @@ describe("testing an image provider from Settings, without making an image", () 
   it("sends a Gemini key to Google's OpenAI-compatible model list", async () => {
     const fetchImpl = answers({ "https://generativelanguage.googleapis.com/v1beta/openai/models": () => Response.json({ data: [{ id: "gemini-2.5-flash-image" }] }) });
     expect((await test({ imageGen: { geminiKey: "AIza-key" } }, "gemini", fetchImpl)).verdict).toEqual({ ok: true, check: "models" });
+  });
+
+  it("never sends a Custom key anywhere while Custom has no usable URL", async () => {
+    const none = vi.fn<typeof fetch>();
+    for (const customUrl of [undefined, "not a url"]) {
+      const cfg: ImageCredentials = { imageGen: { customApiKey: "private-gateway-key", customUrl, primary: { provider: "custom", model: "local/image" } } };
+      expect((await test(cfg, "custom", none)).verdict).toEqual({ ok: false, reason: "no_url" });
+    }
+    expect(none).not.toHaveBeenCalled();
   });
 
   it("refuses a request that names no known provider", async () => {

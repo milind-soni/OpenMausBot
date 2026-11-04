@@ -10,7 +10,7 @@ export const IMAGE_DEFAULT_MODELS: Record<ImageProvider, string> = {
 /** What Settings' Test learns about a provider; no image is made. */
 export type ImageProviderTest =
   | { ok: true; check: "authentication" | "models"; freeTier?: boolean }
-  | { ok: false; reason: "no_key" | "rejected" | "unreachable" | "unexpected"; status?: number }
+  | { ok: false; reason: "no_key" | "no_url" | "rejected" | "unreachable" | "unexpected"; status?: number }
   | { ok: false; reason: "model_missing"; model: string };
 
 export interface ImageModelChoice {
@@ -60,6 +60,13 @@ export interface ImageGenerationConfig {
 
 /** A deliberately configured Images API endpoint, not a provider-returned URL.
  * Local HTTP is useful for self-hosted routers; internet endpoints require TLS. */
+const API_KEY_SHAPE = /^(sk-|sk_|xai-|gsk_|AIza)[A-Za-z0-9_-]{12,}$/;
+
+/** A value pasted into a model field that has the shape of a provider's API key. */
+export function looksLikeApiKey(value: string): boolean {
+  return API_KEY_SHAPE.test(value.trim());
+}
+
 export function normalizeImageGenerationUrl(value: string): string {
   const message = "Use an HTTPS API base URL, or HTTP for a local router, without passwords, query parameters or fragments";
   let url: URL;
