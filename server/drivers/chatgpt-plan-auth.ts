@@ -86,6 +86,8 @@ export class ChatGptPlanAuthController {
   private disposed = false;
   private starting: Promise<ProviderAuthenticationStart> | null = null;
   private retryClientId: string | null = null;
+  /** Refusals this run already knows about, cleared with the saved list on sign-in and sign-out. */
+  private readonly refusedNow = new Set<string>();
 
   constructor(options: Options) {
     if (!isAbsolute(options.directory)) throw new Error("ChatGPT credential storage must use an absolute path.");
@@ -125,13 +127,20 @@ export class ChatGptPlanAuthController {
     writeFileAtomic(join(this.options.directory, "credentials.json"), JSON.stringify(record), { mode: 0o600 });
   }
   private refusedPath(): string { return join(this.options.directory, "refused-models.json"); }
+  private savedRefused(subject: string): string[] {
+    const raw = readJson(this.refusedPath());
+    if (raw === null) return [];
+    const saved = object(raw);
+    return saved.subject === subject && Array.isArray(saved.models) ? saved.models.filter((slug): slug is string => string(slug, 256)) : [];
+  }
   private refusedFor(subject: string): string[] {
-    try {
-      const raw = readJson(this.refusedPath());
-      if (raw === null) return [];
-      const saved = object(raw);
-      return saved.subject === subject && Array.isArray(saved.models) ? saved.models.filter((slug): slug is string => string(slug, 256)) : [];
-    } catch { return []; }
+    let saved: string[] = [];
+    try { saved = this.savedRefused(subject); } catch { /* An unreadable list hides nothing it can't read. */ }
+    return [...new Set([...saved, ...this.refusedNow])];
+  }
+  private clearRefused(): void {
+    this.refusedNow.clear();
+    rmSync(this.refusedPath(), { force: true });
   }
   /** Models ChatGPT refused for the signed-in account although /models lists them ("The 'gpt-6.1-sol' model is not
    * supported when using Codex with a ChatGPT account."). Kept until this account signs out or signs in again. */
@@ -143,10 +152,13 @@ export class ChatGptPlanAuthController {
   }
   async refuseModel(slug: string): Promise<void> {
     if (this.disposed || !string(slug, 256)) return;
+    // Seen at once by the next turn, before the saved list below is written under the lock.
+    this.refusedNow.add(slug);
     this.prepare();
     await locked(this.options.directory, async () => {
       const subject = this.read()?.subject;
-      const models = subject ? this.refusedFor(subject) : [];
+      // A saved list that can't be read throws here, so it is never overwritten with this one model.
+      const models = subject ? this.savedRefused(subject) : [];
       if (subject && !models.includes(slug)) writeFileAtomic(this.refusedPath(), JSON.stringify({ subject, models: [...models, slug] }), { mode: 0o600 });
     });
   }
@@ -313,7 +325,7 @@ export class ChatGptPlanAuthController {
         if (this.disposed || flow.status.phase !== "waiting" || flow.abort.signal.aborted) return;
         if (JSON.stringify(this.read()) !== JSON.stringify(flow.previous)) throw new Error("The selected ChatGPT account changed during sign-in. Start again.");
         this.save({ clientId, hostId: flow.hostId, ...identity, tokens });
-        rmSync(this.refusedPath(), { force: true });
+        this.clearRefused();
         this.retryClientId = null;
         this.finish(flow, tokens.scopes.includes(DIRECT_SCOPE) ? "succeeded" : "failed", tokens.scopes.includes(DIRECT_SCOPE) ? undefined : CONSENT);
       });
@@ -424,7 +436,7 @@ export class ChatGptPlanAuthController {
       } catch { /* Sign-out is local even if OpenAI is temporarily unavailable. */ }
       delete record.tokens;
       this.save(record);
-      rmSync(this.refusedPath(), { force: true });
+      this.clearRefused();
       if (!revoked) throw Object.assign(new Error("Signed out locally, but remote revocation was not confirmed. Disconnect OpenMausBot in ChatGPT Settings → Usage to end access there."), { code: "chatgpt_revocation_unconfirmed" });
     });
   }

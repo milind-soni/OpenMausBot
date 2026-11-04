@@ -1421,6 +1421,21 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       expect(seen.calls.find((call: { method: string }) => call.method === "thread/start").params.model).toBe("gpt-fixture");
     });
 
+    it("takes the refused model off the menu at once, even when it was the account's only model", async () => {
+      plan();
+      let refused: string[] = [];
+      vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockImplementation(async () => {
+        const options = [{ id: "gpt-6.1-sol", label: "GPT-6.1 Sol" }].filter((option) => !refused.includes(option.id));
+        return { default: options[0]?.id ?? "", options };
+      });
+      vi.spyOn(ChatGptPlanAuthController.prototype, "refusedModels").mockImplementation(() => refused);
+      vi.spyOn(ChatGptPlanAuthController.prototype, "refuseModel").mockImplementation(async (slug) => { refused = [...refused, slug]; });
+      await create({ mode: "plan-model-refused", authMode: "chatgpt-plan" });
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "t-plan-only-refused", text: "go", model: "gpt-6.1-sol" });
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      expect(instance.models).toEqual({ default: "", options: [] });
+    });
+
     it("never hides a model for a ChatGPT plan error that isn't ChatGPT refusing that model", async () => {
       plan();
       const refuse = vi.spyOn(ChatGptPlanAuthController.prototype, "refuseModel").mockResolvedValue();

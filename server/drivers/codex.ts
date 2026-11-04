@@ -521,6 +521,13 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       }
       try { writeStartupModelCache(instanceId, models); } catch {}
     };
+    // Only ChatGPT's refusal of a model for this account hides it from the account's list; other errors never do.
+    const hidePlanRefusedModel = (model: string | undefined, raw: string, route: CodexRoute) => {
+      if (!planAuth || !model || !codexPlanModelRefused(raw, route)) return;
+      const options = models.options.filter(option => option.id !== model);
+      models = { default: models.default === model ? options[0]?.id ?? "" : models.default, options };
+      void planAuth.refuseModel(model).then(() => refreshModels(true)).catch(() => {});
+    };
     // Codex's model list ships with the CLI: updating 0.155.1 to 0.162.1 in place adds gpt-6.1-sol.
     let modelsCliVersion: string | null = null;
     let startupModelRefresh: Promise<void> | null = null;
@@ -645,11 +652,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const chatgptTurn = ownLogin &&
         decodeCodexSelection(turn.model || models.default).modelProvider === OFFICIAL_CODEX_PROVIDER;
       const route: CodexRoute = plan ? "plan" : chatgptTurn ? "own" : "other";
-      // Only ChatGPT's refusal of this model for this account hides it from the account's list; other errors never do.
-      const hideRefusedModel = (raw: string) => {
-        const model = turn.model;
-        if (planAuth && model && codexPlanModelRefused(raw, route)) void planAuth.refuseModel(model).then(() => refreshModels(true)).catch(() => {});
-      };
+      const hideRefusedModel = (raw: string) => hidePlanRefusedModel(turn.model, raw, route);
       const signedOut = chatgptTurn && await loginCheck(childEnv()) === "missing";
       assertPlanCurrent();
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
@@ -1719,7 +1722,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         model: selection.model ?? id,
         modelProvider: selection.modelProvider,
         providerArgs: planAuth || config.managed ? providerArgs : codexLocalProviderArgs(env, id),
-        describeError: (message) => codexUserError(message, planAuth ? "plan" : selection.modelProvider === OFFICIAL_CODEX_PROVIDER ? "own" : "other"),
+        describeError: (message) => {
+          const route: CodexRoute = planAuth ? "plan" : selection.modelProvider === OFFICIAL_CODEX_PROVIDER ? "own" : "other";
+          hidePlanRefusedModel(selection.model ?? id, message, route);
+          return codexUserError(message, route);
+        },
       });
     }, options);
   };

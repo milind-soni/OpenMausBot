@@ -144,6 +144,16 @@ describe("official ChatGPT plan OAuth", () => {
     await controller.signOut();
     expect(controller.refusedModels()).toEqual([]);
   });
+  it("knows a refusal at once and never overwrites a saved list it can't read", async () => {
+    const controller = create(); await callback(controller);
+    const saving = controller.refuseModel("gpt-6.1-sol");
+    expect(controller.refusedModels()).toEqual(["gpt-6.1-sol"]);
+    await saving;
+    const path = join(directory, "refused-models.json");
+    writeFileSync(path, "{not json", { mode: 0o600 });
+    await expect(controller.refuseModel("gpt-fixture")).rejects.toThrow();
+    expect(readFileSync(path, "utf8")).toBe("{not json");
+  });
   it.each(["nonce", "issuer", "audience", "future", "expired", "signature"])("rejects %s identity errors without saving credentials", async (failure) => {
     mode = failure; const controller = create();
     expect(await callback(controller)).toMatchObject({ phase: "failed", message: expect.stringContaining("could not be verified") });
