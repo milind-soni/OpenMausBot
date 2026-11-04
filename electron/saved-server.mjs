@@ -46,6 +46,7 @@ export async function reopenSavedServer({ origin }, { saved, fetch: fetchImpl, s
   const entry = origin ? saved().find((candidate) => candidate.origin === origin) ?? null : null;
   if (!entry) return false;
   if (!(await serverAnswers(entry.origin, fetchImpl))) return false;
+  if (!saved().some((candidate) => candidate.id === entry.id)) return false;
   if (!still()) return false;
   return Boolean(await opened(entry));
 }

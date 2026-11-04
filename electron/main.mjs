@@ -1576,7 +1576,8 @@ async function workspaceMenuAction(action) {
   }
 }
 
-function navigateMainWindow(url) {
+function navigateMainWindow(url, keepingRecovery = false) {
+  if (!keepingRecovery) homeWindow.cancel();
   if (!mainWindow || mainWindow.isDestroyed()) return Promise.resolve(false);
   return mainWindow.loadURL(url).then(() => true, () => false);
 }
@@ -1687,6 +1688,7 @@ async function switchLocalEnvironmentTo(targetDir, targetId, quiet = false) {
 
 async function switchEnvironment(id) {
   if ((id === environmentsState.activeId && !homeWindow.asking()) || (id !== LOCAL_ID && !environmentsState.environments.some((entry) => entry.id === id))) return;
+  homeWindow.cancel();
   const entry = environmentsState.environments.find((candidate) => candidate.id === id);
   if (entry?.team || entry?.cloud) return void await showHome({ place: entry.team ? { team: entry.team.id, name: entry.name } : { cloud: entry.cloud.id, name: entry.name } });
   homePlaces.remember(null);
@@ -2555,6 +2557,7 @@ ipcMain.handle("cloud-account:openTeam", localWorkspaceOnly("cloud-account:openT
   const current = ensureCloudAccount().state();
   const team = current.status === "connected" ? current.teams?.find(entry => entry.id === teamId) ?? null : null;
   if (!team) throw new Error("You're not in that team.");
+  homeWindow.cancel();
   await showHome({ place: { team: team.id, name: team.name } });
 }));
 // Cancel trial / Cancel plan and Keep my plan: the page sends the survey's words only; the Cloud is the verified session's own.
@@ -2666,15 +2669,15 @@ const homeWindow = createHomeWindow({ clean: cleanWorkspace, journal: oneHome.jo
   hosts: () => session.defaultSession, readyStore: jsonFile(path.join(app.getPath("userData"), "cloud-ready.json")), ownMove: () => ownHome?.underWay() ?? null,
   remembered: homePlaces.remembered, remember: homePlaces.remember, left: homePlaces.left, drop: homePlaces.drop,
   publish: view => { if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send("home:state-changed", view); },
-  go: (url, origin, place) => { if (place?.kind === "team" || place?.kind === "own") { activatePlace(place); if (place.kind === "team") teamProfileSeeds.opened(place.origin); } else if (origin) activateCloud(origin); else if (activeEnvironment(environmentsState)) persistEnvironments(withActive(environmentsState, LOCAL_ID)); return navigateMainWindow(url); },
-  reopen: (place, still) => reopenSavedServer(place, { still, saved: () => environmentsState.environments, fetch: (...args) => session.defaultSession.fetch(...args), opened: async (entry) => { homePlaces.remember(null); persistEnvironments(withActive(environmentsState, entry.id)); return navigateMainWindow(activeOrigin()); } }),
+  go: (url, origin, place) => { if (place?.kind === "team" || place?.kind === "own") { activatePlace(place); if (place.kind === "team") teamProfileSeeds.opened(place.origin); } else if (origin) activateCloud(origin); else if (activeEnvironment(environmentsState)) persistEnvironments(withActive(environmentsState, LOCAL_ID)); return navigateMainWindow(url, true); },
+  reopen: (place, still) => reopenSavedServer(place, { still, saved: () => environmentsState.environments.filter(handSaved), fetch: (...args) => session.defaultSession.fetch(...args), opened: async (entry) => { homePlaces.remember(null); persistEnvironments(withActive(environmentsState, entry.id)); return navigateMainWindow(activeOrigin(), true); } }),
   showLocal: leaving => { if (!mainWindow || mainWindow.isDestroyed()) return createWindow(); if (!leaving) return; persistEnvironments(withActive(environmentsState, LOCAL_ID)); return navigateMainWindow(rendererOrigin()); } });
 installHomeWindowIpc({ ipcMain, homeWindow, cloudPage: cloudPageAsking });
 /** Every path that shows the window: My Cloud once it is the person's home, else as before. */
 function showHome(options) {
   return homeWindow.show(options).catch(error => slog(`home: ${error?.message ?? error}`));
 }
-const openOwnCloud = id => showHome({ place: { cloud: id, name: environmentsState.environments.find(entry => entry.cloud?.id === id)?.name } });
+const openOwnCloud = id => { homeWindow.cancel(); return showHome({ place: { cloud: id, name: environmentsState.environments.find(entry => entry.cloud?.id === id)?.name } }); };
 // The rail and its ＋ (cloud-rail.mjs): its list for this app's page and hosted Clouds' pages only, opened through switchEnvironment.
 const railList = () => { ownHome?.refresh(); return railPlaces({ saved: environmentsState, home: homeWindow.cloudOrigin() ?? ownHome?.origin() ?? null, mine: myCloud(), state: desktopRemoteAccess ? null : cloudAccount?.state(), offers: entry => !desktopRemoteAccess && ownHome?.offers(entry) === true }); };
 // The rail as the window's own chrome (chrome-rail.mjs): this app's page beside every place's page, the one that lists.

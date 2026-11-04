@@ -225,6 +225,7 @@ export function createHomeWindow(deps) {
     splash = () => null, lastInput = () => 0, publish = () => {}, rehomed = () => {}, versionEveryMs = VERSION_EVERY_MS, quietMs = QUIET_MS,
     now = Date.now, timers = DEFAULT_TIMERS, hosts = () => null, readyStore = null, ownMove = () => null, log = () => {} } = deps;
   let home = { kind: "computer" }, screen = null, status = null, opens = 0, retry = null, tries = 0, loaded = null, newer = false, repairing = null;
+  let recovering = null;
   /** My Cloud asked for before the move made it home (`{ open }`), until its page loads or the person goes elsewhere;
    * `naming`: since when, and how often, a brand-new My Cloud's name was not found. */
   let asked = null, naming = null;
@@ -251,9 +252,8 @@ export function createHomeWindow(deps) {
     clock.seen(state());
     const kept = parseJournal(journal());
     let frozenCloud = null, frozenPlace = null;
-    if (!kept) {
+    if (!awayIn(kept)) {
       const marker = await frozen().catch(() => null);
-      // A freeze for a server of the person's own names it (`place`): home is that server, shown as any saved server is.
       if (marker?.frozen && !marker.place) frozenCloud = typeof marker.cloud === "string" ? marker.cloud : true;
       else if (marker?.frozen && marker.place) frozenPlace = { origin: typeof marker.cloud === "string" ? marker.cloud : null, place: String(marker.place) };
     }
@@ -295,6 +295,11 @@ export function createHomeWindow(deps) {
   const shows = (origin) => {
     const win = window();
     return Boolean(win && !win.isDestroyed()) && originOf(win.webContents.getURL()) === origin;
+  };
+  const onOwnPage = () => {
+    const win = window();
+    const at = win && !win.isDestroyed() ? originOf(win.webContents.getURL()) : null;
+    return !at || at === localOrigin();
   };
   const onScreen = () => {
     const win = window();
@@ -500,6 +505,7 @@ export function createHomeWindow(deps) {
    * "cloud" for My Cloud, `{ team }` for a team's Cloud, `{ cloud }` for another of the person's own, else the place
    * remembered from last time. */
   async function show({ open = null, place = null } = {}) {
+    if (recovering) { if (!open && !place) return; recovering = null; }
     const token = ++opens;
     const current = await refresh();
     if (!wanted(token)) return;
@@ -535,21 +541,23 @@ export function createHomeWindow(deps) {
       asked = null; naming = null;
     }
     if (current.kind === "computer") {
-      // A copy frozen by a move to a server of the person's own is never shown; a move under way keeps its own screen.
       const parkedAt = current.frozenPlace;
-      if (!current.clean && parkedAt && !ownMove() && !(parkedAt.origin && shows(parkedAt.origin))) {
+      if (!current.clean && parkedAt && !ownMove() && onOwnPage()) {
         clearRetry(); screen = null; status = null; shown = null; away = false;
         ensureWindow();
         let slow = null;
-        const back = await Promise.race([
-          reopen(parkedAt, () => wanted(token)).catch(() => false),
-          new Promise((done) => { slow = timers.set(() => done(false), OPEN_MS); }),
-        ]);
-        timers.clear(slow);
-        if (!wanted(token)) return;
-        if (back) return;
-        toScreen({ screen: "offline", reason: `Your bots are on ${parkedAt.place}.` });
-        return later();
+        const mine = {}; recovering = mine;
+        try {
+          const back = await Promise.race([
+            reopen(parkedAt, () => wanted(token)).catch(() => false),
+            new Promise((done) => { slow = timers.set(() => done(false), OPEN_MS); }),
+          ]);
+          timers.clear(slow);
+          if (!wanted(token)) return;
+          if (back) return;
+          toScreen({ screen: "offline", reason: `Your bots are on ${parkedAt.place}.` });
+          return later();
+        } finally { if (recovering === mine) recovering = null; }
       }
       if (current.clean && !(await clean.enter())) { if (wanted(token)) { ensureWindow(); clearRetry(); toScreen({ screen: "signin", ...(current.other ? { other: true } : {}) }); } return; }
       if (!wanted(token)) return;
@@ -718,12 +726,11 @@ export function createHomeWindow(deps) {
      * computer's screen says so and the window tries again by itself. False for any other server. */
     failed(url, code = 0) {
       const at = originOf(url), place = placeOrigin(), mine = readyCloudOrigin(state());
-      // The window's own way back to a frozen copy's server (a recovery at launch): its page didn't load, so this
-      // computer's screen says where the bots are and looks again, never the generic dialog and the way to Local.
       const parkedAt = home.frozenPlace;
       if (!place && parkedAt?.origin && at === parkedAt.origin) {
         ++opens;
-        toScreen({ screen: "offline", reason: `Your bots are on ${parkedAt.place}.` });
+        if (ownMove()) tell();
+        else toScreen({ screen: "offline", reason: `Your bots are on ${parkedAt.place}.` });
         later();
         return true;
       }
@@ -749,6 +756,7 @@ export function createHomeWindow(deps) {
     },
     /** Signs the team on screen in again now, without moving the page (the timer's own step; also for tests). */
     renew: () => renew(),
+    cancel() { opens++; recovering = null; clearRetry(); screen = null; status = null; shown = null; away = false; },
     close() { opens++; clearRetry(); clearRenewal(); timers.clear(watcher); },
   };
 }

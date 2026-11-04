@@ -55,8 +55,7 @@ test("a server of the person's own their bots moved to is no Cloud: no sign-in, 
 test("a frozen copy left on this computer's own page goes back to the server it names, or says where the bots are", async () => {
   const garage = "https://garage.example.test";
   const marker = { frozen: true, cloud: garage, place: "Garage server" };
-  // The window opens on this computer's page, and that server is frozen: its page is the home screen, which waits on a
-  // home that is not here, so it spins there for ever. The window goes back to the server instead, as any saved server does.
+  // This computer's page has nothing to show for a frozen copy: the window goes back to the server, as any saved server does.
   const parked = world({ journal: null, marker, state: { status: "signed-out" }, url: `${LOCAL}${HOME_SCREEN_PATH}` });
   await parked.home.show();
   assert.deepEqual(parked.reopened, [{ origin: garage, place: "Garage server" }], "the server is asked for again, never the frozen page");
@@ -91,7 +90,7 @@ test("a frozen copy left on this computer's own page goes back to the server it 
   release();
   await recovering;
   assert.equal(racing.url, `${garage}/`, "an overlapping show() never pulls the window back to the frozen page");
-  assert.deepEqual(racing.local, [false], "it leaves the window where the recovery is taking it");
+  assert.deepEqual(racing.local, [], "it leaves the window, and the deadline, to the recovery");
   // The recovery's own page failing to load is this app's to answer, not main's generic "not reachable" dialog.
   const loading = world({ journal: null, marker, state: { status: "signed-out" }, url: `${LOCAL}${HOME_SCREEN_PATH}` });
   await loading.home.show();
@@ -114,6 +113,16 @@ test("a frozen copy left on this computer's own page goes back to the server it 
   await moving.home.show();
   assert.deepEqual(moving.reopened, [], "an unfinished move is not opened");
   assert.deepEqual(moving.home.view(), { screen: "moving", name: "Garage server" });
+  assert.equal(moving.home.failed(`${garage}/chats`, -105), true, "the move's own load failure is answered here too");
+  assert.deepEqual(moving.home.view(), { screen: "moving", name: "Garage server" }, "never the offline screen in the middle of a move");
+  assert.equal(moving.timers.length, 1, "and it looks again by itself");
+  const keptBack = world({ journal: { ...done(), phase: "back" }, marker, state: { status: "signed-out" }, url: `${LOCAL}${HOME_SCREEN_PATH}` });
+  await keptBack.home.show();
+  assert.deepEqual(keptBack.reopened, [{ origin: garage, place: "Garage server" }], "a journal that keeps this computer does not hide the marker");
+  const elsewhere = world({ journal: null, marker, state: { status: "signed-out" }, url: "https://studio.example.test/" });
+  await elsewhere.home.show();
+  assert.deepEqual(elsewhere.reopened, [], "a server already open is not left for the frozen one");
+  assert.equal(elsewhere.url, "https://studio.example.test/", "the window stays where it is");
 });
 
 test("a sign-in keeps only a path of My Cloud's own", () => {
