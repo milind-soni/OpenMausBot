@@ -397,6 +397,18 @@ or posts in one.
 On a My Cloud and on a desktop no bot has an owner: nothing is routed, and one Chief per department holds as before.
 Every bot still reaches every bot there.
 
+## Bringing a bot in from My Cloud
+
+Someone with a My Cloud moves a bot into a team from two places: **Move to Acme** in the bot's menu on My Cloud, and on the
+team's own page in the desktop app, **Bring your stuff**, which lists My Cloud's bots with one **Move** each. Both say the
+same before anything moves: who can use it there, what goes (instructions, skills, files, routines, their chats), what
+stays on My Cloud (what the bot remembers, their connections, MausBot), and that there is no way back.
+
+A team's server isn't the person's own, so its page gets less than My Cloud's does (`electron/team-move-main.mjs`). It reads
+only the names of My Cloud's bots and which can go, and only while it is the window's active page and the Admin's verified
+session says the person is in that team. It names a bot by id, and main reads the name from My Cloud. The confirm is main's
+own window, in English, because a page could soften or skip one of its own.
+
 ## Who can use a bot
 
 Each team bot is shared like a document: what everyone in the team gets, and a level for each person added. A person's
