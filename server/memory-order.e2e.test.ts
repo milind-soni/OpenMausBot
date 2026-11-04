@@ -55,10 +55,11 @@ it("starts the person's own line ahead of a hand-off that was already waiting fo
 }), 120_000);
 
 it("on Starter with 13 bots, hand-offs to busy bots start at once: one thread per bot holds only what a person or a routine starts", () => fixture(async (f) => {
-  writeFileSync(join(f.dataDir, "test-starter"), "");
-  expect((await f.api("/api/config", undefined, "GET")).cloudStarter).toBe(true);
+  // A team made before it moved to Starter: the plan limits the bots it makes, never those it has.
   const bots: any[] = [];
   for (let at = 0; at < 13; at += 1) bots.push(await f.bot(`Teammate ${at}`));
+  writeFileSync(join(f.dataDir, "test-starter"), "");
+  expect((await f.api("/api/config", undefined, "GET")).cloudStarter).toBe(true);
   const [chief, target, other] = bots;
   await f.api(`/api/bots/${chief.id}`, { chiefOfStaff: true, managedSections: ["Team"], acknowledgePeerScope: true }, "PATCH");
   const gate = join(f.dataDir, "target-may-finish");
