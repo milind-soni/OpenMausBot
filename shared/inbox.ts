@@ -1,4 +1,4 @@
-import type { OptionCardData } from "./wire.ts";
+import type { OptionCardData, SecretRequestCardData, SignInRequestCardData } from "./wire.ts";
 
 /** On a Team Cloud, a line in a person's inbox: their own conversation with their own Chief of Staff (their own MausBot
  * when they crowned none), where everything addressed to them arrives. It says who it is from and where it came from,
@@ -58,6 +58,10 @@ export interface InboxRow {
   answers?: InboxItem["answers"];
   /** An ask's card as the inbox holds it: answering it answers the card where it was asked. */
   card?: OptionCardData;
+  /** A password the bot asked for, answered with the chat's own card for it. */
+  secret?: SecretRequestCardData;
+  /** A sign-in the bot asked the person to do, answered with the chat's own card for it. */
+  signIn?: SignInRequestCardData;
 }
 
 /** A person's inbox: where its lines live (none yet before the first arrives), and the line the inbox's card in that

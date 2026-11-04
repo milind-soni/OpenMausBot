@@ -192,8 +192,9 @@ describe("a place's inbox in the panel", () => {
     await panel([question]);
     await act(async () => { readInboxLine("card-q"); });
     await mount(createElement(InboxPanel));
-    const choice = [...document.querySelectorAll<HTMLElement>("[data-inbox-reading] button")].find((button) => button.textContent === "Pricing")!;
-    await act(async () => { choice.click(); });
+    await click('[data-inbox-reading] [data-inbox-option="Pricing"]');
+    expect(dispatch, "a tick alone sends nothing").not.toHaveBeenCalled();
+    await click("[data-inbox-reading] [data-inbox-send]");
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "decideRequest", threadId: "eli-launch", requestId: "req-q", behavior: "answer", message: "Pricing" }));
   });
 
@@ -208,7 +209,7 @@ describe("a place's inbox in the panel", () => {
         box.dispatchEvent(new Event("input", { bubbles: true }));
       });
       await act(async () => { box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true })); });
-      const send = [...document.querySelectorAll<HTMLElement>("[data-inbox-reading] footer button")].find((button) => /send/i.test(button.getAttribute("aria-label") ?? button.textContent ?? ""));
+      const send = [...document.querySelectorAll<HTMLElement>("[data-inbox-reading] form button")].find((button) => /send/i.test(button.getAttribute("aria-label") ?? button.textContent ?? ""));
       if (!server.calls.some((call) => call.path === path)) await act(async () => { send?.click(); });
       expect(server.calls.find((call) => call.path === path), path).toMatchObject({ method: "POST", body: { text: "Thanks", threadId, replyToId: id } });
     }

@@ -94,6 +94,9 @@ export function readInboxRow(row: Pick<InboxRow, "id" | "unread">): void {
   void mark(row.id, "read");
 }
 
+/** An ask the person just answered here: it leaves the list at once, before the server's next read says so. */
+export const settleInboxRow = (row: Pick<InboxRow, "id">): void => patchRow(row.id, { tab: "done", unread: false });
+
 /** The person is done with a line of news: it moves to Done. */
 export function doneInboxRow(row: Pick<InboxRow, "id">): void {
   patchRow(row.id, { tab: "done", unread: false });
@@ -108,15 +111,17 @@ export async function replyToInboxRow(view: Pick<InboxView, "botId" | "threadId"
   void refreshInbox();
 }
 
-export interface InboxPanelState { open: boolean; reading: string | null }
+export interface InboxPanelState { open: boolean; reading: string | null; wide?: boolean }
 const panel = store<InboxPanelState>({ open: false, reading: null });
 export const useInboxPanel = (): InboxPanelState => useSyncExternalStore(panel.subscribe, panel.get, panel.get);
 export const currentInboxPanel = panel.get;
 
 /** Opens the inbox in the right panel: its list, or straight on one line. */
 export function openInbox(at: { reading?: string } = {}): void {
-  panel.set({ open: true, reading: at.reading ?? null });
+  panel.set({ ...panel.get(), open: true, reading: at.reading ?? null });
   void refreshInbox();
 }
 export const closeInbox = (): void => panel.set({ ...panel.get(), open: false, reading: null });
 export const readInboxLine = (id: string | null): void => panel.set({ ...panel.get(), reading: id });
+/** The panel at its usual width or wider, for a long message. */
+export const widenInbox = (wide: boolean): void => panel.set({ ...panel.get(), wide });

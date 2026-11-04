@@ -15,10 +15,22 @@ left behind reaches the owner labelled, with its news kept away.
 pnpm exec vitest run server/place-inbox.e2e.test.ts
 ```
 
+## The panel
+
+`src/components/inbox/InboxReading.dom.test.ts` drives the panel as a tab: its count and close, three-line rows with a
+question's choices and the recommended one marked, the search, a line read in full with "n of m" and its steps, the bot's
+words before it drawn as the chat's Markdown, and a question answered with its choice cards, a number key and a note through
+`/api/threads/<id>/respond`, after which the next line opens, or the list when none is left. A password or a sign-in is keyed
+by its own card kind and answered with the chat's own card for it.
+
+```sh
+pnpm exec vitest run src/components/inbox/InboxReading.dom.test.ts src/components/inbox/InboxPanel.dom.test.ts src/components/inbox/InboxEverywhere.dom.test.ts
+```
+
 ## The rail, in a real build
 
 `scripts/verify-place-inbox-rail.mjs` runs the packaged app, production main process and all, on a GitHub macOS runner
-(`.github/workflows/inbox-rail-check.yml`, by hand or by a push to `ci/inbox-rail-check`). It refuses to run anywhere else,
+(the `inbox-rail-check.yml` workflow, which lives only on the `ci/inbox-rail-check` branch and runs on a push there or by hand). It refuses to run anywhere else,
 because it edits `/etc/hosts` and trusts a throwaway certificate. A synthetic Admin and synthetic Clouds answer at their real
 addresses over real TLS, and a bot on the synthetic Claude CLI asks a real question on the real local server.
 
