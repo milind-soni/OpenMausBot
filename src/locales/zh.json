@@ -1884,7 +1884,6 @@
   "orgLibrary.fromSelf": "你的组织",
   "orgLibrary.recommended": "{name} 推荐",
   "orgLibrary.withdrawn": "{name} 已撤回",
-  "orgLibrary.newerRelease": "已有 {version} 版。更新会随之后的 {app} 更新自动送达。",
   "orgLibrary.bots": "机器人：{count}",
   "orgLibrary.skills": "技能：{count}",
   "orgLibrary.presets": "预设机器人：{count}",
