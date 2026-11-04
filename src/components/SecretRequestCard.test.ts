@@ -82,6 +82,12 @@ describe("SecretRequestCard ask card", () => {
     expect(html).toContain('autoComplete="new-password"');
   });
 
+  it("stays in view while it waits, however far the chat scrolls, and lets go once it is settled", () => {
+    expect(view({})).toMatch(/data-ask-card="pending"[^>]*class="[^"]*\bsticky\b/);
+    expect(view({ provided: true, resumed: true })).not.toContain("sticky");
+    expect(view({ superseded: true })).not.toContain("sticky");
+  });
+
   it("folds into one line that names the key once it is saved and the bot resumed", () => {
     const html = view({ provided: true, resumed: true });
     expect(html).toContain('data-ask-card="settled"');

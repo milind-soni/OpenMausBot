@@ -6,7 +6,7 @@ import { t } from "@/lib/i18n";
 import type { MausColor } from "@/lib/mascot";
 import type { Bot } from "@/state/store";
 import { BotAvatar } from "./Avatar";
-import { ELEVATED_CARD } from "./elevated";
+import { ELEVATED_CARD, ELEVATED_FLOAT } from "./elevated";
 
 /** The bot a card asks for: its face and name lead the card. */
 export type Asker = Pick<Bot, "name" | "color"> & Partial<Pick<Bot, "avatarUrl" | "avatarCrop" | "avatarZoom" | "avatarFocusX" | "avatarFocusY" | "mascotBody" | "mascotFaceColor">>;
@@ -39,6 +39,7 @@ export function AskCard({
   children,
   footer,
   onKeyDown,
+  stays = false,
 }: {
   /** An AskHeader: who asks, above the question. */
   header?: ReactNode;
@@ -53,6 +54,8 @@ export function AskCard({
   children?: ReactNode;
   footer?: ReactNode;
   onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void;
+  /** Work rests on this card and the person's answer alone moves it: it stays in view however far the chat scrolls. */
+  stays?: boolean;
 }) {
   return (
     <div
@@ -61,7 +64,7 @@ export function AskCard({
       data-tour={tour}
       data-ask-card="pending"
       onKeyDown={onKeyDown}
-      className={cn("w-full max-w-[560px] rounded-[24px] px-4 pb-3.5 pt-3 text-start", ELEVATED_CARD)}
+      className={cn("w-full max-w-[560px] rounded-[24px] px-4 pb-3.5 pt-3 text-start", stays ? `sticky top-[60px] bottom-[72px] z-10 ${ELEVATED_FLOAT}` : ELEVATED_CARD)}
     >
       {header && <div className="mb-1.5 pe-6">{header}</div>}
       <div className="flex min-w-0 items-start gap-2">
