@@ -195,6 +195,7 @@ export function SecretRequestCard({
       explanation={description}
       onDismiss={dismiss}
       dismissLabel="Not now"
+      stays
     >
       {remoteClient ? (
         <div className="text-[13px] leading-relaxed text-ink-secondary">

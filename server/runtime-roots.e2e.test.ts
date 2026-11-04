@@ -254,7 +254,7 @@ it("T2 parks the root on a credential card and runs it again with the provided l
   expect(f.eventsOf(parked.id)).toContain("parked");
   await f.settle(500);
   expect(f.turns(f.clive.id).map((record: any) => record.planKey)).toEqual(["C0"]);
-  expect(await f.task(f.clive.id, job)).toMatchObject({ busy: false, activity: "idle" });
+  expect(await f.task(f.clive.id, job)).toMatchObject({ busy: false, activity: "waiting-on-you" });
   f.script(f.clive.id, { key: "C-TYPED", match: ["T2-TYPED"], reply: "T2-TYPED-DONE: hello back." });
   await f.say(f.clive.id, job, "T2-TYPED: hello while the card waits.");
   await f.final(job, "T2-TYPED-DONE");
@@ -300,7 +300,7 @@ it("T3 parks the root on connector cards and runs it again once when both connec
       await expect.poll(() => f.roots()[0]?.status, { timeout: 15_000 }).toBe("needs_input");
       const parked = f.roots()[0];
       expect(parked.cards).toEqual([gmail, slack]);
-      expect(await f.task(f.clive.id, job)).toMatchObject({ busy: false, activity: "idle" });
+      expect(await f.task(f.clive.id, job)).toMatchObject({ busy: false, activity: "waiting-on-you" });
       composio.connect("gmail");
       const first = await f.api("GET", `/api/bots/${f.clive.id}/connector-cards/${gmail}/status?threadId=${job}`);
       expect(first.body).toMatchObject({ connected: true });
@@ -635,7 +635,7 @@ it("T9 parks the root on a sign-in card and runs it again with the signed-in lin
   const parked = f.roots()[0];
   expect(parked).toMatchObject({ status: "needs_input", cards: [card.id], executions: 1, question: expect.stringContaining("sign in to example.com") });
   expect(card.signIn.resumed).toBeUndefined();
-  expect(await f.task(f.clive.id, job)).toMatchObject({ busy: false, activity: "idle" });
+  expect(await f.task(f.clive.id, job)).toMatchObject({ busy: false, activity: "waiting-on-you" });
   const done = await f.api("POST", `/api/bots/${f.clive.id}/sign-in-cards/${card.id}/done`, { threadId: job });
   expect(done.status, JSON.stringify(done.body)).toBe(200);
   expect(done.body).toEqual({ done: true, resumed: true });
