@@ -209,6 +209,8 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     const el = scrollRef.current;
     return Boolean(el && el.scrollHeight - el.clientHeight >= 1);
   };
+  // Rows that draw nothing (hidden tool steps) can leave a window too short to scroll while earlier ones exist.
+  const canScrollUp = () => canScroll() || hiddenCount > 0 || Boolean(hasMore);
   const atEnd = () => {
     const el = scrollRef.current;
     return !el || el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_FOLLOW_THRESHOLD;
@@ -228,7 +230,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
       if (el && e.target === el && e.nativeEvent.offsetX >= el.clientWidth) setBottomFollow(false);
     },
     onWheel: (e: WheelEvent<HTMLDivElement>) => {
-      if (e.deltaY < 0 && canScroll()) {
+      if (e.deltaY < 0 && canScrollUp()) {
         setBottomFollow(false);
         const el = scrollRef.current;
         if (el && el.scrollTop <= AUTO_EXPAND_TOP_THRESHOLD) {
@@ -243,7 +245,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     },
     onTouchMove: (e: TouchEvent<HTMLDivElement>) => {
       const y = e.touches[0]?.clientY ?? 0;
-      if (y > touchY.current + 4 && canScroll()) {
+      if (y > touchY.current + 4 && canScrollUp()) {
         setBottomFollow(false);
         const el = scrollRef.current;
         if (el && el.scrollTop <= AUTO_EXPAND_TOP_THRESHOLD) {
