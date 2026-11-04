@@ -13,7 +13,7 @@ const setup = (mutate?: BoxMutation[]): BoxSetup => ({
 });
 const cwd = join(dataDir, "task-workspaces", "bot-a", "thread-1");
 const turn = (mutate?: BoxMutation[]) => planBox(setup(mutate), {
-  command: "/usr/local/bin/claude", args: ["-p", "--mcp-config", "/tmp/omb-mcp-x/mcp.json", "--append-system-prompt-file=/tmp/omb-system-y/prompt.txt"],
+  command: "/usr/local/bin/claude", args: ["-p", "--additional-mcp-config", "@/tmp/omb-copilot-mcp-x/config.json", "--append-system-prompt-file=/tmp/omb-system-y/prompt.txt"],
   cwd, env: { PATH: "/usr/bin", HOME: home, CLAUDE_CONFIG_DIR: "/data/.claude" }, rw: [join(dataDir, "perm-abc.sock")],
 });
 
@@ -30,7 +30,7 @@ linuxBox("the box plan", () => {
     expect(visibleInBox(plan, join(dataDir, "workspaces", "bot-a", "MEMORY.md"))).toBe("rw");
     expect(visibleInBox(plan, join(dataDir, "perm-abc.sock"))).toBe("rw");
     expect(visibleInBox(plan, "/data/.claude/settings.json")).toBe("rw");
-    expect(visibleInBox(plan, "/tmp/omb-mcp-x/mcp.json")).toBe("ro");
+    expect(visibleInBox(plan, "/tmp/omb-copilot-mcp-x/config.json")).toBe("ro");
     expect(visibleInBox(plan, "/tmp/omb-system-y/prompt.txt")).toBe("ro");
     expect(visibleInBox(plan, "/app/dist-server/index.js")).toBe("ro");
     expect(visibleInBox(plan, "/usr/local/bin/claude")).toBe("ro");
@@ -192,6 +192,6 @@ linuxBox("the box plan", () => {
     expect(taskWorkspaceIds("/data/projects/x", dataDir)).toBeNull();
     expect(taskWorkspaceIds(join(dataDir, "task-workspaces"), dataDir)).toBeNull();
     expect(taskWorkspaceIds(join(dataDir, "task-workspaces", "../../etc", "x"), dataDir)).toBeNull();
-    expect(argvPaths(["-p", "--mcp-config", "/tmp/a/mcp.json", "--settings=/tmp/b/s.json", "/", "relative/file", "--model", "x"])).toEqual(["/tmp/a/mcp.json", "/tmp/b/s.json"]);
+    expect(argvPaths(["-p", "--mcp-config", "/tmp/a/mcp.json", "--additional-mcp-config", "@/tmp/copilot/mcp.json", "--settings=/tmp/b/s.json", "/", "relative/file", "--model", "x"])).toEqual(["/tmp/a/mcp.json", "/tmp/copilot/mcp.json", "/tmp/b/s.json"]);
   });
 });
