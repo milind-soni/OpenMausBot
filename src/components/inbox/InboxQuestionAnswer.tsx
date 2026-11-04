@@ -1,6 +1,3 @@
-// A question read in the inbox, answered there: its choices as cards to tick, each with what it means and the bot's
-// recommendation marked, a note of the person's own, and send. Number keys tick a choice, × closes it unanswered. The
-// answer goes where it was asked, through the same route as the chat's card, so it settles there and everywhere.
 import { useEffect, useState } from "react";
 import { ArrowUp, Check, LoaderCircle, X } from "lucide-react";
 import { formatQuestionAnswers, MAX_CUSTOM_ANSWER, type AskQuestion } from "../../../shared/ask-question";
@@ -13,11 +10,8 @@ import { cardAnswerFor } from "../bot-access/access-card";
 import { recommendedOf } from "./inbox-answer";
 import { closeResponse } from "./inbox-view";
 
-/** Most choices a number key reaches. */
 const KEYED_CHOICES = 9;
 
-/** What sending the ticked choices and the note answers: the chat card's own words for a provider's question set, the
- * choice as offered for a card's own, and the note after it. */
 export function questionResponse(row: InboxRow, question: AskQuestion, picked: readonly string[], note: string): CardResponse | null {
   const words = note.trim();
   if (!picked.length && !words) return null;

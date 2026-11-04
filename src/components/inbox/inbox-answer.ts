@@ -1,5 +1,3 @@
-// What a line of the inbox is answered with, by the kind of card it carries, and the words its row and reading view show.
-// A new kind of card adds a kind here and its answer in InboxAnswer, and every row and reading view picks it up.
 import type { AskQuestion } from "../../../shared/ask-question";
 import type { InboxRow } from "../../../shared/inbox";
 import { t } from "@/lib/i18n";

@@ -1,6 +1,3 @@
-// The person's whole inbox in the right panel, as a tab with its count: one list, newest first, a dot on what waits on them,
-// a search over it, and each line read in full in the same place. A line answered there gives way to the next one, and to
-// the list when none is left. At phone width it is a sheet over the chat.
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { Inbox, Maximize2, Minimize2, Search, X } from "lucide-react";
@@ -41,7 +38,6 @@ export function InboxPanel() {
   const ids = rows.map((row) => row.id);
   const at = reading ? ids.indexOf(reading.id) : -1;
 
-  // The list as it stood while the line was in it, so the step after an answer goes to the line that was below it.
   const order = useRef<string[]>([]);
   if (at >= 0) order.current = ids;
   const waited = useRef<string | null>(null);
@@ -54,9 +50,7 @@ export function InboxPanel() {
     const row = next ? view?.rows.find((one) => one.id === next) : undefined;
     if (row) readInboxRow(row);
     readInboxLine(row ? row.id : null);
-    // Only the line read and whether it settled move it on; the list itself is read through the ref.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reading?.id, reading?.tab]);
+  }, [reading, ids, view]);
 
   const step = (by: -1 | 1) => {
     const row = rows[at + by];

@@ -1,6 +1,3 @@
-// One line of the inbox read in full inside the panel. A bar with the way back, where it is in the list with a step up and
-// down, and a menu; where it came from and what it is about; the bot's words in context as the chat draws them; then the
-// person's part, answered with what its kind of card answers with (InboxAnswer).
 import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ExternalLink, MoreHorizontal, UserRound, X } from "lucide-react";
 import type { InboxRow, InboxView } from "../../../shared/inbox";
 import { t } from "@/lib/i18n";

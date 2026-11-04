@@ -1,14 +1,10 @@
-// What the bot said just before a line of the inbox, read from the conversation it came from, so the line reads in context:
-// its words since the person last wrote there. Nothing when that conversation can't be read; the line still reads alone.
 import { useEffect, useState } from "react";
 import type { InboxRow } from "../../../shared/inbox";
 import type { Message } from "@/state/store";
 import { api } from "@/state/api";
 
-/** How far back the reading view looks for the bot's words before the line. */
 const CONTEXT_PAGE = 8;
 
-/** The bot's own words before the line, since the person last wrote: what a question or a report builds on. */
 export function contextBefore(messages: readonly Message[]): Message[] {
   const out: Message[] = [];
   for (let index = messages.length - 1; index >= 0; index--) {

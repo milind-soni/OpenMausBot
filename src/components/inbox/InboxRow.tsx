@@ -1,6 +1,3 @@
-// One line of the person's inbox as a dense row: a dot while it waits on them or is unread, the sender's face, who it is
-// from and where, the time, what it is about in bold, and for a question its choices on one line, the recommended one
-// marked. On hover or keyboard focus the time gives way to the row's quick actions.
 import { Check, CornerUpLeft, ExternalLink, Split, X, type LucideIcon } from "lucide-react";
 import type { InboxRow } from "../../../shared/inbox";
 import { cn } from "@/lib/cn";

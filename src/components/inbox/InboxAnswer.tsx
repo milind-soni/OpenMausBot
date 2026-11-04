@@ -1,6 +1,3 @@
-// The "You" part of a line read in the inbox: how it is answered, chosen by the kind of card it carries. Each kind answers
-// with what the chat already answers it with, through the same route, so one answer settles it on every surface. A new
-// kind of card adds its kind in inbox-answer.ts and one entry here.
 import { useState, type ReactNode } from "react";
 import { Check, ExternalLink } from "lucide-react";
 import type { InboxRow, InboxView } from "../../../shared/inbox";
@@ -31,7 +28,6 @@ function QuestionAnswer({ view, row, threadId, asker }: AnswerProps) {
   const { answer } = useInboxActions(view);
   const question = singleQuestion(row);
   if (!threadId) return null;
-  // A set of several questions keeps the chat's own card, with a tab for each.
   if (!question) return <QuestionCard threadId={threadId} asker={asker} message={asMessage(row)} />;
   return <InboxQuestionAnswer row={row} question={question} asker={asker}
     onAnswer={(response, failed) => { answer(row, response, failed); settleInboxRow(row); }} />;
