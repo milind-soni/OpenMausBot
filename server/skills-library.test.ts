@@ -175,10 +175,10 @@ describe("skills library store", () => {
       const on = hostWith({ features: { skillsLibrary: true } } as AppConfig);
       expect(on.skillsIndex(record, "main")).toContain(name);
       expect(on.skillsIndex(record, undefined)).toContain(name);
-      expect(on.expandSkillCommand(record, "main", `/${name}`)).toContain(`ran your ${name} skill`);
+      expect(on.expandSkillCommand(record, "main", `/${name}`, undefined, [], true)).toContain(`ran your ${name} skill`);
       const off = hostWith({} as AppConfig);
       expect(off.skillsIndex(record, "main")).not.toContain(name);
-      expect(off.expandSkillCommand(record, "main", `/${name}`)).toBe(`/${name}`);
+      expect(off.expandSkillCommand(record, "main", `/${name}`, undefined, [], true)).toBe(`/${name}`);
     } finally {
       library.setLibrarySkillEveryBot(name, false);
     }
