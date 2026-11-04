@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import de from "../../src/locales/de.json" with { type: "json" };
 import type { HandoffView } from "../coordinator.ts";
 import { addServerLinePacks } from "../server-lines.ts";
 import { createQueuedNotes, createWaitWords, QUEUED_NOTE_AFTER_MS, type QueuedNotesDeps } from "./wait-words.ts";
@@ -21,8 +20,8 @@ describe("how a wait for memory reads", () => {
     expect(words(true).waits.text("t", { first: true, running: 1, ahead: 0 })).toContain("Starter has room for about one task at a time. A bigger plan runs more at once.");
     expect(words(false).waits.text("t", { first: true, running: 1, ahead: 0 })).not.toContain("Starter");
     expect(words(true).waits.text("t", { first: false, running: 1, ahead: 0 })).not.toContain("Starter");
-    addServerLinePacks({ de });
-    expect(words(true, "de").waits.text("t", { first: true, running: 1, ahead: 0 })).toBe("Wartet auf Arbeitsspeicher in dieser Cloud. Läuft gerade: 1. Davor in der Reihe: 0. Startet von selbst, sobald Platz ist. Starter hat Platz für etwa eine Aufgabe gleichzeitig. Ein größerer Plan führt mehr gleichzeitig aus.");
+    addServerLinePacks({ xx: { "server.memory.wait": "Warten {running}/{ahead}.", "server.memory.starter": "Größerer Plan." } });
+    expect(words(true, "xx").waits.text("t", { first: true, running: 1, ahead: 0 })).toBe("Warten 1/0. Größerer Plan.");
   });
 
   it("records the limit and what is ahead", () => {
