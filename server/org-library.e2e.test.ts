@@ -13,9 +13,10 @@ const PUBLISHER = "33333333-3333-4333-8333-333333333333";
 const TEAM_ID = "22222222-2222-4222-8222-222222222222";
 const LIBRARY_ID = "44444444-4444-4444-8444-444444444444";
 
-function release(name: string) {
+function release(name: string, edit?: (document: any) => void) {
   const document: any = parsePackageDocument(JSON.parse(readFileSync(join(FIXTURES, name), "utf8")), { trust: "file" });
   document.package.publisher = { organization: "acme", name: "Acme Partners" };
+  edit?.(document);
   const bytes = canonicalJson(document);
   return { document, bytes, sha256: sha(bytes) };
 }
@@ -104,3 +105,52 @@ it("shows the organization's shelf, adds a team once, and keeps its stamps off t
     await fixture.close();
   }
 }, 120_000);
+
+it("brings an added team to a newer release, keeping what the person changed", async () => {
+  const key = randomBytes(32).toString("hex");
+  const fixture = await launchVerificationServer({ ...process.env, OMB_TEST_ORG_LIBRARY_KEY: key });
+  const url = fixture.info.url;
+  const call = async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) => {
+    const response = await fetch(`${url}${path}`, {
+      method, headers: { "content-type": "application/json", ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    return { status: response.status, body: await response.json() as any };
+  };
+  const blobs = join(fixture.info.dataDir, "org-library", "blobs");
+  const offer = async (rel: ReturnType<typeof release>, libraryVersion: number) => {
+    mkdirSync(blobs, { recursive: true });
+    writeFileSync(join(blobs, `${rel.sha256}.json`), rel.bytes, { mode: 0o600 });
+    const catalog = JSON.stringify({ format: "openmaus.org-library", version: 1, libraryVersion, organization: { id: ORG, name: "Customer Co" }, packages: [entry(TEAM_ID, rel)] });
+    const relayed = await call("POST", "/api/testing/org-library", {
+      library: { adminOrigin: "https://admin.example.com", organizationId: ORG, organizationName: "Customer Co", digest: sha(catalog), catalog },
+    }, { "x-openmausbot-test-org-library": key });
+    expect(relayed.status).toBe(200);
+    return relayed.body.report;
+  };
+  try {
+    await offer(release("full-team.v2.json"), 1);
+    const added = await call("POST", "/api/org-library/add", { packageId: TEAM_ID });
+    expect(added.status).toBe(201);
+    const bots = async () => (await call("GET", "/api/bots")).body.bots.filter((bot: any) => bot.section === "Sales desk");
+    const byKey = async (agentKey: string) => (await bots()).find((bot: any) => bot.installedPackage.agentKey === agentKey);
+    const scout = await byKey("scout");
+    expect((await call("PATCH", `/api/bots/${scout.id}`, { soul: "Scout the way we like it." })).status).toBe(200);
+
+    const next = release("full-team.v2.json", (document) => {
+      document.package.release = "1.4.0";
+      for (const agent of document.package.agents) agent.soul = `${agent.soul} Version two.`;
+    });
+    const report = await offer(next, 2);
+    expect(report.packages).toEqual([{ packageId: TEAM_ID, release: "1.4.0", sha256: next.sha256, state: "installed" }]);
+    expect((await byKey("lead")).soul).toMatch(/Version two\.$/);
+    expect((await byKey("scout")).soul).toBe("Scout the way we like it.");
+    expect((await byKey("lead")).installedPackage).toMatchObject({ release: "1.4.0", sha256: next.sha256 });
+    expect(JSON.stringify((await call("GET", "/api/bots")).body)).not.toContain("packageBase");
+    expect((await call("GET", "/api/routines")).body.routines.every((routine: any) => !routine.enabled)).toBe(true);
+    const shelf = (await call("GET", "/api/org-library")).body.packages[0];
+    expect(shelf.installed).toMatchObject({ release: "1.4.0", status: "installed" });
+  } finally {
+    await fixture.close();
+  }
+}, 120_000);
+

@@ -9,7 +9,7 @@ import { CalendarClock, ChevronRight, Columns2, Box, Check, Cloud, Sparkles, Glo
 import { api, ApiError, currentTaskBot, useStore, type Bot, type ConfigStatus } from "@/state/store";
 import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { ComputerFilesPane } from "./ComputerFilesPane";
-import { effectivePlace, isComputerPlace, placeLabelKey, placeOffered } from "@/lib/place";
+import { effectivePlace, isComputerPlace, personPin, placeLabelKey, placeOffered } from "@/lib/place";
 import type { CloudBackend } from "../../shared/wire";
 import { KeyRow } from "./keys/KeyRow"; import { openKeySettings } from "./keys/key-focus";
 import { cn } from "@/lib/cn";
@@ -134,6 +134,7 @@ export function ComputerPanel({
   const { state, dispatch, flushBotPatches } = useStore();
   const liveTask = profileBot.tasks?.find((task) => task.threadId === profileBot.threadId);
   const livePlace = effectivePlace(profileBot, liveTask);
+  const livePin = personPin(liveTask);
   const threadBot = currentTaskBot(profileBot);
   const connectionKey = `${profileBot.id}:${profileBot.threadId}:${livePlace}:${profileBot.cloudBackend ?? "box"}:${threadBot.modelSelection.instanceId}`;
   const [autoSurface, setAutoSurface] = useState<{ key: string; surface: Bot["computer"] } | null>(null);
@@ -1152,8 +1153,7 @@ export function ComputerPanel({
     else if (mode === "browser") updateComputerSelection({ computer: mode, browser: true });
     else updateComputerSelection({ computer: mode });
   };
-  const heldPin = liveTask?.surface && !liveTask.surfaceAuto && profileBot.computer !== "off"
-    && liveTask.surface !== profileBot.computer ? liveTask.surface : undefined;
+  const heldPin = livePin && profileBot.computer !== "off" && livePin !== profileBot.computer ? livePin : undefined;
 
   const tabClass = (active: boolean) => cn(
     "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-[13px] transition-colors @max-[28rem]/paneltabs:[&>svg]:hidden @max-[22rem]/paneltabs:px-2",
@@ -1715,9 +1715,9 @@ export function ComputerPanel({
               </button>
             ))}
           </div>
-          {liveTask?.surface && (
+          {livePin && (
             <p className="mt-2 text-[12px] leading-5 text-ink-secondary" data-testid="place-pinned-note">
-              {t("place.pinnedNote", { place: t(placeLabelKey(liveTask.surface)) })}
+              {t("place.pinnedNote", { place: t(placeLabelKey(livePin)) })}
             </p>
           )}
           <div className="mt-3 border-t border-hairline/40 pt-3 text-[12px] leading-5 text-ink-secondary" aria-live="polite" data-testid="place-line">

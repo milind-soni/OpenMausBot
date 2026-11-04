@@ -7,6 +7,7 @@ import { setLocale } from "@/lib/i18n";
 
 const fx = vi.hoisted(() => ({
   config: {} as Record<string, unknown>,
+  instances: [] as unknown[],
   listeners: new Set<() => void>(),
   api: vi.fn(),
   dispatch: vi.fn(),
@@ -20,7 +21,7 @@ vi.mock("@/state/store", async (original) => {
     api: (...args: unknown[]) => fx.api(...args),
     useStore: () => {
       const config = useSyncExternalStore(subscribe, () => fx.config);
-      return { state: { ...actual.initialState, config, instances: [] }, dispatch: fx.dispatch };
+      return { state: { ...actual.initialState, config, instances: fx.instances as never }, dispatch: fx.dispatch };
     },
   };
 });
@@ -72,6 +73,7 @@ beforeEach(() => {
     if (action.type === "configStatus") setConfig(action.config!);
   });
   fx.config = { composio: { configured: false }, box: { configured: false }, vps: { configured: false, sshAlias: "" } };
+  fx.instances = [];
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -91,6 +93,37 @@ describe("the keys page", () => {
     expect(expanded("voice")).toBe("false");
     expect(rowsShown()).toContain("openai");
     expect(rowsShown()).not.toContain("elevenlabs");
+  });
+
+  it("offers the Live calls service, OpenAI or Azure OpenAI, on the separate live key row", () => {
+    setConfig({ ...fx.config, live: { configured: false, provider: "azure", voice: "", readTypedReplies: true, idleMinutes: 5 } });
+    page();
+    const select = row("liveKey")!.querySelector<HTMLSelectElement>("select")!;
+    expect([...select.options].map((option) => option.value)).toEqual(["openai", "azure"]);
+    expect(select.value).toBe("azure");
+    expect(row("liveKey")!.querySelector('input[type="url"]')).not.toBeNull();
+  });
+
+  it("with Azure chosen, the Live key row asks for an Azure key: required, no OpenAI wording, and no row saying Live uses the OpenAI key", () => {
+    const live = { configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live: { ...live, provider: "azure", azureEndpoint: "https://my-res.openai.azure.com" } });
+    page();
+    const azure = row("liveKey")!;
+    expect(azure.textContent).toContain("Azure OpenAI key for Live calls");
+    expect(azure.textContent).toContain("Required");
+    expect(azure.textContent).not.toContain("Optional");
+    expect(azure.textContent).not.toContain("Separate key");
+    expect(azure.textContent).not.toContain("instead of your OpenAI key");
+    expect([...azure.querySelectorAll("input")].map((input) => input.placeholder)).not.toContain("sk-…");
+    expect(azure.querySelector<HTMLAnchorElement>('a[href*="platform.openai.com"]')).toBeNull();
+    expect(row("liveCalls")).toBeNull();
+
+    setConfig({ ...fx.config, live });
+    page();
+    const openAi = row("liveKey")!;
+    expect(openAi.textContent).toContain("Optional");
+    expect([...openAi.querySelectorAll("input")].map((input) => input.placeholder)).toContain("sk-…");
+    expect(row("liveCalls")).not.toBeNull();
   });
 
   it("opens a section that holds a saved key, and counts what is connected", () => {
@@ -171,6 +204,20 @@ describe("the keys page", () => {
     await vi.waitFor(() => expect(row("box")!.querySelector("[data-key-masked]")?.textContent).toContain("••••••••c3d4"));
     expect(row("box")!.textContent).toContain("Connected");
     expect(fx.api).toHaveBeenCalledOnce();
+  });
+});
+
+describe("the OpenAI-compatible server row", () => {
+  it("offers the reply wait for the built-in server once its base URL is set, such as a local Ollama", () => {
+    const waitFor = () => host.querySelector('select[aria-label="How long to wait for Other (OpenAI-compatible) to reply"]');
+    fx.instances = [{ instanceId: "openaiCompat", driverKind: "openai-compat", displayName: "Other (OpenAI-compatible)", snapshot: { state: "available" } }];
+    page();
+    expect(waitFor()).toBeNull();
+    flushSync(() => setConfig({ ...fx.config, openaiCompat: { url: "http://localhost:11434/v1" } }));
+    expect(row("openaiCompat")).not.toBeNull();
+    expect(waitFor()).not.toBeNull();
+    flushSync(() => setConfig({ ...fx.config, openaiCompat: { url: "" } }));
+    expect(waitFor()).toBeNull();
   });
 });
 
