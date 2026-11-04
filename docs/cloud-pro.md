@@ -1582,6 +1582,11 @@ measured 0.72 s) or, when Fly can't suspend it, stops it (about 20 s to wake).
 The home never stops itself. On every plan that doesn't sleep the Admin never
 calls these routes, and nothing below changes how a home behaves.
 
+Waking a suspended machine moves the wall clock on, and its pending timers keep
+the awake time they had left (measured on Fly: a 120 s timer suspended for 4
+minutes at 30 s fired 120 s of awake time after boot, not at resume). So never
+judge a pending timer by a wall-clock time stored when it was set.
+
 **What idle means (`server/cloud-power.ts`).** All of:
 
 - no turn running (bots, rooms, delegated work), no routine run queued to start

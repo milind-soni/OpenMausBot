@@ -289,3 +289,4 @@ engines. What stays one at a time, and what the person sees:
   to the waiter. The holder's next call is refused once, so nothing lands on a page it did not open.
 - One computer: a turn takes it at its first screen call, not when it starts, and keeps it until it ends.
 - Memory on a Linux Cloud: a turn that would run the machine out says "Waiting for memory" and starts by itself.
+- A Cloud that just woke: a hand-off starts at once. `OMB_TEST_RESUME_CLOCK=1` lets a fixture move `Date.now()` on as a wake does, by writing milliseconds to `<data dir>/resume-clock-ms`; `server/handoff-wake.e2e.test.ts` uses it.
