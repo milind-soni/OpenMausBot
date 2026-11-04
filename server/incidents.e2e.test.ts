@@ -248,7 +248,7 @@ it("reviews the work it handed on from a report without the Chief's computer, ev
   }
 }, 150_000);
 
-it("keeps the team computer for a report turn, and answers without it once it is missing", async () => {
+it("keeps the team computer for a report turn, and reports a run that reaches for one that has gone missing", async () => {
   // A loopback Boat: the team computer is created, then disappears; one listing can be held open.
   const boxes: Array<{ id: string; name: string; state: string }> = [];
   let gone = false;
@@ -324,16 +324,22 @@ it("keeps the team computer for a report turn, and answers without it once it is
 
     gone = true;
     rmSync(file(incidents, "gate"));
+    // A turn runs without the computer until it reaches for it, which is when a missing one stops it.
+    const reachForComputer = async (threadId: string) => {
+      const env = (await dump(threadId)).mcpConfig.mcpServers.computer.env;
+      await fetch(`${env.OMB_HARNESS_URL}/api/internal/computer/mcp`, {
+        method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${env.OMB_MCP_TOKEN_COMPUTER}` },
+        body: JSON.stringify({ method: "tools/call", params: { name: "screenshot", arguments: {} } }),
+      });
+    };
     await control(["send", "--bot", team.cara.id, "--text", "File the expense report."]);
+    await reachForComputer(team.cara.activeTaskId);
     await expect.poll(async () => (await messages(incidents)).some((m) =>
       m.kind === "activity" && /^Cara hit a problem: its run in its thread #File the expense report\. could not start: .*cloud computer is missing/.test(m.tool?.name ?? ""),
     ), { timeout: 20_000 }).toBe(true);
     await reportRan("Cara's run in its thread #File the expense report. could not start");
-    const run = await dump(incidents);
-    expect(Object.keys(run.mcpConfig.mcpServers)).not.toContain("computer");
-    expect(run.systemPrompt).toContain("your computer could not be prepared for it (The team's cloud computer is missing");
-    expect(run.systemPrompt).not.toContain("Your team shares the cloud computer");
     await control(["send", "--bot", team.dan.id, "--text", "Book the venue."]);
+    await reachForComputer(team.dan.activeTaskId);
     await expect.poll(async () => (await messages(team.dan.activeTaskId)).some((m) => /cloud computer is missing/.test(m.tool?.name ?? "")), { timeout: 20_000 }).toBe(true);
     expect((await messages(team.dan.activeTaskId)).some((m) => /Waiting for its turn/.test(m.tool?.name ?? ""))).toBe(false);
     writeFileSync(file(incidents, "gate"), "finish");
