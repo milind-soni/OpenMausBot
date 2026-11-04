@@ -31,6 +31,12 @@ function fixture(over: { team?: null; reachable?: () => boolean; dataDir?: strin
 }
 
 describe("a Send with no AI on a team", () => {
+  it("stays out of the way for a bot on an engine this server no longer has: that isn't a missing AI", () => {
+    const { notice, lines } = fixture();
+    expect(notice.refusal("t1", said(DANA), "claude")).toBeNull();
+    expect(lines).toEqual([]);
+  });
+
   it("tells a User who connects it, as the app's own kind of refusal, and tells the owner in their inbox", () => {
     const { notice, lines } = fixture();
     const refused = notice.refusal("t1", said(DANA));

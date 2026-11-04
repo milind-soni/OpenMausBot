@@ -52,7 +52,7 @@ export interface BotMessageRouteDeps {
     | "patchMessage" | "patchTask" | "projectBotForTask" | "setActiveLeaf" | "setTaskAskedAt" | "taskByThread" | "tasks">;
   registry: Pick<ProviderRegistry, "get">;
   /** On a team: the words for a turn with no AI to answer with, having told who can connect one. */
-  noAiRefusal?(threadId: string, sender: ResolvedSender | undefined): Error | null;
+  noAiRefusal?(threadId: string, sender: ResolvedSender | undefined, instanceId?: string): Error | null;
   routines(): RoutineManager | null;
   handoffs: Pick<Handoffs, "current" | "steered">;
   /** The turn running in a thread now, as its runtime events name it. */
@@ -486,7 +486,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       }
       const rerunSelection = turnSelection(bot.id, bot.threadId) ?? bot.modelSelection;
       if (!registry.get(rerunSelection.instanceId)) {
-        const noAi = deps.noAiRefusal?.(bot.threadId, messageSender(auth));
+        const noAi = deps.noAiRefusal?.(bot.threadId, messageSender(auth), rerunSelection.instanceId);
         if (noAi) throw noAi;
         return json(res, 409, {
           error: `provider instance "${rerunSelection.instanceId}" is unavailable — pick another model in settings`,
