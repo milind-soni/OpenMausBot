@@ -14,7 +14,7 @@ export interface AddressAsk {
   outsideDriven: boolean;
 }
 
-export type WebhookAddress = { url: string; endpoint: string; bearer: string; note: string } | { unavailable: string };
+export type WebhookAddress = { url: string; endpoint: string; githubUrl: string; bearer: string; note: string } | { unavailable: string };
 
 const LOOPBACK = /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?\//u;
 
@@ -37,8 +37,9 @@ export function webhookAddress(webhooks: Pick<WebhookManager, "currentSecret">, 
   return {
     url: credential.url,
     endpoint: credential.endpointUrl,
+    githubUrl: `${credential.endpointUrl}/github`,
     bearer: credential.secret,
-    note: `Paste url into the setup of the app that sends to this automation, and nowhere else: never repeat it in chat, notes, files or messages to other bots. An app that can't take the full address sends to endpoint with the header "Authorization: Bearer <bearer>".${local}`,
+    note: `Paste url into the setup of the app that sends to this automation, and nowhere else: never repeat it in chat, notes, files or messages to other bots. An app that can't take the full address sends to endpoint with the header "Authorization: Bearer <bearer>". For GitHub, use githubUrl as Payload URL, application/json as Content type, and bearer as Secret. Do not append /github to url or Copy address; those may contain the secret. Obtain bearer separately from this private tool result. Select the requested GitHub events; put action and branch conditions in the automation's instructions.${local}`,
   };
 }
 

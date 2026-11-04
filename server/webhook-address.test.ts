@@ -32,6 +32,15 @@ describe("who gets a webhook automation's address", () => {
 });
 
 describe("the address", () => {
+  it("gives GitHub setup a signed endpoint and a separate secret", () => {
+    const address = webhookAddress(kept, "hook-1", "https://acme.example.com/");
+    expect(address).toMatchObject({ githubUrl: "https://acme.example.com/hooks/wh_abc/github", bearer: SECRET });
+    if (!address || "unavailable" in address) throw new Error("Expected an available address");
+    expect(address.note).toContain("githubUrl as Payload URL");
+    expect(address.note).toContain("bearer as Secret");
+    expect(address.note).toContain("Do not append /github to url or Copy address");
+  });
+
   it("is the full address, the endpoint and the bearer secret, with where to paste it and where never to", () => {
     const address = webhookAddress(kept, "hook-1", "https://acme.example.com/");
     expect(address).toMatchObject({ url: `https://acme.example.com/hooks/wh_abc/${SECRET}`, endpoint: "https://acme.example.com/hooks/wh_abc", bearer: SECRET });

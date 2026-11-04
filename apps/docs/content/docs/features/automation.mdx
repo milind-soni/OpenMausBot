@@ -48,6 +48,44 @@ The receiver exposes only health and secret hook routes. It does not expose the 
 
 Bearer authentication is preferred because it keeps the secret out of URLs and most access logs. A capability URL is available for senders that cannot set headers.
 
+### GitHub events
+
+Ask your bot: "When a pull request opens in acme/widgets, review it."
+The bot first checks its connected-app events with `trigger_info action=events app=github`.
+Connect GitHub and allow the bot to use it under **Access**.
+Use the event and repository settings returned by that catalog.
+Available events and branch settings depend on Composio's event type.
+App events require OpenMausBot's managed connected apps; they do not support your own Composio key.
+
+Use a repository webhook when the catalog does not offer the event you need:
+
+1. Ask the bot to create a webhook automation for the work.
+   Include the repository, action, and branch conditions in its instructions.
+   For example: "Review acme/widgets PRs only when action is opened and the base branch is main. Stop for other events."
+2. In your own chat, ask the owning bot for setup details with `trigger_info` and `include_address`.
+   Use the private result's `githubUrl` for the signed endpoint.
+   Get the secret separately from its `bearer` field; keep it only in GitHub's **Secret** field.
+   Do not append `/github` to **Copy address** or the result's `url`; those may contain the secret.
+3. In the GitHub repository, open **Settings → Webhooks → Add webhook**.
+4. Set **Payload URL** to `githubUrl`, such as `https://bots.example.com/hooks/wh_example/github`.
+5. Set **Content type** to `application/json` and **Secret** to the automation's secret.
+   Keep SSL verification enabled.
+6. Select the events you need, such as **Pull requests**, **Issues**, **Pushes**, **Releases**, or **Workflow runs**.
+   Save the webhook and check GitHub's recent deliveries.
+
+The signed endpoint verifies `X-Hub-Signature-256` against the raw request body before parsing it.
+It requires `X-GitHub-Delivery` and `X-GitHub-Event`.
+Retries with the same delivery ID keep the existing duplicate handling.
+The URL contains no secret. Do not append the secret to the signed URL.
+If an older automation cannot show its secret, replace its address and update GitHub's secret.
+
+The repository webhook selects the repository and event families.
+The automation's event-type list can also limit families, such as `pull_request` or `workflow_run`.
+Action and branch conditions in instructions are checked by the bot after a run starts.
+For merged PRs, require `action=closed` and `pull_request.merged=true`.
+For CI failures, require `action=completed` and `workflow_run.conclusion=failure`.
+External event content is untrusted; it does not grant the bot extra permissions.
+
 ### A bot that sets up its own webhook
 
 When a bot creates a webhook automation from chat, it gets the private address in the result, and it can ask for it again later, so it can paste the address into the other app's setup itself instead of asking you to use **Copy address**. Only the bot the automation belongs to gets it, or a Chief of Staff that can reach that bot (bots with a different audience on a shared workspace cannot), and only in a conversation you drive: never in a run that a webhook or app event started, and never in a My Cloud conversation a guest drives. The address stays in that tool result; chat transcripts, step details and logs show it masked, and the Automations page keeps the secret hidden until you press **Show**. **Copy address** copies the same address the bot has, so copying never breaks a setup; **Replace address** makes a new one and the old one stops working.
