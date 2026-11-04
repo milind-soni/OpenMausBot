@@ -54,6 +54,9 @@
 //     and model/list also offers gpt-6.1-sol
 //   FAKE_CODEX_MCP_START  "1": on thread/start, start each `-c mcp_servers.*` mount as codex-cli 0.160.1 does
 //     (its initialize, or FAKE_CODEX_MCP_HANDSHAKE) and dump mcpStartup[name]
+//   FAKE_CODEX_MCP_READY_MS  each `-c mcp_servers.*` mount is reported starting after the thread/start or
+//     thread/resume reply and ready at once, as codex-cli 0.166.0 does; with this, ready only this many ms
+//     later, and the dump records mcpReadyAtTurnStart
 //   FAKE_CODEX_ROLLOUT  rollout path thread/start and thread/resume report as `thread.path`; each happy turn appends a
 //     namespace-less function_call for retry_thread and codex's "unsupported call: retry_thread" output to it
 import { spawn } from "node:child_process";
@@ -96,6 +99,10 @@ if (process.argv[2] === "login" && process.argv[3] === "status") {
   if (mode === "logged-out") {
     process.stderr.write("Not logged in\n");
     process.exit(1);
+  }
+  if (mode === "api-key-configured") {
+    process.stderr.write("API key configured - sk-fake-****\nAuthentication is checked when you send a request.\n");
+    process.exit(0);
   }
   // Codex 0.147.0 reports a successful login on stderr; older versions wrote it on stdout.
   const statusStream = mode === "logged-in-stdout" ? process.stdout : process.stderr;
@@ -281,7 +288,34 @@ const startMcpServers = async (): Promise<Record<string, McpStartup>> => {
   return Object.fromEntries(entries);
 };
 
+let mcpPending: string[] = [];
+let mcpReadyAtTurnStart: boolean | undefined;
+// codex-cli 0.166.0 answers the thread request first and reports each server's startup after it.
+const announceMcpStartup = () => {
+  const report = (name: string, status: string, error: string | null = null) =>
+    out({ jsonrpc: "2.0", method: "mcpServer/startupStatus/updated", params: { threadId: null, name, status, error, failureReason: null } });
+  mcpPending = Object.entries(mcpMounts())
+    .filter(([name, fields]) => "command" in fields && fields.enabled !== false && name !== process.env.FAKE_CODEX_MCP_FAILED)
+    .map(([name]) => name);
+  for (const name of mcpPending) report(name, "starting");
+  const settle = (name: string) => {
+    mcpPending = mcpPending.filter((pending) => pending !== name);
+    const started = mcpStartup?.[name];
+    if (started?.status === "failed") report(name, "failed", started.error);
+    else report(name, "ready");
+  };
+  const delayMs = Number(process.env.FAKE_CODEX_MCP_READY_MS) || 0;
+  for (const [index, name] of [...mcpPending].entries()) {
+    const delay = delayMs * (process.env.FAKE_CODEX_MCP_STAGGER === "1" ? index + 1 : 1);
+    if (delay > 0) setTimeout(() => settle(name), delay);
+    else settle(name);
+  }
+};
 const threadReply = (response: unknown) => {
+  replyToThread(response);
+  announceMcpStartup();
+};
+const replyToThread = (response: unknown) => {
   if (!process.env.FAKE_CODEX_RESTORED_USAGE) return out(response);
   const restored = {
     jsonrpc: "2.0", method: "thread/tokenUsage/updated",
@@ -318,7 +352,8 @@ const dump = () => {
   if (process.env.FAKE_CODEX_DUMP) {
     writeDumpAtomic(
       process.env.FAKE_CODEX_DUMP,
-      JSON.stringify({ pid: process.pid, argv: process.argv.slice(2), env: process.env, calls, decision, ...(mcpStartup ? { mcpStartup } : {}) }, null, 2),
+      JSON.stringify({ pid: process.pid, argv: process.argv.slice(2), env: process.env, calls, decision, ...(mcpStartup ? { mcpStartup } : {}),
+        ...(mcpReadyAtTurnStart !== undefined ? { mcpReadyAtTurnStart } : {}) }, null, 2),
     );
   }
 };
@@ -429,7 +464,7 @@ process.stdin.on("data", (chunk) => {
       case "initialize": {
         experimentalApi = msg.params?.capabilities?.experimentalApi === true;
         logStartup("initialize");
-        const reply = () => out({ jsonrpc: "2.0", id: msg.id, result: { ok: true } });
+        const reply = () => out({ jsonrpc: "2.0", id: msg.id, result: { ok: true, userAgent: process.env.FAKE_CODEX_USER_AGENT ?? "codex_cli_rs/0.166.0" } });
         if (process.env.FAKE_CODEX_STARTUP_DELAY_MS) setTimeout(reply, Number(process.env.FAKE_CODEX_STARTUP_DELAY_MS));
         else reply();
         break;
@@ -609,6 +644,7 @@ process.stdin.on("data", (chunk) => {
         }
         break;
       case "turn/start": {
+        if (process.env.FAKE_CODEX_MCP_READY_MS) mcpReadyAtTurnStart = mcpPending.length === 0;
         dump();
         logStartup("turn/start");
         nativeThreadId = msg.params?.threadId ?? nativeThreadId;
@@ -735,6 +771,14 @@ process.stdin.on("data", (chunk) => {
             notify("turn/completed", { turn: { status: "failed", error } });
             break;
           }
+        }
+        if (mode === "plan-model-refused") {
+          out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+          // The reporter's words (2026-11-03): ChatGPT lists gpt-6.1-sol, then refuses it for a ChatGPT account.
+          const error = { message: "unexpected status 400 Bad Request: invalid_request_error model_not_found: The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.", codexErrorInfo: null, additionalDetails: null };
+          notify("error", { willRetry: false, error });
+          notify("turn/completed", { turn: { status: "failed", error } });
+          break;
         }
         if (mode === "usage-limit") {
           out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });

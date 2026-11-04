@@ -5,7 +5,7 @@ import { useMenuMotion } from "./MenuMotion";
 import { MENU_HEADING, MENU_SHEET } from "./menu-recipe";
 import { t } from "@/lib/i18n";
 import { instanceSupportsLocalComputer, localComputerDisabledReason, localComputerSelectable } from "@/lib/local-computer";
-import { effectivePlace, PLACES, placeLabelKey, placeOffered, type Place } from "@/lib/place";
+import { effectivePlace, personPin, PLACES, placeLabelKey, placeOffered, type Place } from "@/lib/place";
 import { placeBlocked, placeFacts, placeHasIssue, placeViewFor, usePlaceSeat } from "@/lib/place-view";
 import { useStore, type Bot, type Task } from "@/state/store";
 import type { PlaceView } from "../../shared/place-view";
@@ -43,19 +43,20 @@ export function usePlaceAvailability(bot: Bot): PlaceAvailability {
 /** The place chip as one + menu entry with the same choices, for a phone composer that has no room for the chip. */
 export function usePlaceMenuItem({ bot, task, disabled = false, onPin }: {
   bot: Bot;
-  task?: Pick<Task, "surface"> | null;
+  task?: Pick<Task, "surface" | "surfaceAuto"> | null;
   disabled?: boolean;
   onPin: (surface: Place | null) => void;
 }): SidebarMenuItem {
   const { state } = useStore();
   const places = usePlaceViews(bot);
   const effective = effectivePlace(bot, task);
-  const pinned = Boolean(task?.surface);
+  const pin = personPin(task);
+  const pinned = Boolean(pin);
   const off = effective === "off";
   const botDefault = bot.computer ?? "auto";
   const followsAuto = botDefault === "auto";
   const check = <Check size={14} className="text-accent" aria-hidden="true" />;
-  const choose = (surface: Place | null) => { if (surface !== (task?.surface ?? null)) onPin(surface); };
+  const choose = (surface: Place | null) => { if (surface !== (pin ?? null)) onPin(surface); };
   return {
     key: "place",
     label: t("computer.worksOn"),
@@ -80,8 +81,8 @@ export function usePlaceMenuItem({ bot, task, disabled = false, onPin }: {
           label: t(placeLabelKey(place)),
           note: !policy ? t("place.unavailable") : placeHasIssue(view) ? view.short : t(DESCRIPTION[place]),
           icon: <PlaceIcon place={place} size={16} aria-hidden="true" />,
-          active: task?.surface === place,
-          trailing: task?.surface === place ? check : undefined,
+          active: pin === place,
+          trailing: pin === place ? check : undefined,
           disabled: !reachable,
           onSelect: () => choose(place),
         };
@@ -96,7 +97,7 @@ const DESCRIPTION: Record<Place, "computer.dest.cloudDesc" | "computer.dest.vmDe
 
 export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
   bot: Bot;
-  task?: Pick<Task, "surface"> | null;
+  task?: Pick<Task, "surface" | "surfaceAuto"> | null;
   live: boolean;
   disabled?: boolean;
   onPin: (surface: Place | null) => void;
@@ -107,7 +108,8 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
   const { state } = useStore();
   const places = usePlaceViews(bot);
   const effective = effectivePlace(bot, task);
-  const pinned = Boolean(task?.surface);
+  const pin = personPin(task);
+  const pinned = Boolean(pin);
   const off = effective === "off";
   const label = t(placeLabelKey(effective));
   const showLive = live && effective !== "off" && effective !== "auto";
@@ -122,7 +124,7 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
     return () => { document.removeEventListener("mousedown", outside); document.removeEventListener("keydown", escape); };
   }, [open]);
 
-  const choose = (surface: Place | null) => { setOpen(false); if (surface !== (task?.surface ?? null)) onPin(surface); };
+  const choose = (surface: Place | null) => { setOpen(false); if (surface !== (pin ?? null)) onPin(surface); };
   const botDefault = bot.computer ?? "auto";
   const followsAuto = botDefault === "auto";
 
@@ -167,7 +169,7 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
               {!pinned && <Check size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />}
             </button>
             {PLACES.filter((place) => placeOffered(place, state.config)).map((place) => {
-              const selected = task?.surface === place;
+              const selected = pin === place;
               const { view, reachable, policy } = places[place];
               const detail = !policy ? t("place.unavailable") : placeHasIssue(view) ? view.short : t(DESCRIPTION[place]);
               return (

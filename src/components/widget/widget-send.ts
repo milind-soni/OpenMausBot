@@ -1,5 +1,6 @@
 import { api } from "@/state/store";
 import type { WidgetOther, WidgetValues } from "../../../shared/widget";
+import { randomUuid } from "@/lib/random-uuid";
 
 export interface WidgetPress {
   botId: string;
@@ -17,7 +18,7 @@ export type WidgetSendResult =
   /** `refused`: the server said no, in `error`. Otherwise no answer came, and the same sendId may be sent again. */
   | { ok: false; refused: boolean; error?: string };
 
-export const newWidgetSendId = (): string => crypto.randomUUID();
+export const newWidgetSendId = (): string => randomUuid();
 
 export async function sendWidgetAction(press: WidgetPress): Promise<WidgetSendResult> {
   try {
