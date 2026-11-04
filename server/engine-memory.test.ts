@@ -228,7 +228,7 @@ describe("who goes first when memory holds several", () => {
   };
   const finish = async (h: ReturnType<typeof host>, threadId: string) => {
     h.memory.turnEnded(threadId);
-    for (const child of [...h.children.values()]) child.exit();
+    for (const child of h.children.values()) child.exit();
     await settle();
   };
 
