@@ -81,7 +81,13 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   writeFileSync(join(home, "web", "index.html"), "<!doctype html><title>OpenMausBot</title>");
   const port = await freePortBlock([0, 1]);
   base = `http://127.0.0.1:${port}`;
-  const offlinePrelude = `data:text/javascript,${encodeURIComponent('globalThis.fetch = async () => new Response("offline fixture", { status: 503 });')}`;
+  // Offline, and a Cloud with room on its disk: what fits there is its 15% reserve against this machine's free space otherwise,
+  // so a nearly full runner or laptop would keep every copy off it.
+  const offlinePrelude = `data:text/javascript,${encodeURIComponent(`import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+fs.statfsSync = () => ({ bsize: 4096, frsize: 4096, blocks: 2 ** 26, bfree: 2 ** 25, bavail: 2 ** 25, files: 2 ** 20, ffree: 2 ** 19, type: 0 });
+syncBuiltinESMExports();
+globalThis.fetch = async () => new Response("offline fixture", { status: 503 });`)}`;
   child = spawn(process.execPath, ["--import", offlinePrelude, join(SERVER_DIR, "index.ts")], {
     cwd: join(SERVER_DIR, ".."),
     env: {
@@ -169,7 +175,7 @@ it("a lent folder keeps working while the Mac is away: read from the copy, chang
     await vi.waitFor(() => expect(connector.cloudState(env).connected).toBe(true), { timeout: 15_000 });
     // Files copies it by itself: nothing to choose.
     await files.pass();
-    expect(files.state().shared).toMatchObject([{ name: "Notes", lent: true, status: "synced" }]);
+    expect(files.state().shared, JSON.stringify(files.state())).toMatchObject([{ name: "Notes", lent: true, status: "synced" }]);
     // The copy is in the data folder, which no bot's box shows: only shared_computer, with lending's rules, reaches it.
     const copy = join(home, ".openmausbot", "sync", "lent");
     const [computerDir] = readdirSync(copy);

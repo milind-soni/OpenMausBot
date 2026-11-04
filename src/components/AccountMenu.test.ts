@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { accountMenuItems } from "./AccountMenu";
+import { accountMenuItems, cloudRowLabel } from "./AccountMenu";
 
 afterEach(() => vi.unstubAllGlobals());
 const signOut = vi.fn();
@@ -23,4 +23,10 @@ it("another place's page shows no address, only the row that asks main for the s
   expect(JSON.stringify(items)).not.toContain("@");
   items[0].onSelect();
   expect(openSheet).toHaveBeenCalled();
+});
+
+it("the MausBot Cloud row says Sign in while nobody is signed in here; any other page keeps its name", () => {
+  expect(cloudRowLabel({ active: null, others: [] })).toBe("Sign in");
+  expect(cloudRowLabel({ active: { id: "b", email: "b@example.test" }, others: [] })).toBe("MausBot Cloud");
+  expect(cloudRowLabel(null)).toBe("MausBot Cloud");
 });

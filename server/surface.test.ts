@@ -219,7 +219,7 @@ describe("surfacePrompt", () => {
     expect(beside).toContain("This computer is the person's own: their screen, their apps and the browsers they are signed in to.");
     expect(beside).toContain("use, in this order: a connected app that does it, your built-in browser, a cloud computer if select_computer offers one.");
     expect(beside).toContain("Use their own browser or screen only when the task needs their own signed-in session and nothing else works.");
-    expect(beside).toContain("OpenMausBot asks them once whether you may, at every approval level");
+    expect(beside).toContain("OpenMausBot asks them once whether you may, at every approval level except Full access");
     expect(beside).toContain("never mention DevTools, CDP, debugging ports, profiles, grants, binding, attaching, endpoints or drivers");
     const alone = surfacePrompt({ computer: "local", browser: false });
     expect(alone).not.toMatch(/web pages included/);
