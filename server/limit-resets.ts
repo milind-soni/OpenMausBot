@@ -26,8 +26,9 @@ function windowLine(name: LimitWindowName, window: PlanWindow): { window: LimitW
  * their resets counts; with none at the limit, the fullest window counts. Null when the row has no usage. */
 export function engineLimitFromUsage(row: PlanProviderRow): EngineLimit | null {
   if (!row.ok || (row.driver !== "claude" && row.driver !== "codex" && row.driver !== "grok")) return null;
-  const base = { engine: row.id, name: row.name, driver: row.driver as Driver };
   const windows = [windowLine("5-hour", row.fiveHour), windowLine("weekly", row.weekly)].filter((line) => line !== null);
+  const base = { engine: row.id, name: row.name, driver: row.driver as Driver,
+    windows: windows.map(({ window, used, resetsAt }) => ({ window, usedPercent: used, resetsAt })) };
   if (!windows.length) return { ...base, window: null, usedPercent: null, resetsAt: null, blocked: false };
   const full = windows.filter((line) => line.used >= 100);
   if (full.length) {

@@ -80,7 +80,7 @@ import { RichMessageRow, UserLineNote, richRowKind } from "./RichMessageRow"; im
 import { Composer } from "./Composer";
 import { ChatErrorBanner, ChatNotice } from "./ChatErrorBanner";
 import { ThreadContextWarning } from "./ContextWarning";
-import { EngineLimitNotice, useLimitResetContinue } from "./LimitResetContinue";
+import { UsageAlert, useLimitResetContinue } from "./EngineUsage";
 import { ChatFindBar } from "./ChatFindBar";
 import { ReplyQuote } from "./ReplyQuote";
 import { ConnectorCard } from "./ConnectorCard";
@@ -1111,7 +1111,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
             </button>
           )}
           <ThreadContextWarning bot={bot} messages={messages} />
-          <EngineLimitNotice engine={bot.modelSelection?.instanceId} />
+          {phone && <UsageAlert engine={bot.modelSelection?.instanceId} />}
           {/* The model and the bot's computer stay in view in both modes; Simple mode moves only ⋯ into the bot panel. */}
           {!phone && <ModelPicker key={bot.threadId} bot={bot} threadId={bot.threadId} />}
           <LiveCallChip currentBotId={bot.id} onOpen={(botId, threadId) => openThread(dispatch, { botId, threadId }, state, showThreads)} />
