@@ -35,6 +35,7 @@ import type {
   SteerOutcome,
   TextGenerationOptions,
 } from "../contracts.ts";
+import { EMAIL_READ_TOOL_NAMES } from "../../shared/email.ts";
 import { appMountFor, customServerGate, gateQueryTools, gateServer } from "../mcp-gate-config.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
@@ -1094,6 +1095,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       for (const name of ["data", "highlevel", "device"] as const) {
         if (turn.integrations?.[name]) { mcpServers[name] = { ...turn.integrations[name] }; allowed.push(`mcp__${name}`); }
       }
+      // Only its reads: a send asks as any tool of a person's own server does.
+      if (turn.integrations?.email) { mcpServers.email = { ...turn.integrations.email }; allowed.push(...EMAIL_READ_TOOL_NAMES.map((tool) => `mcp__email__${tool}`)); }
       if (turn.integrations?.dweb) {
         mcpServers.dweb = {
           command: process.execPath,
@@ -1129,7 +1132,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         const gated = gateServer({ name, server: mcpServers[name], threadId, nodeEnv: NODE_ENV_FLAG, toolScope: turn.toolScope, ...customServerGate(name, botOwned.has(name), turn.integrations?.customResultBudgets, turnEnvironment), apps: appMountFor(name, turn) });
         if (gated) mcpServers[name] = { ...gated, ...((mcpServers[name] as { alwaysLoad?: unknown })?.alwaysLoad === true ? { alwaysLoad: true } : {}) };
       }
-      allowed.splice(0, allowed.length, ...allowed.filter((name) => Object.hasOwn(mcpServers, name.slice("mcp__".length))));
+      allowed.splice(0, allowed.length, ...allowed.filter((name) => Object.hasOwn(mcpServers, name.slice("mcp__".length).split("__")[0]!)));
       // Full access keeps ask_user: native bypass skips permission prompts, not questions.
       let broker: Awaited<ReturnType<typeof createPermissionBroker>> | undefined;
       const socketPath = permissionSocketPath(threadId, botId);

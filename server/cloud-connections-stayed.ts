@@ -35,7 +35,7 @@ export function stayedConnectors(servers: Record<string, unknown> | undefined, p
 
 /** Why, as a model reads it: words a bot can pass on. */
 export function stayedWhyText(stayed: StayedConnector): string {
-  if (stayed.why.kind === "mail") return `a mail connector keeps its accounts on ${stayed.computer}, and a bot here cannot reach a mail server through it`;
+  if (stayed.why.kind === "mail") return `a mail connector keeps its accounts on ${stayed.computer}, and a bot here cannot reach a mail server through it; the email tools do that job here, and request_credential with credential_id email connects them`;
   if (stayed.why.kind === "program") return `it needs ${stayed.why.program}, which this Cloud does not have`;
   return `it uses files or an address only ${stayed.computer} has`;
 }
@@ -53,8 +53,12 @@ type Bot = { id: string; name: string; threadId: string; chiefOfStaff?: unknown;
 export interface StayedNoticesDeps {
   /** Who has been told what, by connector and bot. */
   file: string;
+  /** My Cloud's public address. */
+  origin: string;
   servers(): Record<string, unknown> | undefined;
   programs(): readonly string[];
+  /** A mailbox is connected here, so a mail connector left behind is no longer missed. */
+  mailConnected?(): boolean;
   bots(): readonly Bot[];
   /** A line in a bot's own chat, in the conversation the person is looking at. */
   say(threadId: string, text: string, kind: "line" | "row"): void;
@@ -77,7 +81,7 @@ export function createStayedNotices(deps: StayedNoticesDeps) {
     (all[key(stayed)] ??= []).push(bot.id);
     try { writeFileAtomic(deps.file, JSON.stringify(all), { mode: 0o600 }); } catch (error) { console.warn("[connections] could not save what was said about what stayed:", error); }
   };
-  const stayed = () => stayedConnectors(deps.servers(), deps.programs());
+  const stayed = () => stayedConnectors(deps.servers(), deps.programs()).filter((connector) => connector.why.kind !== "mail" || !deps.mailConnected?.());
   const serves = (bot: Bot, connector: StayedConnector) => (connector.bot ? connector.bot === bot.id : !bot.mcpServers || bot.mcpServers.includes(connector.name)) && canUseMcpServer(bot.toolScope, connector.name);
 
   return {
@@ -89,7 +93,9 @@ export function createStayedNotices(deps: StayedNoticesDeps) {
       const speaker = bots.find((bot) => bot.chiefOfStaff && left.some((connector) => serves(bot, connector))) ?? bots.find((bot) => left.some((connector) => serves(bot, connector)));
       if (!speaker) return;
       const lines = left.filter((connector) => serves(speaker, connector));
-      const text = lines.map((connector) => stayedLine(language ?? deps.language(speaker.threadId), connector)).join("\n\n");
+      // In a chat line a link can be followed; `/?connect=email` opens where a mailbox connects.
+      const link = lines.some((connector) => connector.why.kind === "mail") ? `\n\n${deps.origin}/?connect=email` : "";
+      const text = `${lines.map((connector) => stayedLine(language ?? deps.language(speaker.threadId), connector)).join("\n\n")}${link}`;
       for (const connector of lines) remember(connector, speaker);
       deps.say(speaker.threadId, text, "line");
       deps.notify(text, speaker, speaker.threadId);

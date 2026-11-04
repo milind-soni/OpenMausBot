@@ -733,8 +733,11 @@ export interface SecretRequestCardData {
   description: string;
   placeholder: string;
   helpUrl: string;
-  /** A custom secret's use the person agrees to: "ref", OpenMausBot's own tools only; "file", the bot's commands. */
-  delivery?: SecretDelivery;
+  /** A custom secret's use the person agrees to: "ref", OpenMausBot's own tools only; "file", the bot's commands; "email",
+   * the Email connector, which keeps it and never gives it to a bot. */
+  delivery?: SecretDelivery | "email";
+  /** An email card: the mailbox it is for, when known. Off a phone the person can type or change it on the card. */
+  address?: string;
   /** A custom secret: the bot's own words on why; `description` adds what the bot may do with it, and helpUrl is empty. */
   reason?: string;
   /** A file secret's Local VM target key, when the asking turn ran in one. */
