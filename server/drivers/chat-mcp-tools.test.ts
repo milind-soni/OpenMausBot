@@ -508,8 +508,9 @@ describe("Chat MCP session", () => {
       const later = Array.from({ length: SAVED_RESULTS_KEPT }, (_, i) => `result-audit_write-${Date.now() + 3_600_000 + i}-abcdef.txt`);
       for (const name of later) writeFileSync(join(results, name), "later");
       const result = await (await f.mount(false, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
-      const file = /saved in (\S+?)\]/.exec(result.text)?.[1] ?? "";
-      expect(readFileSync(file, "utf8")).toBe(big);
+      const [saved] = readdirSync(results).filter((name) => !later.includes(name));
+      expect(result.text).toContain(join(results, saved));
+      expect(readFileSync(join(results, saved), "utf8")).toBe(big);
       expect(readdirSync(results)).toHaveLength(SAVED_RESULTS_KEPT);
       expect(readdirSync(results)).not.toContain(later[0]);
     });
