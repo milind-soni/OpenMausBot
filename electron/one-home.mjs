@@ -220,12 +220,13 @@ export function createOneHome(deps) {
       return { phase: journal.phase, ...(journal.lost ? { lost: true } : {}), ...(journal.elsewhere ? { elsewhere: journal.elsewhere } : {}), ...(journal.kept ? { kept: true } : {}),
         ...(journal.phase === "back" && journal.gone ? { gone: true } : {}) };
     }
-    const running = deps.send.snapshot?.()?.running;
+    const sent = deps.send.snapshot?.();
+    const running = sent?.running;
     const chats = journal.phase === "copy" && running?.phase === "chats" && running.progress ? { done: running.progress.done, total: running.progress.total } : null;
     if (journal.phase === "copy" && journal.updating && !running) return { phase: "copy", updating: true };
     // A check that found things missing pass after pass is said at once, with what did not go: waiting helps none of it.
     const failing = journal.failingSince && (journal.failure?.code === "incomplete" || now() - journal.failingSince >= FAILING_LINE_MS) ? { error: journal.error ?? null } : null;
-    const items = failing ? notCarried(false) : [];
+    const items = failing ? notCarried(sent, false) : [];
     const phase = FROZEN.has(journal.phase) || journal.phase === "switch" ? "finishing" : journal.phase;
     const waits = phase === "wait" && waitingFor !== null ? { waitingFor, ...(waitingWhat ? { waitingWhat } : {}) } : {};
     return { phase, ...(chats ? { chats } : {}), ...waits, ...(failing ? { failing: { ...failing, ...(items.length ? { items } : {}) } } : {}) };
@@ -233,8 +234,8 @@ export function createOneHome(deps) {
 
   /** What the last whole pass could not carry, each with why: all of it while the move is failing, only what My Cloud
    * refused for good (`final`, which the move goes on without) once it is done. */
-  function notCarried(onlyFinal) {
-    const failed = deps.send.snapshot?.()?.whole?.result?.failed;
+  function notCarried(sent, onlyFinal) {
+    const failed = sent?.whole?.result?.failed;
     return (Array.isArray(failed) ? failed : []).filter((entry) => typeof entry?.label === "string" && (!onlyFinal || entry.final === true))
       .slice(0, NAMED_MAX).map((entry) => ({ label: entry.label, error: sentence(entry.error) ?? "It did not move." }));
   }
@@ -354,8 +355,9 @@ export function createOneHome(deps) {
       later(next.retryAt - now());
       return null;
     } finally { await session?.close().catch(() => {}); }
-    const held = (deps.send.snapshot?.()?.whole?.result?.notes ?? []).filter((note) => note?.kind === "held" && typeof note.connection === "string").map((note) => note.connection);
-    const left = notCarried(true);
+    const sent = deps.send.snapshot?.();
+    const held = (sent?.whole?.result?.notes ?? []).filter((note) => note?.kind === "held" && typeof note.connection === "string").map((note) => note.connection);
+    const left = notCarried(sent, true);
     const done = write({ ...journal, phase: "done", switched, doneAt: now(), version: deps.version ?? null, phone: deps.phone?.paired() === true, held, ...(left.length ? { left } : {}),
       error: undefined, failingSince: undefined, retryAt: undefined, tries: undefined, failure: undefined });
     await settle(done);

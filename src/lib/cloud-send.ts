@@ -108,9 +108,11 @@ function ownMoveLine(move: OneHomeView, place: string, page: "local" | "cloud"):
   if (page !== "local" || !["copy", "wait", "finishing"].includes(move.phase)) return null;
   const line = (kind: "sending" | "failed", text: string, more: { retry?: true; reason?: string; extra?: string[] } = {}) => ({ kind, text, extra: [], place, ...more });
   const failing = "failing" in move ? move.failing : undefined;
-  const extra = notCarried(failing?.items);
-  if (failing) return failing.error ? line("failed", t("cloudSend.move.failingNamed", { place, error: failing.error }), { retry: true, reason: failing.error, extra })
-    : line("failed", t("cloudSend.move.failingPlainNamed", { place }), { retry: true, extra });
+  if (failing) {
+    const extra = notCarried(failing.items);
+    return failing.error ? line("failed", t("cloudSend.move.failingNamed", { place, error: failing.error }), { retry: true, reason: failing.error, extra })
+      : line("failed", t("cloudSend.move.failingPlainNamed", { place }), { retry: true, extra });
+  }
   if (move.phase === "copy" && move.updating) return line("sending", t("cloudSend.move.updatingNamed", { place }));
   if (move.phase === "finishing") return line("sending", t("cloudSend.move.finishingNamed", { place }));
   if (move.phase === "wait" && move.waitingFor !== undefined) {
