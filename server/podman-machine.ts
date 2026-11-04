@@ -5,7 +5,9 @@ import { sh, type CommandRunner, type ContainerComputerStatus } from "./containe
 const MACHINE_START_TIMEOUT_MS = 3 * 60_000;
 /** After a failed start, turns get the same message for a while instead of each waiting on another failing start. */
 const FAILED_START_BACKOFF_MS = 5 * 60_000;
-const RECHECK_TRIES = 5;
+/** Podman's API socket can answer a while after `machine start` returns: checks once a second for about 20 s. */
+const RECHECK_TRIES = 20;
+export const NOT_ANSWERING_YET = "The Podman machine started, but Podman is not answering yet; try again in a moment";
 
 type MachineEntry = { Name?: unknown; Default?: unknown; Running?: unknown; Starting?: unknown };
 type RuntimeStatus = Pick<ContainerComputerStatus, "runtime" | "daemonUp" | "problem">;
@@ -39,13 +41,13 @@ export async function startStoppedPodmanMachine<S extends RuntimeStatus>(
     lastFailure = { at: now(), problem: (error as Error).message };
     return { ...status, problem: lastFailure.problem };
   }
-  // Podman's API socket can answer a moment after `machine start` returns.
   let fresh = await recheck();
   for (let tries = 1; tries < RECHECK_TRIES && !fresh.daemonUp; tries++) {
     await pause(1_000);
     fresh = await recheck();
   }
-  return fresh;
+  // Not "Start podman first": it was just started, so say so.
+  return fresh.daemonUp || fresh.runtime !== "podman" ? fresh : { ...fresh, problem: NOT_ANSWERING_YET };
 }
 
 async function startMachine(runner: CommandRunner, onStart: () => void): Promise<boolean> {

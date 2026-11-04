@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { RemoteMcpSpec } from "../contracts.ts";
 import { RemoteMcpClient } from "../mcp-http.ts";
-import { probeMcpServer } from "../mcp-probe.ts";
+import { probeMcpServer, SIGN_IN_CHECK_TOOL } from "../mcp-probe.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import { BOX_BROKER_PORT, type BoxBroker } from "./box.ts";
 import { brokerRemoteMcp, forgetBrokeredMcp, mcpGrantName, mcpReconnectLine, retryBrokeredMcp } from "./broker-mcp.ts";
@@ -101,7 +101,7 @@ describe("remote MCP servers through the broker", () => {
       await client.initialize("engine", signal);
       expect(await client.request("tools/call", { name: "lookup_order", arguments: { id: "1042" } }, signal)).toEqual({ content: [{ type: "text", text: "remote execution recorded" }] });
       await client.close();
-      expect(gateway.calls).toEqual([{ name: "lookup_order", arguments: { id: "1042" } }]);
+      expect(gateway.calls).toEqual([{ name: SIGN_IN_CHECK_TOOL, arguments: {} }, { name: "lookup_order", arguments: { id: "1042" } }]);
       expect(gateway.seenHeaders.filter((headers) => headers["cf-access-client-id"] === id && headers["cf-access-client-secret"] === secret).length).toBeGreaterThanOrEqual(3);
     } finally {
       await new Promise((resolve) => bridge.close(resolve));

@@ -95,3 +95,27 @@ describe("/api/places/elsewhere", () => {
     expect(await other({ path: "/api/places", method: "GET" } as never)).toBe(PASS);
   });
 });
+
+describe("a team the person is a member of", () => {
+  const ACME = { name: "Acme", kind: "team" as const, bots: ["Sales", "Support"] };
+
+  it("on My Cloud a bot asked for a team's bot names the team and the two real actions: ask it there, or move this bot there", () => {
+    const here = createPlacesElsewhere({ dataDir: dataDir() });
+    here.write({ v: 1, self: { name: "My Cloud", kind: "cloud" }, places: [ACME] });
+    expect(here.explain("sales")).toEqual({ where: "Sales lives in Acme, the person's team, not here. Bots work together only within one place, so it can't be reached from here. "
+      + "Tell the person they can ask it in Acme, or move this bot to Acme: in the app, open the bot's menu in the sidebar and choose \"Move to Acme\"." });
+    expect(here.mentioned("ask @Sales for the numbers", [{ name: "Chief" }])).toContain("Sales lives in Acme, the person's team, not here.");
+    expect(here.missed("ask @Sales for the numbers", [{ name: "Chief" }])).toEqual([
+      "Sales lives in Acme, so that mention didn't reach it: bots work together only within one place. Ask it in Acme, or move this bot to Acme: in the app, open the bot's menu in the sidebar and choose \"Move to Acme\".",
+    ]);
+  });
+
+  it("elsewhere says the move starts from My Cloud, the only place the app offers it, and never offers a home or a bridge", () => {
+    const here = createPlacesElsewhere({ dataDir: dataDir() });
+    here.write({ v: 1, self: { name: "Garage server", kind: "server" }, places: [ACME] });
+    const told = (here.explain("Support") as { where: string }).where;
+    expect(told).toContain("Tell the person they can ask it in Acme, or, from My Cloud, move a bot to Acme.");
+    expect(told).not.toMatch(/bring their bots together|my home|Bring them together|Keep this computer/);
+    expect(resolveTeammate([{ id: "chief", name: "Chief" }], { id: "chief", name: "Chief" }, "Support", here.explain)).toEqual({ error: told });
+  });
+});
