@@ -2862,6 +2862,7 @@
   "mcp.apps.toggleAria": "Показувати застосунки {name} в чаті",
   "team.privateChats": "Ваші чати в {team} приватні. Їх бачите лише ви: ні інші учасники, ні адміністратори {team}.",
   "team.privateHeader": "Приватно · лише ви",
+  "team.sharedHeaderPeople": "Спільний · його бачать лише додані люди й адміни",
   "chat.page.usage": "{pages} з {limit} сторінок",
   "chat.page.copyLink": "Копіювати посилання",
   "chat.page.copied": "Скопійовано",

@@ -399,7 +399,8 @@ function withLevel<T extends object>(bot: T, visible: VisibleSet): T {
   if (typeof record.id !== "string") return bot;
   const yourAccess = visible.level(record.id);
   const { access: _access, ...rest } = record;
-  return (yourAccess === "edit" ? { ...rest, access: accessOf(record), yourAccess } : { ...rest, yourAccess }) as T;
+  const audience = isRestricted(record.visibility) ? { onlyPeopleAdded: true as const } : {};
+  return (yourAccess === "edit" ? { ...rest, access: accessOf(record), yourAccess, ...audience } : { ...rest, yourAccess, ...audience }) as T;
 }
 
 /** What only the bot's selected conversation carries, dropped when that conversation is someone else's. */

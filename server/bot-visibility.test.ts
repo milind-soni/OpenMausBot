@@ -383,6 +383,18 @@ describe("a Team Cloud's audiences", () => {
     expect(memberBot({ id: "pub", threadId: "t-pub-2" }, admin)).toEqual({ id: "pub", access: { everyone: "chat", people: {} }, yourAccess: "edit" });
   });
 
+  it("says on everyone's copy when only the people added see a bot, without naming them to anyone who can't edit it", () => {
+    const restricted = { id: "pub", threadId: "t-pub", tasks: [{ threadId: "t-pub" }], visibility: { people: ["ada@x.test"] } };
+    const member = memberBot(restricted, new VisibleSet(open, openGroups, ADA, undefined, { of: audienceOf, person: ADA_KEY })) as Record<string, unknown>;
+    expect(member).toMatchObject({ onlyPeopleAdded: true });
+    expect(JSON.stringify(member)).not.toContain("ada@x.test");
+    const admin = new VisibleSet(open, openGroups, BEN_ADMIN, undefined, { of: audienceOf, person: BEN_KEY });
+    expect(memberBot(restricted, admin)).toMatchObject({ onlyPeopleAdded: true });
+    expect(memberBot({ ...restricted, visibility: "admins" }, admin)).toMatchObject({ onlyPeopleAdded: true });
+    expect(memberBot({ ...restricted, visibility: "everyone" }, admin)).not.toHaveProperty("onlyPeopleAdded");
+    expect(memberBot({ id: "pub", threadId: "t-pub", tasks: [{ threadId: "t-pub" }] }, admin)).not.toHaveProperty("onlyPeopleAdded");
+  });
+
   it("a main chat named as another person's private chat is replaced by a conversation the viewer reads, never sent", () => {
     const admin = new VisibleSet(open, openGroups, BEN_ADMIN, undefined, { of: audienceOf, person: BEN_KEY });
     const bot = { id: "pub", threadId: "t-pub-2", mainThreadId: "t-pub-2", tasks: [{ threadId: "t-pub-2" }, { threadId: "t-pub" }] };

@@ -6170,6 +6170,7 @@
   "team.privateChats": "Le tue chat in {team} sono private. Solo tu puoi vederle: non gli altri membri, non gli amministratori di {team}.",
   "team.privateHeader": "Privato · solo tu",
   "team.sharedHeader": "Condiviso · tutti in {team} possono vedere",
+  "team.sharedHeaderPeople": "Condiviso · possono vedere solo le persone aggiunte e gli admin",
   "chat.page.usage": "{pages} di {limit} pagine",
   "chat.page.copyLink": "Copia link",
   "chat.page.copied": "Copiato",

@@ -6394,6 +6394,7 @@
   "team.privateChats": "Ваши чаты в {team} приватны. Их видите только вы: не другие участники и не администраторы {team}.",
   "team.privateHeader": "Приватный · только вы",
   "team.sharedHeader": "Общий · его видят все в {team}",
+  "team.sharedHeaderPeople": "Общий · его видят только добавленные люди и админы",
   "chat.page.usage": "{pages} из {limit} страниц",
   "chat.page.copyLink": "Скопировать ссылку",
   "chat.page.copied": "Скопировано",

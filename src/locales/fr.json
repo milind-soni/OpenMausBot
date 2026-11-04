@@ -2390,6 +2390,7 @@
   "mcp.apps.toggleAria": "Afficher les apps de {name} dans la conversation",
   "team.privateChats": "Vos discussions dans {team} sont privées. Vous seul pouvez les voir : ni les autres membres, ni les administrateurs de {team}.",
   "team.privateHeader": "Privé · vous seul",
+  "team.sharedHeaderPeople": "Partagé · seules les personnes ajoutées et les admins peuvent voir",
   "chat.page.usage": "{pages} pages sur {limit}",
   "chat.page.copyLink": "Copier le lien",
   "chat.page.copied": "Copié",
