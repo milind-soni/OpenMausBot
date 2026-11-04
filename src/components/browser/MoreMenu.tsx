@@ -17,6 +17,7 @@ export function nextZoom(current: number, direction: 1 | -1): number {
 
 export const VIEWPORTS: ReadonlyArray<{ label: string; setting: PreviewViewportSetting }> = [
   { label: "Fill the panel", setting: { mode: "fill" } },
+  { label: "Full HD · 1920×1080", setting: { mode: "preset", preset: "fullHd" } },
   { label: "Desktop · 1280×800", setting: { mode: "preset", preset: "desktop" } },
   { label: "Tablet · 820×1180", setting: { mode: "preset", preset: "tablet" } },
   { label: "Phone · 390×844", setting: { mode: "preset", preset: "phone" } },
