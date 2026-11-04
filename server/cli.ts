@@ -121,7 +121,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   const options: CliOptions = {
     command: command === "--help" || command === "-h" ? "help" : (command as CliOptions["command"]),
     port: Number(env.OMB_PORT || 8799),
-    dataDir: env.OMB_DATA_DIR || join(homedir(), ".openmausbot"),
+    dataDir: env.MUSTERD_DATA_DIR || env.OMB_DATA_DIR || join(homedir(), ".musterd"),
     tailscale: false,
     tunnel: false,
     client: false,
@@ -747,6 +747,7 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     OMB_DATA_DIR: options.dataDir,
+    MUSTERD_DATA_DIR: options.dataDir,
     OMB_PORT: String(options.port),
     OMB_WEBHOOK_PORT: process.env.OMB_WEBHOOK_PORT || String(options.port + 1),
   };
@@ -949,6 +950,7 @@ export async function runOnboardingCommand(
     return 1;
   }
   process.env.OMB_DATA_DIR = options.dataDir;
+  process.env.MUSTERD_DATA_DIR = options.dataDir;
   if (options.command !== "setup" && await (flow.running ?? isWorkspaceRunning)(options)) {
     if (options.local || options.tunnel || options.tailscale || options.publicUrl) {
       io.error("This workspace is already running. Stop it before changing local or remote access; the current connection was not changed.");
@@ -1012,6 +1014,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     return 2;
   }
   process.env.OMB_DATA_DIR = options.dataDir;
+  process.env.MUSTERD_DATA_DIR = options.dataDir;
   switch (options.command) {
     case "setup":
     case "start":

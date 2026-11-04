@@ -1,5 +1,5 @@
-// ~/.openmausbot/config.json, with env vars overriding its credentials.
-import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
+// ~/.musterd/config.json (migrated from ~/.openmausbot), with env vars overriding its credentials.
+import { readFileSync, mkdirSync, existsSync, renameSync, cpSync, readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -733,15 +733,49 @@ export function changedInstanceIds(before: Record<string, unknown>, after: Recor
     .filter((id) => !isDeepStrictEqual(before[id], after[id]));
 }
 
-export const DATA_DIR = process.env.OMB_DATA_DIR ?? join(homedir(), ".openmausbot");
-const LEGACY_DATA_DIR = join(homedir(), ".opengrokbot");
+function dirHasEntries(path: string): boolean {
+  try {
+    return readdirSync(path).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Explicit env wins; otherwise prefer ~/.musterd (copy-migrate from ~/.openmausbot on first ensureDirs). */
+function resolveDataDir(): string {
+  const musterdEnv = process.env.MUSTERD_DATA_DIR?.trim();
+  if (musterdEnv) return musterdEnv;
+  const ombEnv = process.env.OMB_DATA_DIR?.trim();
+  if (ombEnv) return ombEnv;
+  return join(homedir(), ".musterd");
+}
+
+export const DATA_DIR = resolveDataDir();
+const OPENMAUSBOT_DATA_DIR = join(homedir(), ".openmausbot");
+const LEGACY_GROK_DIR = join(homedir(), ".opengrokbot");
 export const EVENTS_DIR = join(DATA_DIR, "events");
 export const NATIVE_DIR = join(DATA_DIR, "native");
 
 export function ensureDirs() {
-  if (!existsSync(DATA_DIR) && existsSync(LEGACY_DATA_DIR)) {
+  // Prefer rename (instant) over recursive copy — live team homes are huge and copy blocks serve readiness.
+  if (!dirHasEntries(DATA_DIR) && dirHasEntries(OPENMAUSBOT_DATA_DIR) && DATA_DIR !== OPENMAUSBOT_DATA_DIR) {
     try {
-      renameSync(LEGACY_DATA_DIR, DATA_DIR);
+      if (existsSync(DATA_DIR)) rmSync(DATA_DIR, { recursive: true, force: true });
+      renameSync(OPENMAUSBOT_DATA_DIR, DATA_DIR);
+      console.warn(`musterd: moved team data ${OPENMAUSBOT_DATA_DIR} → ${DATA_DIR}`);
+    } catch (renameError) {
+      try {
+        mkdirSync(DATA_DIR, { recursive: true });
+        cpSync(OPENMAUSBOT_DATA_DIR, DATA_DIR, { recursive: true });
+        console.warn(`musterd: copied team data from ${OPENMAUSBOT_DATA_DIR} → ${DATA_DIR} (rename failed: ${renameError instanceof Error ? renameError.message : renameError})`);
+      } catch (error) {
+        console.warn(`musterd: data migrate from ${OPENMAUSBOT_DATA_DIR} failed: ${error instanceof Error ? error.message : error}`);
+      }
+    }
+  }
+  if (!existsSync(DATA_DIR) && existsSync(LEGACY_GROK_DIR)) {
+    try {
+      renameSync(LEGACY_GROK_DIR, DATA_DIR);
     } catch {
     }
   }

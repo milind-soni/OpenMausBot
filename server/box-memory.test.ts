@@ -18,7 +18,7 @@ describe("the box's memory", () => {
     expect(heapSizeArgs(GB, undefined)).toEqual(["--max-old-space-size=614"]);
     expect(heapSizeArgs(128 * 1024 ** 2, "")).toEqual(["--max-old-space-size=128"]);
     expect(heapSizeArgs(64 * GB, "--enable-source-maps")).toEqual(["--max-old-space-size=4096"]);
-    expect(heapSizeArgs(null, undefined)).toEqual([]);
+    expect(heapSizeArgs(null, undefined)).toEqual(["--max-old-space-size=8192"]);
     expect(heapSizeArgs(GB, "--max_old_space_size=300")).toEqual([]);
     expect(heapSizeArgs(GB, "--max-old-space-size=300")).toEqual([]);
   });
@@ -35,11 +35,15 @@ describe("the container's server command", () => {
       env: { OMB_DATA_DIR: join("/srv", "omb"), OMB_PORT: "8799", OMB_SERVER_COMPILE_CACHE: join("/srv", "omb", "cache", "node-compile") },
     });
     expect(serverCommand(here, {}, { exists: () => true, box: small }).env.OMB_SERVER_COMPILE_CACHE)
-      .toBe(join(homedir(), ".openmausbot", "cache", "node-compile"));
+      .toBe(join(homedir(), ".musterd", "cache", "node-compile"));
   });
 
-  it("runs index.js itself without the bootstrap, and leaves the heap alone without a limit or when NODE_OPTIONS sizes it", () => {
-    expect(serverCommand(here, {}, { exists: () => false, box: { bytes: 16 * GB, cgroupLimit: null } })).toEqual({ args: [join(here, "index.js")], env: {} });
+  it("runs index.js itself without the bootstrap; desktop hosts get an 8GB heap floor unless NODE_OPTIONS sizes it", () => {
+    expect(serverCommand(here, {}, { exists: () => false, box: { bytes: 16 * GB, cgroupLimit: null } })).toEqual({
+      args: ["--max-old-space-size=8192", join(here, "index.js")],
+      env: {},
+    });
     expect(serverCommand(here, { NODE_OPTIONS: "--max-old-space-size=900" }, { exists: () => true, box: small }).args).toEqual([join(here, "desktop-entry.mjs")]);
   });
 });
+

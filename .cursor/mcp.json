@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "musterd": {
+      "command": "pnpm",
+      "args": ["mcp"],
+      "env": {
+        "MUSTERD_PORT": "8799"
+      }
+    }
+  }
+}

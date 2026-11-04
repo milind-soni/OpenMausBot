@@ -32,6 +32,7 @@
     "docs:preview": "pnpm --filter @openmausbot/docs preview",
     "companion": "node --experimental-strip-types companion/src/index.ts",
     "omb": "node --experimental-strip-types server/openmausbot.ts",
+    "musterd": "node --experimental-strip-types server/openmausbot.ts",
     "pair": "node --experimental-strip-types server/openmausbot.ts pair",
     "dev:server": "node --experimental-strip-types server/dev-server.ts",
     "mcp": "node --experimental-strip-types scripts/mcp-server.ts",

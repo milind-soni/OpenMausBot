@@ -54,7 +54,7 @@ describe("private managed origin", () => {
         outgoing.once("error", reject);
         outgoing.end();
       });
-      expect(JSON.parse(body)).toEqual({ app: "openmausbot" });
+      expect(JSON.parse(body)).toEqual({ app: "openmausbot", product: "musterd" });
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   );

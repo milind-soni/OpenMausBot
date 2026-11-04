@@ -1,7 +1,10 @@
-# OpenMausBot MCP server
+# Musterd MCP server
 
-The OpenMausBot desktop app includes a local stdio MCP server. It lets another MCP client coordinate your
-OpenMausBot team while the desktop app and its harness are running.
+The Musterd desktop app includes a local stdio MCP server. It lets another MCP client
+(Kepler, Cursor, Hermes, Claude Desktop) coordinate your Musterd team while the
+desktop app and its harness are running.
+
+Legacy OpenMausBot env names (`OPENMAUSBOT_*`, `OMB_*`) still work as aliases.
 
 ## What it can do
 
@@ -9,20 +12,40 @@ OpenMausBot team while the desktop app and its harness are running.
 - read bounded transcript pages and search local transcripts without returning screenshot pixels;
 - create and safely edit bot profiles, channels, and separate task conversations;
 - send work to a bot or channel, wait for either conversation to settle or need help, and interrupt its active turn;
-- list configured model instances and switch an idle bot to an exact available model.
+- list configured model instances and switch an idle bot to an exact available model;
+- post and read **Kepler handoffs** (`kepler_notify` / `kepler_inbox`) for Musterd → Kepler outbound notify.
 
 The v1 server intentionally cannot approve requests, remember permission grants, delete data, import teams,
 change credentials, or control computer/VM lifecycle. Those actions stay in the human-facing app.
 
-## From the openmausbot command
+## Kepler (recommended inbound)
 
-With the `openmausbot` npm package installed, the MCP client can run it
-directly; it serves the same tools:
+With Musterd running on port 8799, point Kepler / Cursor MCP at the source checkout:
 
 ```json
 {
   "mcpServers": {
-    "openmausbot": { "command": "openmausbot", "args": ["mcp"], "env": { "OMB_PORT": "8799" } }
+    "musterd": {
+      "command": "pnpm",
+      "args": ["--dir", "C:/Users/prash/Documents/src/Musterd", "mcp"],
+      "env": {
+        "MUSTERD_PORT": "8799",
+        "MUSTERD_TOKEN": "omb_sess_..."
+      }
+    }
+  }
+}
+```
+
+Outbound (bot → Kepler): set `MUSTERD_KEPLER_TASK_ID` on the Musterd process to the Kepler task id
+(e.g. `task:…`). Handoffs land under `~/.musterd/peers/kepler/` (`inbox.jsonl` + per-id JSON + optional task note).
+
+## From the musterd / openmausbot command
+
+```json
+{
+  "mcpServers": {
+    "musterd": { "command": "pnpm", "args": ["musterd", "mcp"], "env": { "MUSTERD_PORT": "8799" } }
   }
 }
 ```
@@ -32,14 +55,14 @@ The same operations are also commands of their own, for scripts and CI:
 
 ## From a source checkout
 
-Start OpenMausBot, then configure the MCP client to run:
+Start Musterd, then configure the MCP client:
 
 ```json
 {
   "mcpServers": {
-    "openmausbot": {
+    "musterd": {
       "command": "pnpm",
-      "args": ["--dir", "/absolute/path/to/OpenMausBot", "mcp"]
+      "args": ["--dir", "/absolute/path/to/Musterd", "mcp"]
     }
   }
 }
@@ -47,109 +70,31 @@ Start OpenMausBot, then configure the MCP client to run:
 
 Packaged desktop builds require a paired session for tools that create,
 change, send, switch, interrupt, or run anything. Read-only tools work on
-loopback without one. A hosted or shared server with service loopback trust
-([self-hosting](self-hosting.md#loopback-trust-owner-or-service)) needs a
-session for almost every tool, reads included. To authorize an external MCP
-client:
+loopback without one. To authorize an external MCP client:
 
-1. In OpenMausBot, open **Settings → Phone → Set up a phone** and reveal the
+1. In Musterd, open **Settings → Phone → Set up a phone** and reveal the
    one-time pairing code.
 2. Exchange it locally (remove spaces from the displayed code):
 
    ```sh
    curl -X POST http://127.0.0.1:8799/api/auth/pair \
      -H 'content-type: application/json' \
-     --data '{"code":"YOUR-CODE","label":"Local MCP client"}'
+     --data '{"code":"YOUR-CODE","label":"Kepler MCP"}'
    ```
 
-   If the desktop selected a fallback port, replace `8799` with the port shown
-   in Settings. Copy the returned `token`; the pairing code is single-use.
-3. Pin that same port and token in the MCP configuration:
+3. Pin that same port and token:
 
    ```json
    "env": {
-     "ELECTRON_RUN_AS_NODE": "1",
-     "OMB_PORT": "8799",
-     "OPENMAUSBOT_TOKEN": "omb_sess_..."
+     "MUSTERD_PORT": "8799",
+     "MUSTERD_TOKEN": "omb_sess_..."
    }
    ```
 
-The paired client appears with phones under **Settings → Phone** and can be
-revoked there. Do not share the token or commit it to a repository.
+## Product edition
 
-## From the installed desktop app
+Default `MUSTERD_EDITION=local` loads a slim driver set and skips HighLevel / Postiz / phone routes.
+Set `MUSTERD_EDITION=full` for upstream-parity engines and vertical routes.
 
-Release builds bundle `server/mcp-server.js` and can run it with Electron's embedded Node runtime, so users do
-not need Node.js or pnpm installed.
-
-macOS example:
-
-```json
-{
-  "mcpServers": {
-    "openmausbot": {
-      "command": "/Applications/OpenMausBot.app/Contents/MacOS/OpenMausBot",
-      "args": ["/Applications/OpenMausBot.app/Contents/Resources/server/mcp-server.js"],
-      "env": { "ELECTRON_RUN_AS_NODE": "1" }
-    }
-  }
-}
-```
-
-On Windows, use the installed `OpenMausBot.exe` as `command`, the adjacent
-`resources\\server\\mcp-server.js` as the argument, and the same `ELECTRON_RUN_AS_NODE=1` environment value.
-The usual per-user install is under `%LOCALAPPDATA%\\Programs\\OpenMausBot`.
-
-On Ubuntu `.deb` installs, the executable is normally `/opt/OpenMausBot/openmausbot` and the script is
-`/opt/OpenMausBot/resources/server/mcp-server.js`. Use the same environment value.
-
-## Connection discovery
-
-With no configuration, the MCP process probes OpenMausBot's three desktop ports (`8799`, `18799`, and `28799`)
-and accepts only a health response that identifies itself as OpenMausBot. This handles the desktop's normal
-fallback when another local process already owns port 8799.
-
-Set `OMB_PORT` to force one local port, or `OPENMAUSBOT_URL` to use an explicit HTTP(S) origin. Cleartext remote
-HTTP is rejected unless `ALLOW_INSECURE_HTTP=true`; HTTPS should be used outside loopback. An optional
-`OPENMAUSBOT_TOKEN` is sent as a bearer token for authenticated reverse proxies. When a token is set, an
-explicit `OPENMAUSBOT_URL` or `OMB_PORT` is required so the credential is never sent while probing unrelated
-local ports. `OPENMAUSBOT_MCP_TIMEOUT_MS` can set an HTTP timeout between 1,000 and 120,000 milliseconds.
-In packaged builds, `OPENMAUSBOT_TOKEN` is required for mutating tools as
-described above; it is not a generic reverse-proxy secret.
-
-## Tools
-
-| Purpose | Tools |
-|---|---|
-| Inspect | `get_system_health`, `list_bots`, `list_channels`, `get_bot_messages`, `get_channel_messages`, `search_messages`, `list_available_models` |
-| Create and organize | `create_bot`, `update_bot_profile`, `create_channel`, `update_channel`, `create_task`, `switch_task`, `rename_task` |
-| Run work | `send_bot_message`, `send_channel_message`, `wait_for_conversation`, `interrupt_conversation`, `set_bot_model` |
-
-`wait_for_conversation` returns `settled`, `needs-user`, `failed`, `stalled`, or `timed-out`, along with a
-small redacted transcript tail. That `status` keeps its earlier meaning: `settled` says the conversation is
-no longer working (`failed` and `stalled` say its engine died or went silent, or its dispatch failed). The
-result also carries `state`, the job's own verdict (`completed`, `idle`, `needs-input`, `failed`, `stalled`
-or `timed-out`: a lead whose work failed or was stopped is `failed` here even when `status` is `settled`),
-and `job`: the conversation's job as the server computes it (`GET /api/threads/:id/job`), with
-every piece of work it handed to a teammate (`coordinate_bots`, an assignment on the job runtime:
-docs/runtime-contract.md §9), who is doing it, how it ended, and anyone it is waiting on. A conversation is
-not settled while that work is outstanding; it settles once their results have resumed it and that turn has
-ended. A teammate parked on a question or an approval card makes the wait end with `needs-user` at once.
-Optional inputs: `scope` (`job`, the default, or `turn` for the conversation's own turn only), and
-`since_ms` and `after_version` from an earlier result's `job`, to keep watching the same job past a state
-already seen. The server holds each request until the job changes, so a wait is not a poll loop. MCP
-cancellation is honored while a tool is waiting.
-
-`send_bot_message` and `send_channel_message` take an optional `send_id` (16-80 letters, digits, `-` or
-`_`): sending again with the same id returns the first send's receipt instead of a second message. They
-return the stored message's `messageId` and `at`, or `queued: true` when the message waits behind the turn
-running there.
-
-## Safety and data scope
-
-Transcript reads are paged and capped at 200 messages. Search is capped at 100 hits. Screenshot pixels and
-permission grant keys are removed from MCP results. Tool schemas reject unknown fields and malformed values,
-and model changes are refused while a bot is working.
-
-The harness itself is local-first and normally binds to loopback. If you expose it through a reverse proxy,
-authentication and TLS at that proxy are part of your deployment's security boundary.
+Data directory defaults to `~/.musterd` (copy-migrated from `~/.openmausbot` on first start).
+Override with `MUSTERD_DATA_DIR` or legacy `OMB_DATA_DIR`.

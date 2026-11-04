@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Model Context Protocol (MCP) server for OpenMausBot over JSON-RPC 2.0 stdio,
-// for external agents (Hermes, Claude Desktop, Cursor, etc.).
+// Model Context Protocol (MCP) server for Musterd over JSON-RPC 2.0 stdio,
+// for external agents (Kepler, Hermes, Claude Desktop, Cursor, etc.).
 import readline from "node:readline";
 import { isRecord, projectMessage } from "./mcp-message-projection.ts";
 
@@ -10,16 +10,16 @@ export function validateBaseUrl(url: string): string {
   try {
     parsed = new URL(trimmed);
   } catch {
-    throw new Error(`Invalid OpenMausBot URL: '${url}'`);
+    throw new Error(`Invalid Musterd URL: '${url}'`);
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error("OpenMausBot URL must use http:// or https://");
+    throw new Error("Musterd URL must use http:// or https://");
   }
   if (parsed.username || parsed.password) {
-    throw new Error("OpenMausBot URL must not contain credentials; use OPENMAUSBOT_TOKEN instead");
+    throw new Error("Musterd URL must not contain credentials; use MUSTERD_TOKEN or OPENMAUSBOT_TOKEN instead");
   }
   if ((parsed.pathname !== "/" && parsed.pathname !== "") || parsed.search || parsed.hash) {
-    throw new Error("OpenMausBot URL must be an origin without a path, query, or fragment");
+    throw new Error("Musterd URL must be an origin without a path, query, or fragment");
   }
   const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   const isLoopback = hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
@@ -31,8 +31,9 @@ export function validateBaseUrl(url: string): string {
   return parsed.origin;
 }
 
-const configuredUrl = process.env.OPENMAUSBOT_URL ||
-  (process.env.OMB_PORT ? `http://127.0.0.1:${process.env.OMB_PORT}` : undefined);
+const configuredPort = process.env.MUSTERD_PORT || process.env.OMB_PORT;
+const configuredUrl = process.env.MUSTERD_URL || process.env.OPENMAUSBOT_URL ||
+  (configuredPort ? `http://127.0.0.1:${configuredPort}` : undefined);
 
 export const OMB_BASE_URL = validateBaseUrl(configuredUrl || "http://127.0.0.1:8799");
 const DISCOVERY_URLS = configuredUrl
@@ -41,18 +42,18 @@ const DISCOVERY_URLS = configuredUrl
 let discoveredBaseUrl: string | undefined;
 
 export function log(msg: string) {
-  process.stderr.write(`[openmausbot-mcp] ${msg}\n`);
+  process.stderr.write(`[musterd-mcp] ${msg}\n`);
 }
 
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 function requestTimeoutMs(): number {
-  const raw = Number(process.env.OPENMAUSBOT_MCP_TIMEOUT_MS);
+  const raw = Number(process.env.MUSTERD_MCP_TIMEOUT_MS || process.env.OPENMAUSBOT_MCP_TIMEOUT_MS);
   return Number.isFinite(raw) && raw >= 1_000 && raw <= 120_000 ? Math.floor(raw) : DEFAULT_REQUEST_TIMEOUT_MS;
 }
 
 function requestHeaders(options: RequestInit): NonNullable<RequestInit["headers"]> {
-  const token = process.env.OPENMAUSBOT_TOKEN?.trim();
+  const token = (process.env.MUSTERD_TOKEN || process.env.OPENMAUSBOT_TOKEN)?.trim();
   const headers = new Headers(options.headers);
   if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (token && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
@@ -77,16 +78,16 @@ async function fetchJson(url: string, options: RequestInit = {}): Promise<any> {
     const text = await response.text().catch(() => "");
     if (response.status === 403 && !new Headers(headers).has("Authorization")) {
       throw new OpenMausBotApiError(403,
-        "OpenMausBot refused this write because the installed desktop app requires a paired session token. " +
-        "Set OPENMAUSBOT_TOKEN as described in docs/mcp-server.md.",
+        "Musterd refused this write because the installed desktop app requires a paired session token. " +
+        "Set MUSTERD_TOKEN (or OPENMAUSBOT_TOKEN) as described in docs/mcp-server.md.",
       );
     }
-    throw new OpenMausBotApiError(response.status, `OpenMausBot API error (${response.status}): ${text || response.statusText}`);
+    throw new OpenMausBotApiError(response.status, `Musterd API error (${response.status}): ${text || response.statusText}`);
   }
   try {
     return await response.json();
   } catch {
-    throw new Error(`OpenMausBot API returned a non-JSON response from ${url}`);
+    throw new Error(`Musterd API returned a non-JSON response from ${url}`);
   }
 }
 
@@ -98,8 +99,8 @@ export async function probeBaseUrls(candidates: string[]): Promise<string> {
       const health = await fetchJson(`${candidate}/api/health`, {
         signal: AbortSignal.timeout(Math.min(requestTimeoutMs(), 2_000)),
       });
-      if (health?.app !== "openmausbot") {
-        failures.push(`${candidate} answered, but it was not OpenMausBot`);
+      if (health?.app !== "openmausbot" && health?.product !== "musterd") {
+        failures.push(`${candidate} answered, but it was not Musterd`);
         continue;
       }
       return candidate;
@@ -107,13 +108,13 @@ export async function probeBaseUrls(candidates: string[]): Promise<string> {
       failures.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  throw new Error(`Could not find a running OpenMausBot server. ${failures.join("; ")}`);
+  throw new Error(`Could not find a running Musterd server. ${failures.join("; ")}`);
 }
 
 export async function resolveBaseUrl(): Promise<string> {
   if (discoveredBaseUrl) return discoveredBaseUrl;
-  if (process.env.OPENMAUSBOT_TOKEN?.trim() && !configuredUrl) {
-    throw new Error("Set OPENMAUSBOT_URL or OMB_PORT when using OPENMAUSBOT_TOKEN so credentials are never sent during port discovery");
+  if ((process.env.MUSTERD_TOKEN || process.env.OPENMAUSBOT_TOKEN)?.trim() && !configuredUrl) {
+    throw new Error("Set MUSTERD_URL / OPENMAUSBOT_URL or MUSTERD_PORT / OMB_PORT when using a token so credentials are never sent during port discovery");
   }
   discoveredBaseUrl = await probeBaseUrls(DISCOVERY_URLS);
   return discoveredBaseUrl;
@@ -471,6 +472,36 @@ export const TOOLS: McpToolDefinition[] = [
     },
     annotations: DESTRUCTIVE,
   },
+  {
+    name: "kepler_notify",
+    description: "Post a Musterd→Kepler handoff (drop file + inbox) so a Kepler session can pick up work. Set MUSTERD_KEPLER_TASK_ID on the server to tag the owning Kepler task.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        bot_id: { type: "string" },
+        bot_name: { type: "string" },
+        thread_id: { type: "string" },
+        summary: { type: "string" },
+        urgency: { type: "string", enum: ["low", "normal", "high"] },
+        refs: { type: "array", items: { type: "string" } },
+      },
+      required: ["bot_id", "thread_id", "summary"],
+      additionalProperties: false,
+    },
+    annotations: ADDITIVE,
+  },
+  {
+    name: "kepler_inbox",
+    description: "Read recent Musterd→Kepler handoff inbox items (oldest first).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "integer", minimum: 1, maximum: 100 },
+      },
+      additionalProperties: false,
+    },
+    annotations: READ_ONLY,
+  },
 ];
 
 function parsePositiveLimit(raw: unknown, fallback = 30, maximum = 200): number {
@@ -805,13 +836,35 @@ export async function handleToolCall(
   switch (name) {
     case "get_system_health": {
       const res = await fetcher("/api/health");
-      if (res?.app !== "openmausbot") throw new Error("The configured endpoint is not an OpenMausBot server");
+      if (res?.app !== "openmausbot" && res?.product !== "musterd") {
+        throw new Error("The configured endpoint is not a Musterd / OpenMausBot server");
+      }
       return {
         status: "connected",
         endpoint: discoveredBaseUrl ?? OMB_BASE_URL,
-        app: "openmausbot",
+        app: "musterd",
+        legacyApp: "openmausbot",
         packaged: Boolean(res.static),
       };
+    }
+
+    case "kepler_notify": {
+      return await fetcher("/api/peers/kepler/notify", {
+        method: "POST",
+        body: JSON.stringify({
+          botId: idArg(args, "bot_id"),
+          botName: args.bot_name === undefined ? undefined : stringArg(args, "bot_name"),
+          threadId: idArg(args, "thread_id"),
+          summary: stringArg(args, "summary"),
+          urgency: args.urgency === undefined ? undefined : stringArg(args, "urgency"),
+          refs: args.refs,
+        }),
+      });
+    }
+
+    case "kepler_inbox": {
+      const limit = parsePositiveLimit(args.limit, 20, 100);
+      return await fetcher(`/api/peers/kepler/inbox?limit=${limit}`);
     }
 
     case "list_bots": {
@@ -1280,10 +1333,10 @@ export async function processMcpMessage(
           tools: {},
         },
         serverInfo: {
-          name: "openmausbot-mcp",
-          version: "1.1.0",
+          name: "musterd-mcp",
+          version: "1.2.0",
         },
-        instructions: "Use bounded read tools before mutating the OpenMausBot team. Approval grants, deletion, and computer lifecycle are intentionally unavailable.",
+        instructions: "Use bounded read tools before mutating the Musterd team. Approval grants, deletion, and computer lifecycle are intentionally unavailable. Kepler sessions should prefer MUSTERD_* env vars (OPENMAUSBOT_* aliases still work).",
       });
     }
 

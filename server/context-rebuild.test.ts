@@ -514,8 +514,8 @@ describe("tool history in a rebuilt session", () => {
       // ten calls between every pair of 45 messages: 440 lines, far past the cap
       const history = entries(Array.from({ length: 45 }, (_, i) => `message ${i}`));
       const tools = history.slice(0, -1).flatMap(entry => Array.from({ length: 10 }, (_, i) => line(entry.id, `${entry.id}.${i}`)));
-      const result = selectReplay(history, { tools });
-      const plain = selectReplay(history);
+      const result = selectReplay(history, { tools, maxMessages: 40 });
+      const plain = selectReplay(history, { maxMessages: 40 });
       // the same 40 messages (and the same omission notice) as without them
       expect(result.transcript).toEqual(plain.transcript);
       expect(result.transcript.filter(entry => entry.id)).toHaveLength(40);

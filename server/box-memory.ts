@@ -29,11 +29,14 @@ export function availableMemory(): number {
 
 const HEAP_SHARE = 0.6;
 const HEAP_MIN_MB = 128, HEAP_MAX_MB = 4096;
+/** Desktop / unconstrained hosts: floor so large typecheck-class graphs and long threads do not OOM at defaults. */
+const DESKTOP_HEAP_MB = 8192;
 
 /** Node sizes its old space to a quarter of a cgroup limit; a server on a small box runs out of heap long before the box
- * runs out of memory. No flag without a cgroup limit, or when NODE_OPTIONS already sizes the heap. */
+ * runs out of memory. When NODE_OPTIONS already sizes the heap, leave it alone. Without a cgroup limit, apply a desktop floor. */
 export function heapSizeArgs(cgroupLimit: number | null, nodeOptions: string | undefined): string[] {
-  if (cgroupLimit === null || /--max[-_]old[-_]space[-_]size/.test(nodeOptions ?? "")) return [];
+  if (/--max[-_]old[-_]space[-_]size/.test(nodeOptions ?? "")) return [];
+  if (cgroupLimit === null) return [`--max-old-space-size=${DESKTOP_HEAP_MB}`];
   const mb = Math.min(HEAP_MAX_MB, Math.max(HEAP_MIN_MB, Math.floor((cgroupLimit * HEAP_SHARE) / MB)));
   return [`--max-old-space-size=${mb}`];
 }

@@ -153,8 +153,16 @@ export interface CompactionRecord {
   by: "person" | "harness";
 }
 
-export const DEFAULT_REBUILD_BYTES = 24_000;
+/** Raised for long CoS-style threads; still bounded by bytes first. */
+export const DEFAULT_REBUILD_BYTES = 48_000;
+export const DEFAULT_REBUILD_MAX_MESSAGES = 80;
 export const MAX_SUMMARY_BYTES = 6_000;
+
+/** Newest compaction chip on the active path, if any. */
+export function latestCompaction(messages: readonly Message[]): (CompactionRecord & { id: string }) | undefined {
+  const record = messages.findLast((message) => message.kind === "compaction" && message.compaction);
+  return record?.compaction ? { ...record.compaction, id: record.id } : undefined;
+}
 const OMITTED_TEXT = "\n[Text shortened for context; the original remains in this conversation.]";
 
 /** UTF-8 prefixes must not end inside a code point. */
@@ -190,7 +198,7 @@ export function selectReplay(
   representedIds: string[]; dropped: number; compacted: number; shortened: string[];
 } {
   const budget = options.budgetBytes ?? DEFAULT_REBUILD_BYTES;
-  const maxMessages = options.maxMessages ?? 40;
+  const maxMessages = options.maxMessages ?? DEFAULT_REBUILD_MAX_MESSAGES;
   if (!Number.isSafeInteger(budget) || budget < 1_024 || !Number.isSafeInteger(maxMessages) || maxMessages < 1) {
     throw new Error("invalid context replay budget");
   }
