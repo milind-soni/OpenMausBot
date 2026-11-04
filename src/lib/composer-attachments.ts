@@ -473,7 +473,7 @@ export type TranscriptAttachments = {
 };
 
 /** A second encoded pass stays encoded rather than turning attacker-controlled text into markup. */
-function decodeAttachmentAttribute(value: string): string {
+export function decodeAttachmentAttribute(value: string): string {
   return value.replace(/&(quot|lt|gt|amp);|&#(9|10|13);/g, (entity, named: string | undefined, numeric: string | undefined) => {
     if (numeric === "9") return "\t";
     if (numeric === "10") return "\n";

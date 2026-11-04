@@ -1,44 +1,50 @@
-import { constants, copyFileSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
+import { constants, copyFileSync, existsSync, linkSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { escapeAttribute } from "../src/lib/composer-attachments.ts";
+import { decodeAttachmentAttribute, escapeAttribute } from "../src/lib/composer-attachments.ts";
 import { ATTACHMENTS_DIR } from "./attachments.ts";
 import { botBox } from "./bot-box/box.ts";
-
-/** The folder in a boxed turn's working folder that holds its copies of the person's uploads. */
-export const BOX_ATTACHMENTS_FOLDER = ".attachments";
+import { boxUploadsDir, taskWorkspaceIds } from "./bot-box/plan.ts";
+import { DATA_DIR } from "./config.ts";
 
 const TAG = /(<attached-(?:file|image)[\t ]+path=")([^"\r\n]*)(")/g;
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /**
  * The bot box hides the data folder, uploads included, so an `<attached-file>` path would be unreadable there.
- * Each upload the text names is copied into the turn's working folder (which the box always binds) and the path
- * is rewritten to the copy. Only the text sent to the engine changes; with the box off, or no working folder, nothing does.
+ * Each upload the text names is linked into the conversation's uploads folder (plan.ts boxUploadsDir), which the server
+ * owns and every box of the conversation sees read-only, and the path is rewritten to it. The bot can read the upload but
+ * never write it or swap the folder for a link. Only the text sent to the engine changes; with the box off, or a working
+ * folder that is not a conversation's own, nothing does.
  */
-export function attachmentsForBox(text: string, cwd: string | undefined, boxed = botBox.enabled(), attachmentsDir = ATTACHMENTS_DIR): string {
+export function attachmentsForBox(text: string, cwd: string | undefined, boxed = botBox.enabled(), dataDir = DATA_DIR, attachmentsDir = ATTACHMENTS_DIR): string {
   if (!boxed || !cwd || !text.includes("<attached-")) return text;
-  const uploads = resolve(attachmentsDir);
-  return text.replace(TAG, (tag, open: string, path: string, close: string) => {
-    const name = basename(path);
-    if (resolve(dirname(path)) !== uploads || !NAME.test(name)) return tag;
-    const staged = join(cwd, BOX_ATTACHMENTS_FOLDER, name);
+  const ids = taskWorkspaceIds(resolve(cwd), resolve(dataDir));
+  if (!ids) return text;
+  const uploads = resolve(attachmentsDir), shown = boxUploadsDir(resolve(dataDir), ids.botId, ids.threadId);
+  return text.replace(TAG, (tag, open: string, raw: string, close: string) => {
+    const path = decodeAttachmentAttribute(raw), name = basename(path);
+    if (resolve(dirname(path)) !== uploads || !NAME.test(name) || !existsSync(path)) return tag;
+    const target = join(shown, name);
     try {
-      // Uploads never change under their name, so a copy made by an earlier turn (and maybe edited since) is kept.
-      if (!existsSync(staged)) {
-        mkdirSync(dirname(staged), { recursive: true, mode: 0o700 });
-        // A copy, never a link: an engine editing its copy must not change the person's upload. Renamed into place, so a
-        // copy cut short never passes for a whole one.
-        const partial = `${staged}.${process.pid}.partial`;
+      // Uploads never change under their name, so one an earlier turn put here is kept.
+      if (!existsSync(target)) {
+        mkdirSync(shown, { recursive: true, mode: 0o700 });
         try {
-          copyFileSync(path, partial, constants.COPYFILE_FICLONE);
-          renameSync(partial, staged);
-        } finally {
-          rmSync(partial, { force: true });
+          linkSync(path, target);
+        } catch {
+          // Another file system: a copy, renamed into place so one cut short never passes for a whole one.
+          const partial = `${target}.${process.pid}.partial`;
+          try {
+            copyFileSync(path, partial, constants.COPYFILE_FICLONE);
+            renameSync(partial, target);
+          } finally {
+            rmSync(partial, { force: true });
+          }
         }
       }
     } catch {
       return tag;
     }
-    return `${open}${escapeAttribute(staged)}${close}`;
+    return `${open}${escapeAttribute(target)}${close}`;
   });
 }
