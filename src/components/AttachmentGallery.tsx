@@ -124,13 +124,59 @@ export function MessageAttachmentGallery({ text, attachments = NO_GENERATED_ATTA
   return <AttachmentGallery images={attached.images} files={files} message={message} eager={eager} className={className} />;
 }
 
+const MEDIA_STALL_MS = 15_000;
+const MEDIA_STALL_RETRIES = 2;
+
+/**
+ * A proxy or tailnet hiccup can leave a response open with no bytes moving, which would spin "Loading" forever.
+ * Abort an attempt after a quiet stretch and start a fresh request; the caller's signal still cancels everything.
+ */
+async function withStallRetry<T>(
+  signal: AbortSignal,
+  unavailable: string,
+  load: (signal: AbortSignal, progress: () => void) => Promise<T>,
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    const controller = new AbortController();
+    let stalled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const progress = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => { stalled = true; controller.abort(); }, MEDIA_STALL_MS);
+    };
+    const forward = () => controller.abort();
+    signal.addEventListener("abort", forward, { once: true });
+    progress();
+    try {
+      return await load(controller.signal, progress);
+    } catch (reason) {
+      if (!stalled || signal.aborted) throw reason;
+      if (attempt >= MEDIA_STALL_RETRIES) throw new Error(unavailable);
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", forward);
+    }
+  }
+}
+
 /** Security: the server's MIME is required as well as the filename, so arbitrary bytes never become UI. */
-export async function loadMessageVideo(
+export function loadMessageVideo(
   file: GalleryFile,
   message: MessageAttachmentContext,
   signal: AbortSignal,
 ): Promise<Blob> {
+  return withStallRetry(signal, t("attach.videoUnavailable"), (attempt, progress) => readMessageVideo(file, message, attempt, progress));
+}
+
+async function readMessageVideo(
+  file: GalleryFile,
+  message: MessageAttachmentContext,
+  signal: AbortSignal,
+  progress: () => void,
+): Promise<Blob> {
   const response = await requestMessageFile(file.path, message, signal);
+  progress();
   const mime = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
   if (!mime || !["video/mp4", "video/webm", "video/quicktime", "video/x-m4v"].includes(mime)) {
     await response.body?.cancel();
@@ -154,6 +200,7 @@ export async function loadMessageVideo(
       size += value.byteLength;
       if (size > FILE_MAX_BYTES) throw new Error(t("attach.fileTooLarge"));
       chunks.push(new Uint8Array(value));
+      progress();
     }
   } finally {
     await reader.cancel().catch(() => undefined);
@@ -245,12 +292,22 @@ function VideoAttachment({ file, message }: { file: GalleryFile; message: Messag
 
 const AUDIO_MIMES = ["audio/mpeg", "audio/mp4", "audio/x-m4a", "audio/aac", "audio/wav", "audio/x-wav", "audio/wave", "audio/ogg", "audio/opus", "audio/flac", "audio/x-flac"];
 
-export async function loadMessageAudio(
+export function loadMessageAudio(
   file: GalleryFile,
   message: MessageAttachmentContext,
   signal: AbortSignal,
 ): Promise<Blob> {
+  return withStallRetry(signal, t("attach.audioUnavailable"), (attempt, progress) => readMessageAudio(file, message, attempt, progress));
+}
+
+async function readMessageAudio(
+  file: GalleryFile,
+  message: MessageAttachmentContext,
+  signal: AbortSignal,
+  progress: () => void,
+): Promise<Blob> {
   const response = await requestMessageFile(file.path, message, signal);
+  progress();
   const mime = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
   if (!mime || !AUDIO_MIMES.includes(mime)) {
     await response.body?.cancel();
@@ -273,6 +330,7 @@ export async function loadMessageAudio(
       size += value.byteLength;
       if (size > FILE_MAX_BYTES) throw new Error(t("attach.fileTooLarge"));
       chunks.push(new Uint8Array(value));
+      progress();
     }
   } finally {
     await reader.cancel().catch(() => undefined);
