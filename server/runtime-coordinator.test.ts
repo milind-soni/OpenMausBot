@@ -468,6 +468,8 @@ describe("RuntimeCoordinator: a request back to a bot that is waiting on you", (
     const w = world(holdCos);
     const asked = send(w, mail, "gen-mail", undefined, cosWork, "Do you have the mailbox details from yesterday?");
     w.coordinator.tick();
+    // The chief of staff's own request is another line of the person's than the one they stopped.
+    begun(w, cos, "gen-cos", "Mail worked yesterday", { origin: { kind: "user", request: "Mail worked yesterday, find out why" } });
     w.coordinator.stopAwaitingDirect("mail-chat");
     expect(send(w, cos, "gen-cos", undefined, mailWork, "Why can't you fetch mail?").node).toMatchObject({ botId: "mail", status: "queued" });
     if (w.host.held.has(asked.node.id)) await w.host.release(asked.node.id, { ok: true, text: "No details stored" });
