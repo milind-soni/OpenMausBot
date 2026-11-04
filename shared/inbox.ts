@@ -1,3 +1,4 @@
+import type { ConnectorCardData } from "./connector-card.ts";
 import type { OptionCardData, SecretRequestCardData, SignInRequestCardData } from "./wire.ts";
 
 /** On a Team Cloud, a line in a person's inbox: their own conversation with their own Chief of Staff (their own MausBot
@@ -62,6 +63,8 @@ export interface InboxRow {
   secret?: SecretRequestCardData;
   /** A sign-in the bot asked the person to do, answered with the chat's own card for it. */
   signIn?: SignInRequestCardData;
+  /** An app the bot asked the person to connect, answered with the chat's own card for it. */
+  connector?: ConnectorCardData;
 }
 
 /** A person's inbox: where its lines live (none yet before the first arrives), and the line the inbox's card in that

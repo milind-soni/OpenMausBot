@@ -2080,6 +2080,7 @@
   "inbox.note": "Add a note",
   "inbox.you": "You",
   "inbox.headline.signIn": "Sign in to {site}",
+  "inbox.headline.connect": "Connect {app}",
   "inbox.youReplied": "You replied",
   "sidebar.people.mention": "Write to {name}",
   "orgChart.mode.departments": "Departments",

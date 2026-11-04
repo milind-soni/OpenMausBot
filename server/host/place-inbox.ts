@@ -8,10 +8,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 
-import { isPersistentQuestionCard } from "../../shared/ask-question.ts";
 import type { InboxItem, InboxRow, InboxView } from "../../shared/inbox.ts";
-import { liveCardKind } from "../../shared/live-approval.ts";
 import type { Notification } from "../../shared/notification.ts";
+import { personWait, type PersonWait } from "../../shared/person-wait.ts";
 import type { OptionCardData } from "../../shared/wire.ts";
 import { ASK_NOTIFICATIONS } from "../ask-routing.ts";
 import { writeFileAtomic } from "../atomic.ts";
@@ -72,15 +71,12 @@ export interface PlaceInboxDeps {
   handedBy(threadId: string): string | null;
   /** Sends a notification as it is. */
   send(notification: Notification): void;
+  /** Conversations resting on the person for a card a running turn does not hold open: a password, a sign-in, an app to
+   * connect, or an ask left open after its turn ended. */
+  waiting?(): Array<PersonWait & { threadId: string }>;
   now?: () => number;
 }
 
-/** Cards that wait on the person: not an offer to switch engines, a receipt, or anything settled. */
-function waitsOnPerson(card: OptionCardData | null): card is OptionCardData {
-  const kind = liveCardKind(card ?? undefined);
-  if (!card || !kind || card.outboundRequest || card.quotaSwitch || card.teamMemoryRequest || card.autoApplied) return false;
-  return kind === "review" || card.requestType === "permission" || Boolean(card.tool) || isPersistentQuestionCard(card);
-}
 
 export function createPlaceInbox(deps: PlaceInboxDeps) {
   const { store } = deps;
@@ -136,7 +132,7 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     for (const row of deps.openCards()) {
       let card: OptionCardData | null = null;
       try { card = row.card ? JSON.parse(row.card) as OptionCardData : null; } catch { continue; }
-      if (!waitsOnPerson(card) || !deps.sees(auth, row.threadId) || !deps.mayAnswer(auth, row.threadId, card.requestId!)) continue;
+      if (!card || !personWait({ id: row.id, at: row.at, kind: "options", card }) || !deps.sees(auth, row.threadId) || !deps.mayAnswer(auth, row.threadId, card.requestId!)) continue;
       const bot = (row.fromBotId ? store.bot(row.fromBotId) : undefined) ?? store.botByThread(row.threadId);
       if (!bot) continue;
       const group = store.groupByThread(row.threadId);
@@ -147,6 +143,26 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
         ...(handed ? { workingFor: handed } : {}), ...(guest ? { askedBy: { name: deps.guestName(row.threadId) ?? "" } } : {}),
         origin: { botId: bot.id, threadId: row.threadId, title: titleOf(bot.id, row.threadId), ...(group ? { groupId: group.id } : {}), messageId: row.id },
         text: clip(card.subtitle || card.title || "", ROW_TEXT_MAX), at: row.at, unread: !seenAsks.has(row.id), card,
+      });
+    }
+    const listed = new Set([...rows.values()].map((row) => row.id));
+    const viewer = deps.viewer(auth);
+    for (const wait of deps.waiting?.() ?? []) {
+      if (listed.has(wait.messageId) || !deps.sees(auth, wait.threadId)) continue;
+      const guest = deps.guestOf(wait.threadId);
+      if (viewer.kind === "guest" ? guest !== viewer.key : guest !== null) continue;
+      const said = store.messagesFor(wait.threadId).find((one) => one.id === wait.messageId);
+      const bot = (wait.botId ? store.bot(wait.botId) : undefined) ?? store.botByThread(wait.threadId);
+      if (!said || !bot) continue;
+      const card = said.kind === "options" ? said.card : undefined;
+      if (card && !(card.requestId && deps.mayAnswer(auth, wait.threadId, card.requestId))) continue;
+      const group = store.groupByThread(wait.threadId);
+      const handed = workingFor(wait.threadId);
+      rows.set(wait.messageId, {
+        id: wait.messageId, kind: "ask", tab: "needs-you", from: { name: bot.name, botId: bot.id }, ...(handed ? { workingFor: handed } : {}),
+        origin: { botId: bot.id, threadId: wait.threadId, title: titleOf(bot.id, wait.threadId), ...(group ? { groupId: group.id } : {}), messageId: wait.messageId },
+        text: clip(wait.label, ROW_TEXT_MAX), at: wait.at, unread: !seenAsks.has(wait.messageId),
+        ...(card ? { card } : {}), ...(said.secret ? { secret: said.secret } : {}), ...(said.signIn ? { signIn: said.signIn } : {}), ...(said.connector ? { connector: said.connector } : {}),
       });
     }
     return [...rows.values()];

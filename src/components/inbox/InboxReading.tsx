@@ -28,7 +28,7 @@ function settledLabel(row: InboxRow): string {
 /** What the line itself says, drawn after the bot's words before it: a question's question, news as it came. An approval,
  * a password or a sign-in says it on its own card. */
 function ownWords(row: InboxRow): string | null {
-  if (row.secret || row.signIn) return null;
+  if (row.secret || row.signIn || row.connector) return null;
   if (row.kind !== "ask") return textOf(row);
   if (row.card?.tool) return null;
   const question = singleQuestion(row);

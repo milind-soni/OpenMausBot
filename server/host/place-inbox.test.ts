@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Notification } from "../../shared/notification.ts";
+import type { PersonWait } from "../../shared/person-wait.ts";
 import type { OptionCardData } from "../../shared/wire.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { createPlaceInbox, PLACE_MESSAGES_HOURLY, placeInboxViewer, type InboxViewer, type OpenCardRow, type PlaceInboxDeps } from "./place-inbox.ts";
@@ -111,10 +112,42 @@ describe("the inbox of a place that is no team's", () => {
   it("leaves out offers and receipts, and a card somebody already settled", () => {
     const f = setup();
     f.ask("eli-main", "offer", { quotaSwitch: {} as never });
-    f.ask("eli-main", "sent", { outboundRequest: {} as never });
     f.ask("eli-main", "auto", { autoApplied: true });
     f.ask("eli-main", "answered", { answered: "allow" });
     expect(f.inbox.view(OWNER).rows).toEqual([]);
+  });
+
+  it("lists a password, a sign-in and an app to connect the person's conversation rests on, each with the chat's own card", () => {
+    const waits: Array<PersonWait & { threadId: string }> = [];
+    const f = setup({ waiting: () => waits });
+    const secret = { target: "custom", label: "Stripe key", description: "", placeholder: "", helpUrl: "", requestKey: "k" };
+    const signIn = { url: "https://shop.test", site: "shop.test", place: "browser" };
+    const connector = { label: "Gmail", description: "Read mail", resumeKey: "r1" };
+    f.said.set("eli-pricing", [
+      { id: "pw", at: 10, role: "bot", kind: "secret", secret } as never,
+      { id: "si", at: 11, role: "bot", kind: "signin", signIn } as never,
+      { id: "co", at: 12, role: "bot", kind: "connector", connector } as never,
+    ]);
+    f.said.set("guest-chat", [{ id: "gpw", at: 13, role: "bot", kind: "secret", secret } as never]);
+    f.guests.set("guest-chat", "p_guest");
+    waits.push(
+      { kind: "password", messageId: "pw", at: 10, label: "Stripe key", threadId: "eli-pricing" },
+      { kind: "sign-in", messageId: "si", at: 11, label: "shop.test", threadId: "eli-pricing" },
+      { kind: "connect", messageId: "co", at: 12, label: "Gmail", threadId: "eli-pricing" },
+      { kind: "password", messageId: "gpw", at: 13, label: "Stripe key", threadId: "guest-chat" },
+    );
+    const rows = f.inbox.view(OWNER).rows;
+    expect(rows.map((row) => row.id)).toEqual(["co", "si", "pw"]);
+    expect(rows.find((row) => row.id === "pw")).toMatchObject({ kind: "ask", tab: "needs-you", text: "Stripe key", secret, origin: { threadId: "eli-pricing", title: "Pricing work", messageId: "pw" } });
+    expect(rows.find((row) => row.id === "si")).toMatchObject({ signIn });
+    expect(rows.find((row) => row.id === "co")).toMatchObject({ connector });
+    expect(f.inbox.count(OWNER)).toBe(3);
+    expect(f.inbox.view(GUEST).rows.map((row) => row.id), "a guest's own password is theirs alone").toEqual(["gpw"]);
+    expect(f.inbox.view(SHELL).rows).toEqual([]);
+    expect(f.inbox.markRead(OWNER, "pw")).toBe(true);
+    expect(f.inbox.view(OWNER).rows.find((row) => row.id === "pw")!.unread).toBe(false);
+    waits.splice(0, 1);
+    expect(f.inbox.view(OWNER).rows.map((row) => row.id), "gone once it no longer waits").toEqual(["co", "si"]);
   });
 
   it("says who a bot was working for, and which conversation an item came from", () => {

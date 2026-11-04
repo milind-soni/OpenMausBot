@@ -3,24 +3,19 @@ import { Check, ExternalLink } from "lucide-react";
 import type { InboxRow, InboxView } from "../../../shared/inbox";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import type { Bot, Message } from "@/state/store";
+import type { Bot } from "@/state/store";
 import { replyToInboxRow, settleInboxRow } from "@/state/inbox";
 import { ASK_QUIET_ANSWER, AskReply } from "../AskCard";
 import { ELEVATED_CARD } from "../elevated";
 import { pendingApprovals, PendingApprovalActions, PendingApprovalPanel } from "../PendingApproval";
+import { ConnectorCard } from "../ConnectorCard";
 import { QuestionCard } from "../QuestionCard";
 import { SecretRequestCard } from "../SecretRequestCard";
 import { SignInRequestCard } from "../SignInRequestCard";
-import { singleQuestion, type InboxAnswerKind } from "./inbox-answer";
+import { asMessage, singleQuestion, type InboxAnswerKind } from "./inbox-answer";
 import { InboxQuestionAnswer } from "./InboxQuestionAnswer";
 import { answerThread } from "./inbox-view";
 import { useInboxActions } from "./use-inbox-actions";
-
-/** The line as the chat shows it, so an ask answers here with the very card it asks with in the chat. */
-export const asMessage = (row: InboxRow): Message => ({
-  id: row.id, role: "bot", kind: row.secret ? "secret" : row.signIn ? "signin" : "options", text: row.text, at: row.at,
-  ...(row.card ? { card: row.card } : {}), ...(row.secret ? { secret: row.secret } : {}), ...(row.signIn ? { signIn: row.signIn } : {}),
-} as Message);
 
 interface AnswerProps { view: InboxView; row: InboxRow; threadId: string | null; asker?: Bot }
 
@@ -54,9 +49,14 @@ function ReviewAnswer({ view, row }: AnswerProps) {
   );
 }
 
-function SecretAnswer({ row, threadId, asker }: AnswerProps) {
+function PasswordAnswer({ row, threadId, asker }: AnswerProps) {
   const botId = row.from.botId;
   return botId && threadId ? <SecretRequestCard botId={botId} color={asker?.color} threadId={threadId} message={asMessage(row)} /> : null;
+}
+
+function ConnectAnswer({ row, threadId, asker }: AnswerProps) {
+  const botId = row.from.botId;
+  return botId && threadId ? <ConnectorCard botId={botId} color={asker?.color} threadId={threadId} message={asMessage(row)} /> : null;
 }
 
 function SignInAnswer({ row, threadId, asker }: AnswerProps) {
@@ -97,8 +97,9 @@ const ANSWERS: Record<InboxAnswerKind, (props: AnswerProps) => ReactNode> = {
   question: QuestionAnswer,
   approval: ApprovalAnswer,
   review: ReviewAnswer,
-  secret: SecretAnswer,
-  signIn: SignInAnswer,
+  password: PasswordAnswer,
+  "sign-in": SignInAnswer,
+  connect: ConnectAnswer,
   reply: ReplyAnswer,
   none: DoneButton,
 };

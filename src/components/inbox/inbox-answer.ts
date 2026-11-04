@@ -1,23 +1,28 @@
 import type { AskQuestion } from "../../../shared/ask-question";
 import type { InboxRow } from "../../../shared/inbox";
+import { personWait, type PersonWaitKind } from "../../../shared/person-wait";
+import type { Message } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { cardQuestions } from "../QuestionCard";
 import { accessRequestWords } from "../bot-access/access-card";
-import { askOf, senderLabel, subjectOf, textOf } from "./inbox-view";
+import { senderLabel, subjectOf, textOf } from "./inbox-view";
 
-/** How a line is answered: a question's choices, an approval's Allow and Deny, a proposal reviewed in its chat, a
- * password or a sign-in through the chat's own card for it, a reply to news that waits on one, or nothing but Done. */
-export type InboxAnswerKind = "question" | "approval" | "review" | "secret" | "signIn" | "reply" | "none";
+/** How a line is answered: by what it waits on the person for, else a reply to news that waits on one, or nothing but Done. */
+export type InboxAnswerKind = PersonWaitKind | "reply" | "none";
 
-const secretOpen = (row: InboxRow) => Boolean(row.secret && !row.secret.provided && !row.secret.dismissed && !row.secret.superseded && !row.secret.stopped);
-const signInOpen = (row: InboxRow) => Boolean(row.signIn && !row.signIn.done && !row.signIn.cancelled && !row.signIn.superseded && !row.signIn.stopped && !row.signIn.answeredInChat);
+/** The line as the chat shows it, so it answers here with the very card it asks with in the chat. */
+export const asMessage = (row: InboxRow): Message => ({
+  id: row.id, role: "bot", kind: row.secret ? "secret" : row.signIn ? "signin" : row.connector ? "connector" : "options", text: row.text, at: row.at,
+  ...(row.card ? { card: row.card } : {}), ...(row.secret ? { secret: row.secret } : {}), ...(row.signIn ? { signIn: row.signIn } : {}),
+  ...(row.connector ? { connector: row.connector } : {}),
+} as Message);
 
 export function answerKindOf(row: InboxRow): InboxAnswerKind {
   if (row.tab === "done") return "none";
-  if (secretOpen(row)) return "secret";
-  if (signInOpen(row)) return "signIn";
-  const ask = askOf(row);
-  if (ask) return ask;
+  if (row.kind === "ask") {
+    const wait = personWait(asMessage(row));
+    if (wait) return wait.kind;
+  }
   return row.tab === "info" && row.replies === true ? "reply" : "none";
 }
 
@@ -54,6 +59,7 @@ const firstLine = (text: string) => text.split("\n").map((line) => line.replace(
 export function headlineOf(row: InboxRow): string {
   if (row.secret) return row.secret.label;
   if (row.signIn) return t("inbox.headline.signIn", { site: row.signIn.site });
+  if (row.connector) return t("inbox.headline.connect", { app: row.connector.label });
   if (row.kind === "ask") {
     const question = row.card && !row.card.tool ? singleQuestion(row) : null;
     if (question) return question.header ?? firstLine(accessRequestWords(row.card)?.question ?? question.question);

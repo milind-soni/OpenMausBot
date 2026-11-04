@@ -91,13 +91,17 @@ describe("the inbox's words", () => {
     expect(nextAfter(["a"], "a")).toBeNull();
   });
 
-  it("keys a password and a sign-in by their own card kind, ahead of anything else the line says", () => {
+  it("keys a password, a sign-in and an app to connect by what the line waits on the person for", () => {
     const secret: InboxRow = { ...news, kind: "ask", tab: "needs-you", secret: { target: "custom", label: "Stripe key", description: "", placeholder: "", helpUrl: "", requestKey: "k" } as InboxRow["secret"] };
     const signIn: InboxRow = { ...news, kind: "ask", tab: "needs-you", signIn: { url: "https://shop.test", site: "shop.test", place: "browser" } as InboxRow["signIn"] };
-    expect(answerKindOf(secret)).toBe("secret");
-    expect(answerKindOf(signIn)).toBe("signIn");
+    const connect: InboxRow = { ...news, kind: "ask", tab: "needs-you", connector: { label: "Gmail", description: "Read mail", resumeKey: "r1" } as InboxRow["connector"] };
+    expect(answerKindOf(secret)).toBe("password");
+    expect(answerKindOf(signIn)).toBe("sign-in");
+    expect(answerKindOf(connect)).toBe("connect");
     expect(answerKindOf({ ...signIn, signIn: { ...signIn.signIn!, done: true } })).toBe("none");
+    expect(answerKindOf({ ...secret, secret: { ...secret.secret!, provided: true } })).toBe("none");
     expect(headlineOf(signIn)).toBe("Sign in to shop.test");
+    expect(headlineOf(connect)).toBe("Connect Gmail");
   });
 });
 
@@ -184,6 +188,23 @@ describe("a line read in full", () => {
     await click('[data-inbox-answer="question"] [data-inbox-action="close"]');
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "decideRequest", threadId: "plan-thread", requestId: "req-q1", behavior: "answer" }));
     expect(currentInboxPanel().reading).toBeNull();
+  });
+
+  it("answers a password, a sign-in and an app to connect with the chat's own card for each", async () => {
+    const base = { ...news, kind: "ask" as const, tab: "needs-you" as const };
+    const rows: InboxRow[] = [
+      { ...base, id: "pw", secret: { target: "custom", label: "Stripe key", description: "For the billing report", placeholder: "sk_live_…", helpUrl: "", requestKey: "k", reason: "To read invoices" } as InboxRow["secret"] },
+      { ...base, id: "si", signIn: { url: "https://shop.test", site: "shop.test", place: "browser", reason: "To see the order" } as InboxRow["signIn"] },
+      { ...base, id: "co", connector: { label: "Gmail", description: "Read mail", resumeKey: "r1", status: "required" } as InboxRow["connector"] },
+    ];
+    setInboxView(placeView(rows));
+    await mount();
+    for (const [id, kind, words] of [["pw", "password", "Stripe key"], ["si", "sign-in", "shop.test"], ["co", "connect", "Gmail"]] as const) {
+      await act(async () => { readInboxLine(id); });
+      const answer = document.querySelector<HTMLElement>(`[data-inbox-reading="${id}"] [data-inbox-answer-kind]`)!;
+      expect(answer.dataset.inboxAnswerKind).toBe(kind);
+      expect(answer.textContent, kind).toContain(words);
+    }
   });
 
   it("reads news with Done, which moves on to what is left", async () => {
