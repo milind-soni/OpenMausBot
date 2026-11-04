@@ -14659,9 +14659,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const opaque = connectorCalls.some(call => call.slug === "COMPOSIO_PROXY_EXECUTE");
         if (opaque && currentSender.connectorTools !== undefined) return refuseOutbound("OpenMausBot cannot verify this code against this bot's tool grants. Use a direct app tool.");
-        const held: OutboundHoldAnswer = outboundTool
+        // Full access sends freely unless someone set this bot a sending rule. A room turn can run at a Chief's delegated level, which only the room handoff carries.
+        const sendsFreely = () => store.bot(internalCapability.botId)?.outbound === undefined && roomTurnLevels.forRequest(internalCapability.threadId, internalCapability.botId,
+          () => sourceApprovalMode(internalCapability.botId, internalCapability.threadId)) === "full";
+        const fullAccess = outboundTool !== null && sendsFreely();
+        const held: OutboundHoldAnswer = outboundTool && !fullAccess
           ? await outboundHold.hold({
-            bot: currentSender, threadId: internalCapability.threadId, tool: outboundTool, calls: outboundCalls, opaque,
+            bot: currentSender, threadId: internalCapability.threadId, tool: outboundTool, calls: outboundCalls, opaque, fullAccess,
             active: () => internalCapabilityIsActive(internalCapability),
           })
           : { ok: true, approved: false };
@@ -14698,7 +14702,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               try {
                 outboundHold.reserve({
                   bot: fresh, threadId: internalCapability.threadId, tool: outboundTool, calls: outboundCalls, opaque,
-                  approved: outboundApproved,
+                  fullAccess: fullAccess && sendsFreely(), approved: outboundApproved,
                 });
               } catch (error) {
                 refuseDispatch(error instanceof Error ? error.message : String(error));

@@ -313,7 +313,7 @@ describe("shared sentences", () => {
 
 describe("composioSystemPrompt", () => {
   it("keeps the generic all-tools sentence for legacy bots, with the app tools every engine offers by name", () => {
-    expect(composioSystemPrompt(undefined)).toBe(`${COMPOSIO_PROMPT} Gmail and Google Calendar, when connected, have tools of their own: call gmail.search_emails, gmail.read_email, gmail.read_email_thread, gmail.create_draft, gmail.list_drafts, gmail.read_draft and gmail.update_draft. Draft requests never authorize sending. Revisions update the existing draft ID; creation always makes another draft. If an action fails or accidentally sends, report that fact accurately; a later draft does not undo a send, and googlecalendar.list_events and googlecalendar.list_calendars directly (your engine may show them behind its own prefix, with _ for the dot), and use the composio tools for everything else.`);
+    expect(composioSystemPrompt(undefined)).toBe(`${COMPOSIO_PROMPT} Gmail and Google Calendar, when connected, have tools of their own: call gmail.search_emails, gmail.read_email, gmail.read_email_thread, gmail.create_draft, gmail.list_drafts, gmail.read_draft and gmail.update_draft, and googlecalendar.list_events and googlecalendar.list_calendars directly (your engine may show them behind its own prefix, with _ for the dot), and use the composio tools for everything else. Draft requests never authorize sending. Revisions update the existing draft ID; creation always makes another draft. If an action fails or accidentally sends, report that fact accurately; a later draft does not undo a send`);
   });
 
   it("names the app tools of only the apps a bot was granted", () => {
