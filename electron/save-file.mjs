@@ -140,6 +140,35 @@ export async function openLogsFolder(folder, { open, fsp = fs.promises }) {
   return { folder, opened: !error, ...(error ? { error: String(error).slice(0, 300) } : {}) };
 }
 
+export const OPEN_HTML_MAX_BYTES = 2 * 1024 * 1024;
+
+/** A file name safe to write in our own folder: no folders, control or reserved characters, and a .html/.htm end. */
+export function htmlCopyName(name) {
+  const kept = [...String(name ?? "").split(/[\\/]/).pop()].filter((ch) => ch > "\u001f" && ch !== "\u007f" && !'<>:"|?*'.includes(ch));
+  const base = kept.join("").replace(/^[.\s]+|[.\s]+$/g, "");
+  const stem = (base.replace(/\.html?$/i, "") || "page").slice(0, 80);
+  return `${stem}${/\.htm$/i.test(base) ? ".htm" : ".html"}`;
+}
+
+/** Opens HTML the page already showed in the default browser: a fresh copy in our own temp folder, never a path a page
+ * names. `open` is shell.openPath, which answers "" or why it failed. Copies older than a day are cleared first. */
+export async function openHtmlCopy(source, name, { dir, open, fsp = fs.promises, now = Date.now() }) {
+  if (typeof source !== "string") throw new Error("Nothing to open");
+  if (Buffer.byteLength(source, "utf8") > OPEN_HTML_MAX_BYTES) throw new Error("This page is too large to open (2 MB)");
+  await fsp.mkdir(dir, { recursive: true, mode: 0o700 });
+  for (const entry of await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    if (!entry.isDirectory() || !entry.name.startsWith("p-")) continue;
+    const old = path.join(dir, entry.name);
+    const stat = await fsp.stat(old).catch(() => null);
+    if (stat && now - stat.mtimeMs > 24 * 60 * 60 * 1000) await fsp.rm(old, { recursive: true, force: true }).catch(() => undefined);
+  }
+  const file = path.join(await fsp.mkdtemp(path.join(dir, "p-")), htmlCopyName(name));
+  await fsp.writeFile(file, source, { encoding: "utf8", flag: "wx", mode: 0o600 });
+  const error = await open(file);
+  if (error) throw new Error(String(error).slice(0, 300));
+  return true;
+}
+
 export async function defaultSaveName(dir, sourcePath, { fsp = fs.promises } = {}) {
   const ext = path.extname(sourcePath);
   const stem = path.basename(sourcePath, ext);
