@@ -244,6 +244,7 @@ describe("plan usage parsers", () => {
   });
 });
 
+/** OpenCode Go's meters as the panel shows them: the running window, the week and the month. */
 describe("an OpenCode Go allowance", () => {
   const body = {
     usage: {
