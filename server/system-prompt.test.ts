@@ -31,6 +31,15 @@ import {
 import { loginPlace } from "../shared/logins.ts";
 import { REPLY_HABITS_PROMPT } from "./reply-habits.ts";
 
+describe("the stable half", () => {
+  it("leaves out a conversation's folder, so a new thread can read the bot's cached prompt", () => {
+    const built = buildSystemPrompt("You are Kiwi.", "", [{ id: "files", label: "File locations", text: "folder: /tasks/thread-1" }]);
+    expect(built.stable).not.toContain("thread-1");
+    expect(built.volatile).toContain("thread-1");
+    expect(built.text).toContain("thread-1");
+  });
+});
+
 describe("resolveComputerPromptKind", () => {
   // Rows the mounts already refuse are pinned here because no dispatchable engine in the test fleet lacks the capability.
   it.each([
