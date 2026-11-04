@@ -130,6 +130,51 @@ describe("ACP decodeConfig", () => {
     });
     await instance.dispose();
   });
+  it("says its list is unconfirmed until the engine gives one, and shares a read already under way", async () => {
+    let answer!: (catalog: { default: string; options: Array<{ id: string; label: string }> }) => void;
+    let reads = 0;
+    const freshReads: boolean[] = [];
+    const support: AcpSupport = {
+      driverKind: "unconfirmed-test",
+      displayName: "Unconfirmed Test",
+      models: { default: "fixed", options: [{ id: "fixed", label: "Fixed" }] },
+      defaultCli: FAKE_CLI,
+      nativeSource: "unconfirmed-test.acp",
+      loginNote: "not authenticated",
+      spawnArgs: () => [],
+      pickAuthMethod: () => null,
+      authFailure: "continue",
+      isAuthenticated: () => true,
+      resolveModelsOnCreate: false,
+      resolveModels: (_env, _config, _id, fresh) => {
+        reads += 1;
+        freshReads.push(fresh === true);
+        return new Promise((resolve) => { answer = resolve; });
+      },
+    };
+    const driver = createAcpDriver(support);
+    const instance = await driver.create({
+      instanceId: `unconfirmed-${randomUUID()}`,
+      displayName: "Unconfirmed Test",
+      environment: {},
+      enabled: true,
+      config: driver.defaultConfig(),
+    });
+    try {
+      expect(instance.modelsUnconfirmed).toBe(true);
+      const first = instance.refreshModels!();
+      const second = instance.refreshModels!();
+      await vi.waitFor(() => expect(reads).toBe(1));
+      answer({ default: "account", options: [{ id: "account", label: "Account" }] });
+      await Promise.all([first, second]);
+      expect(reads).toBe(1);
+      expect(instance.models.default).toBe("account");
+      expect(instance.modelsUnconfirmed).toBe(false);
+      expect(freshReads).toEqual([true]);
+    } finally {
+      await instance.dispose();
+    }
+  });
   it("grok defaults to the grok binary", () => {
     expect(GrokAgentDriver.decodeConfig({})).toEqual({ cli: "grok", fullAuto: false, workspace: undefined });
   });

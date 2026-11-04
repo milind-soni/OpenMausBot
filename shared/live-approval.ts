@@ -13,7 +13,7 @@ export type LiveCardKind = "approval" | "review" | "question";
  * can answer it any more. */
 export function liveCardKind(card: OptionCardData | undefined): LiveCardKind | null {
   if (!card?.requestId || card.answered || card.dismissed || card.expired) return null;
-  if (card.skillRequest || card.routineRequest || card.profileRequest || card.modelRequest || card.teamSetupRequest || card.mcpRequest || card.quotaSwitch) {
+  if (card.skillRequest || card.routineRequest || card.profileRequest || card.modelRequest || card.teamSetupRequest || card.mcpRequest || card.quotaSwitch || card.lendingLift) {
     return "review";
   }
   return card.tool ? "approval" : "question";

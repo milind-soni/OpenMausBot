@@ -155,7 +155,7 @@ export function createBotApiHost(deps: BotApiHostDeps) {
       if (!task) fail(404, "no such bot");
       threadId = task.threadId;
       opened = true;
-      store.patchTask(botId, threadId, { botApi: true });
+      store.patchTask(botId, threadId, { botApi: true, outside: true });
       deps.opened?.(threadId);
     }
     const receivedAt = Date.now();

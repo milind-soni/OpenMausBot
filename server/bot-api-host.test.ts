@@ -135,7 +135,7 @@ describe("the Bot API door on the webhook receiver", () => {
     expect(first.status).toBe(200);
     expect(first.body).toEqual({ reply: "Hello from Scout", thread: expect.any(String) });
     const threadId = first.body.thread as string;
-    expect(h.fake.bots.get("b1")!.tasks).toEqual([{ threadId, title: "Who are you?", busy: false, approvalMode: "ask", botApi: true }]);
+    expect(h.fake.bots.get("b1")!.tasks).toEqual([{ threadId, title: "Who are you?", busy: false, approvalMode: "ask", botApi: true, outside: true }]);
     const [turn] = h.turns;
     expect(turn!.opts).toMatchObject({ threadId, automationSource: "api", unattended: true });
     expect(turn!.opts.userMessage).toMatchObject({ role: "user", text: "Who are you?", via: "api" });

@@ -43,8 +43,8 @@ afterEach(async () => { await Promise.all(hosts.splice(0).map((host) => host.bro
 
 const turn = { threadId: "thread-1", generation: "gen-1" };
 
-function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = false, device, lendRefusal, holder, audienceOf, bots: botIds = ["scout"], browserBox, lentChrome, turnResources }: {
-  cloudHome?: boolean; device?: BrowserHostDeps["device"]; lendRefusal?: BrowserHostDeps["lendRefusal"]; holder?: (resource: string) => TurnOwner | undefined;
+function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = false, server = false, hosted = false, device, lendRefusal, holder, audienceOf, bots: botIds = ["scout"], browserBox, lentChrome, turnResources }: {
+  cloudHome?: boolean; server?: boolean; hosted?: boolean; device?: BrowserHostDeps["device"]; lendRefusal?: BrowserHostDeps["lendRefusal"]; holder?: (resource: string) => TurnOwner | undefined;
   audienceOf?: BrowserHostDeps["audienceOf"]; bots?: string[]; browserBox?: BrowserHostDeps["browserBox"];
   lentChrome?: BrowserHostDeps["lentChrome"]; turnResources?: BrowserHostDeps["turnResources"];
 } = {}) {
@@ -64,8 +64,9 @@ function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = fal
     turnResources: turnResources ?? { free: () => true, holder: holder ?? (() => undefined), onClaim: () => () => {} },
     activeInternalGenerationByThread: new Map([[turn.threadId, turn.generation]]),
     mintInternalCapability: (capability) => { minted.push(capability); return "capability-token"; },
-    DESKTOP_MANAGED: !cloudHome,
+    DESKTOP_MANAGED: !cloudHome && !server,
     CLOUD_HOME: cloudHome ? { machineId: "m-1" } : null,
+    HOSTED_WORKSPACE: hosted,
     PORT: 4100,
     device,
     lendRefusal,
@@ -134,6 +135,22 @@ describe("the bots' browser host with browserEngine.engine set to chrome", () =>
     expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true })).toMatchObject({ engine: "chrome", myChrome: true });
     cfg.browserEngine = { engine: "agent-browser" };
     expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true })).toEqual({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true, engine: "agent-browser" });
+  });
+
+  it("offers the owner's local-sites switch on a self-hosted server, but never on a shared company workspace", () => {
+    const unavailable = { kind: "unavailable" as const, reason: "agent-browser is not installed", myChrome: false };
+    for (const hosted of [false, true]) {
+      const { cfg, host } = setup("agent-browser", { server: true, hosted });
+      cfg.browserEngine = { engine: "agent-browser", egress: { localNetwork: true, allow: ["10.0.0.5"] } };
+      expect(host.engineSummary(unavailable).serverSites).toBe(hosted ? undefined : true);
+      expect(browserEgress.rules().localNetwork).toBe(!hosted);
+      expect(browserEgress.rules().allowed("10.0.0.5", 80)).toBe(!hosted);
+    }
+    const desktop = setup("agent-browser");
+    desktop.cfg.browserEngine = { engine: "agent-browser", egress: { allow: ["10.0.0.5"] } };
+    expect(desktop.host.engineSummary(unavailable).serverSites).toBeUndefined();
+    // The desktop's own default stays: its browsers reach the local network unless egress.localNetwork is false.
+    expect(browserEgress.rules().localNetwork).toBe(true);
   });
 
   it("forgets the new engine's sessions when the engine is switched back", async () => {
@@ -291,11 +308,26 @@ describe("My Chrome on My Cloud, through the person's lent Chrome", () => {
     expect(engine).not.toHaveBeenCalled();
   });
 
+  it("each refusal names its own way out: a conversation refused on both counts is told both steps, in order", async () => {
+    const texts: Record<string, string> = {
+      "memory-changed-here": "tap Mark reviewed, then start a new conversation with this bot and ask there.",
+      "not-owner": "Only conversations you start with a bot, and routines you wrote, can use your Chrome.",
+      unproven: "Only conversations you start with a bot, and routines you wrote, can use your Chrome.",
+      "someone-else": SOMEONE_ELSE,
+    };
+    for (const [why, expected] of Object.entries(texts)) {
+      const { host, call } = onMyCloud(lender, (holder) => (holder.threadId === GUEST.threadId ? why as "not-owner" : null));
+      const browser = (await host.browserIntegration("scout", "mine", turn))!;
+      const answer = await call(browser, GUEST);
+      expect(answer.content[0]!.text, why).toContain(expected);
+      expect(answer.content[0]!.text, why).toContain("Only the person can change this");
+    }
+  });
   it("a conversation refused over a memory change is pointed to Memory, not to a new conversation", async () => {
     const { host, engine, call } = onMyCloud(lender, (holder) => (holder.threadId === GUEST.threadId ? "memory-changed" : null));
     const browser = (await host.browserIntegration("scout", "mine", turn))!;
     const answer = await call(browser, GUEST);
-    expect(answer).toEqual({ isError: true, content: [{ type: "text", text: "This bot's memory was changed in a conversation you didn't write. Review it in Memory to use your Chrome again." }] });
+    expect(answer).toEqual({ isError: true, content: [{ type: "text", text: expect.stringContaining("This bot's memory was changed in a conversation you didn't write, so it can't use your Chrome. In this bot's settings, open Memory, check what changed and tap Mark reviewed, then ask again here.") }] });
     expect(answer.content[0]!.text).not.toContain(SOMEONE_ELSE);
     expect(engine).not.toHaveBeenCalled();
   });

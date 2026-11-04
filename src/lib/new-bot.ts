@@ -5,6 +5,7 @@ import { currentTeamPeople, departmentOwner, type TeamPeople } from "@/state/tea
 import { openBot } from "@/state/thread-navigation";
 import type { BotSource } from "./analytics-allowlist";
 import { BotCreationDraft } from "./bot-creation-draft";
+import { isBotLimitRefusal } from "./bot-limit";
 import { createConfiguredBot } from "./create-configured-bot";
 import { t } from "./i18n";
 import { botCreated } from "./product-events";
@@ -69,10 +70,12 @@ async function createNewBot(section: string | undefined, bots: readonly Bot[], t
 /** New bot: a bot made at once from the New bot defaults, with its chat open and ready for the first message. */
 export async function makeNewBot(action: Extract<Action, { type: "newBot" }>, bots: readonly Bot[], dispatch: (action: Action) => void,
   showThreads: boolean, request: typeof api = api): Promise<void> {
+  if (currentTeamPeople()?.admin === false) return;
   let made: Awaited<ReturnType<typeof createNewBot>>;
   try {
     made = await createNewBot(action.section, bots, currentTeamPeople(), request);
   } catch (cause) {
+    if (isBotLimitRefusal(cause)) return;
     const message = t("newBot.failed", { error: cause instanceof Error ? cause.message : String(cause) });
     if (action.onError) action.onError(message);
     else dispatch({ type: "error", message });

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { Plus } from "lucide-react";
+import { stoppedAtBotLimit } from "@/lib/bot-limit";
 import { MausAvatar } from "./Avatar";
 import { NewBotDialog } from "./lazy-screens";
 import { READY_BOT_CATEGORIES, READY_BOTS, matchesReadyBot, type ReadyBotCategory } from "@/lib/ready-bots";
@@ -26,9 +27,10 @@ export function ReadyBotGallery({ search, onDialog, onAdded }: {
   onAdded: (bot: Bot) => void;
 }) {
   const [category, setCategory] = useState<ReadyBotCategory | null>(null);
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
   const [adding, setAdding] = useState<string | null>(null);
   const open = (id: string | null) => {
+    if (id !== null && stoppedAtBotLimit(state)) return;
     // A paired device may not read the host's New bot defaults that the review is filled from.
     if (id !== null && window.ogb?.remoteClient?.active) { dispatch({ type: "newBot", onCreated: onAdded }); return; }
     setAdding(id); onDialog(id !== null);
