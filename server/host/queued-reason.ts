@@ -1,5 +1,3 @@
-// Why a queued handoff has not started yet, from the same state that holds it (index.ts coordinator host `busy`, admission.ts
-// "peer"), so a bot, and through it the person, can tell a full thread list from a stuck one. Never changes scheduling.
 import type { HandoffView } from "../coordinator.ts";
 
 export interface QueuedReasonDeps {
