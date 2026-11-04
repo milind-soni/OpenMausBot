@@ -3,9 +3,9 @@ import { Brain, Check, Copy, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { applyMemoryImport, askMausBotToSetUp, mausBotOf, type MemoryImportDone } from "@/lib/memory-import";
+import { applyMemoryImport, askMausBotToSetUp, mausBotOf, saveImportNote, type MemoryImportDone } from "@/lib/memory-import";
 import { useStore } from "@/state/store";
-import { MEMORY_IMPORT_SOURCES, MemoryImportError, memoryImportPrompt, parseMemoryImport, type MemoryImport } from "../../shared/memory-import";
+import { MEMORY_IMPORT_SOURCES, MemoryImportError, memoryImportNote, memoryImportPrompt, parseMemoryImport, type MemoryImport } from "../../shared/memory-import";
 
 const OTHER = "other";
 const button = "inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-accent-ink disabled:opacity-40";
@@ -20,6 +20,7 @@ export function MemoryImportSection() {
   const [choice, setChoice] = useState<string>(MEMORY_IMPORT_SOURCES[0]);
   const [otherName, setOtherName] = useState("");
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState("");
   const [answer, setAnswer] = useState("");
   const [addFacts, setAddFacts] = useState(true);
   const [keepNote, setKeepNote] = useState(true);
@@ -27,6 +28,7 @@ export function MemoryImportSection() {
   const [error, setError] = useState("");
   const [done, setDone] = useState<MemoryImportDone | null>(null);
   const [asked, setAsked] = useState(false);
+  const [asking, setAsking] = useState(false);
   const source = choice === OTHER ? otherName.trim() : choice;
   const prompt = memoryImportPrompt(source || t("settings.import.memory.otherFallback"));
   const mausBot = mausBotOf(state.bots);
@@ -40,14 +42,16 @@ export function MemoryImportSection() {
     }
   }, [answer]);
   const imported = parsed && "imported" in parsed ? parsed.imported : null;
+  const clipped = useMemo(() => (imported ? memoryImportNote(imported, source || "x", today()).clipped : false), [imported, source]);
 
   const copy = async () => {
+    setCopyError("");
     try {
       await navigator.clipboard.writeText(prompt);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2_000);
     } catch {
-      setError(t("settings.import.memory.copyFailed"));
+      setCopyError(t("settings.import.memory.copyFailed"));
     }
   };
 
@@ -57,7 +61,7 @@ export function MemoryImportSection() {
     setError("");
     try {
       const result = await applyMemoryImport({
-        imported, source: source || t("settings.import.memory.otherFallback"), aboutMe: state.config?.profile?.aboutMe ?? "",
+        imported, source: source || t("settings.import.memory.otherFallback"),
         team: Boolean(state.config?.team), addFacts, noteFor: keepNote && mausBot ? mausBot.id : null, today: today(),
       });
       if (result.aboutMe !== null) dispatch({ type: "profileSaved", profile: { aboutMe: result.aboutMe } });
@@ -70,13 +74,29 @@ export function MemoryImportSection() {
   };
 
   const ask = async () => {
-    if (!imported || !mausBot) return;
+    if (!imported || !mausBot || asking) return;
+    setAsking(true);
     setError("");
     try {
       await askMausBotToSetUp(mausBot, source, imported);
       setAsked(true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setAsking(false);
+    }
+  };
+
+  const retryNote = async () => {
+    if (!imported || !mausBot || !done || working) return;
+    setWorking(true);
+    try {
+      const note = await saveImportNote(mausBot.id, { imported, source, today: today() });
+      setDone({ ...done, note, noteError: null });
+    } catch (cause) {
+      setDone({ ...done, noteError: cause instanceof Error ? cause.message : String(cause) });
+    } finally {
+      setWorking(false);
     }
   };
 
@@ -89,12 +109,21 @@ export function MemoryImportSection() {
         <div role="status" className="mt-4 flex flex-col gap-2" data-memory-import-done>
           <p className="flex items-center gap-2 text-[14px] font-medium text-ink"><Check size={15} className="text-success" />{t("settings.import.memory.done", { source })}</p>
           {done.factsAdded > 0 && <p className="text-[13px] text-ink-secondary">{t("settings.import.memory.factsAdded", { count: done.factsAdded })}</p>}
-          {done.factsLeftOut > 0 && <p className="text-[13px] text-ink-secondary">{t("settings.import.memory.factsLeftOut", { count: done.factsLeftOut })}</p>}
+          {done.factsKnown > 0 && <p className="text-[13px] text-ink-secondary">{t("settings.import.memory.factsKnown", { count: done.factsKnown })}</p>}
+          {done.factsLeftOut > 0 && <p className="text-[13px] text-ink-secondary">{t(done.note ? "settings.import.memory.factsLeftOut" : "settings.import.memory.factsLeftOutNoNote", { count: done.factsLeftOut })}</p>}
           {done.note && mausBot && <p className="text-[13px] text-ink-secondary">{t("settings.import.memory.noteSaved", { bot: mausBot.name })}</p>}
+          {done.noteError && (
+            <div role="alert" className="text-[13px] text-danger" data-memory-note-error>
+              {t("settings.import.memory.noteFailed", { error: done.noteError })}
+              <button type="button" className={cn(quiet, "ms-2")} disabled={working} onClick={() => void retryNote()}>{t("settings.import.memory.retryNote")}</button>
+            </div>
+          )}
           {done.note && mausBot && imported.setup.length > 0 && (
             asked
               ? <p className="text-[13px] text-ink-secondary">{t("settings.import.memory.asked", { bot: mausBot.name })}</p>
-              : <button type="button" className={cn(button, "self-start")} onClick={() => void ask()}>{t("settings.import.memory.ask", { bot: mausBot.name })}</button>
+              : <button type="button" className={cn(button, "self-start")} disabled={asking} onClick={() => void ask()}>
+                {asking && <Loader2 size={14} className="animate-spin" />}{t("settings.import.memory.ask", { bot: mausBot.name })}
+              </button>
           )}
           {error && <p role="alert" className="text-[13px] text-danger">{error}</p>}
         </div>
@@ -125,6 +154,8 @@ export function MemoryImportSection() {
                 {copied ? t("settings.import.memory.copied") : t("settings.import.memory.copy")}
               </button>
             </div>
+            {copyError && <p role="alert" className="mt-1 text-[12px] text-danger" data-memory-copy-error>{copyError}</p>}
+            {choice === "Grok" && <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary" data-memory-grok-bot>{t("settings.import.memory.grokBot")}</p>}
             <details className="mt-2">
               <summary className="cursor-pointer text-[12px] text-ink-secondary">{t("settings.import.memory.showPrompt")}</summary>
               <pre className="mt-1 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg bg-inset p-3 text-[12px] leading-relaxed text-ink" data-memory-prompt>{prompt}</pre>
@@ -144,6 +175,7 @@ export function MemoryImportSection() {
                 {t("settings.import.memory.found", { facts: imported.facts.length, setup: imported.setup.length })}
                 {imported.context ? ` ${t("settings.import.memory.foundContext")}` : ""}
               </p>
+              {clipped && <p role="alert" className="mt-1 text-[12px] text-warning" data-memory-clipped>{t("settings.import.memory.clipped")}</p>}
               {imported.setup.length > 0 && (
                 <ul className="mt-2 flex flex-wrap gap-1.5">
                   {imported.setup.map((item) => <li key={item.name} className="rounded-full bg-raised px-2.5 py-0.5 text-[12px] text-ink">{item.name}</li>)}

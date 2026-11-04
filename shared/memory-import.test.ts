@@ -63,6 +63,12 @@ describe("bringing memory over from another assistant", () => {
     expect(imported.context).toBe("- Hiring a dispatcher; interviews next week.\n- Moving tracking from Sheets to Airtable.");
   });
 
+  it("joins a bullet that wraps onto the next line, and keeps text under another heading out", () => {
+    const imported = parseMemoryImport("## About me\n- Runs operations at a small logistics company\n  in Pune, mostly road freight\n- Likes tea\n\n## Source notes\n- Exported from the app on Monday\n\n## Ongoing context\nHiring.");
+    expect(imported.facts).toEqual(["Runs operations at a small logistics company in Pune, mostly road freight", "Likes tea"]);
+    expect(imported.context).toBe("Hiring.");
+  });
+
   it("treats Nothing yet as empty, and refuses an answer without any of the headings", () => {
     expect(parseMemoryImport("## About me\n- Likes tea\n\n## My setup\nNothing yet.\n\n## Ongoing context\nNothing yet.")).toEqual({ facts: ["Likes tea"], setup: [], context: "" });
     expect(() => parseMemoryImport("I can't help with that.")).toThrow(MemoryImportError);
@@ -70,7 +76,7 @@ describe("bringing memory over from another assistant", () => {
 
   it("adds each new fact to About you once, in a dated block, within its share of About you", () => {
     const merged = aboutMeWithImport("I'm Sam.\n- Prefers short answers with bullet points", parseMemoryImport(ANSWER).facts, "Grok", "2026-11-03");
-    expect(merged.added).toBe(3);
+    expect(merged).toMatchObject({ added: 3, alreadyKnown: 1, leftOut: 0 });
     expect(merged.text).toBe([
       "I'm Sam.", "- Prefers short answers with bullet points", "",
       "From Grok (imported 2026-11-03):",
@@ -82,19 +88,29 @@ describe("bringing memory over from another assistant", () => {
     const capped = aboutMeWithImport("", many, "Muse", "2026-11-03");
     expect(capped.text.length).toBeLessThanOrEqual(IMPORTED_FACTS_MAX_CHARS);
     expect(capped.added + capped.leftOut).toBe(200);
-    expect(aboutMeWithImport("Likes tea", ["likes tea"], "Muse", "2026-11-03")).toEqual({ text: "Likes tea", added: 0, leftOut: 0 });
+    // A short fact after one too long to fit still goes in.
+    const long = "x".repeat(IMPORTED_FACTS_MAX_CHARS);
+    expect(aboutMeWithImport("", [long, "Likes tea"], "Muse", "2026-11-03")).toMatchObject({ added: 1, leftOut: 1, text: expect.stringContaining("- Likes tea") });
+    expect(aboutMeWithImport("Likes tea", ["likes tea"], "Muse", "2026-11-03")).toEqual({ text: "Likes tea", added: 0, alreadyKnown: 1, leftOut: 0 });
+    // Whole words only: "Likes tea" is new to someone who "Dislikes tea".
+    expect(aboutMeWithImport("Dislikes tea", ["Likes tea"], "Muse", "2026-11-03")).toMatchObject({ added: 1, alreadyKnown: 0 });
   });
 
   it("keeps everything in a note MausBot finds by its words, one per source, under the memory file cap", () => {
-    const note = memoryImportNote(parseMemoryImport(ANSWER), "Grok", "2026-11-03");
+    const { text: note, clipped } = memoryImportNote(parseMemoryImport(ANSWER), "Grok", "2026-11-03");
+    expect(clipped).toBe(false);
     expect(note.startsWith("---\ntitle: What Grok knew\n")).toBe(true);
     expect(note).toContain("aliases: [Grok, imported memory, my old assistant, my setup]");
     expect(note).toContain("### Inbox Triage\n- **Name:** Inbox Triage");
     expect(note).toContain("## Ongoing context\n- Hiring a dispatcher");
     expect(memoryImportNotePath("Grok")).toBe("memory/imported-from-grok.md");
-    expect(memoryImportNotePath("  My Old Bot!! ")).toBe("memory/imported-from-my-old-bot.md");
+    expect(memoryImportNotePath(" grok ")).toBe("memory/imported-from-grok.md");
+    expect(memoryImportNotePath("  My Old Bot!! ")).toMatch(/^memory\/imported-from-my-old-bot-[a-z0-9]{1,6}\.md$/);
+    expect(memoryImportNotePath("A/B")).not.toBe(memoryImportNotePath("A B"));
+    expect(memoryImportNotePath("A/B")).toBe(memoryImportNotePath("a/b"));
     const huge = memoryImportNote({ facts: [], setup: [{ name: "Big", details: "é".repeat(200_000) }], context: "" }, "Grok", "2026-11-03");
-    expect(new TextEncoder().encode(huge).length).toBeLessThanOrEqual(IMPORT_NOTE_MAX_BYTES + 100);
-    expect(huge).toContain("too long to keep here");
+    expect(huge.clipped).toBe(true);
+    expect(new TextEncoder().encode(huge.text).length).toBeLessThanOrEqual(IMPORT_NOTE_MAX_BYTES + 100);
+    expect(huge.text).toContain("too long to keep here");
   });
 });

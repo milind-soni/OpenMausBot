@@ -85,12 +85,18 @@ export function parseMemoryImport(text: string): MemoryImport {
   for (const line of lines) {
     const heading = /^\s{0,3}#{1,2}\s+(.+?)\s*#*\s*$/.exec(line);
     if (heading) {
-      const next = sectionOf(heading[1]!);
-      if (next) { section = next; continue; }
+      section = sectionOf(heading[1]!);
+      continue;
     }
     if (section) bodies[section].push(line);
   }
-  const facts = bodies.about.map((line) => line.replace(BULLET, "").trim()).filter((line) => line && !NOTHING.test(line) && !line.startsWith("#"));
+  const facts: string[] = [];
+  for (const line of bodies.about) {
+    const text = line.replace(BULLET, "").trim();
+    if (!text || NOTHING.test(text) || text.startsWith("#")) continue;
+    if (!BULLET.test(line) && facts.length) facts[facts.length - 1] += ` ${text}`;
+    else facts.push(text);
+  }
   const setup: ImportedSetupItem[] = [];
   for (const line of bodies.setup) {
     const item = /^\s{0,3}#{3,6}\s+(.+?)\s*#*\s*$/.exec(line);
@@ -109,28 +115,44 @@ export function parseMemoryImport(text: string): MemoryImport {
   return result;
 }
 
+export interface AboutMeMerge {
+  text: string;
+  added: number;
+  /** Already in About you as written, word for word. */
+  alreadyKnown: number;
+  /** New, but past About you's share for imported facts. */
+  leftOut: number;
+}
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const knownIn = (current: string) => (fact: string) =>
+  new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(fact.replace(/\s+/g, " "))}(?![\\p{L}\\p{N}])`, "iu").test(current.replace(/\s+/g, " "));
+
 /** About you with the imported facts added once each, in a dated block, kept within IMPORTED_FACTS_MAX_CHARS. */
-export function aboutMeWithImport(current: string, facts: readonly string[], source: string, date: string): { text: string; added: number; leftOut: number } {
-  const known = current.toLowerCase();
-  const fresh = facts.filter((fact) => !known.includes(fact.toLowerCase()));
+export function aboutMeWithImport(current: string, facts: readonly string[], source: string, date: string): AboutMeMerge {
+  const known = knownIn(current);
+  const fresh = facts.filter((fact) => !known(fact));
   const header = `From ${source.trim() || "another assistant"} (imported ${date}):`;
   const kept: string[] = [];
   let size = header.length + 1;
   for (const fact of fresh) {
     const line = `- ${fact.replace(/\s+/g, " ")}`;
-    if (size + line.length + 1 > IMPORTED_FACTS_MAX_CHARS) break;
+    if (size + line.length + 1 > IMPORTED_FACTS_MAX_CHARS) continue;
     kept.push(line);
     size += line.length + 1;
   }
-  if (!kept.length) return { text: current, added: 0, leftOut: fresh.length };
+  const alreadyKnown = facts.length - fresh.length;
+  const leftOut = fresh.length - kept.length;
+  if (!kept.length) return { text: current, added: 0, alreadyKnown, leftOut };
   const block = [header, ...kept].join("\n");
-  return { text: current.trim() ? `${current.trimEnd()}\n\n${block}` : block, added: kept.length, leftOut: fresh.length - kept.length };
+  return { text: current.trim() ? `${current.trimEnd()}\n\n${block}` : block, added: kept.length, alreadyKnown, leftOut };
 }
 
-/** MausBot's note of the whole import: every fact, each set-up item in full and the ongoing context. */
-export function memoryImportNote(imported: MemoryImport, source: string, date: string): string {
+/** MausBot's note of the whole import: every fact, each set-up item in full and the ongoing context. `clipped` when it
+ * is past a memory file's cap and its end is cut. */
+export function memoryImportNote(imported: MemoryImport, source: string, date: string): { text: string; clipped: boolean } {
   const from = source.trim() || "another assistant";
-  // The frontmatter is what lists the note for the bot (server/memory-topics.ts), so it is found by these words.
+  // A topic note is listed for the bot by its frontmatter, and found by these words.
   const parts = [
     "---", `title: What ${from} knew`, `description: Facts, set-up and ongoing work the person brought over from ${from} on ${date}.`,
     `aliases: [${from}, imported memory, my old assistant, my setup]`, "---", "",
@@ -145,15 +167,25 @@ export function memoryImportNote(imported: MemoryImport, source: string, date: s
   return clipBytes(`${parts.join("\n")}\n`, IMPORT_NOTE_MAX_BYTES);
 }
 
-function clipBytes(text: string, max: number): string {
+function clipBytes(text: string, max: number): { text: string; clipped: boolean } {
   const bytes = new TextEncoder().encode(text);
-  if (bytes.length <= max) return text;
+  if (bytes.length <= max) return { text, clipped: false };
   const kept = new TextDecoder().decode(bytes.subarray(0, max)).replace(/\uFFFD+$/, "");
-  return `${kept.slice(0, kept.lastIndexOf("\n") + 1)}\n(The rest of the import was too long to keep here.)\n`;
+  return { text: `${kept.slice(0, kept.lastIndexOf("\n") + 1)}\n(The rest of the import was too long to keep here.)\n`, clipped: true };
 }
 
-/** The note's path in MausBot's memory: one per source, so importing again replaces it. */
+/** The note's path in MausBot's memory: one per source, so importing from the same one again replaces it. A name the
+ * person typed also carries a short hash of itself, so two names with the same slug ("A/B", "A B") keep separate notes. */
 export function memoryImportNotePath(source: string): string {
-  const slug = source.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "assistant";
-  return `memory/imported-from-${slug}.md`;
+  const name = source.trim();
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "assistant";
+  const known = (MEMORY_IMPORT_SOURCES as readonly string[]).some((one) => one.toLowerCase() === name.toLowerCase());
+  return `memory/imported-from-${slug}${known ? "" : `-${shortHash(name.toLowerCase())}`}.md`;
+}
+
+/** FNV-1a: a stable short tag, not a security boundary. */
+function shortHash(text: string): string {
+  let hash = 0x811c9dc5;
+  for (const ch of text) hash = Math.imul(hash ^ ch.codePointAt(0)!, 0x01000193) >>> 0;
+  return hash.toString(36).slice(0, 6);
 }

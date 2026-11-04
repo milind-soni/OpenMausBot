@@ -2,7 +2,7 @@
 // which every bot reads; the whole import is a topic note in MausBot's memory, so it can set the person's old setup up
 // here with them.
 import { aboutMeWithImport, memoryImportNote, memoryImportNotePath, type MemoryImport } from "../../shared/memory-import";
-import { saveTeamProfile } from "./own-profile";
+import { loadTeamProfile, saveTeamProfile } from "./own-profile";
 import { api, type Bot, type ConfigStatus } from "@/state/store";
 
 /** The person's own MausBot: the one bot that is theirs alone. */
@@ -11,7 +11,6 @@ export const mausBotOf = (bots: readonly Bot[]): Bot | undefined => bots.find((b
 export interface MemoryImportChoice {
   imported: MemoryImport;
   source: string;
-  aboutMe: string;
   /** About you is the signed-in person's own on a Team Cloud, the server's profile anywhere else. */
   team: boolean;
   addFacts: boolean;
@@ -20,14 +19,37 @@ export interface MemoryImportChoice {
   today: string;
 }
 
-export interface MemoryImportDone { factsAdded: number; factsLeftOut: number; aboutMe: string | null; note: string | null }
+export interface MemoryImportDone {
+  factsAdded: number;
+  factsKnown: number;
+  factsLeftOut: number;
+  aboutMe: string | null;
+  note: string | null;
+  /** The note's write failed after About you was saved. */
+  noteError: string | null;
+}
+
+/** About you as stored now: bots learn facts into it without the page hearing, so the copy on screen can be behind. */
+async function storedAboutMe(team: boolean): Promise<string> {
+  const profile = team ? await loadTeamProfile() : (await api<ConfigStatus>("/api/config", { timeoutMs: 10_000 })).profile;
+  return profile?.aboutMe ?? "";
+}
+
+export async function saveImportNote(botId: string, choice: Pick<MemoryImportChoice, "imported" | "source" | "today">): Promise<string> {
+  const path = memoryImportNotePath(choice.source);
+  await api(`/api/bots/${botId}/memory/file`, {
+    method: "PUT", body: JSON.stringify({ path, text: memoryImportNote(choice.imported, choice.source, choice.today).text }),
+  });
+  return path;
+}
 
 export async function applyMemoryImport(choice: MemoryImportChoice): Promise<MemoryImportDone> {
   let aboutMe: string | null = null;
-  let factsAdded = 0, factsLeftOut = 0;
+  let factsAdded = 0, factsKnown = 0, factsLeftOut = 0;
   if (choice.addFacts && choice.imported.facts.length) {
-    const merged = aboutMeWithImport(choice.aboutMe, choice.imported.facts, choice.source, choice.today);
+    const merged = aboutMeWithImport(await storedAboutMe(choice.team), choice.imported.facts, choice.source, choice.today);
     factsAdded = merged.added;
+    factsKnown = merged.alreadyKnown;
     factsLeftOut = merged.leftOut;
     if (merged.added) {
       const saved = choice.team
@@ -36,14 +58,15 @@ export async function applyMemoryImport(choice: MemoryImportChoice): Promise<Mem
       aboutMe = saved?.aboutMe ?? merged.text;
     }
   }
-  let note: string | null = null;
+  let note: string | null = null, noteError: string | null = null;
   if (choice.noteFor) {
-    note = memoryImportNotePath(choice.source);
-    await api(`/api/bots/${choice.noteFor}/memory/file`, {
-      method: "PUT", body: JSON.stringify({ path: note, text: memoryImportNote(choice.imported, choice.source, choice.today) }),
-    });
+    try {
+      note = await saveImportNote(choice.noteFor, choice);
+    } catch (cause) {
+      noteError = cause instanceof Error ? cause.message : String(cause);
+    }
   }
-  return { factsAdded, factsLeftOut, aboutMe, note };
+  return { factsAdded, factsKnown, factsLeftOut, aboutMe, note, noteError };
 }
 
 /** What MausBot is asked once the import is saved: to go through the old setup and offer to make each part here. */
