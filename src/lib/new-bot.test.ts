@@ -13,7 +13,7 @@ import { makeNewBot, type BotDefaultsAnswer } from "./new-bot";
 
 const ME = { email: "ada@acme.test", name: "Ada", role: "member", you: true as const };
 const BOB = { email: "bob@acme.test", name: "Bob", role: "admin" };
-const team: TeamPeople = { people: [ME, BOB], me: ME, admin: false, needsYou: [] };
+const team: TeamPeople = { people: [ME, BOB], me: ME, admin: true, needsYou: [] };
 
 function server(answer: Partial<BotDefaultsAnswer> = {}, fail?: { on: "POST" | "PATCH"; error: string }) {
   const calls: Array<{ method: string; path: string; body: Record<string, unknown> }> = [];
@@ -47,6 +47,13 @@ beforeEach(() => { fixture.track.mockReset(); fixture.openBot.mockReset(); });
 afterEach(() => { vi.unstubAllGlobals(); setTeamPeople(null); setTeamChats(null); });
 
 describe("New bot", () => {
+  it("makes nothing for a User on a team, however it was asked for", async () => {
+    setTeamPeople({ ...team, admin: false });
+    const { calls, request } = server();
+    expect(await newBot(request)).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
   it("makes a bot at once from the New bot defaults and opens its chat", async () => {
     const { calls, request, created } = server();
     const sent = await newBot(request);

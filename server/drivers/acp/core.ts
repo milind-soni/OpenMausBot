@@ -10,7 +10,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { createHash } from "node:crypto";
 
 import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
-import { openStartupModelCatalog, readStartupModelCache, unconfirmedModelCatalog, writeStartupModelCache } from "../../startup-model-catalog.ts";
+import { openStartupModelCatalog } from "../../startup-model-catalog.ts";
+import { acpModelCatalog } from "./model-catalog.ts";
 import { decodeInjectId } from "../local-inject.ts";
 import { DeviceAuthController, type DeviceSignIn } from "../device-auth.ts";
 import { deletePromptSplitReceipt, promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
@@ -169,7 +170,7 @@ export interface AcpSupport {
   /** Google Antigravity resumes through session/resume, not session/load. */
   resumeMethod?: "load" | "resume";
   /** Some agents acknowledge a live load without applying new MCP credentials. */
-  restartOnMcpChange?: boolean;
+  restartOnMcpChange?: boolean; /** The turn's MCP servers come from launcher-owned configuration, not ACP session parameters. */ mcpServersFromLaunch?: boolean;
   /** hermes-agent 0.22.4 re-sends a streamed reply whole under its messageId, as its `💭` reasoning block, a blank line,
    * then the reply; that chunk is dropped instead of appended. */
   resendsReasoningReply?: boolean;
@@ -338,26 +339,19 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         support.transformEnv?.(env, activeConfig, instanceId, input.environment);
         return env;
       };
-      let models = support.resolveModels && support.resolveModelsOnCreate === false
-        ? readStartupModelCache(instanceId) ?? support.models : support.models;
-      let accountModels: ReadonlySet<string> | null = null;
-      const refreshModels = async (fresh = false) => {
-        if (!support.resolveModels) return;
-        try {
-          const resolved = await support.resolveModels(childEnv(), config, instanceId, fresh);
-          if (resolved.options.length) {
-            models = resolved;
-            accountModels = new Set(resolved.options.map((option) => option.id));
-          } else unconfirmedModelCatalog(models);
-        } catch { unconfirmedModelCatalog(models); }
-        try { writeStartupModelCache(instanceId, models); } catch {}
-      };
+      const catalog = acpModelCatalog({
+        instanceId,
+        fixed: support.models,
+        startFromSaved: Boolean(support.resolveModels) && support.resolveModelsOnCreate === false,
+        resolve: support.resolveModels && ((fresh) => support.resolveModels!(childEnv(), config, instanceId, fresh)),
+      });
+      const refreshModels = (fresh?: boolean) => catalog.refresh(fresh);
       let startupModelRefresh: Promise<void> | null = null;
       if (support.resolveModels && support.resolveModelsOnCreate !== false) {
         startupModelRefresh = (await openStartupModelCatalog({
           instanceId,
-          use: (catalog) => { models = catalog; },
-          current: () => models,
+          use: (saved) => { catalog.models = saved; },
+          current: () => catalog.models,
           refresh: refreshModels,
         }))?.pending ?? null;
       } else if (support.resolveModelsOnCreate !== false) {
@@ -1092,7 +1086,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           support.spawnFingerprint?.(spawnEnv, turnConfig) ?? null];
         const contractKey = JSON.stringify([...processContract, cwd, turn.toolScope ?? null, inheritedScopeFingerprint]);
         const launchModel = support.sessionModelEnv && cliTurn.model && /^[\w.:/-]{1,200}$/u.test(cliTurn.model)
-          && accountModels?.has(cliTurn.model) ? cliTurn.model : undefined;
+          && catalog.accountModels?.has(cliTurn.model) ? cliTurn.model : undefined;
         const launchEnv = support.sessionModelEnv && launchModel
           ? { ...spawnEnv, [support.sessionModelEnv]: launchModel }
           : spawnEnv;
@@ -1282,7 +1276,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 try {
                   await request(
                     support.resumeMethod === "resume" ? "session/resume" : "session/load",
-                    { sessionId: cursor, cwd, mcpServers, ...selectionParams },
+                    { sessionId: cursor, cwd, mcpServers: support.mcpServersFromLaunch ? [] : mcpServers, ...selectionParams },
                     LOAD_SESSION_TIMEOUT,
                     (result) => {
                       if (result) {
@@ -1325,7 +1319,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 promptTurn = { ...turn, text: recovery.text };
                 rebuiltFromReplay = recovery.replayed;
               }
-              await request("session/new", { cwd, mcpServers, ...selectionParams }, NEW_SESSION_TIMEOUT, (result) => {
+              await request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : mcpServers, ...selectionParams }, NEW_SESSION_TIMEOUT, (result) => {
                 session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
                 session.sessionKey = sessionKey;
                 receiveModelVariants(result, true);
@@ -1354,9 +1348,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 // Committed before the setter runs: a failed switch still reports the session and respawns a stale process.
                 const pick = pickSessionModel(support, {
                   configId: support.selectModel.configId, session, requested: turn, turn: cliTurn, variant, reportedModel,
-                  catalog: models, launchedThisTurn,
+                  catalog: catalog.models, launchedThisTurn,
                 });
-                if (pick.accountModels) accountModels = pick.accountModels;
+                if (pick.accountModels) catalog.accountModels = pick.accountModels;
                 staleProcess = pick.staleProcess;
                 if (pick.notice) emit({ ...base(threadId, turnId), type: "runtime.notice", message: pick.notice });
                 ({ turn: cliTurn, variant, reportedModel } = pick);
@@ -1641,7 +1635,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             env: spawnEnv,
             cwd,
             prompt,
-            defaultModel: models.default,
+            defaultModel: catalog.models.default,
             pickAuthMethod: (methods) => support.pickAuthMethod(methods, spawnEnv),
             authRequired: support.authFailure === "fail-request" ? "if-requested" : support.authFailure === "fail",
             loginNote: support.loginNote,
@@ -1674,7 +1668,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         ...(support.backgroundText === false ? {} : { generateMemoryText }),
         enabled: input.enabled,
         get models() {
-          return models;
+          return catalog.models;
+        },
+        get modelsUnconfirmed() {
+          return catalog.unconfirmed;
         },
         refreshModels: support.resolveModels ? () => refreshModels(true) : undefined,
         ...(startupModelRefresh ? { startupModelRefresh } : {}),
