@@ -214,6 +214,22 @@ describe("a place's inbox in the panel", () => {
     }
   });
 
+  it("opens a line where it came from: that bot, that thread and that message, from its row or read in full", async () => {
+    const eli = bot({ tasks: [{ threadId: "eli-pricing", title: "Pricing work", createdAt: 1 }, { threadId: "eli-launch", title: "Launch work", createdAt: 2 }] as Bot["tasks"] });
+    const noa = bot({ id: "noa", name: "Noa", threadId: "noa-main", tasks: [{ threadId: "noa-main", title: "Noa", createdAt: 1 }] as Bot["tasks"] });
+    await panel([question, news], [eli, noa]);
+    await click('[data-inbox-row="line-n"] [data-inbox-action="open"]');
+    expect(dispatch).toHaveBeenCalledWith({ type: "revealThread", threadId: "noa-main" });
+    expect(dispatch).toHaveBeenCalledWith({ type: "focusMessage", threadId: "noa-main", messageId: "line-n" });
+    dispatch.mockClear();
+    await act(async () => { readInboxLine("card-q"); });
+    await mount(createElement(InboxPanel), [eli, noa]);
+    await click('[data-inbox-reading] [data-inbox-action="open"]');
+    expect(dispatch).toHaveBeenCalledWith({ type: "revealThread", threadId: "eli-launch" });
+    expect(dispatch).toHaveBeenCalledWith({ type: "focusMessage", threadId: "eli-launch", messageId: "card-q" });
+    expect(dispatch.mock.calls.map(([action]) => action.threadId).filter(Boolean).every((threadId) => threadId === "eli-launch"), "nothing opens another of the bot's threads").toBe(true);
+  });
+
   it("lists the conversations at work with a jump to each and the pin, leaving out what the inbox already asks", async () => {
     const working = { threadId: "eli-work", title: "Writing the page", createdAt: 1, busy: true, activity: "working" as const };
     const asking = { threadId: "eli-pricing", title: "Pricing work", createdAt: 2, activity: "waiting-on-you" as const };
