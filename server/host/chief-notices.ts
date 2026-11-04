@@ -43,6 +43,8 @@ export interface ChiefNoticeDeps {
   quietThread?(botId: string, threadId: string): boolean;
   /** A person's private chat on a Team Cloud: its notices go to that person, never into a Chief's thread the team reads. */
   privateThread?(threadId: string): boolean;
+  /** Security invariant: a confined conversation's words never start a Chief's turn at its own level, so its notices go to a person. */
+  confined?(threadId: string): boolean;
   /** The language a line about this conversation is written in for its person (server/server-lines.ts). */
   threadLanguage?(threadId: string): string | undefined;
   /** A Team Cloud: a notice reaches a Chief only when the conversation's asks are its person's (a member's private chat
@@ -118,6 +120,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
   /** A notice about this thread may go to `chief`: its asks are the Chief's person's, never another person's private chat. */
   function reachesChief(chief: BotRecord, bot: BotRecord, threadId: string): boolean {
     const routing = deps.routing;
+    if (deps.confined?.(threadId)) return false;
     return routing ? routing.askedPerson(bot.id, threadId) === routing.personOf(chief) : deps.privateThread?.(threadId) !== true;
   }
 

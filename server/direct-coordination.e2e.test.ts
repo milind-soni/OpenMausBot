@@ -205,11 +205,10 @@ it("coordinates a lead and its specialist from ordinary chat, returns to Clive, 
   expect(tools).toContain("coordinate_bots");
   expect(tools).toContain("assignment_status");
   for (const alias of ["delegate_bot", "ask_bot", "send_to_bot", "check_delegation", "wait_delegation"]) expect(tools).not.toContain(alias);
-  expect(leadTools.find((tool: any) => tool.name === "start_thread").inputSchema.properties.bot_id.enum).toEqual([f.lead.id]);
   const chiefTools = f.evidence()[0].evidence[0].result.tools;
   const selfThread = chiefTools.find((tool: any) => tool.name === "start_thread");
   expect(selfThread.description).toContain("separate job on yourself");
-  expect(selfThread.inputSchema.properties.bot_id.enum).toEqual([f.chief.id]);
+  expect(selfThread.inputSchema.properties.bot_id).toBeUndefined();
   expect(bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.threadId === receipt.threadRef.threadId).openedBy)
     .toMatchObject({ botId: f.chief.id, name: "Clive" });
   expect(turn.system).toContain("only an actual coordinate_bots result proves that teammate participated");
@@ -221,14 +220,9 @@ it("announces a settled delegation and its resume in the parent thread", () => f
     await f.start();
     expect((await f.wait()).status).toBe("settled");
     // f.wait() resolves through the control CLI poll, independent of the SSE reader: until() proves both settles are stored first.
-    await Promise.all([
-      stream.until(frame => frame.kind === "notify"
-        && frame.notification?.kind === "delegation-settled"
-        && frame.notification.botId === f.chief.id),
-      stream.until(frame => frame.kind === "notify"
-        && frame.notification?.kind === "delegation-settled"
-        && frame.notification.botId === f.lead.id),
-    ]);
+    await stream.until(frame => frame.kind === "notify"
+      && frame.notification?.kind === "delegation-settled"
+      && frame.notification.botId === f.chief.id);
     const settles = () => stream.frames.filter(frame => frame.kind === "notify" && frame.notification?.kind === "delegation-settled");
     const chiefFrames = settles().filter(frame => frame.notification.botId === f.chief.id);
     expect(chiefFrames).toHaveLength(1);
@@ -237,10 +231,12 @@ it("announces a settled delegation and its resume in the parent thread", () => f
       title: "Clive resumed with results",
       body: "Results in from Engineering lead",
     });
-    const leadFrames = settles().filter(frame => frame.notification.botId === f.lead.id);
-    expect(leadFrames).toHaveLength(1);
-    expect(leadFrames[0].notification.threadId).not.toBe(f.lead.activeTaskId);
+    expect(settles().filter(frame => frame.notification.botId === f.lead.id), "bot-to-bot: nothing there needs the person").toEqual([]);
     expect(settles().some(frame => frame.notification.botId === f.specialist.id)).toBe(false);
+    const { bots } = await f.api("/api/bots?messages=0");
+    const work = bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.openedBy?.botId === f.chief.id);
+    expect(work.unread, "no unread mark, on the desktop or the phone's To review, for a teammate's own step").toBeFalsy();
+    expect(bots.find((bot: any) => bot.id === f.chief.id).tasks.find((task: any) => task.threadId === f.chief.activeTaskId).unread, "the person's own conversation still is").toBe(true);
     expect(stream.frames.some(frame => frame.kind === "notify" && frame.notification?.kind === "done"
       && (frame.notification.botId === f.lead.id || frame.notification.botId === f.specialist.id))).toBe(false);
     const chips = (await f.messages(f.chief.activeTaskId))
@@ -464,8 +460,7 @@ it("does not treat self-opened work or an abandoned human branch as new human au
   await f.api(`/api/bots/${f.chief.id}/secret-cards/${secret.id}/dismiss`, { threadId: child.threadId });
   await providerFinished(4);
   expect((await childWait()).status).toBe("settled");
-  const continuation = f.evidence().at(-1);
-  expect(continuation.evidence[0].result.tools.find((tool: any) => tool.name === "start_thread").inputSchema.properties.bot_id.enum).toEqual([f.chief.id]);
+  expect(f.evidence().at(-1).evidence[0].result.tools.find((tool: any) => tool.name === "start_thread").inputSchema.properties.bot_id).toBeUndefined();
   expect((await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id).tasks).toHaveLength(2);
   await f.cli("send", "--bot", f.chief.id, "--task", child.threadId, "--text", "Now I want you to post one new update.");
   await providerFinished(5);
@@ -1071,3 +1066,31 @@ it("tells the Chief a teammate's turn stopped because its engine's settings chan
   expect(resumed.prompt.message.content).toContain("Turn interrupted — provider settings changed.");
   expect(resumed.prompt.message.content).not.toContain("The coordinated turn was interrupted");
 }), 45_000);
+
+// The small model's word is the fixture's: what matters here is what the runtime does with it.
+const withStatusAnswer = (answer: string) => {
+  const routes = join(mkdtempSync(join(tmpdir(), "omb-status-reply-")), "routes.json");
+  writeFileSync(routes, JSON.stringify({ "<teammate_reply>": answer }));
+  return { FAKE_CLAUDE_TEXT_ROUTES: routes };
+};
+
+it("spends no requester turn on a reply that only acknowledged, and the reply stays in its thread", () => fixture(async f => {
+  f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], message: "FYI: the mailbox moved." } }], reply: "I told the lead.", resumeReply: "This is just a confirmation, no action needed." };
+  f.plan[f.lead.id] = { reply: "Noted, thanks." };
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id)).toHaveLength(1);
+  const messages = await f.messages(f.chief.activeTaskId);
+  expect(messages.some((message: any) => message.text === "This is just a confirmation, no action needed.")).toBe(false);
+  expect(messages.find((message: any) => message.roomRequest?.phase === "result")?.tool?.output).toBe("Noted, thanks.");
+  expect(f.nodes().every((node: any) => node.status === "completed")).toBe(true);
+}, withStatusAnswer("ACK")));
+
+it("wakes the requester for a reply that carries something, in any language", () => fixture(async f => {
+  f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Hast du die IMAP-Zugangsdaten?" } }], reply: "Ich habe gefragt.", resumeReply: "Es sind keine hinterlegt." };
+  f.plan[f.lead.id] = { reply: "Nein, ich habe nichts gespeichert." };
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id)).toHaveLength(2);
+  expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "Es sind keine hinterlegt.")).toBe(true);
+}, withStatusAnswer("NEEDS")));

@@ -159,7 +159,7 @@ it("keeps a file secret and a ref secret out of every record, and the bot uses e
   // A file for the bot's own commands.
   expect((await tools.call("request_credential", { label: "Stripe secret key", reason: "To create test charges." })).text).toMatch(/needs delivery/u);
   const askedFile = await tools.call("request_credential", { label: "Stripe secret key", reason: "To create test charges.", placeholder: "sk_test_…", delivery: "file" });
-  expect(askedFile).toEqual({ isError: false, text: expect.stringMatching(/^A secure card for Stripe secret key is ready/u) });
+  expect(askedFile).toEqual({ isError: false, text: expect.stringMatching(/^A secure card for Stripe secret key is now in this conversation/u) });
   const fileCard = (await cards()).at(-1);
   expect(fileCard.secret).toMatchObject({ target: "customSecret", label: "Stripe secret key", placeholder: "sk_test_…", helpUrl: "", delivery: "file", reason: "To create test charges." });
   expect(fileCard.secret.description).toBe("To create test charges. Ledger's commands can read it from a private file for 24 hours; it is never added to chat.");
