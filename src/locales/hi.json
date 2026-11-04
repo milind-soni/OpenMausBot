@@ -2663,7 +2663,7 @@
   "rail.kindCloud": "Cloud",
   "rail.kindTeam": "टीम",
   "rail.kindServer": "अपना सर्वर",
-  "cloudBuy.ready.switchHint": "\"यह कंप्यूटर\" और {name} के बीच विंडो के ऊपर या उसके बाएँ किनारे से स्विच करें।",
+  "cloudBuy.ready.switchHint": "ऐप के बाईं ओर \"यह कंप्यूटर\" और {name} के बीच स्विच करें।",
   "homeLine.joinedTeam": "किसी टीम से जुड़े हैं? उसी पते से साइन इन करें जिस पर आपको आमंत्रण मिला था।",
   "rail.signIn": "अपने Cloud और टीमें देखने के लिए साइन इन करें",
   "rail.tagOpen": "{name}: अपनी सभी जगहें देखें",

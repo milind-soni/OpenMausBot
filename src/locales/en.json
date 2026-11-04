@@ -562,7 +562,7 @@
   "rail.kindCloud": "Cloud",
   "rail.kindTeam": "Team",
   "rail.kindServer": "Own server",
-  "cloudBuy.ready.switchHint": "Switch between This computer and {name} at the top of the window, or along its left edge.",
+  "cloudBuy.ready.switchHint": "Switch between This computer and {name} on the left of the app.",
   "homeLine.joinedTeam": "Joined a team? Sign in with the address you were invited with.",
   "rail.signIn": "Sign in to see your Clouds and teams",
   "rail.tagOpen": "{name}: see all your places",

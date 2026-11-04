@@ -3104,7 +3104,7 @@
   "rail.kindCloud": "Cloud",
   "rail.kindTeam": "Команда",
   "rail.kindServer": "Власний сервер",
-  "cloudBuy.ready.switchHint": "Перемикайтеся між «Цей комп’ютер» і {name} угорі вікна або біля його лівого краю.",
+  "cloudBuy.ready.switchHint": "Перемикайтеся між «Цей комп’ютер» і {name} ліворуч у застосунку.",
   "homeLine.joinedTeam": "Приєдналися до команди? Увійдіть з адресою, на яку прийшло запрошення.",
   "rail.signIn": "Увійдіть, щоб побачити свої Cloud і команди",
   "rail.tagOpen": "{name}: показати всі ваші місця",

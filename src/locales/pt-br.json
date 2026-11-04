@@ -502,7 +502,7 @@
   "rail.kindCloud": "Cloud",
   "rail.kindTeam": "Equipe",
   "rail.kindServer": "Servidor próprio",
-  "cloudBuy.ready.switchHint": "Alterne entre “Este computador” e {name} no topo da janela ou na borda esquerda dela.",
+  "cloudBuy.ready.switchHint": "Alterne entre “Este computador” e {name} à esquerda do app.",
   "homeLine.joinedTeam": "Entrou em uma equipe? Entre com o endereço em que você recebeu o convite.",
   "rail.signIn": "Entre para ver seus Clouds e equipes",
   "rail.tagOpen": "{name}: ver todos os seus lugares",

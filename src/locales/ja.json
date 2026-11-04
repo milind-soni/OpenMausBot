@@ -512,7 +512,7 @@
   "rail.kindCloud": "Cloud",
   "rail.kindTeam": "チーム",
   "rail.kindServer": "自分のサーバー",
-  "cloudBuy.ready.switchHint": "「このコンピューター」と{name}は、ウィンドウ上部または左端から切り替えられます。",
+  "cloudBuy.ready.switchHint": "「このコンピューター」と{name}は、アプリの左側で切り替えられます。",
   "homeLine.joinedTeam": "チームに参加しましたか？招待を受けたアドレスでサインインしてください。",
   "rail.signIn": "サインインすると Cloud とチームが表示されます",
   "rail.tagOpen": "{name}: すべての場所を表示",
