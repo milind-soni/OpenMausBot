@@ -107,23 +107,6 @@ afterEach(() => {
 });
 
 describe("Simple-mode sidebar layout", () => {
-  describe("Active Threads, the desktop's list of what the phone's Updates shows", () => {
-    const working = bot("spuernase", { threadId: "main", tasks: [{ threadId: "main", title: "Main", createdAt: 1 }, { threadId: "work", title: "@CoS · work", createdAt: 2, busy: true, activity: "working" }] });
-    const opened = (tree: ReactElement<Props>[]) => tree.find((node) => node.props["aria-label"] === "Active Threads, 1");
-
-    it("stays away while nothing is going on", () => {
-      expect(labelled(render().tree, "Active Threads")).toBe(false);
-    });
-
-    it("is there while a bot works in a thread another bot opened, and leaves the corner room for it", () => {
-      fixture.state = { ...fixture.state, bots: [working, bot("chief", { chiefOfStaff: true })] };
-      const { tree } = render();
-      expect(opened(tree), "reachable with no thread list in Simple").toBeTruthy();
-      const grid = tree.find((node) => node.type === SidebarTileGrid)!.props as Parameters<typeof SidebarTileGrid>[0];
-      expect(grid.cornerButtons).toBe(3);
-    });
-  });
-
   it("lists the bots with no heading, then gives group chats and a person's own departments a quiet heading with a count", () => {
     const { tree } = render();
     expect(sectionOrder(tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);

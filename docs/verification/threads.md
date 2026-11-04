@@ -73,9 +73,7 @@ switching and Stop can be exercised without a real provider or account.
     `openmausbot://bot/<id>` link opens the main thread. A row or tile with a
     mark on it opens the thread the mark is about (waiting on you, then unread,
     then work under way, a thread another bot opened included); a second click
-    returns to the main thread. In Simple mode **Active Threads** appears beside
-    Search while anything is active and lists what the phone's Updates sheet
-    lists.
+    returns to the main thread.
 13. Stop a running job through its activity entry while a sibling is queued;
     verify only the chosen job stops and the queued message starts normally.
     Reload and confirm Show threads remains off. Turn it back on to recover

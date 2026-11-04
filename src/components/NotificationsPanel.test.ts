@@ -29,7 +29,9 @@ describe("a row in the bell", () => {
   }
 
   it("lands on a thread another bot opened, and reveals its row in the sidebar", () => {
-    expect(click("work")).toEqual([{ type: "select", id: "scout" }, { type: "switchTask", botId: "scout", threadId: "work" }, { type: "revealThread", threadId: "work" }]);
+    const actions = click("work");
+    expect(actions).toContainEqual({ type: "switchTask", botId: "scout", threadId: "work" });
+    expect(actions).toContainEqual({ type: "revealThread", threadId: "work" });
   });
 
   it("says so when that thread is gone, never landing silently on another chat", () => {

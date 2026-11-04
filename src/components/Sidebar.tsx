@@ -1141,7 +1141,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   const { interactive: layoutInteractive, collapsed: sectionCollapsed, toggle: toggleSection } = sections;
   const archivedBots = state.bots.filter((bot) => bot.hidden && !bot.movedTo);
   const archivedEntry = remoteClient ? undefined : { count: archivedBots.length, open: () => setArchivedBotsOpen(true) };
-  const attention = crossBotAttentionThreads(state.bots, state.pendingQueued, undefined, state.groups), activeThreadsShown = advanced || attention.length > 0;
+  const attention = crossBotAttentionThreads(state.bots, state.pendingQueued, undefined, state.groups);
   const pinnedThreads = crossBotPinnedThreads(state.bots, state.groups, state.pendingQueued);
   const pendingBotUndo = teamFeedback?.restoreBot;
   const botRow = (bot: Bot) => botRowProps(state, dispatch, bot, { density, query: q, onMenu: setMenu, renameRequest: renameRequest?.botId === bot.id ? renameRequest.nonce : 0, ...drops.row(bot.id) });
@@ -1312,18 +1312,18 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           >
             <Search size={20} strokeWidth={1.5} />
           </button>}
-          {activeThreadsShown && <div ref={attentionMenuRef} className={density === "icons" ? "relative" : "contents"}>
+          {advanced && <div ref={attentionMenuRef} className={density === "icons" ? "relative" : "contents"}>
             <button
               type="button"
               onClick={() => setAttentionOpen((o) => !o)}
               aria-label={attentionTriggerLabel(attention.length)}
               title={attentionTriggerLabel(attention.length)}
               className={cn(
-                "relative", corner ? SIMPLE_CORNER_BUTTON : simpleDesk ? SIMPLE_TOP_BUTTON : "flex items-center justify-center text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
-                !corner && !simpleDesk && (density === "icons" ? "size-[46px] shrink-0 rounded-xl" : phone ? "size-10 shrink-0 rounded-full border border-hairline bg-card text-ink" : "size-8 rounded-full"),
+                "relative flex items-center justify-center text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
+                density === "icons" ? "size-[46px] shrink-0 rounded-xl" : phone ? "size-10 shrink-0 rounded-full border border-hairline bg-card text-ink" : "size-8 rounded-full",
               )}
             >
-              <Activity size={corner ? 17 : density === "icons" ? 20 : 18} strokeWidth={1.5} />
+              <Activity size={density === "icons" ? 20 : 18} strokeWidth={1.5} />
               {attention.length > 0 && (
                 <span className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-accent px-0.5 text-[10px] font-semibold leading-4 text-ink">{attention.length > 9 ? "9+" : attention.length}</span>
               )}
@@ -1420,7 +1420,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           onToggle={layoutInteractive ? () => toggleSection(PINNED_THREADS_SECTION_ID) : undefined}
         />
       )}
-      {tiles && <SidebarTileGrid primary={primary} pinned={pinnedBots} row={botRow} corner={corner} cornerButtons={activeThreadsShown ? 3 : 2} />}
+      {tiles && <SidebarTileGrid primary={primary} pinned={pinnedBots} row={botRow} corner={corner} />}
       {simpleDesk && !tiles && <SidebarNoBots />}
       </GlassBar>
 

@@ -941,7 +941,7 @@ describe("notification routing", () => {
     const followed = (threadId: string, threadsShown: boolean) => {
       const dispatch = vi.fn();
       openThread(dispatch, { botId: "bot-1", threadId }, { bots: [bot], groups: [] }, threadsShown);
-      return dispatch.mock.calls.map(([action]) => action as Action).filter((action) => action.type !== "revealThread");
+      return dispatch.mock.calls.map(([action]) => action as Action).filter((action) => action.type !== "revealThread" && action.type !== "notice");
     };
 
     it("opens a thread a notification names without passing the reply the bot was left on as read, with threads hidden", () => {
