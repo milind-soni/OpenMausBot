@@ -427,4 +427,32 @@ describe("a browser on Windows", () => {
     expect(killed()).toEqual([["taskkill", "/PID", String(browser), "/T", "/F"]]);
     expect(existsSync(join(dir, "lockfile"))).toBe(false);
   });
+
+  it.runIf(process.platform === "win32")("lists a real browser under cmd.exe with its daemon, keeps it for that daemon and stops it for another", async () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-win-cmd-"));
+    homes.push(root);
+    const dir = join(root, "Kept Profile");
+    mkdirSync(join(dir, "lockfile"), { recursive: true });
+    const ready = join(root, "ready").replaceAll("\\", "/");
+    // This test's node is the daemon; the node under cmd.exe names the profile as the bot's Chrome does.
+    const browser = `require('node:fs').writeFileSync('${ready}', ''); ${IDLE}`;
+    const shell = spawn("cmd.exe", ["/d", "/s", "/c", `""${process.execPath}" -e "${browser}" -- "--user-data-dir=${dir}""`], { stdio: "ignore", windowsHide: true, windowsVerbatimArguments: true });
+    const exited = new Promise((resolve) => shell.once("exit", resolve));
+    try {
+      await vi.waitFor(() => expect(existsSync(ready)).toBe(true), { timeout: 15_000 });
+      const killed = () => vi.mocked(execFile).mock.calls.filter(([file]) => file === "taskkill");
+      vi.mocked(execFile).mockClear();
+      await releaseBrowserProfile(dir, process.execPath, process.execPath);
+      expect(vi.mocked(execFile).mock.calls.some(([file]) => file === "powershell.exe"), "the profile's browsers were listed").toBe(true);
+      expect(killed(), "its daemon's browser is kept").toEqual([]);
+      rmSync(join(dir, "lockfile"), { recursive: true, force: true });
+      await releaseBrowserProfile(dir);
+      mkdirSync(join(dir, "lockfile"));
+      await releaseBrowserProfile(dir, "C:\\Tools\\agent-browser.exe", process.execPath);
+      expect(killed()).toHaveLength(1);
+      await Promise.race([exited, new Promise((_, reject) => setTimeout(() => reject(new Error("the stopped browser's shell still runs")), 10_000))]);
+    } finally {
+      shell.kill();
+    }
+  }, 60_000);
 });
