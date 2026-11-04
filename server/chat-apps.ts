@@ -125,7 +125,7 @@ export function createAppCard(args: {
 
 function placePage(
   args: { store: AgentCardStore; docs: AppDocs; bot: { id: string }; threadId: string; authored?(messageId: string): void },
-  value: { appId?: string; height?: number; fallbackText?: string },
+  value: { appId?: string; height?: number; fallbackText?: string; frameless?: boolean },
   made: MadePage,
 ): AgentCardResult {
   const { store, docs, bot, threadId } = args;
@@ -137,7 +137,7 @@ function placePage(
       doc: stored.ok ? stored.doc : "", rev: 0, bytes: pageBytes(page),
       ...(page.format ? { format: page.format } : {}),
       ...(value.height !== undefined ? { height: value.height } : {}),
-      border: true,
+      border: value.frameless !== true,
       network: { connect: [...BOT_HTML_NETWORK.connect], resources: [...BOT_HTML_NETWORK.resources] },
       ...(stored.ok ? {} : { blocked: "too-large" as const }),
     };
@@ -149,17 +149,22 @@ function placePage(
   const existing = appRow(store, threadId, value.appId);
   if (!existing || (existing.from && existing.from.botId !== bot.id)) return { ok: false, status: 404, error: NO_SUCH_PAGE };
   if (existing.app.source !== "html") return { ok: false, status: 409, error: NOT_A_PAGE };
-  const patched = replacePage(store, docs, threadId, existing, made);
+  const patched = replacePage(store, docs, threadId, existing, made, value.frameless);
   if (!patched) return { ok: false, status: 404, error: NO_SUCH_PAGE };
   args.authored?.(patched.id);
   return { ok: true, messageId: patched.id, ...(made.masked ? { masked: true as const } : {}) };
 }
 
 /** The next version of a row's page; the row is unchanged when the page is the same document. */
-function replacePage(store: Pick<AgentCardStore, "patchMessage">, docs: AppDocs, threadId: string, existing: Message & { app: AppPayload }, made: MadePage): Message | null {
+function replacePage(
+  store: Pick<AgentCardStore, "patchMessage">, docs: AppDocs, threadId: string, existing: Message & { app: AppPayload }, made: MadePage, frameless?: boolean,
+): Message | null {
   const { page } = made;
   const stored = storePage(docs, page);
-  if (stored.ok && stored.doc === existing.app.doc && made.title === existing.app.title) return existing;
+  const border = frameless === undefined ? existing.app.border : !frameless;
+  if (stored.ok && stored.doc === existing.app.doc && made.title === existing.app.title) {
+    return border === existing.app.border ? existing : store.patchMessage(threadId, existing.id, { app: { ...existing.app, border } });
+  }
   // The page reloads: what the old one told the model about itself no longer holds.
   const { context: _context, blocked: _blocked, format: _format, history: earlier, ...kept } = existing.app;
   const history = [...(earlier ?? []), ...(existing.app.doc ? [existing.app.doc] : [])].slice(-(APP_PAGE_VERSIONS - 1));
@@ -169,6 +174,7 @@ function replacePage(store: Pick<AgentCardStore, "patchMessage">, docs: AppDocs,
     doc: stored.ok ? stored.doc : "",
     rev: (existing.app.rev ?? 0) + 1,
     bytes: pageBytes(page),
+    border,
     ...(history.length ? { history } : {}),
     ...(page.format ? { format: page.format } : {}),
     ...(stored.ok ? {} : { blocked: "too-large" as const }),

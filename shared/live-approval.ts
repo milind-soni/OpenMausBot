@@ -141,5 +141,6 @@ export const LIVE_COPY = {
       lastStep ? `; last step: ${lastStep}, ${duration(lastStepAgoMs)} ago` : ""}).`,
   signedOut: "The call has ended because the sign-in that started it has ended. Sign in again to start a new call.",
   unpaired: "The call has ended because the phone that started it was unpaired from this computer.",
+  goodbye: "The user asked to end the call. Say a short goodbye in one sentence and nothing else; the call ends right after.",
   permissionRequest: (prompt: string) => `You need the user's permission. Say it in your own words: ${prompt} Ask for a clear yes or no, then delegate their answer.`,
 };

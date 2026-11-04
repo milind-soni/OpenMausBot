@@ -74,14 +74,14 @@ export const APP_TOOLS: readonly AppTool[] = [
   {
     name: "gmail.create_draft",
     slug: "GMAIL_CREATE_EMAIL_DRAFT",
-    description: "Save an email as a draft in the person's Gmail without sending it. Give thread_id to draft a reply in that conversation.",
+    description: "Create a new Gmail draft without sending. For a reply, read the original thread and provide its thread_id and matching subject. Each call creates a separate draft: first check gmail.list_drafts; revise an existing draft with gmail.update_draft and its draft ID. Never use send_email or a reply/send action to save a draft.",
     properties: {
       to: { type: "string", description: "The recipient's address; several separated by commas." },
       subject: { type: "string" },
       body: { type: "string", description: "The text of the email." },
       thread_id: { type: "string", description: "For a reply: the conversation's thread id." },
     },
-    required: ["to", "body"],
+    required: ["to", "subject", "body"],
     args: (input) => {
       const [first, ...rest] = addresses(input.to ?? input.recipient_email) ?? [];
       return {
@@ -91,9 +91,47 @@ export const APP_TOOLS: readonly AppTool[] = [
     },
   },
   {
+    name: "gmail.list_drafts",
+    slug: "GMAIL_LIST_DRAFTS",
+    description: "List Gmail drafts with draft IDs and message/thread IDs. Find the intended draft before creating or revising a reply. Follow nextPageToken when needed; read its full content with gmail.read_draft.",
+    properties: {
+      query: { type: "string", description: "Gmail search, for example subject:invoice." },
+      max_results: { type: "integer", minimum: 1, maximum: 100 },
+      page_token: { type: "string" },
+    },
+    args: input => ({ user_id: "me", max_results: count(input.max_results, 20, 100),
+      ...(text(input.query) ? { q: text(input.query) } : {}), ...(text(input.page_token) ? { page_token: text(input.page_token) } : {}) }),
+  },
+  {
+    name: "gmail.read_draft",
+    slug: "GMAIL_GET_DRAFT",
+    description: "Read an existing Gmail draft by draft ID, including its content and thread. A draft ID is different from a message ID. Preserve the existing recipients, subject and thread when revising.",
+    properties: { draft_id: { type: "string" } },
+    required: ["draft_id"],
+    args: input => ({ user_id: "me", draft_id: text(input.draft_id) ?? "", format: "full" }),
+  },
+  {
+    name: "gmail.update_draft",
+    slug: "GMAIL_UPDATE_DRAFT",
+    description: "Replace an existing Gmail draft in place without sending. Use its draft_id from creation or gmail.list_drafts, not a message ID. Read it first and provide the complete revised content, preserving recipients, subject and thread_id. Never create a replacement if this fails. Verify the result before claiming success.",
+    properties: {
+      draft_id: { type: "string" }, to: { type: "string" }, subject: { type: "string" }, body: { type: "string" },
+      thread_id: { type: "string" }, cc: { type: "string" }, bcc: { type: "string" }, is_html: { type: "boolean" },
+    },
+    required: ["draft_id", "to", "subject", "body"],
+    args: input => {
+      const [first, ...rest] = addresses(input.to) ?? [];
+      return { user_id: "me", draft_id: text(input.draft_id) ?? "", recipient_email: first ?? "", extra_recipients: rest,
+        subject: String(input.subject ?? ""), body: String(input.body ?? ""),
+        ...(text(input.thread_id) ? { thread_id: text(input.thread_id) } : {}),
+        ...(input.cc !== undefined ? { cc: addresses(input.cc) ?? [] } : {}),
+        ...(input.bcc !== undefined ? { bcc: addresses(input.bcc) ?? [] } : {}), is_html: input.is_html === true };
+    },
+  },
+  {
     name: "gmail.send_email",
     slug: "GMAIL_SEND_EMAIL",
-    description: "Send an email from the person's Gmail.",
+    description: "Send an email immediately from the person's Gmail. This is not a draft tool. Only use when the person explicitly asks to send; for a draft use gmail.create_draft or gmail.update_draft.",
     properties: {
       to: { type: "string", description: "The recipient's address; several separated by commas." },
       subject: { type: "string" },
