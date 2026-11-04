@@ -97,15 +97,16 @@ The slowest shard sets how long a PR and a release wait. Linux and Windows run
 eight shards each, macOS four (the full lane only); `scripts/ci-scope.mjs`
 builds the matrix.
 
-**Files at once.** A Linux shard runs four files at a time (`VITEST_WORKERS`,
-`OMB_VITEST_WORKERS` in `vite.config.ts`), one for each of the runner's vCPUs.
-Most of a shard's time is waiting on real servers and fake engines: one file at
-a time it took 16 minutes with the machine 70% idle, and four at a time 5.
-Windows and macOS shards, and every local run, still run one file at a time. So
+**Files at once.** A Linux or Windows shard runs four files at a time
+(`VITEST_WORKERS`, `OMB_VITEST_WORKERS` in `vite.config.ts`), one for each of the
+runner's vCPUs. Most of a shard's time is waiting on real servers and fake
+engines: a Linux shard took 16 minutes one file at a time with the machine 70%
+idle, and 6.6 at four; a Windows shard 10.6 and 4.6.
+macOS shards, and every local run, still run one file at a time. So
 that files side by side never share a port, each worker picks from its own
 (`server/testing/worker-port.ts`); a test that picks a port some other way can
 meet another file's. Four files share the runner's CPU, so test and hook
-timeouts double there, as on Windows (`server/testing/host-timeout.ts`).
+timeouts double there, and double again on Windows (`server/testing/host-timeout.ts`).
 
 **Which files run where.** Linux runs every file. Most e2e files drive
 OMB's own logic through a real server and fake engines, which is the same on
@@ -157,6 +158,7 @@ For example, a full Windows shard 3/8 uses PowerShell syntax:
 ```powershell
 $env:OMB_VITEST_E2E = "host"
 $env:OMB_VITEST_SUBSET = ""
+$env:OMB_VITEST_WORKERS = "4"
 pnpm exec vitest run --shard=3/8
 ```
 

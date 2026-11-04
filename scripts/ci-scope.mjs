@@ -213,9 +213,10 @@ export function laneOf(event) {
 // shards stay as short as Linux's, and macOS keeps four: the account runs five macOS jobs at a time.
 export const VITEST_SHARDS = { "macos-latest": 4, "ubuntu-latest": 8, "windows-latest": 8 };
 
-// Test files at once on each platform's runner (OMB_VITEST_WORKERS, vite.config.ts). A Linux shard mostly waits on real
-// servers and fake engines: its 4 vCPU sat 70% idle one file at a time, and four files take a third of the time.
-export const VITEST_WORKERS = { "macos-latest": 1, "ubuntu-latest": 4, "windows-latest": 1 };
+// Test files at once on each platform's runner (OMB_VITEST_WORKERS, vite.config.ts). A shard mostly waits on real
+// servers and fake engines: a Linux runner's 4 vCPU sat 70% idle one file at a time, and four files at once take 40% of
+// the time on Linux and on Windows. macOS runs only in the full lane, one file at a time.
+export const VITEST_WORKERS = { "macos-latest": 1, "ubuntu-latest": 4, "windows-latest": 4 };
 
 /** ci.yml's vitest matrix: every shard of every selected platform, and which e2e files that platform runs. */
 export function vitestMatrix(oses) {
