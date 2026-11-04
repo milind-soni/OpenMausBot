@@ -27,7 +27,12 @@ export function exitInWords(code: number | null, signal: NodeJS.Signals | null =
 // shapes, a value after a secret-sounding name, and any long opaque run.
 const LINK_QUERY = /\b(https?:\/\/[^\s?#"'<>]+)[?#][^\s"'<>]*/gi;
 const GOOGLE_SHAPES = [/\bya29\.[\w.-]+/g, /\b1\/\/[\w.-]{16,}/g, /\b4\/[\w-]{16,}/g, /\bGOCSPX-[\w-]+/g];
-const SECRET_PAIR = /\b(code|state|token|secret|password|passwd|verifier|challenge|credential|cookie|session|key|auth)(s?["']?\s*[:=]\s*["']?)([^\s"',;&]{8,})/gi;
+const SECRET_NAME = "(code|state|token|secret|password|passwd|verifier|challenge|credential|cookie|session|key|auth)";
+// After `=` a value is masked from four characters (a six-digit code); after a colon, prose like "Error code: ENOENT" stays.
+const SECRET_ASSIGNMENT = new RegExp(`\\b${SECRET_NAME}(s?["']?\\s*=\\s*["']?)([^\\s"',;&]{4,})`, "gi");
+const SECRET_PAIR = new RegExp(`\\b${SECRET_NAME}(s?["']?\\s*:\\s*["']?)([^\\s"',;&]{8,})`, "gi");
+const KEY_BEGIN = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
+const KEY_END = /-----END [A-Z ]*PRIVATE KEY-----/;
 const OPAQUE = /[A-Za-z0-9_-]{32,}/g;
 const LINE_CHARS = 300;
 
@@ -35,16 +40,21 @@ export function maskDiagnosticLine(line: string): string {
   let out = redactSecretsInText(line);
   out = out.replace(LINK_QUERY, (match: string, link: string) => `${link}?${mask(match.slice(link.length + 1))}`);
   for (const shape of GOOGLE_SHAPES) out = out.replace(shape, (match) => mask(match));
-  out = out.replace(SECRET_PAIR, (match, name: string, separator: string, value: string) => value.startsWith("«redacted") ? match : `${name}${separator}${mask(value)}`);
+  for (const pair of [SECRET_ASSIGNMENT, SECRET_PAIR]) {
+    out = out.replace(pair, (match, name: string, separator: string, value: string) => value.startsWith("«redacted") ? match : `${name}${separator}${mask(value)}`);
+  }
   out = out.replace(OPAQUE, (match) => mask(match));
   const trimmed = out.trim();
   return trimmed.length > LINE_CHARS ? `${trimmed.slice(0, LINE_CHARS)}…` : trimmed;
 }
 
-/** The last few non-empty stderr lines, masked as each completes. A partial line past `partialChars` is dropped unread. */
+/** The last few non-empty stderr lines, masked as each completes. A line longer than `partialChars` is dropped unread to its
+ * end, and a private key's lines from BEGIN to END are never kept. */
 export class StderrTail {
   #partial = "";
   #lines: string[] = [];
+  #droppingLine = false;
+  #inKey = false;
   readonly #keep: number;
   readonly #partialChars: number;
 
@@ -55,14 +65,38 @@ export class StderrTail {
 
   /** Raw output; whole lines are kept masked. Only a chunk's last few lines can stay, so only they are masked. */
   write(chunk: string): void {
-    const parts = (this.#partial + chunk).split("\n");
+    let text = chunk;
+    if (this.#droppingLine) {
+      const end = text.indexOf("\n");
+      if (end === -1) return;
+      this.#droppingLine = false;
+      text = text.slice(end + 1);
+    }
+    const parts = (this.#partial + text).split("\n");
     const rest = parts.pop() ?? "";
-    this.#partial = rest.length > this.#partialChars ? "" : rest;
-    for (const line of parts.filter((part) => part.trim()).slice(-this.#keep)) this.note(line);
+    this.#droppingLine = rest.length > this.#partialChars;
+    this.#partial = this.#droppingLine ? "" : rest;
+    const shown = parts.map((part) => this.#outsideKey(part)).filter((line): line is string => Boolean(line?.trim()));
+    for (const line of shown.slice(-this.#keep)) this.#remember(line);
   }
 
   /** One whole line, already split by the caller. */
   note(line: string): void {
+    const shown = this.#outsideKey(line);
+    if (shown) this.#remember(shown);
+  }
+
+  #outsideKey(line: string): string | null {
+    if (this.#inKey) {
+      if (KEY_END.test(line)) this.#inKey = false;
+      return null;
+    }
+    if (!KEY_BEGIN.test(line)) return line;
+    this.#inKey = !KEY_END.test(line);
+    return "-----BEGIN PRIVATE KEY----- «redacted»";
+  }
+
+  #remember(line: string): void {
     const masked = maskDiagnosticLine(line.replace(/\r$/u, ""));
     if (!masked) return;
     this.#lines.push(masked);
@@ -79,6 +113,8 @@ export class StderrTail {
   clear(): void {
     this.#partial = "";
     this.#lines = [];
+    this.#droppingLine = false;
+    this.#inKey = false;
   }
 
   get text(): string {

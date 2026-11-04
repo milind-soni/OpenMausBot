@@ -31,6 +31,7 @@ describe("masking an engine's diagnostic lines", () => {
   it("keeps a crash line whole", () => {
     expect(maskDiagnosticLine(TCMALLOC_ABORT)).toBe(TCMALLOC_ABORT.trim());
     expect(maskDiagnosticLine("Error code: ENOENT, open '/data/x.json'")).toBe("Error code: ENOENT, open '/data/x.json'");
+    expect(maskDiagnosticLine("worker exit code=134")).toBe("worker exit code=134");
   });
 
   it("masks what a sign-in prints: a link's query, Google's code and token shapes, and a value after a secret's name", () => {
@@ -44,10 +45,11 @@ describe("masking an engine's diagnostic lines", () => {
       "Authorization: Bearer abcdefghijklmnopqrstuvwxyz",
       "key sk-ant-api03-privatekeyvalue1234567890",
       "session=0123456789abcdef0123456789abcdef0123",
+      "verify code=739201",
     ];
     const masked = lines.map(maskDiagnosticLine).join("\n");
     for (const secret of ["private-state", "private-challenge", "private-code-value", "privatecodevalue", "ya29.a0Private", "PrivateRefreshToken",
-      "do-not-disclose", "private-client-secret", "abcdefghijklmnopqrstuvwxyz", "privatekeyvalue", "0123456789abcdef0123"]) {
+      "do-not-disclose", "private-client-secret", "abcdefghijklmnopqrstuvwxyz", "privatekeyvalue", "0123456789abcdef0123", "739201"]) {
       expect(masked, secret).not.toContain(secret);
     }
     expect(masked).toContain("https://accounts.google.com/o/oauth2/v2/auth?«redacted");
@@ -70,12 +72,24 @@ describe("the last stderr lines", () => {
     expect(tail.text).toBe("");
   });
 
-  it("joins a line split across writes, and drops an overlong unfinished line unread", () => {
+  it("joins a line split across writes, and drops an overlong line unread to its end", () => {
     const tail = new StderrTail(3, 16);
     tail.write("CHECK in Num");
     tail.write("CPUs\n");
     tail.write("x".repeat(40));
+    tail.write("unlabeled-value-at-the-end");
     tail.write("\nlast\n");
     expect(tail.text).toBe("CHECK in NumCPUs | last");
+  });
+
+  it("never keeps a private key's lines, even split across writes", () => {
+    const tail = new StderrTail();
+    tail.write("loading\n-----BEGIN RSA PRIVATE KEY-----\nMIIEow+IBAAKC/AQEA");
+    tail.write("x9+/Zq==\nQUJDREVG+/gh\n-----END RSA PRIVATE KEY-----\nready\n");
+    expect(tail.text).toBe("loading | -----BEGIN PRIVATE KEY----- «redacted» | ready");
+    tail.clear();
+    tail.note("-----BEGIN PRIVATE KEY-----");
+    tail.note("MIIEvQIBADAN+Bgkqh/kiG9w0BAQEFAASC");
+    expect(tail.text).toBe("-----BEGIN PRIVATE KEY----- «redacted»");
   });
 });
