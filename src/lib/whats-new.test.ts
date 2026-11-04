@@ -78,6 +78,8 @@ describe("the slides' plans, from the Admin's offer", () => {
   it("names each plan with its price in the offer's numbers: Pro's money-back, Team's free trial", () => {
     expect(whatsNewView({ status: "signed-out" }, OFFER)).toEqual({ slides: ["pro", "team"], audience: "none", signedIn: false, staging: false,
       plans: { pro: { name: "Pro", terms: "Pro · $49/month + tax · 14-day money-back" }, team: { name: "Team", terms: "Free for 3 days, then $169/month + tax" } } });
+    const oneDay: CloudOffer = { ...OFFER, plans: OFFER.plans.map(plan => (plan.tier === "team" ? { ...plan, trialDays: 1 } : plan)) };
+    expect((whatsNewView({ status: "signed-out" }, oneDay) as WhatsNewView).plans.team?.terms).toBe("Free for 1 day, then $169/month + tax");
     const priced: CloudOffer = { ...OFFER, refundDays: undefined, plans: OFFER.plans.map(plan => ({ ...plan, amount: plan.amount + 1000, trialDays: undefined })) };
     expect(whatsNewView(onPlan("pro", { staging: true }), priced)).toEqual({ slides: ["team"], audience: "own", signedIn: true, staging: true,
       plans: { team: { name: "Team", terms: "Team · $179/month + tax" } } });

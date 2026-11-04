@@ -112,6 +112,15 @@ describe("live call media", () => {
     expect(currentCall()).toBeNull();
   });
 
+  it("shows a refusal as the server words it, releases the microphone and offers no retry", async () => {
+    const sentence = "Live calls here go through Azure OpenAI, so only an admin or the owner of this server can start one. Ask an admin if you need a call.";
+    request.mockRejectedValueOnce(new ApiError(sentence, 403, { error: sentence }));
+    await startLiveCall({ botId: "b1", threadId: "t1" });
+    expect(liveMedia()).toMatchObject({ phase: "failed", notice: sentence, needsKey: false, action: null });
+    expect(track.stopped).toBe(true);
+    expect(currentCall()).toBeNull();
+  });
+
   it("says who is on the line when another call runs", async () => {
     const other = { ...call, callId: "c0", client: "ios", status: "live" } as const;
     request.mockRejectedValueOnce(new ApiError("A Live call is already running.", 409, { activeCall: other }));
