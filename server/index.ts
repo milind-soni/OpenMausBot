@@ -121,7 +121,7 @@ import { createSideJobs, helperSelection } from "./side-jobs.ts";
 import type { CaptureTurn, RoomLine } from "./memory-capture.ts";
 import { createAboutMe } from "./about-me.ts"; import { createPersonPreference } from "./host/person-preference.ts";
 import { botMemoryUpdate, ownersOwnAsk } from "./memory-forget.ts";
-import { canManage, canReach, hasTeamAuthority, livePeerRoster, livePeerRosterBlock, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts";
+import { canManage, canReach, hasTeamAuthority, livePeerRoster, livePeerRosterBlock, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts"; import { roomPostRefusal, sharedNamesNote, unreachedMentionLines } from "./same-name-mentions.ts";
 import {
   containerComputerAction,
   containerComputerFrame,
@@ -4322,13 +4322,13 @@ async function interruptHeldMember(groupId: string, botId: string): Promise<void
 }
 
 /** Applied at accept, before the message queues behind a busy room, so a stop reaches a member working now. */
-function applyRoomHoldsFromMessage(groupId: string, text: string): void {
+function applyRoomHoldsFromMessage(groupId: string, text: string, mentions?: readonly string[]): void {
   const group = store.group(groupId);
   if (!group || group.dm) return;
   const members = group.memberIds
     .map((id) => store.bot(id))
     .filter((bot): bot is BotRecord => Boolean(bot) && !bot!.hidden);
-  const mentioned = mentionedBots(text, members).map((bot) => bot.id);
+  const mentioned = mentionedBots(text, members, mentions).map((bot) => bot.id);
   const change = applyHoldDirective(group.holds, classifyHoldDirective(text, mentioned), members.map((bot) => bot.id), Date.now());
   if (!change.held.length && !change.released.length) return;
   store.patchGroup(groupId, { holds: change.holds });
@@ -7213,7 +7213,7 @@ function drainQueuedSendsNow() {
     new Promise<void>((resolve, reject) => {
       void startTurn(botId, prompt, {
         threadId, userMessage, excludeMessageIds: excludeIds, unattended, onTurnSettled: resolve, allowRoomTurnElsewhere: !head.peerAsk,
-        trigger: queuedTurnTrigger(head), ...(head.origin ? { origin: head.origin } : {}),
+        trigger: queuedTurnTrigger(head), ...(head.origin ? { origin: head.origin } : {}), ...(head.mentions ? { mentions: head.mentions } : {}),
       }).catch((err) => {
         const why = err instanceof Error ? err.message : String(err);
         const chief = head.peerAsk?.incident ? store.bot(botId) : null;
@@ -7233,7 +7233,7 @@ function drainQueuedSendsNow() {
   );
 }
 
-async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: ReplyTarget, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext, app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] }) {
+async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: ReplyTarget, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext, app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] }, mentions?: string[]) {
   const decision = admit("direct", {}, {
     atCapacity: botAtThreadCapacity(botId, threadId),
     threadBusy: threadBusy(botId, threadId),
@@ -7244,7 +7244,7 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
     const queued = queueSteeredMessage(botId, threadId, text, {
       replyToId: replyTo?.id,
       sendId,
-      dataContext, fromApp: app?.fromApp,
+      dataContext, fromApp: app?.fromApp, mentions,
       reason: decision.reason,
       prompt: (app?.context ?? "") + personPrompt(threadId, sender, promptWithReply(promptWithDataContext(text, dataContext), replyTo, userNameFor(threadId))),
       sender,
@@ -7255,7 +7255,7 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
     });
     return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason: decision.reason, why: waitWords.queued(threadId, decision.reason) };
   }
-  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via, callId, dataContext, app, allowRoomTurnElsewhere: true });
+  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via, callId, dataContext, app, mentions, allowRoomTurnElsewhere: true });
   return { ok: true as const, threadId, message };
 }
 
@@ -7285,7 +7285,7 @@ async function acceptDirectSend(
   input: DirectSendInput,
   guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
 ): Promise<DirectSendReceipt> {
-  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, callId, dataContext, personPresent, app, followUp } = input;
+  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, callId, dataContext, personPresent, app, followUp, mentions } = input;
   const refused = directSendRefusal(botId, threadId);
   if (refused) throw refused;
   return sendSequencer.run(
@@ -7391,16 +7391,16 @@ async function acceptDirectSend(
           store.setTaskAskedAt(botId, threadId, message.at);
           handoffs.steered(threadId, steerTarget, instance?.instanceId, message.id);
           signInSettle.answerInChat(botId, threadId);
-          if (personsOwn) personFirst.wait(threadId, { requeue: (note) => void queueSteeredMessage(current.id, threadId, text, { prompt: note ? `${queuedPrompt}\n\n${note}` : queuedPrompt, rowId: message.id, first: true, queuedAt: message.at, replyToId: replyTo?.id, dataContext, sender, trigger, via, callId }) });
+          if (personsOwn) personFirst.wait(threadId, { requeue: (note) => void queueSteeredMessage(current.id, threadId, text, { prompt: note ? `${queuedPrompt}\n\n${note}` : queuedPrompt, rowId: message.id, first: true, queuedAt: message.at, replyToId: replyTo?.id, dataContext, sender, trigger, via, callId, mentions }) });
           return { ok: true as const, steered: true as const, threadId, message };
         }
         if (!current.busy) {
-          return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app);
+          return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app, mentions);
         }
         const queued = queueSteeredMessage(current.id, threadId, text, {
           replyToId: replyTo?.id,
           sendId,
-          dataContext, fromApp: app?.fromApp,
+          dataContext, fromApp: app?.fromApp, mentions,
           prompt: queuedPrompt,
           sender,
           trigger,
@@ -7412,7 +7412,7 @@ async function acceptDirectSend(
         if (chose === "restart") await restartForPerson(botId, threadId, trigger);
         return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
       }
-      return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app);
+      return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app, mentions);
     },
   );
 }
@@ -7609,7 +7609,7 @@ async function beginTurn(
     sendId?: string;
     via?: "call"; callId?: string;
     relayed?: boolean;
-    dataContext?: DataContext;
+    dataContext?: DataContext; mentions?: string[];
     app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] };
     onDispatchError?: (message: string) => void;
     compactOnly?: boolean;
@@ -8341,7 +8341,7 @@ async function beginTurn(
       // "@Bob" is the teammate Bob (or the writer themselves), never a bot that shares the name.
       const tagged = integrations.agents
         ? mentionedBots(withoutPersonTags(providerText, [...personTagNames(cfg.profile?.name), ...teamMessages.people().flatMap((one) => one.tags)],
-          store.bots.filter((one) => !one.hidden).map((one) => one.name)), sectionPeers)
+          store.bots.filter((one) => !one.hidden).map((one) => one.name)), sectionPeers, opts?.mentions)
         : [];
       const coordinationPrompt = chiefLevel(bot)
         ? chiefOfStaffSystemPrompt(bot.id, store.bots, Boolean(integrations.agents), chiefEscalationsEnabled(cfg))
@@ -10172,11 +10172,10 @@ async function runClaimedGroupMemberTurn(
     throw await asPlaceFailure(error, place, "room", readyBot, turnProvider(readyBot) === "vps" ? "vps" : "box");
   }
 
-  const roster = readyGroup.memberIds
+  const roomMembers = readyGroup.memberIds
     .map((id) => store.bot(id))
-    .filter((b): b is NonNullable<typeof b> => Boolean(b))
-    .map(roomRosterLine)
-    .join(", ");
+    .filter((b): b is NonNullable<typeof b> => Boolean(b));
+  const roster = roomMembers.map(roomRosterLine).join(", ");
   const roomHandoff = orchestration?.roomHandoffId ? coordinator.node(orchestration.roomHandoffId) : undefined;
   const roomRequester = roomHandoff?.parentId ? store.bot(coordinator.node(roomHandoff.parentId)?.botId ?? "")?.name : undefined;
   const requesterRule = roomRequester
@@ -10192,7 +10191,7 @@ async function runClaimedGroupMemberTurn(
     `Room members: ${roster}, and ${typeof userName === "string" ? `${userName} (the human)` : roomPeople(threadId, userName)}.`,
     readyGroup.bulletin.trim() && `Room bulletin (shared instructions for everyone):\n${readyGroup.bulletin.trim()}`,
     `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.${readyGroup.dm ? "" : ` To get ${typeof userName === "string" ? `${userName}'s` : "a person's"} attention or ask them something blocking, write @you.`} A "[reacted 👍 to …]" line is that person's whole reply to the message it names: 👍 means yes, go ahead, and 👎 means no.`,
-    outsideRoom.length > 0 && roomPeerRosterSystemPrompt(outsideRoom),
+    outsideRoom.length > 0 && roomPeerRosterSystemPrompt(outsideRoom), sharedNamesNote(roomMembers.filter((member) => member.id !== bot.id), Boolean(integrations.agents)),
     integrations.agents && (CREDENTIAL_PROMPT + (orchestration && !orchestration.roomHandoffId ? THREADS_PROMPT : "")).trim(),
     integrations.agents && (!orchestration || orchestration.roomHandoffId) && "For actual OpenMausBot teamwork, discover IDs with list_room_targets and use coordinate_bots for advice or work in this or another room. Do not substitute native coding helpers for these named bots. Consult only when needed to make a decision; no discussion step is mandatory. Give concrete responsibilities, exact accessible paths and acceptance checks. End your turn after assigning; busy teammates queue and results automatically resume you. When they return, finish the requested verification and give the user one final answer. Native helper names are not evidence that an OpenMausBot teammate participated. Plain @mentions are only for conversational replies in this room." + requesterRule,
     integrations.agents && TRIGGER_PROMPT.trim(),
@@ -10602,16 +10601,16 @@ async function runClaimedGroupMemberTurn(
     const members = group.memberIds
       .map((id) => store.bot(id))
       .filter((b): b is NonNullable<typeof b> => Boolean(b) && b!.id !== bot.id);
-    const missed = mentionedBots(
-      replyText,
-      reachablePeers(store.bots, bot).filter((peer) => !group.memberIds.includes(peer.id)),
+    const missed = unreachedMentionLines(
+      replyText, members,
+      reachablePeers(store.bots, bot).filter((peer) => !group.memberIds.includes(peer.id)), threadLanguage(threadId),
     ); for (const line of placesElsewhere.missed(replyText, store.bots)) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: line, ok: false } });
-    for (const peer of missed) {
+    for (const line of missed) {
       store.appendMessage(threadId, {
         role: "bot",
         kind: "activity",
         tool: {
-          name: serverLine(threadLanguage(threadId), "server.rooms.mentionMissed", { bot: peer.name }),
+          name: line,
           ok: false,
         },
       });
@@ -10809,7 +10808,7 @@ async function runGroupGoalOperation(args: {
 type StartGroupTurnOptions = {
   threadId?: string;
   goalCoordinatorBotId?: string;
-  goalRunId?: string;
+  goalRunId?: string; mentions?: string[];
   via?: "api";
   sender?: ResolvedSender;
   trigger?: UsageTrigger;
@@ -10918,13 +10917,13 @@ function startGroupTurn(
       },
     });
   }
-  let responders = roomResponders(text, members, group.defaultResponder);
+  let responders = roomResponders(text, members, group.defaultResponder, options.mentions);
   if (!group.dm) {
     const addressed = stopWordPlacement(text) === "adjacent" ? undefined : message.id;
     for (const held of responders.filter(isHeld)) noteHeldSkip(group.id, threadId, held, addressed);
     responders = responders.filter((responder) => !isHeld(responder));
   }
-  const explicitlyMentionedLead = roomResponders(text, routableMembers, { kind: "mentions" })[0];
+  const explicitlyMentionedLead = roomResponders(text, routableMembers, { kind: "mentions" }, options.mentions)[0];
   const goalCoordinator = channelMode === "goal"
     ? requestedGoalCoordinator ?? explicitlyMentionedLead ?? selectGroupGoalCoordinator(routableMembers, group.defaultResponder)
     : null;
@@ -10937,7 +10936,7 @@ function startGroupTurn(
   }
   // Auto's responders are a fallback until the decision model answers; the append and the return stay synchronous.
   const autoRoute = autoCandidate && !goalCoordinator && routableMembers.length > 1 &&
-    roomResponders(text, availableMembers, { kind: "mentions" }).length === 0;
+    roomResponders(text, availableMembers, { kind: "mentions" }, options.mentions).length === 0;
 
   if (!responders.length && !goalCoordinator && !autoRoute) {
     const defaultArchivedId = group.defaultResponder.kind === "member" ? group.defaultResponder.botId : undefined;
@@ -11096,7 +11095,7 @@ function drainQueuedChannelSendsNow(): void {
           threadId,
           sender: head.sender,
           trigger: queuedTurnTrigger({ trigger: head.trigger, sender: head.sender }),
-          queuedGroup: items,
+          queuedGroup: items, mentions: items.flatMap((item) => item.mentions ?? []),
         });
       } catch (error) {
         for (const item of items) {
@@ -14131,6 +14130,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const eligibility = roomPostEligibility(from, room, fromThreadId);
         if (!eligibility.ok) return json(res, eligibility.status, { error: eligibility.error });
+        const sameName = roomPostRefusal(body.mentionIds, message, room, (id) => store.bot(id)); if (sameName) return json(res, sameName.status, { error: sameName.error });
         // The budget is read BEFORE any approval card and CHARGED only on the path that actually appends.
         const askBudget = (bot: BotRecord, group: GroupRecord) => {
           const attempt: RoomPostAttempt = {
