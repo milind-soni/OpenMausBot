@@ -10,7 +10,7 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 
 describe("skillSwitchTarget", () => {
   it("shows the current SKILL.md and binds the card to its hash", () => {
-    expect(skillSwitchTarget("notes", "disable", own(true))).toEqual({ preview: text, sha256: hash(text), gist: "Keeps notes" });
+    expect(skillSwitchTarget("notes", "disable", own(true))).toEqual({ preview: text, sha256: hash(text), contentSha256: hash(text), gist: "Keeps notes" });
     expect(skillSwitchTarget("notes", "enable", own(false))).toMatchObject({ sha256: hash(text) });
     expect(skillSwitchTarget("notes", "delete", own(false))).toMatchObject({ sha256: hash(text) });
   });
@@ -39,6 +39,14 @@ describe("skillSwitchStillMatches", () => {
     expect(skillSwitchStillMatches("notes", "disable", { ...own(true), text: `${text}more\n` }, hash(text))).toEqual({ error: expect.stringContaining("changed after this card was shown") });
     expect(skillSwitchStillMatches("notes", "disable", own(false), hash(text))).toEqual({ error: "skill \"notes\" is already off" });
     expect(skillSwitchStillMatches("notes", "delete", undefined, hash(text))).toHaveProperty("error");
+  });
+
+  it("binds to the full SKILL.md, not only its redacted preview", () => {
+    const withKey = (key: string): SwitchableSkill => ({ ...own(true), text: `${text}key: sk-ant-api03-${key.repeat(40)}\n` });
+    const shown = skillSwitchTarget("notes", "disable", withKey("A")) as { sha256: string; contentSha256: string };
+    expect(skillSwitchTarget("notes", "disable", withKey("B"))).toMatchObject({ sha256: shown.sha256 });
+    expect(skillSwitchStillMatches("notes", "disable", withKey("A"), shown.contentSha256)).toEqual({ ok: true });
+    expect(skillSwitchStillMatches("notes", "disable", withKey("B"), shown.contentSha256)).toEqual({ error: expect.stringContaining("changed after this card was shown") });
   });
 });
 

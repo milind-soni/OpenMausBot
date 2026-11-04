@@ -21,6 +21,8 @@ export interface SkillSwitchTarget {
   /** The current SKILL.md as the card shows it; approval binds to its hash. */
   preview: string;
   sha256: string;
+  /** Digest of the full SKILL.md, secrets included. Approval binds to this one; it stays on the server, never on the card. */
+  contentSha256: string;
   source?: string;
   gist: string;
 }
@@ -51,6 +53,7 @@ export function skillSwitchTarget(
   return {
     preview,
     sha256: createHash("sha256").update(preview).digest("hex"),
+    contentSha256: createHash("sha256").update(skill.text).digest("hex"),
     ...(skill.source ? { source: redactSecretsInText(skill.source) } : {}),
     gist: redactSecretsInText(skill.description ?? "").replace(/\s+/g, " ").trim().slice(0, STAGED_GIST_MAX),
   };
@@ -61,11 +64,11 @@ export function skillSwitchStillMatches(
   name: string,
   action: SkillSwitchAction,
   skill: SwitchableSkill | undefined,
-  sha256: string,
+  contentSha256: string,
 ): { ok: true } | { error: string } {
   const target = skillSwitchTarget(name, action, skill);
   if ("error" in target) return target;
-  return target.sha256 === sha256
+  return target.contentSha256 === contentSha256
     ? { ok: true }
     : { error: `skill "${name}" changed after this card was shown; ask the bot to propose it again` };
 }

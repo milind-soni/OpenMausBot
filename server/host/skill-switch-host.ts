@@ -1,8 +1,12 @@
 // A bot asks to turn one of its skills on or off, or to delete it. That always waits for the person on a card, even with
-// Full Access, and approval applies only if the skill is still the one the card showed (its SKILL.md sha256).
+// Full Access, and approval applies only if the skill is still the one the card showed: the digest of its full SKILL.md,
+// secrets included, is pinned on the server when the card opens, since the card's own sha256 covers only the redacted preview.
 import { randomUUID } from "node:crypto";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { SkillRequestCardData, SkillSwitchAction } from "../../shared/skill-request.ts";
 import type { OptionCardData } from "../../shared/wire.ts";
+import { writeFileAtomic } from "../atomic.ts";
 import { appendDecision } from "../decision-log.ts";
 import { setImportedSkillEnabled } from "../imported-skills.ts";
 import { listSkills, readSkillFile, removeSkill, setSkillEnabled } from "../skills.ts";
@@ -34,6 +38,11 @@ export type SkillSwitchResolution =
 
 export function createSkillSwitchHost(deps: SkillSwitchHostDeps) {
   const { store } = deps;
+  const pinPath = (requestId: string) => join(deps.dataDir, "skill-switch", `${requestId}.sha256`);
+  const readPin = (requestId: string) => {
+    try { return readFileSync(pinPath(requestId), "utf8"); } catch { return ""; }
+  };
+  const dropPin = (requestId: string) => rmSync(pinPath(requestId), { force: true });
 
   /** The skill a bot asked to turn on, turn off or delete, as it is now. */
   function switchableSkill(bot: BotRecord, name: string): SwitchableSkill | undefined {
@@ -46,15 +55,15 @@ export function createSkillSwitchHost(deps: SkillSwitchHostDeps) {
     return { kind: imported ? "imported" : "fixed", enabled: seen.enabled, text: imported ? deps.readBotSkillFile(bot, name) : null, source: seen.source, description: seen.description };
   }
 
-  function appendCard(args: { botId: string; threadId: string; action: SkillSwitchAction; name: string; target: SkillSwitchTarget }): { requestId: string; summary: string } {
-    const requestId = randomUUID();
+  function appendCard(args: { requestId: string; botId: string; threadId: string; action: SkillSwitchAction; name: string; target: SkillSwitchTarget }): string {
+    const { requestId } = args;
     const copy = skillSwitchCardCopy(args.action, args.name, args.target.gist);
     const payload: SkillRequestCardData = {
       version: 1,
       requestId,
       botId: args.botId,
       threadId: args.threadId,
-      // Nothing is staged: approval binds to the current SKILL.md through sha256.
+      // Nothing is staged: approval binds to the SKILL.md digest pinned on the server.
       stagedId: `switch-${requestId}`,
       action: args.action,
       name: args.name,
@@ -72,7 +81,7 @@ export function createSkillSwitchHost(deps: SkillSwitchHostDeps) {
       from: from ? { botId: from.id, name: from.name, color: from.color } : undefined,
       card: { title: copy.title, subtitle: copy.subtitle, options: [copy.option, "Deny"], requestId, tool: "stage_skill", skillRequest: payload },
     });
-    return { requestId, summary: copy.title };
+    return copy.title;
   }
 
   function apply(botId: string, name: string, action: SkillSwitchAction, kind: SwitchableSkill["kind"] | undefined) {
@@ -88,10 +97,13 @@ export function createSkillSwitchHost(deps: SkillSwitchHostDeps) {
     if (!persistence.ok) return { status: persistence.status, body: { error: persistence.error } };
     const target = skillSwitchTarget(name, action, switchableSkill(from, name));
     if ("error" in target) return { status: 422, body: { error: target.error } };
-    const card = appendCard({ botId: from.id, threadId, action, name, target });
-    appendDecision(deps.dataDir, { threadId, requestId: card.requestId, botId: from.id, botName: from.name,
-      tool: "stage_skill", summary: card.summary, decision: "card-shown", source: "skill" });
-    return { status: 201, body: { state: "pending", name, action, gist: target.gist, warnings: [], summary: card.summary } };
+    const requestId = randomUUID();
+    mkdirSync(dirname(pinPath(requestId)), { recursive: true, mode: 0o700 });
+    writeFileAtomic(pinPath(requestId), target.contentSha256, { mode: 0o600 });
+    const summary = appendCard({ requestId, botId: from.id, threadId, action, name, target });
+    appendDecision(deps.dataDir, { threadId, requestId, botId: from.id, botName: from.name,
+      tool: "stage_skill", summary, decision: "card-shown", source: "skill" });
+    return { status: 201, body: { state: "pending", name, action, gist: target.gist, warnings: [], summary } };
   }
 
   function resolve(
@@ -107,6 +119,7 @@ export function createSkillSwitchHost(deps: SkillSwitchHostDeps) {
       requestId: args.requestId, botId: args.botId, botName: args.botName, tool: card.tool, summary: card.subtitle, decision, source: "user" });
     if (args.behavior !== "allow") {
       store.patchMessage(args.threadId, messageId, { card: { ...card, answered: "deny", dismissed: true, held: undefined } });
+      dropPin(request.requestId);
       decided("user-denied");
       return { claimed: true, outcome: "rejected" };
     }
@@ -118,7 +131,7 @@ export function createSkillSwitchHost(deps: SkillSwitchHostDeps) {
     }
     const bot = store.bot(args.botId);
     const current = bot ? switchableSkill(bot, request.name) : undefined;
-    const still = skillSwitchStillMatches(request.name, request.action, current, request.sha256);
+    const still = skillSwitchStillMatches(request.name, request.action, current, readPin(request.requestId));
     const applied = "error" in still ? still : apply(args.botId, request.name, request.action, current?.kind);
     if ("error" in applied) {
       store.patchMessage(args.threadId, messageId, { card: { ...card, held: applied.error } });
@@ -127,6 +140,7 @@ export function createSkillSwitchHost(deps: SkillSwitchHostDeps) {
     store.patchMessage(args.threadId, messageId, {
       card: { ...card, answered: "allow", held: undefined, title: skillSwitchCardCopy(request.action, request.name, "").done },
     });
+    dropPin(request.requestId);
     deps.noteSkillChange(args.botId, args.threadId);
     decided("user-approved");
     return { claimed: true, outcome: "allowed-once" };
