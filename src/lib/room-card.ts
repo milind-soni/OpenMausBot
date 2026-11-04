@@ -3,7 +3,7 @@
 import type { CloudRoom, CloudUsage } from "../../electron/cloud-home.mjs";
 import { cloudPlanLabel, usd } from "@/lib/cloud-plan";
 import { activeLocale, t } from "@/lib/i18n";
-import { TEAM_TIERS } from "@/lib/usage-meter";
+import { TEAM_TIERS, trialChargeIsNear } from "@/lib/usage-meter";
 
 export interface RoomCardView {
   id: string;
@@ -48,7 +48,7 @@ export const roomCardBusy = (bots: readonly { busy?: boolean }[], waitingForRoom
  * the offer is about the person's own plan's Cloud, not the team's.
  */
 export function roomCardView(input: { room: CloudRoom | null | undefined; usage: CloudUsage | null; busy: boolean; hidden: string | null; usageCardShown: boolean;
-  teamHome?: boolean }): RoomCardView | null {
+  teamHome?: boolean; now?: number }): RoomCardView | null {
   const { room } = input;
   if (!room || input.busy || input.hidden === room.id || input.usageCardShown) return null;
   if (input.teamHome && !TEAM_TIERS.includes(input.usage?.tier ?? "")) return null;
@@ -57,7 +57,7 @@ export function roomCardView(input: { room: CloudRoom | null | undefined; usage:
   const kind = room.cause.kind;
   const offer = room.plan ? {
     tier: room.plan.tier, text: offerText(room.plan, kind),
-    price: t(input.usage?.trialEndsAt ? "roomCard.priceTrial" : "roomCard.price", { price: usd(room.plan.amount / 100) }),
+    price: t(!input.usage?.trialEndsAt ? "roomCard.price" : trialChargeIsNear(input.usage.trialEndsAt, input.now) ? "roomCard.priceTrial.one" : "roomCard.priceTrial.many", { price: usd(room.plan.amount / 100) }),
   } : null;
   return { id: room.id, kind, title: t(kind === "disk" ? "roomCard.title.disk" : "roomCard.title.memory"), cause: roomCauseText(room.cause), offer,
     tip: offer ? null : t(kind === "disk" ? "roomCard.tip.disk" : "roomCard.tip.memory") };

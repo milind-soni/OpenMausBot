@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 
 import { mcpOAuthRedirectUri } from "../mcp-oauth.ts";
+import { forWorker } from "./worker-port.ts";
 
 const isFree = (port: number): Promise<boolean> =>
   new Promise((resolve) => {
@@ -11,11 +12,13 @@ const isFree = (port: number): Promise<boolean> =>
     probe.listen(port, "127.0.0.1", () => probe.close(() => resolve(true)));
   });
 
-/** A base where every `base + offset` is free (the harness also opens a webhook receiver one above
- * itself). A probe, not a reservation: the ports are released before they are returned. */
+/** A base of this worker where every `base + offset` is free (the harness also opens a webhook receiver one above
+ * itself). A probe, not a reservation: the ports are released before they are returned. A range too narrow to share is
+ * one a suite keeps to itself. */
 export async function freePortBlock(offsets: number[], from = 19_600, span = 3_000): Promise<number> {
   for (let attempt = 0; attempt < 40; attempt++) {
-    const base = from + Math.floor(Math.random() * span);
+    const picked = from + Math.floor(Math.random() * span);
+    const base = span < 64 ? picked : forWorker(picked);
     const checks = await Promise.all(offsets.map((offset) => isFree(base + offset)));
     if (checks.every(Boolean)) return base;
   }
