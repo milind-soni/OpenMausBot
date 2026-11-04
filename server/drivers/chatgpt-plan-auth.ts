@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { chmodSync, closeSync, lstatSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { dirname, isAbsolute, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -86,6 +86,8 @@ export class ChatGptPlanAuthController {
   private disposed = false;
   private starting: Promise<ProviderAuthenticationStart> | null = null;
   private retryClientId: string | null = null;
+  /** Refusals this run already knows about, cleared with the saved list on sign-in and sign-out. */
+  private readonly refusedNow = new Set<string>();
 
   constructor(options: Options) {
     if (!isAbsolute(options.directory)) throw new Error("ChatGPT credential storage must use an absolute path.");
@@ -123,6 +125,42 @@ export class ChatGptPlanAuthController {
   }
   private save(record: Credentials): void {
     writeFileAtomic(join(this.options.directory, "credentials.json"), JSON.stringify(record), { mode: 0o600 });
+  }
+  private refusedPath(): string { return join(this.options.directory, "refused-models.json"); }
+  private savedRefused(subject: string): string[] {
+    const raw = readJson(this.refusedPath());
+    if (raw === null) return [];
+    const saved = object(raw);
+    return saved.subject === subject && Array.isArray(saved.models) ? saved.models.filter((slug): slug is string => string(slug, 256)) : [];
+  }
+  private refusedFor(subject: string): string[] {
+    let saved: string[] = [];
+    try { saved = this.savedRefused(subject); } catch { /* An unreadable list hides nothing it can't read. */ }
+    return [...new Set([...saved, ...this.refusedNow])];
+  }
+  private clearRefused(): void {
+    this.refusedNow.clear();
+    rmSync(this.refusedPath(), { force: true });
+  }
+  /** Models ChatGPT refused for the signed-in account although /models lists them ("The 'gpt-6.1-sol' model is not
+   * supported when using Codex with a ChatGPT account."). Kept until this account signs out or signs in again. */
+  refusedModels(): string[] {
+    try {
+      const subject = this.read()?.subject;
+      return subject ? this.refusedFor(subject) : [];
+    } catch { return []; }
+  }
+  async refuseModel(slug: string): Promise<void> {
+    if (this.disposed || !string(slug, 256)) return;
+    // Seen at once by the next turn, before the saved list below is written under the lock.
+    this.refusedNow.add(slug);
+    this.prepare();
+    await locked(this.options.directory, async () => {
+      const subject = this.read()?.subject;
+      // A saved list that can't be read throws here, so it is never overwritten with this one model.
+      const models = subject ? this.savedRefused(subject) : [];
+      if (subject && !models.includes(slug)) writeFileAtomic(this.refusedPath(), JSON.stringify({ subject, models: [...models, slug] }), { mode: 0o600 });
+    });
   }
   private async hostId(): Promise<string> {
     const parent = dirname(this.options.directory);
@@ -287,6 +325,7 @@ export class ChatGptPlanAuthController {
         if (this.disposed || flow.status.phase !== "waiting" || flow.abort.signal.aborted) return;
         if (JSON.stringify(this.read()) !== JSON.stringify(flow.previous)) throw new Error("The selected ChatGPT account changed during sign-in. Start again.");
         this.save({ clientId, hostId: flow.hostId, ...identity, tokens });
+        this.clearRefused();
         this.retryClientId = null;
         this.finish(flow, tokens.scopes.includes(DIRECT_SCOPE) ? "succeeded" : "failed", tokens.scopes.includes(DIRECT_SCOPE) ? undefined : CONSENT);
       });
@@ -354,7 +393,9 @@ export class ChatGptPlanAuthController {
     });
   }
   async models(): Promise<ModelCatalog> {
-    if (!this.read()?.tokens?.scopes.includes(DIRECT_SCOPE)) return { default: "", options: [] };
+    const record = this.read();
+    if (!record?.tokens?.scopes.includes(DIRECT_SCOPE)) return { default: "", options: [] };
+    const refused = this.refusedFor(record.subject);
     const token = await this.accessToken();
     const { response, body } = await this.request(`${this.resource}/models`, { headers: { Authorization: `Bearer ${token}` } });
     if (!response.ok) throw new Error(response.status === 401 || response.status === 403
@@ -365,7 +406,7 @@ export class ChatGptPlanAuthController {
     for (const entry of body.models) {
       if (!entry || typeof entry !== "object") continue;
       const row = entry as Record<string, unknown>;
-      if (row.visibility !== "list" || !string(row.slug, 256) || /[\s\p{Cc}]/u.test(row.slug) || !string(row.display_name, 256) || options.some((item) => item.id === row.slug)) continue;
+      if (row.visibility !== "list" || !string(row.slug, 256) || /[\s\p{Cc}]/u.test(row.slug) || !string(row.display_name, 256) || options.some((item) => item.id === row.slug) || refused.includes(row.slug)) continue;
       options.push({ id: row.slug, label: row.display_name });
     }
     return { default: options[0]?.id ?? "", options };
@@ -395,6 +436,7 @@ export class ChatGptPlanAuthController {
       } catch { /* Sign-out is local even if OpenAI is temporarily unavailable. */ }
       delete record.tokens;
       this.save(record);
+      this.clearRefused();
       if (!revoked) throw Object.assign(new Error("Signed out locally, but remote revocation was not confirmed. Disconnect OpenMausBot in ChatGPT Settings → Usage to end access there."), { code: "chatgpt_revocation_unconfirmed" });
     });
   }

@@ -1250,7 +1250,6 @@
   "orgLibrary.fromSelf": "Tổ chức của bạn",
   "orgLibrary.recommended": "Được {name} đề xuất",
   "orgLibrary.withdrawn": "Đã bị {name} thu hồi",
-  "orgLibrary.newerRelease": "Đã có phiên bản {version}. Nội dung cập nhật sẽ tự động áp dụng trong bản cập nhật {app} sắp tới.",
   "orgLibrary.bots": "Bot: {count}",
   "orgLibrary.skills": "Kỹ năng: {count}",
   "orgLibrary.presets": "Bot preset: {count}",

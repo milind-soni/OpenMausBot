@@ -4,6 +4,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import type { InboxRow, InboxView } from "../../shared/inbox";
 import { api } from "./api";
+import { randomUuid } from "../lib/random-uuid";
 
 type InboxTaskLike = { threadId: string; inbox?: true; openAsks?: number; inboxChangedAt?: number };
 
@@ -103,7 +104,7 @@ export function doneInboxRow(row: Pick<InboxRow, "id">): void {
 export async function replyToInboxRow(view: Pick<InboxView, "botId" | "threadId">, row: Pick<InboxRow, "id" | "origin">, text: string): Promise<void> {
   const origin = view.threadId ? null : row.origin;
   const path = origin?.groupId ? `/api/groups/${origin.groupId}/messages` : `/api/bots/${origin?.botId ?? view.botId}/messages`;
-  await api(path, { method: "POST", body: JSON.stringify({ text, threadId: origin?.threadId ?? view.threadId, replyToId: row.id, sendId: crypto.randomUUID() }) });
+  await api(path, { method: "POST", body: JSON.stringify({ text, threadId: origin?.threadId ?? view.threadId, replyToId: row.id, sendId: randomUuid() }) });
   void refreshInbox();
 }
 

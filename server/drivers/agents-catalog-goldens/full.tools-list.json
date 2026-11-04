@@ -477,6 +477,10 @@
             "type": "string",
             "description": "Optional plain-text version for clients that cannot show pages. Written for you when omitted."
           },
+          "frameless": {
+            "type": "boolean",
+            "description": "Optional: true shows the page without the card frame around it. Default false for a new page; a replacement with app_id keeps the page's frame unless this is given."
+          },
           "app_id": {
             "type": "string",
             "description": "Only to replace a page you showed: the id it returned."
