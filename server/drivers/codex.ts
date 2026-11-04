@@ -638,7 +638,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const chatgptTurn = ownLogin &&
         decodeCodexSelection(turn.model || models.default).modelProvider === OFFICIAL_CODEX_PROVIDER;
       const route: CodexRoute = plan ? "plan" : chatgptTurn ? "own" : "other";
-      const signedOut = chatgptTurn && await loginCheck(childEnv()) === "missing";
+      const signedOut = chatgptTurn && await loginCheck.check(childEnv()) === "missing";
       assertPlanCurrent();
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
       const turnId = newId();
@@ -1120,7 +1120,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const refused = chatgptTurn && loginMark() !== null && (codexSignInRefused(error) ||
           (state.authRecovery && !/\b403\b|forbidden/i.test(raw) && /\b401\b|unauthorized/i.test(raw)));
         if (retryLoginRace(raw, refused)) return;
-        if (refused) loginRefused();
+        if (refused) loginRefused(); else if (chatgptTurn && CODEX_MISSING_CREDENTIALS.test(raw)) loginCheck.forget();
         const message = refused ? codexSignInExpired(raw) : codexUserError(raw, route, error.codexErrorInfo);
         const setup = refused || classifyError({ text: raw }).reason === "auth";
         if (message === state.lastError && (state.lastErrorSetup || !setup)) return;
@@ -1628,7 +1628,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           return relaunch(verdict.reason, message, "rpc_error");
         }
         if (!state.settled && !abandoned) {
-          if (refused) loginRefused();
+          if (refused) loginRefused(); else if (chatgptTurn && CODEX_MISSING_CREDENTIALS.test(raw)) loginCheck.forget();
           emit({
             ...base(threadId, turnId), type: "runtime.error",
             message: earlyNotifications.some((event) => ["commandExecution", "fileChange", "mcpToolCall", "webSearch"].includes(event.params?.item?.type))

@@ -2989,6 +2989,14 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     });
   });
 
+  it("counts an API-key login as signed in", async () => {
+    await create({ mode: "api-key-configured" });
+    await expect(instance.snapshot()).resolves.toMatchObject({
+      state: "available",
+      authenticated: true,
+    });
+  });
+
   it("also accepts login status from older Codex versions that used stdout", async () => {
     await create({ mode: "logged-in-stdout" });
     await expect(instance.snapshot()).resolves.toMatchObject({
@@ -3257,6 +3265,22 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       expect(errors).toEqual([expect.objectContaining({ message: codexNotSignedIn(), setup: true })]);
       expect(done).toMatchObject({ ok: false });
       expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
+    });
+
+    it.each([
+      ["ran the turn", "api-key-configured", { FAKE_CODEX_MISSING_BEARER: "1" }],
+      ["refused turn/start", "unauthorized", {}],
+    ])("asks Codex about its login again once Codex %s without the login it reported", async (_failed, mode, failure) => {
+      const codexHome = join(scratch, ".codex");
+      mkdirSync(codexHome, { recursive: true });
+      await create({ mode, environment: { HOME: scratch, USERPROFILE: scratch, CODEX_HOME: codexHome, FAKE_CODEX_STATE: join(scratch, "launches"), ...failure } });
+      await expect(runTurn("t-login-gone")).resolves.toMatchObject({ errors: [expect.objectContaining({ message: codexNotSignedIn() })] });
+      process.env.FAKE_CODEX_MODE = "logged-out";
+      const spawn = vi.spyOn(procs, "spawnCli");
+      const { done, errors } = await runTurn("t-after-login-gone");
+      expect(errors).toEqual([expect.objectContaining({ message: codexNotSignedIn(), setup: true })]);
+      expect(done).toMatchObject({ ok: false, stopReason: "auth_required" });
+      expect(spawn).not.toHaveBeenCalled();
     });
 
     it("runs the turn again once when Codex started without the login it has now", async () => {
