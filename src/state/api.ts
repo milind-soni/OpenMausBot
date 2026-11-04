@@ -65,3 +65,10 @@ function heldUntilShown<T>(path: string, init: ApiInit): Promise<T> {
   void sent.finally(() => { if (heldReads.get(path) === sent) heldReads.delete(path); }).catch(() => {});
   return sent;
 }
+
+/** A 200 that isn't the snapshot: `api` turns a non-JSON answer into `{}`, and the reducer can't take a missing list. The part
+ * fails instead, which keeps what's on screen. */
+export function snapshotArrays<T>(answer: T, ...keys: (keyof T)[]): T {
+  for (const key of keys) if (!Array.isArray(answer[key])) throw new Error(`Invalid snapshot: ${String(key)} is not a list`);
+  return answer;
+}

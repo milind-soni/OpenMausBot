@@ -287,6 +287,8 @@ export function secretForms(value: string): string[] {
   try {
     forms.add(encodeURIComponent(value));
     forms.add(encodeURIComponent(value).replace(/%20/gu, "+"));
+    // A submitted form (application/x-www-form-urlencoded) also percent-encodes ! ' ( ) ~, which encodeURIComponent keeps.
+    forms.add(new URLSearchParams([["", value]]).toString().slice(1));
   } catch {}
   return [...forms].filter((form) => form.length >= MIN_SECRET);
 }

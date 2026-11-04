@@ -94,6 +94,8 @@ export interface CloudPlanAllowances {
   swapMb?: number;
   /** How many days its daily backups are kept, when the Admin says. */
   snapshotDays?: number;
+  /** A team plan's most people, its owner included. */
+  seats?: number;
 }
 /** One plan OpenMausBot Cloud sells: its monthly price before tax in US cents,
  * and its free trial's days when it comes with one. */
