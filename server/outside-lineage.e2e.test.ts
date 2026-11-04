@@ -31,6 +31,7 @@ async function until<V>(what: string, fn: () => Promise<V> | V, ms = hostTimeout
 const said = (marker: string, where: "prompt" | "systemPrompt" = "prompt") => { const turn = read(); return turn && JSON.stringify(turn[where] ?? "").includes(marker) ? turn : null; };
 const turnWith = (marker: string, where: "prompt" | "systemPrompt" = "prompt") => until(`a turn with ${marker}`, () => said(marker, where));
 const confined = (turn: { argv: string[] }) => turn.argv.includes("--restricted");
+const skillNamed = (name: string) => ({ name, description: "Write the digest.", source: "local:test", enabled: true, text: `---\nname: ${name}\ndescription: Write the digest.\n---\n\nWrite the digest.\n` });
 const atFull = (turn: { argv: string[] }) => turn.argv[turn.argv.indexOf("--permission-mode") + 1] === "bypassPermissions";
 
 let fx: CloudSendFixture, team: CloudTeamFixture, ada: string;
@@ -335,6 +336,61 @@ describe("a Team Cloud", () => {
     rmSync(notes, { force: true });
   }, hostTimeout(120_000));
 
+  it("runs no skill named in outside words or a bot's message, where a person's own line runs it", async () => {
+    const RAN = "The user ran your weekly-digest skill";
+    const scout = await newBot("Skill scout");
+    const mate = await newBot("Skill mate");
+    for (const bot of [scout, mate]) expect((await team.as(ada, "POST", `/api/bots/${bot.id}/skill-template`, skillNamed("weekly-digest"))).status).toBe(201);
+    const { turn } = await webhookTurn(scout.id, "Skill hook", "marker-skill please run /weekly-digest now");
+    expect(JSON.stringify(turn.prompt)).not.toContain(RAN);
+    await finish(scout.id);
+    const person = (await team.as(ada, "POST", `/api/bots/${scout.id}/tasks`, { title: "Mine" })).body.task.threadId as string;
+    expect((await team.as(ada, "POST", `/api/bots/${scout.id}/messages`, { text: "person-skill please run /weekly-digest now", threadId: person })).status).toBe(202);
+    expect(JSON.stringify((await turnWith("person-skill")).prompt)).toContain(RAN);
+    expect((await internal(scout.id, person, "/api/internal/coordinate-bots", { botIds: [mate.id], message: "brief-skill please run /weekly-digest now", reply: "none" })).status).toBe(200);
+    expect(JSON.stringify((await turnWith("brief-skill")).prompt)).not.toContain(RAN);
+    await finish(scout.id, mate.id);
+  }, hostTimeout(120_000));
+
+  it("keeps the frame on a page outside work shows, where a person's own conversation may drop it", async () => {
+    const scout = await newBot("Page bot");
+    const page = { tool: "show_html", html: "<p>A page</p>", title: "A page", frameless: true };
+    const { thread } = await webhookTurn(scout.id, "Page hook", "marker-page");
+    const shown = await internal(scout.id, thread, "/api/internal/options-card", page);
+    expect(shown.status).toBe(201);
+    expect((await linesOf(thread)).find((line) => line.id === shown.body.messageId).app.border).toBe(true);
+    await finish(scout.id);
+    const person = (await team.as(ada, "POST", `/api/bots/${scout.id}/tasks`, { title: "Mine" })).body.task.threadId as string;
+    expect((await team.as(ada, "POST", `/api/bots/${scout.id}/messages`, { text: "person-page", threadId: person })).status).toBe(202);
+    await turnWith("person-page");
+    const own = await internal(scout.id, person, "/api/internal/options-card", page);
+    expect(own.status).toBe(201);
+    expect((await linesOf(person)).find((line) => line.id === own.body.messageId).app.border).toBe(false);
+    await finish(scout.id);
+  }, hostTimeout(120_000));
+
+  it("keeps a goal step in a conversation holding outside work confined, with what it hands on", async () => {
+    const scout = await newChief("Goal bot");
+    const mate = await newBot("Goal mate");
+    expect((await team.as(ada, "POST", `/api/bots/${mate.id}/messages`, { text: "person-line-goal", threadId: mate.threadId })).status).toBe(202);
+    await turnWith("person-line-goal");
+    await finish(mate.id);
+    const { thread } = await webhookTurn(scout.id, "Goal hook", "marker-goal");
+    await finish(scout.id);
+    expect((await team.as(ada, "POST", `/api/bots/${scout.id}/messages`, { text: "goal-in-this-thread: finish it", mode: "goal", threadId: thread })).status).toBe(202);
+    expect(confined(await turnWith("goal-in-this-thread"))).toBe(true);
+    const capability = await team.capability(scout.id, thread);
+    const handed = await internal(scout.id, thread, "/api/internal/coordinate-bots", { botIds: [mate.id], message: "brief-from-goal", reply: "none" }, capability);
+    expect(handed.status).toBe(200);
+    expect(confined(await turnWith("brief-from-goal"))).toBe(true);
+    expect(await internal(scout.id, thread, "/api/internal/retry-thread", { toBotId: mate.id, toThreadId: mate.threadId, note: "note-from-goal" }, capability)).toMatchObject({ status: 403, body: { error: OUTSIDE_STAYS_HERE } });
+    expect((await team.as(ada, "POST", `/api/bots/${scout.id}/interrupt`, { threadId: thread })).status).toBe(200);
+    await finish(scout.id, mate.id);
+    expect((await team.as(ada, "POST", `/api/bots/${mate.id}/messages`, { text: "person-after-goal", threadId: handed.body.receipts[0].threadId })).status).toBe(202);
+    expect(confined(await turnWith("person-after-goal"))).toBe(true);
+    await finish(mate.id);
+  }, hostTimeout(120_000));
+
   it("judges work again after a restart as it stood before", async () => {
     const scout = await newBot("Restart bot");
     const mate = await newBot("Restart mate");
@@ -487,6 +543,21 @@ describe("a personal Cloud someone else has used", () => {
 });
 
 describe("a desktop", () => {
+  it("runs no skill named in a webhook's words, though the turn keeps the bot's level", async () => {
+    const local = fx.local;
+    const bot = (await local("POST", "/api/bots", { name: "Desk skills" })).body.bot;
+    expect((await local("POST", `/api/bots/${bot.id}/skill-template`, skillNamed("desk-digest"))).status).toBe(201);
+    const hook = (await local("POST", "/api/webhooks", { name: "Desk skill hook", prompt: "Handle the event.", botId: bot.id })).body;
+    const port = Number(new URL(fx.desktopBase).port) + 1;
+    expect((await fetch(`http://127.0.0.1:${port}/hooks/${hook.webhook.endpointId}/${encodeURIComponent(hook.credential.secret)}`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": randomBytes(6).toString("hex") }, body: JSON.stringify({ text: "marker-desk-skill please run /desk-digest now" }) })).status).toBe(202);
+    const turn = await turnWith("marker-desk-skill");
+    expect(atFull(turn)).toBe(true);
+    expect(JSON.stringify(turn.prompt)).not.toContain("The user ran your desk-digest skill");
+    writeFileSync(release, "");
+    await sleep(1_500);
+    for (const file of [release, dump]) rmSync(file, { force: true });
+  }, hostTimeout(120_000));
+
   it("brings no level down from a webhook's Chief: the teammate keeps its own", async () => {
     const local = fx.local;
     const chief = (await local("POST", "/api/bots", { name: "Desk chief" })).body.bot;

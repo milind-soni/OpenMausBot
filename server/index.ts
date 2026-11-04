@@ -3148,6 +3148,8 @@ function peerReviewRequired(bot: BotRecord, threadId: string): boolean {
 const delegatedLevel = createDelegatedLevel({ store, node: id => coordinator.node(id), sourceLevel: sourceApprovalMode, turnLevel: approvalModeForTurn,
   driverKind: bot => registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, guestDriven: cloudGuestDriven, handsNoLevel: outsideLineage.handsNoLevel });
 const liveApprovalMode = createLiveApprovalMode({ store, turnLevel: approvalModeForTurn });
+/** Full access is the person's grant to use their screen without asking; words from outside never carry it. */
+const asksBeforeYourComputer = (bot: BotRecord, threadId: string, peerInitiated: boolean) => liveApprovalMode(bot, threadId, peerInitiated) !== "full" || outsideLineage.handsNoLevel(threadId);
 
 function roomTurnApprovalMode(bot: BotRecord, threadId: string, orchestration?: GroupTurnOrchestration): ApprovalMode {
   const handoff = orchestration?.roomHandoffId ? coordinator.node(orchestration.roomHandoffId) : undefined;
@@ -7945,9 +7947,8 @@ async function beginTurn(
         createHash("sha256").update(JSON.stringify([...persistentConfig, soul])).digest("hex").slice(0, 16);
       const plannedConfig = sessionConfig(bot.soul);
       const skillAuthoring = skillAuthoringEnabled(cfg) && agentsMounted;
-      const skillCommandText = supportsWorkspaceFiles(instance.driverKind)
-        ? skillsHost.expandSkillCommand(bot, threadId, providerText, instance)
-        : providerText;
+      const namesSkills = !commsDepth && !opts?.coordination && !opts?.peerAsk && !userMessage.peerAsk && !guestConfined && !outsideLineage.handsNoLevel(threadId);
+      const skillCommandText = namesSkills && supportsWorkspaceFiles(instance.driverKind) ? skillsHost.expandSkillCommand(bot, threadId, providerText, instance) : providerText;
       const setupText = agentsMounted ? expandSetupTurnText(skillCommandText) : skillCommandText;
       const userTurnText = (opts?.app?.context ?? "") + (opts?.cardContinuation ? "" : routineRunNote(threadId, opts?.automationSource)) + labelledLine(personLine && !opts?.excludeMessageIds ? userMessage : {}, withReactionNotes(promptWithReply(
         skillAuthoring ? expandLearnTurnText(setupText) : setupText,
@@ -8266,7 +8267,7 @@ async function beginTurn(
         if (wants === "vm") {
           if (await attachLocalVm(true)) computerKind = "vm";
         } else if (wants === "local") {
-          integrations.localComputer = await mountHostComputer(resourceOwner, bot.id, mountsLocalComputer, surfaceLazyClaimRejection("this computer"), () => placeSource === "auto-pin" && liveApprovalMode(bot, threadId, commsDepth > 0) !== "full", savedSteps.journals(directRequestOwners.get(threadId)));
+          integrations.localComputer = await mountHostComputer(resourceOwner, bot.id, mountsLocalComputer, surfaceLazyClaimRejection("this computer"), () => placeSource === "auto-pin" && asksBeforeYourComputer(bot, threadId, commsDepth > 0), savedSteps.journals(directRequestOwners.get(threadId)));
           computerKind = "local";
         }
 
@@ -8344,7 +8345,7 @@ async function beginTurn(
             label: "this computer",
             onRejected: surfaceLazyClaimRejection("this computer"),
             claim: async (call) => {
-              await claimWithYourComputerConsent(() => liveApprovalMode(bot, threadId, commsDepth > 0) !== "full", () => askToUseYourComputer(approvalBus, bot, resourceOwner, call), () => bindTurnComputer(resourceOwner, "computer:host", true));
+              await claimWithYourComputerConsent(() => asksBeforeYourComputer(bot, threadId, commsDepth > 0), () => askToUseYourComputer(approvalBus, bot, resourceOwner, call), () => bindTurnComputer(resourceOwner, "computer:host", true));
               pinAutoSurface("local"); recordTurnPlace(bot.id, threadId, "local");
             },
           });
@@ -13213,7 +13214,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           store,
           bot: internalSender, apps: chatApps, folders: async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }),
           threadId: internalCapability.threadId,
-          input: body, authored: (id) => handoffs.authored(internalCapability.threadId, internalCapability.generation, id),
+          input: body?.frameless && cloudGuestDriven(internalCapability.threadId) ? { ...body, frameless: false } : body, authored: (id) => handoffs.authored(internalCapability.threadId, internalCapability.generation, id),
         });
         return result.ok
           ? json(res, 201, { messageId: result.messageId, ...("masked" in result && result.masked ? { masked: true } : {}) })
