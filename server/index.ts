@@ -9566,15 +9566,10 @@ function undoSkillCard(botId: string, threadId: string, messageId: string): Undo
   if (!card.autoApplied || card.answered !== "allow") {
     return { claimed: true, state: "invalid", error: "Only a change that applied on its own can be undone here.", status: 409 };
   }
-  if (request.botId !== botId || request.threadId !== threadId) {
-    return { claimed: true, state: "invalid", error: "this skill request belongs to a different bot", status: 403 };
-  }
+  if (request.botId !== botId || request.threadId !== threadId) return { claimed: true, state: "invalid", error: "this skill request belongs to a different bot", status: 403 };
   const action = request.action; if (isSkillSwitchAction(action)) return { claimed: true, state: "invalid", error: "This change was approved on its card and can't be undone here.", status: 409 };
   if (request.shared) return skillsHost.undoReceipt(botId, threadId, message, { ...request, action, shared: request.shared });
-  const undone = undoSkillWrite(botId, {
-    stagedId: request.stagedId,
-    name: request.name,
-    action,
+  const undone = undoSkillWrite(botId, { stagedId: request.stagedId, name: request.name, action,
     ...(request.previous ? { previous: { skillMd: request.previous.preview, source: request.previous.source, references: request.previous.references ?? [] } } : {}),
   });
   if ("stale" in undone) return { claimed: true, state: "invalid", error: UNDO_STALE, status: 409, stale: true };
