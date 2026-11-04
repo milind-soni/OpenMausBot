@@ -39,7 +39,7 @@ export async function verifyKey(key: string): Promise<VerifyResult> {
       headers: { "x-goog-api-key": key },
       signal: AbortSignal.timeout(20_000),
     });
-    await res.body?.cancel();
+    await res.body?.cancel().catch(() => {});
     if (res.ok) return { ok: true };
     if (res.status === 400 || res.status === 401 || res.status === 403) {
       return { ok: false, message: "Gemini rejected the API key or its speech permissions. Check the key in Settings." };
