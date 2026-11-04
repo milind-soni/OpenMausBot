@@ -27,7 +27,7 @@ import { lastChangeRequestUrl } from "../shared/thread-link.ts";
 import { REMOVED_COMPUTER_DRIVER, type ComputerEngineMove } from "./computer-engine-removal.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 import type { GroupGoalRunCardData } from "../shared/group-goal-run.ts";
-import { isMentionBoundary, isMentionNameContinuation } from "../shared/mention-boundary.ts";
+import { isMentionBoundary, isMentionNameContinuation } from "../shared/mention-boundary.ts"; import { resolveMentions } from "../shared/room-mentions.ts";
 import type { HandedState } from "./delta-context.ts";
 import type { AgentPart, PartPair, RoomPart } from "./package-parts.ts";
 import type {
@@ -207,25 +207,8 @@ const messagesFile = (threadId: string) => join(DATA_DIR, `messages-${threadId}.
 
 export const sectionKey = (section?: string | null): string => section?.trim() || "";
 
-export function mentionedBots<T extends { name: string; hidden?: boolean }>(text: string, peers: T[]): T[] {
-  const candidates = peers
-    .filter((p) => !p.hidden && p.name.trim())
-    .sort((a, b) => b.name.length - a.name.length);
-  const lower = text.toLowerCase();
-  const found: T[] = [];
-  let at = -1;
-  while ((at = lower.indexOf("@", at + 1)) !== -1) {
-    if (!isMentionBoundary(text, at)) continue;
-    const rest = lower.slice(at + 1);
-    const hit = candidates.find((p) => {
-      const name = p.name.toLowerCase();
-      if (!rest.startsWith(name)) return false;
-      const after = rest.slice(name.length);
-      return !isMentionNameContinuation(after);
-    });
-    if (hit && !found.includes(hit)) found.push(hit);
-  }
-  return found;
+export function mentionedBots<T extends { id?: string; name: string; hidden?: boolean }>(text: string, peers: T[], picked: readonly string[] = []): T[] {
+  return resolveMentions(text, peers, picked).bots;
 }
 
 export function normalizeGroupDefaultResponder(
@@ -259,6 +242,7 @@ export function roomResponders<T extends { id: string; name: string; hidden?: bo
   text: string,
   members: T[],
   defaultResponder: GroupDefaultResponder,
+  picked: readonly string[] = [],
 ): T[] {
   const available = members.filter((member) => !member.hidden);
   const everyone = "everyone";
@@ -272,7 +256,7 @@ export function roomResponders<T extends { id: string; name: string; hidden?: bo
       return available;
     }
   }
-  const mentioned = mentionedBots(text, available);
+  const mentioned = mentionedBots(text, available, picked);
   if (mentioned.length) return mentioned;
   if (defaultResponder.kind === "everyone") return available;
   if (defaultResponder.kind === "member") {

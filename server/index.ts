@@ -4358,13 +4358,13 @@ async function interruptHeldMember(groupId: string, botId: string): Promise<void
 }
 
 /** Applied at accept, before the message queues behind a busy room, so a stop reaches a member working now. */
-function applyRoomHoldsFromMessage(groupId: string, text: string): void {
+function applyRoomHoldsFromMessage(groupId: string, text: string, mentions?: readonly string[]): void {
   const group = store.group(groupId);
   if (!group || group.dm) return;
   const members = group.memberIds
     .map((id) => store.bot(id))
     .filter((bot): bot is BotRecord => Boolean(bot) && !bot!.hidden);
-  const mentioned = mentionedBots(text, members).map((bot) => bot.id);
+  const mentioned = mentionedBots(text, members, mentions).map((bot) => bot.id);
   const change = applyHoldDirective(group.holds, classifyHoldDirective(text, mentioned), members.map((bot) => bot.id), Date.now());
   if (!change.held.length && !change.released.length) return;
   store.patchGroup(groupId, { holds: change.holds });
@@ -7256,7 +7256,7 @@ function drainQueuedSendsNow() {
     new Promise<void>((resolve, reject) => {
       void startTurn(botId, prompt, {
         threadId, userMessage, excludeMessageIds: excludeIds, unattended, onTurnSettled: resolve, allowRoomTurnElsewhere: !head.peerAsk,
-        trigger: queuedTurnTrigger(head), ...(head.origin ? { origin: head.origin } : {}),
+        trigger: queuedTurnTrigger(head), ...(head.origin ? { origin: head.origin } : {}), ...(head.mentions ? { mentions: head.mentions } : {}),
       }).catch((err) => {
         const why = err instanceof Error ? err.message : String(err);
         const chief = head.peerAsk?.incident ? store.bot(botId) : null;
@@ -7276,7 +7276,7 @@ function drainQueuedSendsNow() {
   );
 }
 
-async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: ReplyTarget, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext, app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] }) {
+async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: ReplyTarget, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext, app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] }, mentions?: string[]) {
   const decision = admit("direct", {}, {
     atCapacity: botAtThreadCapacity(botId, threadId),
     threadBusy: threadBusy(botId, threadId),
@@ -7287,7 +7287,7 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
     const queued = queueSteeredMessage(botId, threadId, text, {
       replyToId: replyTo?.id,
       sendId,
-      dataContext, fromApp: app?.fromApp,
+      dataContext, fromApp: app?.fromApp, mentions,
       reason: decision.reason,
       prompt: (app?.context ?? "") + personPrompt(threadId, sender, promptWithReply(promptWithDataContext(text, dataContext), replyTo, userNameFor(threadId))),
       sender,
@@ -7298,7 +7298,7 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
     });
     return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason: decision.reason };
   }
-  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via, callId, dataContext, app, allowRoomTurnElsewhere: true });
+  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via, callId, dataContext, app, mentions, allowRoomTurnElsewhere: true });
   return { ok: true as const, threadId, message };
 }
 
@@ -7328,7 +7328,7 @@ async function acceptDirectSend(
   input: DirectSendInput,
   guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
 ): Promise<DirectSendReceipt> {
-  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, callId, dataContext, personPresent, app, followUp } = input;
+  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, callId, dataContext, personPresent, app, followUp, mentions } = input;
   const refused = directSendRefusal(botId, threadId);
   if (refused) throw refused;
   return sendSequencer.run(
@@ -7434,16 +7434,16 @@ async function acceptDirectSend(
           store.setTaskAskedAt(botId, threadId, message.at);
           handoffs.steered(threadId, steerTarget, instance?.instanceId, message.id);
           signInSettle.answerInChat(botId, threadId);
-          if (personsOwn) personFirst.wait(threadId, { requeue: (note) => void queueSteeredMessage(current.id, threadId, text, { prompt: note ? `${queuedPrompt}\n\n${note}` : queuedPrompt, rowId: message.id, first: true, queuedAt: message.at, replyToId: replyTo?.id, dataContext, sender, trigger, via, callId }) });
+          if (personsOwn) personFirst.wait(threadId, { requeue: (note) => void queueSteeredMessage(current.id, threadId, text, { prompt: note ? `${queuedPrompt}\n\n${note}` : queuedPrompt, rowId: message.id, first: true, queuedAt: message.at, replyToId: replyTo?.id, dataContext, sender, trigger, via, callId, mentions }) });
           return { ok: true as const, steered: true as const, threadId, message };
         }
         if (!current.busy) {
-          return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app);
+          return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app, mentions);
         }
         const queued = queueSteeredMessage(current.id, threadId, text, {
           replyToId: replyTo?.id,
           sendId,
-          dataContext, fromApp: app?.fromApp,
+          dataContext, fromApp: app?.fromApp, mentions,
           prompt: queuedPrompt,
           sender,
           trigger,
@@ -7455,7 +7455,7 @@ async function acceptDirectSend(
         if (chose === "restart") await restartForPerson(botId, threadId, trigger);
         return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
       }
-      return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app);
+      return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app, mentions);
     },
   );
 }
@@ -7652,7 +7652,7 @@ async function beginTurn(
     sendId?: string;
     via?: "call"; callId?: string;
     relayed?: boolean;
-    dataContext?: DataContext;
+    dataContext?: DataContext; mentions?: string[];
     app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] };
     onDispatchError?: (message: string) => void;
     compactOnly?: boolean;
@@ -8383,7 +8383,7 @@ async function beginTurn(
       // "@Bob" is the teammate Bob (or the writer themselves), never a bot that shares the name.
       const tagged = integrations.agents
         ? mentionedBots(withoutPersonTags(providerText, [...personTagNames(cfg.profile?.name), ...teamMessages.people().flatMap((one) => one.tags)],
-          store.bots.filter((one) => !one.hidden).map((one) => one.name)), sectionPeers)
+          store.bots.filter((one) => !one.hidden).map((one) => one.name)), sectionPeers, opts?.mentions)
         : [];
       const coordinationPrompt = chiefLevel(bot)
         ? chiefOfStaffSystemPrompt(bot.id, store.bots, Boolean(integrations.agents), chiefEscalationsEnabled(cfg))
@@ -10645,7 +10645,7 @@ async function runClaimedGroupMemberTurn(
       replyText,
       reachablePeers(store.bots, bot).filter((peer) => !group.memberIds.includes(peer.id)),
     ); for (const line of placesElsewhere.missed(replyText, store.bots)) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: line, ok: false } });
-    for (const peer of missed) {
+    for (const peer of missed.filter((one, at) => missed.findIndex((other) => other.name === one.name) === at)) {
       store.appendMessage(threadId, {
         role: "bot",
         kind: "activity",
@@ -10848,7 +10848,7 @@ async function runGroupGoalOperation(args: {
 type StartGroupTurnOptions = {
   threadId?: string;
   goalCoordinatorBotId?: string;
-  goalRunId?: string;
+  goalRunId?: string; mentions?: string[];
   via?: "api";
   sender?: ResolvedSender;
   trigger?: UsageTrigger;
@@ -10957,13 +10957,13 @@ function startGroupTurn(
       },
     });
   }
-  let responders = roomResponders(text, members, group.defaultResponder);
+  let responders = roomResponders(text, members, group.defaultResponder, options.mentions);
   if (!group.dm) {
     const addressed = stopWordPlacement(text) === "adjacent" ? undefined : message.id;
     for (const held of responders.filter(isHeld)) noteHeldSkip(group.id, threadId, held, addressed);
     responders = responders.filter((responder) => !isHeld(responder));
   }
-  const explicitlyMentionedLead = roomResponders(text, routableMembers, { kind: "mentions" })[0];
+  const explicitlyMentionedLead = roomResponders(text, routableMembers, { kind: "mentions" }, options.mentions)[0];
   const goalCoordinator = channelMode === "goal"
     ? requestedGoalCoordinator ?? explicitlyMentionedLead ?? selectGroupGoalCoordinator(routableMembers, group.defaultResponder)
     : null;
@@ -10976,7 +10976,7 @@ function startGroupTurn(
   }
   // Auto's responders are a fallback until the decision model answers; the append and the return stay synchronous.
   const autoRoute = autoCandidate && !goalCoordinator && routableMembers.length > 1 &&
-    roomResponders(text, availableMembers, { kind: "mentions" }).length === 0;
+    roomResponders(text, availableMembers, { kind: "mentions" }, options.mentions).length === 0;
 
   if (!responders.length && !goalCoordinator && !autoRoute) {
     const defaultArchivedId = group.defaultResponder.kind === "member" ? group.defaultResponder.botId : undefined;
@@ -11135,7 +11135,7 @@ function drainQueuedChannelSendsNow(): void {
           threadId,
           sender: head.sender,
           trigger: queuedTurnTrigger({ trigger: head.trigger, sender: head.sender }),
-          queuedGroup: items,
+          queuedGroup: items, mentions: items.flatMap((item) => item.mentions ?? []),
         });
       } catch (error) {
         for (const item of items) {
