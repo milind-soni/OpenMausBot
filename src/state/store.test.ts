@@ -971,6 +971,7 @@ describe("notification routing", () => {
       expect(openThread(dispatch, { botId: "bot-1", threadId: "deleted-thread" }, { bots: named, groups: [] }, false)).toBe(false);
       expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
         { type: "switchTask", botId: "bot-1", threadId: "later-chat" },
+        { type: "revealThread", threadId: "deleted-thread" },
         { type: "notice", notice: { kind: "thread-gone", botName: "Scout" } },
       ]);
     });
