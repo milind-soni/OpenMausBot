@@ -22,6 +22,7 @@ const KEY_PREFIXES: RegExp[] = [
   /\bcsk-[A-Za-z0-9]{32,}/g, // cerebras
   /\bLLM\|\d{6,}\|[A-Za-z0-9_-]{16,}/g, // meta model api
   /\bhf_[A-Za-z0-9]{30,}/g, // hugging face
+  /\bpypi-AgE[A-Za-z0-9_-]{82,}/g, // pypi and testpypi api tokens (macaroons)
   /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/g, // github classic
   /\bgithub_pat_[A-Za-z0-9_]{20,}/g, // github fine-grained
   /\bgl(?:pat|dt|rtr?)-[A-Za-z0-9_-]{20,}(?:\.[A-Za-z0-9_-]+)*/g, // gitlab personal, deploy and runner tokens (routable ones carry .-parts)
