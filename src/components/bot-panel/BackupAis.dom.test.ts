@@ -124,6 +124,39 @@ describe("a bot's backup AIs in Simple", () => {
     expect(host.querySelector("[data-backup]")?.textContent).toContain("Unavailable");
   });
 
+  it("offers the bot's own account too, without its own model, and says it shares the usage limit", async () => {
+    fixture.instances.splice(0, 1, engine("claude", "Claude", "claudeAgent", [["claude-sonnet-5", "Claude Sonnet 5"], ["claude-opus-5", "Claude Opus 5"]]));
+    render();
+    click(host.querySelector("[data-panel-action=backup-add]"));
+    await settle();
+    expect(providers()).toEqual(["claude", "codex", "gemini"]);
+    expect(menu()!.querySelector('[data-simple-provider="claude"]')?.textContent).toContain("Same account as the main AI: it shares the usage limit.");
+    expect(menu()!.querySelector('[data-simple-provider="codex"]')?.textContent).not.toContain("Same account");
+    expect(modelRow("Claude Sonnet 5")).toBeUndefined();
+    click(modelRow("Claude Opus 5"));
+    expect(onChange).toHaveBeenCalledWith([{ instanceId: "claude", model: "claude-opus-5" }]);
+  });
+
+  it("allows a second backup on one account, never the same model twice", async () => {
+    render([{ instanceId: "codex", model: "gpt-5.5" }]);
+    click(host.querySelector("[data-panel-action=backup-add]"));
+    await settle();
+    expect(providers()).toEqual(["codex", "gemini"]);
+    const labels = [...menu()!.querySelectorAll("[data-menu-row]")].map((row) => row.getAttribute("aria-label") ?? "");
+    expect(labels.filter((label) => label.startsWith("GPT-5.5") && !label.startsWith("GPT-5.5 mini"))).toEqual([]);
+    click(modelRow("GPT-5.5 mini"));
+    expect(onChange).toHaveBeenCalledWith([{ instanceId: "codex", model: "gpt-5.5" }, { instanceId: "codex", model: "gpt-5.5-mini" }]);
+  });
+
+  it("lists two backups on one account as separate rows and removes the right one", () => {
+    render([{ instanceId: "codex", model: "gpt-5.5" }, { instanceId: "codex", model: "gpt-5.5-mini" }]);
+    const rows = host.querySelectorAll("[data-backup]");
+    expect([...rows].map((row) => row.querySelector("[data-panel-action=backup-change]")?.getAttribute("aria-label")))
+      .toEqual(["Backup 1: GPT-5.5", "Backup 2: GPT-5.5 mini"]);
+    click(rows[1]!.querySelector("[data-panel-action=backup-remove]"));
+    expect(onChange).toHaveBeenCalledWith([{ instanceId: "codex", model: "gpt-5.5" }]);
+  });
+
   it("closes its menu on Escape without letting the key close the panel", async () => {
     render();
     click(host.querySelector("[data-panel-action=backup-add]"));
