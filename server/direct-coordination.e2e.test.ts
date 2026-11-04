@@ -214,25 +214,17 @@ it("coordinates a lead and its specialist from ordinary chat, returns to Clive, 
   expect(turn.system).toContain("only an actual coordinate_bots result proves that teammate participated");
 }), 45_000);
 
-it("announces a settled delegation and its resume in the parent thread", () => fixture(async f => {
+it("shows a settled delegation and its resume in the parent thread, and notifies once, with the answer", () => fixture(async f => {
   const stream = await openSse(`${f.session.info.url}/api/events`);
   try {
     await f.start();
     expect((await f.wait()).status).toBe("settled");
-    // f.wait() resolves through the control CLI poll, independent of the SSE reader: until() proves both settles are stored first.
-    await stream.until(frame => frame.kind === "notify"
-      && frame.notification?.kind === "delegation-settled"
-      && frame.notification.botId === f.chief.id);
-    const settles = () => stream.frames.filter(frame => frame.kind === "notify" && frame.notification?.kind === "delegation-settled");
-    const chiefFrames = settles().filter(frame => frame.notification.botId === f.chief.id);
-    expect(chiefFrames).toHaveLength(1);
-    expect(chiefFrames[0].notification).toMatchObject({
-      threadId: f.chief.activeTaskId,
-      title: "Clive resumed with results",
-      body: "Results in from Engineering lead",
-    });
-    expect(settles().filter(frame => frame.notification.botId === f.lead.id), "bot-to-bot: nothing there needs the person").toEqual([]);
-    expect(settles().some(frame => frame.notification.botId === f.specialist.id)).toBe(false);
+    // f.wait() resolves through the control CLI poll, independent of the SSE reader: until() proves the "done" is stored first.
+    await stream.until(frame => frame.kind === "notify" && frame.notification?.kind === "done" && frame.notification.botId === f.chief.id);
+    // The results coming back to the bot that asked notify nobody: its answer, the one "done", is what the person needs.
+    const notes = stream.frames.filter(frame => frame.kind === "notify").map(frame => frame.notification);
+    expect(notes.map(note => [note.kind, note.botId]), JSON.stringify(notes)).toEqual([["done", f.chief.id]]);
+    expect(notes[0]).toMatchObject({ threadId: f.chief.activeTaskId, title: "Clive finished" });
     const { bots } = await f.api("/api/bots?messages=0");
     const work = bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.openedBy?.botId === f.chief.id);
     expect(work.unread, "no unread mark, on the desktop or the phone's To review, for a teammate's own step").toBeFalsy();

@@ -4039,7 +4039,7 @@ const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoor
         });
         const quiet = turnAnswers(node.threadId, { cardContinuation: true, coordination: node }).quiet;
         const routineRoot = !node.parentId && activeRoutineRunForThread(node.threadId) !== null;
-        if (node.restart !== "rerun" && !quiet && !routineRoot && !node.parentId && asking.length === 0) {
+        if (node.restart !== "rerun" && !quiet && !routineRoot && !node.parentId && asking.length === 0 && !doneNotice.owes(node.threadId)) {
           notify(buildNotification("delegation-settled", bot, node.threadId, serverLine(language, "server.notify.resultsFrom", { who }), { avatarUrl: bot.avatarUrl }));
         }
       if (!node.parentId && !quiet) reviewAnswerThreads.add(node.threadId);
