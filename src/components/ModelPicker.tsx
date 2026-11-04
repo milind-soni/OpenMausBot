@@ -450,7 +450,6 @@ export function ModelPicker({
   const botModelName = botModelInstance
     ? `${botModelInstance.displayName} · ${modelLabel(botModelInstance, profile.modelSelection.model)}`
     : profile.modelSelection.model;
-  // Only a thread on the bot's own model may carry a busy reasoning change to the bot default; otherwise the save would also copy this thread's model to the bot.
   const busyUpdatesBotDefault = Boolean(threadId) && (simpleView ? simpleUpdatesBotDefault : scope === "bot")
     && bot.modelSelection.instanceId === profile.modelSelection.instanceId && bot.modelSelection.model === profile.modelSelection.model;
   const ownModelThreads = threadsOnOwnModel(profile.modelSelection, profile.tasks ?? []).length;
