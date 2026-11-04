@@ -110,6 +110,7 @@ requires_openai_auth=false
   writeFileSync(join(root, "requests.json"), JSON.stringify(captures.map((raw) => JSON.parse(raw)), null, 2));
   for (const result of results) {
     assert.equal(result.serverStatus, "ready");
+    assert.equal(result.turnStartAfterServerReady, true, `the ${result.kind} turn started before the MCP server was ready`);
     assert.equal(result.toolVisibleToFirstExec, true, `the ${result.kind} turn's first exec did not see slow_probe_lookup`);
   }
   console.log(`Evidence: ${root}`);

@@ -291,19 +291,21 @@ const announceMcpStartup = () => {
   const report = (name: string, status: string, error: string | null = null) =>
     out({ jsonrpc: "2.0", method: "mcpServer/startupStatus/updated", params: { threadId: null, name, status, error, failureReason: null } });
   mcpPending = Object.entries(mcpMounts())
-    .filter(([name, fields]) => "command" in fields && name !== process.env.FAKE_CODEX_MCP_FAILED)
+    .filter(([name, fields]) => "command" in fields && fields.enabled !== false && name !== process.env.FAKE_CODEX_MCP_FAILED)
     .map(([name]) => name);
   for (const name of mcpPending) report(name, "starting");
-  const settle = () => {
-    for (const name of mcpPending.splice(0)) {
-      const started = mcpStartup?.[name];
-      if (started?.status === "failed") report(name, "failed", started.error);
-      else report(name, "ready");
-    }
+  const settle = (name: string) => {
+    mcpPending = mcpPending.filter((pending) => pending !== name);
+    const started = mcpStartup?.[name];
+    if (started?.status === "failed") report(name, "failed", started.error);
+    else report(name, "ready");
   };
   const delayMs = Number(process.env.FAKE_CODEX_MCP_READY_MS) || 0;
-  if (delayMs > 0) setTimeout(settle, delayMs);
-  else settle();
+  for (const [index, name] of [...mcpPending].entries()) {
+    const delay = delayMs * (process.env.FAKE_CODEX_MCP_STAGGER === "1" ? index + 1 : 1);
+    if (delay > 0) setTimeout(() => settle(name), delay);
+    else settle(name);
+  }
 };
 const threadReply = (response: unknown) => {
   replyToThread(response);
@@ -458,7 +460,7 @@ process.stdin.on("data", (chunk) => {
       case "initialize": {
         experimentalApi = msg.params?.capabilities?.experimentalApi === true;
         logStartup("initialize");
-        const reply = () => out({ jsonrpc: "2.0", id: msg.id, result: { ok: true } });
+        const reply = () => out({ jsonrpc: "2.0", id: msg.id, result: { ok: true, userAgent: process.env.FAKE_CODEX_USER_AGENT ?? "codex_cli_rs/0.166.0" } });
         if (process.env.FAKE_CODEX_STARTUP_DELAY_MS) setTimeout(reply, Number(process.env.FAKE_CODEX_STARTUP_DELAY_MS));
         else reply();
         break;

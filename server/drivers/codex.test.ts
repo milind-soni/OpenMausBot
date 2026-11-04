@@ -171,13 +171,22 @@ describe("CodexDriver turns (fake app-server)", () => {
 
   it("starts a new thread's turn only once the MCP servers it mounted finished starting", async () => {
     const dump = join(scratch, "mcp-ready.json"); process.env.FAKE_CODEX_DUMP = dump;
-    await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"), FAKE_CODEX_MCP_READY_MS: "400" } });
+    await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"), FAKE_CODEX_MCP_READY_MS: "400", FAKE_CODEX_MCP_STAGGER: "1" } });
     await instance.adapter.sendTurn({ threadId: "mcp-ready", text: "Fixture", integrations: startupMounts });
     await recorder.until((event) => event.type === "turn.completed");
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv).toContain(`mcp_servers.openmausbot_connectors.command=${JSON.stringify(process.execPath)}`);
     expect(seen.mcpReadyAtTurnStart).toBe(true);
     expect(recorder.events.find((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+  });
+
+  it("does not wait for startup notifications on older Codex", async () => {
+    const dump = join(scratch, "mcp-old.json"); process.env.FAKE_CODEX_DUMP = dump;
+    await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"), FAKE_CODEX_USER_AGENT: "codex_cli_rs/0.116.0", FAKE_CODEX_MCP_READY_MS: "600000" } });
+    await instance.adapter.sendTurn({ threadId: "mcp-old", text: "Fixture", integrations: startupMounts });
+    await recorder.until((event) => event.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.mcpReadyAtTurnStart).toBe(false);
   });
 
   it("waits for the MCP servers of a resumed thread too", async () => {

@@ -1,7 +1,7 @@
 import { codexToolSurfaceArgs } from "./codex-tool-surface.ts";
 import { codexShellDisabled, GUEST_CONFINED_CODEX_ARGS } from "./codex-guest.ts";
 import { TEAM_TOOLS_FAILED, teamToolsFailed } from "./team-tools.ts";
-import { mcpStartupTracker } from "./codex-mcp-startup.ts";
+import { enabledMcpMounts, mcpStartupTracker, supportsMcpStartup } from "./codex-mcp-startup.ts";
 import { type McpApprovalMode, mountMcpServer } from "./codex-mcp-mount.ts";
 import { reportUnsupportedCalls, rolloutMark, type RolloutMark } from "./codex-unsupported-calls.ts";
 // The `codex` CLI headless over its app-server JSON-RPC (NDJSON on stdio): completion is
@@ -1397,7 +1397,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       if (attempt === 0 && !announced) emit({ ...base(threadId, turnId), type: "turn.started" });
 
       try {
-        await request("initialize", {
+        const initialized = await request("initialize", {
           clientInfo: { name: "openmausbot", title: "OpenMausBot", version: serverVersion() },
           // Named permission profiles are an experimental app-server field in Codex 0.151.
           capabilities: { experimentalApi: true },
@@ -1585,7 +1585,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             ...(turn.effort ? { effort: turn.effort } : {}),
           });
         };
-        const mcpReady = await mcpStartup.settled([...selectedMcp.keys(), ...directMounts], stopSignal.signal);
+        const waitNames = supportsMcpStartup(initialized?.userAgent) ? enabledMcpMounts([...selectedMcp.keys(), ...directMounts], effectiveConfig, turn.toolScope !== undefined) : [];
+        const mcpReady = await mcpStartup.settled(waitNames, stopSignal.signal);
         if (!mcpReady || stopRequested || state.settled) return releaseSlot();
         try {
           await startTurn();

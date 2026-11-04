@@ -1,8 +1,22 @@
-/** The `mcpServer/startupStatus/updated` states that end a server's startup (codex-cli 0.166.0). */
+/** The `mcpServer/startupStatus/updated` states that end a server's startup. */
 const SETTLED_STATES = new Set(["ready", "failed", "cancelled"]);
 
 /** Codex's own limit for one MCP server's startup (codex-rs `DEFAULT_STARTUP_TIMEOUT`), after which it reports it failed. */
 export const MCP_STARTUP_WAIT_MS = 30_000;
+
+/** Older app servers have no startup notifications. Unknown versions retain the bounded wait. */
+export function supportsMcpStartup(userAgent: unknown): boolean {
+  const match = typeof userAgent === "string" ? userAgent.match(/\/(\d+)\.(\d+)\.(\d+)/) : null;
+  if (!match) return true;
+  return Number(match[1]) > 0 || Number(match[2]) >= 117;
+}
+
+/** Thread-scoped mounts override the process config; otherwise honor disabled effective entries. */
+export function enabledMcpMounts(names: readonly string[], config: unknown, scoped: boolean): string[] {
+  if (scoped) return [...names];
+  const servers = (config as { mcp_servers?: Record<string, { enabled?: boolean }> } | null)?.mcp_servers;
+  return names.filter((name) => servers?.[name]?.enabled !== false);
+}
 
 export type McpStartupTracker = {
   /** Records one `mcpServer/startupStatus/updated` params object. */

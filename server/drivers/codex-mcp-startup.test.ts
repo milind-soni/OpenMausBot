@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { mcpStartupTracker } from "./codex-mcp-startup.ts";
+import { enabledMcpMounts, mcpStartupTracker, supportsMcpStartup } from "./codex-mcp-startup.ts";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -16,6 +16,28 @@ const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 const live = () => new AbortController().signal;
 
 describe("mcpStartupTracker", () => {
+  it("skips unsupported versions and preserves support for newer releases", () => {
+    expect(supportsMcpStartup("codex_cli_rs/0.116.0 (test)")).toBe(false);
+    expect(supportsMcpStartup("codex_cli_rs/0.117.0 (test)")).toBe(true);
+    expect(supportsMcpStartup("codex_cli_rs/1.0.0 (test)")).toBe(true);
+  });
+
+  it("honors disabled effective mounts except when thread selection overrides them", () => {
+    const config = { mcp_servers: { one: { enabled: false }, two: { enabled: true } } };
+    expect(enabledMcpMounts(["one", "two"], config, false)).toEqual(["two"]);
+    expect(enabledMcpMounts(["one", "two"], config, true)).toEqual(["one", "two"]);
+  });
+
+  it("waits for the later of two servers", async () => {
+    const tracker = mcpStartupTracker(new EventEmitter());
+    const wait = tracking(tracker.settled(["first", "second"], live(), 60_000));
+    tracker.record({ name: "first", status: "ready" });
+    await flush();
+    expect(wait.result).toBeUndefined();
+    tracker.record({ name: "second", status: "ready" });
+    await flush();
+    expect(wait.result).toBe(true);
+  });
   it("does not wait when no server was named", async () => {
     await expect(mcpStartupTracker(new EventEmitter()).settled([], live(), 60_000)).resolves.toBe(true);
   });
