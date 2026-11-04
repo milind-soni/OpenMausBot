@@ -3249,6 +3249,7 @@
   "engineSetup.setupTitle": "Set up {name}",
   "engineSetup.terminalSignInCheck": "Installed. Finish signing in to your account in Terminal, then choose Check again.",
   "engineSetup.sameMachine": "Install and sign in on the computer running {app}, as the same user. On a remote connection, that means the machine it runs on, not this device. Then choose Check again. No app restart needed.",
+  "engineSetup.cloudCantInstall": "{name} can’t be installed on your Cloud yet. Choose another AI in the model picker.",
   "engineSetup.pathHint": "Already installed but still not detected? In Settings → Model providers and accounts, expand CLI path and updates and use Set CLI to choose the executable.",
   "engineSetup.checkFailed": "Could not refresh provider status. The previous status is still shown. {reason}",
   "engineSetup.checked": "Provider status refreshed.",

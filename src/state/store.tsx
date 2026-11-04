@@ -467,7 +467,7 @@ export interface InstanceInfo {
   snapshot: {
     state: "available" | "unavailable";
     reason?: string;
-    authenticated?: boolean;
+    authenticated?: boolean; /** The CLI path runs another program, not this engine's CLI. */ notEngineCli?: true;
     chatgptPlan?: boolean;
     /** Ready only through OpenCode's free no-login models: a backup, never "an AI already works". */
     freeFallback?: boolean;

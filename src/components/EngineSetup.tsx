@@ -525,6 +525,10 @@ export function EngineSetup({
   const installCommand = installCommandFor(install);
   const signInCommand = install?.signInCommand;
   const signInOnly = intent === "cloud" && needsSignIn(instance);
+  /** On a Cloud, an engine the app can't install there and that isn't installed: nothing the person can run will. */
+  const cloudCantInstall = cloudHome && !signInOnly && needsCli(instance) && !install?.server && !install?.managed;
+  /** A Cloud's "not installed" reason only says to install it in a terminal or use Set CLI; the card says what to do instead. */
+  const cloudReasonHidden = cloudCantInstall || (cloudHome && !signInOnly && Boolean(install?.server) && instance.snapshot.notEngineCli !== true);
   const deviceSignIn = signInOnly && instance.authentication?.method === "device-code";
   const browserSignIn = signInOnly && instance.authentication?.method === "browser-pkce";
   const pasteSignIn = signInOnly && instance.authentication?.method === "paste-code";
@@ -599,7 +603,7 @@ export function EngineSetup({
         </div>
       </div>
 
-      {instance.snapshot.state === "unavailable" && instance.snapshot.reason && (quiet ? (
+      {instance.snapshot.state === "unavailable" && instance.snapshot.reason && !cloudReasonHidden && (quiet ? (
         <details data-engine-setup-reason className="mt-2 text-[12px] leading-4 text-ink-tertiary">
           <summary className="cursor-pointer select-none hover:text-ink-secondary">{t("engineSetup.details")}</summary>
           <p className="mt-1 whitespace-pre-wrap">{instance.snapshot.reason}</p>
@@ -626,6 +630,11 @@ export function EngineSetup({
         <ServerEngineInstall instance={instance} mode="install" command={installCommand} />
       ) : install.managed ? (
         <ManagedEngineSetup instance={instance} signInOnly={signInOnly} />
+      ) : cloudCantInstall ? (
+        // A Cloud has no terminal: a command to copy, or a path to set, only invites pasting it where it can't run.
+        <p data-cloud-cant-install className="mt-3 rounded-lg bg-inset px-2.5 py-2 text-[12px] leading-relaxed text-ink-secondary">
+          {t("engineSetup.cloudCantInstall", { name: instance.displayName })}
+        </p>
       ) : command ? (
         <CommandRow
           command={command}
@@ -650,13 +659,13 @@ export function EngineSetup({
 
       {(install.command || signInCommand) && !deviceSignIn && !browserSignIn && !pasteSignIn && !install.managed && (
         <div className="mt-3 border-t border-hairline/40 pt-2">
-          <p className="mb-1 text-[12px] leading-relaxed text-ink-secondary">{t("engineSetup.sameMachine")}</p>
-          {needsCli(instance) && <p className="mb-1 text-[12px] leading-relaxed text-ink-secondary">{t("engineSetup.pathHint")}</p>}
+          {!cloudHome && <p className="mb-1 text-[12px] leading-relaxed text-ink-secondary">{t("engineSetup.sameMachine")}</p>}
+          {!cloudHome && needsCli(instance) && <p className="mb-1 text-[12px] leading-relaxed text-ink-secondary">{t("engineSetup.pathHint")}</p>}
           <RefreshEngines key={instance.instanceId} />
         </div>
       )}
 
-      {install.docsUrl && (
+      {install.docsUrl && !cloudCantInstall && (
         <a
           href={install.docsUrl}
           target="_blank"

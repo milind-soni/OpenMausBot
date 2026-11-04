@@ -1588,7 +1588,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       const snapshot = async (): Promise<ProviderSnapshot> => {
         const env = childEnv();
         if (support.snapshot) return support.snapshot(env, config, instanceId);
-        const probe = await new Promise<{ version?: string; reason?: string }>((resolve) => {
+        const probe = await new Promise<{ version?: string; reason?: string; other?: true }>((resolve) => {
           execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout, stderr) => {
             if (err) {
               const failure = err as NodeJS.ErrnoException & { killed?: boolean };
@@ -1605,10 +1605,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             }
             const version = versionFromProbe(stdout, stderr);
             resolve(!version ? { reason: `\`${config.cli}\` returned no version. Check the configured executable with --version, then try again.` }
-              : support.cliVersion && !support.cliVersion.test(version) ? { reason: notThisCli(config.cli, support.displayName) } : { version });
+              : support.cliVersion && !support.cliVersion.test(version) ? { reason: notThisCli(config.cli, support.displayName), other: true } : { version });
           });
         });
-        if (!probe.version) return { state: "unavailable", reason: probe.reason };
+        if (!probe.version) return { state: "unavailable", reason: probe.reason, ...(probe.other ? { notEngineCli: true } : {}) };
         return { state: "available", version: probe.version, authenticated: await support.isAuthenticated(env, config, instanceId) };
       };
 

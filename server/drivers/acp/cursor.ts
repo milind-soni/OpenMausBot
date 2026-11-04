@@ -5,6 +5,7 @@ import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
 import { titleCaseModelId } from "../../contracts.ts";
 import { execCli } from "../../procs.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { CURSOR_STANDALONE } from "./cursor-release.ts";
 import type { DeviceSignIn, DeviceSignInState } from "../device-auth.ts";
 import { discoverAcpModels } from "./custom-model-catalog.ts";
 import type { AcpQuestionRequest } from "./question-requests.ts";
@@ -490,6 +491,8 @@ const support = (run: typeof execCli): AcpSupport => ({
     },
     docsUrl: "https://cursor.com/docs/cli/installation",
     signInCommand: "cursor-agent login",
+    // On Linux, Settings installs Cursor's own pinned build: a Cloud has no terminal for its installer.
+    standalone: CURSOR_STANDALONE,
   },
 
   // Global flags precede `acp`; `--force` is the documented auto-approve switch.

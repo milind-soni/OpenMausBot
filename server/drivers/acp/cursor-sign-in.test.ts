@@ -11,6 +11,11 @@ import type { ProviderInstance } from "../../contracts.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { DeviceAuthController } from "../device-auth.ts";
 import { CURSOR_CLI_VERSION, CURSOR_SIGN_IN, CursorAgentDriver, readCursorStatus } from "./cursor.ts";
+import { CURSOR_STANDALONE } from "./cursor-release.ts";
+import { clientInstall } from "../../contracts.ts";
+import { serverInstallFor } from "../../engine-install.ts";
+import { standaloneAssetFor } from "../../engine-standalone.ts";
+import { STANDALONE_RELEASES } from "../../standalone-releases.ts";
 
 const FAKE_CURSOR = fileURLToPath(new URL("../../testing/fake-cursor-login-cli.ts", import.meta.url));
 const LINK = "https://cursor.com/loginDeepControl?challenge=Jx1fQ3-Vq8kP0Yb_5rT2aWm7nC4dE6gH9iL0oS1uZ2y&uuid=3f2b8c1d-4e5a-4b6c-8d7e-9f0a1b2c3d4e&mode=login&redirectTarget=cli&supportsSelectedTeamLogin=true";
@@ -56,7 +61,8 @@ describe.skipIf(process.platform === "win32")("Cursor's CLI path", () => {
     expect(snapshot.state).toBe("unavailable");
     expect(snapshot).not.toHaveProperty("version");
     expect(snapshot.reason).toContain("is not Cursor's CLI");
-    expect(snapshot.reason).toContain("Reset");
+    // Marked, so the registry can give the path up for Cursor's own CLI once one is installed.
+    expect(snapshot.notEngineCli).toBe(true);
   });
 
   it("is available, signed out until the sign-in, when the path runs Cursor's CLI", async () => {
@@ -72,6 +78,23 @@ describe.skipIf(process.platform === "win32")("Cursor's CLI path", () => {
     const real = join(home, "cursor-agent");
     writeFileSync(real, "#!/bin/sh\necho 2026.10.22-27dcf5f\n", { mode: 0o755 });
     expect(await testCliBinary(real, CursorAgentDriver)).toEqual({ ok: true, version: "2026.10.22-27dcf5f" });
+  });
+});
+
+describe("installing Cursor where there is no terminal", () => {
+  it("offers Cursor's own pinned build from Settings on Linux, with its pins kept on the server", () => {
+    expect(STANDALONE_RELEASES).toContain(CURSOR_STANDALONE);
+    expect(CursorAgentDriver.install?.standalone).toBe(CURSOR_STANDALONE);
+    expect(CURSOR_STANDALONE).toMatchObject({ engine: "cursor-agent", version: "2026.10.22-27dcf5f", hosts: ["downloads.cursor.com"], launcher: true });
+    for (const key of ["linux-x64", "linux-arm64"]) {
+      expect(standaloneAssetFor(CURSOR_STANDALONE, key)).toMatchObject({ archive: "tar.gz", executable: "dist-package/cursor-agent" });
+    }
+    // A Mac or PC has a terminal for Cursor's own installer.
+    for (const key of ["darwin-arm64", "darwin-x64", "win32-x64"]) expect(standaloneAssetFor(CURSOR_STANDALONE, key)).toBeNull();
+    expect(clientInstall(CursorAgentDriver.install)).not.toHaveProperty("standalone");
+    // Without npm, Settings offers exactly that build where this computer has one, and nothing otherwise.
+    const here = standaloneAssetFor(CURSOR_STANDALONE);
+    expect(serverInstallFor(CursorAgentDriver.install, false)).toEqual(here ? { standalone: { version: "2026.10.22-27dcf5f", downloadBytes: here.approxBytes } } : null);
   });
 });
 
