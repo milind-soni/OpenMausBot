@@ -23,6 +23,8 @@ if (args.join(' ') === 'login status') {
     process.stderr.write('Logged in using ChatGPT\\n'); process.exit(0);
   } else if (mode === 'api') {
     process.stderr.write('Logged in using an API key - sk-private-token\\n'); process.exit(0);
+  } else if (mode === 'api-0166') {
+    process.stderr.write('API key configured - sk-private-token\\nAuthentication is checked when you send a request.\\n'); process.exit(0);
   } else if (mode === 'unknown-status') {
     process.stderr.write('Unrecognized login status secret-token\\n'); process.exit(0);
   } else { process.stderr.write('Not logged in\\n'); process.exit(1); }
@@ -217,7 +219,7 @@ describe("Codex server-owned device authentication", () => {
       await expect(controller.signOut()).rejects.toThrow("provider was removed");
     });
 
-    it.each(["api", "unknown-status"])("preserves credentials when the current mode is %s", async (mode) => {
+    it.each(["api", "api-0166", "unknown-status"])("preserves credentials when the current mode is %s", async (mode) => {
       await expect(create(mode).signOut()).rejects.toThrow("did not confirm a ChatGPT sign-in");
       expect(calls().map((call) => call.args)).toEqual([["login", "status"]]);
       expect(calls().map((call) => call.args)).not.toContainEqual(["logout"]);
@@ -244,8 +246,8 @@ describe("Codex server-owned device authentication", () => {
     expect(calls().map((call) => call.args)).toEqual([["login", "status"], ["login", "--device-auth"], ["login", "status"]]);
   });
 
-  it("does not replace another auth method or expose its secret", async () => {
-    await expect(create("api").start()).rejects.toThrow("different sign-in method");
+  it.each(["api", "api-0166"])("does not replace another auth method or expose its secret (%s)", async (mode) => {
+    await expect(create(mode).start()).rejects.toThrow("different sign-in method");
     expect(calls()).toHaveLength(1);
   });
 
