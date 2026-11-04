@@ -8,6 +8,7 @@ import { createSkillsLibraryHost } from "./host/skills-library.ts";
 import { skillExport } from "./skill-export.ts";
 import { installSkill, setSkillEnabled } from "./skills.ts";
 import type { BotRecord, Store } from "./store.ts";
+import { noteTypedSend } from "./typed-sends.ts";
 import { TASK_WORKSPACES_DIR } from "./workspace.ts";
 
 // HOME and the data folder are this test file's own temporary ones (server/testing/setup.ts).
@@ -67,10 +68,27 @@ describe("skills the engine loads by itself", () => {
     expect(host.expandSkillCommand(bot, "main", "/growth-data-expert find churn")).toContain(`Read ${JSON.stringify(shared)}`);
     expect(host.expandSkillCommand(bot, "main", "/bot-notes")).toContain(`Read ${JSON.stringify(own)}`);
     expect(host.expandSkillCommand(bot, "main", "/mine go")).toContain(JSON.stringify(join("workspaces", bot.id, "skills", "mine")).slice(1, -1));
-    const both = host.expandSkillCommand(bot, "main", "find churn with /growth-data-expert, then /mine");
+  });
+
+  it("run mid-message from what a person typed, alongside the bot's own, and stay off when switched off", () => {
+    const { host, bot } = hostFor("claudeAgent");
+    const shared = plant(SHARED, "growth-data-expert");
+    plant(SHARED, "mine-off");
+    installSkill(bot.id, "local", [{ path: "SKILL.md", content: skillMd("mine") }]);
+    setSkillEnabled(bot.id, "mine", true);
+    installSkill(bot.id, "local", [{ path: "SKILL.md", content: skillMd("mine-off") }]);
+    const typed = (text: string) => {
+      const sendId = randomUUID();
+      noteTypedSend("main", sendId, text);
+      return host.expandSkillCommand(bot, "main", text, undefined, [{ sendId, text }]);
+    };
+    const both = typed("find churn with /growth-data-expert, then /mine");
+    expect(both).toContain("ran 2 of your skills with /growth-data-expert, /mine");
     expect(both).toContain(`${JSON.stringify(shared)} for /growth-data-expert`);
     expect(both).toMatch(new RegExp(`workspaces.${bot.id}.skills.mine.SKILL\\.md" for /mine`));
     expect(both).toContain("Request: find churn with /growth-data-expert, then /mine");
+    expect(typed("Skip it, /mine-off")).toBe("Skip it, /mine-off");
+    expect(host.expandSkillCommand(bot, "main", "find churn with /growth-data-expert")).toBe("find churn with /growth-data-expert");
   });
 
   it("stay out of a bot or team package, which carries only the bot's own, library and imported skills", () => {
