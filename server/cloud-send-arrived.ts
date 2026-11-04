@@ -40,6 +40,8 @@ export interface ArrivedDeps {
   webhooks(): Pick<WebhookManager, "list"> | null;
   owner(auth: RequestAuth): CloudOwner | null;
   lineLanguage?: LineLanguage;
+  /** The person hears what stayed on the computer the bots came from (cloud-connections-stayed.ts). */
+  stayed?(language?: string): void;
 }
 
 const arrivedBody = z.object({ v: z.literal(1), computer: z.string().trim().min(1).max(120), webhooks: z.array(z.string().regex(/^[\w-]{1,128}$/u)).max(500),
@@ -66,6 +68,7 @@ export async function arrivedRoute(deps: ArrivedDeps, { req, res, path, method, 
   // Recorded before the lines go: a move cut short here never has a bot say it twice.
   writeFileAtomic(join(deps.dataDir, FILE), JSON.stringify({ computer: body.data.computer, at: kept?.at ?? Date.now(), told: [...told] }), { mode: 0o600 });
   for (const line of telling) deps.store.appendMessage(line.threadId, { role: "bot", kind: "text", text: webhookMovedLine(line.name, body.data.place, deps.lineLanguage?.(owner.person)) });
+  deps.stayed?.(deps.lineLanguage?.(owner.person));
   json(res, 200, { v: 1, told: telling.length });
   return true;
 }

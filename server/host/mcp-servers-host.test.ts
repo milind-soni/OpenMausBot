@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 
 import type { AppConfig } from "../config.ts";
-import { claimedNotice, createMcpServersHost } from "./mcp-servers-host.ts";
+import { claimedNotice, createMcpServersHost, startCheckTimeout } from "./mcp-servers-host.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -115,4 +115,9 @@ it("tests a command server as its bot's turns start it, from that bot's own fold
   expect(host.probeAs({ bot: "paul" })).toEqual({ id: "paul", cwd: data });
   mkdirSync(join(data, "workspaces", "iris"), { recursive: true });
   expect(host.probeAs({ bot: "iris" })).toEqual({ id: "iris", cwd: join(data, "workspaces", "iris") });
+});
+
+it("a package runner's first check waits for its download; any other program's keeps the short wait", () => {
+  for (const command of ["uvx", "npx", "/opt/homebrew/bin/uvx", "npx.cmd"]) expect(startCheckTimeout(command), command).toBe(120_000);
+  for (const command of ["node", "python3", "/usr/local/bin/my-server"]) expect(startCheckTimeout(command), command).toBeUndefined();
 });

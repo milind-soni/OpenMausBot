@@ -34,7 +34,7 @@ export interface HeldSignIn { id: string; label: string; digest: string }
 
 export interface ConnectionsMoved {
   moved: Array<{ id: string; label: string }>;
-  runsHere: Array<{ id: string; label: string; needs?: string }>;
+  runsHere: Array<{ id: string; label: string; needs?: string; off?: true }>;
   kept: Array<{ id: string; label: string }>;
   missing: Array<{ slug: string }>;
   failed: Array<{ id: string; label: string; message: string; final: boolean }>;

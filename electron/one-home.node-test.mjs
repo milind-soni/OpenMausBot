@@ -44,7 +44,7 @@ function world({ cloud = {}, switches = { "routine:r1": true, "routine:r2": fals
           },
           async check() { w.checked++; return { ok: checks.shift() ?? true }; },
           switches: () => switches,
-          snapshot: () => ({ running: w.running ?? null, whole: { result: { notes: [{ kind: "held", connection: "OpenRouter" }], failed: w.failed ?? [] } } }),
+          snapshot: () => ({ running: w.running ?? null, whole: { result: { notes: w.notes ?? [{ kind: "held", connection: "OpenRouter" }], failed: w.failed ?? [] } } }),
         },
         local: {
           async freeze() {
@@ -201,6 +201,17 @@ test("a check that still finds things missing after three passes says so at once
   assert.deepEqual(w.home.view(), { phase: "copy", failing: { error: "Some of this computer's things did not reach My Cloud.", items: [
     { label: "tidy", error: "OpenMausBot on this computer did not answer. Try again in a moment." },
     { label: "Reply to email", error: "This app automation stays on the computer it came from." }] } });
+});
+
+test("a move done while a connector stayed on this computer names it on the done line, with what it needs", async () => {
+  const w = world();
+  w.notes = [{ kind: "stayed", connection: "fetch", needs: "uvx" }, { kind: "stayed", connection: "easy" }, { kind: "held", connection: "OpenRouter" }];
+  await w.home.kick();
+  assert.equal(w.journal.phase, "done");
+  assert.deepEqual(w.home.view().stayed, [{ name: "fetch", needs: "uvx" }, { name: "easy" }]);
+  assert.deepEqual(w.home.view().held, ["OpenRouter"]);
+  w.notes = [];
+  assert.deepEqual(w.home.view().stayed, [{ name: "fetch", needs: "uvx" }, { name: "easy" }], "kept with the move, not read again");
 });
 
 test("a move done without what My Cloud refused for good names it on the done line", async () => {
