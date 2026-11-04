@@ -16,7 +16,7 @@ import { projectMcpServers } from "./claude-project-mcp.ts";
 import { botSettingsFor, withBotSettings } from "./claude-bot-settings.ts";
 import { claudeBilling, claudeCallUsage } from "./claude-billing.ts";
 import { claudeAuthFailure, claudeAuthRecovery } from "./claude-auth-recovery.ts";
-import { CLAUDE_MODEL_ID, claudeModelExtras } from "./claude-model-extras.ts";
+import { CLAUDE_MODEL_ID, STATIC_CLAUDE_MODELS, claudeModelExtras, endpointModelCatalog } from "./claude-model-extras.ts";
 import { claudeToolSearchSetting } from "./claude-tool-search.ts";
 import { claudeElicitations } from "./claude-elicitation.ts";
 import { readCostHistory, recordCostState } from "./claude-cost-history.ts";
@@ -25,7 +25,6 @@ import { ClaudeLoginController } from "./claude-login-auth.ts";
 
 import type {
   DriverCreateInput,
-  ModelCatalog,
   ProviderDriver,
   ProviderInstance,
   ProviderSnapshot,
@@ -275,36 +274,20 @@ export interface ClaudeConfig {
   requireApiKey?: boolean;
 }
 
-export const STATIC_CLAUDE_MODELS: ModelCatalog = {
-  default: "claude-sonnet-5",
-  options: [
-    { id: "claude-fable-5-1", label: "Claude Fable 5.1" },
-    { id: "claude-fable-5", label: "Claude Fable 5" },
-    { id: "claude-opus-5-5", label: "Claude Opus 5.5", contextWindow: 1_000_000 },
-    { id: "claude-opus-5", label: "Claude Opus 5" },
-    { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", contextWindow: 1_000_000 },
-    { id: "claude-sonnet-5", label: "Claude Sonnet 5" },
-    { id: "claude-haiku-5-5", label: "Claude Haiku 5.5", contextWindow: 1_000_000 },
-    { id: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
-  ],
-};
+export { STATIC_CLAUDE_MODELS };
 
 /** Maps an API slug a local host serves to `host::model`, so the turn injects instead of asking
  *  for /login. */
 async function resolveClaudeTurnModel(
   model: string | null | undefined,
   env: Record<string, string | undefined>,
+  endpointModels?: string[],
 ): Promise<string | null | undefined> {
+  if (endpointModels) return model && endpointModels.includes(model) ? model : endpointModels[0];
   if (!model || decodeInjectId(model) || STATIC_CLAUDE_MODELS.options.some((option) => option.id === model)) {
     return model;
   }
   return resolveInjectId(model, await probeLocalInjects(env)) ?? model;
-}
-
-/** A custom endpoint serves only its own models: a saved model it does not list runs on its main one. */
-function endpointTurnModel(model: string | null | undefined, endpointModels: string[] | undefined): string | null | undefined {
-  if (!endpointModels) return model;
-  return model && endpointModels.includes(model) ? model : endpointModels[0];
 }
 
 /** Extra ids from ~/.claude/settings.json's extraModels. Its `model` is Claude Code's last-used
@@ -796,8 +779,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       console.error(`claude (${instanceId}): OMB_CLAUDE_INHERIT_USER_CONFIG=1 — bots inherit this machine's Claude Code MCP servers, skills, hooks and CLAUDE.md on every turn; remove it unless a bot needs a user-scope server`);
     }
     let models = config.managedModels ? { default: config.managedModels[0], options: config.managedModels.map(id => ({ id, label: id })) }
-      : config.endpointModels ? { default: config.endpointModels[0], options: config.endpointModels.map(id => ({ id, label: id })) }
-        : STATIC_CLAUDE_MODELS;
+      : endpointModelCatalog(config.endpointModels) ?? STATIC_CLAUDE_MODELS;
     const orgBlocks = createOrgModelBlocks(() => engineHomes.everyHome(catalogEnv), (blocked) => { models = withOrgBlocks(models, blocked); });
     const refreshModels = async () => {
       if (config.managed || config.endpointModels) return;
@@ -1063,9 +1045,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (cliVersionChecked && claudeCliSupports(cliVersion, "--system-prompt-snapshot")) {
         args.push("--system-prompt-snapshot", "off");
       }
-      const turnModel = config.managed ? turn.model
-        : config.endpointModels ? endpointTurnModel(turn.model, config.endpointModels)
-          : await resolveClaudeTurnModel(turn.model, turnEnvironment);
+      const turnModel = config.managed ? turn.model : await resolveClaudeTurnModel(turn.model, turnEnvironment, config.endpointModels);
       const injected = config.managed || config.endpointModels ? { model: turnModel ?? null, injected: false } : applyClaudeInject({ ...turnEnvironment }, turnModel);
       if (injected.model) args.push("--model", injected.model);
       if (turn.effort) args.push("--effort", turn.effort);

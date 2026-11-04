@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
-import type { BotMovedTo, BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, ServerFrame, GroupThreadUsage, SteerQueueReason, WireBot, WireGroup, WireTask, OptionCardData as WireOptionCard } from "../../shared/wire";
+import type { BotMovedTo, BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, ServerFrame, GroupThreadUsage, SteerQueueReason, WireBot, WireGroup, WireTask, OptionCardData as WireOptionCard } from "../../shared/wire"; import type { InstanceEndpointInfo } from "../../shared/claude-endpoint";
 import { movesThreadToTop } from "../../shared/wire"; import type { DefaultBotFields } from "../../shared/default-bot";
 import { reorderStable } from "../../shared/bot-order";
 import { withOneChief } from "../../shared/bot-owner";
@@ -454,7 +454,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
 
 export type { EngineInstall } from "./engine-install";
 
-export interface InstanceInfo {
+export interface InstanceInfo extends InstanceEndpointInfo {
   instanceId: string;
   driverKind: string;
   displayName: string;
@@ -504,12 +504,6 @@ export interface InstanceInfo {
   cliDefault?: string;
   cliCandidates?: string[];
   claudeAccount?: { configDir: string; signInCommand: string; signInShell: "powershell" | "sh"; isDefault: boolean };
-  /** Where a Claude custom endpoint points and what it serves; its token stays on the server. */
-  claudeEndpoint?: {
-    baseUrl: string; models: string[]; tokenSaved: boolean;
-    opusModel: string; sonnetModel: string; haikuModel: string; smallFastModel: string;
-  };
-  url?: string;
   freeUpSpace?: boolean; replyWaitMinutes?: number;
 }
 

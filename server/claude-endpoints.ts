@@ -5,28 +5,18 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { z } from "zod";
 
+import type { ClaudeEndpointInfo } from "../shared/claude-endpoint.ts";
 import { assertSeparateClaudeAccount } from "./claude-accounts.ts";
 import { DATA_DIR, persistableInstanceConfigs, type AppConfig } from "./config.ts";
 import type { InstanceConfig, InstanceConfigMap } from "./contracts.ts";
 import { CLAUDE_MODEL_ID } from "./drivers/claude-model-extras.ts";
+import { endpointBaseUrl } from "./openai-compat-endpoints.ts";
 
 const displayName = z.string().trim().min(1).max(80).refine((value) => !/\p{Cc}/u.test(value), "Name cannot contain control characters");
 const model = z.string().trim().max(160).regex(CLAUDE_MODEL_ID, "Use the model id the endpoint serves.");
 const optionalModel = z.union([model, z.literal("")]);
 const token = z.string().trim().min(1).max(4096).refine((value) => !/[\p{Cc}\p{Cf}]/u.test(value), "Token cannot contain control characters");
-const baseUrl = z.string().trim().max(2048).refine((value) => endpointUrl(value) !== null, "Enter an http(s) base URL.");
-
-/** A normalized endpoint address: http(s), no credentials, no trailing slash; null when unusable. */
-function endpointUrl(value: string): string | null {
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-    if (url.username || url.password) return null;
-    return value.replace(/\/+$/u, "");
-  } catch {
-    return null;
-  }
-}
+const baseUrl = z.string().trim().max(2048).refine((value) => endpointBaseUrl(value) !== null, "Enter an http(s) base URL.");
 
 export const claudeEndpointSchema = z.object({
   displayName,
@@ -41,7 +31,7 @@ export const claudeEndpointSchema = z.object({
 
 export const claudeEndpointUpdateSchema = z.object({
   displayName: displayName.optional(),
-  /** An empty token keeps the saved one. */
+  /** Omitted keeps the saved token, unless the address changes. */
   token: token.optional(),
   baseUrl: baseUrl.optional(),
   model: model.optional(),
@@ -70,15 +60,7 @@ export function isClaudeEndpoint(entry: InstanceConfig | undefined): boolean {
   return entry?.driver === "claudeAgent" && Array.isArray(rawConfig(entry).endpointModels);
 }
 
-export interface ClaudeEndpointInfo {
-  baseUrl: string;
-  models: string[];
-  tokenSaved: boolean;
-  opusModel: string;
-  sonnetModel: string;
-  haikuModel: string;
-  smallFastModel: string;
-}
+export type { ClaudeEndpointInfo };
 
 /** What the settings UI may know about an endpoint: where it points and which models, never the token. */
 export function claudeEndpointInfo(entry: InstanceConfig): ClaudeEndpointInfo {
@@ -107,7 +89,7 @@ export function withClaudeEndpointInfo(described: unknown, configs: InstanceConf
 }
 
 function endpointEnvironment(url: string, secret: string, fields: EndpointFields): Record<string, string> {
-  const address = endpointUrl(url);
+  const address = endpointBaseUrl(url);
   if (!address) throw Object.assign(new Error("Enter an http(s) base URL."), { status: 400 });
   const environment: Record<string, string> = {
     ANTHROPIC_BASE_URL: address,
@@ -168,10 +150,11 @@ export function updateClaudeEndpoint(cfg: AppConfig, instanceId: string, body: E
   if (!isClaudeEndpoint(entry)) throw Object.assign(new Error("This Claude instance is not a custom endpoint."), { status: 400 });
   const saved = claudeEndpointInfo(entry);
   if (!saved.baseUrl || !saved.models.length) throw Object.assign(new Error("This endpoint is missing its address or model. Remove it and add it again."), { status: 409 });
-  const fields: EndpointFields = {
-    baseUrl: body.baseUrl ?? saved.baseUrl,
-    model: body.model ?? saved.models[0],
-  };
+  const address = body.baseUrl === undefined ? saved.baseUrl : endpointBaseUrl(body.baseUrl);
+  if (!address) throw Object.assign(new Error("Enter an http(s) base URL."), { status: 400 });
+  // A saved token belongs to the address it was entered for.
+  if (body.token === undefined && address !== endpointBaseUrl(saved.baseUrl)) throw Object.assign(new Error("Enter the endpoint's token again for the new address."), { status: 400 });
+  const fields: EndpointFields = { baseUrl: address, model: body.model ?? saved.models[0] };
   if (body.displayName !== undefined) fields.displayName = body.displayName;
   for (const [field, key] of TIERS) {
     const value = body[field] !== undefined ? body[field] : entry.environment?.[key];
@@ -182,7 +165,7 @@ export function updateClaudeEndpoint(cfg: AppConfig, instanceId: string, body: E
   instances[instanceId] = {
     ...entry,
     ...(fields.displayName ? { displayName: fields.displayName } : {}),
-    environment: endpointEnvironment(fields.baseUrl!, secret, fields),
+    environment: endpointEnvironment(address, secret, fields),
     config: { ...rawConfig(entry), endpointModels: endpointModels(fields) },
   };
   return { instances };

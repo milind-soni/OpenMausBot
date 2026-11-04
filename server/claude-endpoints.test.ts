@@ -93,11 +93,10 @@ describe("custom Claude endpoint", () => {
     const updated = updateClaudeEndpoint({ instances }, instanceId, {
       model: "deepseek-reasoner",
       opusModel: "",
-      baseUrl: "https://api.example.test/anthropic",
     });
     const entry = updated.instances[instanceId];
     expect(entry.environment).toMatchObject({
-      ANTHROPIC_BASE_URL: "https://api.example.test/anthropic",
+      ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic",
       ANTHROPIC_AUTH_TOKEN: "sk-fixture-secret",
       ANTHROPIC_MODEL: "deepseek-reasoner",
     });
@@ -107,6 +106,20 @@ describe("custom Claude endpoint", () => {
       .instances[instanceId].environment).toMatchObject({ ANTHROPIC_AUTH_TOKEN: "sk-replaced", ANTHROPIC_API_KEY: "sk-replaced" });
     // Nothing else in the fleet moves.
     expect(updated.instances.claude).toEqual(instances.claude);
+  });
+
+  it("requires the token again when the address changes", () => {
+    const { instanceId, instances } = newClaudeEndpoint(cfg(), BASE);
+    expect(() => updateClaudeEndpoint({ instances }, instanceId, { baseUrl: "https://api.example.test/anthropic" }))
+      .toThrow(/token again for the new address/);
+    const moved = updateClaudeEndpoint({ instances }, instanceId, { baseUrl: "https://api.example.test/anthropic", token: "sk-moved" });
+    expect(moved.instances[instanceId].environment).toMatchObject({
+      ANTHROPIC_BASE_URL: "https://api.example.test/anthropic",
+      ANTHROPIC_AUTH_TOKEN: "sk-moved",
+    });
+    // The saved address, however written, still needs no token.
+    expect(updateClaudeEndpoint({ instances }, instanceId, { baseUrl: BASE.baseUrl }).instances[instanceId].environment)
+      .toMatchObject({ ANTHROPIC_AUTH_TOKEN: "sk-fixture-secret" });
   });
 
   it("rejects a non-endpoint Claude instance, an unknown id and an endpoint with no token", () => {
@@ -158,7 +171,7 @@ describe("Claude endpoint catalog", () => {
     try {
       expect(instance.models).toEqual({
         default: "deepseek-chat",
-        options: [{ id: "deepseek-chat", label: "deepseek-chat" }, { id: "deepseek-reasoner", label: "deepseek-reasoner" }],
+        options: [{ id: "deepseek-chat", label: "deepseek-chat", custom: true }, { id: "deepseek-reasoner", label: "deepseek-reasoner", custom: true }],
       });
     } finally {
       await instance.dispose();
