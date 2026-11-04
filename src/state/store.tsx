@@ -505,7 +505,7 @@ export interface InstanceInfo {
   cliDefault?: string;
   cliCandidates?: string[];
   claudeAccount?: { configDir: string; signInCommand: string; signInShell: "powershell" | "sh"; isDefault: boolean };
-  freeUpSpace?: boolean; replyWaitMinutes?: number;
+  freeUpSpace?: boolean; replyWaitMinutes?: number; modelsUnconfirmed?: true;
 }
 
 export type AppSettingsSection =

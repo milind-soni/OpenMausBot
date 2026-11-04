@@ -10,6 +10,13 @@ export function isCustomOnly(instance: { access?: InstanceInfo["access"] } | und
   return instance?.access === "custom";
 }
 
+/** A signed-in engine whose list it never gave is worth asking: a signed-out one would only refuse. */
+export function modelsAwaitEngine(instance: Pick<InstanceInfo, "modelsUnconfirmed" | "snapshot"> | undefined): boolean {
+  return instance?.modelsUnconfirmed === true
+    && instance.snapshot.state === "available"
+    && instance.snapshot.authenticated !== false;
+}
+
 export type SignInFamily = "claude" | "openai";
 
 export function signInFamily(instance: { driverKind: string; access?: InstanceInfo["access"] } | undefined): SignInFamily | undefined {

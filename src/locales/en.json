@@ -2863,6 +2863,7 @@
   "model.refreshing": "Refreshing {name} models",
   "model.refresh": "Refresh {name} models",
   "model.refreshTitle": "Refresh models",
+  "model.unconfirmed": "{name} hasn't listed its models yet. These may be out of date.",
   "model.localModels": "Local models",
   "model.localHint": "Run this agent with a model already on your machine.",
   "model.apiKeyHint": "Runs on your API key. The provider bills you for what it uses.",
