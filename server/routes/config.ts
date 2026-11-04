@@ -103,11 +103,6 @@ export interface ConfigRouteDeps {
   postiz?: Pick<Postiz, "configCheck" | "configSaved">;
 }
 
-/**
- * Creates configuration and key management HTTP routes.
- * @param deps Injected dependencies for configuration management.
- * @returns Configured route handler function.
- */
 export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
   const {
     store, cfg, registry, sessions, browserCleanup, browserLive, browserRuntime, usedBrowserSessions, decider,
