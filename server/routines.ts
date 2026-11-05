@@ -615,12 +615,7 @@ export class RoutineManager {
         updatedAt: Math.max(now, routine.updatedAt + 1),
       });
       if (patch.enabled !== undefined) delete routine.heldFor;
-      if (!clean.continuity) delete routine.continuity;
-      if (!clean.modelSelection) delete routine.modelSelection;
-      if (clean.overlap !== "queue") delete routine.overlap;
-      if (!clean.runOnStartup) delete routine.runOnStartup;
-      if (!clean.access) delete routine.access;
-      if (!clean.deliver) delete routine.deliver;
+      for (const key of ["continuity", "modelSelection", "overlap", "runOnStartup", "access", "deliver"] as const) if (!clean[key]) delete routine[key];
       if (!clean.checks) for (const key of ["checks", "checkedAt", "checkTrouble", "wakeAt"] as const) delete routine[key];
       if (Object.hasOwn(patch, "timeoutMinutes") && patch.timeoutMinutes == null) {
         delete routine.timeoutMinutes;

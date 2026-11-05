@@ -39,6 +39,14 @@ describe("a routine's own model", () => {
     expect(new RoutineManager(options).listRoutines()[0]).not.toHaveProperty("modelSelection");
   });
 
+  it("refuses a model on a limit-reset routine, which stays on the model of the conversation it continues", () => {
+    const { routines } = manager();
+    const schedule = { type: "limit_reset" as const, engine: "claude", repeat: "once" as const };
+    expect(() => routines.create({ name: "Continue", prompt: "Carry on", botId: "maus-1", schedule, modelSelection: HAIKU })).toThrow("continues its conversation");
+    const routine = routines.create({ name: "Continue", prompt: "Carry on", botId: "maus-1", schedule });
+    expect(() => routines.update(routine.id, { modelSelection: HAIKU })).toThrow("continues its conversation");
+  });
+
   it("refuses a model with no engine or model id, with both an effort and a variant, or on a room goal", () => {
     const { routines } = manager();
     const create = (modelSelection: unknown, target: "bot" | "room-goal" = "bot") =>

@@ -3,7 +3,18 @@ import { runsOnce } from "../shared/limit-reset.ts";
 import { cleanAttachments, cleanTimeoutMinutes } from "./routine-attachments.ts";
 import { loadChecks, loadModelSelection } from "./routine-load.ts";
 import { cleanSchedule } from "./routine-schedules.ts";
+import type { ModelSelection } from "../shared/wire.ts";
 import type { Routine, RoutineInput } from "./routines.ts";
+
+/** Checks a requested routine model the way a bot's is checked, and leaves the checked form in the body. */
+export function routineModelRefusal(body: unknown, check: (raw: unknown) => { ok: true; selection: ModelSelection } | { ok: false; status: number; error: string }): { status: number; error: string } | null {
+  const raw = body && typeof body === "object" ? (body as { modelSelection?: unknown }).modelSelection : undefined;
+  if (raw == null) return null;
+  const checked = check(raw);
+  if (!checked.ok) return checked;
+  (body as { modelSelection: ModelSelection }).modelSelection = checked.selection;
+  return null;
+}
 
 export function sanitizeInput(input: RoutineInput, after: number): Omit<Routine, "id" | "createdAt" | "updatedAt" | "nextRunAt"> {
   const name = String(input.name ?? "").trim().slice(0, 80);
@@ -39,6 +50,7 @@ export function sanitizeInput(input: RoutineInput, after: number): Omit<Routine,
   if (input.modelSelection != null && !modelSelection) throw new Error("Choose a model: an engine, a model id, and an effort level or a variant, not both");
   if (modelSelection && target === "room-goal") throw new Error("Room goals run on their bots' own models");
   const schedule = cleanSchedule(input.schedule, after);
+  if (modelSelection && schedule.type === "limit_reset") throw new Error("A limit-reset routine continues its conversation on that conversation's model");
   const asked = Array.isArray(input.checks) && input.checks.length === 0 ? null : input.checks;
   const checks = asked == null ? undefined : loadChecks(asked);
   if (asked != null && (!checks || checks.length !== new Set(asked).size)) throw new Error("Choose checks from calendar, mail and runs");

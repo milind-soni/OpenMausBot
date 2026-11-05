@@ -425,7 +425,7 @@ import { claudeUserSkillsEnabled, settingsTurnFields } from "./turn-settings.ts"
 import { addHeldSecretScrubber, redactSecretsInText, scrubHeldSecrets } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
 import { vpsConfigForBot, vpsSshAliasForBot } from "./vps-hosts.ts";
-import { ROUTINE_RESTARTED, RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts"; import { routineRunsFor } from "./routine-run-window.ts"; import { batchSaves } from "./save-batch.ts";
+import { ROUTINE_RESTARTED, RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts"; import { routineModelRefusal } from "./routine-input.ts"; import { routineRunsFor } from "./routine-run-window.ts"; import { batchSaves } from "./save-batch.ts";
 import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
 import { BROWSER_UPLOAD_TOOL, browserRuntimeEnv } from "./browser-runtime.ts";
 import { BrowserUploadRefusal, uploadableFiles } from "./browser-upload.ts";
@@ -2645,15 +2645,6 @@ function retryComputerEngineMove(): Promise<void> {
     .catch((error) => console.warn(`[engines] moving bots off the removed Computer engine failed: ${error instanceof Error ? error.message : String(error)}`))
     .finally(() => { computerEngineMoveRunning = null; });
   return computerEngineMoveRunning;
-}
-
-function routineModelRefusal(body: unknown): { status: number; error: string } | null {
-  const raw = body && typeof body === "object" ? (body as { modelSelection?: unknown }).modelSelection : undefined;
-  if (raw == null) return null;
-  const checked = checkedModelSelection(raw);
-  if (!checked.ok) return checked;
-  (body as { modelSelection: ModelSelection }).modelSelection = checked.selection;
-  return null;
 }
 
 function checkedModelSelection(
@@ -8948,8 +8939,7 @@ routines = new RoutineManager({
     return groupIsWorking(group) || coordinator.busy ? "busy" : "ready";
   },
   createTask: (botId, title, run) => {
-    const model = run && routines?.listRoutines().find((routine) => routine.id === run.routineId)?.modelSelection;
-    const task = store.createTask(botId, title, false, undefined, undefined, undefined, model || undefined);
+    const task = store.createTask(botId, title, false, undefined, undefined, undefined, (run && routines?.listRoutines().find((routine) => routine.id === run.routineId)?.modelSelection) || undefined);
     // On a Cloud home the routine's writer opens a run's conversation; a webhook run is the owner's, but its payload never reaches the lent Mac.
     if (task && CLOUD_HOME && run) {
       threadStarters.set(task.threadId, run.triggerSource === "webhook" ? CLOUD_OWNER_KEY! : routineOpener(run.routineId));
@@ -8958,9 +8948,8 @@ routines = new RoutineManager({
   },
   joinConversation: (run) => {
     if (run.eventSource === "wait") return waitRunChat(run, directChatOf, Boolean(CLOUD_HOME));
-    const routine = routines?.listRoutines().find((each) => each.id === run.routineId);
-    // A routine with its own model opens its own thread: a joined conversation keeps the conversation's model.
-    if (routine?.schedule.type !== "limit_reset" || routine.modelSelection || run.target !== "bot") return null;
+    const continues = routines?.listRoutines().some((routine) => routine.id === run.routineId && routine.schedule.type === "limit_reset");
+    if (!continues || run.target !== "bot") return null;
     const source = routineSourceOwner(run);
     if (!source || source.group || source.bot.id !== run.botId) return null;
     return source.threadId;
@@ -14874,14 +14863,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     const routineResultsRefusal = (body: unknown): string | null =>
       body && typeof body === "object" && typeof (body as { resultsThreadId?: unknown }).resultsThreadId === "string"
         ? cloudThreadRefusal(auth, (body as { resultsThreadId: string }).resultsThreadId) : null;
+    const routineBodyRefusal = (body: unknown): { status: number; error: string } | null => {
+      const hidden = hiddenRoutineTarget(body, visible), notYours = routineResultsRefusal(body);
+      return routineModelRefusal(body, checkedModelSelection) ?? (hidden ? { status: 404, error: hidden } : notYours ? { status: 403, error: notYours } : null);
+    };
     if (path === "/api/routines" && method === "POST") {
       const body = await readBody(req);
-      const model = routineModelRefusal(body);
-      if (model) return json(res, model.status, { error: model.error });
-      const hidden = hiddenRoutineTarget(body, visible);
-      if (hidden) return json(res, 404, { error: hidden });
-      const notYours = routineResultsRefusal(body);
-      if (notYours) return json(res, 403, { error: notYours });
+      const refused = routineBodyRefusal(body); if (refused) return json(res, refused.status, { error: refused.error });
       const writer = auth.kind === "session" ? actorKey(auth) : CLOUD_NOBODY_KEY;
       const routine = withRoutineWriter(writer, () => routines!.create(body));
       if (cloudRoutineAuthors && cloudOwnerSession(auth)) cloudRoutineAuthors.record(routine.id, routine);
@@ -14901,12 +14889,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     routineMatch = path.match(/^\/api\/routines\/([\w-]+)$/);
     if (routineMatch && method === "PATCH") {
       const body = await readBody(req);
-      const model = routineModelRefusal(body);
-      if (model) return json(res, model.status, { error: model.error });
-      const hidden = hiddenRoutineTarget(body, visible);
-      if (hidden) return json(res, 404, { error: hidden });
-      const notYours = routineResultsRefusal(body);
-      if (notYours) return json(res, 403, { error: notYours });
+      const refused = routineBodyRefusal(body); if (refused) return json(res, refused.status, { error: refused.error });
       const authors = cloudRoutineAuthors ?? phones.routineAuthors;
       const before = authors ? routines!.listRoutines().find((candidate) => candidate.id === routineMatch![1]) : undefined;
       const wasOwners = Boolean(before && authors?.authored(before.id, before));
