@@ -3,7 +3,7 @@ import { t } from "@/lib/i18n";
 import { threadApprovalModes, type Bot, type InstanceInfo } from "@/state/store";
 import type { BotUpdatePatch } from "@/state/bot-patch-queue";
 import { approvalModeFor, supportsApprovalMode, type ApprovalMode } from "../../shared/approval-mode";
-import { sameAccess, type BotAccess, type BotAccessLevel, type GrantedLevel } from "../../shared/bot-access";
+import { atLeast, sameAccess, type BotAccess, type BotAccessLevel, type GrantedLevel } from "../../shared/bot-access";
 import { botOwner } from "../../shared/bot-owner";
 import { accessOfBot, withPerson } from "@/components/bot-access/access";
 import type { EffortLevel, ModelSelection } from "../../shared/wire";
@@ -75,8 +75,11 @@ export function planAccess(bot: Bot, change: Extract<TeamChange, { kind: "access
   if (bot.defaultBot?.person) return { bot, status: "skip", reason: t("teamSettings.skip.ownMausBot") };
   if (bot.yourAccess !== "edit") return { bot, status: "skip", reason: t("teamSettings.skip.cantShare") };
   const before = accessOfBot(bot);
-  let access: BotAccess = change.everyone ? { everyone: change.everyone, people: before.people } : before;
-  if (change.person && change.person.email !== botOwner(bot)) access = withPerson(access, change.person.email, change.person.level);
+  let access: BotAccess = change.everyone ? { ...before, everyone: change.everyone } : before;
+  const person = change.person;
+  // Adding never lowers someone who can already do more.
+  const keep = !person || person.email === botOwner(bot) || (person.level && atLeast(before.people[person.email], person.level));
+  if (person && !keep) access = { ...access, ...withPerson(access, person.email, person.level) };
   return sameAccess(before, access) ? { bot, status: "unchanged" } : { bot, status: "apply", access };
 }
 
