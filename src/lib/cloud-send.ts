@@ -1,6 +1,6 @@
 // What either page says about the one-time move to My Cloud (electron/one-home.mjs), and what arrived, in words.
 import type { CloudSendCounts } from "../../electron/cloud-send.mjs";
-import type { OneHomeCounts, OneHomeNotCarried, OneHomeView } from "../../electron/one-home.mjs";
+import type { OneHomeCounts, OneHomeNotCarried, OneHomeStayed, OneHomeView } from "../../electron/one-home.mjs";
 import type { TeamMoveView } from "../../electron/team-move.mjs";
 import type { LocaleKey } from "@/locales";
 import { activeLocale, t } from "@/lib/i18n";
@@ -54,6 +54,10 @@ export function moveQuietUntil(move: OneHomeView | null | undefined): number {
 
 /** What a move could not carry, one line each: its name, then why. */
 const notCarried = (items: OneHomeNotCarried[] | undefined) => (items ?? []).map((item) => `${item.label}: ${item.error}`);
+/** What stayed on this computer because it only works here, one line each. */
+const stayedHere = (items: OneHomeStayed[] | undefined) => (items ?? []).map((item) => (item.needs
+  ? t("cloudSend.move.stayedNeeds", { name: item.name, program: item.needs })
+  : t("cloudSend.move.stayedHere", { name: item.name })));
 
 /** The one-time move's line on either page: on its way (with progress, or who it waits for), almost done, failing for a
  * day (with Try again), what arrived (on My Cloud's page, once), coming home, where the bots came home instead, or this
@@ -64,8 +68,8 @@ export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "s
   if (move.phase === "done") {
     if (page !== "cloud") return null;
     const list = move.counts ? arrivedList(move.counts) : [];
-    const text = move.left?.length ? t("cloudSend.move.doneLeft") : list.length ? t("cloudSend.move.done", { list: listOf(list) }) : t("cloudSend.move.doneAll");
-    return { kind: "done", text, extra: [...notCarried(move.left), ...move.held.map((key) => t("cloudSend.result.held", { key }))], ...(move.phone ? { phone: true as const } : {}) };
+    const text = move.left?.length || move.stayed?.length ? t("cloudSend.move.doneLeft") : list.length ? t("cloudSend.move.done", { list: listOf(list) }) : t("cloudSend.move.doneAll");
+    return { kind: "done", text, extra: [...notCarried(move.left), ...stayedHere(move.stayed), ...move.held.map((key) => t("cloudSend.result.held", { key }))], ...(move.phone ? { phone: true as const } : {}) };
   }
   if (move.phase === "keeping") return { kind: "sending", text: t(move.updating ? "cloudSend.move.keepingUpdating" : "cloudSend.move.keeping"), extra: [] };
   if (move.phase === "home-again" || move.phase === "back") {
@@ -104,7 +108,7 @@ export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "s
  * of it here. */
 function ownMoveLine(move: OneHomeView, place: string, page: "local" | "cloud"): ReturnType<typeof moveLine> {
   // What that server refused for good is said there, where the window opens once the move is done.
-  if (move.phase === "done" && page === "cloud" && move.left?.length) return { kind: "done", text: t("cloudSend.move.doneLeft"), extra: notCarried(move.left), place };
+  if (move.phase === "done" && page === "cloud" && (move.left?.length || move.stayed?.length)) return { kind: "done", text: t("cloudSend.move.doneLeft"), extra: [...notCarried(move.left), ...stayedHere(move.stayed)], place };
   if (page !== "local" || !["copy", "wait", "finishing"].includes(move.phase)) return null;
   const line = (kind: "sending" | "failed", text: string, more: { retry?: true; reason?: string; extra?: string[] } = {}) => ({ kind, text, extra: [], place, ...more });
   const failing = "failing" in move ? move.failing : undefined;

@@ -1,5 +1,6 @@
 // The config pins one deliberately unknown driver, so the suite is deterministic with or without agent CLIs installed.
 import { HIGHLEVEL_TOOLS } from "./highlevel/tools.js";
+import { EMAIL_TOOLS } from "./email/tools.ts";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
@@ -34,14 +35,15 @@ import {
   phoneSecretAAD,
   type PhoneSecretContext,
 } from "./phone-secret.ts";
+import { workerPort } from "./testing/worker-port.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
 const FAKE_CLAUDE_CLI = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
 const FAKE_MCP_SERVER = join(SERVER_DIR, "testing", "fake-mcp-server.ts");
-const PORT = 18800 + Math.floor(Math.random() * 10_000);
+const PORT = workerPort(18800, 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
-const WEBHOOK_PORT = 39000 + Math.floor(Math.random() * 10_000);
+const WEBHOOK_PORT = workerPort(39000, 10_000);
 const WEBHOOK_BASE = `http://127.0.0.1:${WEBHOOK_PORT}`;
 const TEST_CAPABILITY_KEY = "index-fixture-internal-capability";
 
@@ -11824,7 +11826,7 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("turns a bot's own skill on, off or deletes it only after the person approves its card", async () => {
+  it("turns a bot's own skill on, off or deletes it at once, with a receipt the person can undo", async () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {
       expect((await api("PATCH", `/api/bots/${bot.id}`, {
@@ -11841,50 +11843,49 @@ describe("harness HTTP API", () => {
         return messages.filter((message: any) => message.card?.skillRequest?.name === "switch-me" && message.card.skillRequest.action === action).at(-1).card;
       };
       const skill = async () => (await api("GET", `/api/bots/${bot.id}/skills`)).body.skills.find((entry: { name: string }) => entry.name === "switch-me");
-      const respond = (body: Record<string, unknown>) => api("POST", `/api/threads/${bot.threadId}/respond`, body);
-      const stage = async (action: string) => {
+      const skillText = async () => (await api("GET", `/api/bots/${bot.id}/skills/switch-me`)).body.text;
+      const undo = (requestId: string) => api("POST", `/api/threads/${bot.threadId}/undo`, { requestId });
+      const skillMd = "---\nname: switch-me\ndescription: Keeps notes.\n---\n\n# Switch me\n";
+      const create = async () => expect((await post({ action: "create", source: "conversation", skill_md: skillMd })).status).toBe(201);
+      const change = async (action: string, title: string) => {
         const response = await post({ action, skill_name: "switch-me" });
         expect(response.status).toBe(201);
-        expect(await response.json()).toMatchObject({ state: "pending", name: "switch-me", action });
-        return latestCard(action);
+        expect(await response.json()).toMatchObject({ state: "applied", name: "switch-me", action });
+        const receipt = await latestCard(action);
+        expect(receipt).toMatchObject({ answered: "allow", autoApplied: true, options: [], title });
+        return receipt;
       };
 
-      expect((await post({
-        action: "create",
-        source: "conversation",
-        skill_md: "---\nname: switch-me\ndescription: Keeps notes.\n---\n\n# Switch me\n",
-      })).status).toBe(201);
+      await create();
       expect(await skill()).toMatchObject({ enabled: true });
 
-      // Even with Full Access, turning a skill off waits for the card.
-      const off = await stage("disable");
-      expect(off).toMatchObject({ title: "Turn off skill \"switch-me\"?", options: ["Turn off", "Deny"] });
-      expect(off.answered).toBeUndefined();
-      expect(off.skillRequest.preview).toContain("# Switch me");
-      expect(await skill()).toMatchObject({ enabled: true });
-      expect((await respond({ requestId: off.requestId, behavior: "allow", reviewedSha256: "0".repeat(64) })).status).toBe(409);
-      expect(await skill()).toMatchObject({ enabled: true });
-      expect((await respond({ requestId: off.requestId, behavior: "allow", reviewedSha256: off.skillRequest.sha256 })).status).toBe(200);
+      const off = await change("disable", "Skill \"switch-me\" turned off");
       expect(await skill()).toMatchObject({ enabled: false });
-      expect(await latestCard("disable")).toMatchObject({ answered: "allow", title: "Skill \"switch-me\" turned off" });
       expect((await post({ action: "disable", skill_name: "switch-me" })).status).toBe(422);
-
-      // Saying no changes nothing.
-      const on = await stage("enable");
-      expect((await respond({ requestId: on.requestId, behavior: "deny" })).status).toBe(200);
-      expect(await skill()).toMatchObject({ enabled: false });
-      expect(await latestCard("enable")).toMatchObject({ answered: "deny" });
-      const onAgain = await stage("enable");
-      expect((await respond({ requestId: onAgain.requestId, behavior: "allow", reviewedSha256: onAgain.skillRequest.sha256 })).status).toBe(200);
+      expect((await undo(off.requestId)).status).toBe(200);
       expect(await skill()).toMatchObject({ enabled: true });
+      expect(await latestCard("disable")).toMatchObject({ undone: true });
 
-      const gone = await stage("delete");
-      expect(gone).toMatchObject({ title: "Delete skill \"switch-me\"?", options: ["Delete", "Deny"] });
-      expect(await skill()).toBeDefined();
-      expect((await respond({ requestId: gone.requestId, behavior: "allow", reviewedSha256: gone.skillRequest.sha256 })).status).toBe(200);
+      const offAgain = await change("disable", "Skill \"switch-me\" turned off");
+      const on = await change("enable", "Skill \"switch-me\" turned on");
+      expect(await skill()).toMatchObject({ enabled: true });
+      expect((await undo(offAgain.requestId)).status, "the skill is on again since, so turning it back on is stale").toBe(409);
+      expect((await undo(on.requestId)).status).toBe(200);
+      expect(await skill()).toMatchObject({ enabled: false });
+
+      const gone = await change("delete", "Skill \"switch-me\" deleted");
       expect(await skill()).toBeUndefined();
+      expect(gone.skillRequest.previous).toMatchObject({ preview: skillMd, enabled: false });
+      expect((await undo(gone.requestId)).status).toBe(200);
+      expect(await skill(), "a skill that was off comes back off").toMatchObject({ enabled: false });
+      expect(await skillText()).toBe(skillMd);
 
-      const missing = await post({ action: "enable", skill_name: "switch-me" });
+      expect((await post({ action: "enable", skill_name: "switch-me" })).status).toBe(201);
+      const goneAgain = await change("delete", "Skill \"switch-me\" deleted");
+      await create();
+      expect((await undo(goneAgain.requestId)).status, "a skill of that name exists again").toBe(409);
+
+      const missing = await post({ action: "enable", skill_name: "not-there" });
       expect(missing.status).toBe(422);
       expect(((await missing.json()) as { error: string }).error).toContain("no skill named");
       expect((await post({ action: "delete" })).status).toBe(400);
@@ -12628,6 +12629,8 @@ describe("harness HTTP API", () => {
         slack: [{ name: "SLACK_POST_MESSAGE", description: "a".repeat(240) }],
         // HighLevel's tools are listed whenever its relay is configured, so grants can be set before connecting.
         highlevel: HIGHLEVEL_TOOLS.map(({ name, description }) => ({ name, description })),
+        // So are email's, wherever a mailbox can be connected here.
+        email: EMAIL_TOOLS.map(({ name, description }) => ({ name, description })),
       },
     });
   });

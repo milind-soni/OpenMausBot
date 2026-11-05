@@ -6,6 +6,18 @@ beforeEach(() => { setLocale("en"); });
 afterEach(() => { setLocale("en"); });
 
 describe("the one-time move's line", () => {
+  it("never says everything is here when a connector stayed on this computer, and says why", () => {
+    const done = { phase: "done" as const, phone: false, held: [], counts: { bots: 13, skills: 0, logins: 0, onePassword: false, chats: 0, routines: 0 } };
+    expect(moveLine(done, "cloud")?.text).toContain("Everything from this computer is here");
+    const line = moveLine({ ...done, stayed: [{ name: "fetch", needs: "uvx" }, { name: "easy" }] }, "cloud");
+    expect(line).toMatchObject({ kind: "done", text: "Everything else from this computer is here. These stayed on it:" });
+    expect(line?.extra).toEqual([
+      "fetch: it needs uvx, which isn't here, so bots here can't use it.",
+      "easy: it only works on that computer, so bots here can't use it.",
+    ]);
+    expect(moveLine({ ...done, place: "Garage server", stayed: [{ name: "easy" }] }, "cloud")?.extra).toEqual(["easy: it only works on that computer, so bots here can't use it."]);
+  });
+
   it("says where the move is on whichever page is open, and who it waits for", () => {
     expect(moveLine({ phase: "copy" }, "local")).toMatchObject({ kind: "sending", text: "Moving your bots to My Cloud…" });
     expect(moveLine({ phase: "copy", chats: { done: 34, total: 120 } }, "local")?.text).toBe("Moving your bots to My Cloud… 34 of 120 chats");

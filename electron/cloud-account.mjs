@@ -11,8 +11,8 @@ export const STAGING_CLOUD_ORIGIN = "https://omb-cloud-staging.fly.dev";
  * entry, Files' state, the Cloud's chosen name): staging never reads or writes production's. */
 export function cloudTarget(env = process.env) {
   return env?.OMB_CLOUD_STAGING === "1"
-    ? { origin: STAGING_CLOUD_ORIGIN, staging: true, file: "cloud-account-staging.bin", environments: "environments-staging.json", sync: "cloud-sync-staging", look: "cloud-home-look-staging.json" }
-    : { origin: CLOUD_ORIGIN, staging: false, file: "cloud-account.bin", environments: "environments.json", sync: "cloud-sync", look: "cloud-home-look.json" };
+    ? { origin: STAGING_CLOUD_ORIGIN, staging: true, file: "cloud-account-staging.bin", saved: "cloud-accounts-staging.bin", places: "account-places-staging.json", environments: "environments-staging.json", sync: "cloud-sync-staging", look: "cloud-home-look-staging.json" }
+    : { origin: CLOUD_ORIGIN, staging: false, file: "cloud-account.bin", saved: "cloud-accounts.bin", places: "account-places.json", environments: "environments.json", sync: "cloud-sync", look: "cloud-home-look.json" };
 }
 const TOKEN = /^omc_[A-Za-z0-9_-]{43}$/;
 const CODE = /^[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/;
@@ -144,7 +144,10 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     if (!closed) { timer = setTimer(() => { timer = null; void work().catch(() => {}); }, Math.max(1, delay)); timer?.unref?.(); }
   };
   const reset = () => { generation++; stopTimer(); controller.abort(); controller = new AbortController(); pending = null; emailed = null; verifiedUntil = 0; failures = 0; return generation; };
-  const current = stamp => !closed && generation === stamp;
+  // `quiet`: another account is taking over (quiesce to reload): this sign-in's grant is still in memory, and nothing may ask for
+  // it or write it over the one taking its place, whoever asks (a window coming to the front, Settings' Refresh).
+  let quiet = false;
+  const current = stamp => !closed && !quiet && generation === stamp;
   const versionHeader = text(appVersion, 40) && /^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/.test(appVersion) ? { "x-openmausbot-version": appVersion } : {};
   async function request(route, { method = "GET", body, token, signal = controller.signal, path = `/api/cloud/desktop/${route}`, timeoutMs = 20_000 } = {}) {
     const response = await fetcher(`${origin}${path}`, {
@@ -924,6 +927,19 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       const result = await request(null, { method: "POST", path: "/api/updates-consent", body: { status, receipt }, signal: AbortSignal.timeout(10_000) });
       if (result?.ok !== true) throw new Error("Invalid Cloud consent response.");
     },
+    /** Another account takes over: nothing more is asked or written for this sign-in. */
+    quiesce() { quiet = true; reset(); },
+    /** Reads the sign-in saved in `store` afresh: nothing of the one before stays. Told once, when the Admin has answered. */
+    reload() {
+      quiet = false;
+      reset();
+      grant = null; issued = null; cleanup = null; cleanupNeeded = false; plan = null; savedHint = null; opened = null; adding = null; renewalCloud = null; offerCache = null; waking = false;
+      confirmations.clear();
+      value = { status: "signed-out", message: "restoring" };
+      return start();
+    },
+    /** Ends a sign-in that waits on this device, at the Admin. */
+    revokeSaved: revoke,
     close() { closed = true; reset(); },
   };
 }

@@ -44,6 +44,8 @@ export function installOneHome(deps: Omit<SendDeps, "local" | "move" | "moveSess
   other?(): null | { view(): unknown; seen(): unknown; retry(): Promise<unknown>; active(): boolean };
 }): ReturnType<typeof installCloudSend> & {
   keep: { state(): KeepHereState; set(on: boolean): Promise<void> };
+  /** Why the account signed in can't be left now, else null. */
+  holding(): "moving" | null;
   kick(): Promise<void>;
   away(): boolean;
   view(): OneHomeView | null;

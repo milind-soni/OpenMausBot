@@ -20,6 +20,8 @@ export const BROWSER_BYTES = 400 * MB;
 /** A new engine's share is held back this long while it starts and grows; it is measured once it has run this long. */
 const RESERVE_MS = 90_000, SETTLED_MS = 30_000;
 const TICK_MS = 2_000, RELIEF_COOLDOWN_MS = 15_000, NOTICE_REPEAT_MS = 10 * 60_000, STOP_GRACE_MS = 5_000;
+/** How long a bot's turn lets a person's own work go first. Past this it takes its place by arrival, so it is never starved. */
+export const BOT_TURN_GIVES_WAY_MS = 5 * 60_000;
 /** A minute counts as stalled on memory when every task that could run waited on memory this much of ten seconds (the
  * kernel's `full avg10`, in percent). */
 const STALL_PERCENT = 20;
@@ -83,6 +85,13 @@ export const memoryStopped = (cause: string) => /^Ran out of room, so I (closed 
 export const memoryWaitText = (count: number) => `Waiting for memory: ${running(count)}, and one more could run it out of memory. `
   + "This one starts by itself when there is room.";
 export const memoryStillWaitingText = (count: number) => `Still waiting for memory: ${running(count)}.`;
+/** How a wait reads to the person, in their language, and where else it shows. */
+export interface EngineWaits {
+  text(threadId: string, wait: { first: boolean; running: number; ahead: number }): string;
+  began(threadId: string, wait: { running: number; ahead: number }): void;
+  /** Whether anything is waiting for memory changed. */
+  changed(): void;
+}
 export const memoryStallText = (cause: string, count: number) => `${cause}. This Cloud ran out of memory while ${tasks(count)} ran at once (not a problem with the AI provider)`;
 
 /** The last day's memory pressure on a Cloud home: tasks that had to wait for memory and how long they waited in all (a wait
@@ -129,7 +138,7 @@ export interface EngineBrowsers {
 
 /** An engine process and the threads whose sessions it runs: one, or several when the driver shares processes. */
 interface Engine { child: ChildProcess; threads: Set<string>; startedAt: number; stopping: boolean }
-interface Waiter { wake: () => void }
+interface Waiter { wake: () => void; threadId: string; since: number }
 
 export interface EngineMemoryOptions {
   enabled: boolean;
@@ -166,6 +175,8 @@ export class EngineMemory {
   private lastRelief = -Infinity;
   private timer: ReturnType<typeof setInterval> | null = null;
   private browsers: EngineBrowsers | null = null;
+  private personsOwn: (threadId: string) => boolean = () => false;
+  private waits: EngineWaits | null = null;
 
   constructor(options: EngineMemoryOptions) {
     this.enabled = options.enabled;
@@ -178,6 +189,14 @@ export class EngineMemory {
   }
 
   useBrowsers(browsers: EngineBrowsers): void { this.browsers = browsers; }
+
+  /** Whether this thread's turn is a person's own work, which goes first when memory holds several. */
+  useTurnOrder(personsOwn: (threadId: string) => boolean): void { this.personsOwn = personsOwn; }
+
+  useWaits(waits: EngineWaits): void { this.waits = waits; }
+
+  /** Whether a task is waiting for memory now. */
+  waiting(): boolean { return this.waitingSince.size > 0; }
 
   /** Runs `start` with the engine processes it spawns counted as this thread's (procs.ts spawnCli calls `track`). */
   within<T>(threadId: string, start: () => T): T {
@@ -247,13 +266,13 @@ export class EngineMemory {
     joining?: number): Promise<boolean> {
     if (!this.enabled) return true;
     if (joining !== undefined) this.engines.get(joining)?.threads.add(threadId);
-    const waiter: Waiter = { wake: () => {} };
+    const waiter: Waiter = { wake: () => {}, threadId, since: this.now() };
     this.queue.push(waiter);
     let announced: number | null = null;
     try {
       for (;;) {
         if (abort.aborted) return false;
-        if (this.queue[0] === waiter) {
+        if (this.order()[0] === waiter) {
           const room = this.room(start, threadId);
           if (room === "admit") {
             this.reserved.set(threadId, { at: this.now(), start, browser: this.browserStarts(threadId) });
@@ -263,9 +282,14 @@ export class EngineMemory {
           if (room !== "wait") { await this.stop(room, "idle"); continue; }
         }
         if (announced === null || this.now() - announced >= NOTICE_REPEAT_MS) {
-          const others = this.othersBusy(threadId);
-          if (announced === null) { this.waitingSince.set(waiter, this.now()); this.ledger.note(this.now(), "waits"); }
-          notify(announced === null ? memoryWaitText(others) : memoryStillWaitingText(others));
+          const others = this.othersBusy(threadId), first = announced === null, ahead = this.order().indexOf(waiter);
+          if (first) {
+            this.waitingSince.set(waiter, this.now());
+            this.ledger.note(this.now(), "waits");
+            this.waits?.began(threadId, { running: others, ahead });
+            if (this.waitingSince.size === 1) this.waits?.changed();
+          }
+          notify(this.waits?.text(threadId, { first, running: others, ahead }) ?? (first ? memoryWaitText(others) : memoryStillWaitingText(others)));
           announced = this.now();
         }
         await new Promise<void>((resolve) => {
@@ -279,7 +303,11 @@ export class EngineMemory {
     } finally {
       this.queue.splice(this.queue.indexOf(waiter), 1);
       const since = this.waitingSince.get(waiter);
-      if (since !== undefined) { this.waitingSince.delete(waiter); this.ledger.note(this.now(), "waitMs", this.now() - since); }
+      if (since !== undefined) {
+        this.waitingSince.delete(waiter);
+        this.ledger.note(this.now(), "waitMs", this.now() - since);
+        if (this.waitingSince.size === 0) this.waits?.changed();
+      }
       this.wake();
     }
   }
@@ -418,6 +446,12 @@ export class EngineMemory {
       if (!this.stops.has(threadId)) this.ledger.note(this.now(), "stopped");
       this.stops.set(threadId, { count: count(threadId), browser: this.browsers?.running(threadId) === true });
     }
+  }
+
+  private order(): Waiter[] {
+    const at = this.now();
+    const ahead = (waiter: Waiter) => this.personsOwn(waiter.threadId) || at - waiter.since >= BOT_TURN_GIVES_WAY_MS;
+    return [...this.queue.filter(ahead), ...this.queue.filter((waiter) => !ahead(waiter))];
   }
 
   private wake(): void { for (const waiter of this.queue) waiter.wake(); }

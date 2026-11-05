@@ -79,7 +79,7 @@ const staleRoutineCard = (card: OptionCardData) => Boolean(card.routineRequest &
 
 /** Cards whose server-written title and first option say what approving does. */
 export const titledCard = (card: OptionCardData | undefined) =>
-  Boolean(card?.teamSetupRequest || card?.mcpRequest || isSkillSwitchAction(card?.skillRequest?.action));
+  Boolean(card?.teamSetupRequest || card?.mcpRequest || card?.lendingLift || isSkillSwitchAction(card?.skillRequest?.action));
 
 export function approvalCardOutcome(card: OptionCardData): string | undefined {
   const isProposal = Boolean(card.routineRequest || card.skillRequest || card.profileRequest || card.modelRequest || titledCard(card));
@@ -175,7 +175,7 @@ export function appliedChange(card: OptionCardData, name: string): { line: strin
   if (skill) {
     return {
       line: t(SKILL_APPLIED_LINE[skill.action], { name, title: skill.name }),
-      canUndo: skill.action === "create" || Boolean(skill.previous),
+      canUndo: skill.action === "create" || skill.action === "enable" || skill.action === "disable" || Boolean(skill.previous),
     };
   }
   const profile = card.profileRequest;
@@ -233,7 +233,7 @@ function AppliedChangeLine({
   const cancels = summary.cancels === true;
   const skill = card.skillRequest;
   const shared = skill?.shared ?? (sharedNow && sharedNow.requestId === card.requestId ? sharedNow.shared : undefined);
-  const canShare = Boolean(skill && !shared && !undone && threadId && card.requestId)
+  const canShare = Boolean(skill && !isSkillSwitchAction(skill.action) && !shared && !undone && threadId && card.requestId)
     && shareLearnedSkillsMode(config) === "ask";
   const share = () => {
     const requestId = card.requestId;

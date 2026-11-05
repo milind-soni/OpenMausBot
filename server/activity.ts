@@ -123,6 +123,7 @@ export function describeTool(name: string, input?: unknown): { app: string | nul
       return Object.hasOwn(RESEARCH_TOOL_LABELS, member) ? RESEARCH_TOOL_LABELS[member]! : { app: "Team", label: humanize(member) };
     }
     if (server === "highlevel") return { app: "HighLevel", label: humanize(action.replace(/^HIGHLEVEL_/, "")) };
+    if (server === "email") return { app: "Email", label: humanize(action.replace(/^EMAIL_/, "")) };
     if (server === "device") return { app: "Phone", label: humanize(action.replace(/^PHONE_/, "")) };
     if (server.startsWith("claude_ai_")) {
       return { app: server.slice("claude_ai_".length).replace(/_/g, " "), label: humanize(action) };

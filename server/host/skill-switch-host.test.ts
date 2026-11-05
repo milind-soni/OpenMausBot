@@ -28,6 +28,7 @@ function setup() {
   const bot = { id: "b1", name: "Bot", color: "blue" } as BotRecord;
   const messages: Array<{ id: string; card: OptionCardData }> = [];
   let file = skillMd("A");
+  let enabled = true;
   let appendFails = false;
   const host = createSkillSwitchHost({
     store: {
@@ -37,7 +38,7 @@ function setup() {
     },
     dataDir,
     persistence: () => ({ ok: true }),
-    listBotSkills: () => [{ name: "lookup", enabled: true, source: "imported", description: "Looks things up", origin: "imported" } as never],
+    listBotSkills: () => [{ name: "lookup", enabled, source: "imported", description: "Looks things up", origin: "imported" } as never],
     readBotSkillFile: () => file,
     noteSkillChange: vi.fn(),
   });
@@ -47,8 +48,13 @@ function setup() {
     const request = shown.skillRequest as SkillRequestCardData & { action: SkillSwitchAction };
     return host.resolve({ botId: bot.id, threadId: "t1", requestId: request.requestId, behavior: "allow", reviewedSha256: request.sha256 }, id, shown, request);
   };
-  const pins = () => readdirSync(join(dataDir, "skill-switch"));
-  return { bot, host, card, approve, pins, edit: (next: string) => { file = next; }, failAppend: () => { appendFails = true; } };
+  const pins = () => { try { return readdirSync(join(dataDir, "skill-switch")); } catch { return []; } };
+  const undo = () => {
+    const { id, card: shown } = messages.at(-1)!;
+    const request = shown.skillRequest as SkillRequestCardData & { action: SkillSwitchAction };
+    return host.undo(bot.id, "t1", { id, card: shown } as never, request);
+  };
+  return { bot, host, card, approve, undo, pins, edit: (next: string) => { file = next; }, failAppend: () => { appendFails = true; }, setEnabled: (next: boolean) => { enabled = next; } };
 }
 
 beforeEach(() => {
@@ -62,9 +68,9 @@ afterEach(async () => {
 });
 
 describe("skill switch cards", () => {
-  it("turns off an imported skill only after the person approves", () => {
+  it("turns off an imported skill only after the person approves when changes wait for the owner", () => {
     const { bot, host, card, approve, pins } = setup();
-    expect(host.stage(bot, "t1", "disable", { skill_name: "lookup" })).toMatchObject({ status: 201, body: { state: "pending" } });
+    expect(host.stage(bot, "t1", "disable", { skill_name: "lookup" }, null)).toMatchObject({ status: 201, body: { state: "pending" } });
     expect(card()).toMatchObject({ title: "Turn off skill \"lookup\"?", options: ["Turn off", "Deny"] });
     expect(card().skillRequest?.preview).not.toContain("AAAA");
     expect(mocks.setImportedSkillEnabled).not.toHaveBeenCalled();
@@ -78,7 +84,7 @@ describe("skill switch cards", () => {
 
   it("refuses approval when a hidden secret changed after the card opened", () => {
     const { bot, host, card, approve, edit } = setup();
-    expect(host.stage(bot, "t1", "disable", { skill_name: "lookup" }).status).toBe(201);
+    expect(host.stage(bot, "t1", "disable", { skill_name: "lookup" }, null).status).toBe(201);
     const shown = card().skillRequest?.sha256;
     // Same length, so the redacted preview and the card's sha256 stay the same.
     edit(skillMd("B"));
@@ -91,7 +97,38 @@ describe("skill switch cards", () => {
   it("leaves no digest pin behind when the card can't be added", () => {
     const { bot, host, pins, failAppend } = setup();
     failAppend();
-    expect(() => host.stage(bot, "t1", "disable", { skill_name: "lookup" })).toThrow("disk full");
+    expect(() => host.stage(bot, "t1", "disable", { skill_name: "lookup" }, null)).toThrow("disk full");
     expect(pins()).toHaveLength(0);
+  });
+
+  it("turns off an imported skill at once where the bot's own changes apply directly, and undoes it from the receipt", () => {
+    const { bot, host, card, undo, pins, setEnabled } = setup();
+    expect(host.stage(bot, "t1", "disable", { skill_name: "lookup" }, "full-access")).toMatchObject({
+      status: 201, body: { state: "applied", name: "lookup", action: "disable", summary: "Skill \"lookup\" turned off." },
+    });
+    expect(mocks.setImportedSkillEnabled).toHaveBeenCalledWith("b1", "lookup", false);
+    expect(card()).toMatchObject({ answered: "allow", autoApplied: true, options: [], title: "Skill \"lookup\" turned off" });
+    expect(card().skillRequest?.preview).not.toContain("AAAA");
+    expect(pins()).toHaveLength(0);
+
+    setEnabled(false);
+    expect(undo()).toEqual({ claimed: true, state: "undone" });
+    expect(mocks.setImportedSkillEnabled).toHaveBeenLastCalledWith("b1", "lookup", true);
+    expect(card().undone).toBe(true);
+  });
+
+  it("refuses Undo, changing nothing, once the skill was switched back since", () => {
+    const { bot, host, undo } = setup();
+    expect(host.stage(bot, "t1", "disable", { skill_name: "lookup" }, "level").body.state).toBe("applied");
+    mocks.setImportedSkillEnabled.mockClear();
+    expect(undo()).toMatchObject({ claimed: true, state: "invalid", status: 409, stale: true });
+    expect(mocks.setImportedSkillEnabled).not.toHaveBeenCalled();
+  });
+
+  it("reports a switch that fails to apply directly, with no receipt", () => {
+    const { bot, host, card } = setup();
+    mocks.setImportedSkillEnabled.mockReturnValue({ error: "the skill folder is gone" });
+    expect(host.stage(bot, "t1", "disable", { skill_name: "lookup" }, "self")).toEqual({ status: 422, body: { state: "failed", error: "the skill folder is gone" } });
+    expect(() => card()).toThrow();
   });
 });

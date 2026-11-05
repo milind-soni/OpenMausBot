@@ -237,8 +237,9 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
             return json(res, 400, { error: "fallback must be a list of up to five { instanceId, model } entries" });
           }
           if (!registry.get(row.instanceId)) return json(res, 400, { error: `fallback engine "${row.instanceId}" is not available` });
-          if (chain.some((seen) => seen.instanceId === row.instanceId)) continue;
-          chain.push({ instanceId: row.instanceId, model: row.model.trim() });
+          const model = row.model.trim();
+          if (chain.some((seen) => seen.instanceId === row.instanceId && seen.model === model)) continue;
+          chain.push({ instanceId: row.instanceId, model });
         }
         patch.fallback = chain;
       }

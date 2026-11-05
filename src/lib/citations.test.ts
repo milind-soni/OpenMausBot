@@ -10,7 +10,7 @@ import {
   splitTranscriptCitations,
   withCitationComment,
 } from "./citations";
-import { citationTabShortcut, findCitationSource, highlightCitationSource } from "./citations-dom";
+import { citationShortcutHint, citationTabShortcut, findCitationSource, highlightCitationSource, isCitationShortcut } from "./citations-dom";
 
 const source = { ownerType: "bot" as const, ownerId: "bot-1", threadId: "thread-1", messageId: "message-1" };
 
@@ -128,6 +128,35 @@ describe("selected-text citations", () => {
     expect(event.preventDefault).not.toHaveBeenCalled();
     expect(disabled.focus).not.toHaveBeenCalled();
     expect(shortcut.handle(event, null)).toBe(false);
+  });
+});
+
+describe("cite shortcut (Cmd+L / Ctrl+L)", () => {
+  const key = (init: Partial<KeyboardEvent>) => ({ key: "l", metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, isComposing: false, defaultPrevented: false, ...init });
+
+  it("is Cmd+L on Mac and Ctrl+L elsewhere", () => {
+    expect(isCitationShortcut(key({ metaKey: true }), true)).toBe(true);
+    expect(isCitationShortcut(key({ metaKey: true, key: "L" }), true)).toBe(true);
+    expect(isCitationShortcut(key({ ctrlKey: true }), false)).toBe(true);
+    expect(isCitationShortcut(key({ ctrlKey: true }), true)).toBe(false);
+    expect(isCitationShortcut(key({ metaKey: true }), false)).toBe(false);
+  });
+
+  it("leaves other keys and chords alone", () => {
+    for (const event of [
+      key({}),
+      key({ ctrlKey: true, key: "k" }),
+      key({ ctrlKey: true, shiftKey: true }),
+      key({ ctrlKey: true, altKey: true }),
+      key({ ctrlKey: true, metaKey: true }),
+      key({ ctrlKey: true, isComposing: true }),
+      key({ ctrlKey: true, defaultPrevented: true }),
+    ]) expect(isCitationShortcut(event, false)).toBe(false);
+  });
+
+  it("shows the shortcut for the platform", () => {
+    expect(citationShortcutHint(true)).toBe("⌘L");
+    expect(citationShortcutHint(false)).toBe("Ctrl+L");
   });
 });
 

@@ -190,3 +190,18 @@ describe("finished-work notifications preference", () => {
     expect(preference.finishedNotificationsEnabled()).toBe(true);
   });
 });
+
+describe("notification tray pin (email 1a1a4fb0)", () => {
+  it("defaults off and survives a renderer reload", async () => {
+    let preference = await import("./notification-preferences");
+    expect(preference.notificationTrayPinned()).toBe(false);
+    preference.setNotificationTrayPinned(true);
+    expect(local.getItem(preference.NOTIFICATION_TRAY_PINNED_KEY)).toBe("1");
+    vi.resetModules();
+    preference = await import("./notification-preferences");
+    expect(preference.notificationTrayPinned()).toBe(true);
+    preference.setNotificationTrayPinned(false);
+    expect(local.getItem(preference.NOTIFICATION_TRAY_PINNED_KEY)).toBeNull();
+    expect(preference.notificationTrayPinned()).toBe(false);
+  });
+});

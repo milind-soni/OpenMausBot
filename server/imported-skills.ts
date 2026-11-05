@@ -14,7 +14,6 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 
-import { skillCommandTurnText } from "../shared/skill-command.ts";
 import { isSkillName } from "../shared/skill-md.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
@@ -406,11 +405,6 @@ export function importedSkillsPrompt(skills: readonly ImportedSkillView[]): stri
     lines.push(line);
   }
   return block(lines, skills.length - lines.length);
-}
-
-/** `/name` for an imported skill, the way a bot's own skill command reads. */
-export function expandImportedSkillCommand(text: string, skills: readonly ImportedSkillView[]): string {
-  return skillCommandTurnText(text, new Map(skills.map((skill) => [skill.name, skill.file])));
 }
 
 const NATIVE_SKILL_DIRS = [".claude/skills", ".agents/skills", ".grok/skills"];

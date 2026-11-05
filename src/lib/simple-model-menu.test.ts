@@ -183,6 +183,23 @@ describe("the Simple model menu", () => {
     expect(modelName(cursor, "gone-model")).toBe("gone-model");
   });
 
+  it("names the picked Antigravity thinking level on the current model, as its row in the list does (#4160)", () => {
+    const variants = [{ id: "low", label: "Low" }, { id: "medium", label: "Medium" }];
+    const gemini = engine("antigravity", "antigravityAgent", "Google Gemini", "subscription", [
+      { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", variants },
+    ], { capabilities: { modelVariants: true } });
+    const picked = menu([gemini], { selection: { instanceId: "antigravity", model: "gemini-3.8-flash", variant: "medium" } });
+    expect(picked.current).toMatchObject({ label: "Gemini 3.8 Flash · Medium" });
+    expect(picked.current?.title).toBe("Google Gemini · Gemini 3.8 Flash · Medium");
+    const pickedLow = menu([gemini], { selection: { instanceId: "antigravity", model: "gemini-3.8-flash", variant: "low" } });
+    expect(pickedLow.current).toMatchObject({ label: "Gemini 3.8 Flash · Low" });
+    expect(rows(picked)).toEqual(["Gemini 3.8 Flash · Low"]);
+    expect(modelName(gemini, "gemini-3.8-flash")).toBe("Gemini 3.8 Flash");
+    expect(modelName(gemini, "gemini-3.8-flash", "gone")).toBe("Gemini 3.8 Flash");
+    expect(modelName({ ...gemini, driverKind: "opencodeGo" }, "gemini-3.8-flash", "medium")).toBe("Gemini 3.8 Flash");
+    expect(modelName(gemini, "gemini-3.8-flash", "low")).toBe("Gemini 3.8 Flash · Low");
+  });
+
   it("is busy while the menu reads its providers or one provider's models", () => {
     expect(menu([claude()]).busy).toBe(false);
     expect(menu([claude()], { loading: true }).busy).toBe(true);

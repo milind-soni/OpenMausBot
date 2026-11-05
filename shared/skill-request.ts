@@ -48,9 +48,9 @@ export interface SkillRequestCardData {
   referencesSha256?: string;
   warnings: string[];
   createdAt: number;
-  /** An update that applied without a person: the SKILL.md it replaced, so
-   * Undo can put it back while the skill is unchanged since. */
-  previous?: { preview: string; source: string; references?: Array<{ path: string; content: string }> };
+  /** An update or delete that applied without a person: the SKILL.md it replaced or removed, so
+   * Undo can put it back while the skill is unchanged since. enabled is false for a deleted skill that was off. */
+  previous?: { preview: string; source: string; references?: Array<{ path: string; content: string }>; enabled?: boolean };
   shared?: SkillShareRecord;
   shareError?: string;
 }

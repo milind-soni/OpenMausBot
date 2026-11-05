@@ -3,7 +3,8 @@
 // home: POST /api/cloud-connections/connected-apps makes this Cloud act as the computer's connected-apps account (a
 // one-time code from OpenMausBot's service, or the person's own Composio project); PUT
 // /api/cloud-connections/mcp/<name>/sign-in and PUT /api/cloud-connections/highlevel take a sign-in that moved; PUT
-// /api/cloud-connections/held-keys keeps a trial's moved keys unused while its Claude credit lasts. Admin scope
+// /api/cloud-connections/held-keys keeps a trial's moved keys unused while its Claude credit lasts; PUT
+// /api/cloud-connections/email takes the person's mailboxes. Admin scope
 // (request-auth's default): only the owner's app reaches them.
 import { z } from "zod";
 
@@ -51,6 +52,8 @@ export interface CloudConnectionRouteDeps {
   /** `replaces`: the digest of the sign-in this computer moved here before, which a newer one may replace. */
   adoptSignIn(name: string, record: McpOAuthRecord, replaces: string | null): Adopted;
   adoptHighLevel(connection: HighLevelConnection, replaces: string | null): Adopted;
+  /** The person's mailboxes with their passwords; one already here at that address stays. */
+  adoptEmail?(accounts: unknown[]): { adopted: number; kept: number };
   /** Keeps the keys of these engines unused while a trial's Claude credit lasts; false when they run now. */
   holdKeys?(engines: string[]): boolean;
 }
@@ -71,10 +74,10 @@ export function createCloudConnectionRoutes(deps: CloudConnectionRouteDeps): Rou
       return json(res, 200, { held: deps.holdKeys?.(asked.data.for) ?? false });
     }
     const signIn = SIGN_IN.exec(path);
-    if (path !== "/api/cloud-connections/connected-apps" && path !== "/api/cloud-connections/highlevel" && !signIn) return json(res, 404, { error: "not found" });
+    if (path !== "/api/cloud-connections/connected-apps" && path !== "/api/cloud-connections/highlevel" && path !== "/api/cloud-connections/email" && !signIn) return json(res, 404, { error: "not found" });
     if (method !== (path === "/api/cloud-connections/connected-apps" ? "POST" : "PUT")) return json(res, 405, { error: "method not allowed" });
     if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) return json(res, 415, { error: "content-type must be application/json" });
-    const refused = deps.personalRefusal?.(signIn ? signIn[1]! : path === "/api/cloud-connections/highlevel" ? "HighLevel" : "these apps");
+    const refused = deps.personalRefusal?.(signIn ? signIn[1]! : path === "/api/cloud-connections/highlevel" ? "HighLevel" : path === "/api/cloud-connections/email" ? "Email" : "these apps");
     if (refused) { req.resume(); return json(res, 403, { error: refused }); }
     const body = await readBody(req, 64 * 1024);
     const replaces = url.searchParams.get("replaces");
@@ -85,6 +88,11 @@ export function createCloudConnectionRoutes(deps: CloudConnectionRouteDeps): Rou
       if (!record) return json(res, 400, { error: "send the sign-in as this computer keeps it" });
       const adopted = deps.adoptSignIn(signIn[1]!, record, replaces);
       return adopted.ok ? json(res, 200, { [adopted.outcome]: true }) : json(res, adopted.status, { error: adopted.error });
+    }
+    if (path === "/api/cloud-connections/email") {
+      const accounts = (body as { accounts?: unknown } | null)?.accounts;
+      if (!Array.isArray(accounts) || !deps.adoptEmail) return json(res, 400, { error: "send { accounts } as this computer keeps them" });
+      return json(res, 200, deps.adoptEmail(accounts));
     }
     if (path === "/api/cloud-connections/highlevel") {
       const connection = parseHighLevelConnection(body);

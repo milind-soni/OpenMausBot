@@ -91,7 +91,7 @@ it("this computer takes a colour and a picture, both shown at once; None and Rem
 
 it("a solo Cloud's owner changes both its colour (on the Admin) and its picture", async () => {
   const { workspaces } = await page(look({ name: "My Cloud", color: null, swatch: null }));
-  expect(host.textContent).toContain("My Cloud shows in this color at the top of the sidebar and on its circle at the window's left edge.");
+  expect(host.textContent).toContain("My Cloud shows in this color at the top of the sidebar and on its icon on the left of the app.");
   expect(host.textContent).toContain("Everyone here sees it.");
   expect([swatch("rose").disabled, button("Use an image")?.disabled]).toEqual([false, false]);
   await click(swatch("rose"));
@@ -104,7 +104,7 @@ it("choosing a swatch saves it through main, and the tint follows at once", asyn
   const { workspaces } = await page(look());
   expect(tint()).toContain("var(--identity-teal)");
   expect(swatch("green").getAttribute("aria-checked")).toBe("true");
-  expect(host.textContent).toContain("Client A shows in this color at the top of the sidebar and on its circle at the window's left edge.");
+  expect(host.textContent).toContain("Client A shows in this color at the top of the sidebar and on its icon on the left of the app.");
   await click(swatch("rose"));
   expect(workspaces.color).toHaveBeenCalledWith("rose");
   expect(swatch("rose").getAttribute("aria-checked")).toBe("true");
