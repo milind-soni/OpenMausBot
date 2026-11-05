@@ -462,6 +462,21 @@ describe("a Starter Cloud", () => {
     expect(await busyThreads(f, a.botId), "Ada's first turn never had to end for it").toContain(a.threads[0]);
   }, 90_000);
 
+  it("keeps a teammate's hand-off out of the person's slot, and the person's own threads still run one at a time", async () => {
+    await starter();
+    const a = await botWithThreads(f, CLAUDE, 1, "Ada");
+    const b = await botWithThreads(f, CLAUDE, 3, "Ben");
+    await send(f, a.botId, a.threads[0]!, "Ada's job");
+    await whenStarted(a.threads[0]!);
+    const toBen = await startThread(a.threads[0]!, "For Ben", b.botId);
+    expect(toBen.status, JSON.stringify(toBen.body)).toBeLessThan(300);
+    await whenStarted(await ownThread(b.botId, "For Ben"));
+    const own = await f.api("POST", `/api/bots/${b.botId}/messages`, { threadId: b.threads[1], text: "The person's own job" });
+    expect(own.body.queued, JSON.stringify(own.body)).toBeUndefined();
+    await whenStarted(b.threads[1]!);
+    expect((await f.api("POST", `/api/bots/${b.botId}/messages`, { threadId: b.threads[2], text: "Their next job" })).body).toMatchObject({ queued: true, reason: "capacity" });
+  }, 90_000);
+
   it("brings a teammate's result back into the thread that asked, while another thread of that bot holds the slot", async () => {
     await starter();
     const a = await botWithThreads(f, CLAUDE, 2, "Ada");

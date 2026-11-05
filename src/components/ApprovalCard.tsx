@@ -73,7 +73,7 @@ const PROFILE_FIELD_LABEL: Record<ProfileRequestField, LocaleKey> = {
 const staleRoutineCard = (card: OptionCardData) => Boolean(card.routineRequest && !card.answered);
 
 /** The card brings its own question and answer words (its title and first option): team setup and MCP server changes. */
-export const titledCard = (card: OptionCardData | undefined) => Boolean(card?.teamSetupRequest || card?.mcpRequest);
+export const titledCard = (card: OptionCardData | undefined) => Boolean(card?.teamSetupRequest || card?.mcpRequest || card?.lendingLift);
 
 export function titledCardAction(card: OptionCardData): string {
   if (card.mcpRequest) return mcpRequestActionLabel(card.mcpRequest.action);

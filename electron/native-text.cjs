@@ -7,7 +7,7 @@ const SOURCE_HASHES = "source-hashes.json";
 const ENGLISH = "en";
 const LOCALE_ALIASES = Object.freeze({ pt: "pt-br", "zh-hant": "zh-tw", "zh-hk": "zh-tw", "zh-mo": "zh-tw" });
 const SHARED_KEYS = new Set(["place.local", "rail.thisComputer", "rail.remove", "cloudHome.tryAgain", "computer.windows.start", "mcp.turnOn", "cloudSetup.myCloud", "computer.badge.local"]);
-const kept = (key) => key.startsWith("native.") || SHARED_KEYS.has(key);
+const kept = (key) => key.startsWith("native.") || key.startsWith("teamMove.") || SHARED_KEYS.has(key);
 
 /** Security: a language is only ever a pack file listed here; a code from a page never reaches a path unchecked. */
 function localeCodes(dir = LOCALES_DIR, files = fs) {

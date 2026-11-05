@@ -138,6 +138,7 @@ const __APP_VERSION__: string;
       /** This computer's page, and My Cloud's own page once it is the person's home: the window onto My Cloud. */
       home?: import("../../electron/home-window.mjs").HomeBridge;
       desktopNotices?: import("../../electron/desktop-prefs.mjs").DesktopNoticesBridge;
+      desktopNotifications?: import("../../electron/desktop-notifications.mjs").DesktopNotificationsBridge;
       /** This computer's own page only: the account's full name, for a first run's profile (system-name.mjs). */
       desktopProfile?: { systemName(): Promise<string | null> };
       desktopAnalytics?: import("../../electron/desktop-prefs.mjs").DesktopAnalyticsBridge;

@@ -19,7 +19,7 @@ import { DATA_ROUTES, type DataSheet, type DataTable } from "../../shared/data-s
 import type { NotificationLogEntry } from "../../shared/notification";
 import { isNotificationFeedAction, reduceNotificationFeed, type NotificationFeedAction } from "./notification-feed";
 import { bumpThreadUpdatedAt, mergeTaskStamps, rewindThreadUpdatedAt } from "./thread-stamps";
-import { botOpensTo, openBot, openNotificationTarget, visibleNotificationThread } from "./thread-navigation";
+import { botOpensTo, openBot, openThread, visibleNotificationThread } from "./thread-navigation";
 import { patchGroupTask } from "./thread-edits";
 import type { EngineInstall } from "./engine-install";
 import { optimisticMessageId, optimisticUserMessage, sendArrived, sendReconciled } from "./optimistic-send";
@@ -27,14 +27,14 @@ import { patchedGroups, roomAnswers, snapshotPatch } from "./room-frames";
 import { savedStateAction, type SavedOwner, type SavedSnapshot } from "./saved-state";
 import { keepBotNavigation, keepGroupNavigation, navigatedSince, visibleMessages } from "./snapshot-navigation";
 export { visibleMessages } from "./snapshot-navigation";
-export { awayFromMainThread, botOpensTo, openBot, openBotThread, openNotificationTarget, openThread, visibleNotificationThread, type ThreadTarget } from "./thread-navigation";
+export { awayFromMainThread, botOpensTo, markedThread, openBot, openBotRow, openBotThread, openRoomThread, openThread, visibleNotificationThread, type ThreadTarget } from "./thread-navigation";
 import type { TurnDigest } from "../../shared/digest";
 import type { ToolScope } from "../../shared/tool-scope";
 import type { ModelVariantOption, RuntimeEvent } from "../../shared/runtime-events";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
-import { askResetBridge, desktopCapabilitiesNow } from "@/lib/desktop";
+import { askResetBridge, desktopCapabilitiesNow } from "@/lib/desktop"; import { isBotLimitRefusal, stoppedAtBotLimit } from "@/lib/bot-limit";
 import { sameModelSelection } from "../../shared/thread-model";
 import type { BotBodyId } from "../../shared/bot-body";
 import { StoreRefContext } from "./store-ref-context";
@@ -78,7 +78,7 @@ import { reconcileSnapshotQueues, rememberConsumedQueueId, replaceBotQueues } fr
 export type { MausColor } from "@/lib/mascot";
 export type { RoutineRunCardData } from "../../shared/routine-run";
 
-export interface OptionCardData extends Pick<WireOptionCard, "fixedOptions" | "webhookRequest" | "appTriggerRequest" | "yourComputer" | "computerAsk" | "waitRequest" | "stopped" | "accessRequest" | "mcpRequest" | "summaryCode" | "summaryParams"> {
+export interface OptionCardData extends Pick<WireOptionCard, "fixedOptions" | "lendingLift" | "webhookRequest" | "appTriggerRequest" | "yourComputer" | "computerAsk" | "waitRequest" | "stopped" | "accessRequest" | "mcpRequest" | "summaryCode" | "summaryParams"> {
   title: string;
   subtitle: string;
   options: string[];
@@ -202,7 +202,7 @@ export interface GroupTask {
   pinned?: boolean;
   updatedAt?: number;
   turnTimeoutMinutes?: number;
-  archivedAt?: number;
+  archivedAt?: number; activity?: "waiting-on-you";
   lastThreadOrderAt?: number;
   working?: boolean;
   busyBotId?: string | null;
@@ -1451,7 +1451,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "notice":
       return { ...state, notice: action.notice };
     case "revealThread":
-      return { ...state, revealThread: { threadId: action.threadId, nonce: (state.revealThread?.nonce ?? 0) + 1 } };
+      return { ...state, appSettingsOpen: false, shortcutsOpen: false, pluginsOpen: false, revealThread: { threadId: action.threadId, nonce: (state.revealThread?.nonce ?? 0) + 1 } };
     case "focusMessage":
       return {
         ...state,
@@ -1737,7 +1737,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return action.cwd !== undefined ? state : { ...state, selectedId: action.botId, activeView: "chat" };
     case "switchTask": {
       const { [action.threadId]: _old, ...backgroundThreadEvents } = state.backgroundThreadEvents;
-      return updateBot({ ...state, backgroundThreadEvents, selectedId: action.botId, activeView: "chat" }, action.botId,
+      return updateBot({ ...state, backgroundThreadEvents, selectedId: action.botId, activeView: "chat", revealThread: { threadId: action.threadId, nonce: (state.revealThread?.nonce ?? 0) + 1 } }, action.botId,
         (bot) => ({ ...bot, switchingTo: action.threadId }));
     }
     case "switchTaskFailed":
@@ -2159,7 +2159,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const olderPagesInFlight = new Set<string>();
     const newTaskOnce = createNewTaskOnce();
     let creatingBot = false;
-    const showError = (e: unknown) => { if (isNoAiRefusal(e)) wrapped({ type: "notice", notice: { kind: "note", botName: null, text: e.message } }); else rawDispatch({ type: "error", message: e instanceof Error ? e.message : String(e) }); };
+    const showError = (e: unknown) => { if (isBotLimitRefusal(e)) return; if (isNoAiRefusal(e)) wrapped({ type: "notice", notice: { kind: "note", botName: null, text: e.message } }); else rawDispatch({ type: "error", message: e instanceof Error ? e.message : String(e) }); };
     const showSavedState = (owner: SavedOwner) => (error: unknown) => {
       showError(error);
       void api<SavedSnapshot>("/api/bots?messages=0").then((snapshot) => {
@@ -2602,7 +2602,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           break;
         }
-        case "newBot": {
+        case "newBot": { if (stoppedAtBotLimit(stateRef.current)) break;
           // A double click lands before React paints the pending state.
           if (creatingBot || stateRef.current.botCreationPending) break;
           creatingBot = true;
@@ -2616,7 +2616,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             });
           break;
         }
-        case "duplicateBot": {
+        case "duplicateBot": { if (stoppedAtBotLimit(stateRef.current)) break;
           const source = stateRef.current.bots.find((b) => b.id === action.botId);
           if (!source) break;
           const duplicateProfile = duplicateBotProfile(source);
@@ -3179,7 +3179,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // The wrapped dispatch: only it PATCHes unread:false back to the server.
           showNotification(
             frame.notification,
-            (target) => openNotificationTarget(dispatch, target, stateRef.current, showThreadsRef.current),
+            (target) => openThread(dispatch, target, stateRef.current, showThreadsRef.current),
             stateRef.current.bots.find((bot) => bot.id === frame.notification.botId)?.avatarUrl,
             visibleNotificationThread(stateRef.current),
           );

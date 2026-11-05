@@ -48,7 +48,8 @@ describe("t", () => {
   });
 
   it("keeps new department lifecycle labels available in partial packs, with interpolated names and counts", () => {
-    setLocale("de");
+    // Hindi does not translate the department dialogs yet, so they fall back to English with their names and counts.
+    setLocale("hi");
     expect(t("team.create")).toBe("Create department");
     expect(t("team.moveTo", { name: "Research" })).toBe("Move bots to Research");
     expect(t("team.moveMany", { count: 2 })).toBe("Move 2 bots");

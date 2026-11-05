@@ -36,7 +36,6 @@ export function SecretRequestCard({
   const suppliedDescription = localize && parts
     ? [t(parts.baseCode), parts.reason, t("server.connect.secretNeverRead", { bot: parts.bot })].filter(Boolean).join(" ")
     : secret.description;
-  const remoteClient = window.ogb?.remoteClient?.active === true;
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedLocally, setSavedLocally] = useState(false);
@@ -44,6 +43,9 @@ export function SecretRequestCard({
   const endpoint = `/api/bots/${encodeURIComponent(botId)}/secret-cards/${encodeURIComponent(message.id)}`;
   const error = localError ?? secret.error;
   const custom = secret.target === CUSTOM_SECRET_TARGET;
+  // A page reached through a desktop paired to another computer: a key that computer keeps in its own encrypted store can
+  // only be typed there. Anything its server keeps, a custom secret or a provider key, is typed here like on any page.
+  const onlyOnHost = window.ogb?.remoteClient?.active === true && secret.target !== CUSTOM_SECRET_TARGET && desktopCredentialSlot(secret.target) !== null;
   const outcome = credentialResumeOutcome(secret);
   const provided = outcome === "provided";
   const declined = outcome === "dismissed";
@@ -209,8 +211,9 @@ export function SecretRequestCard({
       explanation={description}
       onDismiss={dismiss}
       dismissLabel={t("notice.notNow")}
+      stays
     >
-      {remoteClient ? (
+      {onlyOnHost ? (
         <div className="text-[13px] leading-relaxed text-ink-secondary">
           {t("chat.secret.remoteClient")}
         </div>

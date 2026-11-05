@@ -39,6 +39,9 @@ function offerText(plan: NonNullable<CloudRoom["plan"]>, kind: RoomCardView["kin
   return t("roomCard.offer.memoryMore", { plan: name, gb: gb(plan.memoryMb / 1024) });
 }
 
+/** Mid-turn counts as busy, unless a task is waiting for memory: that wait is the moment this card is about. */
+export const roomCardBusy = (bots: readonly { busy?: boolean }[], waitingForRoom: boolean | undefined): boolean => !waitingForRoom && bots.some((bot) => bot.busy);
+
 /**
  * The card, or null while there is nothing to show now: no offer, a turn running anywhere (never shown mid-turn), the person
  * said Not now to this very offer here, the usage meter's card is showing (one card at a time), or this is a team's Cloud and

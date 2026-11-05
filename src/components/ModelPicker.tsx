@@ -37,6 +37,7 @@ import { useAiSwitch } from "@/lib/ai-switch";
 import { usePickerPane } from "@/lib/model-picker-pane";
 import { threadsOnOwnModel } from "../../shared/thread-model";
 import { ThreadModelsLine } from "./ThreadModelsLine";
+import { USAGE_WARN_WIDENS, UsageBars, UsageMenuRows } from "./EngineUsage";
 import { Select } from "./Select";
 
 const COMPACT_MODEL_COUNT = 5;
@@ -612,7 +613,7 @@ export function ModelPicker({
         contained
           ? "hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.08] disabled:opacity-50 disabled:hover:bg-transparent"
           : cn(ELEVATED_FLOAT, ELEVATED_HOVER, "disabled:text-ink-tertiary disabled:hover:bg-composer"),
-        !contained && active && !showActiveAccount && COMPACT_SQUARE,
+        !contained && active && !showActiveAccount && cn(COMPACT_SQUARE, USAGE_WARN_WIDENS),
       )}
     >
       {active && (contained
@@ -639,6 +640,7 @@ export function ModelPicker({
           </span>
         )}
       </span>
+      <UsageBars engine={selection.instanceId} compact={!contained} />
       <ChevronDown
         size={12}
         className={cn(
@@ -666,6 +668,7 @@ export function ModelPicker({
         {attention && <span data-model-attention className="absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-warning ring-[1.5px] ring-app" />}
       </span>
       <span className="min-w-0 max-w-[160px] truncate">{modelName(active, selection.model)}</span>
+      <UsageBars engine={selection.instanceId} className="ml-1.5" />
       <ChevronDown size={12} strokeWidth={2} aria-hidden="true" className="ml-1 shrink-0 text-ink-tertiary group-hover:text-ink-secondary" />
     </button>
   );
@@ -960,6 +963,7 @@ export function ModelPicker({
       } : { width: popoverWidth }}
       className={cn("menu-surface z-[80] flex flex-col overflow-hidden", motion.className)}
     >
+      <UsageMenuRows engine={selection.instanceId} />
       {simpleMenu ? (
         <SimpleModelMenu
           menu={simpleMenu}

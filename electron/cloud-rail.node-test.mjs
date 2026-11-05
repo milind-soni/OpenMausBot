@@ -368,3 +368,11 @@ test("Remove from list on a server saved by hand: main forgets it here, by its o
   assert.deepEqual(await rail({ forget: async () => false }).call("workspaces:remove", "vps"), { outcome: "failed" });
   assert.deepEqual(await rail().call("workspaces:remove", "vps"), { outcome: "unsupported" }, "a main without forget says so");
 });
+
+test("a place with inbox lines waiting says so on its circle, this computer's too; the Admin's payment problem still does", () => {
+  const places = railPlaces({ saved: saved("home"), mine: HOME, state: session(), waiting: id => id === "a" || id === "local" });
+  assert.equal(places.find(place => place.id === "a").attention, true);
+  assert.equal(places.find(place => place.id === "local").attention, true);
+  assert.equal(places.find(place => place.id === "vps").attention, undefined);
+  assert.equal(railPlaces({ saved: saved("home"), mine: HOME, state: session() }).find(place => place.id === "a").attention, undefined, "with nothing to say, nothing fires");
+});

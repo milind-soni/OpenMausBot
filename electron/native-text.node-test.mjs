@@ -101,3 +101,13 @@ test("the shipped catalog: English reads every native key, and pt-br has them al
   for (const key of keys) assert.equal(text.t(key), pt[key], key);
   assert.equal(text.t("place.local"), pt["place.local"]);
 });
+
+test("the native team confirm reuses the renderer's teamMove keys without retaining unrelated keys", (t) => {
+  const dir = packs(t, {
+    "en.json": { "teamMove.title": "Move {bot} to {team}?", "chat.other": "not main's" },
+    "pt-br.json": { "teamMove.title": "Mover {bot} para {team}?" },
+  });
+  const text = createNativeText({ dir, saved: "pt-br" });
+  assert.equal(text.t("teamMove.title", { bot: "Atlas", team: "Acme" }), "Mover Atlas para Acme?");
+  assert.equal(text.t("chat.other"), "chat.other");
+});

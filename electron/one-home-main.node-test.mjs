@@ -134,3 +134,21 @@ test("while a server of the person's own is chosen as home, no move to My Cloud 
     assert.equal(none.journal()?.cloud.origin, "https://omb-u-1.fly.dev", "without one, My Cloud's move starts as before");
   } finally { none.main.close(); }
 });
+
+test("the team bring handlers receive the same dynamic translator as one home", async () => {
+  const handlers = new Map();
+  let language = "en";
+  const main = installOneHome({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, cloudPage: () => "local", server: () => null, home: () => null,
+    cookieFetch: async () => json({}, 401), reconnect: async () => false, power: { asleep: () => false }, file: () => "/nonexistent/cloud-send.json", window: () => null,
+    localOrigin: () => "http://127.0.0.1:4100", fetch: async () => json({}, 404), localRequest: async () => json({}, 404), account: () => null,
+    journalFile: () => "/nonexistent/one-home.json", tempRoot: () => "/nonexistent", journal: { read: () => null, write: () => {} },
+    t: (key) => `${language}:${key}`,
+  });
+  try {
+    const move = handlers.get("cloud-send:team-bring-move");
+    await assert.rejects(move({}, "atlas-bot-1"), { message: "en:native.teamMove.openTeam" });
+    language = "pt-br";
+    await assert.rejects(move({}, "atlas-bot-1"), { message: "pt-br:native.teamMove.openTeam" });
+  } finally { main.close(); }
+});

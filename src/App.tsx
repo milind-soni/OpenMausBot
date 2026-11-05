@@ -29,13 +29,14 @@ import { NotificationRail, NotificationsPanel } from "@/components/Notifications
 import { useNotificationFeed } from "@/lib/notification-preferences";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { AppNotices } from "@/components/AppNotices";
+import { BotLimitPopup } from "@/components/BotLimitPopup";
 import { CloudAsleepStrip } from "@/components/CloudAsleepStrip";
 import { LiveConnectionStrip } from "@/components/LiveConnectionStrip";
 import { CloudSendStrip } from "@/components/CloudSendStrip";
 import { HomeLine } from "@/components/HomeLine";
 import { useTeamChats } from "@/state/team-chats";
 import { needsYouVersion, useTeamPeopleLoader } from "@/state/team-people";
-import { inboxVersion, useInboxLoader, useInboxPanel } from "@/state/inbox";
+import { inboxVersion, useInboxLoader, useInboxPanel, useInboxReady } from "@/state/inbox";
 import { InboxPanel } from "@/components/inbox/InboxPanel";
 import { PlacesRail } from "@/components/PlacesRail";
 import { CloudHowTo } from "@/components/CloudHowTo";
@@ -59,7 +60,7 @@ import { botCycleStep, shouldOpenKeyboardShortcuts } from "@/lib/keyboard-shortc
 import { effectiveLanguage, useLanguageChoice, usePageLanguage } from "@/lib/language-preference";
 import { botUnreadCount, showBrowserUnread } from "@/lib/bot-unread";
 import { phonePairingSettingsAction, takePhonePairingRequest } from "@/lib/phone-pairing"; import { takeConnectRequest } from "@/lib/connect-link";
-import { useExternalChatLinks } from "@/hooks/use-external-chat-links";
+import { useDesktopNotificationOpens, useExternalChatLinks } from "@/hooks/use-external-chat-links";
 import { useUsageSnapshot } from "@/hooks/use-usage-snapshot";
 import { useReadShownChatOnFocus } from "@/hooks/use-read-shown-chat";
 import { usePresence } from "@/hooks/use-presence";
@@ -74,10 +75,11 @@ import { WebPanelPage } from "@/components/WebPanelPage";
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
   useTeamChats(state.config);
-  useTeamPeopleLoader(state.config, needsYouVersion(state.bots, state.groups, state.notifications));
-  const inbox = inboxVersion(state.bots);
-  useInboxLoader(inbox);
-  const inboxShown = useInboxPanel().open && inbox !== null;
+  const needsYou = needsYouVersion(state.bots, state.groups, state.notifications);
+  useTeamPeopleLoader(state.config, needsYou);
+  useInboxLoader(`${inboxVersion(state.bots) ?? ""}|${needsYou}`);
+  const inboxReady = useInboxReady();
+  const inboxShown = useInboxPanel().open && inboxReady;
   // A Switch AI pick lands once its stopped turn's chat is idle, wherever the person is by then.
   useAiSwitchKeeper({ bots: state.bots, dispatch });
   const showThreads = useShowThreads();
@@ -127,7 +129,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     window.history.replaceState(null, "", request.rest);
     dispatch("section" in request ? { type: "toggleAppSettings", open: true, section: request.section } : { type: "togglePlugins", open: true, surface: request.surface });
   }, [dispatch]);
-  useExternalChatLinks(state, dispatch);
+  useExternalChatLinks(state, dispatch); useDesktopNotificationOpens(state, dispatch);
   usePresence(state, dispatch);
   const [drawerOpen, setDrawerOpen] = useState(false);
   usePageLanguage(effectiveLanguage(useLanguageChoice(), state.config?.language));
@@ -314,6 +316,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   return (
     <div className={cn("flex h-full flex-col", framed && "bg-frame")}>
       <WindowFrameBar />
+      <BotLimitPopup />
       {!framed && strips}
       <div className="relative flex min-h-0 flex-1">
       {!calendarFocus && <button

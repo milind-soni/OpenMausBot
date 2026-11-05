@@ -7,6 +7,7 @@ import { Runtime } from "./runtime/runtime.ts";
 import { importLegacyDelegations, importLegacyHandoffs, type LegacyThreadResolver } from "./runtime/import-legacy.ts";
 import { openRuntimeStore, type RuntimeStore } from "./runtime/store.ts";
 import { personOnly, requesterDecides, withDefault } from "./runtime/questions.ts";
+import { isStatusOnly, mayBeStatusOnly, statusReplyPrompt } from "./runtime/status-reply.ts";
 import { answersSender, childrenSince, clip, isTerminal, path } from "./runtime/tree.ts";
 import type { Answerer, Assignment, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
 import { sameRequest } from "./same-request.ts";
@@ -333,6 +334,17 @@ export class RuntimeCoordinator implements Coordinator {
     return this.runtime.answer(id, text, by);
   }
 
+  followCard(threadId: string, from: string, to: string): void {
+    this.ready();
+    for (const n of this.live()) if (n.assignee.destination.threadId === threadId && n.cards?.includes(from)) this.runtime.followCard(n.id, from, to);
+  }
+
+  /** Nothing can answer what this parked turn waits on any more. */
+  releaseParked(id: string, reason: string): void {
+    this.ready();
+    if (this.store.get(id)?.status === "needs_input") this.runtime.cancel(id, reason, "stopped");
+  }
+
   parkedFor(botId: string): HandoffView[] {
     this.ready();
     return this.live().filter(n => n.status === "needs_input" && n.assignee.botId === botId).map(n => this.project(n));
@@ -476,6 +488,11 @@ export class RuntimeCoordinator implements Coordinator {
     for (const n of this.live()) if (n.status === "running" && n.assignee.destination.threadId === threadId) this.runtime.progress(n.id);
   }
 
+  held(threadId: string, why: string): void {
+    this.ready();
+    for (const n of this.live()) if (n.status === "running" && n.assignee.destination.threadId === threadId) this.runtime.held(n.id, why);
+  }
+
   answer(threadId: string, text: string): boolean {
     this.ready();
     const parked = this.live().find(n => n.parentId !== undefined && n.status === "needs_input" && !(n.cards && n.cards.length > 0) &&
@@ -492,7 +509,10 @@ export class RuntimeCoordinator implements Coordinator {
     const host = this.host;
     return {
       validate: (a, parent) => host.validate(view(a, parent), parent && this.project(parent)),
-      canStart: a => !host.busy(this.project(a)),
+      canStart: a => {
+        const node = this.project(a);
+        return host.busy(node) ? host.holdReason?.(node) ?? false : true;
+      },
       run: (a, input, signal) => this.run(a, input, signal),
       park: (a, question, restored) => host.park(this.project(a), question, restored),
       report: (a, parent) => host.report(view(a, parent), parent && this.project(parent)),
@@ -508,6 +528,16 @@ export class RuntimeCoordinator implements Coordinator {
       names: (a, parent) => host.names(view(a, parent), parent && this.project(parent)),
       outward: a => host.outward ? host.outward(this.project(a)) : [],
     };
+  }
+
+  private async statusOnly(a: Assignment, parent: Assignment | undefined, turn: RunInput["turn"], result: HostTurnResult, signal: AbortSignal): Promise<boolean> {
+    if (turn !== "first" || !this.host.statusReply || !mayBeStatusOnly(a, parent, result.text, result.evidence)) return false;
+    try {
+      return a.requester.botId !== undefined && isStatusOnly(await this.host.statusReply(a.requester.botId, statusReplyPrompt(a.brief, result.text), signal));
+    } catch (error) {
+      this.log(`status reply check failed: ${String(error)}`);
+      return false;
+    }
   }
 
   private async run(a: Assignment, input: RunInput, signal: AbortSignal): Promise<RunResult> {
@@ -538,7 +568,7 @@ export class RuntimeCoordinator implements Coordinator {
     if (result.cards) return { kind: "needs_input", question: result.cards.question, cards: result.cards.ids, ...evidence(result) };
     if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...evidence(result) };
     const question = root ? undefined : needsInputQuestion(result.text);
-    if (question === undefined) return { kind: "completed", text: result.text, ...evidence(result) };
+    if (question === undefined) return { kind: "completed", text: result.text, ...(await this.statusOnly(a, parent, input.turn, result, signal) ? { statusOnly: true } : {}), ...evidence(result) };
     const named = withDefault(question);
     const decide = requesterDecides(a) && !result.privateQuestion && !personOnly(named.question) ? { decide: named.default ? { default: named.default } : {} } : {};
     return { kind: "needs_input", question, ...decide, ...evidence(result) };

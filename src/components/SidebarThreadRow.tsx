@@ -99,15 +99,14 @@ export function partitionHelperThreads<T extends ThreadRowTask>(tasks: T[], acti
   const helpers: T[] = [];
   for (const task of tasks) {
     const filed = folders.some((folder) => folder.id === task.projectId);
-    const needsPerson = task.threadId === activeId || task.activity === "waiting-on-you" || Boolean(task.unread);
-    const helper = Boolean(task.openedBy) && task.pinned !== true && !filed && !needsPerson &&
+    const helper = Boolean(task.openedBy) && task.pinned !== true && !filed && !demandsAttention(task, activeId) &&
       !task.closedBy && !isArchived(task) && !isSnoozed(task);
     (helper ? helpers : own).push(task);
   }
   return { own, helpers };
 }
 
-export function HelperThreadGroup<T>({ tasks, busy, renderThread }: { tasks: T[]; busy: boolean; renderThread: (task: T) => ReactNode }) {
+export function HelperThreadGroup<T>({ tasks, renderThread }: { tasks: T[]; renderThread: (task: T) => ReactNode }) {
   const [open, setOpen] = useState(false);
   if (tasks.length === 0) return null;
   const label = t("task.helperGroup");
@@ -117,7 +116,6 @@ export function HelperThreadGroup<T>({ tasks, busy, renderThread }: { tasks: T[]
       <ChevronRight aria-hidden="true" size={11} className={cn("shrink-0 transition-transform", open && "rotate-90")} />
       <span className="truncate">{label}</span>
       <span className="shrink-0 text-[10px] opacity-50">{tasks.length}</span>
-      {!open && busy && <Loader2 size={10} className="shrink-0 animate-spin text-success" />}
     </button>
     {open && <div role="group" aria-label={label}>{tasks.map(renderThread)}</div>}
   </div>;

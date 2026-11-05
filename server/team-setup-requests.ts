@@ -9,6 +9,7 @@ import { validateBotCwd } from "./bot-cwd.ts";
 import { UNDO_STALE, type DirectApply } from "./direct-apply.ts";
 import { harnessCapabilityLines, type DriverCapabilities } from "./harness-capabilities.ts";
 import { redactSecretsInText } from "./redact.ts"; import { chiefLevel } from "./chief-level.ts"; import { defaultBotRefusal } from "./default-bot.ts";
+import type { BotLimit } from "./host/starter-bot-limit.ts";
 import type { BotRecord, OptionCardData } from "./store.ts";
 import type { TeamSetupFields, TeamSetupOperation, TeamSetupRequest, TeamSetupResult, TeamSetupUndo } from "../shared/team-setup.ts";
 
@@ -35,7 +36,8 @@ const planSchema = z.object({
 
 export class TeamSetupError extends Error {
   readonly status: number;
-  constructor(message: string, status = 400) { super(message); this.status = status; }
+  readonly code?: string;
+  constructor(message: string, status = 400, code?: string) { super(message); this.status = status; this.code = code; }
 }
 
 /** Without `fields` (deletions) any drift cancels; with them it pins only the before-values the card showed, and authority is re-checked at confirm. */
@@ -83,6 +85,7 @@ interface Options {
   driverCapabilities?(instanceId: string): DriverCapabilities | undefined;
   validateChange?(before: BotRecord, fields: TeamSetupFields): void;
   maxBots: number;
+  botLimit?: Pick<BotLimit, "refusal">;
   ownsThread(botId: string, threadId: string): boolean;
   /** `request` only for a reviewed deletion; Undo of a creation deletes without one. */
   deleteBot(botId: string, revalidate: () => void, request?: TeamSetupRequest): Promise<void>;
@@ -171,7 +174,10 @@ export class TeamSetupRequestService {
       const at = projected.findIndex((bot) => bot.id === operation.botId);
       if (at < 0) projected.push(next); else projected[at] = next;
     }
-    if (this.options.store.bots.length + request.operations.filter((op) => op.action === "create").length > this.options.maxBots) throw new TeamSetupError("This setup exceeds the workspace bot limit", 409);
+    const creating = request.operations.filter((op) => op.action === "create").length;
+    if (this.options.store.bots.length + creating > this.options.maxBots) throw new TeamSetupError("This setup exceeds the workspace bot limit", 409);
+    const overPlan = this.options.botLimit?.refusal(creating, confirming && !immediate ? "person" : "bot");
+    if (overPlan) throw new TeamSetupError(overPlan.error, 409, overPlan.code);
     for (const name of request.newTeams) if (!request.operations.some((op) => section(op.fields.section) === name)) throw new TeamSetupError(`New team ${JSON.stringify(name)} needs a specialist in this setup`);
     for (const operation of request.operations) {
       const candidate = projected.find((bot) => bot.id === operation.botId)!;

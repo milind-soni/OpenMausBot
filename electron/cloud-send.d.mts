@@ -107,6 +107,10 @@ export interface CloudSendPageBridge {
   /** `moveToTeam` with main's refusal as a value, which the page says in its own language; `moveToTeam` keeps rejecting
    * with the English only, for pages that predate this. Absent from an older desktop. */
   moveToTeamCoded?(botId: string, teamId: string, name: string): Promise<{ view: import("./team-move.mjs").TeamMoveView | null } | { refused: import("./team-move.mjs").TeamMoveRefusal }>;
+  /** A team's own page: the bots its person has on My Cloud, and one moved in once they agree in main's own confirm. */
+  teamBring?(): Promise<{ team?: { id: string; name: string; ready: boolean }; bots: Array<{ id: string; name: string; stays?: "default" | "chief" | "last" }> }>;
+  teamBringMove?(botId: string): Promise<{ started: boolean; move: import("./team-move.mjs").TeamMoveView | null }>;
+  teamBringStatus?(): Promise<import("./team-move.mjs").TeamMoveView | null>;
   teamRetry?(): Promise<import("./team-move.mjs").TeamMoveView | null>;
   /** Shows that team's page, where the bot now lives. */
   openTeam?(teamId: string): Promise<void>;

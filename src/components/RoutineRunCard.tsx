@@ -7,7 +7,7 @@ import type { LocaleKey } from "@/locales";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { liveCardKind } from "../../shared/live-approval";
 import type { AutomationLine, RoutineRunCardData } from "../../shared/routine-run";
-import { formatTime, openNotificationTarget, useStore, type Message } from "@/state/store";
+import { formatTime, openThread, useStore, type Message } from "@/state/store";
 
 const DETAIL_LIMIT = 280;
 
@@ -135,7 +135,7 @@ export function RoutineRunRow({ message, botId }: { message: Message; botId: str
     <RoutineRunCard
       message={message}
       onOpen={canOpen && executionThreadId
-        ? () => openNotificationTarget(dispatch, { botId, threadId: executionThreadId }, state, showThreads)
+        ? () => openThread(dispatch, { botId, threadId: executionThreadId }, state, showThreads)
         : undefined}
     />
   );
@@ -158,7 +158,7 @@ export function AutomationCaption({ message, line, botId }: { message: Message; 
       {canOpen && (
         <button
           type="button"
-          onClick={() => openNotificationTarget(dispatch, { botId, threadId: line.executionThreadId }, state, showThreads)}
+          onClick={() => openThread(dispatch, { botId, threadId: line.executionThreadId }, state, showThreads)}
           aria-label={t("chat.automation.openRunFor", { name: line.name })}
           className="shrink-0 rounded px-1 hover:bg-inset hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
         >

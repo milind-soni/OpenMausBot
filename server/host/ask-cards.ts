@@ -164,6 +164,7 @@ export function createAskCards(deps: AskCardsDeps) {
     }
     if (node.groupId) store.patchGroup(node.groupId, { unread: true });
     else store.patchTask(bot.id, node.threadId, { unread: true });
+    if (node.cards?.length) return;
     const room = node.groupId ? store.group(node.groupId) : undefined;
     notify(buildNotification(asksWithCard ? "question" : "delegation-settled", bot, node.threadId, withDefault(question).question,
       { avatarUrl: bot.avatarUrl, ...(room ? { group: { id: room.id, name: room.name } } : {}) }));

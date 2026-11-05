@@ -1290,7 +1290,7 @@ describe("OpenCode session variants", () => {
   it("is stored as a status row the person always sees", () => {
     const source = readFileSync(new URL("../../index.ts", import.meta.url), "utf8");
     const handler = source.slice(source.indexOf('case "runtime.notice":'), source.indexOf('case "runtime.error":'));
-    expect(handler).toContain('role: "bot", kind: "activity", tool: runtimeNoticeTool(event)');
+    expect(handler).toContain('role: "bot", kind: "activity", tool: { ...runtimeNoticeTool(event), name: `notice: ${event.message.slice(0, 400)}` }');
     const message = "Retired model ".repeat(30);
     expect(runtimeNoticeTool({ message })).toEqual({ name: `notice: ${message.slice(0, 240)}`, ok: true });
   });

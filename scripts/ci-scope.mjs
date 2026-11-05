@@ -86,6 +86,7 @@ export const VITEST_SUBSETS = {
       "server/cloud-team-setup-request.e2e.test.ts",
       "server/cloud-team.e2e.test.ts",
       "server/host/brief-words.test.ts",
+      "server/host/lending-lifts.test.ts",
       "server/lent-folders.e2e.test.ts",
       "server/one-home-keep.e2e.test.ts",
       "server/one-home-outdated.e2e.test.ts",
@@ -94,6 +95,7 @@ export const VITEST_SUBSETS = {
       "server/one-home-trial-key.e2e.test.ts",
       "server/one-home-two-desks.e2e.test.ts",
       "server/one-home.e2e.test.ts",
+      "server/parked-cards.e2e.test.ts",
       "server/question-cards.e2e.test.ts",
       "server/shared-computers.e2e.test.ts",
       "server/team-move.e2e.test.ts",
@@ -134,6 +136,8 @@ export const VITEST_SUBSETS = {
       "server/two-places.e2e.test.ts",
       "scripts/ci-workflow.test.ts",
       "scripts/pre-push-check.test.ts",
+      "server/host/wait-words.test.ts",
+      "server/place-inbox.e2e.test.ts",
     ],
     shards: 2,
     nodeTests: true,
@@ -293,17 +297,20 @@ export function laneOf(event) {
   return "full";
 }
 
-// A shard runs its files one at a time, so the slowest shard sets the run's length. Windows and macOS run only the e2e
-// files that depend on their OS, so their shards stay as short as Linux's, and macOS keeps four: the account runs five
-// macOS jobs at a time.
+// The slowest shard sets the run's length. Windows and macOS run only the e2e files that depend on their OS, so their
+// shards stay as short as Linux's, and macOS keeps four: the account runs five macOS jobs at a time.
 export const VITEST_SHARDS = { "macos-latest": 4, "ubuntu-latest": 8, "windows-latest": 8 };
+
+// Test files at once on each platform's runner (OMB_VITEST_WORKERS, vite.config.ts). A Linux shard mostly waits on real
+// servers and fake engines: its 4 vCPU sat 70% idle one file at a time, and four files take a third of the time.
+export const VITEST_WORKERS = { "macos-latest": 1, "ubuntu-latest": 4, "windows-latest": 1 };
 
 /** ci.yml's vitest matrix: every shard of every selected platform, and which e2e files that platform runs. */
 export function vitestMatrix(oses) {
   return {
     include: oses.flatMap((os) => Array.from({ length: VITEST_SHARDS[os] }, (_, i) => ({
       os, part: `shard ${i + 1}/${VITEST_SHARDS[os]}`, shard: i + 1, shards: VITEST_SHARDS[os], files: "",
-      e2e: os === "ubuntu-latest" ? "all" : "host", node_tests: i === 0,
+      e2e: os === "ubuntu-latest" ? "all" : "host", node_tests: i === 0, workers: VITEST_WORKERS[os],
     }))),
   };
 }
@@ -318,7 +325,7 @@ export function ciOutputs({ checks }, oses) {
     for (let shard = 1; shard <= shards; shard++) {
       include.push({
         os: "ubuntu-latest", part: shards > 1 ? `${part} ${shard}/${shards}` : part, shard, shards,
-        files: files.join(" "), e2e: "all", node_tests: nodeTests && shard === 1,
+        files: files.join(" "), e2e: "all", node_tests: nodeTests && shard === 1, workers: VITEST_WORKERS["ubuntu-latest"],
       });
     }
   }
