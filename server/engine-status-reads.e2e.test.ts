@@ -1,6 +1,6 @@
 // Real server, fake Claude CLI that logs each status probe: an engine's CLI is probed once per answer, not once per reader.
 import { spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,11 +39,8 @@ async function boot(home: string, knobs: Record<string, string> = {}) {
     stdio: ["ignore", "pipe", "pipe"],
   });
   children.push(child);
-  const logDir = join(tmpdir(), "openmausbot-verification-evidence");
-  mkdirSync(logDir, { recursive: true });
-  const logPath = join(logDir, `engine-status-${port}.log`);
   let output = "";
-  const capture = (chunk: Buffer) => { output += chunk; appendFileSync(logPath, chunk); };
+  const capture = (chunk: Buffer) => { output += chunk; };
   child.stdout!.on("data", capture);
   child.stderr!.on("data", capture);
   await expect.poll(async () => {
@@ -59,7 +56,7 @@ async function boot(home: string, knobs: Record<string, string> = {}) {
     return response.json() as Promise<any>;
   };
   const stop = () => waitForExit(child, { signal: "SIGTERM" });
-  return { call, control: (...args: string[]) => runControlOmb([...args, "--url", base]) as Promise<any>, stop, logPath };
+  return { call, control: (...args: string[]) => runControlOmb([...args, "--url", base]) as Promise<any>, stop };
 }
 
 const probeCount = (log: string, probe: "version" | "help" | "auth") =>
@@ -92,9 +89,6 @@ it.each(["slow", "empty-once"])("detects a %s CLI across concurrent status reads
   const transcript = await server.control("messages", "--bot", bot.id);
   expect(replies(transcript.messages)).toHaveLength(replies(initial.messages).length + 2);
   expect((await read()).modelSelection).toEqual(selection);
-  const evidenceDir = join(ROOT, ".omb-scratch", "issue-4195-detection");
-  mkdirSync(evidenceDir, { recursive: true });
-  writeFileSync(join(evidenceDir, `${mode}.json`), JSON.stringify({ mode, logPath: server.logPath, statuses: lists, versionProbes: probeCount(probes, "version"), selection, turns, transcript }, null, 2));
 }, 90_000);
 
 it("probes the engine's CLI once on a later start while the model lists arrive and the engine list is read", async () => {

@@ -293,7 +293,7 @@ export function defaultCredentialReader(env: NodeJS.ProcessEnv = process.env): C
 
 export async function fetchPlanUsage(accounts: PlanAccount[], deps: PlanUsageDeps): Promise<PlanUsageReport> {
   const now = deps.now?.() ?? Date.now();
-  const providers = await Promise.all(accounts.filter((account) => !account.noUsage).map((account) => fetchProvider(account, deps)));
+  const providers = (await Promise.all(accounts.filter((account) => !account.noUsage).map((account) => fetchProvider(account, deps)))).filter((row) => row !== null);
   return { fetchedAt: new Date(now).toISOString(), providers };
 }
 
@@ -918,14 +918,14 @@ function okRow(account: PlanAccount, windows: PlanWindows): PlanProviderRow {
   };
 }
 
-async function fetchProvider(account: PlanAccount, deps: PlanUsageDeps): Promise<PlanProviderRow> {
+async function fetchProvider(account: PlanAccount, deps: PlanUsageDeps): Promise<PlanProviderRow | null> { // null: OpenCode, in every fleet, with no key of its own
   let credential: PlanCredential;
   try {
     credential = await deps.credentials.read(account);
   } catch {
-    return errorRow(account, signInAgain(account.driver));
+    return account.driver === "opencode" ? null : errorRow(account, signInAgain(account.driver));
   }
-  if (credential.expired || !credential.token) return errorRow(account, signInAgain(account.driver));
+  if (credential.expired || !credential.token) return account.driver === "opencode" && !credential.expired ? null : errorRow(account, signInAgain(account.driver));
   try {
     if (account.driver === "claude") return await fetchClaude(account, credential.token, deps);
     if (account.driver === "codex") return await fetchCodex(account, credential.token, credential.accountId, deps);

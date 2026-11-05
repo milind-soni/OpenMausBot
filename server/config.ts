@@ -395,9 +395,7 @@ const appConfigSchema = z.object({
       .refine((value) => !value || /^https?:\/\//i.test(value), "the Chatterbox server address must start with http:// or https://")
       .optional(),
     model: optionalText,
-    fishModel: z.enum(FISH_TTS_MODELS).optional(),
-    /** Every bot's replies come with a voice note unless the bot's own `voiceNoteEveryReply` says otherwise. */
-    everyReply: z.boolean().optional(),
+    fishModel: z.enum(FISH_TTS_MODELS).optional(), everyReply: z.boolean().optional(), // a voice note with every reply unless a bot's voiceNoteEveryReply says otherwise
   }).optional(),
   decider: deciderConfigSchema.optional(),
   live: liveConfigSchema.optional(),
