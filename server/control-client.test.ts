@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  CONTROL_REFUSAL_PLAIN, CONTROL_UNCONFIRMED, CONTROL_WAIT_MS, controlRefusal, createControlClient,
+  CONTROL_REFUSAL_PLAIN, CONTROL_TURN_ENDED, CONTROL_UNCONFIRMED, CONTROL_WAIT_MS, controlRefusal, createControlClient,
 } from "./control-client.ts";
 
 const options = { url: "http://control.test/state", token: "fixture-token" };
@@ -107,9 +107,18 @@ describe("computer control client", () => {
     await expect(createControlClient({ ...options, fetchImpl }).state()).resolves.toEqual(unavailable);
   });
 
-  it.each([401, 403, 500])("fails closed for HTTP %i", async (status) => {
+  it.each([403, 500])("fails closed for HTTP %i", async (status) => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ held: false }, { status }));
     await expect(createControlClient({ ...options, fetchImpl }).state()).resolves.toEqual(unavailable);
+  });
+
+  it("says the turn ended, not 'retry in a few seconds', when the gate no longer accepts the turn's capability (401)", async () => {
+    // A self-woken engine (e.g. Claude's ScheduleWakeup) keeps calling after its turn settled and its capability was revoked;
+    // "Retry in a few seconds" made it retry for hours.
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ error: "unauthorized" }, { status: 401 }));
+    const state = await createControlClient({ ...options, fetchImpl }).state(true);
+    expect(state).toEqual({ held: true, helpOpen: false, blockedReason: CONTROL_TURN_ENDED });
+    expect(controlRefusal(state)).toBe(CONTROL_TURN_ENDED);
   });
 
   it("fails closed when the request rejects", async () => {
