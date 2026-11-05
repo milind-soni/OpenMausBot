@@ -136,6 +136,15 @@ describe("a cloud computer starts only when the bot uses it", () => {
         // Every request is counted, a stray own-key one included.
         const path = url.pathname.replace(/^\/relay\/api\/box\/v1/, "");
         requests.push({ method: req.method ?? "GET", path });
+        // The computer's own transfer links: no key, the file's path in the link.
+        const linked = /^\/sandbox\/(get|put)\/([^/]+)$/.exec(url.pathname);
+        if (linked) {
+          if (req.headers.authorization) return send(400, { ok: false, message: "a transfer link takes no key" });
+          const file = Buffer.from(linked[2]!, "base64url").toString("utf8");
+          if (linked[1] === "put") { written.set(file, raw); res.writeHead(200); return res.end(); }
+          res.writeHead(200, { "content-type": "application/octet-stream", "content-length": String(FRAME.length) });
+          return res.end(FRAME);
+        }
         if (req.headers.authorization !== `Bearer ${INCLUDED}` || !url.pathname.startsWith("/relay/api/box/v1")) {
           return send(401, { ok: false, code: "unauthorized", message: "Unauthorized" });
         }
@@ -168,9 +177,10 @@ describe("a cloud computer starts only when the bot uses it", () => {
         }
         if (verb === "desktop" && req.method === "POST") return send(200, { desktopUrl: `https://desktop.invalid/${row.id}` });
         if (verb === "commands" && req.method === "POST") return send(200, { exitCode: 0, stdout: "captured", stderr: "" });
-        if (verb === "files" && req.method === "PUT") {
-          written.set(body.path, Buffer.from(body.content, body.encoding).toString("utf8"));
-          return send(200, { ok: true, type: "file.written", path: body.path, encoding: body.encoding, size: written.get(body.path)!.length });
+        if ((verb === "files/download-url" || verb === "files/upload-url") && req.method === "POST") {
+          const get = verb === "files/download-url";
+          return send(200, { ok: true, url: `http://${req.headers.host}/sandbox/${get ? "get" : "put"}/${Buffer.from(body.path).toString("base64url")}`,
+            method: get ? "GET" : "PUT", path: body.path, expiresAt: new Date(Date.now() + 300_000).toISOString() });
         }
         if (verb === "artifacts" && req.method === "GET") {
           res.writeHead(200, { "content-type": "image/jpeg", "content-length": String(FRAME.length) });
@@ -477,8 +487,9 @@ describe("a cloud computer starts only when the bot uses it", () => {
     expect((await call(sent, "copy_to_computer", { from: "query.sql", path: "/tmp/query.sql" })).body.result.isError).toBeFalsy();
     expect(written.get("/tmp/query.sql")).toBe("select 1;");
     expect((await call(sent, "copy_from_computer", { path: "/tmp/x", to: "../escaped" })).body.result.isError).toBe(true);
-    expect(requests.filter(request => /\/(artifacts|files)$/.test(request.path)).map(request => request.method))
-      .toEqual(expect.arrayContaining(["GET", "PUT"]));
+    expect(requests.filter(request => /files\/(download|upload)-url$|^\/sandbox\//.test(request.path)).map(request => `${request.method} ${request.path.split("/").slice(0, 3).join("/")}`))
+      .toEqual([`POST /boxes/${rows.at(-1)!.id}`, "GET /sandbox/get", `POST /boxes/${rows.at(-1)!.id}`, "PUT /sandbox/put"]);
+    expect(JSON.stringify([brought.body])).not.toContain("/sandbox/");
     await finish(bot.id);
 
     const { group } = await apiOk("POST", "/api/groups", { name: "Copy room", memberIds: [bot.id] });

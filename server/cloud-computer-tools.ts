@@ -5,7 +5,7 @@ import { isRedditAddress, REDDIT_REFUSAL } from "./browser/egress/reddit.ts";
 import { copyFromComputer, copyToComputer } from "./cloud-computer-files.ts";
 import type { AppConfig } from "./config.ts";
 import { controlRefusal, type ControlState } from "./control-client.ts";
-import { HARNESS_CALL_BUDGET_MS } from "./harness-budget.ts";
+import { COMPUTER_COPY_BUDGET_MS, HARNESS_CALL_BUDGET_MS } from "./harness-budget.ts";
 import { compileToolSchema } from "./mcp-schema-validator.ts";
 
 const coordinate = { type: "integer", minimum: 0, maximum: 32767 };
@@ -22,11 +22,11 @@ export const CLOUD_COMPUTER_TOOLS = [
   tool("scroll", "Scroll at a point on the cloud desktop.", { x: coordinate, y: coordinate, direction: { type: "string", enum: ["up", "down", "left", "right"] }, amount: { type: "integer", minimum: 1, maximum: 30 } }, ["x", "y", "direction"]),
   tool("open_url", "Request opening an HTTP or HTTPS URL in the cloud desktop browser; inspect the screen to confirm it loaded.", { url: { type: "string", pattern: "^https?://", maxLength: 2000 } }, ["url"]),
   tool("exec", "Run a shell command on the assigned cloud computer.", { command: { type: "string", minLength: 1, maxLength: 4000 } }, ["command"]),
-  tool("copy_from_computer", "Copy one file of at most 50 MiB from the cloud computer into your working folder, for example to load it with data_load or use it in a page. A file already there is replaced.", {
+  tool("copy_from_computer", "Copy one file of up to 2 GiB from the cloud computer into your working folder, for example to load it with data_load or use it in a page. A file already there is replaced.", {
     path: { type: "string", minLength: 1, maxLength: 4096, description: "The file on the cloud computer, under /home/user or /tmp." },
     to: { type: "string", minLength: 1, maxLength: 1000, description: "Where it goes, relative to your working folder. Default: the file's own name." },
   }, ["path"]),
-  tool("copy_to_computer", "Copy one file of at most 5 MiB from your working folder to the cloud computer. A file already there is replaced.", {
+  tool("copy_to_computer", "Copy one file of up to 2 GiB from your working folder to the cloud computer. A file already there is replaced.", {
     from: { type: "string", minLength: 1, maxLength: 1000, description: "The file, relative to your working folder." },
     path: { type: "string", minLength: 1, maxLength: 4096, description: "Where it goes on the cloud computer, under /home/user or /tmp." },
   }, ["from", "path"]),
@@ -34,6 +34,10 @@ export const CLOUD_COMPUTER_TOOLS = [
 /** A call the gate let through while no Boat had landed for the turn. */
 export const CLOUD_COMPUTER_NOT_READY = "The cloud computer is not ready. This call was not performed. Take a fresh screenshot in a moment.";
 export const CLOUD_COMPUTER_LATE = "The cloud computer did not answer in time. This call may still have run; take a fresh screenshot before repeating it.";
+export const CLOUD_COMPUTER_COPY_LATE = "The copy did not finish within 9 minutes and was stopped; nothing was changed. Make the file smaller on the cloud computer first (filter, compress or split it), then copy the parts.";
+const COPY_TOOLS = new Set(["copy_from_computer", "copy_to_computer"]);
+export const cloudComputerCallBudgetMs = (name: unknown): number =>
+  typeof name === "string" && COPY_TOOLS.has(name) ? COMPUTER_COPY_BUDGET_MS : HARNESS_CALL_BUDGET_MS;
 const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
 const buttons: Record<string, number> = { left: 1, middle: 2, right: 3 };
 const scrollButtons: Record<string, number> = { up: 4, down: 5, left: 6, right: 7 };
@@ -70,12 +74,11 @@ export async function runCloudComputerTool(
   const problem = cloudComputerCallProblem(name, args);
   if (problem) return { isError: true, content: [{ type: "text", text: problem }] };
   signal.throwIfAborted();
-  if (name === "copy_from_computer" || name === "copy_to_computer") {
+  if (COPY_TOOLS.has(name)) {
     if (!folder) return { isError: true, content: [{ type: "text", text: "This turn has no working folder to copy into or out of." }] };
     const copied = name === "copy_from_computer"
       ? await copyFromComputer(cfg, boxId, folder, args as { path: string; to?: string }, signal)
       : await copyToComputer(cfg, boxId, folder, args as { from: string; path: string }, signal);
-    signal.throwIfAborted();
     return "error" in copied ? { isError: true, content: [{ type: "text", text: copied.error }] } : { content: [{ type: "text", text: JSON.stringify(copied) }] };
   }
   if (name === "screenshot") {
@@ -121,7 +124,7 @@ export async function cloudComputerRpc(
     budgetMs?: number;
   },
 ): Promise<{ tools: typeof CLOUD_COMPUTER_TOOLS } | CloudComputerResult> {
-  const deadline = Date.now() + (deps.budgetMs ?? HARNESS_CALL_BUDGET_MS);
+  const started = Date.now();
   if (request?.method === "tools/list") {
     deps.assertActive();
     return { tools: CLOUD_COMPUTER_TOOLS };
@@ -129,6 +132,8 @@ export async function cloudComputerRpc(
   if (request?.method !== "tools/call") throw Object.assign(new Error("unsupported computer method"), { status: 400 });
   const params = (request.params && typeof request.params === "object" ? request.params : {}) as { name?: unknown; arguments?: unknown };
   const args = params.arguments ?? {};
+  const copy = typeof params.name === "string" && COPY_TOOLS.has(params.name);
+  const deadline = started + (deps.budgetMs ?? cloudComputerCallBudgetMs(params.name));
   const problem = cloudComputerCallProblem(params.name, args);
   if (problem) return { isError: true, content: [{ type: "text", text: problem }] };
   const control = await deps.gate();
@@ -142,7 +147,7 @@ export async function cloudComputerRpc(
     result = await runCloudComputerTool(deps.cfg, boxId, params.name as string, args as Record<string, unknown>, AbortSignal.any([deps.signal, late]), deps.folder?.());
   } catch (error) {
     if (!late.aborted || deps.signal.aborted) throw error;
-    return { isError: true, content: [{ type: "text", text: CLOUD_COMPUTER_LATE }] };
+    return { isError: true, content: [{ type: "text", text: copy ? CLOUD_COMPUTER_COPY_LATE : CLOUD_COMPUTER_LATE }] };
   }
   deps.assertActive();
   return result;
