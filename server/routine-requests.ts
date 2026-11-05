@@ -14,6 +14,7 @@ import {
   type RoutineToolScheduleInput,
 } from "./routine-request-schemas.ts";
 import { runsOnce } from "../shared/limit-reset.ts";
+import { cleanSteps } from "./routine-load.ts";
 import { limitResetOccurrence } from "./routine-schedules.ts";
 import {
   intervalHasRestrictions,
@@ -25,6 +26,7 @@ import {
   type RoutineSchedule,
   type RoutineScheduleInput,
 } from "./routines.ts";
+import { ROUTINE_STEP_LIMITS, type RoutineStep } from "../shared/routines.ts";
 import type {
   RoutineRequestCardData,
   RoutineRequestChanges,
@@ -116,6 +118,7 @@ export interface RoutineRequestServiceOptions {
   /** Re-authorizes a cross-bot target at propose and confirm time: the card can outlive the target's section. */
   validateTarget?: (proposerBotId: string, target: { botId: string; name: string }) => string | null;
   engines?: LimitResetEngines;
+  botName?: (botId: string) => string | undefined;
 }
 
 export interface ProposeRoutineRequestArgs {
@@ -359,6 +362,14 @@ function normalizeScheduleChanges(
   };
 }
 
+function normalizeSteps(steps: NonNullable<RoutineToolDefinitionInput["steps"]>): RoutineStep[] {
+  try {
+    return cleanSteps(steps.map((step, index) => ({ ...step, instructions: text(step.instructions, `step ${index + 1} instructions`, ROUTINE_STEP_LIMITS.instructions) })));
+  } catch (error) {
+    throw error instanceof RoutineRequestError ? error : new RoutineRequestError(error instanceof Error ? error.message : String(error));
+  }
+}
+
 function normalizeDefinition(input: RoutineToolDefinitionInput, now: number, ownEngine?: string): RoutineRequestDefinition {
   const timeoutMinutes = timeout(input.timeoutMinutes);
   return {
@@ -371,6 +382,7 @@ function normalizeDefinition(input: RoutineToolDefinitionInput, now: number, own
     ...(input.continuity === true ? { continuity: true } : {}),
     ...(input.overlap === "queue" ? { overlap: "queue" as const } : {}),
     ...(input.runOnStartup === true ? { runOnStartup: true } : {}),
+    ...(input.steps?.length ? { steps: normalizeSteps(input.steps) } : {}),
   };
 }
 
@@ -385,6 +397,7 @@ function normalizeChanges(input: RoutineToolChangesInput, now: number, ownEngine
   if (input.continuity !== undefined) changes.continuity = input.continuity === true;
   if (input.overlap !== undefined) changes.overlap = input.overlap;
   if (input.runOnStartup !== undefined) changes.runOnStartup = input.runOnStartup === true;
+  if (input.steps !== undefined) changes.steps = input.steps?.length ? normalizeSteps(input.steps) : null;
   return changes;
 }
 
@@ -627,9 +640,10 @@ function effectiveDefinition(operation: RoutineRequestOperation, manager: Routin
     ...(existing.continuity ? { continuity: true } : {}),
     ...(existing.overlap ? { overlap: existing.overlap } : {}),
     ...(existing.runOnStartup ? { runOnStartup: true } : {}),
+    ...(existing.steps ? { steps: existing.steps } : {}),
   };
   if (operation.action !== "update") return base;
-  const { schedule, timeoutMinutes, ...changes } = operation.changes;
+  const { schedule, timeoutMinutes, steps, ...changes } = operation.changes;
   const merged: RoutineRequestDefinition = {
     ...base,
     ...changes,
@@ -637,6 +651,8 @@ function effectiveDefinition(operation: RoutineRequestOperation, manager: Routin
   };
   if (timeoutMinutes === null) delete merged.timeoutMinutes;
   else if (timeoutMinutes !== undefined) merged.timeoutMinutes = timeoutMinutes;
+  if (steps === null) delete merged.steps;
+  else if (steps !== undefined) merged.steps = steps;
   if (runsOnce(merged.schedule)) delete merged.runOnStartup;
   return merged;
 }
@@ -647,6 +663,7 @@ function cardCopy(
   timeZone: string,
   now: number,
   engines?: LimitResetEngines,
+  botName: (botId: string) => string | undefined = () => undefined,
 ): RoutineCardCopy {
   const definition = effectiveDefinition(operation, manager);
   const actionCopy = ACTION_COPY[operation.action];
@@ -717,6 +734,8 @@ function cardCopy(
       ...(operation.action === "create" || operation.action === "update"
         ? [consequenceLine(definition.schedule, Boolean(definition.continuity))]
         : []),
+      ...(definition.steps ? ["", "Steps:", ...definition.steps.map((step, index) => `${index + 1}. @${redactSecretsInText(botName(step.botId) ?? step.botId)}${
+        step.model === "quick" ? " (quick)" : ""}${step.check ? ", check" : ""}: ${redactSecretsInText(step.instructions).replace(/\s+/g, " ").slice(0, 200)}`)] : []),
       "",
       "Instructions:",
       visibleInstructions,
@@ -739,6 +758,7 @@ function inputFromDefinition(definition: RoutineRequestDefinition, botId: string
     ...(definition.continuity ? { continuity: true } : {}),
     ...(definition.overlap === "queue" ? { overlap: "queue" as const } : {}),
     ...(definition.runOnStartup ? { runOnStartup: true } : {}),
+    ...(definition.steps ? { steps: definition.steps } : {}),
   };
 }
 
@@ -757,6 +777,7 @@ function updateFromChanges(
   if (changes.continuity !== undefined) patch.continuity = changes.continuity;
   if (changes.overlap !== undefined) patch.overlap = changes.overlap;
   if (changes.runOnStartup !== undefined) patch.runOnStartup = changes.runOnStartup;
+  if (changes.steps !== undefined) patch.steps = changes.steps;
   return patch;
 }
 
@@ -831,6 +852,7 @@ function revalidateOperation(operation: RoutineRequestOperation, manager: Routin
         || Boolean(routine.continuity) !== Boolean(definition.continuity)
         || (routine.overlap ?? "skip") !== (definition.overlap ?? "skip")
         || Boolean(routine.runOnStartup) !== Boolean(definition.runOnStartup)
+        || !isDeepStrictEqual(routine.steps ?? null, definition.steps ?? null)
         || (routine.attachments?.length ?? 0) > 0) return false;
       if (schedule.type === "limit_reset" || routine.schedule.type === "limit_reset") {
         return schedule.type === routine.schedule.type && isDeepStrictEqual(requestSchedule(schedule), requestSchedule(routine.schedule));
@@ -916,6 +938,7 @@ function routineSnapshot(routine: Routine): RoutineRequestSnapshot | undefined {
     ...(routine.continuity ? { continuity: true } : {}),
     ...(routine.overlap === "queue" ? { overlap: "queue" as const } : {}),
     ...(routine.runOnStartup ? { runOnStartup: true } : {}),
+    ...(routine.steps ? { steps: routine.steps } : {}),
     enabled: routine.enabled,
     ...(routine.target === "room-goal" ? { target: "room-goal" as const } : {}),
     ...(routine.groupId ? { groupId: routine.groupId } : {}),
@@ -938,6 +961,7 @@ function restorePatch(before: RoutineRequestSnapshot, now: number): Partial<Rout
     continuity: before.continuity === true,
     overlap: before.overlap ?? "skip",
     runOnStartup: before.runOnStartup === true,
+    steps: before.steps ?? null,
   };
 }
 
@@ -951,6 +975,7 @@ export class RoutineRequestService {
   private readonly validateTarget?: RoutineRequestServiceOptions["validateTarget"];
   private readonly autoApply?: RoutineRequestServiceOptions["autoApply"];
   private readonly engines?: LimitResetEngines;
+  private readonly botName?: (botId: string) => string | undefined;
 
   constructor(options: RoutineRequestServiceOptions) {
     this.store = options.store;
@@ -962,6 +987,7 @@ export class RoutineRequestService {
     this.validateTarget = options.validateTarget;
     this.autoApply = options.autoApply;
     this.engines = options.engines;
+    this.botName = options.botName;
   }
 
   /** Writes the card without applying it, the first half of submit(); no production path stops here since Triggers v2. */
@@ -991,6 +1017,9 @@ export class RoutineRequestService {
       const refusal = this.validateTarget(botId, operation.forBot);
       if (refusal) throw new RoutineRequestError(refusal, 403);
     }
+    const stepsRefused = this.routines.stepsProblem(operation.forBot?.botId ?? botId,
+      operation.action === "create" ? operation.routine.steps : operation.action === "update" ? operation.changes.steps ?? undefined : undefined);
+    if (stepsRefused) throw new RoutineRequestError(stepsRefused, 403);
     await this.requireCloudReadiness(operation, botId);
     // The probe is async: re-check the captured revision before persisting the snapshot.
     const cardAt = this.now();
@@ -1006,7 +1035,7 @@ export class RoutineRequestService {
     };
     const definition = effectiveDefinition(operation, this.routines);
     const timeZone = definition?.schedule.type === "cron" ? definition.schedule.timeZone : this.timeZone();
-    const copy = cardCopy(operation, this.routines, timeZone, cardAt, this.engines);
+    const copy = cardCopy(operation, this.routines, timeZone, cardAt, this.engines, this.botName);
     const messageInput: Parameters<RoutineRequestStore["appendMessage"]>[1] = {
       role: "bot",
       kind: "options",
@@ -1170,6 +1199,7 @@ export class RoutineRequestService {
             ...(before.continuity ? { continuity: true } : {}),
             ...(before.overlap === "queue" ? { overlap: "queue" as const } : {}),
             ...(before.runOnStartup ? { runOnStartup: true } : {}),
+            ...(before.steps ? { steps: before.steps } : {}),
             ...(before.resultsThreadId ? { resultsThreadId: before.resultsThreadId } : {}),
           }).id;
           break;

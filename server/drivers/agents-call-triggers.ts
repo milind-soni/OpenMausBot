@@ -15,7 +15,7 @@ const LIST_ROUTE = "/api/internal/triggers";
 const EVENTS_ROUTE = "/api/internal/trigger-events";
 const APP_ONLY = ["app", "event", "account"] as const;
 const REQUEST_ROUTE = "/api/internal/trigger-requests";
-const SCHEDULE_ONLY = ["schedule", "timeout_minutes", "timeoutMinutes", "clear_timeout", "continuity", "overlap", "run_on_startup", "runOnStartup"] as const;
+const SCHEDULE_ONLY = ["schedule", "timeout_minutes", "timeoutMinutes", "clear_timeout", "continuity", "overlap", "run_on_startup", "runOnStartup", "steps"] as const;
 
 function jsonRecord(value: unknown): value is Json {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -264,7 +264,26 @@ function routineFields(args: Json): { fields: Json; error?: string } {
   if (typeof args.continuity === "boolean") fields.continuity = args.continuity;
   if (args.overlap !== undefined) fields.overlap = args.overlap;
   if (typeof runOnStartup === "boolean") fields.runOnStartup = runOnStartup;
+  if (args.steps != null) {
+    const steps = routineSteps(args.steps);
+    if (typeof steps === "string") return { fields, error: steps };
+    fields.steps = steps;
+  }
   return { fields };
+}
+
+/** The bot names each step's bot; the harness reads that name or id as its id. */
+function routineSteps(raw: unknown): Json[] | string {
+  const shape = 'steps must be a list like [{"do":"find three news items"},{"bot":"Writer","do":"summarize them","quick":true},{"do":"does it mention a release?","check":true}].';
+  if (!Array.isArray(raw)) return shape;
+  const steps: Json[] = [];
+  for (const step of raw) {
+    if (!jsonRecord(step) || typeof step.do !== "string" || !step.do.trim()) return shape;
+    if ((step.bot != null && typeof step.bot !== "string") || (step.quick != null && typeof step.quick !== "boolean") || (step.check != null && typeof step.check !== "boolean")) return shape;
+    steps.push({ instructions: step.do.trim(), ...(typeof step.bot === "string" && step.bot.trim() ? { bot: step.bot.trim() } : {}),
+      ...(step.quick === true ? { model: "quick" } : {}), ...(step.check === true ? { check: true } : {}) });
+  }
+  return steps;
 }
 
 

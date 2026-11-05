@@ -179,6 +179,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
     const listing = listTriggers({
       botId: ownerId, triggerId: url.searchParams.get("triggerId") ?? undefined, routines: deps.routines().listRoutines(),
       webhooks: deps.webhooks.list(), appTriggers: manager.list(), runs: deps.routines().listRuns(), timeZone: deps.timeZone(), now: Date.now(),
+      botName: (botId) => deps.store.bot(botId)?.name,
     });
     const shown = listing.trigger;
     if (url.searchParams.get("includeAddress") !== "1" || !shown) return json(res, 200, listing);
