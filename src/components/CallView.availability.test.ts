@@ -70,7 +70,7 @@ describe("call capability guidance", () => {
     }, "other"), false, false);
     expect(help).toEqual({
       label: "Calls where you take turns need the desktop app",
-      reason: "They listen from this computer, so they need the MausBot app on a Mac, Windows or Linux computer.",
+      reason: "They listen from this computer, so they need MausBot on a Mac, Windows or Linux computer.",
     });
   });
 

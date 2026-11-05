@@ -16,7 +16,7 @@ import { t } from "@/lib/i18n";
 import { speaker } from "@/lib/tts";
 import { localSystemVoiceActive } from "@/lib/local-voice";
 import { useSpeech } from "@/lib/tts/useSpeech";
-import { usePushToTalk } from "@/lib/push-to-talk";
+import { pushToTalkKeys, usePushToTalk } from "@/lib/push-to-talk";
 import { BotAvatar } from "./Avatar";
 import { navigateThreadMenu } from "./BotProjects";
 import { LiveKeyNeeded } from "./LiveKeyNeeded";
@@ -799,7 +799,7 @@ function Call({ bot }: { bot: Bot }) {
         {phase === "listening" ? (
           heard || (
             <span className="text-ink-secondary">
-              {pushToTalk ? "Release Control + Option to send…" : "Say something…"}
+              {pushToTalk ? `Release ${pushToTalkKeys()} to send…` : "Say something…"}
             </span>
           )
         ) : (
@@ -842,7 +842,7 @@ function Call({ bot }: { bot: Bot }) {
       </div>
 
       <div className="text-[12px] text-ink-tertiary">
-        Hold Control + Option to talk · Space interrupts · Esc hangs up
+        Hold {pushToTalkKeys()} to talk · Space interrupts · Esc hangs up
       </div>
     </>
   );

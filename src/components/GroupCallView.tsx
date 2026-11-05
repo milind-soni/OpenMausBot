@@ -9,7 +9,7 @@ import { track } from "@/lib/analytics";
 import { normalizeState } from "@/lib/mascot";
 import { speaker } from "@/lib/tts";
 import { useSpeech } from "@/lib/tts/useSpeech";
-import { usePushToTalk } from "@/lib/push-to-talk";
+import { pushToTalkKeys, usePushToTalk } from "@/lib/push-to-talk";
 import { useStore, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { BotAvatar } from "./Avatar";
@@ -527,7 +527,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
           heard || (
             <span className="text-ink-secondary">
               {pushToTalk
-                ? "Release Control + Option to send…"
+                ? `Release ${pushToTalkKeys()} to send…`
                 : "Say a name, say “everyone,” or just talk to the group…"}
             </span>
           )
@@ -569,7 +569,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       </div>
 
       <div className="text-[12px] text-ink-tertiary">
-        Hold Control + Option to talk · Say a member’s name to direct the turn · Space interrupts · Esc hangs up
+        Hold {pushToTalkKeys()} to talk · Say a member’s name to direct the turn · Space interrupts · Esc hangs up
       </div>
     </div>
   );
