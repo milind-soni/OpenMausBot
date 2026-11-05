@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { collisionFreeDownloadPath, defaultSaveName, openLogsFolder, resolveSavablePath, revealDownloadWhenDone, revealInFolder, withSavableFile } from "./save-file.mjs";
+import { collisionFreeDownloadPath, defaultSaveName, htmlCopyName, openHtmlCopy, openLogsFolder, resolveSavablePath, revealDownloadWhenDone, revealInFolder, withSavableFile } from "./save-file.mjs";
 
 // Creating a symlink on Windows needs elevation or developer mode.
 const canSymlink = (() => {
@@ -289,4 +289,66 @@ describe("openLogsFolder", () => {
     assert.match(main, /ipcMain\.handle\("desktop:open-logs", localOrHome\("desktop:open-logs", \(\) => openLogsFolder\(LOG_DIR, \{ open: \(folder\) => shell\.openPath\(folder\) \}\)\)\);/);
     assert.match(main, /const LOG_DIR = app\.getPath\("logs"\);/);
   });
+});
+
+describe("openHtmlCopy (#4406)", () => {
+  it("opens a fresh private copy inside our own folder, never a path from the page", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omb-open-html-"));
+    try {
+      const opened = [];
+      assert.equal(await openHtmlCopy("<h1>hi</h1>", "../../evil/report.html", { dir, open: async (file) => { opened.push(file); return ""; } }), true);
+      assert.equal(opened.length, 1);
+      assert.equal(path.dirname(path.dirname(opened[0])), dir);
+      assert.equal(path.basename(opened[0]), "report.html");
+      assert.equal(fs.readFileSync(opened[0], "utf8"), "\ufeff<h1>hi</h1>");
+      if (process.platform !== "win32") assert.equal(fs.statSync(opened[0]).mode & 0o777, 0o600);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses what is not a page or is too large, and passes on why the system could not open it", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omb-open-html-"));
+    try {
+      const open = async () => "";
+      await assert.rejects(openHtmlCopy(42, "a.html", { dir, open }), /Nothing to open/);
+      await assert.rejects(openHtmlCopy("x".repeat(2 * 1024 * 1024 + 1), "a.html", { dir, open }), /too large/);
+      await assert.rejects(openHtmlCopy("<p>", "a.html", { dir, open: async () => "No application" }), /No application/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("clears copies older than a day", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omb-open-html-"));
+    try {
+      const old = path.join(dir, "p-old");
+      fs.mkdirSync(old);
+      const day = Date.now() + 25 * 60 * 60 * 1000;
+      await openHtmlCopy("<p>", "a.html", { dir, open: async () => "", now: day });
+      assert.equal(fs.existsSync(old), false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps only a safe file name with an HTML ending", () => {
+    assert.equal(htmlCopyName("C:\\x\\Report.HTM"), "Report.htm");
+    assert.equal(htmlCopyName("a<b>:c?.txt"), "abc.txt.html");
+    assert.equal(htmlCopyName(".."), "page.html");
+    assert.equal(htmlCopyName(undefined), "page.html");
+    assert.deepEqual(["CON.html", "nul", "com1.report.htm", "Lpt9.HTML", "console.html"].map(htmlCopyName), ["_CON.html", "_nul.html", "_com1.report.htm", "_Lpt9.html", "console.html"]);
+  });
+
+  it("is wired in main for this computer's page only, with main's own temp folder", () => {
+    const main = fs.readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
+    assert.match(main, /ipcMain\.handle\("desktop:open-html", localOnly\("desktop:open-html", \(_event, source, name\) =>\s*openHtmlCopy\(source, name, \{ dir: path\.join\(app\.getPath\("userData"\), "open-html"\)/);
+  });
+});
+
+it("HTML validation uses the caller's translator before opening anything", async () => {
+  const t = (key) => ({ "native.html.nothingToOpen": "Não há nada para abrir", "native.html.tooLarge": "Esta página é grande demais para abrir (2 MB)" })[key];
+  const options = { t, dir: home, open: () => assert.fail("nothing should open") };
+  await assert.rejects(openHtmlCopy(null, "page", options), { message: "Não há nada para abrir" });
+  await assert.rejects(openHtmlCopy("x".repeat(2 * 1024 * 1024 + 1), "page", options), { message: "Esta página é grande demais para abrir (2 MB)" });
 });

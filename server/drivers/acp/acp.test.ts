@@ -2076,6 +2076,15 @@ describe("ACP turns (fake CLI)", () => {
     expect(recorder.events.some((e) => e.type === "runtime.error")).toBe(true);
   });
 
+  it("an engine that aborts says so in plain words, with its last output masked", async () => {
+    await create(GrokAgentDriver, "abort-in-prompt");
+    await instance.adapter.sendTurn({ threadId: "t-abort", text: "go" });
+    const failed = await recorder.until((e) => e.type === "runtime.error") as { message: string };
+    expect(failed.message).toMatch(/ exited 134 before the prompt result: it stopped itself \(abort\)\. Last output: Open https:\/\/accounts\.google\.com\/o\/oauth2\/v2\/auth\?«redacted \d+ chars» \| 2 third_party\/tcmalloc\/internal\/sysinfo\.h:76\] CHECK in NumCPUs: maybe_cpus\.has_value\(\) \(false\)$/u);
+    for (const secret of ["private-state", "private-code-value"]) expect(failed.message).not.toContain(secret);
+    expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: false });
+  });
+
   it("does not expire an agent while a person is answering an approval", async () => {
     process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "150";
     await create(GrokAgentDriver, "permission");

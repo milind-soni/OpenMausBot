@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
+import { CLOUD_NOBODY_KEY, CLOUD_OUTSIDE_KEY } from "./cloud-sharing.ts";
 import type { RoutineRunTrigger } from "./routines.ts";
 
 type Card = { requestId?: string; answered?: string; answeredText?: string; dismissed?: boolean; autoApplied?: boolean; answeredBy?: { kind: string; person?: string } };
@@ -82,7 +83,7 @@ export function cloudHomeLendingRefusal(turn: CloudLendingTurn): CloudLendingRef
     owner = turn.ownerPerson(personOf(turn.thread[index]));
   } else {
     const run = turn.routineRun();
-    owner = request.automation !== "webhook" && Boolean(run) && run!.triggerSource !== "webhook" &&
+    owner = request.automation !== "webhook" && request.automation !== "api" && Boolean(run) && run!.triggerSource !== "webhook" &&
       run!.ownerAuthored && (run!.triggerSource !== "manual" || run!.ownerStarted);
   }
   if (!owner) return "not-owner";
@@ -152,7 +153,8 @@ export function createCloudRoutineAuthors(file: string) {
   return {
     record(id: string, routine: RoutineShape) { routines = { ...routines, [id]: routineFingerprint(routine) }; save(); },
     forget(id: string) { if (Object.hasOwn(routines, id)) { const next = { ...routines }; delete next[id]; routines = next; save(); } },
-    wrote(id: string, person: string) { if (writers[id] !== person) { writers = { ...writers, [id]: person }; save(); } },
+    /** Security invariant: what outside work wrote stays outside until a person saves it; a bot's change never makes it nobody's. */
+    wrote(id: string, person: string) { if (writers[id] !== person && !(writers[id] === CLOUD_OUTSIDE_KEY && person === CLOUD_NOBODY_KEY)) { writers = { ...writers, [id]: person }; save(); } },
     writer(id: string): string | undefined { return Object.hasOwn(writers, id) ? writers[id] : undefined; },
     remove(id: string) {
       if (!Object.hasOwn(routines, id) && !Object.hasOwn(writers, id)) return;

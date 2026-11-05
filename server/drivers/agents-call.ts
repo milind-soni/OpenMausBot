@@ -2,6 +2,7 @@
 // per-turn limits are the harness's, since one proxy can serve many turns of a warm engine.
 import { agentsCallMember, resolveAgentsCall } from "../../shared/agents-tool-names.ts";
 import { CREDENTIAL_TARGETS, isCredentialTargetId } from "../../shared/credential-request.ts";
+import { EMAIL_CREDENTIAL } from "../../shared/email.ts";
 
 import { peerName } from "../peer-roster.ts";
 import { callCardTool, CARD_TOOL_NAMES } from "./agents-call-cards.ts";
@@ -358,7 +359,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     }
     const r = await api("/api/internal/post-to-room", {
       method: "POST",
-      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, groupId, message, attachVoiceNote }),
+      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, groupId, message, attachVoiceNote, ...(args.mention_ids !== undefined ? { mentionIds: args.mention_ids } : {}) }),
     });
     if (r.error) return { text: String(r.error), isError: true };
     return {
@@ -546,6 +547,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   if (name === "request_credential") {
     const credentialId = args.credential_id;
     if (credentialId === undefined || credentialId === "") return requestCustomSecret(args, context);
+    if (credentialId === EMAIL_CREDENTIAL) return requestEmailCard(args, context);
     if (!isCredentialTargetId(credentialId)) {
       return { text: "request_credential needs a supported credential_id.", isError: true };
     }
@@ -876,6 +878,17 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     return { text: String(r.body.text ?? "") };
   }
   return { text: `Unknown tool: ${name}`, isError: true };
+}
+
+/** One card for a mailbox's address and password: the bot never sees either go by, and the email tools arrive when it is done. */
+async function requestEmailCard(args: Json, context: ToolCallContext): Promise<ToolCallResult> {
+  const r = await context.client.apiResponse("/api/internal/request-credential", {
+    method: "POST",
+    body: JSON.stringify({ fromBotId: context.botId, fromThreadId: context.threadId, credentialId: EMAIL_CREDENTIAL, address: args.address, reason: args.reason }),
+  });
+  if (!r.ok) return { text: String(r.body.error ?? `request_credential failed (HTTP ${r.status}).`), isError: true };
+  if (r.body.alreadyConfigured === true) return { text: `${String(r.body.label)} is already connected. Use the email tools.` };
+  return { text: "A secure card for the mailbox is ready in OpenMausBot, on the computer and on a freshly QR-paired phone. End this turn now and say in one line that you are waiting for it; OpenMausBot resumes you when the person connects it or declines." };
 }
 
 /** A secret OpenMausBot does not keep: the person agrees to one use, and the bot gets a secretRef or a file path back. */

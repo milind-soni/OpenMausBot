@@ -39,6 +39,7 @@ export type DecisionSource =
   | "connector-scope"
   | "outbound"
   | "team-memory"
+  | "outside-write"
   | "auto-review"
   | "auto-review-shadow";
 

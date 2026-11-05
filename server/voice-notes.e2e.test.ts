@@ -340,6 +340,52 @@ it("keeps the parked note when the room-post append fails, so a retry can attach
   expect(audio.path.endsWith(f.mp3Files()[0])).toBe(true);
 }, { failFirstAudioAppend: true }), 60_000);
 
+it("keeps a failed turn's voice note above its failure row, and still deletes a stopped turn's", async () => withVoiceFixture(async (f) => {
+  const baseUrl = await f.serveTts();
+  await f.api("/api/config", { tts: { provider: "chatterbox", baseUrl, voice: "voice-a" } }, "PUT");
+  const replying = (await f.cli("new-bot", "--name", "Failing reply bot")).bot;
+  const quiet = (await f.cli("new-bot", "--name", "Failing quiet bot")).bot;
+  const stopped = (await f.cli("new-bot", "--name", "Stopped note bot")).bot;
+  const gate = join(f.dataDir, "stopped-note-gate");
+  const replyNote = "Status: the first half of the export is done.";
+  const quietNote = "Status: nothing is exported yet.";
+  f.savePlan({
+    // The second turn is the harness's one automatic retry after a failure.
+    [replying.id]: { turns: [{ steps: [{ tool: "send_voice_note", arguments: { text: replyNote } }], progress: "Half the export is done.", failWith: "the export step crashed" }, { steps: [], reply: "Retried." }] },
+    [quiet.id]: { turns: [{ steps: [{ tool: "send_voice_note", arguments: { text: quietNote } }], failWith: "the export step crashed" }, { steps: [], reply: "Retried." }] },
+    [stopped.id]: { steps: [{ tool: "send_voice_note", arguments: { text: "This note is stopped." } }], gateFile: gate, reply: "Never reached." },
+  });
+  const failure = (m: any) => m.kind === "activity" && String(m.tool?.name ?? "").startsWith("error:");
+  const settledFailure = async (bot: any, note: string) => {
+    await f.cli("send", "--bot", bot.id, "--task", bot.activeTaskId, "--text", "Export it, and tell me by voice.");
+    await expect.poll(async () => (await f.messages(bot.activeTaskId)).some(failure), { timeout: 30_000 }).toBe(true);
+    await f.cli("wait", "--bot", bot.id, "--task", bot.activeTaskId, "--timeout", "30");
+    const messages = await f.messages(bot.activeTaskId);
+    const voiced = messages.findIndex((m: any) => (m.attachments ?? []).some((a: any) => a.kind === "audio"));
+    expect(voiced).toBeGreaterThanOrEqual(0);
+    const audio = messages[voiced].attachments.find((a: any) => a.kind === "audio");
+    expect(audio.text).toBe(note);
+    const failed = messages.findIndex(failure);
+    expect(failed).toBeGreaterThan(voiced);
+    expect(messages.slice(failed + 1).some((m: any) => m.role === "bot" && m.kind === "text" && m.turnId === messages[voiced].turnId)).toBe(false);
+    return messages[voiced];
+  };
+
+  const withReply = await settledFailure(replying, replyNote);
+  expect(withReply.text).toBe("Half the export is done.");
+  const alone = await settledFailure(quiet, quietNote);
+  expect(alone.role).toBe("bot");
+  expect(alone.text).toBe("");
+  expect(f.mp3Files()).toHaveLength(2);
+
+  await f.cli("send", "--bot", stopped.id, "--task", stopped.activeTaskId, "--text", "Send a note, then hold.");
+  await expect.poll(() => f.mp3Files().length, { timeout: 20_000 }).toBe(3);
+  await f.api("/api/bots/" + stopped.id + "/interrupt", { threadId: stopped.activeTaskId });
+  await expect.poll(() => f.mp3Files().length, { timeout: 20_000 }).toBe(2);
+  await f.cli("wait", "--bot", stopped.id, "--task", stopped.activeTaskId, "--timeout", "30");
+  expect((await f.messages(stopped.activeTaskId)).some((m: any) => (m.attachments ?? []).some((a: any) => a.kind === "audio"))).toBe(false);
+}), 120_000);
+
 it("deletes a parked voice note when the turn is cancelled mid-flight", async () => withVoiceFixture(async (f) => {
   const baseUrl = await f.serveTts();
   await f.api("/api/config", { tts: { provider: "chatterbox", baseUrl, voice: "voice-a" } }, "PUT");

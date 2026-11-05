@@ -163,6 +163,16 @@ describe("readBotActivity", () => {
     ]);
   });
 
+  it.each([
+    ["mcp__email__EMAIL_SEND_EMAIL", "Send email"],
+    ["mcp__email__EMAIL_READ_EMAIL", "Read email"],
+  ])("keeps %s unchanged and supplies its app's presentation key", (tool, label) => {
+    toolRun("t1", "mail", tool, "2026-09-07T09:00:00.000Z", true);
+    expect(read()).toEqual([expect.objectContaining({ tool, app: "Email", appKey: "activity.app.email", label, outcome: "ran" })]);
+    expect(describeTool(tool)).toEqual({ app: "Email", label });
+    expect(englishCatalog["activity.app.email"]).toBe("Email");
+  });
+
   it("marks a tool that finished badly as failed, and one still going as running", () => {
     toolRun("t1", "i1", "Bash", "2026-09-07T09:00:00.000Z", false);
     toolRun("t1", "i2", "WebSearch", "2026-09-07T09:01:00.000Z", null);

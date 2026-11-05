@@ -268,6 +268,15 @@ describe("CI outputs", () => {
       "scripts/pre-push-check.test.ts",
       "server/host/wait-words.test.ts",
       "server/place-inbox.e2e.test.ts",
+      "server/bot-api-team.e2e.test.ts",
+      "server/cloud-team-first-look.e2e.test.ts",
+      "server/cloud-team-mausbot-own-chat.e2e.test.ts",
+      "server/connector-stayed.e2e.test.ts",
+      "server/email/host.test.ts",
+      "server/host/outside-lineage.test.ts",
+      "server/memory-move.test.ts",
+      "server/outside-lineage.e2e.test.ts",
+      "server/same-name-mentions.e2e.test.ts",
     ]);
     expect(out.vitest_matrix.include).toEqual([1, 2].map((shard) => ({
       os: "ubuntu-latest", part: `locale tests ${shard}/2`, shard, shards: 2,

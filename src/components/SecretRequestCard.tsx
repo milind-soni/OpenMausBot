@@ -8,6 +8,8 @@ import { activeLocale, t } from "@/lib/i18n";
 import { keySaved, keySaveFailure, savedKeyResult } from "@/lib/product-events";
 import { api, useStore, type Bot, type ConfigStatus, type Message } from "@/state/store";
 import { ASK_FIELD, askPrimary, ASK_QUIET_BUTTON, AskCard, AskSettledLine, returnFocusToComposer } from "./AskCard";
+import { EmailServerInputs } from "./EmailCard";
+import type { EmailServerFields } from "../../shared/email";
 import { productName } from "@/lib/brand";
 
 // Security: the value goes straight to the host's settings, never into the chat.
@@ -40,6 +42,10 @@ export function SecretRequestCard({
   const [saving, setSaving] = useState(false);
   const [savedLocally, setSavedLocally] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const email = secret.delivery === "email";
+  const [address, setAddress] = useState(secret.address ?? "");
+  const [server, setServer] = useState<EmailServerFields>({});
+  const [needsServer, setNeedsServer] = useState(false);
   const endpoint = `/api/bots/${encodeURIComponent(botId)}/secret-cards/${encodeURIComponent(message.id)}`;
   const error = localError ?? secret.error;
   const custom = secret.target === CUSTOM_SECRET_TARGET;
@@ -52,7 +58,7 @@ export function SecretRequestCard({
   const superseded = secret.superseded === true;
   const stopped = secret.stopped === true;
   const authorName = message.from?.name ?? botName;
-  const deliveryDescription = custom && authorName ? t(secret.delivery === "file" ? "secretCard.delivery.fileNamed" : "secretCard.delivery.refNamed", { botName: authorName }) : null;
+  const deliveryDescription = custom && !email && authorName ? t(secret.delivery === "file" ? "secretCard.delivery.fileNamed" : "secretCard.delivery.refNamed", { botName: authorName }) : null;
   const customDescription = activeLocale() !== "en" && deliveryDescription ? [secret.reason, deliveryDescription].filter(Boolean).join(" ") : suppliedDescription;
   const description = superseded
     ? t("chat.secret.superseded")
@@ -70,7 +76,7 @@ export function SecretRequestCard({
     : declined
     ? t("chat.secret.declinedFailed")
     : secret.resumed
-      ? custom && secret.delivery === "file" ? t("secretCard.resumed") : t("chat.secret.resumedWithout")
+      ? custom && (secret.delivery === "file" || email) ? t("secretCard.resumed") : t("chat.secret.resumedWithout")
       : error
         ? t("chat.secret.resumeFailed")
         : t("chat.secret.waiting");
@@ -106,10 +112,12 @@ export function SecretRequestCard({
     setSaving(true);
     setLocalError(null);
     try {
-      await api(`${endpoint}/save`, { method: "POST", body: JSON.stringify({ threadId, value: value.trim() }) });
+      // A password goes as typed: a mailbox's can begin or end with a space.
+      await api(`${endpoint}/save`, { method: "POST", body: JSON.stringify(email ? { threadId, value, address: address.trim(), ...server } : { threadId, value: value.trim() }) });
       setValue("");
       returnFocusToComposer();
     } catch (error) {
+      if ((error as { body?: { needsServer?: unknown } }).body?.needsServer === true) setNeedsServer(true);
       setLocalError(error instanceof Error ? error.message : String(error));
     } finally {
       setSaving(false);
@@ -219,6 +227,12 @@ export function SecretRequestCard({
         </div>
       ) : (
         <form onSubmit={(event) => void save(event)}>
+          {email && (
+            <div className="mb-2 flex flex-col gap-2">
+              <input type="email" autoComplete="off" spellCheck={false} dir="ltr" value={address} onChange={(event) => setAddress(event.target.value)} placeholder={t("email.address")} disabled={saving} aria-label={t("email.address")} className={cn(ASK_FIELD, "w-full")} />
+              {needsServer && <EmailServerInputs value={server} onChange={setServer} className={cn(ASK_FIELD, "w-full")} />}
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
             <input
               type="password"
@@ -232,7 +246,7 @@ export function SecretRequestCard({
               aria-label={label}
               className={cn(ASK_FIELD, "min-w-[10rem] flex-1")}
             />
-            <button type="submit" disabled={saving || (!value.trim() && !savedLocally)} {...askPrimary(color)}>
+            <button type="submit" disabled={saving || (!value.trim() && !savedLocally) || (email && !address.trim())} {...askPrimary(color)}>
               {saving ? <Loader2 size={14} className="animate-spin" /> : <LockKeyhole size={14} />}
               {t(savedLocally ? "chat.secret.continue" : "chat.secret.save")}
             </button>
@@ -240,7 +254,7 @@ export function SecretRequestCard({
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-tertiary">
             <span className="flex items-center gap-1">
               <LockKeyhole size={11} />{" "}
-              {!custom ? t("chat.secret.storedHint", { app: productName() }) : secret.delivery === "file" ? t("secretCard.file") : t("secretCard.ref")}
+              {!custom ? t("chat.secret.storedHint", { app: productName() }) : email ? t("secretCard.email") : secret.delivery === "file" ? t("secretCard.file") : t("secretCard.ref")}
             </span>
             {secret.helpUrl && (
               <a

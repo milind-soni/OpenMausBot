@@ -2,7 +2,7 @@ import { t, tFromServer } from "./i18n";
 import { namesLocale } from "./clock-time";
 import { en, type LocaleKey } from "@/locales";
 
-export const ACTIVITY_WHATS = ["all", "approvals", "decisions", "config", "people", "session", "webhook", "mcp", "engine", "bot", "budget", "visibility"] as const;
+export const ACTIVITY_WHATS = ["all", "approvals", "decisions", "config", "people", "session", "webhook", "bot-api", "mcp", "engine", "bot", "budget", "visibility"] as const;
 export type ActivityWhat = typeof ACTIVITY_WHATS[number];
 
 export type ActivityEntry =

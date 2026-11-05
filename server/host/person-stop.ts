@@ -1,7 +1,5 @@
-import { noticeTool } from "../chat-notices.ts";
 // What a person's Stop does to a direct thread: the Stop button (POST /api/bots/:id/interrupt), a typed "stop"
-// while the bot works (acceptDirectSend), "Restart turn" from the send menu, and the pills for teammates a stop leaves running.
-import type { HandoffView } from "../coordinator.ts";
+// while the bot works (acceptDirectSend), and "Restart turn" from the send menu. A stop ends what the request handed out too.
 import type { Handoffs } from "../delta-context.ts";
 import { addressesEveryone, isStopCommand } from "../room-holds.ts";
 import type { RoutineManager } from "../routines.ts";
@@ -80,20 +78,5 @@ export function createPersonStop(deps: PersonStopDeps) {
     await stopThreadForPerson(botId, threadId);
   }
 
-  /** Stop left teammates mid-turn: one pill each links to the conversation where Stop reaches that turn. */
-  function noteTeammatesLeftRunning(threadId: string, running: HandoffView[]): void {
-    if (!store.botByThread(threadId) && !store.groupByThread(threadId)) return;
-    for (const node of running) {
-      const name = store.bot(node.botId)?.name;
-      const task = store.taskByThread(node.botId, node.threadId);
-      store.appendMessage(threadId, {
-        role: "bot",
-        kind: "activity",
-        tool: noticeTool(name === undefined ? "chat.notice.unknownTeammateWorking" : "chat.notice.teammateWorking", name === undefined ? undefined : { name }, { ok: true }),
-        ...(task ? { threadRef: { botId: node.botId, threadId: node.threadId, title: task.title } } : {}),
-      });
-    }
-  }
-
-  return { stopThreadForPerson, stopOnTypedCommand, restartForPerson, noteTeammatesLeftRunning };
+  return { stopThreadForPerson, stopOnTypedCommand, restartForPerson };
 }

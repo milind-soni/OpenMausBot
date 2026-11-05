@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Code2, Download, Eye, LoaderCircle, RotateCcw } from "lucide-react";
+import { Check, Code2, Download, ExternalLink, Eye, LoaderCircle, RotateCcw } from "lucide-react";
 import { requestMessageFile, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
 import { TableDialog } from "./RichTable";
 import { readTableResponse } from "./TableFilePreview";
@@ -19,13 +19,70 @@ export function htmlPreviewDocument(source: string): string {
   return `<meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}"><base target="_blank">${source}`;
 }
 
-export function HtmlFileButton({ path, name, message }: { path: string; name: string; message: MessageAttachmentContext }) {
+/** The desktop app opens a copy of the page in this computer's default browser. Security: never on the web or in the
+ * Cloud app, where a page would have to run on the app's own origin, nor while the window shows another computer. */
+export function htmlBrowserBridge(): ((source: string, name: string) => Promise<unknown>) | undefined {
+  const ogb = typeof window === "undefined" ? undefined : window.ogb;
+  return ogb?.remoteClient?.active ? undefined : ogb?.openHtmlInBrowser;
+}
+
+/** The page preview dialog for an HTML file in a message, opened by the eye button or by the file's name. */
+export function useHtmlPreview(path: string, name: string, message?: MessageAttachmentContext) {
   const [open, setOpen] = useState(false);
-  const trigger = useRef<HTMLButtonElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  const html = message !== undefined && (isHtmlFile(name) || isHtmlFile(path));
+  return {
+    html,
+    show: (event: { currentTarget: HTMLElement }) => {
+      opener.current = event.currentTarget;
+      setOpen(true);
+    },
+    dialog: html && open && message
+      ? <TableDialog title={name} returnFocus={opener.current} onClose={() => setOpen(false)}><HtmlFileContent key={`${message.threadId}:${message.messageId}:${path}`} path={path} name={name} message={message} /></TableDialog>
+      : null,
+  };
+}
+
+export function HtmlFileButton({ path, name, message }: { path: string; name: string; message: MessageAttachmentContext }) {
+  const preview = useHtmlPreview(path, name, message);
   return <>
-    <button ref={trigger} type="button" className="table-action" title={t("html.preview", { name })} aria-label={t("html.preview", { name })} onClick={() => setOpen(true)}><Eye size={14} /></button>
-    {open && <TableDialog title={name} returnFocus={trigger.current} onClose={() => setOpen(false)}><HtmlFileContent key={`${message.threadId}:${message.messageId}:${path}`} path={path} name={name} message={message} /></TableDialog>}
+    <button type="button" className="table-action" title={t("html.preview", { name })} aria-label={t("html.preview", { name })} onClick={preview.show}><Eye size={14} /></button>
+    {preview.dialog}
   </>;
+}
+
+/** A file chip's name button: an HTML file's name opens its preview, any other file's name saves it. */
+export function chipNameAction(preview: ReturnType<typeof useHtmlPreview>, save: ReturnType<typeof useLocalFileSave>, name: string, retryable: boolean) {
+  if (preview.html) return { onClick: preview.show, disabled: false, "aria-label": t("html.preview", { name }) };
+  return { onClick: () => void save.save(), disabled: save.state === "saving", "aria-label": retryable ? t("attach.retrySaveAria", { name }) : t("attach.saveAria", { name }) };
+}
+
+/** Saves a file whose name opens its preview instead. */
+export function SaveIconButton({ name, save, retryable }: { name: string; save: ReturnType<typeof useLocalFileSave>; retryable: boolean }) {
+  const label = retryable ? t("attach.retrySaveAria", { name }) : t("attach.saveAria", { name });
+  return (
+    <button type="button" className="table-action" aria-label={label} title={label} disabled={save.state === "saving"} onClick={() => void save.save()}>
+      {save.state === "saving" ? (
+        <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />
+      ) : save.state === "saved" ? (
+        <Check size={14} className="text-success" aria-hidden="true" />
+      ) : retryable ? (
+        <RotateCcw size={14} className="text-danger" aria-hidden="true" />
+      ) : (
+        <Download size={14} aria-hidden="true" />
+      )}
+    </button>
+  );
+}
+
+export function OpenInBrowserButton({ source, name, onError }: { source: string; name: string; onError: (reason: string) => void }) {
+  const open = htmlBrowserBridge();
+  if (!open) return null;
+  const label = t("html.openInBrowser", { name });
+  return <button type="button" className="table-action" aria-label={label} title={label} onClick={() => {
+    onError("");
+    open(source, name).catch((reason: unknown) => onError(reason instanceof Error && reason.message ? reason.message : t("html.openFailed")));
+  }}><ExternalLink size={14} /></button>;
 }
 
 function HtmlFileContent({ path, name, message }: { path: string; name: string; message: MessageAttachmentContext }) {
@@ -33,6 +90,7 @@ function HtmlFileContent({ path, name, message }: { path: string; name: string; 
   const [source, setSource] = useState<string | null>(null);
   const [error, setError] = useState<"size" | "load" | null>(null);
   const [showSource, setShowSource] = useState(false);
+  const [openFailed, setOpenFailed] = useState("");
   const save = useLocalFileSave(path, name, message);
   useEffect(() => {
     const controller = new AbortController();
@@ -55,9 +113,11 @@ function HtmlFileContent({ path, name, message }: { path: string; name: string; 
     <div className="flex items-center justify-end gap-1">
       <button type="button" className="table-action" aria-pressed={showSource} aria-label={t(showSource ? "html.rendered" : "html.source")} title={t(showSource ? "html.rendered" : "html.source")} onClick={() => setShowSource(!showSource)}>{showSource ? <Eye size={14} /> : <Code2 size={14} />}</button>
       <button type="button" className="table-action" aria-label={t("html.reload")} title={t("html.reload")} onClick={() => setAttempt(attempt + 1)}><RotateCcw size={14} /></button>
+      <OpenInBrowserButton source={source} name={name} onError={setOpenFailed} />
       <button type="button" className="table-action" aria-label={t("attach.saveAria", { name })} title={t("attach.saveAria", { name })} disabled={save.state === "saving"} onClick={() => void save.save()}><Download size={14} /></button>
     </div>
     {save.state === "failed" && <p role="alert" className="text-end text-[12px] text-danger">{save.reason}</p>}
+    {openFailed && <p role="alert" className="text-end text-[12px] text-danger">{openFailed}</p>}
     {showSource
       ? <pre className="h-[72dvh] overflow-auto rounded-lg border border-hairline/40 bg-inset p-3 text-[12px] leading-5 whitespace-pre-wrap break-words text-ink">{source}</pre>
       : <HtmlPreviewFrame source={source} name={name} />}

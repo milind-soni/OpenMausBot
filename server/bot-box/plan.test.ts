@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { engineInstallRoots } from "../engine-roots.ts";
-import { BOX_MUTATIONS, argvPaths, bwrapArgs, planBox, taskWorkspaceIds, visibleInBox, type BoxMutation, type BoxSetup } from "./plan.ts";
+import { BOX_MUTATIONS, CPU_LIST_FILES, argvPaths, bwrapArgs, planBox, taskWorkspaceIds, visibleInBox, type BoxMutation, type BoxSetup } from "./plan.ts";
 
 const home = "/data";
 const dataDir = "/data/.openmausbot";
@@ -110,6 +110,22 @@ linuxBox("the box plan", () => {
     expect(bwrapArgs(plan).join(" ")).not.toContain("/run/omb");
     expect(visibleInBox(plan, "/data/.openmausbot/browser/profiles/p1/Default")).toBe("rw");
     expect(visibleInBox(plan, "/data/.openmausbot/messages.db")).toBe("none");
+  });
+
+  it("has the machine's CPU list read-only and nothing else of /sys, so a TCMalloc runtime (Antigravity) can start", () => {
+    // Measured on a Fly Cloud home (2, 4 and 8 shared CPUs): without `possible` Google's runtime stops at start with
+    // "tcmalloc/internal/sysinfo.h:76] CHECK in NumCPUs" and exit 134; with it, initialize answers.
+    const command = join(dataDir, "tools", "antigravity-acp", "linux-x64", "versions", "abc", "agy_acp_server.par");
+    for (const plan of [turn(), planBox(setup(), { command, args: ["--uid="], cwd, env: { HOME: home } })]) {
+      expect(visibleInBox(plan, "/sys/devices/system/cpu/possible")).toBe("ro");
+      expect(visibleInBox(plan, "/sys/devices/system/cpu/online")).toBe("ro");
+      for (const hidden of ["/sys/devices/system/cpu/vulnerabilities/spectre_v2", "/sys/class/net/eth0/address", "/sys/fs/cgroup/memory.max", "/sys/kernel/mm"]) {
+        expect(visibleInBox(plan, hidden), hidden).toBe("none");
+      }
+      const text = bwrapArgs(plan).join(" ");
+      for (const file of CPU_LIST_FILES) expect(text).toContain(`--ro-bind-try ${file} ${file}`);
+      expect(text).not.toMatch(/--(?:ro-)?bind(?:-try)? \/sys /);
+    }
   });
 
   it("Antigravity's own profile (GEMINI_HOME) goes back read-write, and no other account's", () => {

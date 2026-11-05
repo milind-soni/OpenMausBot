@@ -3,6 +3,7 @@ import { canWorkOnCloud, type CloudEngine } from "../shared/cloud-computer.ts";
 import { canUseMcpServer } from "../shared/tool-scope.ts";
 import { placeRowText, type PlaceRow, type PlaceSource } from "../shared/place-view.ts";
 import { PLAIN_WORDS } from "./local-computer-guidance.ts";
+import { theirComputer, type LentPlatform } from "./lent-computers.ts";
 export type { Surface, PlaceSource };
 
 /** The bot's "Works on" setting; undefined = Auto. */
@@ -183,19 +184,38 @@ const REPORT_BACK = "tell the bot that gave you this job which place you need an
 const SURFACE_AUTHORITY =
   ` For browser and computer tasks, use OpenMausBot's mounted browser/computer tools first: inspect the target, perform the action, and verify its result before claiming success. Discover deferred tools by their server/name when needed. Do not substitute the provider's own desktop, a shell-launched browser, or another automation path for the selected OpenMausBot surface. Ordinary code and file tasks may still use their normal tools. Announcing an action is not performing it. A request naming another place does not move these tools: this computer is the user's host, Local VM is an isolated desktop, the cloud computer is remote, and the built-in browser is a separate browser. If the requested place differs from the mounted one, ${ASK_TO_SWITCH}; never act on a different computer or describe a host window as a VM.`;
 
+/** A Cloud home without the shared-computer tools cannot reach the person's own computer at all. */
+const UNREACHABLE_OWN = "the user's own computer cannot be reached from here";
+
+/** With the shared-computer tools, what the wording above says of every screen holds only for this turn's places. */
+const OWN_COMPUTER_WORDING: ReadonlyArray<readonly [RegExp | string, string]> = [
+  [/ Everything you do on screen happens (on|in) /, " The screen tools mounted this turn work $1 "],
+  ["there is no desktop computer this turn", "no desktop computer is mounted this turn"],
+  ["You cannot open apps, click, or inspect a screen through OpenMausBot.", "No place's tools can open apps, click, or inspect a screen this turn."],
+];
+
 /** A Cloud home has neither this computer nor a Local VM; each pair rewrites one phrase of the wording above. */
 const CLOUD_HOME_WORDING: ReadonlyArray<readonly [string, string]> = [
   ["this computer is the user's host, Local VM is an isolated desktop, the cloud computer is remote, and the built-in browser is a separate browser",
-    "the cloud computer is remote, the built-in browser is a separate browser, and the user's own computer cannot be reached from here"],
+    `the cloud computer is remote, the built-in browser is a separate browser, and ${UNREACHABLE_OWN}`],
   [" or describe a host window as a VM", ""],
   ["select an available Local VM without asking", "select an available cloud computer without asking"],
   [" Never silently replace an explicitly requested VM with the host desktop.", ""],
 ];
 
-/** Built from what was actually mounted, never from the setting, so the model is only told about tools it can call. */
+/** On a Cloud home the person's own computer is never one of the places above: shared_computer reaches it, whatever
+ * place the conversation has. Saying it can't be reached there turned a bot away from a PC lent with its screen. */
+function ownComputerSentence(lent: ReadonlyArray<{ name: string; platform: LentPlatform | null }>, place: string | null): string {
+  const { theirs } = theirComputer(lent);
+  return ` ${theirs[0]!.toUpperCase()}${theirs.slice(1)} is reached only through shared_computer, never select_computer: when they ask for something on it, check list_shared_computers, then use shared_computer on it (computer_tools, then computer_call, for its apps and screen), whatever this conversation is pinned to. If list_shared_computers says this conversation can't use it, or that it doesn't lend what you need, say so in one sentence${place ? ` and don't do it on ${place} instead unless they ask` : ""}.`;
+}
+
+/** Built from what was actually mounted, never from the setting, so the model is only told about tools it can call.
+ * `ownComputer`: on a Cloud home, the person's lent computers (newest first) when this turn has the shared-computer tools. */
 export function surfacePrompt(
   mounted: MountedSurfaces,
-  opts: { pinned?: Surface | null; note?: string; canSelect?: boolean; cloudHome?: boolean; botOpened?: boolean } = {},
+  opts: { pinned?: Surface | null; note?: string; canSelect?: boolean; cloudHome?: boolean; botOpened?: boolean;
+    ownComputer?: ReadonlyArray<{ name: string; platform: LentPlatform | null }> } = {},
 ): string {
   const reportBack = opts.botOpened && !opts.canSelect;
   const computer = mounted.computer ? surfaceLabel(mounted.computer) : null;
@@ -229,5 +249,10 @@ export function surfacePrompt(
   if (computer || mounted.browser) text += CONNECTED_APP_FIRST;
   if (computer || mounted.browser) text += " For online research, use the selected OpenMausBot browser when a search service is unavailable. A failed tool proves only that this attempt failed, not that every browser is unavailable. Inspect the current page after navigation; report a sign-in page, redirect or error as such. A completed model turn is not proof that the user's task succeeded.";
   if (opts.cloudHome) for (const [desktop, cloudHome] of CLOUD_HOME_WORDING) text = text.replace(desktop, cloudHome);
+  if (opts.cloudHome && opts.ownComputer) {
+    // What this turn's places reach, never every screen: their own computer is reachable too, through shared_computer.
+    for (const [nowhere, places] of OWN_COMPUTER_WORDING) text = text.replace(nowhere, places);
+    text = text.replace(UNREACHABLE_OWN, `${theirComputer(opts.ownComputer).theirs} is not one of these places`) + ownComputerSentence(opts.ownComputer, computer);
+  }
   return text + (opts.note ?? "");
 }

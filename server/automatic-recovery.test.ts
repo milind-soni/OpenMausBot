@@ -12,6 +12,14 @@ describe("automatic recovery capabilities", () => {
       expect(recoveryCapabilityError(engine, { ...engine, capabilities: { ...engine.capabilities, [key]: false } })).toMatch(/tools and attachments/);
     }
   });
+  it("lets a limited Claude bot carry on with an engine that has every tool but a USB phone", () => {
+    const claude = { driverKind: "claudeAgent", capabilities: { sessionModelSwitch: "in-session" as const, agentsMcp: true, customMcp: true,
+      computerMcp: true, composioMcp: true, phoneMcp: true, browserMcp: true, dataMcp: true, highlevelMcp: true, deviceMcp: true, images: true } };
+    const { phoneMcp: _phone, ...rest } = claude.capabilities;
+    const opencode = { driverKind: "opencodeAgent", capabilities: { ...rest, sessionModelSwitch: "unsupported" as const, localComputerMcp: true } };
+    expect(recoveryCapabilityError(claude, opencode)).toBeUndefined();
+    expect(recoveryCapabilityError(claude, { ...opencode, capabilities: { ...opencode.capabilities, browserMcp: false } })).toMatch(/tools and attachments/);
+  });
   it("does not silently move work to a file-less engine", () => {
     expect(recoveryCapabilityError(engine, { ...engine, driverKind: "openai-compat" })).toMatch(/same workspace/);
   });

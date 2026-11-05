@@ -60,6 +60,7 @@ import { openQuestionRequest, questionRequestFor, type AcpQuestionRequest } from
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
 import { acpToolEndEvents } from "./tool-items.ts";
 import { AcpHost } from "./host.ts";
+import { exitDetail } from "./exit-report.ts";
 import { endTurn, trackRunningTool, type AcpAskFinish, type AcpSession, type AcpTurn } from "./turn-state.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
 import { noticeFailure } from "../../chat-notices.ts";
@@ -188,8 +189,6 @@ export interface AcpSupport {
   ownMcpOverHttp?: boolean;
   /** How many tools the agent lists of its own beside the MCP servers', counted against a provider's tool limit. */
   engineTools?: number;
-  /** Do not retain stderr from providers that may place OAuth material there. */
-  redactStderr?: boolean;
   /** The agent's own debug log, read while a prompt is quiet: a new line proves it alive and `parse`
    * picks what to tell the person. Null when this process keeps none. A `shared` log holds every session's
    * and process's lines, so its lines prove nothing about this turn and only `parse` reads them. */
@@ -634,7 +633,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const running = sharedHost(hostKey);
         if (running) return running;
         const child = spawnCli(launch.command, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { allowEnv: instanceEnvNames(input.environment, env) } }, "bot");
-        const host = new AcpHost(child, hostKey, { source: SOURCE, logMessage: nativeLogMessage, keepStderr: !support.redactStderr, unrouted: refuse });
+        const host = new AcpHost(child, hostKey, { source: SOURCE, logMessage: nativeLogMessage, unrouted: refuse });
         hosts.add(host);
         child.once("close", () => hosts.delete(host));
         child.once("error", () => hosts.delete(host));
@@ -974,7 +973,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           idleTimer: null,
           closing: false,
           dead: false,
-          get stderr() { return host.stderr; },
+          get stderr() { return host.stderrTail.text; },
           current: null,
         };
         acp.inbound = {
@@ -992,7 +991,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             emit({ ...base(threadId, current.turnId), type: "runtime.error", ...describeSpawnFailure(e, launch.command, cwd) });
             settle(threadId, session, false, "spawn_error");
           },
-          exit: (code) => {
+          exit: (code, signal) => {
             session.dead = true;
             const current = session.current;
             if (current?.state.cancelling) return;
@@ -1000,7 +999,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               if (!current.state.stopped) emit({
                 ...base(threadId, current.turnId),
                 type: "runtime.error",
-                message: `${support.displayName} exited ${code} before the prompt result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`,
+                message: `${support.displayName} exited ${code ?? signal ?? "unexpectedly"} before the prompt result${exitDetail(code, signal, session.stderr)}`,
               });
               settle(threadId, session, current.state.stopped, current.state.stopped ? "cancelled" : "exit_before_result");
             } else if (sessions.get(threadId) === session) {

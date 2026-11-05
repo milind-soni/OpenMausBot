@@ -192,6 +192,13 @@ export const USER_ERROR = {
   "serverError.attachment.alreadyInMessage": "This file is already in a message, so it stays.",
   "serverError.engine.signedOut": "{name} is signed out.",
   "serverError.bot.viewOnly": "You can view {bot}, not chat with it.",
+  "serverError.secret.mailboxAlreadyConnected": "this mailbox was already connected",
+  "serverError.secret.emailAndPassword": "Enter your email address and its password.",
+  "serverError.secret.emailUnavailable": "Email can't be connected here.",
+  "serverError.mailbox.adminOnly": "Only the owner or an admin can manage the mailboxes.",
+  "serverError.mailbox.addressAndPassword": "Enter your email address and password.",
+  "serverError.voice.fishKeyRequired": "Add a Fish Audio key in Settings → API keys to talk to your bots here.",
+  "serverError.voice.fishTranscribeConnection": "Couldn't reach Fish Audio to hear you — check your connection.",
 } as const;
 
 export type UserErrorKey = keyof typeof USER_ERROR;

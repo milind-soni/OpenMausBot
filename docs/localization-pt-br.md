@@ -284,7 +284,7 @@ the whole catalog in the same change.
 | trace (usage) | rastreamento | “View trace” → “Ver rastreamento”. |
 | trial | teste | “free trial” → “teste grátis”; “trial credit” → “crédito do teste”. |
 | trigger | gatilho | |
-| turn (a bot's turn) | sessão | Feminine. Use “sessão de trabalho” only when the sentence also mentions a browser, sign-in or provider session. Calls where people take turns keep “por turnos”. |
+| turn (a bot's turn) | sessão | Feminine. Use “sessão de trabalho” only when the sentence also mentions a browser, sign-in or provider session. For calls, use “Um de cada vez” as the mode label and “falas alternadas” when describing it. |
 | turn on, turn off | ligar, desligar | Follow the English verb. |
 | upload | enviar | Never `upload` or `carregar`. |
 | wake, asleep | acordar, dormindo | Used for desktops and computers. |

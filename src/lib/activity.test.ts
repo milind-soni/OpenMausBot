@@ -75,6 +75,16 @@ describe("activityLabel", () => {
     setLocale("pt-br");
     expect(activityLabel(entry)).toBe(portuguese);
   });
+  it("translates the email app's presentation key but keeps its English fallback and wire tool", () => {
+    const entry = row({ tool: "mcp__email__EMAIL_SEND_EMAIL", app: "Email", appKey: "activity.app.email", label: "Send email" });
+    expect(activityApp(entry)).toBe("Email");
+    setLocale("pt-br");
+    expect(activityApp(entry)).toBe("E-mail");
+    expect(activityApp({ app: "Email" })).toBe("Email");
+    expect(activityLabel(entry)).toBe("Send email");
+    expect(entry.tool).toBe("mcp__email__EMAIL_SEND_EMAIL");
+  });
+
   it("says a known tool's action in the app language, and keeps the server's words for any other key", () => {
     expect(activityLabel(row({ labelKey: "activity.tool.ranCommand" }))).toBe("Ran a command");
     setLocale("pt-br");

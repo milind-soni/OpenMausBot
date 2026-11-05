@@ -10,7 +10,7 @@ import { actorLabel, boundRetentionDays, pruneMonthFiles, type DecisionActor, ty
 import { redactSecrets } from "./redact.ts";
 import { csvCell, monthKey } from "./usage-ledger.ts";
 
-export const ADMIN_ACTIVITY_CATEGORIES = ["config", "people", "session", "webhook", "mcp", "engine", "bot", "budget", "visibility"] as const;
+export const ADMIN_ACTIVITY_CATEGORIES = ["config", "people", "session", "webhook", "bot-api", "mcp", "engine", "bot", "budget", "visibility"] as const;
 export type AdminActivityCategory = typeof ADMIN_ACTIVITY_CATEGORIES[number];
 
 export type AdminActor = DecisionActor | { kind: "cli" };

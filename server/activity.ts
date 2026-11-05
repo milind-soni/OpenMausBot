@@ -217,6 +217,7 @@ export function describedTool(name: string, input?: unknown): Described {
       return Object.hasOwn(RESEARCH_TOOL_LABELS, member) ? RESEARCH_TOOL_LABELS[member]! : ownAction("Team", member, TEAM_ACTION_KEYS);
     }
     if (server === "highlevel") return { app: "HighLevel", label: humanize(action.replace(/^HIGHLEVEL_/, "")) };
+    if (server === "email") return { app: "Email", appKey: "activity.app.email", label: humanize(action.replace(/^EMAIL_/, "")) };
     if (server === "device") return { app: "Phone", label: humanize(action.replace(/^PHONE_/, "")) };
     if (server.startsWith("claude_ai_")) {
       return { app: server.slice("claude_ai_".length).replace(/_/g, " "), label: humanize(action) };

@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { writeFileAtomic } from "../atomic.ts";
 import type { AppConfig } from "../config.ts";
+import { launcherOf } from "../cloud-connections.ts";
 import { customMcpServers } from "../config.ts";
 import type { McpServerSpec, StdioMcpSpec } from "../contracts.ts";
 import { addBotMcpServer, claimBotMcpServers, keepForBot, withoutBotMcpServers, type BotKept, type BotMcpServerAdd } from "../mcp-bot-servers.ts";
@@ -32,6 +33,11 @@ export interface McpServersHostDeps {
 }
 
 const CLAIMED_FILE = (dataDir: string) => join(dataDir, "mcp-bot-servers.json");
+
+/** A package runner fetches its program the first time it starts, and later starts are quick: its check waits for that. */
+const PACKAGE_RUNNERS: ReadonlySet<string> = new Set(["uvx", "npx", "bunx", "pipx", "pnpm", "uv"]);
+const PACKAGE_START_MS = 120_000;
+export const startCheckTimeout = (command: string): number | undefined => (PACKAGE_RUNNERS.has(launcherOf(command)) ? PACKAGE_START_MS : undefined);
 
 /** What the person hears once when servers in one bot's folder became that bot's own. */
 export function claimedNotice(botName: string, names: readonly string[]): string {
@@ -71,7 +77,7 @@ export function createMcpServersHost(deps: McpServersHostDeps) {
     return { id: botId, cwd: existsSync(own) ? own : deps.dataDir };
   };
   const start: McpHealthDeps["start"] = deps.start ?? (async (_name, server, botId) => {
-    const result = await probeMcpServer({ ...server, enabled: true }, undefined, undefined, { asBot: asBot(botId) });
+    const result = await probeMcpServer({ ...server, enabled: true }, startCheckTimeout(server.command), undefined, { asBot: asBot(botId) });
     return result.ok ? { ok: true } : { ok: false, error: result.error };
   });
   const checks = createMcpHealth({

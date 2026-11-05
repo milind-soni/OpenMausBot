@@ -146,6 +146,16 @@ owner" card rule (whoever started a conversation, or an Admin, answers its cards
 the Admin's Team admin → Settings. It is this server's language while its own settings set none (the app's words and the
 language new bots start in); a value that isn't a locale is ignored, never refused.
 
+## Work from outside stays with that work
+
+What came in from outside (a webhook, an app's event) is confined, and the conversation it reached stays that way for good: a run or a hand-off ends, its words stay in the thread. The record is on the conversation (`outside`, `server/host/outside-lineage.ts`), and every turn is judged from it, at any level and after a restart.
+
+- **What it starts stays outside.** A thread it hands work to, a one-way notice still queued when the run ends, a retry, a wake and a routine it makes or changes all run confined. A routine it made runs without full access until someone opens it and saves it once. An event's own results chat counts too.
+- **It reaches nothing else.** A confined turn can't open a thread, hand work to, post to or retry into a conversation or room that isn't already outside, can't answer a question in a person's work or be folded into a turn running there, and can't change, start, pause, resume or delete a person's routine. A skill its words name stays plain text, and a page it shows keeps its frame. It hears why in plain words and finishes where it is. Of the server's own routes it reaches only those `server/host/outside-fence.ts` lists; anything else is refused, whether or not its engine pre-allows the tool.
+- **What it writes for later turns waits on a card.** A room's bulletin and a bot's memory load into later turns as instructions, so an admin sees a card and nothing is saved until they say yes (`server/host/outside-writes.ts`). A memory log line and a preference are refused, and nothing such a conversation says reaches memory or the daily log on its own.
+- **Its problems reach a person.** A confined run that fails or needs someone notifies a person; it starts no turn on a Chief at the Chief's own level. None of what it says lands in a person's inbox thread, by naming them or as a copy of its question or report: the person gets the notification and opens the conversation.
+- **A person's own line there runs confined too.** The engine reads the outside words as context, whoever typed last, so the bot works without its shell and says so once. A new conversation with the same bot runs at the bot's own level; it doesn't read that conversation on its own (recall and the recent-work brief leave it out), and a person can paste what they want into it.
+
 ## Team admin: the Admin's signed read
 
 The Admin's Team admin pages (openmaus-cloud docs/team-cloud.md "Team admin") show a team's Super admin and Admins what

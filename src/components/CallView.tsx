@@ -16,7 +16,7 @@ import { t } from "@/lib/i18n";
 import { speaker } from "@/lib/tts";
 import { localSystemVoiceActive } from "@/lib/local-voice";
 import { useSpeech } from "@/lib/tts/useSpeech";
-import { usePushToTalk } from "@/lib/push-to-talk";
+import { pushToTalkKeys, usePushToTalk } from "@/lib/push-to-talk";
 import { BotAvatar } from "./Avatar";
 import { navigateThreadMenu } from "./BotProjects";
 import { LiveKeyNeeded } from "./LiveKeyNeeded";
@@ -26,6 +26,7 @@ import { callStarted } from "@/lib/product-events";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { callCapabilityHelp, type CallCapabilityHelp } from "@/lib/call-capability";
 import { onCallStartRequest } from "@/lib/call-start-request";
+import { fishListeningReady, listensHere, speechBridge } from "@/lib/speech";
 import { VoiceSetupDialog } from "./VoiceSetupDialog";
 import { openBotSettings } from "./bot-panel/panel-link";
 import { MENU_SHEET } from "./menu-recipe";
@@ -101,7 +102,7 @@ export function CallTargetButton({
   const active = onCall || onLiveCall;
   const remoteClient = globalThis.window?.ogb?.remoteClient?.active === true;
   const capabilityHelp = capabilitiesReady
-    ? callCapabilityHelp(capabilities, Boolean(window.ogb?.speechStart))
+    ? callCapabilityHelp(capabilities, Boolean(speechBridge()?.speechStart), fishListeningReady(state.config))
     : null;
   const supported = capabilitiesReady && !capabilityHelp;
   const localVoice = localSystemVoiceActive();
@@ -110,7 +111,7 @@ export function CallTargetButton({
   const voiceReady =
     localVoice ||
     (configured && (requireExplicitVoices ? everyTargetHasVoice : Boolean(state.config?.tts?.ready || everyTargetHasVoice)));
-  const turnsHere = !capabilitiesReady || capabilities.dictation.available;
+  const turnsHere = !capabilitiesReady || listensHere(capabilities, state.config);
   const mode = effectiveCallMode(useCallMode(), { turnsHere, canLive });
   const liveMode = canLive && mode === "live";
   const turnsReady = capabilitiesReady && supported && voiceReady;
@@ -512,7 +513,7 @@ function Call({ bot }: { bot: Bot }) {
   }, []);
 
   const hush = useCallback(() => {
-    void window.ogb?.speechStop();
+    void speechBridge()?.speechStop();
   }, []);
 
   const listen = useCallback(() => {
@@ -520,7 +521,7 @@ function Call({ bot }: { bot: Bot }) {
     move("listening");
     setHeard("");
     setNote(null);
-    void window.ogb?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
+    void speechBridge()?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
       if (alive.current && currentCall() === bot.id) {
         setNote(t("call.turns.micFailed"));
       }
@@ -560,7 +561,7 @@ function Call({ bot }: { bot: Bot }) {
   }, [bot.id]);
 
   useEffect(() => {
-    const bridge = window.ogb;
+    const bridge = speechBridge();
     if (!bridge) return;
     const offTranscript = bridge.onSpeechTranscript((line) => {
       if (!alive.current || currentCall() !== bot.id || phaseRef.current !== "listening") return;
@@ -633,7 +634,7 @@ function Call({ bot }: { bot: Bot }) {
       move("sending");
       dispatch({ type: "send", botId: bot.id, text: said, threadId: bot.threadId });
     });
-    const offEnd = bridge.onSpeechEnd(({ code, reason }) => {
+    const offEnd = bridge.onSpeechEnd(({ code, reason, message }) => {
       if (!alive.current || currentCall() !== bot.id) return;
       if (code === 2) {
         setNote(t("call.turns.needsDictation"));
@@ -641,7 +642,7 @@ function Call({ bot }: { bot: Bot }) {
       }
       if (code === 1) {
         setNote(
-          t(reason === "helper-build-failed"
+          message ?? t(reason === "helper-build-failed"
             ? "call.turns.helperBuildFailed"
             : reason === "dictation-disabled"
               ? "composer.dictation.disabled"
@@ -658,7 +659,7 @@ function Call({ bot }: { bot: Bot }) {
     return () => {
       offTranscript();
       offEnd();
-      void window.ogb?.speechStop();
+      void speechBridge()?.speechStop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bot.id, bot.threadId, dispatch, hush, listen, move, sayThenListen]);
@@ -797,7 +798,7 @@ function Call({ bot }: { bot: Bot }) {
         {phase === "listening" ? (
           heard || (
             <span className="text-ink-secondary">
-              {pushToTalk ? t("call.turns.releaseToSend") : t("call.turns.saySomething")}
+              {pushToTalk ? t("call.turns.releaseToSend", { keys: pushToTalkKeys() }) : t("call.turns.saySomething")}
             </span>
           )
         ) : (
@@ -840,7 +841,7 @@ function Call({ bot }: { bot: Bot }) {
       </div>
 
       <div className="text-[12px] text-ink-tertiary">
-        {t("call.turns.keysHint")}
+        {t("call.turns.keysHint", { keys: pushToTalkKeys() })}
       </div>
     </>
   );

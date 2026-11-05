@@ -9,13 +9,14 @@ import { track } from "@/lib/analytics";
 import { normalizeState } from "@/lib/mascot";
 import { speaker } from "@/lib/tts";
 import { useSpeech } from "@/lib/tts/useSpeech";
-import { usePushToTalk } from "@/lib/push-to-talk";
+import { pushToTalkKeys, usePushToTalk } from "@/lib/push-to-talk";
 import { useStore, type Bot, type Group, type Message } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { BotAvatar } from "./Avatar";
 import { CallTargetButton, type CallButtonPlacement } from "./CallView";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { speechBridge } from "@/lib/speech";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
 
@@ -122,7 +123,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   }, []);
 
   const hush = useCallback(() => {
-    void window.ogb?.speechStop();
+    void speechBridge()?.speechStop();
   }, []);
 
   const listen = useCallback(() => {
@@ -131,7 +132,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
     setSpeakingMemberId(null);
     setHeard("");
     setNote(null);
-    void window.ogb?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
+    void speechBridge()?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
       if (alive.current && currentCall() === group.id) {
         setNote(t("call.turns.micFailed"));
       }
@@ -214,7 +215,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   }, [group.id]);
 
   useEffect(() => {
-    const bridge = window.ogb;
+    const bridge = speechBridge();
     if (!bridge) return;
     const offTranscript = bridge.onSpeechTranscript((line) => {
       if (!alive.current || currentCall() !== group.id || phaseRef.current !== "listening") return;
@@ -311,7 +312,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       dispatch({ type: "sendGroup", groupId: group.id, text: routed.text, threadId: group.threadId });
       scheduleListen(false, 600);
     });
-    const offEnd = bridge.onSpeechEnd(({ code, reason }) => {
+    const offEnd = bridge.onSpeechEnd(({ code, reason, message }) => {
       if (!alive.current || currentCall() !== group.id) return;
       if (code === 2) {
         setNote(t("call.turns.needsDictation"));
@@ -319,7 +320,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       }
       if (code === 1) {
         setNote(
-          t(reason === "helper-build-failed"
+          message ?? t(reason === "helper-build-failed"
             ? "call.turns.helperBuildFailed"
             : reason === "dictation-disabled"
               ? "composer.dictation.disabled"
@@ -336,7 +337,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
     return () => {
       offTranscript();
       offEnd();
-      void window.ogb?.speechStop();
+      void speechBridge()?.speechStop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch, enqueueSpeech, group.id, group.threadId, hush, listen, move, scheduleListen]);
@@ -526,7 +527,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
           heard || (
             <span className="text-ink-secondary">
               {pushToTalk
-                ? t("call.turns.releaseToSend")
+                ? t("call.turns.releaseToSend", { keys: pushToTalkKeys() })
                 : t("call.group.sayPrompt")}
             </span>
           )
@@ -568,7 +569,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       </div>
 
       <div className="text-[12px] text-ink-tertiary">
-        {t("call.group.keysHint")}
+        {t("call.group.keysHint", { keys: pushToTalkKeys() })}
       </div>
     </div>
   );

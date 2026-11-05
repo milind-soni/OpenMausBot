@@ -1851,7 +1851,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const stdio = (name: string) => ({ command: process.execPath, args: [`/fake/${name}.js`], env: {} });
     const integrations = {
       agents: stdio("agents"), browser: stdio("browser"), composio: stdio("composio"), composioOwn: stdio("own-apps"),
-      localComputer: stdio("computer"), phone: stdio("phone"), data: stdio("data"), highlevel: stdio("highlevel"),
+      localComputer: stdio("computer"), phone: stdio("phone"), data: stdio("data"), highlevel: stdio("highlevel"), email: stdio("email"),
       device: stdio("device"), dweb: { url: "http://127.0.0.1:1" },
       custom: {
         shop: { command: "npx", args: ["shop"], env: {} }, docs: { type: "http" as const, url: "https://docs.example.test/mcp", headers: {} },
@@ -1870,10 +1870,15 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       };
     };
 
+    await instance.adapter.sendTurn({ threadId: "t-email", text: "hi", cwd: scratch, integrations: { email: stdio("email") } }).then(({ turnId }) => recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId));
+    const allowedOf = () => { const argv = (JSON.parse(readFileSync(dump, "utf8")) as { argv: string[] }).argv; return argv[argv.indexOf("--allowedTools") + 1]!.split(","); };
+    expect(allowedOf(), "reading mail needs no card").toEqual(expect.arrayContaining(["mcp__email__EMAIL_LIST_MESSAGES", "mcp__email__EMAIL_SEARCH_MESSAGES", "mcp__email__EMAIL_READ_MESSAGE", "mcp__email__EMAIL_LIST_MAILBOXES"]));
+    expect(allowedOf().filter((name) => name.includes("SEND") || name === "mcp__email"), "a send asks as any tool of a person's own server does").toEqual([]);
+
     const browsing = await mounted("t-tool-search", true);
     expect(browsing.toolSearch).toBe("true");
     expect(browsing.alwaysLoaded).toEqual(["agents", "browser", "ogb"]);
-    expect(browsing.onDemand).toEqual(["composio", "computer", "data", "device", "docs", "dweb", "highlevel", "own_apps", "phone", "postiz", "shop"]);
+    expect(browsing.onDemand).toEqual(["composio", "computer", "data", "device", "docs", "dweb", "email", "highlevel", "own_apps", "phone", "postiz", "shop"]);
     const other = await mounted("t-tool-search-no-browse", false);
     expect(other.alwaysLoaded).toEqual(["agents", "ogb"]);
     expect(other.onDemand).toContain("browser");
