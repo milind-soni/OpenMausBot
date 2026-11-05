@@ -6,7 +6,7 @@ import { type McpApprovalMode, mountMcpServer } from "./codex-mcp-mount.ts";
 import { reportUnsupportedCalls, rolloutMark, type RolloutMark } from "./codex-unsupported-calls.ts";
 // The `codex` CLI headless over its app-server JSON-RPC (NDJSON on stdio): completion is
 // `turn/completed`, approvals arrive as server→client requests, resumeCursor is the codex thread id.
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -409,6 +409,30 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       if (existsSync(join(planDirectory, "codex", "auth.json"))) return "legacy";
       return "maus";
     };
+
+    /** True when this plan instance's Codex home is signed in with an API key: no plan turn or
+     * background call may bill through it. The file shape decides cheaply and deterministically;
+     * the CLI probe also catches keys Codex stores outside auth.json, such as a keyring store. */
+    const codexPlanHomeApiKey = async (): Promise<boolean> => {
+      try {
+        // Codex's ChatGPT auth.json carries OPENAI_API_KEY: null; only a real string is an API-key home.
+        const parsed = JSON.parse(readFileSync(join(planDirectory, "codex", "auth.json"), "utf8")) as { OPENAI_API_KEY?: unknown };
+        const apiKey = parsed?.OPENAI_API_KEY;
+        if (typeof apiKey === "string" && apiKey.length > 0) return true;
+      } catch { /* absent or unreadable — the CLI probe decides */ }
+      return (await codexLoginKind(config.cli, childEnv())) === "api-key";
+    };
+
+    /** `codex logout` in the instance's Codex home. The device controller deliberately refuses to
+     * remove sign-ins it did not create, but an API-key home on a plan instance is dead weight, so
+     * the explicit device sign-in clears it through Codex itself (which knows the configured
+     * credential store, keyring included). Resolves the exit code. */
+    const codexLogout = (): Promise<number> => new Promise((resolve, reject) => {
+      execCli(config.cli, ["logout"], { timeout: 8000, env: childEnv() }, (error) => {
+        const code = (error as { code?: unknown } | null)?.code;
+        if (error && typeof code !== "number") reject(error); else resolve(typeof code === "number" ? code : 0);
+      });
+    });
     let models = plan ? { default: "", options: [] } : config.managed ? { default: config.managed.models[0], options: config.managed.models.map(id => ({ id, label: id })) } : STATIC_CODEX_MODELS;
     const refreshModels = async (preserveExisting = false) => {
       if (config.managed) return;
@@ -523,7 +547,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       assertPlanCurrent();
       if (planUnavailable) throw new Error(planUnavailable);
       if (planAuth) planLane = await detectPlanLane();
-      if (planAuth && planLane === "legacy" && await codexLoginKind(config.cli, childEnv()) === "api-key") {
+      if (planAuth && planLane === "legacy" && await codexPlanHomeApiKey()) {
         // An API-key home would answer through Codex's API billing, not the subscription.
         throw new Error("This account's Codex home is signed in with an API key. Start the device sign-in again to switch it to the ChatGPT plan.");
       }
@@ -1665,6 +1689,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       if (planLane === "maus") {
         env.OPENMAUSBOT_CHATGPT_TOKEN = await planAuth.accessToken();
         providerArgs = chatgptPlanCodexArgs();
+      } else if (await codexPlanHomeApiKey()) {
+        // Background text through an API-key home bills outside the plan, exactly like a turn.
+        throw new Error("This account's Codex home is signed in with an API key. Start the device sign-in again to switch it to the ChatGPT plan.");
       }
       if (planSigningOut || disposed) throw new Error("This ChatGPT account is being disconnected.");
       mkdirSync(join(planDirectory, "codex"), { recursive: true, mode: 0o700 });
@@ -1711,12 +1738,16 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       if (planSigningOut || disposed) throw new Error("This account is being disconnected. Wait before signing in again.");
       if (plan && config.authFlow === "device") {
         // Codex's status probe needs the home to exist before the first turn creates it.
-        // A stale API-key login would read as signed-in to the device flow, and no plan turn may
-        // bill through it, so starting the device sign-in resets the home's login.
-        if (await codexLoginKind(config.cli, childEnv()) === "api-key") {
-          rmSync(join(planDirectory, "codex", "auth.json"), { force: true });
-        }
         mkdirSync(join(planDirectory, "codex"), { recursive: true, mode: 0o700 });
+        // An API-key home would mislead the device flow, and no plan turn may bill through it, so
+        // starting the device sign-in resets the home through Codex's own logout and verifies the
+        // result — a key Codex keeps outside auth.json (a keyring store) fails loudly here.
+        if (await codexPlanHomeApiKey()) {
+          const code = await codexLogout();
+          if (code !== 0 || await codexLoginKind(config.cli, childEnv()) === "api-key") {
+            throw new Error("This account's Codex home still holds an API key after logout — the key may live outside auth.json, such as a keyring credential store. Remove it with `codex logout` in that home, then start the device sign-in again.");
+          }
+        }
         return authentication.start();
       }
       return (planAuth ?? authentication).start();

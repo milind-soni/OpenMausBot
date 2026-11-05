@@ -165,6 +165,8 @@ describe("CodexDriver turns (fake app-server)", () => {
   const record = (mount: string) => `OMB_REMOTE_MCP_CONFIG_${createHash("sha256").update(mount).digest("hex")}`;
 
   beforeEach(() => {
+    // create() opts.mode pins FAKE_CODEX_MODE globally; drop the previous test's mode.
+    delete process.env.FAKE_CODEX_MODE;
     chmodSync(FAKE_CLI, 0o755);
     scratch = mkdtempSync(join(tmpdir(), "omb-codex-test-"));
   });
@@ -2026,16 +2028,32 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
   it("turns away API-key homes and resets one when the device sign-in starts", async () => {
     vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockResolvedValue({ default: "gpt-6.1-sol", options: [{ id: "gpt-6.1-sol", label: "GPT-6.1 Sol" }] });
     const deviceStart = vi.spyOn(DeviceAuthController.prototype, "start").mockResolvedValue({ phase: "waiting", flowId: "flow-1", authorizationUrl: null, expiresAt: null });
-    await create({ authMode: "chatgpt-plan", authFlow: "device", mode: "api-key-configured" });
+    await create({ authMode: "chatgpt-plan", authFlow: "device", mode: "logged-out" });
     const codexHome = join(DATA_DIR, "providers", "chatgpt-plan", createHash("sha256").update("codex-test").digest("hex"), "codex");
     mkdirSync(codexHome, { recursive: true, mode: 0o700 });
     writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-test" }));
     try {
       await expect(instance.adapter.sendTurn({ threadId: "t-device-apikey", text: "Continue", model: "gpt-6.1-sol" }))
         .rejects.toThrow(/API key/);
+      await expect(instance.generateMemoryText!("Summarize this."))
+        .rejects.toThrow(/API key/);
       await expect(instance.startAuthentication!()).resolves.toMatchObject({ phase: "waiting" });
       expect(existsSync(join(codexHome, "auth.json"))).toBe(false);
       expect(deviceStart).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true });
+    }
+  });
+
+  it("turns away a legacy home whose Codex reports an API key even with ChatGPT-shaped auth.json", async () => {
+    vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockResolvedValue({ default: "gpt-6.1-sol", options: [{ id: "gpt-6.1-sol", label: "GPT-6.1 Sol" }] });
+    await create({ authMode: "chatgpt-plan", mode: "api-key-configured" });
+    const codexHome = join(DATA_DIR, "providers", "chatgpt-plan", createHash("sha256").update("codex-test").digest("hex"), "codex");
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ tokens: { access_token: "t" } }));
+    try {
+      await expect(instance.adapter.sendTurn({ threadId: "t-device-shape", text: "Continue", model: "gpt-6.1-sol" }))
+        .rejects.toThrow(/API key/);
     } finally {
       rmSync(codexHome, { recursive: true, force: true });
     }
