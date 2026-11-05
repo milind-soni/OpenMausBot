@@ -44,6 +44,8 @@ describe("refusesRequestSize", () => {
     [400, '{"error":{"code":"invalid_request_error","message":"context_length_exceeded"}}'],
     [400, '{"code":"context_length_exceeded"}'],
     [400, '{"error":[{"code":"context_length_exceeded"}]}'],
+    [400, '{"error":{"code":"context_length_exceeded_extra"}}'],
+    [400, '{"error":{"type":"context_length_exceeded_extra"}}'],
     [400, "null"],
     [400, "[]"],
     [400, '{"error":'],
