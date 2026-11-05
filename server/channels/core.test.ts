@@ -54,7 +54,7 @@ beforeEach(() => {
     createThread: (botId) => { const id = `${botId}-thread-${threads.length + 1}`; threads.push(id); paths.set(id, []); return id; },
     deliver: async (botId, threadId, text, sendId) => { delivered.push({ botId, threadId, text, sendId }); paths.get(threadId)!.push(msg(`u-${sendId}`, "user", text)); },
     activePath: (threadId) => paths.get(threadId) ?? [],
-    needsInput: (message) => message.kind === "card",
+    needsInput: (message) => message.kind === "options",
     now: () => clock,
   });
 });
@@ -193,7 +193,7 @@ describe("replies", () => {
   });
 
   it("says when the bot waits for an approval in the app", async () => {
-    paths.get("bot-a-thread-1")!.push(msg("c1", "bot", "", { kind: "card" } as Partial<Message>));
+    paths.get("bot-a-thread-1")!.push(msg("c1", "bot", "", { kind: "options" }));
     await channel.noteTurnCompleted("bot-a-thread-1");
     expect(sent.map((entry) => entry.text)).toEqual([WAITING_NOTE]);
   });
