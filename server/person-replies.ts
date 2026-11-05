@@ -17,7 +17,7 @@ export interface PersonReplyDeps {
   usageTriggerFor(auth: RequestAuth): UsageTrigger;
   groupThreadIsWorking(groupId: string, threadId: string): boolean;
   startGroupTurn(groupId: string, text: string, replyTo: ReplyTarget, sendId: string, mode: "chat", queueId: undefined,
-    options: { threadId: string; sender?: ResolvedSender; trigger: UsageTrigger }): unknown;
+    options: { threadId: string; sender?: ResolvedSender; trigger: UsageTrigger; mentions: string[] }): unknown;
   startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo: ReplyTarget, sendId: string,
     sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string): Promise<{ queued?: true }>;
 }
@@ -42,7 +42,7 @@ export interface PersonReply {
 
 const conflict = (message: string) => Object.assign(new Error(message), { status: 409 });
 
-/** At Full access a bot decided the question: the person's own answer still replaces its pick. */
+/** A bot answered the question: the person's own answer still replaces it. */
 const decidedByBot = (card: NonNullable<Message["card"]>): boolean => card.answeredBy?.kind === "bot";
 
 export function createPersonReplies(deps: PersonReplyDeps) {
@@ -91,10 +91,10 @@ export function createPersonReplies(deps: PersonReplyDeps) {
         const current = store.group(group.id);
         if (!current || !owned) throw conflict(`the room switched tasks before it could receive the answer`);
         if (deps.groupThreadIsWorking(current.id, threadId)) {
-          queueChannelMessage(current.id, threadId, text, { replyToId: target.id, sendId, mode: "chat", sender, trigger, reaction: target.reactedWith });
+          queueChannelMessage(current.id, threadId, text, { replyToId: target.id, sendId, mode: "chat", sender, trigger, reaction: target.reactedWith, mentions: [owner.id] });
           return { queued: true };
         }
-        deps.startGroupTurn(current.id, text, target, sendId, "chat", undefined, { threadId, sender, trigger });
+        deps.startGroupTurn(current.id, text, target, sendId, "chat", undefined, { threadId, sender, trigger, mentions: [owner.id] });
         return { queued: false };
       }
       const direct = await deps.startOrQueueDirectMessage(owner.id, threadId, text, target, sendId, sender, trigger, via, callId);

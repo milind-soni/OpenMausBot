@@ -36,6 +36,9 @@ const __APP_VERSION__: string;
       packaged: boolean;
     };
     windowChrome: "mac-inset" | "win-caption" | "native";
+    /** The page draws the window's frame: false once the person turned it off. Absent on an older app, whose window
+     * draws it. */
+    windowFrame?: boolean;
     screenPreview: {
       available: boolean;
       interaction: "direct" | "portal-picker" | "none";
@@ -43,7 +46,7 @@ const __APP_VERSION__: string;
     };
     dictation: {
       available: boolean;
-      engine: "apple-speech" | "none";
+      engine: "apple-speech" | "fish-audio" | "none";
       onDevice: boolean;
       reasonCode?: string;
     };
@@ -119,6 +122,8 @@ const __APP_VERSION__: string;
       app?: { version: string; ownPage: boolean };
       organization?: import("../../electron/managed-desktop.mjs").ManagedDesktopBridge;
       cloudAccount?: import("../../electron/cloud-account.mjs").CloudAccountBridge;
+      accounts?: import("../../electron/cloud-account.mjs").AccountsBridge;
+      accountSheet?: import("../../electron/cloud-account.mjs").AccountSheetBridge;
       /** Either page in this app: the one-time move's line (on its way, what arrived, coming home). */
       cloudSendPage?: import("../../electron/cloud-send.mjs").CloudSendPageBridge;
       /** This computer's page only: bots in two places, and the one tap that brings them together on one (electron/two-places.mjs). */
@@ -133,6 +138,7 @@ const __APP_VERSION__: string;
       /** This computer's page, and My Cloud's own page once it is the person's home: the window onto My Cloud. */
       home?: import("../../electron/home-window.mjs").HomeBridge;
       desktopNotices?: import("../../electron/desktop-prefs.mjs").DesktopNoticesBridge;
+      desktopNotifications?: import("../../electron/desktop-notifications.mjs").DesktopNotificationsBridge;
       /** This computer's own page only: the account's full name, for a first run's profile (system-name.mjs). */
       desktopProfile?: { systemName(): Promise<string | null> };
       desktopAnalytics?: import("../../electron/desktop-prefs.mjs").DesktopAnalyticsBridge;
@@ -155,8 +161,9 @@ const __APP_VERSION__: string;
       rail?: import("../../electron/chrome-rail.mjs").ChromeRailBridge;
       workspaces?: {
         /** `color`: a saved server's colour name (its owner chose it while setting the Cloud up); `home`: this window's
-         * home is this Cloud, so there is nothing to switch to. */
-        state: () => Promise<{ local: boolean; name: string; origin?: string; color?: string; home?: boolean; role?: string }>;
+         * home is this Cloud, so there is nothing to switch to; `localPath`: a local workspace's folder, absent for This
+         * computer's own. */
+        state: () => Promise<{ local: boolean; name: string; origin?: string; color?: string; home?: boolean; role?: string; localPath?: string }>;
         /** The native server menu; resolves when it closes. `from: "howto"`: the Show me how tip opened it. */
         menu: (options?: { from?: "howto" }) => Promise<void>;
         /** One plain line for the next page, served once: a team this person is no longer in. */
@@ -165,7 +172,8 @@ const __APP_VERSION__: string;
          * places). Absent on an older app. */
         places?: () => Promise<import("../../electron/cloud-rail.mjs").RailState>;
         /** Opens a circle main listed, by its id, through main's own switch: only from the person's click. */
-        open?: (id: string) => Promise<unknown>;
+        /** Nothing for a place of the account in use; for another account's, how its switch went. */
+        open?: (id: string) => Promise<import("../../electron/cloud-account.mjs").RailOpenResult | undefined>;
         /** ＋'s fixed choices: buy a Cloud (this computer's own sheet), a server's pairing link (`link`: the one pasted on the
          * sheet; without it, the clipboard's), or type its address. Resolves false when the person cancels Connect. */
         add?: (choice: "cloud" | "link" | "address", link?: string) => Promise<unknown>;
@@ -311,7 +319,7 @@ const __APP_VERSION__: string;
       onSpeechTranscript(
         cb: (line: { partial?: boolean; text?: string; error?: string }) => void,
       ): () => void;
-      onSpeechEnd(cb: (info: { code: number | null; reason?: string }) => void): () => void;
+      onSpeechEnd(cb: (info: { code: number | null; reason?: string; message?: string }) => void): () => void;
       /** Absolute path of a dropped File ("" when the drag carried no
        * file on disk). Absent in older builds of the shell. */
       getPathForFile?(file: File): string;
@@ -337,6 +345,12 @@ const __APP_VERSION__: string;
       openExternal?(url: string): Promise<boolean>;
       /** Recolor the native window chrome for a skin; absent on older builds. */
       applySkin?(skin: string): Promise<boolean>;
+      /** The window's own frame, this desktop's choice (Settings → Appearance). Absent on an older app. */
+      windowFrame?: {
+        state(): Promise<import("../../electron/desktop-prefs.mjs").WindowFrameState>;
+        /** From the person's click on another server's page. */
+        set(on: boolean): Promise<import("../../electron/desktop-prefs.mjs").WindowFrameState>;
+      };
       /** The renderer-drawn Windows caption buttons; absent outside the
        * frameless Windows shell (macOS/Linux/browser keep native chrome). */
       windowControls?: {
@@ -394,6 +408,8 @@ const __APP_VERSION__: string;
        * it there and reveals it. Resolves the chosen path, or null if the
        * user cancelled the dialog. */
       saveFile?(filePath: string): Promise<string | null>;
+      /** Desktop only: opens HTML this page already showed in the default browser, from a temp copy main writes. */
+      openHtmlInBrowser?(source: string, name: string): Promise<unknown>;
       /** Points this computer's file manager at a file a bot linked outside
        * its workspace, without opening or reading it. Local app only. */
       revealInFolder?(filePath: string): Promise<"shown" | "missing" | "invalid">;
@@ -403,7 +419,7 @@ const __APP_VERSION__: string;
       openAtLogin?: { state(): Promise<{ available: boolean; on: boolean }>; set(on: boolean): Promise<{ available: boolean; on: boolean }> };
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(
-        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey",
+        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey",
         value: string,
       ): Promise<ConfigStatus>;
       /** In-app auto-update (packaged app only; dormant in dev). Updates

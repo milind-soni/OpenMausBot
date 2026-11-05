@@ -98,6 +98,8 @@ export interface InstanceConfig {
   icon?: ProviderIcon;
   environment?: Record<string, string>;
   enabled?: boolean;
+  /** Left out of every model list, picker and automatic choice; the engine itself (its CLI and sign-in) is untouched. */
+  hidden?: boolean;
   /** Picker group over the driver's default: an `openai-compat` instance on a provider's own key is "api". */
   access?: EngineAccess;
   config?: unknown;
@@ -182,6 +184,8 @@ export interface SendTurnInput {
     data?: { command: string; args: string[]; env: Record<string, string> };
     /** The HighLevel CRM tools' MCP proxy: the harness holds the tokens and the per-bot verdict. */
     highlevel?: { command: string; args: string[]; env: Record<string, string> };
+    /** The Email tools' MCP proxy: the harness holds the passwords and the per-bot verdict. */
+    email?: { command: string; args: string[]; env: Record<string, string> };
     /** The paired phone's app tools' MCP proxy: the harness holds the jobs and the per-bot verdict. */
     device?: { command: string; args: string[]; env: Record<string, string> };
     /** dweb daemon tools; `url` is the dweb HTTP base. */
@@ -195,10 +199,15 @@ export interface SendTurnInput {
     customResultBudgets?: Record<string, number>;
   };
   cwd?: string;
+  /** Engines with no working folder (the chat drivers): where an MCP result too big for the model is saved whole; a folder attach_file can deliver from. */
+  toolResultFolder?: string;
   /** Also load the person's own CLI MCP setup (Claude Code user scope, claude.ai connectors). */
   mcpFromUserConfig?: boolean;
   /** Claude Code loads the person's own `~/.claude/skills` from this folder's `.claude/skills` (`--add-dir`). */
   userSkillsDir?: string;
+  /** The bot's own Claude Code settings: `.claude/settings.json` in its working folder, else in its own folder. A Claude
+   * turn in any other folder takes their hooks, plugins, permission rules and env. */
+  botSettingsFile?: string;
   /** Per-call ceiling (ms) for this turn's MCP tools; absent is the driver's default (10 min). */
   mcpCallTimeoutMs?: number;
   /** Times an API-model turn that answers after a failed tool call is sent back to re-run it (`loopGuard.correctiveRounds`); never after a denial. */
@@ -244,7 +253,7 @@ export interface ProviderAdapter {
     browserMcp?: boolean;
     /** The driver can mount the Data tools MCP. */
     dataMcp?: boolean;
-    /** The driver can mount the HighLevel CRM tools MCP. */
+    /** The driver can mount the HighLevel CRM tools MCP, and the Email tools the same way. */
     highlevelMcp?: boolean;
     /** The driver can mount the phone apps MCP. */
     deviceMcp?: boolean;
@@ -459,6 +468,8 @@ export interface ModelCatalog {
     contextWindow?: number;
     /** Discovery hints; the native session revalidates these before each turn. */
     variants?: ModelVariantOption[];
+    /** The organization of the signed-in account turned this model off: the engine would answer with another. */
+    orgBlocked?: true;
   }>;
 }
 
@@ -527,6 +538,8 @@ export interface ProviderInstance {
   readonly displayName: string | undefined;
   readonly enabled: boolean;
   readonly models: ModelCatalog;
+  /** True while the catalog is the driver's fixed list or a failed read's leftover, not a list the engine gave. */
+  readonly modelsUnconfirmed?: boolean;
   /** False while the sign-in can refuse a model its catalog lists (Codex on a ChatGPT account): a short message and background text then stay on the bot's own model. */
   readonly quickModelsUsable?: () => boolean;
   /** Refresh a live catalog without recreating the provider instance. */

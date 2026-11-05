@@ -185,6 +185,24 @@ and your Claude bots follow it:
 
 Not yet. Codex bots use your ChatGPT sign-in, or your organisation's models.
 
+## Ollama's context window
+
+Below 23 GB of graphics memory, Ollama gives a model a 4,096-token context window
+unless told otherwise, and it drops whatever doesn't fit without an error. That is
+less than a bot's instructions and tools, so OpenMausBot sets a larger window the
+first time a bot uses a model.
+
+You'll see the result in `ollama list` as a second name, such as
+`qwen3.5:4b-omb-64k`. It uses the same weights, so it takes no extra disk space.
+Removing it is safe: OpenMausBot makes it again when it needs it. To free the disk
+space a model uses, remove both names.
+
+The window is 16K, 32K or 64K tokens, depending on your memory and the model's size.
+To choose your own, set `num_ctx` in a Modelfile or start Ollama with
+`OLLAMA_CONTEXT_LENGTH`. A `num_ctx` in a Modelfile is always left alone. With
+`OLLAMA_CONTEXT_LENGTH`, keep the model loaded before the first turn, because
+OpenMausBot can only see that setting on a running model.
+
 ## Current limits
 
 There is no shared provider list that configures every engine. Use each

@@ -26,6 +26,10 @@ describe("whose turn may use the desktop owner's phones", () => {
     expect(owners(base())).toBe(true);
   });
 
+  it("a conversation a bot opened from the owner's own work is theirs here: off a Cloud its origin vouches for it", () => {
+    expect(owners(base({ botOpened: true }))).toBe(true);
+  });
+
   it("a live admin session's line is the owner's; a client session's is not", () => {
     expect(owners(base({ thread: [said("m1", { sender: { id: ADMIN } })] }))).toBe(true);
     expect(owners(base({ thread: [said("m1", { sender: { id: MEMBER } })] }))).toBe(false);

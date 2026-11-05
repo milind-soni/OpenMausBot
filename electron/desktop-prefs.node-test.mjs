@@ -12,12 +12,21 @@ const require = createRequire(import.meta.url);
 const environments = require("./environments.cjs");
 const localOrigin = require("./local-origin.cjs");
 
-const POPUP = "whats-new-2026-11", BOAT = "boat-credit-2026-11";
+const POPUP = "whats-new-2026-11", BOAT = "boat-credit-2026-11", GROK = "grok-move-2026-11";
 const NOON = new Date(2026, 9, 16, 12).getTime();
 const LOCAL = "http://127.0.0.1:18799", CLOUD = "https://omb-u-1.fly.dev", VPS = "https://bots.example.test";
 
-test("What's new and Boat's credit offer are the notices a page can record; seen and analytics survive a restart; a broken record never stops the app", () => {
-  assert.deepEqual([...DESKTOP_NOTICES], [POPUP, BOAT]);
+test("a page on an older release keeps working with the longer list: its own ids record as before, and it never reads the new one", () => {
+  let saved = { seen: [POPUP, GROK, "gone-notice"] };
+  const prefs = createDesktopPrefs({ read: () => saved, write: value => { saved = structuredClone(value); } });
+  assert.deepEqual(prefs.seen(), [POPUP, GROK]);
+  prefs.markSeen(BOAT);
+  assert.deepEqual(saved.seen, [POPUP, GROK, BOAT], "the new id is kept beside the ones an older page records");
+  assert.ok(prefs.seen().includes(BOAT) && prefs.seen().includes(POPUP), "the lookups an older page makes");
+});
+
+test("What's new, Boat's credit offer and the Grok Bot move are the notices a page can record; seen and analytics survive a restart; a broken record never stops the app", () => {
+  assert.deepEqual([...DESKTOP_NOTICES], [POPUP, BOAT, GROK]);
   let saved = null;
   const writes = [];
   const prefs = createDesktopPrefs({ read: () => saved, write: value => { writes.push(value); saved = structuredClone(value); } });
@@ -89,7 +98,7 @@ function desktopMain({ offered = true, page = event => event.page, config = () =
 
 test("every page of this desktop's window reads and records the same notices; nothing else is answered", async () => {
   const main = desktopMain();
-  assert.deepEqual(main.channels, ["desktop-notices:state", "desktop-notices:seen", "desktop-profile:system-name", "desktop-analytics:set", "desktop-language:set"]);
+  assert.deepEqual(main.channels, ["desktop-notices:state", "desktop-notices:seen", "desktop-profile:system-name", "desktop-analytics:set", "desktop-language:set", "window-frame:state", "window-frame:set"]);
   for (const page of ["local", "cloud", "server"]) assert.deepEqual(await main.ask("desktop-notices:state", page), { seen: [], cloud: true });
   await main.ask("desktop-notices:seen", "server", POPUP);
   assert.deepEqual(await main.ask("desktop-notices:state", "local"), { seen: [POPUP], cloud: true });
@@ -202,7 +211,7 @@ test("the preload gives every page of the window the notices and the switch's st
     assert.equal(page.bridge.desktopAnalytics.set, undefined, "a server's page cannot change the desktop's switch");
     await page.bridge.desktopNotices.state(); await page.bridge.desktopNotices.seen({ toString: () => POPUP });
     assert.deepEqual(page.invoked, [["desktop-notices:state"], ["desktop-notices:seen", POPUP]]);
-    assert.deepEqual(Object.keys(page.bridge.desktopNotices), ["state", "seen"], "no page moves the window to this computer");
+    assert.deepEqual(Object.keys(page.bridge.desktopNotices), ["state", "seen", "shown"], "no page moves the window to this computer");
   }
   const local = preload(LOCAL, { activation: true, saved: false });
   assert.equal(typeof local.bridge.desktopNotices.state, "function");
@@ -262,7 +271,7 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
   localOrigin.setLocalOrigin(LOCAL);
   const sent = [], window = name => ({ isDestroyed: () => name === "closed", webContents: { send: (...message) => sent.push([name, ...message]) } });
   const windows = [window("team"), window("home"), window("closed")];
-  let switched = async id => { calls.push(["switch", id]); }, loads = true;
+  let switched = async id => { calls.push(["switch", id]); }, loads = true, broadcasts = 0;
   const context = vm.createContext({
     registerDesktopPrefs: value => { options = value; }, createDesktopPrefs: store => ({ store }), jsonFile: file => ({ read: () => file, write: () => {} }), ipcMain: {}, updatesConsent: null, cloudAccount: "the client",
     path: { join: (...parts) => parts.join("/") }, app: { getPath: () => "/user-data" }, desktopDataDir: () => "/home/.openmausbot",
@@ -273,12 +282,16 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
     rendererOrigin: () => LOCAL, cloudAccountRestored: async () => calls.push("restored"), cloudOffersReady: async () => { calls.push("offers"); return true; },
     cloudPageAsking: event => event.verifiedCloud ? "cloud" : null,
     serverReady: true, LOCAL_ID: "local", switchEnvironment: id => switched(id),
+    process: { platform: "win32" }, windowFrameMade: false, broadcastDesktopCapabilities: async () => { broadcasts++; },
     // main's own: a failed switch shows its dialog and resolves.
     workspaceMenuAction: async action => { try { await action(); } catch { calls.push("dialog"); } },
   });
   vm.runInContext(main.slice(start, end), context);
   assert.equal(options.prefs.store.read(), "/user-data/desktop-prefs.json");
   assert.equal(options.localConfig(), "/home/.openmausbot/config.json", "This computer's own workspace, whichever server the window shows");
+  assert.deepEqual([options.frame.made(), options.frame.restarts], [false, true], "Windows: the frame its window was made with, until a restart");
+  options.frame.changed();
+  assert.equal(broadcasts, 1, "the pages hear the frame change");
   assert.equal(options.page({ sender: { mainFrame: localFrame }, senderFrame: localFrame }), "local");
   assert.equal(options.page({ sender: contents, senderFrame: serverFrame }), "server");
   assert.equal(options.page({ sender: contents, senderFrame: serverFrame, verifiedCloud: true }), "cloud", "My Cloud's page as main verifies it");
@@ -344,4 +357,36 @@ test("registerDesktopPrefs works on the store main hands it", async () => {
     page: () => "local", cloudOffered: async () => false });
   await handlers.get("desktop-analytics:set")({}, false);
   assert.equal(prefs.analytics(), false);
+});
+
+test("the window draws its own frame until the person turns it off, and the choice survives a restart", () => {
+  let saved = null, writes = 0;
+  const prefs = createDesktopPrefs({ read: () => saved, write: value => { saved = structuredClone(value); writes++; } });
+  assert.equal(prefs.windowFrame(), true);
+  prefs.setWindowFrame(true);
+  assert.equal(writes, 0, "turning on a frame that is on writes nothing");
+  prefs.setWindowFrame(false);
+  assert.equal(createDesktopPrefs({ read: () => saved, write: () => {} }).windowFrame(), false);
+  prefs.setWindowFrame("off");
+  assert.equal(createDesktopPrefs({ read: () => saved, write: () => {} }).windowFrame(), true, "only false turns it off");
+  assert.equal(createDesktopPrefs({ read: () => ({ windowFrame: "no" }), write: () => {} }).windowFrame(), true);
+});
+
+test("Settings reads and changes the window's frame on any page of the window; on Windows the change waits for a restart", async () => {
+  const prefs = createDesktopPrefs({ read: () => null, write: () => {} });
+  const handlers = new Map();
+  let made = true, changes = 0, asking = "server";
+  const register = (restarts) => registerDesktopPrefs({ prefs, ipcMain: { handle: (c, h) => handlers.set(c, h), on: () => {} }, read: () => null, write: () => {},
+    page: () => asking, cloudOffered: async () => false, frame: { made: () => made, restarts, changed: () => { changes++; } } });
+  register(false);
+  assert.deepEqual(await handlers.get("window-frame:state")({}), { on: true, restart: false });
+  assert.deepEqual(await handlers.get("window-frame:set")({}, false), { on: false, restart: false }, "macOS: at once");
+  assert.equal(changes, 1, "the pages hear it");
+  register(true);
+  assert.deepEqual(await handlers.get("window-frame:state")({}), { on: false, restart: true }, "Windows: the window was made with its frame");
+  assert.deepEqual(await handlers.get("window-frame:set")({}, true), { on: true, restart: false }, "back as it was made: nothing to restart");
+  made = null;
+  assert.deepEqual(await handlers.get("window-frame:set")({}, false), { on: false, restart: false }, "no window yet");
+  asking = null;
+  assert.throws(() => handlers.get("window-frame:set")({}, true), /only available in this app's window/);
 });

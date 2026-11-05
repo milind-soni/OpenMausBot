@@ -23,8 +23,6 @@ export const SESSION_TTL_MS = daysMs(process.env.OMB_SESSION_TTL_DAYS, 30);
 /** OMB_SESSION_MAX_DAYS (default 180): renewal never passes this, so a stolen cookie has a bounded life. */
 export const SESSION_MAX_AGE_MS = daysMs(process.env.OMB_SESSION_MAX_DAYS, 180);
 export const SESSION_RENEW_WHEN_LEFT_MS = SESSION_TTL_MS / 2;
-/** OMB_SESSION_IDLE_DAYS (default: the session term): revoke a session this many days after its last use. */
-export const SESSION_IDLE_MS = daysMs(process.env.OMB_SESSION_IDLE_DAYS, SESSION_TTL_MS / 86_400_000);
 
 export function cookieMaxAgeSeconds(session: { expiresAt: number }, now = Date.now()): number {
   return Math.max(1, Math.floor((session.expiresAt - now) / 1000));
@@ -182,10 +180,9 @@ export interface SessionStoreOptions {
   emailScopes?: EmailScopesResolver;
   emailScopesSnapshot?: () => EmailScopesResolver;
   portalMembership?: boolean;
-  /** Tests only: an idle window shorter than a day is unsound here — `lastSeenAt` is
-   * persisted at most once a minute (LAST_SEEN_WRITE_INTERVAL_MS), so sub-day windows
-   * can revoke a session used moments ago. Production idle windows are whole days. */
-  idleMs?: number;
+  /** Between membershipChanged() calls, the hot paths (each request, stream frame and liveness check) recheck email
+   * membership at most this often. Default 0: every call. */
+  recheckMs?: number;
 }
 
 export class SessionRegistry {
@@ -198,17 +195,16 @@ export class SessionRegistry {
   private readonly onIssued = new Set<(session: Pick<SessionRecord, "id" | "scopes" | "email" | "teamRole" | "membershipAuthority">) => void>();
   private lastSeenWrites = new Map<string, number>();
   private readonly now: () => number;
-  private readonly idleMs: number;
   private readonly options: SessionStoreOptions;
   private readonly openMarker: string;
   private closed = false;
   private adminOnly: string | null = null;
+  private membershipCheckedAt = -Infinity;
 
   // No parameter properties: Node's strip-only TypeScript mode only erases types.
   constructor(options: SessionStoreOptions) {
     this.options = options;
     this.now = options.now ?? Date.now;
-    this.idleMs = options.idleMs ?? SESSION_IDLE_MS;
     this.openMarker = `${options.file}.open`;
     const unclean = existsSync(this.openMarker);
     try {
@@ -265,7 +261,7 @@ export class SessionRegistry {
   }
 
   private prune(): void {
-    this.revalidateEmailSessions();
+    this.recheckMembership();
     const now = this.now();
     this.pairings = this.pairings.filter((p) => p.expiresAt > now);
     this.replays = this.replays.filter((r) => r.expiresAt > now);
@@ -273,14 +269,14 @@ export class SessionRegistry {
     for (const [source, entry] of this.failures) {
       if (entry.lockedUntil <= now && now - entry.windowStart > LOCKOUT.windowMs) this.failures.delete(source);
     }
-    const expired = this.sessions.filter((s) => s.expiresAt <= now || now - s.lastSeenAt > this.idleMs);
+    const expired = this.sessions.filter((s) => s.expiresAt <= now);
     if (expired.length) {
-      this.sessions = this.sessions.filter((s) => s.expiresAt > now && now - s.lastSeenAt <= this.idleMs);
+      this.sessions = this.sessions.filter((s) => s.expiresAt > now);
       for (const s of expired) this.forget(s.id);
       try {
         this.persist();
       } catch {
-        // Memory already holds the reduced set; the heartbeat reaches prune() through isLive(), where an escaping write failure would exit the process.
+        // The heartbeat reaches prune() through isLive(), where an escaping write failure would exit the process.
         console.error("Could not persist session pruning.");
       }
     }
@@ -521,9 +517,21 @@ export class SessionRegistry {
     this.failures.delete(source);
   }
 
+  /** The sign-in lists may have changed: the next recheckMembership() reads them. */
+  membershipChanged(): void {
+    this.membershipCheckedAt = -Infinity;
+  }
+
+  /** revalidateEmailSessions(), unless one ran within `recheckMs` and membershipChanged() has not been called since. */
+  recheckMembership(): void {
+    if (this.now() - this.membershipCheckedAt < (this.options.recheckMs ?? 0)) return;
+    this.revalidateEmailSessions();
+  }
+
   /** Email membership is live: losing any scope revokes the token and its streams; promotions never widen existing credentials. */
   revalidateEmailSessions(): void {
     if (this.closed) throw new Error("Session registry is closed.");
+    this.membershipCheckedAt = this.now();
     // A team session's membership is the Admin's signed claim, checked at each pairing (cloud-team.ts), never the sign-in list.
     const eligible = this.sessions.filter(session => session.email !== undefined && session.membershipAuthority !== "team" && !(this.options.portalMembership && session.membershipAuthority === "portal"));
     if (!eligible.length) return;
@@ -555,18 +563,11 @@ export class SessionRegistry {
 
   authenticate(token: string | undefined): SessionRecord | null {
     if (!token) return null;
-    this.revalidateEmailSessions();
+    this.recheckMembership();
     const hash = sha256(token);
     const now = this.now();
     const record = this.sessions.find((s) => sameDigest(s.tokenHash, hash));
     if (!record || record.expiresAt <= now || this.personal(record.scopes)) return null;
-    if (now - record.lastSeenAt > this.idleMs) {
-      this.sessions = this.sessions.filter((s) => s.id !== record.id);
-      this.forget(record.id);
-      // The revocation holds in memory either way; a restart re-reads the saved set.
-      try { this.persist(); } catch { console.error("Could not persist idle session revocation."); }
-      return null;
-    }
     const lastWrite = this.lastSeenWrites.get(record.id) ?? 0;
     if (now - lastWrite >= LAST_SEEN_WRITE_INTERVAL_MS) {
       record.lastSeenAt = now;
@@ -578,7 +579,7 @@ export class SessionRegistry {
 
   /** Call only after origin and scope checks pass; never revives an expired session. */
   renew(sessionId: string): boolean {
-    this.revalidateEmailSessions();
+    this.recheckMembership();
     const record = this.sessions.find((s) => s.id === sessionId);
     const now = this.now();
     if (!record || record.expiresAt <= now) return false;
@@ -607,6 +608,12 @@ export class SessionRegistry {
   memberPhones(): PublicSession[] {
     this.prune();
     return this.sessions.filter((s) => s.membershipAuthority === "team" && s.memberCheckedAt !== undefined).map(publicSession);
+  }
+
+  /** Every code a member made for a phone stops working, and every phone such a code opened signs out. Never an Admin-signed pairing (an app). */
+  closeMemberPhones(): number {
+    this.pairings = this.pairings.filter((pairing) => !(pairing.member && pairing.memberCheckedAt !== undefined));
+    return this.memberPhones().filter((phone) => this.revoke(phone.id)).length;
   }
 
   /** A person who left a Team Cloud: every session of theirs (app windows, phones) ends now, and no open code of theirs

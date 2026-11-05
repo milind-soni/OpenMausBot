@@ -1,23 +1,19 @@
-// One line of the inbox read in full inside the panel: who it is from, what about, when and where it came from, all of
-// it, then its answer: an ask's own card, the very one it asks with in the chat, or a reply, and the way back to the list.
-import { useState } from "react";
-import { ArrowLeft, Check, ExternalLink } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ExternalLink, MoreHorizontal, UserRound, X } from "lucide-react";
 import type { InboxRow, InboxView } from "../../../shared/inbox";
-import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import type { Message } from "@/state/store";
-import { readInboxLine, replyToInboxRow } from "@/state/inbox";
-import { ASK_QUIET_ANSWER, AskReply } from "../AskCard";
-import { ELEVATED_CARD } from "../elevated";
+import { readInboxLine } from "@/state/inbox";
+import { ChatMarkdown } from "../ChatMarkdown";
 import { InboxSender } from "../InboxLine";
-import { pendingApprovals, PendingApprovalActions, PendingApprovalPanel } from "../PendingApproval";
-import { QuestionCard } from "../QuestionCard";
+import { SidebarPopoverMenu, type SidebarMenuItem } from "../SidebarPopoverMenu";
 import { threadUpdatedLabel } from "../SidebarThreadRow";
-import { askOf, closeResponse, subjectOf } from "./inbox-view";
+import { accessRequestWords } from "../bot-access/access-card";
+import { InboxAnswer } from "./InboxAnswer";
+import { answerKindOf, headlineOf, singleQuestion } from "./inbox-answer";
+import { askOf, closeResponse, senderLabel, textOf } from "./inbox-view";
+import { useAskContext } from "./use-ask-context";
 import { useInboxActions } from "./use-inbox-actions";
 
-/** The line as the chat shows it, so an ask answers here with the very card it asks with in the chat. */
-export const asMessage = (row: InboxRow): Message => ({ id: row.id, role: "bot", kind: "options", text: row.text, at: row.at, card: row.card } as Message);
+const NAV_BUTTON = "flex size-7 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink disabled:pointer-events-none disabled:opacity-35 pointer-coarse:size-9";
 
 function settledLabel(row: InboxRow): string {
   if (row.kind !== "ask") return t("common.done");
@@ -29,79 +25,93 @@ function settledLabel(row: InboxRow): string {
   return card?.answered === "answer" && !card.dismissed ? t("question.status.answered") : t("question.status.closed");
 }
 
-export function InboxReading({ view, row, now }: { view: InboxView; row: InboxRow; now: number }) {
+/** What the line itself says, drawn after the bot's words before it: a question's question, news as it came. An approval,
+ * a password or a sign-in says it on its own card. */
+function ownWords(row: InboxRow): string | null {
+  if (row.secret || row.signIn || row.connector) return null;
+  if (row.kind !== "ask") return textOf(row);
+  if (row.card?.tool) return null;
+  const question = singleQuestion(row);
+  return question ? accessRequestWords(row.card)?.question ?? question.question : row.card?.questionRequest ? null : row.card?.subtitle || row.text;
+}
+
+export function InboxReading({ view, row, now, position, onStep }: {
+  view: InboxView;
+  row: InboxRow;
+  now: number;
+  /** Where the line is in the list the person came from; null when it has left it. */
+  position: { index: number; count: number } | null;
+  onStep(by: -1 | 1): void;
+}) {
   const { answer, openInChat, run, askerOf } = useInboxActions(view);
   const asker = askerOf(row);
-  const [reply, setReply] = useState("");
-  const [sending, setSending] = useState(false);
-  const ask = askOf(row);
-  const send = async (text: string) => {
-    if (sending) return;
-    setSending(true);
-    try {
-      await replyToInboxRow(view, row, text);
-      setReply("");
-    } finally {
-      setSending(false);
-    }
-  };
-  const approval = ask === "approval" && view.threadId ? pendingApprovals([asMessage(row)])[0] : undefined;
-  const canReply = !ask && row.tab === "info" && row.replies === true;
+  const context = useAskContext(row);
+  const kind = answerKindOf(row);
+  const headline = headlineOf(row);
+  const words = ownWords(row);
+  const said = context.filter((message) => message.text?.trim() !== words?.trim());
+  const menu: SidebarMenuItem[] = [
+    ...(row.origin || view.threadId ? [{ key: "open", label: t("inbox.action.openInChat"), icon: <ExternalLink size={16} />, onSelect: () => openInChat(row) }] : []),
+    ...(row.tab === "info" ? [{ key: "done", label: t("common.done"), icon: <Check size={16} />, onSelect: () => run(row, "done") }] : []),
+    ...(askOf(row) === "question" ? [{ key: "close", label: t("inbox.action.closeQuestion"), icon: <X size={16} />, onSelect: () => answer(row, closeResponse(row)) }] : []),
+  ];
+  const place = row.origin?.title || senderLabel(row);
   return (
-    <article data-inbox-reading={row.id} aria-label={`${row.from.name} · ${subjectOf(row)}`} className="flex min-h-0 flex-1 flex-col">
-      <header className="flex items-start gap-2 border-b border-hairline/40 px-3 py-2.5">
+    <article data-inbox-reading={row.id} aria-label={`${senderLabel(row)} · ${headline}`} className="flex min-h-0 flex-1 flex-col">
+      <header className="flex items-center gap-1 px-2 py-1.5">
         <button type="button" onClick={() => readInboxLine(null)} aria-label={t("inbox.action.back")} title={t("inbox.action.back")}
-          className="flex size-7 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink pointer-coarse:size-9">
-          <ArrowLeft size={15} aria-hidden="true" />
+          className="flex h-7 shrink-0 items-center gap-0.5 rounded-md pe-2 ps-1 text-[13px] font-medium text-ink hover:bg-raised pointer-coarse:h-9">
+          <ChevronLeft size={16} aria-hidden="true" className="rtl:rotate-180" />{t("inbox.panel.title")}
         </button>
-        <span className="mt-0.5 shrink-0" aria-hidden="true"><InboxSender from={row.from} size={28} /></span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2">
-            <span className="min-w-0 truncate text-[14px] font-semibold text-ink">{row.from.name}</span>
-            <span className="ml-auto shrink-0 text-[11px] tabular-nums text-ink-tertiary">{threadUpdatedLabel(row.at, now)}</span>
-          </div>
-          <div className="truncate text-[13px] text-ink">{subjectOf(row)}</div>
-          {(row.origin || row.via) && (
-            <div className="truncate text-[12px] text-ink-tertiary">
-              {row.via && t("inbox.via", { name: row.via.name })}{row.via && row.origin && " · "}{row.origin && t("inbox.in", { title: row.origin.title })}
-            </div>
-          )}
-        </div>
+        <span className="flex-1" />
+        {position && <span data-inbox-position className="px-1 text-[12px] tabular-nums text-ink-tertiary">{t("inbox.position", { index: position.index + 1, count: position.count })}</span>}
+        <button type="button" onClick={() => onStep(-1)} disabled={!position || position.index === 0} aria-label={t("inbox.action.previous")} title={t("inbox.action.previous")} className={NAV_BUTTON}>
+          <ChevronUp size={16} aria-hidden="true" />
+        </button>
+        <button type="button" onClick={() => onStep(1)} disabled={!position || position.index >= position.count - 1} aria-label={t("inbox.action.next")} title={t("inbox.action.next")} className={NAV_BUTTON}>
+          <ChevronDown size={16} aria-hidden="true" />
+        </button>
+        {menu.length > 0 && (
+          <SidebarPopoverMenu items={menu} ariaLabel={t("inbox.action.more")} placement="below" align="end" triggerClassName="rounded-md" triggerTitle={t("inbox.action.more")}
+            renderTrigger={() => <span className={NAV_BUTTON}><MoreHorizontal size={16} aria-hidden="true" /></span>} />
+        )}
       </header>
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
-        {!ask && <p className="whitespace-pre-wrap break-words text-[14px] leading-6 text-ink">{row.text}</p>}
+      <nav aria-label={t("inbox.breadcrumb")} className="flex min-w-0 items-center gap-1 border-b border-hairline/40 px-3.5 pb-2 text-[12px] text-ink-tertiary">
+        <button type="button" data-inbox-action="open" onClick={() => openInChat(row)} title={t("inbox.action.openInChat")}
+          className="min-w-0 max-w-[45%] shrink truncate rounded hover:text-ink hover:underline">{place}</button>
+        <ChevronRight size={12} aria-hidden="true" className="shrink-0 rtl:rotate-180" />
+        <span className="min-w-0 truncate font-medium text-ink-secondary">{headline}</span>
+      </nav>
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3.5 py-3">
+        <section aria-label={senderLabel(row)} className="flex gap-2.5">
+          <span className="mt-0.5 shrink-0" aria-hidden="true"><InboxSender from={row.from} size={22} /></span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-2">
+              <span className="min-w-0 truncate text-[13px] font-semibold text-ink">{senderLabel(row)}</span>
+              <span className="shrink-0 text-[11px] tabular-nums text-ink-tertiary">{threadUpdatedLabel(row.at, now)}</span>
+            </div>
+            {row.via && <div className="truncate text-[12px] text-ink-tertiary">{t("inbox.via", { name: row.via.name })}</div>}
+            <div data-inbox-words className="mt-1 space-y-2 text-[14px] leading-6 text-ink">
+              {said.map((message) => <ChatMarkdown key={message.id} text={message.text!} />)}
+              {words && <ChatMarkdown text={words} />}
+            </div>
+          </div>
+        </section>
         {row.answers?.map((given) => (
           <p key={given.at} className="rounded-xl bg-ink/[0.045] px-3 py-2 text-[13px] text-ink-secondary">
             <span className="block text-[11px] font-medium text-ink-tertiary">{t(given.by === "assistant" ? "inbox.assistantAnswered" : "inbox.youReplied")}</span>
             <span className="whitespace-pre-wrap break-words">{given.text}</span>
           </p>
         ))}
-        {row.tab === "done" && (
-          <>
-            {row.kind === "ask" && <p className="whitespace-pre-wrap break-words text-[14px] leading-6 text-ink">{row.card?.subtitle ?? row.text}</p>}
-            <p className="flex items-center gap-1.5 text-[13px] text-ink-secondary"><Check size={14} aria-hidden="true" />{settledLabel(row)}</p>
-          </>
-        )}
-        {ask === "question" && view.threadId && <QuestionCard threadId={view.threadId} asker={asker} message={asMessage(row)} />}
-        {approval && view.threadId && (
-          <div className={cn("rounded-[20px]", ELEVATED_CARD)}>
-            <PendingApprovalPanel pending={approval} count={1} index={0} botName={asker?.name ?? row.from.name} asker={asker}
-              actions={<PendingApprovalActions part="primary" tag="inbox" pending={approval} threadId={view.threadId} bot={asker} onCancelTurn={() => {}} />} />
+        <section data-inbox-you aria-label={t("inbox.you")} className="flex gap-2.5">
+          <span aria-hidden="true" className="mt-0.5 flex size-[22px] shrink-0 items-center justify-center rounded-full bg-ink/[0.08] text-ink-secondary"><UserRound size={13} /></span>
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="text-[13px] font-semibold text-ink">{t("inbox.you")}</div>
+            {row.tab === "done" && <p className="flex items-center gap-1.5 text-[13px] text-ink-secondary"><Check size={14} aria-hidden="true" />{settledLabel(row)}</p>}
+            <InboxAnswer kind={kind} view={view} row={row} asker={asker} />
           </div>
-        )}
-        {ask === "review" && <p className="text-[13px] text-ink-secondary">{t("inbox.reviewInChat")}</p>}
+        </section>
       </div>
-      <footer className="space-y-2 border-t border-hairline/40 px-3 py-2.5">
-        {canReply && (
-          <AskReply label={t("inbox.reply.placeholder")} placeholder={t("inbox.reply.placeholder")} color={asker?.color} value={reply} onChange={setReply}
-            onSend={(text) => void send(text)} sending={sending} multiline />
-        )}
-        <div className={cn("flex flex-wrap items-center gap-1.5", canReply && "pt-0.5")}>
-          {ask === "question" && <button type="button" data-inbox-action="close" onClick={() => answer(row, closeResponse(row))} className={ASK_QUIET_ANSWER}>{t("inbox.action.closeQuestion")}</button>}
-          {row.tab === "info" && <button type="button" data-inbox-action="done" onClick={() => { run(row, "done"); readInboxLine(null); }} className={ASK_QUIET_ANSWER}><Check size={15} aria-hidden="true" />{t("common.done")}</button>}
-          <button type="button" data-inbox-action="open" onClick={() => openInChat(row)} className={ASK_QUIET_ANSWER}><ExternalLink size={15} aria-hidden="true" />{t("inbox.action.openInChat")}</button>
-        </div>
-      </footer>
     </article>
   );
 }

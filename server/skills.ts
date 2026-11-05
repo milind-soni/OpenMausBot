@@ -33,7 +33,6 @@ import {
 } from "./skill-storage.ts";
 import { workspaceDir } from "./workspace.ts";
 import { isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
-import { parseSkillCommand } from "../shared/skill-command.ts";
 
 export {
   DESCRIPTION_MAX,
@@ -438,6 +437,11 @@ export function syncSkillLinks(
     writeManagedLinks(botId, [...managed], threadId);
   } catch {
   }
+}
+
+/** Where syncSkillLinks links each of this bot's enabled skills. */
+export function ownSkillLinks(botId: string): Map<string, string> {
+  return new Map(Object.entries(readManifest(botId)).flatMap(([name, entry]) => entry.enabled ? [[name, skillTarget(workspaceDir(botId), name, entry)] as const] : []));
 }
 
 export interface SkillListing {
@@ -1299,23 +1303,14 @@ export function skillsSystemPrompt(botId: string, assignedLibrary?: readonly str
 }
 
 export function enabledSkillFile(botId: string, name: string, assignedLibrary?: readonly string[]): string | null {
-  const skill = resolveBotSkills(botId, assignedLibrary).find((entry) => entry.name === name && entry.enabled);
-  if (!skill) return null;
-  const entry = readManifest(botId)[name];
-  return entry ? join(skillTarget(workspaceDir(botId), name, entry), "SKILL.md") : librarySkillFilePath(name);
+  return enabledSkillFiles(botId, [name], assignedLibrary).get(name) ?? null;
 }
 
-export function expandSkillCommandTurnText(botId: string, text: string, assignedLibrary?: readonly string[]): string {
-  if (!text.trimStart().startsWith("/")) return text;
-  const names = resolveBotSkills(botId, assignedLibrary).filter((skill) => skill.enabled).map((skill) => skill.name);
-  const command = parseSkillCommand(text, names);
-  if (!command) return text;
-  const file = enabledSkillFile(botId, command.name, assignedLibrary);
-  if (!file) return text;
-  const lead = `The user ran your ${command.name} skill with /${command.name}. Read ${JSON.stringify(file)} with your file tools and follow it for this turn.`;
-  return command.request
-    ? `${lead} Where the skill says {input}, use the request.\n\nRequest: ${command.request}`
-    : `${lead} There is no further request, so run it as the skill describes.`;
+/** SKILL.md of each named skill that is on for the bot. */
+export function enabledSkillFiles(botId: string, names: readonly string[], assignedLibrary?: readonly string[]): Map<string, string> {
+  if (!names.length) return new Map();
+  const on = new Set(resolveBotSkills(botId, assignedLibrary).filter((skill) => skill.enabled).map((skill) => skill.name)), manifest = readManifest(botId);
+  return new Map(names.filter((name) => on.has(name)).map((name) => [name, manifest[name] ? join(skillTarget(workspaceDir(botId), name, manifest[name]), "SKILL.md") : librarySkillFilePath(name)] as const));
 }
 
 export function resolveBotSkills(botId: string, assignedLibrary: readonly string[] | undefined): SkillListing[] {

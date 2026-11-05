@@ -6,6 +6,7 @@ import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync,
 import { join } from "node:path";
 
 import type { AppNetwork, AppSource, AppToolDefinition, AppToolResult } from "../shared/app.ts";
+import type { PageVideo } from "./pages/bundle.ts";
 
 export const APP_DOCS_MAX_BYTES = 512 * 1024 * 1024;
 export const APP_DOCS_SWEEP_GRACE_MS = 10 * 60_000;
@@ -21,6 +22,8 @@ export interface AppDocData {
    * index.html by its path in the folder. */
   folder?: string;
   files?: Record<string, string>;
+  /** Videos that stay on disk, by path in the folder. They take no room in this store. */
+  videos?: Record<string, PageVideo>;
   tool?: AppToolDefinition;
   toolInput?: Record<string, unknown>;
   toolResult?: AppToolResult;
@@ -97,6 +100,12 @@ export class AppDocs {
     const id = this.read(doc)?.data?.files?.[path];
     if (!id || !ID.test(id)) return null;
     try { return readFileSync(this.path("file", id)); } catch { return null; }
+  }
+
+  /** A video this document recorded when it was shown; nothing else is ever a video of this page. */
+  video(doc: string, path: string): PageVideo | null {
+    const videos = this.read(doc)?.data?.videos;
+    return videos && Object.hasOwn(videos, path) ? videos[path]! : null;
   }
 
   put(input: { source: AppSource; html: string; data?: AppDocData; files?: ReadonlyArray<{ path: string; data: Buffer }> }): AppDocPut {

@@ -124,14 +124,15 @@ export interface CloudTeamFixture {
   /** The Admin's signed pairing for one member, as the Admin hands it to the app: a one-time code, not redeemed. */
   grant(member: TeamMember): Promise<{ origin: string; code: string; expiresAt: number }>;
   /** The Admin's signed pairing for one member, redeemed into a bearer. `body` replaces the member and team claims
-   * (a forged or missing claim); `secret` signs with another key (a forgery). */
+   * (a forged or missing claim); `secret` signs with another key (a forgery). The first owner or admin to pair also gives
+   * the team's Chief a fixed name, "Seedling". */
   pair(member: TeamMember | null, options?: { body?: Record<string, unknown>; secret?: string; label?: string }): Promise<{ status: number; body: any; token: string | null }>;
   /** A request as one person, by their bearer. */
   as(token: string, method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any }>;
   /** The Admin's signed power request (the sleep handshake). */
   signed(method: string, path: string, body?: unknown): Promise<{ status: number; body: any }>;
   /** A turn's own bearer for the internal routes, as the harness gives a bot's tools. */
-  capability(botId: string, threadId: string): Promise<string>;
+  capability(botId: string, threadId: string, kind?: string): Promise<string>;
   /** The server stopped and started again on the same data (a deploy). */
   relaunch(env?: NodeJS.ProcessEnv): Promise<void>;
 }
@@ -161,7 +162,7 @@ exports.createClient = async ({ auth }) => {
 export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswordToken = onePasswordToken, toolCalls = 0, broker, env = {}, cloudEnv = {}, cloudEngine = "", desktopEngine = "", space, cloudSignedIn = true, team }: {
   onePasswordToken: string; cloudOnePasswordToken?: string; toolCalls?: number;
   /** A Team Cloud too (OMB_CLOUD_ROLE=team), with its own environment and synthetic Claude CLI lines. */
-  team?: { id: string; name: string; env?: NodeJS.ProcessEnv; engine?: string };
+  team?: { id: string; name: string; env?: NodeJS.ProcessEnv; engine?: string; noAi?: boolean };
   broker?: { url: string; install(): Promise<{ id: string; token: string; userId: string }> };
   env?: NodeJS.ProcessEnv;
   /** My Cloud's own environment only (a store limit, say). */
@@ -201,7 +202,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       ...Object.fromEntries(["codex", "cursor", "githubCopilot", "openaiCompat", "qwen", "hermes", "pi", "grok"].map((id) => [id, { driver: "not-a-real-driver" }])),
       claude: { driver: "claudeAgent", displayName: "Claude", config: { cli } },
     } }));
-    const offline = `data:text/javascript,${encodeURIComponent('const real = globalThis.fetch; globalThis.fetch = async (url, init) => String(url).startsWith("http://127.0.0.1:") ? real(url, init) : new Response("offline fixture", { status: 503 });')}`;
+    const offline = `data:text/javascript,${encodeURIComponent('const real = globalThis.fetch; const admin = process.env.FIXTURE_ADMIN_STAND_IN; globalThis.fetch = async (url, init) => admin && String(url).startsWith("https://cloud.example.test/") ? real(admin + String(url).slice(26), init) : String(url).startsWith("http://127.0.0.1:") ? real(url, init) : new Response("offline fixture", { status: 503 });')}`;
     const child = spawn(process.execPath, ["--import", offline, ...extra, join(SERVER_DIR, "index.ts")], {
       cwd: join(SERVER_DIR, ".."),
       env: { PATH: process.env.PATH, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}), HOME: home, USERPROFILE: home, OMB_DATA_DIR: dataDir,
@@ -251,6 +252,8 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
     const response = await fetch(`${cloudBase}/api/cloud/pairing`, { method: "POST", headers: { ...EDGE, "content-type": "application/json",
       "x-omb-cloud-timestamp": timestamp, "x-omb-cloud-nonce": nonce, "x-omb-cloud-signature": `v1=${cloudPairingSignature(secret, timestamp, nonce, body)}` }, body });
+    // A Cloud that turns the request away says why, instead of handing main a code that is not there.
+    if (!response.ok) throw new Error(`My Cloud gave no one-time code: HTTP ${response.status} ${await response.text()}`);
     return ((await response.json()) as { code: string }).code;
   };
   const pairOwner = async () => {
@@ -276,6 +279,10 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     // asked to stop over IPC and runs its own SIGTERM shutdown (as server/acp-shutdown.e2e.test.ts does).
     const stopOverIpc = process.platform === "win32";
     const stopOnMessage = `data:text/javascript,${encodeURIComponent('process.on("message", (message) => { if (message === "stop") process.emit("SIGTERM"); }); process.channel?.unref();')}`;
+    if (team.noAi) {
+      mkdirSync(join(root, "team", ".openmausbot"), { recursive: true });
+      writeFileSync(join(root, "team", ".openmausbot", "config.json"), JSON.stringify({ instances: Object.fromEntries(["claude", "codex", "cursor", "githubCopilot", "openaiCompat", "qwen", "hermes", "pi", "grok"].map((id) => [id, { driver: "not-a-real-driver" }])) }));
+    }
     const startTeam = (more: NodeJS.ProcessEnv = {}) => start("team", { OMB_CLOUD_ROLE: "team", OMB_CLOUD_TEAM_ID: team.id, OMB_CLOUD_TEAM_NAME: team.name,
       OMB_CLOUD_MACHINE_ID: "0d9e8f7a-6b5c-4d3e-9f8a-7b6c5d4e3f2a", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test", OMB_CLOUD_BOOTSTRAP_SECRET: secret,
       OMB_PUBLIC_URL: `https://${CLOUD_HOST}`, OMB_TEST_INTERNAL_CAPABILITY_KEY: CAPABILITY_KEY, ...(broker ? { OMB_COMPOSIO_BROKER_URL: broker.url } : {}), ...team.env, ...more },
@@ -287,6 +294,15 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       if (body !== undefined) init.body = body instanceof Uint8Array ? body : JSON.stringify(body);
       const response = await remember(await fetch(`${teamBase}${path}`, init));
       return { status: response.status, body: parse(await response.text()) };
+    };
+    // A new Team Cloud's Chief gets a name at random, so one run in 64 it would share a name with a bot the test makes.
+    let chiefNamed = false;
+    const nameChief = async (token: string) => {
+      const listed = await as(token, "GET", "/api/bots?messages=0");
+      const chief = (listed.body.bots as Array<{ id: string; chiefOfStaff?: boolean }>).find((bot) => bot.chiefOfStaff);
+      if (!chief) return;
+      const renamed = await as(token, "PATCH", `/api/bots/${chief.id}`, { name: "Seedling" });
+      if (renamed.status !== 200) throw new Error(`could not name the team's Chief: ${renamed.status} ${JSON.stringify(renamed.body)}`);
     };
     teamFixture = {
       base: teamBase, home: join(root, "team"), id: team.id, name: team.name,
@@ -308,13 +324,18 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
         if (minted.status !== 200) return { status: minted.status, body: grant, token: null };
         const paired = await remember(await fetch(`${teamBase}/api/auth/pair`, { method: "POST", headers: { ...EDGE, "content-type": "application/json" }, body: JSON.stringify({ code: grant.code }) }));
         const session = parse(await paired.text());
-        return { status: paired.status, body: session, token: paired.status === 200 ? session.token as string : null };
+        if (paired.status !== 200) return { status: paired.status, body: session, token: null };
+        if (!chiefNamed && member && member.role !== "member") {
+          chiefNamed = true;
+          await nameChief(session.token as string);
+        }
+        return { status: paired.status, body: session, token: session.token as string };
       },
       as,
       signed: (method, path, body) => signedRequest(teamBase, method, path, body === undefined ? "" : JSON.stringify(body)),
-      async capability(botId, threadId) {
+      async capability(botId, threadId, kind) {
         // A loopback caller with the private key, as the harness mints one: never through the edge.
-        const minted = await fetch(`${teamBase}/api/testing/internal-capability`, { method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-capability": CAPABILITY_KEY }, body: JSON.stringify({ botId, threadId }) });
+        const minted = await fetch(`${teamBase}/api/testing/internal-capability`, { method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-capability": CAPABILITY_KEY }, body: JSON.stringify({ botId, threadId, ...(kind ? { kind } : {}) }) });
         const answer = parse(await minted.text());
         if (minted.status !== 200 && minted.status !== 201) throw new Error(`no test capability: ${minted.status} ${JSON.stringify(answer)}`);
         return answer.token as string;

@@ -1,4 +1,5 @@
 import { isCitationAttachment, serializeCitation, type CitationAttachment } from "./citations.ts";
+import { randomUuid } from "./random-uuid.ts";
 export { dataContextFor, type DataContext, type DataViewContext } from "../../shared/data-context.ts";
 
 export type PasteAttachment = {
@@ -82,21 +83,7 @@ function newId(): string {
 }
 
 /** Stable across the one retry, so a lost success response cannot create a second file. */
-function newUploadId(): string {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-  const bytes = new Uint8Array(16);
-  if (globalThis.crypto?.getRandomValues) {
-    globalThis.crypto.getRandomValues(bytes);
-  } else {
-    for (let index = 0; index < bytes.length; index += 1) {
-      bytes[index] = Math.floor(Math.random() * 256);
-    }
-  }
-  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
-  return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
-}
+const newUploadId = randomUuid;
 
 export function fileAttachment(name: string, path: string, size: number): FileAttachment {
   return { kind: "file", id: newId(), path, name, size };
@@ -105,6 +92,51 @@ export function fileAttachment(name: string, path: string, size: number): FileAt
 /** Must match the server's IMAGE_MAX_BYTES. */
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 export const FILE_MAX_BYTES = 25 * 1024 * 1024;
+/** Must match the server's TURN_IMAGE_MAX_COUNT: a message carrying more images is refused at send. */
+export const TURN_IMAGE_MAX_COUNT = 10;
+
+/** Must match the server's TURN_IMAGE_MAX_BYTES: a message whose images total more is refused at send. */
+export const TURN_IMAGE_MAX_BYTES = 4 * IMAGE_MAX_BYTES;
+
+export function imageLimitNotice(leftOut: readonly string[]): string {
+  return `A message takes up to ${TURN_IMAGE_MAX_COUNT} images, ${TURN_IMAGE_MAX_BYTES / (1024 * 1024)} MB in all. ${leftOut.join(", ")} ${leftOut.length === 1 ? "wasn't" : "weren't"} attached.`;
+}
+
+/** Splits images by the slots and bytes left: an image over IMAGE_MAX_BYTES is kept to fail with its own size error but takes no room. */
+export function fitImagesToSlots<T extends { size: number }>(images: readonly T[], slots: number, bytes = Infinity): { kept: T[]; leftOut: T[] } {
+  const kept: T[] = [];
+  const leftOut: T[] = [];
+  let room = slots;
+  let bytesRoom = bytes;
+  for (const image of images) {
+    if (image.size > IMAGE_MAX_BYTES) kept.push(image);
+    else if (room > 0 && image.size <= bytesRoom) {
+      room -= 1;
+      bytesRoom -= image.size;
+      kept.push(image);
+    } else leftOut.push(image);
+  }
+  return { kept, leftOut };
+}
+
+/** Images a draft holding these attachments can still take. */
+export function imageSlotsLeft(attachments: readonly Attachment[]): number {
+  return Math.max(0, TURN_IMAGE_MAX_COUNT - attachments.filter((attachment) => attachment.kind === "image").length);
+}
+
+/** Image bytes a draft holding these attachments can still take. */
+export function imageBytesLeft(attachments: readonly Attachment[]): number {
+  return Math.max(0, TURN_IMAGE_MAX_BYTES - attachments.reduce((total, attachment) => total + (attachment.kind === "image" ? attachment.size : 0), 0));
+}
+
+/** The images that fit the slots and bytes left; the rest are named in one notice. */
+export function imagesThatFit<T extends { name: string; size: number }>(images: readonly T[], slots: number, onNotice: (notice: string) => void, bytes = Infinity): T[] {
+  const { kept, leftOut } = fitImagesToSlots(images, slots, bytes);
+  if (leftOut.length) onNotice(imageLimitNotice(leftOut.map((image) => image.name)));
+  return kept;
+}
+
+const ARCHIVE_NAME = /\.(?:zip|rar|7z|tar|gz|tgz|bz2|xz)$/i;
 
 const DOCUMENT_MIMES: Readonly<Record<string, string>> = {
   txt: "text/plain",
@@ -438,7 +470,7 @@ export type TranscriptAttachments = {
 };
 
 /** A second encoded pass stays encoded rather than turning attacker-controlled text into markup. */
-function decodeAttachmentAttribute(value: string): string {
+export function decodeAttachmentAttribute(value: string): string {
   return value.replace(/&(quot|lt|gt|amp);|&#(9|10|13);/g, (entity, named: string | undefined, numeric: string | undefined) => {
     if (numeric === "9") return "\t";
     if (numeric === "10") return "\n";
@@ -715,10 +747,17 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
     getPath: (file: T) => string;
     uploadImage: (file: T) => Promise<Attachment | null>;
     uploadFile?: (file: T) => Promise<FileAttachment | null>;
+    /** Images the message can still take; the rest are left out and named in the notice. */
+    imageSlots?: number;
+    /** Image bytes the message can still take; images past it are left out the same way. */
+    imageBytes?: number;
   },
 ): Promise<{ attachments: Attachment[]; notice: string | null }> {
-  const files = [..._files];
   const { allowImages, getPath, uploadImage } = _opts;
+  const images = allowImages ? _files.filter((file) => isImageFile(file)) : [];
+  const overflow = new Set(fitImagesToSlots(images, _opts.imageSlots ?? Infinity, _opts.imageBytes).leftOut);
+  const leftOut = [...overflow].map((file) => file.name);
+  const files = _files.filter((file) => !overflow.has(file));
   const uploadFile = _opts.uploadFile ?? (async (file: T) => {
     if (!file.arrayBuffer) return null;
     return fileAttachmentFromFile(file as unknown as File);
@@ -757,14 +796,19 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
   }));
   const attachments = results.flatMap((result) => result.attachments);
   const rejectedNames = results.flatMap((result) => result.rejectedNames);
+  const archives = rejectedNames.filter((name) => ARCHIVE_NAME.test(name));
+  const unsupported = rejectedNames.filter((name) => !ARCHIVE_NAME.test(name));
   const uploadErrors = results.flatMap((result) => result.uploadError ? [result.uploadError] : []);
-  const pathless = rejectedNames.length
-    ? `Unable to attach ${rejectedNames.join(", ")}. Choose a supported image, document, or audio file.`
-    : null;
+  const pathless = [
+    unsupported.length ? `Unable to attach ${unsupported.join(", ")}. Choose a supported image, document, or audio file.` : "",
+    archives.length ? `Archives can't be attached: unzip ${archives.join(", ")} and attach the files inside.` : "",
+  ].filter(Boolean).join(" ") || null;
   const failed = uploadErrors.length ? uploadErrors.join("; ") : null;
+  const notice = pathless && failed ? `${pathless} (${failed})` : (pathless ?? failed);
+  const limited = leftOut.length ? imageLimitNotice(leftOut) : null;
   return {
     attachments,
-    notice: pathless && failed ? `${pathless} (${failed})` : (pathless ?? failed),
+    notice: limited && notice ? `${limited} ${notice}` : (limited ?? notice),
   };
 }
 

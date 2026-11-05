@@ -15,6 +15,7 @@ its database, its settings, other bots' folders and other turns' processes are n
 | put back inside it: the turn's working folder and the bot's own folder (`workspaces/<bot>`), read-write | What the turn works on, and the bot's memory and skills |
 | put back: this turn's permission socket (the engine's question and approval helper reaches the server through it), and, read-only, the conversation's own hook token folder (the hook helper's bearer, renewed each turn) and the files its command line names (MCP config, system prompt) | What the driver made for this one process |
 | private `/tmp`, `/var/tmp`, `/run`, `/dev`, `/proc` | Its own PID namespace: other turns' processes do not exist for it |
+| `/sys/devices/system/cpu/possible` and `online`, read-only; nothing else of `/sys` | The machine's CPU count. Programs built with TCMalloc (Google's Antigravity runtime) stop themselves at start without it (exit 134) |
 | a network namespace with loopback only | Two loopback ports are bridged to unix sockets from outside (below); nothing else on the machine's loopback is reachable, and there is no route out |
 
 The environment is an allow-list (`server/bot-box/env.ts`): the engine's own settings and keys, the harness capability

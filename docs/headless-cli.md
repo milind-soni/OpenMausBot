@@ -135,11 +135,13 @@ and `wait` keep asking for the same job until their time runs out; a refusal
 (an expired token) ends them with exit 5 at once.
 
 Stopping a job (`interrupt --tree`, `--on-input stop`, `--on-timeout stop`)
-presses Stop in its conversation, then in each teammate's own conversation
-that still holds part of it: a turn still running, waiting on its own
-teammates, parked on an answer, or about to run again. Work that never
-started is dropped by the first Stop, and its teammate's conversation is left
-alone.
+presses Stop in its conversation, which ends everything it handed out:
+teammates mid-turn, what they handed on, and work that never started. If a
+teammate's own conversation still holds part of it after that (a turn still
+running, waiting on its own teammates, parked on an answer, or about to run
+again), Stop is pressed there too. `stopped` (`teammates` for `interrupt
+--tree`) lists each teammate task that was at work and ended; work that never
+started is dropped without being listed.
 
 The waiting is done by the server: each request is held until the job
 changes, so a long wait costs one request at a time, not a poll loop. The

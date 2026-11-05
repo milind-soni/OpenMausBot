@@ -17,6 +17,8 @@ export interface ChannelQueueItem {
   sender?: ResolvedSender;
   trigger?: UsageTrigger;
   reaction?: string;
+  /** Bot ids picked from the @ list; the turn that drains this line reads its @names with them. */
+  mentions?: string[];
   queuedAt: number;
 }
 
@@ -62,6 +64,7 @@ export function queueChannelMessage(
     sender?: ResolvedSender;
     trigger?: UsageTrigger;
     reaction?: string;
+    mentions?: string[];
   } = {},
 ): QueuedChannelMessage {
   const entry = queues.get(threadId) ?? { groupId, items: [] };
@@ -76,6 +79,7 @@ export function queueChannelMessage(
     sender: options.sender,
     trigger: options.trigger,
     ...(options.reaction ? { reaction: options.reaction } : {}),
+    ...(options.mentions?.length ? { mentions: options.mentions } : {}),
     queuedAt: Date.now(),
   };
   saveChatFollowup({ id: item.id, kind: "channel", ownerId: groupId, threadId, payload: item });

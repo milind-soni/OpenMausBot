@@ -72,7 +72,7 @@ export const CLOUD_BACKGROUND_HEADER = "x-omb-background";
 export const CLOUD_POWER_HEADER = "x-omb-cloud-power";
 const MARKER = "cloud-sleep.json";
 /** Long-polls and streams that stay open by design: never "in flight" work. */
-const HELD = [/^\/api\/events$/, /^\/api\/sync\/changes$/, /^\/api\/shared-computers\/[\w-]+\/(?:poll|link)$/];
+const HELD = [/^\/api\/events$/, /^\/api\/sync\/changes$/, /^\/api\/shared-computers\/asks$/, /^\/api\/shared-computers\/[\w-]+\/(?:poll|link)$/];
 
 /** The answer a held poll (Files sync, lending) gets once the home agreed to sleep: the desktop pauses until it wakes. */
 export function answerAsleep(res: ServerResponse, json: (res: ServerResponse, status: number, body: unknown) => void) {

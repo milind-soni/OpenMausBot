@@ -55,6 +55,7 @@ Use only mapped, tested commands:
 - [MausBot, everyone's helper](mausbot.md)
 - [Profile proposal and credential-card lifecycle](proposal-cards.md)
 - [Full Access without duplicate approvals](full-access.md)
+- [Gmail draft creation, send approval and revision](gmail-drafts.md)
 - [Exact command allowlist UI and saved rules](command-allowlist.md)
 - [The safety floor: a never-list no grant can allow](safety-floor.md)
 - [Peer approval denial, expiry, and cancellation](peer-approvals.md)
@@ -68,6 +69,7 @@ Use only mapped, tested commands:
 - [Waits: tell me when, with no AI while waiting](waits.md)
 - [A new Cloud's first hour](first-hour.md)
 - [Chat widgets](widgets.md)
+- [The Inbox on every plan](inbox.md)
 - [Reactions](reactions.md)
 - [Chat widgets: prompts to try with a real bot](widget-prompts.md)
 - [Phone web app installation and safe areas](phone-web-app.md)
@@ -238,9 +240,9 @@ default focus, keyboard wrapping and focus return against two disposable bots;
 its departments recipe drags bots to reorder them and into new departments.
 
 The [sidebar attention geometry fixture](sidebar-attention.md) measures the
-Active Threads popover's width and inset at each expanded sidebar density in a
-headless Electron window, including the compact-density case where the menu
-used to cross the window's left edge and lose its title.
+Active Threads popover's width and inset in the open sidebar and its column of
+avatars in a headless Electron window, so the menu never crosses the window's
+left edge and loses its title.
 
 The [avatar provider fixture](avatar-providers.md) checks image-provider settings,
 keyless local generation, saved-key handling, and safe errors with a local fake API.
@@ -320,6 +322,10 @@ The [Group and Goal Local VM recipe](group-local-vm.md) checks per-speaker
 desktop routing, cancellation, and computer authority cleanup.
 
 ## Evidence
+
+The [Gemini speech fixture](gemini-speech.md) checks write-only credentials,
+voice selection and WAV synthesis against an offline provider in an isolated
+server, with manual steps for real Google access and playback.
 
 The [persistence responsiveness benchmark](persistence-performance.md) measures
 synthetic message/log bursts and history scans, with isolated chat, visibility

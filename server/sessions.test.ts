@@ -332,6 +332,32 @@ describe("sessions", () => {
     expect(registry.isLive(email.session.id)).toBe(false);
   });
 
+  it("with recheckMs, reads membership at most that often, at once after membershipChanged(): a removal still ends access promptly", () => {
+    let allowed = true;
+    const resolve = vi.fn((_email: string) => allowed ? ["client" as const] : null);
+    registry = new SessionRegistry({ file: file(), now: () => clock, emailScopes: resolve, recheckMs: 2_000 });
+    const email = registry.issue({ label: "browser", email: "person@example.test", scopes: ["client"] });
+    resolve.mockClear();
+    for (let i = 0; i < 1_000; i++) expect(registry.isLive(email.session.id)).toBe(true);
+    expect(resolve.mock.calls.length).toBeLessThanOrEqual(1);
+    allowed = false;
+    registry.membershipChanged();
+    expect(registry.isLive(email.session.id)).toBe(false);
+    expect(registry.authenticate(email.token)).toBeNull();
+  });
+
+  it("with recheckMs, a sign-in list edited outside the app ends access within that time", () => {
+    let allowed = true;
+    registry = new SessionRegistry({ file: file(), now: () => clock, emailScopes: () => allowed ? ["client"] : null, recheckMs: 2_000 });
+    const email = registry.issue({ label: "browser", email: "person@example.test", scopes: ["client"] });
+    registry.recheckMembership();
+    allowed = false;
+    clock += 1_999;
+    expect(registry.isLive(email.session.id)).toBe(true);
+    clock += 1;
+    expect(registry.isLive(email.session.id)).toBe(false);
+  });
+
   it("builds one membership resolver per pass and skips snapshots with no eligible account sessions", () => {
     const resolve = vi.fn((_email: string) => ["client" as const]);
     const snapshot = vi.fn(() => resolve);
@@ -492,45 +518,6 @@ describe("sessions", () => {
     registry.authenticate(token);
     expect(registry.list()[0]?.lastSeenAt).toBe(clock);
     expect(statSync(file()).mtimeMs).toBeGreaterThanOrEqual(before);
-  });
-
-  it("revokes a session no one has used inside the idle window, before its term is up", () => {
-    const local = new SessionRegistry({ file: file(), now: () => clock, idleMs: 120_000 });
-    const { code } = local.openPairing({ label: "phone" });
-    const paired = local.exchange({ code, label: "phone", source: "a" });
-    if (!paired.ok) throw new Error(paired.error);
-    expect(local.authenticate(paired.token)?.id).toBe(paired.session.id);
-    clock += 121_000; // the 30-day term is still ahead; only the idle window has passed
-    expect(local.authenticate(paired.token)).toBeNull();
-    expect(local.list()).toEqual([]);
-    expect(JSON.parse(readFileSync(file(), "utf8")).sessions).toEqual([]);
-  });
-
-  it("keeps a session used inside the idle window alive, and revokes it once the quiet returns", () => {
-    const local = new SessionRegistry({ file: file(), now: () => clock, idleMs: 120_000 });
-    const { code } = local.openPairing({ label: "phone" });
-    const paired = local.exchange({ code, label: "phone", source: "a" });
-    if (!paired.ok) throw new Error(paired.error);
-    clock += 61_000; // past the once-a-minute last-seen write, so this use counts
-    expect(local.authenticate(paired.token)?.id, "a use inside the window counts").toBe(paired.session.id);
-    clock += 30_000;
-    expect(local.authenticate(paired.token)?.id, "still inside the window after the last use").toBe(paired.session.id);
-    clock += 121_000;
-    expect(local.authenticate(paired.token)).toBeNull();
-  });
-
-  it("closes an idle session's stream tickets and tells revocation listeners", () => {
-    const local = new SessionRegistry({ file: file(), now: () => clock, idleMs: 120_000 });
-    const { code } = local.openPairing({ label: "phone" });
-    const paired = local.exchange({ code, label: "phone", source: "a" });
-    if (!paired.ok) throw new Error(paired.error);
-    const { ticket } = local.issueStreamTicket(paired.session.id);
-    const revoked: string[] = [];
-    local.onSessionRevoked((id) => revoked.push(id));
-    clock += 121_000;
-    expect(local.list()).toEqual([]);
-    expect(revoked).toEqual([paired.session.id]);
-    expect(local.redeemStreamTicket(ticket)).toBeNull();
   });
 
   it("renews a session with half its term or less left, and never revives an expired one", () => {

@@ -4,18 +4,20 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { arrivedRoute, automationsOffRoute, homeRoute, movedFrom, webhookHomeLine, webhookMovedLine } from "./cloud-send-arrived.ts";
+import "./server-line-packs.ts";
 import type { MoveAutomations } from "./move-freeze.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
-function cloud(owner = true) {
+function cloud(owner = true, language?: string) {
   const dataDir = mkdtempSync(join(tmpdir(), "omb-arrived-")); dirs.push(dataDir);
   const lines: Array<{ threadId: string; text?: string }> = [];
   const deps = {
     dataDir,
     store: { bot: (id: string) => (id === "scout" ? { threadId: "t-scout" } : undefined), appendMessage: (threadId: string, message: { text?: string }) => { lines.push({ threadId, text: message.text }); return message; } } as never,
     webhooks: () => ({ list: () => [{ id: "w1", name: "Orders", botId: "scout" }, { id: "w2", name: "Gone", botId: "nobody" }] }) as never,
+    lineLanguage: (person?: string) => person === "p_owner" ? language : "en",
     owner: () => (owner ? { person: "p_owner", name: "Owner" } : null),
   };
   const ask = async (body: unknown) => {
@@ -24,10 +26,18 @@ function cloud(owner = true) {
       json: (_res: unknown, status: number, value: unknown) => { answered = { status, body: value }; }, readBody: async () => body } as never);
     return answered!;
   };
-  return { dataDir, lines, ask };
+  return { dataDir, lines, ask, deps };
 }
 
 describe("POST /api/cloud-send/arrived", () => {
+  it("has the person told what stayed behind, in their language, once the move is recorded", async () => {
+    const { dataDir, ask, deps } = cloud(true, "de");
+    const told: Array<string | undefined> = [];
+    (deps as { stayed?: (language?: string) => void }).stayed = (language) => { told.push(language); expect(movedFrom(dataDir)?.computer).toBe("MacBook Air"); };
+    expect((await ask({ v: 1, computer: "MacBook Air", webhooks: [] })).status).toBe(200);
+    expect(told).toEqual(["de"]);
+  });
+
   it("keeps the computer the bots came from, and each webhook's bot says its new address is on its card, once", async () => {
     const { dataDir, lines, ask } = cloud();
     expect(await ask({ v: 1, computer: "MacBook Air", webhooks: ["w1", "w2", "w9"] })).toEqual({ status: 200, body: { v: 1, told: 1 } });
@@ -36,6 +46,15 @@ describe("POST /api/cloud-send/arrived", () => {
     expect(movedFrom(dataDir)).toMatchObject({ computer: "MacBook Air", told: ["w1"] });
     expect(await ask({ v: 1, computer: "MacBook Air", webhooks: ["w1"] }), "a move resumed after a crash says nothing twice").toEqual({ status: 200, body: { v: 1, told: 0 } });
     expect(lines).toHaveLength(1);
+  });
+
+  it.each([
+    [undefined, 'Now that I live on Garage server, my webhook "Orders" has a new address. Open Automations, choose Copy address on "Orders", and paste it into the app that sends to it.'],
+    ["de", 'Jetzt, wo ich auf Garage server lebe, hat mein Webhook „Orders“ eine neue Adresse. Öffne Automatisierungen, wähle bei „Orders“ die Option „Adresse kopieren“ und füge sie in die App ein, die Daten dorthin sendet.'],
+  ])("writes the move notice in the owner's language (%s), keeping the server and webhook names", async (language, text) => {
+    const { lines, ask } = cloud(true, language);
+    expect((await ask({ v: 1, computer: "MacBook Air", webhooks: ["w1"], place: "Garage server" })).status).toBe(200);
+    expect(lines).toEqual([{ threadId: "t-scout", text }]);
   });
 
   it("only from My Cloud's owner", async () => {

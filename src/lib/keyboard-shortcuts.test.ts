@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  botCycleStep,
   filterShortcutGroups,
   isSidebarToggle,
   SHORTCUT_GROUPS,
@@ -83,6 +84,10 @@ describe("keyboard-shortcuts", () => {
     const mod = shortcutGroupsFor("mod-enter");
     expect(row(mod, "send-message")).toMatchObject({ macKeys: ["⌘", "Return"], winKeys: ["Ctrl", "Enter"] });
     expect(row(mod, "new-line")).toMatchObject({ macKeys: ["Return"], winKeys: ["Enter"] });
+    // The other of steer and queue: Ctrl/⌘ with the send key, so Shift joins it when Ctrl/⌘+Enter already sends.
+    expect(row(SHORTCUT_GROUPS, "send-follow-up")).toMatchObject({ macKeys: ["⌘", "Return"], winKeys: ["Ctrl", "Enter"] });
+    expect(row(shift, "send-follow-up")).toMatchObject({ macKeys: ["⌘", "Return"], winKeys: ["Ctrl", "Enter"] });
+    expect(row(mod, "send-follow-up")).toMatchObject({ macKeys: ["⌘", "⇧", "Return"], winKeys: ["Ctrl", "Shift", "Enter"] });
     for (const groups of [shift, mod]) {
       expect(row(groups, "save-bulletin")).toBe(row(SHORTCUT_GROUPS, "save-bulletin"));
       expect(row(groups, "send-message").description).toBe("Send message");
@@ -137,5 +142,22 @@ describe("keyboard shortcut opening guard", () => {
     }
     expect(shouldOpenKeyboardShortcuts(event("?", { ctrlKey: true }))).toBe(false);
     expect(shouldOpenKeyboardShortcuts(event("/", { metaKey: true, shiftKey: true }))).toBe(false);
+  });
+});
+
+describe("botCycleStep", () => {
+  it("steps forward on ] and back on [, as macOS reports them with ⌘⇧", () => {
+    expect(botCycleStep({ key: "]" })).toBe(1);
+    expect(botCycleStep({ key: "[" })).toBe(-1);
+  });
+
+  it("also steps on } and {, which Ctrl+Shift reports on Windows and Linux", () => {
+    expect(botCycleStep({ key: "}" })).toBe(1);
+    expect(botCycleStep({ key: "{" })).toBe(-1);
+  });
+
+  it("ignores other keys", () => {
+    expect(botCycleStep({ key: "+" })).toBeNull();
+    expect(botCycleStep({ key: "1" })).toBeNull();
   });
 });

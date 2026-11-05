@@ -33,11 +33,11 @@ function viewMaker() {
   return { made, createView };
 }
 
-function world({ wanted = true, hidden = false } = {}) {
+function world({ wanted = true, hidden = false, frame = true } = {}) {
   const { win, page, children } = appWindow();
   const { made, createView } = viewMaker();
   const state = { wanted, hidden, changes: 0 };
-  const prefs = { railHidden: () => state.hidden, setRailHidden: (value) => { state.hidden = value; } };
+  const prefs = { railHidden: () => state.hidden, setRailHidden: (value) => { state.hidden = value; }, windowFrame: () => frame };
   const rail = createChromeRail({ createView, preload: "/app/preload.cjs", args: () => ["--omb-local-origin=http://127.0.0.1:8799", "--omb-company-desktop=1"], url: () => RAIL,
     wanted: () => state.wanted, prefs: () => prefs, changed: () => { state.changes++; } });
   const handlers = new Map();
@@ -201,6 +201,21 @@ test("the traffic lights sit in the frame's top bar beside a page that draws it,
   }
 });
 
+test("a page with the frame turned off says it draws none: the traffic lights go back at once, and the window opens that way next time", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const w = world();
+  w.rail.attach(w.win);
+  w.ask("rail:draws-frame", true);
+  w.ask("rail:draws-frame", false);
+  assert.deepEqual([w.rail.framed(), w.win.lights], [false, [TRAFFIC_LIGHTS.unframed]], "no grace to wait out: the page said so");
+  w.ask("rail:draws-frame", true);
+  assert.deepEqual([w.rail.framed(), w.win.lights.at(-1)], [true, TRAFFIC_LIGHTS.framed], "and back in the bar when it is turned on again");
+  const off = world({ frame: false });
+  off.rail.attach(off.win);
+  t.mock.timers.tick(RAIL_OFFER_GRACE_MS);
+  assert.deepEqual([off.rail.framed(), off.win.lights], [false, []], "a window made with the frame off opened its lights where they stay (windowChromeOptions)");
+});
+
 test("a page that stops responding, crashes or gives way to an error page gets the rail back", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const w = world({ hidden: true });
@@ -303,7 +318,8 @@ test("every page beside the rail, from any server, gets the button's bridge, lea
   remote.navigator.userActivation.isActive = true;
   assert.deepEqual(plain(await remote.bridge.rail.setHidden(true)), { available: true, hidden: true });
   await remote.bridge.rail.drawsFrame();
-  assert.deepEqual(plain(remote.invoked), [["rail:offer"], ["rail:hide", true], ["rail:draws-frame"]]);
+  await remote.bridge.rail.drawsFrame(false);
+  assert.deepEqual(plain(remote.invoked), [["rail:offer"], ["rail:hide", true], ["rail:draws-frame", true], ["rail:draws-frame", false]]);
   const heard = [];
   const stop = remote.bridge.rail.onState((state) => heard.push(state));
   remote.hear("rail:state", { available: true, hidden: false, places: ["home"] });
@@ -321,4 +337,49 @@ test("every page beside the rail, from any server, gets the button's bridge, lea
   assert.deepEqual(framed, [false, false], "only true is framed");
   await local.bridge.rail.setHidden(false);
   assert.deepEqual(plain(local.invoked), [["rail:hide", false]], "this app's own page, as for its other choices");
+});
+
+test("the accounts sheet holds the rail's page up, even for someone who hid the rail or has one place, and letting go puts things back", () => {
+  const w = world({ wanted: false, hidden: true });
+  w.rail.attach(w.win);
+  assert.equal(w.rail.shown(), false);
+  w.rail.holdOpen(true);
+  assert.equal(w.rail.shown(), true);
+  w.rail.expand(true);
+  assert.equal(w.made[0].bounds.width, 1440, "the sheet has the whole window");
+  w.rail.expand(false);
+  w.rail.holdOpen(false);
+  assert.equal(w.rail.shown(), false);
+  w.state.hidden = false; w.state.wanted = true;
+  w.rail.refresh();
+  w.rail.holdOpen(true); w.rail.holdOpen(false);
+  assert.equal(w.rail.shown(), true, "a rail that was there stays");
+});
+
+test("the rail's page that couldn't load (this app's server was restarting) loads again at the next refresh, so it isn't left a blank strip", () => {
+  const w = world();
+  w.rail.attach(w.win);
+  const contents = w.made[0].webContents, loads = () => contents.loaded.length;
+  assert.equal(loads(), 1);
+  w.rail.refresh();
+  assert.equal(loads(), 1, "loaded or on its way: not loaded again");
+  contents.emit("did-fail-load", {}, -102, "ERR_CONNECTION_REFUSED", "http://127.0.0.1:8799/rail", true);
+  assert.equal(loads(), 1, "nothing retries until the server says it is ready");
+  w.rail.refresh();
+  assert.equal(loads(), 2, "the next refresh loads it");
+  w.rail.refresh();
+  assert.equal(loads(), 2, "once");
+  contents.emit("did-fail-load", {}, -3, "ERR_ABORTED", "http://127.0.0.1:8799/rail", true);
+  w.rail.refresh();
+  assert.equal(loads(), 2, "a load cut short by another isn't a failure");
+  contents.emit("did-fail-load", {}, -105, "ERR_NAME_NOT_RESOLVED", "https://cdn.example.test/", false);
+  w.rail.refresh();
+  assert.equal(loads(), 2, "nor a frame inside it");
+  contents.emit("did-fail-load", {}, -102, "ERR_CONNECTION_REFUSED", "http://127.0.0.1:8799/rail", true);
+  contents.emit("did-finish-load");
+  w.rail.refresh();
+  assert.equal(loads(), 3, "the error page that replaced it finishing loading isn't the rail's page loading (seen in the real app)");
+  contents.emit("did-finish-load");
+  w.rail.refresh();
+  assert.equal(loads(), 3, "and the load that worked stays");
 });

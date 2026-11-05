@@ -12,8 +12,9 @@ import { pendingApprovals, PendingApprovalActions } from "../PendingApproval";
 import { ASK_QUIET_ANSWER, ASK_QUIET_BUTTON, AskChoices, AskError } from "../AskCard";
 import { ELEVATED_CARD } from "../elevated";
 import { InboxRowItem } from "./InboxRow";
-import { asMessage } from "./InboxReading";
+import { asMessage } from "./inbox-answer";
 import { askOf, CARD_ROWS, choiceResponse, choicesOf, rowsIn, tabCounts } from "./inbox-view";
+import { accessRequestWords } from "../bot-access/access-card";
 import { useInboxActions } from "./use-inbox-actions";
 
 /** Most choices a question shows as buttons on the card; one with more opens in the inbox. */
@@ -49,7 +50,7 @@ function Answers({ row, view }: { row: InboxRow; view: InboxView }) {
   return (
     <div>
       {choices.length > 0 && choices.length <= CARD_CHOICES && (
-        <AskChoices choices={choices.map((label) => ({ label }))} label={row.card?.subtitle ?? row.text} sending={sending} tag="data-inbox-choice" onPick={pick} />
+        <AskChoices choices={choices.map((label) => ({ label }))} label={accessRequestWords(row.card)?.question ?? row.card?.subtitle ?? row.text} sending={sending} tag="data-inbox-choice" onPick={pick} />
       )}
       <div className="mt-1.5 flex justify-end">
         <button type="button" data-inbox-action="reply" onClick={reading} className={ASK_QUIET_ANSWER}><CornerUpLeft size={15} aria-hidden="true" />{t("chat.reply")}</button>
@@ -69,8 +70,8 @@ export function InboxCard({ view }: { view: InboxView }) {
   const counts = tabCounts(view);
   const rows = rowsIn(view, "needs-you").slice(0, CARD_ROWS);
   const openRow = (row: InboxRow) => { readInboxRow(row); openInbox({ reading: row.id }); };
-  const openAll = () => openInbox({ tab: counts["needs-you"] ? "needs-you" : "info" });
-  const shell = cn("my-1 w-full max-w-[560px] rounded-[20px]", ELEVATED_CARD);
+  const openAll = () => openInbox();
+  const shell = cn("my-1 w-full max-w-[560px] rounded-[24px]", ELEVATED_CARD);
   if (!rows.length) {
     return (
       <section data-inbox-card="caught-up" aria-label={t("inbox.card.caughtUp")} className={cn(shell, "flex items-center gap-2 px-4 py-2 text-[13px] text-ink-secondary")}>

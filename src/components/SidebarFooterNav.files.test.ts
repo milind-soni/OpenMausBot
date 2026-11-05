@@ -34,9 +34,9 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); delete window.ogb; });
 
-it.each(["comfortable", "compact"] as const)("leaves Files out of Simple mode's footer and rail, since the account menu holds it (%s)", async (density) => {
+it("leaves Files out of Simple mode's footer and rail, since the account menu holds it", async () => {
   bridge("idle");
-  await render(density);
+  await render("comfortable");
   expect(row()).toBeNull();
   await render("icons", {}, true);
   expect(row()).toBeNull();

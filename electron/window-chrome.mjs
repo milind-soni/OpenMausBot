@@ -10,12 +10,14 @@ export function windowBackground(prefersDark) {
  * them in the bar, and main moves them as each page says (chrome-rail.mjs). */
 export const TRAFFIC_LIGHTS = { framed: { x: 12, y: 7 }, unframed: { x: 16, y: 16 } };
 
-export function windowChromeOptions(platform) {
+/** `frame`: the window draws its own frame (the person may turn it off): on macOS the traffic lights open where it puts
+ * them, and on Windows the app draws its caption buttons, or else the system's own title bar comes back. */
+export function windowChromeOptions(platform, frame = true) {
   if (platform === "darwin") {
-    return { titleBarStyle: "hiddenInset", trafficLightPosition: TRAFFIC_LIGHTS.framed };
+    return { titleBarStyle: "hiddenInset", trafficLightPosition: frame ? TRAFFIC_LIGHTS.framed : TRAFFIC_LIGHTS.unframed };
   }
   if (platform === "win32") {
-    return { titleBarStyle: "hidden" };
+    return frame ? { titleBarStyle: "hidden" } : {};
   }
   return {};
 }

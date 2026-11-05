@@ -1,10 +1,10 @@
 import { useSyncExternalStore } from "react";
 import { z } from "zod";
 
-export type SidebarDensity = "comfortable" | "compact" | "icons";
+/** The sidebar as it is, or "icons": the column of avatars the person dragged its edge down to. */
+export type SidebarDensity = "comfortable" | "icons";
 export type SidebarToolsLayout = "rows" | "toolbar";
 
-export const SIDEBAR_DENSITIES: readonly SidebarDensity[] = ["comfortable", "compact", "icons"];
 export const SIDEBAR_TOOLS_LAYOUTS: readonly SidebarToolsLayout[] = ["rows", "toolbar"];
 
 export const SIDEBAR_DENSITY_KEY = "openmausbot.sidebarDensity";
@@ -19,15 +19,12 @@ export const PINNED_CIRCLES_KEY = "openmausbot.pinnedCircles";
 export const UNIVERSAL_PINS_KEY = "openmausbot.universalPins";
 export const PINNED_CIRCLE_ORDER_KEY = "openmausbot.pinnedCircleOrder.v1";
 
+/** What the sidebar's key keeps for the column of avatars. The values an older app kept there ("compact", "icons") open
+ * the sidebar as it is. */
+const AVATARS = "avatars";
+
 export function parseSidebarDensity(value: string | null): SidebarDensity {
-  switch (value) {
-    case "comfortable":
-    case "compact":
-    case "icons":
-      return value;
-    default:
-      return "comfortable";
-  }
+  return value === AVATARS ? "icons" : "comfortable";
 }
 
 export function loadSidebarDensity(storage?: Pick<Storage, "getItem"> | null): SidebarDensity {
@@ -45,7 +42,7 @@ export function saveSidebarDensity(
 ): void {
   try {
     const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
-    target?.setItem(SIDEBAR_DENSITY_KEY, density);
+    target?.setItem(SIDEBAR_DENSITY_KEY, density === "icons" ? AVATARS : density);
   } catch {
   }
 }
@@ -170,8 +167,11 @@ export function useSidebarToolsLayout(): SidebarToolsLayout {
   return useSyncExternalStore(subscribeSidebarToolsLayout, currentSidebarToolsLayout, () => "rows");
 }
 
+/** The narrowest the open sidebar gets. */
+export const SIDEBAR_MIN_WIDTH = 240;
+
 export function clampSidebarWidth(width: number, viewportWidth: number, max = 480): number {
-  return Math.max(240, Math.min(max, viewportWidth - 320, Math.round(width)));
+  return Math.max(SIDEBAR_MIN_WIDTH, Math.min(max, viewportWidth - 320, Math.round(width)));
 }
 
 export function loadSidebarWidth(storage?: Pick<Storage, "getItem"> | null, key = SIDEBAR_WIDTH_KEY): number | null {
@@ -180,7 +180,7 @@ export function loadSidebarWidth(storage?: Pick<Storage, "getItem"> | null, key 
     const raw = target?.getItem(key);
     if (raw === null || raw === undefined || !/^\d+$/.test(raw)) return null;
     const width = Number(raw);
-    return width >= 240 && width <= 480 ? width : null;
+    return width >= SIDEBAR_MIN_WIDTH && width <= 480 ? width : null;
   } catch {
     return null;
   }

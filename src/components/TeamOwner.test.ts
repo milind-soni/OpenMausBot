@@ -3,7 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { initialState, StoreContext, type AppState, type Bot } from "@/state/store";
-import { departmentOwner, setTeamPeople, type TeamPeople } from "@/state/team-people";
+import { setInboxSupport } from "@/state/inbox";
+import { setTeamPeople, type TeamPeople } from "@/state/team-people";
 
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 
@@ -25,25 +26,17 @@ const withStore = (state: AppState, child: ReturnType<typeof createElement>) =>
   createElement(StoreContext.Provider, { value: { state, dispatch: vi.fn(), flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn() } as never }, child);
 const row = (candidate: Bot, selected = false) => {
   const state = { ...initialState, bots: [candidate], selectedId: selected ? candidate.id : null, activeView: "chat" } as AppState;
-  return renderToStaticMarkup(createElement(BotListItem, botRowProps(state, vi.fn(), candidate, { density: "comfortable", quiet: false, query: "", onMenu: vi.fn() })));
+  return renderToStaticMarkup(createElement(BotListItem, botRowProps(state, vi.fn(), candidate, { density: "comfortable", query: "", onMenu: vi.fn() })));
 };
 
 afterEach(() => setTeamPeople(null));
 
-describe("who a team bot reports to, in the sidebar", () => {
-  it("shows the owner's face at the end of the row, which only the owner or an Admin can change", () => {
+describe("who looks after a team bot, in the sidebar", () => {
+  it("shows no face on a bot's row, on a team or off it", () => {
     setTeamPeople(asBob());
-    const fox = row(bot({ createdBy: ADA.email, reportsTo: BOB.email }));
-    expect(fox).toMatch(/<button[^>]*data-owner-face="bob@acme.test"[^>]*title="Reports to Bob: questions and reports go to Bob"/);
-    const lead = row(bot({ id: "lead", name: "Tech Lead", createdBy: BOB.email, reportsTo: ADA.email }));
-    expect(lead).toMatch(/<span data-owner-face="ada@acme.test" role="img" aria-label="Reports to Ada: questions and reports go to Ada"/);
-    expect(lead).not.toMatch(/<button[^>]*data-owner-face/);
-    setTeamPeople({ ...asBob(), admin: true });
-    expect(row(bot({ id: "lead", createdBy: BOB.email, reportsTo: ADA.email }))).toMatch(/<button[^>]*data-owner-face="ada@acme.test"/);
-    expect(row(bot({ id: "stray" }))).toContain("Nobody owns this bot yet, so its questions go to the admins.");
-  });
-
-  it("shows no face anywhere but a team", () => {
+    expect(row(bot({ createdBy: ADA.email, reportsTo: BOB.email }))).not.toContain("data-owner-face");
+    expect(row(bot({ id: "stray" }))).not.toContain("Nobody");
+    setTeamPeople(null);
     expect(row(bot({ createdBy: ADA.email }))).not.toContain("data-owner-face");
   });
 
@@ -54,19 +47,16 @@ describe("who a team bot reports to, in the sidebar", () => {
     expect(actions(row(bot(), false))).toContain("group-hover:opacity-100");
   });
 
-  it("names a department's owner beside it when every bot there reports to one person", () => {
-    const team = asBob();
-    expect(departmentOwner([bot({ reportsTo: BOB.email }), bot({ id: "owl", createdBy: BOB.email })], team)?.name).toBe("Bob");
-    expect(departmentOwner([bot({ reportsTo: BOB.email }), bot({ id: "lead", reportsTo: ADA.email })], team)).toBeNull();
-    const header = renderToStaticMarkup(createElement(SidebarSectionHeader, { name: "Product A", lead: "Bob", collapsed: false, reorderable: false, dragging: false, line: true }));
-    expect(header).toContain(">→ Bob<");
-    expect(header).toContain("Every bot in Product A reports to Bob");
+  it("names no department caption for the person its bots report to", () => {
+    const header = renderToStaticMarkup(createElement(SidebarSectionHeader, { name: "Product A", collapsed: false, reorderable: false, dragging: false, line: true }));
+    expect(header).not.toContain("data-department-lead");
+    expect(header).not.toContain("→");
   });
 
   it("offers Set owner for all bots in a department's menu only when the caller passes it", () => {
     const items = (onSetOwner?: () => void) => renderToStaticMarkup(createElement(TeamMenuItems, { onAddBots: vi.fn(), onRename: vi.fn(), onShare: vi.fn(), onDelete: vi.fn(), onSetOwner }));
-    expect(items(vi.fn())).toContain("Set owner for all bots…");
-    expect(items()).not.toContain("Set owner for all bots…");
+    expect(items(vi.fn())).toContain("Set who looks after all bots…");
+    expect(items()).not.toContain("Set who looks after all bots…");
   });
 });
 
@@ -91,10 +81,8 @@ describe("a teammate's face", () => {
     expect(face({ email: ADA.email, name: "Ada", role: "member" })).toMatch(/>A<\/span>$/);
   });
 
-  it("is the owner's face at the end of a bot's row and beside a card's Asking line", () => {
+  it("is beside a card's Asking line", () => {
     setTeamPeople(withPicture());
-    expect(row(bot({ createdBy: BOB.email, reportsTo: ADA.email }))).toMatch(/data-owner-face="ada@acme.test"[^>]*>[^]*?<img src="\/api\/team\/people\/p_ada\/picture\?v=1"/);
-    expect(row(bot({ createdBy: ADA.email, reportsTo: BOB.email }))).toMatch(/data-owner-face="bob@acme.test"[^>]*><span aria-hidden="true"[^>]*>B<\/span>/);
     const fox = bot({ reportsTo: ADA.email, tasks: [{ threadId: "fox-main", title: "Fox" }] as Bot["tasks"] });
     const line = renderToStaticMarkup(withStore({ ...initialState, bots: [fox] } as AppState, createElement(AskingLine, { botId: "fox", threadId: "fox-main" })));
     expect(line).toMatch(/<img src="\/api\/team\/people\/p_ada\/picture\?v=1"[^>]*style="width:14px;height:14px"[^>]*>Asking Ada/);
@@ -137,12 +125,21 @@ describe("a card waiting on someone", () => {
   });
 });
 
-describe("Needs you", () => {
+describe("Needs you, on a server older than this page", () => {
+  afterEach(() => setInboxSupport("unknown"));
+  const render = () => renderToStaticMarkup(withStore({ ...initialState, bots: [bot()] } as AppState, createElement(NeedsYouButton)));
+
   it("counts what bots ask of this person, and hides when nothing does", () => {
-    const render = () => renderToStaticMarkup(withStore({ ...initialState, bots: [bot()] } as AppState, createElement(NeedsYouButton)));
+    setInboxSupport("no");
     setTeamPeople(asBob([{ kind: "question", id: "q1", at: 1, botId: "fox", threadId: "fox-main", text: "Which landing page?" }]));
     expect(render()).toContain('aria-label="Needs you, 1"');
     setTeamPeople(asBob());
+    expect(render()).toBe("");
+  });
+
+  it("gives way to the Inbox row on any server that has an inbox", () => {
+    setInboxSupport("yes");
+    setTeamPeople(asBob([{ kind: "question", id: "q1", at: 1, botId: "fox", threadId: "fox-main", text: "Which landing page?" }]));
     expect(render()).toBe("");
   });
 });

@@ -6,6 +6,7 @@ import { liveDisclosure } from "@/lib/call-mode";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import type { LiveSettings } from "../../shared/wire";
 import { LiveKeySetup } from "./LiveKeySetup";
+import { LiveProviderSettings } from "./LiveProviderSettings";
 import { KeysLink } from "./keys/KeysLink";
 import { Select } from "./Select";
 
@@ -22,6 +23,7 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
   const focusOnOpen = useCallback((dialog: HTMLDivElement | null) => {
     dialog?.querySelector<HTMLElement>("select, input, button")?.focus();
   }, []);
+  const azure = live.provider === "azure";
   const voice = live.voice || "marin";
   const known = LIVE_VOICE_OPTIONS.some((option) => option.id === voice);
 
@@ -66,6 +68,7 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
         onClose();
       }}
     >
+      <LiveProviderSettings />
       <label className="flex items-center justify-between gap-2">
         <span className="text-ink-secondary">{t("call.live.voice")}</span>
         <Select
@@ -104,7 +107,7 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
         </Select>
       </label>
       <div className="flex items-center justify-between gap-2 border-t border-hairline/60 pt-2">
-        <span className="text-ink-secondary">{t("call.live.key")}</span>
+        <span className="text-ink-secondary">{t(azure ? "call.live.azureKey" : "call.live.key")}</span>
         <span className="flex gap-2">
           <button type="button" className="text-accent hover:underline" onClick={() => setChangingKey((open) => !open)}>
             {t("call.live.keyChange")}
@@ -116,11 +119,12 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
           )}
         </span>
       </div>
-      {live.keySource !== "live" && (
+      {live.keySource !== "live" && azure && <div className="-mt-2 text-[12px] text-ink-tertiary">{t("call.live.azureNeedsKey")}</div>}
+      {live.keySource !== "live" && !azure && (
         <div className="-mt-2 text-[12px] text-ink-tertiary">{t(live.keySource === "openai" ? "call.live.keyFromApiKeys" : "call.live.needsKey")} <KeysLink id="openai" purpose="liveCalls" /></div>
       )}
       {changingKey && <LiveKeySetup compact onSaved={() => setChangingKey(false)} />}
-      <div className="text-[12px] text-ink-tertiary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true })} {t("call.live.cost")}</div>
+      <div className="text-[12px] text-ink-tertiary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure })} {t(azure ? "call.live.azureCost" : "call.live.cost")}</div>
       {error && <div className="text-[12px] text-danger">{error}</div>}
     </div>
   );

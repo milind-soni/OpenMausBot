@@ -72,7 +72,10 @@ describe("caption chrome", () => {
   );
 
   it("frames the window on macOS and Windows: nothing under the frame's top bar moves out of the window's buttons", () => {
-    expect([windowFramed("mac-inset"), windowFramed("win-caption"), windowFramed("native"), windowFramed(undefined)]).toEqual([true, true, false, false]);
+    expect([windowFramed({ windowChrome: "mac-inset" }), windowFramed({ windowChrome: "win-caption" }), windowFramed({ windowChrome: "native" }), windowFramed(undefined)])
+      .toEqual([true, true, false, false]);
+    expect(windowFramed({ windowChrome: "mac-inset", windowFrame: false }), "the person turned it off").toBe(false);
+    expect(captionChrome("mac-inset").draggable, "the headers still drag a window with no title bar of its own").toBe(true);
     for (const chrome of ["mac-inset", "win-caption", "native"] as const) {
       expect(Object.keys(captionChrome(chrome))).not.toContain("padClass");
       expect(Object.keys(captionChrome(chrome))).not.toContain("controlsShiftStyle");
@@ -81,9 +84,9 @@ describe("caption chrome", () => {
 
   it("opts controls, menus and dialogs out of a drag region in styles.css", () => {
     const document = new Window().document;
-    document.body.innerHTML = `<div data-window-drag><button></button><input><a href="#"></a><span role="button"></span><span></span><div class="field"><select></select><svg></svg></div></div><div role="menu"></div><div class="fixed backdrop"><div role="dialog"></div></div><div class="fixed overlay"><p></p></div>`;
-    const matches = [...document.querySelectorAll("button, input, a, span, .field, [role], .backdrop, .overlay")].map((element) => element.matches(noDragSelector));
-    expect(matches).toEqual([true, true, true, true, false, true, true, true, true, false]);
+    document.body.innerHTML = `<div data-window-drag><button></button><input><a href="#"></a><span role="button"></span><span></span><div class="field"><select></select><svg></svg></div></div><div role="menu"></div><div class="fixed backdrop"><div role="dialog"></div></div><div class="fixed overlay"><p></p></div><div data-browser-transport="stream"></div>`;
+    const matches = [...document.querySelectorAll("button, input, a, span, .field, [role], .backdrop, .overlay, [data-browser-transport]")].map((element) => element.matches(noDragSelector));
+    expect(matches).toEqual([true, true, true, true, false, true, true, true, true, false, true]);
   });
 });
 

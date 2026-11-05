@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 
 import { currentCall } from "./call";
+import { isMacPlatform } from "./keyboard-shortcuts";
+import { speechBridge } from "./speech";
 
 type ModifierEvent = Pick<KeyboardEvent, "altKey" | "ctrlKey" | "code" | "repeat">;
+
+export const pushToTalkKeys = () => (isMacPlatform() ? "Control + Option" : "Ctrl + Alt");
 
 export function isPushToTalkPress(event: ModifierEvent): boolean {
   const modifier =
@@ -28,7 +32,7 @@ export function usePushToTalk(targetId: string, enabled: boolean, onError: () =>
   }, [enabled]);
 
   useEffect(() => {
-    const bridge = window.ogb;
+    const bridge = speechBridge();
     if (!bridge?.speechFinish) return;
 
     const finish = () => {

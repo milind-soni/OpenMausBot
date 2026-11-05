@@ -70,7 +70,7 @@ export function VpsComputersCard({
                 : t("vm.vps.foundMany", { count: instances.length })}
       </p>
 
-      <div
+      {!(configured === false && !loading && !unavailableReason) && <div
         aria-busy={loading || removingName !== null}
         className="mt-3 overflow-hidden rounded-xl border border-hairline/40"
       >
@@ -150,7 +150,7 @@ export function VpsComputersCard({
             </div>
           );
         })}
-      </div>
+      </div>}
     </Card>
   );
 }

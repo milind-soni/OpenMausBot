@@ -41,9 +41,10 @@ export function useBesideFramed(): boolean {
   return framed;
 }
 
-/** The page beside the rail draws the window's frame: main puts the traffic lights in its top bar. */
-export function sayFrameDrawn(): void {
-  void bridge()?.drawsFrame?.()?.catch(() => {});
+/** Whether the page beside the rail draws the window's frame: main puts the traffic lights in its top bar, or back where
+ * the window keeps them without it. */
+export function sayFrameDrawn(drawn = true): void {
+  void bridge()?.drawsFrame?.(drawn)?.catch(() => {});
 }
 
 /** From the person's click: main hides or shows the rail, and this desktop keeps the choice. */

@@ -10,11 +10,15 @@ const FUCHS = bot("fuchs", "Fuchs", { chiefOfStaff: true });
 const DACHS = bot("dachs", "Dachs");
 const OTTER = bot("otter", "Otter");
 
-function world(options: { live?: string[]; privateTo?: string } = {}) {
+function world(options: { live?: string[]; privateTo?: string; steers?: boolean; takesAnswers?: boolean; unattended?: string[]; confined?: string[] } = {}) {
   const threads = new Map<string, Message[]>();
   let ids = 0;
   const rows = (threadId: string) => threads.get(threadId) ?? [];
-  const tasks: Record<string, Array<{ threadId: string; title: string }>> = { dachs: [{ threadId: "work", title: "Fix" }, { threadId: "other-work", title: "Other" }] };
+  const tasks: Record<string, Array<{ threadId: string; title: string; activity?: string; archivedAt?: number; openedBy?: { botId: string } }>> = { dachs: [
+    { threadId: "work", title: "Fix" }, { threadId: "other-work", title: "Other" },
+    // The person's own chats with Dachs, one archived, and a thread Fuchs opened on Dachs.
+    { threadId: "chat", title: "Dachs", activity: "waiting-on-you" }, { threadId: "old-chat", title: "Old", activity: "waiting-on-you", archivedAt: 1 },
+    { threadId: "chief-work", title: "Chief", activity: "waiting-on-you", openedBy: { botId: "fuchs" } }] };
   const store = {
     bot: (id: string) => [FUCHS, DACHS, OTTER].find((one) => one.id === id),
     tasks: (botId: string) => tasks[botId] ?? [],
@@ -43,6 +47,7 @@ function world(options: { live?: string[]; privateTo?: string } = {}) {
   const answeredNodes: Array<{ id: string; text: string; by: Answerer }> = [];
   const answeredLive: Array<{ threadId: string; requestId: string; text: string }> = [];
   const settled: string[] = [];
+  const steered: Array<{ threadId: string; text: string }> = [];
   const deps: QuestionRoutingDeps = {
     store: store as unknown as QuestionRoutingDeps["store"],
     active: () => [...nodes.values()],
@@ -56,11 +61,14 @@ function world(options: { live?: string[]; privateTo?: string } = {}) {
       return true;
     },
     live: (_threadId, requestId) => (options.live ?? []).includes(requestId),
-    answerLive: async (threadId, requestId, text) => { answeredLive.push({ threadId, requestId, text }); return true; },
+    unattended: (_botId, threadId) => (options.unattended ?? []).includes(threadId),
+    answerLive: async (threadId, requestId, text) => { if (options.takesAnswers === false) return false; answeredLive.push({ threadId, requestId, text }); return true; },
     settleSignIns: (parked) => { settled.push(parked.id); },
     keptPrivate: (child, requester) => child.threadId === options.privateTo && requester.threadId !== options.privateTo,
+    steer: async (threadId, text) => { if (options.steers === false) return false; steered.push({ threadId, text }); return true; },
+    mayReach: (fromThreadId, toThreadId) => !(options.confined ?? []).includes(fromThreadId) || (options.confined ?? []).includes(toThreadId),
   };
-  return { routing: createQuestionRouting(deps), store, rows, node, nodes, answeredNodes, answeredLive, settled };
+  return { routing: createQuestionRouting(deps), store, rows, node, nodes, answeredNodes, answeredLive, settled, steered };
 }
 
 describe("at Full access a question asked with an ask tool", () => {
@@ -114,12 +122,62 @@ describe("an answer passed on by another bot", () => {
     expect(w.answeredNodes.map((one) => one.text)).toEqual(["Excel"]);
   });
 
-  it("never takes new work for an answer: same conversation, same sender, a question still open", async () => {
+  it("takes the requester's message to the thread its earlier work waits in as the answer, in a later turn and unnamed", async () => {
     const w = world();
-    parked(w);
-    expect(await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", senderNode: { id: "root" } as HandoffView, target: DACHS, message: "Neue Aufgabe: prüf das Logo" })).toBeUndefined();
+    const node = parked(w);
+    const receipt = await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", senderNode: { id: "root-2" } as HandoffView, target: DACHS, message: "Kurz und freundlich", threadId: "work" });
+    expect(receipt).toMatchObject({ outcome: "injected", threadId: "work", requestId: node.id });
+    expect(w.answeredNodes).toEqual([{ id: node.id, text: "Kurz und freundlich", by: { kind: "bot", botId: "fuchs" } }]);
+    expect(w.rows("work")[0]!.card).toMatchObject({ answered: "answer", answeredText: "Kurz und freundlich", answeredBy: { kind: "bot", name: "Fuchs" } });
+  });
+
+  it("takes nothing for an answer sent to another thread, by a bot that did not hand the work on, in the turn that handed it out, or once its requester ended", async () => {
+    const send = async (w: ReturnType<typeof world>, over: { sender?: BotRecord; threadId?: string; sentThisTurn?: ReadonlySet<string> }) =>
+      w.routing.relay({ sender: over.sender ?? FUCHS, senderThreadId: "inbox", target: DACHS, message: "Neue Aufgabe: prüf das Logo",
+        ...(over.threadId !== undefined ? { threadId: over.threadId } : {}), ...(over.sentThisTurn ? { sentThisTurn: over.sentThisTurn } : {}) });
+    const w = world();
+    const node = parked(w);
+    expect(await send(w, {})).toBeUndefined();
+    expect(await send(w, { threadId: "other-work" })).toBeUndefined();
+    expect(await send(w, { sender: OTTER, threadId: "work" })).toBeUndefined();
+    expect(await send(w, { threadId: "work", sentThisTurn: new Set([node.id]) })).toBeUndefined();
+    w.nodes.set("root", { ...w.nodes.get("root")!, status: "cancelled" });
+    expect(await send(w, { threadId: "work" })).toBeUndefined();
     expect(w.answeredNodes).toEqual([]);
     expect(w.rows("work")[0]!.card!.answered).toBeUndefined();
+  });
+
+  it("does not take the requester's later message for a sign-in only the person can do", async () => {
+    const w = world();
+    w.store.appendMessage("work", { role: "bot", kind: "signin", text: "Sign in", signIn: { url: "https://notion.so", site: "notion.so", place: "browser" } });
+    w.node({ question: "Waiting on the person: sign in to notion.so", cards: ["m1"] });
+    expect(await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Prüf auch die Unterseiten", threadId: "work" })).toBeUndefined();
+    expect(w.answeredNodes).toEqual([]);
+    expect(w.settled).toEqual([]);
+  });
+
+  it("refuses a teammate's answer to which of the person's own accounts to use: only the person settles it, where it was asked", async () => {
+    const w = world();
+    const node = parked(w, { question: "Which email account should be connected — Gmail or another provider?" });
+    const named = await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Gmail, the person's address", answers: node.id });
+    expect(named).toMatchObject({ botId: "dachs", outcome: "failed" });
+    expect(named?.detail).toContain("only the person can answer");
+    // Unnamed too: from the turn that was resumed with it, and to the thread the requester's earlier work waits in.
+    expect(await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", senderNode: { id: "root", carrying: [node.id] } as HandoffView, target: DACHS, message: "Gmail" }))
+      .toMatchObject({ outcome: "failed" });
+    expect(await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", senderNode: { id: "root-2" } as HandoffView, target: DACHS, message: "Gmail", threadId: "work" }))
+      .toMatchObject({ outcome: "failed" });
+    expect(w.answeredNodes).toEqual([]);
+    expect(w.rows("work")[0]!.card?.answered).toBeUndefined();
+  });
+
+  it("answers the question card the turn of the requester's earlier work waits on, from a later turn, unnamed", async () => {
+    const w = world({ live: ["req-1"] });
+    w.node({ id: "as_live", status: "running" });
+    w.store.appendMessage("work", { role: "bot", kind: "options", text: "Soll ich?", card: { title: "Your bot has a question", subtitle: "Soll ich?", options: ["Ja", "Nein"], requestId: "req-1", requestType: "question" } });
+    expect(await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Ja", threadId: "work" })).toMatchObject({ outcome: "injected", requestId: "as_live" });
+    expect(w.answeredLive).toEqual([{ threadId: "work", requestId: "req-1", text: "@Fuchs answered: Ja" }]);
+    expect(w.steered).toEqual([]);
   });
 
   it("refuses an answer to work that no longer asks, saying how to send it as work instead", async () => {
@@ -150,5 +208,121 @@ describe("an answer passed on by another bot", () => {
     const node = connect.node({ question: "Waiting on the person: connect Notion", cards: ["m1"] });
     expect(await connect.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "verbunden", answers: node.id })).toMatchObject({ outcome: "failed" });
     expect(connect.answeredNodes).toEqual([]);
+  });
+});
+
+describe("a Chief's answer, for the person, to a question a teammate asks them", () => {
+  const QUESTION = "Soll ich die alte Version behalten?";
+  const asks = (w: ReturnType<typeof world>, threadId: string, question = QUESTION, requestId = "req-p") =>
+    w.store.appendMessage(threadId, { role: "bot", kind: "options", text: question, card: { title: "Dachs has a question", subtitle: question, options: ["Ja", "Nein"], requestId, requestType: "question" } });
+  const answer = (w: ReturnType<typeof world>, threadId: string) =>
+    w.routing.answerForPerson({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, threadId, message: "Ja, behalten" });
+
+  it("answers the card in the person's own chat with the teammate, and the card and the Chief's chat say who answered", async () => {
+    const w = world({ live: ["req-p"] });
+    asks(w, "chat");
+    const receipt = await answer(w, "chat");
+    expect(receipt).toMatchObject({ botId: "dachs", outcome: "injected", threadId: "chat" });
+    expect(receipt?.detail).toBe(`answered its question "${QUESTION}" for the person; it carries on with your answer, and the person can still give their own in that thread`);
+    expect(w.answeredLive).toEqual([{ threadId: "chat", requestId: "req-p", text: "@Fuchs answered for the person: Ja, behalten" }]);
+    expect(w.rows("chat")[0]!.card).toMatchObject({ answered: "answer", answeredText: "Ja, behalten", answeredBy: { kind: "bot", name: "Fuchs" } });
+    expect(w.rows("inbox")).toEqual([expect.objectContaining({ kind: "activity", tool: expect.objectContaining({ name: "Answered Dachs's question for the person" }),
+      threadRef: { botId: "dachs", threadId: "chat", title: "Dachs" } })]);
+  });
+
+  it("leaves to the usual thread rules a thread with no live question, one only the person can answer, an archived one and one the Chief opened", async () => {
+    const idle = world();
+    asks(idle, "chat");
+    expect(await answer(idle, "chat"), "the card's turn no longer waits on it").toBeUndefined();
+    const theirs = world({ live: ["req-p"] });
+    asks(theirs, "chat", "Please sign in to the bank portal");
+    expect(await answer(theirs, "chat")).toBeUndefined();
+    const w = world({ live: ["req-p"] });
+    for (const threadId of ["old-chat", "chief-work", "nowhere"]) {
+      asks(w, threadId);
+      expect(await answer(w, threadId), threadId).toBeUndefined();
+    }
+    expect([...idle.answeredLive, ...theirs.answeredLive, ...w.answeredLive]).toEqual([]);
+  });
+
+  it("leaves with the person, and does not list, a question in work an outside event started", async () => {
+    const w = world({ live: ["req-p"], unattended: ["chat"] });
+    asks(w, "chat");
+    expect(await answer(w, "chat")).toBeUndefined();
+    expect(w.routing.waitingForPerson(FUCHS, [DACHS])).toEqual([]);
+    expect(w.answeredLive).toEqual([]);
+  });
+
+  it("says nothing was sent when the question was answered meanwhile", async () => {
+    const w = world({ live: ["req-p"], takesAnswers: false });
+    asks(w, "chat");
+    expect(await answer(w, "chat")).toMatchObject({ outcome: "failed", detail: `Dachs's question "${QUESTION}" was answered or closed meanwhile; nothing was sent` });
+    expect(w.rows("chat")[0]!.card!.answered).toBeUndefined();
+    expect(w.rows("inbox")).toEqual([]);
+  });
+
+  it("lists the questions teammates wait on the person for, leaving out threads the Chief opened, archived ones and ones it may not read", () => {
+    const w = world({ live: ["req-p"] });
+    for (const threadId of ["chat", "old-chat", "chief-work"]) asks(w, threadId);
+    const waiting = w.routing.waitingForPerson(FUCHS, [DACHS, OTTER]);
+    expect(waiting).toEqual([{ bot: "Dachs", threadId: "chat", thread: "Dachs", question: QUESTION, since: expect.any(Number) }]);
+    // Since when: the card's own time, so a Chief can say how long it has waited.
+    expect(waiting[0]!.since).toBe(w.rows("chat").find((row) => row.card)!.at);
+    expect(w.routing.waitingForPerson(FUCHS, [DACHS], (threadId) => threadId !== "chat")).toEqual([]);
+  });
+});
+
+describe("a message to the thread where work the sender handed on is running", () => {
+  it("goes to that running turn, framed as its requester's, and shows in both conversations; no new work", async () => {
+    const w = world();
+    const node = w.node({ status: "running" });
+    const receipt = await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Nimm auch die Steuerspalte mit", threadId: "work" });
+    expect(receipt).toMatchObject({ botId: "dachs", outcome: "injected", threadId: "work", requestId: node.id });
+    expect(w.steered).toHaveLength(1);
+    expect(w.steered[0]!.threadId).toBe("work");
+    expect(w.steered[0]!.text).toContain(`[From @Fuchs (bot) · addition to assignment ${node.id}, while you work on it · `);
+    expect(w.steered[0]!.text).toContain(JSON.stringify("Nimm auch die Steuerspalte mit"));
+    expect(w.rows("work")).toEqual([expect.objectContaining({ role: "user", text: "Nimm auch die Steuerspalte mit", peerAsk: { botId: "fuchs", name: "Fuchs" }, aside: true, steered: true })]);
+    expect(w.rows("inbox")).toEqual([expect.objectContaining({ kind: "activity", tool: expect.objectContaining({ name: "Sent to Dachs" }), threadRef: { botId: "dachs", threadId: "work", title: "Fix" } })]);
+    expect(w.answeredNodes).toEqual([]);
+  });
+
+  it("is left to become new work when the engine cannot take it now, or the work there is someone else's or handed out this turn", async () => {
+    const send = (w: ReturnType<typeof world>, sender: BotRecord, sentThisTurn?: ReadonlySet<string>) =>
+      w.routing.relay({ sender, senderThreadId: "inbox", target: DACHS, message: "Nimm auch die Steuerspalte mit", threadId: "work", ...(sentThisTurn ? { sentThisTurn } : {}) });
+    const refusing = world({ steers: false });
+    refusing.node({ status: "running" });
+    expect(await send(refusing, FUCHS)).toBeUndefined();
+    expect(refusing.rows("work")).toEqual([]);
+    expect(refusing.rows("inbox")).toEqual([]);
+    const w = world();
+    const node = w.node({ status: "running" });
+    expect(await send(w, OTTER)).toBeUndefined();
+    expect(await send(w, FUCHS, new Set([node.id]))).toBeUndefined();
+    expect(w.steered).toEqual([]);
+  });
+});
+
+describe("work from outside stays out of a person's work", () => {
+  it("neither answers a parked question nor steers into running work in a thread that is not confined", async () => {
+    const parked = world({ confined: ["inbox"] });
+    parked.node({ question: "Which format?" });
+    expect(await parked.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Excel", threadId: "work" })).toBeUndefined();
+    expect(parked.answeredNodes).toEqual([]);
+    const named = world({ confined: ["inbox"] });
+    const asked = named.node({ question: "Which format?" });
+    expect(await named.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Excel", answers: asked.id })).toMatchObject({ outcome: "failed" });
+    expect(named.answeredNodes).toEqual([]);
+    const running = world({ confined: ["inbox"] });
+    running.node({ status: "running" });
+    expect(await running.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Excel", threadId: "work" })).toBeUndefined();
+    expect(running.steered).toEqual([]);
+  });
+
+  it("still reaches work of its own lineage", async () => {
+    const own = world({ confined: ["inbox", "work"] });
+    own.node({ status: "running" });
+    expect(await own.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Excel", threadId: "work" })).toMatchObject({ outcome: "injected" });
+    expect(own.steered).toHaveLength(1);
   });
 });

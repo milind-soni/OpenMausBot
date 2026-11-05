@@ -38,9 +38,8 @@ At the next start (the runtime's restart policy, `server/runtime/runtime.ts` `op
   Every time budget of a tree that outlived a restart starts again at boot
   (downtime is nobody's budget); request and execution counts carry on, and a
   rerun costs one execution. Stop on the requester cancels a rerun not yet
-  started, "Stopped before it resumed", since nothing of it is running; a
-  rerun already running is left alone like any teammate mid-turn, and so is
-  one the person left working by a Stop before the restart.
+  started, "Stopped before it resumed", and a rerun already running, like any
+  teammate mid-turn.
 - A routine run still going at a restart fails, as before, and its
   teammates' work ends with it, "OpenMausBot restarted while this routine was
   running": none of it runs again, so no result lands after the person was
@@ -139,8 +138,14 @@ Outside a room, a conversation has one thread with each recipient, titled
 “@Clive · work”. The first request opens it; every later request from that
 conversation — a follow-up, a change of plan, rework — goes into it, so the
 recipient has the earlier work in its own history. If the recipient is still
-working there, the request waits and runs next; the same work never runs twice
-in parallel. A different conversation of the sender gets its own thread.
+working there on what the sender handed it before, the request goes into that
+work: it reaches the running turn, which reads it at its next step, or answers
+the question that work waits on, and the work's one result comes back once.
+Only when the recipient's engine cannot take a message mid-turn does the
+request wait and run next; a second request from the same turn always does.
+The same work never runs twice in parallel. A request can also name, by its
+thread id, any thread the sender opened on that recipient (`thread`), and goes
+there. A different conversation of the sender gets its own thread.
 Successful reported work closes in the sidebar but remains readable, and
 reopens when the next request arrives; failed or withheld work remains
 visible. Each receipt names the thread the request went into. Within the
@@ -174,16 +179,14 @@ every outstanding assignment has settled and the resumed coordination has
 finished. Steering stays the default; Stop keeps its conversation-scoped
 behavior either way.
 
-Stop is scoped to the conversation it was pressed in. It ends that bot's turn
-and stops the conversation awaiting its teammates, so nothing resumes into a
-stopped chat. An assignment that had not started yet is cancelled, since
-nothing is lost. A teammate already mid-turn keeps its own provider process:
-it finishes, and its result is still recorded and reported back here as the
-usual receipt. Each teammate Stop leaves running gets its own pill in the
-transcript — "Stopped here — Eli is still working; open to stop it too" —
-which survives Tool calls being hidden and opens that teammate's conversation,
-where Stop reaches its turn for real. Deleting a waiting source still cancels
-its whole tree, and never recreates the conversation.
+Stop is scoped to the request in the conversation it was pressed in, and stop
+means stop. It ends that bot's turn and everything the request handed out: an
+assignment that had not started yet ("Stopped before it started") and a
+teammate already mid-turn ("Stopped with the request it was for"), with what
+they handed on in turn. Nothing resumes into a stopped chat, and no result
+arrives after it. Each stopped assignment is still recorded and reported back
+here as the usual receipt. Deleting a waiting source still cancels its whole
+tree, and never recreates the conversation.
 
 Provider work and waiting-on-teammate status stay separate internally, so
 waiting does not hold a provider session or block another independent
@@ -340,7 +343,7 @@ no recipient starts until all are allowed. It does not claim model judgment or a
 The direct-chat suite exercises Clive → lead → specialist → lead → Clive with
 the real MCP proxy, no room, and no changes to unrelated conversations. It also
 checks that follow-ups from one conversation continue one recipient thread
-(queued behind running work, never in parallel), that another conversation
+(into the running work, never in parallel), that another conversation
 gets its own thread, thread titles, work that closes itself and reopens, recipient model/permission
 defaults, idempotency without extra tasks, capacity-bound queues, dispatch to a
 spare recipient thread while unrelated work remains active, pinned parent

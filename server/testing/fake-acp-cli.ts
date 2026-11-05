@@ -3,9 +3,11 @@
 // session/prompt and scripted session/update streams) for driver tests. Env knobs:
 //   FAKE_ACP_LOAD_NULL  session/load returns null, so the driver falls through to session/new
 //   FAKE_ACP_REJECT_LIVE_LOAD_FILE  while it exists, load/resume of a session live in this process errors
+//     (FAKE_ACP_REJECT_LIVE_LOAD_DSH=1: with dsh 0.2's -32602 "session is already active" instead of -32000)
 //   FAKE_ACP_CACHED_LIVE_LOAD  a live session/load is acknowledged but keeps the old MCP credentials, like Qwen
 //   FAKE_ACP_TEXT_REPLY  answer every session/prompt with only this text
-//   FAKE_ACP_MODE  happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | crash-in-prompt | hang
+//   FAKE_ACP_MODE  happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | crash-in-prompt
+//     | abort-in-prompt (a sign-in link, then a TCMalloc CHECK line on stderr, then exit 134 as bubblewrap reports SIGABRT) | hang
 //     | hang-initialize | unkeyed-tool | finished-tools (tool_call frames that arrive already completed or failed, one updated again)
 //     | no-auth | auth-required | permission | question
 //     | ask-question (a mid-prompt vendor question: FAKE_ACP_ASK_METHOD, default cursor/ask_question, params
@@ -38,10 +40,14 @@
 //   FAKE_ACP_MODELS  model ids: opencode-shaped configOptions and set_config_option (-32602 for others);
 //     a new session starts on AGY_ACP_DEFAULT_MODEL when set, taken unchecked as agy_acp_server 1.1.1 does
 //   FAKE_ACP_MODELS_FILE  the same list, read once at startup, as `opencode acp` never re-reads a login
+//   FAKE_ACP_MODELS_REFRESH_FROM  `models --refresh` copies this file over FAKE_ACP_MODELS_FILE, as OpenCode 1.19.4
+//     refetches its models.dev cache only then; OPENCODE_CONFIG_CONTENT's provider models join any model list
 //   FAKE_ACP_MODELS_LIST=v2  OpenCode 2: `models` answers empty with exit 0, `models --verbose` exits 1
 //   FAKE_ACP_MODELS_LIST=auto-only  Cursor CLI 2026.10.22: `models` lists only `auto`
 //   FAKE_ACP_VERBOSE_FAIL_ONCE  marker path: the first `models --verbose` fails, like a new OpenCode home's first run
 //   FAKE_ACP_MODEL_STICKS  set_config_option succeeds but keeps the old model
+//   FAKE_ACP_OMIT_MODEL_VALUE  when the live model equals this id, the model option has no currentValue
+//     (Copilot CLI 1.0.105 does this for auto)
 //   FAKE_ACP_EXIT_ON_MODEL  the process exits when set_config_option selects this model
 //   FAKE_ACP_VARIANTS  JSON map model -> {id?, currentValue?, options} of ACP select values
 //   FAKE_ACP_CONFIG_UPDATES  JSON [{after, sessionId?, configOptions, replay?}] emitted after the named response
@@ -82,6 +88,12 @@ const modelsText = process.env.FAKE_ACP_MODELS_FILE && existsSync(process.env.FA
   : process.env.FAKE_ACP_MODELS ?? "";
 // One id per line when the list holds a newline (DeepSeek's wire values are JSON pairs with commas); else comma-separated.
 const models = modelsText.split(modelsText.includes("\n") ? "\n" : ",").map((id) => id.trim()).filter(Boolean);
+try {
+  const declared = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || "{}")?.provider ?? {};
+  for (const [provider, entry] of Object.entries<any>(declared)) {
+    for (const id of Object.keys(entry?.models ?? {})) if (models.length && !models.includes(`${provider}/${id}`)) models.push(`${provider}/${id}`);
+  }
+} catch {}
 const defaultModelEnv = process.env.AGY_ACP_DEFAULT_MODEL;
 if (models.length && defaultModelEnv && !models.includes(defaultModelEnv)) models.push(defaultModelEnv);
 let currentModel: string | null = models.length && defaultModelEnv ? defaultModelEnv : models[0] ?? null;
@@ -105,6 +117,9 @@ const handoffIdOf = (reply: string): string => /"requestId":"([\w-]+)"/.exec(rep
 const statusCall = (id: string): { name: string; args: () => object } => ({ name: "assignment_status", args: () => ({ id }) });
 const logFile = process.env.FAKE_ACP_LOG_FILE ?? "";
 const rejectLiveLoadFile = process.env.FAKE_ACP_REJECT_LIVE_LOAD_FILE ?? "";
+const liveLoadError = (sessionId: string) => process.env.FAKE_ACP_REJECT_LIVE_LOAD_DSH === "1"
+  ? { code: -32602, message: `Invalid params: session is already active: ${sessionId}` }
+  : { code: -32000, message: "session already active in this agent" };
 function fakeLog(line: string): void {
   if (!logFile) return;
   try {
@@ -138,7 +153,7 @@ const configOptions = () => {
           name: "Model",
           category: "model",
           type: "select",
-          currentValue: currentModel,
+          ...(process.env.FAKE_ACP_OMIT_MODEL_VALUE === currentModel ? {} : { currentValue: currentModel }),
           options: models.map((value) => ({ value, name: value })),
         },
       ] : []),
@@ -281,6 +296,12 @@ if (argv[0] === "status" || argv[0] === "whoami") {
   console.log(JSON.stringify({ isAuthenticated: authenticated }));
   process.exit(0);
 }
+if (argv[0] === "models" && argv.includes("--refresh")) {
+  if (process.env.FAKE_ACP_MODELS_REFRESH_FROM && process.env.FAKE_ACP_MODELS_FILE) {
+    writeFileSync(process.env.FAKE_ACP_MODELS_FILE, readFileSync(process.env.FAKE_ACP_MODELS_REFRESH_FROM));
+  }
+  process.exit(0);
+}
 if (argv[0] === "models" || argv.includes("--list-models")) {
   const failOnce = process.env.FAKE_ACP_VERBOSE_FAIL_ONCE;
   if (failOnce && argv.includes("--verbose") && !existsSync(failOnce)) {
@@ -365,12 +386,12 @@ const resultAndConfigUpdates = (id: unknown, res: unknown, after: string, sessio
   process.stdout.write([{ jsonrpc: "2.0", id, result: res }, ...updates].map((message) => JSON.stringify(message)).join("\n") + "\n");
 };
 const rpcMethods: string[] = [];
-const recordMethod = (method: string) => {
+const recordMethod = (method: string, sessionId?: unknown) => {
   rpcMethods.push(method);
   if (process.env.FAKE_ACP_RPC_DUMP) writeFileSync(process.env.FAKE_ACP_RPC_DUMP, JSON.stringify(rpcMethods));
   if (process.env.FAKE_ACP_RPC_APPEND_FILE) {
     try {
-      appendFileSync(process.env.FAKE_ACP_RPC_APPEND_FILE, JSON.stringify({ pid: process.pid, method, cwd: process.cwd() }) + "\n");
+      appendFileSync(process.env.FAKE_ACP_RPC_APPEND_FILE, JSON.stringify({ pid: process.pid, method, cwd: process.cwd(), sessionId }) + "\n");
     } catch {}
   }
 };
@@ -390,6 +411,23 @@ type McpEntry = { command: string; args?: string[]; env?: Array<{ name: string; 
 let agentsMcp: McpEntry | null = null;
 type AnyMcpEntry = { name: string; command?: string; args?: string[]; env?: Array<{ name: string; value: string }>; url?: string; headers?: Array<{ name: string; value: string }> };
 let sessionMcp: AnyMcpEntry[] = [];
+const additionalMcp = argv.indexOf("--additional-mcp-config");
+const launchMcp: AnyMcpEntry[] = additionalMcp < 0 ? [] : Object.entries(
+  JSON.parse(readFileSync(argv[additionalMcp + 1].slice(1), "utf8")).mcpServers,
+).map(([name, value]) => {
+  const server = value as { command: string; args: string[]; env: Record<string, string> };
+  return { name, command: server.command, args: server.args,
+    env: Object.entries(server.env).map(([name, value]) => ({ name, value })) };
+});
+const acceptedMcp = (servers: AnyMcpEntry[]) => [
+  ...launchMcp,
+  // Copilot CLI 1.0.105 rejects client-supplied stdio servers, but accepts launcher-owned MCP configuration.
+  ...servers.filter((server) => process.env.FAKE_ACP_REJECT_STDIO_MCP !== "1" || !server.command),
+];
+function offeredAgents(servers: AnyMcpEntry[]): McpEntry | null {
+  const server = acceptedMcp(servers).find((server) => server.name === "agents");
+  return server?.command ? { command: server.command, args: server.args, env: server.env } : null;
+}
 /** grok 1.0.25's initialize (`grok mcp doctor`) */
 const GROK_MCP_HANDSHAKE = { protocolVersion: "2025-11-25", capabilities: { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] } } }, clientInfo: { name: "grok-shell", version: "1.0.25" } };
 
@@ -589,6 +627,7 @@ function heldByHoldFile(msg: any): boolean {
   return true;
 }
 
+/** Applies one ACP message while preserving the fake CLI's launcher-owned MCP behavior. */
 function handle(msg: any) {
   if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined) && msg.id === pendingAskQuestionId) {
     pendingAskQuestionId = null;
@@ -612,7 +651,7 @@ function handle(msg: any) {
   }
   if (!msg.method) return;
   if (msg.method === "session/prompt" && heldByHoldFile(msg)) return;
-  recordMethod(msg.method);
+  recordMethod(msg.method, msg.params?.sessionId);
 
   switch (msg.method) {
     case "initialize": {
@@ -674,15 +713,15 @@ function handle(msg: any) {
         });
         break;
       }
-      const servers: McpEntry[] = Array.isArray(msg.params?.mcpServers) ? msg.params.mcpServers : [];
+      const servers: AnyMcpEntry[] = Array.isArray(msg.params?.mcpServers) ? msg.params.mcpServers : [];
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.session.json`, JSON.stringify(msg.params));
         dumpState.mcpServers = servers;
         writeDumpAtomic(process.env.FAKE_ACP_DUMP, JSON.stringify(dumpState, null, 2));
       }
-      const offered = servers.find((s: any) => s?.name === "agents") ?? null;
+      const offered = offeredAgents(servers);
       agentsMcp = mode === "list-peers" ? agentsMcp ?? offered : offered;
-      sessionMcp = servers as AnyMcpEntry[];
+      sessionMcp = acceptedMcp(servers);
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(servers, null, 2));
       }
@@ -715,21 +754,21 @@ function handle(msg: any) {
         out({
           jsonrpc: "2.0",
           id: msg.id,
-          error: { code: -32000, message: "session already active in this agent" },
+          error: liveLoadError(msg.params.sessionId),
         });
         break;
       }
       const cachedLiveLoad = process.env.FAKE_ACP_CACHED_LIVE_LOAD === "1" && liveSession === msg.params?.sessionId;
       if ((mode === "safe-agent-reads" || mode === "chief-delegate" || mode === "create-peer") && !cachedLiveLoad) {
-        agentsMcp = (msg.params?.mcpServers ?? []).find((server: any) => server.name === "agents") ?? null;
+        agentsMcp = offeredAgents(msg.params?.mcpServers ?? []);
       }
       if (mode === "list-peers") {
-        agentsMcp ??= (msg.params?.mcpServers ?? []).find((server: any) => server.name === "agents") ?? null;
+        agentsMcp ??= offeredAgents(msg.params?.mcpServers ?? []);
       }
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(msg.params?.mcpServers ?? []));
       }
-      if (!cachedLiveLoad) sessionMcp = msg.params?.mcpServers ?? [];
+      if (!cachedLiveLoad) sessionMcp = acceptedMcp(msg.params?.mcpServers ?? []);
       const opts = configOptions();
       const mdls = sessionModels();
       liveSession = typeof msg.params?.sessionId === "string" ? msg.params.sessionId : liveSession;
@@ -741,7 +780,7 @@ function handle(msg: any) {
         out({
           jsonrpc: "2.0",
           id: msg.id,
-          error: { code: -32000, message: "session already active in this agent" },
+          error: liveLoadError(msg.params.sessionId),
         });
         break;
       }
@@ -893,6 +932,11 @@ function handle(msg: any) {
         hangKeepAlive = setInterval(() => {}, 1_000);
         return;
       }
+      if (mode === "abort-in-prompt") {
+        process.stderr.write("Open https://accounts.google.com/o/oauth2/v2/auth?state=private-state&code=4/0AVGzR1private-code-value\n");
+        process.stderr.write("2 third_party/tcmalloc/internal/sysinfo.h:76] CHECK in NumCPUs: maybe_cpus.has_value() (false) \n");
+        process.exit(134);
+      }
       if (mode === "crash-in-prompt") {
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "working" } } } });
         setTimeout(() => process.exit(3), 200);
@@ -1000,7 +1044,7 @@ function handle(msg: any) {
       }
       const promptText = String(msg.params?.prompt?.[0]?.text ?? "");
       // A hand-off result wake is synthesized: the mode's usual flow would loop on an unprompted turn.
-      const runtimeReport = /\[OpenMausBot report from @[^\]\n]*: ([a-z_]+)/.exec(promptText);
+      const runtimeReport = /\[From @[^\]\n·]* \(bot\) · report on assignment [^\]\n·]*?: ([a-z_]+)/.exec(promptText);
       const wokeFromDelegation = promptText.includes("[A delegated task just completed]")
         || promptText.includes("[A delegated task failed]")
         || runtimeReport !== null;
@@ -1125,9 +1169,25 @@ function handle(msg: any) {
           (tools) => `${entry.name}: ${tools.join(",")}`,
           (error: Error) => `${entry.name} failed: ${error.message}`,
         ))).then((lines) => {
-          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: lines.join("\n") } } } });
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: lines.join("\n") || "No MCP servers configured." } } } });
           complete();
         });
+        return;
+      }
+      if (mode === "mcp-calls") {
+        const calls = JSON.parse(readFileSync(process.env.FAKE_ACP_MCP_CALLS_FILE!, "utf8")) as Array<{ server: string; name: string; arguments: Record<string, unknown> }>;
+        void (async () => {
+          for (const call of calls) {
+            const server = sessionMcp.find((entry) => entry.name === call.server);
+            if (!server?.command) throw new Error(`Fixture MCP server unavailable: ${call.server}`);
+            const text = await driveMcp({ command: server.command, args: server.args, env: server.env },
+              [{ name: call.name, args: () => call.arguments }], true);
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: {
+              sessionUpdate: "agent_message_chunk", content: { text: `${call.name}: ${text}\n` },
+            } } });
+          }
+          complete();
+        })().catch((error) => out({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: String(error) } }));
         return;
       }
       if (mode === "ask-peer" && agentsMcp) {

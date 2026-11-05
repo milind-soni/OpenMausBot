@@ -201,8 +201,18 @@ describe("preview stream downloads, uploads and messages", () => {
     FakeSocket.current.closeWith(4404, "gone");
     expect(onGone).toHaveBeenCalledOnce();
     createPreviewStreamClient(target, events({ onHostSetup }));
+    FakeSocket.current.closeWith(4503, JSON.stringify({ need: "libraries" }));
+    expect(onHostSetup).toHaveBeenCalledWith({ need: "libraries", command: "sudo openmausbot browser install --with-deps" });
+    // An older server named a command that never existed: the viewer shows the real command, or the steps.
+    createPreviewStreamClient(target, events({ onHostSetup }));
     FakeSocket.current.closeWith(4503, JSON.stringify({ need: "libraries", command: "sudo openmausbot browser setup" }));
-    expect(onHostSetup).toHaveBeenCalledWith({ need: "libraries", command: "sudo openmausbot browser setup" });
+    expect(onHostSetup).toHaveBeenLastCalledWith({ need: "libraries", command: "sudo openmausbot browser install --with-deps" });
+    createPreviewStreamClient(target, events({ onHostSetup }));
+    FakeSocket.current.closeWith(4503, JSON.stringify({ need: "sandbox", command: "sudo openmausbot browser setup" }));
+    expect(onHostSetup).toHaveBeenLastCalledWith({ need: "sandbox" });
+    createPreviewStreamClient(target, events({ onHostSetup }));
+    FakeSocket.current.closeWith(4503, "not json");
+    expect(onHostSetup).toHaveBeenLastCalledWith({ need: "sandbox" });
     createPreviewStreamClient(target, events({ onUnauthorized }));
     FakeSocket.current.closeWith(1006, "", false);
     expect(onUnauthorized).toHaveBeenCalledOnce();

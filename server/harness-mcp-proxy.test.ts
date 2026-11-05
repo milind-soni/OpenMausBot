@@ -27,7 +27,7 @@ beforeAll(async () => {
   url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 });
 afterAll(async () => { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); });
-const connection = (kind: "browser" | "computer" | "data" | "highlevel" | "device" = "browser") => ({ url, token: "scoped-capability", kind });
+const connection = (kind: "browser" | "computer" | "data" | "highlevel" | "email" | "device" = "browser") => ({ url, token: "scoped-capability", kind });
 const frame = (method: string, params: unknown = {}) => ({ jsonrpc: "2.0", id: 1, method, params });
 
 describe("harness MCP capability proxy", () => {

@@ -11,14 +11,15 @@ import type { BotBodyId } from "./bot-body.ts";
 import type { ReplyStyle } from "./reply-style.ts";
 import type { CredentialTargetId, CUSTOM_SECRET_TARGET, SecretDelivery } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts"; import type { DefaultBotFields, HelperIntroField } from "./default-bot.ts";
-import type { SetupCardFields } from "./setup-card.ts"; import type { BugReportField } from "./devs-report-status.ts"; import type { BotAccessFields } from "./bot-access.ts";
+import type { SetupCardFields } from "./setup-card.ts"; import type { BugReportField } from "./devs-report-status.ts"; import type { AccessRequestCardField, BotAccessFields } from "./bot-access.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts"; import type { SavedStepsMark } from "./saved-steps.ts";
 import type { WebhookRequestCardData } from "./webhook-request.ts"; import type { WaitCardField, WaitLineField } from "./wait-request.ts"; import type { ComputerAskField } from "./computer-ask.ts";
 import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTriggerService } from "./app-triggers.ts";
 import type { ProfileRequestCardData } from "./profile-request.ts";
 import type { PlaceRow } from "./place-view.ts";
 import type { ModelRequestCardData } from "./model-request.ts";
-import type { SkillRequestCardData } from "./skill-request.ts";
+import type { ConnectorCardData } from "./connector-card.ts"; import type { McpChangeRequest } from "./mcp-request.ts";
+import type { SkillRequestCardData } from "./skill-request.ts"; import type { OutsideWriteCardField } from "./outside-write.ts";
 import type { QuestionRequestCardData } from "./ask-question.ts";
 import type { AutomationLine, RoutineRunCardData } from "./routine-run.ts";
 import type { WidgetPayload } from "./widget.ts";
@@ -31,7 +32,10 @@ import type { WebhookAttempt, WebhookTrigger } from "./webhooks.ts";
 import type { PublishedPageCard } from "./published-page.ts";
 import type { InboxItem, InboxTask } from "./inbox.ts";
 import type { LiveCallRecord, LiveCallState } from "./live-call-wire.ts";
-export type { LiveCallRecord, LiveCallState, LiveCallStatus, LiveClient, LiveEndReason, LiveKeySource, LiveSettings } from "./live-call-wire.ts";
+/** What a team bot's main chat is called, beside each person's own chats. */
+export const SHARED_CHAT_TITLE = "Shared chat";
+
+export type { LiveCallRecord, LiveCallState, LiveCallStatus, LiveClient, LiveEndReason, LiveKeySource, LiveProvider, LiveSettings } from "./live-call-wire.ts";
 
 /** Reasoning-effort levels, ascending: a union of what any engine accepts;
  * each driver declares the subset its CLI will take. */
@@ -138,12 +142,15 @@ export interface WireTask extends InboxTask {
   /** The first message already drove a title attempt for this thread, so a
    * later one does not rename a thread the person may have retitled. */
   titleFromFirstMessage?: true;
+  /** Team Cloud only: this is the bot's main chat, everyone's who sees the bot. Its title is SHARED_CHAT_TITLE on every
+   * person's copy, whatever is stored, and it can't be renamed. */
+  sharedChat?: true;
   /** Organizational grouping only; never a directory or provider context. */
   projectId?: string;
-  /** Detached routine execution, reachable through its visible results card. */
-  routineRunId?: string;
-  /** Set when a bot, not a person, opened this thread. */
-  openedBy?: TaskOpenedBy;
+  /** Detached routine execution, reachable through its visible results card. */ routineRunId?: string;
+  /** Work from outside (a webhook, an app's event) reached this conversation: what it starts or runs stays confined, for good. */ outside?: true;
+  /** An outside caller opened this thread through the bot's API, so only it may continue it; such a thread is outside too. */ botApi?: true;
+  /** Set when a bot, not a person, opened this thread. */ openedBy?: TaskOpenedBy;
   /** On a team's server: one person's conversation, seen by them alone (never by another member or an admin). */
   private?: true;
   /** Set by close_thread; absent while the thread is open. */
@@ -191,7 +198,7 @@ export interface WireTask extends InboxTask {
   /** Prompt-cache keep-warm status for this thread, derived at projection;
    * absent when no window is open. */
   cacheKeepWarm?: CacheKeepWarmStatus;
-  /** the folder this task's turns run in, pinned on its first turn. */
+  /** the folder this task's turns run in, pinned on its first turn; one in its own folder moves to its bot's working folder. */
   cwd?: string | null;
   /** Set me up was pressed here (server/setup-request.ts): the person's next line in this conversation runs as a
    * setup request. Server-owned; a client only shows it. `by`: who pressed, where several people share the place (their
@@ -317,7 +324,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   /** This bot's own SSH config alias for its managed VPS computer; absent
    * means the default server from Settings → API keys. */
   vpsAlias?: string;
-  /** where NEW tasks run their shell tools; absent = home folder. */
+  /** where its tasks run their tools; absent = each task's own folder. Its .claude/settings.json (else the bot folder's) applies in all. */
   cwd?: string;
   /** Auto mode: the bot approves its own tool permissions. */
   autoApprove?: boolean;
@@ -497,9 +504,11 @@ export interface WireMessage extends HelperIntroField, SetupCardFields, WaitLine
   call?: LiveCallRecord;
   /** activity messages: tool name + outcome. */
   tool?: {
-    name: string; ok?: boolean; spoken?: string; setup?: boolean; terminal?: boolean; summary?: string; input?: string; output?: string;
+    name: string; ok?: boolean; spoken?: string; setup?: boolean; terminal?: boolean; summary?: string; input?: string; output?: string; clipped?: boolean;
     /** What the call works on, as its live status said it: the chip's and the "Now" card's specific words. `whose`: the person whose own app or MCP server the call used. */
     step?: import("./turn-progress.ts").LiveStep; whose?: { person: string; app: string };
+    /** Words the harness wrote for what the call did, shown in place of `name`; `name` stays the tool's own. */
+    label?: string;
     /** error rows: the installed Claude Code is too old for the model, and
      * the UI can offer to update it in place. notice rows: `rescue`, a turn that heard nothing from its AI for a while. */
     claudeUpdate?: boolean; rescue?: import("./first-reply-rescue.ts").FirstReplyRescue;
@@ -507,6 +516,8 @@ export interface WireMessage extends HelperIntroField, SetupCardFields, WaitLine
     place?: PlaceRow;
     /** error rows: epoch ms when the usage limit that stopped the turn resets. */
     limitResetsAt?: number;
+    /** error rows: the reply came back; only a step the turn ran failed or wasn't allowed. */
+    partial?: boolean;
     /** Provider item identity, scoped to the owning turn. */
     itemId?: string;
     /** Whether the harness captured the full redacted result. Private
@@ -645,7 +656,8 @@ export function nextOpenThread<T extends OpenThreadCandidate>(tasks: readonly T[
   return [listed, open, own].map((candidates) => orderedThreadList(candidates)[0]).find((task) => task !== undefined);
 }
 
-export interface OptionCardData extends WaitCardField, ComputerAskField {
+export interface OptionCardData extends WaitCardField, ComputerAskField, AccessRequestCardField, OutsideWriteCardField {
+  /** The harness asks the owner to let this line of theirs use the lent computer (server/host/lending-lifts.ts). */ lendingLift?: { requestMessageId: string; memoryToken?: string; outside?: true; botOpened?: true; allowedAt?: number };
   /** calls: one per outbound call the card covers, in subtitle order. */
   outboundRequest?: { tool: string; app: string | null; calls?: Array<{ app: string | null; label: string }> };
   /** `revision`: the entry as it applied without a person, so Undo can tell it changed since. */
@@ -700,6 +712,8 @@ export interface OptionCardData extends WaitCardField, ComputerAskField {
   /** A durable default-model proposal (propose_model). */
   modelRequest?: ModelRequestCardData;
   teamSetupRequest?: TeamSetupRequest;
+  /** A bot's MCP server change waiting on the person (Ask, Edits or Auto). */
+  mcpRequest?: McpChangeRequest;
   /** A durable learned-skill proposal. */
   skillRequest?: SkillRequestCardData;
   /** A provider's structured question set. */
@@ -719,24 +733,6 @@ export interface QuotaSwitchCardData {
   rootId?: string;
 }
 
-export interface ConnectorCardData {
-  /** Composio toolkit slug. It is validated server-side before every action. */
-  slug: string;
-  label: string;
-  description: string;
-  status: "required" | "authorizing" | "connected" | "failed";
-  /** Cards created by one agent request resume together after all connect. */
-  resumeKey: string;
-  /** Account alias supplied by the agent when adding a second account. */
-  alias?: string;
-  error?: string;
-  dismissed?: boolean;
-  resumed?: boolean;
-  /** Stop ended the turn this card paused: it offers no action, and a
-   * connection made afterwards is kept but continues nothing. */
-  stopped?: boolean;
-}
-
 export interface SecretRequestCardData {
   /** Fixed allowlisted credential id, never a config path; CUSTOM_SECRET_TARGET: a secret the bot names, kept off Settings. */
   target: CredentialTargetId | typeof CUSTOM_SECRET_TARGET;
@@ -744,8 +740,8 @@ export interface SecretRequestCardData {
   description: string;
   placeholder: string;
   helpUrl: string;
-  /** A custom secret's use the person agrees to: "ref", OpenMausBot's own tools only; "file", the bot's commands. */
-  delivery?: SecretDelivery;
+  /** A custom secret's use: "ref", OpenMausBot's own tools only; "file", the bot's commands; "email", the Email connector, never a bot. */ delivery?: SecretDelivery | "email";
+  /** An email card: the mailbox it is for, when known; off a phone the person can change it on the card. */ address?: string;
   /** A custom secret: the bot's own words on why; `description` adds what the bot may do with it, and helpUrl is empty. */
   reason?: string;
   /** A file secret's Local VM target key, when the asking turn ran in one. */
@@ -830,6 +826,8 @@ export interface GroupTask {
   /** This conversation's own turn limit: whole minutes a turn may go without progress. Absent uses
    * the global group turn limit. Direct chats do not use this limit. */
   turnTimeoutMinutes?: number;
+  /** Epoch ms when the person archived this thread; absent while it is in the list. */ archivedAt?: number;
+  /** A card in this thread waits on the person, with no turn running. */ activity?: "waiting-on-you";
   /** Epoch ms of the newest message, or createdAt when the thread has none. */
   updatedAt?: number;
   lastThreadOrderAt?: number;
@@ -934,7 +932,7 @@ export type SteerQueueReason = "capacity" | "group-turn";
 
 /** Pending steer-queue chips, as `queuedSteerSnapshot` emits them and the
  * `bot.queued` frame carries them: threadId → queued items. */
-export type BotQueuedMessages = Record<string, Array<{ queueId: string; text: string; reason?: SteerQueueReason }>>;
+export type BotQueuedMessages = Record<string, Array<{ queueId: string; text: string; reason?: SteerQueueReason; /** The reason in plain words, shown as it is. */ why?: string }>>;
 
 /** Skills library browse surface: one row per library entry, with the bots
  * currently assigned to it. Version is null for locally imported skills. */
@@ -981,6 +979,8 @@ export type ServerFrame =
   | { kind: "app-trigger.deleted"; triggerId: string }
   | { kind: "app-trigger.service"; service: AppTriggerService }
   | { kind: "runtime"; event: RuntimeEvent }
+  /** An MCP server was added, changed or removed: a list of them is stale. */
+  | { kind: "mcp.changed" }
   /** `surface` names what the frame shows: the bot's desktop (`computer`) or its built-in browser. */
   | { kind: "screen"; botId: string; threadId: string; png: string; mime?: string; surface?: "browser" | "computer" }
   /** A bot's computer is being set up or woken for a turn; the chat shows
