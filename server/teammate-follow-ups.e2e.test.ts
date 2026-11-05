@@ -261,7 +261,7 @@ it("P1 lets Clive, as Mira's Chief, answer for the person the question she asks 
   expect(f.given("C-ANSWER")).toContain(PERSON_QUESTION);
   const [sent] = f.replies("C-ANSWER");
   expect(sent.receipts).toEqual([expect.objectContaining({ outcome: "injected", threadId: chat, detail: expect.stringContaining(`answered its question "${PERSON_QUESTION}" for the person`) })]);
-  expect(sent.message, "an answer alone hands no work out, so Clive continues and tells the person").toContain("Answered for the person. Nothing comes back and nothing resumes you");
+  expect(sent.message, "an answer alone hands no work out, so Clive continues and tells the person").toContain("Answered for the person. Nothing from this call comes back or resumes you");
   await expect.poll(async () => (await f.messages(chat)).some((message: any) => message.role === "bot" && String(message.text).startsWith("P1-RESULT")), { timeout: 30_000 }).toBe(true);
   const result = (await f.messages(chat)).find((message: any) => String(message.text).startsWith("P1-RESULT")).text as string;
   expect(result).toContain("@Clive answered for the person");
