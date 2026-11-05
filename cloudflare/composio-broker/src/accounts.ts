@@ -179,17 +179,23 @@ export async function revokeAccount(request: Request, env: Env, ctx: Pick<Execut
   return json({ revoked: true, installations }, 202);
 }
 
-/** Deletes at Composio the sign-ins of the four oldest revoked accounts not yet cleared, with at most `budget` requests:
- *  the Workers free plan allows 50 subrequests per invocation, and the hourly sweep may take 40. One page of 50 per
- *  account, so a listing costs exactly one; an account with more is finished over later runs. */
+/** Deletes at Composio the sign-ins of four revoked accounts not yet cleared, the ones tried longest ago first, with at
+ *  most `budget` requests: the Workers free plan allows 50 subrequests per invocation, and the hourly sweep may take 40.
+ *  One page of 50 per account, so a listing costs exactly one; an account with more is finished over later runs. */
 export async function clearRevokedAccounts(env: Env, now = Date.now(), budget = 8) {
-  // Before migration 0006 there is no revoked_accounts table, and the hourly run beside this must still finish.
-  const { results } = await env.DB.prepare("SELECT account_id FROM revoked_accounts WHERE cleared_at IS NULL ORDER BY revoked_at LIMIT 4")
-    .all<{ account_id: string }>().catch(() => ({ results: [] }));
+  const { results } = await env.DB.prepare(
+    "SELECT account_id FROM revoked_accounts WHERE cleared_at IS NULL ORDER BY COALESCE(attempted_at, 0), revoked_at LIMIT 4",
+  ).all<{ account_id: string }>().catch((error: unknown) => {
+    const why = error instanceof Error ? error.message : String(error);
+    // Before migration 0006 there is no revoked_accounts table, and the hourly run beside this must still finish.
+    if (!why.includes("no such table")) console.warn(JSON.stringify({ message: "revoked account cleanup failed", status: null, error: why }));
+    return { results: [] };
+  });
   for (const { account_id: accountId } of results) {
     if (budget < 1) return;
     const failed = (status: number | null) => console.warn(JSON.stringify({ message: "revoked account cleanup failed", accountId, status }));
     try {
+      await env.DB.prepare("UPDATE revoked_accounts SET attempted_at = ? WHERE account_id = ?").bind(now, accountId).run();
       budget -= 1;
       const listed = await composioRequest(env, `/connected_accounts?${new URLSearchParams({ limit: "50", user_ids: accountUser(accountId) })}`);
       if (!listed.ok) {

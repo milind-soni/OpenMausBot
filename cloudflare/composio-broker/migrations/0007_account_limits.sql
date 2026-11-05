@@ -12,3 +12,5 @@ CREATE TABLE account_links (
   minted_at INTEGER NOT NULL,
   PRIMARY KEY (account_id, toolkit)
 );
+-- The installations acting as a user shared with them, which a revoke disables along with the account's phones.
+CREATE INDEX installations_shared_user_idx ON installations(shared_user_id) WHERE shared_user_id IS NOT NULL;

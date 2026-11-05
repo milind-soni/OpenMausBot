@@ -42,8 +42,9 @@ export async function shareUser(request: Request, installation: InstallationRow,
   const target = parsed.data.for;
   if (target === installation.id) return json({ error: "an installation already reaches its own connected apps" }, 400);
   if (await limited(installation, env)) return json({ error: "too many connected-app requests" }, 429);
-  // A free MausBot account's apps reach only a paid Cloud, which brings its own allowance.
-  const cloudOnly = installation.account_id ? " AND cloud_machine_id IS NOT NULL" : "";
+  // A free MausBot account's apps reach only a paid Cloud, which brings its own allowance, whether a bound phone or a
+  // Cloud that adopted the account's user shares them.
+  const cloudOnly = actingUser(installation).startsWith("omb_acct_") ? " AND cloud_machine_id IS NOT NULL" : "";
   const exists = await env.DB.prepare(`SELECT id FROM installations WHERE id = ? AND disabled_at IS NULL${cloudOnly}`).bind(target).first<{ id: string }>();
   if (!exists && cloudOnly) {
     return json({ error: "A MausBot account's connected apps can be shared only with a MausBot Cloud.", code: "cloud_only" }, 403);
@@ -69,6 +70,7 @@ export async function shareUser(request: Request, installation: InstallationRow,
 export async function adoptSharedUser(request: Request, installation: InstallationRow, env: Env, now = Date.now()): Promise<{ ok: boolean; response: Response }> {
   const refuse = (response: Response) => ({ ok: false, response });
   const accountBound = () => refuse(json({ error: "This installation's connected apps follow its MausBot account.", code: "account_bound" }, 409));
+  const noLongerValid = () => refuse(json({ error: "This sharing code is no longer valid." }, 404));
   if (installation.account_id) return accountBound();
   const parsed = adoptSchema.safeParse(await readJsonBody(request, 1024));
   if (!parsed.success) return refuse(json({ error: "send {code}" }, 400));
@@ -76,7 +78,7 @@ export async function adoptSharedUser(request: Request, installation: Installati
   const share = await env.DB.prepare(
     "DELETE FROM user_shares WHERE code_hash = ? AND for_installation = ? RETURNING composio_user_id, expires_at",
   ).bind(await sha256(parsed.data.code), installation.id).first<{ composio_user_id: string; expires_at: number }>();
-  if (!share || share.expires_at < now) return refuse(json({ error: "This sharing code is no longer valid." }, 404));
+  if (!share || share.expires_at < now) return noLongerValid();
   if (share.composio_user_id === actingUser(installation)) {
     return { ok: true, response: json({ shared: true, user: await userDigest(installation) }) };
   }
@@ -91,11 +93,15 @@ export async function adoptSharedUser(request: Request, installation: Installati
     const toolkits = [...new Set(active.map((account) => account.toolkit?.slug?.toLowerCase() ?? "").filter(Boolean))].sort();
     return refuse(json({ error: "This installation has connected apps of its own.", code: "has_connections", toolkits }, 409));
   }
-  // Before migration 0006 the row has no account_id column. With it, a bind since this request was authenticated wins.
-  const unbound = "account_id" in installation ? " AND account_id IS NULL" : "";
-  const saved = await env.DB.prepare(`UPDATE installations SET shared_user_id = ?, session_id = NULL WHERE id = ?${unbound}`)
+  // Before migration 0006 the row has no account_id column. With it, a bind since this request was authenticated wins,
+  // and so does a revoke of the shared account's user, in the same statement, so nothing adopts a deleted account.
+  const revoked = "SELECT 1 FROM revoked_accounts r WHERE 'omb_acct_' || r.account_id = ?1";
+  const unbound = "account_id" in installation ? ` AND account_id IS NULL AND NOT EXISTS (${revoked})` : "";
+  const saved = await env.DB.prepare(`UPDATE installations SET shared_user_id = ?1, session_id = NULL WHERE id = ?2${unbound}`)
     .bind(share.composio_user_id, installation.id).run();
-  if (!saved.meta.changes) return accountBound();
+  if (!saved.meta.changes) {
+    return await env.DB.prepare(revoked).bind(share.composio_user_id).first() ? noLongerValid() : accountBound();
+  }
   const adopted = { ...installation, shared_user_id: share.composio_user_id };
   return { ok: true, response: json({ shared: true, user: await userDigest(adopted) }) };
 }

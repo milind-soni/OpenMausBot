@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { accountToolCallRefusal, clearRevokedAccounts, presentAccountGrant, reserveAppLink, revokeAccount, verifyAccountGrant } from "./accounts";
 import { DAY_MS, utcDay, utf8, type InstallationRow } from "./common";
 import worker, { createSession } from "./index";
-import { adoptSharedUser } from "./sharing";
+import { adoptSharedUser, shareUser } from "./sharing";
 import { accountGrant, brokerHarness, CLOUD_GRANT_SECRET, cloudGrant, message, type Installation } from "./test-harness";
 
 let h: ReturnType<typeof brokerHarness>;
@@ -175,6 +175,19 @@ describe("a phone's installation bound to its MausBot account", () => {
     expect((await post(cloud, "/v1/installation/adopt", { code: await share(phone, cloud) })).status).toBe(200);
     expect((await me(cloud)).user).toBe((await me(phone)).user);
     expect((await mcpCall(cloud)).accounts).toHaveLength(1);
+  });
+
+  it("keeps a Cloud that adopted an account's apps from sharing them on with anything but a Cloud", async () => {
+    harness();
+    const phone = await h.install(), cloud = await h.install(), desktop = await h.install(), cloud2 = await h.install();
+    await h.bind(phone, ACCOUNT);
+    await asCloud(cloud); await asCloud(cloud2);
+    expect((await post(cloud, "/v1/installation/adopt", { code: await share(phone, cloud) })).status).toBe(200);
+    const refused = await post(cloud, "/v1/installation/share", { for: desktop.id });
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: "A MausBot account's connected apps can be shared only with a MausBot Cloud.", code: "cloud_only" });
+    expect(h.d1.rows("SELECT * FROM user_shares")).toEqual([]);
+    expect((await post(cloud2, "/v1/installation/adopt", { code: await share(cloud, cloud2) })).status).toBe(200);
   });
 
   it("refuses a grant that outlives the Admin's 24 hours by more than 300 s", async () => {
@@ -488,7 +501,7 @@ describe("a deleted MausBot account", () => {
     harness();
     const phone = await h.install(), cloud = await h.install(), desktop = await h.install(), other = await h.install();
     await h.bind(phone, ACCOUNT);
-    await asCloud(cloud);
+    for (const owner of [cloud, desktop, other]) await asCloud(owner);
     expect((await post(cloud, "/v1/installation/adopt", { code: await share(phone, cloud) })).status).toBe(200);
     expect((await post(desktop, "/v1/installation/adopt", { code: await share(cloud, desktop) })).status).toBe(200);
     const gmail = h.account(h.accountOwner(ACCOUNT), "gmail");
@@ -518,7 +531,7 @@ describe("a deleted MausBot account", () => {
     delete unsigned.headers["x-omb-revoke-signature"];
     for (const init of [unsigned, revokeInit(ACCOUNT, now - 301), revokeInit(ACCOUNT, now + 301), revokeInit(ACCOUNT, now, CLOUD_GRANT_SECRET, OTHER),
       revokeInit(ACCOUNT, now, "other-secret"), { ...revokeInit(ACCOUNT), body: JSON.stringify({ accountId: ACCOUNT, extra: 1 }) },
-      { ...revokeInit(ACCOUNT), body: "not json" }, revokeInit("a")]) {
+      { ...revokeInit(ACCOUNT), body: "not json" }, revokeInit("a"), { ...revokeInit(ACCOUNT), body: JSON.stringify({ accountId: ACCOUNT }) + " ".repeat(1024) }]) {
       const refused = await h.fetch("/v1/accounts/revoke", init);
       expect(refused.status).toBe(401);
       expect(await refused.json()).toEqual({ error: "unauthorized" });
@@ -552,22 +565,104 @@ describe("a deleted MausBot account", () => {
     expect(h.d1.rows("SELECT cleared_at FROM revoked_accounts")).toEqual([{ cleared_at: expect.any(Number) }]);
   });
 
-  it("spends at most 8 Composio requests a run on the four oldest revoked accounts it has not cleared", async () => {
+  it("spends at most 8 Composio requests a run on four revoked accounts, the ones tried longest ago first", async () => {
     harness();
     for (const [index, accountId] of ["acct_e", "acct_d", "acct_c", "acct_b", "acct_a"].entries()) {
       h.d1.db.prepare("INSERT INTO revoked_accounts (account_id, revoked_at) VALUES (?, ?)").run(accountId, 5 - index);
     }
     for (let app = 0; app < 10; app += 1) h.account(h.accountOwner("acct_a"), `app${app}`);
     const cleared = () => h.d1.rows<{ account_id: string }>("SELECT account_id FROM revoked_accounts WHERE cleared_at IS NOT NULL ORDER BY account_id").map((row) => row.account_id);
-    await clearRevokedAccounts(h.env as never);
-    expect(h.composio.calls).toHaveLength(8);
+    const run = (at: number) => clearRevokedAccounts(h.env as never, at);
+    await run(1_000);
+    expect(h.composio.calls).toHaveLength(8);              // the oldest: 1 listing + 7 deletes
     expect(h.composio.accounts).toHaveLength(3);
-    await clearRevokedAccounts(h.env as never);
-    expect(h.composio.calls).toHaveLength(15);
+    await run(2_000);                                       // it goes to the back
+    expect(h.composio.calls).toHaveLength(12);
+    expect(cleared()).toEqual(["acct_b", "acct_c", "acct_d", "acct_e"]);
+    expect(h.composio.accounts).toHaveLength(3);
+    await run(3_000);
+    expect(h.composio.calls).toHaveLength(16);
     expect(h.composio.accounts).toEqual([]);
-    expect(cleared()).toEqual(["acct_b", "acct_c", "acct_d"]);
-    await clearRevokedAccounts(h.env as never);
+    await run(4_000);
     expect(cleared()).toEqual(["acct_a", "acct_b", "acct_c", "acct_d", "acct_e"]);
+  });
+
+  it("keeps an account uncleared while Composio fails to delete its sign-ins, and logs the status", async () => {
+    harness();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    h.d1.db.prepare("INSERT INTO revoked_accounts (account_id, revoked_at) VALUES (?, ?)").run(ACCOUNT, 1);
+    const gmail = h.account(h.accountOwner(ACCOUNT), "gmail");
+    h.composio.fail(500, (call) => call.method === "DELETE");
+    await clearRevokedAccounts(h.env as never);
+    expect(h.composio.accounts.map((account) => account.id)).toEqual([gmail]);
+    expect(h.d1.rows("SELECT cleared_at FROM revoked_accounts")).toEqual([{ cleared_at: null }]);
+    expect(warn.mock.calls.map(([line]) => JSON.parse(String(line)))).toEqual([{ message: "revoked account cleanup failed", accountId: ACCOUNT, status: 500 }]);
+    await clearRevokedAccounts(h.env as never);
+    await clearRevokedAccounts(h.env as never);
+    expect(h.composio.accounts).toEqual([]);
+    expect(h.d1.rows("SELECT cleared_at FROM revoked_accounts")).toEqual([{ cleared_at: expect.any(Number) }]);
+  });
+
+  it("finishes deleting a revoked account's sign-ins even when the rest of the hourly run fails", async () => {
+    harness();
+    h.d1.db.prepare("INSERT INTO revoked_accounts (account_id, revoked_at) VALUES (?, ?)").run(ACCOUNT, 1);
+    h.account(h.accountOwner(ACCOUNT), "gmail");
+    h.env.DB.batch = async () => { throw new Error("D1 is down"); };
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return h.composio.fetchImpl(input, init);
+    });
+    await expect(cron()).rejects.toThrow("D1 is down");
+    expect(h.composio.accounts).toEqual([]);
+  });
+
+  it("logs a cleanup that can't read its revoked accounts", async () => {
+    harness();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const prepare = h.env.DB.prepare;
+    h.env.DB.prepare = (sql: string) => sql.includes("FROM revoked_accounts WHERE cleared_at IS NULL")
+      ? { ...prepare(sql), all: async () => { throw new Error("D1_ERROR: database is locked"); } } as never
+      : prepare(sql);
+    await clearRevokedAccounts(h.env as never);
+    expect(warn.mock.calls.map(([line]) => JSON.parse(String(line))))
+      .toEqual([{ message: "revoked account cleanup failed", status: null, error: "D1_ERROR: database is locked" }]);
+  });
+
+  it("refuses an adopt of the account's user once the account is revoked, even while the adopt waits on Composio", async () => {
+    harness();
+    const phone = await h.install(), cloud = await h.install();
+    await h.bind(phone, ACCOUNT);
+    await asCloud(cloud);
+    const code = await share(phone, cloud);
+    let revokeDuringWait = true;
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      if (revokeDuringWait && String(input).includes(`user_ids=${cloud.userId}`)) {
+        revokeDuringWait = false;
+        expect(await (await h.fetch("/v1/accounts/revoke", revokeInit(ACCOUNT))).json()).toEqual({ revoked: true, installations: 1 });
+      }
+      return h.composio.fetchImpl(input, init);
+    });
+    const adopted = await post(cloud, "/v1/installation/adopt", { code });
+    expect(revokeDuringWait).toBe(false);
+    expect(adopted.status).toBe(404);
+    expect(await adopted.json()).toEqual({ error: "This sharing code is no longer valid." });
+    expect(h.d1.rows("SELECT shared_user_id, disabled_at FROM installations WHERE id = ?", cloud.id)).toEqual([{ shared_user_id: null, disabled_at: null }]);
+  });
+
+  it("refuses an adopt of a code a phone minted just after its account was revoked", async () => {
+    harness();
+    const phone = await h.install(), cloud = await h.install();
+    await h.bind(phone, ACCOUNT);
+    await asCloud(cloud);
+    const authenticated = h.d1.rows<InstallationRow>("SELECT * FROM installations WHERE id = ?", phone.id)[0]!;
+    expect((await h.fetch("/v1/accounts/revoke", revokeInit(ACCOUNT))).status).toBe(202);
+    const request = new Request("https://broker.test/v1/installation/share", { method: "POST", body: JSON.stringify({ for: cloud.id }) });
+    const minted = await shareUser(request, authenticated, h.env as never);
+    expect(minted.status).toBe(201);
+    const adopted = await post(cloud, "/v1/installation/adopt", { code: ((await minted.json()) as { code: string }).code });
+    expect(adopted.status).toBe(404);
+    expect(await adopted.json()).toEqual({ error: "This sharing code is no longer valid." });
+    expect(h.d1.rows("SELECT shared_user_id FROM installations WHERE id = ?", cloud.id)).toEqual([{ shared_user_id: null }]);
   });
 
   it("takes a sign-in another cleanup run deleted first as deleted", async () => {
@@ -580,13 +675,20 @@ describe("a deleted MausBot account", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it("still expires app events on the hourly run on a database without migration 0006, where nothing can be revoked", async () => {
+  it("answers a revoke 503 and still expires app events on the hourly run on a database without migration 0006", async () => {
     harness(5);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const desktop = await h.install();
+    const refused = await h.fetch("/v1/accounts/revoke", revokeInit(ACCOUNT));
+    expect(refused.status).toBe(503);
+    expect(await refused.json()).toEqual({ error: "service unavailable" });
+    expect(h.background).toEqual([]);
     const { body: trigger } = await h.createTrigger(desktop, h.account(desktop, "gmail"));
     expect((await h.deliver(message(trigger.triggerId, desktop.userId))).status).toBe(200);
     expect(h.queued(desktop.id)).toHaveLength(1);
     await cron(Date.now() + 8 * DAY_MS);
     expect(h.queued()).toEqual([]);
+    expect(warn.mock.calls.filter(([line]) => String(line).includes("revoked account cleanup failed"))).toEqual([]);
   });
 });

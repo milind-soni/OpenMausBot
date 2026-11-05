@@ -802,7 +802,13 @@ export default {
     }
   },
   async scheduled(controller: ScheduledController, env: Env) {
-    await Promise.all([runHourly(env, controller.scheduledTime), clearRevokedAccounts(env, controller.scheduledTime)]);
+    // The cleanup never rejects; awaiting it last keeps a failing hourly run from ending the invocation under it.
+    const cleanup = clearRevokedAccounts(env, controller.scheduledTime);
+    try {
+      await runHourly(env, controller.scheduledTime);
+    } finally {
+      await cleanup;
+    }
   },
 } satisfies ExportedHandler<Env>;
 

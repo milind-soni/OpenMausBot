@@ -47,8 +47,8 @@ Composio --signed POST--> /v1/composio/webhook --> D1 queue per installation <--
 | `GET /v1/events?after=<seq>&wait=<0-25>&limit=<1-50>` + header `x-omb-poller` | installation token | Acks every event at or below `after`, then returns the next events in arrival order, holding up to `wait` seconds. One poller at a time per installation: another `x-omb-poller` gets 409 until the 90 s lease runs out. |
 | `POST /v1/events/test` `{triggerId, data}` | installation token | Queues a synthetic event (`type: "omb.test"`) through the same queue and limits. |
 | `PUT /v1/installation/cloud` `{grant}` | installation token | Marks the installation as a paid Cloud's from an Admin-signed grant. |
-| `POST /v1/installation/share` `{for}` | installation token | A one-time code (10 minutes, only its hash kept) that lets the installation `for` act as this installation's Composio user. An installation bound to a MausBot account shares only with a paid Cloud's installation: any other gets 403 `cloud_only`. |
-| `POST /v1/installation/adopt` `{code}` | installation token | Redeems a code minted for this installation: from then on it acts as that Composio user (`shared_user_id`). Refused with 409 `has_connections` while it has active connected accounts of its own, which stay reachable. An installation bound to a MausBot account gets 409 `account_bound` before the code is read, so the code stays valid; once the code is looked up it is spent, whatever the answer. |
+| `POST /v1/installation/share` `{for}` | installation token | A one-time code (10 minutes, only its hash kept) that lets the installation `for` act as this installation's Composio user. An installation acting as a MausBot account's user (a bound phone, or a Cloud that adopted it) shares only with a paid Cloud's installation: any other gets 403 `cloud_only`. |
+| `POST /v1/installation/adopt` `{code}` | installation token | Redeems a code minted for this installation: from then on it acts as that Composio user (`shared_user_id`). Refused with 409 `has_connections` while it has active connected accounts of its own, which stay reachable. An installation bound to a MausBot account gets 409 `account_bound` before the code is read, so the code stays valid; once the code is looked up it is spent, whatever the answer. A code that shares a deleted MausBot account's user gets 404. |
 | `PUT /v1/installation/account` `{grant}` | installation token | Binds a phone's installation to a MausBot account from an Admin-signed grant. See "Phones signed in to a MausBot account". |
 | `DELETE /v1/installation` | installation token | The installation ends itself (a phone signing out): 200 `{ended: true}`, and its token is refused from then on. A repeat answers the same, and it works after the account grant ran out. The account's sign-ins and other phones are untouched. |
 | `POST /v1/accounts/revoke` `{accountId}` | Admin signature (`CLOUD_GRANT_SECRET`) | Stops a deleted MausBot account everywhere and deletes its sign-ins. See "Phones signed in to a MausBot account". |
@@ -82,6 +82,8 @@ and sharing answers 503 until it is applied.
 | Waiting in the queue | 1,000 events or 20 MB | same |
 | Event `data` stored | 64 KB, then a truncation marker with a preview | same |
 | Kept when not collected | 7 days | same |
+
+A phone bound to a MausBot account gets the Desktop limits.
 
 An event over a limit is answered 200 to Composio, not queued, and counted on
 its trigger (`event_drops`, shown by `GET /v1/triggers`) and in the daily
@@ -128,8 +130,9 @@ const grant = `v1.acct.${accountId}.${installationId}.${exp}.${createHmac("sha25
 | 503 `unsupported` | No `CLOUD_GRANT_SECRET`, or no migration 0006. |
 
 - **24-hour lease.** The Admin mints grants for 24 hours. Once `exp` passes,
-  every route but `GET /v1/me` and `PUT /v1/installation/account` answers 401
-  `grant_expired` until the phone presents a fresh grant. Every bind clears the
+  every route but `GET /v1/me`, `PUT /v1/installation/account` and
+  `DELETE /v1/installation` answers 401 `grant_expired` until the phone
+  presents a fresh grant. Every bind clears the
   stored Session, so the next call creates a fresh one; an MCP client holding
   the old `mcp-session-id` gets one 404 and initializes again.
 - **Three apps.** A free account connects up to 3 apps across all its phones.
@@ -154,10 +157,11 @@ const grant = `v1.acct.${accountId}.${installationId}.${exp}.${createHmac("sha25
 - **No connection management.** A bound phone's Sessions are created with
   `manage_connections: {enable: false}`, so a bot can't connect apps through
   Composio's own tool, past the allowance.
-- **The person's Cloud.** A bound phone shares the account's apps only with an
-  installation that presented a paid Cloud grant (403 `cloud_only`
-  otherwise), which brings its own allowance. A bound installation never
-  adopts another user (409 `account_bound`).
+- **The person's Cloud.** A bound phone, and a Cloud that adopted the
+  account's user, share the account's apps only with an installation that
+  presented a paid Cloud grant (403 `cloud_only` otherwise), which brings its
+  own allowance. A bound installation never adopts another user (409
+  `account_bound`).
 
 #### Revoking a deleted account
 
@@ -183,14 +187,16 @@ queued events, trigger bindings, drop counts and share codes of every
 installation acting as the account's user, and disables those installations:
 the bound phones, and any installation that adopted the account's user through
 a share code. Their next call gets 401, and a grant minted before the deletion
-gets 403 `account_revoked`. The bind is one conditional `UPDATE` that checks
-`revoked_accounts`, so a bind racing the revoke either lands first and is
-disabled by it, or lands after and is refused.
+gets 403 `account_revoked`. The bind and the adopt are each one conditional
+`UPDATE` that checks `revoked_accounts`, so a bind or an adopt of the
+account's user racing the revoke either lands first and is disabled by it, or
+lands after and is refused (403 `account_revoked`, or 404 for the adopt).
 
 After answering, and then on every hourly run, the broker deletes the
 account's sign-ins at Composio (`DELETE /connected_accounts/{id}?revoke_on_delete=true`),
-4 accounts and 8 requests a run, oldest first, until a listing comes back
-empty (`cleared_at`). A Composio outage never holds up the revoke itself: a
+4 accounts and 8 requests a run, until a listing comes back empty
+(`cleared_at`). Each run takes the accounts it tried longest ago first
+(`attempted_at`), so an account that keeps failing goes to the back. A Composio outage never holds up the revoke itself: a
 failure is logged as `{message: "revoked account cleanup failed", accountId,
 status}` and retried on the next run.
 
