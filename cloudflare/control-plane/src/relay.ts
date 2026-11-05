@@ -163,6 +163,16 @@ async function hostIdFor(env: Env, installationId: string): Promise<{ hostId: st
 
 const unavailable = () => errorResponse(503, "relay_unavailable");
 
+let schemaWarned = false;
+/** A Worker deployed before migration 0012 must keep pairing and health working: the relay just stays off. */
+function relaySchemaMissing(): Response {
+  if (!schemaWarned) {
+    schemaWarned = true;
+    console.error(JSON.stringify({ message: "relay tables missing; apply migration 0012", errorCode: "relay_schema" }));
+  }
+  return unavailable();
+}
+
 export async function issueRelayToken(request: Request, env: Env): Promise<Response> {
   const installation = await requireInstallation(request, env);
   const parsed = requestSchema.safeParse(await readBoundedJSON(request).catch(() => null));
@@ -176,17 +186,25 @@ export async function issueRelayToken(request: Request, env: Env): Promise<Respo
   }
   const settings = await readRelaySettings(env);
   if (!settings) return unavailable();
-  const { hostId, blocked } = await hostIdFor(env, installation.installation_id);
+  let host: { hostId: string; blocked: boolean };
+  try {
+    host = await hostIdFor(env, installation.installation_id);
+  } catch (error) {
+    if (error instanceof HTTPError) throw error;
+    return relaySchemaMissing();
+  }
+  const { hostId, blocked } = host;
   const continent = (request as Request & { cf?: { continent?: unknown } }).cf?.continent;
   const region = typeof continent === "string" && /^[A-Z]{2}$/.test(continent) ? continent : null;
   // Counted for every relay-capable desktop, in the rollout or not: the tunnel path retires on these numbers.
-  await env.DB.prepare(
+  const counted = await env.DB.prepare(
     `INSERT INTO relay_adoption (installation_id, app_version, e2e_devices, legacy_devices, continent, updated_at)
      VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(installation_id) DO UPDATE SET
        app_version = excluded.app_version, e2e_devices = excluded.e2e_devices,
        legacy_devices = excluded.legacy_devices, continent = excluded.continent, updated_at = excluded.updated_at`,
-  ).bind(installation.installation_id, parsed.data.appVersion, parsed.data.devices.e2e, parsed.data.devices.legacy, region, now).run();
+  ).bind(installation.installation_id, parsed.data.appVersion, parsed.data.devices.e2e, parsed.data.devices.legacy, region, now).run().then(() => true, () => false);
+  if (!counted) return relaySchemaMissing();
   if (blocked) return unavailable();
   const hostBytes = fromB64u(hostId) as Uint8Array;
   const included = settings.allowInstallations.has(installation.installation_id)
@@ -211,17 +229,23 @@ export type RelayAdoption = {
   installs: number;
 };
 
-let adoptionMemo: { at: number; value: RelayAdoption } | null = null;
+let adoptionMemo: { at: number; value: RelayAdoption | null } | null = null;
+
+/** Test-only. */
+export function forgetRelayAdoption(): void {
+  adoptionMemo = null;
+}
 
 /** Sums only, for /healthz: how far the encrypted connection has replaced the tunnel. Read at most every five
- * minutes per isolate, since desktops call /healthz often. */
-export async function relayAdoption(env: Env, now = Date.now()): Promise<RelayAdoption> {
+ * minutes per isolate, since desktops call /healthz often; a failed read (no migration 0012 yet) is remembered too,
+ * as null, and /healthz leaves the field out. */
+export async function relayAdoption(env: Env, now = Date.now()): Promise<RelayAdoption | null> {
   if (adoptionMemo && now - adoptionMemo.at < ADOPTION_MEMO_MS) return adoptionMemo.value;
   const row = await env.DB.prepare(
     `SELECT COALESCE(SUM(e2e_devices), 0) AS e2e, COALESCE(SUM(legacy_devices), 0) AS legacy, COUNT(*) AS installs
        FROM relay_adoption WHERE updated_at > ?`,
-  ).bind(now - ADOPTION_WINDOW_MS).first<{ e2e: number; legacy: number; installs: number }>();
-  const value = { e2eDevices: row?.e2e ?? 0, legacyDevices: row?.legacy ?? 0, installs: row?.installs ?? 0 };
+  ).bind(now - ADOPTION_WINDOW_MS).first<{ e2e: number; legacy: number; installs: number }>().then((found) => found, () => undefined);
+  const value = row === undefined ? null : { e2eDevices: row?.e2e ?? 0, legacyDevices: row?.legacy ?? 0, installs: row?.installs ?? 0 };
   adoptionMemo = { at: now, value };
   return value;
 }

@@ -1,12 +1,12 @@
 import { env } from "cloudflare:workers";
-import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
+import { applyD1Migrations, createExecutionContext, createScheduledController, waitOnExecutionContext } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
 import vectors from "../../../companion/src/e2e/vectors/v1.json";
 import { createAuth } from "../src/auth";
 import { readConfig } from "../src/config";
 import { createWorker } from "../src/index";
-import { importSigningSeed, mintRelayToken, orderNodes, RELAY_TOKEN_LIMIT, rolloutBucket } from "../src/relay";
+import { forgetRelayAdoption, importSigningSeed, mintRelayToken, orderNodes, RELAY_TOKEN_LIMIT, rolloutBucket } from "../src/relay";
 
 const BASE_URL = "https://auth.openmausbot.test";
 const hex = (text: string) => Uint8Array.from(text.match(/../g)!.map((pair) => Number.parseInt(pair, 16)));
@@ -188,5 +188,53 @@ describe("tunnels for relay-capable desktops", () => {
     ] as const) {
       expect((await call(testEnv, "/v1/installations/self/endpoint", { token: credential, body })).status).not.toBe(409);
     }
+  });
+});
+
+describe("a Worker deployed before migration 0012", () => {
+  it("keeps health, pairing endpoints and the cron working, and the relay off", async () => {
+    const db = env.MIGRATION_DB;
+    const relayMigration = env.TEST_MIGRATIONS.findIndex((migration) => migration.name.startsWith("0012_"));
+    expect(relayMigration).toBeGreaterThan(0);
+    await applyD1Migrations(db, env.TEST_MIGRATIONS.slice(0, relayMigration));
+    const oldEnv = { ...relayEnv({ RELAY_CAPABLE_MIN_VERSION: "0.1.150" }), DB: db } as unknown as Env;
+
+    const now = Date.now();
+    const lookup = b64u(crypto.getRandomValues(new Uint8Array(16)));
+    const credential = `omb_install_${lookup}.${b64u(crypto.getRandomValues(new Uint8Array(32)))}`;
+    const secretHash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential)))]
+      .map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    const installationId = crypto.randomUUID();
+    await db.batch([
+      db.prepare('INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)').bind("old-user", "Old", "old@example.test", now, now),
+      db.prepare("INSERT INTO installations (id, owner_user_id, client_instance_id, display_name, platform, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind(installationId, "old-user", crypto.randomUUID(), "Old computer", "darwin", now, now),
+      db.prepare("INSERT INTO installation_credentials (id, installation_id, lookup_id, secret_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)")
+        .bind(crypto.randomUUID(), installationId, lookup, secretHash, now, now + 3_600_000),
+    ]);
+
+    forgetRelayAdoption();
+    const health = await call(oldEnv, "/healthz", { method: "GET" });
+    expect(health.status).toBe(200);
+    const body = await health.json<Record<string, unknown>>();
+    expect(body).toMatchObject({ ok: true, service: "openmausbot-control-plane" });
+    expect(body).not.toHaveProperty("relayAdoption");
+
+    const token = await ask(oldEnv, credential);
+    expect(token.status).toBe(503);
+    expect(await token.json()).toEqual({ error: "relay_unavailable" });
+
+    const refused = await call(oldEnv, "/v1/installations/self/endpoint", { token: credential, body: { appVersion: "0.1.151", legacyDevices: 0 } });
+    expect(refused.status).toBe(409);
+    for (const body of [{ appVersion: "0.1.151", legacyDevices: 1 }, { appVersion: "0.1.149" }]) {
+      const response = await call(oldEnv, "/v1/installations/self/endpoint", { token: credential, body });
+      expect(response.status).not.toBe(500);
+      expect(await response.json()).not.toEqual({ error: "internal_error" });
+    }
+
+    const ctx = createExecutionContext();
+    worker.scheduled(createScheduledController(), oldEnv, ctx);
+    await waitOnExecutionContext(ctx);
+    expect((await call(oldEnv, "/v1/installations/self", { token: credential, method: "GET" })).status).toBe(200);
   });
 });
