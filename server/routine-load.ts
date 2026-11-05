@@ -3,7 +3,7 @@
 import { z } from "zod";
 
 import type { RoutineRequestOperation } from "../shared/routine-request.ts";
-import { ROUTINE_CHECKS, type RoutineCheck } from "../shared/routines.ts";
+import { ROUTINE_CHECKS, ROUTINE_STEP_LIMITS, type RoutineCheck, type RoutineStep } from "../shared/routines.ts";
 import { ROUTINE_PARTS, type PartPair, type RoutinePart } from "./package-parts.ts";
 import { loadAttachments, loadTimeoutMinutes } from "./routine-attachments.ts";
 import { isRoutineHoldCause } from "./routine-holds.ts";
@@ -59,6 +59,20 @@ export function loadChecks(value: unknown): RoutineCheck[] | undefined {
   return checks.length ? checks : undefined;
 }
 
+/** A routine's steps, checked; throws a sentence the person or bot can act on. */
+export function cleanSteps(value: unknown): RoutineStep[] {
+  const { min, max, instructions: most } = ROUTINE_STEP_LIMITS;
+  if (!Array.isArray(value) || value.length < min || value.length > max) throw new Error(`A routine with steps has ${min} to ${max} of them`);
+  return value.map((step: Partial<RoutineStep> | null, index) => {
+    const botId = typeof step?.botId === "string" ? step.botId.trim() : "";
+    const instructions = typeof step?.instructions === "string" ? step.instructions.trim() : "";
+    if (!botId) throw new Error(`Choose a bot for step ${index + 1}`);
+    if (!instructions || instructions.length > most) throw new Error(`Step ${index + 1} needs instructions of 1 to ${most.toLocaleString("en-US")} characters`);
+    if (step?.check === true && index === 0) throw new Error("The first step can't be a check: there is nothing before it to check");
+    return { botId, instructions, ...(step?.model === "quick" ? { model: "quick" as const } : {}), ...(step?.check === true ? { check: true as const } : {}) };
+  });
+}
+
 /** A routine's checks, access and delivery as it may hold them; a field out of range is left out. */
 export function withCheckFields<T extends Pick<Routine, "target" | "checks" | "access" | "deliver">>(routine: T): T {
   const clean = { ...routine, checks: routine.target === "bot" ? loadChecks(routine.checks) : undefined,
@@ -99,9 +113,10 @@ export function loadRoutine(routine: Routine, now: number): Routine | null {
     checkTrouble: typeof routine.checkTrouble === "string" && routine.checkTrouble ? routine.checkTrouble.slice(0, 300) : undefined,
     wakeAt: instant(routine.wakeAt),
     heldFor: isRoutineHoldCause(routine.heldFor) ? routine.heldFor : undefined,
+    steps: routine.steps === undefined ? undefined : (() => { try { return cleanSteps(routine.steps); } catch { return undefined; } })(),
   };
   delete loaded.failureStreak;
-  return withCheckFields(withoutUndefined(loaded, ["timeoutMinutes", "runOnStartup", "installedPackage", "checkedAt", "checkTrouble", "wakeAt", "heldFor"]));
+  return withCheckFields(withoutUndefined(loaded, ["timeoutMinutes", "runOnStartup", "installedPackage", "checkedAt", "checkTrouble", "wakeAt", "heldFor", "steps"]));
 }
 
 export function loadRun(run: RoutineRun): RoutineRun {

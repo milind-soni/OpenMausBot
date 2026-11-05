@@ -9,7 +9,7 @@ import type { AutomationLine } from "../shared/routine-run.ts";
 import { signInWaits } from "../shared/sign-in-request.ts";
 import { intlLocale } from "./language.ts";
 import { needsInputQuestion } from "./runtime-coordinator.ts";
-import type { RoutineManager, RoutineRun } from "./routines.ts";
+import { runningBotId, type RoutineManager, type RoutineRun } from "./routines.ts";
 import { serverLine } from "./server-lines.ts";
 import type { BotRecord, Message, Store } from "./store.ts";
 import { hostTimeZone } from "./turn-clock.ts";
@@ -221,7 +221,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     const option = message.kind === "options" && Boolean(message.card?.requestId);
     if (message.automation || (!option && message.kind !== "signin" && message.kind !== "connector" && message.kind !== "secret")) return;
     const run = deps.routines()?.runForThread(change.threadId);
-    const target = run?.target === "bot" && store.taskByThread(run.botId, change.threadId)?.routineRunId === run.id ? destination(run) : null;
+    const target = run?.target === "bot" && store.taskByThread(runningBotId(run), change.threadId)?.routineRunId === run.id ? destination(run) : null;
     if (!run || !target) return;
     if (change.type === "message") {
       if (option ? !message.card!.autoApplied : waitingCardText(message)) {
@@ -242,7 +242,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     flush,
     /** A run's turn ended: once the run is complete, its reply becomes one line in the chat it reports to, or nothing. */
     runSettled(run: RoutineRun, turnId?: string): void {
-      if (run.target !== "bot" || run.status !== "completed" || !run.threadId) return;
+      if (run.target !== "bot" || run.status !== "completed" || !run.threadId || run.report?.state === "quiet") return;
       if (run.deliver === "brief") return deps.brief?.(run, turnId);
       const said = turnId ? store.activePath(run.threadId).findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === turnId) : replyOf(run);
       const reply = read(said);

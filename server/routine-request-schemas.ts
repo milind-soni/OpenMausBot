@@ -2,6 +2,7 @@
 import { z } from "zod";
 
 import { normalizeCronSchedule } from "../shared/routine-schedule.ts";
+import { ROUTINE_STEP_LIMITS } from "../shared/routines.ts";
 import type { JsonValue } from "./schema.ts";
 
 export const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
@@ -40,6 +41,13 @@ export const routineToolScheduleSchema = z.discriminatedUnion("type", [
   }).strict(),
 ]);
 
+const toolStepSchema = z.object({
+  botId: z.string().max(128),
+  instructions: z.string().max(ROUTINE_STEP_LIMITS.instructions),
+  model: z.literal("quick").optional(),
+  check: z.literal(true).optional(),
+}).strict();
+
 export const routineToolDefinitionSchema = z.object({
   name: z.string().max(80),
   instructions: z.string().max(20_000),
@@ -50,12 +58,13 @@ export const routineToolDefinitionSchema = z.object({
   continuity: z.boolean().optional(),
   overlap: z.enum(["skip", "queue"]).optional(),
   runOnStartup: z.boolean().optional(),
+  steps: z.array(toolStepSchema).max(20).optional(),
 }).strict();
 
 export const routineToolChangesSchema = routineToolDefinitionSchema
-  .omit({ timeoutMinutes: true })
+  .omit({ timeoutMinutes: true, steps: true })
   .partial()
-  .extend({ timeoutMinutes: z.number().nullable().optional() })
+  .extend({ timeoutMinutes: z.number().nullable().optional(), steps: z.array(toolStepSchema).max(20).nullable().optional() })
   .strict()
   .refine(
   (changes) => Object.values(changes).some((value) => value !== undefined),
@@ -169,6 +178,12 @@ export const storedScheduleChangesSchema = z.discriminatedUnion("type", [
     });
   }
 });
+const storedStepsSchema = z.array(z.object({
+  botId: z.string().min(1).max(128),
+  instructions: z.string().trim().min(1).max(ROUTINE_STEP_LIMITS.instructions),
+  model: z.literal("quick").optional(),
+  check: z.literal(true).optional(),
+}).strict()).min(ROUTINE_STEP_LIMITS.min).max(ROUTINE_STEP_LIMITS.max);
 export const storedDefinitionSchema = z.object({
   name: z.string().trim().min(1).max(80),
   instructions: z.string().trim().min(1).max(20_000),
@@ -179,13 +194,15 @@ export const storedDefinitionSchema = z.object({
   continuity: z.boolean().optional(),
   overlap: z.enum(["skip", "queue"]).optional(),
   runOnStartup: z.boolean().optional(),
+  steps: storedStepsSchema.optional(),
 }).strict();
 export const storedChangesSchema = storedDefinitionSchema
-  .omit({ schedule: true, timeoutMinutes: true })
+  .omit({ schedule: true, timeoutMinutes: true, steps: true })
   .partial()
   .extend({
     schedule: storedScheduleChangesSchema.optional(),
     timeoutMinutes: z.number().int().min(5).max(240).nullable().optional(),
+    steps: storedStepsSchema.nullable().optional(),
   })
   .strict()
   .refine(

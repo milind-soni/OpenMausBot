@@ -1,7 +1,7 @@
 // A routine as a person, a bot or an import asked for it, checked and cleaned before RoutineManager keeps it.
 import { runsOnce } from "../shared/limit-reset.ts";
 import { cleanAttachments, cleanTimeoutMinutes } from "./routine-attachments.ts";
-import { loadChecks } from "./routine-load.ts";
+import { cleanSteps, loadChecks } from "./routine-load.ts";
 import { cleanSchedule } from "./routine-schedules.ts";
 import type { Routine, RoutineInput } from "./routines.ts";
 
@@ -42,6 +42,10 @@ export function sanitizeInput(input: RoutineInput, after: number): Omit<Routine,
   if (checks && (target !== "bot" || runsOnce(schedule))) throw new Error("Checks need a bot routine that repeats");
   if (input.access != null && input.access !== "read-and-draft") throw new Error("Choose read-and-draft access or none");
   if (input.deliver != null && (input.deliver !== "brief" || target !== "bot")) throw new Error("Only a bot routine can deliver to the brief");
+  const steps = input.steps == null || (Array.isArray(input.steps) && input.steps.length === 0) ? undefined : cleanSteps(input.steps);
+  if (steps && (target !== "bot" || checks || input.access != null || input.deliver != null)) {
+    throw new Error("Steps work only on a bot routine without checks, access limits or brief delivery");
+  }
   return {
     name,
     prompt,
@@ -60,5 +64,6 @@ export function sanitizeInput(input: RoutineInput, after: number): Omit<Routine,
     ...(checks ? { checks } : {}),
     ...(input.access === "read-and-draft" ? { access: "read-and-draft" as const } : {}),
     ...(input.deliver === "brief" ? { deliver: "brief" as const } : {}),
+    ...(steps ? { steps } : {}),
   };
 }
