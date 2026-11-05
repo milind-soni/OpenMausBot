@@ -1,15 +1,15 @@
 # iMessage, one Sendblue line of the person's own per MausBot bot
 
 A bot's settings take a Sendblue API key ID and secret and the Sendblue number
-the bot will use. Once Sendblue accepts them (`GET /api/v2/lines/state` lists
+the bot will use. Once Sendblue accepts them (`GET https://api.sendblue.com/api/v2/lines/state` lists
 the number on the account), the server asks Sendblue for new inbound messages
-every four seconds (`GET /api/v2/messages` with `is_outbound=false`, oldest
+every four seconds (`GET https://api.sendblue.com/api/v2/messages` with `is_outbound=false`, oldest
 first, from a saved cursor), so no public address or webhook is needed. The
 person links their own iPhone by texting `link <code>` to that number. Only
 linked numbers are heard, only one-to-one messages (a `group_id` is ignored),
 and a number that is not linked gets no answer at all. Each linked number has
 one thread on the bot, and every finished turn in it goes back as plain text
-from the bot's number (`POST /api/send-message`). The key and secret live
+from the bot's number (`POST https://api.sendblue.com/api/send-message`). The key and secret live
 sealed in `imessage.json` next to an `imessage-key` file, never in `bots.json`,
 and no route returns them. The channel is off on a Team Cloud, and one number
 belongs to one bot.
