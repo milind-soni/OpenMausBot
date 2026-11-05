@@ -353,13 +353,9 @@ the whole catalog in the same change.
 When English copy changes, `pnpm i18n:check` marks the old translation stale.
 Re-translate it from the new English instead of re-accepting it unchanged.
 
-The pt-BR pack is kept complete. `pnpm i18n:check` fails when `pt-br.json`
-misses an English key or holds a value identical to the English one, so a
-missing translation can't hide behind the English fallback. Values with no
-words outside placeholders, such as `{reason}`, pass. `node
-scripts/generate-locale.mjs pt-br` drafts missing and stale keys. When a value
-rightly stays English (a name, a code, or a word both languages share, such as
-“Claude”, “CSV” or “Terminal”), add it as one line to `sameAsEnglish` under
-`pt-br` in `scripts/complete-locales.json`. Otherwise translate it and accept it
-as above. Drafts for pt-BR ask the model for `IA` and the core terms of this
-glossary, but still check each one against it.
+Like every other pack, pt-BR may lag behind English: a missing key reads in
+English until it is translated, and `pnpm i18n:check` doesn't fail on it. To
+catch up, `node scripts/generate-locale.mjs pt-br` drafts missing and stale
+keys; translate or review them and accept them as above. Drafts for pt-BR ask
+the model for `IA` and the core terms of this glossary, but still check each
+one against it.
