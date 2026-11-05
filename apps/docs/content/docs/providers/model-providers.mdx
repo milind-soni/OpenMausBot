@@ -238,6 +238,10 @@ started by OpenMausBot.
 
 The URL must be reachable **from the OpenMausBot server or container**. A
 Tailscale hostname that resolves on your desktop may not resolve in Docker.
+`localhost` and `127.0.0.1` refer to that server or container, not the
+computer displaying the app. If both processes run on the same computer,
+try `127.0.0.1` if the gateway listens only on IPv4. Saving reports network,
+API-key, HTTP and empty-catalog failures separately.
 Check the container's DNS and network route if a connection fails. Codex
 endpoints require HTTPS, with HTTP allowed only on localhost. For a LAN-only
 HTTP proxy, expose HTTPS or use a secure tunnel whose local listener is
