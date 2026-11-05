@@ -216,8 +216,7 @@ describe("V5 yamux codec", () => {
 });
 
 describe("V6 must fail", () => {
-  it.each(v.V6.handshake.map((c: { name: string }) => [c.name, c]))("handshake: %s", (_name, testCase) => {
-    const c = testCase as { side: string; transport: TransportByte; candidates: string[]; message1: string; message2: string };
+  it.each(v.V6.handshake as Array<{ name: string; side: string; transport: TransportByte; candidates: string[]; message1: string; message2: string }>)("handshake: $name", (c) => {
     if (c.side === "computer") {
       expect(computer(c.transport, c.candidates, bytes(c.message1))).toBeNull();
     } else {
@@ -226,8 +225,7 @@ describe("V6 must fail", () => {
     }
   });
 
-  it.each(v.V6.records.map((c: { name: string }) => [c.name, c]))("record: %s", (_name, testCase) => {
-    const c = testCase as { receiver: string; records: string[]; failsAt: number };
+  it.each(v.V6.records as Array<{ name: string; receiver: string; records: string[]; failsAt: number }>)("record: $name", (c) => {
     const keys = v2Sessions();
     const receiver = c.receiver === "computer" ? keys.computer.receive : keys.phone.receive;
     let failedAt = -1;
@@ -242,12 +240,11 @@ describe("V6 must fail", () => {
     expect(failedAt).toBe(c.failsAt);
   });
 
-  it.each(v.V6.frames.map((c: { name: string }) => [c.name, c]))("frame: %s", (_name, testCase) => {
-    expect(() => decodeFrame(bytes((testCase as { hex: string }).hex))).toThrow(YamuxError);
+  it.each(v.V6.frames as Array<{ name: string; hex: string }>)("frame: $name", (c) => {
+    expect(() => decodeFrame(bytes(c.hex))).toThrow(YamuxError);
   });
 
-  it.each(v.V6.sessions.map((c: { name: string }) => [c.name, c]))("session: %s", (_name, testCase) => {
-    const c = testCase as { role: Role; accept?: string; steps: ScriptStep[]; expect: { errorAt?: number; sent?: string[] } };
+  it.each(v.V6.sessions as Array<{ name: string; role: Role; accept?: string; steps: ScriptStep[]; expect: { errorAt?: number; sent?: string[] } }>)("session: $name", (c) => {
     expect(runScript(c.role, c.accept, c.steps)).toEqual(c.expect);
   });
 });
@@ -284,16 +281,14 @@ function runScript(role: Role, accept: string | undefined, steps: ScriptStep[]) 
 }
 
 describe("V7 pairing descriptor", () => {
-  it.each(v.V7.valid.map((c: { name: string }) => [c.name, c]))("accepts %s", (_name, testCase) => {
-    const c = testCase as { value: string; chars: number; parsed: unknown };
+  it.each(v.V7.valid as Array<{ name: string; value: string; chars: number; parsed: unknown }>)("accepts $name", (c) => {
     expect(c.value.length).toBe(c.chars);
     const result = parseDescriptor(c.value);
     expect(result.outcome).toBe("ok");
     if (result.outcome === "ok") expect(result.descriptor).toEqual(c.parsed);
   });
 
-  it.each(v.V7.invalid.map((c: { name: string }) => [c.name, c]))("refuses %s", (_name, testCase) => {
-    const c = testCase as { value: string; outcome: string };
+  it.each(v.V7.invalid as Array<{ name: string; value: string; outcome: string }>)("refuses $name", (c) => {
     expect(parseDescriptor(c.value).outcome).toBe(c.outcome);
   });
 });
@@ -306,8 +301,7 @@ describe("V8 relay token", () => {
     expect(Buffer.from(v.V8.token.split(".")[0], "base64url").toString("utf8")).toBe(v.V8.payloadJson);
   });
 
-  it.each(v.V8.verify.map((c: { name: string }) => [c.name, c]))("verify: %s", (_name, testCase) => {
-    const c = testCase as { token: string; keys: Record<string, string>; now: number; expectHid?: string; ok: boolean; error?: string };
+  it.each(v.V8.verify as Array<{ name: string; token: string; keys: Record<string, string>; now: number; expectHid?: string; ok: boolean; error?: string }>)("verify: $name", (c) => {
     const keys = new Map(Object.entries(c.keys).map(([kid, raw]) => [kid, fromB64u(raw)!]));
     const result = verifyRelayToken(c.token, keys, c.now, c.expectHid);
     expect(result.ok).toBe(c.ok);

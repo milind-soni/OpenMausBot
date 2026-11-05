@@ -93,7 +93,7 @@ export function isPublicKey(bytes: Uint8Array): boolean {
 export function hkdf(chainingKey: Uint8Array, ikm: Uint8Array, outputs: 2 | 3): Buffer[] {
   const temp = hmacSha256(chainingKey, ikm);
   const out: Buffer[] = [];
-  let previous = Buffer.alloc(0);
+  let previous: Buffer = Buffer.alloc(0);
   for (let index = 1; index <= outputs; index += 1) {
     previous = hmacSha256(temp, Buffer.concat([previous, Buffer.from([index])]));
     out.push(previous);

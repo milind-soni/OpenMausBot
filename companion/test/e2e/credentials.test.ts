@@ -20,7 +20,8 @@ describe("base64url", () => {
     const bytes = Buffer.from([0xfb, 0xff, 0x01]);
     expect(fromB64u(b64u(bytes))).toEqual(bytes);
     expect(fromB64u("-_8B")).toEqual(bytes);
-    for (const bad of ["+/8B", "-_8B=", "-_8", "A", "-_ 8B", "AB==", "AR"]) expect(fromB64u(bad), bad).toBeNull();
+    expect(fromB64u("-_8")).toEqual(bytes.subarray(0, 2));
+    for (const bad of ["+/8B", "-_8B=", "-_9", "A", "-_ 8B", "AB==", "AR"]) expect(fromB64u(bad), bad).toBeNull();
   });
 });
 

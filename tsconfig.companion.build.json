@@ -10,5 +10,8 @@
   },
   "include": [
     "companion/src"
+  ],
+  "exclude": [
+    "companion/src/e2e/gen-vectors.ts"
   ]
 }

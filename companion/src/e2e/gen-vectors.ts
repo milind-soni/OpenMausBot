@@ -571,7 +571,7 @@ function v8() {
   const [body, signature] = token.split(".");
   const keys = (entries: Record<string, Buffer>) => new Map(Object.entries(entries));
   const tamperedBody = b64u(Buffer.from(JSON.stringify({ ...claims, iid: "00000000-0000-4000-8000-000000000000" })));
-  const cases = [
+  const cases: Array<{ name: string; token: string; keys: Record<string, Buffer>; now: number; expectHid?: string }> = [
     { name: "valid", token, keys: { k1: publicKey }, now: iat + 60 },
     { name: "valid_two_keys", token, keys: { k2: otherPublic, k1: publicKey }, now: iat + 60 },
     { name: "valid_refresh_same_hid", token, keys: { k1: publicKey }, now: claims.exp - 1, expectHid: claims.hid },
