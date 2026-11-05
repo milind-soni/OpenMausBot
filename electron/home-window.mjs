@@ -72,6 +72,12 @@ export function homeOf({ journal = null, frozenCloud = null, state = null }) {
     : frozenCloud ? { origin: typeof frozenCloud === "string" ? frozenCloud : null, account: null } : null;
   if (!moved) return { kind: "computer" };
   const connected = state?.status === "connected";
+  const signedInNow = state?.account?.id ?? null;
+  // This computer moved to another account's Cloud: its frozen copy stays frozen, and this account's own Cloud is what opens.
+  if (moved.account && signedInNow && moved.account !== signedInNow && state.status !== "signed-out" && state.status !== "connecting") {
+    const own = connected && !state.machine?.hold ? state.machine?.origin ?? null : null;
+    return own && own !== moved.origin ? { kind: "cloud", origin: own, otherAccount: true } : { kind: "signin", other: true };
+  }
   if (connected && state.machine?.hold && (!moved.origin || !state.machine.origin || state.machine.origin === moved.origin)) return { kind: "computer" };
   const signedIn = state?.account?.id ?? null;
   if (!signedIn || state.status === "signed-out" || state.status === "connecting") return { kind: "signin" };

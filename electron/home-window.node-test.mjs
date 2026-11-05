@@ -874,3 +874,14 @@ test("an account leaving: nothing under way for it goes on, and the next show ta
   await here.home.show();
   assert.deepEqual(here.local, [false], "already on this computer's page: nothing moves");
 });
+
+const B_CLOUD = "https://omb-b.fly.dev";
+const accountB = (machine) => ({ status: "connected", account: { id: "acct-2", email: "b@example.test" }, ...(machine ? { machine } : {}) });
+
+test("moved to A's Cloud, B signed in with a Cloud of its own: B's Cloud opens, and A's frozen copy is never shown", () => {
+  assert.deepEqual(homeOf({ journal: done(), state: accountB({ status: "ready", origin: B_CLOUD }) }), { kind: "cloud", origin: B_CLOUD, otherAccount: true });
+  assert.deepEqual(homeOf({ journal: done(), state: accountB(null) }), { kind: "signin", other: true }, "B has no Cloud: the screen says where the bots are");
+  assert.deepEqual(homeOf({ journal: done(), state: accountB({ status: "stopped", hold: { until: 9 } }) }), { kind: "signin", other: true }, "B's Cloud ended: never this computer's frozen copy");
+  assert.deepEqual(homeOf({ journal: done(), state: { status: "unavailable", account: { id: "acct-2" } } }), { kind: "signin", other: true }, "before the Admin answers");
+  assert.deepEqual(homeOf({ journal: done(), state: { status: "reauth-required", account: { id: "acct-2" } } }), { kind: "signin", other: true });
+});

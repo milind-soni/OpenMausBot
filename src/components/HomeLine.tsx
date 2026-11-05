@@ -7,11 +7,12 @@ import { t } from "@/lib/i18n";
 import { setNotificationPlace } from "@/lib/notify";
 import { useStore } from "@/state/store";
 
-type Line = { kind: "left"; name: string } | { kind: "clean" };
+type Line = { kind: "left"; name: string } | { kind: "clean"; saved?: boolean };
 
-/** The words for main's one line: a team this person is no longer in, or that the clean workspace isn't where their bots went. */
+/** The words for main's one line: a team this person is no longer in, or that the clean workspace isn't where their bots went (`saved`: the account they moved with is signed in here too, one click away on the rail). */
 export function homeLineText(line: Line): string {
-  return line.kind === "clean" ? t("homeLine.clean") : t("homeLine.left", { name: line.name });
+  if (line.kind === "clean") return t(line.saved ? "homeLine.cleanSaved" : "homeLine.clean");
+  return t("homeLine.left", { name: line.name });
 }
 
 /** The clean workspace skips the new-user setup, so connecting an AI is offered here while none is ready. Nothing is sent to
