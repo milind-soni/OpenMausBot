@@ -7,7 +7,7 @@ import type { RuntimeEvent } from "../shared/runtime-events.ts";
 import type { RoutineRetryCause } from "../shared/routines.ts";
 import { engineFailureKind } from "./drivers/engine-errors.ts";
 import { classifyError } from "./drivers/retry.ts";
-import type { RoutineRun } from "./routines.ts";
+import type { Routine, RoutineRun } from "./routines.ts";
 import { hostTimeZone } from "./turn-clock.ts";
 import { classifyContinuable } from "./turn-continuation.ts";
 
@@ -204,4 +204,11 @@ export function weekRuns(runs: readonly RoutineRun[], routineId: string, now: nu
     if (run.status === "completed") ok += 1;
   }
   return total ? { ok, total } : undefined;
+}
+
+/** A run its repeating schedule started: not one started by hand or by an event, and not a one-off or limit-reset routine. */
+export function scheduledRecurringRun(run: RoutineRun, routines: readonly Routine[]): boolean {
+  if ((run.triggerSource ?? (run.manual ? "manual" : "schedule")) !== "schedule") return false;
+  const type = routines.find((routine) => routine.id === run.routineId)?.schedule.type;
+  return type !== undefined && type !== "once" && type !== "limit_reset";
 }

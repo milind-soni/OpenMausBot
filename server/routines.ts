@@ -23,7 +23,7 @@ import {
   routineFailure, routineHostWarning, skipNeedsNotice, supersededBy,
 } from "./routine-execution.ts";
 import {
-  dispatchRefusal, engineFacts, loadOwnerNotices, recoverRun, requeueOnce, weekRuns, type RoutineAlert, type RoutineFailureFacts, type RoutineOwnerNotice,
+  dispatchRefusal, engineFacts, loadOwnerNotices, recoverRun, requeueOnce, weekRuns, type RoutineAlert, type RoutineFailureFacts, type RoutineOwnerNotice, scheduledRecurringRun,
 } from "./routine-recovery.ts";
 import { activeMs, askOf, settleAsk, waitingFor, type RoutineRunAsk } from "./routine-waits.ts";
 import { failsLikeLastOutcome, outcomesNewestFirst } from "./routine-outcomes.ts";
@@ -619,9 +619,7 @@ export class RoutineManager {
       if (!clean.access) delete routine.access;
       if (!clean.deliver) delete routine.deliver;
       if (!clean.checks) for (const key of ["checks", "checkedAt", "checkTrouble", "wakeAt"] as const) delete routine[key];
-      if (Object.hasOwn(patch, "timeoutMinutes") && patch.timeoutMinutes == null) {
-        delete routine.timeoutMinutes;
-      }
+      if (Object.hasOwn(patch, "timeoutMinutes") && patch.timeoutMinutes == null) delete routine.timeoutMinutes;
       if (patch.enabled === false) {
         for (const run of this.runs) {
           if (run.routineId !== routine.id || run.status !== "queued") continue;
@@ -1311,8 +1309,7 @@ export class RoutineManager {
     this.failureFacts.delete(run.id);
     if (this.closing) return;
     const held = facts.limit !== undefined || facts.limitResetsAt !== undefined ? facts.limit ?? "engine" : facts.stopReason === "auth_required" ? "signed-out" : undefined, backupReady = held !== undefined && this.options.limitBackup?.(run.botId, held) === true;
-    const skipLimitReplay = this.options.skipLimitReplay?.() === true && this.scheduledRecurringRun(run);
-    const recovery = recoverRun(run, failure, { ...facts, ...(backupReady ? { backupReady } : {}), ...(skipLimitReplay ? { skipLimitReplay } : {}) }, this.now(), this.ownerNotices);
+    const recovery = recoverRun(run, failure, { ...facts, ...(backupReady ? { backupReady } : {}), ...(this.options.skipLimitReplay?.() === true && scheduledRecurringRun(run, this.routines) ? { skipLimitReplay: true } : {}) }, this.now(), this.ownerNotices);
     if (!recovery.queued) this.failRun(Object.assign(run, { partial: (facts.partial && Boolean(run.output)) || undefined }), recovery.error, "failed", recovery.alert);
     else {
       this.saveLater();
@@ -1320,12 +1317,6 @@ export class RoutineManager {
       if (recovery.alert) this.options.onRunDeferred?.(cloneRun(run), recovery.alert);
     }
     queueMicrotask(() => this.tickInBackground());
-  }
-
-  private scheduledRecurringRun(run: RoutineRun): boolean {
-    if ((run.triggerSource ?? (run.manual ? "manual" : "schedule")) !== "schedule") return false;
-    const type = this.routines.find((routine) => routine.id === run.routineId)?.schedule.type;
-    return type !== undefined && type !== "once" && type !== "limit_reset";
   }
 
   finishGoalRun(runId: string, status: GroupGoalRunStatus, detail: string): RoutineRun | null {
