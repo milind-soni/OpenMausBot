@@ -874,6 +874,8 @@ git add server/testing/desktop-parent.mjs server/phone-move-in.e2e.test.ts
 git commit -m "test: a phone's move into its paired computer, end to end and resent"
 ```
 
+After `arrived` the brought bots are closed to the move: the phone never replays profile steps after `arrived`. A resend of the whole move happens before `arrived`.
+
 ## Open questions
 
 1. With no desktop app (a headless companion), the ask answers 409 and no move happens. Fine, or should the control page offer Allow?
