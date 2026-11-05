@@ -2893,6 +2893,8 @@
   "attach.downloading": "Downloading…",
   "attach.downloaded": "Downloaded",
   "attach.showInFolder": "Show in folder",
+  "attach.showInFinder": "Show in Finder",
+  "attach.originalMissing": "The original file was moved or deleted",
   "attach.folderEmpty": "This folder has no files to open here",
   "attach.folderFilesAria": "Files in {name}",
   "attach.folderTruncated": "Only the first files are listed",

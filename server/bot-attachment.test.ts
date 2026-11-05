@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -69,6 +69,8 @@ describe("saveBotAttachment", () => {
     expect(saved.attachment.path.startsWith(ATTACHMENTS_DIR)).toBe(true);
     expect(readFileSync(saved.attachment.path)).toEqual(bytes);
     if (saved.attachment.kind === "file") expect(saved.attachment.name.toLowerCase()).toBe(name.toLowerCase());
+    // The desktop app shows the original in its folder, not the copy.
+    expect(saved.attachment).toMatchObject({ source: realpathSync.native(join(WORK, name)) });
   });
 
   it("reads a file from the VM guest workspace through its host mount", async () => {
@@ -79,7 +81,8 @@ describe("saveBotAttachment", () => {
       roots: [WORK],
       guest: { root: "/home/cua/workspace", host: VM_HOME },
     });
-    expect(saved.attachment).toMatchObject({ kind: "file", mime: "application/pdf", name: "決算書.pdf" });
+    expect(saved.attachment).toMatchObject({ kind: "file", mime: "application/pdf", name: "決算書.pdf",
+      source: realpathSync.native(join(VM_HOME, "reports", "nekoneko.pdf")) });
     expect(readFileSync(saved.attachment.path, "utf8")).toBe("%PDF-1.4 fake");
   });
 
@@ -124,7 +127,7 @@ describe("saveBotAttachment for a file a turn saved outside its folders", () => 
     // Bots on macOS write the URL unencoded; Windows needs a real file URL.
     const href = process.platform === "win32" ? pathToFileURL(source).href : `file://${source}`;
     const saved = await saveBotAttachment({ path: href, roots: [WORK], savedThisTurn: { since, refuse } });
-    expect(saved.attachment).toMatchObject({ kind: "image", mime: "image/jpeg", name: "00_غلاف.jpg" });
+    expect(saved.attachment).toMatchObject({ kind: "image", mime: "image/jpeg", name: "00_غلاف.jpg", source: realpathSync.native(source) });
     expect(saved.attachment.path.startsWith(ATTACHMENTS_DIR)).toBe(true);
     expect(readFileSync(saved.attachment.path, "utf8")).toBe("jpeg-bytes");
     expect(readFileSync(source, "utf8")).toBe("jpeg-bytes");
