@@ -36,7 +36,6 @@
   "hostedMcp.setupFailed": "{service} を追加できませんでした。再読み込みして、もう一度お試しください。",
   "hostedMcp.testFailed": "サインインしましたが、{service} のツールを読み込めませんでした：{reason} もう一度接続してお試しください。",
   "hostedMcp.loadingTools": "サインインしました。{service} のツールを読み込んでいます…",
-  "agentcard.description": "ご自身の Agentcard アカウントで買い物と支払いをします。",
   "agentcard.notice": "Agentcard アカウントでサインインします。API キーは不要です。カードの保管と購入の承認は Agentcard が行い、OpenMausBot はカードの情報を保存しません。Agentcard を使えるボットは、購入やカード情報の表示を含むすべてのツールを呼び出せます。どのボットに使わせるかは「ボットへのアクセス」で選んでください。",
   "highlevel.title": "HighLevel",
   "highlevel.description": "Growablyなど、HighLevelベースのCRMにも対応しています。",
