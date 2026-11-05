@@ -374,14 +374,14 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         <CloudIntent />
       ) : firstRun === "sign-in" ? (
         <CloudEngineSignIn />
-      ) : noEngines ? (
-        <NoEngines />
       ) : chiefStep ? (
         <EmptyChatShell />
       ) : group ? (
         <GroupView key={group.id} group={group} />
       ) : bot ? (
         <ChatView bot={bot} />
+      ) : noEngines ? (
+        <NoEngines />
       ) : (
         <main data-app-loading={loading.text} className="relative flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
           <WindowDragStrip />
