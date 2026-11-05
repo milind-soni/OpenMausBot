@@ -8,6 +8,11 @@ export const LIVE_EVENTS_PATH = "/api/events";
 export const LIVE_EVENTS_STALE_MS = 40_000;
 export const LIVE_EVENTS_RETRY_MIN_MS = 500;
 export const LIVE_EVENTS_RETRY_MAX_MS = 10_000;
+const RETRY_LIVE_EVENTS = "omb:retry-live-events";
+
+export function retryLiveEvents(): void {
+  window.dispatchEvent(new Event(RETRY_LIVE_EVENTS));
+}
 
 export interface LiveFrame {
   kind: string;
@@ -377,6 +382,9 @@ export function openLiveEvents(
   const onVisibilityChange = () => {
     if (platform.isVisible()) recover();
   };
+  const onRetry = () => {
+    if (platform.isVisible() && !cloudAsleep()) reconnectNow(true);
+  };
 
   const onScreenWish = () => queueMicrotask(() => {
     if (source && cursor && !pendingSnapshot && screensWanted() !== sourceScreens) reconnectNow(false);
@@ -388,6 +396,7 @@ export function openLiveEvents(
   const stopPower = onCloudPower((asleep) => { if (!asleep) reconnectNow(false); });
   platform.windowTarget?.addEventListener("online", onOnline);
   platform.windowTarget?.addEventListener("focus", onFocus);
+  platform.windowTarget?.addEventListener(RETRY_LIVE_EVENTS, onRetry);
   platform.documentTarget?.addEventListener("visibilitychange", onVisibilityChange);
 
   return () => {
@@ -400,6 +409,7 @@ export function openLiveEvents(
     closeSource();
     platform.windowTarget?.removeEventListener("online", onOnline);
     platform.windowTarget?.removeEventListener("focus", onFocus);
+    platform.windowTarget?.removeEventListener(RETRY_LIVE_EVENTS, onRetry);
     platform.documentTarget?.removeEventListener("visibilitychange", onVisibilityChange);
   };
 }

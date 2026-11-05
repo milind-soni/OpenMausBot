@@ -476,6 +476,17 @@ describe("sessions", () => {
     expect(readFileSync(blocked, "utf8")).toContain(paired.session.id);
   });
 
+  it("still reduces the in-memory set when persisting a prune fails", () => {
+    pair();
+    clock += SESSION_TTL_MS + 1;
+    const logger = vi.spyOn(console, "error").mockImplementation(() => {});
+    const writes = vi.spyOn(atomic, "writeFileAtomic").mockImplementation(() => { throw new Error("EIO: the session file is unwritable"); });
+    expect(() => registry.list(), "the heartbeat prunes through isLive(), where a throw would exit the process").not.toThrow();
+    expect(registry.list()).toEqual([]);
+    expect(logger.mock.calls.flat().join(" ")).toContain("Could not persist session pruning.");
+    writes.mockRestore();
+  });
+
   it("stores only a hash, owner-only, and reloads from disk", () => {
     const { token, session } = pair();
     const onDisk = readFileSync(file(), "utf8");

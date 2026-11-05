@@ -9,16 +9,21 @@ const short = (names, t) => names.length < 3 ? listed(names, t) : t("native.lend
 
 /** `screen`: computer control's state; while it isn't ready the line says what the Clouds
  * can't use, and `screen` why. */
-export function indicatorText({ clouds, using, paused, screen = null }, device, t = nativeText.englishText.t) {
+/** `waiting`: lent Clouds that haven't accepted this computer yet; they are never said to be able to use it, and
+ * `pending` says who is still being waited for. */
+export function indicatorText({ clouds, using, paused, screen = null, waiting = [] }, device, t = nativeText.englishText.t) {
   const named = device === "computer" ? t("native.lendTray.computer") : device;
   if (paused) return { line: t("native.lendTray.pausedLine", { clouds: listed(clouds, t), device: named }), title: t("native.lendTray.paused"), screen: null };
   const why = screenLine(screen, device, t);
+  const pending = waiting.length ? { pending: t("native.lendTray.waiting", { clouds: listed(waiting, t), device: named }) } : {};
   if (using.length) {
     const key = using.length > 1 ? "native.lendTray.usingMany" : "native.lendTray.usingOne";
-    return { line: t(key, { clouds: listed(using, t), device: named }), title: t(key, { clouds: short(using, t), device: named }), screen: why };
+    return { line: t(key, { clouds: listed(using, t), device: named }), title: t(key, { clouds: short(using, t), device: named }), screen: why, ...pending };
   }
-  const line = t(why ? "native.lendTray.canUseWithoutScreen" : "native.lendTray.canUse", { clouds: listed(clouds, t), device: named });
-  return { line, title: "", screen: why };
+  const ready = clouds.filter(name => !waiting.includes(name));
+  if (!ready.length) return { line: pending.pending ?? t("native.lendTray.canUse", { clouds: listed(clouds, t), device: named }), title: "", screen: why };
+  const line = t(why ? "native.lendTray.canUseWithoutScreen" : "native.lendTray.canUse", { clouds: listed(ready, t), device: named });
+  return { line, title: "", screen: why, ...pending };
 }
 
 export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPause, onResume, onActivity, onTerminal, onStartScreen = () => {}, device = deviceWord(), t = nativeText.englishText.t }) {
@@ -26,13 +31,14 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPa
   let shown = null;
   const draw = view => {
     if (!tray || tray.isDestroyed()) return;
-    const { line, title, screen } = indicatorText(view, device, t);
+    const { line, title, screen, pending } = indicatorText(view, device, t);
     const fix = screen ? screenFixLabel(view.screen, t) : null;
-    tray.setToolTip(`OpenMausBot: ${line}${screen ? `. ${screen}` : ""}`);
+    tray.setToolTip(`OpenMausBot: ${line}${pending ? `. ${pending}` : ""}${screen ? `. ${screen}` : ""}`);
     // Electron shows a tray title beside the icon on macOS only.
     tray.setTitle?.(title);
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: line, enabled: false },
+      ...pending ? [{ label: pending, enabled: false }] : [],
       ...screen ? [{ label: screen, enabled: false }] : [],
       ...fix ? [{ label: fix, click: () => onStartScreen() }] : [],
       { type: "separator" },
@@ -44,8 +50,8 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPa
     ]));
   };
   return {
-    update({ clouds = [], using = [], paused = false, terminal = false, screen = null }) {
-      const next = { clouds: [...clouds], using: paused ? [] : [...using], paused: paused === true, terminal: terminal === true,
+    update({ clouds = [], using = [], paused = false, terminal = false, screen = null, waiting = [] }) {
+      const next = { clouds: [...clouds], using: paused ? [] : [...using], waiting: paused ? [] : [...waiting], paused: paused === true, terminal: terminal === true,
         screen: screen ? { ready: screen.ready === true, reason: screen.reason ?? null, fix: screen.fix ?? null, ...(screen.message ? { message: screen.message } : {}) } : null };
       if (shown && JSON.stringify(next) === JSON.stringify(shown)) return;
       shown = next;

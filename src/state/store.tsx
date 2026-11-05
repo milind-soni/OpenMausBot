@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
-import type { BotMovedTo, BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, ServerFrame, GroupThreadUsage, SteerQueueReason, WireBot, WireGroup, WireTask, OptionCardData as WireOptionCard } from "../../shared/wire";
+import type { BotMovedTo, BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, ServerFrame, GroupThreadUsage, SteerQueueReason, WireBot, WireGroup, WireTask, OptionCardData as WireOptionCard } from "../../shared/wire"; import type { InstanceEndpointInfo } from "../../shared/claude-endpoint";
 import { movesThreadToTop } from "../../shared/wire"; import type { DefaultBotFields } from "../../shared/default-bot";
 import { reorderStable } from "../../shared/bot-order";
 import { withOneChief } from "../../shared/bot-owner";
@@ -309,7 +309,7 @@ export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor" |
   speakReplies?: boolean;
   replyStyle?: import("../../shared/wire").WireBot["replyStyle"];
   voice?: string;
-  voiceNotes?: boolean; xResearch?: boolean;
+  voiceNotes?: boolean; xResearch?: boolean; voiceNoteEveryReply?: boolean | null; // null or absent: follows the Voice setting
   memoryEnabled?: boolean;
   pinned?: boolean;
   hidden?: boolean;
@@ -456,7 +456,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
 
 export type { EngineInstall } from "./engine-install";
 
-export interface InstanceInfo {
+export interface InstanceInfo extends InstanceEndpointInfo {
   instanceId: string;
   driverKind: string;
   displayName: string;
@@ -468,7 +468,7 @@ export interface InstanceInfo {
   snapshot: {
     state: "available" | "unavailable";
     reason?: string;
-    authenticated?: boolean;
+    authenticated?: boolean; /** The CLI path runs another program, not this engine's CLI. */ notEngineCli?: true;
     chatgptPlan?: boolean;
     /** Ready only through OpenCode's free no-login models: a backup, never "an AI already works". */
     freeFallback?: boolean;
@@ -517,7 +517,7 @@ export type AppSettingsSection =
   | "appearance"
   | "experimental"
   | "connections"
-  | "decisionModel"
+  | "decisionModel" | "imageGeneration"
   | "engines"
   | "companion"
   | "remote"

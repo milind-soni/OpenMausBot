@@ -1,8 +1,9 @@
 // The language each person's app shows, from its presence pings (src/hooks/use-presence.ts), so the lines the server
 // writes for a person read in it (server/server-lines.ts). The app keeps a person's language pick on their own computer,
 // so this is the only way the server learns it. Kept on disk: a routine's line at night, with no app open, still knows.
-// A line for nobody in particular reads in the place's language: the one set on this server or by the team's Admin,
-// else the one most people's apps here show.
+// A line for nobody in particular, or in a conversation more than one person reads (a room, a team's shared chat), reads
+// in the place's language: the one set on this server or by the team's Admin, else the one every app here shows, else
+// English. One person's pick never decides the words everyone else reads.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
@@ -24,6 +25,8 @@ export interface PersonLanguagesDeps {
   dataDir: string;
   /** The language set on this server, else the team's default from the Admin. */
   configured(): string | undefined;
+  /** The one person a conversation is private to (a member's own chat on a Team Cloud), else null. */
+  privateTo?(threadId: string): string | null;
   now?: () => number;
 }
 
@@ -47,17 +50,13 @@ export function createPersonLanguages(deps: PersonLanguagesDeps) {
     }
   };
 
-  /** The language most people's apps here show; on a tie, the one heard most lately. */
-  const usual = (): string | undefined => {
-    const counts = new Map<string, { people: number; at: number }>();
-    for (const { language, at } of people.values()) {
-      const count = counts.get(language);
-      counts.set(language, { people: (count?.people ?? 0) + 1, at: Math.max(count?.at ?? 0, at) });
-    }
-    return [...counts].sort(([, a], [, b]) => b.people - a.people || b.at - a.at)[0]?.[0];
+  /** The language every app heard here shows; none (English) when they differ. */
+  const everyones = (): string | undefined => {
+    const heard = new Set([...people.values()].map(({ language }) => language));
+    return heard.size === 1 ? [...heard][0] : undefined;
   };
 
-  const forLine: LineLanguage = (person) => (person ? people.get(person)?.language : undefined) ?? deps.configured() ?? usual();
+  const forLine: LineLanguage = (person) => (person ? people.get(person)?.language : undefined) ?? deps.configured() ?? everyones();
 
   return {
     /** A presence ping from this person's app: the language it shows. Written down only when it changes. */
@@ -75,6 +74,9 @@ export function createPersonLanguages(deps: PersonLanguagesDeps) {
       save();
     },
     forLine,
+    /** A line in this conversation: its person's language when it is private to one person, else the place's, never that
+     * of whoever spoke last where others read too. */
+    forThread: (threadId: string): string | undefined => forLine(deps.privateTo?.(threadId) ?? undefined),
   };
 }
 

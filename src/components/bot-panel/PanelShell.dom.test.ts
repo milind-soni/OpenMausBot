@@ -107,10 +107,10 @@ describe("named links into the bot panel", () => {
     await settle();
     expect(page()).toBe("folder");
 
-    // Simple mode has no MCP page: the link lands where Access does.
+    // MCP servers are listed on the apps page.
     flushSync(() => openBotSettings(fixture.dispatch, "access", { page: "mcp" }));
     await settle();
-    expect([tab(), page()]).toEqual(["computer", null]);
+    expect(page()).toBe("apps");
 
     flushSync(() => openBotSettings(fixture.dispatch, "access"));
     await settle();

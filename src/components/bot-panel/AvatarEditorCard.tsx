@@ -57,7 +57,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
   onClose: () => void;
 }) {
   const image = useAvatarImage(bot, onPatch);
-  const { fileRef, crop, uploading, generating, setSavingConnection, busy, error, upload, removeImage, generate } = image;
+  const { fileRef, crop, uploading, generating, busy, error, upload, removeImage, generate } = image;
   const showsImage = crop !== "mascot" && Boolean(bot.avatarUrl);
   const [tab, setTab] = useState<AvatarEditorTab>(showsImage ? "upload" : "bot");
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -207,7 +207,6 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
               disabled={uploading}
               generating={generating}
               onGenerate={generate}
-              onSavingChange={setSavingConnection}
             />
           </div>
         )}

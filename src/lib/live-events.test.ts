@@ -6,6 +6,7 @@ import {
   listenLiveFrames,
   liveEventsUrl,
   openLiveEvents,
+  retryLiveEvents,
   shouldReconnectLiveEvents,
   type LiveEventSourceLike,
   type LiveEventsPlatform,
@@ -123,6 +124,57 @@ describe("the chat's status line", () => {
 });
 
 describe("live events supervisor", () => {
+  it("retries immediately with its saved cursor, cancels backoff, and removes the retry listener on stop", () => {
+    const test = harness();
+    vi.stubGlobal("window", {
+      dispatchEvent: (event: Event) => test.windowTarget.emit(event.type),
+      addEventListener: test.windowTarget.addEventListener.bind(test.windowTarget),
+      removeEventListener: test.windowTarget.removeEventListener.bind(test.windowTarget),
+    });
+    const onFrame = vi.fn();
+    const stop = openLiveEvents({ onFrame, onSnapshotRequired: async () => true }, test.platform);
+    try {
+      test.sources[0].open();
+      test.sources[0].message({ kind: "message" }, "run00000:4");
+      test.sources[0].error();
+      retryLiveEvents();
+      expect(test.sources).toHaveLength(2);
+      expect(test.sources[1].url).toBe("/api/events?since=run00000%3A4&screens=off");
+      test.sources[1].open();
+      test.sources[1].message({ kind: "ping" });
+      vi.advanceTimersByTime(500);
+      expect(test.sources).toHaveLength(2);
+      expect(onFrame).toHaveBeenCalledOnce();
+      stop();
+      retryLiveEvents();
+      expect(test.sources).toHaveLength(2);
+      expect(test.windowTarget.count("omb:retry-live-events")).toBe(0);
+    } finally {
+      stop();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each(["offline", "hidden", "asleep"])("does not manually reconnect while %s", (state) => {
+    const test = harness();
+    vi.stubGlobal("window", {
+      dispatchEvent: (event: Event) => test.windowTarget.emit(event.type),
+      addEventListener: test.windowTarget.addEventListener.bind(test.windowTarget),
+      removeEventListener: test.windowTarget.removeEventListener.bind(test.windowTarget),
+    });
+    const stop = openLiveEvents({ onFrame: vi.fn(), onSnapshotRequired: async () => true }, test.platform);
+    try {
+      if (state === "offline") test.setOnline(false);
+      if (state === "hidden") test.setVisible(false);
+      if (state === "asleep") test.sources[0].message({ kind: "power", state: "sleeping" });
+      retryLiveEvents();
+      expect(test.sources).toHaveLength(1);
+    } finally {
+      stop();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("uses data pings as liveness without forwarding them", () => {
     const test = harness();
     const onFrame = vi.fn();

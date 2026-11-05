@@ -11,7 +11,7 @@ const deliver = (name: string, path = `/store/${name}`) => ({ kind: "file" as co
 describe("files under a reply", () => {
   it("drops a file the text links inline, so it shows once", () => {
     const text = "Updated [DESIGN_SYSTEM.md](/work/DESIGN_SYSTEM.md) and [MEMORY.md](/work/MEMORY.md).";
-    expect(replyAttachmentGroup(text, [])).toEqual({ images: [], files: [], delivered: {} });
+    expect(replyAttachmentGroup(text, [])).toEqual({ images: [], files: [], delivered: {}, originals: {} });
   });
 
   it("lets an inline link stand for the same file delivered with attach_file", () => {
@@ -19,6 +19,11 @@ describe("files under a reply", () => {
     const group = replyAttachmentGroup(text, [deliver("DESIGN_SYSTEM.md"), deliver("report.pdf")]);
     expect(group.delivered).toEqual({ "DESIGN_SYSTEM.md": "/store/DESIGN_SYSTEM.md" });
     expect(group.files.map((file) => file.name)).toEqual(["report.pdf"]);
+  });
+
+  it("carries where each attached copy came from, for Show in Finder", () => {
+    const group = replyAttachmentGroup("Done.", [{ ...deliver("report.pdf"), source: "/Users/me/Reports/report.pdf" }, deliver("plain.md")]);
+    expect(group.originals).toEqual({ "/store/report.pdf": "/Users/me/Reports/report.pdf" });
   });
 
   it("keeps two deliveries with one name as chips, a link can't pick between them", () => {

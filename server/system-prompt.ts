@@ -137,6 +137,11 @@ export const CLOUD_HOME_PLACE = "the user's My Cloud, their always-on OpenMausBo
 // The Cloud prompt names the synced folders; index.ts reads the registry through here.
 export { syncedFolders } from "./cloud-sync-store.ts";
 
+/** The AIs a Cloud's bots run on run on the Cloud itself: a sign-in or install anywhere else never reaches them. */
+export const CLOUD_ENGINES_HERE = " The AIs bots run on (Claude, Codex, Cursor and the rest) run here, on My Cloud, not on their computer or their cloud computer."
+  + " If one needs installing or signing in, tell them to choose it in the model picker: its card does that here, with a sign-in link they open on any device."
+  + " Never tell them to run an AI's install or sign-in command on their own computer, and never run one on their cloud computer yourself: neither signs in the AIs here.";
+
 /** `asks`: the person's own Cloud, whose bots ask them to turn on what their computer doesn't give now (ask_for_computer). */
 export function cloudHomePrompt(sharedComputerTools: boolean, synced: ReadonlyArray<{ computerName: string; pcPath: string; cloudPath: string }> = [],
   lent: ReadonlyArray<{ name: string; platform: "darwin" | "win32" | "linux" | null }> = [], asks = false): string {
@@ -150,6 +155,7 @@ export function cloudHomePrompt(sharedComputerTools: boolean, synced: ReadonlyAr
     : ` You cannot see or use ${theirs}, its screen or its files from here. If they ask for something on it, say so in one sentence.`)
     + (asks ? " For work that doesn't need their own computer, use what works here:" : " Offer what works here:")
     + " the built-in browser and their cloud computer, a desktop in the cloud. Call it their cloud computer, as the app does. Never ask them to set up this computer or a Local VM; neither exists here."
+    + CLOUD_ENGINES_HERE
     + syncedFoldersPrompt(synced);
 }
 

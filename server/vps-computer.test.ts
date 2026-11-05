@@ -471,7 +471,8 @@ describe("VPS computer", () => {
     expect(run.some((arg) => /^VNC_PW=[A-Za-z0-9_-]{8,}$/.test(arg))).toBe(true);
     expect(run).not.toContain("--mount");
     expect(run).not.toContain("-p");
-    expect(provision.calls.some(({ args }) => args[2] === "build")).toBe(true);
+    const build = provision.calls.find(({ args }) => args[2] === "build");
+    expect(build?.args.slice(2)).toEqual(["build", "--force-rm", "-t", VPS_IMAGE, "-"]);
   });
 
   it("uses the image id produced by a rebuild", async () => {

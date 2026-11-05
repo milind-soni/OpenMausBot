@@ -45,6 +45,7 @@ beforeEach(() => {
   fixture.config = null;
   fixture.instances = [];
   fixture.capabilities.host = { homeDir: undefined };
+  fixture.capabilities.localComputer = { available: false, reasonCode: "unsupported" };
   fixture.apps = { phase: "loading", apps: [], connectedSlugs: [] };
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -272,6 +273,15 @@ describe("AccessSection Works on", () => {
     expect(html).toContain(of("local").note);
   });
 
+
+  it("leaves This computer out of a bot not made yet on another server's page, and shows Auto in its place", () => {
+    fixture.capabilities.localComputer = { available: false, reasonCode: "remote-server" };
+    let tree!: ReturnType<typeof AccessSection>;
+    function Capture() { tree = AccessSection({ bot: makeBot({ computer: "local" }), derived: makeDerived() }); return tree; }
+    const html = renderToStaticMarkup(createElement(StoreProvider, null, createElement(BotEditorContext.Provider, { value: { request: api, draft: true } }, createElement(Capture))));
+    expect(html).not.toContain("This computer");
+    expect(html).toMatch(/<button[^>]*aria-pressed="true"[^>]*>(?:(?!<\/button>).)*?Auto/);
+  });
 
   it("hides the Boat or VPS choice on My Cloud, whose cloud computers are the plan's", () => {
     expect(render(makeBot())).toContain("Cloud backend");

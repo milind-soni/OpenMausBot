@@ -4,12 +4,13 @@ import type { Bot, ConfigStatus } from "@/state/store";
 import type { PlaceView } from "../../shared/place-view";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import type { Place } from "@/lib/place";
+import { pageOnRemoteServer } from "@/lib/local-computer";
+import { placeOffered, type Place } from "@/lib/place";
 import type { LocaleKey } from "@/locales";
 
 export type WorksOnMode = Place | "off" | null;
 
-export const WORKS_ON_CHOICES = [
+const WORKS_ON_CHOICES = [
   [null, "vm.dest.auto", "computer.dest.autoDesc", Sparkles],
   ["cloud", "place.cloud", "computer.dest.cloudDesc", Cloud],
   ["vm", "vm.dest.vm", "computer.dest.vmDesc", Box],
@@ -17,6 +18,14 @@ export const WORKS_ON_CHOICES = [
   ["browser", "vm.dest.browser", "computer.dest.browserDesc", Globe],
   ["off", "vm.dest.off", "computer.dest.offDesc", Power],
 ] as const satisfies ReadonlyArray<readonly [WorksOnMode, LocaleKey, LocaleKey, LucideIcon]>;
+
+export function worksOnChoices(config: Parameters<typeof placeOffered>[1], capabilities: DesktopCapabilities) {
+  return WORKS_ON_CHOICES.filter(([mode]) => mode === null || mode === "off" || (placeOffered(mode, config) && !(mode === "local" && pageOnRemoteServer(capabilities))));
+}
+
+export function worksOnSelected(mode: WorksOnMode, computer: Bot["computer"], capabilities: DesktopCapabilities): boolean {
+  return mode === null ? !computer || (computer === "local" && pageOnRemoteServer(capabilities)) : computer === mode;
+}
 
 export function placeManagedBy(mode: WorksOnMode, cloudBackend: Bot["cloudBackend"], policy: ConfigStatus["managedPolicy"]): string | undefined {
   const kind = mode === "local" ? "thisComputer" : mode === "vm" ? "localVm" : mode === "cloud" ? (cloudBackend === "vps" ? "vps" : "box") : null;

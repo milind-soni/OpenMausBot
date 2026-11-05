@@ -4,6 +4,7 @@ import { formatQuestionAnswers, MAX_CUSTOM_ANSWER, type AskQuestion } from "../.
 import type { InboxRow } from "../../../shared/inbox";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { imeComposing } from "@/lib/send-key";
 import type { CardResponse } from "@/lib/card-answer";
 import { askPrimary, ASK_ICON_SHAPE, AskError, type Asker } from "../AskCard";
 import { cardAnswerFor } from "../bot-access/access-card";
@@ -109,7 +110,7 @@ export function InboxQuestionAnswer({ row, question, asker, onAnswer }: {
             placeholder={question.options.length ? t("inbox.note") : t("question.answerPlaceholder")}
             onChange={(event) => setNote(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+              if (event.key !== "Enter" || event.shiftKey || imeComposing(event.nativeEvent)) return;
               event.preventDefault();
               send();
             }}

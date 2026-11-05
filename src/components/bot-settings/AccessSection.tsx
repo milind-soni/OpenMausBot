@@ -7,15 +7,14 @@ import { useBotEditor } from "./BotEditorContext";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { mcpServersForBot, mcpServersOfBot, useMcpServers } from "@/lib/mcp-servers";
+import { mcpServersForBot, mcpServersOfBot, mcpSwitch, useMcpServers } from "@/lib/mcp-servers";
 import { instanceSupportsLocalComputer, localComputerDisabledReason, localComputerSelectable } from "@/lib/local-computer";
-import { placeOffered } from "@/lib/place";
 import { placeBlocked, placeFacts, placeHasIssue, placeViewFor, usePlaceSeat, type PlaceSeat } from "@/lib/place-view";
 import { shortPath } from "@/lib/short-path";
 import { isOwnThreadFolder } from "../../../shared/thread-folder";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { CloudBackendPicker } from "../CloudBackendPicker";
-import { placeManagedBy, WORKS_ON_CHOICES, WorksOnGrid, type WorksOnMode } from "../WorksOnGrid";
+import { placeManagedBy, worksOnChoices, WorksOnGrid, worksOnSelected, type WorksOnMode } from "../WorksOnGrid";
 import { Switch } from "../SettingsPrimitives";
 import { PhoneAppsCard } from "./PhoneAppsCard";
 import { ProposalStatus } from "./ProposalStatus";
@@ -138,9 +137,7 @@ export function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpS
 
   const toggle = (name: string) => {
     if (!servers || bot.busy || error) return;
-    const current = usesAll ? servers.filter((server) => server.enabled).map((server) => server.name) : [...(bot.mcpServers ?? [])];
-    const next = current.includes(name) ? current.filter((item) => item !== name) : [...current, name];
-    patch({ mcpServers: next });
+    patch({ mcpServers: mcpSwitch(servers, bot.mcpServers, name) });
   };
   const openPlugins = () => {
     dispatch({ type: "toggleSettings", open: false });
@@ -642,7 +639,7 @@ function DraftWorksOn({ bot, patch, seat }: { bot: Bot; patch: ReturnType<typeof
   const providerSupportsLocal = instanceSupportsLocalComputer(state.instances, bot);
   const localReason = localComputerDisabledReason({ capabilities, providerSupportsLocal });
   const named = { ...bot, name: bot.name || t("sidebar.newBotSimple") };
-  const options = WORKS_ON_CHOICES.filter(([mode]) => mode === null || mode === "off" || placeOffered(mode, state.config)).map(([mode, labelKey, descriptionKey, Icon]) => {
+  const options = worksOnChoices(state.config, capabilities).map(([mode, labelKey, descriptionKey, Icon]) => {
     const view = placeViewFor(placeFacts({
       bot: named, place: mode ?? "auto", seat, config: state.config, instances: state.instances,
       local: {
@@ -653,7 +650,7 @@ function DraftWorksOn({ bot, patch, seat }: { bot: Bot; patch: ReturnType<typeof
     const managedBy = placeManagedBy(mode, bot.cloudBackend, state.config?.managedPolicy);
     return {
       mode, labelKey, descriptionKey, Icon, view, managedBy,
-      selected: mode === null ? !bot.computer : bot.computer === mode,
+      selected: worksOnSelected(mode, bot.computer, capabilities),
       disabled: Boolean(managedBy) || placeBlocked(view),
       issue: !managedBy && placeHasIssue(view),
       note: placeHasIssue(view) ? view.line : mode === "local" ? localReason ?? undefined : undefined,
@@ -695,7 +692,7 @@ export function AccessSection({
   } = derived;
   const browserInstallable = state.config?.browserEngine?.installable === true;
   const { capabilities } = useDesktopCapabilities();
-  const placeSeat = usePlaceSeat(state.config, capabilities.host?.platform ?? "other");
+  const placeSeat = usePlaceSeat(state.config, capabilities);
   const worksOn = placeViewFor(placeFacts({
     bot, place: bot.computer ?? "auto", seat: placeSeat, config: state.config, instances: state.instances,
   }));

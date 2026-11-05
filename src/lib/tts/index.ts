@@ -2,7 +2,7 @@
 
 import { localSystemVoiceActive, remoteSystemVoice, resolveLocalSystemVoice } from "@/lib/local-voice";
 import { recordBlockTiming, recordPrepared, recordSpeakEnter } from "../voice-latency-probe";
-import { t } from "@/lib/i18n";
+import { t, tFromServer } from "@/lib/i18n";
 import { serverErrorText } from "@/lib/server-error";
 import type { ServerErrorBody } from "../../../shared/server-text";
 
@@ -383,7 +383,9 @@ export class Speaker {
     });
     if (!res.ok) {
       const body: TtsErrorBody = await res.json().catch(() => ({}));
-      throw new Error(serverErrorText(body, body.error ?? t("voice.error.service", { status: res.status })));
+      // OpenAI readout names its refusal with a voice.openai.error.* key; any other key that isn't a serverError.* is not ours to show.
+      const voiceKey = body.errorKey?.startsWith("voice.openai.error.") ? body.errorKey : undefined;
+      throw new Error(serverErrorText(body, tFromServer(voiceKey, body.error) ?? t("voice.error.service", { status: res.status })));
     }
     return res.blob();
   }

@@ -923,7 +923,7 @@ async function prepareManagedImage(runtime: Runtime, runner: CommandRunner): Pro
   const context = await mkdtemp(join(tmpdir(), "openmausbot-cua-image-"));
   try {
     await writeFile(join(context, "Dockerfile"), managedImageDockerfile(), { mode: 0o600 });
-    await runner(runtime, ["build", "-t", IMAGE, context], 10 * 60_000);
+    await runner(runtime, ["build", ...(runtime === "container" ? [] : ["--force-rm"]), "-t", IMAGE, context], 10 * 60_000); // the legacy builder keeps a failed step's container without --force-rm
   } finally {
     await rm(context, { recursive: true, force: true });
   }

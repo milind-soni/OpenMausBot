@@ -17,6 +17,7 @@ export const HOST_E2E: Readonly<Record<string, string>> = {
   "server/headless-cli.e2e.test.ts": "the omb command line as a real process on each OS",
   "server/host-lazy-claim.e2e.test.ts": "Auto on the person's own desktop, which only macOS and Windows have",
   "server/long-running-chief.e2e.test.ts": "a teammate's screen call on the person's own desktop, macOS and Windows only",
+  "server/portable-hermes.e2e.test.ts": "a portable Hermes install's launcher shims, which only Windows has",
   "server/room-roots.e2e.test.ts": "the host desktop fallback, macOS and Windows only",
   "server/runtime-roots.e2e.test.ts": "the host desktop fallback, macOS and Windows only",
   "server/saved-login.e2e.test.ts": "a sign-in started on the person's own desktop screen, which only macOS and Windows have",
