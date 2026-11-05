@@ -32,6 +32,7 @@ export interface WorksOnOption {
   managedBy?: string;
   disabled: boolean;
   unavailableTitle?: string;
+  note?: string;
   issue: boolean;
   view: PlaceView;
 }
@@ -39,7 +40,7 @@ export interface WorksOnOption {
 export function WorksOnGrid({ options, onSelect }: { options: readonly WorksOnOption[]; onSelect: (mode: WorksOnMode) => void }) {
   return (
     <div role="group" aria-label={t("computer.destinationAria")} className="mt-3 grid auto-rows-fr grid-cols-2 gap-2">
-      {options.map(({ mode, labelKey, descriptionKey, Icon, selected, managedBy, disabled, unavailableTitle, issue, view }) => (
+      {options.map(({ mode, labelKey, descriptionKey, Icon, selected, managedBy, disabled, unavailableTitle, note, issue, view }) => (
         <button
           key={mode ?? "auto"}
           disabled={disabled}
@@ -62,7 +63,7 @@ export function WorksOnGrid({ options, onSelect }: { options: readonly WorksOnOp
             <span>{t(labelKey)}</span>
           </span>
           <span className="mt-1.5 block text-[11px] leading-4 text-ink-secondary">
-            {managedBy ?? (disabled ? view.line : issue ? view.short : t(descriptionKey))}
+            {managedBy ?? note ?? (disabled ? view.line : issue ? view.short : t(descriptionKey))}
           </span>
         </button>
       ))}

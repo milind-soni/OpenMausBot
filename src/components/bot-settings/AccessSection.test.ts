@@ -11,11 +11,13 @@ const fixture = vi.hoisted(() => ({
   mcpError: false,
   servers: null as null | Array<{ name: string; enabled: boolean }>,
   config: null as unknown,
+  instances: [] as unknown[],
+  capabilities: { host: { homeDir: undefined } as { homeDir: undefined; platform?: string }, localComputer: { available: false, reasonCode: "unsupported" } },
   apps: { phase: "loading", apps: [], connectedSlugs: [] } as import("./useBotApps").BotApps,
 }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
-  return { ...original, useStore: () => ({ state: { ...original.initialState, config: fixture.config ?? original.initialState.config }, dispatch: fixture.dispatch }) };
+  return { ...original, useStore: () => ({ state: { ...original.initialState, config: fixture.config ?? original.initialState.config, instances: fixture.instances as typeof original.initialState.instances }, dispatch: fixture.dispatch }) };
 });
 // The connected-apps list (Composio accounts plus the native HighLevel connection) is seeded per test.
 vi.mock("./useBotApps", async (importOriginal) => ({
@@ -29,7 +31,7 @@ vi.mock("@/lib/mcp-servers", async (importOriginal) => ({
 
 // DesktopCapabilities reads window.ogb at module scope, and this suite runs in the node environment.
 vi.mock("../DesktopCapabilities", () => ({
-  useDesktopCapabilities: () => ({ capabilities: { host: { homeDir: undefined }, localComputer: { available: false, reasonCode: "unsupported" } } }),
+  useDesktopCapabilities: () => ({ capabilities: fixture.capabilities }),
 }));
 
 const { AccessSection } = await import("./AccessSection");
@@ -41,6 +43,8 @@ beforeEach(() => {
   fixture.mcpError = false;
   fixture.servers = null;
   fixture.config = null;
+  fixture.instances = [];
+  fixture.capabilities.host = { homeDir: undefined };
   fixture.apps = { phase: "loading", apps: [], connectedSlugs: [] };
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -244,6 +248,30 @@ describe("AccessSection Works on", () => {
     select(null);
     expect(vi.mocked(derived.patch).mock.calls).toEqual([[{ computer: "browser", browser: true }], [{ computer: null }]]);
   });
+
+  it("says on a selectable tile of a bot not made yet what stands in its way, with no name to borrow", () => {
+    fixture.config = { box: { configured: true } } as Partial<ConfigStatus>;
+    fixture.instances = [{ instanceId: "local", capabilities: { computerMcp: true } }];
+    fixture.capabilities.host = { homeDir: undefined, platform: "darwin" };
+    let tree!: ReturnType<typeof AccessSection>;
+    function Capture() { tree = AccessSection({ bot, derived: makeDerived() }); return tree; }
+    const bot = makeBot({ name: "", toolScope: { deny: ["mcp:computer:*"] } } as Partial<Bot>);
+    renderToStaticMarkup(createElement(StoreProvider, null, createElement(BotEditorContext.Provider, { value: { request: api, draft: true } }, createElement(Capture))));
+    const picker = nodes(tree).find((node) => (node.type as { name?: string }).name === "DraftWorksOn")!;
+    let rendered: ReactNode = null;
+    function Picker() { rendered = (picker.type as (props: unknown) => ReactNode)(picker.props); return rendered; }
+    renderToStaticMarkup(createElement(StoreProvider, null, createElement(Picker)));
+    const grid = nodes(rendered).find((node) => (node.type as { name?: string }).name === "WorksOnGrid")!;
+    const options = grid.props.options as Array<{ mode: string | null; disabled: boolean; note?: string }>;
+    const of = (mode: string) => options.find((option) => option.mode === mode)!;
+    expect(of("cloud")).toMatchObject({ disabled: false, note: "What New bot can use doesn't include a desktop." });
+    expect(of("local").disabled).toBe(false);
+    expect(of("local").note).toBeTruthy();
+    const html = renderToStaticMarkup(grid).replaceAll("&#x27;", "'").replaceAll("&amp;", "&");
+    expect(html).toContain(of("cloud").note);
+    expect(html).toContain(of("local").note);
+  });
+
 
   it("hides the Boat or VPS choice on My Cloud, whose cloud computers are the plan's", () => {
     expect(render(makeBot())).toContain("Cloud backend");
