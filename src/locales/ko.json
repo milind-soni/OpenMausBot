@@ -3311,7 +3311,6 @@
   "settings.profiles.own": "자체 브라우저",
   "settings.profiles.temporary": "임시 — 로그인을 저장하지 않음",
   "settings.profiles.temporaryHint": "임시 세션은 앱이 실행되는 동안만 로그인을 유지해요. 디스크에 저장되지 않아요.",
-  "settings.profiles.sharedHint": "자체 브라우저는 로그인을 이 봇만 쓰도록 보관해요. 공유 프로필의 봇들은 같은 로그인을 써요.",
   "settings.profiles.stopToSwitch": "브라우저 프로필을 바꾸기 전에 이 봇의 턴을 멈추세요.",
   "settings.profiles.manage": "프로필 관리",
   "settings.profiles.newName": "새 프로필 이름",

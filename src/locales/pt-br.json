@@ -3013,7 +3013,6 @@
   "settings.profiles.own": "Navegador próprio",
   "settings.profiles.temporary": "Temporário — não salvar logins",
   "settings.profiles.temporaryHint": "Sessões temporárias guardam os logins só enquanto o app estiver rodando. Eles não são salvos em disco.",
-  "settings.profiles.sharedHint": "O navegador próprio mantém os logins privados para este bot. Bots em um perfil compartilhado usam os mesmos logins.",
   "settings.profiles.stopToSwitch": "Pare o turno deste bot antes de trocar de perfil de navegador.",
   "settings.profiles.manage": "Gerenciar perfis",
   "settings.profiles.newName": "Nome do novo perfil",

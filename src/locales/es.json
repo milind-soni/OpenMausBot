@@ -2846,7 +2846,6 @@
   "settings.profiles.own": "Navegador propio",
   "settings.profiles.temporary": "Temporal: no guardar inicios de sesión",
   "settings.profiles.temporaryHint": "Las sesiones temporales conservan los inicios de sesión solo mientras la app está en marcha. No se guardan en el disco.",
-  "settings.profiles.sharedHint": "El navegador propio mantiene los inicios de sesión privados para este bot. Los bots de un perfil compartido usan los mismos inicios de sesión.",
   "settings.profiles.stopToSwitch": "Detén el turno de este bot antes de cambiar de perfil de navegador.",
   "settings.profiles.manage": "Gestionar perfiles",
   "settings.profiles.newName": "Nombre del perfil nuevo",

@@ -2151,7 +2151,6 @@
   "settings.profiles.own": "自己的瀏覽器",
   "settings.profiles.temporary": "暫時 — 不儲存登入資訊",
   "settings.profiles.temporaryHint": "暫時工作階段只會在應用程式執行期間保留登入資訊。它們不會儲存到磁碟。",
-  "settings.profiles.sharedHint": "使用自己的瀏覽器可讓登入資訊僅限此機器人。使用同一個共用設定檔的機器人則會共用相同的登入資訊。",
   "settings.profiles.stopToSwitch": "請先停止此機器人的回合，再切換瀏覽器設定檔。",
   "settings.profiles.manage": "管理設定檔",
   "settings.profiles.newName": "新設定檔名稱",

@@ -3000,7 +3000,6 @@
   "settings.profiles.own": "Browser proprio",
   "settings.profiles.temporary": "Temporaneo — non salvare gli accessi",
   "settings.profiles.temporaryHint": "Le sessioni temporanee tengono gli accessi solo mentre l'app è in esecuzione. Non vengono salvate su disco.",
-  "settings.profiles.sharedHint": "Il browser proprio tiene gli accessi privati di questo bot. I bot su un profilo condiviso usano gli stessi accessi.",
   "settings.profiles.stopToSwitch": "Ferma il turno di questo bot prima di cambiare profilo del browser.",
   "settings.profiles.manage": "Gestisci i profili",
   "settings.profiles.newName": "Nome del nuovo profilo",

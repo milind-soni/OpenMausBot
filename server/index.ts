@@ -740,7 +740,7 @@ const onePassword = new OnePasswordLogins({
   },
 });
 if (logins.onePasswordToken()) void onePassword.refresh();
-const botLogins = new BotLogins(logins, onePassword);
+const botLogins = new BotLogins(logins, onePassword, () => store.bots);
 const SESSION_COOKIE = sessionCookieName(PORT, ENVIRONMENT_ID);
 const HOSTED_WORKSPACE = hostedWorkspaceConfigured();
 let workspaceAccess: WorkspaceAccess | null = null;
@@ -11667,7 +11667,7 @@ async function saveLoginFromCard(botId: string, threadId: string, messageId: str
   const current = signInMessage(botId, threadId, messageId)?.signIn;
   if (!current || current.superseded || signInOutcome(current)) return { status: 409, body: { error: "this sign-in request was answered or replaced while the login was being saved" } };
   const place = cardLoginPlace(page.cardHost, page.observed, body.signInHost);
-  logins.create({ ...place, username: fields.value.username ?? "", password: fields.value.password!, totp: totp.value ?? null, source: "card", bots: [botId] });
+  logins.create({ ...place, username: fields.value.username ?? "", password: fields.value.password!, totp: totp.value ?? null, source: "card", bots: botLogins.cardBots(botId) });
   const elsewhere = place.hosts.filter((host) => loginSite(host) !== place.site);
   return signInSettle.settle(botId, threadId, messageId, "done", { site: [place.site, ...elsewhere].join(" and ") });
 }
