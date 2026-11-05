@@ -6,7 +6,7 @@ import { type McpApprovalMode, mountMcpServer } from "./codex-mcp-mount.ts";
 import { reportUnsupportedCalls, rolloutMark, type RolloutMark } from "./codex-unsupported-calls.ts";
 // The `codex` CLI headless over its app-server JSON-RPC (NDJSON on stdio): completion is
 // `turn/completed`, approvals arrive as server→client requests, resumeCursor is the codex thread id.
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -427,18 +427,14 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         }
       } else {
         // Non-plan instances and legacy-lane plan instances both read the catalog through Codex itself.
+        // Plan instances get OpenAI's own models only; filtering happens inside the catalog reader so
+        // its unconfirmed marker (a WeakSet entry) survives.
         if (!(planAuth && planUnavailable)) {
           try {
             const generation = planGeneration;
-            const resolved = await readCodexModelCatalog(catalogEnv, fetch, config.cli);
-            // A device-lane ChatGPT account routes only through OpenAI: custom Codex providers would
-            // bill outside the subscription, so they never reach a plan instance's catalog.
-            const options = planAuth
-              ? resolved.options.filter(option => decodeCodexSelection(option.id).modelProvider === OFFICIAL_CODEX_PROVIDER)
-              : resolved.options;
-            const usableDefault = resolved.default && options.some(option => option.id === resolved.default) ? resolved.default : options[0]?.id ?? "";
+            const resolved = await readCodexModelCatalog(catalogEnv, fetch, config.cli, planAuth ? true : undefined);
             if (generation === planGeneration && !planSigningOut && !disposed) {
-              if (options.length) models = { default: usableDefault, options }; else unconfirmedModelCatalog(models);
+              if (resolved.options.length) models = resolved; else unconfirmedModelCatalog(models);
             }
           } catch { unconfirmedModelCatalog(models); }
         }
@@ -527,6 +523,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       assertPlanCurrent();
       if (planUnavailable) throw new Error(planUnavailable);
       if (planAuth) planLane = await detectPlanLane();
+      if (planAuth && planLane === "legacy" && await codexLoginKind(config.cli, childEnv()) === "api-key") {
+        // An API-key home would answer through Codex's API billing, not the subscription.
+        throw new Error("This account's Codex home is signed in with an API key. Start the device sign-in again to switch it to the ChatGPT plan.");
+      }
       const planToken = planAuth && planLane === "maus" ? await planAuth.accessToken() : undefined;
       assertPlanCurrent();
       if (planAuth) {
@@ -1711,6 +1711,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       if (planSigningOut || disposed) throw new Error("This account is being disconnected. Wait before signing in again.");
       if (plan && config.authFlow === "device") {
         // Codex's status probe needs the home to exist before the first turn creates it.
+        // A stale API-key login would read as signed-in to the device flow, and no plan turn may
+        // bill through it, so starting the device sign-in resets the home's login.
+        if (await codexLoginKind(config.cli, childEnv()) === "api-key") {
+          rmSync(join(planDirectory, "codex", "auth.json"), { force: true });
+        }
         mkdirSync(join(planDirectory, "codex"), { recursive: true, mode: 0o700 });
         return authentication.start();
       }

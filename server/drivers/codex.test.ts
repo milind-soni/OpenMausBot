@@ -11,7 +11,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderInstance, RuntimeEvent } from "../contracts.ts";
 import { DATA_DIR, NATIVE_DIR } from "../config.ts";
 import { flushNativeLog } from "./native.ts";
+import { readStartupModelCacheEntry, writeStartupModelCache } from "../startup-model-catalog.ts";
+import { readCodexModelCatalog } from "./codex-catalog.ts";
 import { ChatGptPlanAuthController } from "./chatgpt-plan-auth.ts";
+import { DeviceAuthController } from "./device-auth.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { CodexDriver, codexNativeIncomingLogMessage, codexUpdateCommand } from "./codex.ts";
 import { codexCliOverrides } from "./codex-process.ts";
@@ -137,7 +140,7 @@ describe("CodexDriver turns (fake app-server)", () => {
   let scratch: string;
 
   const create = async (
-    opts: { mode?: string; fullAuto?: boolean; environment?: Record<string, string>; managed?: boolean; authMode?: "chatgpt-plan"; cli?: string } = {},
+    opts: { mode?: string; fullAuto?: boolean; environment?: Record<string, string>; managed?: boolean; authMode?: "chatgpt-plan"; authFlow?: "device"; cli?: string } = {},
   ) => {
     if (opts.mode) process.env.FAKE_CODEX_MODE = opts.mode;
     instance = await CodexDriver.create({
@@ -152,6 +155,7 @@ describe("CodexDriver turns (fake app-server)", () => {
         cli: opts.cli ?? FAKE_CLI,
         fullAuto: opts.fullAuto ?? false,
         ...(opts.authMode ? { authMode: opts.authMode } : {}),
+        ...(opts.authFlow ? { authFlow: opts.authFlow } : {}),
         ...(opts.managed ? { managed: { url: "http://127.0.0.1:1/v1", models: ["company-codex-model"] } } : {}),
       },
     });
@@ -2017,6 +2021,30 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     } finally {
       rmSync(codexHome, { recursive: true, force: true });
     }
+  });
+
+  it("turns away API-key homes and resets one when the device sign-in starts", async () => {
+    vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockResolvedValue({ default: "gpt-6.1-sol", options: [{ id: "gpt-6.1-sol", label: "GPT-6.1 Sol" }] });
+    const deviceStart = vi.spyOn(DeviceAuthController.prototype, "start").mockResolvedValue({ phase: "waiting", flowId: "flow-1", authorizationUrl: null, expiresAt: null });
+    await create({ authMode: "chatgpt-plan", authFlow: "device", mode: "api-key-configured" });
+    const codexHome = join(DATA_DIR, "providers", "chatgpt-plan", createHash("sha256").update("codex-test").digest("hex"), "codex");
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-test" }));
+    try {
+      await expect(instance.adapter.sendTurn({ threadId: "t-device-apikey", text: "Continue", model: "gpt-6.1-sol" }))
+        .rejects.toThrow(/API key/);
+      await expect(instance.startAuthentication!()).resolves.toMatchObject({ phase: "waiting" });
+      expect(existsSync(join(codexHome, "auth.json"))).toBe(false);
+      expect(deviceStart).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the unconfirmed marker on an official-only catalog", async () => {
+    const broken = await readCodexModelCatalog({ HOME: scratch, USERPROFILE: scratch, CODEX_HOME: join(scratch, ".codex") }, fetch, "/bin/nonexistent-codex-cli", true);
+    writeStartupModelCache("catalog-marker-test", broken);
+    expect(readStartupModelCacheEntry("catalog-marker-test")?.checkedAt).toBe(0);
   });
 
   it("keeps custom Codex providers out of a device-lane plan turn", async () => {
