@@ -13185,6 +13185,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 200, { result: await cloudComputerRpc(body, {
           cfg, signal: abort.signal,
           boxId: () => internalCapability.boxId ?? claimedBoatId(internalCapability),
+          folder: () => messageFileRootsForThread(internalCapability.botId, internalCapability.threadId)[0],
           gate: () => computerCallGate(internalCapability, abort.signal),
           assertActive: requireActiveInternalCapability,
         }) });

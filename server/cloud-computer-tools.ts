@@ -2,6 +2,7 @@
 import type { ValidateFunction } from "ajv";
 import { isolatedRemoteCommand, runCommand, screenshotBoat } from "./boat.ts";
 import { isRedditAddress, REDDIT_REFUSAL } from "./browser/egress/reddit.ts";
+import { copyFromComputer, copyToComputer } from "./cloud-computer-files.ts";
 import type { AppConfig } from "./config.ts";
 import { controlRefusal, type ControlState } from "./control-client.ts";
 import { HARNESS_CALL_BUDGET_MS } from "./harness-budget.ts";
@@ -21,6 +22,14 @@ export const CLOUD_COMPUTER_TOOLS = [
   tool("scroll", "Scroll at a point on the cloud desktop.", { x: coordinate, y: coordinate, direction: { type: "string", enum: ["up", "down", "left", "right"] }, amount: { type: "integer", minimum: 1, maximum: 30 } }, ["x", "y", "direction"]),
   tool("open_url", "Request opening an HTTP or HTTPS URL in the cloud desktop browser; inspect the screen to confirm it loaded.", { url: { type: "string", pattern: "^https?://", maxLength: 2000 } }, ["url"]),
   tool("exec", "Run a shell command on the assigned cloud computer.", { command: { type: "string", minLength: 1, maxLength: 4000 } }, ["command"]),
+  tool("copy_from_computer", "Copy one file of at most 50 MiB from the cloud computer into your working folder, for example to load it with data_load or use it in a page. A file already there is replaced.", {
+    path: { type: "string", minLength: 1, maxLength: 4096, description: "The file on the cloud computer, under /home/user or /tmp." },
+    to: { type: "string", minLength: 1, maxLength: 1000, description: "Where it goes, relative to your working folder. Default: the file's own name." },
+  }, ["path"]),
+  tool("copy_to_computer", "Copy one file of at most 5 MiB from your working folder to the cloud computer. A file already there is replaced.", {
+    from: { type: "string", minLength: 1, maxLength: 1000, description: "The file, relative to your working folder." },
+    path: { type: "string", minLength: 1, maxLength: 4096, description: "Where it goes on the cloud computer, under /home/user or /tmp." },
+  }, ["from", "path"]),
 ];
 /** A call the gate let through while no Boat had landed for the turn. */
 export const CLOUD_COMPUTER_NOT_READY = "The cloud computer is not ready. This call was not performed. Take a fresh screenshot in a moment.";
@@ -49,17 +58,26 @@ export type CloudComputerResult = {
   isError?: boolean;
 };
 
-/** The caller has already checked the arguments and the person's control. */
+/** The caller has already checked the arguments and the person's control. `folder` is the bot's working folder for this turn. */
 export async function runCloudComputerTool(
   cfg: AppConfig,
   boxId: string,
   name: string,
   args: Record<string, unknown>,
   signal: AbortSignal,
+  folder?: string | null,
 ): Promise<CloudComputerResult> {
   const problem = cloudComputerCallProblem(name, args);
   if (problem) return { isError: true, content: [{ type: "text", text: problem }] };
   signal.throwIfAborted();
+  if (name === "copy_from_computer" || name === "copy_to_computer") {
+    if (!folder) return { isError: true, content: [{ type: "text", text: "This turn has no working folder to copy into or out of." }] };
+    const copied = name === "copy_from_computer"
+      ? await copyFromComputer(cfg, boxId, folder, args as { path: string; to?: string }, signal)
+      : await copyToComputer(cfg, boxId, folder, args as { from: string; path: string }, signal);
+    signal.throwIfAborted();
+    return "error" in copied ? { isError: true, content: [{ type: "text", text: copied.error }] } : { content: [{ type: "text", text: JSON.stringify(copied) }] };
+  }
   if (name === "screenshot") {
     const shot = await screenshotBoat(cfg, "", boxId, { signal, nativeSize: true });
     signal.throwIfAborted();
@@ -94,6 +112,8 @@ export async function cloudComputerRpc(
     cfg: AppConfig;
     /** The Boat this call acts on, read after the gate. */
     boxId(): string | null | undefined;
+    /** The bot's working folder, which the copy tools read from and write into. */
+    folder?(): string | null | undefined;
     gate(): Promise<Pick<ControlState, "held" | "reason" | "blockedReason">>;
     assertActive(): void;
     signal: AbortSignal;
@@ -119,7 +139,7 @@ export async function cloudComputerRpc(
   const late = AbortSignal.timeout(Math.max(1, deadline - Date.now()));
   let result: CloudComputerResult;
   try {
-    result = await runCloudComputerTool(deps.cfg, boxId, params.name as string, args as Record<string, unknown>, AbortSignal.any([deps.signal, late]));
+    result = await runCloudComputerTool(deps.cfg, boxId, params.name as string, args as Record<string, unknown>, AbortSignal.any([deps.signal, late]), deps.folder?.());
   } catch (error) {
     if (!late.aborted || deps.signal.aborted) throw error;
     return { isError: true, content: [{ type: "text", text: CLOUD_COMPUTER_LATE }] };

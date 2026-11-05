@@ -20,6 +20,12 @@ at native resolution; tool approvals and **Take control** still apply. A model
 without computer tools can't use the cloud computer: choose another model, or set
 **Works on** to Auto.
 
+A bot can copy files between the Boat and its working folder: `copy_from_computer`
+brings back one file of up to 50 MiB (for example a result to load in the Data
+tab or use in a page), and `copy_to_computer` sends one file of up to 5 MiB. On
+the Boat, files live under `/home/user` or `/tmp`. Both work with your own Boat
+key and with the cloud computers included in a Cloud plan.
+
 On **Auto**, a conversation works on the Boat only after the bot moves it there
 (it asks to switch with `select_computer`). Auto by itself never reads, wakes or
 creates a Boat, so it adds no cloud computer calls to an ordinary message.

@@ -39,6 +39,8 @@ describe("a cloud computer starts only when the bot uses it", () => {
    * hours are used up. */
   const refuse = { creates: false };
   const requests: Request[] = [];
+  /** Files the bots wrote on their computers, by path. */
+  const written = new Map<string, string>();
   /** Boat ids in Boat's own alphabet, one per computer created. */
   const boxId = (n: number) => `bx_${"23456789abcdefgh"[n]}3456789`;
 
@@ -166,6 +168,10 @@ describe("a cloud computer starts only when the bot uses it", () => {
         }
         if (verb === "desktop" && req.method === "POST") return send(200, { desktopUrl: `https://desktop.invalid/${row.id}` });
         if (verb === "commands" && req.method === "POST") return send(200, { exitCode: 0, stdout: "captured", stderr: "" });
+        if (verb === "files" && req.method === "PUT") {
+          written.set(body.path, Buffer.from(body.content, body.encoding).toString("utf8"));
+          return send(200, { ok: true, type: "file.written", path: body.path, encoding: body.encoding, size: written.get(body.path)!.length });
+        }
         if (verb === "artifacts" && req.method === "GET") {
           res.writeHead(200, { "content-type": "image/jpeg", "content-length": String(FRAME.length) });
           return res.end(FRAME);
@@ -458,5 +464,34 @@ describe("a cloud computer starts only when the bot uses it", () => {
     } finally {
       refuse.creates = false;
     }
+  }, 60_000);
+
+  it("copies files between the cloud computer and the folder the turn works in, in a chat and in a room", async () => {
+    const bot = await cloudBot("Copier");
+    const sent = await startTurn(bot.id, "Bring the results back");
+    const call = (turn: any, name: string, args: unknown) => computerCall(turn, "tools/call", { name, arguments: args });
+    const brought = await call(sent, "copy_from_computer", { path: "/home/user/out/frame.jpg", to: "results/frame.jpg" });
+    expect(brought.body.result, JSON.stringify(brought.body)).toEqual({ content: [{ type: "text", text: JSON.stringify({ path: join("results", "frame.jpg"), bytes: FRAME.length }) }] });
+    expect(readFileSync(join(sent.cwd, "results", "frame.jpg"))).toEqual(FRAME);
+    writeFileSync(join(sent.cwd, "query.sql"), "select 1;");
+    expect((await call(sent, "copy_to_computer", { from: "query.sql", path: "/tmp/query.sql" })).body.result.isError).toBeFalsy();
+    expect(written.get("/tmp/query.sql")).toBe("select 1;");
+    expect((await call(sent, "copy_from_computer", { path: "/tmp/x", to: "../escaped" })).body.result.isError).toBe(true);
+    expect(requests.filter(request => /\/(artifacts|files)$/.test(request.path)).map(request => request.method))
+      .toEqual(expect.arrayContaining(["GET", "PUT"]));
+    await finish(bot.id);
+
+    const { group } = await apiOk("POST", "/api/groups", { name: "Copy room", memberIds: [bot.id] });
+    await apiOk("PATCH", `/api/groups/${group.id}/setup`, { action: "skip" });
+    rmSync(dumpFile, { force: true });
+    rmSync(finishFile, { force: true });
+    await apiOk("POST", `/api/groups/${group.id}/messages`, { text: "Bring it here too" });
+    const roomTurn = await dump();
+    expect(roomTurn.cwd).not.toBe(sent.cwd);
+    expect((await call(roomTurn, "copy_from_computer", { path: "/tmp/frame.jpg" })).body.result.isError).toBeFalsy();
+    expect(readFileSync(join(roomTurn.cwd, "frame.jpg"))).toEqual(FRAME);
+    await finish(bot.id);
+    await apiOk("DELETE", `/api/groups/${group.id}`);
+    await apiOk("DELETE", `/api/bots/${bot.id}`);
   }, 60_000);
 });
