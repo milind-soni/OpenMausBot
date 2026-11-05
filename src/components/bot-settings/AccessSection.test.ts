@@ -234,10 +234,10 @@ describe("AccessSection Works on", () => {
     function Picker() { rendered = (picker.type as (props: unknown) => ReactNode)(picker.props); return rendered; }
     renderToStaticMarkup(createElement(StoreProvider, null, createElement(Picker)));
     const grid = nodes(rendered).find((node) => (node.type as { name?: string }).name === "WorksOnGrid")!;
-    const options = grid.props.options as Array<{ mode: string | null; disabled: boolean; unavailableTitle?: string }>;
+    const options = grid.props.options as Array<{ mode: string | null; disabled: boolean; view: { line: string } }>;
     const local = options.find((option) => option.mode === "local")!;
     expect(local.disabled).toBe(true);
-    expect(local.unavailableTitle).toBeTruthy();
+    expect(renderToStaticMarkup(grid).replaceAll("&#x27;", "'")).toContain(local.view.line);
 
     const select = grid.props.onSelect as (mode: string | null) => void;
     select("browser");

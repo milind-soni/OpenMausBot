@@ -404,7 +404,7 @@ describe("Where the bot works", () => {
     const advanced = render(makeBot());
     const card = destinations(advanced)[1]!;
     expect(card.props.disabled).toBe(true);
-    expect(text(card.props.children)).toBe("Cloud desktopNot with this model");
+    expect(text(card.props.children)).toBe(`Cloud desktop${tile.props.title}`);
     expect(card.props.title).toBe(tile.props.title);
   });
 
