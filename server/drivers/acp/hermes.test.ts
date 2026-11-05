@@ -373,6 +373,22 @@ describe("resolveHermesModels when Hermes has no model to list", () => {
     await expect(resolveHermesModels(env, { cli: missing })).resolves.toEqual({ default: "", options: [] });
   });
 
+  it("offers nothing when the Hermes path is a directory or can't run", async () => {
+    const { cli, env } = setup("");
+    await expect(resolveHermesModels(env, { cli: dirname(cli) })).resolves.toEqual({ default: "", options: [] });
+    if (process.platform === "win32") return;
+    const plain = join(dirname(cli), "plain-hermes");
+    writeFileSync(plain, "", { mode: 0o644 });
+    await expect(resolveHermesModels(env, { cli: plain })).resolves.toEqual({ default: "", options: [] });
+  });
+
+  it("answers empty for an Ollama or LM Studio setup whose server is down, so earlier models stay", async () => {
+    for (const provider of ["ollama", "lmstudio"]) {
+      const { cli, env } = setup("", `model:\n  provider: ${provider}\n  default: llama3\n`);
+      await expect(resolveHermesModels(env, { cli })).resolves.toEqual({ default: "", options: [] });
+    }
+  });
+
   it("keeps today's list when a hosted provider is configured", async () => {
     const { cli, env } = setup("OPENROUTER_API_KEY=sk-or-v1-test\n", "model:\n  default: anthropic/claude-opus-4.6\n");
     await expect(resolveHermesModels(env, { cli })).resolves.toEqual({

@@ -2,7 +2,7 @@
 // forward it), and OPENAI_API_KEY makes provider:auto resolve to OpenRouter without its key ("HTTP 401:
 // Missing Authentication header"), so injects write providers.<host> and set_model `custom:<host>:<model>`.
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { accessSync, constants, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -203,9 +203,31 @@ export function hermesConfiguredModel(
   return hermesConfigOption(configuredDefault?.model ?? "");
 }
 
+/** A runnable file, so the default entry never points at a directory or a file that can't start. */
 function hermesInstalled(cli: string): boolean {
   const found = findCliCandidates(cli)[0];
-  return Boolean(found && existsSync(found));
+  if (!found) return false;
+  try {
+    if (!statSync(found).isFile()) return false;
+    if (process.platform !== "win32") accessSync(found, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// The local probes list Ollama's and LM Studio's models: with none listed that server is down, and an empty
+// answer keeps the catalog's earlier models instead of replacing them with the default.
+const HERMES_PROBED_PROVIDERS = new Set(["ollama", "lmstudio"]);
+
+function hermesUsesProbedProvider(env: Record<string, string | undefined>): boolean {
+  const dir = env.HERMES_HOME || harnessHome("hermes", env);
+  try {
+    const provider = hermesConfigDefault(readFileSync(join(dir, "config.yaml"), "utf8"))?.provider.toLowerCase() ?? "";
+    return HERMES_PROBED_PROVIDERS.has(provider);
+  } catch {
+    return false;
+  }
 }
 
 export const HERMES_ACP_MODELS_TIMEOUT_ENV = "HERMES_ACP_MODELS_TIMEOUT_MS";
@@ -337,7 +359,7 @@ export async function resolveHermesModels(
   });
   // A custom endpoint or a config we can't read (another HERMES_HOME, WSL) would leave no choice and no way to
   // create a Hermes bot: offer Hermes' own config.yaml model, which starts `hermes acp` without picking one.
-  if (!options.length && hermesInstalled(cli)) {
+  if (!options.length && !hermesUsesProbedProvider(env) && hermesInstalled(cli)) {
     options.push(hermesConfigOption(""));
   }
   return { default: options[0]?.id ?? "", options };
