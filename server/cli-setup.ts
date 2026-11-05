@@ -121,17 +121,47 @@ async function chooseModel(io: SetupIo, models: ModelCatalog): Promise<string> {
   }
 }
 
-const NATIVE = [
-  { id: "codex", driver: "codex", label: "ChatGPT / Codex — sign in with your account", cli: "codex", pkg: "@openai/codex" },
-  { id: "claude", driver: "claudeAgent", label: "Claude Code — sign in with your account", cli: "claude", pkg: "@anthropic-ai/claude-code" },
-] as const;
+interface NativeChoice {
+  id: string;
+  driver: string;
+  label: string;
+  cli: string;
+  pkg: string;
+  login?: readonly string[];
+  key?: { env: string; url: string };
+  note?: string;
+}
+
+const NATIVE: readonly NativeChoice[] = [
+  { id: "codex", driver: "codex", label: "ChatGPT / Codex — sign in with your account", cli: "codex", pkg: "@openai/codex", login: ["login"] },
+  { id: "claude", driver: "claudeAgent", label: "Claude Code — sign in with your account", cli: "claude", pkg: "@anthropic-ai/claude-code", login: ["auth", "login"] },
+  {
+    id: "kimi", driver: "kimiAgent", label: "Kimi Code — sign in with your Kimi account", cli: "kimi", pkg: "@moonshot-ai/kimi-code",
+    login: ["login"], note: "Kimi shows a code and a link; open the link in any browser and approve the sign-in.",
+  },
+  {
+    id: "gemini", driver: "geminiAgent", label: "Gemini CLI — Gemini API key", cli: "gemini", pkg: "@google/gemini-cli",
+    key: { env: "GEMINI_API_KEY", url: "https://aistudio.google.com/apikey" },
+    // Google stopped serving Gemini CLI to consumer Google sign-ins on 2026-06-18.
+    note: "Gemini CLI no longer accepts personal Google sign-ins; use a Gemini API key. For a Google account, use the Antigravity engine in the app.",
+  },
+  {
+    id: "deepseek", driver: "deepseekAgent", label: "DeepSeek Harness — DeepSeek API key", cli: "dsh", pkg: "@deepseek-ai/dsh",
+    key: { env: "DEEPSEEK_API_KEY", url: "https://platform.deepseek.com/api_keys" },
+  },
+];
+
+const NATIVE_DRIVERS = new Set(NATIVE.map((n) => n.driver));
 
 async function connectNative(
-  choice: typeof NATIVE[number], id: string, entry: InstanceConfig, io: SetupIo, deps: SetupDependencies,
+  choice: NativeChoice, id: string, entry: InstanceConfig, io: SetupIo, deps: SetupDependencies,
 ): Promise<ModelCatalog> {
   const cli = typeof rawObject(entry.config).cli === "string" ? rawObject(entry.config).cli as string : choice.cli;
   io.log("Connecting your account…");
-  io.log("Sign-in stays with your provider. Its account limits apply; OpenMausBot never asks for your password.");
+  io.log(choice.key
+    ? "Your API key goes only to this engine. Usage is billed to your API account."
+    : "Sign-in stays with your provider. Its account limits apply; OpenMausBot never asks for your password.");
+  if (choice.note) io.log(choice.note);
   let state = await deps.inspect(id, entry);
   if (state.snapshot.state !== "available") {
     if (cli !== choice.cli) throw new Error("Your custom CLI path is unavailable. Fix that path in Settings before running setup again.");
@@ -141,15 +171,23 @@ async function connectNative(
     if (state.snapshot.state !== "available") throw new Error(`${choice.cli} is still unavailable. Check the installation output and try again.`);
   }
   if (!state.snapshot.authenticated) {
-    let args = ["auth", "login"];
-    if (choice.id === "codex") {
-      const method = await io.choose("How would you like to sign in?", [
-        "Open a browser on this computer", "Use a device code (SSH / remote server)",
-      ], process.env.SSH_CONNECTION ? 1 : 0);
-      args = method === 1 ? ["login", "--device-auth"] : ["login"];
+    if (choice.key) {
+      io.log(`Create a key: ${choice.key.url}`);
+      const key = (await io.secret(`${choice.key.env} (hidden): `)).trim();
+      if (!key) throw new Error("An API key is required. Nothing was saved.");
+      entry.environment = { ...entry.environment, [choice.key.env]: key };
+      io.log("The key will be stored in your private config.json (plaintext, owner-only permissions on Unix). Never share this file.");
+    } else {
+      let args = [...(choice.login ?? [])];
+      if (choice.id === "codex") {
+        const method = await io.choose("How would you like to sign in?", [
+          "Open a browser on this computer", "Use a device code (SSH / remote server)",
+        ], process.env.SSH_CONNECTION ? 1 : 0);
+        if (method === 1) args = ["login", "--device-auth"];
+      }
+      if (args.includes("--device-auth")) io.log("Enable device-code login in ChatGPT security settings if your account requests it.");
+      await deps.runCli(cli, args, entry.environment);
     }
-    if (args.includes("--device-auth")) io.log("Enable device-code login in ChatGPT security settings if your account requests it.");
-    await deps.runCli(cli, args, entry.environment);
     state = await deps.inspect(id, entry);
     if (state.snapshot.state !== "available" || !state.snapshot.authenticated) {
       throw new Error("Sign-in was not confirmed. Your OpenMausBot settings are unchanged; complete provider sign-in and try again.");
@@ -174,11 +212,12 @@ export async function runSetup(
     const cfg = loadConfig();
     const runtime = instanceConfigs(cfg);
     const existing = Object.entries(runtime).filter(([id, entry]) =>
-      !!cfg.instances?.[id] && ["codex", "claudeAgent", "openai-compat"].includes(entry.driver) && entry.enabled !== false);
+      !!cfg.instances?.[id] && (NATIVE_DRIVERS.has(entry.driver) || entry.driver === "openai-compat") && entry.enabled !== false);
     io.log("\nWelcome to OpenMausBot\n");
     io.log("Let's connect your AI. Choose a provider, then a model.");
     io.log("Existing bots and conversations stay untouched. Ctrl-C cancels.");
     io.log("You can add integrations and change settings later.\n");
+    const existingStart = NATIVE.length + 1;
     const existingDefault = existing.findIndex(([id]) => id === cfg.defaultModelSelection?.instanceId);
     const providerOptions = [
       ...NATIVE.map((n) => n.label),
@@ -191,9 +230,9 @@ export async function runSetup(
     let entry: InstanceConfig;
     let model: string;
     for (;;) {
-      pick ??= await io.choose("Choose your AI connection", providerOptions, existingDefault < 0 ? 0 : existingDefault + 3);
-      const prior = pick >= 3 ? existing[pick - 3] : undefined;
-      const native = pick < 2 ? NATIVE[pick] : NATIVE.find((n) => n.driver === prior?.[1].driver);
+      pick ??= await io.choose("Choose your AI connection", providerOptions, existingDefault < 0 ? 0 : existingDefault + existingStart);
+      const prior = pick >= existingStart ? existing[pick - existingStart] : undefined;
+      const native = pick < NATIVE.length ? NATIVE[pick] : NATIVE.find((n) => n.driver === prior?.[1].driver);
       try {
         if (native) {
           // Reuse native provider settings; an ID the user repurposed keeps its connection.
