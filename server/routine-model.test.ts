@@ -3,6 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { modelSwitchNeedsAsk, type ApprovalMode } from "../shared/approval-mode.ts";
+import type { ModelSelection } from "../shared/wire.ts";
+import { ROUTINE_MODEL_PERMISSIONS, routineModelRefusal, routineThreadModel, type RoutineModelChecks } from "./routine-input.ts";
 import { RoutineManager, type RoutineManagerOptions } from "./routines.ts";
 
 const dirs: string[] = [];
@@ -56,5 +59,45 @@ describe("a routine's own model", () => {
     expect(create({ ...HAIKU, effort: "low", variant: "fast" })).toThrow(/Choose a model/);
     expect(create(HAIKU, "room-goal")).toThrow(/Room goals run on their bots' own models/);
     expect(routines.listRoutines()).toEqual([]);
+  });
+});
+
+describe("a routine's model and its bot's permissions", () => {
+  const DRIVERS: Record<string, string> = { claude: "claudeAgent", codex: "codex", gemini: "geminiAgent", pi: "pi" };
+  const CODEX = { instanceId: "codex", model: "gpt-5-codex" };
+  const bots: Record<string, { modelSelection: ModelSelection; approvalMode: ApprovalMode }> = {
+    custom: { modelSelection: CODEX, approvalMode: "custom" },
+    edits: { modelSelection: HAIKU, approvalMode: "edits" },
+    full: { modelSelection: CODEX, approvalMode: "full" },
+  };
+  const checks: RoutineModelChecks = {
+    check: (raw) => ({ ok: true, selection: raw as ModelSelection }),
+    bot: (botId) => bots[botId],
+    engineSwitchNeedsAsk: (mode, from, to) => modelSwitchNeedsAsk(mode, DRIVERS[from.instanceId], DRIVERS[to.instanceId]),
+  };
+  const refusal = { status: 400, error: ROUTINE_MODEL_PERMISSIONS };
+
+  it("refuses a model on another engine that the bot's permission level can't move to, as a bot's own model change is", () => {
+    expect(routineModelRefusal({ botId: "custom", modelSelection: HAIKU }, checks)).toEqual(refusal);
+    expect(routineModelRefusal({ botId: "edits", modelSelection: { instanceId: "pi", model: "pi-1" } }, checks)).toEqual(refusal);
+  });
+
+  it("keeps a model on the bot's own engine, or on any engine the permission level carries to", () => {
+    expect(routineModelRefusal({ botId: "custom", modelSelection: { ...CODEX, model: "gpt-5-mini" } }, checks)).toBeNull();
+    expect(routineModelRefusal({ botId: "edits", modelSelection: { instanceId: "gemini", model: "gemini-flash" } }, checks)).toBeNull();
+    expect(routineModelRefusal({ botId: "full", modelSelection: HAIKU }, checks)).toBeNull();
+  });
+
+  it("checks the routine's model again when an edit moves it to another bot, and not when the edit drops it", () => {
+    const existing = { botId: "full", modelSelection: HAIKU };
+    expect(routineModelRefusal({ botId: "custom" }, checks, existing)).toEqual(refusal);
+    expect(routineModelRefusal({ botId: "custom", modelSelection: null }, checks, existing)).toBeNull();
+    expect(routineModelRefusal({ prompt: "Sweep twice" }, checks, existing)).toBeNull();
+  });
+
+  it("opens a run on the bot's model once the bot's permissions no longer let the routine's model through", () => {
+    expect(routineThreadModel({ botId: "full", modelSelection: HAIKU }, checks)).toEqual(HAIKU);
+    expect(routineThreadModel({ botId: "custom", modelSelection: HAIKU }, checks)).toBeUndefined();
+    expect(routineThreadModel({ botId: "custom" }, checks)).toBeUndefined();
   });
 });

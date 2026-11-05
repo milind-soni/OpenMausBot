@@ -1,4 +1,5 @@
 // A routine as a person, a bot or an import asked for it, checked and cleaned before RoutineManager keeps it.
+import { approvalModeFor, type ApprovalMode } from "../shared/approval-mode.ts";
 import { runsOnce } from "../shared/limit-reset.ts";
 import { cleanAttachments, cleanTimeoutMinutes } from "./routine-attachments.ts";
 import { loadChecks, loadModelSelection } from "./routine-load.ts";
@@ -6,14 +7,43 @@ import { cleanSchedule } from "./routine-schedules.ts";
 import type { ModelSelection } from "../shared/wire.ts";
 import type { Routine, RoutineInput } from "./routines.ts";
 
-/** Checks a requested routine model the way a bot's is checked, and leaves the checked form in the body. */
-export function routineModelRefusal(body: unknown, check: (raw: unknown) => { ok: true; selection: ModelSelection } | { ok: false; status: number; error: string }): { status: number; error: string } | null {
-  const raw = body && typeof body === "object" ? (body as { modelSelection?: unknown }).modelSelection : undefined;
-  if (raw == null) return null;
-  const checked = check(raw);
-  if (!checked.ok) return checked;
-  (body as { modelSelection: ModelSelection }).modelSelection = checked.selection;
-  return null;
+type Refusal = { status: number; error: string };
+
+/** What a routine's model is held to: the checks a bot's own model change gets. */
+export interface RoutineModelChecks {
+  check(raw: unknown): { ok: true; selection: ModelSelection } | ({ ok: false } & Refusal);
+  bot(botId: string): (Parameters<typeof approvalModeFor>[0] & { modelSelection: ModelSelection }) | null | undefined;
+  engineSwitchNeedsAsk(mode: ApprovalMode, from: ModelSelection, to: ModelSelection): boolean;
+}
+
+export const ROUTINE_MODEL_PERMISSIONS = "That model runs on another engine, which can't keep this bot's permission level. Choose a model on the bot's own engine, or change the bot's permissions first.";
+
+/** A run's thread keeps its bot's permission level, so its model may change engines only where a bot's own model change could
+ * without dropping to Ask: a Custom grant never leaves its engine, and Auto-accept edits stops at an engine without it. */
+function keepsPermissions(checks: Pick<RoutineModelChecks, "bot" | "engineSwitchNeedsAsk">, botId: string, selection: ModelSelection): boolean {
+  const bot = checks.bot(botId);
+  return !bot || !checks.engineSwitchNeedsAsk(approvalModeFor(bot), bot.modelSelection, selection);
+}
+
+/** Checks a requested routine model the way a bot's is checked, and leaves the checked form in the body. A move to another bot
+ * checks the model the routine already has against that bot. */
+export function routineModelRefusal(body: unknown, checks: RoutineModelChecks, existing?: Pick<Routine, "botId" | "modelSelection">): Refusal | null {
+  const fields = body && typeof body === "object" ? body as { modelSelection?: unknown; botId?: unknown } : {};
+  if (fields.modelSelection == null && fields.botId === undefined) return null;
+  let selection = fields.modelSelection === null ? undefined : existing?.modelSelection;
+  if (fields.modelSelection != null) {
+    const checked = checks.check(fields.modelSelection);
+    if (!checked.ok) return { status: checked.status, error: checked.error };
+    selection = (body as { modelSelection: ModelSelection }).modelSelection = checked.selection;
+  }
+  const botId = typeof fields.botId === "string" ? fields.botId : existing?.botId;
+  return selection && botId && !keepsPermissions(checks, botId, selection) ? { status: 400, error: ROUTINE_MODEL_PERMISSIONS } : null;
+}
+
+/** The model a run opens its thread on: the routine's own, unless its bot's permissions changed since so that it no longer may. */
+export function routineThreadModel(routine: Pick<Routine, "botId" | "modelSelection"> | undefined,
+  checks: Pick<RoutineModelChecks, "bot" | "engineSwitchNeedsAsk">): ModelSelection | undefined {
+  return routine?.modelSelection && keepsPermissions(checks, routine.botId, routine.modelSelection) ? routine.modelSelection : undefined;
 }
 
 export function sanitizeInput(input: RoutineInput, after: number): Omit<Routine, "id" | "createdAt" | "updatedAt" | "nextRunAt"> {
