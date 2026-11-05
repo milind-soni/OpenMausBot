@@ -6,6 +6,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type Server, type ServerResponse } from "node:http";
 
 import type { DeviceRegistry, DeviceRoutes } from "./devices.ts";
+import type { E2EDescriptor } from "./e2e/descriptor.ts";
 import type { LiveRoute } from "./e2e/registry.ts";
 import { companionEndpointCandidates, hostedCompanionUrl } from "./endpoints.ts";
 import { lanAddresses, lanInterfaces, tailnetName, tailscaleAddress } from "./listener.ts";
@@ -48,6 +49,8 @@ export interface E2EStatus {
   enabled: boolean;
   relay: "connected" | "connecting" | "off";
   node: string | null;
+  /** What the pairing QR carries as `e2e`. */
+  descriptor: E2EDescriptor | null;
 }
 
 /** A bracketed IPv6 literal has colons of its own. A malformed authority comes
@@ -214,7 +217,7 @@ export function companionState(options: Omit<ControlOptions, "controlToken">) {
     ...(secretPublicKey ? { secretPublicKey } : {}),
     pairing: pairing ? { code: pairing.code, token: pairing.token, expiresAt: pairing.expiresAt } : null,
     devices: options.devices.list().map((device) => ({ ...device, route: options.liveRoutes?.()[device.id] ?? null })),
-    e2e: options.e2e?.() ?? { enabled: false, relay: "off", node: null },
+    e2e: options.e2e?.() ?? { enabled: false, relay: "off", node: null, descriptor: null },
     // An empty list from an unreadable file must not read as "nothing paired".
     ...(options.devices.devicesUnreadable() ? { devicesUnreadable: true } : {}),
     connectedDeviceIds: options.connectedDeviceIds?.() ?? [],

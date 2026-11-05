@@ -9,7 +9,8 @@ import { CLOSE, TRANSPORT_RELAY, type KeyPair, type PskCandidate, type Transport
 import { E2ESession, type RecordTransport } from "./session.ts";
 
 export type LiveRoute = "wifi" | "tailscale" | "relay";
-export type Peer = { kind: "device"; id: string } | { kind: "pairing" };
+/** A pairing peer carries the admission value its window had, so a relay session stays admitted after pairing. */
+export type Peer = { kind: "device"; id: string } | { kind: "pairing"; admHash: string | null };
 
 /** Shared by every stream of one session, so a pairing session becomes that device's once it has paired. */
 export interface E2EContext {
@@ -25,6 +26,9 @@ export interface RelayIdentity {
 interface Live {
   session: E2ESession<Peer>;
   context: E2EContext;
+  /** A relay session opened with a pairing token: kept in the admission set until it ends, or redeeming the window
+   * would make the relay close the very session that paired. */
+  pairingAdmission: string | null;
 }
 
 const ROUTE_RANK: Record<LiveRoute, number> = { wifi: 0, tailscale: 1, relay: 2 };
@@ -39,9 +43,15 @@ export class E2ERegistry {
   #key: KeyPair | null = null;
   #relay: RelayIdentity | null = null;
   #pending = 0;
+  readonly #admissionListeners = new Set<() => void>();
 
   constructor(devices: DeviceRegistry) {
     this.#devices = devices;
+  }
+
+  /** The admission set may have changed for a reason the device registry doesn't see. */
+  onAdmissionChange(listener: () => void): void {
+    this.#admissionListeners.add(listener);
   }
 
   get enabled(): boolean {
@@ -71,7 +81,11 @@ export class E2ERegistry {
       const hash = credentialHashFromHex(device.tokenHash);
       if (hash) out.push({ id: { kind: "device", id: device.id }, psk: psk(hash, id) });
     }
-    for (const window of this.#devices.pairingWindows()) out.push({ id: { kind: "pairing" }, psk: psk(credentialHash(window.token), id) });
+    for (const window of this.#devices.pairingWindows()) {
+      const hash = credentialHash(window.token);
+      const admHash = this.#relay ? admissionHash(admission(hash, this.#relay.hostId)) : null;
+      out.push({ id: { kind: "pairing", admHash }, psk: psk(hash, id) });
+    }
     return out;
   }
 
@@ -86,7 +100,8 @@ export class E2ERegistry {
       if (hash) out.push(admissionHash(admission(hash, hostId)));
     }
     for (const window of this.#devices.pairingWindows()) out.push(admissionHash(admission(credentialHash(window.token), hostId)));
-    return out.sort();
+    for (const live of this.#live) if (live.pairingAdmission) out.push(live.pairingAdmission);
+    return [...new Set(out)].sort();
   }
 
   /** For one device (null: a phone that is pairing now). A restricted device never learns the relay. */
@@ -110,7 +125,7 @@ export class E2ERegistry {
       return null;
     }
     this.#pending += 1;
-    const live: Live = { context: { peer: { kind: "pairing" }, route }, session: null as unknown as E2ESession<Peer> };
+    const live: Live = { context: { peer: { kind: "pairing", admHash: null }, route }, session: null as unknown as E2ESession<Peer>, pairingAdmission: null };
     live.session = E2ESession.computer<Peer>({
       transport,
       transportByte,
@@ -121,6 +136,7 @@ export class E2ERegistry {
         live.context.peer = peer;
         this.#live.add(live);
         if (peer.kind === "device") return this.#devices.markE2E(peer.id);
+        if (transportByte === TRANSPORT_RELAY) live.pairingAdmission = peer.admHash;
         const timer = setTimeout(() => {
           if (live.context.peer.kind === "pairing") live.session.close(CLOSE.rejected);
         }, PAIRING_SESSION_MS);
@@ -138,6 +154,7 @@ export class E2ERegistry {
     void live.session.closed.then(() => {
       settle();
       this.#live.delete(live);
+      if (live.pairingAdmission) for (const listener of this.#admissionListeners) listener();
     });
     return live.session;
   }

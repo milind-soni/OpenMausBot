@@ -198,6 +198,7 @@ function configureE2E(message: Record<string, unknown>): void {
 }
 
 devices.onChange(() => relay?.refreshAdmission());
+e2e.onAdmissionChange(() => relay?.refreshAdmission());
 
 const control = createControlServer({
   devices,
@@ -222,7 +223,7 @@ const control = createControlServer({
     void notifyDeviceRevoked({ harnessPort: HARNESS_PORT, deviceId, mutationToken: mutationToken ?? undefined });
   },
   refreshTailscale: () => refreshTailnetName(),
-  e2e: () => ({ enabled: e2e.enabled, relay: relay?.status ?? "off", node: relay?.node ?? null }),
+  e2e: () => ({ enabled: e2e.enabled, relay: relay?.status ?? "off", node: relay?.node ?? null, descriptor: e2e.descriptor(null) }),
   liveRoutes: () => e2e.routes(),
   routesChanged: (deviceId, routes) => {
     relay?.refreshAdmission();
