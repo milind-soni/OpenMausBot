@@ -3,12 +3,17 @@
 // this engine to stop, it is a failure, and the person must read that in words, not see "Stopped" as if they had.
 import { clientCancellation } from "../../shared/client-cancel.ts";
 import type { ProviderInstance, RuntimeEvent } from "../contracts.ts";
+import { noticeFailure } from "../chat-notices.ts";
 
 const SAID_CHARS = 120;
 
-export function unaskedStopMessage(said: string): string {
+export function unaskedStopFailure(said: string) {
   const quoted = said.replace(/\s+/g, " ").trim().slice(0, SAID_CHARS).replaceAll('"', "'");
-  return `The AI's request was cut off before it finished, and nobody stopped it (it said only "${quoted}"). Send the message again to try once more.`;
+  return noticeFailure("chat.notice.unaskedStop", { said: quoted });
+}
+
+export function unaskedStopMessage(said: string): string {
+  return unaskedStopFailure(said).message;
 }
 
 export function withUnaskedStops(instance: ProviderInstance): ProviderInstance {
@@ -23,7 +28,7 @@ export function withUnaskedStops(instance: ProviderInstance): ProviderInstance {
     }
     if (item.type !== "runtime.error" || asked.has(item.threadId)) return item;
     const said = clientCancellation(item.message);
-    return said === null ? item : { ...item, message: unaskedStopMessage(said) };
+    return said === null ? item : { ...item, ...unaskedStopFailure(said) };
   };
   (instance as { adapter: ProviderInstance["adapter"] }).adapter = {
     ...adapter,

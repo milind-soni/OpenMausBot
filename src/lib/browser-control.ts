@@ -1,4 +1,5 @@
 import type { PreviewStreamClient, PreviewStreamControl, PreviewStreamInput } from "./browser-stream-client";
+import { t } from "./i18n";
 
 export type BrowserTakeStatus = "" | "pending" | "slow" | "stale";
 
@@ -227,14 +228,14 @@ export function streamTransport(client: PreviewStreamClient, control: {
     take: () => new Promise((resolve, reject) => {
       const before = control.current();
       if (before?.controller === "you") { resolve({ waited: false }); return; }
-      if (!client.send({ type: "takeControl" })) { reject(new Error("The browser view is not connected. Reconnect it, then try again.")); return; }
+      if (!client.send({ type: "takeControl" })) { reject(new Error(t("browser.panel.notConnected"))); return; }
       const waited = before?.controller === "agent";
       const done = (outcome: () => void) => { clearTimeout(timer); unwatch(); outcome(); };
-      const timer = setTimeout(() => done(() => reject(new Error("Could not take control of the browser. Try again shortly."))), TAKE_TIMEOUT_MS);
+      const timer = setTimeout(() => done(() => reject(new Error(t("browser.panel.takeFailed")))), TAKE_TIMEOUT_MS);
       const unwatch = control.watch((next) => {
         if (next?.controller === "you") done(() => resolve({ waited }));
         else if (next?.controller === "another-viewer") done(() => reject(new Error(heldElsewhere)));
-        else if (next === null) done(() => reject(new Error("The browser view disconnected.")));
+        else if (next === null) done(() => reject(new Error(t("browser.panel.viewDisconnected"))));
       });
     }),
     release: async () => { client.send({ type: "releaseControl" }); },

@@ -24,6 +24,22 @@ vi.mock("@/state/store", () => ({
 }));
 import { HOSTED_MCP_APPS } from "@/lib/hosted-mcp-apps";
 import { McpServersPanel } from "./McpServersPanel";
+import { setLocale } from "@/lib/i18n";
+
+afterEach(() => setLocale("en"));
+
+it("renders key refusals without an HTTP status in the current language, but keeps HTTP technical", () => {
+  fixture.servers = [{ name: "docs", type: "http", url: "https://mcp.example.com/mcp", headerKeys: ["X-Token"], enabled: true }];
+  fixture.seeded[5] = { docs: { ok: false, reason: "keys", error: "Raw server diagnostic" } };
+  expect(render(true)).toContain("unauthorized");
+  setLocale("pt-br");
+  expect(render(true)).toContain("acesso não autorizado");
+  expect(render(true)).toContain("X-Token");
+  expect(render(true)).not.toContain("Raw server diagnostic");
+  fixture.seeded[5] = { docs: { ok: false, reason: "keys", status: 401 } };
+  expect(render(true)).toContain("HTTP 401");
+  expect(render(true)).not.toContain("acesso não autorizado");
+});
 
 function render(embedded: boolean, cards = false, hideHosted = false) {
   function Capture() {

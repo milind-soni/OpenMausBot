@@ -221,7 +221,7 @@ export function TeamLibraryPanel({
       try {
         manifest = JSON.parse(raw);
       } catch (cause) {
-        if (cause instanceof SyntaxError) throw new Error("That backup or team file is not valid JSON.");
+        if (cause instanceof SyntaxError) throw new Error(t("teamLibrary.invalidJson"));
         throw cause;
       }
     }

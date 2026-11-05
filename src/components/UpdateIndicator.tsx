@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowDown, ArrowDownToLine, Loader2, PackageOpen, RefreshCw, X } from "lucide-react";
 
-import { useUpdaterState, type UpdaterState } from "@/lib/updater";
+import { updaterMessage, useUpdaterState, type UpdaterState } from "@/lib/updater";
 import { releaseHighlights } from "@/lib/release-highlights";
 import { RELEASES_URL, appVersion, openExternalLink } from "@/lib/app-links";
 import { productName } from "../lib/brand";
@@ -170,7 +170,7 @@ export function UpdateCard({
       : handoff ? <PackageOpen size={14} aria-hidden /> : <RefreshCw size={14} aria-hidden />;
 
   const note = failed
-    ? state.message?.split("\n")[0]?.slice(0, 160) || t("update.card.failed")
+    ? updaterMessage(state)?.split("\n")[0]?.slice(0, 160) || t("update.card.failed")
     : downloading
       ? t("update.card.downloadingNote")
       : handoff

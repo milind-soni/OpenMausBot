@@ -38,6 +38,7 @@ export function installOneHome(deps: Omit<SendDeps, "local" | "move" | "moveSess
   openTeam?(team: { id: string; name: string }): void;
   /** The team moves' journal, team-moves.json beside journalFile by default. */
   teamJournal?: { read(): unknown; write(value: unknown): void };
+  t?(key: string, params?: Record<string, string | number>): string;
   /** The waits of the move's report to the Admin (move-status.mjs), setTimeout's by default. */
   reportTimers?: { set(work: () => void, ms: number): unknown; clear(timer: unknown): void };
   /** The move to a server of the person's own: while it is chosen no move to My Cloud starts, and its line is this computer's page's. */

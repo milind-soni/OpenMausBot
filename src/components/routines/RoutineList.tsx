@@ -3,7 +3,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { Routine, RoutineRun } from "@/lib/routines";
 import { scheduleLabel } from "@/lib/schedule-label";
-import { latestRoutineRun, routineDateTime, routineFinished, routineHeldNote, routineNextLabel, routineRunLabel, routineRunTone, routineScheduleState } from "@/lib/routine-display";
+import { latestRoutineRun, routineDateTime, routineFinished, routineHeldNote, routineNextLabel, routineRunLabel, routineRunText, routineRunTone, routineScheduleState } from "@/lib/routine-display";
 import type { Bot } from "@/state/store";
 import { Switch } from "../SettingsPrimitives";
 
@@ -24,6 +24,7 @@ export function RoutineList({ routines, runs, bots, loading, error, onOpen, onLo
     {!loading && !error && sorted.length === 0 && <div className="rounded-xl border border-dashed border-hairline/50 p-5 text-center text-[13px] text-ink-secondary"><Repeat2 size={20} className="mx-auto mb-2 opacity-60" />{t("routines.empty")}</div>}
     {sorted.map((routine) => {
       const latest = latestRoutineRun(routine.id, runs);
+      const said = latest && (latest.attention ? "attention" : latest.error ? "error" : latest.output ? "output" : null);
       const bot = bots?.find((candidate) => candidate.id === routine.botId);
       const switched = onToggle !== undefined && !routineFinished(routine);
       return <article key={routine.id} className="rounded-xl border border-hairline/40 bg-card p-3.5" aria-label={routine.name}>
@@ -43,9 +44,9 @@ export function RoutineList({ routines, runs, bots, loading, error, onOpen, onLo
           </div>
           <button type="button" onClick={() => onLogs(routine)} aria-label={t("routines.logsFor", { name: routine.name })} className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink"><FileText size={12} />{t("routines.logs")}</button>
         </div>
-        {latest && (latest.attention || latest.error || latest.output) && <p className={cn("mt-2 line-clamp-2 whitespace-pre-wrap text-[12px] leading-relaxed", latest.error ? "text-danger" : "text-ink-secondary")}>{latest.attention || latest.error || latest.output}</p>}
+        {latest && said && <p className={cn("mt-2 line-clamp-2 whitespace-pre-wrap text-[12px] leading-relaxed", latest.error ? "text-danger" : "text-ink-secondary")}>{routineRunText(latest, said)}</p>}
         {!!routine.failureStreak && <p className="mt-2 text-[12px] text-danger">{t("routines.failureStreak", { count: routine.failureStreak })}</p>}
-        {routine.weekRuns && <p className="mt-2 text-[12px] text-ink-secondary">{t("routines.weekRuns", routine.weekRuns)}</p>}
+        {routine.weekRuns && <p className="mt-2 text-[12px] text-ink-secondary">{t(routine.weekRuns.total === 1 ? "routines.weekRunsOne" : "routines.weekRuns", routine.weekRuns)}</p>}
         {routine.warning && <p className="mt-2 text-[12px] leading-relaxed text-warning">{routine.warning}</p>}
         {routine.heldFor && <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{routineHeldNote(routine)}</p>}
         {!!routine.skippedRuns && <p className="mt-2 text-[12px] text-ink-secondary">

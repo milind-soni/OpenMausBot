@@ -1,6 +1,8 @@
 // Plain words for an engine's failure, shared by every driver: an account out of credits, a usage or rate limit, an
 // overloaded or failing service, or any other HTTP refusal names the provider and keeps its own short reason. Each
 // sentence keeps the words classifyError (retry.ts) reads, so retries, account switching and health codes are unchanged.
+import type { ServerText } from "../../shared/server-text.ts";
+import { chatNotice, noticeFailure } from "../chat-notices.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { hostTimeZone } from "../turn-clock.ts";
 import { toolCountLimitFromError } from "../tool-count-limit.ts";
@@ -85,8 +87,16 @@ export function engineFailureKind(text: string, status = httpStatusOf(text)): En
 export function engineFailureMessage(
   provider: string,
   text: string,
-  { kind, status, resetsAt, timeZone }: { kind?: EngineFailureKind | null; status?: number | null; resetsAt?: number; timeZone?: string } = {},
+  options: { kind?: EngineFailureKind | null; status?: number | null; resetsAt?: number; timeZone?: string } = {},
 ): string | null {
+  return engineFailure(provider, text, options)?.message ?? null;
+}
+
+export function engineFailure(
+  provider: string,
+  text: string,
+  { kind, status, resetsAt, timeZone }: { kind?: EngineFailureKind | null; status?: number | null; resetsAt?: number; timeZone?: string } = {},
+): { message: string; text?: ServerText } | null {
   const http = status === undefined ? httpStatusOf(text) : status;
   const what = kind ?? engineFailureKind(text, http);
   if (!what) return null;
@@ -94,23 +104,33 @@ export function engineFailureMessage(
   const says = reason ? `${provider} says: "${reason}"` : null;
   const detail = (...parts: Array<string | null>) => parts.some(Boolean) ? ` (${parts.filter(Boolean).join("; ")})` : "";
   const code = http ? `HTTP ${http}` : null;
+  if (what === "usage_limit") {
+    const params = { provider, detail: detail(says) };
+    if (resetsAt) {
+      let zone = timeZone ?? hostTimeZone();
+      try { new Intl.DateTimeFormat("en-US", { timeZone: zone }); } catch { zone = "UTC"; }
+      const resets = limitResetTime(resetsAt, timeZone);
+      return noticeFailure("chat.notice.usageLimitResets", { ...params, resetsAt, timeZone: zone, resets });
+    }
+    return { message: chatNotice("chat.notice.usageLimit", params), text: { key: "chat.notice.usageLimit", params } };
+  }
   switch (what) {
-    case "credits": return `Your ${provider} account is out of credits${detail(says)}. Add credits with ${provider}, then run it again.`;
-    case "usage_limit": return resetsAt
-      ? `This ${provider} account has reached its usage limit${detail(says)}, which resets ${limitResetTime(resetsAt, timeZone)}. Until then, switch this bot to another AI.`
-      : `This ${provider} account has reached its usage limit${detail(says)}. Wait for it to reset, or switch this bot to another AI.`;
-    case "rate_limit": return `${provider} hit a rate limit${detail(code, says)}. Wait a minute, then run it again.`;
-    case "overloaded": return `${provider} is overloaded right now${detail(code, says)}. This is usually temporary, so try again in a few minutes.`;
-    case "server": return `${provider} had a temporary server problem${detail(code, says)}. Try again in a few minutes.`;
+    case "credits": return { message: `Your ${provider} account is out of credits${detail(says)}. Add credits with ${provider}, then run it again.` };
+    case "rate_limit": return { message: `${provider} hit a rate limit${detail(code, says)}. Wait a minute, then run it again.` };
+    case "overloaded": return { message: `${provider} is overloaded right now${detail(code, says)}. This is usually temporary, so try again in a few minutes.` };
+    case "server": return { message: `${provider} had a temporary server problem${detail(code, says)}. Try again in a few minutes.` };
     case "tool_schema": {
       const tool = SCHEMA_TOOL_NAME.exec(text)?.[1];
       const problem = SCHEMA_TOO_LARGE.test(text) ? "is too large" : `uses a form ${provider} does not accept`;
-      return `${provider} refused this turn as an invalid request because the input schema of ${tool ? `the "${tool}" tool` : "one of this bot's tools"} `
-        + `${problem}, so nothing ran. Turn off the MCP server or app that tool comes from for this bot, or switch the bot to another AI.`;
+      return { message: `${provider} refused this turn as an invalid request because the input schema of ${tool ? `the "${tool}" tool` : "one of this bot's tools"} `
+        + `${problem}, so nothing ran. Turn off the MCP server or app that tool comes from for this bot, or switch the bot to another AI.` };
     }
-    case "tool_count": return `${provider} refused this turn because this model takes at most ${toolCountLimitFromError(text) ?? "a limited number of"} tools `
-      + "and this bot offers more, even with its tool lists trimmed, so nothing ran. Turn off some of this bot's apps or MCP servers, or switch the bot to another model.";
-    case "refused": return `${provider} stopped with an error${detail(code, says)}.`;
+    case "tool_count": {
+      const limit = toolCountLimitFromError(text);
+      return limit == null ? noticeFailure("chat.notice.toolCountUnknown", { provider })
+        : noticeFailure("chat.notice.toolCount", { provider, limit: String(limit) });
+    }
+    case "refused": return { message: `${provider} stopped with an error${detail(code, says)}.` };
   }
 }
 
@@ -139,6 +159,7 @@ function isErrorBody(body: string): boolean {
 
 export interface ErrorReplyFailure {
   message: string;
+  text?: ServerText;
   stopReason: "quota" | "auth_required" | "rpc_error";
   setup?: true;
   limit?: "engine";
@@ -157,41 +178,37 @@ export function errorReplyFailure(provider: string, text: string, now = Date.now
   const said = engineFailureKind(body, status);
   const kind = said !== "credits" && usageLimitWait(status, waitMs) ? "usage_limit" : said;
   const resetsAt = kind === "usage_limit" && waitMs > 0 ? now + waitMs : undefined;
-  const message = engineFailureMessage(provider, body, { kind, status, resetsAt, timeZone })!;
-  if (kind === "credits") return { message, stopReason: "auth_required", setup: true };
-  if (kind !== "usage_limit") return { message, stopReason: "rpc_error" };
-  return { message, stopReason: "quota", limit: "engine", ...(resetsAt ? { limitResetsAt: resetsAt } : {}) };
+  const failure = engineFailure(provider, body, { kind, status, resetsAt, timeZone })!;
+  if (kind === "credits") return { ...failure, stopReason: "auth_required", setup: true };
+  if (kind !== "usage_limit") return { ...failure, stopReason: "rpc_error" };
+  return { ...failure, stopReason: "quota", limit: "engine", ...(resetsAt ? { limitResetsAt: resetsAt } : {}) };
 }
 
 /** Only an out-of-credits failure or a refused tool schema or tool count in plain words; any other text stays as it is. */
 export function plainFailureMessage(provider: string, text: string): string {
-  const kind = engineFailureKind(text);
-  return kind === "credits" || kind === "tool_schema" || kind === "tool_count" ? engineFailureMessage(provider, text, { kind })! : text;
+  return plainFailure(provider, text).message;
 }
 
-/** ACP's StopReason values (protocol v1) that do say why a turn ended early, naming the AI when the caller knows it;
- * each carries the advice that fits it. */
-const STOP_REASON_WORDS: Record<string, { words: (ai: string) => string; hint: string }> = {
-  refusal: {
-    words: (ai) => `${ai} refused to go on with this request`,
-    hint: "Try again, reword the request, or switch this bot to another AI.",
-  },
-  max_tokens: {
-    words: (ai) => `${ai}'s reply reached its maximum length before it finished`,
-    hint: "Ask it to continue, or ask for a shorter answer.",
-  },
-  max_turn_requests: {
-    words: () => "The turn made as many model requests as one turn may before it finished",
-    hint: "Ask it to carry on from where it stopped, or split the task.",
-  },
-};
+export function plainFailure(provider: string, text: string): { message: string; text?: ServerText } {
+  const kind = engineFailureKind(text);
+  return kind === "credits" || kind === "tool_schema" || kind === "tool_count" ? engineFailure(provider, text, { kind })! : { message: text };
+}
+
+/** ACP protocol v1's StopReason values that explain why a turn ended early. */
+export function stopFailure(stopReason: string | null | undefined, provider?: string): { message: string; text?: ServerText } | undefined {
+  const reason = stopReason?.trim();
+  if (!reason) return undefined;
+  const name = provider?.trim();
+  if (reason === "refusal") return name ? noticeFailure("chat.notice.stop.refusal", { provider: name, reason })
+    : noticeFailure("chat.notice.stop.refusalGeneric", { reason });
+  if (reason === "max_tokens") return name ? noticeFailure("chat.notice.stop.maxTokens", { provider: name, reason })
+    : noticeFailure("chat.notice.stop.maxTokensGeneric", { reason });
+  if (reason === "max_turn_requests") return noticeFailure("chat.notice.stop.maxRequests", { reason });
+  return { message: /^[a-z][a-z0-9_]*$/i.test(reason) ? `The engine stopped without saying why (stop reason: ${reason}).` : reason };
+}
 
 /** A failed turn's stop reason as its cause: a bare provider token ("stop_sequence", "rpc_error") is never the whole
  * message, and the token stays in it so its class still reads. */
 export function stopCause(stopReason: string | null | undefined, provider?: string): string | undefined {
-  const reason = stopReason?.trim();
-  if (!reason) return undefined;
-  const entry = Object.hasOwn(STOP_REASON_WORDS, reason) ? STOP_REASON_WORDS[reason] : undefined;
-  if (entry) return `${entry.words(provider?.trim() || "The AI")} (stop reason: ${reason}). ${entry.hint}`;
-  return /^[a-z][a-z0-9_]*$/i.test(reason) ? `The engine stopped without saying why (stop reason: ${reason}).` : reason;
+  return stopFailure(stopReason, provider)?.message;
 }

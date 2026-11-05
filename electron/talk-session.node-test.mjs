@@ -135,7 +135,7 @@ test("voice in use refuses without listening", () => {
   const h = harness({ busy: true }); h.session.press();
   assert.deepEqual(h.starts, []);
   assert.equal(h.prepares, 0);
-  assert.deepEqual(h.views, [{ state: "error", text: "Voice is in use in MausBot" }]);
+  assert.deepEqual(h.views, [{ state: "error", text: "Voice is in use in MausBot", textCode: "native.talk.voiceBusy" }]);
   mock.timers.tick(3_999); assert.equal(h.closed, 0);
   mock.timers.tick(1); assert.equal(h.closed, 1);
 });
@@ -162,17 +162,17 @@ test("words heard before a recognizer error are still sent", async () => {
 
 test("permission and setup problems say what to fix, in the composer's words: only a refused permission asks for access", async () => {
   const problems = [
-    ["speech-not-authorized", TALK_TEXT.permission],
-    ["mic-failed", TALK_TEXT.unavailable],
-    ["recognizer-unavailable", TALK_TEXT.unavailable],
-    ["dictation-disabled", TALK_TEXT.dictationOff],
-    ["helper-build-failed", TALK_TEXT.unavailable],
-    ["helper-start-failed", TALK_TEXT.unavailable],
-    ["unsupported-platform", TALK_TEXT.unavailable],
+    ["speech-not-authorized", TALK_TEXT.permission, "native.talk.permissions"],
+    ["mic-failed", TALK_TEXT.unavailable, "native.talk.unavailable"],
+    ["recognizer-unavailable", TALK_TEXT.unavailable, "native.talk.unavailable"],
+    ["dictation-disabled", TALK_TEXT.dictationOff, "native.talk.dictationOff"],
+    ["helper-build-failed", TALK_TEXT.unavailable, "native.talk.unavailable"],
+    ["helper-start-failed", TALK_TEXT.unavailable, "native.talk.unavailable"],
+    ["unsupported-platform", TALK_TEXT.unavailable, "native.talk.unavailable"],
   ];
-  for (const [reason, text] of problems) {
+  for (const [reason, text, textCode] of problems) {
     const h = harness(); h.session.press(); release(h, { code: 1, reason }); await flush();
-    assert.deepEqual(h.views.at(-1), { state: "error", text }, reason);
+    assert.deepEqual(h.views.at(-1), { state: "error", text, textCode }, reason);
     assert.equal(h.asks.length, 0, reason);
     mock.timers.tick(3_999); assert.equal(h.closed, 0, reason);
     mock.timers.tick(1); assert.equal(h.closed, 1, reason);
@@ -181,19 +181,19 @@ test("permission and setup problems say what to fix, in the composer's words: on
 
 test("a server that can't take asks says why and stops listening: down, still starting, no MausBot, or moved to My Cloud", async () => {
   const notices = [
-    ["server-down", "Open MausBot to talk"],
-    ["starting", TALK_TEXT.starting],
-    ["no-mausbot", TALK_TEXT.noMausbot],
-    ["moved", "MausBot lives on My Cloud now — talk to it there"],
+    ["server-down", "Open MausBot to talk", "native.talk.openMausBot"],
+    ["starting", TALK_TEXT.starting, "native.talk.starting"],
+    ["no-mausbot", TALK_TEXT.noMausbot, "native.talk.setUpFirst"],
+    ["moved", "MausBot lives on My Cloud now — talk to it there", "native.talk.movedToCloud"],
   ];
-  for (const [code, text] of notices) {
+  for (const [code, text, textCode] of notices) {
     const h = harness({ prepare: async () => { throw new TalkServerError(code); } });
     h.session.press(); await flush();
     assert.deepEqual(h.stops, [true], code);
-    assert.deepEqual(h.views.at(-1), { state: "error", text }, code);
+    assert.deepEqual(h.views.at(-1), { state: "error", text, textCode }, code);
     say(h, "too late"); release(h); await flush();
     assert.equal(h.asks.length, 0, code);
-    assert.deepEqual(h.views.at(-1), { state: "error", text }, code);
+    assert.deepEqual(h.views.at(-1), { state: "error", text, textCode }, code);
     mock.timers.tick(3_999); assert.equal(h.closed, 0, code);
     mock.timers.tick(1); assert.equal(h.closed, 1, code);
   }
@@ -207,17 +207,17 @@ test("a server that goes away as the words are sent says Open MausBot to talk", 
   fail(new TalkServerError("server-down")); await flush();
   assert.deepEqual(late.stops, []);
   assert.equal(late.asks.length, 0);
-  assert.deepEqual(late.views.at(-1), { state: "error", text: TALK_TEXT.serverDown });
+  assert.deepEqual(late.views.at(-1), { state: "error", text: TALK_TEXT.serverDown, textCode: "native.talk.openMausBot" });
   mock.timers.tick(TALK_TIMING.noticeHideMs); assert.equal(late.closed, 1);
 
   const gone = harness({ ask: async () => { throw new TalkServerError("server-down"); } });
   gone.session.press(); say(gone, "hello"); release(gone); await flush();
-  assert.deepEqual(gone.views.at(-1), { state: "error", text: TALK_TEXT.serverDown });
+  assert.deepEqual(gone.views.at(-1), { state: "error", text: TALK_TEXT.serverDown, textCode: "native.talk.openMausBot" });
   mock.timers.tick(TALK_TIMING.noticeHideMs); assert.equal(gone.closed, 1);
 
   const moved = harness({ ask: async () => { throw new TalkServerError("moved"); } });
   moved.session.press(); say(moved, "hello"); release(moved); await flush();
-  assert.deepEqual(moved.views.at(-1), { state: "error", text: TALK_TEXT.moved });
+  assert.deepEqual(moved.views.at(-1), { state: "error", text: TALK_TEXT.moved, textCode: "native.talk.movedToCloud" });
   mock.timers.tick(TALK_TIMING.noticeHideMs); assert.equal(moved.closed, 1);
 });
 
@@ -281,7 +281,7 @@ test("a lost stream shows Still working; a refused send shows the failure", asyn
 
   const refused = harness({ ask: async () => { throw new TalkServerError("refused"); } });
   refused.session.press(); say(refused, "summarise my inbox"); release(refused); await flush();
-  assert.deepEqual(refused.views.at(-1), { state: "error", text: TALK_TEXT.failed });
+  assert.deepEqual(refused.views.at(-1), { state: "error", text: TALK_TEXT.failed, textCode: "native.talk.failed" });
   mock.timers.tick(11_999); assert.equal(refused.closed, 0);
   mock.timers.tick(1); assert.equal(refused.closed, 1);
 });
@@ -289,7 +289,7 @@ test("a lost stream shows Still working; a refused send shows the failure", asyn
 test("a turn that fails shows the failure", async () => {
   const h = harness({ ask: async input => { input.onUpdate({ kind: "thinking" }); input.onUpdate({ kind: "done", ok: false, text: "" }); return "failed"; } });
   h.session.press(); say(h, "summarise my inbox"); release(h); await flush();
-  assert.deepEqual(h.views.at(-1), { state: "error", text: TALK_TEXT.failed });
+  assert.deepEqual(h.views.at(-1), { state: "error", text: TALK_TEXT.failed, textCode: "native.talk.failed" });
   mock.timers.tick(11_999); assert.equal(h.closed, 0);
   mock.timers.tick(1); assert.equal(h.closed, 1);
 });
@@ -445,7 +445,7 @@ test("speech that fails to start says Talking couldn't start, and a later press 
   const h = harness();
   h.startFails = true;
   assert.doesNotThrow(() => h.session.press());
-  assert.deepEqual(h.views.at(-1), { state: "error", text: TALK_TEXT.unavailable });
+  assert.deepEqual(h.views.at(-1), { state: "error", text: TALK_TEXT.unavailable, textCode: "native.talk.unavailable" });
   assert.deepEqual(h.stops, [true]);
   mock.timers.tick(3_999); assert.equal(h.closed, 0);
   mock.timers.tick(1); assert.equal(h.closed, 1);
@@ -460,7 +460,7 @@ test("speech that fails to start says Talking couldn't start, and a later press 
   keyless.releaseFails = true;
   assert.doesNotThrow(() => keyless.session.press());
   assert.deepEqual(keyless.starts, []);
-  assert.deepEqual(keyless.views.at(-1), { state: "error", text: TALK_TEXT.unavailable });
+  assert.deepEqual(keyless.views.at(-1), { state: "error", text: TALK_TEXT.unavailable, textCode: "native.talk.unavailable" });
   keyless.releaseFails = false;
   keyless.session.press();
   assert.equal(keyless.starts.length, 1);

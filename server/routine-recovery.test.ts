@@ -9,6 +9,7 @@ import {
   classifyRoutineFailure, dispatchRefusal, retryNote, ROUTINE_BUSY_RECHECK_MS, ROUTINE_BUSY_WAIT_MS, weekRuns, type RoutineAlert,
 } from "./routine-recovery.ts";
 import { RoutineManager, type RoutineManagerOptions, type RoutineRun } from "./routines.ts";
+import { claudeLimitError } from "./drivers/claude-limits.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -151,7 +152,8 @@ describe("an unattended run that fails for a passing reason", () => {
     h.event("thread-1", { type: "item.completed", itemType: "assistant_text", text: "Half done" });
     h.fail("thread-1", ROUTING);
     expect(h.run(run.id)).toMatchObject({ status: "queued", retried: "provider", threadId: "thread-1", retryAt: START + 15 * SECOND,
-      attention: `Starting again shortly after a temporary error: ${ROUTING}` });
+      attention: `Starting again shortly after a temporary error: ${ROUTING}`,
+      attentionCode: "routines.server.retryAfter", attentionParams: { why: "routines.server.part.provider", failure: ROUTING } });
     expect(h.failed).toEqual([]);
 
     await h.advance(14 * SECOND);
@@ -293,7 +295,7 @@ describe("an unattended run whose bot is busy when it starts", () => {
     h.refuse(busy());
     const run = await h.start(h.routine().id);
     expect(h.run(run.id)).toMatchObject({ status: "queued", threadId: "thread-1", deferredAt: START, retryAt: START + ROUTINE_BUSY_RECHECK_MS,
-      attention: `Waiting to start: ${BUSY}` });
+      attention: `Waiting to start: ${BUSY}`, attentionCode: "routines.server.waitingToStart", attentionParams: { failure: BUSY } });
     expect(h.run(run.id).retried).toBeUndefined();
     expect(h.failed).toEqual([]);
     await h.advance(ROUTINE_BUSY_RECHECK_MS - SECOND);
@@ -399,7 +401,8 @@ describe("an unattended run only its owner can fix", () => {
     const run = await h.start(h.routine().id);
     h.fail("thread-1", limit, { stopReason: "quota", limitResetsAt: resetsAt });
     expect(h.run(run.id)).toMatchObject({ status: "queued", retried: "usage_limit", retryAt: resetsAt + MINUTE, threadId: "thread-1",
-      attention: expect.stringMatching(/^Waiting for the AI's usage limit to reset; this run starts again at /) });
+      attention: expect.stringMatching(/^Waiting for the AI's usage limit to reset; this run starts again at /),
+      attentionCode: "routines.server.limitWait", attentionParams: expect.objectContaining({ resetsAt: resetsAt + MINUTE }) });
     expect(h.failed).toEqual([]);
     expect(h.deferred).toEqual([expect.objectContaining({ alert: { detail: expect.stringMatching(/^This bot's AI reached its usage limit\. This run starts again at .+\.$/) } })]);
     expect(h.manager.wakeHold()).toEqual({ hold: false });
@@ -472,5 +475,21 @@ describe("weekRuns", () => {
     h.complete(run.threadId!);
     expect(h.manager.listRoutines()[0]).toMatchObject({ id: routine.id, weekRuns: { ok: 1, total: 1 } });
     expect(JSON.parse(readFileSync(h.options.file!, "utf8")).routines[0]).not.toHaveProperty("weekRuns");
+  });
+});
+
+describe("a coded engine error on a run", () => {
+  it("keeps its code while the stored line is whole, and drops it when the 500-character cut leaves params that cannot rebuild it", async () => {
+    for (const [said, coded] of [["Weekly limit reached.", true], ["x".repeat(500), false]] as const) {
+      const h = harness();
+      const limit = claudeLimitError(null, said, 0, "UTC");
+      const run = await h.start(h.routine().id);
+      h.fail("thread-1", limit.message, { text: limit.text });
+      const stored = h.run(run.id);
+      expect(stored.error).toBe(limit.message.slice(0, 500));
+      expect(stored.errorCode).toBe(coded ? "chat.notice.claudeLimitSaid" : undefined);
+      if (coded) expect(stored.errorParams).toEqual(limit.text!.params);
+      else expect(stored.errorParams).toBeUndefined();
+    }
   });
 });

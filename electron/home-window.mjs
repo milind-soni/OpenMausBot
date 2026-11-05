@@ -8,9 +8,10 @@
 // signed-out app (its automations would run twice). The page that counts as home is the main window's main frame at the
 // shown place's verified origin, nothing else. A team is only ever one the Admin's session lists, paired through the
 // Admin's team pairing (its claims are the Admin's), never an address a page supplied.
-import { cloudHomeConnectUrl, cloudSetupOf, cloudUnreachableText, machineSetup, readyCloudOrigin } from "./cloud-home.mjs";
+import { cloudHomeConnectUrl, cloudSetupOf, cloudUnreachableCause, cloudUnreachableText, machineSetup, readyCloudOrigin } from "./cloud-home.mjs";
 import { cloudMachine, cloudState, otherOwnClouds, ownCloud } from "./cloud-list.mjs";
 import { asleepAnswer, BACKGROUND_HEADERS, openSleepingCloud, SIGNED_IN_MS } from "./cloud-power.mjs";
+import nativeText from "./native-text.cjs";
 import { awayIn, parseJournal } from "./one-home.mjs";
 
 export const HOME_SCREEN_PATH = "/home";
@@ -37,17 +38,21 @@ export const VERSION_EVERY_MS = 60_000;
 export const UPDATING_MS = 30_000;
 /** While the startup screen is up, a wake that takes longer hands over to this computer's screen, which says the same. */
 export const SPLASH_HANDOFF_MS = 6_000;
-export const SPLASH_TEXT = Object.freeze({ opening: "Opening My Cloud…", waking: "Waking My Cloud…" });
 /** A team's Cloud ends each session within an hour of its pairing (T2), so the window signs in again before that, without
  * moving the page: every TEAM_RENEW_MS after a pairing, or TEAM_RENEW_EARLY_MS before the end its session reports. The
  * Admin refusing that pairing (404) means the person is no longer in the team. */
 export const TEAM_RENEW_MS = 45 * 60_000;
 export const TEAM_RENEW_EARLY_MS = 10 * 60_000;
 export const TEAM_RENEW_RETRY_MS = 5 * 60_000;
+const SPLASH_KEYS = Object.freeze({
+  opening: ["native.splash.openingCloud", "native.splash.openingNamed"], waking: ["native.splash.wakingCloud", "native.splash.wakingNamed"],
+});
 /** The startup screen's line: My Cloud's words, or the team's name. */
-export function splashText(status, name = null) {
-  return name ? `${status === "waking" ? "Waking" : "Opening"} ${name}…` : SPLASH_TEXT[status];
+export function splashText(status, name = null, t = nativeText.englishText.t) {
+  const [cloud, named] = SPLASH_KEYS[status === "waking" ? "waking" : "opening"];
+  return name ? t(named, { name }) : t(cloud);
 }
+export const SPLASH_TEXT = Object.freeze({ opening: splashText("opening"), waking: splashText("waking") });
 const PLAN_PROBLEMS = new Set(["stopped", "payment-problem", "failed"]);
 /** The screens of a listed Cloud that isn't running (`cloudScreen`): nothing to look again for, the session's word moves them. */
 const NOT_RUNNING = new Set(["ended", "checkout", "payment"]);
@@ -211,6 +216,7 @@ export function routeOf(url, origin) {
  *   readyStore?: { read(): unknown, write(value: unknown): void },
  *   ownMove?(): { phase: string, name: string } | null,
  *   log?(line: string): void,
+ *   t?(key: string, params?: Record<string, string | number>): string,
  * }} deps `ownMove()`: the move to a server of the person's own (own-home-main.mjs), whose freeze is never My Cloud's.
  * `hosts`: the window's Electron session, for its own resolver and host cache. `readyStore`: when My Cloud
  * became ready (createReadyClock). `go(url, origin, place)`: main's one way to move the window, to My Cloud or a team's Cloud (`origin`, with the
@@ -226,7 +232,7 @@ export function createHomeWindow(deps) {
   const { journal, frozen, account, restored = async () => {}, window, ensureWindow, localOrigin, cookieFetch, power, go, showLocal, clean = null,
     remembered = () => null, remember = () => {}, left = () => {}, drop = (place) => { if (place.kind === "team") left(place.name); remember(null); },
     splash = () => null, lastInput = () => 0, publish = () => {}, rehomed = () => {}, versionEveryMs = VERSION_EVERY_MS, quietMs = QUIET_MS,
-    now = Date.now, timers = DEFAULT_TIMERS, hosts = () => null, readyStore = null, ownMove = () => null, log = () => {} } = deps;
+    now = Date.now, timers = DEFAULT_TIMERS, hosts = () => null, readyStore = null, ownMove = () => null, log = () => {}, t = nativeText.englishText.t } = deps;
   let home = { kind: "computer" }, screen = null, status = null, opens = 0, retry = null, tries = 0, loaded = null, newer = false, repairing = null;
   /** My Cloud asked for before the move made it home (`{ open }`), until its page loads or the person goes elsewhere;
    * `naming`: since when, and how often, a brand-new My Cloud's name was not found. */
@@ -290,7 +296,7 @@ export function createHomeWindow(deps) {
   };
   function say(next) {
     status = next;
-    if (next) onSplash(splashText(next, teamName()));
+    if (next) onSplash(splashText(next, teamName(), t));
     tell();
   }
   const shows = (origin) => {
@@ -314,15 +320,15 @@ export function createHomeWindow(deps) {
   function toScreen(next) {
     screen = next;
     status = null;
-    onSplash(splashText("opening", teamName()));
+    onSplash(splashText("opening", teamName(), t));
     goScreen();
   }
 
   /** The place didn't answer: this computer's screen says so, with the Admin's reason for My Cloud, and looks again by itself. */
   function offline(token) {
     if (!wanted(token)) return;
-    const reason = otherPlace(opening) ? null : cloudUnreachableText(state(), cloudOrigin());
-    toScreen({ screen: "offline", ...(reason ? { reason } : {}) });
+    const cause = otherPlace(opening) ? null : cloudUnreachableCause(state(), cloudOrigin());
+    toScreen({ screen: "offline", ...(cause ? { reason: cloudUnreachableText(state(), cloudOrigin()), cause } : {}) });
     later();
   }
   function later(delays = RETRY_MS, count = () => tries++) {
@@ -603,7 +609,7 @@ export function createHomeWindow(deps) {
      * home it opens as a saved server, and while the Admin sets it up the setup screen shows until it opens by itself. */
     async openCloud(open = null) {
       if ((await refresh()).kind !== "computer") return show({ place: "cloud", open });
-      if (!cloudSetupOf(state()) && !readyCloudOrigin(state()) && !notRunning()) throw new Error("My Cloud is not ready to connect yet.");
+      if (!cloudSetupOf(state()) && !readyCloudOrigin(state()) && !notRunning()) throw new Error(t("native.cloud.notReady"));
       asked = { open };
       return show({ place: "cloud", open });
     },

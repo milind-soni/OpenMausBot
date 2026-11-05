@@ -1,3 +1,4 @@
+import type { ServerTextParams } from "./server-text.ts";
 // The shape of one line in a bot's activity log, shared by the harness reader
 // and the panel that renders it.
 
@@ -26,7 +27,14 @@ export interface ActivityRow {
   app: string | null;
   /** the action, in words */
   label: string;
+  /** `label` as an `activity.tool.*` catalog key, for a client to say in its own language */
+  labelKey?: string;
+  /** `app` as an `activity.app.*` catalog key, only for the app's own surfaces (Team, Computer, Research) */
+  appKey?: string;
   /** the arguments the decision log recorded, already redacted */
   summary?: string;
+  /** Fixed summary words; the English remains authoritative. */
+  summaryCode?: string;
+  summaryParams?: ServerTextParams;
   outcome: ActivityOutcome;
 }

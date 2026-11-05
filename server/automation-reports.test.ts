@@ -257,6 +257,8 @@ describe("automation reports", () => {
       ["This run didn't finish: it ran past its 25-minute limit.", failed.id, true, undefined],
       [recoveredText("Inbox brief", finishedAt), ok.id, undefined, true],
     ]);
+    expect(f.lines()[1]!.textCode).toBeUndefined();
+    expect(f.lines()[1]!.textParams).toBeUndefined();
     expect(f.runs.get(ok.id)!.report).toEqual({ state: "posted", threadId: f.main, messageId: f.lines()[1]!.id });
     expect(f.wrote).toEqual([f.main, f.main]);
     expect(f.notified).toEqual([]);

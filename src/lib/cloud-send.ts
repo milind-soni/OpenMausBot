@@ -1,17 +1,26 @@
 // What either page says about the one-time move to My Cloud (electron/one-home.mjs), and what arrived, in words.
 import type { CloudSendCounts } from "../../electron/cloud-send.mjs";
 import type { OneHomeCounts, OneHomeNotCarried, OneHomeStayed, OneHomeView } from "../../electron/one-home.mjs";
-import type { TeamMoveView } from "../../electron/team-move.mjs";
+import type { TeamMoveRefusal, TeamMoveRefusalCode, TeamMoveView } from "../../electron/team-move.mjs";
 import type { LocaleKey } from "@/locales";
-import { activeLocale, t } from "@/lib/i18n";
+import { activeLocale, t, tFromServer } from "@/lib/i18n";
+import { serverErrorText } from "@/lib/server-error";
 
 const counted = (count: number, one: LocaleKey, many: LocaleKey) => t(count === 1 ? one : many, { count });
 
 export const listOf = (parts: string[]) => new Intl.ListFormat(activeLocale(), { type: "conjunction" }).format(parts);
 
+/** Refusals the preload sends before main is asked: it has no catalog, so they come in English. */
+const BRIDGE_REFUSALS: Readonly<Record<string, LocaleKey>> = {
+  "Turn the switch to keep this computer's bots here.": "cloudAccount.keepHere.unclicked",
+  "Choose Try again to move.": "cloudSend.move.unclicked",
+  "Choose Move to move the bot.": "teamMove.unclicked",
+};
+
 /** The words main threw, without Electron's "Error invoking remote method" wrapper; null when there are none. */
 export function ipcErrorText(cause: unknown): string | null {
-  return cause instanceof Error && cause.message ? cause.message.replace(/^Error invoking remote method '[^']*':\s*(?:\w*Error:\s*)?/u, "") : null;
+  const text = cause instanceof Error && cause.message ? cause.message.replace(/^Error invoking remote method '[^']*':\s*(?:\w*Error:\s*)?/u, "") : null;
+  return text !== null && Object.hasOwn(BRIDGE_REFUSALS, text) ? t(BRIDGE_REFUSALS[text]!) : text;
 }
 
 /** "12 bots, 3 skills, 2 logins, 1Password and 48 chats", from counts only. */
@@ -88,7 +97,7 @@ export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "s
   const failing = "failing" in move ? move.failing : undefined;
   if (failing) {
     const extra = notCarried(failing.items);
-    return failing.error ? { kind: "failed", text: t("cloudSend.move.failing", { error: failing.error }), extra, retry: true, reason: failing.error }
+    return failing.error ? { kind: "failed", text: t("cloudSend.move.failing", { error: serverErrorText(failing, failing.error) }), extra, retry: true, reason: serverErrorText(failing, failing.error) }
       : { kind: "failed", text: t("cloudSend.move.failingPlain"), extra, retry: true };
   }
   if (move.phase === "finishing") return { kind: "sending", text: t("cloudSend.move.finishing"), extra: [] };
@@ -114,7 +123,7 @@ function ownMoveLine(move: OneHomeView, place: string, page: "local" | "cloud"):
   const failing = "failing" in move ? move.failing : undefined;
   if (failing) {
     const extra = notCarried(failing.items);
-    return failing.error ? line("failed", t("cloudSend.move.failingNamed", { place, error: failing.error }), { retry: true, reason: failing.error, extra })
+    return failing.error ? line("failed", t("cloudSend.move.failingNamed", { place, error: serverErrorText(failing, failing.error) }), { retry: true, reason: serverErrorText(failing, failing.error), extra })
       : line("failed", t("cloudSend.move.failingPlainNamed", { place }), { retry: true, extra });
   }
   if (move.phase === "copy" && move.updating) return line("sending", t("cloudSend.move.updatingNamed", { place }));
@@ -133,4 +142,15 @@ export function teamMoveLine(move: TeamMoveView): { kind: "sending" | "failed" |
   if (move.phase === "done") return { kind: "done", text: t("teamMove.done", names) };
   if (move.phase === "failed") return { kind: "failed", text: t("teamMove.failed", names) };
   return { kind: "sending", text: t("teamMove.moving", names) };
+}
+
+const TEAM_MOVE_REFUSALS: Record<TeamMoveRefusalCode, LocaleKey> = {
+  notInTeam: "teamMove.refused.notInTeam",
+  notABot: "teamMove.refused.notABot",
+  movingElsewhere: "teamMove.refused.movingElsewhere",
+};
+
+export function teamMoveRefusalText(refused: TeamMoveRefusal): string {
+  const params = Object.fromEntries(Object.entries(Object(refused.params)).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+  return Object.hasOwn(TEAM_MOVE_REFUSALS, refused.code) ? tFromServer(TEAM_MOVE_REFUSALS[refused.code as TeamMoveRefusalCode], refused.message, params) : refused.message;
 }

@@ -29,6 +29,12 @@ describe("voice routes", () => {
     }
   });
 
+  it("keeps the 413 and English refusal above the utterance ceiling", async () => {
+    expect((await call("POST", "/api/tts/speak", { text: "a".repeat(501) })).answers).toEqual([[413, {
+      error: "voice utterances are limited to 500 characters", errorKey: "serverError.voice.utteranceTooLong",
+    }]]);
+  });
+
   it("prepare a reply with a short first block, and never a held secret", async () => {
     const remove = addHeldSecretScrubber((text) => text.replaceAll("correct-horse-battery", "••••••"));
     try {
@@ -85,4 +91,16 @@ describe("transcribe route", () => {
     expect(answers[0]![0]).toBe(502);
     expect((answers[0]![1] as { error: string }).error).toContain("rejected that API key");
   });
+});
+
+it("keeps the English network refusal and its translation fields", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
+  try {
+    const req = Object.assign(Readable.from([Buffer.from("RIFF")]), { headers: { "content-type": "audio/wav", "content-length": "4" } });
+    const { answers } = await call("POST", "/api/tts/transcribe", {}, { tts: { fishKey: "fish-key" } } as AppConfig, req as never);
+    expect(answers).toEqual([[502, {
+      error: "Couldn't reach Fish Audio to hear you — check your connection.",
+      errorKey: "serverError.voice.fishTranscribeConnection",
+    }]]);
+  } finally { vi.unstubAllGlobals(); }
 });

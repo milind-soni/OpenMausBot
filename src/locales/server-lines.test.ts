@@ -411,10 +411,6 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/drivers/acp/cursor.ts", "Cursor did not accept  …  in this session, so it runs  … ."],
     ["server/drivers/acp/cursor.ts", "its default model"],
     ["server/drivers/acp/cursor.ts", "Choose another model for this bot to stop seeing this."],
-    ["server/drivers/codex-unsupported-calls.ts", "Codex could not run  …   …  (\"unsupported call\"): the AI provider sent"],
-    ["server/drivers/codex-unsupported-calls.ts", "the tool"],
-    ["server/drivers/codex-unsupported-calls.ts", "the tools"],
-    ["server/drivers/codex-unsupported-calls.ts", "the call back without the tool's app name, so it never reached the too"],
     ["server/index.ts", "notice: This thread's model ( … ) isn't available, so it now uses  … '"],
     ["server/index.ts", "Company connection changed — choose whether to reconnect or use a pers"],
     ["server/quota-switch.ts", "while  …  is signed out"],
@@ -497,17 +493,13 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/team-setup-requests.ts", "Team setup not applied"],
   ],
   "restarts, stops and context": [
-    ["server/index.ts", "Resuming after a restart"],
-    ["server/index.ts", "…  was cut off by a restart; resuming"],
     ["server/index.ts", "context compaction started ( … )"],
     ["server/index.ts", "context compacted — re-sent the last  …  digest …"],
     ["server/index.ts", "generated image could not be attached —  …"],
     ["server/index.ts", "invalid image"],
-    ["server/index.ts", "Queued follow-up interrupted by restart or restore — it may have alrea"],
     ["shared/first-reply-rescue.ts", "notice:  …  hasn't heard back from  …  yet."],
   ],
   "moves to the Cloud": [
-    ["server/cloud-send-arrived.ts", "I'm back on this computer, so my webhook \" … \" has an address here aga"],
   ],
   "calls": [
     ["shared/live-call.ts", "Call with  …  ·  …"],

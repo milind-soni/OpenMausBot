@@ -40,7 +40,9 @@ describe("holdBodyDeadline", () => {
     const port = await listen(200);
     const answer = await send(port, "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 10\r\n\r\nab", []);
     expect(answer).toMatch(/^HTTP\/1\.1 408 Request Timeout/);
-    expect(answer).toContain("The request took too long.");
+    const [, body] = answer.split("\r\n\r\n");
+    expect(JSON.parse(body!)).toEqual({ error: "The request took too long. Check the connection and try again.", errorKey: "serverError.request.bodyTimeout" });
+    expect(answer).toContain(`Content-Length: ${Buffer.byteLength(body!)}`);
   });
 
   it("gives a large upload time in proportion to its size", async () => {
