@@ -19,3 +19,10 @@ it("discards only the voice notes of a stopped turn", () => {
 it("leaves no transcript on a note recorded without words", () => {
   expect(settleParkedFiles([{ ...note, text: "   " }], false, redact).land).toEqual([{ kind: "audio", path: "/a/two.mp3", mime: "audio/mpeg" }]);
 });
+
+it("discards a goal coordinator's images and keeps its voice notes", () => {
+  expect(settleParkedFiles([image, note], false, redact, true)).toEqual({
+    land: [{ kind: "audio", path: "/a/two.mp3", mime: "audio/mpeg", text: "the token is [redacted]" }],
+    discard: [image],
+  });
+});

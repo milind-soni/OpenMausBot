@@ -295,6 +295,13 @@ if (probe) {
 }
 
 if (argv[0] === "--version") {
+  const delay = Number(process.env.FAKE_CLAUDE_VERSION_DELAY_MS ?? 0);
+  if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+  const emptyOnce = process.env.FAKE_CLAUDE_EMPTY_VERSION_ONCE;
+  if (emptyOnce && !existsSync(emptyOnce)) {
+    writeFileSync(emptyOnce, "");
+    process.exit(0);
+  }
   // FAKE_CLAUDE_VERSION stands in for an older CLI.
   process.stdout.write(`${process.env.FAKE_CLAUDE_VERSION ?? "2.1.232"} (Claude Code)\n`);
   process.exit(0);

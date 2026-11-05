@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Audio, Voice } from "./elevenlabs.ts";
+import type { Audio, Voice, VerifyResult } from "./elevenlabs.ts";
 
 export const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash-lite-tts";
 const API = (process.env.OMB_GEMINI_TTS_API || "https://generativelanguage.googleapis.com/v1beta").replace(/\/+$/, "");
@@ -9,14 +9,58 @@ const outputSchema = z.object({ steps: z.array(z.object({
   content: z.array(z.object({ type: z.string(), data: z.string().optional(), mime_type: z.string().optional() })).optional(),
 })) });
 
+/**
+ * Lists available Gemini voices, returning the catalog of 30 prebuilt voices.
+ * @returns Array of available Voice descriptors.
+ */
 export function listVoices(): Voice[] {
   return VOICES.map((id) => ({ id, label: id }));
 }
 
+/**
+ * Checks whether a voice ID is in the supported Gemini prebuilt voice catalog.
+ * @param voiceId Voice identifier to check.
+ * @returns True if voice is supported, false otherwise.
+ */
 export function isSupportedVoice(voiceId: string | undefined): boolean {
   return voiceId !== undefined && VOICES.includes(voiceId);
 }
 
+/**
+ * Verifies that the provided Gemini API key is valid by querying the models endpoint.
+ * @param key The Gemini API key to verify.
+ * @returns An object indicating whether the key is valid, with an error message if invalid.
+ */
+export async function verifyKey(key: string): Promise<VerifyResult> {
+  try {
+    const res = await fetch(`${API}/models?pageSize=1`, {
+      method: "GET",
+      redirect: "error",
+      headers: { "x-goog-api-key": key },
+      signal: AbortSignal.timeout(20_000),
+    });
+    await res.body?.cancel().catch(() => {});
+    if (res.ok) return { ok: true };
+    if (res.status === 400 || res.status === 401 || res.status === 403) {
+      return { ok: false, message: "Gemini rejected the API key or its speech permissions. Check the key in Settings." };
+    }
+    if (res.status === 429) {
+      return { ok: false, message: "Gemini quota exceeded. Try again later." };
+    }
+    return { ok: false, message: `Couldn't verify Gemini API key (HTTP ${res.status}).` };
+  } catch {
+    return { ok: false, message: "Couldn't reach Gemini to check that key — check your connection." };
+  }
+}
+
+/**
+ * Synthesizes text to speech using the Gemini speech interactions API.
+ * @param text The plain text to read aloud.
+ * @param voiceId Prebuilt Gemini voice ID.
+ * @param key The Gemini API key.
+ * @param model Gemini model identifier.
+ * @returns Synthesized Audio object containing bytes and MIME type.
+ */
 export async function synthesize(text: string, voiceId: string, key: string, model = DEFAULT_GEMINI_MODEL): Promise<Audio> {
   if (!isSupportedVoice(voiceId)) throw new Error("Pick a Gemini voice from the voice list.");
   let response: Response;

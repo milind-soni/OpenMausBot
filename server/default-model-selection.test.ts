@@ -29,6 +29,14 @@ describe("new bot default model selection", () => {
     const preferred = { instanceId: "mistral", model: "selected-model" };
     expect(selectDefaultModelSelection([instance], preferred)).toEqual(preferred);
   });
+  it("starts a new bot on the person's own plan, not a custom endpoint on the same driver", () => {
+    const endpoint = { ...claude, instanceId: "claude-endpoint", access: "custom" as const,
+      models: { default: "deepseek-chat", options: [{ id: "deepseek-chat", label: "deepseek-chat" }] } };
+    // Listed first, so only the rank keeps the plan ahead of it.
+    expect(selectDefaultModelSelection([endpoint, claude])).toEqual({ instanceId: "claude", model: "claude-default" });
+    // Alone it is still the engine a new bot starts on.
+    expect(selectDefaultModelSelection([endpoint])).toEqual({ instanceId: "claude-endpoint", model: "deepseek-chat" });
+  });
   it("keeps a saved custom endpoint even when its account sign-in is false", () => {
     const instance = { ...codex, access: "custom" as const, snapshot: { state: "available", authenticated: false } satisfies ProviderSnapshot };
     const preferred = { instanceId: "codex", model: "selected-model" };

@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SKINS, SKIN_IDS, DEFAULT_SKIN_CHOICE, PRIOR_INSTALL_SKIN, THEME_SKINS, resolveSkin } from "./skins";
+import en from "@/locales/en.json";
 
 const css = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), "../styles.css"),
@@ -16,6 +17,10 @@ const blocks = new Set(
 describe("skins", () => {
   it("gives every registered skin a stylesheet block", () => {
     for (const id of SKIN_IDS) expect(blocks).toContain(id);
+  });
+
+  it("gives every skin a tagline in the catalog", () => {
+    expect(SKINS.map((skin) => `skins.tagline.${skin.id}`).filter((key) => !Object.hasOwn(en, key))).toEqual([]);
   });
 
   it("registers every stylesheet block", () => {

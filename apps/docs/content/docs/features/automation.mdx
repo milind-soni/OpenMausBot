@@ -36,6 +36,14 @@ Each run starts fresh by default. For work that builds on last time, such as a Q
 
 If your computer is often off when a routine is due, open the routine's **Advanced** options and turn on **Also run when OpenMausBot starts**. The routine then runs once each time OpenMausBot opens, as well as on its schedule. Its run logs show these runs as **On startup**. A routine that OpenMausBot is already catching up on at startup runs once, not twice, and an occurrence missed by more than 12 hours is covered by the startup run instead of being reported as missed. Switching to another workspace and back, or OpenMausBot recovering from a crash, doesn't count as opening the app again. Pausing a routine stops its startup runs too. It's available for repeating routines, and you can also ask the bot in chat to turn it on.
 
+### A routine's own model
+
+A routine runs on its bot's model unless it has its own. Give it one through the API with `modelSelection` (the same shape as a bot's: `instanceId`, `model`, and an optional `effort` or `variant`), for example a light hourly check on a smaller model while the bot chats on a stronger one: `PATCH /api/routines/<id>` with `{"modelSelection": {"instanceId": "claude", "model": "claude-haiku-4-5"}}`. Each run's thread then uses that model; if its AI isn't available, the thread falls back to the bot's model. The model has to keep the bot's permission level, as a bot's own model change does: with Custom approval it must run on the bot's own engine, and with Auto-accept edits on an engine that has that level. Other models are refused, and if the bot's permissions change later so the routine's model no longer fits, runs use the bot's model. Room goals always use their bots' own models, and a limit-reset routine stays on the model of the conversation it continues. Send `"modelSelection": null` to go back to the bot's model.
+
+### When the AI's usage limit stops a run
+
+If a bot's AI reaches its usage limit during a run and the limit resets within 12 hours, OpenMausBot starts that run once more a minute after the reset, and tells you so. A repeating routine's scheduled run is the exception when the routine's next scheduled run comes no later than one of its intervals after the reset (an hour for an hourly routine, a day for a daily one): that next run does the same work, so the stopped run fails with the usual usage-limit notice instead. Runs you start with **Run now**, one-time routines and routines that run when a limit resets still start again at the reset, and a bot with a backup AI still switches to it at once.
+
 ### Clear a folder's unread dots
 
 Right-click a folder or open its **…** menu, then choose **Mark folder as read**. This clears unread dots without opening each thread. It does not answer approvals, dismiss questions, or stop any running work.

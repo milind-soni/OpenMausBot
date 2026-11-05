@@ -896,7 +896,7 @@ function assertUsableContainer(status: VpsComputerStatus) {
 
 async function prepareVpsImage(alias: string, runner: VpsCommandRunner) {
   await runner(vpsDockerArgs(alias, ["pull", BASE_IMAGE]), { timeoutMs: 10 * 60_000 });
-  await runner(vpsDockerArgs(alias, ["build", "-t", VPS_IMAGE, "-"]), {
+  await runner(vpsDockerArgs(alias, ["build", "--force-rm", "-t", VPS_IMAGE, "-"]), {
     input: managedImageDockerfile(),
     timeoutMs: 10 * 60_000,
   });

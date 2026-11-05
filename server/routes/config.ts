@@ -451,6 +451,11 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         const check = await tts.verifyKey("fish", newTts.fishKey.trim());
         if (!check.ok) return json(res, 400, { error: check.message });
       }
+      if (newTts?.geminiKey !== undefined) newTts.geminiKey = newTts.geminiKey.trim();
+      if (newTts?.geminiKey) {
+        const check = await tts.verifyKey("gemini", newTts.geminiKey);
+        if (!check.ok) return json(res, 400, { error: check.message });
+      }
       const deciderKey = patch.decider ? deciderPatchKey(patch.decider, cfg.decider) : null;
       if (deciderKey) {
         const check = await decider.testKey(deciderKey.check);
@@ -533,6 +538,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           if (persisted.decider?.workersAiToken !== undefined) persisted.decider.workersAiToken = "";
           if (persisted.imageGen?.key !== undefined) persisted.imageGen.key = "";
           if (persisted.imageGen?.customApiKey !== undefined) persisted.imageGen.customApiKey = "";
+          if (persisted.imageGen?.geminiKey !== undefined) persisted.imageGen.geminiKey = "";
           if (persisted.live?.key !== undefined) persisted.live.key = "";
           if (persisted.treg?.key !== undefined) persisted.treg.key = "";
           if (persisted.postiz?.key !== undefined) persisted.postiz.key = "";

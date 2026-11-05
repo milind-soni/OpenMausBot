@@ -5,11 +5,10 @@ import { fileURLToPath } from "node:url";
 
 // The ci.yml jobs a pull request runs only when its change can affect them;
 // `static` and the `CI` gate always run. Besides these job ids a scope's checks
-// name "build" (static's typecheck, Electron syntax check and UI build) and the
-// vitest job's parts: "linux-tests", "host-tests" (Windows, and macOS where the
-// event runs it), and the subsets in VITEST_SUBSETS.
+// name the vitest job's parts: "linux-tests", "host-tests" (Windows, and macOS
+// where the event runs it), and the subsets in VITEST_SUBSETS.
 export const SELECTABLE_JOBS = [
-  "vitest", "behavior-evals", "packaged-server", "windows-cua", "electron-smokes", "cloudflared-linux-arm64",
+  "build", "vitest", "behavior-evals", "packaged-server", "windows-cua", "electron-smokes", "cloudflared-linux-arm64",
   "foss", "control-plane", "ui-smoke", "browser-identity", "package-linux", "browser-driver",
 ];
 
@@ -147,6 +146,7 @@ export const VITEST_SUBSETS = {
       "server/memory-move.test.ts",
       "server/outside-lineage.e2e.test.ts",
       "server/same-name-mentions.e2e.test.ts",
+      "server/skill-switch.test.ts",
     ],
     shards: 2,
     nodeTests: true,
@@ -325,7 +325,7 @@ export function vitestMatrix(oses) {
 }
 
 /** What ci.yml runs for a scope on an event whose suite covers `oses`: the
- * selected job ids, whether `static` builds, and the vitest matrix. */
+ * selected job ids and the vitest matrix. */
 export function ciOutputs({ checks }, oses) {
   const platforms = oses.filter((os) => checks.includes(os === "ubuntu-latest" ? "linux-tests" : "host-tests"));
   const { include } = vitestMatrix(platforms);
@@ -341,7 +341,6 @@ export function ciOutputs({ checks }, oses) {
   const jobs = SELECTABLE_JOBS.filter((job) => (job === "vitest" ? include.length > 0
     : job === "windows-cua" ? checks.includes(job) && oses.includes("windows-latest") : checks.includes(job)));
   return {
-    build: checks.includes("build"),
     jobs,
     vitest_os: oses,
     // macOS's packaged server smoke runs in the macOS smokes job.

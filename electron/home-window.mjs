@@ -222,6 +222,8 @@ export function routeOf(url, origin) {
  * became ready (createReadyClock). `go(url, origin, place)`: main's one way to move the window, to My Cloud or a team's Cloud (`origin`, with the
  * `place` it is) or this computer's screen (null). `showLocal(leaving)`: the window as it was before the move (this computer's page, or a saved server it
  * shows); `leaving`: it showed a place or this computer's screen until now, so it goes back to this computer's page.
+ * `reopen(place, still)`: this computer's copy moved to a server of the person's own, so the window goes back to that
+ * server (`origin`, `place`); false when it isn't saved here any more, doesn't answer, or `still()` says a newer `show()` took over.
  * `frozen()`: this computer's server's freeze marker. `splash()`: the startup screen while it is up. `remembered()`: the
  * team or other Cloud shown last time, with its name and origin as saved; `remember(place)`: what to open next time;
  * `left(name)`: the team shown is no longer this person's, so the window says so once; `drop(place)`: the Admin said so
@@ -230,10 +232,12 @@ export function routeOf(url, origin) {
  */
 export function createHomeWindow(deps) {
   const { journal, frozen, account, restored = async () => {}, window, ensureWindow, localOrigin, cookieFetch, power, go, showLocal, clean = null,
+    reopen = async () => false,
     remembered = () => null, remember = () => {}, left = () => {}, drop = (place) => { if (place.kind === "team") left(place.name); remember(null); },
     splash = () => null, lastInput = () => 0, publish = () => {}, rehomed = () => {}, versionEveryMs = VERSION_EVERY_MS, quietMs = QUIET_MS,
     now = Date.now, timers = DEFAULT_TIMERS, hosts = () => null, readyStore = null, ownMove = () => null, log = () => {}, t = nativeText.englishText.t } = deps;
   let home = { kind: "computer" }, screen = null, status = null, opens = 0, retry = null, tries = 0, loaded = null, newer = false, repairing = null;
+  let recovering = null;
   /** My Cloud asked for before the move made it home (`{ open }`), until its page loads or the person goes elsewhere;
    * `naming`: since when, and how often, a brand-new My Cloud's name was not found. */
   let asked = null, naming = null;
@@ -259,17 +263,18 @@ export function createHomeWindow(deps) {
   async function refresh() {
     clock.seen(state());
     const kept = parseJournal(journal());
-    let frozenCloud = null;
-    if (!kept) {
+    let frozenCloud = null, frozenPlace = null;
+    if (!awayIn(kept)) {
       const marker = await frozen().catch(() => null);
-      // A freeze for a server of the person's own names it (`place`): home is that server, shown as any saved server is.
       if (marker?.frozen && !marker.place) frozenCloud = typeof marker.cloud === "string" ? marker.cloud : true;
+      else if (marker?.frozen && marker.place) frozenPlace = { origin: typeof marker.cloud === "string" ? marker.cloud : null, place: String(marker.place) };
     }
     if (frozenCloud || awayIn(kept)) await restored();
     const before = home;
     const worked = homeOf({ journal: kept, frozenCloud, state: state() });
     // Home is this computer then, in its clean workspace, so a Cloud of this account's own opens from it as for anyone.
     home = clean && noWayHome(worked, state()) ? { kind: "computer", clean: true, ...(worked.other ? { other: true } : {}) } : worked;
+    if (frozenPlace) home = { ...home, frozenPlace };
     if (home.kind !== before.kind || home.origin !== before.origin || home.clean !== before.clean) {
       try { rehomed(home); } catch {}
     }
@@ -302,6 +307,11 @@ export function createHomeWindow(deps) {
   const shows = (origin) => {
     const win = window();
     return Boolean(win && !win.isDestroyed()) && originOf(win.webContents.getURL()) === origin;
+  };
+  const onOwnPage = () => {
+    const win = window();
+    const at = win && !win.isDestroyed() ? originOf(win.webContents.getURL()) : null;
+    return !at || at === localOrigin();
   };
   const onScreen = () => {
     const win = window();
@@ -507,6 +517,7 @@ export function createHomeWindow(deps) {
    * "cloud" for My Cloud, `{ team }` for a team's Cloud, `{ cloud }` for another of the person's own, else the place
    * remembered from last time. */
   async function show({ open = null, place = null } = {}) {
+    if (recovering) { if (!open && !place) return; recovering = null; }
     const token = ++opens;
     const current = await refresh();
     if (!wanted(token)) return;
@@ -542,6 +553,24 @@ export function createHomeWindow(deps) {
       asked = null; naming = null;
     }
     if (current.kind === "computer") {
+      const parkedAt = current.frozenPlace;
+      if (!current.clean && parkedAt && !ownMove() && onOwnPage()) {
+        clearRetry(); screen = null; status = null; shown = null; away = false;
+        ensureWindow();
+        let slow = null;
+        const mine = {}; recovering = mine;
+        try {
+          const back = await Promise.race([
+            reopen(parkedAt, () => wanted(token)).catch(() => false),
+            new Promise((done) => { slow = timers.set(() => done(false), OPEN_MS); }),
+          ]);
+          timers.clear(slow);
+          if (!wanted(token)) return;
+          if (back) return;
+          toScreen({ screen: "offline", reason: `Your bots are on ${parkedAt.place}.` });
+          return later();
+        } finally { if (recovering === mine) recovering = null; }
+      }
       if (current.clean && !(await clean.enter())) { if (wanted(token)) { ensureWindow(); clearRetry(); toScreen({ screen: "signin", ...(current.other ? { other: true } : {}) }); } return; }
       if (!wanted(token)) return;
       clearRetry(); screen = null; status = null; shown = null;
@@ -709,6 +738,14 @@ export function createHomeWindow(deps) {
      * computer's screen says so and the window tries again by itself. False for any other server. */
     failed(url, code = 0) {
       const at = originOf(url), place = placeOrigin(), mine = readyCloudOrigin(state());
+      const parkedAt = home.frozenPlace;
+      if (!place && parkedAt?.origin && at === parkedAt.origin) {
+        ++opens;
+        if (ownMove()) tell();
+        else toScreen({ screen: "offline", reason: `Your bots are on ${parkedAt.place}.` });
+        later();
+        return true;
+      }
       if (!at || (at !== place && (home.kind !== "computer" || at !== mine))) return false;
       if (at !== place) asked ??= { open: null };
       const token = ++opens;
@@ -731,6 +768,7 @@ export function createHomeWindow(deps) {
     },
     /** Signs the team on screen in again now, without moving the page (the timer's own step; also for tests). */
     renew: () => renew(),
+    cancel() { opens++; recovering = null; clearRetry(); screen = null; status = null; shown = null; away = false; },
     close() { opens++; clearRetry(); clearRenewal(); timers.clear(watcher); },
   };
 }

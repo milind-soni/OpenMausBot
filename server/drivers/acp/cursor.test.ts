@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { RuntimeEvent } from "../../contracts.ts";
 import { ensureDirs } from "../../config.ts";
@@ -135,6 +135,9 @@ describe("classifyCursorError", () => {
 
 describe("CursorAgentDriver", () => {
   const scratchDirs: string[] = [];
+  // The fake answers --version the way cursor-agent does: another answer is another program behind the CLI path.
+  beforeAll(() => { process.env.FAKE_ACP_VERSION = "2026.10.22-27dcf5f"; });
+  afterAll(() => { delete process.env.FAKE_ACP_VERSION; });
 
   afterEach(async () => {
     delete process.env.FAKE_ACP_DUMP;

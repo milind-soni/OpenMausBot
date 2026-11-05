@@ -3,6 +3,7 @@
 import type { AppConfig } from "../config.ts";
 import { redactSecretsInText } from "../redact.ts";
 import * as fish from "../tts/fish.ts";
+import { voiceFailure } from "../tts/errors.ts";
 import * as tts from "../tts/index.ts";
 import { toUtterances, VOICE_FIRST_BLOCK_MAX_CHARS } from "../tts/speech-text.ts";
 import { userError, userErrorFields } from "../user-errors.ts";
@@ -59,8 +60,12 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
       if (!text) return json(res, 400, { error: "text required" });
       // A hard ceiling, so an arbitrary local request cannot turn the hosted voice account into an unbounded billable job.
       if (text.length > 500) return json(res, 413, userError("serverError.voice.utteranceTooLong"));
+      const controller = new AbortController();
+      const cancel = () => { if (!res.writableEnded) controller.abort(); };
+      res.on("close", cancel);
       try {
-        const audio = await tts.speak(cfg, text, typeof body.voiceId === "string" ? body.voiceId : undefined);
+        const audio = await tts.speak(cfg, text, typeof body.voiceId === "string" ? body.voiceId : undefined, undefined, controller.signal);
+        if (controller.signal.aborted) return;
         res.writeHead(200, {
           "content-type": audio.mime,
           "content-length": String(audio.bytes.byteLength),
@@ -69,8 +74,12 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
         res.end(Buffer.from(audio.bytes));
         return;
       } catch (e) {
-        if (e instanceof tts.NoVoiceConfigured) return json(res, 409, { error: e.message });
+        if (controller.signal.aborted) return;
+        const failure = voiceFailure(e);
+        if (failure) return json(res, failure.status, failure.body);
         return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
+      } finally {
+        res.off("close", cancel);
       }
     }
     if (method === "POST" && path === "/api/tts/transcribe") {

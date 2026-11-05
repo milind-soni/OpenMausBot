@@ -151,6 +151,7 @@ describe("the page fills the panel", () => {
     expect(chrome().viewport).toEqual({ width: 1600, height: 1000 });
     expect(chrome().sentTo(page()).some((sent) => sent.method === "Emulation.clearDeviceMetricsOverride")).toBe(true);
     expect(viewportFor({ mode: "preset", preset: "phone", landscape: true }, null)).toEqual({ width: 844, height: 390 });
+    expect(viewportFor({ mode: "preset", preset: "fullHd" }, null)).toEqual({ width: 1920, height: 1080 });
   });
 
   it("ends a drag on a still of the final size, though Chromium sends no frame for it", async () => {
