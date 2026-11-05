@@ -1436,7 +1436,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         autoAcceptPermissions = approvalMode === "full";
         const selection = config.managed
           ? { model: turn.model, modelProvider: "openmaus_company" }
-          : config.authMode === "chatgpt-plan"
+          : config.authMode === "chatgpt-plan" && planLane === "maus"
             ? { model: turn.model, modelProvider: "openai_chatgpt_plan" }
             : decodeCodexSelection(turn.model);
         const cursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;

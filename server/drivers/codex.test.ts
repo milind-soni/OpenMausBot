@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -1972,6 +1972,35 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(pids.size).toBe(selections.length);
     expect(token).toHaveBeenCalledTimes("authMode" in opts ? selections.length : 0);
     expect(catalog).toHaveBeenCalledTimes("authMode" in opts ? 1 : 0);
+  });
+
+  it("routes device-lane plan turns through Codex's own provider, not the plan bridge", async () => {
+    const token = vi.spyOn(ChatGptPlanAuthController.prototype, "accessToken").mockResolvedValue("synthetic-plan-token");
+    const catalog = vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockResolvedValue({ default: "gpt-6.1-sol", options: [{ id: "gpt-6.1-sol", label: "GPT-6.1 Sol" }] });
+    await create({ authMode: "chatgpt-plan", mode: "approval" });
+    // Codex owns its login on this instance: auth.json exists, maus's credential store does not.
+    const codexHome = join(DATA_DIR, "providers", "chatgpt-plan", createHash("sha256").update("codex-test").digest("hex"), "codex");
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: null, tokens: { access_token: "synthetic", refresh_token: "synthetic", account_id: "acc" }, last_refresh: "2026-01-01T00:00:00.000Z" }));
+    const dump = join(scratch, "device-lane-turn.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-device-lane", text: "Continue", model: "gpt-6.1-sol" });
+      // The point is the launch shape, not the turn outcome: the fake dumps as soon as turn/start lands.
+      await vi.waitFor(() => {
+        expect(JSON.parse(readFileSync(dump, "utf8")).calls.some((call: { method: string }) => call.method === "turn/start")).toBe(true);
+      });
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.argv.some((arg: string) => arg.includes("openai_chatgpt_plan") || arg.includes("OPENMAUSBOT_CHATGPT_TOKEN"))).toBe(false);
+      expect(seen.env.OPENMAUSBOT_CHATGPT_TOKEN).toBeUndefined();
+      expect(seen.env.CODEX_HOME.startsWith(join(DATA_DIR, "providers", "chatgpt-plan") + sep)).toBe(true);
+      const threadCalls = seen.calls.filter((call: { method: string }) => ["thread/start", "thread/resume"].includes(call.method));
+      expect(threadCalls[0]).toMatchObject({ method: "thread/start", params: { model: "gpt-6.1-sol", modelProvider: "openai" } });
+      expect(token).not.toHaveBeenCalled();
+      expect(catalog).toHaveBeenCalledTimes(1); // create-time refresh, while the instance was still maus-lane
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true });
+    }
   });
 
   it.each([
