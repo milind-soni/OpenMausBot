@@ -11,6 +11,7 @@ import { z } from "zod";
 import { EMPTY, MOVE_BOT_PARTS, itemKey } from "../electron/cloud-send-parts.mjs";
 import type { MoveKind } from "../electron/cloud-send-parts.mjs";
 import type { AppTrigger } from "../shared/app-triggers.ts";
+import { defaultBotPerson } from "../shared/default-bot.ts";
 import { canonicalJson } from "../shared/package-format.ts";
 import { isSkillName } from "../shared/skill-md.ts";
 import type { InstalledPlaybook, InstalledPackageMetadata } from "../shared/wire.ts";
@@ -19,8 +20,7 @@ import type { AppTriggerManager } from "./app-triggers.ts";
 import type { CalendarCall, CalendarCallManager } from "./calendar-calls.ts";
 import type { CloudOwner } from "./cloud-owner-lines.ts";
 import type { CloudSendItem } from "./cloud-send.ts";
-import { defaultBotPerson } from "../shared/default-bot.ts";
-import { placeMausBotUnused, retireUnusedStarter, takeArrivingDefaultBot } from "./default-bot.ts";
+import { placeMausBotUnused, retireUnusedStarter, takeArrivingDefaultBot, unusedStarter } from "./default-bot.ts";
 import { watchAsMade } from "./host/default-watch.ts";
 import { IMPORTED_SKILLS_DIR, readImportedSkills, storeImportedSkills, type ImportedSkillInput } from "./imported-skills.ts";
 import type { RequestAuth } from "./request-auth.ts";
@@ -289,15 +289,20 @@ function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown, mainIfUnu
     const library = readSkillLibraryIndex();
     patch.assignedSkills = fields.assignedSkills ? fields.assignedSkills.filter((name) => library[name]) : undefined;
   }
-  // A phone's MausBot beside a MausBot someone uses brings neither Chief nor sections: the computer's own keeps both.
-  const takes = !fields.defaultBot || !mainIfUnused || (!!bot.defaultBot && !defaultBotPerson(bot)) || placeMausBotUnused(deps.store, deps.dataDir);
-  if (takes) {
+  // On a phone's move only its MausBot can take anything, and only over a place MausBot nobody uses; Chief and sections move
+  // only when the place's Chief is absent, the unused starter, or the arrival itself.
+  const main = !!bot.defaultBot && !defaultBotPerson(bot);
+  const takes = !mainIfUnused || (!!fields.defaultBot && (main || placeMausBotUnused(deps.store, deps.dataDir)));
+  const chief = deps.store.bots.find((held) => held.chiefOfStaff && !held.hidden);
+  const chiefMoves = !mainIfUnused || (takes && (!chief || chief.id === id || chief.id === unusedStarter(deps.store, deps.dataDir)?.id));
+  if (chiefMoves) {
     set("managedSections", fields.managedSections ? [...new Set(fields.managedSections.filter(Boolean))] : undefined);
     if (Object.hasOwn(fields, "chiefOfStaff") && fields.chiefOfStaff !== true) patch.chiefOfStaff = fields.chiefOfStaff ?? undefined;
     if (fields.chiefOfStaff === true) delete patch.hidden;
   }
+  if (mainIfUnused && fields.defaultBot && !takes) { patch.sidebarHidden = undefined; patch.welcomed = undefined; }
   deps.store.patchBot(id, patch);
-  if (takes && fields.chiefOfStaff === true) {
+  if (chiefMoves && fields.chiefOfStaff === true) {
     deps.store.setChiefOfStaff(id);
     if (patch.managedSections) deps.store.patchBot(id, { managedSections: patch.managedSections });
   }

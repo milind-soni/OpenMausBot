@@ -110,7 +110,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (field) {
           return json(res, 403, {
             error: moving
-              ? `forbidden: a phone's move may bring a bot's profile, look, model, voice and memory settings, not "${field}"; set that on the host computer`
+              ? `forbidden: a phone's move may bring a bot's profile, look, model, voice, memory and phone-app settings, not "${field}"; set that on the host computer`
               : pairedDevice
               ? `forbidden: a paired device may change how a bot looks, not "${field}"; change it on the host computer`
               : level === "edit" ? `forbidden: "${field}" is an admin's to change`

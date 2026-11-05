@@ -388,7 +388,7 @@ describe("PATCH /api/bots/:id under a phone's move", () => {
     expect(store.bot(bot.id)?.memoryEnabled).toBe(true);
     const refused = await patch(bot.id, { approvalMode: "full" }, phone);
     expect(refused.status).toBe(403);
-    expect(refused.body.error).toBe(`forbidden: a phone's move may bring a bot's profile, look, model, voice and memory settings, not "approvalMode"; set that on the host computer`);
+    expect(refused.body.error).toBe(`forbidden: a phone's move may bring a bot's profile, look, model, voice, memory and phone-app settings, not "approvalMode"; set that on the host computer`);
   });
 
   it("lets a phone's move carry its own bot's phone-app grant", async () => {
@@ -396,6 +396,13 @@ describe("PATCH /api/bots/:id under a phone's move", () => {
     const ok = await patch(bot.id, { phoneApps: { calendar: "read" } }, phone);
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     expect(store.bot(bot.id)?.phoneApps).toEqual({ calendar: "read" });
+  });
+
+  it("refuses a malformed phone-app grant on its own bot, and any grant on a bot the move did not bring", async () => {
+    const own = fixture((_auth, id) => id === own.store.bots[0]?.id);
+    expect((await own.patch(own.bot.id, { phoneApps: ["calendar"] }, phone)).status).toBe(400);
+    const other = fixture(() => false);
+    expect((await other.patch(other.bot.id, { phoneApps: { calendar: "read" } }, phone)).status).toBe(403);
   });
 
   it("keeps today's look-only rule for every bot the move did not bring", async () => {
