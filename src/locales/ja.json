@@ -6595,6 +6595,8 @@
   "settings.recovery.ownBackups": "独自の予備があるボット（モデル → このボットのバックアップモデル）は、この設定のオン・オフに関係なく、そちらを使います。",
   "limits.windowAtLimit": "上限に達しました",
   "limits.clearsOnReply": "{engine} が再び返信できるようになると自動的に解除されます。",
+  "limits.cardTitle": "{engine} の使用状況",
+  "limits.checked": "{when}に確認",
   "botAccess.share": "共有",
   "botAccess.title": "{bot} を共有",
   "botAccess.addPlaceholder": "名前かメールでメンバーを追加",

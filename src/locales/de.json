@@ -2862,6 +2862,8 @@
   "limits.resets": "wird {time} zurückgesetzt",
   "limits.windowAtLimit": "Am Limit",
   "limits.clearsOnReply": "Löst sich von selbst, sobald {engine} wieder antwortet.",
+  "limits.cardTitle": "{engine}-Nutzung",
+  "limits.checked": "geprüft {when}",
   "botAccess.share": "Teilen",
   "botAccess.title": "{bot} teilen",
   "botAccess.addPlaceholder": "Personen nach Name oder E-Mail hinzufügen",
