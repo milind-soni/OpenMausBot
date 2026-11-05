@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { BotRecord } from "../store.ts";
 import { LONG_WAIT_MS, waitedWords } from "./long-waits.ts";
-import { createAsksActingPerson, createAsksActingPerson, createTeammatePrompts, type TeammatePromptDeps } from "./teammate-prompts.ts";
+import { createAsksActingPerson, createTeammatePrompts, type TeammatePromptDeps } from "./teammate-prompts.ts";
 
 vi.mock("../peer-roster.ts", () => ({ canManage: () => true }));
 

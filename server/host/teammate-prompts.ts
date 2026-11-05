@@ -28,6 +28,15 @@ export interface TeammatePromptDeps {
   now?(): number;
 }
 
+/** What a coordinate_bots call tells the bot to do next. */
+export function coordinateResultMessage(reply: "none" | "poll" | "resume", answeredOnly: boolean): string {
+  if (reply === "none") return "Sent one way. Nothing comes back and nothing resumes you; continue your turn.";
+  if (answeredOnly) return "Answered for the person. Nothing comes back and nothing resumes you; continue your turn and tell the person what you answered.";
+  return reply === "poll"
+    ? "Handed to the coordinator. Read each result with assignment_status (id: a receipt's requestId, or rootId for the whole call), long-polling with wait_ms."
+    : "End your turn after sending all work. These actual teammates will reply and resume you automatically. Do not poll or wait.";
+}
+
 /** Security invariant: on a team a Chief answers a teammate's question only for the person it is for, and only in a turn that person drives.
  * A room's turn names its person only through its generation. */
 export function createAsksActingPerson(deps: {
