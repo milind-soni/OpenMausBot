@@ -8,7 +8,8 @@ import {
   withCitationComment,
   type CitationAttachment,
 } from "@/lib/citations";
-import { captureCitationSelection, citationTabShortcut } from "@/lib/citations-dom";
+import { captureCitationSelection, citationShortcutHint, citationTabShortcut, isCitationShortcut } from "@/lib/citations-dom";
+import { isMacPlatform } from "@/lib/keyboard-shortcuts";
 import { sendsMessage, useSendKey } from "@/lib/send-key";
 import { intlLocale, t } from "@/lib/i18n";
 
@@ -111,6 +112,7 @@ export function CitationSelectionToolbar({
 }) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const tabShortcut = useRef(citationTabShortcut()).current;
+  const isMac = useRef(isMacPlatform()).current;
   const [captured, setCaptured] = useState<{
     citation: CitationAttachment;
     point: Point;
@@ -146,7 +148,20 @@ export function CitationSelectionToolbar({
     viewportRef.current?.addEventListener("pointerup", update);
     viewportRef.current?.addEventListener("keyup", update);
     const focusAction = (event: KeyboardEvent) => {
-      if (captured && !editing) tabShortcut.handle(event, buttonRef.current);
+      if (!captured) return;
+      if (editing) {
+        // Holding the shortcut keeps repeating it after the card opens; keep those repeats from reaching the browser.
+        if (event.repeat && isCitationShortcut(event, isMac)) event.preventDefault();
+        return;
+      }
+      if (isCitationShortcut(event, isMac)) {
+        if (captured.citation.quote.length > CITATION_MAX_QUOTE_LENGTH) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setEditing(true);
+        return;
+      }
+      tabShortcut.handle(event, buttonRef.current);
     };
     document.addEventListener("keydown", focusAction, true);
     return () => {
@@ -155,7 +170,7 @@ export function CitationSelectionToolbar({
       viewportRef.current?.removeEventListener("keyup", update);
       document.removeEventListener("keydown", focusAction, true);
     };
-  }, [captured, editing, tabShortcut, viewportRef]);
+  }, [captured, editing, isMac, tabShortcut, viewportRef]);
 
   useLayoutEffect(() => {
     if (!captured || editing) return;
@@ -180,12 +195,15 @@ export function CitationSelectionToolbar({
     />;
   }
   const tooLong = captured.citation.quote.length > CITATION_MAX_QUOTE_LENGTH;
+  const shortcut = citationShortcutHint(isMac);
   return createPortal(
     <button
       ref={buttonRef}
       type="button"
       disabled={tooLong}
       aria-label={t(tooLong ? "chat.citation.tooLongLabel" : "chat.citation.citeLabel")}
+      aria-keyshortcuts={tooLong ? undefined : isMac ? "Meta+L" : "Control+L"}
+      title={tooLong ? undefined : `${t("chat.citation.citeLabel")} (${shortcut})`}
       onPointerDown={(event) => event.preventDefault()}
       onClick={() => setEditing(true)}
       onKeyDown={(event) => {
@@ -195,6 +213,7 @@ export function CitationSelectionToolbar({
       style={captured.point}
     >
       <Quote size={13} aria-hidden="true" /> {t(tooLong ? "chat.citation.shorten" : "chat.citation.cite")}
+      {!tooLong && <kbd aria-hidden="true" className="font-sans text-[11px] font-normal text-ink-secondary">{shortcut}</kbd>}
     </button>,
     document.body,
   );

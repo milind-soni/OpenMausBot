@@ -3,6 +3,9 @@ export interface ChatToolCall {
   id: string;
   type: "function";
   function: { name: string; arguments: string };
+  /** Gemini's thought signature (`{ google: { thought_signature } }`): sent back with the call, or Gemini rejects the
+   * next round with "Function call is missing a thought_signature". */
+  extra_content?: Record<string, unknown>;
 }
 
 /** Calls one model reply may carry (its index bound). */
@@ -65,6 +68,13 @@ export class ChatToolCalls {
           call.function[field] += fn[field];
           if (field === "arguments") this.argumentChars += fn[field].length;
         }
+      }
+      const extra = object(delta.extra_content);
+      if (extra) {
+        // A later chunk replaces the earlier value, so count only the size change.
+        const previous = call.extra_content ? JSON.stringify(call.extra_content).length : 0;
+        call.extra_content = extra;
+        this.argumentChars += JSON.stringify(extra).length - previous;
       }
       if (call.function.name.length > 64 || this.argumentChars > MAX_ARGUMENT_CHARS) {
         throw new ChatProtocolError("provider tool calls exceeded the size limit");
