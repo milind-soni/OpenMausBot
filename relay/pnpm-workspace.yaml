@@ -1,0 +1,5 @@
+# The relay is its own pnpm root with its own lockfile: its image, its CI job and its audit see only the relay's
+# dependencies, and nothing the desktop app adds can reach the relay.
+packages:
+  - "."
+onlyBuiltDependencies: []
