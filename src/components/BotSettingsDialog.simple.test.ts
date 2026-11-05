@@ -404,7 +404,7 @@ describe("the bot panel in Simple mode", () => {
     expect(shown(panel(makeBot(), "access"))).toEqual({ tab: "computer", page: undefined });
   });
 
-  it("shows no switch on any tab or on Bot settings: memory, upkeep, browser, record steps and Work until done live elsewhere", () => {
+  it("shows no switch on any tab, and on Bot settings only Bot API's: memory, upkeep, browser, record steps and Work until done live elsewhere", () => {
     const bot = makeBot();
     expect(switches(panel(bot).html)).toBe(0);
     expect(panel(bot).html).not.toContain('aria-label="Work until done"');
@@ -415,7 +415,9 @@ describe("the bot panel in Simple mode", () => {
       for (const text of ["Memory", "Upkeep", "Record"]) expect(rendered.html).not.toContain(`>${text}<`);
     }
     click(find(panel(bot), "data-panel-gear"));
-    expect(switches(panel(bot).html)).toBe(0);
+    const settings = panel(bot).html;
+    expect(switches(settings)).toBe(1);
+    expect(settings).toContain('aria-label="Let apps talk to this bot"');
   });
 });
 
@@ -651,7 +653,8 @@ describe("the Bot settings page", () => {
       .map((marker) => rendered.html.indexOf(marker));
     expect(order.every((index) => index > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(switches(rendered.html)).toBe(0);
+    expect(switches(rendered.html)).toBe(1);
+    expect(rendered.html).toContain('aria-label="Let apps talk to this bot"');
     expect(rendered.html.match(/pl-\[38px\]/g)).toHaveLength(4);
   });
 

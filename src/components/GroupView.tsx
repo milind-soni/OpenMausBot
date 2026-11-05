@@ -9,7 +9,8 @@ import {
   api,
   useStore,
   formatTime,
-  openNotificationTarget,
+  openRoomThread,
+  openThread,
   type Bot,
   type Group,
   type GroupDefaultResponder,
@@ -110,13 +111,7 @@ export function RoomToolChip({ message, roomId, threadId, live = false }: { mess
   }
   const comm = message.comm;
   if (comm && comm.groupId !== roomId) {
-    return <HandoffChip message={message} bots={state.bots} title={t("room.openBot", { name: comm.withName })} onClick={() => {
-      dispatch({ type: "select", id: comm.groupId });
-      const destination = state.groups.find(g => g.id === comm.groupId);
-      if (comm.threadId && destination?.tasks?.some(task => task.threadId === comm.threadId)) {
-        dispatch({ type: "switchGroupTask", groupId: comm.groupId, threadId: comm.threadId });
-      }
-    }} />;
+    return <HandoffChip message={message} bots={state.bots} title={t("room.openBot", { name: comm.withName })} onClick={() => openRoomThread(dispatch, comm, state.groups)} />;
   }
   if (!comm) return <ToolActivity tool={tool} live={live} source={threadId ? { threadId, messageId: message.id } : undefined} />;
   return (
@@ -453,7 +448,7 @@ export const Transcript = memo(function Transcript({
               <RoutineRunCard
                 message={m}
                 onOpen={routineTarget
-                  ? () => openNotificationTarget(dispatch, routineTarget, state, showThreads)
+                  ? () => openThread(dispatch, routineTarget, state, showThreads)
                   : undefined}
               />
             </div>

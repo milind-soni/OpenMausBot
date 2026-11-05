@@ -6,6 +6,7 @@ import { newId } from "./contracts.ts";
 import { optionCardsForTools } from "./message-db.ts";
 import { buildNotification, type Notification } from "./notify.ts";
 import type { BotRecord, Store } from "./store.ts";
+import { turnWaitedOnPerson } from "./waiting-on-person.ts";
 import {
   cleanAppName,
   cleanSiteName,
@@ -64,7 +65,7 @@ function settle(entry: Pending, answer: "allow" | "deny", source: "user" | "syst
     entry.store.patchMessage(entry.threadId, entry.messageId, { card: { ...card, answered: answer, dismissed: source !== "user" } });
   }
   const task = entry.botId ? entry.store.projectBotForTask(entry.botId, entry.threadId) : null;
-  if (task?.activity === "waiting-on-you") entry.store.setTaskActivity(task.id, entry.threadId, "working");
+  if (turnWaitedOnPerson(task)) entry.store.setTaskActivity(task.id, entry.threadId, "working");
 }
 
 /** Resolves when the person allows; rejects with YourComputerDeclined when they deny or the request ends first. */

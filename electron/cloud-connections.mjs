@@ -1,5 +1,5 @@
 // This computer's connections, moved once with the rest of the person's things to their own Cloud: MCP servers with
-// their secrets and sign-ins, the AI keys bots run on, connected apps and HighLevel. Secrets reach main only over the
+// their secrets and sign-ins, the AI keys bots run on, connected apps, HighLevel and mailboxes. Secrets reach main only over the
 // server's private port (cloud-logins.mjs) and go only to the move's owner session on My Cloud. A sign-in that
 // refreshes itself moves: once My Cloud has it, this computer forgets its own copy, so only My Cloud uses it.
 //
@@ -12,16 +12,16 @@
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const sentence = (value) => (typeof value === "string" && value.trim() ? value.trim().slice(0, 300) : null);
 const pick = (source, names) => Object.fromEntries(names.filter((name) => source[name] !== undefined && source[name] !== null).map((name) => [name, source[name]]));
-const ID = /^(?:mcp:[a-z][a-z0-9_-]{0,31}|key:\w{1,40}|composio|highlevel)$/u;
+const ID = /^(?:mcp:[a-z][a-z0-9_-]{0,31}|key:\w{1,40}|composio|highlevel|email)$/u;
 const INSTALLATION = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const ENVIRONMENT = /^[\w-]{1,128}$/u;
 const SLUG = /^[a-z0-9_][a-z0-9_-]{0,80}$/u;
 const ENGINE = /^[\w.:-]{1,128}$/u;
 const LAUNCHER = /^[a-z0-9._+-]{1,40}$/u;
 const DIGEST = /^[0-9a-f]{64}$/u;
-const KINDS = new Set(["mcp", "key", "composio", "highlevel"]);
+const KINDS = new Set(["mcp", "key", "composio", "highlevel", "email"]);
 /** Keys first, so the engines they run are ready before anything that follows them; connected apps last. */
-const ORDER = { key: 0, mcp: 1, highlevel: 2, composio: 3 };
+const ORDER = { key: 0, mcp: 1, highlevel: 2, email: 2, composio: 3 };
 const MCP_FIELDS = ["command", "args", "env", "type", "url", "headers", "oauth", "resultBudget", "enabled", "runsOn"];
 /** How long a move waits for My Cloud to run the engines whose keys just went. */
 const ENGINE_WAIT_MS = 10_000;
@@ -153,7 +153,7 @@ export async function adoptComposioId(target, { local, here, there, managedApps 
  * With `signIns: false`, a sign-in that refreshes itself stays here for a later pass (`later`), and the rest goes.
  *
  * Returns { moved, runsHere, kept, missing, failed, release, later, held }: what My Cloud has now; what went marked as
- * running here (`needs`: a program My Cloud lacks); what My Cloud kept of its own (its own sign-in, its own connected
+ * running here (`needs`: a program My Cloud lacks; `off`: it was switched off here too); what My Cloud kept of its own (its own sign-in, its own connected
  * apps); the connected apps of this computer's that My Cloud then lacks; what failed (`final`: trying again can't fix
  * it); the sign-ins My Cloud took that this computer still holds; the sign-ins left for a later pass; and the keys a
  * trial's Cloud keeps unused while its Claude credit lasts.
@@ -202,7 +202,7 @@ export async function sendConnections(collected, target, { local, release = true
         if (saved.ok && enabled === true) saved = await target.call("PATCH", `/api/mcp/servers/${name}`, { enabled: true });
       }
       if (!saved.ok) throw refused(saved, `My Cloud did not take ${item.label}.`);
-      if (runsOn) return void result.runsHere.push({ id: item.id, label: item.label, ...(missing && !item.runsHere && !record(marked) ? { needs: missing } : {}) });
+      if (runsOn) return void result.runsHere.push({ id: item.id, label: item.label, ...(missing && !item.runsHere && !record(marked) ? { needs: missing } : {}), ...(enabled === true ? {} : { off: true }) });
       done(item);
       if (record(signIn)) {
         if (!digest) throw new ConnectionMoveError("local", `${item.label}'s sign-in could not be read on this computer.`);
@@ -218,6 +218,14 @@ export async function sendConnections(collected, target, { local, release = true
       const kept = result.kept.length;
       await moveSignIn(item, highlevel, highlevel.kind === "oauth" ? digest : undefined);
       if (result.kept.length === kept) done(item);
+    },
+    async email(item) {
+      const accounts = (await secrets(local, item)).connection.email;
+      if (!Array.isArray(accounts)) throw new ConnectionMoveError("local", "The mailboxes could not be read on this computer.");
+      const answer = await target.call("PUT", "/api/cloud-connections/email", { accounts });
+      if (answer.status === 404) throw new ConnectionMoveError("outdated", "My Cloud can't take your mailboxes yet. Connect them there under Connected apps.", true);
+      if (!answer.ok) throw refused(answer, "My Cloud did not take your mailboxes.");
+      done(item);
     },
     async composio(item) {
       const outcome = await adoptComposioId(target, { local, here: item, there: cloud.connections.find((theirs) => theirs.id === "composio") ?? null, managedApps: cloud.managedApps !== false });

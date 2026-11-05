@@ -497,7 +497,6 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/team-setup-requests.ts", "Team setup not applied"],
   ],
   "restarts, stops and context": [
-    ["server/host/person-stop.ts", "Stopped here —  …  is still working; open to stop it too"],
     ["server/index.ts", "Resuming after a restart"],
     ["server/index.ts", "…  was cut off by a restart; resuming"],
     ["server/index.ts", "context compaction started ( … )"],

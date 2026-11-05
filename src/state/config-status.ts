@@ -55,6 +55,10 @@ export interface ConfigStatus {
   newBots?: { effort?: EffortLevel };
   /** This Cloud is on the Starter plan, as the Admin last said; absent or false otherwise. */
   cloudStarter?: boolean;
+  /** The most bots this Cloud's plan makes, its MausBot aside; absent when its plan has no such limit. */
+  botLimit?: number;
+  /** A task on this Cloud is waiting for memory right now. */
+  waitingForRoom?: boolean;
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
   /** Prompt-cache keep-warm for idle Claude threads. Absent from older servers. */

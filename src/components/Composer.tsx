@@ -62,7 +62,7 @@ import {
   type Attachment,
   type PasteAttachment,
 } from "@/lib/composer-attachments";
-import { goalCoordinatorForComposer, jevRoomRoutingOn, openTaskWorking, roomRespondersForComposer } from "@/lib/group-routing";
+import { goalCoordinatorForComposer, jevRoomRoutingOn, openTaskWorking, roomRouteForComposer } from "@/lib/group-routing";
 import { composerPlaceholder, sendLabels, SIMPLE_COMPOSER, SIMPLE_CONTROL, slotColors } from "./composer-simple"; import { ComposerSendButton } from "./ComposerSendButton";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { CallButton } from "./CallView";
@@ -82,7 +82,7 @@ import {
   doubleEnterSteersQueue,
 } from "./ComposerQueuedMessages";
 import { skillAuthoringEnabled } from "@/lib/feature-flags";
-import { mentionChoicesForQuery, mentionQueryAt } from "@/lib/mentions";
+import { mentionChoicesForQuery, mentionQueryAt } from "@/lib/mentions"; import { mentionPicksFor, restoreMentionPicks } from "@/lib/mention-picks";
 import { serializeThreadRefs, threadTokenFromPaste, threadTokenSpacing } from "@/lib/thread-refs";
 import {
   composerSlashTrigger,
@@ -168,7 +168,7 @@ export function Composer({
     !group && bot ? `bot:${bot.id}` : undefined,
   );
   const attachmentPending = useDraftAttachmentPending(draftId);
-  const failedSends = useFailedComposerSends(draftId);
+  const failedSends = useFailedComposerSends(draftId); const picks = mentionPicksFor(draftId);
   const [channelMode, setChannelMode] = useComposerChannelMode(draftId);
   const editText = useCallback(
     (next: string) => {
@@ -187,7 +187,7 @@ export function Composer({
   const restoreDraft = useCallback(
     (sent: ComposerDraftSnapshot) => {
       if (recoverFailedComposerSend(sent) === "restored") {
-        if (sent.reply) onRestoreReply?.(sent.reply, sent.threadId);
+        restoreMentionPicks(sent.draftId, sent.mentions); if (sent.reply) onRestoreReply?.(sent.reply, sent.threadId);
       }
     },
     [onRestoreReply],
@@ -283,10 +283,10 @@ export function Composer({
   const imageTargetsSupport = (message: string, mode: "chat" | "goal") => {
     if (!group) return botSupportsImages(bot);
     if (mode === "goal") {
-      return botSupportsImages(goalCoordinatorForComposer(message, members ?? [], group) ?? undefined);
+      return botSupportsImages(goalCoordinatorForComposer(message, members ?? [], group, picks.ids(message)) ?? undefined);
     }
-    const responders = roomRespondersForComposer(message, members ?? [], group);
-    return responders.length > 0 && responders.every(botSupportsImages);
+    const route = roomRouteForComposer(message, members ?? [], group, picks.ids(message));
+    return route.ambiguous || (route.responders.length > 0 && route.responders.every(botSupportsImages));
   };
   const typedGoalText = !group?.dm ? goalTextFromComposer(text) : null;
   const effectiveText = typedGoalText ?? text;
@@ -373,7 +373,7 @@ export function Composer({
     if (!mention) return;
     const after = text.slice(caret);
     const next = `${text.slice(0, mention.start)}@${peer.name} ${after}`;
-    editText(next);
+    picks.pick(peer); editText(next);
     const newCaret = mention.start + peer.name.length + 2;
     setCaret(newCaret);
     setDismissedAt(mention.start);
@@ -546,14 +546,14 @@ export function Composer({
       sendId: failed.sendId,
       text: failed.requestText,
       replyToId: failed.replyToId,
-      threadId: failed.threadId,
+      threadId: failed.threadId, mentions: failed.mentions,
       onError: () => {
         rememberFailedComposerSend(draftId, {
           sendId: failed.sendId,
           text: failed.text,
           requestText: failed.requestText,
           replyToId: failed.replyToId,
-          threadId: failed.threadId,
+          threadId: failed.threadId, mentions: failed.mentions,
           channelMode: failed.channelMode,
         });
       },
@@ -588,7 +588,7 @@ export function Composer({
       reply: replyTo ?? null,
       replyToId: replyTo?.id,
       threadId,
-      channelMode: effectiveChannelMode,
+      channelMode: effectiveChannelMode, mentions: picks.ids(body),
     };
     if (group) {
       dispatch({
@@ -598,21 +598,21 @@ export function Composer({
         sendId: sentDraft.sendId,
         replyToId: replyTo?.id,
         threadId,
-        mode: effectiveChannelMode,
+        mode: effectiveChannelMode, mentions: sentDraft.mentions,
         onError: () => restoreDraft(sentDraft),
       });
       roomMessageSent(effectiveChannelMode, busy);
     } else if (bot) {
       const points = effectiveChannelMode === "goal" ? null : takePointedChips(threadId);
       dispatch({
-        type: "send", botId: bot.id, text: body, sendId: sentDraft.sendId, replyToId: replyTo?.id, threadId, dataContext, mode: effectiveChannelMode,
+        type: "send", botId: bot.id, text: body, sendId: sentDraft.sendId, replyToId: replyTo?.id, threadId, dataContext, mode: effectiveChannelMode, mentions: sentDraft.mentions,
         ...(points ? { pointed: points.pointed } : {}), ...(followUp ? { followUp } : {}),
         onError: () => { points?.restore(); restoreDraft(sentDraft); },
       });
       directMessageSent(state.instances, bot.modelSelection?.instanceId, busy && followUp !== "steer");
     }
     setText("");
-    setAttachments([]);
+    setAttachments([]); picks.clear();
     onConsumeReply?.();
     setChannelMode("chat");
   };
