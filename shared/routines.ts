@@ -180,7 +180,7 @@ export interface Routine {
   /** Set while OpenMausBot keeps it paused because its owner left; turning it on or off clears it. */
   heldFor?: RoutineHoldCause;
   attachments?: RoutineContextAttachment[];
-  /** Absent: one bot runs the prompt, as before. */
+  /** Absent: one bot runs the prompt. */
   steps?: RoutineStep[];
   sourceThreadId?: string;
   resultsThreadId?: string;

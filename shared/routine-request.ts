@@ -62,7 +62,7 @@ export interface RoutineRequestDefinition {
   overlap?: "skip" | "queue";
   /** Also run once each time OpenMausBot starts. Repeating routines only. */
   runOnStartup?: boolean;
-  /** Absent: one bot runs the instructions, as before. */
+  /** Absent: one bot runs the instructions. */
   steps?: RoutineStep[];
 }
 

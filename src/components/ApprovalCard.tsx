@@ -433,8 +433,7 @@ export function ApprovalCard({
     : undefined;
   if (applied) {
     const operation = card.routineRequest?.operation;
-    // The server adds `steps` to an update's changes; the shared type does not carry it yet.
-    const planned = operation?.action === "update" && (operation.changes as { steps?: unknown[] | null }).steps?.length ? operation.routineId : undefined;
+    const planned = operation?.action === "update" && operation.changes.steps?.length ? operation.routineId : undefined;
     const line = <AppliedChangeLine card={card} name={bot?.name ?? t("approval.someone")} threadId={threadId} summary={applied} />;
     return planned ? <div className="w-full max-w-[840px]">{line}<RoutinePlan routineId={planned} /></div> : line;
   }
