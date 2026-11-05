@@ -492,6 +492,14 @@ function currencyDigits(currency: string): number | null {
   }
 }
 
+/** Whether Claude's paid extra usage is on and not used up, on a plan with rolling windows: sends then go on past a
+ * full window and are paid from it. */
+export function claudeHasExtraUsageRoom(row: Pick<PlanProviderRow, "driver" | "fiveHour" | "weekly" | "extra">): boolean {
+  if (row.driver !== "claude" || !(row.fiveHour.available || row.weekly.available)) return false;
+  const budget = row.extra[0];
+  return !!budget && (budget.label === EXTRA_USAGE || budget.label === MONTHLY_SPEND) && budget.usedPercent < 100;
+}
+
 /** A plan with no rolling windows lives on its monthly budget (Claude Enterprise); on others that budget is the extra usage
  * bought on top of them. */
 function readClaudeBudget(root: Record<string, unknown>, hasWindows: boolean): PlanExtra | null {
