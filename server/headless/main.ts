@@ -17,7 +17,11 @@ const T = "TARGET is a bot or room by name or id, or --bot ID, --channel ID, --t
 export const VERB_HELP: Record<string, string> = {
   doctor: `openmausbot doctor [--wait DURATION]
   Check the server answers, is new enough, says who you are to it, and has an engine ready.
-  --wait 2m keeps checking until it is ready. Exit 0 ready, 1 no engine, 5 unreachable or too old.`,
+  --wait 2m keeps checking until it is ready. Exit 0 ready, 1 no engine, 5 unreachable or too old.
+openmausbot doctor --host [--data-dir DIR] [--port 8799] [--domain HOST]
+  Check this Linux machine can run the server and the bots' sandbox: the system, Docker or Podman, user
+  namespaces, seccomp, cgroup v2, free disk, size, ports and the clock. Each problem says its fix.
+  Exit 0 ready (warnings allowed), 7 something is missing. On macOS and Windows it says it is for Linux.`,
   bots: "openmausbot bots\n  Your bots and what each is doing.",
   channels: "openmausbot channels\n  Your rooms (group chats) and who is in them.",
   models: "openmausbot models\n  The engines and the models each offers (use them as INSTANCE/MODEL).",
