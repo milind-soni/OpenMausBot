@@ -1,8 +1,8 @@
 // Noise_NKpsk0_P256_AESGCM_SHA256 (Noise Protocol Framework rev 34, with P-256 as the DH function) and the
 // transport records that follow it. Wire spec: companion/src/e2e/README.md, "Handshake" and "Transport messages".
-import { createCipheriv, createDecipheriv, createECDH, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createECDH, hkdfSync, randomBytes } from "node:crypto";
 
-import { b64u, fromB64u, hmacSha256, sha256 } from "./credentials.ts";
+import { b64u, fromB64u, sha256 } from "./credentials.ts";
 
 export const PROTOCOL_NAME = "Noise_NKpsk0_P256_AESGCM_SHA256";
 export const PUBLIC_KEY_BYTES = 65;
@@ -89,16 +89,10 @@ export function isPublicKey(bytes: Uint8Array): boolean {
   }
 }
 
-/** Noise HKDF over HMAC-SHA256. */
+/** Noise's HKDF is RFC 5869 HKDF-SHA256 with the chaining key as salt and empty info. */
 export function hkdf(chainingKey: Uint8Array, ikm: Uint8Array, outputs: 2 | 3): Buffer[] {
-  const temp = hmacSha256(chainingKey, ikm);
-  const out: Buffer[] = [];
-  let previous: Buffer = Buffer.alloc(0);
-  for (let index = 1; index <= outputs; index += 1) {
-    previous = hmacSha256(temp, Buffer.concat([previous, Buffer.from([index])]));
-    out.push(previous);
-  }
-  return out;
+  const out = Buffer.from(hkdfSync("sha256", ikm, chainingKey, Buffer.alloc(0), 32 * outputs));
+  return Array.from({ length: outputs }, (_, index) => out.subarray(index * 32, index * 32 + 32));
 }
 
 export function nonceBytes(n: number): Buffer {

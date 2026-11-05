@@ -1,4 +1,4 @@
-import { createCipheriv, createECDH, createHash, createHmac, hkdfSync } from "node:crypto";
+import { createCipheriv, createECDH, createHash, createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -97,13 +97,16 @@ describe("V1 derivations", () => {
   });
 });
 
-/** Every step written out from the spec text, with RFC 5869 HKDF (the same construction as Noise's) and no
- * shared code, so the reference cannot agree with itself by accident. */
+/** Every step written out from the spec text, with HKDF as Noise defines it (HMAC chains) rather than the
+ * library HKDF the reference uses, and no shared code, so the reference cannot agree with itself by accident. */
 function straightLine(transport: number, pskBytes: Buffer) {
   const hash = (...parts: Uint8Array[]) => sha256(Buffer.concat(parts));
+  const hmac = (key: Uint8Array, data: Uint8Array) => createHmac("sha256", key).update(data).digest();
   const hkdf = (ck: Buffer, ikm: Uint8Array, n: number) => {
-    const out = Buffer.from(hkdfSync("sha256", ikm, ck, Buffer.alloc(0), 32 * n));
-    return Array.from({ length: n }, (_, index) => out.subarray(index * 32, index * 32 + 32));
+    const temp = hmac(ck, ikm);
+    const out: Buffer[] = [];
+    for (let index = 1; index <= n; index += 1) out.push(hmac(temp, Buffer.concat([out[index - 2] ?? Buffer.alloc(0), Buffer.from([index])])));
+    return out;
   };
   const seal = (key: Buffer, ad: Buffer, plaintext: Buffer) => {
     const cipher = createCipheriv("aes-256-gcm", key, Buffer.alloc(12), { authTagLength: 16 });
@@ -115,8 +118,8 @@ function straightLine(transport: number, pskBytes: Buffer) {
     curve.setPrivateKey(priv);
     return curve.computeSecret(pub);
   };
-  let h = Buffer.concat([Buffer.from("Noise_NKpsk0_P256_AESGCM_SHA256"), Buffer.alloc(1)]);
-  let ck = h;
+  let h: Buffer = Buffer.concat([Buffer.from("Noise_NKpsk0_P256_AESGCM_SHA256"), Buffer.alloc(1)]);
+  let ck: Buffer = h;
   let k: Buffer;
   h = hash(h, Buffer.from([...Buffer.from("omb-e2e/1"), 0, transport]));
   h = hash(h, T.publicKey);
