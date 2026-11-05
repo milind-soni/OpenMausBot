@@ -27,7 +27,7 @@ import { lastChangeRequestUrl } from "../shared/thread-link.ts";
 import { REMOVED_COMPUTER_DRIVER, type ComputerEngineMove } from "./computer-engine-removal.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 import type { GroupGoalRunCardData } from "../shared/group-goal-run.ts";
-import { isMentionBoundary, isMentionNameContinuation } from "../shared/mention-boundary.ts";
+import { isMentionBoundary, isMentionNameContinuation } from "../shared/mention-boundary.ts"; import { resolveMentions } from "../shared/room-mentions.ts";
 import type { HandedState } from "./delta-context.ts";
 import type { AgentPart, PartPair, RoomPart } from "./package-parts.ts";
 import type {
@@ -104,11 +104,11 @@ const ASK_NOW = { approvalMode: "ask" as const, autoApprove: false, alwaysAllow:
 const TASK_PATCH_FIELDS = [
   "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
   "unread", "lastReadMessageId", "rewound", "archivedAt", "pinned", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
-  "routineRunId", "surface", "surfaceSource", "snoozedUntil", "link", "linkAuto", "appliedCompactionId", "contextFloor", "lastContextModel", "setupRequest",
+  "routineRunId", "surface", "surfaceSource", "snoozedUntil", "link", "linkAuto", "appliedCompactionId", "contextFloor", "lastContextModel", "setupRequest", "botApi", "outside",
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
 
-export type GroupTaskPatch = Partial<Pick<GroupTaskRecord, "title" | "pinned">> & { turnTimeoutMinutes?: number | null };
+export type GroupTaskPatch = Partial<Pick<GroupTaskRecord, "title" | "pinned">> & { turnTimeoutMinutes?: number | null; archivedAt?: number | null; activity?: "waiting-on-you" | null };
 
 function mirrorActiveGroupTask(group: GroupRecord, task: GroupTaskRecord): void {
   Object.assign(group, { threadId: task.threadId, pinnedCwd: task.pinnedCwd, pinnedMessageId: task.pinnedMessageId });
@@ -168,7 +168,7 @@ export function titleFromLlm(raw: string): string | null {
 export interface BotRecord extends Omit<WireBot, "avatarUrl" | "tasks"> {
   tasks?: TaskRecord[];
   avatarUrl?: string;
-  resumeCursors: Record<string, unknown>;
+  resumeCursors: Record<string, unknown>; mainThreadChoice?: string; // mainThreadChoice ("Set as main thread") is host-only; clients get mainThreadId.
   /** Elevation journal: Full/Custom runs as Ask until Electron confirms the prepared reply; a marker surviving a restart is revoked on load. */
   approvalGrant?: {
     requestId: string;
@@ -185,7 +185,7 @@ export interface BotRecord extends Omit<WireBot, "avatarUrl" | "tasks"> {
   assignedSkills?: string[];
 }
 
-export type BotWirePrivateKeys = "resumeCursors" | "tasks" | "avatarUrl" | "approvalGrant" | "lastProfileRequestId" | "lastTeamSetupReceipt" | "packageBase" | "assignedSkills";
+export type BotWirePrivateKeys = "resumeCursors" | "mainThreadChoice" | "tasks" | "avatarUrl" | "approvalGrant" | "lastProfileRequestId" | "lastTeamSetupReceipt" | "packageBase" | "assignedSkills";
 export type BotWireProjection = Pick<BotRecord, Exclude<keyof BotRecord, BotWirePrivateKeys>>;
 export type BotWireProjectionIsExact = AssertExact<Omit<WireBot, "avatarUrl" | "tasks">, BotWireProjection> & AssertSameKeys<Omit<WireBot, "avatarUrl" | "tasks">, BotWireProjection>;
 export const botWireProjectionIsExact: BotWireProjectionIsExact = true;
@@ -207,25 +207,8 @@ const messagesFile = (threadId: string) => join(DATA_DIR, `messages-${threadId}.
 
 export const sectionKey = (section?: string | null): string => section?.trim() || "";
 
-export function mentionedBots<T extends { name: string; hidden?: boolean }>(text: string, peers: T[]): T[] {
-  const candidates = peers
-    .filter((p) => !p.hidden && p.name.trim())
-    .sort((a, b) => b.name.length - a.name.length);
-  const lower = text.toLowerCase();
-  const found: T[] = [];
-  let at = -1;
-  while ((at = lower.indexOf("@", at + 1)) !== -1) {
-    if (!isMentionBoundary(text, at)) continue;
-    const rest = lower.slice(at + 1);
-    const hit = candidates.find((p) => {
-      const name = p.name.toLowerCase();
-      if (!rest.startsWith(name)) return false;
-      const after = rest.slice(name.length);
-      return !isMentionNameContinuation(after);
-    });
-    if (hit && !found.includes(hit)) found.push(hit);
-  }
-  return found;
+export function mentionedBots<T extends { id?: string; name: string; hidden?: boolean }>(text: string, peers: T[], picked: readonly string[] = []): T[] {
+  return resolveMentions(text, peers, picked).bots;
 }
 
 export function normalizeGroupDefaultResponder(
@@ -259,6 +242,7 @@ export function roomResponders<T extends { id: string; name: string; hidden?: bo
   text: string,
   members: T[],
   defaultResponder: GroupDefaultResponder,
+  picked: readonly string[] = [],
 ): T[] {
   const available = members.filter((member) => !member.hidden);
   const everyone = "everyone";
@@ -272,7 +256,8 @@ export function roomResponders<T extends { id: string; name: string; hidden?: bo
       return available;
     }
   }
-  const mentioned = mentionedBots(text, available);
+  const { bots, ambiguous } = resolveMentions(text, available, picked);
+  const mentioned = bots.filter((bot) => !ambiguous.some((sharing) => sharing.includes(bot)));
   if (mentioned.length) return mentioned;
   if (defaultResponder.kind === "everyone") return available;
   if (defaultResponder.kind === "member") {
@@ -1049,10 +1034,9 @@ export class Store {
     if (!group || !task) return null;
     this.commitGroupChange(group, "the thread change", () => {
       if (patch.title !== undefined) task.title = patch.title.trim().slice(0, 80) || UNTITLED_TASK;
-      if (patch.pinned) task.pinned = true;
-      else if (patch.pinned === false) delete task.pinned;
-      if (patch.turnTimeoutMinutes === null) delete task.turnTimeoutMinutes;
-      else if (patch.turnTimeoutMinutes !== undefined) task.turnTimeoutMinutes = patch.turnTimeoutMinutes;
+      if (patch.pinned) task.pinned = true; else if (patch.pinned === false) delete task.pinned;
+      if (patch.activity) task.activity = patch.activity; else if (patch.activity === null) delete task.activity;
+      for (const key of ["turnTimeoutMinutes", "archivedAt"] as const) if (patch[key] === null) delete task[key]; else if (patch[key] !== undefined) task[key] = patch[key];
     });
     this.emit({ type: "group", groupId });
     return task;
@@ -1671,11 +1655,11 @@ export class Store {
     return bot;
   }
 
-  setTaskActivity(botId: string, threadId: string, activity: BotActivity): BotRecord | null {
+  setTaskActivity(botId: string, threadId: string, activity: BotActivity, noTurnRunning = false): BotRecord | null {
     const bot = this.bot(botId);
     const task = this.taskByThread(botId, threadId);
     if (!bot || !task) return null;
-    const busy = ACTIVITY_BUSY.has(activity);
+    const busy = ACTIVITY_BUSY.has(activity) && !noTurnRunning;
     if ((task.activity ?? "idle") === activity && Boolean(task.busy) === busy) return bot;
     const wasBusy = Boolean(task.busy);
     task.activity = activity;
@@ -1695,7 +1679,7 @@ export class Store {
     const activities = [this.legacyActivities.get(bot.id), ...(bot.tasks ?? []).map((task) => task.activity)];
     bot.activity = (["waiting-on-you", "no-signal", "working", "dead"] as const)
       .find((activity) => activities.includes(activity)) ?? "idle";
-    bot.busy = ACTIVITY_BUSY.has(bot.activity);
+    bot.busy = ACTIVITY_BUSY.has(this.legacyActivities.get(bot.id) ?? "idle") || (bot.tasks ?? []).some((task) => task.busy);
   }
 
   /** Makes `id` its scope's one Chief (its owner's on a Team Cloud, else its department's), or with no `id` leaves

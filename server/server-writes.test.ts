@@ -2,7 +2,7 @@
 // (where a crash or an exit can land) the files hold what one write per change would have left.
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Spied, not replaced: every call reaches the real filesystem, and a test counts the renames a save costs.
@@ -16,13 +16,15 @@ const { RoutineManager } = await import("./routines.ts");
 type RuntimeEvent = import("./contracts.ts").RuntimeEvent;
 
 const selection = () => ({ instanceId: "claude", model: "claude-sonnet-5" });
-const writesOf = (name: string) => vi.mocked(fs.renameSync).mock.calls.filter(([, to]) => String(to).endsWith(`/${name}`)).length;
-const reads = (name: string) => vi.mocked(fs.readFileSync).mock.calls.filter(([path]) => String(path).endsWith(`/${name}`)).length;
+// By file name, so a Windows path (backslashes) counts the same as any other.
+const writesOf = (name: string) => vi.mocked(fs.renameSync).mock.calls.filter(([, to]) => basename(String(to)) === name).length;
+const reads = (name: string) => vi.mocked(fs.readFileSync).mock.calls.filter(([path]) => basename(String(path)) === name).length;
 const bots = () => readFileSync(join(DATA_DIR, "bots.json"), "utf8");
 
 describe("bots.json saves", () => {
   beforeEach(() => {
-    rmSync(DATA_DIR, { recursive: true, force: true });
+    // Not the whole folder: on Windows the open messages database holds it.
+    rmSync(join(DATA_DIR, "bots.json"), { force: true });
     vi.mocked(fs.renameSync).mockClear();
   });
 

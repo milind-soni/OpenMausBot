@@ -20,6 +20,10 @@ export function signedOutEngine(tool: ActivityTool, engine: InstanceInfo | undef
   return tool.setup && !tool.claudeUpdate && engineSignedOut(engine) ? engine : undefined;
 }
 
+export function claudeUpdateTarget(engine: InstanceInfo | undefined): InstanceInfo | undefined {
+  return engine?.driverKind === "claudeAgent" && !engine.readOnly ? engine : undefined;
+}
+
 export function botEngine(bot: Bot | undefined, instances: InstanceInfo[]): InstanceInfo | undefined {
   return bot && instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
 }
@@ -29,6 +33,7 @@ export function activityPreview(tool: ActivityTool, engine: InstanceInfo | undef
   if (isStoppedTurnName(tool.name)) return t("chat.turnStopped");
   const cause = failedTurnCause(tool.name);
   if (cause !== null && isClientCancellation(cause)) return t("chat.turnStopped");
+  if (cause !== null && tool.partial) return t("chat.error.partialPreview");
   if (cause === null) return advanced ? tool.name : STATUS_MARKER.test(tool.name) ? tool.name.replace(STATUS_MARKER, "") : toolStepLabel(tool);
   const signedOut = signedOutEngine(tool, engine);
   return signedOut ? t("sidebar.preview.signedOut", { name: signedOut.displayName }) : plainErrorLine(cause) ?? cause;

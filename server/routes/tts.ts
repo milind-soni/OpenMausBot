@@ -1,10 +1,14 @@
 // The voice routes: whether a voice is ready, the provider's voices (searched, or one pasted by ID or link), adding an
-// ElevenLabs Voice Library voice to My Voices, and speaking a line. Scopes are keyed by path in server/request-auth.ts.
+// ElevenLabs Voice Library voice to My Voices, speaking a line, and hearing speech. Scopes are keyed by path in server/request-auth.ts.
 import type { AppConfig } from "../config.ts";
 import { redactSecretsInText } from "../redact.ts";
+import * as fish from "../tts/fish.ts";
 import * as tts from "../tts/index.ts";
 import { toUtterances, VOICE_FIRST_BLOCK_MAX_CHARS } from "../tts/speech-text.ts";
 import { PASS, type RouteHandler } from "./table.ts";
+
+/** About six minutes of 16 kHz mono 16-bit PCM. */
+export const TRANSCRIBE_MAX_BYTES = 12 * 1024 * 1024;
 
 export interface TtsRouteDeps {
   config(): AppConfig;
@@ -65,6 +69,41 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
         return;
       } catch (e) {
         if (e instanceof tts.NoVoiceConfigured) return json(res, 409, { error: e.message });
+        return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (method === "POST" && path === "/api/tts/transcribe") {
+      const rawType = req.headers["content-type"];
+      const mime = (Array.isArray(rawType) ? rawType[0] : rawType)?.split(";")[0]?.trim().toLowerCase();
+      if (mime !== "audio/wav") {
+        req.resume();
+        return json(res, 400, { error: "content-type must be audio/wav" });
+      }
+      const key = cfg.tts?.fishKey;
+      if (!key) {
+        req.resume();
+        return json(res, 409, { error: "Add a Fish Audio key in Settings → API keys to talk to your bots here." });
+      }
+      const declared = Number(req.headers["content-length"] ?? 0);
+      if (declared > TRANSCRIBE_MAX_BYTES) {
+        req.resume();
+        return json(res, 413, { error: `audio exceeds ${TRANSCRIBE_MAX_BYTES} bytes` });
+      }
+      const audio = await new Promise<Buffer | null>((resolve, reject) => {
+        const chunks: Buffer[] = [];
+        let received = 0;
+        // Answering before the upload is read to its end resets the connection on Windows instead of delivering the 413.
+        req.on("data", (chunk: Buffer) => {
+          received += chunk.byteLength;
+          if (received <= TRANSCRIBE_MAX_BYTES) chunks.push(chunk);
+        });
+        req.on("end", () => resolve(received > TRANSCRIBE_MAX_BYTES ? null : Buffer.concat(chunks)));
+        req.on("error", reject);
+      });
+      if (!audio) return json(res, 413, { error: `audio exceeds ${TRANSCRIBE_MAX_BYTES} bytes` });
+      try {
+        return json(res, 200, { text: await fish.transcribe(audio, mime, key) });
+      } catch (e) {
         return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
       }
     }

@@ -5,7 +5,8 @@ import { cn } from "@/lib/cn";
 import { scrollParent, scrollWithin } from "@/lib/scroll-within";
 import { t } from "@/lib/i18n";
 import { BoatOfferPanel } from "../BoatOffer";
-import { LmStudioServer, OtherOpenAiCompatServers } from "../OpenAiCompatServers";
+import { LiveProviderSettings } from "../LiveProviderSettings";
+import { BuiltInReplyWait, LmStudioServer, OtherOpenAiCompatServers } from "../OpenAiCompatServers";
 import { KEY_CATALOG, KEY_SECTIONS, keyMatches, savedState, type KeyEntry, type KeyId, type KeySectionId } from "./key-catalog";
 import { finishKeyFocus, useKeyFocus, type KeyFocusRequest } from "./key-focus";
 import { AnthropicEveryClaudeBot, OpenAiCompatUrl, OpenCodeProviderKeys, VpsConnection } from "./KeyPanels";
@@ -22,8 +23,9 @@ const PANELS: Partial<Record<KeyId, () => ReactNode>> = {
 
 const EXTRAS: Partial<Record<KeyId, () => ReactNode>> = {
   anthropic: () => <AnthropicEveryClaudeBot />,
-  openaiCompat: () => <><OpenAiCompatUrl /><OtherOpenAiCompatServers /></>,
+  openaiCompat: () => <><OpenAiCompatUrl /><BuiltInReplyWait /><OtherOpenAiCompatServers /></>,
   box: () => <BoatOfferPanel />,
+  liveKey: () => <LiveProviderSettings />,
 };
 
 function connected(entry: KeyEntry, config: ConfigStatus | null | undefined): boolean {
@@ -143,7 +145,9 @@ export function KeysPage() {
     return () => window.cancelAnimationFrame(frame);
   }, [focus]);
 
-  const rows = KEY_CATALOG.filter((entry) => keyMatches(entry, q));
+  // With Azure chosen, Live calls do not use the OpenAI key that row points at.
+  const azureLive = state.config?.live?.provider === "azure";
+  const rows = KEY_CATALOG.filter((entry) => keyMatches(entry, q) && !(azureLive && entry.id === "liveCalls"));
   const sections = KEY_SECTIONS.flatMap((section) => {
     const own = rows.filter((entry) => entry.section === section.id);
     return own.length > 0 ? [{ id: section.id, rows: own }] : [];

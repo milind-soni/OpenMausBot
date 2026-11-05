@@ -32,6 +32,13 @@ Compatible bots get it on their next task; no app restart is needed. On a
 Team Cloud everyone on the team can use a server an Admin adds; **Only for
 me**, offered for a server with one key, keeps that key as the Admin's own.
 
+A server you run as a command keeps running between a bot's tasks. A bot that
+changes the server's code reloads it with `mcp_server` action `restart`, which
+keeps the server's saved keys and sign-in; its next task starts the new code.
+Turning the server off and on does the same. Removing it deletes its saved
+keys, and a key the person entered on a card works once, so they would have to
+enter it again.
+
 Header and environment values are write-only: typed like passwords, never shown
 again, and a saved one left blank is kept. Tokens for URL servers go in
 headers, never in the address.
@@ -61,6 +68,21 @@ manage, and its own consequential-action confirmations still apply. See the
 [official Whop MCP documentation](https://github.com/whopio/whop-mcp-server).
 This is an optional connected tool, not a change to OMB's subscription billing.
 
+### Agentcard
+
+In Plugins, find **Agentcard** beside Whop and click **Connect**. The card uses
+Agentcard's official hosted MCP endpoint, `https://mcp.agentcard.sh/mcp`, and
+opens Agentcard's browser sign-in with your own Agentcard account. No API key
+is needed. After sign-in and tool discovery it enables the connection, and
+**Disconnect** and **Bot access** work as they do for Whop.
+
+OpenMausBot owns no cards, approvals or orders here. Agentcard keeps your cards
+and handles purchase approvals; OpenMausBot stores no card details. A bot that
+can use Agentcard can call all of its tools, including the ones that buy and
+the ones that show card details, so choose which bots get it under **Bot
+access**. Existing custom entries at the official HTTP endpoint are recognized
+rather than replaced.
+
 ### Servers that ask you to sign in
 
 Some URL servers take no token; they want you to sign in with your browser
@@ -69,7 +91,9 @@ details (RFC 9728 protected-resource metadata, then the authorization
 server's own metadata), the server shows **Needs sign-in** and a **Sign in**
 button. Sign in opens the provider's page in your browser, which returns to
 OpenMausBot when you approve. The server then shows **Signed in**, and Test
-lists its tools.
+lists its tools. A server that lists its tools before you sign in but refuses
+tool calls the same way (an HTTP 401 pointing at those sign-in details) shows
+**Sign in** too.
 
 - **Which servers work.** The authorization server must support PKCE with
   S256. If it lets apps register themselves (dynamic client registration),

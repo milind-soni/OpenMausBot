@@ -4,12 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initialState, type AppState, type Bot, type Group } from "@/state/store";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 
-const fixture = vi.hoisted(() => ({ advanced: false, showThreads: true, state: {} as Partial<AppState>, dispatch: vi.fn() }));
+const fixture = vi.hoisted(() => ({ advanced: false, showThreads: true, admin: true as boolean | null, state: {} as Partial<AppState>, dispatch: vi.fn() }));
 vi.mock("@/lib/interface-mode", async (original) => ({
   ...await original<typeof import("@/lib/interface-mode")>(),
   useAdvancedMode: () => fixture.advanced,
 }));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.showThreads }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 vi.mock("react-dom", () => ({ createPortal: (node: ReactNode) => node }));
 vi.mock("@/state/store", async (importOriginal) => {
@@ -37,6 +38,7 @@ const bot: Bot = {
     { threadId: "unread", title: "Finished reply", createdAt: 6, unread: true },
   ],
 };
+const quiet: Bot = { ...bot, unread: false, tasks: bot.tasks!.filter((task) => !task.busy && !task.unread && !task.activity) };
 const densities: SidebarDensity[] = ["comfortable", "icons"];
 const botRow = (BotListItem as MemoExoticComponent<(props: BotRowProps) => ReactNode>).type;
 const pinnedCircle = (PinnedBotCircle as MemoExoticComponent<(props: BotRowProps) => ReactNode>).type;
@@ -56,6 +58,7 @@ function findElement(tree: ReactNode, attribute: string, value: string): ReactEl
 beforeEach(() => {
   fixture.advanced = false;
   fixture.showThreads = true;
+  fixture.admin = true;
   fixture.state = { bots: [bot], selectedId: "other-bot", activeView: "chat", pendingQueued: { queued: [{ queueId: "q", text: "next" }] } };
   fixture.dispatch.mockClear();
   vi.stubGlobal("window", { innerWidth: 1024, innerHeight: 768 });
@@ -109,12 +112,12 @@ describe("bot-first sidebar", () => {
     it.each(densities)(`opens the last selected conversation on mouse or keyboard, %s density, threads ${enabled ? "on" : "off"}`, (density) => {
       fixture.showThreads = enabled;
       let tree: ReactNode;
-      function Capture() { tree = botRow(rowProps(density)); return tree; }
+      function Capture() { tree = botRow(rowProps(density, quiet)); return tree; }
       renderToStaticMarkup(createElement(Capture));
       const row = findElement(tree, "data-sidebar-bot-row", bot.id)!;
       row.props.onClick!({ type: "click", target: {} } as MouseEvent);
       expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "select", id: bot.id });
-      expect(bot.threadId).toBe("last-selected");
+      expect(quiet.threadId).toBe("last-selected");
       for (const key of ["Enter", " "]) {
         fixture.dispatch.mockClear();
         const preventDefault = vi.fn();
@@ -321,8 +324,25 @@ describe("bot-first sidebar", () => {
     expect(markup).not.toContain("waiting-dot");
   });
 
+  it.each(densities)("opens the thread a row or circle is marked for, on mouse or keyboard, %s density", (density) => {
+    fixture.showThreads = false;
+    const trees: ReactNode[] = [];
+    function Capture() { const tree = [botRow(rowProps(density)), pinnedCircle(rowProps(density))]; trees.push(...tree); return tree; }
+    renderToStaticMarkup(createElement(Capture));
+    for (const tree of trees) {
+      const row = findElement(tree, "data-sidebar-bot-row", bot.id)!;
+      fixture.dispatch.mockClear();
+      row.props.onClick!({ type: "click", target: {} } as MouseEvent);
+      expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "switchTask", botId: bot.id, threadId: "approval" });
+      if (!row.props.onKeyDown) continue;
+      fixture.dispatch.mockClear();
+      row.props.onKeyDown({ key: "Enter", preventDefault: vi.fn() } as unknown as KeyboardEvent);
+      expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "switchTask", botId: bot.id, threadId: "approval" });
+    }
+  });
+
   it.each(densities)("opens the thread the person last wrote in when threads are hidden, %s density", (density) => {
-    const used = { ...bot, mainThreadId: "idle-history" };
+    const used = { ...quiet, mainThreadId: "idle-history" };
     for (const enabled of [false, true]) {
       fixture.showThreads = enabled;
       const opened = enabled ? { type: "select", id: bot.id } : { type: "switchTask", botId: bot.id, threadId: "idle-history" };
@@ -393,6 +413,76 @@ describe("bot-first sidebar", () => {
     expect(disabled).toContain("Delete all threads…");
     expect(disabled).toContain("Edit Profile");
     expect(disabled).toContain("Move to department");
+  });
+
+  it("gives the Simple bot menu New thread, View threads and Set as main thread", () => {
+    let tree: ReactNode;
+    function Capture() {
+      tree = BotContextMenu({
+        menu: { botId: bot.id, x: 0, y: 0 }, onClose: vi.fn(), onArchive: vi.fn(), onDelete: vi.fn(), onMoveToSection: vi.fn(), onNewFolder: vi.fn(), onNewTaskFolder: vi.fn(),
+      });
+      return tree;
+    }
+    const items = () => {
+      const found: ReactElement<ElementProps>[] = [];
+      const walk = (node: ReactNode) => {
+        for (const child of Children.toArray(node)) {
+          if (!isValidElement<ElementProps>(child)) continue;
+          if (child.props.role === "menuitem") found.push(child);
+          walk(child.props.children);
+        }
+      };
+      walk(tree);
+      return found;
+    };
+    const named = (label: string) => items().find((item) => Children.toArray(item.props.children).includes(label));
+    fixture.state = { ...fixture.state, bots: [{ ...bot, mainThreadId: "idle-history" }], selectedId: bot.id };
+    renderToStaticMarkup(createElement(Capture));
+
+    named("New thread")!.props.onClick!({} as MouseEvent);
+    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "newTask", botId: bot.id }]]);
+
+    fixture.dispatch.mockClear();
+    named("View threads")!.props.onClick!({} as MouseEvent);
+    expect(fixture.dispatch.mock.calls).toEqual([
+      [{ type: "select", id: bot.id }],
+      [{ type: "toggleSettings", open: true, section: "history", botId: bot.id }],
+    ]);
+
+    fixture.dispatch.mockClear();
+    const setMain = named("Set as main thread")!;
+    expect(setMain.props.disabled).toBeFalsy();
+    setMain.props.onClick!({} as MouseEvent);
+    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "updateBot", botId: bot.id, patch: { mainThreadChoice: "last-selected" } }]]);
+
+    // Not offered until the person is known to be the owner or an admin.
+    for (const admin of [null, false]) {
+      fixture.admin = admin;
+      renderToStaticMarkup(createElement(Capture));
+      expect(named("Set as main thread")).toBeUndefined();
+    }
+    fixture.admin = true;
+
+    // Already main: offered but off. Another bot's open thread, or a routine run, is never offered.
+    fixture.state = { ...fixture.state, bots: [{ ...bot, mainThreadId: "last-selected" }] };
+    renderToStaticMarkup(createElement(Capture));
+    expect(named("Set as main thread")!.props.disabled).toBe(true);
+    fixture.state = { ...fixture.state, selectedId: "other-bot" };
+    renderToStaticMarkup(createElement(Capture));
+    expect(named("Set as main thread")).toBeUndefined();
+    expect(named("New thread")).toBeDefined();
+    fixture.state = { ...fixture.state, selectedId: bot.id, bots: [{ ...bot, threadId: "run", tasks: [...bot.tasks!, { threadId: "run", title: "Run", createdAt: 9, routineRunId: "r" }] }] };
+    renderToStaticMarkup(createElement(Capture));
+    expect(named("Set as main thread")).toBeUndefined();
+    // A Team Cloud private thread can't be the main thread either (the host refuses it).
+    fixture.state = { ...fixture.state, selectedId: bot.id, bots: [{ ...bot, threadId: "mine", tasks: [...bot.tasks!, { threadId: "mine", title: "Mine", createdAt: 9, private: true }] }] };
+    renderToStaticMarkup(createElement(Capture));
+    expect(named("Set as main thread")).toBeUndefined();
+    // A view-only teammate can look at the threads but not start one.
+    fixture.state = { ...fixture.state, bots: [{ ...bot, yourAccess: "view" }] };
+    renderToStaticMarkup(createElement(Capture));
+    expect(named("New thread")).toBeUndefined();
+    expect(named("View threads")).toBeDefined();
   });
 
   it("Edit profile opens the panel without naming a section", () => {
@@ -543,6 +633,23 @@ describe("activity-only escape hatch", () => {
     expect(markup).not.toContain('data-sidebar-activity-row="approval"');
     expect(markup).not.toContain('data-sidebar-activity-row="working"');
     expect(markup).toContain('data-sidebar-activity-row="unread"');
+  });
+
+  it("offers a running routine's thread under its bot in both modes, also beside an open thread tree, and drops it once the run ends", () => {
+    const runner: Bot = { ...bot, unread: false, threadId: "main", tasks: [
+      { threadId: "main", title: "Main chat", createdAt: 1 },
+      { threadId: "run", title: "Morning report", createdAt: 2, routineRunId: "run-1", busy: true, activity: "working" },
+    ] };
+    const ended: Bot = { ...runner, tasks: runner.tasks!.map((task) => task.routineRunId ? { ...task, busy: false, activity: "idle" as const, unread: true } : task) };
+    // Searching "Main" opens the thread tree, which itself keeps routine runs out: the row is the only way in.
+    const rows = (candidate: Bot, query = "") => renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate, query))).split('data-sidebar-activity-row="run"').length - 1;
+    for (const showThreads of [false, true]) for (const advanced of [false, true]) {
+      fixture.showThreads = showThreads;
+      fixture.advanced = advanced;
+      expect(rows(runner)).toBe(1);
+      expect(rows(ended)).toBe(0);
+      if (showThreads) expect(rows(runner, "Main")).toBe(1);
+    }
   });
 
   it("lists a reply in the thread a bot was left on, since its row opens the main thread", () => {

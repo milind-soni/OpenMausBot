@@ -41,7 +41,9 @@ const ABORTED = -3;
  * desktop keeps the person's choice to hide it; `changed()`: the rail came or went beside the page.
  */
 export function createChromeRail({ createView, preload, args, url, wanted, prefs = () => null, changed = () => {}, log = () => {} }) {
-  let view = null, win = null, shown = false, expanded = false;
+  let view = null, win = null, shown = false, expanded = false, held = false;
+  // The rail's page didn't load (this app's server was restarting): it loads again at the next refresh, or it stays a blank strip.
+  let unloaded = false;
   // Whether the page beside draws the frame; the window opens as if it does (windowChromeOptions).
   let framed = true, frameGrace = null;
   // The document beside the rail offered its button; a new one may still (`grace`); the page stopped responding.
@@ -94,6 +96,7 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
   };
   /** The page beside the rail asks: the window's own page, in its main frame (never a frame inside it). */
   const pageBeside = (event) => Boolean(page() && event?.sender === win.webContents && event.senderFrame === win.webContents.mainFrame);
+  const load = (contents) => { void contents.loadURL(url()).catch((error) => log(`chrome rail: ${error?.message ?? error}`)); };
   const ensureView = () => {
     if (view) return view;
     view = createView({ webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, preload, additionalArguments: args() } });
@@ -105,14 +108,16 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
     contents.on("will-redirect", stay);
     contents.on("render-process-gone", () => { log("chrome rail: its page went away; loading it again"); void contents.loadURL(url()).catch(() => {}); });
     contents.on("did-finish-load", () => contents.send("rail:framed", framed));
-    void contents.loadURL(url()).catch((error) => log(`chrome rail: ${error?.message ?? error}`));
+    // Only a load's failing says so: the error page that replaces it finishes loading too.
+    contents.on("did-fail-load", (_event, code, _description, _url, mainFrame) => { if (mainFrame && code !== ABORTED) unloaded = true; });
+    load(contents);
     return view;
   };
   const rail = {
     /** The window the rail stands beside: its size moves the rail, and each of its documents gets the room again. */
     attach(next) {
       win = next;
-      shown = false; expanded = false; offered = false; hung = false; told = "";
+      shown = false; expanded = false; held = false; offered = false; hung = false; told = "";
       framed = prefs()?.windowFrame?.() !== false;
       // The window's first document has the same time as any other to offer the button and to draw the frame.
       if (choseHidden()) startGrace(); else stopGrace();
@@ -137,7 +142,8 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
     /** Shown while there are two places or more (railPlaces) and the person hasn't hidden it; the page beside it has the
      * whole window otherwise. */
     refresh() {
-      const on = alive() && wanted() && !hidden();
+      const on = alive() && ((wanted() && !hidden()) || held);
+      if (view && unloaded && on) { unloaded = false; load(view.webContents); }
       if (on === shown) layout();
       else {
         shown = on;
@@ -152,6 +158,12 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
         changed();
       }
       tellState();
+    },
+    /** A sheet the rail's page shows for the page beside it (the person's accounts): the rail's page is up meanwhile, even
+     * for someone who hid the rail. */
+    holdOpen(on) {
+      held = on === true;
+      rail.refresh();
     },
     /** A sheet of the rail's is open: the view covers the window until it closes. */
     expand(on) {

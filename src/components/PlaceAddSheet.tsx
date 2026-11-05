@@ -2,7 +2,7 @@
 // one), buy a Cloud (the buying sheet: another Cloud right here, or the first one on this computer's own sheet), or add a
 // server of the person's own by pasting its pairing link.
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { Building2, Cloud, Loader2, Server, X } from "lucide-react";
+import { Building2, Cloud, Loader2, Server, UserRound, X } from "lucide-react";
 import type { RailAddChoices } from "../../electron/cloud-rail.mjs";
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
@@ -89,9 +89,9 @@ export function RailSheet({ wide = false, focusKey, onClose, children }: { wide?
   </div>;
 }
 
-export function PlaceAddSheet({ choices, connect = null, onClose }: { choices: RailAddChoices; connect?: { name: string } | null; onClose: () => void }) {
-  const server = choices.link, organization = choices.organization === true;
-  const several = [organization, choices.cloud, server].filter(Boolean).length > 1;
+export function PlaceAddSheet({ choices, connect = null, onClose, onAccount }: { choices: RailAddChoices; connect?: { name: string } | null; onClose: () => void; onAccount?: () => void }) {
+  const server = choices.link, organization = choices.organization === true, account = choices.account === true && Boolean(onAccount);
+  const several = [organization, choices.cloud, server, account].filter(Boolean).length > 1;
   const [view, setView] = useState<"choose" | "cloud" | "server" | "organization">(connect ? "server" : several ? "choose" : organization ? "organization" : choices.cloud ? "cloud" : "server");
   const [wide, setWide] = useState(false);
   const workspaces = window.ogb?.workspaces;
@@ -107,6 +107,7 @@ export function PlaceAddSheet({ choices, connect = null, onClose }: { choices: R
         {organization && <Choice kind="organization" icon={<Building2 size={19} />} title={t("rail.org")} sub={t("rail.orgSub")} onClick={() => setView("organization")} />}
         {choices.cloud && <Choice kind="cloud" icon={<Cloud size={19} />} title={t("rail.buy")} sub={t("rail.buySub")} onClick={() => setView("cloud")} />}
         {server && <Choice kind="server" icon={<Server size={19} />} title={t("rail.own")} sub={t("rail.ownSub")} onClick={() => setView("server")} />}
+        {account && <Choice kind="account" icon={<UserRound size={19} />} title={t("accounts.add")} sub={t("rail.accountSub")} onClick={() => onAccount!()} />}
       </div>
     </div>}
     {view === "server" && <OwnServerLink onBack={several && !connect ? () => setView("choose") : null} onConnected={onClose} connect={connect} />}

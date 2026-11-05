@@ -94,6 +94,11 @@ describe("nextAnnouncement", () => {
     ])).toEqual(["Pepper failed: The model timed out."]);
 
     expect(play([
+      { busy: true },
+      { busy: false, failure: { id: "f3", name: "Pepper", cause: "Stopped because the tool call failed.", partial: true } },
+    ])).toEqual(["Pepper partly done: Stopped because the tool call failed."]);
+
+    expect(play([
       { busy: false },
       { busy: true },
       {

@@ -1,12 +1,10 @@
 import { AtSign, Check, ChevronDown } from "lucide-react";
 
-import { atLeast, GRANTED_LEVELS, type BotAccessLevel, type GrantedLevel } from "../../../shared/bot-access";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { TeamPerson } from "@/state/team-people";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "../SidebarPopoverMenu";
 import { PersonFace } from "../TeamOwner";
-import { levelHint, levelLabel } from "./access";
 
 const gutter = (checked: boolean) => (checked ? <Check size={14} aria-hidden="true" /> : <span aria-hidden="true" />);
 
@@ -24,18 +22,14 @@ export function QuietMenu({ label, shown, items, align = "end", className }: {
 export const choiceItem = (key: string, name: string, chosen: boolean, onSelect: () => void, more: Partial<SidebarMenuItem> = {}): SidebarMenuItem =>
   ({ key, label: name, checked: chosen, icon: gutter(chosen), onSelect, ...more });
 
-/** A level to choose, each with what it allows; what everyone already gets is the lowest on offer. `onChange(null)` takes
- * the person's own access away, offered only when `removable`. */
-export function LevelMenu({ value, floor = "none", removable = false, disabled = false, label, onChange, onMakeOwner }: {
-  value: GrantedLevel; floor?: BotAccessLevel; removable?: boolean; disabled?: boolean; label: string;
-  onChange: (level: GrantedLevel | null) => void; onMakeOwner?: () => void;
+/** What can change for a person added: someone else looking after the bot, and taking their access away. */
+export function PersonMenu({ disabled = false, label, onRemove, onMakeOwner, makeOwnerLabel }: {
+  disabled?: boolean; label: string; onRemove: () => void; onMakeOwner?: () => void; makeOwnerLabel?: string;
 }) {
-  const shown = atLeast(value, floor) ? value : (floor as GrantedLevel);
-  const items: SidebarMenuItem[] = GRANTED_LEVELS.map((level) => choiceItem(level, levelLabel(level), level === shown,
-    () => { if (level !== shown) onChange(level); }, { subtitle: levelHint(level), disabled: disabled || !atLeast(level, floor) }));
-  if (onMakeOwner) items.push({ key: "owner", label: t("botAccess.makeOwner"), icon: gutter(false), separatorBefore: true, disabled, onSelect: onMakeOwner });
-  if (removable) items.push({ key: "remove", label: t("botAccess.remove"), icon: gutter(false), separatorBefore: !onMakeOwner, disabled, onSelect: () => onChange(null) });
-  return <QuietMenu label={label} shown={levelLabel(shown)} items={items} />;
+  const items: SidebarMenuItem[] = [];
+  if (onMakeOwner) items.push({ key: "owner", label: makeOwnerLabel ?? "", icon: gutter(false), disabled, onSelect: onMakeOwner });
+  items.push({ key: "remove", label: t("botAccess.remove"), icon: gutter(false), separatorBefore: Boolean(onMakeOwner), disabled, onSelect: onRemove });
+  return <QuietMenu label={label} shown={t("botAccess.added")} items={items} />;
 }
 
 /** A person's face, or a plain sign for an address nobody on the team has (an `@domain` entry). */

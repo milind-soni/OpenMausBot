@@ -384,7 +384,7 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/escalations.ts", "in its thread # …"],
     ["server/escalations.ts", "in its main conversation"],
     ["server/escalations.ts", "… 's work  …  is parked at a gate:  … ."],
-    ["server/host/delegated-level.ts", "…  — delegated by  … ,  … a Chief of Staff on  …"],
+    ["server/host/delegated-level.ts", "…  — handed on by  … ,  … a Chief of Staff on  …"],
     ["server/peer-approval.ts", "@ …  wants to  …   …"],
     ["server/store.ts", "needs your input"],
     ["server/store.ts", "reached its turn limit"],
@@ -497,7 +497,6 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/team-setup-requests.ts", "Team setup not applied"],
   ],
   "restarts, stops and context": [
-    ["server/host/person-stop.ts", "Stopped here —  …  is still working; open to stop it too"],
     ["server/index.ts", "Resuming after a restart"],
     ["server/index.ts", "…  was cut off by a restart; resuming"],
     ["server/index.ts", "context compaction started ( … )"],

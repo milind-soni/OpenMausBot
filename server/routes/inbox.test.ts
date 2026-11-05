@@ -28,6 +28,8 @@ function setup(options: Parameters<typeof teamInbox>[0] = {}) {
 it("answers each member with their own inbox, which a client session may read and mark", async () => {
   const { f, call } = setup();
   f.team.pass("scout", "cleo-private", "Ben", "The launch moved to Friday.");
+  expect(await call("GET", "/api/inbox/count")).toMatchObject({ status: 200, body: { count: 1 } });
+  expect(requiredScope("GET", "/api/inbox/count")).toBe("client");
   const mine = await call("GET", "/api/inbox");
   expect(mine).toMatchObject({ status: 200, body: { botId: "bens-chief", rows: [{ text: "The launch moved to Friday.", tab: "info", unread: true }] } });
   const line = mine.body.rows[0].id as string;

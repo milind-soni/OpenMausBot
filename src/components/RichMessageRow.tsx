@@ -52,6 +52,7 @@ export function UserLineNote({ message }: { message: Message }) {
       </span>
     );
   }
+  if (message.via === "api") return <span data-via-bot-api className="mt-1 text-[11px] text-ink-tertiary" title={t("chat.viaBotApi")}>{t("chat.viaBotApi")}</span>;
   if (message.via !== "call") return null;
   return <span className="mt-1 text-[11px] text-ink-tertiary" title={t("chat.viaCall")}>{t("chat.viaCall")}</span>;
 }

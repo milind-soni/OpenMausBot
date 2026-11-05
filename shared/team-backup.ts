@@ -31,6 +31,8 @@ const task = z.object({
   // Travels only when the first message already named this task, so a
   // restore cannot re-arm one generated title on a row that used it.
   titleFromFirstMessage: z.literal(true).optional(),
+  /** Work from outside reached this conversation: it stays confined after a restore. */
+  outside: z.literal(true).optional(),
   openedBy: z.object({ botId: key, name, at: timestamp, kind: z.enum(["pair", "work"]).optional() }).optional(),
   closedBy: z.object({ botId: key, name, at: timestamp }).optional(),
   /** Only true travels; absence is unpinned. */

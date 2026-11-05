@@ -96,13 +96,13 @@ describe("turn image admission", () => {
     });
   });
 
-  it("resolves a video delivered through the generic <attached-file> tag and strips it from the prompt", () => {
+  it("resolves a video delivered through the generic <attached-file> tag and keeps the tag for engines that read files", () => {
     const root = store();
     const clip = video(root, 0, ".mp4", 9);
     const source = `watch this\n\n<attached-file path="${clip}" name="clip.mp4" />`;
 
     expect(extractTurnImages(source, { attachmentsDir: root })).toEqual({
-      text: "watch this\n\n",
+      text: source,
       images: [],
       videos: [{ path: clip, mime: "video/mp4", bytes: 9 }],
     });
@@ -127,18 +127,22 @@ describe("turn image admission", () => {
     ].join("\n\n");
 
     const result = extractTurnImages(source, { attachmentsDir: root });
-    expect(result.text).toBe("\n\n");
+    expect(result.text).toBe(`\n\n<attached-file path="${clip}" name="clip.webm" />`);
     expect(result.images).toEqual([{ path: png, mime: "image/png", bytes: 4 }]);
     expect(result.videos).toEqual([{ path: clip, mime: "video/webm", bytes: 6 }]);
   });
 
-  it("rejects more than one video at a time", () => {
+  it("samples only the first video and leaves every video's tag in place", () => {
     const root = store();
     const first = video(root, 0, ".mp4", 4);
     const second = video(root, 1, ".mov", 4);
     const source = `<attached-file path="${first}" />\n\n<attached-file path="${second}" />`;
 
-    expect(() => extractTurnImages(source, { attachmentsDir: root })).toThrow("Send no more than 1 video at a time");
+    expect(extractTurnImages(source, { attachmentsDir: root })).toEqual({
+      text: source,
+      images: [],
+      videos: [{ path: first, mime: "video/mp4", bytes: 4 }],
+    });
   });
 
   it("rejects count and aggregate limits before partially stripping the prompt", () => {
@@ -153,6 +157,18 @@ describe("turn image admission", () => {
     expect(() => extractTurnImages(source, { attachmentsDir: root, maxBytes: 7 })).toThrow(
       "Attached images exceed 0 MB total",
     );
+  });
+
+  it("takes up to ten images in one message by default and refuses the eleventh", () => {
+    const root = store();
+    const tags = Array.from({ length: 11 }, (_, index) => {
+      const path = join(root, `123e4567-e89b-42d3-a456-4266141741${String(index).padStart(2, "0")}.png`);
+      writeFileSync(path, Buffer.alloc(4, index + 1));
+      return `<attached-image path="${path}" />`;
+    });
+
+    expect(extractTurnImages(tags.slice(0, 10).join("\n\n"), { attachmentsDir: root }).images).toHaveLength(10);
+    expect(() => extractTurnImages(tags.join("\n\n"), { attachmentsDir: root })).toThrow("Send no more than 10 images");
   });
 
   it("does not admit a symlink carrying an attachment-shaped name", () => {

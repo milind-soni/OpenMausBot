@@ -5,6 +5,7 @@ import { cn } from "@/lib/cn";
 import { listOf } from "@/lib/cloud-send";
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { BringMyCloud } from "./BringMyCloud";
 import { CARD, CARD_IDLE, CARD_PICKED, CardIcon, Footer, PRIMARY, QUIET, SECONDARY, StepHeading } from "./parts";
 
 export type BringOutcome = "team" | "here" | "skipped";
@@ -68,6 +69,7 @@ export function WelcomeBring({ name, desktop, older = false, cloudHasWork, sent 
   return <section aria-labelledby="cloud-welcome-step" data-welcome-step="bring" className="flex flex-col gap-5">
     <StepHeading headingRef={headingRef} title={t("cloudWelcome.bring.title", { name })} sub={t(team ? "cloudWelcome.bring.subTeam" : "cloudWelcome.bring.sub", { name })} />
     {older && <p role="note" data-bring-update className="text-[13px] leading-relaxed text-ink">{t("cloudWelcome.bring.update")}</p>}
+    {team && desktop && <BringMyCloud />}
     {cloudHasWork
       ? <div data-bring-here className={cn(CARD, CARD_IDLE)}>
           <CardIcon icon={Users} />

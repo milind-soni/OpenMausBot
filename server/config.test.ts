@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, utime
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { botThreadLimitText, defaultBotThreads, maxConcurrentBotThreads, maxConcurrentChildThreads } from "./bot-thread-limits.ts";
 import type { JsonValue } from "./schema.ts";
 
 import { cacheUntilConfigChanges,
@@ -22,7 +23,6 @@ import { cacheUntilConfigChanges,
   persistableInstanceConfigs,
   roomTurnTimeoutMinutes,
   mcpCallTimeoutMinutes,
-  maxConcurrentBotThreads,
   threadEventLogMaxBytes,
   threadEventLogRetentionDays,
   showToolCallsEnabled,
@@ -127,8 +127,21 @@ describe("configuration boundaries", () => {
     expect(() => parseConfigPatch({ tts: { fishModel: "s1" } })).toThrow("fishModel");
   });
 
-  it("defaults to three parallel threads and validates a configurable maximum of sixteen", () => {
-    expect(maxConcurrentBotThreads({})).toBe(3);
+  it("defaults to what each host holds, and a saved number wins except over a plan's limit", () => {
+    const GB = 1024 ** 3;
+    const desktop = (gb: number) => ({ memoryGate: false, totalBytes: gb * GB, oneThreadPerBot: false });
+    for (const [gb, threads] of [[2, 3], [4, 3], [8, 4], [16, 8], [26, 13], [32, 16], [128, 16]] as const) expect(maxConcurrentBotThreads({}, desktop(gb))).toBe(threads);
+    expect(maxConcurrentBotThreads({}, desktop(15.8)), "a 16 GB machine reports a little less").toBe(8);
+    for (const gb of [2, 8]) expect(maxConcurrentBotThreads({}, { memoryGate: true, totalBytes: gb * GB, oneThreadPerBot: false }), "the memory gate decides").toBe(16);
+    expect(maxConcurrentBotThreads({ threads: { maxConcurrentPerBot: 2 } }, desktop(64))).toBe(2);
+    expect(maxConcurrentBotThreads({ threads: { maxConcurrentPerBot: 2 } }, { memoryGate: true, totalBytes: 8 * GB, oneThreadPerBot: false })).toBe(2);
+    const starter = { memoryGate: true, totalBytes: 2 * GB, oneThreadPerBot: true };
+    expect(maxConcurrentBotThreads({}, starter)).toBe(1);
+    expect(maxConcurrentBotThreads({ threads: { maxConcurrentPerBot: 8 } }, starter), "a plan's limit is not a preference").toBe(1);
+    expect(maxConcurrentChildThreads({}, starter), "a bot's own turn is never held behind itself").toBe(16);
+    expect(maxConcurrentChildThreads({ threads: { maxConcurrentPerBot: 2 } }, desktop(64)), "only a plan's limit lets children through").toBe(2);
+    expect(botThreadLimitText({}, starter)).toContain("Starter runs one thread at a time per bot");
+    expect(botThreadLimitText({ threads: { maxConcurrentPerBot: 5 } }, desktop(16))).toBe("this bot has reached its limit of 5 parallel threads — wait for one to finish");
     expect(parseStoredConfig({ threads: { maxConcurrentPerBot: 16 } })).toEqual({ threads: { maxConcurrentPerBot: 16 } });
     expect(maxConcurrentBotThreads(parseConfigPatch({ threads: { maxConcurrentPerBot: 1 } }))).toBe(1);
     for (const value of [0, -1, 17, 1.5, "10", null]) {
@@ -704,6 +717,20 @@ describe("a config.json saved with a byte order mark", () => {
       rmSync(path, { force: true });
     }
   });
+
+  it("keeps the browser's allow-list when the owner flips its local-sites switch", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({ browserEngine: { engine: "chrome", egress: { allow: ["10.0.0.5"] } } }));
+    try {
+      saveConfig({ browserEngine: { egress: { localNetwork: true } } });
+      expect(JSON.parse(readFileSync(path, "utf8")).browserEngine).toEqual({ engine: "chrome", egress: { allow: ["10.0.0.5"], localNetwork: true } });
+      saveConfig({ browserEngine: { egress: { localNetwork: false } } });
+      expect(JSON.parse(readFileSync(path, "utf8")).browserEngine).toEqual({ engine: "chrome", egress: { allow: ["10.0.0.5"], localNetwork: false } });
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
 });
 
 describe("loadConfig between changes", () => {
@@ -772,15 +799,15 @@ describe("saving the newer sections", () => {
     }
   });
 
-  it("seeds the concurrency default when the first threads save is an event-log knob", () => {
+  it("seeds what this machine holds when the first threads save is an event-log knob, so an older version can still read the file", () => {
     const path = join(DATA_DIR, "config.json");
     mkdirSync(DATA_DIR, { recursive: true });
     writeFileSync(path, JSON.stringify({}));
     try {
       saveConfig({ threads: { eventLogRetentionDays: 30 } });
       const disk = JSON.parse(readFileSync(path, "utf8"));
-      expect(disk.threads).toEqual({ maxConcurrentPerBot: 3, eventLogRetentionDays: 30 });
-      expect(parseStoredConfig(disk).threads).toEqual({ maxConcurrentPerBot: 3, eventLogRetentionDays: 30 });
+      expect(disk.threads).toEqual({ maxConcurrentPerBot: defaultBotThreads(), eventLogRetentionDays: 30 });
+      expect(parseStoredConfig(disk).threads).toEqual({ maxConcurrentPerBot: defaultBotThreads(), eventLogRetentionDays: 30 });
     } finally {
       rmSync(path, { force: true });
     }
@@ -1539,6 +1566,15 @@ describe("credential env preference", () => {
     expect(loadConfig().customDomain).toBe("https://bots.example.com");
     saveConfig({ customDomain: "" });
     expect(loadConfig()).toMatchObject({ customDomain: "", language: "en", profile: { name: "Workspace owner" } });
+  });
+
+  it("saves, trims and clears the computer name a paired phone shows", () => {
+    expect(parseConfigPatch({ computerName: "  AdamPC  " })).toEqual({ computerName: "AdamPC" });
+    expect(() => parseConfigPatch({ computerName: "x".repeat(64) })).toThrow();
+    saveConfig({ profile: { name: "Workspace owner" }, computerName: "AdamPC" });
+    expect(loadConfig()).toMatchObject({ computerName: "AdamPC", profile: { name: "Workspace owner" } });
+    saveConfig({ computerName: "" });
+    expect(loadConfig()).toMatchObject({ computerName: "", profile: { name: "Workspace owner" } });
   });
 
   it("merges onboarding progress like any other section", () => {

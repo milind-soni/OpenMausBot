@@ -76,6 +76,14 @@ describe.skipIf(!hasFfmpeg())("video frame sampling", () => {
     expect(frames).toHaveLength(2);
   });
 
+  it("stops at the frame limit, and samples nothing when the turn has no room left", async () => {
+    const root = store();
+    const clip = syntheticClip(root, 5);
+
+    expect(await videoFrameImages([clip], 3)).toHaveLength(3);
+    expect(await videoFrameImages([clip], 0)).toEqual([]);
+  });
+
   it("never follows a playlist named as a video to the files it points at", async () => {
     const root = store();
     const clip = spawnSync("ffmpeg", ["-f", "lavfi", "-i", "testsrc=duration=2:size=320x240:rate=5", "-pix_fmt", "yuvj420p", "-y", join(root, "clip.mp4")]);

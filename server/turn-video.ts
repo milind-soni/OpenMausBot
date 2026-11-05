@@ -77,16 +77,18 @@ async function extractFrame(video: TurnVideoInput, atSeconds: number, outPath: s
 /**
  * Samples a handful of evenly spaced stills from an attached video so a model with only image input can see what
  * it contains. Frames live in their own temp directory, cleaned up on a delay rather than right after this call,
- * since the caller's driver still has to read each frame's path off disk later in the same turn.
+ * since the caller's driver still has to read each frame's path off disk later in the same turn. `limit` caps the
+ * frames returned, so a turn's pictures plus frames never pass its image count.
  */
-export async function videoFrameImages(videos: readonly TurnVideoInput[] | undefined): Promise<TurnImageInput[]> {
-  if (!videos?.length) return [];
+export async function videoFrameImages(videos: readonly TurnVideoInput[] | undefined, limit = Infinity): Promise<TurnImageInput[]> {
+  if (!videos?.length || limit <= 0) return [];
   const frames: TurnImageInput[] = [];
   for (const video of videos) {
+    if (frames.length >= limit) break;
     let dir: string | undefined;
     try {
       const duration = await videoDurationSeconds(video);
-      const count = Math.min(VIDEO_SAMPLE_FRAME_COUNT, Math.max(1, Math.ceil(duration)));
+      const count = Math.min(VIDEO_SAMPLE_FRAME_COUNT, Math.max(1, Math.ceil(duration)), limit - frames.length);
       dir = await mkdtemp(join(tmpdir(), "omb-video-frame-"));
       for (let index = 0; index < count; index += 1) {
         const atSeconds = (duration * (index + 0.5)) / count;

@@ -6,12 +6,13 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import { ATTACHMENTS_DIR, FILE_MAX_BYTES, IMAGE_MAX_BYTES } from "./attachments.ts";
 import type { TurnImageInput, TurnVideoInput } from "./contracts.ts";
 import { decodeAttachmentAttribute } from "./message-file.ts";
+import { videoFrameImages } from "./turn-video.ts";
 
-export const TURN_IMAGE_MAX_COUNT = 4;
-export const TURN_IMAGE_MAX_BYTES = TURN_IMAGE_MAX_COUNT * IMAGE_MAX_BYTES;
-// A video is sampled into several frames before it reaches a model, so only one is admitted per turn.
+export const TURN_IMAGE_MAX_COUNT = 10;
+/** Total image bytes one turn may carry: the 40 MB it was when a turn took four images, so engine requests don't grow. */
+export const TURN_IMAGE_MAX_BYTES = 4 * IMAGE_MAX_BYTES;
+// A video is sampled into several frames before it reaches a model, so only the first one in a message is sampled.
 export const TURN_VIDEO_MAX_COUNT = 1;
-export const TURN_VIDEO_MAX_BYTES = FILE_MAX_BYTES;
 
 type MarkdownNode = {
   type: string;
@@ -119,10 +120,12 @@ export interface ExtractTurnImagesOptions {
   maxCount?: number;
   maxBytes?: number;
   maxVideoCount?: number;
-  maxVideoBytes?: number;
 }
 
-/** Invalid tags stay visible as ordinary text and never become native image or video input. */
+/**
+ * Invalid tags stay visible as ordinary text and never become native image input. A video's <attached-file> tag
+ * always stays in the text, so an engine that reads files still gets its path; sampled frames only add to it.
+ */
 export function extractTurnImages(
   text: string,
   options: ExtractTurnImagesOptions = {},
@@ -133,7 +136,6 @@ export function extractTurnImages(
   const maxCount = options.maxCount ?? TURN_IMAGE_MAX_COUNT;
   const maxBytes = options.maxBytes ?? TURN_IMAGE_MAX_BYTES;
   const maxVideoCount = options.maxVideoCount ?? TURN_VIDEO_MAX_COUNT;
-  const maxVideoBytes = options.maxVideoBytes ?? TURN_VIDEO_MAX_BYTES;
   const candidates = attachmentTagCandidates(text);
 
   const admittedImages = candidates
@@ -148,28 +150,22 @@ export function extractTurnImages(
     throw statusError(413, `Attached images exceed ${Math.floor(maxBytes / (1024 * 1024))} MB total`);
   }
 
-  const admittedVideos = candidates
+  const videos = candidates
     .filter((tag) => tag.kind === "file")
-    .map((tag) => ({ tag, video: ownedVideo(tag.path, attachmentsDir) }))
-    .filter((item): item is { tag: TagCandidate; video: TurnVideoInput } => item.video !== null);
-  if (admittedVideos.length > maxVideoCount) {
-    throw statusError(413, `Send no more than ${maxVideoCount} video${maxVideoCount === 1 ? "" : "s"} at a time`);
-  }
-  const aggregateVideoBytes = admittedVideos.reduce((total, item) => total + item.video.bytes, 0);
-  if (aggregateVideoBytes > maxVideoBytes) {
-    throw statusError(413, `Attached videos exceed ${Math.floor(maxVideoBytes / (1024 * 1024))} MB total`);
-  }
+    .map((tag) => ownedVideo(tag.path, attachmentsDir))
+    .filter((video): video is TurnVideoInput => video !== null)
+    .slice(0, maxVideoCount);
 
   let providerText = text;
-  const removedTags = [...admittedImages.map((item) => item.tag), ...admittedVideos.map((item) => item.tag)]
-    .sort((a, b) => b.start - a.start);
+  const removedTags = admittedImages.map((item) => item.tag).sort((a, b) => b.start - a.start);
   for (const tag of removedTags) providerText = providerText.slice(0, tag.start) + providerText.slice(tag.end);
 
-  return {
-    text: providerText,
-    images: admittedImages.map((item) => item.image),
-    videos: admittedVideos.map((item) => item.video),
-  };
+  return { text: providerText, images: admittedImages.map((item) => item.image), videos };
+}
+
+/** Stills sampled from a message's video, never taking a turn that already carries `earlier` images past its image count. */
+export function videoFramesWithin(earlier: number, videos: readonly TurnVideoInput[]): Promise<TurnImageInput[]> {
+  return videoFrameImages(videos, TURN_IMAGE_MAX_COUNT - earlier);
 }
 
 export function extractSteerImages(

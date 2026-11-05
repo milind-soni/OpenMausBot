@@ -49,39 +49,33 @@ afterEach(() => {
 });
 
 describe("the inbox panel", () => {
-  it("opens on Needs you with its count, lists each tab's own lines, and reads one in full", async () => {
-    openInbox({ tab: "needs-you" });
+  it("is one list, newest first, with a dot on what waits on the person and no tabs, and reads one line in full", async () => {
+    openInbox();
     await mount(createElement(InboxPanel));
-    const tab = (name: string) => document.querySelector<HTMLElement>(`[data-inbox-tab="${name}"]`)!;
-    expect(tab("needs-you").getAttribute("aria-selected")).toBe("true");
-    expect(tab("needs-you").getAttribute("aria-label")).toBe("Needs you, 2");
+    expect(document.querySelector("[role=tablist], [data-inbox-tab]")).toBeNull();
     const listed = () => [...document.querySelectorAll<HTMLElement>("[data-inbox-row]")].map((row) => row.dataset.inboxRow);
-    expect(listed()).toEqual([approvalRow.id, questionRow.id]);
+    expect(listed()).toEqual([approvalRow.id, questionRow.id, messageRow.id, reportRow.id]);
+    expect(listed(), "a settled line is not listed again").not.toContain(settledRow.id);
+    expect([...document.querySelectorAll<HTMLElement>("[data-inbox-row] [data-inbox-waits]")].map((dot) => dot.closest<HTMLElement>("[data-inbox-row]")!.dataset.inboxRow)).toEqual([approvalRow.id, questionRow.id]);
     expect(document.querySelector(`[data-inbox-row="${approvalRow.id}"]`)!.hasAttribute("data-unread")).toBe(true);
-    await click('[data-inbox-tab="info"]');
-    expect(listed()).toEqual([messageRow.id, reportRow.id]);
-    await click('[data-inbox-tab="done"]');
-    expect(listed()).toEqual([settledRow.id]);
-    await click('[data-inbox-tab="info"]');
     await click(`[data-inbox-row="${messageRow.id}"] button`);
     expect(document.querySelector(`[data-inbox-reading="${messageRow.id}"]`)?.textContent).toContain("The launch moved to Friday.");
     expect(server.calls).toContainEqual({ path: `/api/inbox/${messageRow.id}/read`, method: "POST" });
     expect(document.querySelector("textarea"), "a message that waits on an answer takes a reply").not.toBeNull();
     await click('[aria-label="Back to the list"]');
-    expect(listed()).toEqual([messageRow.id, reportRow.id]);
+    expect(listed()).toEqual([approvalRow.id, questionRow.id, messageRow.id, reportRow.id]);
   });
 
   it("answers an ask from its row through the copy's own card, as the chat's buttons do, and marks news done", async () => {
-    openInbox({ tab: "needs-you" });
+    openInbox();
     await mount(createElement(InboxPanel));
     await click(`[data-inbox-row="${approvalRow.id}"] [data-inbox-action="allow"]`);
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "decideRequest", threadId: "inbox", requestId: "req-approval", behavior: "allow" }));
     await click(`[data-inbox-row="${questionRow.id}"] [data-inbox-action="close"]`);
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "decideRequest", threadId: "inbox", requestId: "req-question", behavior: "answer" }));
-    await click('[data-inbox-tab="info"]');
     await click(`[data-inbox-row="${reportRow.id}"] [data-inbox-action="done"]`);
     expect(server.calls).toContainEqual({ path: `/api/inbox/${reportRow.id}/done`, method: "POST" });
-    expect(document.querySelector(`[data-inbox-row="${reportRow.id}"]`), "it leaves the tab at once").toBeNull();
+    expect(document.querySelector(`[data-inbox-row="${reportRow.id}"]`), "it leaves the list at once").toBeNull();
   });
 
   it("is a sheet at phone width", async () => {
@@ -106,7 +100,7 @@ describe("the inbox's card in the chat", () => {
     await click('[data-inbox-card] [data-inbox-choice="Pricing"]');
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "decideRequest", threadId: "inbox", requestId: "req-question", behavior: "answer", message: "Pricing" }));
     await click('[data-inbox-card] header button');
-    expect(currentInboxPanel()).toMatchObject({ open: true, tab: "needs-you" });
+    expect(currentInboxPanel()).toMatchObject({ open: true, reading: null });
     await mount(createElement(InboxCardSlot, { threadId: "elsewhere", messageId: approvalRow.id }));
     expect(document.querySelector("[data-inbox-card]"), "never in another conversation").toBeNull();
   });
@@ -159,28 +153,25 @@ describe("answer buttons in the asking bot's colour", () => {
 });
 
 describe("keeping the list live", () => {
-  function Loader({ version }: { version: string | null }) {
+  function Loader({ version }: { version: string }) {
     useInboxLoader(version);
     return null;
   }
 
-  it("reads the list again whenever the person's inbox task says it changed, and never off a team", async () => {
+  it("reads the list again whenever what it depends on changes", async () => {
     const task = (inboxChangedAt?: number, openAsks?: number) => [{ id: "bens-chief", tasks: [{ threadId: "inbox", inbox: true as const, ...(inboxChangedAt ? { inboxChangedAt } : {}), ...(openAsks ? { openAsks } : {}) }] }];
     expect(inboxVersion([{ id: "solo", tasks: [{ threadId: "t1" }] }]), "nothing is anyone's inbox off a team").toBeNull();
     const first = inboxVersion(task(5, 2));
     expect(inboxVersion(task(6, 2))).not.toBe(first);
     expect(inboxVersion(task(5, 1))).not.toBe(first);
-    await mount(createElement(Loader, { version: first }));
+    await mount(createElement(Loader, { version: first! }));
     await settle();
     const reads = () => server.calls.filter((call) => call.path === "/api/inbox").length;
     expect(reads()).toBe(1);
-    await mount(createElement(Loader, { version: first }));
+    await mount(createElement(Loader, { version: first! }));
     await settle();
     expect(reads(), "the same version reads nothing").toBe(1);
-    await mount(createElement(Loader, { version: inboxVersion(task(6, 1)) }));
-    await settle();
-    expect(reads()).toBe(2);
-    await mount(createElement(Loader, { version: null }));
+    await mount(createElement(Loader, { version: inboxVersion(task(6, 1))! }));
     await settle();
     expect(reads()).toBe(2);
   });

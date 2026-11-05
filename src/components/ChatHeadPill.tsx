@@ -1,3 +1,4 @@
+import { localizedTaskTitle } from "@/lib/task-title";
 import { ChevronRight, Lock, UserRound, Users } from "lucide-react";
 import type { ComponentProps } from "react";
 
@@ -9,12 +10,13 @@ import { BotAvatar } from "./Avatar";
 import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated";
 import { sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { BOT_PANEL_ID } from "./bot-panel/side-panel";
+import { sharedChatAudience } from "./TeamPrivateChatsLine";
 
 /** The factory title a new conversation starts with. */
 const UNTITLED = "New thread";
 const CHEVRON_MOTION = "duration-[140ms] ease-[cubic-bezier(.22,1,.36,1)]";
 
-export type ChatHeadPrivacy = { kind: "private" } | { kind: "ownHelper" } | { kind: "shared"; team: string } | null;
+export type ChatHeadPrivacy = { kind: "private" } | { kind: "ownHelper" } | { kind: "shared"; team: string; onlyPeopleAdded?: boolean } | null;
 
 const PRIVACY_ICONS = { private: Lock, ownHelper: UserRound, shared: Users } as const;
 
@@ -22,7 +24,7 @@ function privacyLabelOf(privacy: ChatHeadPrivacy): string | null {
   switch (privacy?.kind) {
     case "private": return t("team.privateHeader");
     case "ownHelper": return t("team.ownHelperHeader");
-    case "shared": return t("team.sharedHeader", { team: privacy.team });
+    case "shared": return sharedChatAudience(privacy.team, privacy.onlyPeopleAdded);
     default: return null;
   }
 }
@@ -43,8 +45,8 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
   const PrivacyIcon = privacy ? PRIVACY_ICONS[privacy.kind] : Users;
   const title = bot.tasks?.find((task) => task.threadId === bot.threadId)?.title;
   // Simple mode calls an untitled conversation what it is, never a "thread".
-  const conversation = !awayFromMainThread(bot, false) ? null
-    : !title || title === UNTITLED ? t("task.untitledConversation") : title;
+  const conversation = !awayFromMainThread(bot, false) ? (privacy?.kind === "shared" ? t("task.sharedChat") : null)
+    : !title || title === UNTITLED ? t("task.untitledConversation") : localizedTaskTitle(title);
   const label = t("chat.openProfileAria", { name: bot.name });
   return (
     <button

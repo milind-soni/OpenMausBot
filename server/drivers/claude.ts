@@ -8,7 +8,7 @@ import { join, dirname, isAbsolute, normalize } from "node:path";
 
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
 import { openStartupModelCatalog, unconfirmedModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
-import { writeFileAtomic, writeFileAtomicIfChanged } from "../atomic.ts";
+import { writeFileAtomicIfChanged } from "../atomic.ts";
 import { augmentedPath } from "../env-path.ts";
 import { brokerSocketPath, cliVersionReader, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
 import { claudeAuthStatus } from "./claude-auth-status.ts";
@@ -17,7 +17,9 @@ import { botSettingsFor, withBotSettings } from "./claude-bot-settings.ts";
 import { claudeBilling, claudeCallUsage } from "./claude-billing.ts";
 import { claudeAuthFailure, claudeAuthRecovery } from "./claude-auth-recovery.ts";
 import { claudeModelExtras } from "./claude-model-extras.ts";
-import { claudeToolSearchSetting } from "./claude-tool-search.ts";
+import { claudeToolSearchSetting } from "./claude-tool-search.ts"; import { unusableBuiltIns } from "./claude-unusable-tools.ts"; import { EMAIL_READ_TOOL_NAMES } from "../../shared/email.ts";
+import { claudeElicitations } from "./claude-elicitation.ts";
+import { readCostHistory, recordCostState } from "./claude-cost-history.ts";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
 import { ClaudeLoginController } from "./claude-login-auth.ts";
 
@@ -44,7 +46,7 @@ import { createOrgModelBlocks, modelSwapNotice, withOrgBlocks } from "./claude-m
 import { engineHomes } from "../engine-homes/engine-homes.ts";
 import { TEAM_TOOLS_FAILED, failedCustomMcp, teamToolsFailed } from "./team-tools.ts";
 import { armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose } from "./session-idle.ts";
-import { promptHalves, withVolatileNote } from "./prompt-split.ts";
+import { promptHalves, withVolatileNote } from "./prompt-split.ts"; import { CLAUDE_OWN_MEMORY_OFF } from "./claude-own-memory.ts";
 import { parseVersionTriple, versionAtLeast } from "./acp/version-probe.ts";
 import {
   applyClaudeInject,
@@ -416,15 +418,16 @@ export function hookTokenFile(threadId: string, botId?: string): string {
   return join(DATA_DIR, "hook-tokens", digest, "token");
 }
 
-/** Hooks for the private --settings file. Claude Code runs each command as a shell line with the
- * event JSON on stdin and applies any hookSpecificOutput it prints. */
-export function claudeHookSettings(helperPath: string): Record<string, unknown> {
+/** Hooks for the private --settings file. Claude Code runs each command with the event JSON on
+ * stdin and applies any hookSpecificOutput it prints. */
+export function claudeHookSettings(helperPath: string, platform: NodeJS.Platform = process.platform): Record<string, unknown> {
+  // Claude Code runs `command` as a shell line: sh on macOS and Linux; on Windows Git Bash, or PowerShell
+  // when Git Bash is missing, and the two quote differently. Given `args` (2.1.139), it starts `command` itself.
   // JSON quoting is not shell quoting: $(), backticks and $names expand inside double quotes.
-  // Windows paths go through env so their backslashes are not JSON-escaped.
-  const command = process.platform === "win32"
-    ? '"%OMB_HOOK_NODE%" "%OMB_HOOK_HELPER%"'
-    : [process.execPath, helperPath].map(path => `'${path.replace(/'/g, "'\\''")}'`).join(" ");
-  const entry = [{ matcher: "", hooks: [{ type: "command", command, timeout: 5 }] }];
+  const hook = platform === "win32"
+    ? { type: "command", command: process.execPath, args: [helperPath], timeout: 5 }
+    : { type: "command", command: [process.execPath, helperPath].map(path => `'${path.replace(/'/g, "'\\''")}'`).join(" "), timeout: 5 };
+  const entry = [{ matcher: "", hooks: [hook] }];
   return { PostToolUse: entry, PostToolUseFailure: entry, PreCompact: entry, SessionStart: entry, Stop: entry };
 }
 
@@ -709,39 +712,6 @@ export function restoredCostBase(
   return exact ?? inside;
 }
 
-const COST_HISTORY_FILE = join(DATA_DIR, "claude-cost-history.json");
-const COST_HISTORY_SESSIONS = 100;
-const COST_HISTORY_STATES = 8;
-
-function isCostSnapshot(value: unknown): value is ClaudeCostSnapshot {
-  if (!value || typeof value !== "object") return false;
-  const { total, models } = value as { total?: unknown; models?: unknown };
-  return typeof total === "number" && !!models && typeof models === "object" &&
-    Object.values(models).every((counts) => Array.isArray(counts) && counts.length === 4 && counts.every((n) => typeof n === "number"));
-}
-
-function readCostHistory(): Record<string, ClaudeCostSnapshot[]> {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(COST_HISTORY_FILE, "utf8"));
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    return Object.fromEntries(Object.entries(parsed).map(([id, states]) => [id, Array.isArray(states) ? states.filter(isCostSnapshot) : []]));
-  } catch {
-    return {};
-  }
-}
-
-function recordCostState(sessionId: string, state: ClaudeCostSnapshot): void {
-  const history = readCostHistory();
-  const states = [...(history[sessionId] ?? []), state].slice(-COST_HISTORY_STATES);
-  delete history[sessionId];
-  history[sessionId] = states;
-  const ids = Object.keys(history);
-  for (const id of ids.slice(0, Math.max(0, ids.length - COST_HISTORY_SESSIONS))) delete history[id];
-  try {
-    writeFileAtomic(COST_HISTORY_FILE, JSON.stringify(history), { mode: 0o600, durable: false });
-  } catch {}
-}
-
 type ClaudeImage = NonNullable<SendTurnInput["images"]>[number];
 type ClaudeUserContent =
   | { type: "image"; source: { type: "base64"; media_type: ClaudeImage["mime"]; data: string } }
@@ -873,6 +843,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     interface Session {
       child: ReturnType<typeof spawnCli>;
       broker?: Awaited<ReturnType<typeof createPermissionBroker>>;
+      elicit: ReturnType<typeof claudeElicitations>;
       mcpConfigPath: string | null;
       systemPromptPath: string | null;
       argsKey: string;
@@ -938,6 +909,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const broker = s.broker;
       s.broker = undefined;
       broker?.close();
+      s.elicit.close();
       appendNative(threadId, { dir: "out", source: "claude.session", msg: { close: why } });
       // stdin EOF is the CLI's exit signal; give it a moment, then insist
       try {
@@ -1052,9 +1024,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       }
       if (turn.guestConfined) args.push("--restricted", "--tools", GUEST_CLAUDE_TOOLS.join(","));
       else if (config.tools !== undefined) args.push("--tools", config.tools.join(","));
-      if (config.disallowedTools?.length) {
-        args.push("--disallowedTools", config.disallowedTools.join(","));
-      }
       const turnEnvironment = environment();
       await ensureCliVersion(turnEnvironment);
       if (turn.guestConfined && !claudeCliSupports(cliVersion, "--restricted")) {
@@ -1063,6 +1032,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const replaysUserMessages = cliVersion === null || versionAtLeast(cliVersion, CLAUDE_REPLAY_FLOOR);
       if (replaysUserMessages) args.push("--replay-user-messages");
       const isolated = !inheritsUserConfig(turnEnvironment);
+      const disallowed = [...(config.disallowedTools ?? []), ...unusableBuiltIns({ isolated, listsTools: config.tools !== undefined, guest: Boolean(turn.guestConfined) })];
+      if (disallowed.length) args.push("--disallowedTools", disallowed.join(","));
       if (turn.toolScope !== undefined && (!isolated || turn.mcpFromUserConfig || cliVersion === null || !claudeCliSupports(cliVersion, "--strict-mcp-config"))) {
         throw new Error("Claude cannot confirm a restricted MCP configuration for this account. Disable inherited Claude MCP servers and use a current, identifiable Claude CLI before using tool selection.");
       }
@@ -1123,6 +1094,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       for (const name of ["data", "highlevel", "device"] as const) {
         if (turn.integrations?.[name]) { mcpServers[name] = { ...turn.integrations[name] }; allowed.push(`mcp__${name}`); }
       }
+      if (turn.integrations?.email) { mcpServers.email = { ...turn.integrations.email }; allowed.push(...EMAIL_READ_TOOL_NAMES.map((tool) => `mcp__email__${tool}`)); } // Only its reads: a send asks as any tool of a person's own server does.
       if (turn.integrations?.dweb) {
         mcpServers.dweb = {
           command: process.execPath,
@@ -1158,7 +1130,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         const gated = gateServer({ name, server: mcpServers[name], threadId, nodeEnv: NODE_ENV_FLAG, toolScope: turn.toolScope, ...customServerGate(name, botOwned.has(name), turn.integrations?.customResultBudgets, turnEnvironment), apps: appMountFor(name, turn) });
         if (gated) mcpServers[name] = { ...gated, ...((mcpServers[name] as { alwaysLoad?: unknown })?.alwaysLoad === true ? { alwaysLoad: true } : {}) };
       }
-      allowed.splice(0, allowed.length, ...allowed.filter((name) => Object.hasOwn(mcpServers, name.slice("mcp__".length))));
+      allowed.splice(0, allowed.length, ...allowed.filter((name) => Object.hasOwn(mcpServers, name.slice("mcp__".length).split("__")[0]!)));
       // Full access keeps ask_user: native bypass skips permission prompts, not questions.
       let broker: Awaited<ReturnType<typeof createPermissionBroker>> | undefined;
       const socketPath = permissionSocketPath(threadId, botId);
@@ -1190,15 +1162,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         writeFileAtomicIfChanged(hookTokenPath, hooks.token, { mode: 0o600, durable: false });
         env.OMB_HOOK_URL = hooks.url;
         env.OMB_HOOK_TOKEN_FILE = hookTokenPath;
-        env.OMB_HOOK_NODE = process.execPath;
-        env.OMB_HOOK_HELPER = HOOK_HELPER_PATH;
         // in the packaged app process.execPath is Electron — run the helper as node
         if (process.versions.electron) env.ELECTRON_RUN_AS_NODE = "1";
       }
       const cwd = turn.cwd ?? homedir();
       // Every MCP server without alwaysLoad loads on demand behind ToolSearch (claude-tool-search.ts).
       const toolSearch = claudeToolSearchSetting(cwd, env);
-      const own: Record<string, unknown> = { ...authSettings, env: { ...authSettings.env, ENABLE_TOOL_SEARCH: toolSearch } };
+      const own: Record<string, unknown> = { ...authSettings, env: { ...authSettings.env, ENABLE_TOOL_SEARCH: toolSearch, ...(isolated ? CLAUDE_OWN_MEMORY_OFF : {}) } };
       // Project-only settings still find the personal memory via ancestors when the bot lives under HOME.
       if (isolated) own.claudeMdExcludes = [join(homedir(), ".claude", "CLAUDE.md")];
       if (hooks) own.hooks = claudeHookSettings(HOOK_HELPER_PATH);
@@ -1381,6 +1351,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         closed: new Promise<void>((resolve) => { markClosed = resolve; }),
         child,
         broker,
+        // A CLI that already exited needs no answer: the write is skipped, like writeUser's.
+        elicit: claudeElicitations((frame) => new Promise<boolean>((resolve) => {
+          const { stdin } = session.child;
+          if (!stdin.writable || stdin.destroyed) return resolve(false);
+          try { stdin.write(`${JSON.stringify(frame)}\n`, (err) => resolve(!err)); } catch { resolve(false); }
+        }),
+          (event) => emit({ ...base(threadId, session.turn?.turnId ?? turnId), ...event })),
         mcpConfigPath,
         systemPromptPath,
         argsKey,
@@ -1468,6 +1445,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         authRecovery.frame(threadId, o, session.costTotal);
         // A replayed stdin message carries its images again: keep their bytes out of the log.
         appendNative(threadId, { dir: "in", source: "claude.sdk.message", msg: o?.type === "user" && o.isReplay === true && o.message ? diagnosticClaudeUserMessage(o) : o });
+        if (session.elicit.frame(o)) return;
         if (session.turn?.continuationSilence && !(o.type === "system" && o.subtype === "init") && !(o.type === "user" && o.isReplay === true)) {
           clearTimeout(session.turn.continuationSilence);
           session.turn.continuationSilence = null;
@@ -1763,6 +1741,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             session.broker = undefined;
             failedBroker?.pause();
             failedBroker?.close();
+            session.elicit.close();
             if (session.mcpConfigPath) {
               try {
                 rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
@@ -1842,6 +1821,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             });
             session.broker?.close();
             session.broker = undefined;
+            session.elicit.close();
             if (session.mcpConfigPath) {
               try {
                 rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
@@ -1883,6 +1863,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         }
         if (session.idleTimer) clearTimeout(session.idleTimer);
         session.broker?.close();
+        session.elicit.close();
         if (session.mcpConfigPath) {
           try {
             rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
@@ -2085,6 +2066,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         steer,
         interruptTurn: async (threadId) => active.get(threadId)?.stop(),
         respondToRequest: async (threadId, requestId, decision) => {
+          const elicited = await sessions.get(threadId)?.elicit.answer(requestId, decision.behavior);
+          if (elicited === "failed") return "unavailable";
+          if (elicited === "sent") return decision.behavior === "allow" ? "allowed-once" : "rejected";
           const broker = sessions.get(threadId)?.broker ?? active.get(threadId)?.broker;
           if (!broker) return "unavailable";
           const behavior = decision.behavior === "answer" ? "answer" : decision.behavior;
