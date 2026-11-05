@@ -211,8 +211,9 @@ describe("CI concurrency", () => {
     for (const path of named) expect(existsSync(new URL(`../${path}`, import.meta.url)), path).toBe(true);
     expect(named).toContain("src/locales/");
     expect(named).toContain("scripts/testing/file-size-ratchet.test.ts");
-    // Before the slow checks, so a failed guard reports within a minute.
-    expect(steps.indexOf(guards)).toBeLessThan(steps.findIndex((step) => step.run === "pnpm typecheck"));
+    // Before the slow checks, so a failed guard reports within a minute: typecheck and the build wait for static.
+    expect(steps.some((step) => step.run === "pnpm typecheck")).toBe(false);
+    expect(workflow.jobs.build.needs).toBe("static");
     // Every test the guards run stays in the suite: vitest's include has them, so the shards still deal them out.
     expect(workflow.jobs.vitest.needs).toBe("static");
   });
