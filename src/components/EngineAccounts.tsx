@@ -336,7 +336,10 @@ export function AccountsCard({ group, accounts, advanced, bare = false }: { grou
                 onSignInDone={() => setSigningIn((current) => current === instance.instanceId ? null : current)} />
             ))}
           </ul>
-          {!primary.snapshot.authenticationUnavailableReason && <AddAccount label={t(COPY[group].add)} endpoint={`/api/instances/${group}-accounts`} folder={group === "claude"} onAdded={setSigningIn} />}
+          {!primary.snapshot.authenticationUnavailableReason && <>
+            <AddAccount label={t(COPY[group].add)} endpoint={`/api/instances/${group}-accounts`} folder={group === "claude"} onAdded={setSigningIn} />
+            {group === "chatgpt" && <p className="px-2 text-[12px] leading-relaxed text-ink-secondary">{t("accounts.addChatgptWorkspaceNote")}</p>}
+          </>}
         </div>
       )}
       {primary.snapshot.update && <EngineUpdateNotice update={primary.snapshot.update} instance={primary} className="mt-3" quiet />}
