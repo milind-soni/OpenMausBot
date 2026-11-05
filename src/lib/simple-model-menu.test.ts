@@ -261,3 +261,15 @@ describe("a model the organization turned off", () => {
     expect(menuOn("sonnet-5").current?.blocked).toBeUndefined();
   });
 });
+
+describe("custom Claude endpoint", () => {
+  // The driver marks every endpoint catalog option `custom`; the picker keeps exactly those.
+  const endpoint = claude({ access: "custom" }, [
+    { id: "deepseek-chat", label: "deepseek-chat", custom: true },
+    { id: "deepseek-reasoner", label: "deepseek-reasoner", custom: true },
+  ]);
+
+  it("lists the endpoint's own models and none of Claude's", () => {
+    expect(rows(menu([endpoint]), 0)).toEqual(["deepseek-chat", "deepseek-reasoner"]);
+  });
+});

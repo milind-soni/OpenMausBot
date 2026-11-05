@@ -1,4 +1,4 @@
-import { loginPageCheck, loginPlace, loginSite, type LoginPlace } from "../shared/logins.ts";
+import { browserMatesOf, loginPageCheck, loginPlace, loginSite, type LoginPlace } from "../shared/logins.ts";
 import type { FillCandidate } from "./login-fill.ts";
 import { receiveLoginHandoff, type ConnectionHandoffAnswer, type ConnectionHandoffWhat, type LoginHandoffResult } from "./login-handoff.ts";
 import type { LoginStore } from "./login-store.ts";
@@ -41,14 +41,23 @@ export function cardLoginPlace(cardHost: string, observed: ObservedPage | null, 
   return loginPlace(cardHost, [onSite, ...(elsewhere && confirmedHost === elsewhere ? [elsewhere] : [])]);
 }
 
-/** Saved logins and 1Password items, as each bot may use them. */
+/** Saved logins and 1Password items, as each bot may use them. A login kept to some bots is filled only where every bot
+ * sharing that browser may use it: a sign-in stays in the browser, so a bot sharing it would be signed in as well. */
 export class BotLogins {
   readonly store: LoginStore;
   readonly onePassword: OnePasswordLogins;
+  private readonly bots: () => ReadonlyArray<{ id: string; browserProfile?: string | null }>;
 
-  constructor(store: LoginStore, onePassword: OnePasswordLogins) {
+  constructor(store: LoginStore, onePassword: OnePasswordLogins, bots: () => ReadonlyArray<{ id: string; browserProfile?: string | null }> = () => []) {
     this.store = store;
     this.onePassword = onePassword;
+    this.bots = bots;
+  }
+
+  /** The bot and every other bot that signs in through its browser: who a login saved from its sign-in card is kept
+   * to, since a sign-in there reaches all of them. */
+  cardBots(botId: string): string[] {
+    return [botId, ...browserMatesOf(this.bots(), botId)];
   }
 
   /** The desktop main process's private ask for one login, for Send to My Cloud, or for a connection a move carries. */
@@ -58,18 +67,20 @@ export class BotLogins {
 
   /** Where each login the bot may use fills, with its username. */
   sitesFor(botId: string): Array<LoginPlace & { username: string }> {
-    return [...this.store.sitesFor(botId), ...this.onePassword.sitesFor(botId)];
+    const bots = this.cardBots(botId);
+    return [...this.store.sitesFor(bots), ...this.onePassword.sitesFor(bots)];
   }
 
   /** Secrets are read only when one is filled. */
   async candidates(botId: string, pageHost: string): Promise<FillCandidate[]> {
     await this.onePassword.fresh();
+    const bots = this.cardBots(botId);
     return [
-      ...this.store.usableFor(pageHost, botId).map((login): FillCandidate => ({
+      ...this.store.usableFor(pageHost, bots).map((login): FillCandidate => ({
         id: login.id, site: login.site, hosts: login.hosts, exactHost: login.exactHost, username: login.username, source: login.source,
         secrets: async () => ({ password: login.password, totp: login.totp ?? null }),
       })),
-      ...this.onePassword.candidates(pageHost, botId),
+      ...this.onePassword.candidates(pageHost, bots),
     ];
   }
 

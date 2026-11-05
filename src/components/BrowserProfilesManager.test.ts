@@ -41,7 +41,7 @@ describe("browser profile manager", () => {
     expect(html).toContain('value="">Own browser</option>');
     expect(html).toContain('value="work" selected="">Work</option>');
     expect(html).toContain('value="guest"');
-    expect(html).toContain("Bots on a shared profile use the same logins.");
+    expect(html).toContain("Bots on a shared profile share whatever it is signed in to; a saved login kept to some bots is filled there only if every bot on the profile may use it.");
     expect(html).not.toMatch(/<details[^>]*\bopen/);
     expect(html.match(/<select[^>]*>/)?.[0]).toContain('disabled=""');
   });

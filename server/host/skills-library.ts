@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import { skillCalls, skillCommandTurnText } from "../../shared/skill-command.ts";
-import type { SkillRequestCardData, SkillShareRecord } from "../../shared/skill-request.ts";
+import { isSkillSwitchAction, type SkillRequestCardData, type SkillShareRecord } from "../../shared/skill-request.ts";
 import { narrowestAudience, intersectAudience } from "../bot-visibility.ts";
 import { DATA_DIR, type AppConfig } from "../config.ts";
 import { appendDecision } from "../decision-log.ts";
@@ -351,8 +351,8 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       const card = message?.card;
       const request = card?.skillRequest;
       if (!message || !card || !request) return { ok: false, status: 404, error: "this skill is no longer in the conversation" };
-      if (!card.autoApplied || card.answered !== "allow" || card.undone) {
-        return { ok: false, status: 409, error: "only a skill change that applied and was not undone can be shared" };
+      if (!card.autoApplied || card.answered !== "allow" || card.undone || isSkillSwitchAction(request.action)) {
+        return { ok: false, status: 409, error: "only a new or updated skill that applied and was not undone can be shared" };
       }
       if (request.shared) return { ok: true, shared: request.shared };
       const botId = message.from?.botId ?? store.botByThread(threadId)?.id;
@@ -364,7 +364,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
 
     shareFromBot,
 
-    undoReceipt(botId: string, threadId: string, message: Message, request: SkillRequestCardData & { shared: SkillShareRecord }): UndoResult {
+    undoReceipt(botId: string, threadId: string, message: Message, request: SkillRequestCardData & { action: "create" | "update"; shared: SkillShareRecord }): UndoResult {
       const undone = undoSharedLearnedSkill({
         authorId: botId,
         name: request.name,

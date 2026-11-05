@@ -36,16 +36,7 @@ import { LocalScreenPreview } from "./LocalScreenPreview";
 import { LinuxLocalControl } from "./LinuxLocalControl";
 import { MacLocalControl } from "./MacLocalControl"; import { WindowsLocalControl } from "./WindowsLocalControl";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
-import {
-  busyBoatView,
-  instanceSupportsLocalComputer,
-  localComputerDisabledReason,
-  localComputerSelectable,
-  persistedComputerSelectionMatches,
-  isReadyBoatState,
-  resolveBoatPanelAction,
-  shouldPollCloudPreview,
-} from "@/lib/local-computer";
+import { busyBoatView, instanceSupportsLocalComputer, localComputerDisabledReason, localComputerSelectable, pageOnRemoteServer, persistedComputerSelectionMatches, isReadyBoatState, resolveBoatPanelAction, shouldPollCloudPreview } from "@/lib/local-computer";
 import { moveBetweenTabs, PANEL_TABS, panelTabProps, scrollTabsWithWheel, TAB_PANEL_FOCUS, tabPanelProps, useAndroidTabFallback } from "./computer-panel-tabs";
 import { releaseComputerPanelFocus, useComputerPanelEntry } from "@/lib/computer-panel-focus";
 import { PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, useComputerPanelResize } from "./computer-panel-resize";
@@ -160,7 +151,7 @@ export function ComputerPanel({
   const localSelectable = placeOffered("local", state.config) && localComputerSelectable({ capabilities, providerSupportsLocal });
   const [localAutoWarningTarget, setLocalAutoWarningTarget] = useState<string | null>(null);
   const localDisabledReason = localComputerDisabledReason({ capabilities, providerSupportsLocal });
-  const placeSeat = usePlaceSeat(state.config, capabilities.host.platform);
+  const placeSeat = usePlaceSeat(state.config, capabilities);
   const [phase, setPhase] = useState<Phase>("checking");
   const [persistedComputerSelection, setPersistedComputerSelection] = useState<{
     botId: string;
@@ -1112,6 +1103,7 @@ export function ComputerPanel({
     : undefined;
   const cloudView = viewOf("cloud", cloudRefused);
   const autoView = viewOf("auto");
+  const localHidden = pageOnRemoteServer(capabilities);
   const placeOptions = ([
     [null, "vm.dest.auto", "computer.dest.autoDesc", Sparkles],
     ["cloud", "place.cloud", "computer.dest.cloudDesc", Cloud],
@@ -1119,8 +1111,8 @@ export function ComputerPanel({
     ["local", "vm.dest.local", "computer.dest.localDesc", Monitor],
     ["browser", "vm.dest.browser", "computer.dest.browserDesc", Globe],
     ["off", "vm.dest.off", "computer.dest.offDesc", Power],
-  ] as const).filter(([mode]) => mode === null || mode === "off" || (placeOffered(mode, state.config) && !(mode === "local" && capabilities.localComputer.reasonCode === "remote-server"))).map(([mode, labelKey, descriptionKey, Icon]) => {
-    const selected = mode === null ? !profileBot.computer : profileBot.computer === mode;
+  ] as const).filter(([mode]) => mode === null || mode === "off" || (placeOffered(mode, state.config) && !(mode === "local" && localHidden))).map(([mode, labelKey, descriptionKey, Icon]) => {
+    const selected = mode === null ? !profileBot.computer || (profileBot.computer === "local" && localHidden) : profileBot.computer === mode;
     const managedKind = mode === "local" ? "thisComputer" : mode === "vm" ? "localVm" : mode === "cloud" ? (profileBot.cloudBackend === "vps" ? "vps" : "box") : null;
     const managedBy = managedPolicy && managedKind && !managedPolicy.computers[managedKind] ? t("policy.managedBy", { organization: managedPolicy.organizationName }) : undefined;
     const view = mode === null ? autoView : mode === "cloud" ? cloudView : viewOf(mode);
@@ -1152,6 +1144,10 @@ export function ComputerPanel({
     }
     else if (mode === "browser") updateComputerSelection({ computer: mode, browser: true });
     else updateComputerSelection({ computer: mode });
+  };
+  const unpinToWorksOn = () => {
+    if (profileBot.computer === "local" && localHidden) updateComputerSelection({ computer: null });
+    dispatch({ type: "updateTask", botId: profileBot.id, threadId: profileBot.threadId, patch: { surface: null } });
   };
   const heldPin = livePin && profileBot.computer !== "off" && livePin !== profileBot.computer ? livePin : undefined;
 
@@ -1600,13 +1596,13 @@ export function ComputerPanel({
           </button>
         )}
         {!advanced && (cloudPreviewReady || phase === "vm") && (
-          <div className="mt-3 flex gap-2" data-testid="computer-actions">
+          <div className="mt-3 flex flex-wrap gap-2" data-testid="computer-actions">
             {!control.held && !bannerTakesControl && (
               <button
                 type="button"
                 onClick={() => void takeControl()}
                 disabled={controlPending || pending === "join" || (phase === "vm" && !liveTarget)}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-accent py-2 text-[13px] font-medium text-accent-ink hover:brightness-110 disabled:opacity-50"
+                className="flex flex-auto items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-accent-ink hover:brightness-110 disabled:opacity-50"
                 title={t("computer.takeControlTitle")}
               >
                 {pending === "join" ? <Loader2 size={14} className="animate-spin" /> : <Hand size={14} />}
@@ -1617,7 +1613,7 @@ export function ComputerPanel({
               type="button"
               onClick={() => void takeControl(true)}
               disabled={pending === "join" || (!control.held && controlPending) || (phase === "vm" && !liveTarget)}
-              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+              className="flex flex-auto items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
               title={t("computer.openLiveDesktop")}
             >
               <Maximize2 size={14} />
@@ -1628,7 +1624,7 @@ export function ComputerPanel({
                 type="button"
                 onClick={() => run("sleep")}
                 disabled={pending === "sleep" || profileBot.busy}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                className="flex flex-auto items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
                 title={t("computer.sleepTitle")}
               >
                 {pending === "sleep" ? <Loader2 size={14} className="animate-spin" /> : <Moon size={14} />}
@@ -1638,12 +1634,12 @@ export function ComputerPanel({
           </div>
         )}
         {advanced && cloudPreviewReady && (
-          <div className="mt-3 flex gap-2">
+          <div className="mt-3 flex flex-wrap gap-2">
             {!control.held && !bannerTakesControl && (
               <button
                 onClick={() => void takeControl()}
                 disabled={controlPending || pending === "join"}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                className="flex flex-auto items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
                 title={t("computer.takeControlTitle")}
               >
                 {pending === "join" ? <Loader2 size={14} className="animate-spin" /> : <Hand size={14} />}
@@ -1654,7 +1650,7 @@ export function ComputerPanel({
               <button
                 onClick={() => void takeControl(true)}
                 disabled={pending === "join"}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                className="flex flex-auto items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
               >
                 {pending === "join" ? <Loader2 size={14} className="animate-spin" /> : liveTarget ? <Maximize2 size={14} /> : <Monitor size={14} />}
                 {t(liveTarget ? "computer.fullScreen" : "computer.openLiveDesktop")}
@@ -1664,7 +1660,7 @@ export function ComputerPanel({
               <button
                 onClick={() => run("sleep")}
                 disabled={pending === "sleep" || profileBot.busy}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                className="flex flex-auto items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
                 title={t("computer.sleepTitle")}
               >
                 {pending === "sleep" ? <Loader2 size={14} className="animate-spin" /> : <Moon size={14} />}
@@ -1782,7 +1778,7 @@ export function ComputerPanel({
                   type="button"
                   disabled={Boolean(bot.busy)}
                   title={bot.busy ? t("place.busy") : undefined}
-                  onClick={() => dispatch({ type: "updateTask", botId: profileBot.id, threadId: profileBot.threadId, patch: { surface: null } })}
+                  onClick={unpinToWorksOn}
                   className="shrink-0 rounded-md px-2 py-0.5 text-[12px] font-medium leading-5 text-accent-text transition-colors hover:bg-control focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
                   data-testid="place-unpin"
                 >

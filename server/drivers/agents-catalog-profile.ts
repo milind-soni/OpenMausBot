@@ -30,6 +30,7 @@ export interface CatalogProfile {
   /** A room's thread: the widget and page tools, which rooms refuse, and the wait tools, since a room holds no wait,
    * are not mounted. */
   room?: boolean;
+  imageGeneration?: boolean;
 }
 
 /** Everything is off unless the harness says "1". */
@@ -49,5 +50,6 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     mausbot: env.OMB_MAUSBOT === "1",
     computerSelection: env.OMB_COMPUTER_SELECTION === "1",
     room: env.OMB_ROOM === "1",
+    imageGeneration: env.OMB_IMAGE_GENERATION === "1",
   };
 }

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VoiceProbeSample } from "../../../shared/voice-latency-probe";
 
-import { Speaker } from "./index";
 import { setLocale } from "../i18n";
+import { Speaker } from "./index";
 import { toUtterances } from "../../../server/tts/speech-text";
 import { userError } from "../../../server/user-errors";
 
@@ -697,5 +697,26 @@ describe("local system voice stream", () => {
     second.cancel();
     expect(speaker.state).toEqual({ status: "idle" });
     expect(synth.cancel.mock.calls.length).toBe(cancelsBefore + 1);
+  });
+});
+
+
+describe("OpenAI voice error language", () => {
+  beforeEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  it("localizes a new server error and preserves an unknown error fallback", async () => {
+    const fetch = vi.fn(async (input: string | URL | Request) => String(input).endsWith("/prepare")
+      ? json({ ready: true, utterances: ["fixture text"] })
+      : new Response(JSON.stringify({ error: "English fallback", errorKey: "voice.openai.error.auth" }), { status: 502 }));
+    vi.stubGlobal("fetch", fetch);
+    const speaker = new Speaker();
+    try {
+      await speaker.speak("fixture text");
+      expect(speaker.state.error).toContain("OpenAI rejected the API key");
+      fetch.mockImplementation(async (input) => String(input).endsWith("/prepare")
+        ? json({ ready: true, utterances: ["fixture text"] })
+        : new Response(JSON.stringify({ error: "future fallback", errorKey: "voice.future" }), { status: 502 }));
+      await speaker.speak("fixture text");
+      expect(speaker.state.error).toBe("future fallback");
+    } finally { setLocale("en"); }
   });
 });

@@ -255,7 +255,7 @@ function PlaceFailedRow({ place, botId, threadId, onRetry }: {
 }) {
   const { state, dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
-  const seat = usePlaceSeat(state.config, capabilities.host.platform);
+  const seat = usePlaceSeat(state.config, capabilities);
   const bot = state.bots.find((candidate) => candidate.id === botId);
   const view = placeRowViewFor(place, seat, worksOnSimpleLabel(bot?.computer, capabilities.host.platform));
   const id = view.action?.id;

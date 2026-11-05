@@ -8,7 +8,7 @@ vi.mock("react", async (importOriginal) => ({
   useSyncExternalStore: (_subscribe: unknown, snapshot: () => unknown) => snapshot(),
 }));
 
-import { mcpServersForBot, mcpServersOfBot } from "./mcp-servers";
+import { mcpServersForBot, mcpServersOfBot, mcpSwitch } from "./mcp-servers";
 
 describe("mcpServersForBot", () => {
   const all = [
@@ -90,5 +90,23 @@ describe("shared MCP inventory", () => {
     fixture.api.mockResolvedValueOnce({ servers: [changed] });
     await loadMcpServers();
     expect(useMcpServers()).toMatchObject({ servers: [changed], error: false });
+  });
+});
+
+describe("mcpSwitch", () => {
+  const all = [
+    { name: "notes", enabled: true },
+    { name: "linear", enabled: true },
+    { name: "off", enabled: false },
+  ];
+
+  it("starts from every enabled server when the bot has no list", () => {
+    expect(mcpSwitch(all, null, "notes")).toEqual(["linear"]);
+    expect(mcpSwitch(all, undefined, "linear")).toEqual(["notes"]);
+  });
+
+  it("adds a name the explicit list leaves out and removes one it holds", () => {
+    expect(mcpSwitch(all, ["notes"], "linear")).toEqual(["notes", "linear"]);
+    expect(mcpSwitch(all, ["notes", "linear"], "notes")).toEqual(["linear"]);
   });
 });
