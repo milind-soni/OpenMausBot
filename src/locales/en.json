@@ -5674,6 +5674,8 @@
   "engineSetup.chatgpt.manageUsage": "Manage usage",
   "engineSetup.chatgpt.welcome": "You’re using your ChatGPT plan",
   "engineSetup.chatgpt.welcomeBody": "Eligible AI requests in {app} use your ChatGPT plan. Manage usage and access in ChatGPT settings. Your ChatGPT plan is separate from MausBot Cloud.",
+  "engineSetup.chatgpt.useDevice": "Sign in with a device code instead",
+  "engineSetup.chatgpt.switchingDevice": "Switching to a device code…",
   "engineSetup.device.start": "Connect ChatGPT",
   "engineSetup.device.starting": "Getting your sign-in code…",
   "engineSetup.device.enterCode": "Enter this one-time code on OpenAI's sign-in page:",
