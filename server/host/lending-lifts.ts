@@ -87,9 +87,10 @@ export function createLendingLifts(deps: LendingLiftDeps) {
     const parts: string[] = [];
     if (memory) {
       parts.push(serverLine(language, "server.lendingLift.memory"));
+      // A skill's folder says nothing its SKILL.md doesn't. Either separator: the names come from the Cloud's own paths.
+      const skillFolders = new Set(memory.changed.flatMap((file) => /[\\/]SKILL\.md$/u.test(file) ? [file.slice(0, -"/SKILL.md".length)] : []));
       for (const file of memory.changed) {
-        // A skill's folder says nothing its SKILL.md doesn't.
-        if (memory.changed.includes(join(file, "SKILL.md"))) continue;
+        if (skillFolders.has(file)) continue;
         const words = deps.words(botId, file);
         parts.push(`- ${file.replace(BOT_FOLDER, "")}`, ...(words ? [redactSecretsInText(words)] : []));
       }

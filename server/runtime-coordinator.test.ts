@@ -30,6 +30,7 @@ interface Host extends CoordinatorHost {
   levels: Record<string, { level: Level; driverKind?: string }>;
   chiefs: Set<string>;
   statusAsks?: string[];
+  statusAskers?: string[];
   release(id: string, outcome: Outcome): Promise<void>;
 }
 
@@ -899,12 +900,14 @@ describe("RuntimeCoordinator: modes and openers", () => {
       handoff(w, chief, "gen-1", undefined, tester, "FYI: the mailbox moved.", ask);
       ended(w, "gen-1");
       w.coordinator.tick(); await flush(); w.coordinator.tick(); await flush();
-      return { resumed: w.host.runs.some(run => run.node.id === "gen-1"), asked: w.host.statusAsks };
+      return { resumed: w.host.runs.some(run => run.node.id === "gen-1"), asked: w.host.statusAsks, askers: w.host.statusAskers };
     };
     const asking = (answer: string | undefined | Error) => {
       const w = world();
       w.host.statusAsks = [];
-      w.host.statusReply = async (_node, prompt) => {
+      w.host.statusAskers = [];
+      w.host.statusReply = async (asker, prompt) => {
+        w.host.statusAskers!.push(asker);
         w.host.statusAsks!.push(prompt);
         if (answer instanceof Error) throw answer;
         return answer;
@@ -913,8 +916,10 @@ describe("RuntimeCoordinator: modes and openers", () => {
     };
 
     it("spends no requester turn on a plain ACK, and shows the helper both messages as data", async () => {
-      const { resumed, asked } = await after(asking("ACK"), {}, {});
+      const { resumed, asked, askers } = await after(asking("ACK"), {}, {});
       expect(resumed).toBe(false);
+      // The requester's engine answers, never the teammate's, whose engine is busy with the work itself.
+      expect(askers).toEqual(["chief"]);
       expect(asked).toHaveLength(1);
       expect(asked![0]).toContain("<sender_message>\nFYI: the mailbox moved.\n</sender_message>");
       expect(asked![0]).toContain("<teammate_reply>\nNoted, thanks.\n</teammate_reply>");

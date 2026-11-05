@@ -13,6 +13,9 @@ export const STATUS_REPLY_TIMEOUT_MS = 8_000;
  * (done_when), work that did anything (a tool, a file, a send) or a requester that owes someone above it an answer still wakes it. */
 export function mayBeStatusOnly(a: Assignment, parent: Assignment | undefined, text: string, evidence: TurnEvidence | undefined): boolean {
   if (!parent || parent.parentId !== undefined) return false;
+  // Only a person's or a bot's own turn can skip its wake (runtime.ts nothingToAnswer): a routine's run or an outside runtime
+  // always takes it, so asking would only spend a call.
+  if (parent.requester.kind !== "person" && parent.requester.kind !== "bot_turn") return false;
   if (a.requester.kind !== "bot_turn" || a.mode !== "work" || a.reply !== "resume" || a.doneWhen) return false;
   if (a.assignee.destination.groupId !== undefined || parent.assignee.destination.groupId !== undefined) return false;
   if (evidence?.toolCalls || evidence?.commands || evidence?.filesChanged?.length || evidence?.outward?.length) return false;

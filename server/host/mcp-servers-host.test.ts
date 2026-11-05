@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 
 import type { AppConfig } from "../config.ts";
+import { mcpServerConfigHash } from "../mcp-app-catalog.ts";
 import { claimedNotice, createMcpServersHost, startCheckTimeout } from "./mcp-servers-host.ts";
 
 const dirs: string[] = [];
@@ -128,6 +129,7 @@ it("a restart, or turning a server off and on, shows in what the next turn start
   host.health.changed("notes");
   const restarted = JSON.stringify(host.mounted(PAUL).notes);
   expect(restarted).not.toBe(fresh);
+  expect(mcpServerConfigHash(JSON.parse(restarted)), "still the server the apps catalog learned").toBe(mcpServerConfigHash(JSON.parse(fresh)));
 
   const entry = cfg.mcpServers!.notes as { enabled: boolean };
   entry.enabled = false;
