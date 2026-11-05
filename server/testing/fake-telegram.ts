@@ -65,7 +65,7 @@ export async function startFakeTelegram(bots: Record<string, string>): Promise<F
     push(token, chatId, text, extra = {}) {
       const update_id = nextUpdate++;
       const queue = queues.get(token) ?? [];
-      queue.push({ update_id, message: { message_id: update_id, text, chat: { id: chatId, type: extra.type ?? "private" }, from: { first_name: extra.name ?? "Azad" } } });
+      queue.push({ update_id, message: { message_id: update_id, text, chat: { id: chatId, type: extra.type ?? "private" }, from: { first_name: extra.name ?? "Ada" } } });
       queues.set(token, queue);
       return update_id;
     },

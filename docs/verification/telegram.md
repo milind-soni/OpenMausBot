@@ -52,7 +52,7 @@ pointed at the loopback stand-in (the launcher forwards only a
 - A good token shows **Connected as @scout_bot**; neither `telegram.json` nor
   `GET /api/bots/<id>/telegram` carries the token.
 - **Link your Telegram** shows the `t.me` link with the code and waits; a
-  `/start <code>` from a chat links it, the card shows **Linked: Azad**, and the
+  `/start <code>` from a chat links it, the card shows **Linked: Ada**, and the
   chat is told it is connected.
 - A message from the linked chat gets the bot's reply on Telegram, in a thread
   titled Telegram.

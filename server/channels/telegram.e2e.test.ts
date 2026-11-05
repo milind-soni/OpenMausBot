@@ -42,9 +42,9 @@ it("connects a token per bot, links the person's chat, and answers it on Telegra
   const link = await api(`/api/bots/${scout.id}/telegram/link`, {});
   expect(link.url).toBe(`https://t.me/scout_bot?start=${link.code}`);
   expect(link.code).toMatch(/^\d{6}$/);
-  fake.push(TOKEN_A, ME, `/start ${link.code}`, { name: "Azad" });
+  fake.push(TOKEN_A, ME, `/start ${link.code}`, { name: "Ada" });
   await expect.poll(() => fake!.sent.map((entry) => entry.text), { timeout: 20_000, interval: 250 }).toEqual(["You're connected to Scout. Message me here any time."]);
-  expect(await api(`/api/bots/${scout.id}/telegram`, undefined, "GET")).toMatchObject({ connected: true, chats: [{ id: String(ME), name: "Azad" }] });
+  expect(await api(`/api/bots/${scout.id}/telegram`, undefined, "GET")).toMatchObject({ connected: true, chats: [{ id: String(ME), name: "Ada" }] });
 
   fake.push(TOKEN_A, ME, "What does my week look like?");
   await expect.poll(() => fake!.sent.map((entry) => entry.text), { timeout: 30_000, interval: 250 })

@@ -62,8 +62,8 @@ try {
   await card.getByText("Waiting for you to tap Start…", { exact: true }).waitFor();
   await page.screenshot({ path: join(output, "4-link.png"), fullPage: true });
 
-  fake.push(TOKEN, ME, `/start ${code}`, { name: "Azad" });
-  await card.getByText("Linked: Azad", { exact: true }).waitFor({ timeout: 20_000 });
+  fake.push(TOKEN, ME, `/start ${code}`, { name: "Ada" });
+  await card.getByText("Linked: Ada", { exact: true }).waitFor({ timeout: 20_000 });
   assert.deepEqual(fake.sent.map((entry) => entry.text), ["You're connected to Scout. Message me here any time."]);
   await page.screenshot({ path: join(output, "5-linked.png"), fullPage: true });
 

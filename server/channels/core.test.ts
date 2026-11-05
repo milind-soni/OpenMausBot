@@ -24,7 +24,7 @@ let channel: ReturnType<typeof createChannel>;
 
 const msg = (id: string, role: "user" | "bot", text: string, extra: Partial<Message> = {}): Message =>
   ({ id, role, kind: "text", text, at: 0, ...extra }) as Message;
-const inbound = (id: string, text: string, extra: Partial<InboundMessage> = {}): InboundMessage => ({ id, chatId: CHAT, text, private: true, name: "Azad", ...extra });
+const inbound = (id: string, text: string, extra: Partial<InboundMessage> = {}): InboundMessage => ({ id, chatId: CHAT, text, private: true, name: "Ada", ...extra });
 
 async function link(botId = A, chatId = CHAT): Promise<string> {
   const { code } = channel.startLink(botId);
@@ -84,7 +84,7 @@ describe("linking", () => {
     await link();
     expect(sent).toEqual([{ token: TOKEN_A, chatId: CHAT, text: "You're connected to Scout. Message me here any time." }]);
     expect(store.bot(A).allowed).toEqual([CHAT]);
-    expect(store.bot(A).chats[CHAT]?.name).toBe("Azad");
+    expect(store.bot(A).chats[CHAT]?.name).toBe("Ada");
     expect(store.bot(A).link).toBeUndefined();
     await channel.handleInbound(A, inbound("m1", "hello"));
     expect(delivered).toEqual([{ botId: A, threadId: "bot-a-thread-1", text: "hello", sendId: "channel_m1" }]);

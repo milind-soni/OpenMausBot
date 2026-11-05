@@ -22,12 +22,12 @@ describe("the Bot API client", () => {
   });
 
   it("reads updates from an offset, parses messages and skips what carries none", async () => {
-    const first = fake.push(TOKEN, 42, "hello", { name: "Azad" });
+    const first = fake.push(TOKEN, 42, "hello", { name: "Ada" });
     fake.push(TOKEN, -100, "group chatter", { type: "supergroup" });
     const all = await api.getUpdates(TOKEN, undefined);
     expect(all.ok && all.updates.map(inboundOf)).toEqual([
-      { id: `tg_${first}`, chatId: "42", name: "Azad", text: "hello", private: true },
-      { id: `tg_${first + 1}`, chatId: "-100", name: "Azad", text: "group chatter", private: false },
+      { id: `tg_${first}`, chatId: "42", name: "Ada", text: "hello", private: true },
+      { id: `tg_${first + 1}`, chatId: "-100", name: "Ada", text: "group chatter", private: false },
     ]);
     const later = await api.getUpdates(TOKEN, first + 1);
     expect(later.ok && later.updates.map((update) => update.update_id)).toEqual([first + 1]);

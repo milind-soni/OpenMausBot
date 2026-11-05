@@ -69,10 +69,10 @@ describe("the Telegram card", () => {
     await click("telegram-copy");
     expect(fixture.copied).toEqual(["https://t.me/scout_bot?start=123456"]);
 
-    fixture.view = { available: true, connected: true, username: "scout_bot", chats: [{ id: "4242", name: "Azad" }] };
+    fixture.view = { available: true, connected: true, username: "scout_bot", chats: [{ id: "4242", name: "Ada" }] };
     await new Promise((resolve) => setTimeout(resolve, 2_100));
     await settle();
-    expect(find("telegram-chats")!.textContent).toBe("Linked: Azad");
+    expect(find("telegram-chats")!.textContent).toBe("Linked: Ada");
     expect(find("telegram-link")).toBeNull();
     expect(find("telegram-start-link")!.textContent).toBe("Link another Telegram");
 
