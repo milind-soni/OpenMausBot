@@ -45,7 +45,7 @@ export interface ProxyOptions {
    * it synchronously on revoke; the returned disposer is called exactly once. */
   connected?: (deviceId: string, disconnect: () => void) => () => void;
   headersTimeoutMs?: number;
-  moves?: Pick<MoveGrants, "ask" | "state" | "live" | "end">;
+  moves?: Pick<MoveGrants, "ask" | "state" | "live" | "end" | "withdraw">;
   /** Hands the ask to the desktop app; false or absent when no app can ask the owner. */
   askOwner?(ask: { deviceId: string; deviceName: string; bots: number }): boolean;
 }
@@ -237,7 +237,7 @@ const moveAnswer = (move: MoveState) => move.state === "pending" || move.state =
   ? { v: 1, state: move.state, expiresAt: move.expiresAt }
   : { v: 1, state: move.state };
 
-/** Sidecar-owned, like the endpoint list: the grant lives here and never reaches the harness. */
+/** The grant lives here and never reaches the harness. */
 function answerMove(
   options: ProxyOptions,
   req: IncomingMessage,
@@ -262,15 +262,22 @@ function answerMove(
       }
       if (!moves || !deviceId) return noApp();
       const { state, created } = moves.ask(deviceId, bots);
-      if (created && !options.askOwner?.({ deviceId, deviceName: device.name ?? "", bots })) {
-        moves.end(deviceId);
-        return noApp();
+      if (created) {
+        let asked = false;
+        try {
+          asked = options.askOwner?.({ deviceId, deviceName: device.name ?? "", bots }) === true;
+        } finally {
+          if (!asked) moves.withdraw(deviceId);
+        }
+        if (!asked) return noApp();
       }
-      return sendJson(res, state.state === "granted" ? 200 : 202, moveAnswer(state));
+      if (state.state === "none" || state.state === "expired") {
+        return sendJson(res, 429, { error: "This computer was asked a moment ago. Ask again in a few minutes." });
+      }
+      return sendJson(res, state.state === "pending" ? 202 : 200, moveAnswer(state));
     },
     () => sendJson(res, 400, INVALID_MOVE_ASK),
   ).catch((error: unknown) => {
-    if (deviceId) moves?.end(deviceId);
     console.error("companion: the move ask failed", error);
     sendJson(res, 500, { error: "could not ask this computer" });
   });

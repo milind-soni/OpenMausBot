@@ -26,11 +26,41 @@ describe("move grants", () => {
     expect(grants.ask("phone-1", 4)).toEqual({ created: false, state: { state: "granted", expiresAt: 1_000 + MOVE_GRANT_TTL_MS } });
   });
 
-  it("Don't Allow is final for that ask; the phone may ask again later", () => {
+  it("Don't Allow is final for that ask; the phone may ask again only after 5 minutes", () => {
     grants.ask("phone-1", 4);
+    now += 60_000;
     grants.refuse("phone-1");
     expect(grants.state("phone-1")).toEqual({ state: "refused" });
     expect(grants.allow("phone-1")).toBe(false);
+    expect(grants.ask("phone-1", 4)).toEqual({ created: false, state: { state: "refused" } });
+    now += MOVE_ASK_TTL_MS - 1;
+    expect(grants.ask("phone-1", 4).created).toBe(false);
+    now += 1;
+    expect(grants.ask("phone-1", 4).created).toBe(true);
+  });
+
+  it("a revoked grant also keeps the phone from asking again for 5 minutes", () => {
+    grants.ask("phone-1", 4);
+    grants.allow("phone-1");
+    now += 20 * 60_000;
+    grants.refuse("phone-1");
+    expect(grants.ask("phone-1", 4).created).toBe(false);
+    now += MOVE_ASK_TTL_MS;
+    expect(grants.ask("phone-1", 4).created).toBe(true);
+  });
+
+  it("the phone ending its own ask does not let it ask again sooner", () => {
+    grants.ask("phone-1", 4);
+    grants.end("phone-1");
+    expect(grants.ask("phone-1", 4)).toEqual({ created: false, state: { state: "none" } });
+    now += MOVE_ASK_TTL_MS;
+    expect(grants.ask("phone-1", 4).created).toBe(true);
+  });
+
+  it("an ask the owner never saw is withdrawn without holding back the next", () => {
+    grants.ask("phone-1", 4);
+    grants.withdraw("phone-1");
+    expect(grants.state("phone-1")).toEqual({ state: "none" });
     expect(grants.ask("phone-1", 4).created).toBe(true);
   });
 

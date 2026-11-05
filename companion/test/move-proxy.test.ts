@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { MOVE_GRANT_TTL_MS, MoveGrants } from "../src/move-grants.ts";
+import { MOVE_ASK_TTL_MS, MOVE_GRANT_TTL_MS, MoveGrants } from "../src/move-grants.ts";
 import { companionIdentityHeaders, createProxyHandler, proxyHeadersTimeoutMs, type ProxyOptions } from "../src/proxy.ts";
 
 const listen = (server: Server) => new Promise<number>((resolve) => {
@@ -53,7 +53,7 @@ async function companion(overrides: Partial<ProxyOptions> = {}) {
     const res = await fetch(`http://127.0.0.1:${port}${path}`, {
       method,
       headers: { authorization: "Bearer phone-token", ...headers, ...(body === undefined ? {} : { "content-type": "application/json" }) },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined || typeof body === "string" ? body : JSON.stringify(body),
       signal: AbortSignal.timeout(3000),
     });
     return { status: res.status, text: await res.text() };
@@ -97,6 +97,9 @@ describe("a phone moving its bots in", () => {
       expect(res.status).toBe(400);
       expect(JSON.parse(res.text)).toEqual({ error: "send { v: 1, bots }" });
     }
+    const garbled = await phone("POST", "/api/companion/move", "{ v: 1, bots: 4");
+    expect(garbled.status).toBe(400);
+    expect(JSON.parse(garbled.text)).toEqual({ error: "send { v: 1, bots }" });
     expect(askOwner).not.toHaveBeenCalled();
 
     const headless = await companion({ askOwner: undefined });
@@ -198,6 +201,71 @@ describe("a phone moving its bots in", () => {
     const next = await phone("POST", "/api/cloud-send/memory", { v: 1 });
     expect(next.status).toBe(404);
     expect(next.text).toBe(noRoute("POST", "/api/cloud-send/memory"));
+  });
+
+  it("ends an ask no app could show, and lets the phone ask again at once", async () => {
+    const { phone, askOwner } = await companion();
+    askOwner.mockReturnValueOnce(false);
+    const refused = await phone("POST", "/api/companion/move", { v: 1, bots: 4 });
+    expect(refused.status).toBe(409);
+    expect(JSON.parse(refused.text)).toEqual({ error: "Open OpenMausBot on this computer to move bots here." });
+    expect(JSON.parse((await phone("GET", "/api/companion/move")).text)).toEqual({ v: 1, state: "none" });
+    expect((await phone("POST", "/api/companion/move", { v: 1, bots: 4 })).status).toBe(202);
+    expect(askOwner).toHaveBeenCalledTimes(2);
+  });
+
+  it("ends an ask the app failed to take, and answers 500", async () => {
+    const { phone, askOwner } = await companion();
+    askOwner.mockImplementationOnce(() => { throw new Error("port closed"); });
+    const failed = await phone("POST", "/api/companion/move", { v: 1, bots: 4 });
+    expect(failed.status).toBe(500);
+    expect(JSON.parse(failed.text)).toEqual({ error: "could not ask this computer" });
+    expect(JSON.parse((await phone("GET", "/api/companion/move")).text)).toEqual({ v: 1, state: "none" });
+  });
+
+  it("keeps the owner's No: asking again at once raises no dialog", async () => {
+    const { phone, askOwner, moves } = await companion();
+    await phone("POST", "/api/companion/move", { v: 1, bots: 4 });
+    moves.refuse("phone-1");
+    const again = await phone("POST", "/api/companion/move", { v: 1, bots: 4 });
+    expect(again.status).toBe(200);
+    expect(JSON.parse(again.text)).toEqual({ v: 1, state: "refused" });
+    expect(askOwner).toHaveBeenCalledTimes(1);
+  });
+
+  it("raises at most one dialog per 5 minutes however often the phone asks and cancels", async () => {
+    const { phone, askOwner, advance } = await companion();
+    const answers: number[] = [];
+    for (let round = 0; round < 3; round++) {
+      answers.push((await phone("POST", "/api/companion/move", { v: 1, bots: 4 })).status);
+      expect((await phone("DELETE", "/api/companion/move")).status).toBe(200);
+    }
+    expect(answers).toEqual([202, 429, 429]);
+    expect(askOwner).toHaveBeenCalledTimes(1);
+    const waiting = await phone("POST", "/api/companion/move", { v: 1, bots: 4 });
+    expect(JSON.parse(waiting.text)).toEqual({ error: "This computer was asked a moment ago. Ask again in a few minutes." });
+
+    advance(MOVE_ASK_TTL_MS);
+    expect((await phone("POST", "/api/companion/move", { v: 1, bots: 4 })).status).toBe(202);
+    expect(askOwner).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives the long deadline to a move route under the grant and to nothing else", async () => {
+    const { phone, moves } = await companion();
+    await phone("POST", "/api/companion/move", { v: 1, bots: 4 });
+    moves.allow("phone-1");
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    const deadlines = async (method: string, path: string, body?: unknown) => {
+      timers.mockClear();
+      await phone(method, path, body);
+      return timers.mock.calls.map(([, ms]) => ms).filter((ms) => ms === 30_000 || ms === 105_000);
+    };
+    try {
+      expect(await deadlines("POST", "/api/cloud-send/chats", { v: 1 })).toEqual([105_000]);
+      expect(await deadlines("GET", "/api/bots")).toEqual([30_000]);
+    } finally {
+      timers.mockRestore();
+    }
   });
 
   it("gives a request the grant opened the long deadline a large upload needs", () => {

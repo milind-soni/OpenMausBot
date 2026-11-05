@@ -15,17 +15,23 @@ type Entry = { kind: "pending" | "granted" | "refused"; bots: number; expiresAt:
 export class MoveGrants {
   private readonly entries = new Map<string, Entry>();
 
+  /** One dialog per device per window, so a phone cannot wear the owner down
+   * by asking again after a No or by asking and ending in a loop. */
+  private readonly quietUntil = new Map<string, number>();
+
   private readonly now: () => number;
 
   constructor(now: () => number = Date.now) {
     this.now = now;
   }
 
-  /** created: false while an ask already waits or a grant is live, so no second dialog is raised. */
+  /** created: false while an ask already waits, a grant is live, or the device asked or was refused within MOVE_ASK_TTL_MS. */
   ask(deviceId: string, bots: number): { state: MoveState; created: boolean } {
     const current = this.state(deviceId);
     if (current.state === "pending" || current.state === "granted") return { state: current, created: false };
+    if ((this.quietUntil.get(deviceId) ?? 0) > this.now()) return { state: current, created: false };
     this.entries.set(deviceId, { kind: "pending", bots, expiresAt: this.now() + MOVE_ASK_TTL_MS });
+    this.quietUntil.set(deviceId, this.now() + MOVE_ASK_TTL_MS);
     return { state: this.state(deviceId), created: true };
   }
 
@@ -40,11 +46,18 @@ export class MoveGrants {
   /** The owner's no, a revoke, or unpairing: the ask or grant ends and reads "refused". */
   refuse(deviceId: string): void {
     this.entries.set(deviceId, { kind: "refused", bots: 0, expiresAt: 0 });
+    this.quietUntil.set(deviceId, this.now() + MOVE_ASK_TTL_MS);
   }
 
-  /** The phone's own end: reads "none". */
+  /** The phone's own end: reads "none", and the device still waits out its window before asking again. */
   end(deviceId: string): void {
     this.entries.delete(deviceId);
+  }
+
+  /** An ask that never reached the owner holds back nothing. */
+  withdraw(deviceId: string): void {
+    this.entries.delete(deviceId);
+    this.quietUntil.delete(deviceId);
   }
 
   state(deviceId: string): MoveState {

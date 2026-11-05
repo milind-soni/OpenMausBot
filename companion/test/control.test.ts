@@ -160,10 +160,13 @@ describe("origins the control server will change state for", () => {
     expect(await ask("POST", "/devices/nobody/move")).toMatchObject({ status: 404, body: { error: "no such device" } });
     expect((await ask("DELETE", "/devices/nobody/move")).status).toBe(404);
 
-    moves.ask(id, 4);
-    moves.allow(id);
-    expect((await ask("DELETE", `/devices/${id}`)).status).toBe(200);
-    expect(moves.live(id)).toBe(false);
+    const second = devices.redeem(devices.openPairing().code, "Second moving phone");
+    if ("error" in second) throw new Error(second.error);
+    moves.ask(second.device.id, 4);
+    moves.allow(second.device.id);
+    expect(moves.live(second.device.id)).toBe(true);
+    expect((await ask("DELETE", `/devices/${second.device.id}`)).status).toBe(200);
+    expect(moves.live(second.device.id)).toBe(false);
   });
 
   it("reports a permission write failure without dropping the control server", async () => {
