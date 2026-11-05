@@ -1,6 +1,6 @@
 // POST /api/phone-move/key: a key a phone ticked to bring under its move grant, sealed for this computer. Only the
 // phone-secret bridge opens it, and only after the grant, the phone and the slot are checked; the value is never echoed or logged.
-import { credentialIsConfigured, isCredentialTargetId, type CredentialConfig } from "../../shared/credential-request.ts";
+import { credentialIsConfigured, isCredentialTargetId, isProviderCredentialTarget, type CredentialConfig } from "../../shared/credential-request.ts";
 import { phoneSecretEnvelopeSchema } from "../host/secret-cards.ts";
 import { PhoneSecretError, type PhoneSecretBridge } from "../phone-secret.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -12,6 +12,7 @@ export interface PhoneMoveKeyDeps {
   moving(auth: RequestAuth): string | null;
   keys: Pick<PhoneSecretBridge, "provideMoveKey">;
   config(): CredentialConfig;
+  providerKeysRefused(): boolean;
 }
 
 export function createPhoneMoveKeyRoutes(deps: PhoneMoveKeyDeps): RouteHandler {
@@ -23,7 +24,9 @@ export function createPhoneMoveKeyRoutes(deps: PhoneMoveKeyDeps): RouteHandler {
     if (!parsed.success) return json(res, 400, { error: "The encrypted key is invalid" });
     const envelope = parsed.data;
     if (envelope.deviceId !== phone) return json(res, 403, { error: "This encrypted key belongs to another phone." });
-    if (!isCredentialTargetId(envelope.target) || envelope.target === "onePasswordToken") return json(res, 400, { error: "Add this key on the computer." });
+    if (!isCredentialTargetId(envelope.target) || envelope.target === "onePasswordToken" || (deps.providerKeysRefused() && isProviderCredentialTarget(envelope.target))) {
+      return json(res, 400, { error: "Add this key on the computer." });
+    }
     // A moved key never replaces the computer's own, and is not even opened then.
     if (credentialIsConfigured(deps.config(), envelope.target)) return json(res, 200, { v: 1, saved: false, kept: true });
     try {

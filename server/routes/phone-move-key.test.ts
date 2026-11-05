@@ -23,7 +23,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-async function fixture(config: CredentialConfig = {}) {
+async function fixture(config: CredentialConfig = {}, providerKeysRefused = false) {
   const material = await keyMaterial();
   let bridge!: PhoneSecretBridge;
   const sent: Array<{ value: string }> = [];
@@ -34,7 +34,7 @@ async function fixture(config: CredentialConfig = {}) {
   }, 200);
   bridge.receive(material.message);
   const opened = vi.spyOn(bridge, "provideMoveKey");
-  const handler = createPhoneMoveKeyRoutes({ moving, keys: bridge, config: () => config });
+  const handler = createPhoneMoveKeyRoutes({ moving, keys: bridge, config: () => config, providerKeysRefused: () => providerKeysRefused });
   const fields = (over: Partial<{ deviceId: string; target: string }> = {}) =>
     ({ version: 1 as const, keyId: material.keyId, deviceId: "phone-1", target: "anthropicApiKey", requestKey: "move-key-1", ...over });
   const sealed = (over: Partial<{ deviceId: string; target: string }> = {}) => seal(fields(over), phoneMoveKeyAAD(fields(over)), material.publicKey, KEY);
@@ -98,6 +98,17 @@ describe("POST /api/phone-move/key", () => {
     }
     expect(opened).not.toHaveBeenCalled();
     expect(sent).toEqual([]);
+  });
+
+  it("refuses an AI provider key on a computer whose models are company-managed, before opening it", async () => {
+    const { post, sealed, sent, opened } = await fixture({}, true);
+    for (const target of ["anthropicApiKey", "openaiApiKey"]) {
+      expect(await post(await sealed({ target }))).toEqual({ status: 400, body: { error: "Add this key on the computer." } });
+    }
+    expect(opened).not.toHaveBeenCalled();
+    expect(sent).toEqual([]);
+    expect(await post(await sealed({ target: "ttsKey" }))).toEqual({ status: 200, body: { v: 1, saved: true } });
+    expect(sent.map((message) => message.value)).toEqual([KEY]);
   });
 
   it("refuses an envelope whose target was swapped in transit", async () => {
