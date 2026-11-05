@@ -38,7 +38,7 @@ If your computer is often off when a routine is due, open the routine's **Advanc
 
 ### When the AI's usage limit stops a run
 
-If a bot's AI reaches its usage limit during a run and the limit resets within 12 hours, OpenMausBot starts that run once more a minute after the reset, and tells you so. For a repeating routine you can have it wait for its next scheduled run instead: set `"recurringRoutinesSkipLimitReplay": true` under `features` in `~/.openmausbot/config.json`. The stopped run then fails with the usual usage-limit notice. Runs you start with **Run now**, one-time routines and routines that run when a limit resets still start again at the reset, and a bot with a backup AI still switches to it at once.
+If a bot's AI reaches its usage limit during a run and the limit resets within 12 hours, OpenMausBot starts that run once more a minute after the reset, and tells you so. A repeating routine's scheduled run is the exception when the routine's next scheduled run comes no later than one of its intervals after the reset (an hour for an hourly routine, a day for a daily one): that next run does the same work, so the stopped run fails with the usual usage-limit notice instead. Runs you start with **Run now**, one-time routines and routines that run when a limit resets still start again at the reset, and a bot with a backup AI still switches to it at once.
 
 ### Clear a folder's unread dots
 
