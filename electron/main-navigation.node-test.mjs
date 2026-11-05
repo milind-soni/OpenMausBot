@@ -7,7 +7,8 @@ test("a navigation retires the launch recovery, except the recovery's own", asyn
   const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
   const start = source.indexOf("function navigateMainWindow(");
   assert.ok(start > 0);
-  const end = source.indexOf("\n}\n", start) + 3;
+  const close = /\r?\n\}\r?\n/.exec(source.slice(start)); // a Windows checkout ends lines with \r\n
+  const end = start + close.index + close[0].length;
   const calls = [];
   const context = vm.createContext({
     homeWindow: { cancel: () => calls.push("cancel") },
