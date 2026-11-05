@@ -262,15 +262,19 @@ export const WORDS = Object.freeze({
 
 const ALIASES = Object.freeze({ pt: "pt-br", "zh-hant": "zh-tw", "zh-hk": "zh-tw", "zh-mo": "zh-tw" });
 
-/** The words for `locale` (a language tag such as "de" or "pt-BR"), found the way the page finds its language; English
- * for any other. */
-export function wordsFor(locale) {
+/** The words in `table` for `locale` (a language tag such as "de" or "pt-BR"), found the way the page finds its
+ * language; English for any other. */
+export function wordsIn(table, locale) {
   for (let candidate = typeof locale === "string" ? locale.toLowerCase() : ""; candidate;) {
     const code = ALIASES[candidate] ?? candidate;
-    if (Object.hasOwn(WORDS, code)) return { ...WORDS.en, ...WORDS[code] };
+    if (Object.hasOwn(table, code)) return { ...table.en, ...table[code] };
     const cut = candidate.lastIndexOf("-");
     if (cut < 0) break;
     candidate = candidate.slice(0, cut);
   }
-  return WORDS.en;
+  return table.en;
+}
+
+export function wordsFor(locale) {
+  return wordsIn(WORDS, locale);
 }

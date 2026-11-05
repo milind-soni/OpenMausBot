@@ -2,9 +2,11 @@ export const MOVE_ASK_TTL_MS = 300_000;
 export const MOVE_GRANT_TTL_MS = 1_800_000;
 export const MOVE_MAX_BOTS = 200;
 
+type PendingMove = { state: "pending"; bots: number; expiresAt: number };
+
 export type MoveState =
   | { state: "none" }
-  | { state: "pending"; bots: number; expiresAt: number }
+  | PendingMove
   | { state: "granted"; expiresAt: number }
   | { state: "refused" }
   | { state: "expired" };
@@ -26,13 +28,14 @@ export class MoveGrants {
   }
 
   /** created: false while an ask already waits, a grant is live, or the device asked or was refused within MOVE_ASK_TTL_MS. */
-  ask(deviceId: string, bots: number): { state: MoveState; created: boolean } {
+  ask(deviceId: string, bots: number): { state: MoveState; created: false } | { state: PendingMove; created: true } {
     const current = this.state(deviceId);
     if (current.state === "pending" || current.state === "granted") return { state: current, created: false };
     if ((this.quietUntil.get(deviceId) ?? 0) > this.now()) return { state: current, created: false };
-    this.entries.set(deviceId, { kind: "pending", bots, expiresAt: this.now() + MOVE_ASK_TTL_MS });
-    this.quietUntil.set(deviceId, this.now() + MOVE_ASK_TTL_MS);
-    return { state: this.state(deviceId), created: true };
+    const expiresAt = this.now() + MOVE_ASK_TTL_MS;
+    this.entries.set(deviceId, { kind: "pending", bots, expiresAt });
+    this.quietUntil.set(deviceId, expiresAt);
+    return { state: { state: "pending", bots, expiresAt }, created: true };
   }
 
   /** The owner's yes: only an unexpired pending ask becomes a grant. */

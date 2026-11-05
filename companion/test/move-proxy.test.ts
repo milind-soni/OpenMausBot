@@ -22,7 +22,7 @@ const noRoute = (method: string, path: string) => JSON.stringify({ error: `no ro
 async function companion(overrides: Partial<ProxyOptions> = {}) {
   let clock = 1_000;
   const moves = new MoveGrants(() => clock);
-  const askOwner = vi.fn((_ask: { deviceId: string; deviceName: string; bots: number }) => true);
+  const askOwner = vi.fn((_ask: { deviceId: string; deviceName: string; bots: number; expiresAt: number }) => true);
   const seen: Array<{ method: string; path: string; headers: IncomingMessage["headers"] }> = [];
   let answer = (res: ServerResponse) => {
     res.writeHead(200, { "content-type": "application/json" });
@@ -73,8 +73,8 @@ describe("a phone moving its bots in", () => {
     const { phone, askOwner, seen, moves } = await companion();
     const first = await phone("POST", "/api/companion/move", { v: 1, bots: 4 });
     expect(first.status).toBe(202);
-    expect(JSON.parse(first.text)).toEqual({ v: 1, state: "pending", expiresAt: expect.any(Number) });
-    expect(askOwner.mock.calls).toEqual([[{ deviceId: "phone-1", deviceName: "Omkar's iPhone", bots: 4 }]]);
+    expect(JSON.parse(first.text)).toEqual({ v: 1, state: "pending", expiresAt: 1_000 + MOVE_ASK_TTL_MS });
+    expect(askOwner.mock.calls).toEqual([[{ deviceId: "phone-1", deviceName: "Omkar's iPhone", bots: 4, expiresAt: 1_000 + MOVE_ASK_TTL_MS }]]);
 
     const again = await phone("POST", "/api/companion/move", { v: 1, bots: 4 });
     expect(again.status).toBe(202);

@@ -47,7 +47,7 @@ export interface ProxyOptions {
   headersTimeoutMs?: number;
   moves?: Pick<MoveGrants, "ask" | "state" | "live" | "end" | "withdraw">;
   /** Hands the ask to the desktop app; false or absent when no app can ask the owner. */
-  askOwner?(ask: { deviceId: string; deviceName: string; bots: number }): boolean;
+  askOwner?(ask: { deviceId: string; deviceName: string; bots: number; expiresAt: number }): boolean;
 }
 
 export interface CompanionEndpointSnapshot {
@@ -265,7 +265,7 @@ function answerMove(
       if (created) {
         let asked = false;
         try {
-          asked = options.askOwner?.({ deviceId, deviceName: device.name ?? "", bots }) === true;
+          asked = options.askOwner?.({ deviceId, deviceName: device.name ?? "", bots, expiresAt: state.expiresAt }) === true;
         } finally {
           if (!asked) moves.withdraw(deviceId);
         }

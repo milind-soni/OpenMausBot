@@ -9,6 +9,9 @@ import {
   companionOriginHealth,
   createCompanionOriginEndpoint,
 } from "./companion-origin-gateway.mjs";
+import { decodeMoveAsk } from "./move-in-ask.mjs";
+
+export { createMoveInAsks } from "./move-in-ask.mjs";
 
 // Must stay clear of the harness's 8799 and its webhook receiver's 8800.
 const CONTROL_PORT = 8811;
@@ -21,6 +24,7 @@ let lastError = null;
 let advertisedHostedUrl = null;
 let originTarget = null;
 let lifecycleListener = () => {};
+let moveAskListener = () => {};
 const expectedStops = new WeakSet();
 
 const entryPoint = (resourcesPath) =>
@@ -110,6 +114,10 @@ export function setCompanionLifecycleListener(listener = () => {}) {
   lifecycleListener = listener;
 }
 
+export function setCompanionMoveAskListener(listener = () => {}) {
+  moveAskListener = listener;
+}
+
 // Lifecycle transitions run one at a time: every guard below is a check followed by an await.
 let transition = Promise.resolve();
 
@@ -195,6 +203,10 @@ async function start({ resourcesPath, harnessPort, mutationToken, hostedUrl = nu
       log?.("companion authorization could not be initialized");
       child.kill();
     }
+  });
+  child.on("message", (message) => {
+    const ask = decodeMoveAsk(message);
+    if (ask) moveAskListener(ask);
   });
   child.stdout?.on("data", (d) => log?.(`[companion] ${String(d).trimEnd()}`));
   child.stderr?.on("data", (d) => log?.(`[companion err] ${String(d).trimEnd()}`));
@@ -379,6 +391,11 @@ export async function companionCloudDesktopAccess(deviceId, allowed) {
   if (!/^[\w-]{1,64}$/.test(String(deviceId ?? ""))) return companionState();
   await control(allowed ? "POST" : "DELETE", `/devices/${deviceId}/cloud-desktop`).catch(() => {});
   return companionState();
+}
+
+export async function companionMoveAccess(deviceId, allowed) {
+  if (!proc || !/^[\w-]{1,128}$/.test(String(deviceId ?? ""))) return;
+  await control(allowed ? "POST" : "DELETE", `/devices/${deviceId}/move`);
 }
 
 /** Browser access is its own per-device grant, never inherited from VM access. */
