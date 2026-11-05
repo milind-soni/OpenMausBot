@@ -377,7 +377,7 @@ describe("Antigravity validation shutdown", () => {
 
 describe("Antigravity sign-in on a boxed host", () => {
   // Google's runtime waits for the OAuth redirect on 127.0.0.1 and "Send redirect" delivers it from the server,
-  // so a sign-in runtime in the box's own network namespace refused it with ECONNREFUSED on My Cloud.
+  // so the sign-in runtime must share the server's loopback instead of the box's own network namespace.
   it("runs the sign-in runtime on the host network, still as a bot spawn", async () => {
     fakeChild();
     const controller = new AntigravityAuthController();
