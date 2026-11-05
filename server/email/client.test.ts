@@ -115,7 +115,7 @@ describe("an attachment's file", () => {
     const first = saveAttachment(folder, "note.pdf", Buffer.from("one"));
     const second = saveAttachment(folder, "note.pdf", Buffer.from("two"));
     expect([readFileSync(first, "utf8"), readFileSync(second, "utf8")]).toEqual(["one", "two"]);
-    expect(statSync(first).mode & 0o077).toBe(0);
+    if (process.platform !== "win32") expect(statSync(first).mode & 0o077).toBe(0);
     const secret = join(root, "config.json");
     execFileSync("sh", ["-c", `printf keep > '${secret}'`]);
     symlinkSync(secret, join(folder, "planted.pdf"));

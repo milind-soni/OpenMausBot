@@ -121,7 +121,8 @@ describe("connecting a mailbox", () => {
     await email.connect({ address: "me@shop.example", password: PASSWORD });
     for (const name of readdirSync(dataDir)) {
       expect(readFileSync(join(dataDir, name)).toString("latin1"), name).not.toContain(PASSWORD);
-      expect(statSync(join(dataDir, name)).mode & 0o077, name).toBe(0);
+      // Windows has no POSIX mode bits; its files are private to the user by their folder.
+      if (process.platform !== "win32") expect(statSync(join(dataDir, name)).mode & 0o077, name).toBe(0);
     }
     expect(service(() => ({ messages: 1 }), undefined, { dataDir }).email.store.get("me@shop.example")?.password).toBe(PASSWORD);
   });
