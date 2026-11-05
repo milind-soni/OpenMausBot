@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer } from "../scripts/control-omb.ts";
 import { fixtureApi } from "../scripts/testing/preview-fixture.ts";
+import { hostTimeout } from "./testing/host-timeout.ts";
 import { openSse } from "./testing/sse.ts";
 
 it("Mistral keys persist, rotate, clear and reach real HTTP turns without leaking into public state", async () => {
@@ -91,4 +92,4 @@ it("Mistral keys persist, rotate, clear and reach real HTTP turns without leakin
     await fixture.close();
     await new Promise<void>((resolve) => provider.close(() => resolve()));
   }
-});
+}, hostTimeout(60_000));

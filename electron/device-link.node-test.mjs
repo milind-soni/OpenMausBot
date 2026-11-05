@@ -247,18 +247,28 @@ test("the link signs in like the poll, takes My Cloud's word for this computer's
   const stop = new AbortController();
   let opened = 0;
   const connects = [];
-  const running = runDeviceLink({ url: end.url, headers: { cookie: "omb_session=s", "x-omb-computer-secret": "a".repeat(64) }, signal: stop.signal, onOpen: () => opened++, openMs: 100,
+  const running = runDeviceLink({ url: end.url, headers: { cookie: "omb_session=s", "x-omb-computer-secret": "a".repeat(64) }, signal: stop.signal, onOpen: () => opened++,
     egress: { interfaces: () => ({}), resolve: async () => [{ address: SEEN_AS, family: 4 }], connect: (options) => { connects.push(options); return tcpConnect(1, "127.0.0.1"); } } });
   await until(() => end.sessions.length === 1 && opened === 1, "the link to open");
   assert.equal(end.sessions[0].headers.cookie, "omb_session=s");
   assert.equal(end.sessions[0].headers["x-omb-computer-secret"], "a".repeat(64));
-  await delay(250); // past the opening limit: a link that opened is not ended by it
   assert.deepEqual(await end.sessions[0].mux.open({ host: "home-router.test", port: 443 }), { refused: "home-network" }, "the home's own public address is home");
   assert.equal(connects.length, 0);
   stop.abort();
   assert.deepEqual(await running, { code: 1000, reason: "stopped" });
   assert.equal(linkUrl("https://omb-u-1.fly.dev", "/api/shared-computers/c/link"), "wss://omb-u-1.fly.dev/api/shared-computers/c/link");
   assert.equal(linkUrl("http://127.0.0.1:9", "/x"), "ws://127.0.0.1:9/x");
+});
+
+test("a link that opened is never ended by its opening limit", async () => {
+  class OpensAtOnce { constructor() { queueMicrotask(() => this.onopen?.()); } send() {} close() {} }
+  const stop = new AbortController();
+  let opened = 0;
+  const running = runDeviceLink({ url: "ws://127.0.0.1:9/link", WebSocket: OpensAtOnce, signal: stop.signal, openMs: 20, onOpen: () => opened++, egress: { interfaces: () => ({}) } });
+  await delay(100);
+  stop.abort();
+  assert.equal(opened, 1);
+  assert.deepEqual(await running, { code: 1000, reason: "stopped" });
 });
 
 test("a My Cloud that stops answering ends the link here within the silence limit, so nothing hangs on it", async (t) => {

@@ -515,41 +515,57 @@ describe("cancellation", () => {
     expect((await failure(db.run("SELECT 1", { ...bot, signal: early.signal }))).error.code).toBe("cancelled");
   });
 
-  it("cancels a statement whose abort landed before it dispatched", async () => {
-    let dispatched = false;
-    let delivered = 0;
+  /** A lane whose statement reaches the connection only on `dispatch()`; an interrupt before that is lost, as DuckDB's is,
+   * and one that is never delivered after it lets the statement finish half a second later. */
+  function undispatched(signal?: AbortSignal) {
+    const seen = { dispatched: false, delivered: 0 };
     let abandon: (() => void) | undefined;
-    const connection = {
+    const lane = new Lane({
       run: () => {
-        dispatched = true;
+        seen.dispatched = true;
         return new Promise<unknown>((resolve, reject) => {
           const finish = setTimeout(() => resolve("finished without an interrupt"), 500);
           abandon = () => { clearTimeout(finish); reject(new Error("INTERRUPT Error: Interrupted!")); };
         });
       },
       interrupt: () => {
-        delivered++;
+        seen.delivered++;
         abandon?.();
       },
-    };
-    const lane = new Lane(connection as never);
+    } as never);
     let parked!: () => void;
     const atWork = new Promise<void>((done) => { parked = done; });
-    let open!: () => void;
-    const gate = new Promise<void>((done) => { open = done; });
-    const controller = new AbortController();
-    const running = lane.run("SELECT 1", { signal: controller.signal, timeoutMs: 30_000 }, async (conn) => {
+    let dispatch!: () => void;
+    const gate = new Promise<void>((done) => { dispatch = done; });
+    const running = lane.run("SELECT 1", { signal, timeoutMs: 30_000 }, async (conn) => {
       parked();
       await gate;
       return conn.run("SELECT 1");
     });
-    await atWork;
+    return { seen, lane, atWork, dispatch, running };
+  }
+
+  it("cancels a statement whose abort landed before it dispatched", async () => {
+    const controller = new AbortController();
+    const statement = undispatched(controller.signal);
+    await statement.atWork;
     controller.abort();
-    open();
-    const error = await failure(running);
-    expect(dispatched).toBe(true);
+    statement.dispatch();
+    const error = await failure(statement.running);
+    expect(statement.seen.dispatched).toBe(true);
     expect(error.error.code).toBe("cancelled");
-    expect(delivered).toBeGreaterThan(1);
+    expect(statement.seen.delivered).toBeGreaterThan(1);
+  });
+
+  it("cancels a statement whose interrupt landed before it dispatched", async () => {
+    const statement = undispatched();
+    await statement.atWork;
+    statement.lane.interrupt();
+    statement.dispatch();
+    const error = await failure(statement.running);
+    expect(statement.seen.dispatched).toBe(true);
+    expect(error.error.code).toBe("cancelled");
+    expect(statement.seen.delivered).toBeGreaterThan(1);
   });
 
   it("interrupts one connection while the other keeps working, and queued statements still run", async () => {
