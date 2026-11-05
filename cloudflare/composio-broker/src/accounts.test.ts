@@ -1,14 +1,18 @@
+import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { accountToolCallRefusal, presentAccountGrant, reserveAppLink, verifyAccountGrant } from "./accounts";
+import { accountToolCallRefusal, clearRevokedAccounts, presentAccountGrant, reserveAppLink, revokeAccount, verifyAccountGrant } from "./accounts";
 import { DAY_MS, utcDay, utf8, type InstallationRow } from "./common";
-import { createSession } from "./index";
+import worker, { createSession } from "./index";
 import { adoptSharedUser } from "./sharing";
-import { accountGrant, brokerHarness, cloudGrant, type Installation } from "./test-harness";
+import { accountGrant, brokerHarness, CLOUD_GRANT_SECRET, cloudGrant, message, type Installation } from "./test-harness";
 
 let h: ReturnType<typeof brokerHarness>;
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 function harness(migrations?: number) {
   h = brokerHarness(migrations === undefined ? {} : { migrations });
@@ -20,6 +24,7 @@ const ACCOUNT = "Jx3kQ9mZ2pL7vR4tY8wB1nC6dF0hG5sA";
 const OTHER = "Pq8wE2rT6yU0iO4pA9sD3fG7hJ1kL5zX";
 const ADMIN_SECRET = "test-cloud-grant-secret-0123456789abcdef";
 const GRANT_VECTOR = "v1.acct.Jx3kQ9mZ2pL7vR4tY8wB1nC6dF0hG5sA.6f1d2c3b-4a59-4e8f-9a0b-1c2d3e4f5a6b.1800000000.P7t4nUF2_zleQuGefUILWeZiYXrkPuhnRQmgSlJo0os";
+const REVOKE_VECTOR = "v1=CxeisAj12Y9Drmez9vama1tp1sqkJ1VlKU-M4a_VVp4";
 const soon = Math.floor(Date.now() / 1000) + 3600;
 const INVALID_GRANT = { error: "This grant isn't valid. Ask MausBot for a new one.", code: "invalid_grant" };
 const GRANT_EXPIRED = { error: "Sign in to MausBot again to keep using connected apps.", code: "grant_expired" };
@@ -51,6 +56,14 @@ async function asCloud(owner: Installation) {
   expect(response.status).toBe(200);
 }
 const forwardedToolCalls = () => h.composio.calls.filter((call) => call.path.endsWith("/mcp") && call.body?.method === "tools/call").length;
+/** The Admin's revoke, signed with node:crypto apart from the Worker code it checks. */
+function revokeInit(accountId: string, ts = Math.floor(Date.now() / 1000), secret = CLOUD_GRANT_SECRET, signedFor = accountId) {
+  const signature = createHmac("sha256", secret).update(`omb-connected-apps-revoke:v1\n${ts}\n${signedFor}`).digest("base64url");
+  const headers: Record<string, string> = { "content-type": "application/json", "x-omb-revoke-timestamp": String(ts), "x-omb-revoke-signature": `v1=${signature}` };
+  return { method: "POST", body: JSON.stringify({ accountId }), headers };
+}
+const cron = (scheduledTime = Date.now()) =>
+  worker.scheduled!({ scheduledTime, cron: "23 * * * *", noRetry() {} } as never, h.env as never);
 async function connected(owner: Installation) {
   const response = await h.call(owner, "/v1/connectors/connected");
   return ((await response.json()) as { services: Record<string, { connected: boolean }> }).services;
@@ -429,5 +442,151 @@ describe("an installation ending itself", () => {
     expect((await h.call(phone, "/v1/installation", { method: "DELETE" })).status).toBe(200);
     expect((await h.call({ ...phone, token: "0".repeat(64) }, "/v1/installation", { method: "DELETE" })).status).toBe(401);
     expect((await h.fetch("/v1/installation", { method: "DELETE" })).status).toBe(401);
+  });
+});
+
+describe("a deleted MausBot account", () => {
+  it("accepts the Admin's revoke signature recipe", async () => {
+    harness(); h.env.CLOUD_GRANT_SECRET = ADMIN_SECRET;
+    expect(revokeInit(ACCOUNT, 1800000000, ADMIN_SECRET).headers["x-omb-revoke-signature"]).toBe(REVOKE_VECTOR);
+    const request = new Request("https://broker.test/v1/accounts/revoke", { method: "POST", body: JSON.stringify({ accountId: ACCOUNT }),
+      headers: { "content-type": "application/json", "x-omb-revoke-timestamp": "1800000000", "x-omb-revoke-signature": REVOKE_VECTOR } });
+    expect((await revokeAccount(request, h.env as never, h.ctx, 1_800_000_000_000)).status).toBe(202);
+  });
+
+  it("revokes an account: its phones stop at once, its queued events and share codes go, its sign-ins are deleted, and an older grant is refused", async () => {
+    harness();
+    const phone = await h.install(), cloud = await h.install(), desktop = await h.install();
+    await h.bind(phone, ACCOUNT);
+    await asCloud(cloud);
+    const gmail = h.account(h.accountOwner(ACCOUNT), "gmail");
+    const { body: trigger } = await h.createTrigger(phone, gmail);
+    expect((await h.deliver(message(trigger.triggerId, `omb_acct_${ACCOUNT}`))).status).toBe(200);
+    expect(h.queued(phone.id)).toHaveLength(1);
+    const pending = await share(phone, cloud), early = accountGrant(ACCOUNT, desktop.id, soon);
+    await share(desktop, phone);
+    const revoked = await h.fetch("/v1/accounts/revoke", revokeInit(ACCOUNT));
+    expect(revoked.status).toBe(202);
+    expect(await revoked.json()).toEqual({ revoked: true, installations: 1 });
+    await Promise.all(h.background);
+    expect((await h.call(phone, "/v1/connectors/connected")).status).toBe(401);
+    expect(h.queued(phone.id)).toEqual([]);
+    expect((await post(cloud, "/v1/installation/adopt", { code: pending })).status).toBe(404);
+    expect(h.d1.rows("SELECT * FROM user_shares")).toEqual([]);
+    expect(h.composio.calls.some(call => call.method === "DELETE" && call.path === `/connected_accounts/${gmail}` && call.query.get("revoke_on_delete") === "true")).toBe(true);
+    expect(h.composio.accounts.filter(account => account.user_id === `omb_acct_${ACCOUNT}`)).toEqual([]);
+    const late = await h.call(desktop, "/v1/installation/account", { method: "PUT", body: JSON.stringify({ grant: early }) });
+    expect(late.status).toBe(403);
+    expect(await late.json()).toMatchObject({ code: "account_revoked" });
+    expect((await h.call(desktop, "/v1/connectors/connected")).status).toBe(200);
+    const again = await h.fetch("/v1/accounts/revoke", revokeInit(ACCOUNT));   // again: harmless
+    expect(again.status).toBe(202);
+    expect(await again.json()).toEqual({ revoked: true, installations: 0 });
+  });
+
+  it("revokes every installation acting as the account's user, including a Cloud that adopted it and one that adopted from that Cloud", async () => {
+    harness();
+    const phone = await h.install(), cloud = await h.install(), desktop = await h.install(), other = await h.install();
+    await h.bind(phone, ACCOUNT);
+    await asCloud(cloud);
+    expect((await post(cloud, "/v1/installation/adopt", { code: await share(phone, cloud) })).status).toBe(200);
+    expect((await post(desktop, "/v1/installation/adopt", { code: await share(cloud, desktop) })).status).toBe(200);
+    const gmail = h.account(h.accountOwner(ACCOUNT), "gmail");
+    const { body: trigger } = await h.createTrigger(cloud, gmail);
+    expect((await h.deliver(message(trigger.triggerId, `omb_acct_${ACCOUNT}`))).status).toBe(200);
+    expect(h.queued(cloud.id)).toHaveLength(1);
+    const forOther = await share(cloud, other);
+    for (const owner of [phone, cloud, desktop]) await connected(owner);
+    const sessions = () => h.d1.rows<{ session_id: string | null }>("SELECT session_id FROM installations WHERE id IN (?, ?, ?)", phone.id, cloud.id, desktop.id);
+    expect(sessions().every((row) => row.session_id)).toBe(true);
+    const revoked = await h.fetch("/v1/accounts/revoke", revokeInit(ACCOUNT));
+    expect(await revoked.json()).toEqual({ revoked: true, installations: 3 });
+    for (const owner of [phone, cloud, desktop]) expect((await h.call(owner, "/v1/connectors/connected")).status).toBe(401);
+    expect(h.queued(cloud.id)).toEqual([]);
+    expect(h.d1.rows("SELECT * FROM trigger_bindings")).toEqual([]);
+    expect(sessions()).toEqual([{ session_id: null }, { session_id: null }, { session_id: null }]);
+    expect((await post(other, "/v1/installation/adopt", { code: forOther })).status).toBe(404);
+    expect((await h.call(other, "/v1/connectors/connected")).status).toBe(200);
+  });
+
+  it("refuses a revoke that is unsigned, stale, signed for another account or with another secret, and answers 503 without CLOUD_GRANT_SECRET", async () => {
+    harness();
+    const phone = await h.install();
+    await h.bind(phone, ACCOUNT);
+    const now = Math.floor(Date.now() / 1000);
+    const unsigned = revokeInit(ACCOUNT);
+    delete unsigned.headers["x-omb-revoke-signature"];
+    for (const init of [unsigned, revokeInit(ACCOUNT, now - 301), revokeInit(ACCOUNT, now + 301), revokeInit(ACCOUNT, now, CLOUD_GRANT_SECRET, OTHER),
+      revokeInit(ACCOUNT, now, "other-secret"), { ...revokeInit(ACCOUNT), body: JSON.stringify({ accountId: ACCOUNT, extra: 1 }) },
+      { ...revokeInit(ACCOUNT), body: "not json" }, revokeInit("a")]) {
+      const refused = await h.fetch("/v1/accounts/revoke", init);
+      expect(refused.status).toBe(401);
+      expect(await refused.json()).toEqual({ error: "unauthorized" });
+    }
+    expect(h.d1.rows("SELECT * FROM revoked_accounts")).toEqual([]);
+    expect((await h.call(phone, "/v1/connectors/connected")).status).toBe(200);
+    expect((await h.fetch("/v1/accounts/revoke", revokeInit(ACCOUNT, now - 299))).status).toBe(202);
+    h.env.CLOUD_GRANT_SECRET = undefined;
+    const unsupported = await h.fetch("/v1/accounts/revoke", revokeInit(ACCOUNT));
+    expect(unsupported.status).toBe(503);
+    expect(await unsupported.json()).toEqual({ error: "Account revocation is not set up on this service.", code: "unsupported" });
+  });
+
+  it("keeps a revoke while Composio is down and finishes deleting the sign-ins on the hourly run", async () => {
+    harness();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const phone = await h.install();
+    await h.bind(phone, ACCOUNT);
+    const gmail = h.account(h.accountOwner(ACCOUNT), "gmail");
+    h.composio.fail(503, (call) => call.path === "/connected_accounts");
+    expect((await h.fetch("/v1/accounts/revoke", revokeInit(ACCOUNT))).status).toBe(202);
+    await Promise.all(h.background);
+    expect((await h.call(phone, "/v1/connectors/connected")).status).toBe(401);
+    expect(h.composio.accounts.map((account) => account.id)).toEqual([gmail]);
+    expect(h.d1.rows("SELECT cleared_at FROM revoked_accounts")).toEqual([{ cleared_at: null }]);
+    expect(warn.mock.calls.map(([line]) => JSON.parse(String(line)))).toContainEqual({ message: "revoked account cleanup failed", accountId: ACCOUNT, status: 503 });
+    await cron();
+    expect(h.composio.accounts).toEqual([]);
+    expect(h.d1.rows("SELECT cleared_at FROM revoked_accounts")).toEqual([{ cleared_at: null }]);
+    await cron();
+    expect(h.d1.rows("SELECT cleared_at FROM revoked_accounts")).toEqual([{ cleared_at: expect.any(Number) }]);
+  });
+
+  it("spends at most 8 Composio requests a run on the four oldest revoked accounts it has not cleared", async () => {
+    harness();
+    for (const [index, accountId] of ["acct_e", "acct_d", "acct_c", "acct_b", "acct_a"].entries()) {
+      h.d1.db.prepare("INSERT INTO revoked_accounts (account_id, revoked_at) VALUES (?, ?)").run(accountId, 5 - index);
+    }
+    for (let app = 0; app < 10; app += 1) h.account(h.accountOwner("acct_a"), `app${app}`);
+    const cleared = () => h.d1.rows<{ account_id: string }>("SELECT account_id FROM revoked_accounts WHERE cleared_at IS NOT NULL ORDER BY account_id").map((row) => row.account_id);
+    await clearRevokedAccounts(h.env as never);
+    expect(h.composio.calls).toHaveLength(8);
+    expect(h.composio.accounts).toHaveLength(3);
+    await clearRevokedAccounts(h.env as never);
+    expect(h.composio.calls).toHaveLength(15);
+    expect(h.composio.accounts).toEqual([]);
+    expect(cleared()).toEqual(["acct_b", "acct_c", "acct_d"]);
+    await clearRevokedAccounts(h.env as never);
+    expect(cleared()).toEqual(["acct_a", "acct_b", "acct_c", "acct_d", "acct_e"]);
+  });
+
+  it("takes a sign-in another cleanup run deleted first as deleted", async () => {
+    harness();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    h.d1.db.prepare("INSERT INTO revoked_accounts (account_id, revoked_at) VALUES (?, ?)").run(ACCOUNT, 1);
+    h.account(h.accountOwner(ACCOUNT), "gmail");
+    await Promise.all([clearRevokedAccounts(h.env as never), clearRevokedAccounts(h.env as never)]);
+    expect(h.composio.calls.filter((call) => call.method === "DELETE")).toHaveLength(2);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("still expires app events on the hourly run on a database without migration 0006, where nothing can be revoked", async () => {
+    harness(5);
+    const desktop = await h.install();
+    const { body: trigger } = await h.createTrigger(desktop, h.account(desktop, "gmail"));
+    expect((await h.deliver(message(trigger.triggerId, desktop.userId))).status).toBe(200);
+    expect(h.queued(desktop.id)).toHaveLength(1);
+    await cron(Date.now() + 8 * DAY_MS);
+    expect(h.queued()).toEqual([]);
   });
 });

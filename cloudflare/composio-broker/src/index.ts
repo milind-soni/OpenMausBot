@@ -1,7 +1,15 @@
 import { z } from "zod";
 
 import { planAccountLink } from "../../../shared/connector-account-link";
-import { accountLeaseLapsed, accountToolCallRefusal, PHONE_CONNECT_CALLBACK, presentAccountGrant, reserveAppLink } from "./accounts";
+import {
+  accountLeaseLapsed,
+  accountToolCallRefusal,
+  clearRevokedAccounts,
+  PHONE_CONNECT_CALLBACK,
+  presentAccountGrant,
+  reserveAppLink,
+  revokeAccount,
+} from "./accounts";
 import { appEventStats, composioWebhook, pollEvents, presentCloudGrant, queueTestEvent, runHourly } from "./app-events";
 import {
   ACCOUNT_ID,
@@ -746,6 +754,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext) {
   if (request.method === "GET" && url.pathname === "/health") return json({ service: "openmausbot-composio", ready: Boolean(env.COMPOSIO_API_KEY) });
   if (request.method === "POST" && url.pathname === "/v1/installations") return register(request, env);
   if (request.method === "POST" && url.pathname === "/v1/composio/webhook") return composioWebhook(request, env, ctx);
+  if (request.method === "POST" && url.pathname === "/v1/accounts/revoke") return revokeAccount(request, env, ctx);
   if (request.method === "GET" && url.pathname === "/v1/stats/app-events") return appEventStats(request, url, env);
   if (!url.pathname.startsWith("/v1/")) return json({ error: "not found" }, 404);
   if (request.method === "DELETE" && url.pathname === "/v1/installation") return endInstallation(request, env);
@@ -793,7 +802,7 @@ export default {
     }
   },
   async scheduled(controller: ScheduledController, env: Env) {
-    await runHourly(env, controller.scheduledTime);
+    await Promise.all([runHourly(env, controller.scheduledTime), clearRevokedAccounts(env, controller.scheduledTime)]);
   },
 } satisfies ExportedHandler<Env>;
 

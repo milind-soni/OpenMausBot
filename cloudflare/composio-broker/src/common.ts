@@ -153,7 +153,7 @@ const connectedAccountResponseSchema = z.object({
   toolkit: z.object({ slug: z.string().optional() }).optional(),
 });
 export type ConnectedAccountResponse = z.infer<typeof connectedAccountResponseSchema>;
-const connectedAccountsPageSchema = z.object({
+export const connectedAccountsPageSchema = z.object({
   items: z.array(connectedAccountResponseSchema),
   next_cursor: z.string().nullable().optional(),
 });

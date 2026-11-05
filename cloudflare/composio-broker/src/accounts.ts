@@ -1,10 +1,21 @@
 // A phone signed in to a MausBot account reaches that account's connected apps: the Cloud Admin signs a 24-hour grant
 // naming the account and the phone's installation, and every installation bound to one account acts as the account's
-// Composio user until its grant runs out.
+// Composio user until its grant runs out. When the Admin deletes the account it revokes it here: every installation
+// acting as its user stops at once, and its sign-ins are deleted at Composio.
 import { z } from "zod";
 
 import { base64Bytes, cloudGrantSchema, hmacKey } from "./app-events";
-import { DAY_MS, json, readJsonBody, utcDay, utf8, type ConnectedAccountResponse, type InstallationRow } from "./common";
+import {
+  composioRequest,
+  connectedAccountsPageSchema,
+  DAY_MS,
+  json,
+  readJsonBody,
+  utcDay,
+  utf8,
+  type ConnectedAccountResponse,
+  type InstallationRow,
+} from "./common";
 import { userDigest } from "./sharing";
 
 export const ACCOUNT_GRANT = /^v1\.acct\.([A-Za-z0-9][A-Za-z0-9_-]{2,127})\.([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.(\d{10})\.([A-Za-z0-9_-]{43})$/;
@@ -14,6 +25,8 @@ export const ACCOUNT_APP_LIMIT = 3;
 const PENDING_LINK_MS = 15 * 60_000;
 const ACCOUNT_DAILY_TOOL_CALLS = 300;
 export const PHONE_CONNECT_CALLBACK = "openmausbot://connected-apps/done";
+const REVOKE_TOLERANCE_S = 300;
+const revokeSchema = z.object({ accountId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/) }).strict();
 
 export function accountGrantMessage(accountId: string, installationId: string, exp: number) {
   return `omb-connected-apps-account:v1\n${accountId}\n${installationId}\n${exp}`;
@@ -125,4 +138,78 @@ export async function accountToolCallRefusal(body: Uint8Array, installation: Ins
   ).bind(installation.account_id, utcDay(now), calls, limit).first();
   if (counted) return null;
   return json({ error: `A free MausBot account makes up to ${limit} connected-app tool calls a day. Try again tomorrow, or get MausBot Cloud for more.`, code: "daily_limit" }, 429);
+}
+
+export function revokeMessage(timestamp: number, accountId: string) {
+  return `omb-connected-apps-revoke:v1\n${timestamp}\n${accountId}`;
+}
+
+/** POST /v1/accounts/revoke {accountId}, sent by the Cloud Admin when it deletes the account, with
+ *  `x-omb-revoke-timestamp: <unix s>` and `x-omb-revoke-signature: v1=<base64url HMAC-SHA256(CLOUD_GRANT_SECRET,
+ *  revokeMessage)>`. A replay within the 300 s window repeats the same revoke. */
+export async function revokeAccount(request: Request, env: Env, ctx: Pick<ExecutionContext, "waitUntil">, now = Date.now()) {
+  if (!env.CLOUD_GRANT_SECRET) return json({ error: "Account revocation is not set up on this service.", code: "unsupported" }, 503);
+  const unauthorized = () => json({ error: "unauthorized" }, 401);
+  const timestamp = request.headers.get("x-omb-revoke-timestamp") ?? "";
+  const signature = /^v1=([A-Za-z0-9_-]{43})$/.exec(request.headers.get("x-omb-revoke-signature") ?? "")?.[1];
+  const bytes = signature ? base64Bytes(signature, true) : null;
+  if (!bytes || !/^\d{1,12}$/.test(timestamp) || Math.abs(now / 1000 - Number(timestamp)) > REVOKE_TOLERANCE_S) return unauthorized();
+  const parsed = revokeSchema.safeParse(await readJsonBody(request, 1024).catch(() => null));
+  if (!parsed.success) return unauthorized();
+  const { accountId } = parsed.data;
+  const message = utf8(revokeMessage(Number(timestamp), accountId));
+  if (!await crypto.subtle.verify("HMAC", await hmacKey(env.CLOUD_GRANT_SECRET), bytes, message)) return unauthorized();
+  // Bound phones carry account_id; a Cloud that adopted the account's user through a share code (and anything that
+  // adopted from it) carries only shared_user_id. One transaction with the revoked_accounts row, so a bind either lands
+  // before it and is disabled here, or after it and is refused.
+  const theirs = "SELECT id FROM installations WHERE account_id = ?1 OR shared_user_id = ?2";
+  const results = await env.DB.batch([
+    env.DB.prepare("INSERT INTO revoked_accounts (account_id, revoked_at) VALUES (?1, ?2) ON CONFLICT DO NOTHING").bind(accountId, now),
+    ...["events", "trigger_bindings", "event_drops"].map((table) =>
+      env.DB.prepare(`DELETE FROM ${table} WHERE installation_id IN (${theirs})`).bind(accountId, accountUser(accountId))),
+    env.DB.prepare(`DELETE FROM user_shares WHERE from_installation IN (${theirs}) OR for_installation IN (${theirs})`)
+      .bind(accountId, accountUser(accountId)),
+    env.DB.prepare(
+      "UPDATE installations SET disabled_at = ?3, session_id = NULL WHERE (account_id = ?1 OR shared_user_id = ?2) AND disabled_at IS NULL",
+    ).bind(accountId, accountUser(accountId), now),
+  ]);
+  const installations = results.at(-1)?.meta.changes ?? 0;
+  console.log(JSON.stringify({ message: "account revoked", accountId, installations }));
+  ctx.waitUntil(clearRevokedAccounts(env, now));
+  return json({ revoked: true, installations }, 202);
+}
+
+/** Deletes at Composio the sign-ins of the four oldest revoked accounts not yet cleared, with at most `budget` requests:
+ *  the Workers free plan allows 50 subrequests per invocation, and the hourly sweep may take 40. One page of 50 per
+ *  account, so a listing costs exactly one; an account with more is finished over later runs. */
+export async function clearRevokedAccounts(env: Env, now = Date.now(), budget = 8) {
+  // Before migration 0006 there is no revoked_accounts table, and the hourly run beside this must still finish.
+  const { results } = await env.DB.prepare("SELECT account_id FROM revoked_accounts WHERE cleared_at IS NULL ORDER BY revoked_at LIMIT 4")
+    .all<{ account_id: string }>().catch(() => ({ results: [] }));
+  for (const { account_id: accountId } of results) {
+    if (budget < 1) return;
+    const failed = (status: number | null) => console.warn(JSON.stringify({ message: "revoked account cleanup failed", accountId, status }));
+    try {
+      budget -= 1;
+      const listed = await composioRequest(env, `/connected_accounts?${new URLSearchParams({ limit: "50", user_ids: accountUser(accountId) })}`);
+      if (!listed.ok) {
+        failed(listed.status);
+        continue;
+      }
+      const ids = connectedAccountsPageSchema.parse(await listed.json()).items.flatMap((account) => account.id ?? []);
+      if (!ids.length) {
+        await env.DB.prepare("UPDATE revoked_accounts SET cleared_at = ? WHERE account_id = ?").bind(now, accountId).run();
+        continue;
+      }
+      for (const id of ids.slice(0, budget)) {
+        budget -= 1;
+        const removed = await composioRequest(env, `/connected_accounts/${encodeURIComponent(id)}?revoke_on_delete=true`, { method: "DELETE" });
+        await removed.body?.cancel();
+        // 404: another run deleted it first.
+        if (!removed.ok && removed.status !== 404) failed(removed.status);
+      }
+    } catch {
+      failed(null);
+    }
+  }
 }
