@@ -36,7 +36,7 @@ test("2, 3, 4, 5. one account: exactly today's rail, with no grouping, divider o
   for (const places of shapes) {
     const state = signedIn(A);
     const none = railPlaces({ saved: list(places), mine: "https://a.test", state });
-    assert.deepEqual(railPlaces({ saved: list(places), mine: "https://a.test", state, waiting: [] }), none);
+    assert.deepEqual(railPlaces({ saved: list(places), mine: "https://a.test", state, accounts: [] }), none);
     assert.equal(dividers(none), 0);
     assert.equal(JSON.stringify(none).includes("@"), false, "no address");
     assert.equal(none.some((row) => row.group !== undefined), false);
@@ -44,7 +44,7 @@ test("2, 3, 4, 5. one account: exactly today's rail, with no grouping, divider o
 });
 
 test("6. two accounts, one Cloud each, both called My Cloud: told apart by group, divider and address; This computer on top", () => {
-  const rows = railPlaces({ saved: list([myCloud("https://a.test", "a-home")]), mine: "https://a.test", state: signedIn(A), waiting: [waits(B, [myCloud("https://b.test", "b-home")])] });
+  const rows = railPlaces({ saved: list([myCloud("https://a.test", "a-home")]), mine: "https://a.test", state: signedIn(A), accounts: [waits(B, [myCloud("https://b.test", "b-home")])] });
   assert.deepEqual(ids(rows), [LOCAL_ID, "a-home", "b-home"]);
   assert.deepEqual(rows.map((row) => row.name), ["This computer", "My Cloud", "My Cloud"]);
   assert.deepEqual(rows.map((row) => row.email ?? null), [null, A, B]);
@@ -57,7 +57,7 @@ test("6. two accounts, one Cloud each, both called My Cloud: told apart by group
 test("7. two accounts with several Clouds and teams: groups in a fixed order by address, each in its order, colours per Cloud", () => {
   const b = [myCloud("https://b.test", "b1"), ownCloud("https://b2.test", "B Two", "b2"), teamCloud("https://bt.test", "B Team", "b3")];
   const rows = railPlaces({ saved: list([myCloud("https://a.test", "a1"), ownCloud("https://a2.test", "A Two", "a2"), teamCloud("https://at.test", "A Team", "a3")]), mine: "https://a.test", state: signedIn(A),
-    waiting: [waits(B, b, [{ id: "b1", name: "My Cloud", color: "red", kind: "cloud", opens: true }, { id: "b2", name: "B Two", color: "blue", kind: "cloud", opens: true }, { id: "b3", name: "B Team", color: null, kind: "team", opens: true }])] });
+    accounts: [waits(B, b, [{ id: "b1", name: "My Cloud", color: "red", kind: "cloud", opens: true }, { id: "b2", name: "B Two", color: "blue", kind: "cloud", opens: true }, { id: "b3", name: "B Team", color: null, kind: "team", opens: true }])] });
   assert.deepEqual(ids(rows), [LOCAL_ID, "a1", "a2", "a3", "b1", "b2", "b3"]);
   assert.deepEqual(rows.slice(4).map((row) => row.color), ["red", "blue", null], "as they looked");
   assert.equal(new Set(rows.slice(1, 4).map((row) => row.group)).size, 1);
@@ -65,19 +65,19 @@ test("7. two accounts with several Clouds and teams: groups in a fixed order by 
 });
 
 test("8. an account with no Clouds has one row of its own while it waits; while it's the one in use, it has none", () => {
-  const rows = railPlaces({ saved: list([myCloud("https://a.test", "a1")]), mine: "https://a.test", state: signedIn(A), waiting: [{ id: C, email: C, places: [], rows: [] }] });
+  const rows = railPlaces({ saved: list([myCloud("https://a.test", "a1")]), mine: "https://a.test", state: signedIn(A), accounts: [{ id: C, email: C, places: [], rows: [] }] });
   assert.deepEqual(ids(rows), [LOCAL_ID, "a1", `${ACCOUNT_PLACE}${C}`]);
   assert.deepEqual({ kind: rows[2].kind, name: rows[2].name, opens: rows[2].opens, account: rows[2].account }, { kind: "account", name: C, opens: true, account: C });
-  const active = railPlaces({ saved: list([]), state: signedIn(C), waiting: [waits(A, [myCloud("https://a.test", "a1")])] });
+  const active = railPlaces({ saved: list([]), state: signedIn(C), accounts: [waits(A, [myCloud("https://a.test", "a1")])] });
   assert.deepEqual(ids(active), [LOCAL_ID, "a1"], "the rail stands though the one in use has nothing on it");
 });
 
 test("9. the same team under both accounts is one row: the account in use's when it's a member, else the first that waits", () => {
   const mine = teamCloud("https://t.test", "Team", "t-as-a"), theirs = teamCloud("https://t.test", "Team", "t-as-b");
-  const both = railPlaces({ saved: list([mine]), state: signedIn(A), waiting: [waits(B, [theirs])] });
+  const both = railPlaces({ saved: list([mine]), state: signedIn(A), accounts: [waits(B, [theirs])] });
   assert.deepEqual(ids(both).sort(), [LOCAL_ID, "t-as-a", `${ACCOUNT_PLACE}${B}`].sort(), "one row, opened as the account in use, and B can still be reached");
   assert.equal(both[1].account, undefined);
-  const notMine = railPlaces({ saved: list([]), state: signedIn(A), waiting: [waits(B, [theirs]), waits(C, [teamCloud("https://t.test", "Team", "t-as-c")])] });
+  const notMine = railPlaces({ saved: list([]), state: signedIn(A), accounts: [waits(B, [theirs]), waits(C, [teamCloud("https://t.test", "Team", "t-as-c")])] });
   assert.deepEqual(ids(notMine), [LOCAL_ID, "t-as-b", `${ACCOUNT_PLACE}${C}`]);
   assert.equal(notMine[1].account, B, "a click switches to the one that is a member");
 });
@@ -88,7 +88,7 @@ test("10. a Cloud that ended keeps looking so while it waits; once its account i
 });
 
 test("11. hand-connected servers stay outside any account's group, after them, and aren't kept with an account", () => {
-  const rows = railPlaces({ saved: list([myCloud("https://a.test", "a1"), byHand("https://hand.test", "Hand")]), mine: "https://a.test", state: signedIn(A), waiting: [waits(B, [myCloud("https://b.test", "b1")])] });
+  const rows = railPlaces({ saved: list([myCloud("https://a.test", "a1"), byHand("https://hand.test", "Hand")]), mine: "https://a.test", state: signedIn(A), accounts: [waits(B, [myCloud("https://b.test", "b1")])] });
   assert.deepEqual(ids(rows), [LOCAL_ID, "a1", "b1", "https://hand.test"]);
   assert.equal(rows[3].group, "hand");
   assert.equal(rows[3].email, undefined);
@@ -97,20 +97,20 @@ test("11. hand-connected servers stay outside any account's group, after them, a
 });
 
 test("12. a place that waits carries no live state: nothing on the rail can say it is lent or busy", () => {
-  const rows = railPlaces({ saved: list([]), state: signedIn(A), waiting: [waits(B, [myCloud("https://b.test", "b1")], accountRows([{ id: "b1", name: "My Cloud", color: null, kind: "cloud", opens: true, active: true, progress: 0.4, attention: true, update: {}, offline: true, server: true }]))] });
+  const rows = railPlaces({ saved: list([]), state: signedIn(A), accounts: [waits(B, [myCloud("https://b.test", "b1")], accountRows([{ id: "b1", name: "My Cloud", color: null, kind: "cloud", opens: true, active: true, progress: 0.4, attention: true, update: {}, offline: true, server: true }]))] });
   assert.deepEqual(Object.keys(rows[1]).sort(), ["account", "color", "email", "group", "id", "kind", "name", "opens"]);
 });
 
 test("14. a moved computer whose home is a Cloud of the account that waits: its row is there, and This computer is the clean workspace's", () => {
-  const rows = railPlaces({ saved: list([]), home: null, state: signedIn(B), waiting: [waits(A, [myCloud("https://a.test", "a1")])] });
+  const rows = railPlaces({ saved: list([]), home: null, state: signedIn(B), accounts: [waits(A, [myCloud("https://a.test", "a1")])] });
   assert.deepEqual(ids(rows), [LOCAL_ID, "a1"]);
   assert.equal(rows[1].account, A);
-  const home = railPlaces({ saved: list([myCloud("https://a.test", "a1")]), home: "https://a.test", mine: "https://a.test", state: signedIn(A), waiting: [waits(B, [myCloud("https://b.test", "b1")])] });
+  const home = railPlaces({ saved: list([myCloud("https://a.test", "a1")]), home: "https://a.test", mine: "https://a.test", state: signedIn(A), accounts: [waits(B, [myCloud("https://b.test", "b1")])] });
   assert.deepEqual(ids(home), ["a1", "b1"], "home on the account in use: as today, no This computer, and the other account's Clouds beside it");
 });
 
 test("an account whose sign-in ended keeps its rows, and says so", () => {
-  const rows = withAccounts([], { saved: list([]), waiting: [{ ...waits(B, [myCloud("https://b.test", "b1")]), signIn: true }] });
+  const rows = withAccounts([], { saved: list([]), accounts: [{ ...waits(B, [myCloud("https://b.test", "b1")]), signIn: true }] });
   assert.equal(rows[0].signIn, true);
   assert.equal(rows[0].opens, true);
 });
@@ -168,8 +168,8 @@ test("no page but the rail's reads the rows, and the rail's never hears which ac
 
 test("the groups keep their order whichever account is in use, so a click doesn't move the row under the pointer", () => {
   const a = [myCloud("https://a.test", "a1")], b = [myCloud("https://b.test", "b1")];
-  const asAlice = railPlaces({ saved: list(a), mine: "https://a.test", state: signedIn(A), waiting: [waits(B, b)] });
-  const asBob = railPlaces({ saved: list(b), mine: "https://b.test", state: signedIn(B), waiting: [waits(A, a)] });
+  const asAlice = railPlaces({ saved: list(a), mine: "https://a.test", state: signedIn(A), accounts: [waits(B, b)] });
+  const asBob = railPlaces({ saved: list(b), mine: "https://b.test", state: signedIn(B), accounts: [waits(A, a)] });
   assert.deepEqual(ids(asAlice), ids(asBob));
   assert.deepEqual(ids(asAlice), [LOCAL_ID, "a1", "b1"], "alice before bob");
 });

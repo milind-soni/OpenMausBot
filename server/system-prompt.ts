@@ -27,7 +27,7 @@ export function userProfileSystemPrompt(profile?: { aboutMe?: string; person?: s
 // Two per-turn sections stay stable on purpose: "setup" sits right after the standing instructions it overrides,
 // and "webhook" keeps its untrusted-data rule in the system prompt, out of reach of the payload it guards.
 const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding", "teammate-questions", "long-waits", "recent", "availability", "active-routines",
-  "plan", "assignment", "routine-execution", "skill-instructions", "playbooks", "device-place"]);
+  "plan", "assignment", "routine-execution", "skill-instructions", "playbooks", "device-place", "files"]);
 
 /** Its id is what puts it in the volatile half. */
 export function teamAvailabilityPart(team: readonly RosterMember[]): PromptPart {

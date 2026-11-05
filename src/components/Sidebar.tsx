@@ -1,11 +1,12 @@
 import { OrganizationIdentity } from "./OrganizationIdentity";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch } from "react";
 import { createPortal } from "react-dom";
-import { Activity, Archive, Bot as BotIcon, Check, ChevronRight, ClipboardCopy, Crown, FolderPlus, Library, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, Phone, Pin, PinOff, Plus, Search, TextQuote, Trash2, Users, X } from "lucide-react";
+import { Archive, Bot as BotIcon, Check, ChevronRight, ClipboardCopy, Crown, FolderPlus, Library, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, Phone, Pin, Plus, Search, TextQuote, Trash2, Users, X } from "lucide-react";
 import { api, useStore, formatTime, visibleMessages, currentTaskBot, botOpensTo, openBot, openThread, type Action, type AppState, type Bot, type BotProject, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { approvalModeFor } from "../../shared/approval-mode";
 import { liveActivityLabel } from "@/lib/live-activity";
 import { SidebarWorkingStep } from "./SidebarWorkingStep";
+import { openBotRow } from "@/state/thread-navigation";
 import { llmThreadTitlesEnabled } from "@/lib/feature-flags";
 
 import { BotAvatar } from "./Avatar";
@@ -40,7 +41,7 @@ import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { draggedFolder, FOLDER_DRAG_TYPE, moveFolder, placeFolder } from "@/lib/folder-order";
 import { folderUnreadThreadIds, markFolderRead } from "@/lib/folder-read";
 import { HelperThreadGroup, orderedThreadList, partitionHelperThreads, SidebarThreadRow, stampClock, threadRecency, threadRowActions, useRelativeNow, useRevealedThreadRow, useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
-import { loadSidebarAttentionPinned, saveSidebarAttentionPinned, setSidebarDensity, useSidebarDensity, usePinnedCircles, useUniversalPins, type SidebarDensity } from "@/lib/sidebar-preferences";
+import { setSidebarDensity, useSidebarDensity, usePinnedCircles, useUniversalPins, type SidebarDensity } from "@/lib/sidebar-preferences";
 import {
   ATTENTION_SECTION_ID,
   BOT_CHATS_SECTION_ID,
@@ -73,7 +74,7 @@ import { GlassBar, GlassScrollFrame, GlassScroller } from "./GlassScrollFrame";
 import { DesktopWorkspaceSwitcher, endCloudHowTo } from "./DesktopWorkspaceSwitcher"; import { PlaceTint } from "./PlaceTint"; import { ChromeRailToggle } from "./ChromeRailToggle";
 import { useCloudOwner } from "./CloudOwner";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
-import { NeedsYouButton, OwnerPickerHost, pickOwnerOf } from "./TeamOwner"; import { SidebarPeople } from "./SidebarPeople";
+import { NeedsYouButton, OwnerPickerHost, pickOwnerOf } from "./TeamOwner"; import { SidebarPeople } from "./SidebarPeople"; import { SidebarInboxRow } from "./SidebarInboxRow"; import { SidebarActiveThreads } from "./SidebarActiveThreads"; import { setAttentionPinned, useAttentionPinned } from "./inbox/attention-pinned"; import { useInboxSupport } from "@/state/inbox";
 import { showWhoReportsToWhom, TeamMenuItems } from "./SidebarTeamMenu";
 import { MENU_ITEM, MENU_SHEET } from "./menu-recipe";
 import { ELEVATED_CONTROL } from "./elevated";
@@ -85,7 +86,7 @@ import { isSidebarToggle } from "@/lib/keyboard-shortcuts";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { useBotUnread } from "./unread-notice";
-import { attentionHasRunningWork, attentionJumpAction, attentionTriggerLabel, attentionUnpinAction, AttentionThreadRows, crossBotAttentionThreads, crossBotPinnedThreads, runningRoutineRun, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
+import { attentionHasRunningWork, attentionJumpAction, attentionUnpinAction, crossBotAttentionThreads, crossBotPinnedThreads, runningRoutineRun, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
 import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
 export { BotContextMenu };
@@ -625,7 +626,7 @@ export function BotThreadList({ bot, selected, query, pendingQueued, reveal, loc
       <span role="status" className="sr-only">{readStatus}</span>
       {projects.length > 0 && ungrouped.length > 0 && <div className="pl-6 pr-3 pb-1 pt-2 text-[11px] text-ink-tertiary">{t("task.list")}</div>}
       {ungrouped.map(renderThread)}
-      <HelperThreadGroup tasks={orderedThreadList(helpers)} busy={helpers.some((task) => currentTaskBot(bot, task.threadId).busy)} renderThread={renderThread} />
+      <HelperThreadGroup tasks={orderedThreadList(helpers)} renderThread={renderThread} />
       <ThreadListFooter bulk={bulk} rows={shownRows} selected={selection} total={ownTasks.length} canShowAll={!query && !showAll && ownTasks.length > visibleTasks.length} canSelect={tasks.length > 1}
         onShowAll={() => setShowAll(true)} freshConversation onDelete={(threadIds) => deleteThreadsInBulk({ botId: bot.id }, threadIds, dispatch)} />
       <LocalComputerAutoWarning
@@ -848,7 +849,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
     if (renaming) return;
     const insideRenameInput = event.target instanceof HTMLInputElement;
     if (botListItemPointerIntent(event.type, insideRenameInput) === "select") {
-      openBot(dispatch, bot, showThreads);
+      openBotRow(dispatch, bot, showThreads, selected);
     }
   };
 
@@ -877,7 +878,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           if (drag && stepKey(event)) { event.preventDefault(); drag.step(bot.id, stepKey(event)!); return; }
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
-            openBot(dispatch, bot, showThreads);
+            openBotRow(dispatch, bot, showThreads, selected);
           }
         }}
         onContextMenu={onContextMenu}
@@ -967,13 +968,8 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   const [plusOpen, setPlusOpen] = useState(false);
   const plusMotion = useMenuMotion(plusOpen);
   const advanced = useAdvancedMode();
-  const [attentionOpen, setAttentionOpen] = useState(false);
-  const attentionMotion = useMenuMotion(attentionOpen);
-  const [attentionPinned, setAttentionPinnedState] = useState(() => loadSidebarAttentionPinned());
-  const setAttentionPinned = (pinned: boolean) => {
-    setAttentionPinnedState(pinned);
-    saveSidebarAttentionPinned(pinned);
-  };
+  const attentionPinned = useAttentionPinned();
+  const inboxSupport = useInboxSupport();
   const [newRoom, setNewRoom] = useState(false);
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [newFolderBotId, setNewFolderBotId] = useState<string | null>(null);
@@ -1026,9 +1022,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
     return () => document.removeEventListener("keydown", closeOnEscape);
   }, [open, onClose, confirm, deletingRoom]);
 
-  const attentionMenuRef = useRef<HTMLDivElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
-  usePopoverDismiss(attentionOpen, attentionMenuRef, () => setAttentionOpen(false));
   usePopoverDismiss(plusOpen, plusMenuRef, () => setPlusOpen(false));
 
   useEffect(() => {
@@ -1312,54 +1306,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           >
             <Search size={20} strokeWidth={1.5} />
           </button>}
-          {advanced && <div ref={attentionMenuRef} className={density === "icons" ? "relative" : "contents"}>
-            <button
-              type="button"
-              onClick={() => setAttentionOpen((o) => !o)}
-              aria-label={attentionTriggerLabel(attention.length)}
-              title={attentionTriggerLabel(attention.length)}
-              className={cn(
-                "relative flex items-center justify-center text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
-                density === "icons" ? "size-[46px] shrink-0 rounded-xl" : phone ? "size-10 shrink-0 rounded-full border border-hairline bg-card text-ink" : "size-8 rounded-full",
-              )}
-            >
-              <Activity size={density === "icons" ? 20 : 18} strokeWidth={1.5} />
-              {attention.length > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-accent px-0.5 text-[10px] font-semibold leading-4 text-ink">{attention.length > 9 ? "9+" : attention.length}</span>
-              )}
-              {attentionHasRunningWork(attention) && (
-                <span data-header-activity="" className="absolute bottom-0.5 right-0.5 size-1.5 rounded-full bg-success" aria-hidden="true" />
-              )}
-            </button>
-            {attentionMotion.shown && (
-              <>
-                <div className={cn(
-                  "absolute top-full z-40 mt-1 overflow-hidden", MENU_SHEET,
-                  density === "icons" ? "left-0" : "right-0",
-                  density === "icons" ? "w-72" : "w-72 md:w-[min(288px,calc(var(--sidebar-width)_-_32px))]",
-                  attentionMotion.className,
-                )} {...attentionMotion.exitProps}>
-                  <div className="flex items-center gap-1 py-0.5 pl-2">
-                    <span className="flex-1 text-[13px] font-medium text-ink">{t("attention.title")}</span>
-                    <button
-                      type="button"
-                      onClick={() => setAttentionPinned(!attentionPinned)}
-                      aria-label={t(attentionPinned ? "attention.unpin" : "attention.pin")}
-                      title={t(attentionPinned ? "attention.unpin" : "attention.pin")}
-                      className="flex size-6 items-center justify-center rounded-md text-ink-secondary hover:bg-menu-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-                    >
-                      {attentionPinned ? <PinOff size={14} /> : <Pin size={14} />}
-                    </button>
-                  </div>
-                  {attention.length === 0 ? (
-                    <div className="px-2 py-1.5 text-[13px] text-ink-secondary">{t("attention.empty")}</div>
-                  ) : (
-                    <AttentionThreadRows inset entries={attention} onJump={(entry) => { setAttentionOpen(false); dispatch(attentionJumpAction(entry)); }} />
-                  )}
-                </div>
-              </>
-            )}
-          </div>}
+          {advanced && inboxSupport === "no" && <SidebarActiveThreads entries={attention} icons={density === "icons"} phone={phone} dispatch={dispatch} />}
           {plusControl}
         </div>}
       </div>
@@ -1379,6 +1326,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           />
         </div>
       </div>}
+      {!q && <SidebarInboxRow icons={density === "icons"} large={!advanced} running={attentionHasRunningWork(attention)} onOpened={phone ? onClose : undefined} />}
       {universalPins && pinnedBots.length > 0 && !simpleDesk && (
         <div
           data-sidebar-universal-pins=""
@@ -1434,7 +1382,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           )}
           {!q && <NeedsYouButton compact={rail} />}{!q && <SidebarPeople compact={rail} />}
           {unsectionedChief && (phone ? (
-            <PhoneHero bot={unsectionedChief} selected={botRow(unsectionedChief).selected} onOpen={() => openBot(dispatch, unsectionedChief, showThreads)} onMenu={setMenu} />
+            <PhoneHero bot={unsectionedChief} selected={botRow(unsectionedChief).selected} onOpen={() => openBotRow(dispatch, unsectionedChief, showThreads, botRow(unsectionedChief).selected)} onMenu={setMenu} />
           ) : (
             <div className="mb-1.5">
               <BotListItem {...botRow(unsectionedChief)} />

@@ -25,7 +25,6 @@ export function SecretRequestCard({
 }) {
   const { dispatch } = useStore();
   const secret = message.secret!;
-  const remoteClient = window.ogb?.remoteClient?.active === true;
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedLocally, setSavedLocally] = useState(false);
@@ -33,6 +32,9 @@ export function SecretRequestCard({
   const endpoint = `/api/bots/${encodeURIComponent(botId)}/secret-cards/${encodeURIComponent(message.id)}`;
   const error = localError ?? secret.error;
   const custom = secret.target === CUSTOM_SECRET_TARGET;
+  // A page reached through a desktop paired to another computer: a key that computer keeps in its own encrypted store can
+  // only be typed there. Anything its server keeps, a custom secret or a provider key, is typed here like on any page.
+  const onlyOnHost = window.ogb?.remoteClient?.active === true && secret.target !== CUSTOM_SECRET_TARGET && desktopCredentialSlot(secret.target) !== null;
   const outcome = credentialResumeOutcome(secret);
   const provided = outcome === "provided";
   const declined = outcome === "dismissed";
@@ -195,8 +197,9 @@ export function SecretRequestCard({
       explanation={description}
       onDismiss={dismiss}
       dismissLabel="Not now"
+      stays
     >
-      {remoteClient ? (
+      {onlyOnHost ? (
         <div className="text-[13px] leading-relaxed text-ink-secondary">
           This key must be saved on the host computer. Open this conversation on the host to continue securely.
         </div>

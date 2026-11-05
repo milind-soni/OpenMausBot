@@ -21,10 +21,10 @@ export function accountRows(rows) {
  * (a team's) is one row: the account in use's when it can, else the first that waits. An account that waits, left with no row, gets
  * one of its own.
  * @param {any[]} all the account in use's rows, from railPlaces.
- * @param {{ saved: { environments: any[] }, email?: string | null, waiting?: Array<{ id: string, email: string, signIn?: true, places: any[], rows: any[] }> }} input
+ * @param {{ saved: { environments: any[] }, email?: string | null, accounts?: Array<{ id: string, email: string, signIn?: true, places: any[], rows: any[] }> }} input
  */
-export function withAccounts(all, { saved, email = null, waiting = [] }) {
-  if (!waiting.length) return all;
+export function withAccounts(all, { saved, email = null, accounts = [] }) {
+  if (!accounts.length) return all;
   const taken = new Set(saved.environments.map((entry) => entry.origin).filter(Boolean));
   const first = (account, row) => {
     const origin = account.places.find((entry) => entry.id === row.id)?.origin;
@@ -40,7 +40,7 @@ export function withAccounts(all, { saved, email = null, waiting = [] }) {
   };
   const isComputer = (row) => row.kind === "computer";
   // The first claim to a Cloud two accounts share is the account in use's, whatever the order they show in.
-  const waited = waiting.map((account) => ({ email: account.email, rows: rowsOf(account) }));
+  const waited = accounts.map((account) => ({ email: account.email, rows: rowsOf(account) }));
   const own = all.filter((row) => !isComputer(row) && !row.forget).map((row) => ({ ...row, group: ACTIVE, ...(email ? { email } : {}) }));
   // In a fixed order, so a click that makes another account the one in use doesn't move the row under the pointer.
   const groups = [...(own.length ? [{ email: email ?? "", rows: own }] : []), ...waited].sort((a, b) => a.email.localeCompare(b.email));

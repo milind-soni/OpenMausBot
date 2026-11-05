@@ -57,6 +57,8 @@ export interface SecretCardsDeps {
   phoneSecretSubmissions: PhoneSecretSubmissionRegistry;
   connectorThread(botId: string, threadId: string): { bot: BotRecord; group: GroupRecord | undefined } | null;
   answerCardNode(threadId: string, messageId: string, text: string): boolean;
+  /** A newer card replaced `from`: a turn parked on it waits on `to`. */
+  followCard(threadId: string, from: string, to: string): void;
   dataDir: string;
   /** Admin manages this server's models: an AI provider key cannot be saved here. */
   providerKeysRefused: boolean;
@@ -377,6 +379,7 @@ export function createSecretCards(deps: SecretCardsDeps) {
       if (prior.id === message.id) continue;
       if (!prior.secret || !isPendingCredentialRequest(prior, credentialId, from.id, Boolean(owner.group))) continue;
       store.patchMessage(fromThreadId, prior.id, { secret: { ...prior.secret, superseded: true } });
+      deps.followCard(fromThreadId, prior.id, message.id);
     }
     return { status: 201, body: { messageId: message.id, label: target.label } };
   }
@@ -415,6 +418,7 @@ export function createSecretCards(deps: SecretCardsDeps) {
     for (const prior of path) {
       if (!prior.secret || !isPendingCustomSecretRequest(prior, asked.label, from.id, room)) continue;
       store.patchMessage(threadId, prior.id, { secret: { ...prior.secret, superseded: true } });
+      deps.followCard(threadId, prior.id, message.id);
     }
     return { status: 201, body: { messageId: message.id, label: asked.label, delivery: asked.delivery, ...(mismatch ? { savedAs: mismatch } : {}) } };
   }

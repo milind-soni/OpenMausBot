@@ -41,7 +41,7 @@ function phrases(phase: string, keys: LocaleKey[]): LiveActivityPhrases {
 export function friendlyNowPhrases(status: LiveStatus | null, message?: Message): LiveActivityPhrases {
   const plain = message?.kind === "activity" && message.tool?.spoken ? { ...message, tool: { ...message.tool, spoken: undefined } } : message;
   const now = turnNowPhrases(status, plain);
-  if (now?.phase.startsWith("step:")) return now;
+  if (now?.phase.startsWith("step:") || now?.phase.startsWith("notice:")) return now;
   const tool = (status && "tool" in status ? status.tool : undefined) ?? (message?.kind === "activity" && message.tool?.ok === undefined ? message.tool?.name : undefined);
   const service = toolService(tool);
   if (service) return { phase: `friendly:service:${service}`, phrases: [t("chat.friendly.service", { service })] };

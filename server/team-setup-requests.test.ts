@@ -1,3 +1,4 @@
+import { createBotLimit } from "./host/starter-bot-limit.ts";
 import { describe, expect, it, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,7 +10,7 @@ import type { BotRecord, OptionCardData } from "./store.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 import type { DirectApply } from "./direct-apply.ts";
 
-function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean }>) {
+function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean }>, plan: { starter: boolean } = { starter: false }) {
   const bots: BotRecord[] = [];
   const messages: Array<{ id: string; role?: string; card?: OptionCardData }> = [];
   const teams = ["", "Work", "Engineering", "Private"];
@@ -47,7 +48,7 @@ function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean 
   const targetBusy = vi.fn((id: string, _sourceThreadId?: string) => Boolean(store.bot(id)?.busy));
   const validateChange = vi.fn();
   const canPersist = vi.fn((): { ok: true } | { ok: false; status: number; error: string } => ({ ok: true }));
-  const service = new TeamSetupRequestService({ store, teams: () => teams, maxBots: 100, hasTeamAuthority,
+  const service = new TeamSetupRequestService({ store, teams: () => teams, maxBots: 100, hasTeamAuthority, botLimit: createBotLimit({ starter: () => plan.starter, bots: () => bots }),
     canPersist, ownsThread: () => sourceExists, targetBusy, deleteBot, autoApply, validateChange,
     validateModel: (selection, current) => {
       if (!({ claude: ["sonnet", "opus"], codex: ["gpt-fixture"] }[selection.instanceId]?.includes(selection.model))) return "Model is not in the current catalog";
@@ -607,5 +608,66 @@ describe("MausBot's Chief-level team setup", () => {
     const maus = h.bot("Maus", { defaultBot: {} });
     expect(() => h.service.proposeDeletion({ botId: h.chief.id, threadId: h.chief.threadId, targetBotId: maus.id, reason: "remove" }))
       .toThrow(/Maus can't be deleted or archived/);
+  });
+});
+
+describe("a Starter Cloud's limit on bots", () => {
+  const SELECTION = { instanceId: "claude", model: "sonnet" };
+  const specialist = (key: string) => ({ action: "create", key, fields: { name: key, title: "Specialist", soul: "Work.", modelSelection: SELECTION, section: "Work" } });
+  /** Clive and Ada are two; `others` more makes the count. */
+  const full = (others: number, starter = true) => {
+    const plan = { starter };
+    const app = harness(undefined, plan);
+    for (let i = 0; i < others; i++) app.bot(`Other${i}`);
+    return { ...app, plan };
+  };
+
+  it("refuses a proposal at the limit with the words a bot acts on, and shows no card", () => {
+    const app = full(3);
+    expect(() => app.propose([specialist("Scout")])).toThrow(expect.objectContaining({ status: 409, code: "bot_limit", message: expect.stringContaining("Do not retry") }));
+    expect(app.messages).toHaveLength(0);
+    expect(app.apply).not.toHaveBeenCalled();
+  });
+
+  it("refuses a whole setup that doesn't fit: no bot of it is made", async () => {
+    const app = full(2);
+    app.autoApply.mockReturnValue({ source: "profile" } as never);
+    await expect(app.submit([specialist("Scout"), specialist("Writer")])).rejects.toMatchObject({ status: 409, code: "bot_limit" });
+    expect(app.apply).not.toHaveBeenCalled();
+    expect(app.store.bots).toHaveLength(4);
+  });
+
+  it("takes a setup that fits", () => {
+    const app = full(2);
+    expect(app.propose([specialist("Scout")]).requestId).toBeTruthy();
+  });
+
+  it("at the limit still changes the bots it has", () => {
+    const app = full(3);
+    const proposal = app.propose([{ action: "update", botId: app.peer.id, fields: { title: "Lead" } }]);
+    expect(proposal.requestId).toBeTruthy();
+  });
+
+  it("asks again when the person confirms, and tells them, not the bot", async () => {
+    const app = full(2);
+    const { requestId } = app.propose([specialist("Scout")]);
+    app.bot("Late arrival");
+    const answered = await app.resolve(requestId);
+    expect(app.apply).not.toHaveBeenCalled();
+    expect(answered?.result).toMatchObject({ state: "cancelled", error: "You've reached the 5 bots Starter includes. To create more, upgrade this Cloud." });
+  });
+
+  it("makes what was proposed on Starter once the plan is bigger", async () => {
+    const app = full(2);
+    const { requestId } = app.propose([specialist("Scout")]);
+    app.bot("Late arrival");
+    app.plan.starter = false;
+    const answered = await app.resolve(requestId);
+    expect(answered?.result).toMatchObject({ state: "applied" });
+  });
+
+  it("has no such limit on another plan", () => {
+    const app = full(10, false);
+    expect(app.propose([specialist("Scout")]).requestId).toBeTruthy();
   });
 });
