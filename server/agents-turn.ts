@@ -52,13 +52,14 @@ export function agentsServerEnv(conversation: AgentsConversation, turn: AgentsTu
 }
 
 /** What started a direct turn, in the words a refusal uses. */
-export type TurnKind = "person" | "routine" | "webhook" | "handoff" | "continuation";
+export type TurnKind = "person" | "routine" | "webhook" | "api" | "handoff" | "continuation";
 
 export function directTurnKind(turn: {
   automationSource?: string; commsDepth?: number; coordination?: unknown; peerAsk?: unknown;
   cardContinuation?: boolean; computerSelectionContinuation?: boolean; unattended?: boolean; compactOnly?: boolean;
 }): TurnKind {
   if (turn.automationSource === "webhook") return "webhook";
+  if (turn.automationSource === "api") return "api";
   if (turn.automationSource !== undefined) return "routine";
   if (turn.commsDepth || turn.coordination || turn.peerAsk) return "handoff";
   if (turn.cardContinuation || turn.computerSelectionContinuation || turn.unattended || turn.compactOnly) return "continuation";
@@ -68,6 +69,7 @@ export function directTurnKind(turn: {
 const THIS_TURN: Record<Exclude<TurnKind, "person">, string> = {
   routine: "This turn is a routine run",
   webhook: "This turn was started by a webhook",
+  api: "This turn came in through the Bot API",
   handoff: "This turn is a teammate's hand-off",
   continuation: "This turn continues earlier work",
 };

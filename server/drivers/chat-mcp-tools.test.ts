@@ -1,10 +1,11 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { crc32 } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { augmentedPath } from "../env-path.ts";
-import { ChatToolSessionError, chatToolNotices, directServers, mountChatTools, trimmedToolsNotice, type ChatToolSession } from "./chat-mcp-tools.ts";
+import { MESSAGE_FILE_MAX_BYTES } from "../message-file.ts";
+import { ChatToolSessionError, SAVED_RESULTS_FOLDER, SAVED_RESULTS_KEPT, chatToolNotices, directServers, mountChatTools, trimmedToolsNotice, type ChatToolSession } from "./chat-mcp-tools.ts";
 import type { ToolScope } from "../../shared/tool-scope.ts";
 import { catalogServer, CUA_DRIVER_WINDOWS_TOOLS, syntheticToolNames } from "../testing/cua-driver-tools.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
@@ -73,8 +74,9 @@ function fixture(body = "", toolSchema: Record<string, unknown> = schema) {
   return {
     dir, receipt, controller, server,
     read: () => JSON.parse(readFileSync(receipt, "utf8")) as { pid: number; path: string; omb: Record<string, string>; calls: Array<{ method: string; params?: { name?: string; arguments?: unknown } }> },
-    async mount(computerUse = false, localComputer = false, toolScope?: ToolScope) {
-      const session = await mountChatTools(localComputer ? { localComputer: server } : { custom: { audit: server } }, controller.signal, computerUse, toolScope);
+    async mount(computerUse = false, localComputer = false, toolScope?: ToolScope, resultFolder?: string, serverName = "audit", scrub?: (text: string) => string) {
+      const session = await mountChatTools(localComputer ? { localComputer: server } : { custom: { [serverName]: server } }, controller.signal, computerUse, toolScope,
+        undefined, undefined, resultFolder, scrub);
       sessions.push(session);
       return session;
     },
@@ -415,6 +417,123 @@ describe("Chat MCP session", () => {
     expect(Buffer.byteLength(result.text)).toBeLessThan(52_000);
     expect(result.text).toContain("truncated");
     expect(result.text).not.toContain("�");
+  });
+
+  describe("a result over 50KB with a working folder", () => {
+    const big = "line of a big kDrive file as base64 text ".repeat(5000);
+    const bigFixture = () => fixture(`if (message.method === "tools/call") { reply(message,{content:[{type:"text",text:${JSON.stringify(big)}}]}); continue; }`);
+    const workFolder = () => { const dir = mkdtempSync(join(tmpdir(), "omb-chat-mcp-work-")); dirs.push(dir); return dir; };
+
+    it("is saved whole to a file there, and the model gets its start and the path", async () => {
+      const f = bigFixture();
+      const folder = workFolder();
+      const result = await (await f.mount(false, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
+      const saved = readdirSync(join(folder, SAVED_RESULTS_FOLDER));
+      expect(saved).toHaveLength(1);
+      expect(saved[0]).toMatch(/^result-audit_write-\d+-[0-9a-f]{6}\.txt$/);
+      const file = join(folder, SAVED_RESULTS_FOLDER, saved[0]);
+      expect(readFileSync(file, "utf8")).toBe(big);
+      expect(result.ok).toBe(true);
+      expect(result.text.startsWith(big.slice(0, 1000))).toBe(true);
+      expect(result.text).toContain(`The full result is saved in ${file}]`);
+      expect(result.text).toContain(`${Math.ceil(Buffer.byteLength(big) / 1024)}KB`);
+      expect(Buffer.byteLength(result.text)).toBeLessThan(52_000);
+    });
+
+    // Only computer-use servers may send a frame this big (32 MiB).
+    it("is cut as before when it is over the attach limit", async () => {
+      const f = fixture(`if (message.method === "tools/call") { reply(message,{content:[{type:"text",text:"a".repeat(${MESSAGE_FILE_MAX_BYTES + 1})}]}); continue; }`);
+      const folder = workFolder();
+      const result = await (await f.mount(true, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
+      expect(existsSync(join(folder, SAVED_RESULTS_FOLDER)) ? readdirSync(join(folder, SAVED_RESULTS_FOLDER)) : []).toEqual([]);
+      expect(result.text).toContain("truncated");
+      expect(Buffer.byteLength(result.text)).toBeLessThan(52_000);
+    });
+
+    it("stays inside the folder whatever the server is called", async () => {
+      const f = bigFixture();
+      const folder = workFolder();
+      const session = await f.mount(false, false, undefined, folder, "../../escape");
+      await session.execute(session.definitions[0].function.name, { value: "test" }, f.controller.signal);
+      expect(readdirSync(folder)).toEqual([SAVED_RESULTS_FOLDER]);
+      expect(readdirSync(join(folder, SAVED_RESULTS_FOLDER))[0]).toMatch(/^result-[a-z0-9_]+-\d+-[0-9a-f]{6}\.txt$/);
+    });
+
+    it("is cut as before when the results folder is a link elsewhere", async () => {
+      const f = bigFixture();
+      const folder = workFolder();
+      const elsewhere = workFolder();
+      symlinkSync(elsewhere, join(folder, SAVED_RESULTS_FOLDER));
+      const result = await (await f.mount(false, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
+      expect(readdirSync(elsewhere)).toEqual([]);
+      expect(result.text).toContain("[MCP result truncated at 50KB; request less output.]");
+    });
+
+    it("masks key-shaped values before the file is written", async () => {
+      const key = `sk-ant-${"k".repeat(40)}`;
+      const f = fixture(`if (message.method === "tools/call") { reply(message,{content:[{type:"text",text:${JSON.stringify(`${big}token ${key} end`)}}]}); continue; }`);
+      const folder = workFolder();
+      await (await f.mount(false, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
+      const [saved] = readdirSync(join(folder, SAVED_RESULTS_FOLDER));
+      const text = readFileSync(join(folder, SAVED_RESULTS_FOLDER, saved), "utf8");
+      expect(text.startsWith(big)).toBe(true);
+      expect(text).not.toContain(key);
+    });
+
+    it("masks the turn's own secrets too, and says so in the notice", async () => {
+      const secret = "plain-configured-api-key-value";
+      const f = fixture(`if (message.method === "tools/call") { reply(message,{content:[{type:"text",text:${JSON.stringify(`${big}auth ${secret} end`)}}]}); continue; }`);
+      const folder = workFolder();
+      const scrub = (text: string) => text.split(secret).join("[redacted]");
+      const result = await (await f.mount(false, false, undefined, folder, "audit", scrub)).execute("audit_write", { value: "test" }, f.controller.signal);
+      const [saved] = readdirSync(join(folder, SAVED_RESULTS_FOLDER));
+      const text = readFileSync(join(folder, SAVED_RESULTS_FOLDER, saved), "utf8");
+      expect(text).not.toContain(secret);
+      expect(text).toContain("auth [redacted] end");
+      expect(result.text).toContain("(secret-looking values in it are masked)");
+    });
+
+    it(`keeps only the newest ${SAVED_RESULTS_KEPT} saved results`, async () => {
+      const f = bigFixture();
+      const folder = workFolder();
+      const results = join(folder, SAVED_RESULTS_FOLDER);
+      mkdirSync(results);
+      const old = Array.from({ length: SAVED_RESULTS_KEPT }, (_, i) => `result-audit_write-${1_700_000_000_000 + i}-abcdef.txt`);
+      for (const name of old) writeFileSync(join(results, name), "old");
+      writeFileSync(join(results, "notes.md"), "not a saved result");
+      writeFileSync(join(results, "export-1700000000000-abcdef.txt"), "the person's own file with a look-alike name");
+      await (await f.mount(false, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
+      const left = readdirSync(results);
+      expect(left).toHaveLength(SAVED_RESULTS_KEPT + 2);
+      expect(left).toContain("notes.md");
+      expect(left).toContain("export-1700000000000-abcdef.txt");
+      expect(left).not.toContain(old[0]);
+      expect(left).toContain(old[1]);
+    });
+
+    it("never removes the file it just wrote, even when the clock went back", async () => {
+      const f = bigFixture();
+      const folder = workFolder();
+      const results = join(folder, SAVED_RESULTS_FOLDER);
+      mkdirSync(results);
+      const later = Array.from({ length: SAVED_RESULTS_KEPT }, (_, i) => `result-audit_write-${Date.now() + 3_600_000 + i}-abcdef.txt`);
+      for (const name of later) writeFileSync(join(results, name), "later");
+      const result = await (await f.mount(false, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
+      const [saved] = readdirSync(results).filter((name) => !later.includes(name));
+      expect(result.text).toContain(join(results, saved));
+      expect(readFileSync(join(results, saved), "utf8")).toBe(big);
+      expect(readdirSync(results)).toHaveLength(SAVED_RESULTS_KEPT);
+      expect(readdirSync(results)).not.toContain(later[0]);
+    });
+
+    it("leaves a result under 50KB as it is, with no file", async () => {
+      const f = fixture(`if (message.method === "tools/call") { reply(message,{content:[{type:"text",text:"small"}]}); continue; }`);
+      const folder = workFolder();
+      mkdirSync(join(folder, "keep"));
+      const result = await (await f.mount(false, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
+      expect(result.text).toBe("small");
+      expect(readdirSync(folder)).toEqual(["keep"]);
+    });
   });
 
   it.each(["initialize", "tools/list", "tools/call"])("cancels %s and awaits its owned process tree", async (method) => {

@@ -73,6 +73,30 @@ describe("SecretRequestCard superseded requests", () => {
   });
 });
 
+describe("SecretRequestCard on a page reached through a desktop paired to another computer", () => {
+  const remote = (secret: Record<string, unknown>) => {
+    vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
+    return view(secret);
+  };
+
+  it("offers the field for a secret the server keeps: a custom one, or a provider key", () => {
+    for (const secret of [
+      { target: "customSecret", label: "Mailbox password", delivery: "ref", placeholder: "", helpUrl: "" },
+      { target: "openaiApiKey", label: "OpenAI API key" },
+    ]) {
+      const html = remote(secret);
+      expect(html, secret.target).toContain('type="password"');
+      expect(html, secret.target).not.toContain("must be saved on the host computer");
+    }
+  });
+
+  it("sends a key the host computer keeps in its own encrypted store to that computer", () => {
+    const html = remote({ target: "boxToken", label: "Boat token" });
+    expect(html).toContain("must be saved on the host computer");
+    expect(html).not.toContain('type="password"');
+  });
+});
+
 describe("SecretRequestCard ask card", () => {
   it("waits as a compact ask card with a masked field", () => {
     const html = view({});
@@ -80,6 +104,12 @@ describe("SecretRequestCard ask card", () => {
     expect(html).toContain("text-accent-text");
     expect(html).toContain('type="password"');
     expect(html).toContain('autoComplete="new-password"');
+  });
+
+  it("stays in view while it waits, however far the chat scrolls, and lets go once it is settled", () => {
+    expect(view({})).toMatch(/data-ask-card="pending"[^>]*class="[^"]*\bsticky\b/);
+    expect(view({ provided: true, resumed: true })).not.toContain("sticky");
+    expect(view({ superseded: true })).not.toContain("sticky");
   });
 
   it("folds into one line that names the key once it is saved and the bot resumed", () => {
@@ -97,6 +127,30 @@ describe("SecretRequestCard ask card", () => {
     expect(html).toContain("Try again");
     expect(html).toContain("The bot could not be resumed.");
     expect(html).not.toContain('type="password"');
+  });
+});
+
+describe("SecretRequestCard mailbox", () => {
+  const email = { target: "customSecret", delivery: "email", label: "Connect your mailbox", placeholder: "Mailbox password", helpUrl: "", description: "Ledger never sees the password." };
+
+  it("asks for the address and the password on one card, with the address the bot knew", () => {
+    const html = view({ ...email, address: "me@shop.example" });
+    expect(html).toContain('type="email"');
+    expect(html).toContain('value="me@shop.example"');
+    expect(html).toContain('type="password"');
+    expect(html).toContain("Mailbox password");
+    expect(html).toContain("They never see it.");
+  });
+
+  it("asks for the server only once one could not be found, and other cards have no address field", () => {
+    expect(view(email)).not.toContain("Incoming mail server");
+    expect(view({})).not.toContain('type="email"');
+  });
+
+  it("says the bot goes on once connected, without the address field", () => {
+    const html = view({ ...email, provided: true, resumed: true, address: "me@shop.example" });
+    expect(html).toContain('data-ask-card="settled"');
+    expect(html).not.toContain("<input");
   });
 });
 

@@ -545,6 +545,15 @@ describe("A chat pinned to a place", () => {
       expect(unpin(rendered)).toBeUndefined();
     }
   });
+
+  it("does not call the place Auto picked a pin in Advanced either", () => {
+    fixture.advanced = true;
+    fresh();
+    const rendered = render(pinnedOn(undefined, { surface: "browser", surfaceAuto: true }));
+    expect(rendered.nodes.some((node) => node.props["data-testid"] === "place-pinned-note")).toBe(false);
+    fresh();
+    expect(note(render(pinnedOn(undefined, { surface: "browser" })))).toBe("This conversation is pinned to Browser. Change it from the composer.");
+  });
 });
 
 describe("Technical controls", () => {

@@ -47,28 +47,14 @@ export function codexBackgroundRoute(catalog: ModelCatalog, smallModelsUsable: b
   return own && own !== model ? { model, retry: own } : { model };
 }
 
-const MAX_BACKGROUND_ATTEMPTS = 4;
-
-/** The account's other official models, tried in catalog order when every model of the route is refused. */
-export function codexRefusalAlternatives(catalog: ModelCatalog): string[] {
-  return catalog.options.filter((option) => !option.custom &&
-    decodeCodexSelection(option.id).modelProvider === OFFICIAL_CODEX_PROVIDER).map((option) => option.id);
-}
-
-export async function runCodexBackgroundRoute(
-  route: CodexBackgroundRoute, run: (model: string) => Promise<string>, options: TextGenerationOptions = {},
-  alternatives: readonly string[] = [],
-): Promise<string> {
-  const queue = [...new Set([route.model, ...(route.retry ? [route.retry] : []), ...alternatives])].slice(0, MAX_BACKGROUND_ATTEMPTS);
-  for (const [index, model] of queue.entries()) {
-    try {
-      return await run(model);
-    } catch (error) {
-      if (index === queue.length - 1 || !refusesModel(error instanceof Error ? error.message : String(error), model)) throw error;
-      if (index === 0) options.fallback?.onRefused(model);
-    }
+export async function runCodexBackgroundRoute(route: CodexBackgroundRoute, run: (model: string) => Promise<string>, options: TextGenerationOptions = {}): Promise<string> {
+  try {
+    return await run(route.model);
+  } catch (error) {
+    if (!route.retry || !refusesModel(error instanceof Error ? error.message : String(error), route.model)) throw error;
+    options.fallback?.onRefused(route.model);
+    return run(route.retry);
   }
-  throw new Error("Codex lists no model for background calls.");
 }
 
 /** Features off (codex-cli 0.160.1 `codex features list`); an older Codex ignores unknown names. */

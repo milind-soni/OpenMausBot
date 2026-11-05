@@ -234,21 +234,16 @@ describe("Codex generateMemoryText (fake CLI)", () => {
     expect(usage).toEqual([expect.objectContaining({ model: "gpt-fake-default" })]);
   });
 
-  it("moves to the account's next listed model when a ChatGPT plan refuses the bot's own model", async () => {
+  it("runs only once when the bot's own model is refused, or the call failed for another reason", async () => {
     chatgptLogin();
     const refusing = await create({ FAKE_CODEX_LUNA: "1", FAKE_CODEX_TEXT_REFUSE: "gpt-fake-default" });
     const { fallback, onRefused } = ownModel("gpt-fake-default");
-    await expect(refusing.generateMemoryText!("hello", { fallback })).resolves.toBe("fake background answer");
-    expect(modelsRun()).toEqual(["gpt-fake-default", "gpt-6-luna"]);
-    expect(onRefused).toHaveBeenCalledWith("gpt-fake-default");
-  });
-
-  it("runs only once when the call failed for a reason other than the model", async () => {
+    await expect(refusing.generateMemoryText!("hello", { fallback })).rejects.toThrow(/'gpt-fake-default' model is not supported/);
+    await refusing.dispose();
     apiKeyLogin();
     const failing = await create({ FAKE_CODEX_LUNA: "1", FAKE_CODEX_TEXT_MODE: "fail" });
-    const { fallback, onRefused } = ownModel("gpt-fake-default");
     await expect(failing.generateMemoryText!("hello", { fallback })).rejects.toThrow(/401/);
-    expect(modelsRun()).toEqual(["gpt-6-luna"]);
+    expect(modelsRun()).toEqual(["gpt-fake-default", "gpt-6-luna"]);
     expect(onRefused).not.toHaveBeenCalled();
   });
 

@@ -3,13 +3,15 @@ import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface InboxRouteDeps {
-  /** The session's person's inbox; null off a team or for someone without one. */
+  /** This viewer's inbox; null for someone on a team without one. */
   view(auth: RequestAuth): InboxView | null;
+  /** How many of its lines wait on them; null for someone on a team without one. */
+  count(auth: RequestAuth): number | null;
   markDone(auth: RequestAuth, id: string): "done" | "unknown" | "an ask";
   markRead(auth: RequestAuth, id: string): boolean;
 }
 
-/** GET /api/inbox: the session's person's inbox as its panel lists it. POST /api/inbox/<line>/read and /done: one of its
+/** GET /api/inbox: this viewer's inbox as its panel lists it. GET /api/inbox/count: how many of its lines wait on them. POST /api/inbox/<line>/read and /done: one of its
  * lines read, or news they need nothing more from; each answers with the inbox as it lists them now. */
 export function createInboxRoutes(deps: InboxRouteDeps): RouteHandler {
   return async ({ res, path, method, auth, json }) => {
@@ -17,6 +19,11 @@ export function createInboxRoutes(deps: InboxRouteDeps): RouteHandler {
       if (method !== "GET") return json(res, 405, { error: "method not allowed" });
       const view = deps.view(auth);
       return view ? json(res, 200, view) : json(res, 404, { error: "There is no inbox here." });
+    }
+    if (path === "/api/inbox/count") {
+      if (method !== "GET") return json(res, 405, { error: "method not allowed" });
+      const count = deps.count(auth);
+      return count === null ? json(res, 404, { error: "There is no inbox here." }) : json(res, 200, { count });
     }
     const m = /^\/api\/inbox\/([\w-]+)\/(read|done)$/.exec(path);
     if (!m) return PASS;

@@ -240,6 +240,35 @@ describe("a local model repeating itself", () => {
     expect(f.effects()).toEqual([]);
   });
 
+  it("a hosted model that went on to use more tools after a failed call ends ok, and the failed step still shows failed", async () => {
+    // Real HTTP and a real MCP server: one bad call mid-turn, then the bot works around it and answers.
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) structured(response, "audit_write", "call-1");
+      else if (round === 2) structured(response, "audit_fail", "call-2");
+      else if (round === 3) structured(response, "audit_write", "call-3");
+      else say(response, "Done another way.");
+    }, "hosted");
+    await f.start();
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
+    const steps = f.recorder.events.flatMap((event) => event.type === "item.completed" && event.itemType === "tool" ? [[event.itemId, (event as { ok?: boolean }).ok]] : []);
+    expect(steps).toEqual([["call-1", true], ["call-2", false], ["call-3", true]]);
+    expect(f.effects().map((effect) => effect.name)).toEqual(["same", "same", "same"]);
+    expect(f.replies()).toEqual(["Done another way."]);
+  });
+
+  it("a hosted model whose last calls failed still ends failed, after any earlier recovery", async () => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) structured(response, "audit_fail", "call-1");
+      else if (round === 2) structured(response, "audit_write", "call-2");
+      else if (round === 3) structured(response, "audit_fail", "call-3");
+      else say(response, "It is finished.");
+    }, "hosted");
+    await f.start();
+    expect(await f.completed()).toMatchObject({ ok: false, stopReason: "tool_error" });
+    expect(f.requests).toHaveLength(4);
+  });
+
   it("a hosted model's failed turn ends as before", async () => {
     let id = 0;
     const f = await fixture((_body, response, round) => round === 1 ? structured(response, "audit_fail", `call-${++id}`) : say(response, "It is finished."), "hosted");

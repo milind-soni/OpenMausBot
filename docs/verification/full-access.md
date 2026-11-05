@@ -41,6 +41,11 @@ of a real provider's planning quality or authentication.
 - An expired turn token is refused, and Full does not authorize changes to
   an existing bot outside the Chief's team scope.
 
+Connected-app sends follow **Sending on your behalf** at Full access:
+**Ask every time** waits for consent and **Allow a daily amount** consumes
+the configured cap. The [Gmail and outbound fixture](gmail-drafts.md) verifies
+both policies, opaque execution, delegation and changes before dispatch.
+
 ## Evidence and limits
 
 The desktop smoke uses a disposable Electron utility-process server and the

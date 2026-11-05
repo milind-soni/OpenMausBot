@@ -22,7 +22,8 @@ export const API_KEY_FLEET: InstanceConfigMap = {
   },
 };
 
-// Google retired Gemini CLI for the free/Pro/Ultra Google sign-ins on 2026-06-18; it still runs on a Gemini API key.
+// Google retired Gemini CLI for the free/Pro/Ultra tiers on 2026-06-18; enterprise licences restore it with
+// `{"instances": {"gemini": {"driver": "geminiAgent"}}}`.
 export const DEFAULT_FLEET: InstanceConfigMap = {
   grok: { driver: "grokAgent" },
   kimi: { driver: "kimiAgent" },
@@ -41,7 +42,6 @@ export const DEFAULT_FLEET: InstanceConfigMap = {
   greenference: { driver: "greenference" },
   meta: { driver: "meta" },
   deepseek: { driver: "deepseekAgent" },
-  gemini: { driver: "geminiAgent" },
   museCode: { driver: "museCode" },
   ...API_KEY_FLEET,
   qwen: { driver: "qwenAgent" },
@@ -60,7 +60,6 @@ const CUSTOM_ONLY = {
 /** Added to a saved fleet that holds a product engine (claude, grok or codex), when it lacks them. */
 export const PRODUCT_FLEET_ADDITIONS = {
   chatgpt: { driver: "codex", displayName: "ChatGPT plan", config: { authMode: "chatgpt-plan" } },
-  kimi: { driver: "kimiAgent" },
   cursor: { driver: "cursorAgent" },
   githubCopilot: { driver: "copilotAgent" },
   openaiCompat: { driver: "openai-compat" },
@@ -70,7 +69,6 @@ export const PRODUCT_FLEET_ADDITIONS = {
   greenference: { driver: "greenference" },
   meta: { driver: "meta" },
   deepseek: { driver: "deepseekAgent" },
-  gemini: { driver: "geminiAgent" },
   museCode: { driver: "museCode" },
   ...API_KEY_FLEET,
   ...CUSTOM_ONLY,

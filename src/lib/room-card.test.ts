@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { CloudRoom, CloudUsage } from "../../electron/cloud-home.mjs";
 import { setLocale } from "@/lib/i18n";
-import { roomCardView, roomCauseText } from "@/lib/room-card";
+import { roomCardBusy, roomCardView, roomCauseText } from "@/lib/room-card";
 
 const usage: CloudUsage = { tier: "starter", resetsAt: Date.UTC(2026, 10, 1), meters: [], upgrades: [{ tier: "pro", amount: 4900 }, { tier: "max", amount: 9900 }] };
 const room = (over: Partial<CloudRoom> = {}): CloudRoom => ({ id: "offer-1", cause: { kind: "memory", waits: 3, waitMinutes: 6, stopped: 0 },
@@ -33,13 +33,22 @@ describe("the card", () => {
     expect(view({ room: room({ plan: { ...max, memoryMb: 8192, fromMemoryMb: 3072 } }) })?.offer?.text).toBe("Max has 8 GB of memory.");
     expect(view({ room: room({ cause: { kind: "disk", usedGb: 9, capGb: 10 } }) })).toMatchObject({ kind: "disk", title: "This Cloud is almost out of space",
       cause: "9 GB of 10 GB used.", offer: { text: "Pro has room for 100 GB." } });
-    expect(view({ usage: { ...usage, trialEndsAt: Date.UTC(2026, 10, 3) } })?.offer?.price).toBe("$49 a month once your trial ends. Nothing is charged today.");
+    const now = Date.UTC(2026, 10, 4, 9), DAY = 86_400_000;
+    expect(view({ usage: { ...usage, trialEndsAt: now + 3 * DAY }, now })?.offer?.price).toBe("$49 a month once your trial ends. Nothing is charged today.");
+    expect(view({ usage: { ...usage, trialEndsAt: now + DAY }, now })?.offer?.price, "a 1-day trial can charge hours later").toBe("$49 a month once your trial ends.");
   });
 
   it("gives the top plan a tip instead of an offer", () => {
     expect(view({ room: { id: "tip-1", cause: { kind: "memory", waits: 0, waitMinutes: 0, stopped: 2 }, tip: true } })).toEqual({ id: "tip-1", kind: "memory",
       title: "This Cloud is short on room", cause: "2 tasks were stopped today to keep everything else running.", offer: null,
       tip: "You're on the biggest plan. To give it more room, run fewer bots at once and close browsers you're not using." });
+  });
+
+  it("counts a running turn as busy, unless a task is waiting for memory, which is when it speaks", () => {
+    expect(roomCardBusy([{ busy: true }, { busy: false }], false)).toBe(true);
+    expect(roomCardBusy([{ busy: true }], undefined)).toBe(true);
+    expect(roomCardBusy([{ busy: false }], false)).toBe(false);
+    expect(roomCardBusy([{ busy: true }], true)).toBe(false);
   });
 
   it("is never shown mid-turn, after Not now on this offer, beside the usage card, or without an offer", () => {

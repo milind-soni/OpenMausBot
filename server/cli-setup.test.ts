@@ -6,6 +6,8 @@ import { DATA_DIR, instanceConfigs, loadConfig, PROVIDER_CREDENTIAL_ENV, WORKSPA
 import { acquireDataDirLease } from "./data-dir-lease.ts";
 import { SetupCancelled, type SetupIo } from "./cli-prompts.ts";
 import { isSetupComplete, readCliStartup, runSetup, saveCliStartup } from "./cli-setup.ts";
+import { hasDeepSeekKey } from "./drivers/acp/deepseek.ts";
+import { geminiIsAuthenticated } from "./drivers/acp/gemini.ts";
 import { OpenAICompatDriver } from "./drivers/openai-compat.ts";
 
 const options = { dataDir: DATA_DIR, port: 8799 };
@@ -255,6 +257,21 @@ describe("native provider onboarding", () => {
     expect(loadConfig().defaultModelSelection).toEqual({ instanceId: id, model: "fixture-default" });
     expect(ui.lines.join("\n")).not.toContain("fixture-engine-key");
     ui.assertConsumed();
+  });
+
+  it("hands a key saved by setup to its engine at run time, ahead of a workspace key", async () => {
+    persist({ deepseek: { key: "fixture-workspace-key" }, tts: { geminiKey: "fixture-speech-key" } });
+    for (const [choice, id, env] of [[3, "gemini", "GEMINI_API_KEY"], [4, "deepseek", "DEEPSEEK_API_KEY"]] as const) {
+      const deps = dependencies();
+      deps.inspect.mockResolvedValueOnce({ snapshot: { state: "available", authenticated: false }, models });
+      const ui = prompts({ choices: [choice, 0], secrets: [`fixture-${id}-key`], confirms: [true] });
+      expect(await runSetup(options, ui.io, deps)).toBe(true);
+      const saved = loadConfig();
+      expect(instanceConfigs(saved)[id]?.environment?.[env]).toBe(`fixture-${id}-key`);
+      expect(saved.tts?.geminiKey, "the speech key stays its own").toBe("fixture-speech-key");
+    }
+    expect(geminiIsAuthenticated({ GEMINI_API_KEY: instanceConfigs(loadConfig()).gemini?.environment?.GEMINI_API_KEY })).toBe(true);
+    expect(hasDeepSeekKey({ DEEPSEEK_API_KEY: instanceConfigs(loadConfig()).deepseek?.environment?.DEEPSEEK_API_KEY })).toBe(true);
   });
 
   it("saves nothing when an engine API key is left empty", async () => {

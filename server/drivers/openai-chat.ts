@@ -348,9 +348,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         if (!message || !object(message) || !["content", "reasoning_content", "reasoning", "reasoning_details", "tool_calls", "function_call"].some((key) => key in message)) {
           throw new ChatProtocolError("provider returned no completion message");
         }
-        if (message?.function_call) throw new ChatProtocolError("legacy function_call is unsupported; use structured tool_calls");
         const calls = new ChatToolCalls();
         calls.add(message?.tool_calls, false);
+        calls.addLegacy(message.function_call);
         const details = new ChatReasoningDetails();
         details.add(message.reasoning_details);
         const reasoning = message.reasoning_content ?? message.reasoning;
@@ -401,8 +401,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         const choice = chunk.choices?.find((row) => row.index === undefined || row.index === 0);
         const delta = choice?.delta;
         if (object(delta)) sawChoice = true;
-        if (delta?.function_call) throw new ChatProtocolError("legacy function_call is unsupported; use structured tool_calls");
         calls.add(delta?.tool_calls, true);
+        calls.addLegacy(delta?.function_call);
         details.add(delta?.reasoning_details);
         if (choice?.finish_reason) finishReason = choice.finish_reason;
         const reasoningPart = delta?.reasoning_content ?? delta?.reasoning;
@@ -611,7 +611,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         if (!parsed.ok) throw new Error(parsed.error);
         const scope = parsed.scope;
         tools = await mountChatTools(options.tools === false ? undefined : turn.integrations, abort.signal, options.computerUse, scope, turn.mcpCallTimeoutMs,
-          toolSchemaProfileFor({ url: options.apiUrl, model }));
+          toolSchemaProfileFor({ url: options.apiUrl, model }), turn.cwd ?? turn.toolResultFolder, safeText);
         noteToolBudget(turn.botId, tools.budget);
         for (const message of chatToolNotices(tools)) emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message) });
         const questionAllowed = options.tools !== false && allowsTool(scope, { kind: "native", name: ASK_USER_TOOL });
@@ -782,9 +782,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           }
           if (seenCalls.size > MAX_TURN_TOOL_CALLS) throw new ChatProtocolError(stoppedAfter(`${MAX_TURN_TOOL_CALLS} tool calls`));
           messages.push(assistantReply(model, completion, completion.text || null, completion.toolCalls));
-          // After a corrective round, the failure stays pending only until the bot runs tools again. A local model that
-          // went on to use more tools has already reacted: a wrong guess, a search, then the right call is not a failed turn.
-          if ((correctiveRounds || options.localModel) && !denials.length) { toolFailed = false; failedCalls.length = 0; }
+          // A failure stays pending only until the bot runs tools again: one that went on to use more tools has read the error
+          // and reacted (a wrong guess, a bad query, then the right call), so its turn is not failed for it, on any model. The
+          // failed step still shows as failed; a failure in the last calls before the answer, or a person's no, still ends it.
+          if (!denials.length) { toolFailed = false; failedCalls.length = 0; }
           const screenshotParts: ChatContentPart[] = [];
           for (const call of completion.toolCalls) {
             abort.signal.throwIfAborted();

@@ -130,6 +130,29 @@ describe("Settings → Engines → setup cards", () => {
     expect(unsupported).not.toMatch(/<button[^>]*>Sign in<\/button>/);
   });
 
+  it("says under Add another ChatGPT account that Business and Enterprise organizations can block it, on the ChatGPT card only", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.bots = [];
+    const note = "ChatGPT Business and Enterprise organizations can block adding an account here";
+    const chatgpt: InstanceInfo = {
+      instanceId: "chatgpt", driverKind: "codex", displayName: "ChatGPT", cliDefault: "codex",
+      snapshot: { state: "available", authenticated: true, chatgptPlan: true }, models: { default: "gpt", options: [] },
+    };
+    fixture.instances = [chatgpt];
+    const html = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(html.split(note)).toHaveLength(2);
+    expect(html).toContain("3p_delegated_access_policy_denied");
+    expect(html.indexOf(note)).toBeGreaterThan(html.indexOf("Add another ChatGPT account"));
+    const noteId = html.match(/<p id="([^"]+)"[^>]*>ChatGPT Business and Enterprise organizations/)?.[1];
+    expect(noteId).toBeTruthy();
+    expect(html).toMatch(new RegExp(`<button[^>]*aria-describedby="${noteId}"[^>]*>.*?Add another ChatGPT account`));
+    fixture.instances = [{ instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", cliDefault: "claude", snapshot: { state: "available", authenticated: true }, models: { default: "sonnet", options: [] } }];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain(note);
+    fixture.instances = [{ ...chatgpt, readOnly: true }];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain(note);
+  });
+
   it("shows the actual Google account email with an honest fallback", () => {
     vi.stubGlobal("window", {});
     fixture.bots = [];

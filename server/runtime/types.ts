@@ -123,6 +123,8 @@ export interface Assignment {
    * a repeat lands on it unless rework is set. */
   rework: boolean;
   /** While parked: the exact question for the person. */
+  /** Its reply only acknowledged: its requester takes no turn for it (status-reply.ts). */
+  statusOnly?: boolean;
   question?: string;
   /** While parked under Full access ("Just do it"): the question is its requester's to answer, never the person's.
    * Still unanswered when the requester's turn that carries it ends, the assignee goes on with `default`, or with its
@@ -172,7 +174,7 @@ export interface TurnEvidence {
 export type EventKind =
   | "enqueued" | "refused" | "admitted" | "started" | "progress" | "parked" | "answered"
   | "waiting" | "resume_due" | "settled" | "reported" | "woken" | "cancelled"
-  | "restart_reconciled" | "budget" | "stalled" | "continued";
+  | "restart_reconciled" | "budget" | "stalled" | "continued" | "held";
 
 export interface AssignmentEvent {
   id: number;
@@ -245,7 +247,8 @@ export interface RunInput {
 }
 
 export type RunResult =
-  | { kind: "completed"; text: string; evidence?: TurnEvidence }
+  /** statusOnly: nothing in `text` for the requester to do (status-reply.ts). */
+  | { kind: "completed"; text: string; evidence?: TurnEvidence; statusOnly?: boolean }
   | { kind: "failed"; outcome: Exclude<Outcome, "done" | "needs_input">; text: string; evidence?: TurnEvidence }
   | { kind: "needs_input"; question: string; cards?: string[]; decide?: { default?: string }; evidence?: TurnEvidence }
   /** The turn stopped short (a step cap, a seat it could not get) and the

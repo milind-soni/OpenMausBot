@@ -167,6 +167,58 @@ function probeWith(result: probeModule.McpProbeResult) {
 
 afterEach(() => { vi.restoreAllMocks(); });
 
+describe("internal mcp_server restart", () => {
+  it("restarts a command server at any level, keeping its saved keys, spending no secretRef and saying what the test showed", async () => {
+    probeWith({ ok: true, tools: [{ name: "read_mail" }] });
+    for (const full of [true, false]) {
+      const { post, stored, cfg, decided, lines, chat, ref } = fixture({ full, servers: { notes } });
+      const key = ref("spare-key");
+      const before = structuredClone(cfg.mcpServers);
+      const { status, body } = await post({ action: "restart", name: "notes" });
+      expect(status).toBe(200);
+      expect(body.text).toBe("Restarted MCP server notes. Its saved keys stay. Test: it started and listed its tools: read_mail. That does not show what they return: call one to check. This turn keeps talking to the old process; your next turn starts the new code.");
+      expect(cfg.mcpServers).toEqual(before);
+      expect(stored("notes")).toMatchObject({ env: { NOTES_TOKEN: "saved-token" }, enabled: true });
+      expect(chat, "no card: it runs what is already on").toEqual([]);
+      expect(decided).toEqual([{ summary: "Restarted MCP server notes", applied: full ? "full-access" : "level" }]);
+      expect(lines.at(-1)).toContain("Restarted MCP server notes");
+      expect((await post({ action: "update", name: "notes", env: { NOTES_TOKEN: key } })).status, "the unused ref still works").not.toBe(400);
+    }
+  });
+
+  it("a secretRef still works once, after a restart like any other time", async () => {
+    probeWith({ ok: true, tools: [{ name: "read_mail" }] });
+    const { post, ref } = fixture();
+    const key = ref("the-password");
+    expect((await post({ action: "add", name: "mail", command: "mail-mcp", env: { PASSWORD: key } })).status).toBe(201);
+    expect((await post({ action: "restart", name: "mail" })).status).toBe(200);
+    const again = await post({ action: "add", name: "mail2", command: "mail-mcp", env: { PASSWORD: key } });
+    expect(again.status).toBe(400);
+    expect(again.body.error).toContain("was already used");
+  });
+
+  it("refuses what has no process to restart here", async () => {
+    probeWith({ ok: true, tools: [] });
+    const { post } = fixture({ servers: { linear, notes: { ...notes, enabled: false }, away: { ...notes, runsOn: MAC } } });
+    expect(await post({ action: "restart", name: "linear" })).toMatchObject({ status: 400, body: { error: expect.stringContaining("has no process to restart") } });
+    expect(await post({ action: "restart", name: "notes" })).toMatchObject({ status: 403, body: { error: "notes is off. Call mcp_server with action enable first." } });
+    expect((await post({ action: "restart", name: "away" })).status, "on another computer").toBe(403);
+    expect((await post({ action: "restart", name: "missing" })).status).toBe(404);
+  });
+
+  it("is an admin's on a team's shared server, and a guest's turn gets nothing", async () => {
+    probeWith({ ok: true, tools: [] });
+    expect(await fixture({ admin: false, servers: { notes } }).post({ action: "restart", name: "notes" })).toMatchObject({ status: 403, body: { error: ASK_ADMIN } });
+    expect(await fixture({ guest: true, servers: { notes } }).post({ action: "restart", name: "notes" })).toMatchObject({ status: 403, body: { error: OWNER_ONLY } });
+  });
+
+  it("says plainly that a test only proves the server started", async () => {
+    probeWith({ ok: true, tools: [] });
+    const { post } = fixture({ servers: { notes } });
+    expect((await post({ action: "test", name: "notes" })).body.text).toBe("MCP server notes: Test: it started, but it has no tools.");
+  });
+});
+
 describe("internal mcp_server route, Full access", () => {
   it("add saves the server on, tests it as the bot and returns the tool names", async () => {
     const probe = probeWith({ ok: true, tools: [{ name: "search_notes" }, { name: "create_note" }] });
@@ -353,7 +405,7 @@ describe("internal mcp_server route, Full access", () => {
   it("every action, list included, is refused in a guest-driven thread with \"MCP servers are managed by the owner.\"", async () => {
     const { call, post, cfg } = fixture({ guest: true, servers: { linear } });
     expect(await call("GET")).toEqual({ status: 403, body: { error: OWNER_ONLY } });
-    for (const action of ["list", "add", "update", "enable", "disable", "test", "sign_in", "sign_out", "remove"]) {
+    for (const action of ["list", "add", "update", "enable", "disable", "restart", "test", "sign_in", "sign_out", "remove"]) {
       expect(await post({ action, name: "linear" }), action).toEqual({ status: 403, body: { error: OWNER_ONLY } });
     }
     expect(cfg.mcpServers).toEqual({ linear });
@@ -570,7 +622,7 @@ describe("internal mcp_server route, below Full access", () => {
     expect(probe).toHaveBeenCalledOnce();
     expect(probe.mock.calls[0]?.[3]).toMatchObject({ asBot: { id: BOT, cwd: dataDir } });
     expect(answers).toHaveLength(1);
-    expect(answers[0]).toContain("Turned on MCP server linear. Test: it works. Its tools: list_issues, create_issue.");
+    expect(answers[0]).toContain("Turned on MCP server linear. Test: it started and listed its tools: list_issues, create_issue. That does not show what they return: call one to check.");
     expect(answers[0]).not.toContain("next turn");
     expect(card()).toMatchObject({ answered: "allow", mcpRequest: { resumed: true, result: { state: "applied" } } });
     expect(decisions).toEqual(["card-shown", "user-approved"]);
@@ -824,7 +876,7 @@ describe("a card answered after OpenMausBot restarts", () => {
     expect(stored("linear")?.enabled).toBe(true);
     expect(probe).toHaveBeenCalledOnce();
     expect(card()).toMatchObject({ answered: "allow", mcpRequest: { resumed: true, result: { state: "applied" } } });
-    expect(answers[0]).toContain("Turned on MCP server linear. Test: it works. Its tools: list_issues.");
+    expect(answers[0]).toContain("Turned on MCP server linear. Test: it started and listed its tools: list_issues.");
   });
 
   it("Remove removes the server", async () => {

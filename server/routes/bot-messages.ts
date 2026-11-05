@@ -32,6 +32,8 @@ import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { extractSteerImages } from "../turn-images.ts";
 import { followupFacts, helperFollowup, helperFollowupBody, mayFollowUp } from "../helper-followup.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
+import { noteTypedSend } from "../typed-sends.ts";
+import { parseMentionPicks } from "../../shared/room-mentions.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
@@ -51,6 +53,8 @@ export interface BotMessageRouteDeps {
     | "activeLeaf" | "appendMessage" | "bot" | "botByThread" | "bots" | "groupByThread" | "messagesFor"
     | "patchMessage" | "patchTask" | "projectBotForTask" | "setActiveLeaf" | "setTaskAskedAt" | "taskByThread" | "tasks">;
   registry: Pick<ProviderRegistry, "get">;
+  /** On a team: the words for a turn with no AI to answer with, having told who can connect one. */
+  noAiRefusal?(threadId: string, sender: ResolvedSender | undefined, instanceId?: string): Error | null;
   routines(): RoutineManager | null;
   handoffs: Pick<Handoffs, "current" | "steered">;
   /** The turn running in a thread now, as its runtime events name it. */
@@ -123,6 +127,8 @@ export interface BotMessageRouteDeps {
   goals: Pick<OneOnOneGoals, "start">;
   /** A Team Cloud: the person's reply to a line in their own inbox goes back where that line came from, with no turn
    * here; null for any other message. */
+  /** On a team: the name of whoever connects its AI; empty until they have opened the team. */
+  teamAiOwnerName?(): string;
   inboxReply?(auth: RequestAuth, threadId: string, replyToId: string, text: string, line: { sendId?: string; sender?: ResolvedSender }): { status: number; message?: Message; error?: string } | null;
   /** A typed line that answers a bot's question card; null sends it as usual. */
   typedCardAnswer?(auth: RequestAuth, threadId: string, text: string, target: Message | undefined, line: { sendId?: string; sender?: ResolvedSender }): Promise<{ status: number; message?: Message; error?: string } | null>;
@@ -192,6 +198,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (pointing && (guarded || pressed || fromAnApp)) return json(res, 400, { error: "only a typed message can carry what the person pointed at" });
       const followUp = parseFollowUp(body.followUp);
       if (followUp === null) return json(res, 400, { error: "followUp must be steer, queue or restart" });
+      const mentions = parseMentionPicks(body.mentions);
+      if (mentions === null) return json(res, 400, { error: "mentions must be a list of up to 20 bot ids" });
       if (followUp && (guarded || pressed || fromAnApp)) return json(res, 400, { error: "only a typed message can choose how it meets the running turn" });
       // A distinct route, so an older server answers 404 instead of ignoring the safety preconditions.
       const guardedBody = guarded ? guardedSendSchema.safeParse(body) : null;
@@ -312,13 +320,16 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
           }
         : undefined;
       if (phone && sendId) notePhoneSend(sendId);
+      // The bot's own shell reaches this route on a headless server (loopback is the owner), so only a
+      // paired session or the desktop capability proves a person and lifts the webhook block.
+      const personPresent = auth.kind === "session" || DESKTOP_MANAGED;
+      if (personPresent && sendId && !guarded && !press && !appSent) noteTypedSend(threadId, sendId, text);
       if (pressKey) pressesInFlight.set(pressKey, sendId);
       try {
         const receipt = await acceptDirectSend({
           botId: bot.id, threadId, text, sendId, replyTo, sender, trigger, dataContext, ...(app ? { app } : {}),
-          // The bot's own shell reaches this route on a headless server (loopback is the owner), so only a
-          // paired session or the desktop capability proves a person and lifts the webhook block.
-          personPresent: auth.kind === "session" || DESKTOP_MANAGED, ...(followUp ? { followUp } : {}),
+          personPresent, ...(followUp ? { followUp } : {}),
+          ...(mentions?.length && !press && !appSent ? { mentions } : {}),
         }, guardedStart);
         press?.settle("queueId" in receipt ? receipt.queueId : undefined);
         appContext?.deliver();
@@ -430,7 +441,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (!parsed.success) return json(res, 400, { error: "body must be { ai, apps?, threadId? }" });
       const threadId = parsed.data.threadId ?? bot.threadId;
       if (store.botByThread(threadId)?.id !== bot.id) return json(res, 404, { error: "no such conversation" });
-      const next = helperFollowup(store.messagesFor(threadId), () => followupFacts(bot, parsed.data, store.bots, routines?.listRoutines() ?? []));
+      const connects = auth.scopes.includes("admin") ? undefined : deps.teamAiOwnerName?.();
+      const next = helperFollowup(store.messagesFor(threadId), () => followupFacts(bot, parsed.data, store.bots, routines?.listRoutines() ?? [], connects));
       if (!next) return json(res, 409, { error: "this conversation has no intro to follow up" });
       if ("existing" in next) return json(res, 200, { message: next.existing });
       return json(res, 201, { message: store.appendMessage(threadId, next.append) });
@@ -481,6 +493,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       }
       const rerunSelection = turnSelection(bot.id, bot.threadId) ?? bot.modelSelection;
       if (!registry.get(rerunSelection.instanceId)) {
+        const noAi = deps.noAiRefusal?.(bot.threadId, messageSender(auth), rerunSelection.instanceId);
+        if (noAi) throw noAi;
         return json(res, 409, {
           error: `provider instance "${rerunSelection.instanceId}" is unavailable — pick another model in settings`,
         });

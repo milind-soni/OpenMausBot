@@ -118,6 +118,21 @@ describe("show_html", () => {
   });
 });
 
+describe("a frameless page", () => {
+  it("is drawn without the card frame only when the bot asks, and keeps that look through updates unless changed", () => {
+    const { call, row } = setup();
+    call({ tool: "show_html", html: PAGE, title: "Framed" });
+    expect(row("m1").app).toMatchObject({ border: true });
+    call({ tool: "show_html", html: PAGE, title: "Inline", frameless: true });
+    expect(row("m2").app).toMatchObject({ border: false });
+    call({ tool: "update_html", app_id: "m2", html: "<p>New numbers</p>" });
+    expect(row("m2").app).toMatchObject({ border: false, rev: 1 });
+    call({ tool: "update_html", app_id: "m2", html: "<p>New numbers</p>", frameless: false });
+    expect(row("m2").app).toMatchObject({ border: true, rev: 1 });
+    expect(call({ tool: "show_html", html: PAGE, title: "Bad", frameless: "yes" })).toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/^frameless:/) });
+  });
+});
+
 describe("update_html", () => {
   it("replaces the page in place: a new document, the next revision, the title kept unless given, context dropped", () => {
     const { call, row, store } = setup();
