@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR } from "../config.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
-import { AntigravityAcpClient, validateAntigravityRuntime } from "./antigravity-acp.ts";
+import { AntigravityAcpClient, AntigravityAuthController, validateAntigravityRuntime } from "./antigravity-acp.ts";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
 import { VERIFICATION_TEMP_KEY, antigravityTempDir, folderBytes } from "./antigravity-temp.ts";
 
@@ -372,5 +372,25 @@ describe("Antigravity validation shutdown", () => {
     await expect(validateAntigravityRuntime(runtime, "1.1.1")).resolves.toBeUndefined();
     expect(rm).toHaveBeenCalledWith(scratch[0], { recursive: true, force: true, maxRetries: 4, retryDelay: 250 });
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(`verification files ${scratch[0]}: cleanup EPERM`));
+  });
+});
+
+describe("Antigravity sign-in on a boxed host", () => {
+  // Google's runtime waits for the OAuth redirect on 127.0.0.1 and "Send redirect" delivers it from the server,
+  // so a sign-in runtime in the box's own network namespace refused it with ECONNREFUSED on My Cloud.
+  it("runs the sign-in runtime on the host network, still as a bot spawn", async () => {
+    fakeChild();
+    const controller = new AntigravityAuthController();
+    const profile = { directory: "/fixture/profile", tokenPath: "/fixture/profile/token", environment: {} };
+    await expect(controller.start(runtime, profile)).resolves.toMatchObject({ phase: "succeeded" });
+    const [, , options, owner] = vi.mocked(spawnCli).mock.calls[0];
+    expect(owner).toBe("bot");
+    expect(options.box).toEqual({ net: "shared" });
+  });
+
+  it("keeps every other runtime on the box's isolated network", async () => {
+    fakeChild();
+    await validateAntigravityRuntime(runtime, "1.1.1");
+    expect(vi.mocked(spawnCli).mock.calls[0][2].box).toBeUndefined();
   });
 });
