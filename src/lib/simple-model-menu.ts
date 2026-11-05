@@ -42,6 +42,8 @@ export interface MenuGroup {
   label: string;
   provider: string;
   account?: string;
+  /** A short line under the heading, such as why this account is special here. */
+  note?: string;
   body: MenuGroupBody;
 }
 
