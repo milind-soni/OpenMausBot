@@ -534,6 +534,17 @@ describe("the model picker in Simple mode", () => {
     }));
   });
 
+  it("shows the picked Antigravity thinking level on the closed picker, so the pick visibly lands (#4160)", () => {
+    const variants = [{ id: "low", label: "Low" }, { id: "medium", label: "Medium" }];
+    fixture.instances = [{ ...engine("antigravity", "antigravityAgent", "Google Gemini", "subscription", [
+      { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", variants },
+    ]), capabilities: { modelVariants: true } }];
+    const forBot = { ...bot(undefined, "antigravity", "gemini-3.8-flash"), modelSelection: {
+      instanceId: "antigravity", model: "gemini-3.8-flash", variant: "medium",
+    } };
+    expect(render(forBot, { contained: true }).html).toContain(">Gemini 3.8 Flash · Medium</span>");
+  });
+
   it.each([[true, true], [false, false], [null, false]] as const)(
     "lets the bot panel's picker, given the open thread, set the default only for the Cloud owner (owner: %s)",
     (ownerOrAdmin, updatesDefault) => {
