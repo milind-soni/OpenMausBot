@@ -57,10 +57,14 @@ export async function shareUser(request: Request, installation: InstallationRow,
 /**
  * POST /v1/installation/adopt {code}: from now on this installation acts as the user the code shares. Refused while it
  * has connected accounts of its own, which its Sessions could no longer use: they stay reachable, and the person
- * connects the shared apps here instead. Either way the code is spent.
+ * connects the shared apps here instead. Either way the code is spent, unless the installation is bound to a MausBot
+ * account, which it refuses first.
  */
 export async function adoptSharedUser(request: Request, installation: InstallationRow, env: Env, now = Date.now()): Promise<{ ok: boolean; response: Response }> {
   const refuse = (response: Response) => ({ ok: false, response });
+  if (installation.account_id) {
+    return refuse(json({ error: "This installation's connected apps follow its MausBot account.", code: "account_bound" }, 409));
+  }
   const parsed = adoptSchema.safeParse(await readJsonBody(request, 1024));
   if (!parsed.success) return refuse(json({ error: "send {code}" }, 400));
   if (await limited(installation, env)) return refuse(json({ error: "too many connected-app requests" }, 429));

@@ -8,6 +8,9 @@ export interface InstallationRow {
   session_id: string | null;
   disabled_at: number | null;
   last_seen_at?: number;
+  /** Absent on a database that has not run migration 0006 yet. */
+  account_id?: string | null;
+  account_until?: number | null;
 }
 
 /** The Composio user whose connected accounts the installation reaches: the one shared with it, else its own. */

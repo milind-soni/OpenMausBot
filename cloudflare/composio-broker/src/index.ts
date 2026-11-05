@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { planAccountLink } from "../../../shared/connector-account-link";
+import { accountLeaseLapsed, presentAccountGrant } from "./accounts";
 import { appEventStats, composioWebhook, pollEvents, presentCloudGrant, queueTestEvent, runHourly } from "./app-events";
 import {
   ACCOUNT_ID,
@@ -355,12 +356,28 @@ async function verifySession(installation: InstallationRow, env: Env, ctx: Execu
   throw json({ error: "Connected apps changed. Try again." }, 503);
 }
 
+function bearerToken(request: Request) {
+  return request.headers.get("authorization")?.match(/^Bearer ([0-9a-f]{64})$/)?.[1];
+}
+
 async function authenticate(request: Request, env: Env) {
-  const token = request.headers.get("authorization")?.match(/^Bearer ([0-9a-f]{64})$/)?.[1];
+  const token = bearerToken(request);
   if (!token) return null;
   // Every column, so a database that has not run a later migration still answers.
   const row = await env.DB.prepare("SELECT * FROM installations WHERE token_hash = ?").bind(await sha256(token)).first<InstallationRow>();
   return row && row.disabled_at === null ? row : null;
+}
+
+/** DELETE /v1/installation: the installation ends itself (a phone signing out); its token is refused from then on. A
+ *  repeat with the same token answers the same. */
+async function endInstallation(request: Request, env: Env) {
+  const token = bearerToken(request);
+  const ended = token ? await env.DB.prepare(
+    "UPDATE installations SET disabled_at = COALESCE(disabled_at, ?) WHERE token_hash = ? RETURNING id",
+  ).bind(Date.now(), await sha256(token)).first<{ id: string }>() : null;
+  if (!ended) return json({ error: "unauthorized" }, 401);
+  console.log(JSON.stringify({ message: "installation ended", installationId: ended.id }));
+  return json({ ended: true });
 }
 
 async function register(request: Request, env: Env) {
@@ -716,8 +733,14 @@ async function route(request: Request, env: Env, ctx: ExecutionContext) {
   if (request.method === "POST" && url.pathname === "/v1/composio/webhook") return composioWebhook(request, env, ctx);
   if (request.method === "GET" && url.pathname === "/v1/stats/app-events") return appEventStats(request, url, env);
   if (!url.pathname.startsWith("/v1/")) return json({ error: "not found" }, 404);
+  if (request.method === "DELETE" && url.pathname === "/v1/installation") return endInstallation(request, env);
   const installation = await authenticate(request, env);
   if (!installation) return json({ error: "unauthorized" }, 401);
+  const presenting = request.method === "PUT" && url.pathname === "/v1/installation/account";
+  if (accountLeaseLapsed(installation, Date.now()) && !presenting && !(request.method === "GET" && url.pathname === "/v1/me")) {
+    return json({ error: "Sign in to MausBot again to keep using connected apps.", code: "grant_expired" }, 401);
+  }
+  if (presenting) return presentAccountGrant(request, installation, env);
   const appEvents = await appEventRoute(request, url, installation, env, ctx);
   if (appEvents) return appEvents;
   if (request.method === "GET" && url.pathname === "/v1/me") return me(installation);
