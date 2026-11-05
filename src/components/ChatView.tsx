@@ -273,19 +273,47 @@ function TrialCreditFailedRow({ kind, onRetry }: { kind: TrialCreditRefusal; onR
   return <ErrorRow message={t(TRIAL_CREDIT_LINE[kind])} action={{ label: t("chat.error.connectOwnAi"), onClick: () => dispatch({ type: "toggleAppSettings", open: true, section: "engines" }) }} />;
 }
 
-export function FailedTurnRow({ tool, engine, onRetry, botId, threadId }: {
+export function FailedTurnRow({ tool, engine, onRetry, botId, threadId, messageAt }: {
   tool: NonNullable<Message["tool"]>;
   engine: InstanceInfo | undefined;
   onRetry?: () => void;
   botId?: string;
   threadId?: string;
+  messageAt?: number;
 }) {
   const resume = useLimitResetContinue(botId, threadId, tool.limitResetsAt);
+  const [clock, setClock] = useState(Date.now);
+  useEffect(() => {
+    const at = tool.limitResetsAt;
+    if (typeof at !== "number" || !Number.isFinite(at)) return;
+    const delay = at - Date.now();
+    if (delay <= 0) {
+      setClock(Date.now());
+      return;
+    }
+    const timer = setTimeout(() => setClock(Date.now()), Math.min(delay + 1_000, 2_147_483_647));
+    return () => clearTimeout(timer);
+  }, [tool.limitResetsAt]);
   if (tool.place && botId) return <PlaceFailedRow place={tool.place} botId={botId} threadId={threadId} onRetry={onRetry} />;
   const credit = trialCreditKind(failedTurnCause(tool.name) ?? "");
   if (credit) return <TrialCreditFailedRow kind={credit} onRetry={onRetry} />;
   const { cause, notice } = failedTurnNotice(tool);
   if (tool.partial) return <PartlyDoneRow cause={notice ?? cause} onRetry={onRetry} />;
+  // A past refusal remains in the transcript for evidence, not as a current blocker.
+  // The reset time passing does not prove today's quota is available again.
+  const expired = typeof tool.limitResetsAt === "number" &&
+    Number.isFinite(tool.limitResetsAt) &&
+    typeof messageAt === "number" &&
+    messageAt <= tool.limitResetsAt &&
+    clock >= tool.limitResetsAt;
+  if (expired) {
+    return (
+      <details className="my-1 w-fit max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-lg border border-hairline/40 bg-raised px-3 py-2 text-[12px] text-ink-secondary">
+        <summary className="cursor-pointer">Past usage-limit notice (reset time passed; check current usage)</summary>
+        <p className="mt-2 break-words">{notice ?? cause}</p>
+      </details>
+    );
+  }
   const signedOut = signedOutEngine(tool, engine);
   return (
     <ErrorRow
@@ -754,6 +782,7 @@ const MessagesList = memo(function MessagesList({
                 return (
                   <FailedTurnRow
                     tool={m.tool}
+                    messageAt={m.at}
                     engine={engine}
                     botId={botId}
                     threadId={threadId}

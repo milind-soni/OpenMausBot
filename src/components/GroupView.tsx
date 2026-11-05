@@ -107,7 +107,7 @@ export function RoomToolChip({ message, roomId, threadId, live = false }: { mess
   if (!tool) return null;
   if (message.threadRef) return <ThreadChip message={message} />; if (message.relay) return <TeammateChip message={message} />;
   if (failedTurnCause(tool.name) !== null) {
-    return <FailedTurnRow tool={tool} engine={botEngine(state.bots.find((b) => b.id === message.from?.botId), state.instances)} botId={message.from?.botId} />;
+    return <FailedTurnRow tool={tool} engine={botEngine(state.bots.find((b) => b.id === message.from?.botId), state.instances)} botId={message.from?.botId} messageAt={message.at} />;
   }
   const comm = message.comm;
   if (comm && comm.groupId !== roomId) {
