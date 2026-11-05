@@ -243,10 +243,8 @@ const featureConfigSchema = z.object({
   sharedComputers: z.boolean().optional(),
   claudeUserMcp: z.boolean().optional(), // Claude bots also load this machine's Claude Code MCP servers. Off unless true: tools cost tokens.
   claudeUserSkills: z.boolean().optional(), // Claude bots also load the skills in ~/.claude/skills, in place. Off unless true.
-  /** LLM-generated titles for new threads. Off unless true. */
-  llmThreadTitles: z.boolean().optional(),
-  /** A recurring routine run that a usage limit stopped waits for its next scheduled run instead of starting again at the reset. Off unless true. */
-  recurringRoutinesSkipLimitReplay: z.boolean().optional(),
+  llmThreadTitles: z.boolean().optional(), // LLM-generated titles for new threads. Off unless true.
+  recurringRoutinesSkipLimitReplay: z.boolean().optional(), // A recurring routine run that a usage limit stopped waits for its next scheduled run instead of starting again at the reset. Off unless true.
   /** A new bot's setup card offers answers its engine writes for it, when there is something to go on. On unless false. */
   smartSetupChoices: z.boolean().optional(),
   /** Recall matching passages from the bot's memory into each turn. On unless false. */
