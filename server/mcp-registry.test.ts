@@ -22,6 +22,14 @@ describe("custom MCP registry", () => {
     });
   });
 
+  it("takes a command entry that names its stdio transport, and stores it as before", () => {
+    const plain = parseMcpServerMutation("notes", { command: "npx", args: ["-y", "notes-mcp"] });
+    expect(parseMcpServerMutation("notes", { type: "stdio", command: "npx", args: ["-y", "notes-mcp"] })).toEqual(plain);
+    expect(parseStoredMcpServer("notes", { type: "stdio", command: "npx" })).toEqual(parseStoredMcpServer("notes", { command: "npx" }));
+    expect(parseMcpServerMutation("notes", { type: "local", command: "npx" })).toMatchObject({ ok: false });
+    expect(parseMcpServerMutation("notes", { type: "stdio", url: "https://x.example/mcp" })).toMatchObject({ ok: false });
+  });
+
   it("refuses unsafe and reserved routing names", () => {
     expect(mcpServerNameError("Bad.Name")).toMatch(/lowercase/);
     expect(mcpServerNameError("computer")).toMatch(/reserved/);

@@ -453,10 +453,11 @@ The same registry lives in `~/.openmausbot/config.json`:
 }
 ```
 
-`type` is `http` (Streamable HTTP, the default) or `sse`. `oauth` is the
-optional sign-in app; `clientSecret` and `scopes` may be left out. If you edit the file
-by hand, restart OpenMausBot. Every bot whose engine can mount custom MCP
-servers gets the enabled tools on its next task.
+`type` is `http` (Streamable HTTP, the default) or `sse`. A command entry may
+say `"type": "stdio"`, as other MCP clients write it; it changes nothing.
+`oauth` is the optional sign-in app; `clientSecret` and `scopes` may be left
+out. If you edit the file by hand, restart OpenMausBot. Every bot whose
+engine can mount custom MCP servers gets the enabled tools on its next task.
 
 ## Rules that keep this safe
 

@@ -86,6 +86,18 @@ it("says when a server is added, imported or removed on purpose, so a Cloud home
   expect(changes).toEqual(["added", "added", "removed"]);
 });
 
+it("adds a command server sent with type stdio, as other MCP clients write it, and keeps the old shape working", async () => {
+  const { cfg, post } = await serve();
+  const typed = await post("/api/mcp/servers", { name: "notes", type: "stdio", command: "npx", args: ["-y", "notes-mcp"] });
+  expect(typed.status, await typed.clone().text()).toBe(201);
+  const plain = await post("/api/mcp/servers", { name: "files", command: "npx", args: ["-y", "files-mcp"] });
+  expect(plain.status, await plain.clone().text()).toBe(201);
+  expect(cfg.mcpServers).toEqual({
+    notes: { command: "npx", args: ["-y", "notes-mcp"], env: {}, enabled: false },
+    files: { command: "npx", args: ["-y", "files-mcp"], env: {}, enabled: false },
+  });
+});
+
 it.each([["private", "person"], ["public", "team"]])("lists the scope of %s in reads and mutation responses", async (name, scope) => {
   const { post, get } = await serve();
   const response = await post("/api/mcp/servers", { name, url: "https://mail.example.com/mcp", headers: { Authorization: "" } });
