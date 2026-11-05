@@ -13,6 +13,7 @@ import {
   clientBotPatchViolation,
   clientGroupPatchViolation,
   ipcPeer,
+  movedBotSetting,
   isAllowedOrigin,
   isLoopbackHost,
   isProxied,
@@ -231,6 +232,13 @@ describe("scopes", () => {
       expect(botProfileSettings({ ...profile, [field]: true }), field).toEqual(profile);
     }
   });
+
+  it("lets a moved bot bring its profile, model, voice and memory settings, never what it may do", () => {
+    expect(movedBotSetting({ name: "Scout", soul: "Plans trips", voiceNotes: true, memoryEnabled: true, memoryUpkeep: "weekly", modelSelection: {}, welcomed: true })).toBeNull();
+    for (const field of ["approvalMode", "alwaysAllow", "computer", "cwd", "mcpServers", "composio", "browser", "peers", "section", "chiefOfStaff", "defaultBot", "installedPackage"]) {
+      expect(movedBotSetting({ [field]: true }), field).toBe(field);
+    }
+  });
 });
 
 describe("resolveRequestAuth", () => {
@@ -294,6 +302,35 @@ describe("resolveRequestAuth", () => {
     expect(check("POST", "/api/live/device-revoked").auth?.kind).toBe("loopback");
     for (const overrides of forged) expect(check("POST", "/api/live/device-revoked", overrides).auth).toBeNull();
     expect(check("GET", "/api/live/device-revoked").auth).toBeNull();
+  });
+
+  it("trusts a companion's move mark only on a move route of a verified companion request", () => {
+    const relay = { host: "127.0.0.1:8799", "x-openmausbot-companion": "1", "x-openmausbot-companion-device": "phone-1", "x-openmausbot-companion-auth": "relay-secret" };
+    const mark = { "x-openmausbot-companion-move": "1" };
+    const as = (headers: Record<string, string>, method: string, path: string, extra: Partial<Parameters<typeof resolveRequestAuth>[1]> = {}) =>
+      resolveRequestAuth(request(headers, method), {
+        sessions, cookieName, streamPath: "/api/events", url: new URL(path, "http://localhost"),
+        loopbackMutationToken: "desktop-secret", companionMutationToken: "relay-secret", ...extra,
+      });
+    expect(as({ ...relay, ...mark }, "POST", "/api/cloud-send/chats").auth)
+      .toEqual({ kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-1", companionMove: true });
+    // Under a grant the companion marks every move route, a phone's everyday PATCH of any bot too.
+    expect(as({ ...relay, ...mark }, "PATCH", "/api/bots/here-bot-0001").auth).toEqual({ kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-1", companionMove: true });
+    expect(as(relay, "PATCH", "/api/bots/here-bot-0001").auth).toEqual({ kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-1" });
+    expect(as(relay, "POST", "/api/cloud-send/chats")).toMatchObject({ auth: null, status: 403, error: "forbidden: invalid companion request" });
+    expect(as({ ...relay, ...mark }, "GET", "/api/bots").auth).toEqual({ kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-1" });
+    expect(as({ ...relay, ...mark }, "POST", "/api/cloud-send/verify-secrets")).toMatchObject({ auth: null, status: 403, error: "forbidden: invalid companion request" });
+    expect(as({ ...relay, ...mark, "x-openmausbot-companion-auth": "desktop-secret" }, "POST", "/api/cloud-send/chats").auth).toBeNull();
+    // From anyone else the mark is ignored: the owner's own loopback, a companion request without its token, a session, a trusted local browser.
+    expect(as({ host: "127.0.0.1:8799", ...mark }, "GET", "/api/bots").auth).toEqual({ kind: "loopback", scopes: ["admin", "client"] });
+    expect(as({ host: "127.0.0.1:8799", ...mark }, "POST", "/api/cloud-send/chats", { loopbackMutationToken: undefined }).auth).toEqual({ kind: "loopback", scopes: ["admin", "client"] });
+    const { "x-openmausbot-companion-auth": _token, ...tokenless } = relay;
+    expect(as({ ...tokenless, ...mark }, "POST", "/api/cloud-send/chats", { loopbackMutationToken: undefined }).auth).toEqual({ kind: "loopback", scopes: ["admin", "client"] });
+    const session = as({ host: "127.0.0.1:8799", authorization: `Bearer ${pairedToken()}`, ...mark }, "POST", "/api/cloud-send/chats").auth;
+    expect(session?.kind).toBe("session");
+    expect(session).not.toHaveProperty("companionMove");
+    const page = { host: "127.0.0.1:8799", "sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "empty", ...mark };
+    expect(as(page, "POST", "/api/cloud-send/chats", { loopbackMutationToken: undefined, trustLocalBrowser: true }).auth).toEqual({ kind: "loopback", scopes: ["admin", "client"] });
   });
 
   function pairedToken(scopes: Array<"admin" | "client"> = ["admin", "client"]): string {

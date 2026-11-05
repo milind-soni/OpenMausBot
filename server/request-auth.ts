@@ -6,7 +6,7 @@ import { isIP } from "node:net";
 
 import { BOT_PROFILE_PATCH_FIELDS } from "./bot-profile.ts";
 import type { Scope, SessionRecord, SessionRegistry } from "./sessions.ts";
-import { denyReason as companionDenial, isCompanionNotice } from "../companion/src/routes.ts";
+import { denyReason as companionDenial, isCompanionNotice, isMoveRoute } from "../companion/src/routes.ts";
 
 /** `owner`: the machine's owner. `service`: a shared server where every bot's shell is a loopback caller too,
  * so loopback without a session may reach only SERVICE_ALLOW. */
@@ -17,6 +17,8 @@ export type RequestAuth =
     kind: "loopback"; scopes: readonly Scope[]; trust?: "service";
     /** Set only on the verified companion-token path: the sidecar's id for the phone that authenticated. */
     companionDevice?: string;
+    /** Set only on the verified companion path, on a move route, while the companion holds that phone's move grant. */
+    companionMove?: true;
   }
   | { kind: "session"; session: SessionRecord; via: "bearer" | "cookie" | "ticket"; scopes: readonly Scope[] };
 
@@ -469,6 +471,13 @@ export function adminOnlyBotSetting(fields: Record<string, unknown>): string | n
   return Object.keys(fields).find((key) => !BOT_PROFILE_SETTINGS.has(key)) ?? null;
 }
 
+/** All a phone's move may set on a bot it brought: its profile, model, voice and memory settings. */
+const MOVED_BOT_SETTINGS: ReadonlySet<string> = new Set([...BOT_PROFILE_SETTINGS, "voiceNotes", "memoryEnabled", "memoryUpkeep"]);
+
+export function movedBotSetting(fields: Record<string, unknown>): string | null {
+  return Object.keys(fields).find((key) => !MOVED_BOT_SETTINGS.has(key)) ?? null;
+}
+
 export function botProfileSettings(fields: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(fields).filter(([key]) => BOT_PROFILE_SETTINGS.has(key)));
 }
@@ -604,13 +613,15 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
   if (loopback) {
     const companionToken = headerValue(req.headers["x-openmausbot-companion-auth"]);
     if (companionToken && options.loopbackMutationToken !== undefined) {
+      const move = headerValue(req.headers["x-openmausbot-companion-move"]) === "1";
       if (
         !secureTokenMatch(companionToken, options.companionMutationToken ?? "") ||
         req.headers["x-openmausbot-companion"] !== "1" ||
         !/^[\w-]{1,128}$/.test(headerValue(req.headers["x-openmausbot-companion-device"]) ?? "") ||
-        (companionDenial({ path, method, authenticated: true }) && !isCompanionNotice(method, path))
+        (companionDenial({ path, method, authenticated: true, move }) && !isCompanionNotice(method, path))
       ) return deny(403, "forbidden: invalid companion request");
-      return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES, companionDevice: headerValue(req.headers["x-openmausbot-companion-device"]) }, status: 401, error: "" };
+      return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES, companionDevice: headerValue(req.headers["x-openmausbot-companion-device"]),
+        ...(move && isMoveRoute(method, path) ? { companionMove: true as const } : {}) }, status: 401, error: "" };
     }
     const desktopOwner = options.loopbackMutationToken !== undefined &&
       secureTokenMatch(headerValue(req.headers[DESKTOP_OWNER_HEADER]), options.loopbackMutationToken) && fromOwnPage(req);
