@@ -38,6 +38,32 @@ export function moveTeams(state) {
     .map((team) => ({ id: team.id, name: team.name, origin: team.machine.origin, ready: team.machine.status === "ready" }));
 }
 
+/** What a native confirm says when a team's own page asks to bring a bot in: main's words, so no page can soften them. */
+export function teamMoveConfirmWords({ bot, team }) {
+  return {
+    message: `Move ${bot} to ${team}?`,
+    detail: [
+      `Everyone in ${team} can use ${bot}. Only ${team}'s admins can change it.`,
+      `Goes with ${bot}: instructions, skills, files, routines, and your chats with ${bot}`,
+      "Your chats stay private there: only you can see them.",
+      `Stays on My Cloud: what ${bot} remembers, your connections, and MausBot`,
+      "There's no way back: you can't move it back to My Cloud.",
+    ].join("\n\n"),
+    buttons: [`Move to ${team}`, "Cancel"],
+  };
+}
+
+const BRING_LIST_MS = 30_000;
+
+/** The bots on My Cloud a team's page offers: in the order My Cloud lists them, each with why it can't go, if it can't. */
+export function bringableBots(listed) {
+  const here = (Array.isArray(listed) ? listed : []).filter((bot) => record(bot) && ID.test(bot.id ?? "") && typeof bot.name === "string" && !bot.hidden && !bot.movedTo);
+  return here.map((bot) => {
+    const stays = bot.defaultBot ? "default" : bot.chiefOfStaff ? "chief" : here.length <= 1 ? "last" : null;
+    return { id: bot.id, name: bot.name, ...(stays ? { stays } : {}) };
+  });
+}
+
 /** A session opened once, when first used, and closed once. */
 function lazy(open) {
   let opened = null;
@@ -70,6 +96,8 @@ function bearerSession(origin, token, fetchImpl) {
  * @param {{
  *   ipcMain: { handle(channel: string, handler: (...args: any[]) => unknown): void },
  *   cloudPage(event: unknown): "local" | "cloud" | null,
+ *   pageOrigin?(event: unknown): string | null,
+ *   confirmMove?(words: { message: string, detail: string, buttons: string[] }): Promise<boolean>,
  *   home(): { origin: string, grant(): Promise<{ origin: string, code: string }> } | null,
  *   account(): { state(): any, pairTeam(teamId: string): Promise<{ origin: string, code: string }> } | null,
  *   file(): string,
@@ -81,8 +109,10 @@ function bearerSession(origin, token, fetchImpl) {
  *   log?(line: string): void,
  * }} deps `home`: My Cloud and the Admin's code for it. `account`: the MausBot Cloud sign-in, whose verified session
  * names the person's teams. `file`: the send's own state; `journalFile`: the moves'. `openTeam`: shows the team's page.
+ * `pageOrigin`: the origin of the page asking, when it is this window's active server's main frame. `confirmMove`: asks
+ * the person outside any page.
  */
-export function installTeamMove({ ipcMain, cloudPage, home, account, file, journalFile, openTeam, onChange = () => {}, fetch: fetchImpl = globalThis.fetch, journal, log = () => {} }) {
+export function installTeamMove({ ipcMain, cloudPage, pageOrigin = () => null, confirmMove = async () => false, home, account, file, journalFile, openTeam, onChange = () => {}, fetch: fetchImpl = globalThis.fetch, journal, log = () => {} }) {
   const teams = () => moveTeams(account()?.state());
   const teamOf = (id) => teams().find((team) => team.id === id) ?? null;
   const sendStore = jsonFile(file);
@@ -188,6 +218,46 @@ export function installTeamMove({ ipcMain, cloudPage, home, account, file, journ
     if (!team) throw new Error("You're not in that team.");
     openTeam?.({ id: team.id, name: team.name });
   }));
+
+  // Security: a team's server is not the person's own, so its page reaches My Cloud's bots only through these. It names a
+  // bot by id and learns its name and what can go; the team is the page's own by the Admin's word, the name comes from My
+  // Cloud, and nothing goes until the person says so in a confirm no page draws.
+  const pageTeam = (event) => {
+    const origin = pageOrigin(event);
+    return origin ? teams().find((team) => team.origin === origin) ?? null : null;
+  };
+  let bringList = null;
+  async function myCloudBots() {
+    if (bringList && Date.now() - bringList.at < BRING_LIST_MS) return bringList.bots;
+    const target = home();
+    if (!target) return [];
+    const session = await openOwnerSession(target, fetchImpl, { label: "Move to a team", background: false });
+    try {
+      const listed = await session.call("GET", "/api/bots?messages=0");
+      if (!listed.ok) throw new Error("My Cloud did not answer.");
+      bringList = { at: Date.now(), bots: bringableBots(listed.body?.bots) };
+      return bringList.bots;
+    } finally { await session.close().catch(() => {}); }
+  }
+  ipcMain.handle("cloud-send:team-bring", async (event) => {
+    const team = pageTeam(event);
+    if (!team) return { bots: [] };
+    return { team: { id: team.id, name: team.name, ready: team.ready }, bots: await myCloudBots().catch(() => []) };
+  });
+  ipcMain.handle("cloud-send:team-bring-move", async (event, botId) => {
+    const team = pageTeam(event);
+    if (!team?.ready) throw new Error("Open the team you're moving a bot into.");
+    const bot = (await myCloudBots()).find((entry) => entry.id === String(botId));
+    if (!bot || bot.stays) throw new Error("Choose one of your bots to move.");
+    if (!(await confirmMove(teamMoveConfirmWords({ bot: bot.name, team: team.name })))) return { started: false, move: moves.view() };
+    void moves.start({ bot: { id: bot.id, name: bot.name }, team: { id: team.id, name: team.name, origin: team.origin } });
+    bringList = null;
+    return { started: true, move: moves.view() };
+  });
+  ipcMain.handle("cloud-send:team-bring-status", (event) => {
+    const team = pageTeam(event), move = moves.view();
+    return team && move?.team.id === team.id ? move : null;
+  });
 
   return {
     kick: () => moves.kick(),

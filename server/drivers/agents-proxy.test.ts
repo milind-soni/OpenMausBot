@@ -658,6 +658,7 @@ describe("agents-proxy MCP surface", () => {
       "fill_login",
       "decide",
       "extract",
+      "message_person",
       "report_bug",
       "memory_update",
       "retry_thread",
@@ -701,7 +702,8 @@ describe("agents-proxy MCP surface", () => {
     expect(credential.description).toContain("on a secure card in the app or a QR-paired phone, never in chat");
     expect(credential.description).toContain("onePasswordToken: a 1Password service account token");
     expect(credential.description).toContain("You never see the value");
-    expect(Object.keys(credential.inputSchema.properties)).toEqual(["credential_id", "label", "reason", "placeholder", "delivery"]);
+    expect(Object.keys(credential.inputSchema.properties)).toEqual(["credential_id", "address", "label", "reason", "placeholder", "delivery"]);
+    expect(credential.inputSchema.properties.address.description).toMatch(/^credential_id email only/);
     expect(credential.inputSchema.required).toBeUndefined();
   });
 
@@ -963,12 +965,11 @@ describe("agents-proxy MCP surface", () => {
     expect(postCalls).toBe(before + 4);
   });
 
-  it("start_thread: a job on yourself, with the one bot_id it accepts, and the teammate case pointed at coordinate_bots", async () => {
+  it("start_thread: a job on yourself, naming no bot, and the teammate case pointed at coordinate_bots", async () => {
     const list = await rpc("tools/list");
     const start = list.result.tools.find((tool: { name: string }) => tool.name === "start_thread");
     expect(start.inputSchema.required).toEqual(["title", "message"]);
-    expect(Object.keys(start.inputSchema.properties)).toEqual(["title", "message", "bot_id", "folder", "model_selection"]);
-    expect(start.inputSchema.properties.bot_id).toEqual({ type: "string", enum: ["bot-asker"], description: "Leave out, or use your own bot ID. For teammates use coordinate_bots." });
+    expect(Object.keys(start.inputSchema.properties)).toEqual(["title", "message", "folder", "model_selection"]);
     expect(start.description).toContain("Open a separate job on yourself");
     expect(start.description).toContain('use coordinate_bots for teammates (thread "new" opens a fresh thread on them)');
     expect(start.description).toContain("do not retry it");
@@ -1165,7 +1166,7 @@ describe("agents-proxy MCP surface", () => {
   it("asks for any other secret by its name, reason and delivery, never its value", async () => {
     const res = await callTool("request_credential", { label: "Stripe secret key", reason: "To create test charges.", placeholder: "sk_test_…", delivery: "file" });
     expect(res.result.isError).toBeFalsy();
-    expect(res.result.content[0].text).toMatch(/^A secure card for OpenCode API key is ready in OpenMausBot, on the computer and on a freshly QR-paired phone\. End this turn now/u);
+    expect(res.result.content[0].text).toMatch(/^A secure card for OpenCode API key is now in this conversation, in the app and on a QR-paired phone, and the person was notified\. If they can't find it, tell them it is in this conversation, and the notification opens it\. End this turn now/u);
     expect(lastCredentialBody).toEqual({
       fromBotId: "bot-asker",
       fromThreadId: "thread-asker-routine",
@@ -2374,7 +2375,7 @@ describe("tool bridge", () => {
   /** The main child's switches: a Chief with skills and shared computers. */
   const CHIEF = { OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1", OMB_CHIEF_OF_STAFF: "1", OMB_COMPUTER_SELECTION: "1" };
   const CHIEF_ONLY = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "manage_room", "retry_thread"];
-  const HOT = ["tool_result_read", "list_room_targets", "coordinate_bots", "list_bots", "list_rooms", "select_computer", "attach_file", "publish_page", "post_to_room", "request_credential", "request_sign_in", "fill_login", "memory_update"];
+  const HOT = ["tool_result_read", "list_room_targets", "coordinate_bots", "list_bots", "list_rooms", "select_computer", "attach_file", "publish_page", "post_to_room", "request_credential", "request_sign_in", "fill_login", "message_person", "memory_update"];
   let chief: Rpc;
   let plain: Rpc;
   let off: Rpc;

@@ -12,7 +12,7 @@ import { pendingApprovals, PendingApprovalActions } from "../PendingApproval";
 import { ASK_QUIET_ANSWER, ASK_QUIET_BUTTON, AskChoices, AskError } from "../AskCard";
 import { ELEVATED_CARD } from "../elevated";
 import { InboxRowItem } from "./InboxRow";
-import { asMessage } from "./InboxReading";
+import { asMessage } from "./inbox-answer";
 import { askOf, CARD_ROWS, choiceResponse, choicesOf, rowsIn, tabCounts } from "./inbox-view";
 import { accessRequestWords } from "../bot-access/access-card";
 import { useInboxActions } from "./use-inbox-actions";

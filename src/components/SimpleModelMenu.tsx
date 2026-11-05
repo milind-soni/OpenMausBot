@@ -272,6 +272,7 @@ export function SimpleModelMenu(props: SimpleModelMenuProps) {
                   <Gutter><InstanceProviderMark instance={group.instance} size={14} subtle /></Gutter>
                   <span className="min-w-0 truncate">{group.label}</span>
                 </div>
+                {group.note && <p className={cn(MENU_NOTE, "pl-8 pt-0")}>{group.note}</p>}
                 <GroupBody group={group} props={props} />
               </div>
             );

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Check, Loader2, MoreHorizontal, Plus } from "lucide-react";
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { t } from "@/lib/i18n";
@@ -248,11 +248,12 @@ function AccountRow({ group, instance, signingIn, onSignIn, onSignInDone }: {
 }
 
 /** Names a new account and hands its id back, so the caller can start its sign-in at once. */
-export function AddAccount({ label, endpoint, extra, folder: offerFolder = false, onAdded }: {
+export function AddAccount({ label, endpoint, extra, folder: offerFolder = false, describedBy, onAdded }: {
   label: string;
   endpoint: string;
   extra?: Record<string, unknown>;
   folder?: boolean;
+  describedBy?: string;
   onAdded: (instanceId: string) => void;
 }) {
   const { dispatch } = useStore();
@@ -283,7 +284,7 @@ export function AddAccount({ label, endpoint, extra, folder: offerFolder = false
 
   if (!open) {
     return (
-      <button type="button" onClick={() => setOpen(true)} className="flex min-h-8 w-fit items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-medium text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">
+      <button type="button" onClick={() => setOpen(true)} aria-describedby={describedBy} className="flex min-h-8 w-fit items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-medium text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">
         <Plus size={14} />{label}
       </button>
     );
@@ -292,7 +293,7 @@ export function AddAccount({ label, endpoint, extra, folder: offerFolder = false
     <form data-add-account={endpoint} className="space-y-2.5 rounded-xl border border-hairline/50 bg-app p-3" onSubmit={(event) => { event.preventDefault(); void add(); }}>
       <label className="flex flex-col gap-1 text-[12px] font-medium text-ink">
         {t("accounts.nameLabel")}
-        <input value={name} onChange={(event) => setName(event.target.value)} placeholder={t("accounts.namePlaceholder")} maxLength={80} autoFocus required disabled={saving}
+        <input value={name} onChange={(event) => setName(event.target.value)} placeholder={t("accounts.namePlaceholder")} maxLength={80} autoFocus required disabled={saving} aria-describedby={describedBy}
           className="rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] font-normal text-ink outline-none focus:border-accent-border disabled:opacity-50" />
       </label>
       {offerFolder && (
@@ -321,6 +322,7 @@ export function AccountsCard({ group, accounts, advanced, bare = false }: { grou
   const primary = accounts[0]!;
   const installed = accounts.some((instance) => instance.snapshot.state === "available");
   const policy = accounts.find((instance) => instance.policy)?.policy;
+  const noteId = useId();
   return (
     <EngineCard instance={primary} summary={summaryFor(group, accounts)} bare={bare}>
       {policy && <p className="mb-3 text-[12px] leading-relaxed text-ink-secondary">
@@ -336,7 +338,11 @@ export function AccountsCard({ group, accounts, advanced, bare = false }: { grou
                 onSignInDone={() => setSigningIn((current) => current === instance.instanceId ? null : current)} />
             ))}
           </ul>
-          {!primary.snapshot.authenticationUnavailableReason && <AddAccount label={t(COPY[group].add)} endpoint={`/api/instances/${group}-accounts`} folder={group === "claude"} onAdded={setSigningIn} />}
+          {!primary.snapshot.authenticationUnavailableReason && <>
+            <AddAccount label={t(COPY[group].add)} endpoint={`/api/instances/${group}-accounts`} folder={group === "claude"}
+              describedBy={group === "chatgpt" ? noteId : undefined} onAdded={setSigningIn} />
+            {group === "chatgpt" && <p id={noteId} className="px-2 text-[12px] leading-relaxed text-ink-secondary">{t("accounts.addChatgptWorkspaceNote")}</p>}
+          </>}
         </div>
       )}
       {primary.snapshot.update && <EngineUpdateNotice update={primary.snapshot.update} instance={primary} className="mt-3" quiet />}
