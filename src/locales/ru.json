@@ -3870,6 +3870,7 @@
   "remote.devices.subtitle": "Управляйте устройствами, которые могут использовать этот {app}.",
   "remote.devices.empty": "Сопряжённых устройств пока нет.",
   "remote.devices.lastSeen": "Последняя активность: {when}",
+  "remote.devices.paused": "Приостановлено после 30 дней без использования. Подключится снова, когда вы откроете эту страницу.",
   "remote.devices.remove": "Удалить {name}",
   "remote.devices.allowView": "Разрешить просмотр компьютера",
   "remote.devices.allowViewDetail": "Полный интерактивный доступ с этого устройства.",
