@@ -10,6 +10,7 @@ import { activeRunsOf, nextDueOf, schedulerDueOf, wakeHoldOf } from "./routine-d
 import { startDueTimer, type DueTimer } from "./due-timer.ts";
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import type { RoutineRequestOperation } from "../shared/routine-request.ts";
+import type { ModelSelection } from "../shared/wire.ts";
 import { intervalAllowsOccurrence, intervalHasRestrictions, isSameLocalDay, latestIntervalOccurrence } from "./routine-intervals.ts";
 import { cloneSchedule, limitResetOccurrence, mergeScheduleUpdate, nextOccurrence, RoutineScheduleError, type RoutineSchedule, type RoutineScheduleInput } from "./routine-schedules.ts";
 import { runsOnce } from "../shared/limit-reset.ts";
@@ -60,6 +61,7 @@ export interface Routine {
   timeoutMinutes?: number;
   attachments?: RoutineContextAttachment[];
   continuity?: boolean;
+  modelSelection?: ModelSelection;
   overlap?: "skip" | "queue";
   runOnStartup?: boolean;
   checks?: RoutineCheck[];
@@ -175,6 +177,7 @@ export interface RoutineInput {
   timeoutMinutes?: number | null;
   attachments?: RoutineContextAttachment[];
   continuity?: boolean;
+  modelSelection?: ModelSelection | null;
   overlap?: "skip" | "queue";
   runOnStartup?: boolean;
   checks?: RoutineCheck[] | null;
@@ -582,6 +585,7 @@ export class RoutineManager {
       timeoutMinutes: Object.hasOwn(patch, "timeoutMinutes") ? patch.timeoutMinutes : routine.timeoutMinutes,
       attachments: patch.attachments ?? routine.attachments,
       continuity: patch.continuity ?? routine.continuity,
+      modelSelection: Object.hasOwn(patch, "modelSelection") ? patch.modelSelection : routine.modelSelection,
       overlap: Object.hasOwn(patch, "overlap") ? patch.overlap : routine.overlap,
       runOnStartup: patch.runOnStartup ?? routine.runOnStartup,
       checks: Object.hasOwn(patch, "checks") ? patch.checks : routine.checks,
@@ -611,11 +615,7 @@ export class RoutineManager {
         updatedAt: Math.max(now, routine.updatedAt + 1),
       });
       if (patch.enabled !== undefined) delete routine.heldFor;
-      if (!clean.continuity) delete routine.continuity;
-      if (clean.overlap !== "queue") delete routine.overlap;
-      if (!clean.runOnStartup) delete routine.runOnStartup;
-      if (!clean.access) delete routine.access;
-      if (!clean.deliver) delete routine.deliver;
+      for (const key of ["continuity", "modelSelection", "overlap", "runOnStartup", "access", "deliver"] as const) if (!clean[key]) delete routine[key];
       if (!clean.checks) for (const key of ["checks", "checkedAt", "checkTrouble", "wakeAt"] as const) delete routine[key];
       if (Object.hasOwn(patch, "timeoutMinutes") && patch.timeoutMinutes == null) {
         delete routine.timeoutMinutes;
