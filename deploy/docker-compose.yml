@@ -37,6 +37,9 @@ services:
       # "Sign in with your email"). Empty means pairing codes only.
       OMB_SIGNIN_EMAILS: ${OMB_SIGNIN_EMAILS:-}
       OMB_SIGNIN_MEMBER_EMAILS: ${OMB_SIGNIN_MEMBER_EMAILS:-}
+      # Send the codes through your own mail server (same section of the docs).
+      OMB_SIGNIN_SMTP_URL: ${OMB_SIGNIN_SMTP_URL:-}
+      OMB_SIGNIN_SMTP_FROM: ${OMB_SIGNIN_SMTP_FROM:-}
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot"]
       interval: 30s
