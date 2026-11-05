@@ -376,6 +376,35 @@ posixOnly("Live call e2e", () => {
     }
   }, 40_000);
 
+  it("ends a paired device's call once an admin limits what that device sees", async () => {
+    const bot = await createBot();
+    const invitation = (await post("/api/auth/pairing", { label: "Desk", scopes: ["admin", "client"] })).body as { code: string };
+    const paired = (await post("/api/auth/pair", { code: invitation.code, label: "Desk" })).body as { token: string; session: { id: string } };
+    const desk = { authorization: `Bearer ${paired.token}`, origin: base };
+    const sse = await openSse(`${base}/api/events`);
+    try {
+      const before = live.sessions.length;
+      const started = await post("/api/live/session", { botId: bot.id, sdp: SDP, client: "web" }, desk);
+      expect(started.status).toBe(201);
+      const { call } = started.body as { call: LiveCallState };
+      const session = live.sessions[before];
+      await live.waitForAttach(session.id);
+      await sse.until((frame) => frame.kind === "live.call" && frame.call?.callId === call.callId && frame.call?.status === "live");
+
+      const limited = await fetch(`${base}/api/auth/sessions/${paired.session.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ view: { sections: [], bots: [], groups: [] } }),
+      });
+      expect(limited.status).toBe(200);
+      await live.waitForCommand(session.id, (c) => c.type === "session.close", 5_000);
+      const ended = await sse.until((frame) => frame.kind === "live.call" && frame.call?.callId === call.callId && frame.call?.status === "ended", 10_000);
+      expect(ended.call).toMatchObject({ endReason: "signed-out" });
+    } finally {
+      sse.close();
+    }
+  }, 40_000);
+
   it("never reads back a line a worker relayed into the call's chat as the caller's own", async () => {
     const bot = await createBot();
     const { call, session } = await startCall(bot.id);

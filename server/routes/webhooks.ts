@@ -9,7 +9,7 @@ import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 export interface WebhookRouteDeps {
   webhooks: WebhookManager;
   ingress: () => { available: boolean; baseUrl: string; error?: string };
-  visible: (auth: RequestAuth) => { everything: boolean; bot(id: string): boolean; group(id: string): boolean };
+  visible: (auth: RequestAuth) => { everything: boolean; reaches(id: string): boolean; group(id: string): boolean };
 }
 
 export function createWebhookRoutes({ webhooks, ingress, visible }: WebhookRouteDeps): RouteHandler {

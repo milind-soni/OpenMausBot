@@ -16,7 +16,7 @@ const asSession = (record: SessionRecord): RequestAuth => ({ kind: "session", sc
 const phone = (id: string, email: string, label: string, createdAt = 2_000): PublicSession => ({ id, label, email, teamRole: "member", scopes: ["client"], createdAt, lastSeenAt: createdAt, expiresAt: 9_000 });
 const PHONES = [phone("ph-cleo", "cleo@acme.test", "Cleo's Pixel"), phone("ph-ada-2", "ada@acme.test", "Ada's iPad", 3_000), phone("ph-ada", "ada@acme.test", "Ada's iPhone")];
 
-function call(team: typeof TEAM | null, auth: RequestAuth, path = TEAM_PHONE_PAIRING_PATH, { live = true, base = "https://acme.example", method = "POST" }: { live?: boolean; base?: string | null; method?: string } = {}) {
+function call(team: typeof TEAM | null, auth: RequestAuth, path = TEAM_PHONE_PAIRING_PATH, { live = true, base = "https://acme.example", method = "POST", body = {} }: { live?: boolean; base?: string | null; method?: string; body?: unknown } = {}) {
   const opened: Array<Record<string, unknown>> = [];
   const revoked: string[] = [];
   const route = createTeamPhoneRoutes({
@@ -31,7 +31,7 @@ function call(team: typeof TEAM | null, auth: RequestAuth, path = TEAM_PHONE_PAI
   });
   const answers: Array<{ status: number; body: Record<string, unknown> }> = [];
   const json = ((_res: ServerResponse, status: number, body: Record<string, unknown>) => { answers.push({ status, body }); }) as never;
-  return route({ req: {} as IncomingMessage, res: {} as ServerResponse, url: new URL(`http://x${path}`), path, method, auth, json, readBody: (async () => ({})) as never })
+  return route({ req: {} as IncomingMessage, res: {} as ServerResponse, url: new URL(`http://x${path}`), path, method, auth, json, readBody: (async () => body) as never })
     .then((out) => ({ out, opened, revoked, answer: answers[0] }));
 }
 
@@ -43,6 +43,12 @@ describe("Open on your phone, on a Team Cloud", () => {
     expect(String(answer!.body.inviteUrl)).toContain("name=Acme");
     const admin = await call(TEAM, asSession(session({ email: "ben@acme.test", teamRole: "admin", scopes: ["admin", "client"] })), "/api/auth/pairing");
     expect(admin.opened, "an admin's own pairing code carries them too, never a bare admin code").toEqual([{ scopes: ["admin", "client"], label: "Phone", member: { email: "ben@acme.test", role: "admin" }, memberCheckedAt: 1_000 }]);
+  });
+
+  it("refuses a device view rather than dropping it: a team member's devices see what that person may", async () => {
+    const { opened, answer } = await call(TEAM, asSession(session()), "/api/auth/pairing", { body: { scopes: ["client"], view: { sections: [], bots: ["b1"], groups: [] } } });
+    expect(opened).toEqual([]);
+    expect(answer).toMatchObject({ status: 409, body: { error: expect.stringMatching(/Team Cloud/) } });
   });
 
   it("answers off a team, and for a session the Admin never signed, exactly as before", async () => {

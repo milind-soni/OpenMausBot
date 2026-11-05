@@ -80,6 +80,14 @@ it("revoking a session removes its phone and ends its pending poll before a late
   expect(h.phones.fromPhone({ kind: "session", session: h.session, via: "bearer", scopes: ["admin", "client"] })).toBe(false);
 });
 
+it("limiting a phone's device to a view removes it as a phone and fails its waiting job", async () => {
+  const h = await fixture();
+  const pending = h.request();
+  h.sessions.setView(h.paired.session.id, { sections: [], bots: ["helper"], groups: [] });
+  expect(await pending).toMatchObject({ isError: true });
+  expect(h.phones.fromPhone({ kind: "session", session: h.session, via: "bearer", scopes: ["client"] })).toBe(false);
+});
+
 it("revoking a session fails both a leased job and a queued job", async () => {
   const h = await fixture();
   const first = h.request();
