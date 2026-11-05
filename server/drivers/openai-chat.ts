@@ -348,9 +348,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         if (!message || !object(message) || !["content", "reasoning_content", "reasoning", "reasoning_details", "tool_calls", "function_call"].some((key) => key in message)) {
           throw new ChatProtocolError("provider returned no completion message");
         }
-        if (message?.function_call) throw new ChatProtocolError("legacy function_call is unsupported; use structured tool_calls");
         const calls = new ChatToolCalls();
         calls.add(message?.tool_calls, false);
+        calls.addLegacy(message.function_call);
         const details = new ChatReasoningDetails();
         details.add(message.reasoning_details);
         const reasoning = message.reasoning_content ?? message.reasoning;
@@ -401,8 +401,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         const choice = chunk.choices?.find((row) => row.index === undefined || row.index === 0);
         const delta = choice?.delta;
         if (object(delta)) sawChoice = true;
-        if (delta?.function_call) throw new ChatProtocolError("legacy function_call is unsupported; use structured tool_calls");
         calls.add(delta?.tool_calls, true);
+        calls.addLegacy(delta?.function_call);
         details.add(delta?.reasoning_details);
         if (choice?.finish_reason) finishReason = choice.finish_reason;
         const reasoningPart = delta?.reasoning_content ?? delta?.reasoning;
