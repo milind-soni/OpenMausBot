@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { McpOAuthError, McpOAuthManager, mcpCallbackOrigin, mcpOAuthRedirectUri, type McpSignInStatus, withMcpSignIn, withoutPendingSignIn } from "./mcp-oauth.ts";
+import { cardOwner, McpOAuthError, McpOAuthManager, mcpCallbackOrigin, mcpOAuthRedirectUri, type McpSignInPhase, type McpSignInStatus, withMcpSignIn, withoutPendingSignIn } from "./mcp-oauth.ts";
 import type { McpOAuthClientConfig } from "./mcp-registry.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
 import { startFakeOAuth, type FakeOAuth, type FakeOAuthOptions } from "./testing/fake-oauth-server.ts";
@@ -175,6 +175,30 @@ describe("McpOAuthManager tokens", () => {
     expect(manager.authState("docs", mcp.url)).toBe("needs-sign-in");
     manager.forget("docs");
     expect(manager.authState("docs", mcp.url)).toBe("none");
+  });
+
+  it("records that a sign-in is required for a server with no record", async () => {
+    await setup();
+    manager.requireSignIn("docs", mcp.url);
+    expect(manager.authState("docs", mcp.url)).toBe("needs-sign-in");
+  });
+
+  it("leaves a signed-in server signed in and never revokes", async () => {
+    await signedIn();
+    const token = await manager.accessToken("docs", mcp.url);
+    manager.requireSignIn("docs", mcp.url);
+    manager.requireSignIn("docs", mcp.url);
+    expect(manager.authState("docs", mcp.url)).toBe("signed-in");
+    expect(await manager.accessToken("docs", mcp.url)).toBe(token);
+    expect(oauth.counts.revoke).toBe(0);
+  });
+
+  it("keeps a requirement it already recorded", async () => {
+    await setup();
+    manager.requireSignIn("docs", mcp.url);
+    manager.requireSignIn("docs", mcp.url);
+    expect(manager.authState("docs", mcp.url)).toBe("needs-sign-in");
+    expect(oauth.counts.revoke).toBe(0);
   });
 });
 
@@ -563,6 +587,58 @@ describe("MCP sign-in from another computer", () => {
     expect(oauth.counts.token).toBe(1);
     expect(manager.authState("docs", mcp.url)).toBe("none");
     await expect.poll(() => oauth.counts.revoke).toBe(1);
+  });
+});
+
+describe("McpOAuthManager onSettled", () => {
+  async function watched(lifetimeMs?: number) {
+    await setup({}, lifetimeMs);
+    const calls: Array<[string, McpSignInPhase, string]> = [];
+    manager = new McpOAuthManager({
+      file: join(dir, "mcp-oauth.json"), ...(lifetimeMs ? { lifetimeMs } : {}),
+      onSettled: (name, phase, owner) => { calls.push([name, phase, owner]); },
+    });
+    return calls;
+  }
+
+  it("onSettled fires once with succeeded for a card owner", async () => {
+    const calls = await watched();
+    const owner = cardOwner("thread-1", "msg-1");
+    expect(owner).toBe("card:thread-1:msg-1");
+    const started = await manager.start("docs", mcp.url, undefined, owner);
+    expect(calls).toEqual([]);
+    expect((await approve(started)).status).toBe(200);
+    expect(calls).toEqual([["docs", "succeeded", owner]]);
+    manager.cancel("docs");
+    manager.dispose();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("reports a sign-in that expires or is cancelled, and nothing when the server shuts down", async () => {
+    const calls = await watched(100);
+    await manager.start("docs", mcp.url, undefined, "loopback");
+    await expect.poll(() => calls).toEqual([["docs", "expired", "loopback"]]);
+    await manager.start("docs", mcp.url, undefined, "loopback");
+    manager.cancel("docs");
+    expect(calls.at(-1)).toEqual(["docs", "cancelled", "loopback"]);
+    await manager.start("docs", mcp.url, undefined, "loopback");
+    manager.dispose();
+    expect(calls).toHaveLength(2);
+  });
+});
+
+describe("McpOAuthManager with a failing onSettled", () => {
+  it("a throwing onSettled neither breaks a callback nor escapes the expiry timer", async () => {
+    await setup({}, 150);
+    const heard: McpSignInPhase[] = [];
+    manager = new McpOAuthManager({ file: join(dir, "mcp-oauth.json"), lifetimeMs: 150, onSettled: (_name, phase) => { heard.push(phase); throw new Error("listener broke"); } });
+    const started = await manager.start("docs", mcp.url);
+    const page = await approve(started);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toBe("Signed in. You can close this tab and return to OpenMausBot.");
+    expect(manager.authState("docs", mcp.url)).toBe("signed-in");
+    await manager.start("docs", mcp.url);
+    await expect.poll(() => heard).toEqual(["succeeded", "expired"]);
   });
 });
 

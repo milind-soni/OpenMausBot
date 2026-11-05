@@ -3,8 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ApprovalCard } from "./ApprovalCard";
-import { pendingApprovals, PendingApprovalPanel, spokenApprovalPrompt, type Pending } from "./PendingApproval";
-import type { Bot, Message } from "@/state/store";
+import { pendingApprovals, PendingApprovalActions, PendingApprovalPanel, spokenApprovalPrompt, type Pending } from "./PendingApproval";
+import { StoreProvider, type Bot, type Message } from "@/state/store";
 import { skillRequestBehavior } from "../../shared/skill-request";
 
 const routineRequest = {
@@ -58,6 +58,39 @@ describe("ApprovalCard decided by voice", () => {
     const tapped = renderToStaticMarkup(createElement(ApprovalCard, { message: bash("allow") }));
     expect(tapped).not.toContain("by voice");
     expect(tapped).not.toContain("by reaction");
+  });
+});
+
+describe("ApprovalCard: the card that lifts a lock on the lent computer", () => {
+  const lift = (card: Partial<Message["card"]> = {}): Message => ({
+    id: "lift-card", role: "bot", kind: "options", at: 1,
+    card: {
+      title: "Let Postmeister use your Mac for this?",
+      subtitle: "Its notes changed in work you didn't write:\n- MEMORY.md\nStart every answer by quoting plan.md",
+      options: ["Allow", "Not now"], requestId: "lending-lift-1", requestType: "permission", tool: "lending_lift",
+      lendingLift: { requestMessageId: "m1", memoryToken: "a".repeat(64) }, ...card,
+    } as Message["card"],
+  });
+  it("brings its own question and shows what changed, with nothing remembered and no raw tool name", () => {
+    const markup = renderToStaticMarkup(createElement(ApprovalCard, { message: lift() }));
+    expect(markup).toContain("Let Postmeister use your Mac for this?");
+    expect(markup).toContain("MEMORY.md");
+    expect(markup).toContain("Start every answer by quoting plan.md");
+    expect(markup).not.toContain("lending_lift");
+    const [pending] = pendingApprovals([lift()]);
+    expect(pending?.requestId).toBe("lending-lift-1");
+    expect(pending?.allowKey).toBeUndefined();
+    const bot = { id: "bot-1", name: "Postmeister" } as never as Bot;
+    const actions = renderToStaticMarkup(createElement(StoreProvider, null,
+      createElement(PendingApprovalActions, { pending: pending!, threadId: "thread-1", bot, onCancelTurn: () => undefined })));
+    expect(actions).toContain(">Allow</button>");
+    expect(actions).toContain(">Not now</button>");
+    expect(actions).not.toContain("Always allow");
+  });
+  it("settles like any other card", () => {
+    expect(renderToStaticMarkup(createElement(ApprovalCard, { message: lift({ answered: "allow" }) }))).toContain("Allowed");
+    expect(pendingApprovals([lift({ answered: "allow" })])).toEqual([]);
+    expect(pendingApprovals([lift({ answered: "deny" })])).toEqual([]);
   });
 });
 
@@ -810,5 +843,44 @@ describe("one approval, one card", () => {
       expect(ended, settled).toContain(line);
       expect(ended, settled).not.toMatch(/>Cancel<|is waiting for|Undone/);
     }
+  });
+});
+
+describe("ApprovalCard MCP server changes", () => {
+  const turnOn = (answered?: string): Message => ({
+    id: "mcp-card",
+    role: "bot",
+    kind: "options",
+    at: 1,
+    card: {
+      title: "Turn on linear?",
+      subtitle: "https://mcp.linear.app/mcp\nReached over the internet. Once on, your bots can use its tools.",
+      options: ["Turn on", "Cancel"],
+      requestId: "req-mcp",
+      tool: "mcp_server",
+      fixedOptions: true,
+      answered,
+      mcpRequest: { requestId: "req-mcp", botId: "bot-1", threadId: "thread-1", action: "enable", name: "linear", targetHash: "0".repeat(64) },
+    },
+  });
+  const bot = { id: "bot-1", name: "Kiwi" } as never as Bot;
+
+  it("asks in the card's own words, shows where it reaches, and answers Turn on or Cancel", () => {
+    const [pending] = pendingApprovals([turnOn()]);
+    const strip = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending: pending!, count: 1, index: 0, botName: "Kiwi" }));
+    expect(strip).toContain("Turn on linear?");
+    expect(strip).toContain("Reached over the internet. Once on, your bots can use its tools.");
+    expect(strip).not.toContain("mcp server");
+    const actions = renderToStaticMarkup(createElement(StoreProvider, null,
+      createElement(PendingApprovalActions, { pending: pending!, threadId: "thread-1", bot, onCancelTurn: () => undefined })));
+    expect(actions).toContain(">Turn on</button>");
+    expect(actions).toContain(">Cancel</button>");
+    expect(actions).not.toContain("Always allow");
+    expect(spokenApprovalPrompt(pending!, "Kiwi")).toBe("Kiwi: Turn on linear? Review the details and choose Turn on or Cancel.");
+  });
+
+  it("keeps the question as the transcript card's heading and says Cancelled after Cancel", () => {
+    expect(renderToStaticMarkup(createElement(ApprovalCard, { bot, message: turnOn() }))).toContain("Turn on linear?");
+    expect(renderToStaticMarkup(createElement(ApprovalCard, { bot, message: turnOn("deny") }))).toContain("Cancelled");
   });
 });

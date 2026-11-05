@@ -32,7 +32,7 @@ export function levelNeeded(method: string, path: string): Exclude<BotAccessLeve
   const verb = method.toUpperCase();
   if (verb === "GET" || verb === "HEAD") return "view";
   if (/^\/api\/bots\/[\w-]+$/.test(path)) return null;
-  if (/^\/api\/bots\/[\w-]+\/access$/.test(path)) return "edit";
+  if (/^\/api\/bots\/[\w-]+\/(?:access|bot-api(?:\/new-key)?)$/.test(path)) return "edit";
   if (/^\/api\/routines\/[\w-]+$/.test(path)) return null;
   if (/^\/api\/(?:bots|groups)\/[\w-]+\/read$/.test(path) || /^\/api\/bots\/[\w-]+\/access-request$/.test(path)) return "view";
   if (verb === "POST" && OPEN_CONVERSATION.test(path)) return "view";
@@ -86,14 +86,14 @@ export function createBotAccessGate(deps: BotAccessGateDeps) {
   };
 }
 
-type SetupCard = { profileRequest?: unknown; modelRequest?: unknown; skillRequest?: unknown; teamSetupRequest?: unknown; webhookRequest?: unknown; appTriggerRequest?: unknown };
+type SetupCard = { profileRequest?: unknown; modelRequest?: unknown; skillRequest?: unknown; teamSetupRequest?: unknown; webhookRequest?: unknown; appTriggerRequest?: unknown; mcpRequest?: unknown };
 
-/** A card whose answer changes the bot itself (its instructions, model, skills, team, triggers) is answered only by
- * someone who can edit it; any other card by whoever may answer it. */
+/** A card whose answer changes the bot itself (its instructions, model, skills, team, triggers, MCP servers) is answered
+ * only by someone who can edit it; any other card by whoever may answer it. */
 export function setupCardRefusal(card: SetupCard | undefined, bot: { id: string; name: string } | undefined, level: (botId: string) => BotAccessLevel): string | null {
   if (!card || !bot) return null;
   const changesBot = card.profileRequest !== undefined || card.modelRequest !== undefined || card.skillRequest !== undefined ||
-    card.teamSetupRequest !== undefined || card.webhookRequest !== undefined || card.appTriggerRequest !== undefined;
+    card.teamSetupRequest !== undefined || card.webhookRequest !== undefined || card.appTriggerRequest !== undefined || card.mcpRequest !== undefined;
   return changesBot && !atLeast(level(bot.id), "edit") ? refusalFor(bot.name, "edit") : null;
 }
 

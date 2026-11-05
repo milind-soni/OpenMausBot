@@ -100,6 +100,7 @@ it("moves the MCP servers with their secrets and sign-ins, the keys and the conn
     { name: "docs", type: "http", url: "https://mcp.docs.example.test/mcp", headers: { Authorization: `Bearer ${DOCS_TOKEN}` } },
     { name: "linear", type: "http", url: LINEAR_URL, oauth: { clientId: "omb-fixture-client", clientSecret: CLIENT_SECRET } },
     { name: "notes", type: "http", url: "http://127.0.0.1:9/mcp" },
+    { name: "easy", command: "uvx", args: ["mcp-email-server", "stdio"] },
   ]) {
     expect((await local("POST", "/api/mcp/servers", server)).status).toBe(201);
     expect((await local("PATCH", `/api/mcp/servers/${server.name}`, { enabled: true })).status).toBe(200);
@@ -116,7 +117,7 @@ it("moves the MCP servers with their secrets and sign-ins, the keys and the conn
   const refreshToken = [...relay.refreshTokens][0]!;
 
   const collected = await collectConnections(asLocal(fx));
-  expect(collected.connections.map((item) => item.id)).toEqual(["mcp:dodo", "mcp:docs", "mcp:linear", "mcp:notes", "key:openrouter", "composio", "highlevel"]);
+  expect(collected.connections.map((item) => item.id)).toEqual(["mcp:dodo", "mcp:docs", "mcp:linear", "mcp:notes", "mcp:easy", "key:openrouter", "composio", "highlevel"]);
   expect(collected.connections.find((item) => item.id === "highlevel")).toMatchObject({ signIn: true });
   expect(collected.connections.find((item) => item.id === "mcp:linear")).toMatchObject({ signIn: true });
   expect(collected.connections.find((item) => item.id === "mcp:notes")).toMatchObject({ runsHere: true });
@@ -126,14 +127,14 @@ it("moves the MCP servers with their secrets and sign-ins, the keys and the conn
   const result = await sendConnections(collected, asTarget(fx), { local: asLocal(fx), onProgress: ({ label }) => progress.push(label) });
   expect(result.failed).toEqual([]);
   expect(result.moved.map((item) => item.id)).toEqual(["key:openrouter", "mcp:dodo", "mcp:docs", "mcp:linear", "highlevel", "composio"]);
-  expect(result.runsHere).toEqual([{ id: "mcp:notes", label: "notes" }]);
+  expect(result.runsHere).toEqual([{ id: "mcp:notes", label: "notes" }, { id: "mcp:easy", label: "easy" }]);
   expect(result.kept).toEqual([]);
   expect(result.release).toEqual([]);
-  expect(progress).toEqual(["OpenRouter", "dodo", "docs", "linear", "notes", "HighLevel", "Connected apps"]);
+  expect(progress).toEqual(["OpenRouter", "dodo", "docs", "linear", "notes", "easy", "HighLevel", "Connected apps"]);
 
   // The MCP servers arrived with their secrets, on, and the command-line one works there with its key.
   const servers = (await onCloud("GET", "/api/mcp/servers")).body.servers as Array<Record<string, unknown>>;
-  expect(servers.map((server) => server.name).sort()).toEqual(["docs", "dodo", "linear", "notes"]);
+  expect(servers.map((server) => server.name).sort()).toEqual(["docs", "dodo", "easy", "linear", "notes"]);
   expect(servers.find((server) => server.name === "dodo")).toMatchObject({ enabled: true, envKeys: ["DODO_PAYMENTS_API_KEY", "DODO_PAYMENTS_ENVIRONMENT"] });
   expect(servers.find((server) => server.name === "docs")).toMatchObject({ enabled: true, headerKeys: ["Authorization"] });
   expect(servers.find((server) => server.name === "linear")).toMatchObject({ auth: "signed-in", oauth: { clientId: "omb-fixture-client", clientSecretConfigured: true } });
@@ -141,6 +142,7 @@ it("moves the MCP servers with their secrets and sign-ins, the keys and the conn
 
   // The server that needs this computer is kept there, marked as running here, and never started there.
   expect(servers.find((server) => server.name === "notes")).toMatchObject({ enabled: true, runsOn: collected.computer });
+  expect(servers.find((server) => server.name === "easy"), "a mail connector stays with its accounts, whatever programs My Cloud has").toMatchObject({ enabled: true, runsOn: collected.computer });
   const notesTest = await onCloud("POST", "/api/mcp/servers/notes/test");
   expect(notesTest).toMatchObject({ status: 409, body: { error: `This server runs on ${collected.computer.label}, so it isn't started here.` } });
 
@@ -172,7 +174,7 @@ it("moves the MCP servers with their secrets and sign-ins, the keys and the conn
   expect((await onCloud("PATCH", `/api/bots/${bot.id}`, { mcpServers: ["dodo", "docs", "linear", "notes"] })).status).toBe(200);
   const sections = (await onCloud("GET", `/api/bots/${bot.id}/system-prompt`)).body.sections as Array<{ id: string; text?: string }>;
   expect(sections.find((section) => section.id === "to-connect")?.text)
-    .toBe(` Runs only on the person's computer ${collected.computer.label}, not on My Cloud: notes. If a task needs one, say so in plain words.`);
+    .toBe(` Runs only on the person's computer ${collected.computer.label}, not on My Cloud: notes (it uses files or an address only ${collected.computer.label} has). It worked there before the bots moved here. If a task needs one, tell the person in plain words that it stayed on ${collected.computer.label} and why, not that it was never set up, and do not write your own replacement.`);
 
   // Moving again changes nothing and spends nothing.
   const again = await sendConnections(await collectConnections(asLocal(fx)), asTarget(fx), { local: asLocal(fx) });

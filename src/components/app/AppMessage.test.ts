@@ -125,6 +125,18 @@ describe("the row before its frame runs", () => {
     expect(renderToStaticMarkup(view(row(mcpPayload())))).toContain("App from Excalidraw");
   });
 
+  it("shows the last change the card made itself, so a reopened conversation does not look unsent (#4532)", async () => {
+    expect(renderToStaticMarkup(view(row(mcpPayload())))).not.toContain("data-app-done");
+    const done = { tool: "Create issue", text: "Created issue #12", url: "https://github.com/o/r/issues/12", at: 2 };
+    const markup = renderToStaticMarkup(view(row(mcpPayload({ done }))));
+    expect(markup).toContain("Done: Create issue · Created issue #12");
+    expect(markup.indexOf("data-app-done")).toBeGreaterThan(markup.indexOf("data-app-box"));
+    expect(renderToStaticMarkup(view(row(mcpPayload({ done: { tool: "Create issue", at: 2 } }))))).not.toMatch(/data-app-done[^]*<button/);
+    await mount(row(mcpPayload({ done })));
+    await act(async () => { find<HTMLButtonElement>("[data-app-done] button")!.click(); });
+    expect((window as unknown as { ogb: { openExternal: ReturnType<typeof vi.fn> } }).ogb.openExternal).toHaveBeenCalledWith("https://github.com/o/r/issues/12");
+  });
+
   it("reads as its text when there is no payload", () => {
     const markup = renderToStaticMarkup(view(row(undefined)));
     expect(markup).not.toContain("data-app=");
@@ -153,6 +165,15 @@ describe("a bot's page", () => {
     expect(frame().hasAttribute("allow")).toBe(false);
     expect(frame().getAttribute("srcdoc")).toBe(htmlDoc().srcdoc);
     expect(pool.live()).toEqual(["t1:a1"]);
+  });
+
+  it("shows a frameless page as part of the chat: no card around it, still in the sandboxed frame, with its title and tools", async () => {
+    await mount(row(htmlPayload({ border: false })));
+    expect(find("[data-app] > div")!.className).not.toContain("rounded-3xl");
+    expect(find("[data-app-box]")!.className).not.toContain("border-t");
+    expect(frame().getAttribute("sandbox")).toBe("allow-scripts allow-forms");
+    expect(find("[data-app]")!.textContent).toContain("Coffee counter");
+    expect(button("Reload app")).toBeTruthy();
   });
 
   it("lists what the frame may reach, its size, and what is always off", async () => {

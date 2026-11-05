@@ -70,6 +70,12 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
         winKeys: ["Shift", "Enter"],
       },
       {
+        id: "send-follow-up",
+        description: "While a bot works: queue instead of steering, or the other way round",
+        macKeys: ["⌘", "Return"],
+        winKeys: ["Ctrl", "Enter"],
+      },
+      {
         id: "edit-last-message",
         description: "Edit last message (when composer is empty)",
         macKeys: ["↑"],
@@ -128,25 +134,38 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
 type Keys = Pick<ShortcutItem, "macKeys" | "winKeys">;
 const ENTER: Keys = { macKeys: ["Return"], winKeys: ["Enter"] };
 const SHIFT_ENTER: Keys = { macKeys: ["⇧", "Return"], winKeys: ["Shift", "Enter"] };
-const SEND_ROWS: Record<Exclude<SendKey, "enter">, [Keys, Keys]> = {
-  "shift-enter": [SHIFT_ENTER, ENTER],
-  "mod-enter": [{ macKeys: ["⌘", "Return"], winKeys: ["Ctrl", "Enter"] }, ENTER],
+const MOD_ENTER: Keys = { macKeys: ["⌘", "Return"], winKeys: ["Ctrl", "Enter"] };
+const SEND_ROWS: Record<Exclude<SendKey, "enter">, [Keys, Keys, Keys]> = {
+  "shift-enter": [SHIFT_ENTER, ENTER, MOD_ENTER],
+  "mod-enter": [MOD_ENTER, ENTER, { macKeys: ["⌘", "⇧", "Return"], winKeys: ["Ctrl", "Shift", "Enter"] }],
 };
 
 export function shortcutGroupsFor(sendKey: SendKey): readonly ShortcutGroup[] {
   if (sendKey === "enter") return SHORTCUT_GROUPS;
-  const [send, newLine] = SEND_ROWS[sendKey];
+  const [send, newLine, followUp] = SEND_ROWS[sendKey];
   return SHORTCUT_GROUPS.map((group) => ({
     ...group,
     items: group.items.map((item) =>
       item.id === "send-message" ? { ...item, ...send }
         : item.id === "new-line" ? { ...item, ...newLine }
-          : item),
+          : item.id === "send-follow-up" ? { ...item, ...followUp }
+            : item),
   }));
 }
 
 export function isSidebarToggle(event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey" | "defaultPrevented">): boolean {
   return !event.defaultPrevented && event.key === "\\" && (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey;
+}
+
+/**
+ * The step of ⌘⇧] / ⌘⇧[ (Ctrl+Shift outside macOS) through the bots: 1, -1, or null for any other key. Outside
+ * macOS, Shift turns the key into "}" / "{", so those count too. The physical key (`code`) is not used: on many
+ * layouts BracketRight types another character.
+ */
+export function botCycleStep(event: Pick<KeyboardEvent, "key">): 1 | -1 | null {
+  if (event.key === "]" || event.key === "}") return 1;
+  if (event.key === "[" || event.key === "{") return -1;
+  return null;
 }
 
 export function shouldOpenKeyboardShortcuts(event: KeyboardEvent): boolean {

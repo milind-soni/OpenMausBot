@@ -14,7 +14,7 @@ export function GroupThreadList({ group, selected, query = "" }: { group: Group;
     const waiting = Boolean(speakerId) && state.bots.find((bot) => bot.id === speakerId)?.activity === "waiting-on-you";
     return {
       ...task, busy: roomThreadWorking(group, task.threadId), unread: task.threadId === group.threadId && group.unread,
-      activity: waiting ? "waiting-on-you" as const : undefined,
+      activity: waiting || task.activity === "waiting-on-you" ? "waiting-on-you" as const : undefined,
     };
   });
   const bulk = useBulkSelect();
@@ -32,6 +32,7 @@ export function GroupThreadList({ group, selected, query = "" }: { group: Group;
     onRename: (task: { threadId: string }, title: string) => dispatch({ type: "renameGroupTask", groupId, threadId: task.threadId, title }),
     onDelete: (task: { threadId: string }) => dispatch({ type: "deleteGroupTask", groupId, threadId: task.threadId }),
     onPin: (task: { threadId: string; title: string }, pinned: boolean) => dispatch({ type: "pinGroupTask", groupId, threadId: task.threadId, pinned, title: task.title }),
+    onArchive: (task: { threadId: string }, archivedAt: number | null) => dispatch({ type: "archiveGroupTask", groupId, threadId: task.threadId, archivedAt }),
   }), [groupId, dispatch]);
   const locale = activeLocale();
   return <div className="mb-2 space-y-0.5" role="group" aria-label={t("task.namedList", { name: group.name })}>

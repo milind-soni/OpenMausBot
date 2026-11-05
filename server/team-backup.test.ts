@@ -238,6 +238,17 @@ describe("additive portable team backups", () => {
     expect(() => parseTeamBackup(tampered)).toThrow();
   });
 
+  it("keeps a conversation that work from outside reached marked through backup and restore", () => {
+    const { store, routines, chief } = fixture();
+    const reached = store.createTask(chief.id, "Event chat", false)!.threadId;
+    store.patchTask(chief.id, reached, { outside: true });
+    const backup = createTeamBackup(store, routines.listRoutines(), "Marked");
+    const result = importTeamBackup(store, routines, JSON.parse(JSON.stringify(backup)), selection());
+    const restored = result.bots.find((bot) => bot.name === "Mira 2")!.tasks!;
+    expect(restored.find((task) => task.title === "Event chat")!.outside).toBe(true);
+    expect(restored.find((task) => task.title === "First conversation")).not.toHaveProperty("outside");
+  });
+
   it("keeps first-message title markers armed-once through backup and restore", () => {
     const { store, routines, chief, group } = fixture();
     const titled = store.createTask(chief.id, undefined, false)!.threadId;

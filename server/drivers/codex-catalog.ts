@@ -8,6 +8,7 @@ import type { ModelCatalog } from "../contracts.ts";
 import { qualifiedModelLabel } from "../contracts.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { codexHome } from "./codex-identity.ts";
+import { unconfirmedModelCatalog } from "../startup-model-catalog.ts";
 import { mergeLocalInject } from "./local-inject.ts";
 
 export const STATIC_CODEX_MODELS: ModelCatalog = {
@@ -353,7 +354,17 @@ export async function readCodexModelCatalog(
   fetchImpl: typeof fetch = fetch,
   cli?: string,
 ): Promise<ModelCatalog> {
-  const official = (cli ? await readCodexAppServerModelCatalog(cli, env) : null) ?? STATIC_CODEX_MODELS;
+  const official = cli ? await readCodexAppServerModelCatalog(cli, env) : null;
+  const catalog = await catalogAround(official ?? STATIC_CODEX_MODELS, env, fetchImpl);
+  if (cli && !official) unconfirmedModelCatalog(catalog);
+  return catalog;
+}
+
+async function catalogAround(
+  official: ModelCatalog,
+  env: Record<string, string | undefined>,
+  fetchImpl: typeof fetch,
+): Promise<ModelCatalog> {
   // A relative CODEX_HOME or user home must not load a catalog from another directory.
   const home = codexHome(env);
   if (!home) return mergeLocalInject(official, env, fetchImpl);

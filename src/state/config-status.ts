@@ -6,7 +6,7 @@ import type { ModelSelection } from "./store";
 /** A saved credential: whether it is set and, for admins, its last four characters. The key itself never comes back. */
 export interface SavedKey { configured: boolean; last4?: string }
 
-export type NestedKeyName = "ttsKey" | "fishAudioKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey";
+export type NestedKeyName = "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey";
 
 /** GET /api/config — configured flags only; secrets are never echoed. */
 export interface ConfigStatus {
@@ -53,6 +53,12 @@ export interface ConfigStatus {
   mcp?: { callTimeoutMinutes: number };
   /** Workspace defaults for new bots; absent effort = no level is sent. */
   newBots?: { effort?: EffortLevel };
+  /** This Cloud is on the Starter plan, as the Admin last said; absent or false otherwise. */
+  cloudStarter?: boolean;
+  /** The most bots this Cloud's plan makes, its MausBot aside; absent when its plan has no such limit. */
+  botLimit?: number;
+  /** A task on this Cloud is waiting for memory right now. */
+  waitingForRoom?: boolean;
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
   /** Prompt-cache keep-warm for idle Claude threads. Absent from older servers. */
@@ -62,14 +68,14 @@ export interface ConfigStatus {
    * providers, never the keys. */
   opencodeGo?: SavedKey & { providerKeys?: string[] };
   /** Voice. `configured` = the engine has what it needs (an ElevenLabs or
-   * Fish Audio key, or a Chatterbox server address); `ready` = that AND a voice, which is
+   * Fish Audio, Gemini or xAI key, or a Chatterbox server address); `ready` = that AND a voice, which is
    * what it takes to actually speak. The key itself is never echoed back;
-   * `baseUrl`/`model` are Chatterbox settings, not credentials. */
+   * `baseUrl` is the Chatterbox address; `model` selects Chatterbox or Gemini speech. */
   tts?: {
     configured: boolean;
     ready: boolean;
     voice: string;
-    provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai";
+    provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini";
     baseUrl?: string;
     model?: string;
     /** Fish Audio speech model; present only while Fish is the provider. */
@@ -119,6 +125,8 @@ export interface ConfigStatus {
   profile?: { name: string; email: string; aboutMe?: string; avatarUrl?: string };
   /** UI language override; "" (or absent) follows the system language. */
   language?: string;
+  /** What a paired phone calls this computer; "" uses the default. */
+  computerName?: string;
   /** Opt-in flags. Absent means off. */
   features?: { skillAuthoring: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean };
   /** First-run progress: whether the welcome tour was finished and which
@@ -148,6 +156,10 @@ export interface ManagedPolicySummary {
   mcp: { allowCustom: boolean; allowlist: string[] };
   computers: { thisComputer: boolean; localVm: boolean; box: boolean; vps: boolean };
   remoteAccess: boolean;
+  /** Connected apps by service slug; absent from an older Team Cloud and from an organisation's policy. */
+  apps?: { allowAll: boolean; allowlist: string[] };
+  /** A Team Cloud's rules rather than an organisation's. */
+  team?: true;
 }
 
 export interface BrowserEngineSummary {
@@ -169,6 +181,9 @@ export interface BrowserEngineSummary {
   myChromeLendable?: true;
   /** browserEngine.engine: "chrome" when the bots' browsers run on OpenMausBot's own Chrome driver. */
   engine?: "agent-browser" | "chrome";
+  /** Self-hosted servers only: whether bots' browsers may open this server's own sites and its local network
+   * (browserEngine.egress.localNetwork, off by default). Absent on the desktop and on MausBot Cloud. */
+  serverSites?: boolean;
 }
 
 export interface BrowserProfile {

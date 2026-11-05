@@ -4,6 +4,8 @@ import type { CursorState, StateEffects } from "./CursorAvatar";
 export const FULL_FRAME_MS = 1000 / 60;
 export const FRAME_SLACK_MS = 4;
 const FRAME_TIERS_MS = [1000 / 20, 1000 / 30, FULL_FRAME_MS];
+export const SMALL_MASCOT_PX = 64;
+const SMALL_MASCOT_FRAME_MS = FRAME_TIERS_MS[0]!;
 export const SMOOTH_STEP_PX = 0.5;
 export const VISIBLE_PX = 0.2;
 const SETTLE_MS = 1400;
@@ -188,7 +190,15 @@ export function nextFrameAt(now: number, interval: number): number {
   return (Math.floor((now + FRAME_SLACK_MS) / interval) + 1) * interval;
 }
 
+export function frameFloorMs(sizePx: number): number {
+  return sizePx <= SMALL_MASCOT_PX ? SMALL_MASCOT_FRAME_MS : FULL_FRAME_MS;
+}
+
 export function nextMascotFrame(now: number, input: CadenceInput): number {
+  return Math.max(smoothFrameAt(now, input), nextFrameAt(now, frameFloorMs(input.sizePx)));
+}
+
+function smoothFrameAt(now: number, input: CadenceInput): number {
   const { motion, effects, stateElapsedMs: elapsed, strength } = input;
   const full = nextFrameAt(now, FULL_FRAME_MS);
   if (input.blinkingOrSpinning) return full;

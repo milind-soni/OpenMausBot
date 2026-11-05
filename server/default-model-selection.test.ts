@@ -355,3 +355,12 @@ describe("new bot effort default", () => {
     expect(withNewBotEffort(selection, "high", undefined)).toEqual(selection);
   });
 });
+
+describe("a hidden provider", () => {
+  it("drops out of every selectable list, and an unhidden one comes back", () => {
+    const instances = [{ instanceId: "claude" }, { instanceId: "hermes" }] as unknown as SelectableInstance[];
+    expect(withInstanceConfig(instances, { hermes: { driver: "fake", hidden: true } }).map((instance) => instance.instanceId)).toEqual(["claude"]);
+    expect(withInstanceConfig(instances, { hermes: { driver: "fake" } }).map((instance) => instance.instanceId)).toEqual(["claude", "hermes"]);
+  });
+});
+

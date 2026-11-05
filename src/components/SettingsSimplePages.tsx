@@ -9,13 +9,13 @@ import { UpdatesConsentRow } from "./UpdatesConsent";
 import { OpenAtLoginRow } from "./OpenAtLoginRow";
 import { DefaultBotSidebarRow } from "./DefaultBotControls";
 import { TalkShortcutRow } from "./TalkShortcutRow";
+import { AttachmentStorageSettings } from "./AttachmentStorageSettings";
 import { DiagnosticsRow } from "./DiagnosticsRow";
 import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { PeopleSection } from "./PeopleSection";
 import { ActivitySection } from "./ActivitySection";
-import { AccessOverview } from "./bot-access/AccessOverview";
-import { BuiltInBrowserRow } from "./BrowserSettingsRows";
+import { BuiltInBrowserRow, ServerSitesRow } from "./BrowserSettingsRows";
 import { LoginsSettings } from "./LoginsSettings";
 import { OrganizationSettings } from "./OrganizationSettings";
 import { CloudPlanRow, CloudPlanFootnote, useCloudPlan } from "./ProIntroduction";
@@ -31,7 +31,7 @@ import { ProfileSummaryRow } from "./ProfileSettings";
 import { ImportSettings } from "./ImportSettings";
 import { NotificationRows } from "./NotificationSettingsRows";
 import { useServerUpdateItem } from "./SidebarProfileMenu";
-import { AdvancedModeRow, BrowserProfilesRow, ColorUserBubblesRow, LanguageRow, ReplayTourRow, SendKeyRow, UpdatesRow } from "./AppSettingsRows";
+import { AdvancedModeRow, BrowserProfilesRow, ColorUserBubblesRow, FollowUpRow, LanguageRow, ReplayTourRow, SendKeyRow, UpdatesRow } from "./AppSettingsRows";
 import { ThemeRow } from "./ThemeRow";
 import { AdminOnly } from "./AdminOnly";
 
@@ -69,6 +69,7 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
             <ColorUserBubblesRow simple />
             <LanguageRow simple />
             <SendKeyRow simple />
+            <FollowUpRow simple />
             <SettingRow title={t("settings.simple.looks.title")}>
               <button type="button" className="ui-button" onClick={onLooks}>{t("settings.simple.looks.change")}</button>
             </SettingRow>
@@ -86,13 +87,13 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
             <OpenAtLoginRow simple />
             <DefaultBotSidebarRow simple />
             <TalkShortcutRow />
+            <AttachmentStorageSettings />
             <AnalyticsRow simple />
           </SettingsRows>
         </SettingsGroup>
       )}
       {has("import") && <SettingsGroup label={t("settings.section.import")} block="import"><AdminOnly><ImportSettings /></AdminOnly></SettingsGroup>}
       {has("organization") && <SettingsGroup label={t("settings.section.organization")} block="organization"><OrganizationSettings /></SettingsGroup>}
-      {has("botAccess") && <SettingsGroup label={t("settings.section.botAccess")} block="botAccess"><AccessOverview /></SettingsGroup>}
       {has("activity") && <SettingsGroup label={t("settings.section.activity")} block="activity"><ActivitySection /></SettingsGroup>}
       <div data-settings-block="advanced-mode" className="scroll-mt-4">
         <SettingsRows><AdvancedModeRow simple /></SettingsRows>
@@ -139,7 +140,7 @@ export function SimpleComputerPage({ has, remoteAccess, servers, disclose }: { h
       )}
       {has("computer") && (
         <SettingsGroup label={t("settings.experimental.browser")} block="browser">
-          <SettingsRows><BuiltInBrowserRow /></SettingsRows>
+          <SettingsRows><BuiltInBrowserRow /><ServerSitesRow /></SettingsRows>
           <BrowserProfilesRow />
         </SettingsGroup>
       )}

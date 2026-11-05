@@ -142,7 +142,7 @@ export class BrowserEgress {
       host: setup.host,
       ownPort: (port) => setup.listeners.has(port),
       botPort: (port) => setup.ownership.botOwned(port),
-      localNetwork: config?.localNetwork !== false,
+      localNetwork: setup.host === "server" ? config?.localNetwork === true : config?.localNetwork !== false,
       allowed: allowList(setup.host === "server" ? config?.allow : undefined),
     };
   }

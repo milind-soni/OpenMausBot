@@ -207,6 +207,11 @@ describe("describeRun", () => {
     );
   });
 
+  it("names a step by the line the harness wrote for it, not its raw tool name", () => {
+    const labelled: Message = { ...tool("mcp__agents__mcp_server"), tool: { name: "mcp__agents__mcp_server", ok: true, label: "Added MCP server linear · Turned on · Test: 3 tools" } };
+    expect(describeRun([labelled, tool("Bash")])).toBe("2 steps · Added MCP server linear · Turned on · Test: 3 tools, Bash");
+  });
+
   it("names steps by the label it is given, counting steps that read the same together", () => {
     const plain = ({ name }: { name: string }) => (name === "Bash" || name.includes(" ") ? "Run a command" : name);
     expect(describeRun([tool("Bash"), tool("ls -la"), tool("Edit")], plain)).toBe("3 steps · Run a command ×2, Edit");

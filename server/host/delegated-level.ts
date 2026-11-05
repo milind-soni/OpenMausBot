@@ -19,6 +19,8 @@ export interface DelegatedLevelDeps {
   turnLevel: (bot: BotRecord, peerInitiated: boolean, threadId: string) => ApprovalMode;
   driverKind: (bot: BotRecord) => string | undefined;
   guestDriven: (threadId: string) => boolean;
+  /** Outside lineage inherits nothing (docs/runtime-contract.md §3). */
+  handsNoLevel: (threadId: string) => boolean;
 }
 
 const NAMES: Partial<Record<ApprovalMode, string>> = { edits: "Auto-accept edits", auto: "Approve for me", full: "Full access" };
@@ -41,7 +43,7 @@ export function createDelegatedLevel(deps: DelegatedLevelDeps) {
   /** The level work `from` hands `target` comes down with, or null to keep `own`. */
   function handedDown(from: Hop | undefined, target: BotRecord, own: ApprovalMode) {
     const above = chiefAbove(from);
-    if (!from || !above) return null;
+    if (!from || !above || deps.handsNoLevel(from.threadId) || deps.handsNoLevel(above.threadId)) return null;
     const chiefMode = deps.sourceLevel(above.chief.id, above.threadId);
     const level = delegatedApprovalMode({
       senderIsChief: true, senderMode: chiefMode, sameBot: from.botId === target.id || above.chief.id === target.id,
@@ -62,7 +64,7 @@ export function createDelegatedLevel(deps: DelegatedLevelDeps) {
     store.appendMessage(threadId, {
       role: "bot",
       kind: "activity",
-      tool: { name: `${name} — delegated by ${from.name}, ${via}a Chief of Staff on ${name}`, ok: true },
+      tool: { name: `${name} — handed on by ${from.name}, ${via}a Chief of Staff on ${name}`, ok: true },
     });
   }
 

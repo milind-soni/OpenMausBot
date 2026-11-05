@@ -129,6 +129,31 @@ describe("official ChatGPT plan OAuth", () => {
       expect(statSync(join(home, "chatgpt-plan", "host-id.json")).mode & 0o777).toBe(0o600);
     }
   });
+  it("hides a model ChatGPT refused for this account only, until it signs in again or signs out", async () => {
+    const controller = create(); await callback(controller);
+    await controller.refuseModel("gpt-6.1-sol");
+    expect(controller.refusedModels()).toEqual(["gpt-6.1-sol"]);
+    expect(await controller.models()).toEqual({ default: "gpt-fixture", options: [{ id: "gpt-fixture", label: "Fixture" }] });
+    if (process.platform !== "win32") expect(statSync(join(directory, "refused-models.json")).mode & 0o777).toBe(0o600);
+    const other = create("account-two"); await callback(other);
+    expect((await other.models()).default).toBe("gpt-6.1-sol");
+    await callback(controller);
+    expect(controller.refusedModels()).toEqual([]);
+    expect((await controller.models()).default).toBe("gpt-6.1-sol");
+    await controller.refuseModel("gpt-6.1-sol");
+    await controller.signOut();
+    expect(controller.refusedModels()).toEqual([]);
+  });
+  it("knows a refusal at once and never overwrites a saved list it can't read", async () => {
+    const controller = create(); await callback(controller);
+    const saving = controller.refuseModel("gpt-6.1-sol");
+    expect(controller.refusedModels()).toEqual(["gpt-6.1-sol"]);
+    await saving;
+    const path = join(directory, "refused-models.json");
+    writeFileSync(path, "{not json", { mode: 0o600 });
+    await expect(controller.refuseModel("gpt-fixture")).rejects.toThrow();
+    expect(readFileSync(path, "utf8")).toBe("{not json");
+  });
   it.each(["nonce", "issuer", "audience", "future", "expired", "signature"])("rejects %s identity errors without saving credentials", async (failure) => {
     mode = failure; const controller = create();
     expect(await callback(controller)).toMatchObject({ phase: "failed", message: expect.stringContaining("could not be verified") });

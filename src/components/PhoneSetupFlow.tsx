@@ -1,3 +1,4 @@
+import { companionBridge } from "@/lib/companion-bridge";
 import {
   useCallback,
   useEffect,
@@ -125,9 +126,7 @@ interface PhonePairingRequest {
   generation: number;
 }
 
-export const companionBridge = (): CompanionBridge | null =>
-  // SAFETY: the preload owns this narrow bridge; browser builds are guarded by the optional lookup.
-  (globalThis as { ogb?: { companion?: CompanionBridge } }).ogb?.companion ?? null;
+export { companionBridge };
 
 export const companionAccountBridge = (): AccountBridge | null =>
   // SAFETY: Electron exposes only these account operations and never sends credentials to the renderer.

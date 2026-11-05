@@ -240,16 +240,29 @@ export function execCli(
     return;
   }
   let escalate: NodeJS.Timeout | undefined;
+  let deadline: NodeJS.Timeout | undefined;
+  let timedOut = false;
   const child = execFile(resolved.command, resolved.args, { ...opts, windowsHide: true, encoding: "utf8" }, (err, stdout, stderr) => {
     clearTimeout(escalate);
-    cb(err, stdout, stderr);
+    clearTimeout(deadline);
+    cb(err ?? (timedOut ? cutOffError(cli, opts.timeout) : null), stdout, stderr);
   });
   // Node (24) calls back only once the child exits, and a CLI wrapper that traps SIGTERM outlives the timeout's signal.
   // Only the child is stopped: execFile starts no process group, so a grandchild that ignores SIGTERM can outlive it.
+  // When its timeout fires after the child exited but before Node saw the exit, Node (24) drops the output and still
+  // reports success; this timer is queued just after Node's, so it marks that run as timed out.
   if (opts.timeout) {
     escalate = setTimeout(() => void killCliTree(child, 0), opts.timeout + EXEC_KILL_GRACE_MS);
     escalate.unref?.();
+    deadline = setTimeout(() => {
+      timedOut = true;
+    }, opts.timeout);
+    deadline.unref?.();
   }
+}
+
+function cutOffError(cli: string, timeout: number | undefined): Error {
+  return Object.assign(new Error(`${cli} timed out after ${timeout} ms`), { killed: true, code: null, signal: null });
 }
 
 /** Concurrent probes on a busy machine can outlast the timeout, so a CLI that answered before keeps its last version. */
@@ -378,6 +391,10 @@ async function stopCliTree(child: ChildProcess, pid: number, timeoutMs: number):
         child.kill();
       } catch {
       }
+      // taskkill /T also fails when one process in the tree could not be stopped; that one may still hold the pipes the CLI
+      // inherited, so "close" never comes. The CLI itself exiting is what counts.
+      if (exited()) done(true);
+      else child.once("exit", closed);
     });
   });
 }

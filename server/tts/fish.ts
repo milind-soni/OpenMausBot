@@ -204,3 +204,26 @@ export async function synthesize(
   if (!res.ok) throw new Error(errorMessage(res.status, "speaking", await safeBody(res)));
   return { bytes: new Uint8Array(await res.arrayBuffer()), mime: "audio/mpeg" };
 }
+
+export async function transcribe(audio: Uint8Array, mime: string, key: string): Promise<string> {
+  const form = new FormData();
+  form.append("audio", new Blob([audio as Uint8Array<ArrayBuffer>], { type: mime }), "speech.wav");
+  form.append("ignore_timestamps", "true");
+  form.append("diarize", "false");
+  form.append("tag_audio_events", "false");
+  let res: Response;
+  try {
+    res = await fetch(`${API}/v1/asr`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, model: "transcribe-1-pro" },
+      body: form,
+      signal: AbortSignal.timeout(60_000),
+    });
+  } catch {
+    throw new Error("Couldn't reach Fish Audio to hear you — check your connection.");
+  }
+  const body = await safeBody(res);
+  if (!res.ok) throw new Error(errorMessage(res.status, "hearing you", body));
+  const text = body && typeof body === "object" ? (body as Record<string, unknown>).text : undefined;
+  return typeof text === "string" ? text.trim() : "";
+}

@@ -10,7 +10,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { createHash } from "node:crypto";
 
 import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
-import { openStartupModelCatalog, readStartupModelCache, writeStartupModelCache } from "../../startup-model-catalog.ts";
+import { openStartupModelCatalog } from "../../startup-model-catalog.ts";
+import { acpModelCatalog } from "./model-catalog.ts";
 import { decodeInjectId } from "../local-inject.ts";
 import { DeviceAuthController, type DeviceSignIn } from "../device-auth.ts";
 import { deletePromptSplitReceipt, promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
@@ -58,9 +59,10 @@ import { openQuestionRequest, questionRequestFor, type AcpQuestionRequest } from
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
 import { acpToolEndEvents } from "./tool-items.ts";
 import { AcpHost } from "./host.ts";
-import { trackRunningTool, type AcpAskFinish, type AcpSession, type AcpTurn } from "./turn-state.ts";
+import { exitDetail } from "./exit-report.ts";
+import { endTurn, trackRunningTool, type AcpAskFinish, type AcpSession, type AcpTurn } from "./turn-state.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
-import { engineIdleMs, sessionIdlePolicy } from "../session-idle.ts";
+import { armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose } from "../session-idle.ts";
 import { classifyError } from "../retry.ts";
 import { engineFailureKind, engineFailureMessage, stopCause } from "../engine-errors.ts";
 import { narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
@@ -102,12 +104,12 @@ export interface AcpSupport {
   modelVariants?: boolean;
   /** Default CLI binary name if the instance config doesn't override it. */
   defaultCli: string;
-  /** Optional live model catalog; a failed lookup keeps the last usable one. `config` lets a
-   *  support ask the binary it will spawn, not whatever is on PATH. */
+  /** Optional live model catalog; a failed lookup keeps the last usable one. `config` lets a support ask the binary
+   *  it will spawn, not whatever is on PATH; `fresh` is the person's Refresh, which may bypass the CLI's own cache. */
   resolveModels?(
     environment: Record<string, string | undefined>,
     config: AcpConfig,
-    instanceId: string,
+    instanceId: string, fresh?: boolean,
   ): ModelCatalog | Promise<ModelCatalog>;
   /** Some managed agents are not probed at app startup; their Refresh is the only lookup. */
   resolveModelsOnCreate?: boolean;
@@ -169,7 +171,7 @@ export interface AcpSupport {
   /** Google Antigravity resumes through session/resume, not session/load. */
   resumeMethod?: "load" | "resume";
   /** Some agents acknowledge a live load without applying new MCP credentials. */
-  restartOnMcpChange?: boolean;
+  restartOnMcpChange?: boolean; /** The turn's MCP servers come from launcher-owned configuration, not ACP session parameters. */ mcpServersFromLaunch?: boolean;
   /** hermes-agent 0.22.4 re-sends a streamed reply whole under its messageId, as its `💭` reasoning block, a blank line,
    * then the reply; that chunk is dropped instead of appended. */
   resendsReasoningReply?: boolean;
@@ -184,8 +186,6 @@ export interface AcpSupport {
   ownMcpOverHttp?: boolean;
   /** How many tools the agent lists of its own beside the MCP servers', counted against a provider's tool limit. */
   engineTools?: number;
-  /** Do not retain stderr from providers that may place OAuth material there. */
-  redactStderr?: boolean;
   /** The agent's own debug log, read while a prompt is quiet: a new line proves it alive and `parse`
    * picks what to tell the person. Null when this process keeps none. A `shared` log holds every session's
    * and process's lines, so its lines prove nothing about this turn and only `parse` reads them. */
@@ -338,26 +338,19 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         support.transformEnv?.(env, activeConfig, instanceId, input.environment);
         return env;
       };
-      let models = support.resolveModels && support.resolveModelsOnCreate === false
-        ? readStartupModelCache(instanceId) ?? support.models : support.models;
-      let accountModels: ReadonlySet<string> | null = null;
-      const refreshModels = async () => {
-        if (!support.resolveModels) return;
-        try {
-          const resolved = await support.resolveModels(childEnv(), config, instanceId);
-          if (resolved.options.length) {
-            models = resolved;
-            accountModels = new Set(resolved.options.map((option) => option.id));
-          }
-        } catch {}
-        try { writeStartupModelCache(instanceId, models); } catch {}
-      };
+      const catalog = acpModelCatalog({
+        instanceId,
+        fixed: support.models,
+        startFromSaved: Boolean(support.resolveModels) && support.resolveModelsOnCreate === false,
+        resolve: support.resolveModels && ((fresh) => support.resolveModels!(childEnv(), config, instanceId, fresh)),
+      });
+      const refreshModels = (fresh?: boolean) => catalog.refresh(fresh);
       let startupModelRefresh: Promise<void> | null = null;
       if (support.resolveModels && support.resolveModelsOnCreate !== false) {
         startupModelRefresh = (await openStartupModelCatalog({
           instanceId,
-          use: (catalog) => { models = catalog; },
-          current: () => models,
+          use: (saved) => { catalog.models = saved; },
+          current: () => catalog.models,
           refresh: refreshModels,
         }))?.pending ?? null;
       } else if (support.resolveModelsOnCreate !== false) {
@@ -398,7 +391,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const session = sessions.get(threadId);
         if (!session || session.closing) return;
         session.closing = true;
-        if (session.idleTimer) clearTimeout(session.idleTimer);
+        stopIdleClose(`${instanceId}\0${threadId}`, session.idleTimer);
         appendNative(threadId, { dir: "out", source: SOURCE, msg: { close: why } });
         sessions.delete(threadId);
         const { host, sessionId } = session;
@@ -465,8 +458,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const session = sessions.get(threadId);
         if (!session) return;
         if (session.idleTimer) clearTimeout(session.idleTimer);
-        session.idleTimer = setTimeout(() => closeSession(threadId, "idle"), engineIdleMs(threadId, sessionIdle));
-        session.idleTimer.unref?.();
+        session.idleTimer = armIdleClose(`${instanceId}\0${threadId}`, engineIdleMs(threadId, sessionIdle), { close: () => closeSession(threadId, "idle"),
+          idle: () => sessions.get(threadId) === session && !session.closing && !session.current });
       };
     // Session allows the driver keeps when the agent offered no `allow_always`: exact operations per
     // thread, for the native session's life. A generic title with no input is never remembered.
@@ -606,21 +599,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       // Detach before the final events: a listener may start the next turn synchronously.
         session.current = null;
         active.delete(threadId);
-        current.flushAssistantText();
-        let finalOk = ok;
-        let finalStopReason = stopReason;
-        // A Stop the agent answers with end_turn (OpenCode does) is the person's stop. Otherwise `end_turn` with
-        // nothing to show is a lost turn: a provider may cut a reasoning-only stream and still answer end_turn.
-        if (finalOk && finalStopReason === null && current.state.stopped) finalStopReason = "cancelled";
-        else if (finalOk && finalStopReason === null && !current.state.producedItem) {
-          finalOk = false; finalStopReason = "empty_turn";
-          emit({
-            ...base(threadId, current.turnId),
-            type: "runtime.error",
-            message: `${support.displayName} finished without replying.`,
-          });
-        }
-        emit({ ...base(threadId, current.turnId), type: "turn.completed", ok: finalOk, stopReason: finalStopReason, cost: null });
+        const end = endTurn(current, ok, stopReason, support.displayName);
+        if (end.error) emit({ ...base(threadId, current.turnId), type: "runtime.error", ...end.error });
+        emit({ ...base(threadId, current.turnId), type: "turn.completed", ok: end.ok, stopReason: end.stopReason, cost: null });
         if (session.child.exitCode === null && !session.closing && !session.dead) {
           armIdle(threadId);
           recycleWhenIdle(session.host);
@@ -649,7 +630,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const running = sharedHost(hostKey);
         if (running) return running;
         const child = spawnCli(launch.command, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { allowEnv: instanceEnvNames(input.environment, env) } }, "bot");
-        const host = new AcpHost(child, hostKey, { source: SOURCE, logMessage: nativeLogMessage, keepStderr: !support.redactStderr, unrouted: refuse });
+        const host = new AcpHost(child, hostKey, { source: SOURCE, logMessage: nativeLogMessage, unrouted: refuse });
         hosts.add(host);
         child.once("close", () => hosts.delete(host));
         child.once("error", () => hosts.delete(host));
@@ -989,7 +970,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           idleTimer: null,
           closing: false,
           dead: false,
-          get stderr() { return host.stderr; },
+          get stderr() { return host.stderrTail.text; },
           current: null,
         };
         acp.inbound = {
@@ -1007,7 +988,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             emit({ ...base(threadId, current.turnId), type: "runtime.error", ...describeSpawnFailure(e, launch.command, cwd) });
             settle(threadId, session, false, "spawn_error");
           },
-          exit: (code) => {
+          exit: (code, signal) => {
             session.dead = true;
             const current = session.current;
             if (current?.state.cancelling) return;
@@ -1015,7 +996,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               if (!current.state.stopped) emit({
                 ...base(threadId, current.turnId),
                 type: "runtime.error",
-                message: `${support.displayName} exited ${code} before the prompt result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`,
+                message: `${support.displayName} exited ${code ?? signal ?? "unexpectedly"} before the prompt result${exitDetail(code, signal, session.stderr)}`,
               });
               settle(threadId, session, current.state.stopped, current.state.stopped ? "cancelled" : "exit_before_result");
             } else if (sessions.get(threadId) === session) {
@@ -1104,7 +1085,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           support.spawnFingerprint?.(spawnEnv, turnConfig) ?? null];
         const contractKey = JSON.stringify([...processContract, cwd, turn.toolScope ?? null, inheritedScopeFingerprint]);
         const launchModel = support.sessionModelEnv && cliTurn.model && /^[\w.:/-]{1,200}$/u.test(cliTurn.model)
-          && accountModels?.has(cliTurn.model) ? cliTurn.model : undefined;
+          && catalog.accountModels?.has(cliTurn.model) ? cliTurn.model : undefined;
         const launchEnv = support.sessionModelEnv && launchModel
           ? { ...spawnEnv, [support.sessionModelEnv]: launchModel }
           : spawnEnv;
@@ -1153,7 +1134,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         ): Promise<any> =>
           session.acp.request(method, params, timeoutMs, receive, idleMs, idleMessage);
 
-        const state: AcpTurn["state"] = { settled: false, promptSent: false, text: "", textMessageId: null, producedItem: false, startupActivity: false, stopped: false, usagePeak: null, usageLast: null, usageCompacted: false, cancelling: false };
+        const state: AcpTurn["state"] = { settled: false, promptSent: false, text: "", textMessageId: null, producedItem: false, repliedText: false, startupActivity: false, stopped: false, usagePeak: null, usageLast: null, usageCompacted: false, cancelling: false };
         let acknowledge = () => {};
         let rejectStartup = (_error: TurnNotStartedError) => {};
         const startupAck = turn.startupRecovery ? new Promise<{ turnId: string }>((resolve, reject) => {
@@ -1181,6 +1162,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           const text = stripLeakedSystemHarnessMessages(raw);
           if (!text.trim()) return;
           state.producedItem = true;
+          state.repliedText = true;
           emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
         };
         const current: AcpTurn = {
@@ -1293,7 +1275,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 try {
                   await request(
                     support.resumeMethod === "resume" ? "session/resume" : "session/load",
-                    { sessionId: cursor, cwd, mcpServers, ...selectionParams },
+                    { sessionId: cursor, cwd, mcpServers: support.mcpServersFromLaunch ? [] : mcpServers, ...selectionParams },
                     LOAD_SESSION_TIMEOUT,
                     (result) => {
                       if (result) {
@@ -1336,7 +1318,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 promptTurn = { ...turn, text: recovery.text };
                 rebuiltFromReplay = recovery.replayed;
               }
-              await request("session/new", { cwd, mcpServers, ...selectionParams }, NEW_SESSION_TIMEOUT, (result) => {
+              await request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : mcpServers, ...selectionParams }, NEW_SESSION_TIMEOUT, (result) => {
                 session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
                 session.sessionKey = sessionKey;
                 receiveModelVariants(result, true);
@@ -1365,9 +1347,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 // Committed before the setter runs: a failed switch still reports the session and respawns a stale process.
                 const pick = pickSessionModel(support, {
                   configId: support.selectModel.configId, session, requested: turn, turn: cliTurn, variant, reportedModel,
-                  catalog: models, launchedThisTurn,
+                  catalog: catalog.models, launchedThisTurn,
                 });
-                if (pick.accountModels) accountModels = pick.accountModels;
+                if (pick.accountModels) catalog.accountModels = pick.accountModels;
                 staleProcess = pick.staleProcess;
                 if (pick.notice) emit({ ...base(threadId, turnId), type: "runtime.notice", message: pick.notice });
                 ({ turn: cliTurn, variant, reportedModel } = pick);
@@ -1652,7 +1634,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             env: spawnEnv,
             cwd,
             prompt,
-            defaultModel: models.default,
+            defaultModel: catalog.models.default,
             pickAuthMethod: (methods) => support.pickAuthMethod(methods, spawnEnv),
             authRequired: support.authFailure === "fail-request" ? "if-requested" : support.authFailure === "fail",
             loginNote: support.loginNote,
@@ -1685,9 +1667,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         ...(support.backgroundText === false ? {} : { generateMemoryText }),
         enabled: input.enabled,
         get models() {
-          return models;
+          return catalog.models;
         },
-        refreshModels: support.resolveModels ? refreshModels : undefined,
+        get modelsUnconfirmed() {
+          return catalog.unconfirmed;
+        },
+        refreshModels: support.resolveModels ? () => refreshModels(true) : undefined,
         ...(startupModelRefresh ? { startupModelRefresh } : {}),
         ...(deviceSignIn ? {
           startAuthentication: () => deviceSignIn.start(),

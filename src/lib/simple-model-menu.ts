@@ -4,7 +4,7 @@ import { t } from "./i18n";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "./custom-models";
 import { isCustomOnly, SIGN_IN_FAMILY_LABEL, signInFamily, splitEngineRail } from "./engine-rail";
 import { displayModelLabel, shortModelLabel } from "./model-friendly";
-import { choiceIsSelected, modelChoices, type ModelChoice } from "./model-choices";
+import { choiceIsSelected, modelChoices, takesTypedModels, type ModelChoice } from "./model-choices";
 
 export type ModelOption = InstanceInfo["models"]["options"][number];
 
@@ -19,10 +19,11 @@ export interface MenuModelRow {
   label: string;
   route?: string;
   current: boolean;
+  blocked: boolean;
 }
 
 export type MenuGroupBody =
-  | { kind: "policy"; organization: string }
+  | { kind: "policy"; organization: string; team?: boolean }
   | { kind: "setUp" }
   | { kind: "signIn" }
   | { kind: "empty"; loading: boolean }
@@ -41,6 +42,8 @@ export interface MenuGroup {
   label: string;
   provider: string;
   account?: string;
+  /** A short line under the heading, such as why this account is special here. */
+  note?: string;
   body: MenuGroupBody;
 }
 
@@ -51,6 +54,8 @@ export interface MenuCurrent {
   meta?: string;
   warning: boolean;
   pending: boolean;
+  /** The organization turned the selected model off: nothing to set up, only another model to pick. */
+  blocked?: boolean;
 }
 
 export interface SimpleMenu {
@@ -83,10 +88,18 @@ export function providerName(instance: InstanceInfo): string {
   return instance.displayName.replace(/\s*\((?:API key|API)\)$/i, "") || instance.displayName;
 }
 
-export function modelName(instance: InstanceInfo | undefined, model: string): string {
+export function variantSuffix(instance: InstanceInfo | undefined, model: string, variant?: string): string {
+  const option = instance?.models.options.find((candidate) => candidate.id === model);
+  if (!instance || !option || variant === undefined) return "";
+  const listed = modelChoices(instance, [option]).some((choice) => choiceIsSelected(choice, { instanceId: instance.instanceId, model, variant }));
+  const label = listed ? option.variants?.find((candidate) => candidate.id === variant)?.label : undefined;
+  return label ? ` · ${label}` : "";
+}
+
+export function modelName(instance: InstanceInfo | undefined, model: string, variant?: string): string {
   const option = instance?.models.options.find((candidate) => candidate.id === model);
   if (!instance || !option) return model;
-  return displayModelLabel(option.label, providerName(instance), option.custom);
+  return displayModelLabel(option.label, providerName(instance), option.custom) + variantSuffix(instance, model, variant);
 }
 
 export function repeatedModelLabels(options: readonly ModelOption[]): Set<string> {
@@ -123,9 +136,10 @@ function currentRow(input: SimpleMenuInput): MenuCurrent {
   const active = instances.find((instance) => instance.instanceId === selection.instanceId);
   const option = active?.models.options.find((candidate) => candidate.id === selection.model);
   const name = option?.label ?? selection.model;
-  const row = { instance: active, label: modelName(active, selection.model), title: active ? `${active.displayName} · ${name}` : name, warning: false, pending: false };
+  const row = { instance: active, label: modelName(active, selection.model, selection.variant), title: active ? `${active.displayName} · ${name}${variantSuffix(active, selection.model, selection.variant)}` : name, warning: false, pending: false };
   if (!active) return loading ? { ...row, pending: true } : { ...row, meta: t("model.simple.unavailable"), warning: true };
   if (!option && input.refreshing === active.instanceId) return { ...row, pending: true };
+  if (option?.orgBlocked) return { ...row, meta: t("model.orgBlocked"), warning: true, blocked: true };
   if (active.policy) return { ...row, meta: t("policy.managedBy", { organization: active.policy.organizationName }), warning: true };
   if (needsCli(active)) return { ...row, meta: t("model.setupRequired"), warning: true };
   if (needsSignIn(active) && !isCustomOnly(active) && !option?.custom) return { ...row, meta: t("model.signInRequired"), warning: true };
@@ -141,14 +155,14 @@ export function simpleModelMenu(input: SimpleMenuInput): SimpleMenu {
   const models = new Map(listed.map((instance) => [instance.instanceId, listedModels(instance)]));
   const total = listed.filter((instance) => !instance.policy && !needsCli(instance))
     .reduce((sum, instance) => sum + models.get(instance.instanceId)!.all.length, 0);
-  const search = total > SIMPLE_SEARCH_AFTER;
+  const search = total > SIMPLE_SEARCH_AFTER || listed.some((instance) => takesTypedModels(instance) && !instance.policy && !needsCli(instance));
   const query = search ? input.query.trim() : "";
   const { subscription, api, custom } = splitEngineRail(listed);
   const ordered = [...subscription, ...api, ...custom];
   const current = ordered.find((instance) => instance.instanceId === selection.instanceId);
 
   function groupBody(instance: InstanceInfo, provider: string): MenuGroupBody | null {
-    if (instance.policy) return query ? null : { kind: "policy", organization: instance.policy.organizationName };
+    if (instance.policy) return query ? null : { kind: "policy", organization: instance.policy.organizationName, ...(instance.policy.team ? { team: true } : {}) };
     if (needsCli(instance)) return query ? null : { kind: "setUp" };
     const { signedOut, own, all } = models.get(instance.instanceId)!;
     if (all.length === 0) return query ? null : signedOut ? { kind: "signIn" } : { kind: "empty", loading: input.refreshing === instance.instanceId };
@@ -162,6 +176,7 @@ export function simpleModelMenu(input: SimpleMenuInput): SimpleMenu {
       label: shortModelLabel(option.label, provider),
       ...(repeated.has(option.label) && option.provider ? { route: option.provider } : {}),
       current: currentSelection ? choiceIsSelected(option, currentSelection) : false,
+      blocked: option.orgBlocked === true,
     });
     const mixed = own.length > 0 && own.length < all.length;
     if (query) {

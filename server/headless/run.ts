@@ -12,23 +12,33 @@ const enc = encodeURIComponent;
 
 const STOPPABLE = new Set(["running", "waiting", "needs_input", "resume"]);
 
-export async function stopTeammates(client: HeadlessClient, threadId: string, nodes: readonly Rec[]): Promise<Rec[]> {
+/** The teammate tasks a Stop ended: each one still at work after the conversation's Stop is stopped in its own
+ * conversation, and one that was at work before it (`working`, node ids) and is cancelled now ended with it. */
+export async function stopTeammates(client: HeadlessClient, threadId: string, nodes: readonly Rec[], working: ReadonlySet<string> = new Set()): Promise<Rec[]> {
   const stopped: Rec[] = [];
   const done = new Set<string>();
   for (const node of nodes) {
-    if (!STOPPABLE.has(node.status) || node.threadId === threadId || done.has(node.threadId)) continue;
+    if (node.threadId === threadId || done.has(node.threadId)) continue;
+    const record = { id: node.id, botId: node.botId, botName: node.botName, threadId: node.threadId };
+    if (node.status === "cancelled" && working.has(node.id)) {
+      done.add(node.threadId);
+      stopped.push(record);
+      continue;
+    }
+    if (!STOPPABLE.has(node.status)) continue;
     done.add(node.threadId);
     const route = node.groupId ? `/api/groups/${enc(node.groupId)}/interrupt` : `/api/bots/${enc(node.botId)}/interrupt`;
     try {
       await client.json(route, { method: "POST", body: JSON.stringify({ threadId: node.threadId }) });
-      stopped.push({ id: node.id, botId: node.botId, botName: node.botName, threadId: node.threadId });
+      stopped.push(record);
     } catch {
     }
   }
   return stopped;
 }
 
-/** The job is read before the Stop (for its since, which the Stop moves past) and again after it. */
+/** The job is read before the Stop (for its since, which the Stop moves past, and the teammates then at work) and
+ * again after it. The Stop itself ends the teammates mid-turn; any still at work after it are stopped one by one. */
 export async function stopConversation(client: HeadlessClient, target: Target, tree: boolean): Promise<{ result: Rec; stopped: Rec[] }> {
   let threadId = target.taskId;
   if (tree && !threadId) {
@@ -38,8 +48,9 @@ export async function stopConversation(client: HeadlessClient, target: Target, t
   const before = tree && threadId ? await readJob(client, threadId) : undefined;
   const result = await client.tool("interrupt_conversation", { target_type: target.type, target_id: target.id, ...(threadId ? { task_id: threadId } : {}) });
   if (!before) return { result, stopped: [] };
+  const working = new Set<string>((before.nodes ?? []).filter((node: Rec) => STOPPABLE.has(node.status)).map((node: Rec) => node.id));
   const after = await readJob(client, result.taskId, { since: String(before.since) });
-  return { result, stopped: await stopTeammates(client, result.taskId, after.nodes ?? []) };
+  return { result, stopped: await stopTeammates(client, result.taskId, after.nodes ?? [], working) };
 }
 
 /** From the job's own state: MCP's `status` keeps older words (a lead whose work failed is "settled" there). */

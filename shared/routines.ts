@@ -60,7 +60,8 @@ export interface RoutineContextAttachment {
   size: number;
 }
 
-export type RoutineRunTrigger = "schedule" | "manual" | "webhook" | "startup";
+/** "api": an outside caller through the bot's API; "webhook": an outside event. Both run as nobody's work. */
+export type RoutineRunTrigger = "schedule" | "manual" | "webhook" | "startup" | "api";
 
 /** A check a routine runs on each tick before any AI turn, in plain code: `calendar` reads the next 36 hours, `mail`
  * new inbox mail since the last check, `runs` other routines' finished runs. Nothing new means no AI turn. */
@@ -190,6 +191,8 @@ export interface RoutineRun {
   finishedAt?: number;
   output?: string;
   error?: string;
+  /** A failed run whose reply still came back: only a step it ran failed or wasn't allowed. */
+  partial?: boolean;
   /** Set when the run used its one automatic second start, and why. */
   retried?: RoutineRetryCause;
   /** Concise, redacted question or approval reason while status is waiting,

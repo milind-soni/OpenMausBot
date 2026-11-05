@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { LocaleKey } from "@/locales";
+import { desktopCapabilitiesNow } from "./desktop";
 import { t } from "./i18n";
 
 export type CallMode = "turns" | "live";
@@ -10,12 +11,14 @@ export const CALL_MODES: ReadonlyArray<{ id: CallMode; label: LocaleKey }> = [
   { id: "live", label: "call.mode.live" },
 ];
 
-export function liveDisclosure({ cloudHome = false }: { cloudHome?: boolean } = {}): string {
+export function liveDisclosure({ cloudHome = false, azure = false }: { cloudHome?: boolean; azure?: boolean } = {}): string {
+  if (azure) return t(cloudHome ? "call.live.disclosureAzureCloud" : "call.live.disclosureAzure");
   return t(cloudHome ? "call.live.disclosureCloud" : "call.live.disclosure");
 }
 
 export function callModeHint(mode: CallMode, where: { cloudHome?: boolean } = {}): string {
-  return mode === "live" ? `${t("call.mode.liveHint")} ${liveDisclosure(where)}` : t("call.mode.turnsHint");
+  if (mode === "live") return `${t("call.mode.liveHint")} ${liveDisclosure(where)}`;
+  return t(desktopCapabilitiesNow().dictation.engine === "fish-audio" ? "call.mode.turnsHintFish" : "call.mode.turnsHint");
 }
 
 export function effectiveCallMode(stored: CallMode, { turnsHere, canLive }: { turnsHere: boolean; canLive: boolean }): CallMode {

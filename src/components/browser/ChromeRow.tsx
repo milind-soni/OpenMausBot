@@ -1,7 +1,7 @@
 // The tab strip and address bar above a bot's browser. The address bar follows pingdotgg/t3code@00cdceb1
 // apps/web/src/components/preview/PreviewChromeRow.tsx, MIT License, Copyright (c) 2026 T3 Tools Inc. (full text in
 // third_party/t3-code/LICENSE); modified: OpenMausBot's tabs, control pill and profile button.
-import { ArrowLeft, ArrowRight, Expand, Globe, Hand, Loader2, Maximize2, Minimize2, Plus, RotateCw, Shrink, UserRound, X } from "lucide-react";
+import { AppWindow, ArrowLeft, ArrowRight, Globe, Hand, Loader2, Maximize, Minimize, Plus, RotateCw, Shrink, UserRound, X } from "lucide-react";
 import { forwardRef, useState, type ReactNode } from "react";
 
 import type { PreviewStreamControl } from "@/lib/browser-stream-client";
@@ -109,8 +109,8 @@ export const ChromeRow = forwardRef<HTMLInputElement, {
           <span className="truncate">{PILL_TEXT[pill](botName)}</span>
           {pill === "bot" || pill === "watching" ? <span className="shrink-0 text-ink">· {t("browser.control.take")}</span> : handsBack ? <span className="shrink-0">· {t("browser.control.handBack")}</span> : null}
         </button>
-        <button className={button} title={props.maximized ? "Restore size" : "Maximize"} aria-label={props.maximized ? "Restore size" : "Maximize"} onClick={props.onMaximize}>{props.maximized ? <Shrink size={15} /> : <Expand size={15} />}</button>
-        <button className={button} title={props.fullscreen ? "Exit full screen" : "Full screen"} aria-label={props.fullscreen ? "Exit full screen" : "Full screen"} onClick={props.onFullscreen}>{props.fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button>
+        <button className={button} title={props.maximized ? "Restore size" : "Maximize (fill the app window)"} aria-label={props.maximized ? "Restore size" : "Maximize"} onClick={props.onMaximize}>{props.maximized ? <Shrink size={15} /> : <AppWindow size={15} />}</button>
+        <button className={button} title={props.fullscreen ? "Exit full screen" : "Full screen (whole display)"} aria-label={props.fullscreen ? "Exit full screen" : "Full screen"} onClick={props.onFullscreen}>{props.fullscreen ? <Minimize size={15} /> : <Maximize size={15} />}</button>
         <button className={`${button} rounded-xl bg-inset p-1.5`} title={`Browser profile: ${props.profileName}`} aria-label="Browser profiles" onClick={props.onProfiles}><UserRound size={15} /></button>
       </div>
       <form

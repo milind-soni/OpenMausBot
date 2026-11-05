@@ -5,7 +5,7 @@ import { FRAME_SLACK_MS, FULL_FRAME_MS } from "./mascot-motion";
 export type MascotFrame = (now: number) => number;
 
 export interface MascotTicket {
-  wake(): void;
+  wake(by?: number): void;
   remove(): void;
 }
 
@@ -36,6 +36,8 @@ interface Entry {
   onScreen: boolean;
 }
 
+const TIMER_LEAD_MS = 1;
+
 export function createMascotClock(env: ClockEnvironment): MascotClock {
   const entries = new Set<Entry>();
   const byElement = new Map<Element, Entry>();
@@ -60,8 +62,8 @@ export function createMascotClock(env: ClockEnvironment): MascotClock {
     }
     timerHandle = env.setTimer(() => {
       timerHandle = null;
-      if (frameHandle === null && !hidden) frameHandle = env.requestFrame(run);
-    }, wait - FULL_FRAME_MS / 2);
+      if (frameHandle === null && !hidden && entries.size) frameHandle = env.requestFrame(run);
+    }, wait - TIMER_LEAD_MS);
   };
 
   const draw = (entry: Entry, now: number) => {
@@ -112,9 +114,9 @@ export function createMascotClock(env: ClockEnvironment): MascotClock {
       }
       schedule();
       return {
-        wake() {
+        wake(by = -Infinity) {
           if (!entries.has(entry)) return;
-          entry.due = -Infinity;
+          entry.due = Math.min(entry.due, by);
           schedule();
         },
         remove() {

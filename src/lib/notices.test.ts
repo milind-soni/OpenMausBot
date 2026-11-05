@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { EMPTY_ONBOARDING, type OnboardingStatus } from "@/lib/onboarding";
 import { withTourReset } from "@/lib/guided-tour";
 import { DESKTOP_NOTICES } from "../../electron/desktop-prefs.mjs";
-import { BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, introShown, introStage, launchNotice, localDay, markLaunchNotice, nextNotice, noticeSeen,
+import { BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, localDay, markLaunchNotice, nextNotice, noticeSeen,
   NOTICES, OLD_PRO_DISMISSALS, PRODUCT_HUNT_NOTICE, SIMPLE_MODE_NOTICE, STAR_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE, type NoticeFacts } from "./notices";
 
 let storage: Map<string, string>, session: Map<string, string>;
@@ -15,17 +15,27 @@ afterEach(() => vi.unstubAllGlobals());
 
 const record = (hintsSeen: string[] = []): OnboardingStatus => ({ ...EMPTY_ONBOARDING, completedAt: "2026-09-01", version: 1, hintsSeen });
 const facts = (intro: boolean | null, trial: boolean | null, cloud: boolean | null, star: boolean | null, launch: boolean | null = false, popup: boolean | null = false,
-  consent: boolean | null = false, simple: boolean | null = false, boat: boolean | null = false, two: boolean | null = false): NoticeFacts =>
-  ({ [SIMPLE_MODE_NOTICE]: simple, [WHATS_NEW_NOTICE]: popup, [UPDATES_CONSENT_NOTICE]: consent, [TWO_PLACES_NOTICE]: two, [PRODUCT_HUNT_NOTICE]: launch, [CLOUD_INTRO]: intro, [CLOUD_TRIAL_NOTICE]: trial, [CLOUD_NOTICE]: cloud,
+  consent: boolean | null = false, simple: boolean | null = false, boat: boolean | null = false, two: boolean | null = false, grok: boolean | null = false): NoticeFacts =>
+  ({ [GROK_MOVE_NOTICE]: grok, [SIMPLE_MODE_NOTICE]: simple, [WHATS_NEW_NOTICE]: popup, [UPDATES_CONSENT_NOTICE]: consent, [TWO_PLACES_NOTICE]: two, [PRODUCT_HUNT_NOTICE]: launch, [CLOUD_INTRO]: intro, [CLOUD_TRIAL_NOTICE]: trial, [CLOUD_NOTICE]: cloud,
     [BOAT_OFFER_NOTICE]: boat, [STAR_NOTICE]: star });
 const none = () => false;
 const DAY = 86_400_000, NOON = new Date(2026, 9, 9, 12).getTime();
+
+it("the Move from Grok Bot popup goes ahead of everything, and holds the queue while it waits", () => {
+  const all = (grok: boolean | null) => facts(true, true, true, true, true, true, true, true, true, true, grok);
+  expect(nextNotice(all(true), none)).toBe(GROK_MOVE_NOTICE);
+  expect(nextNotice(all(null), none)).toBeNull();
+  expect(nextNotice(all(false), none)).toBe(SIMPLE_MODE_NOTICE);
+  expect(nextNotice(all(true), none, WHATS_NEW_NOTICE), "not in a launch another notice took").toBe(WHATS_NEW_NOTICE);
+  expect(nextNotice(all(true), none, GROK_MOVE_NOTICE), "a reload of the launch it took").toBe(GROK_MOVE_NOTICE);
+  expect(GROK_MOVE_NOTICE).toBe("grok-move-2026-11");
+});
 
 it("is one queue: the Simple mode popup first, then What's new, the product-updates question, the launch card, the card after the update, the trial's notice, the My Cloud card, Boat's credit offer, the star", () => {
   expect(nextNotice(facts(true, true, true, true, true, true, true, true), none)).toBe(SIMPLE_MODE_NOTICE);
   expect(nextNotice(facts(true, true, true, true, true, true, true, null), none), "nothing shows while the Simple mode popup waits").toBeNull();
   expect(nextNotice(facts(true, true, true, true, true, true, true, true), id => id === SIMPLE_MODE_NOTICE)).toBe(WHATS_NEW_NOTICE);
-  expect(NOTICES).toEqual([SIMPLE_MODE_NOTICE, WHATS_NEW_NOTICE, UPDATES_CONSENT_NOTICE, TWO_PLACES_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE, BOAT_OFFER_NOTICE, STAR_NOTICE]);
+  expect(NOTICES).toEqual([GROK_MOVE_NOTICE, SIMPLE_MODE_NOTICE, WHATS_NEW_NOTICE, UPDATES_CONSENT_NOTICE, TWO_PLACES_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE, BOAT_OFFER_NOTICE, STAR_NOTICE]);
   expect(nextNotice(facts(true, true, true, true, true, false, false, false, false, true), none), "bots in two places come before any promotion").toBe(TWO_PLACES_NOTICE);
   expect(nextNotice(facts(true, true, true, true, true, false, true, false, false, true), none), "after the product-updates question").toBe(UPDATES_CONSENT_NOTICE);
   expect(nextNotice(facts(true, true, true, true, true, false, false, false, false, null), none), "nothing lower shows while main hasn't answered").toBeNull();
@@ -56,8 +66,8 @@ it("is one queue: the Simple mode popup first, then What's new, the product-upda
   expect(nextNotice(facts(false, false, false, false), none)).toBeNull();
 });
 
-it("Boat's credit offer is one the desktop keeps for its every page, as What's new is", () => {
-  expect(DESKTOP_NOTICES).toEqual([WHATS_NEW_NOTICE, BOAT_OFFER_NOTICE]);
+it("Boat's credit offer and the Grok Bot move are ones the desktop keeps for its every page, as What's new is", () => {
+  expect(DESKTOP_NOTICES).toEqual([WHATS_NEW_NOTICE, BOAT_OFFER_NOTICE, GROK_MOVE_NOTICE]);
 });
 
 it("one notice a launch: What's new goes first and Boat's credit offer waits for a later launch; only the product-updates question may follow", () => {
