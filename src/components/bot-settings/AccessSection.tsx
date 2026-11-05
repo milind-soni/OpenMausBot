@@ -636,7 +636,6 @@ export function CloudPreference({ bot, patch }: { bot: Bot; patch: ReturnType<ty
   );
 }
 
-/** A bot not made yet has no Screen panel to open, so its place is chosen here. */
 function DraftWorksOn({ bot, patch, seat }: { bot: Bot; patch: ReturnType<typeof useBotSettingsDerived>["patch"]; seat: PlaceSeat }) {
   const { state } = useStore();
   const { capabilities } = useDesktopCapabilities();
@@ -655,6 +654,7 @@ function DraftWorksOn({ bot, patch, seat }: { bot: Bot; patch: ReturnType<typeof
       selected: mode === null ? !bot.computer : bot.computer === mode,
       disabled: Boolean(managedBy) || placeBlocked(view),
       issue: !managedBy && placeHasIssue(view),
+      unavailableTitle: managedBy ?? (placeBlocked(view) ? view.line : undefined),
     };
   });
   const choose = (mode: WorksOnMode) => patch(mode === "browser" ? { computer: mode, browser: true } : { computer: mode });

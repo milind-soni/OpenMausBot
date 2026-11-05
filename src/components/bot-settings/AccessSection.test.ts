@@ -226,8 +226,23 @@ describe("AccessSection Works on", () => {
 
     fixture.config = { box: { configured: true } } as Partial<ConfigStatus>;
     const chosen = draft(makeBot({ computer: "cloud" }));
-    expect(chosen.html).toMatch(/aria-pressed="true"[^>]*>.*?Cloud desktop/);
+    expect(chosen.html).toMatch(/<button[^>]*aria-pressed="true"[^>]*>(?:(?!<\/button>).)*?Cloud desktop/);
     expect(chosen.html).toContain("Cloud backend");
+
+    const picker = nodes(chosen.tree).find((node) => (node.type as { name?: string }).name === "DraftWorksOn")!;
+    let rendered: ReactNode = null;
+    function Picker() { rendered = (picker.type as (props: unknown) => ReactNode)(picker.props); return rendered; }
+    renderToStaticMarkup(createElement(StoreProvider, null, createElement(Picker)));
+    const grid = nodes(rendered).find((node) => (node.type as { name?: string }).name === "WorksOnGrid")!;
+    const options = grid.props.options as Array<{ mode: string | null; disabled: boolean; unavailableTitle?: string }>;
+    const local = options.find((option) => option.mode === "local")!;
+    expect(local.disabled).toBe(true);
+    expect(local.unavailableTitle).toBeTruthy();
+
+    const select = grid.props.onSelect as (mode: string | null) => void;
+    select("browser");
+    select(null);
+    expect(vi.mocked(derived.patch).mock.calls).toEqual([[{ computer: "browser", browser: true }], [{ computer: null }]]);
   });
 
   it("hides the Boat or VPS choice on My Cloud, whose cloud computers are the plan's", () => {
