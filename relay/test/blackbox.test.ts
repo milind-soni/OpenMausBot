@@ -300,7 +300,7 @@ describe("logs", () => {
     }
     const all = relay.stdout() + relay.stderr();
     for (const secret of secrets) assert.equal(all.includes(secret), false, "a secret or identifier reached the log");
-    for (const marker of ["PAYLOAD-MARKER", "198.51.", "127.0.0.1"]) assert.equal(all.includes(marker), false, marker);
+    for (const marker of ["PAYLOAD-MARKER", "198.18.", "198.19.", "127.0.0.1"]) assert.equal(all.includes(marker), false, marker);
     assert.ok(lines.some((line) => JSON.parse(line).ev === "session"));
   });
 });

@@ -40,10 +40,10 @@ export function mintToken(key: TestKey, claims: Claims = {}, nowSeconds = Math.f
 }
 
 let nextAddress = 0;
-/** A distinct documentation-range client address, so each test client has its own per-IP limits. */
+/** A distinct address from 198.18.0.0/15 (set aside for testing), so each test client has its own per-IP limits. */
 export function freshIp(): string {
-  nextAddress += 1;
-  return `198.51.${(nextAddress >> 8) & 255}.${nextAddress & 255}`;
+  nextAddress = (nextAddress + 1) % 131_072;
+  return `198.${18 + (nextAddress >> 16)}.${(nextAddress >> 8) & 255}.${nextAddress & 255}`;
 }
 
 export interface Received {

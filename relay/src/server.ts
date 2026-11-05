@@ -112,7 +112,14 @@ export async function startRelay(config: RelayConfig, options: RelayOptions = {}
     res.end();
   };
 
-  const server = createServer({ maxHeaderSize: 16 * 1024, headersTimeout: 5_000, requestTimeout: 10_000, keepAliveTimeout: 5_000 }, onRequest);
+  // Node checks headersTimeout and requestTimeout only every connectionsCheckingInterval (30 s by default).
+  const server = createServer({
+    maxHeaderSize: 16 * 1024,
+    headersTimeout: 5_000,
+    requestTimeout: 10_000,
+    keepAliveTimeout: 5_000,
+    connectionsCheckingInterval: 1_000,
+  }, onRequest);
   server.maxConnections = limits.socketsMax + CONNECTION_HEADROOM;
 
   server.on("upgrade", (req: IncomingMessage, socket: Socket, head: Buffer) => {
