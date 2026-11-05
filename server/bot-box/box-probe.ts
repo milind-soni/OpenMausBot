@@ -36,6 +36,8 @@ export interface ProbeSpec {
   publicTarget: string | null;
   /** Checks that apply only when the box has its own network. */
   isolatedNet: boolean;
+  /** The host has a CPU list (`/sys/devices/system/cpu/possible`), so the box must have it too (plan.ts CPU_LIST_FILES). */
+  cpuList?: boolean;
   /** T0c: the seccomp filter is on, so a kernel-keyring call must fail with EPERM (an unprivileged process may make it otherwise). */
   seccomp?: boolean;
   /** T0b: a model call through the broker, and the real key's value that must be nowhere in the box. */
@@ -130,6 +132,11 @@ export async function runProbe(spec: ProbeSpec, env: Record<string, string | und
   add("engine-read-only", existsSync(join(spec.engine.bin, spec.engine.name)) && tamper.failed, tamper.code);
   add("tmp-private", !existsSync(spec.hostTmpFile), existsSync(spec.hostTmpFile) ? "host /tmp visible" : "private");
   add("hostname-private", hostname() === "omb-box", hostname() === "omb-box" ? "omb-box" : "host name visible");
+  if (spec.cpuList) {
+    // TCMalloc runtimes (Google's Antigravity) stop at start without it: exit 134.
+    const cpus = fails(() => { if (!/^\d/.test(readFileSync("/sys/devices/system/cpu/possible", "utf8"))) throw new Error("empty"); });
+    add("cpu-list-readable", !cpus.failed, cpus.code);
+  }
 
   add("harness-internal-allowed", (await httpStatus(spec.harnessPort, "/api/internal/box-probe")) === "200", "GET /api/internal/box-probe");
   add("harness-other-refused", (await httpStatus(spec.harnessPort, "/api/bots")) === "403", "GET /api/bots");

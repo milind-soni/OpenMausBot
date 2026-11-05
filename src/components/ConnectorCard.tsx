@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, PlugZap, RefreshCw, X } from "lucide-react";
 
+import { FIRST_HOUR_OFFER_KEY } from "../../shared/person-wait";
 import { api, type Bot, type Message } from "@/state/store";
 import { ApiError } from "@/state/api";
 import { t } from "@/lib/i18n";
@@ -177,6 +178,7 @@ export function ConnectorCard({ botId, color, threadId, message }: { botId: stri
     <AskCard
       tour="connector"
       ariaLabel={connector.label}
+      stays={!connector.resumeKey.startsWith(FIRST_HOUR_OFFER_KEY)}
       icon={<PlugZap size={15} />}
       title={isMcp ? t("connectors.card.signInTo", { label: connector.label }) : connector.label}
       explanation={connector.description}

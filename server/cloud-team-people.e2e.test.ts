@@ -102,14 +102,15 @@ it("refuses someone who left in plain words, and caps passes per conversation", 
   expect(sent).toEqual([...Array(10).fill(200), 429]);
 }, hostTimeout(90_000));
 
-it("has none of it on a My Cloud: no tool route, no tags by name, nothing new in Needs you", async () => {
+it("has no people on a My Cloud: message_person reaches its one person's Inbox, no tags by name, nothing new in Needs you", async () => {
   const solo = (await fx.onCloud("POST", "/api/bots", { name: "Solo" })).body.bot as { id: string; threadId: string };
   const minted = await fetch(`${fx.cloudBase}/api/testing/internal-capability`, { method: "POST",
     headers: { "content-type": "application/json", "x-openmausbot-test-capability": CLOUD_CAPABILITY_KEY }, body: JSON.stringify({ botId: solo.id, threadId: solo.threadId }) });
   expect(minted.status).toBe(201);
   const { token } = await minted.json() as { token: string };
   const answer = await fetch(`${fx.cloudBase}/api/internal/people/message`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ to: "Bob", message: "Hi" }) });
-  expect(answer.status).toBe(404);
+  expect(answer.status).toBe(200);
+  expect((await fx.onCloud("GET", "/api/inbox")).body.rows.filter((row: { from: { name: string } }) => row.from.name === "Solo")).toHaveLength(1);
   expect(((await fx.onCloud("GET", "/api/needs-you")).body.items as Array<{ kind: string }>).filter((item) => item.kind === "message")).toEqual([]);
   expect((await fx.onCloud("GET", "/api/notifications")).body.notifications.filter((entry: { forPerson?: string }) => entry.forPerson)).toEqual([]);
 }, hostTimeout(60_000));

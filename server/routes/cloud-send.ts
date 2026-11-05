@@ -39,6 +39,8 @@ export interface CloudSendRouteDeps extends Pick<CloudSendSources, "appVersion" 
   /** This server's connections (cloud-connections.ts), by id. */
   connections?(): Promise<ReadonlyArray<{ id: string }>>;
   connectionFingerprints?(nonce: string): Record<string, string>;
+  /** The move ended: the person hears which connections stayed on the computer it came from. */
+  connectionsMoved?(language?: string): void;
   /** What only a move carries: automations, skill extras and bot fields, memory, and bot files. */
   move?: MoveKindsDeps & Omit<MoveMemoryDeps, "bot" | "owner">;
   /** This server's automations, which a Cloud home stops for a computer whose bots go home to it. */
@@ -83,7 +85,7 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
     if (move && await moveKindsRoute(move, ctx)) return;
     if (move && await moveMemoryRoute({ ...move, bot: (id) => move.store.bot(id) ?? undefined }, ctx)) return;
     if (move && await moveFilesRoute({ dataDir: move.dataDir, bots: () => (bot ? move.store.bots.filter((entry) => entry.id === bot) : move.store.bots), owner: move.owner }, ctx)) return;
-    if (move && home && await arrivedRoute({ dataDir: move.dataDir, store: move.store, webhooks: move.webhooks, owner: move.owner, lineLanguage: deps.lineLanguage ?? (() => deps.config().language) }, ctx)) return;
+    if (move && home && await arrivedRoute({ dataDir: move.dataDir, store: move.store, webhooks: move.webhooks, owner: move.owner, lineLanguage: deps.lineLanguage ?? (() => deps.config().language), ...(deps.connectionsMoved ? { stayed: deps.connectionsMoved } : {}) }, ctx)) return;
     if (move && deps.cloudHome && deps.automations && await automationsOffRoute({ automations: deps.automations, owner: move.owner }, ctx)) return;
     if (move && !deps.cloudHome && await homeRoute({ dataDir: move.dataDir, store: move.store, webhooks: move.webhooks }, ctx)) return;
     if (path === "/api/cloud-send/manifest") {

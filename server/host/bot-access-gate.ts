@@ -32,7 +32,7 @@ export function levelNeeded(method: string, path: string): Exclude<BotAccessLeve
   const verb = method.toUpperCase();
   if (verb === "GET" || verb === "HEAD") return "view";
   if (/^\/api\/bots\/[\w-]+$/.test(path)) return null;
-  if (/^\/api\/bots\/[\w-]+\/access$/.test(path)) return "edit";
+  if (/^\/api\/bots\/[\w-]+\/(?:access|bot-api(?:\/new-key)?)$/.test(path)) return "edit";
   if (/^\/api\/routines\/[\w-]+$/.test(path)) return null;
   if (/^\/api\/(?:bots|groups)\/[\w-]+\/read$/.test(path) || /^\/api\/bots\/[\w-]+\/access-request$/.test(path)) return "view";
   if (verb === "POST" && OPEN_CONVERSATION.test(path)) return "view";

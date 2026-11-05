@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 
 import type { AppConfig } from "../config.ts";
-import { claimedNotice, createMcpServersHost } from "./mcp-servers-host.ts";
+import { mcpServerConfigHash } from "../mcp-app-catalog.ts";
+import { claimedNotice, createMcpServersHost, startCheckTimeout } from "./mcp-servers-host.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -115,4 +116,38 @@ it("tests a command server as its bot's turns start it, from that bot's own fold
   expect(host.probeAs({ bot: "paul" })).toEqual({ id: "paul", cwd: data });
   mkdirSync(join(data, "workspaces", "iris"), { recursive: true });
   expect(host.probeAs({ bot: "iris" })).toEqual({ id: "iris", cwd: join(data, "workspaces", "iris") });
+});
+
+it("a restart, or turning a server off and on, shows in what the next turn starts, so an engine that kept the old process replaces it", async () => {
+  const { cfg, host } = setup({ boxed: false, bots: [PAUL] });
+  host.boot();
+  await host.health.settled();
+  const notes = () => host.mounted(PAUL).notes as { env: Record<string, string> };
+  const fresh = JSON.stringify(host.mounted(PAUL).notes);
+  expect(notes().env.OMB_MCP_RESTART).toBeUndefined();
+
+  host.health.changed("notes");
+  const restarted = JSON.stringify(host.mounted(PAUL).notes);
+  expect(restarted).not.toBe(fresh);
+  expect(mcpServerConfigHash(JSON.parse(restarted)), "still the server the apps catalog learned").toBe(mcpServerConfigHash(JSON.parse(fresh)));
+
+  const entry = cfg.mcpServers!.notes as { enabled: boolean };
+  entry.enabled = false;
+  host.health.changed("notes");
+  entry.enabled = true;
+  host.health.changed("notes");
+  expect(JSON.stringify(host.mounted(PAUL).notes), "off and on in one turn leaves the config the same").not.toBe(restarted);
+  expect(JSON.stringify(host.mounted(PAUL).blender)).toBe(JSON.stringify(host.mounted(PAUL).blender));
+});
+
+it("leaves servers reached by URL alone", async () => {
+  const { cfg, host } = setup({ boxed: false, bots: [PAUL] });
+  cfg.mcpServers!.linear = { type: "http", url: "https://mcp.linear.app/mcp", headers: {}, enabled: true };
+  host.health.changed("linear");
+  expect(host.mounted(PAUL).linear).toEqual({ type: "http", url: "https://mcp.linear.app/mcp", headers: {} });
+});
+
+it("a package runner's first check waits for its download; any other program's keeps the short wait", () => {
+  for (const command of ["uvx", "npx", "/opt/homebrew/bin/uvx", "npx.cmd"]) expect(startCheckTimeout(command), command).toBe(120_000);
+  for (const command of ["node", "python3", "/usr/local/bin/my-server"]) expect(startCheckTimeout(command), command).toBeUndefined();
 });

@@ -7,8 +7,9 @@ import { ATTACHMENTS_DIR, IMAGE_MAX_BYTES } from "./attachments.ts";
 import type { TurnImageInput } from "./contracts.ts";
 import { decodeAttachmentAttribute } from "./message-file.ts";
 
-export const TURN_IMAGE_MAX_COUNT = 4;
-export const TURN_IMAGE_MAX_BYTES = TURN_IMAGE_MAX_COUNT * IMAGE_MAX_BYTES;
+export const TURN_IMAGE_MAX_COUNT = 10;
+/** Total image bytes one turn may carry: the 40 MB it was when a turn took four images, so engine requests don't grow. */
+export const TURN_IMAGE_MAX_BYTES = 4 * IMAGE_MAX_BYTES;
 
 type MarkdownNode = {
   type: string;

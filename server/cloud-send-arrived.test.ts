@@ -26,10 +26,18 @@ function cloud(owner = true, language?: string) {
       json: (_res: unknown, status: number, value: unknown) => { answered = { status, body: value }; }, readBody: async () => body } as never);
     return answered!;
   };
-  return { dataDir, lines, ask };
+  return { dataDir, lines, ask, deps };
 }
 
 describe("POST /api/cloud-send/arrived", () => {
+  it("has the person told what stayed behind, in their language, once the move is recorded", async () => {
+    const { dataDir, ask, deps } = cloud(true, "de");
+    const told: Array<string | undefined> = [];
+    (deps as { stayed?: (language?: string) => void }).stayed = (language) => { told.push(language); expect(movedFrom(dataDir)?.computer).toBe("MacBook Air"); };
+    expect((await ask({ v: 1, computer: "MacBook Air", webhooks: [] })).status).toBe(200);
+    expect(told).toEqual(["de"]);
+  });
+
   it("keeps the computer the bots came from, and each webhook's bot says its new address is on its card, once", async () => {
     const { dataDir, lines, ask } = cloud();
     expect(await ask({ v: 1, computer: "MacBook Air", webhooks: ["w1", "w2", "w9"] })).toEqual({ status: 200, body: { v: 1, told: 1 } });

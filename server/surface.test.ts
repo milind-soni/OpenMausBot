@@ -219,7 +219,7 @@ describe("surfacePrompt", () => {
     expect(beside).toContain("This computer is the person's own: their screen, their apps and the browsers they are signed in to.");
     expect(beside).toContain("use, in this order: a connected app that does it, your built-in browser, a cloud computer if select_computer offers one.");
     expect(beside).toContain("Use their own browser or screen only when the task needs their own signed-in session and nothing else works.");
-    expect(beside).toContain("OpenMausBot asks them once whether you may, at every approval level");
+    expect(beside).toContain("OpenMausBot asks them once whether you may, at every approval level except Full access");
     expect(beside).toContain("never mention DevTools, CDP, debugging ports, profiles, grants, binding, attaching, endpoints or drivers");
     const alone = surfacePrompt({ computer: "local", browser: false });
     expect(alone).not.toMatch(/web pages included/);
@@ -312,9 +312,42 @@ describe("surfacePrompt", () => {
     }
   });
 
+  // A Cloud conversation on Auto, pinned to the cloud computer by an earlier turn, with the person's PC lent with its
+  // screen and Chrome: the paragraph said everything on screen happens on the cloud computer and that their own computer
+  // could not be reached, so the bot told them it couldn't use their PC.
+  it("tells a Cloud home's bots their lent computer is reached through shared_computer, whatever place is mounted", () => {
+    const lent = [{ name: "OFFICE-PC", platform: "win32" as const }];
+    for (const { mounted, opts } of shapes) {
+      const text = surfacePrompt(mounted, { ...opts, cloudHome: true, ownComputer: lent });
+      const where = JSON.stringify({ mounted, opts });
+      expect(text, where).not.toContain("cannot be reached from here");
+      expect(text, where).not.toContain("Everything you do on screen happens");
+      expect(text, where).not.toContain("You cannot open apps, click, or inspect a screen");
+      expect(text, where).toContain("Their PC (OFFICE-PC) is reached only through shared_computer, never select_computer: when they ask for something on it, check list_shared_computers, then use shared_computer on it (computer_tools, then computer_call, for its apps and screen), whatever this conversation is pinned to.");
+      expect(text, where).toContain("If list_shared_computers says this conversation can't use it, or that it doesn't lend what you need, say so in one sentence");
+      if (mounted.computer || mounted.browser) expect(text, where).toContain("and their PC (OFFICE-PC) is not one of these places");
+    }
+    const pinned = surfacePrompt({ computer: "cloud", browser: false }, { pinned: "cloud", canSelect: true, cloudHome: true, ownComputer: lent });
+    expect(pinned).toContain(" The screen tools mounted this turn work on the cloud computer, web pages included, through its own browser");
+    expect(pinned).toContain("say so in one sentence and don't do it on the cloud computer instead unless they ask.");
+    expect(surfacePrompt({ computer: null, browser: true }, { cloudHome: true, ownComputer: lent })).toContain("no desktop computer is mounted this turn");
+    // Never lent yet: still their own computer, reached the same way once it is.
+    expect(surfacePrompt({ computer: "cloud", browser: false }, { cloudHome: true, ownComputer: [] })).toContain("Their own computer is reached only through shared_computer");
+  });
+
+  it("still says the person's computer can't be reached when the turn has no shared-computer tools", () => {
+    for (const { mounted, opts } of shapes.filter(({ mounted }) => mounted.computer || mounted.browser)) {
+      const text = surfacePrompt(mounted, { ...opts, cloudHome: true });
+      expect(text).toContain("the user's own computer cannot be reached from here");
+      expect(text).not.toContain("shared_computer");
+    }
+  });
+
   it("leaves every other server's paragraph exactly as it was", () => {
     for (const { mounted, opts } of shapes) {
       expect(surfacePrompt(mounted, { ...opts, cloudHome: false })).toBe(surfacePrompt(mounted, opts));
+      // Lending to a desktop server names no Cloud: its own computer is "this computer".
+      expect(surfacePrompt(mounted, { ...opts, ownComputer: [{ name: "OFFICE-PC", platform: "win32" }] })).toBe(surfacePrompt(mounted, opts));
     }
     expect(surfacePrompt({ computer: "cloud", browser: true }, { canSelect: true }))
       .toContain("this computer is the user's host, Local VM is an isolated desktop, the cloud computer is remote");

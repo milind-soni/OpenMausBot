@@ -207,6 +207,124 @@ describe("a team bot shared with a level per person", () => {
     expect((await botOf("dan", payroll.id))?.soul).toBe("Answer pay questions briefly.");
   });
 
+  it("lets Admins and the bot's editors manage its Bot API, and its calls run as outside work the team can read", async () => {
+    const path = `/api/bots/${mirror.id}/bot-api`;
+    expect((await as("eve", "GET", path)).status).toBe(404);
+    for (const who of ["bob", "cara"]) {
+      expect((await as(who, "POST", path, { enabled: true })).status, who).toBe(403);
+      expect((await as(who, "POST", `${path}/new-key`)).status, who).toBe(403);
+    }
+    expect((await as("cara", "GET", path)).body).toMatchObject({ enabled: false, canManage: false });
+    const on = await as("dan", "POST", path, { enabled: true });
+    expect(on.status, JSON.stringify(on.body)).toBe(200);
+    expect((await as("ada", "POST", `${path}/new-key`)).status).toBe(200);
+    const rekeyed = await as("dan", "POST", `${path}/new-key`);
+    const key = rekeyed.body.key as string;
+
+    const hooks = `${team.base.replace(/:(\d+)$/, (_, port) => `:${Number(port) + 1}`)}/hooks/api/bots/${mirror.id}/messages`;
+    const answered = await fetch(hooks, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ message: "What is the pay date?" }) });
+    const body = await answered.json() as { reply?: string; thread: string };
+    expect(answered.status, JSON.stringify(body)).toBe(200);
+    expect(body.reply).toBeTruthy();
+    const task = (await botOf("cara", mirror.id) as unknown as { tasks: Array<{ threadId: string; botApi?: boolean; approvalMode?: string }> }).tasks.find((one) => one.threadId === body.thread);
+    expect(task).toMatchObject({ botApi: true, approvalMode: "ask" });
+    expect((await as("cara", "GET", `/api/threads/${body.thread}/messages`)).body.messages.find((line: { role: string }) => line.role === "user")).toMatchObject({ text: "What is the pay date?", via: "api" });
+    expect((await as("cara", "GET", path)).body.calls).toEqual([]);
+    expect((await as("dan", "GET", path)).body.calls[0]).toMatchObject({ statusCode: 200, preview: "What is the pay date?" });
+    const activity = JSON.stringify((await as("ada", "GET", "/api/admin-activity?what=bot-api")).body);
+    expect(activity).toContain("bot-api.on");
+    expect(activity).toContain("bot-api.new-key");
+    expect(activity).not.toContain(key);
+    expect((await as("dan", "POST", path, { enabled: false })).body).toMatchObject({ enabled: false });
+    await until(idle);
+  });
+
+  it("follows the Admin's signed plan on Bot API without a restart, and an Admin that sends none means not Starter", async () => {
+    const path = `/api/bots/${mirror.id}/bot-api`;
+    expect((await team.signed("POST", "/api/cloud/plan", { v: 1, cancelled: false })).status).toBe(200);
+    expect((await as("ada", "GET", path)).body).toMatchObject({ included: true });
+    const key = (await as("ada", "POST", path, { enabled: true })).body.key as string;
+    const hooks = `${team.base.replace(/:(\d+)$/, (_, port) => `:${Number(port) + 1}`)}/hooks/api/bots/${mirror.id}/messages`;
+    const send = () => fetch(hooks, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ message: "Plan check", wait: 0 }) });
+
+    expect((await team.signed("POST", "/api/cloud/plan", { v: 1, tier: "starter" })).status).toBe(200);
+    expect((await as("ada", "GET", "/api/config")).body).toMatchObject({ cloudStarter: true });
+    const refused = await send();
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: "Bot API comes with a higher plan. Upgrade this Cloud to use it." });
+    expect((await as("ada", "POST", `${path}/new-key`)).status).toBe(403);
+
+    expect((await team.signed("POST", "/api/cloud/plan", { v: 1, tier: "pro" })).status).toBe(200);
+    expect((await as("ada", "GET", "/api/config")).body).toMatchObject({ cloudStarter: false });
+    expect((await send()).status).toBeLessThan(300);
+    await until(idle);
+    expect((await as("ada", "POST", path, { enabled: false })).status).toBe(200);
+  });
+
+  it("refuses a Bot API turn every way out, and a teammate who leaves takes the key they made", async () => {
+    const fenced = (await as("ada", "POST", "/api/bots", { name: "Fenced" })).body.bot as Bot;
+    const path = `/api/bots/${fenced.id}/bot-api`;
+    const FINN = { email: "finn@acme.test", role: "member" as const };
+    token.finn = (await team.pair(FINN)).token!;
+    expect((await share("ada", fenced.id, { everyone: "none", people: { [FINN.email]: "edit" } })).status).toBe(200);
+    expect((await as("ada", "PATCH", `/api/bots/${fenced.id}`, { approvalMode: "full", applyToAllThreads: true })).status).toBe(200);
+    const key = (await as("finn", "POST", path, { enabled: true })).body.key as string;
+    const hooks = `${team.base.replace(/:(\d+)$/, (_, port) => `:${Number(port) + 1}`)}/hooks/api/bots/${fenced.id}/messages`;
+    const send = () => fetch(hooks, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ message: "Fence check" }) });
+    const answered = await send();
+    expect(answered.status).toBe(200);
+    const thread = (await answered.json() as { thread: string }).thread;
+    const turnToken = await team.capability(fenced.id, thread);
+    const internal = (method: string, route: string, body?: unknown) => fetch(`${team.base}${route}${route.includes("?") ? "&" : "?"}fromBotId=${fenced.id}`, {
+      method, headers: { authorization: `Bearer ${turnToken}`, "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const ways: Array<[string, string, unknown?]> = [
+      ["POST", "/api/internal/threads", { fromBotId: fenced.id, fromThreadId: thread, title: "Own", message: "Run a shell" }],
+      ["GET", "/api/internal/threads"],
+      ["POST", "/api/internal/trigger-requests", { action: "create", when: "schedule", name: "Later", prompt: "x" }],
+      ["POST", "/api/internal/routine-requests", { name: "Later", prompt: "x" }],
+      ["POST", "/api/internal/webhook-requests", { name: "In", prompt: "x" }],
+      ["POST", "/api/internal/profile-requests", { soul: "new" }],
+      ["POST", "/api/internal/model-requests", { model: "x" }],
+      ["POST", "/api/internal/skills", { action: "create" }],
+      ["POST", "/api/internal/memory", { text: "x" }],
+      ["POST", "/api/internal/team-memory", { text: "x" }],
+      ["GET", "/api/internal/session-search?q=pay"],
+      ["GET", "/api/internal/session-read?threadId=x"],
+      ["POST", "/api/internal/coordinate-bots", { to: "x" }],
+      ["POST", "/api/internal/create-bot", { name: "x" }],
+      ["POST", "/api/internal/post-to-room", { text: "x" }],
+      ["POST", "/api/internal/manage-room", {}],
+      ["POST", "/api/internal/fill-login", {}],
+      ["POST", "/api/internal/retry-thread", {}],
+      ["POST", "/api/internal/computer/select", {}],
+      ["POST", "/api/internal/computer/mcp", {}],
+      ["POST", "/api/internal/browser/mcp", {}],
+      ["POST", "/api/internal/connectors/mcp", {}],
+      ["POST", "/api/internal/phone/claim", {}],
+      ["GET", "/api/internal/shared-computers"],
+      ["POST", "/api/internal/vm-exec", { command: "id" }],
+      ["POST", "/api/internal/team-setup-requests", {}],
+    ];
+    for (const [method, route, body] of ways) {
+      const refused = await internal(method, route, body);
+      expect(refused.status, `${method} ${route}`).toBe(403);
+      expect((await refused.json() as { error: string }).error, `${method} ${route}`).toMatch(/came in through the Bot API/);
+    }
+    const before = (await botOf("ada", fenced.id) as unknown as { tasks: unknown[] }).tasks.length;
+    expect((await botOf("ada", fenced.id) as unknown as { tasks: unknown[] }).tasks).toHaveLength(before);
+
+    // The same token on the person's own conversation is not fenced: the gate is the thread, not the bot.
+    const own = await team.capability(fenced.id, fenced.threadId);
+    const search = await fetch(`${team.base}/api/internal/session-search?fromBotId=${fenced.id}&q=Fence`, { headers: { authorization: `Bearer ${own}`, "content-type": "application/json" } });
+    expect(search.status).toBe(200);
+    expect((await search.json() as { hits: Array<{ threadId: string }> }).hits.map((hit) => hit.threadId)).not.toContain(thread);
+
+    expect((await team.signed("POST", "/api/cloud/team/member-left", { v: 1, email: FINN.email })).status).toBeLessThan(300);
+    expect((await send()).status).toBe(403);
+    await until(idle);
+  });
+
   it("relays another app's message only for a person who can chat with the bot", async () => {
     const relay = async (email: string | undefined, n: number) => {
       const leaf = (await as("ada", "GET", `/api/threads/${payroll.threadId}/messages?limit=1`)).body.activeLeafId ?? null;
