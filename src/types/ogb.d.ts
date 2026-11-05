@@ -408,6 +408,8 @@ const __APP_VERSION__: string;
        * it there and reveals it. Resolves the chosen path, or null if the
        * user cancelled the dialog. */
       saveFile?(filePath: string): Promise<string | null>;
+      /** Desktop only: opens HTML this page already showed in the default browser, from a temp copy main writes. */
+      openHtmlInBrowser?(source: string, name: string): Promise<unknown>;
       /** Points this computer's file manager at a file a bot linked outside
        * its workspace, without opening or reading it. Local app only. */
       revealInFolder?(filePath: string): Promise<"shown" | "missing" | "invalid">;
