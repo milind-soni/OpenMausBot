@@ -76,7 +76,7 @@ const OPENAI_SHAPE = /^sk-(proj|svcacct|admin)-/;
 const provider = (driverKind: string, preset?: ProviderIconPreset): KeyMark => ({ driverKind, ...(preset ? { preset } : {}) });
 
 export const KEY_CATALOG: readonly KeyEntry[] = [
-  { id: "openai", section: "ai", labelKey: "keys.openai.label", purposeKey: "keys.purpose.openai", name: "OpenAI", env: ["OMB_OPENAI_API_KEY"],
+  { id: "openai", section: "ai", labelKey: "keys.openai.label", purposeKey: "keys.purpose.openaiModelsVoice", name: "OpenAI", env: ["OMB_OPENAI_API_KEY"],
     words: ["openai", "chatgpt", "gpt", "live calls"], mark: provider("openai-compat", "openai"), kind: "key",
     target: providerKey("openai", { placeholder: "sk-…", href: "https://platform.openai.com/api-keys", test: "openai", analytics: "openai", shape: OPENAI_SHAPE, noteKey: "keys.openai.note" }) },
   { id: "anthropic", section: "ai", labelKey: "keys.anthropic.label", purposeKey: "keys.purpose.anthropic", name: "Anthropic", env: ["OMB_ANTHROPIC_API_KEY"],
@@ -120,8 +120,8 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
     words: ["openai-compatible", "openai compatible", "ollama", "together", "gemini", "google ai studio", "base url", "server", "endpoint"], mark: { icon: Server }, kind: "key",
     target: { patch: (value) => ({ openaiCompat: { key: value } }), saved: (config) => flag(config.openaiCompat), placeholder: "…", placeholderKey: "keys.openaiCompat.placeholder",
       href: "https://platform.openai.com/docs/api-reference", test: "openaiCompat", analytics: "openai_compat" } },
-  { id: "liveCalls", section: "voice", labelKey: "call.live.key", purposeKey: "keys.purpose.liveCalls", name: "OpenAI", env: [],
-    words: ["openai", "live calls", "calls", "voice", "talk", "gpt-live"], mark: { icon: Phone }, kind: "uses", uses: "openai" },
+  { id: "liveCalls", section: "voice", labelKey: "keys.openai.label", purposeKey: "keys.purpose.openaiVoice", name: "OpenAI", env: [],
+    words: ["openai", "live calls", "calls", "voice", "talk", "gpt-live", "read aloud", "speech", "tts"], mark: { icon: Phone }, kind: "uses", uses: "openai" },
   { id: "liveKey", section: "voice", labelKey: "keys.label.liveKey", purposeKey: "keys.purpose.liveKey", name: "OpenAI", env: ["OMB_OPENAI_LIVE_KEY"],
     words: ["openai", "live calls", "calls", "voice", "gpt-live", "azure", "foundry"], mark: { icon: Phone }, kind: "key",
     target: { patch: (value) => ({ live: { key: value } }), slot: "openaiLiveKey",
