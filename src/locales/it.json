@@ -5468,8 +5468,6 @@
   "call.mode.turns": "A turni",
   "call.mode.turnsHint": "Parli tu, poi il bot risponde con la sua voce. L'ascolto resta su questo computer.",
   "call.mode.liveHint": "Parla con naturalezza e interrompi quando vuoi; il lavoro lo fa comunque il bot.",
-  "call.capability.turnsNeedMac": "Le chiamate a turni richiedono l'app per Mac",
-  "call.capability.turnsNeedMacReason": "Ascoltano con il riconoscimento vocale sul dispositivo, disponibile solo nell'app per Mac.",
   "call.capability.turnsOnThisComputer": "Le chiamate a turni funzionano con i bot su questo Mac",
   "call.capability.turnsOnThisComputerReason": "Ascoltano con il riconoscimento vocale del tuo Mac: possono usarlo solo i bot su questo Mac.",
   "call.capability.unavailable": "Le chiamate non sono disponibili su questo dispositivo",

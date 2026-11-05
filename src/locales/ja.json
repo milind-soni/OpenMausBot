@@ -5703,8 +5703,6 @@
   "call.mode.turnsHint": "あなたが話したあと、ボットが自分の声で答えます。音声の聞き取りはこのコンピューター内で行います。",
   "call.mode.live": "Live",
   "call.mode.liveHint": "自然に会話でき、いつでも割り込めます。ボットは作業も続けます。",
-  "call.capability.turnsNeedMac": "交互に話す通話には、Macアプリが必要です",
-  "call.capability.turnsNeedMacReason": "デバイス上の音声認識で聞き取るため、Macアプリでのみ利用できます。",
   "call.capability.turnsOnThisComputer": "交互に話す通話は、この Mac のボットで利用できます",
   "call.capability.turnsOnThisComputerReason": "Mac 自体の音声認識で聞き取るため、この Mac のボットだけが利用できます。",
   "call.capability.unavailable": "このデバイスでは通話を利用できません",

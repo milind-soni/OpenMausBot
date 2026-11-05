@@ -6230,8 +6230,6 @@
   "call.mode.turnsHint": "你先说，机器人再用自己的声音回答。语音识别全程在这台电脑上完成。",
   "call.mode.live": "实时",
   "call.mode.liveHint": "像平常一样对话，随时可以打断；工作仍由机器人完成。",
-  "call.capability.turnsNeedMac": "轮流说话的通话需要 Mac 应用",
-  "call.capability.turnsNeedMacReason": "这类通话使用设备端的语音识别，只有 Mac 应用具备这个能力。",
   "call.capability.turnsOnThisComputer": "轮流说话的通话适用于这台 Mac 上的机器人",
   "call.capability.turnsOnThisComputerReason": "这类通话使用 Mac 自身的语音识别，只有这台 Mac 上的机器人能使用。",
   "call.capability.unavailable": "此设备无法进行通话",
