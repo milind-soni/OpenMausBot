@@ -6,12 +6,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import { DATA_DIR, type AppConfig } from "./config.ts";
 import { createSkillsLibraryHost } from "./host/skills-library.ts";
 import {
-  expandImportedSkillCommand, IMPORTED_CHANGED_WARNING, IMPORTED_SKILLS_DIR, importedSkillListings, importedSkillsFor, importedSkillsPrompt,
+  IMPORTED_CHANGED_WARNING, IMPORTED_SKILLS_DIR, importedSkillListings, importedSkillsFor, importedSkillsPrompt,
   nativeSkillFolders, readImportedSkillFile, setImportedSkillEnabled, storeImportedSkills, syncImportedSkillLinks, type ImportedSkillInput,
 } from "./imported-skills.ts";
+import { skillCommandTurnText } from "../shared/skill-command.ts";
 import { ensureTaskWorkspaceWithSkills } from "./skill-task-links.ts";
 import { installSkill, setSkillEnabled } from "./skills.ts";
 import type { BotRecord, Store } from "./store.ts";
+import { noteTypedSend } from "./typed-sends.ts";
 import { ensureTaskWorkspace } from "./workspace.ts";
 
 // HOME and the data folder are this test file's own temporary ones (server/testing/setup.ts).
@@ -58,8 +60,9 @@ describe("skills brought in from this computer", () => {
       const prompt = importedSkillsPrompt(skills);
       expect(prompt).toContain("Skills from this computer:");
       expect(prompt).toContain(`- pdf: Works with pdf. Read ${JSON.stringify(join(IMPORTED_SKILLS_DIR, "pdf", "SKILL.md"))}.`);
-      expect(expandImportedSkillCommand("/review the diff", skills)).toContain(`Read ${JSON.stringify(join(IMPORTED_SKILLS_DIR, "review", "SKILL.md"))}`);
-      expect(expandImportedSkillCommand("/other thing", skills)).toBe("/other thing");
+      const files = new Map(skills.map((skill) => [skill.name, skill.file]));
+      expect(skillCommandTurnText("/review the diff", files, "", true)).toContain(`Read ${JSON.stringify(join(IMPORTED_SKILLS_DIR, "review", "SKILL.md"))}`);
+      expect(skillCommandTurnText("/other thing", files)).toBe("/other thing");
       const folder = ensureTaskWorkspaceWithSkills(bot, "thread-1", skills);
       for (const family of [".claude", ".agents", ".grok"]) {
         expect(target(join(folder, family, "skills", "pdf"))).toBe(resolve(IMPORTED_SKILLS_DIR, "pdf"));
@@ -170,7 +173,7 @@ describe("skills brought in from this computer", () => {
     installSkill(bot, "mine", [{ path: "SKILL.md", content: skillMd("zeta-own", "My own.") }]);
     setSkillEnabled(bot, "zeta-own", true);
     const host = createSkillsLibraryHost({
-      store: { bot: () => undefined, messagesFor: () => [] } as unknown as Store,
+      store: { bot: () => undefined, messagesFor: () => [], taskByThread: () => undefined } as unknown as Store,
       cfg: {} as AppConfig,
       appendSkillRequestCard: () => ({ requestId: "", summary: "" }),
     });
@@ -183,7 +186,15 @@ describe("skills brought in from this computer", () => {
     // The same set: listed in Bot Settings, readable, and run by /name.
     expect(host.listBotSkills(record).map((skill) => skill.name)).toEqual(["zeta-own", ...many.map((one) => one.name)]);
     expect(host.readBotSkillFile(record, "skill-03")).toBe(skillMd("skill-03"));
-    expect(host.expandSkillCommand(record, "thread", "/skill-03 go", { instanceId: "claude", driverKind: "claudeAgent" })).toContain(`Read ${JSON.stringify(join(IMPORTED_SKILLS_DIR, "skill-03", "SKILL.md"))}`);
-    expect(host.expandSkillCommand(record, "thread", "/zeta-own go")).toContain(JSON.stringify(join("workspaces", bot, "skills", "zeta-own", "SKILL.md")).slice(1, -1));
+    expect(host.expandSkillCommand(record, "thread", "/skill-03 go", { instanceId: "claude", driverKind: "claudeAgent" }, [], true)).toContain(`Read ${JSON.stringify(join(IMPORTED_SKILLS_DIR, "skill-03", "SKILL.md"))}`);
+    expect(host.expandSkillCommand(record, "thread", "/zeta-own go", undefined, [], true)).toContain(JSON.stringify(join("workspaces", bot, "skills", "zeta-own", "SKILL.md")).slice(1, -1));
+    // One message reaches both kinds, whichever comes first.
+    const sendId = randomUUID();
+    const typed = "Two things: /skill-03 the diff, /zeta-own after it";
+    noteTypedSend("thread", sendId, typed);
+    const both = host.expandSkillCommand(record, "thread", typed, { instanceId: "claude", driverKind: "claudeAgent" }, [{ sendId, text: typed }]);
+    expect(both).toContain(JSON.stringify(join(IMPORTED_SKILLS_DIR, "skill-03", "SKILL.md")));
+    expect(both).toContain(JSON.stringify(join("workspaces", bot, "skills", "zeta-own", "SKILL.md")).slice(1, -1));
+    expect(both.endsWith(`Request: ${typed}`)).toBe(true);
   });
 });

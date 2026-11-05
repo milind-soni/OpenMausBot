@@ -89,16 +89,16 @@ const BUDGET_BASELINE: Record<string, number> = {
   "skills+voice": 61850,
   "skills+shared": 63334,
   "skills+shared+voice": 64115,
-  "non-chief": 48881,
-  "voice+non-chief": 49662,
-  "shared+non-chief": 51146,
-  "shared+voice+non-chief": 51927,
-  "skills+non-chief": 51700,
+  "non-chief": 49935,
+  "voice+non-chief": 50716,
+  "shared+non-chief": 52200,
+  "shared+voice+non-chief": 52981,
+  "skills+non-chief": 52754,
   "skills+voice+non-chief": 52793,
-  "skills+shared+non-chief": 53965,
+  "skills+shared+non-chief": 55212,
   "skills+shared+voice+non-chief": 55058,
-  "skills+shared+voice+cloud-home": 63096,
-  "skills+shared+voice+non-chief+cloud-home": 53961,
+  "skills+shared+voice+cloud-home": 64782,
+  "skills+shared+voice+non-chief+cloud-home": 55566,
   "default+legacy-switches": 58250,
   "default+mausbot": 58901,
   "skills+shared+voice+mausbot": 64766,
@@ -106,8 +106,8 @@ const BUDGET_BASELINE: Record<string, number> = {
   "skills+shared+voice+escalations+x": 68784,
   "skills+shared+voice+escalations+x+team": 69416,
   "default+no-computer-pick": 57038,
-  "default+room": 49808,
-  "non-chief+room": 40751,
+  "default+room": 50849,
+  "non-chief+room": 41633,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';
@@ -229,8 +229,17 @@ describe("agents proxy tools/list golden", () => {
       expect(coordinate.thread!.enum).toBeUndefined();
       expect(coordinate.reply!.enum).toEqual(["resume", "none"]);
       expect(Object.keys(tools.get("assignment_status")!.inputSchema.properties)).toEqual(["id", "wait_ms"]);
-      expect(tools.get("start_thread")!.inputSchema.properties.bot_id!.enum).toEqual(["bot-golden"]);
+      expect(tools.get("start_thread")!.inputSchema.properties.bot_id).toBeUndefined();
       expect(wire).not.toMatch(/Brief synchronous consultation|DEFAULT FOR ASSIGNING WORK|BLOCKING status tool/);
+    }
+  });
+
+  // Providers cache a prompt from its start, tools first: one bot's id in a schema makes every other bot rewrite the whole list.
+  it("lists the same bytes for two bots of the same role", () => {
+    for (const chief of [true, false]) {
+      const lists = ["bot-one", "bot-two"].map((botId) => JSON.stringify(availableTools({ ...catalogProfileFromEnv({}), chief, botId })));
+      expect(lists[1]).toBe(lists[0]);
+      expect(lists[0]).not.toContain("bot-one");
     }
   });
 
@@ -242,12 +251,9 @@ describe("agents proxy tools/list golden", () => {
     }
   });
 
-  it("mounts message_person only on a Team Cloud, and adds nothing else", () => {
+  it("mounts message_person everywhere: every plan's bots can reach the person's Inbox", () => {
     const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
-    expect(names(wires[FULL]!).filter((tool) => tool !== "message_person")).toEqual(names(wires["skills+shared+voice+escalations+x"]!));
-    for (const [name, profile] of Object.entries(PROFILES)) {
-      expect(names(wires[name]!).includes("message_person"), name).toBe(profile.env.OMB_TEAM_PEOPLE === "1");
-    }
+    for (const name of Object.keys(PROFILES)) expect(names(wires[name]!), name).toContain("message_person");
   });
 
   it("mounts ask_for_computer only on a person's own Cloud that is lent their computer, never a Team Cloud", () => {

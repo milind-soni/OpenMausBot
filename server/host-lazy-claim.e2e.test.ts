@@ -144,6 +144,27 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
   });
   afterEach(async () => { await stop(); resetTurn(); });
 
+  itAutoHost("never offers a computer to a call through the Bot API, on Auto, on this computer or on a private desktop", async () => {
+    await start({ FAKE_CLAUDE_VERSION: "2.1.284" });
+    // "vm" has no machine here: a turn that reached for one would fail before the engine ever heard the message.
+    for (const place of [undefined, "local", "vm"] as const) {
+      const { bot } = await apiOk("POST", "/api/bots", { name: `API bot ${place ?? "auto"}` });
+      if (place) await apiOk("PATCH", `/api/bots/${bot.id}`, { computer: place });
+      const { key } = await apiOk("POST", `/api/bots/${bot.id}/bot-api`, { enabled: true });
+      resetTurn();
+      const marker = `api-call-${place ?? "auto"}`;
+      const answered = await fetch(`${base.replace(/:(\d+)$/, (_, port) => `:${Number(port) + 1}`)}/hooks/api/bots/${bot.id}/messages`, {
+        method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ message: marker, wait: 0 }),
+      });
+      expect(answered.status).toBe(202);
+      const sent: any = await until((): any => { try { const dump = JSON.parse(readFileSync(dumpFile, "utf8")); return JSON.stringify(dump.prompt).includes(marker) ? dump : null; } catch { return null; } }, Boolean);
+      expect(sent.mcpConfig?.mcpServers?.computer).toBeUndefined();
+      writeFileSync(finishFile, "finish");
+      const { thread } = await answered.json() as { thread: string };
+      await idle(bot.id, thread);
+    }
+  }, hostTimeout(90_000));
+
   itAutoHost("holds no computer:host claim and records no pin until a screen tool runs", async () => {
     await start();
     const { bot: holder } = await apiOk("POST", "/api/bots", { name: "Screenless Host Bot", settings: { approvalMode: ASKS } });

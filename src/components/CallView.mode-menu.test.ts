@@ -204,15 +204,15 @@ describe("the call mode menu", () => {
 
   it("shows Take turns disabled with its reason where this page can't take turns", () => {
     const turnsUnavailable = {
-      label: "Calls where you take turns need the Mac app",
-      reason: "They listen with on-device speech recognition, which only the Mac app has.",
+      label: "Calls where you take turns need the desktop app",
+      reason: "They listen from this computer, so they need MausBot on a Mac, Windows or Linux computer.",
     };
     const markup = renderToStaticMarkup(createElement(CallModeMenu, { id: "m", mode: "live", turnsUnavailable, onChoose: vi.fn(), onClose: vi.fn() }));
     const [turns, live] = markup.split('role="menuitemradio"').slice(1);
     expect(turns).toMatch(/^ aria-checked="false" aria-disabled="true"/);
     expect(turns).not.toContain('disabled=""');
     expect(turns).toContain(">Take turns<");
-    expect(turns).toContain("Calls where you take turns need the Mac app. They listen with on-device speech recognition, which only the Mac app has.");
+    expect(turns).toContain("Calls where you take turns need the desktop app. They listen from this computer, so they need MausBot on a Mac, Windows or Linux computer.");
     expect(turns).not.toContain("Listening stays on this computer");
     expect(live).toMatch(/^ aria-checked="true"/);
     expect(live).not.toMatch(/aria-disabled="true"|disabled=""/);

@@ -72,6 +72,12 @@ export function homeOf({ journal = null, frozenCloud = null, state = null }) {
     : frozenCloud ? { origin: typeof frozenCloud === "string" ? frozenCloud : null, account: null } : null;
   if (!moved) return { kind: "computer" };
   const connected = state?.status === "connected";
+  const signedInNow = state?.account?.id ?? null;
+  // This computer moved to another account's Cloud: its frozen copy stays frozen, and this account's own Cloud is what opens.
+  if (moved.account && signedInNow && moved.account !== signedInNow && state.status !== "signed-out" && state.status !== "connecting") {
+    const own = connected && !state.machine?.hold ? state.machine?.origin ?? null : null;
+    return own && own !== moved.origin ? { kind: "cloud", origin: own, otherAccount: true } : { kind: "signin", other: true };
+  }
   if (connected && state.machine?.hold && (!moved.origin || !state.machine.origin || state.machine.origin === moved.origin)) return { kind: "computer" };
   const signedIn = state?.account?.id ?? null;
   if (!signedIn || state.status === "signed-out" || state.status === "connecting") return { kind: "signin" };
@@ -94,6 +100,9 @@ export function noWayHome(worked, state) {
 
 /** A place besides My Cloud: a team's Cloud, or another Cloud of the person's own (`own`), each the session's. */
 export const otherPlace = (place) => place?.kind === "team" || place?.kind === "own";
+
+/** A place's plan problem. A team's User can't do anything about it, so the screen sends them to its owner (`member`). */
+const planScreen = (machine, place) => ({ screen: "plan", machine, ...(place?.kind === "team" && place.role === "member" ? { member: true } : {}) });
 
 /**
  * This computer's screen for a Cloud the session's list says isn't running, so its address is never looked up: it has ended
@@ -434,7 +443,7 @@ export function createHomeWindow(deps) {
     const listed = place.kind === "cloud" ? cloudScreen(myListed()) : null;
     if (listed && NOT_RUNNING.has(listed.screen)) { clearRetry(); return toScreen(listed); }
     if (machine && (PLAN_PROBLEMS.has(machine.status) || (place.kind === "team" && machine.hold))) {
-      toScreen({ screen: "plan", machine: PLAN_PROBLEMS.has(machine.status) ? machine.status : "stopped" }); later(); return;
+      toScreen(planScreen(PLAN_PROBLEMS.has(machine.status) ? machine.status : "stopped", place)); later(); return;
     }
     // Its address is never looked up while it is set up: the session's next word (changed()) opens it.
     const setup = machineSetup(machine);
@@ -511,7 +520,7 @@ export function createHomeWindow(deps) {
       if (listed && NOT_RUNNING.has(listed.screen)) { clearRetry(); return toScreen(listed); }
       const setup = machineSetup(target.machine);
       if (setup) { clearRetry(); return toScreen({ screen: "setup", ...setup }); }
-      if (!target.origin) { toScreen({ screen: "plan", machine: target.machine?.status ?? "stopped" }); later(); return; }
+      if (!target.origin) { toScreen(planScreen(target.machine?.status ?? "stopped", target)); later(); return; }
       return connect(target, token, open);
     }
     if (place === "cloud" || target.left) remember(null);

@@ -72,7 +72,7 @@ const PROFILE_FIELD_LABEL: Record<ProfileRequestField, LocaleKey> = {
 const staleRoutineCard = (card: OptionCardData) => Boolean(card.routineRequest && !card.answered);
 
 /** The card brings its own question and answer words (its title and first option): team setup and MCP server changes. */
-export const titledCard = (card: OptionCardData | undefined) => Boolean(card?.teamSetupRequest || card?.mcpRequest);
+export const titledCard = (card: OptionCardData | undefined) => Boolean(card?.teamSetupRequest || card?.mcpRequest || card?.lendingLift);
 
 export function approvalCardOutcome(card: OptionCardData): string | undefined {
   const isProposal = Boolean(card.routineRequest || card.skillRequest || card.profileRequest || card.modelRequest || titledCard(card));

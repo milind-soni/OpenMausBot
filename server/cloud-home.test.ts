@@ -463,6 +463,10 @@ it("ships an edge and a Fly template that keep the server private", () => {
   expect(image).toMatch(/apt-get install -y --no-install-recommends [^\n]*\bbubblewrap\b[^\n]*\bsocat\b/);
   expect(image).toMatch(/npm install -g pnpm@10\.33\.0/);
   expect(image).toContain("bwrap --version && socat -V");
+  // uvx, so a connector someone runs with it can come along when they move here (server/cloud-connections.ts).
+  expect(image).toMatch(/ARG UV_VERSION=\d+\.\d+\.\d+/);
+  expect(image).toContain("install -m 0755 /tmp/uv-install/uv /tmp/uv-install/uvx /usr/local/bin/");
+  expect(image).toContain('uv --version | grep -qF "uv ${UV_VERSION}"');
   const fly = readFileSync(join(import.meta.dirname, "../deploy/fly/fly.toml"), "utf8");
   expect(fly).toMatch(/internal_port = 8080/);
   expect(fly).toMatch(/destination = "\/data"/);

@@ -33,7 +33,6 @@ import {
 } from "./skill-storage.ts";
 import { workspaceDir } from "./workspace.ts";
 import { isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
-import { skillCommandTurnText, skillMentions } from "../shared/skill-command.ts";
 
 export {
   DESCRIPTION_MAX,
@@ -438,6 +437,11 @@ export function syncSkillLinks(
     writeManagedLinks(botId, [...managed], threadId);
   } catch {
   }
+}
+
+/** Where syncSkillLinks links each of this bot's enabled skills. */
+export function ownSkillLinks(botId: string): Map<string, string> {
+  return new Map(Object.entries(readManifest(botId)).flatMap(([name, entry]) => entry.enabled ? [[name, skillTarget(workspaceDir(botId), name, entry)] as const] : []));
 }
 
 export interface SkillListing {
@@ -1307,10 +1311,6 @@ export function enabledSkillFiles(botId: string, names: readonly string[], assig
   if (!names.length) return new Map();
   const on = new Set(resolveBotSkills(botId, assignedLibrary).filter((skill) => skill.enabled).map((skill) => skill.name)), manifest = readManifest(botId);
   return new Map(names.filter((name) => on.has(name)).map((name) => [name, manifest[name] ? join(skillTarget(workspaceDir(botId), name, manifest[name]), "SKILL.md") : librarySkillFilePath(name)] as const));
-}
-
-export function expandSkillCommandTurnText(botId: string, text: string, assignedLibrary?: readonly string[]): string {
-  return skillCommandTurnText(text, enabledSkillFiles(botId, skillMentions(text), assignedLibrary));
 }
 
 export function resolveBotSkills(botId: string, assignedLibrary: readonly string[] | undefined): SkillListing[] {

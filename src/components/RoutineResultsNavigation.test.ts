@@ -100,20 +100,21 @@ describe("routine results navigation", () => {
     expect(fixture.dispatch.mock.calls).toEqual([
       [{ type: "select", id: bot.id }],
       [{ type: "switchTask", botId: bot.id, threadId: "original-source" }],
+      [{ type: "revealThread", threadId: "original-source" }],
     ]);
     expect(onClose).toHaveBeenCalledOnce();
   });
 
   it("uses the definition's destination only for a definition-only view", () => {
     details(null).buttons.get("Open results thread")!.onClick!();
-    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "switchTask", botId: bot.id, threadId: "new-results" });
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: bot.id, threadId: "new-results" });
   });
 
   it("opens the bot's main thread for a definition with no thread of its own, never for a run", () => {
     const { resultsThreadId: _chosen, ...unchosen } = routine;
     fixture.state!.bots = [{ ...bot, mainThreadId: "original-source" }];
     details(null, unchosen).buttons.get("Open results thread")!.onClick!();
-    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "switchTask", botId: bot.id, threadId: "original-source" });
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: bot.id, threadId: "original-source" });
     expect(details({ ...run, sourceThreadId: undefined }, unchosen).buttons.has("Open results thread")).toBe(false);
   });
 
@@ -127,6 +128,7 @@ describe("routine results navigation", () => {
     expect(fixture.dispatch.mock.calls).toEqual([
       [{ type: "select", id: group.id }],
       [{ type: "switchGroupTask", groupId: group.id, threadId: "original-room-source" }],
+      [{ type: "revealThread", threadId: "original-room-source" }],
     ]);
   });
 
@@ -138,6 +140,7 @@ describe("routine results navigation", () => {
     expect(fixture.dispatch.mock.calls).toEqual([
       [{ type: "select", id: group.id }],
       [{ type: "switchGroupTask", groupId: group.id, threadId: "original-room-source" }],
+      [{ type: "revealThread", threadId: "original-room-source" }],
     ]);
   });
 
@@ -145,7 +148,7 @@ describe("routine results navigation", () => {
     fixture.showThreads = false;
     const { buttons } = details();
     buttons.get("Open results thread")!.onClick!();
-    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "switchTask", botId: bot.id, threadId: "original-source" }]]);
+    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "switchTask", botId: bot.id, threadId: "original-source" }], [{ type: "revealThread", threadId: "original-source" }]]);
     fixture.dispatch.mockClear();
     fixture.state!.bots = [{ ...bot, threadId: "new-results" }];
     details().buttons.get("Open thread")!.onClick!();

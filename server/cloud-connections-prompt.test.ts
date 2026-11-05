@@ -29,8 +29,8 @@ describe("what a bot on My Cloud is told about connections that need the person"
     expect(prompt({})).toBe(
       " Not connected on My Cloud yet: linear (sign in here: https://omb-u-1.fly.dev/?connect=mcp%3Alinear); jira (sign in here: https://omb-u-1.fly.dev/?connect=mcp%3Ajira)."
       + " When a task needs one, say in plain words that it needs the person once on My Cloud and give its link; do not try another way."
-      + " Runs only on the person's computer Milind's MacBook, not on My Cloud: notes. If a task needs one, say so in plain words.");
-    expect(prompt({ mcpServers: ["dodo", "notes"] })).toBe(" Runs only on the person's computer Milind's MacBook, not on My Cloud: notes. If a task needs one, say so in plain words.");
+      + " Runs only on the person's computer Milind's MacBook, not on My Cloud: notes (it uses files or an address only Milind's MacBook has). It worked there before the bots moved here. If a task needs one, tell the person in plain words that it stayed on Milind's MacBook and why, not that it was never set up, and do not write your own replacement.");
+    expect(prompt({ mcpServers: ["dodo", "notes"] })).toBe(" Runs only on the person's computer Milind's MacBook, not on My Cloud: notes (it uses files or an address only Milind's MacBook has). It worked there before the bots moved here. If a task needs one, tell the person in plain words that it stayed on Milind's MacBook and why, not that it was never set up, and do not write your own replacement.");
     expect(prompt({ mcpServers: ["dodo", "off"] })).toBe("");
   });
 
