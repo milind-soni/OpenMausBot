@@ -63,7 +63,10 @@ export class Hosts {
   admitted(entry: HostEntry | undefined, admHash: Buffer): boolean {
     const set = entry?.control ? entry.admission : [];
     let found = 0;
-    for (let i = 0; i < this.slots; i++) found |= timingSafeEqual(set[i] ?? NO_MATCH, admHash) ? 1 : 0;
+    for (let i = 0; i < this.slots; i++) {
+      const equal = timingSafeEqual(set[i] ?? NO_MATCH, admHash) ? 1 : 0;
+      found |= equal & (i < set.length ? 1 : 0);
+    }
     return found === 1;
   }
 
@@ -116,8 +119,8 @@ export class HostBudgets {
   }
 }
 
-function checkToken(ctx: Context, token: string): TokenResult {
-  const result = verifyToken(token, ctx.tokenKeys, ctx.wallSeconds());
+function checkToken(ctx: Context, token: string, expectHid?: string): TokenResult {
+  const result = verifyToken(token, ctx.tokenKeys, ctx.wallSeconds(), expectHid);
   if (!result.ok) ctx.metrics.inc("relay_token_rejected_total", result.reason);
   return result;
 }
@@ -183,8 +186,8 @@ export function handleControl(ctx: Context, ws: WebSocket): void {
       if (next?.t === "auth") {
         const refresh = parseAuth(next);
         if (refresh === undefined) return closeWith(ctx, ws, Close.Malformed);
-        const renewed = checkToken(ctx, refresh);
-        if (!renewed.ok || !renewed.claims.hid.equals(entry.hid)) return closeWith(ctx, ws, Close.TokenInvalid);
+        const renewed = checkToken(ctx, refresh, entry.hidText);
+        if (!renewed.ok) return closeWith(ctx, ws, Close.TokenInvalid);
         expires = renewed.claims.exp;
         armExpiry();
         return sendJson(ws, { t: "hello", v: 1, node: ctx.node, sessionsMax: ctx.limits.hostSessionsMax });
