@@ -60,6 +60,10 @@ reveals nothing about `psk`: the two are separate HMAC outputs under different l
   - `h` and `r` are present only when the computer has a relay token (signed in, relay enabled, and the device isn't restricted to "Wi-Fi and
     Tailscale only").
   - `r` lists 1 to 4 hostnames in the order to try. Each MUST match `^relay[1-9][0-9]?\.openmausbot\.com$`.
+  - `routes` is optional, `"any"` or `"local"`. `"local"` means the computer restricted this device to Wi-Fi and
+    Tailscale; it never comes with `h` or `r`. Absent means `"any"`, so a descriptor without `h` and `r` and without
+    `"local"` only says the computer has no relay right now (signed out, or outside the rollout). The QR never carries
+    `"local"`: a restriction is set per phone after pairing, and reaches it through the endpoint list.
   - The encoded value is at most 1,024 bytes.
 - **Phone parsing rules:**
   - A malformed `e2e` rejects the whole invite. That includes bad base64, bad JSON, a bad point, `h` without `r` or `r` without `h`, and a host
@@ -348,6 +352,7 @@ These make the sections above exact where an implementation could otherwise choo
 - `v` must be an integer. `v > 1` means "update the app" whatever the other fields hold; `v < 1`, a string, or a missing
   `v` rejects.
 - Unknown fields are ignored. Field order is free.
+- `routes`, when present, must be the string `"any"` or `"local"`, and `"local"` with `h` or `r` rejects.
 - base64url is strict everywhere (descriptor, keys, `h`, `conn`, tokens): the URL-safe alphabet only, no padding, and
   canonical (unused low bits of the last character are zero). Decode, re-encode and compare is enough.
 

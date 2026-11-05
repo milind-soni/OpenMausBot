@@ -2141,6 +2141,41 @@
       "relay2.openmausbot.com"
      ]
     }
+   },
+   {
+    "name": "routes_local",
+    "value": "eyJ2IjoxLCJrIjoiQkppRm1pM2J6cFFVYXlNSkVybDZlcXQyNG1VT3ZIRVVSNnV6dXRQVEhmdW5kSWd5WnhzM2JTelVNeWRHT2ZnYldkd1FzaEl5enpsTVdxeE1rTkhubWQwIiwicm91dGVzIjoibG9jYWwifQ",
+    "chars": 158,
+    "parsed": {
+     "v": 1,
+     "k": "BJiFmi3bzpQUayMJErl6eqt24mUOvHEUR6uzutPTHfundIgyZxs3bSzUMydGOfgbWdwQshIyzzlMWqxMkNHnmd0",
+     "routes": "local"
+    }
+   },
+   {
+    "name": "routes_any_with_relay",
+    "value": "eyJ2IjoxLCJrIjoiQkppRm1pM2J6cFFVYXlNSkVybDZlcXQyNG1VT3ZIRVVSNnV6dXRQVEhmdW5kSWd5WnhzM2JTelVNeWRHT2ZnYldkd1FzaEl5enpsTVdxeE1rTkhubWQwIiwiaCI6Imx6ODFpc0IzQnVOVjZySGdZZ0czV2ciLCJyIjpbInJlbGF5MS5vcGVubWF1c2JvdC5jb20iLCJyZWxheTIub3Blbm1hdXNib3QuY29tIl0sInJvdXRlcyI6ImFueSJ9",
+    "chars": 268,
+    "parsed": {
+     "v": 1,
+     "k": "BJiFmi3bzpQUayMJErl6eqt24mUOvHEUR6uzutPTHfundIgyZxs3bSzUMydGOfgbWdwQshIyzzlMWqxMkNHnmd0",
+     "h": "lz81isB3BuNV6rHgYgG3Wg",
+     "r": [
+      "relay1.openmausbot.com",
+      "relay2.openmausbot.com"
+     ],
+     "routes": "any"
+    }
+   },
+   {
+    "name": "routes_any_without_relay",
+    "value": "eyJ2IjoxLCJrIjoiQkppRm1pM2J6cFFVYXlNSkVybDZlcXQyNG1VT3ZIRVVSNnV6dXRQVEhmdW5kSWd5WnhzM2JTelVNeWRHT2ZnYldkd1FzaEl5enpsTVdxeE1rTkhubWQwIiwicm91dGVzIjoiYW55In0",
+    "chars": 155,
+    "parsed": {
+     "v": 1,
+     "k": "BJiFmi3bzpQUayMJErl6eqt24mUOvHEUR6uzutPTHfundIgyZxs3bSzUMydGOfgbWdwQshIyzzlMWqxMkNHnmd0",
+     "routes": "any"
+    }
    }
   ],
   "invalid": [
@@ -2274,6 +2309,24 @@
     "name": "json_array",
     "value": "WzFd",
     "chars": 4,
+    "outcome": "reject"
+   },
+   {
+    "name": "routes_unknown",
+    "value": "eyJ2IjoxLCJrIjoiQkppRm1pM2J6cFFVYXlNSkVybDZlcXQyNG1VT3ZIRVVSNnV6dXRQVEhmdW5kSWd5WnhzM2JTelVNeWRHT2ZnYldkd1FzaEl5enpsTVdxeE1rTkhubWQwIiwicm91dGVzIjoid2lmaSJ9",
+    "chars": 156,
+    "outcome": "reject"
+   },
+   {
+    "name": "routes_not_a_string",
+    "value": "eyJ2IjoxLCJrIjoiQkppRm1pM2J6cFFVYXlNSkVybDZlcXQyNG1VT3ZIRVVSNnV6dXRQVEhmdW5kSWd5WnhzM2JTelVNeWRHT2ZnYldkd1FzaEl5enpsTVdxeE1rTkhubWQwIiwicm91dGVzIjoxfQ",
+    "chars": 150,
+    "outcome": "reject"
+   },
+   {
+    "name": "routes_local_with_relay",
+    "value": "eyJ2IjoxLCJrIjoiQkppRm1pM2J6cFFVYXlNSkVybDZlcXQyNG1VT3ZIRVVSNnV6dXRQVEhmdW5kSWd5WnhzM2JTelVNeWRHT2ZnYldkd1FzaEl5enpsTVdxeE1rTkhubWQwIiwiaCI6Imx6ODFpc0IzQnVOVjZySGdZZ0czV2ciLCJyIjpbInJlbGF5MS5vcGVubWF1c2JvdC5jb20iLCJyZWxheTIub3Blbm1hdXNib3QuY29tIl0sInJvdXRlcyI6ImxvY2FsIn0",
+    "chars": 271,
     "outcome": "reject"
    },
    {
