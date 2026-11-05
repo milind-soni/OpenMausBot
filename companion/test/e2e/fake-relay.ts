@@ -30,6 +30,8 @@ export interface FakeRelay {
   hosts: Map<string, Host>;
   /** Close codes sent, in order, for assertions. */
   closes: Array<{ kind: string; code: number }>;
+  /** Token refreshes accepted on a live control socket. */
+  refreshes: number;
   admitted(hid: string): Set<string>;
   restart(): void;
   /** Drops every socket without a close frame, as a crashed process would. */
@@ -42,6 +44,7 @@ const toBuffer = (data: RawData): Buffer => (Array.isArray(data) ? Buffer.concat
 
 export async function startFakeRelay(options: FakeRelayOptions): Promise<FakeRelay> {
   const hosts = new Map<string, Host>();
+  const relay = { refreshes: 0 } as FakeRelay;
   const closes: FakeRelay["closes"] = [];
   const server = createServer((_req, res) => res.writeHead(404).end());
   const wss = new WebSocketServer({
@@ -109,6 +112,7 @@ export async function startFakeRelay(options: FakeRelayOptions): Promise<FakeRel
         if (next.t === "auth") {
           const refreshed = typeof next.token === "string" ? verifyRelayToken(next.token, options.keys, now(), hid) : null;
           if (!refreshed?.ok) close(socket, "host", 4401);
+          else relay.refreshes += 1;
         } else if (next.t === "admit" && Array.isArray(next.set) && next.set.length <= 32) {
           host.set = new Set(next.set as string[]);
           for (const session of host.sessions) {
@@ -162,7 +166,7 @@ export async function startFakeRelay(options: FakeRelayOptions): Promise<FakeRel
 
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, "127.0.0.1", resolve));
   const port = (server.address() as AddressInfo).port;
-  return {
+  Object.assign(relay, {
     port,
     url: `ws://127.0.0.1:${port}`,
     hosts,
@@ -182,5 +186,6 @@ export async function startFakeRelay(options: FakeRelayOptions): Promise<FakeRel
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
-  };
+  });
+  return relay;
 }

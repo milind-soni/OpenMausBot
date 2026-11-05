@@ -74,6 +74,7 @@ describe("the relay client", () => {
     const socket = relay.hosts.get(hid)!.control;
     instance.setToken(token(7200));
     await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(relay.refreshes).toBe(1);
     expect(relay.hosts.get(hid)?.control).toBe(socket);
     expect(relay.closes).toEqual([]);
   });
