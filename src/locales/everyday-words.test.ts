@@ -14,7 +14,7 @@ const EVERYDAY_PREFIXES: Record<string, readonly string[]> = {
   "the rail of Clouds and its ＋": ["rail."],
   "a place's color, in Settings": ["placeLook."],
   "the bot panel": [
-    "botPanel.", "botSettings.simple.", "botAccess.tools.", "botAccess.browser.", "memory.learnFromRooms.", "memory.upkeep.",
+    "botPanel.", "botApi.", "botSettings.simple.", "botAccess.tools.", "botAccess.browser.", "memory.learnFromRooms.", "memory.upkeep.",
   ],
   "the Screen panel and where a bot works": [
     "place.", "computer.tab.", "computer.simple.", "computer.phase.", "computer.cloud.", "computer.badge.", "computer.problem.",

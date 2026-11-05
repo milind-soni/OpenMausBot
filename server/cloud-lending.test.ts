@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { cloudHomeLendingRefusal, cloudLendingRefusalText, createCloudRoutineAuthors, ownerOnlyConversation, routineFingerprint, teamLendingRefusal, type CloudLendingTurn } from "./cloud-lending.ts";
+import { CLOUD_NOBODY_KEY, CLOUD_OUTSIDE_KEY } from "./cloud-sharing.ts";
 
 const OWNER = "p_owner", GUEST = "p_guest";
 const ownerPerson = (person: string | undefined) => person === OWNER;
@@ -19,6 +20,12 @@ const mayLend = (lending: CloudLendingTurn) => cloudHomeLendingRefusal(lending) 
 describe("who may use a Mac lent to a Cloud home (review: guests, webhooks)", () => {
   it("the owner's own conversation from one of their devices may", () => {
     expect(mayLend(turn({}))).toBe(true);
+  });
+  it("a turn an outside caller started through the bot's API may not, whoever's line it reads", () => {
+    const apiLine = said("m1", undefined, { via: "api" });
+    expect(mayLend(turn({ request: request("m1", { automation: "api" }), thread: [apiLine] }))).toBe(false);
+    expect(cloudHomeLendingRefusal(turn({ request: request("m1", { automation: "api" }), thread: [said("m1", OWNER, { via: "api" })] }))).toBe("not-owner");
+    expect(cloudHomeLendingRefusal(turn({ request: request("m1", { automation: "api" }), thread: [said("m1", OWNER)], routineRun: run({ ownerStarted: true }) }))).toBe("not-owner");
   });
   it("a conversation a bot opened may not, even for the owner's line: another bot's words start its session", () => {
     expect(cloudHomeLendingRefusal(turn({ botOpened: true }))).toBe("someone-else");
@@ -117,6 +124,17 @@ describe("the owner's routines", () => {
   afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); dir = ""; });
   const routine = { prompt: "Tidy ~/Downloads on my Mac", target: "bot", botId: "b1", attachments: [{ id: "a1", path: "/x" }],
     schedule: { type: "interval", everyMinutes: 1440, anchorAt: 1_790_000_000_000 }, runOn: "maus" };
+  it("keeps a routine outside work wrote outside when a bot's change would make it nobody's; a person's save still makes it theirs", () => {
+    dir = mkdtempSync(join(tmpdir(), "omb-cloud-lending-"));
+    const authors = createCloudRoutineAuthors(join(dir, "lending-routines.json"));
+    authors.wrote("r1", CLOUD_OUTSIDE_KEY);
+    authors.wrote("r1", CLOUD_NOBODY_KEY);
+    expect(authors.writer("r1")).toBe(CLOUD_OUTSIDE_KEY);
+    expect(createCloudRoutineAuthors(join(dir, "lending-routines.json")).writer("r1")).toBe(CLOUD_OUTSIDE_KEY);
+    authors.wrote("r1", "p_aPersonWhoSavedItxxxx");
+    expect(authors.writer("r1")).toBe("p_aPersonWhoSavedItxxxx");
+  });
+
   it("records what the owner wrote; any change to the instructions, target or attachments no longer matches", () => {
     dir = mkdtempSync(join(tmpdir(), "omb-cloud-lending-"));
     const authors = createCloudRoutineAuthors(join(dir, "lending-routines.json"));

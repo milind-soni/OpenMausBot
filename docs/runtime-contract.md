@@ -52,7 +52,7 @@ queued ──admit──> running ──turn ends──> completed | failed | ca
 
 `level = max(own, inherited)` in the order `ask < edits < auto < full`. `custom` never travels.
 
-`inherited` is the Chief conversation's level only when the origin is `person` or `routine` **and** the requester is a Chief, or a Chief is an ancestor in the same root. Outside lineage inherits nothing.
+`inherited` is the Chief conversation's level only when the origin is `person` or `routine` **and** the requester is a Chief, or a Chief is an ancestor in the same root. Outside lineage inherits nothing: a thread a hand-off opens keeps its own level, and no level lands on it (`server/host/delegated-level.ts` asks `handsNoLevel`, the conversation's own record, so this holds after the run ends and after a restart).
 
 The inherited level is capped by what the assignee's engine really does (`shared/approval-mode.ts`): `full` passes on every engine (`supportsApprovalMode(kind, "full")` is always true, Full being the default level); `auto` only if `hasNativeAutoReview(kind)`, otherwise `edits` if supported, otherwise `own`. `levelSource` says which rule won. The permission mode a turn runs with must equal the level on its record (invariant I6).
 

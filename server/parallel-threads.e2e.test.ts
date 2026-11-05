@@ -440,23 +440,27 @@ describe("a Starter Cloud", () => {
     expect(opened.body.state).toBe("running");
     await whenStarted(opened.body.threadId);
     expect((await busyThreads(f, botId)).sort(), "parent and child run at once").toEqual([main, opened.body.threadId].sort());
+    // A job the bot opened on itself opens no more (self-threads.e2e): only the person's own request does.
     const grandchild = await startThread(opened.body.threadId, "Own grandchild");
-    expect(grandchild.body.state).toBe("running");
-    await whenStarted(grandchild.body.threadId);
+    expect(grandchild.status, JSON.stringify(grandchild.body)).toBe(409);
   }, 90_000);
 
-  it("lets a hand-off through to a busy bot, and one from it back to a bot whose turn is still running", async () => {
+  it("lets a hand-off through to a busy bot, and one to a bot whose own turn is still running", async () => {
     await starter();
     const a = await botWithThreads(f, CLAUDE, 1, "Ada");
     const b = await botWithThreads(f, CLAUDE, 1, "Ben");
+    const c = await botWithThreads(f, CLAUDE, 1, "Cyd");
     await send(f, a.botId, a.threads[0]!, "Ada's job");
     await whenStarted(a.threads[0]!);
     await send(f, b.botId, b.threads[0]!, "Ben's own job");
     await whenStarted(b.threads[0]!);
+    await send(f, c.botId, c.threads[0]!, "Cyd's own job");
+    await whenStarted(c.threads[0]!);
     const toBen = await startThread(a.threads[0]!, "For Ben", b.botId);
     expect(toBen.status, JSON.stringify(toBen.body)).toBeLessThan(300);
     await whenStarted(await ownThread(b.botId, "For Ben"));
-    const toAda = await startThread(b.threads[0]!, "For Ada", a.botId);
+    // From a third bot: Ben asking Ada back while Ada waits on Ben would be refused as a loop (crossed-handoffs.e2e).
+    const toAda = await startThread(c.threads[0]!, "For Ada", a.botId);
     expect(toAda.status, JSON.stringify(toAda.body)).toBeLessThan(300);
     await whenStarted(await ownThread(a.botId, "For Ada"));
     expect(await busyThreads(f, a.botId), "Ada's first turn never had to end for it").toContain(a.threads[0]);

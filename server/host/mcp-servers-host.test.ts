@@ -5,7 +5,7 @@ import { afterEach, expect, it } from "vitest";
 
 import type { AppConfig } from "../config.ts";
 import { mcpServerConfigHash } from "../mcp-app-catalog.ts";
-import { claimedNotice, createMcpServersHost } from "./mcp-servers-host.ts";
+import { claimedNotice, createMcpServersHost, startCheckTimeout } from "./mcp-servers-host.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -145,4 +145,9 @@ it("leaves servers reached by URL alone", async () => {
   cfg.mcpServers!.linear = { type: "http", url: "https://mcp.linear.app/mcp", headers: {}, enabled: true };
   host.health.changed("linear");
   expect(host.mounted(PAUL).linear).toEqual({ type: "http", url: "https://mcp.linear.app/mcp", headers: {} });
+});
+
+it("a package runner's first check waits for its download; any other program's keeps the short wait", () => {
+  for (const command of ["uvx", "npx", "/opt/homebrew/bin/uvx", "npx.cmd"]) expect(startCheckTimeout(command), command).toBe(120_000);
+  for (const command of ["node", "python3", "/usr/local/bin/my-server"]) expect(startCheckTimeout(command), command).toBeUndefined();
 });

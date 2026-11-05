@@ -130,6 +130,30 @@ describe("SecretRequestCard ask card", () => {
   });
 });
 
+describe("SecretRequestCard mailbox", () => {
+  const email = { target: "customSecret", delivery: "email", label: "Connect your mailbox", placeholder: "Mailbox password", helpUrl: "", description: "Ledger never sees the password." };
+
+  it("asks for the address and the password on one card, with the address the bot knew", () => {
+    const html = view({ ...email, address: "me@shop.example" });
+    expect(html).toContain('type="email"');
+    expect(html).toContain('value="me@shop.example"');
+    expect(html).toContain('type="password"');
+    expect(html).toContain("Mailbox password");
+    expect(html).toContain("They never see it.");
+  });
+
+  it("asks for the server only once one could not be found, and other cards have no address field", () => {
+    expect(view(email)).not.toContain("Incoming mail server");
+    expect(view({})).not.toContain('type="email"');
+  });
+
+  it("says the bot goes on once connected, without the address field", () => {
+    const html = view({ ...email, provided: true, resumed: true, address: "me@shop.example" });
+    expect(html).toContain('data-ask-card="settled"');
+    expect(html).not.toContain("<input");
+  });
+});
+
 describe("SecretRequestCard key analytics", () => {
   const KEY = "boat_ZZtestSECRET0123456789abcdef";
   type Props = { children?: ReactNode; type?: string; onChange?: (event: { target: { value: string } }) => void; onSubmit?: (event: { preventDefault(): void }) => void };

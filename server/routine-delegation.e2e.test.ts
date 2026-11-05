@@ -277,7 +277,7 @@ describe("routine delegation through the isolated harness", () => {
     evidence.push({ providerReloadKeptRuntimeHandoff: true, runId: run.id, transcript: await messages(run.threadId) });
   }, 60_000);
 
-  it("does not revive a cancelled routine when its running peer replies during later user work", async () => {
+  it("does not revive a cancelled routine: its running peer stops with it, and later user work never resumes it", async () => {
     const run = await start();
     await delegate(run.threadId);
     finish(run.threadId);
@@ -287,20 +287,26 @@ describe("routine delegation through the isolated harness", () => {
     await expect.poll(() => peerWork(run.threadId)?.status, { timeout: 15_000 }).toBe("running");
     await api("POST", `/api/routine-runs/${run.id}/cancel`);
     await expect.poll(() => rows().find((node) => node.id === work.parentId)?.status, { timeout: 10_000 }).toBe("cancelled");
+    // Stop means stop: the peer mid-turn ends with the cancelled run, its engine turn included.
+    await expect.poll(() => peerWork(run.threadId)?.status, { timeout: 10_000 }).toBe("cancelled");
+    await expect.poll(async () => Boolean((await botState(peer.id)).busy), { timeout: 15_000 }).toBe(false);
     unlinkSync(file(run.threadId, "gate"));
     unlinkSync(file(run.threadId, "json"));
     await api("POST", `/api/bots/${source.id}/messages`, { threadId: run.threadId, text: "A new independent request after cancellation." });
     await dump(run.threadId);
+    // Past the moment the peer would have answered, during the later user work.
     finish(work.threadId);
-    await expect.poll(() => peerWork(run.threadId)?.status, { timeout: 15_000 }).toBe("completed");
     finish(run.threadId);
     await control(["wait", "--bot", source.id, "--task", run.threadId]);
     await new Promise((resolve) => setTimeout(resolve, 2_000));
+    expect(peerWork(run.threadId)?.status).toBe("cancelled");
     const transcript = await messages(run.threadId);
+    expect(transcript.some((message) => message.tool?.name === "Routine peer replied")).toBe(false);
+    expect(transcript.some((message) => message.text?.includes(REPORT_FROM_PEER))).toBe(false);
     expect(transcript.some((message) => message.text?.includes(SETTLED))).toBe(false);
     expect(transcript.some((message) => message.tool?.name?.startsWith("Resumed with"))).toBe(false);
     expect((await runState(run.id)).status).toBe("cancelled");
     expect(Boolean((await botState(source.id)).busy)).toBe(false);
-    evidence.push({ cancelledPeerDidNotResumeNewUserTurn: true, transcript });
+    evidence.push({ cancelledPeerStoppedWithRun: true, transcript });
   }, 45_000);
 });

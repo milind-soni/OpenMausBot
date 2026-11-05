@@ -201,7 +201,8 @@ describe("on a Cloud someone else once used", () => {
     const owners = await h.thread(zed.id, "My work");
     h.script(zed.id,
       { key: "G1", match: ["G1-GO"], timeoutMs: 120_000, steps: [{ server: "agents", tool: "message_person", arguments: { message: "For the guest" } }, { server: "ogb", tool: "ask_user", arguments: { question: "Guest's question?", choices: ["A", "B"] }, capture: { answer: "([\\s\\S]+)" } }], reply: "G1: {{answer}}" },
-      { key: "G2", match: ["G2-GO"], timeoutMs: 120_000, steps: [{ server: "ogb", tool: "ask_user", arguments: { question: "Owner's question?", choices: ["A", "B"] }, capture: { answer: "([\\s\\S]+)" } }], reply: "G2: {{answer}}" });
+      { key: "G2", match: ["G2-GO"], timeoutMs: 120_000, steps: [{ server: "ogb", tool: "ask_user", arguments: { question: "Owner's question?", choices: ["A", "B"] }, capture: { answer: "([\\s\\S]+)" } }], reply: "G2: {{answer}}" },
+      { key: "G3", match: ["G3-GO"], reply: "G3 done" });
 
     markLeftBehind(join(fx.root, "cloud", ".openmausbot"), { threadIds: [theirs] });
     await fx.relaunch({ cloud: {} });
@@ -216,5 +217,13 @@ describe("on a Cloud someone else once used", () => {
     expect((await h.messages(theirs)).some((line) => line.text === "For the guest"), "the bot did send it").toBe(true);
     expect(rows.some((row) => row.text === "For the guest"), "a guest's news isn't the owner's").toBe(false);
     expect((await h.notes()).some((note) => note.body === "For the guest")).toBe(false);
+    // The owner's answer reaches the guest's turn, and the guest's conversation stays confined after it.
+    const answered = await fx.onCloud("POST", `/api/threads/${theirs}/respond`, { requestId: guests.card!.requestId, behavior: "answer", message: "A" });
+    expect(answered.status, JSON.stringify(answered.body)).toBe(200);
+    await until(async () => (await h.messages(theirs)).some((line) => line.text === "G1: A"), "the guest's turn to go on");
+    await h.say(zed.id, theirs, "G3-GO");
+    await until(() => h.turns(zed.id).some((turn) => turn.planKey === "G3"), "a later turn in the guest's conversation");
+    const restricted = (key: string) => (h.turns(zed.id).find((turn) => turn.planKey === key) as { restricted?: boolean } | undefined)?.restricted;
+    expect([restricted("G1"), restricted("G3")]).toEqual([true, true]);
   }, hostTimeout(420_000));
 });

@@ -90,6 +90,8 @@ export interface Delivery {
 }
 
 export interface PersonInboxDeps {
+  /** Security invariant: an inbox is a person's own chat with their Chief at its own level, so what a confined conversation says never lands there. */
+  confined?(threadId: string): boolean;
   team: CloudTeam | null;
   dataDir: string;
   store: Pick<Store, "bots" | "bot" | "tasks" | "taskByThread" | "createTask" | "patchTask" | "patchGroup" | "appendMessage" | "patchMessage" | "messagesFor" | "groupByThread" | "onChange">;
@@ -378,6 +380,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     if (!team || notification.forPerson || (!ASK_NOTIFICATIONS.has(notification.kind) && !result)) return notification;
     const person = deps.askedPerson(notification.botId, notification.threadId);
     if (!person || personOf(notification.threadId)) return notification;
+    if (deps.confined?.(notification.threadId)) return { ...notification, forPerson: person };
     const own = audienceMember(deps.audienceOf(notification.threadId)) === person;
     if (own && !how.routine && !deps.handedFrom?.(notification.threadId)) return notification;
     const card = notification.kind === "approval" || notification.kind === "question" ? openCard(notification.botId, notification.threadId) : undefined;

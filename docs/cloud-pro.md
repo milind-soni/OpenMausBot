@@ -252,9 +252,10 @@ no line, card answer, conversation or routine recorded under anyone else's
 key; and a record that can be read), every routine and conversation runs at
 its bot's own level, whatever writer it has on record. Only what came in from
 outside stays confined: a routine a bot made or changed in a conversation a
-webhook drove (its run, a payload posted into it, or work it handed on) is
-recorded as the outside's, and runs without full access until the owner opens
-it and saves it once. Routines from before this that a webhook-driven
+webhook drove (its run, a payload posted into it, or work it handed on, for good
+once that run has ended) is recorded as the outside's, and runs without full
+access until the owner opens it and saves it once; what its runs hand a teammate
+stays confined too, in that thread, after the work ends. Routines from before this that a webhook-driven
 conversation made or changed are recorded the same way, once. The first trace
 of a second person makes the Cloud shared for good: cloud-owner.json records
 when, nothing clears it, and a restore never brings or removes it. If that
@@ -927,7 +928,11 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
   (docs/runtime-contract.md §4, §9). Work or a question for a teammate runs
   in the work thread the guest's conversation has with that teammate, opened
   as the guest's, never in the owner's conversation with it, and is never
-  folded into a turn running there. It works in a folder of its own, never the bot's
+  folded into a turn running there. Such a turn reaches no conversation or room
+  of the owner's at all (`retry_thread`, `post_to_room`, `coordinate_bots` with a
+  thread or a room, an answer to a question there), and what it writes to a
+  room's bulletin waits on the owner's card; of the server's own routes it reaches only those
+  `server/host/outside-fence.ts` lists. It works in a folder of its own, never the bot's
   project folder the owner's conversations share, and a card it raises
   never offers "always allow". One that already ran in another folder keeps
   it, except a conversation a revoked session opened: it is unpinned at boot,
@@ -1745,8 +1750,11 @@ before the engines are read again.
 
 **`POST /api/cloud/plan`**, signed over its JSON body like the sleep request:
 `{"v":1,"cancelled":true}` when the customer cancels, `{"v":1,"cancelled":false}`
-when renewal is back on. `200 {"ok":true}`; `400 {"error":"invalid_plan"}`
-without a boolean `cancelled`. The Admin does not send it yet.
+when renewal is back on, and `{"v":1,"tier":"starter"}` for which plan this Cloud
+is on now (either or both). `200 {"ok":true}`; `400 {"error":"invalid_plan"}`
+without one of them, or with a malformed one. The tier is kept across restarts
+(`server/host/cloud-plan-tier.ts`) and counts at once; a home that was never told
+is not Starter. Bot API uses it. The Admin does not send any of this yet.
 
 ## What the desktop reads from the Admin
 

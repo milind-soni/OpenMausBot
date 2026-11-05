@@ -25,6 +25,7 @@ import type { BotRecord, GroupRecord, Message, Store, StoreChange } from "../sto
 import type { TeamPeople } from "../team-people.ts";
 import { currentTimeZone } from "../time-zone.ts";
 import { loadMemory } from "../workspace.ts";
+import { OUTSIDE_REFUSAL } from "./outside-fence.ts";
 import type { PlaceInbox } from "./place-inbox.ts";
 import { createPersonInbox, type Delivery, type Item, type Passed, type PersonInbox, type PersonInboxDeps } from "./person-inbox.ts";
 import { createRepresentative, type RepresentativeDeps } from "./representative.ts";
@@ -59,6 +60,8 @@ export interface TeamMessagesDeps {
   starters: { get(threadId: string): string | undefined; set(threadId: string, person: string): void };
   /** What one person may see, as their own session would. */
   sees(person: { email: string; role: TeamRole }): { bot(botId: string): boolean; thread(threadId: string): boolean };
+  /** Security invariant: a confined conversation's words reach nobody's inbox by naming them. */
+  confined?(threadId: string): boolean;
   notify(notification: Notification): void;
   /** The inbox of a place that is no team's. */
   place?: PlaceInbox | null;
@@ -99,7 +102,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
 
   const { representative, ...wiring } = deps.inbox;
   const inbox = createPersonInbox({
-    notes: (botId) => loadMemory(botId)?.text ?? "", ...wiring, team, dataDir: deps.dataDir, store, starters: deps.starters, audienceOf: deps.audienceOf, personKeyOf: keyOf,
+    notes: (botId) => loadMemory(botId)?.text ?? "", ...wiring, ...(deps.confined ? { confined: deps.confined } : {}), team, dataDir: deps.dataDir, store, starters: deps.starters, audienceOf: deps.audienceOf, personKeyOf: keyOf,
     send: deps.notify, now, person: (key) => byKey(key),
     sees: (key, threadId) => { const one = byKey(key); return one ? deps.sees(one).thread(threadId) : false; },
     ...(representative ? { representative: createRepresentative({ now, timeZone: () => currentTimeZone(), ...representative }) } : {}),
@@ -243,7 +246,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
     if (handledTurns.size > MAX_HANDLED_TURNS) handledTurns.delete(handledTurns.values().next().value!);
     const told = toldThisTurn.get(threadId) ?? new Set<string>();
     toldThisTurn.delete(threadId);
-    if (line.turnSucceeded !== true) return;
+    if (line.turnSucceeded !== true || deps.confined?.(threadId)) return;
     const group = store.groupByThread(threadId);
     const speaker = line.from?.botId ? store.bot(line.from.botId) : store.botByThread(threadId);
     if (!speaker) return;
@@ -317,6 +320,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
         return ctx.json(ctx.res, sent.status, sent.status === 200 ? { text: sent.text } : { error: sent.text });
       }
       if (!team || !deps.people) return ctx.json(ctx.res, 404, { error: "Passing a message to a person works only on a team's Cloud." });
+      if (deps.confined?.(ctx.threadId)) return ctx.json(ctx.res, 403, { error: OUTSIDE_REFUSAL });
       const body = bodySchema.safeParse(await ctx.readBody());
       if (!body.success) return ctx.json(ctx.res, 400, { error: `message_person needs to (a teammate's name or email) and message (up to ${MESSAGE_PERSON_MAX} characters).` });
       const passed = pass(ctx.botId, ctx.threadId, body.data.to, body.data.message);

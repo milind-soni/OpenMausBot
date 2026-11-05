@@ -1,5 +1,6 @@
 // The agents tool catalog and which tools a turn sees: definitions only, no environment, no calls.
 import { CREDENTIAL_TARGETS } from "../../shared/credential-request.ts";
+import { EMAIL_CREDENTIAL } from "../../shared/email.ts";
 import { OPTIONS_CARD_LIMITS, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
 import { agentToolAnnotations } from "../agent-tool-policy.ts";
 import { CHAT_CARD_TOOL_DEFINITIONS } from "./agents-chat-card-tools.ts";
@@ -343,7 +344,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "post_to_room",
     description:
-      "Put one message into a shared room you belong to, for example when the user asks you to tell the team something. Get group_id from list_rooms. This posts and returns: no room member's turn starts, nobody replies, and nothing comes back except confirmation — so never use it to ask a question or hand out work (use coordinate_bots for those). Post once, say it in full, and tell the user what you posted. Set attach_voice_note true to attach this turn's voice note. If a post is refused, do not retry it: say what you wanted to post in your reply instead.",
+      "Put one message into a shared room you belong to, for example when the user asks you to tell the team something. Get group_id from list_rooms. This posts and returns: no room member's turn starts, nobody replies, and nothing comes back except confirmation — so never use it to ask a question or hand out work (use coordinate_bots for those). Post once, say it in full, and tell the user what you posted. Set attach_voice_note true to attach this turn's voice note. If a post is refused, do not retry it unless the refusal says how: say what you wanted to post in your reply instead.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -351,6 +352,7 @@ const TOOL_DEFINITIONS = [
         group_id: { type: "string", description: "The room's id, copied exactly from list_rooms." },
         message: { type: "string", description: "The complete message to post, written for the room to read as it stands." },
         attach_voice_note: { type: "boolean", description: "True to attach this turn's send_voice_note recording; the message is its caption. Call send_voice_note first." },
+        mention_ids: { type: "array", items: { type: "string" }, description: "Ids of the bots a shared @name in message means." },
       },
       required: ["group_id", "message"],
     },
@@ -458,14 +460,15 @@ const TOOL_DEFINITIONS = [
   {
     name: "request_credential",
     description:
-      "Ask the person for a secret on a secure card in the app or a QR-paired phone, never in chat. credential_id: a key OpenMausBot keeps (onePasswordToken: a 1Password service account token). Other secrets: label, reason, delivery. You never see the value; end the turn, and you resume when they save or decline.",
+      "Ask the person for a secret on a secure card in the app or a QR-paired phone, never in chat. credential_id: a key OpenMausBot keeps (onePasswordToken: a 1Password service account token; email: a mailbox on any mail host, one card for its address and password). Other secrets: label, reason, delivery. You never see the value; end the turn, and you resume when they save or decline.",
     inputSchema: {
       type: "object",
       properties: {
         credential_id: {
           type: "string",
-          enum: Object.keys(CREDENTIAL_TARGETS),
+          enum: [...Object.keys(CREDENTIAL_TARGETS), EMAIL_CREDENTIAL],
         },
+        address: { type: "string", description: "credential_id email only: the mailbox's address, when you know it." },
         label: { type: "string", description: "Other secret's card title, e.g. Stripe secret key." },
         reason: { type: "string", description: "Short, non-sensitive: why, and where to find it." },
         placeholder: { type: "string" },
