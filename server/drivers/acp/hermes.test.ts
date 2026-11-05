@@ -405,6 +405,26 @@ describe("resolveHermesModels when Hermes has no model to list", () => {
     await expect(resolveHermesModels(env, { cli: `${cli} hermes` })).resolves.toEqual({ default: HERMES_CONFIG_MODEL_ID, options: [DEFAULT] });
   });
 
+  it("finds a Windows Hermes path given without its .exe, as it is launched", async () => {
+    const { cli, env } = setup("");
+    const bare = join(dirname(cli), "hermes");
+    writeFileSync(`${bare}.EXE`, "#!/usr/bin/env node\nprocess.stdin.resume();\n", { mode: 0o755 });
+    const platform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    vi.stubEnv("PATHEXT", ".EXE");
+    try {
+      await expect(resolveHermesModels(env, { cli: bare })).resolves.toEqual({ default: HERMES_CONFIG_MODEL_ID, options: [DEFAULT] });
+    } finally {
+      Object.defineProperty(process, "platform", { value: platform });
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("offers the default for an https endpoint on the probe's port, which the http probe can't list", async () => {
+    const { cli, env } = setup("", "model:\n  provider: ollama\n  default: llama3\n  base_url: https://localhost:11434/v1\n");
+    await expect(resolveHermesModels(env, { cli })).resolves.toEqual({ default: HERMES_CONFIG_MODEL_ID, options: [DEFAULT] });
+  });
+
   it.skipIf(process.platform === "win32")("looks past a PATH entry that can't run to a later runnable hermes", async () => {
     const { cli, env } = setup("");
     const blocked = join(dirname(cli), "blocked");

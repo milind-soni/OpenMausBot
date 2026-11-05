@@ -217,7 +217,7 @@ function isFile(p: string): boolean {
   }
 }
 
-function whichWin(cli: string, env?: NodeJS.ProcessEnv): string | null {
+export function whichWin(cli: string, env?: NodeJS.ProcessEnv): string | null {
   const exts = ((env ?? process.env).PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
   // npm installs both `claude` (a sh script) and `claude.cmd`; an extensionless name is not runnable on Windows.
   const probe = (base: string) => {

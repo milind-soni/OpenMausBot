@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
-import { findCliCandidates, harnessHome, splitCliString } from "../../env-path.ts";
+import { findCliCandidates, harnessHome, splitCliString, whichWin } from "../../env-path.ts";
 import { resolveCli } from "../../procs.ts";
 import { decodeInjectId, hostApiKey, INJECT_SEP, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
@@ -208,10 +208,11 @@ export function hermesConfiguredModel(
 function hermesInstalled(cli: string): boolean {
   const trimmed = cli.trim();
   const head = trimmed.includes(" ") && existsSync(trimmed) ? trimmed : (splitCliString(trimmed)[0] ?? "");
+  if (process.platform === "win32") return whichWin(head) !== null;
   return findCliCandidates(head).some((found) => {
     try {
       if (!statSync(found).isFile()) return false;
-      if (process.platform !== "win32") accessSync(found, constants.X_OK);
+      accessSync(found, constants.X_OK);
       return true;
     } catch {
       return false;
@@ -219,9 +220,6 @@ function hermesInstalled(cli: string): boolean {
   });
 }
 
-// The local probes list Ollama's and LM Studio's models on their usual local port: with none listed that server is
-// down, and an empty answer keeps the catalog's earlier models instead of replacing them with the default. A
-// base_url elsewhere (another host or port) is never probed, so it gets the default like a custom endpoint.
 const HERMES_PROBED_PROVIDERS = new Set(["ollama", "lmstudio"]);
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
@@ -243,7 +241,12 @@ function hermesUsesProbedProvider(env: Record<string, string | undefined>): bool
       yamlString(config.base_url);
     if (!baseUrl) return true;
     const configured = new URL(baseUrl);
-    return LOOPBACK_HOSTS.has(configured.hostname) && configured.port === new URL(probe.baseUrl).port;
+    const probed = new URL(probe.baseUrl);
+    return (
+      LOOPBACK_HOSTS.has(configured.hostname) &&
+      configured.protocol === probed.protocol &&
+      configured.port === probed.port
+    );
   } catch {
     return false;
   }
