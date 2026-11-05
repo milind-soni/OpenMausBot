@@ -290,6 +290,7 @@ export function brokerHarness(options: { migrations?: number } = {}) {
     CLOUD_GRANT_SECRET: CLOUD_GRANT_SECRET as string | undefined,
     STATS_TOKEN: STATS_TOKEN as string | undefined,
     CLOUD_ADMIN_URL: undefined as string | undefined,
+    ACCOUNT_DAILY_TOOL_CALLS: undefined as string | undefined,
     REGISTRATION_LIMITER: { limit: async () => ({ success: true }) },
     SESSION_LIMITER: { limit: async () => ({ success: true }) },
     EVENTS_LIMITER: { limit: async () => ({ success: limits.events }) },

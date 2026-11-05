@@ -62,9 +62,8 @@ export async function shareUser(request: Request, installation: InstallationRow,
  */
 export async function adoptSharedUser(request: Request, installation: InstallationRow, env: Env, now = Date.now()): Promise<{ ok: boolean; response: Response }> {
   const refuse = (response: Response) => ({ ok: false, response });
-  if (installation.account_id) {
-    return refuse(json({ error: "This installation's connected apps follow its MausBot account.", code: "account_bound" }, 409));
-  }
+  const accountBound = () => refuse(json({ error: "This installation's connected apps follow its MausBot account.", code: "account_bound" }, 409));
+  if (installation.account_id) return accountBound();
   const parsed = adoptSchema.safeParse(await readJsonBody(request, 1024));
   if (!parsed.success) return refuse(json({ error: "send {code}" }, 400));
   if (await limited(installation, env)) return refuse(json({ error: "too many connected-app requests" }, 429));
@@ -86,8 +85,11 @@ export async function adoptSharedUser(request: Request, installation: Installati
     const toolkits = [...new Set(active.map((account) => account.toolkit?.slug?.toLowerCase() ?? "").filter(Boolean))].sort();
     return refuse(json({ error: "This installation has connected apps of its own.", code: "has_connections", toolkits }, 409));
   }
-  await env.DB.prepare("UPDATE installations SET shared_user_id = ?, session_id = NULL WHERE id = ?")
+  // Before migration 0006 the row has no account_id column. With it, a bind since this request was authenticated wins.
+  const unbound = "account_id" in installation ? " AND account_id IS NULL" : "";
+  const saved = await env.DB.prepare(`UPDATE installations SET shared_user_id = ?, session_id = NULL WHERE id = ?${unbound}`)
     .bind(share.composio_user_id, installation.id).run();
+  if (!saved.meta.changes) return accountBound();
   const adopted = { ...installation, shared_user_id: share.composio_user_id };
   return { ok: true, response: json({ shared: true, user: await userDigest(adopted) }) };
 }

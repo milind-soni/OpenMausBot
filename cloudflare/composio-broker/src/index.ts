@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { planAccountLink } from "../../../shared/connector-account-link";
-import { accountLeaseLapsed, presentAccountGrant } from "./accounts";
+import { accountLeaseLapsed, accountToolCallRefusal, appLimitRefusal, PHONE_CONNECT_CALLBACK, presentAccountGrant } from "./accounts";
 import { appEventStats, composioWebhook, pollEvents, presentCloudGrant, queueTestEvent, runHourly } from "./app-events";
 import {
   ACCOUNT_ID,
@@ -50,6 +50,7 @@ interface ConnectorServiceState {
 interface AccountLinkRequest {
   toolkit: string;
   alias?: string;
+  callback_url?: string;
 }
 
 const sessionWireSchema = z.object({
@@ -174,16 +175,15 @@ async function getSession(env: Env, sessionId: string) {
   return parseSession(sessionWireSchema.parse(await response.json()));
 }
 
-async function createSession(env: Env, userId: string, authConfigs: AuthConfigMap = {}) {
+async function createSession(env: Env, userId: string, authConfigs: AuthConfigMap = {}, manageConnections = true) {
   const response = await composioRequest(env, "/tool_router/session", {
     method: "POST",
     body: JSON.stringify({
       user_id: userId,
-      manage_connections: {
-        enable: true,
-        enable_wait_for_connections: true,
-        enable_connection_removal: true,
-      },
+      // Off, Composio leaves COMPOSIO_MANAGE_CONNECTIONS out of the Session, so its bots cannot start a sign-in.
+      manage_connections: manageConnections
+        ? { enable: true, enable_wait_for_connections: true, enable_connection_removal: true }
+        : { enable: false },
       multi_account: MULTI_ACCOUNT_CONFIG,
       ...(Object.keys(authConfigs).length ? { auth_configs: authConfigs } : {}),
     }),
@@ -337,7 +337,7 @@ async function verifySession(installation: InstallationRow, env: Env, ctx: Execu
       }
       touchLastSeen(installation, env, ctx);
     } else {
-      session = await createSession(env, user, authConfigs);
+      session = await createSession(env, user, authConfigs, !installation.account_id);
       multiAccountUpgradeAttempted.add(session.sessionId);
       authConfigUpgradeAttempted.add(authConfigsKey(session.sessionId, authConfigs));
       const userColumn = installation.shared_user_id === undefined ? "composio_user_id" : "COALESCE(shared_user_id, composio_user_id)";
@@ -401,6 +401,8 @@ async function proxyMcp(request: Request, installation: InstallationRow, env: En
   if (!body) return json({ error: "MCP request is too large" }, 413);
   await limitSessionRequests(installation, env);
   Object.assign(installation, await currentInstallation(env, installation.id));
+  const capped = await accountToolCallRefusal(body, installation, env);
+  if (capped) return capped;
   const reused = verifiedSession(installation);
   if (reused) touchLastSeen(installation, env, ctx);
   let session = reused ?? await verifySession(installation, env, ctx);
@@ -606,9 +608,21 @@ async function authorize(
   ctx: ExecutionContext,
 ) {
   const session = await ensureSession(installation, env, ctx);
-  // Listing can be denied to the broker's key scope; authorize must still
-  // work, with the alias guardrails degrading to first-account behavior.
-  const accounts = await listConnectedAccounts(env, actingUser(installation), [slug]).catch(() => []);
+  const bound = Boolean(installation.account_id);
+  let accounts: ConnectedAccountResponse[];
+  if (bound) {
+    try {
+      accounts = await listConnectedAccounts(env, actingUser(installation), []);
+    } catch {
+      return json({ error: "Connected apps can't be checked right now. Try again in a minute.", code: "provider_error" }, 502);
+    }
+    const refused = appLimitRefusal(accounts, slug);
+    if (refused) return refused;
+  } else {
+    // Listing can be denied to the broker's key scope; authorize must still
+    // work, with the alias guardrails degrading to first-account behavior.
+    accounts = await listConnectedAccounts(env, actingUser(installation), [slug]).catch(() => []);
+  }
   const serviceAccounts = accounts.filter((account) => account.toolkit?.slug?.toLowerCase() === slug);
   const plan = planAccountLink(
     slug,
@@ -624,6 +638,7 @@ async function authorize(
   }
   const linkRequest: AccountLinkRequest = { toolkit: slug };
   if (plan.alias) linkRequest.alias = plan.alias;
+  if (bound) linkRequest.callback_url = PHONE_CONNECT_CALLBACK;
   const response = await composioRequest(env, `/tool_router/session/${encodeURIComponent(session.sessionId)}/link`, {
     method: "POST",
     body: JSON.stringify(linkRequest),

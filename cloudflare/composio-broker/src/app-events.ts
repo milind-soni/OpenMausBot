@@ -55,7 +55,7 @@ const testEventSchema = z.object({
   triggerId: z.string().regex(TRIGGER_ID),
   data: z.record(z.string(), z.unknown()).default({}),
 }).strict();
-const cloudGrantSchema = z.object({ grant: z.string().max(256) }).strict();
+export const cloudGrantSchema = z.object({ grant: z.string().max(256) }).strict();
 
 function text(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 && value.length <= 200 ? value : undefined;

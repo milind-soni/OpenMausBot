@@ -3,12 +3,16 @@
 // Composio user until its grant runs out.
 import { z } from "zod";
 
-import { base64Bytes, hmacKey } from "./app-events";
-import { json, readJsonBody, utf8, type InstallationRow } from "./common";
+import { base64Bytes, cloudGrantSchema, hmacKey } from "./app-events";
+import { DAY_MS, json, readJsonBody, utcDay, utf8, type ConnectedAccountResponse, type InstallationRow } from "./common";
 import { userDigest } from "./sharing";
 
 export const ACCOUNT_GRANT = /^v1\.acct\.([A-Za-z0-9][A-Za-z0-9_-]{2,127})\.([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.(\d{10})\.([A-Za-z0-9_-]{43})$/;
-const grantSchema = z.object({ grant: z.string().max(256) }).strict();
+/** The Admin mints 24-hour grants; 300 s covers its clock running ahead of ours. */
+const MAX_GRANT_AHEAD_MS = DAY_MS + 300_000;
+export const ACCOUNT_APP_LIMIT = 3;
+const ACCOUNT_DAILY_TOOL_CALLS = 300;
+export const PHONE_CONNECT_CALLBACK = "openmausbot://connected-apps/done";
 
 export function accountGrantMessage(accountId: string, installationId: string, exp: number) {
   return `omb-connected-apps-account:v1\n${accountId}\n${installationId}\n${exp}`;
@@ -40,9 +44,9 @@ export async function presentAccountGrant(request: Request, installation: Instal
   if (!env.CLOUD_GRANT_SECRET || !("account_id" in installation)) {
     return json({ error: "Connected apps for MausBot accounts are not set up on this service.", code: "unsupported" }, 503);
   }
-  const parsed = grantSchema.safeParse(await readJsonBody(request, 1024).catch(() => null));
+  const parsed = cloudGrantSchema.safeParse(await readJsonBody(request, 1024).catch(() => null));
   const grant = parsed.success ? await verifyAccountGrant(parsed.data.grant, env.CLOUD_GRANT_SECRET) : null;
-  if (!grant || grant.installationId !== installation.id || grant.exp * 1000 <= now) {
+  if (!grant || grant.installationId !== installation.id || grant.exp * 1000 <= now || grant.exp * 1000 > now + MAX_GRANT_AHEAD_MS) {
     return json({ error: "This grant isn't valid. Ask MausBot for a new one.", code: "invalid_grant" }, 403);
   }
   const user = accountUser(grant.accountId);
@@ -65,5 +69,45 @@ export async function presentAccountGrant(request: Request, installation: Instal
     }
     return json({ error: "unauthorized" }, 401);
   }
-  return json({ accountUntil: grant.exp * 1000, appLimit: 3, user: await userDigest({ ...installation, shared_user_id: user }) });
+  return json({ accountUntil: grant.exp * 1000, appLimit: ACCOUNT_APP_LIMIT, user: await userDigest({ ...installation, shared_user_id: user }) });
+}
+
+/** A 402 once the account has ACCOUNT_APP_LIMIT apps signed in besides `slug`; another sign-in to an app it has is fine. */
+export function appLimitRefusal(accounts: ConnectedAccountResponse[], slug: string): Response | null {
+  const apps = [...new Set(accounts.filter((account) => /^active$/i.test(account.status ?? ""))
+    .map((account) => account.toolkit?.slug?.toLowerCase() ?? "").filter((app) => app && app !== slug))].sort();
+  if (apps.length < ACCOUNT_APP_LIMIT) return null;
+  return json({
+    error: "A free MausBot account connects up to 3 apps. Disconnect one, or get MausBot Cloud for more.",
+    code: "app_limit",
+    limit: ACCOUNT_APP_LIMIT,
+    apps,
+  }, 402);
+}
+
+/** Counts a bound installation's MCP tool calls against its account's UTC day, shared by all the account's phones; a
+ *  429 once they would pass the cap. */
+export async function accountToolCallRefusal(body: Uint8Array, installation: InstallationRow, env: Env, now = Date.now()) {
+  if (!installation.account_id) return null;
+  let messages: unknown;
+  try {
+    messages = JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    // Forwarded unparsed, a body Composio reads differently could run a call we never counted.
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const calls = [messages].flat().filter((message) => (message as { method?: unknown } | null)?.method === "tools/call").length;
+  if (!calls) return null;
+  const configured = Number(env.ACCOUNT_DAILY_TOOL_CALLS);
+  const limit = Number.isSafeInteger(configured) && configured > 0 ? configured : ACCOUNT_DAILY_TOOL_CALLS;
+  // One statement, so the account's phones calling at once can never pass the cap together.
+  const counted = calls <= limit && await env.DB.prepare(
+    `INSERT INTO account_tool_calls (account_id, day, calls) VALUES (?1, ?2, ?3)
+     ON CONFLICT (account_id) DO UPDATE SET
+       calls = CASE WHEN day = excluded.day THEN calls + excluded.calls ELSE excluded.calls END, day = excluded.day
+     WHERE day != excluded.day OR calls + excluded.calls <= ?4
+     RETURNING calls`,
+  ).bind(installation.account_id, utcDay(now), calls, limit).first();
+  if (counted) return null;
+  return json({ error: `A free MausBot account makes up to ${limit} app actions a day. Try again tomorrow, or get MausBot Cloud for more.`, code: "daily_limit" }, 429);
 }
