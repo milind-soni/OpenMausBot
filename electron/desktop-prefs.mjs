@@ -151,9 +151,10 @@ export function createDesktopPrefs({ read, write }) {
  * another saved server open in this desktop's window, null for anything else. `cloudOffered()`: this desktop sells
  * MausBot Cloud, asked once its Cloud sign-in is restored. `localConfig()`: This computer's own workspace's config.json.
  * `languageChanged(language, sender)`: tells this desktop's other pages the language picked on one of them;
- * `onLanguage(language)`: tells main, which draws its menus, tray and dialogs in it. `prefs`: the record main reads too.
+ * `onLanguage(language)`: tells main, which draws its menus, tray and dialogs in it. `onShown(language, sender)`: the
+ * language a page of the window shows, which main's words follow while nothing is picked. `prefs`: the record main reads too.
  */
-export function registerDesktopPrefs({ prefs: given, ipcMain, read, write, page, cloudOffered, cloudAccount, localConfig = () => null, languageChanged = () => {}, onLanguage = () => {}, frame = null, now = Date.now, systemName = accountFullName }) {
+export function registerDesktopPrefs({ prefs: given, ipcMain, read, write, page, cloudOffered, cloudAccount, localConfig = () => null, languageChanged = () => {}, onLanguage = () => {}, onShown = () => {}, frame = null, now = Date.now, systemName = accountFullName }) {
   let prefs = given ?? null;
   const store = () => prefs ??= createDesktopPrefs({ read, write });
   const from = (channel, pages, handler) => (event, ...args) => {
@@ -195,6 +196,9 @@ export function registerDesktopPrefs({ prefs: given, ipcMain, read, write, page,
       try { onLanguage(language); } catch {}
     }
     return store().language() === language;
+  });
+  ipcMain.on("desktop-language:shown", (event, language) => {
+    try { if (page(event) && isLanguage(language) && language) onShown(language, event.sender); } catch {}
   });
   // Every page of this desktop's window reads and sets the frame; a server's page sets it only from the person's click,
   // which the preload checks.
