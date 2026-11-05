@@ -7251,6 +7251,8 @@
   "page.broken.reload": "Reload",
   "app.open": "Open app",
   "app.openAgain": "Open again",
+  "app.done": "Done: {tool}",
+  "app.doneOpen": "Open",
   "app.loading": "Opening the app",
   "app.strip.signIn": "Sign in to {server} again",
   "app.strip.signInAction": "Sign in",

@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { AppWindow, CircleAlert, Info, Loader2, RotateCw } from "lucide-react";
+import { AppWindow, CircleAlert, CircleCheck, Info, Loader2, RotateCw } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import type { AppNetwork } from "../../../shared/app";
+import { openExternalLink } from "@/lib/app-links";
+import type { AppDoneState, AppNetwork } from "../../../shared/app";
 import { ASK_CHIP, ASK_CHIP_IDLE, ASK_QUIET_BUTTON } from "../AskCard";
 
 export const APP_SURFACE = "w-full overflow-hidden rounded-2xl bg-composer ring-1 ring-composer-ring";
@@ -105,6 +106,17 @@ export function AppStrip({ text, action, bordered, tone = "warning" }: {
       <CircleAlert aria-hidden="true" size={14} className={cn("shrink-0", tone === "warning" ? "text-warning" : "text-ink-tertiary")} />
       <span dir="auto" className="min-w-0 flex-1 break-words">{text}</span>
       {action && <button type="button" onClick={action.onClick} className={ASK_QUIET_BUTTON}>{action.label}</button>}
+    </div>
+  );
+}
+
+/** The last change the card made itself, kept on the row: a reopened conversation shows it was sent. */
+export function AppDone({ done, bordered }: { done: AppDoneState; bordered: boolean }) {
+  return (
+    <div role="status" data-app-done className={cn("flex items-center gap-2 border-t border-ink/[0.12] py-2.5 text-[13px] leading-[18px] text-ink-secondary", bordered ? "mx-4" : "mt-2")}>
+      <CircleCheck aria-hidden="true" size={14} className="shrink-0 text-success" />
+      <span dir="auto" className="min-w-0 flex-1 break-words">{t("app.done", { tool: done.tool })}{done.text ? ` · ${done.text}` : ""}</span>
+      {done.url && <button type="button" onClick={() => openExternalLink(done.url!)} className={ASK_QUIET_BUTTON}>{t("app.doneOpen")}</button>}
     </div>
   );
 }
