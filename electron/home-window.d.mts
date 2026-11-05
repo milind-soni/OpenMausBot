@@ -31,7 +31,10 @@ export interface HomeBridge {
   updating?: boolean;
 }
 
-export type Home = { kind: "computer" } | { kind: "cloud"; origin: string } | { kind: "signin"; other?: true };
+export type Home = ({ kind: "computer" } | { kind: "cloud"; origin: string } | { kind: "signin"; other?: true })
+  /** This computer's copy is frozen by a move to a server of the person's own, whose marker names it: that server, and
+   * its name. The copy's own page has nothing to show, so the window goes back to it (`reopen`). */
+  & { frozenPlace?: { origin: string | null; place: string } };
 /** A place the window shows: My Cloud, or a team's Cloud or another Cloud of the person's own (`own`), from the verified session. */
 export type HomePlace = { kind: "cloud"; origin: string } | { kind: "team" | "own"; id: string; name: string; role: string | null; origin: string };
 /** What to open: My Cloud, a team's Cloud, another Cloud of the person's own, or (null) the place remembered from last time. */
@@ -70,6 +73,7 @@ type Timers = { set(work: () => void, ms: number): unknown; clear(timer: unknown
 
 export interface HomeWindow {
   show(options?: { open?: "phone" | null; place?: HomeAsk }): Promise<unknown>;
+  cancel(): void;
   openCloud(open?: "phone" | null): Promise<unknown>;
   /** Remove from list from this computer's screen: the Cloud it shows leaves the person's list. */
   remove(): Promise<import("./cloud-account.mjs").CloudRemoveOutcome>;
@@ -99,7 +103,7 @@ export interface HomeWindow {
 
 export function createHomeWindow(deps: {
   journal(): unknown;
-  frozen(): Promise<{ frozen: boolean; cloud?: string } | null>;
+  frozen(): Promise<{ frozen: boolean; cloud?: string; place?: string } | null>;
   account(): { state(): any; power(): any; wakeHome(): Promise<unknown>; setWaking(on: boolean): void; pairHome(cloudId?: string | null): Promise<{ origin: string; code: string; expiresAt: number }>;
     pairTeam?(teamId: string): Promise<{ origin: string; code: string; expiresAt: number }>; signInAgain(): Promise<unknown>; begin(): Promise<unknown>; signOut?(): Promise<unknown>; reopen?(): Promise<unknown>;
     hideCloud?(cloudId: string): Promise<{ outcome: import("./cloud-account.mjs").CloudRemoveOutcome }> } | null;
@@ -110,6 +114,7 @@ export function createHomeWindow(deps: {
   cookieFetch: (url: string, init?: RequestInit) => Promise<Response>;
   power: { asleep(): boolean; hold(): void; woke(): void };
   go(url: string, origin: string | null, place: HomePlace | null): unknown;
+  reopen?(place: { origin: string | null; place: string }, still?: () => boolean): Promise<boolean>;
   showLocal(leaving: boolean): unknown;
   clean?: import("./clean-workspace.mjs").CleanWorkspace | null;
   remembered?(): RememberedPlace;

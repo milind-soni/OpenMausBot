@@ -34,3 +34,19 @@ export async function serverOpens(entry, { fetch: fetchImpl, dialog, forget, tim
     if (response !== 0) return false;
   }
 }
+
+/**
+ * The window's way back to a server this computer's bots moved to: opens it again as the Server menu does, without that
+ * menu's dialog, because this is the app putting itself right and the screen it lands on has Try again. False when the
+ * server isn't saved here any more, nothing answers at it, or `still()` says a newer `show()` took over.
+ * @param {{ origin: string | null }} place
+ * @param {{ saved(): Array<{ id: string, origin: string }>, fetch: typeof fetch, still?(): boolean, opened(entry: object): unknown }} deps
+ */
+export async function reopenSavedServer({ origin }, { saved, fetch: fetchImpl, still = () => true, opened }) {
+  const entry = origin ? saved().find((candidate) => candidate.origin === origin) ?? null : null;
+  if (!entry) return false;
+  if (!(await serverAnswers(entry.origin, fetchImpl))) return false;
+  if (!saved().some((candidate) => candidate.id === entry.id)) return false;
+  if (!still()) return false;
+  return Boolean(await opened(entry));
+}
