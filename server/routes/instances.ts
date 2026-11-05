@@ -226,6 +226,8 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
                   if (target) {
                     target.config = { ...raw.config, authFlow: "device" };
                     await persistProviderInstance(instanceId, instances);
+                    // Keep the in-memory config in step so repeat requests see the persisted lane.
+                    cfg.instances = instances;
                     return json(res, 200, { instances: await describeInstances() });
                   }
                 } finally { providerConfigBusy.set(false); }

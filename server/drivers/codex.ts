@@ -6,7 +6,7 @@ import { type McpApprovalMode, mountMcpServer } from "./codex-mcp-mount.ts";
 import { reportUnsupportedCalls, rolloutMark, type RolloutMark } from "./codex-unsupported-calls.ts";
 // The `codex` CLI headless over its app-server JSON-RPC (NDJSON on stdio): completion is
 // `turn/completed`, approvals arrive as server→client requests, resumeCursor is the codex thread id.
-import { mkdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -404,11 +404,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     const detectPlanLane = async (): Promise<"maus" | "legacy"> => {
       if (!planAuth) return "maus";
       if (config.authFlow === "device") return "legacy";
-      try {
-        const mausCredentials = await planAuth.snapshot();
-        if (mausCredentials.authenticated || !mausCredentials.reason) return "maus";
-      } catch { /* fall through to the Codex-owned store */ }
-      try { if (statSync(join(planDirectory, "codex", "auth.json")).isFile()) return "legacy"; } catch { /* no Codex login either */ }
+      // Store presence, never planAuth calls: the lane probe runs on every snapshot and must
+      // stay invisible to callers that count controller access (and planAuth may be unavailable).
+      if (existsSync(join(planDirectory, "credentials.json"))) return "maus";
+      if (existsSync(join(planDirectory, "codex", "auth.json"))) return "legacy";
       return "maus";
     };
     let models = plan ? { default: "", options: [] } : config.managed ? { default: config.managed.models[0], options: config.managed.models.map(id => ({ id, label: id })) } : STATIC_CODEX_MODELS;

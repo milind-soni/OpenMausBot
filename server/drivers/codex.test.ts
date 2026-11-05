@@ -58,6 +58,11 @@ describe("CodexDriver.decodeConfig", () => {
     expect(codexUserError(refusal, "own")).toBe(refusal);
     expect(() => CodexDriver.decodeConfig({ authMode: "chatgpt-plan", managed: {} })).toThrow("cannot be combined");
   });
+  it("accepts only the device auth flow", () => {
+    expect(CodexDriver.decodeConfig({ authMode: "chatgpt-plan", authFlow: "device" }))
+      .toMatchObject({ authMode: "chatgpt-plan", authFlow: "device" });
+    expect(() => CodexDriver.decodeConfig({ authFlow: "pkce" })).toThrow("Unknown Codex sign-in flow.");
+  });
   it("defaults to the codex binary with fullAuto off", () => {
     expect(CodexDriver.decodeConfig({})).toEqual({ cli: "codex", fullAuto: false });
     expect(CodexDriver.decodeConfig(undefined)).toEqual({ cli: "codex", fullAuto: false });
