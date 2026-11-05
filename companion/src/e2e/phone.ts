@@ -27,7 +27,8 @@ export interface DialOptions {
 /** Codes a WebSocket client may send; any other closes without one. */
 const sendable = (code: number) => code === 1000 || (code >= 3000 && code <= 4999);
 
-function transportFor(socket: WebSocket): RecordTransport {
+/** A built-in WebSocket client as a record transport. */
+export function webSocketTransport(socket: WebSocket): RecordTransport {
   return {
     send: (message) => socket.send(message),
     close: (code, reason) => (sendable(code) ? socket.close(code, reason) : socket.close()),
@@ -51,7 +52,7 @@ export function dial(options: DialOptions): Promise<E2ESession<never>> {
   if (relayed && options.transportByte !== TRANSPORT_RELAY) throw new Error("the relay route uses the relay prologue");
   const socket = new WebSocket(options.url, [relayed ? RELAY_PROTOCOL : DIRECT_PROTOCOL]);
   socket.binaryType = "arraybuffer";
-  const transport = transportFor(socket);
+  const transport = webSocketTransport(socket);
   return new Promise((resolve, reject) => {
     let session: E2ESession<never> | null = null;
     const timer = setTimeout(() => {

@@ -5,6 +5,9 @@ import { request as httpRequest, type IncomingMessage, type ServerResponse } fro
 import type { Duplex } from "node:stream";
 
 import { bearerToken } from "./devices.ts";
+import type { E2EDescriptor } from "./e2e/descriptor.ts";
+import { e2eContextOf } from "./e2e/origin.ts";
+import type { E2EContext } from "./e2e/registry.ts";
 import {
   COMPANION_ENDPOINT_KINDS,
   MAX_COMPANION_ENDPOINTS,
@@ -26,7 +29,7 @@ export interface ProxyOptions {
   mutationToken?: () => string | null;
   authenticate: (
     token: string | undefined,
-  ) => { id?: string; cloudDesktopAccess: boolean; browserControlAccess: boolean } | null;
+  ) => { id?: string; cloudDesktopAccess: boolean; browserControlAccess: boolean; e2eAt?: number } | null;
   /** Pairing is handled here and never forwarded: the harness has no such route. */
   redeem: (
     code: string,
@@ -43,6 +46,25 @@ export interface ProxyOptions {
    * it synchronously on revoke; the returned disposer is called exactly once. */
   connected?: (deviceId: string, disconnect: () => void) => () => void;
   headersTimeoutMs?: number;
+  /** The `e2e` descriptor for one device (null: the phone pairing now); null when end-to-end is off. */
+  e2eDescriptor?: (deviceId: string | null) => E2EDescriptor | null;
+  /** A phone paired through an encrypted session keyed by the pairing token: the session is now that device's. */
+  e2ePaired?: (context: E2EContext, deviceId: string) => void;
+}
+
+/** Which listener a request reached. Only `lan` (port 8810, plain HTTP) refuses a device that has gone end-to-end;
+ * requests arriving through an encrypted stream are recognised by their socket, whatever this says. */
+export type ProxyListener = "lan" | "origin";
+
+/** §11 rule 4 of the wire spec: a phone that has used the encrypted connection never goes back to plain HTTP. */
+const UPDATE_APP = { error: "update_app" } as const;
+
+const PAIRING_SESSION_PATHS = new Set(["POST /api/pair", "GET /api/health"]);
+
+/** A token presented inside a session must belong to the device whose psk opened it. */
+function e2eRefusal(context: E2EContext, method: string, path: string, deviceId: string | undefined): string | null {
+  if (context.peer.kind === "pairing") return PAIRING_SESSION_PATHS.has(`${method} ${path}`) ? null : "pair this phone first";
+  return deviceId && deviceId !== context.peer.id ? "this connection belongs to another device" : null;
 }
 
 export interface CompanionEndpointSnapshot {
@@ -264,7 +286,7 @@ function harnessControlCheck(options: ProxyOptions) {
 export function createProxyHandler(options: ProxyOptions) {
   const viewers = new CompanionViewerRelay({ checkControl: harnessControlCheck(options) });
   const capabilityStreams = new Map<string, Set<() => void>>();
-  const handle = function handle(req: IncomingMessage, res: ServerResponse): void {
+  const handle = function handle(req: IncomingMessage, res: ServerResponse, listener: ProxyListener = "lan"): void {
     const target = requestTarget(req.url);
     if (!target) return sendJson(res, 400, { error: "invalid request target" });
     const path = (req.url ?? "/").split("?")[0];
@@ -278,6 +300,10 @@ export function createProxyHandler(options: ProxyOptions) {
 
     const token = bearerToken(req.headers.authorization);
     const device = options.authenticate(token);
+    const e2e = e2eContextOf(req.socket);
+    if (!e2e && listener === "lan" && device?.e2eAt && path !== "/api/health") return sendJson(res, 426, UPDATE_APP);
+    const e2eDenial = e2e ? e2eRefusal(e2e, method, path, device?.id) : null;
+    if (e2eDenial) return sendJson(res, 401, { error: e2eDenial });
     const browserRequest = isBrowserControlAccess(method, path);
     const browserRefusal = () => {
       if (!browserRequest) return null;
@@ -332,18 +358,23 @@ export function createProxyHandler(options: ProxyOptions) {
             body.pairRequestId,
           );
           if ("error" in result) return sendJson(res, 401, { error: result.error });
+          const pairedId = (result.device as { id?: unknown } | null)?.id;
+          if (e2e && typeof pairedId === "string") options.e2ePaired?.(e2e, pairedId);
           const hosts = options.hosts?.() ?? [];
           const endpoints = options.endpoints?.() ?? [];
+          const descriptor = options.e2eDescriptor?.(typeof pairedId === "string" ? pairedId : null) ?? null;
           const response: typeof result & {
             serverName: string;
             hosts?: string[];
             endpoints?: CompanionEndpoint[];
+            e2e?: E2EDescriptor;
           } = {
             ...result,
             serverName: options.serverName(),
           };
           if (hosts.length) response.hosts = hosts;
           if (endpoints.length) response.endpoints = endpoints;
+          if (descriptor) response.e2e = descriptor;
           return sendJson(res, 201, response);
         },
         (error: Error) => sendJson(res, 400, { error: error.message }),
@@ -357,7 +388,8 @@ export function createProxyHandler(options: ProxyOptions) {
     // Sidecar-owned state: answered here after the bearer and default-deny
     // checks, never sent to the harness.
     if (method === "GET" && path === "/api/companion/endpoints") {
-      return sendJson(res, 200, endpointSnapshot(options));
+      const descriptor = options.e2eDescriptor?.(device?.id ?? null) ?? null;
+      return sendJson(res, 200, { ...endpointSnapshot(options), ...(descriptor ? { e2e: descriptor } : {}) });
     }
 
     const mutationToken = device ? options.mutationToken?.() : undefined;
@@ -634,13 +666,22 @@ export function createProxyHandler(options: ProxyOptions) {
     req.pipe(upstream);
   };
 
-  handle.upgrade = (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
+  handle.upgrade = (req: IncomingMessage, socket: Duplex, head: Buffer, listener: ProxyListener = "lan"): void => {
     if (req.headers.origin) {
       socket.destroy();
       return;
     }
     const token = bearerToken(req.headers.authorization);
     const device = options.authenticate(token);
+    const e2e = e2eContextOf(req.socket);
+    if (!e2e && listener === "lan" && device?.e2eAt) {
+      socket.end("HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+      return;
+    }
+    if (e2e && e2eRefusal(e2e, req.method ?? "GET", (req.url ?? "/").split("?")[0], device?.id)) {
+      socket.destroy();
+      return;
+    }
     viewers.handleUpgrade(req, socket, head, device);
   };
   handle.closeViewers = (): void => viewers.closeAll();
