@@ -46,7 +46,7 @@ beforeEach(() => {
   sendFails = false;
   channel = createChannel({
     store,
-    transport: { maxChars: 40, send: async (token, chatId, text) => { if (sendFails) return { ok: false, error: "refused" }; sent.push({ token, chatId, text }); return { ok: true }; } },
+    transport: { maxChars: 40, linkCommand: /^\/start(?:\s+(\S{1,64}))?$/i, strangerNote: "This bot only talks to its owner.", send: async (token, chatId, text) => { if (sendFails) return { ok: false, error: "refused" }; sent.push({ token, chatId, text }); return { ok: true }; } },
     threadTitle: "Telegram",
     prompt: "You are on Telegram.",
     bot: (botId) => (botId === A ? { id: A, name: "Scout" } : botId === B ? { id: B, name: "Mira" } : undefined),
@@ -131,6 +131,45 @@ describe("linking", () => {
   });
 });
 
+describe("a transport's own link command", () => {
+  let texts: Array<{ chatId: string; text: string }>;
+  let own: ReturnType<typeof createChannel>;
+  beforeEach(() => {
+    texts = [];
+    own = createChannel({
+      store, transport: { maxChars: 40, linkCommand: /^link\s+(\d{6})$/i, send: async (_token, chatId, text) => { texts.push({ chatId, text }); return { ok: true }; } },
+      threadTitle: "iMessage", prompt: "", bot: (botId) => (botId === A ? { id: A, name: "Scout" } : undefined), threadExists: () => true,
+      createThread: () => "t", deliver: async (_botId, _threadId, text) => { delivered.push({ botId: A, threadId: "t", text, sendId: "" }); }, activePath: () => [], needsInput: () => false, now: () => clock,
+    });
+  });
+
+  it("links on the transport's words and not on Telegram's", async () => {
+    const { code } = own.startLink(A);
+    await own.handleInbound(A, inbound("w1", `/start ${code}`, { chatId: "+15550100" }));
+    expect(store.bot(A).allowed).toEqual([]);
+    await own.handleInbound(A, inbound("w2", `Link ${code}`, { chatId: "+15550100" }));
+    await own.idle();
+    expect(store.bot(A).allowed).toEqual(["+15550100"]);
+    expect(texts).toEqual([{ chatId: "+15550100", text: "You're connected to Scout. Message me here any time." }]);
+  });
+
+  it("welcomes a linked chat that sends the command again instead of passing it to the bot", async () => {
+    await link(A, "+15550100");
+    await own.handleInbound(A, inbound("w3", "link 123456", { chatId: "+15550100" }));
+    await own.idle();
+    expect(delivered).toEqual([]);
+    expect(texts.at(-1)?.text).toBe("You're connected to Scout. Message me here any time.");
+  });
+
+  it("stays silent to a stranger when the transport has no note for one, and still never hears them", async () => {
+    await own.handleInbound(A, inbound("s1", "hello", { chatId: "+15550199" }));
+    await own.handleInbound(A, inbound("s2", "hello?", { chatId: "+15550199" }));
+    await own.idle();
+    expect(texts).toEqual([]);
+    expect(delivered).toEqual([]);
+  });
+});
+
 describe("messages", () => {
   beforeEach(() => link());
 
@@ -152,7 +191,7 @@ describe("messages", () => {
 
   it("tells the chat when the bot could not take the message", async () => {
     const failing = createChannel({
-      store, transport: { maxChars: 40, send: async (token, chatId, text) => { sent.push({ token, chatId, text }); return { ok: true }; } },
+      store, transport: { maxChars: 40, linkCommand: /^\/start$/i, send: async (token, chatId, text) => { sent.push({ token, chatId, text }); return { ok: true }; } },
       threadTitle: "Telegram", prompt: "", bot: () => ({ id: A, name: "Scout" }), threadExists: () => true,
       createThread: () => "t", deliver: async () => { throw new Error("the bot is busy"); }, activePath: () => [], needsInput: () => false, now: () => clock,
     });

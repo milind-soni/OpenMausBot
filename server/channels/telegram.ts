@@ -4,15 +4,15 @@
 import { z } from "zod";
 
 import type { InboundMessage, SendResult } from "./core.ts";
+import type { ReadResult } from "./poller.ts";
 
 export const TELEGRAM_API_BASE = "https://api.telegram.org";
 /** Telegram's own limits: 4096 characters a message, and a token shaped "<bot id>:<secret>". */
 export const TELEGRAM_MAX_CHARS = 4096;
+export const TELEGRAM_LINK_COMMAND = /^\/start(?:\s+(\S{1,64}))?$/i;
+export const TELEGRAM_STRANGER_NOTE = "This bot only talks to its owner.";
 export const TELEGRAM_TOKEN = /^\d{6,12}:[A-Za-z0-9_-]{30,}$/;
 export const POLL_TIMEOUT_S = 25;
-export const POLL_BACKOFF_MIN_MS = 5_000;
-export const POLL_BACKOFF_MAX_MS = 60_000;
-export const PAUSED_CHECK_MS = 1_000;
 
 export const TELEGRAM_PROMPT = [
   "This conversation is the person's Telegram chat with you. Your replies go to their phone as plain-text Telegram messages: keep them short, in plain sentences, with no Markdown, tables or headings. They cannot see cards, forms, buttons or files here, so ask questions in text with numbered options.",
@@ -81,12 +81,12 @@ export function createTelegramApi(options: TelegramApiOptions = {}) {
     return me.success ? { ok: true, username: me.data.username } : { ok: false, error: "Telegram answered without a bot username." };
   }
 
-  async function getUpdates(token: string, offset: number | undefined, signal?: AbortSignal): Promise<{ ok: true; updates: TelegramUpdate[] } | Exclude<ApiAnswer, { ok: true }>> {
+  async function getUpdates(token: string, offset: number | undefined, signal?: AbortSignal): Promise<ReadResult<TelegramUpdate>> {
     const answer = await call(token, "getUpdates", { ...(offset === undefined ? {} : { offset }), timeout: POLL_TIMEOUT_S, allowed_updates: ["message"] }, signal);
     if (!answer.ok) return answer;
     const updates = z.array(z.unknown()).safeParse(answer.result);
     if (!updates.success) return { ok: false, error: "Telegram answered without an update list." };
-    return { ok: true, updates: updates.data.map((raw) => updateSchema.safeParse(raw)).filter((parsed) => parsed.success).map((parsed) => parsed.data!) };
+    return { ok: true, items: updates.data.map((raw) => updateSchema.safeParse(raw)).filter((parsed) => parsed.success).map((parsed) => parsed.data!) };
   }
 
   async function sendMessage(token: string, chatId: string, text: string): Promise<SendResult> {
@@ -113,92 +113,3 @@ export function inboundOf(update: TelegramUpdate): InboundMessage | null {
 }
 
 export const telegramLink = (username: string, code: string): string => `https://t.me/${username}?start=${code}`;
-
-export interface TelegramPollerDeps {
-  api: Pick<TelegramApi, "getUpdates">;
-  token(): string;
-  cursor(): number | undefined;
-  /** One update, in order; the poller moves on only once it returns. */
-  handle(update: TelegramUpdate): Promise<void>;
-  failed(error: string): void;
-  log?(line: string): void;
-  /** Tests: how long to wait, by reason. */
-  delays?: { backoffMin?: number; backoffMax?: number; paused?: number };
-}
-
-/** One bot's long-polling loop. Stop ends it; pause lets a check in flight finish but delivers nothing from it. */
-export function createTelegramPoller(deps: TelegramPollerDeps) {
-  const backoffMin = deps.delays?.backoffMin ?? POLL_BACKOFF_MIN_MS;
-  const backoffMax = deps.delays?.backoffMax ?? POLL_BACKOFF_MAX_MS;
-  const pausedMs = deps.delays?.paused ?? PAUSED_CHECK_MS;
-  let stopped = true;
-  let paused = false;
-  let backoff = 0;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let inflight: AbortController | null = null;
-  let checking = false;
-
-  async function check(): Promise<number> {
-    const token = deps.token();
-    if (!token) return backoffMax;
-    inflight = new AbortController();
-    const controller = inflight;
-    try {
-      const result = await deps.api.getUpdates(token, deps.cursor(), controller.signal);
-      if (controller.signal.aborted || stopped || paused) return 0;
-      if (!result.ok) {
-        backoff = Math.min(backoff ? backoff * 2 : backoffMin, backoffMax);
-        deps.failed(result.error);
-        deps.log?.(`checking Telegram failed: ${result.error}`);
-        return result.retryAfterMs ?? backoff;
-      }
-      backoff = 0;
-      for (const update of result.updates) {
-        if (stopped || paused) return 0;
-        await deps.handle(update);
-      }
-      return 0;
-    } finally {
-      if (inflight === controller) inflight = null;
-    }
-  }
-
-  function schedule(delay: number): void {
-    if (stopped) return;
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => {
-      timer = null;
-      if (stopped) return;
-      if (paused) return schedule(pausedMs);
-      checking = true;
-      void check()
-        .catch((error: unknown) => { deps.log?.(`checking Telegram failed: ${(error as Error).message}`); return backoffMin; })
-        .then((next) => { checking = false; schedule(paused ? pausedMs : next); });
-    }, delay);
-    timer.unref?.();
-  }
-
-  return {
-    start() {
-      if (!stopped) return;
-      stopped = false;
-      schedule(0);
-    },
-    stop() {
-      stopped = true;
-      if (timer) clearTimeout(timer);
-      timer = null;
-      inflight?.abort();
-    },
-    pause() {
-      paused = true;
-      inflight?.abort();
-    },
-    resume() {
-      paused = false;
-    },
-    busy: () => checking,
-  };
-}
-
-export type TelegramPoller = ReturnType<typeof createTelegramPoller>;

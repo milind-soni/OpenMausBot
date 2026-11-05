@@ -9,7 +9,8 @@ import { PASS, type RouteHandler } from "../routes/table.ts";
 import { schemaIssue } from "../schema.ts";
 import type { Message, Store } from "../store.ts";
 import { createChannel, createChannelStore, type BotChannelState } from "./core.ts";
-import { createTelegramApi, createTelegramPoller, inboundOf, TELEGRAM_MAX_CHARS, TELEGRAM_PROMPT, telegramLink, type TelegramPoller } from "./telegram.ts";
+import { type Poller, createPoller } from "./poller.ts";
+import { createTelegramApi, inboundOf, TELEGRAM_LINK_COMMAND, TELEGRAM_MAX_CHARS, TELEGRAM_PROMPT, TELEGRAM_STRANGER_NOTE, telegramLink, type TelegramUpdate } from "./telegram.ts";
 
 export const TELEGRAM_STORE = "telegram";
 export const TELEGRAM_THREAD_TITLE = "Telegram";
@@ -47,20 +48,20 @@ export function createTelegramHost(deps: TelegramHostDeps) {
   const store = createChannelStore(deps.dataDir, TELEGRAM_STORE);
   const api = createTelegramApi({ base: deps.apiBase, fetchImpl: deps.fetchImpl });
   const channel = createChannel({
-    store, transport: { maxChars: TELEGRAM_MAX_CHARS, send: api.sendMessage }, threadTitle: TELEGRAM_THREAD_TITLE, prompt: TELEGRAM_PROMPT,
+    store, transport: { maxChars: TELEGRAM_MAX_CHARS, linkCommand: TELEGRAM_LINK_COMMAND, strangerNote: TELEGRAM_STRANGER_NOTE, send: api.sendMessage }, threadTitle: TELEGRAM_THREAD_TITLE, prompt: TELEGRAM_PROMPT,
     bot: (botId) => { const bot = deps.store.bot(botId); return bot ? { id: bot.id, name: bot.name } : undefined; },
     threadExists: (botId, threadId) => Boolean(deps.store.taskByThread(botId, threadId)),
     createThread: (botId, title) => deps.store.createTask(botId, title, false)?.threadId ?? null,
     deliver: deps.deliver, activePath: (threadId) => deps.store.activePath(threadId), needsInput: deps.needsInput, now, log,
   });
-  const pollers = new Map<string, TelegramPoller>();
+  const pollers = new Map<string, Poller<TelegramUpdate>>();
   let running = false;
   let paused = false;
 
   function startPoller(botId: string): void {
     if (!running || deps.teamCloud || pollers.has(botId) || !deps.store.bot(botId)) return;
-    const poller = createTelegramPoller({
-      api, token: () => store.token(botId), cursor: () => store.bot(botId).cursor, log, delays: deps.delays,
+    const poller = createPoller<TelegramUpdate>({
+      source: "Telegram", read: api.getUpdates, token: () => store.token(botId), cursor: () => store.bot(botId).cursor, log, delays: deps.delays,
       handle: async (update) => {
         const message = inboundOf(update);
         if (message) await channel.handleInbound(botId, message);

@@ -1,6 +1,6 @@
 // A chat app as a way to talk to one MausBot bot, on the person's own account. The core is the same for every chat app:
 // only chats the person linked with a one-time code are heard, each linked chat has one thread on the bot, and every
-// finished turn in that thread is sent back. A transport (telegram.ts) carries the messages and knows nothing else.
+// finished turn in that thread is sent back. A transport (telegram.ts, sendblue.ts) carries the messages and knows nothing else.
 // Tokens are sealed with a 0600 key file no backup carries, as webhooks.ts does for webhook secrets.
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
@@ -17,7 +17,6 @@ export const LINK_TTL_MS = 10 * 60_000;
 export const LINK_MAX_FAILURES = 5;
 export const MAX_MESSAGES_PER_REPLY = 5;
 const SEEN_MAX = 500;
-const LINK_COMMAND = /^\/start(?:\s+(\S{1,64}))?$/i;
 export const WAITING_NOTE = "The bot is waiting for your OK in OpenMausBot. Open the app to answer it.";
 
 export interface InboundMessage {
@@ -35,6 +34,10 @@ export type SendResult = { ok: true } | { ok: false; error: string };
 
 export interface ChannelTransport {
   maxChars: number;
+  /** The message that carries a link code, the code in group 1. A chat already linked that sends it is welcomed again. */
+  linkCommand: RegExp;
+  /** What a chat that is not linked is told, once. Absent: it is not answered at all. */
+  strangerNote?: string;
   send(token: string, chatId: string, text: string): Promise<SendResult>;
 }
 
@@ -47,6 +50,7 @@ const chatSchema = z.object({
 
 const botSchema = z.object({
   sealedToken: z.string().optional(),
+  /** What the transport calls the account: Telegram's bot username, Sendblue's phone number. */
   username: z.string().optional(),
   allowed: z.array(z.string()).default([]),
   chats: z.record(z.string(), chatSchema).default({}),
@@ -272,7 +276,7 @@ export function createChannel(deps: ChannelDeps) {
     const bot = deps.bot(botId);
     if (!bot) return;
     const { chatId, text } = message;
-    if (LINK_COMMAND.test(text)) {
+    if (deps.transport.linkCommand.test(text)) {
       await send(botId, chatId, `You're connected to ${bot.name}. Message me here any time.`);
       return;
     }
@@ -303,14 +307,15 @@ export function createChannel(deps: ChannelDeps) {
     if (!deps.store.firstSighting(botId, message.id)) return;
     const lane = `${botId}:${message.chatId}`;
     if (!deps.store.bot(botId).allowed.includes(message.chatId)) {
-      const code = LINK_COMMAND.exec(message.text)?.[1];
+      const code = deps.transport.linkCommand.exec(message.text)?.[1];
       if (message.private && code && deps.store.claimLink(botId, code, message.chatId, message.name, now())) {
         const name = deps.bot(botId)?.name ?? "the bot";
         await inLane(lane, () => send(botId, message.chatId, `You're connected to ${name}. Message me here any time.`).then(() => undefined));
       } else if (message.private && !refused.has(lane)) {
         refused.add(lane);
         log("ignored a message from a chat that is not linked");
-        await inLane(lane, () => send(botId, message.chatId, "This bot only talks to its owner.").then(() => undefined));
+        const note = deps.transport.strangerNote;
+        if (note) await inLane(lane, () => send(botId, message.chatId, note).then(() => undefined));
       }
       return;
     }
