@@ -64,6 +64,7 @@ export async function verifyKey(key: string): Promise<VerifyResult> {
     // The public catalog needs no key, so it proves nothing; `self=true` answers 401 for an absent or invalid Bearer token.
     const res = await fetch(`${API}/model?page_size=1&self=true`, {
       headers: { authorization: `Bearer ${key}` },
+      redirect: "error",
       signal: AbortSignal.timeout(20_000),
     });
     if (res.ok) return { ok: true };
@@ -78,6 +79,7 @@ async function fishGet(key: string, path: string): Promise<{ status: number; bod
   try {
     response = await fetch(`${API}${path}`, {
       headers: { authorization: `Bearer ${key}` },
+      redirect: "error",
       signal: AbortSignal.timeout(20_000),
     });
   } catch {
@@ -196,6 +198,7 @@ export async function synthesize(
         mp3_bitrate: 64,
         latency: "normal",
       }),
+      redirect: "error",
       signal: AbortSignal.timeout(60_000),
     });
   } catch {
