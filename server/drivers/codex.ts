@@ -1689,7 +1689,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     startAuthentication: async () => {
       if (planUnavailable) throw new Error(planUnavailable);
       if (planSigningOut || disposed) throw new Error("This account is being disconnected. Wait before signing in again.");
-      if (plan && config.authFlow === "device") return authentication.start();
+      if (plan && config.authFlow === "device") {
+        // Codex's status probe needs the home to exist before the first turn creates it.
+        mkdirSync(join(planDirectory, "codex"), { recursive: true, mode: 0o700 });
+        return authentication.start();
+      }
       return (planAuth ?? authentication).start();
     },
     getAuthentication: async (flowId) => {
