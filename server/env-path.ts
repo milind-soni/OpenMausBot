@@ -42,7 +42,7 @@ function knownDirs(): string[] {
     join(home, ".deno", "bin"),
     join(home, "bin"),
     ...nvmBinDirs(),
-    // Mac Local VM runtimes (#4520): Docker Desktop's per-user CLI install and Podman's official pkg.
+    // Mac Local VM runtimes: Docker Desktop's per-user CLI install and Podman's official pkg.
     ...(process.platform === "darwin" ? [
       join(home, ".docker", "bin"),
       ...(sealedFixture() ? [] : ["/opt/podman/bin"]),
