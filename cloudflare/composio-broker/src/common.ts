@@ -147,6 +147,7 @@ export function composioRequest(env: Env, path: string, init?: RequestInit) {
 
 const connectedAccountResponseSchema = z.object({
   id: z.string().optional(),
+  user_id: z.string().optional(),
   alias: z.string().nullable().optional(),
   status: z.string().optional(),
   updated_at: z.string().optional(),

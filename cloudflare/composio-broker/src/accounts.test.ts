@@ -603,6 +603,32 @@ describe("a deleted MausBot account", () => {
     expect(h.d1.rows("SELECT cleared_at FROM revoked_accounts")).toEqual([{ cleared_at: expect.any(Number) }]);
   });
 
+  it("deletes only the revoked account's own sign-ins even if Composio's listing ignores its user filter", async () => {
+    harness();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    h.d1.db.prepare("INSERT INTO revoked_accounts (account_id, revoked_at) VALUES (?, ?)").run(ACCOUNT, 1);
+    const desktop = await h.install();
+    const gmail = h.account(h.accountOwner(ACCOUNT), "gmail"), theirs = h.account(desktop, "gmail");
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      // Every sign-in of every user, whatever user_ids asked for.
+      if ((init?.method ?? "GET") === "GET" && url.pathname.endsWith("/connected_accounts")) return Response.json({ items: h.composio.accounts, next_cursor: null });
+      return h.composio.fetchImpl(input, init);
+    });
+    await clearRevokedAccounts(h.env as never);
+    await clearRevokedAccounts(h.env as never);
+    expect(h.composio.accounts.map((account) => account.id)).toEqual([theirs]);
+    expect(h.composio.calls.filter((call) => call.method === "DELETE").map((call) => call.path)).toEqual([`/connected_accounts/${gmail}`]);
+    // A listing that still holds someone else's sign-in is no proof the account's own are gone.
+    expect(h.d1.rows("SELECT cleared_at FROM revoked_accounts")).toEqual([{ cleared_at: null }]);
+    const lines = warn.mock.calls.map(([line]) => String(line));
+    expect(lines.map((line) => JSON.parse(line))).toEqual([
+      { message: "revoked account cleanup skipped another user's sign-ins", skipped: 1 },
+      { message: "revoked account cleanup skipped another user's sign-ins", skipped: 1 },
+    ]);
+    for (const id of [theirs, desktop.userId, ACCOUNT]) expect(lines.join("\n")).not.toContain(id);
+  });
+
   it("finishes deleting a revoked account's sign-ins even when the rest of the hourly run fails", async () => {
     harness();
     h.d1.db.prepare("INSERT INTO revoked_accounts (account_id, revoked_at) VALUES (?, ?)").run(ACCOUNT, 1);

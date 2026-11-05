@@ -202,11 +202,15 @@ export async function clearRevokedAccounts(env: Env, now = Date.now(), budget = 
         failed(listed.status);
         continue;
       }
-      const ids = connectedAccountsPageSchema.parse(await listed.json()).items.flatMap((account) => account.id ?? []);
-      if (!ids.length) {
+      const items = connectedAccountsPageSchema.parse(await listed.json()).items;
+      if (!items.length) {
         await env.DB.prepare("UPDATE revoked_accounts SET cleared_at = ? WHERE account_id = ?").bind(now, accountId).run();
         continue;
       }
+      // Never another person's sign-in, even if Composio ignored user_ids; such a listing also never clears the account.
+      const ids = items.flatMap((account) => account.user_id === accountUser(accountId) && account.id ? [account.id] : []);
+      const skipped = items.filter((account) => account.user_id !== accountUser(accountId)).length;
+      if (skipped) console.warn(JSON.stringify({ message: "revoked account cleanup skipped another user's sign-ins", skipped }));
       for (const id of ids.slice(0, budget)) {
         budget -= 1;
         const removed = await composioRequest(env, `/connected_accounts/${encodeURIComponent(id)}?revoke_on_delete=true`, { method: "DELETE" });

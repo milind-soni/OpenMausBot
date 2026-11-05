@@ -195,7 +195,11 @@ lands after and is refused (403 `account_revoked`, or 404 for the adopt).
 After answering, and then on every hourly run, the broker deletes the
 account's sign-ins at Composio (`DELETE /connected_accounts/{id}?revoke_on_delete=true`),
 4 accounts and 8 requests a run, until a listing comes back empty
-(`cleared_at`). Each run takes the accounts it tried longest ago first
+(`cleared_at`). It deletes only listed items whose `user_id` is the
+account's user: should Composio ever ignore the `user_ids` filter, another
+person's sign-ins are skipped, the account stays uncleared, and each run
+logs `{message: "revoked account cleanup skipped another user's sign-ins",
+skipped}` with a count and no ids. Each run takes the accounts it tried longest ago first
 (`attempted_at`), so an account that keeps failing goes to the back. A Composio outage never holds up the revoke itself: a
 failure is logged as `{message: "revoked account cleanup failed", accountId,
 status}` and retried on the next run.
@@ -274,4 +278,14 @@ changes nothing.
    on. Without `CLOUD_GRANT_SECRET` (step 5), both
    `PUT /v1/installation/account` and `POST /v1/accounts/revoke` answer 503
    `unsupported`. Optionally set the var `ACCOUNT_DAILY_TOOL_CALLS` (default
-   300) in `wrangler.jsonc`.
+   300) in `wrangler.jsonc`. To check that this code is live (an unsigned
+   `POST /v1/accounts/revoke` can't tell: an older broker answers it 401
+   too), run `pnpm exec wrangler deployments list --config cloudflare/composio-broker/wrangler.jsonc`,
+   or register a throwaway installation and send `PUT /v1/installation/account`
+   with `{}` and its token: 403 `invalid_grant` is this code, 503 is this
+   code without `CLOUD_GRANT_SECRET` or 0006, and 404 is older code; then end
+   it with `DELETE /v1/installation`. Rolling back past this code removes the
+   phone limits (bound phones keep their account's user with no lease,
+   allowance, daily cap or connection-management lock) and every revoke
+   answers 401, so the Admin refuses deletions of accounts that had grants:
+   unset `OMB_COMPOSIO_BROKER_URL` on the Admin first.
