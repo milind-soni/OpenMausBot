@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { accountToolCallRefusal, presentAccountGrant, verifyAccountGrant } from "./accounts";
-import { utf8, type InstallationRow } from "./common";
+import { accountToolCallRefusal, presentAccountGrant, reserveAppLink, verifyAccountGrant } from "./accounts";
+import { DAY_MS, utcDay, utf8, type InstallationRow } from "./common";
+import { createSession } from "./index";
 import { adoptSharedUser } from "./sharing";
 import { accountGrant, brokerHarness, cloudGrant, type Installation } from "./test-harness";
 
@@ -41,6 +42,14 @@ const authorize = (owner: Installation, slug: string, body: Record<string, unkno
 const linkBodies = () => h.composio.calls.filter((call) => call.path.endsWith("/link")).map((call) => call.body!);
 const rpc = (owner: Installation, message: unknown) => h.call(owner, "/v1/mcp", { method: "POST", body: JSON.stringify(message) });
 const toolCall = (owner: Installation) => rpc(owner, { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "GMAIL_SEND_EMAIL", arguments: {} } });
+const CALL = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "GMAIL_SEND_EMAIL", arguments: {} } };
+const LIST = { jsonrpc: "2.0", id: 1, method: "tools/list" };
+const sessionBodies = () => h.composio.calls.filter((call) => call.method === "POST" && call.path === "/tool_router/session").map((call) => call.body!);
+/** Marks the installation as a paid Cloud's, as the Cloud's server does after registering. */
+async function asCloud(owner: Installation) {
+  const response = await h.call(owner, "/v1/installation/cloud", { method: "PUT", body: JSON.stringify({ grant: cloudGrant(`machine-${owner.id}`) }) });
+  expect(response.status).toBe(200);
+}
 const forwardedToolCalls = () => h.composio.calls.filter((call) => call.path.endsWith("/mcp") && call.body?.method === "tools/call").length;
 async function connected(owner: Installation) {
   const response = await h.call(owner, "/v1/connectors/connected");
@@ -136,10 +145,15 @@ describe("a phone's installation bound to its MausBot account", () => {
     expect((await h.call(desktop, "/v1/connectors/connected")).status).toBe(200);
   });
 
-  it("lets a bound phone share its account's apps with the person's Cloud, but never adopt another user", async () => {
+  it("lets a bound phone share its account's apps only with a MausBot Cloud, and never adopt another user", async () => {
     harness();
     const phone = await h.install(), desktop = await h.install(), cloud = await h.install();
     expect((await h.bind(phone, ACCOUNT)).status).toBe(200);
+    const notCloud = await post(phone, "/v1/installation/share", { for: desktop.id });
+    expect(notCloud.status).toBe(403);
+    expect(await notCloud.json()).toEqual({ error: "A MausBot account's connected apps can be shared only with a MausBot Cloud.", code: "cloud_only" });
+    expect(h.d1.rows("SELECT * FROM user_shares")).toEqual([]);
+    await asCloud(cloud);
     h.account(h.accountOwner(ACCOUNT), "gmail");
     const refused = await post(phone, "/v1/installation/adopt", { code: await share(desktop, phone) });
     expect(refused.status).toBe(409);
@@ -173,6 +187,30 @@ describe("a phone's installation bound to its MausBot account", () => {
     expect(adopted.response.status).toBe(409);
     expect(await adopted.response.json()).toEqual({ error: "This installation's connected apps follow its MausBot account.", code: "account_bound" });
     expect(h.d1.rows("SELECT shared_user_id FROM installations WHERE id = ?", phone.id)).toEqual([{ shared_user_id: `omb_acct_${ACCOUNT}` }]);
+  });
+
+  it("starts a fresh Session without connection management every time a phone binds", async () => {
+    harness();
+    const phone = await h.install();
+    await h.bind(phone, ACCOUNT);
+    // A Session with management on, as code without the allowance made it.
+    const managed = await createSession(h.env as never, `omb_acct_${ACCOUNT}`);
+    h.d1.db.prepare("UPDATE installations SET session_id = ? WHERE id = ?").run(managed.sessionId, phone.id);
+    expect((await h.bind(phone, ACCOUNT)).status).toBe(200);
+    expect(h.d1.rows("SELECT session_id FROM installations WHERE id = ?", phone.id)).toEqual([{ session_id: null }]);
+    expect((await h.call(phone, "/v1/connectors/connected")).status).toBe(200);
+    expect(sessionBodies().at(-1)?.manage_connections).toEqual({ enable: false });
+  });
+
+  it("fails closed for a bound phone's tool calls and sign-ins on a database without migration 0007", async () => {
+    harness(6);
+    const phone = await h.install();
+    expect((await h.bind(phone, ACCOUNT)).status).toBe(200);
+    expect((await rpc(phone, LIST)).status).toBe(200);
+    expect((await rpc(phone, CALL)).status).toBe(503);
+    expect(forwardedToolCalls()).toBe(0);
+    expect((await authorize(phone, "gmail")).status).toBe(503);
+    expect(linkBodies()).toEqual([]);
   });
 
   it("keeps unbound installations working on a database without migration 0006", async () => {
@@ -218,6 +256,34 @@ describe("a free MausBot account's allowance and its hosted sign-in callback", (
     expect((await authorize(phone, "jira")).status).toBe(200);
   });
 
+  it("counts the sign-ins an account opened in the last 15 minutes, once per app, across its phones", async () => {
+    harness();
+    const phone = await h.install(), tablet = await h.install();
+    await h.bind(phone, ACCOUNT); await h.bind(tablet, ACCOUNT);
+    for (const [owner, slug] of [[phone, "gmail"], [tablet, "gmail"], [phone, "slack"], [tablet, "notion"]] as const) {
+      expect((await authorize(owner, slug)).status).toBe(200);
+    }
+    const refused = await authorize(phone, "linear");
+    expect(refused.status).toBe(402);
+    expect(await refused.json()).toEqual({ error: expect.any(String), code: "app_limit", limit: 3, apps: ["gmail", "notion", "slack"] });
+    expect(linkBodies().some((body) => body.toolkit === "linear")).toBe(false);
+    expect((await authorize(tablet, "slack")).status).toBe(200);           // an app already opened stays allowed
+    h.d1.db.prepare("UPDATE account_links SET minted_at = ? WHERE toolkit = 'notion'").run(Date.now() - 15 * 60_000 - 1);
+    expect((await authorize(phone, "linear")).status).toBe(200);
+  });
+
+  it("lets at most three new apps through when an account's phones open them at the same moment", async () => {
+    harness();
+    const phone = await h.install(), tablet = await h.install();
+    await h.bind(phone, ACCOUNT); await h.bind(tablet, ACCOUNT);
+    const opened = await Promise.all(["gmail", "slack", "notion", "linear", "jira"].map((slug, index) => authorize(index % 2 ? tablet : phone, slug)));
+    expect(opened.map((response) => response.status).sort()).toEqual([200, 200, 200, 402, 402]);
+    expect(linkBodies()).toHaveLength(3);
+    // Five claims that reach the database in the same tick.
+    const claims = await Promise.all(["asana", "jira", "linear", "notion", "slack"].map((slug) => reserveAppLink(h.env as never, OTHER, [], slug)));
+    expect(claims.filter((claim) => claim === null)).toHaveLength(3);
+  });
+
   it("refuses to start an account's connection while Composio can't list its apps, without asking for a link", async () => {
     harness();
     const phone = await h.install(), desktop = await h.install();
@@ -256,39 +322,71 @@ describe("a free MausBot account's allowance and its hosted sign-in callback", (
       .toEqual({ enable: true, enable_wait_for_connections: true, enable_connection_removal: true });
   });
 
-  it("caps an account's tool calls per UTC day across its phones, even when they call at once, and never a desktop's or a Cloud's", async () => {
+  it("caps an account's tool calls per UTC day across its phones, even when they call at once", async () => {
     harness();
     h.env.ACCOUNT_DAILY_TOOL_CALLS = "3";
-    const phone = await h.install(), tablet = await h.install(), desktop = await h.install(), cloud = await h.install();
+    const phone = await h.install(), tablet = await h.install(), other = await h.install();
     await h.bind(phone, ACCOUNT); await h.bind(tablet, ACCOUNT);
     h.account(h.accountOwner(ACCOUNT), "gmail");
-    expect((await rpc(phone, { jsonrpc: "2.0", id: 1, method: "tools/list" })).status).toBe(200);
+    expect((await rpc(phone, LIST)).status).toBe(200);
     const statuses = (await Promise.all([phone, tablet, phone, tablet, phone].map(toolCall))).map((response) => response.status);
     expect(statuses.sort()).toEqual([200, 200, 200, 429, 429]);
     expect(forwardedToolCalls()).toBe(3);
     const refused = await toolCall(tablet);
     expect(refused.status).toBe(429);
-    expect(await refused.json()).toEqual({ error: expect.any(String), code: "daily_limit" });
-    expect((await rpc(phone, { jsonrpc: "2.0", id: 1, method: "tools/list" })).status).toBe(200);
-    expect((await h.call(phone, "/v1/mcp", { method: "POST", body: "not json" })).status).toBe(400);
-
-    expect((await post(cloud, "/v1/installation/adopt", { code: await share(phone, cloud) })).status).toBe(200);
-    h.account(desktop, "gmail");
-    for (const owner of [desktop, desktop, desktop, desktop, cloud, cloud, cloud, cloud]) expect((await toolCall(owner)).status).toBe(200);
+    expect(await refused.json()).toEqual({
+      error: "A free MausBot account makes up to 3 connected-app tool calls a day. Try again tomorrow, or get MausBot Cloud for more.",
+      code: "daily_limit",
+    });
+    expect((await rpc(phone, LIST)).status).toBe(200);
 
     // The next UTC day starts the count again, and a batch counts every call in it.
     h.d1.db.prepare("UPDATE account_tool_calls SET day = '2000-01-01'").run();
-    const call = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "GMAIL_SEND_EMAIL", arguments: {} } };
-    expect((await rpc(phone, [call, call])).status).toBe(200);
-    expect((await rpc(tablet, [call, call])).status).toBe(429);
+    expect((await rpc(phone, [CALL, CALL])).status).toBe(200);
+    expect((await rpc(tablet, [CALL, CALL])).status).toBe(429);
     expect((await toolCall(tablet)).status).toBe(200);
 
     // Five calls that reach the counter in the same tick: exactly the cap passes.
-    await h.bind(desktop, OTHER);
-    const bound = h.d1.rows<InstallationRow>("SELECT * FROM installations WHERE id = ?", desktop.id)[0]!;
-    const body = utf8(JSON.stringify(call));
-    const refusals = await Promise.all(Array.from({ length: 5 }, () => accountToolCallRefusal(body, bound, h.env as never)));
+    await h.bind(other, OTHER);
+    const bound = h.d1.rows<InstallationRow>("SELECT * FROM installations WHERE id = ?", other.id)[0]!;
+    const refusals = await Promise.all(Array.from({ length: 5 }, () => accountToolCallRefusal(utf8(JSON.stringify(CALL)), bound, h.env as never)));
     expect(refusals.filter((refusal) => refusal === null)).toHaveLength(3);
+  });
+
+  it("never moves an account's day backwards, or past its cap, when a call carries a stale clock", async () => {
+    harness();
+    h.env.ACCOUNT_DAILY_TOOL_CALLS = "2";
+    const phone = await h.install();
+    await h.bind(phone, ACCOUNT);
+    const bound = h.d1.rows<InstallationRow>("SELECT * FROM installations WHERE id = ?", phone.id)[0]!;
+    const count = (at: number) => accountToolCallRefusal(utf8(JSON.stringify(CALL)), bound, h.env as never, at);
+    const now = Date.now();
+    expect(await count(now + DAY_MS)).toBeNull();
+    expect(await count(now)).toBeNull();
+    expect(h.d1.rows("SELECT day, calls FROM account_tool_calls")).toEqual([{ day: utcDay(now + DAY_MS), calls: 2 }]);
+    expect((await count(now))?.status).toBe(429);
+    expect(h.d1.rows("SELECT day, calls FROM account_tool_calls")).toEqual([{ day: utcDay(now + DAY_MS), calls: 2 }]);
+  });
+
+  it("refuses a bound phone's MCP body that isn't JSON, which could hide an uncounted call", async () => {
+    harness();
+    const phone = await h.install();
+    await h.bind(phone, ACCOUNT);
+    const refused = await h.call(phone, "/v1/mcp", { method: "POST", body: "not json" });
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ error: "This request isn't valid JSON.", code: "invalid_request" });
+  });
+
+  it("never counts a desktop's tool calls, or a Cloud's that shares the account's apps", async () => {
+    harness();
+    h.env.ACCOUNT_DAILY_TOOL_CALLS = "1";
+    const phone = await h.install(), desktop = await h.install(), cloud = await h.install();
+    await h.bind(phone, ACCOUNT);
+    await asCloud(cloud);
+    expect((await post(cloud, "/v1/installation/adopt", { code: await share(phone, cloud) })).status).toBe(200);
+    h.account(h.accountOwner(ACCOUNT), "gmail"); h.account(desktop, "gmail");
+    for (const owner of [desktop, desktop, cloud, cloud]) expect((await toolCall(owner)).status).toBe(200);
+    expect(h.d1.rows("SELECT * FROM account_tool_calls")).toEqual([]);
   });
 
   it("allows 300 tool calls a day unless configured otherwise", async () => {

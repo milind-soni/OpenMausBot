@@ -11,6 +11,7 @@ export const ACCOUNT_GRANT = /^v1\.acct\.([A-Za-z0-9][A-Za-z0-9_-]{2,127})\.([0-
 /** The Admin mints 24-hour grants; 300 s covers its clock running ahead of ours. */
 const MAX_GRANT_AHEAD_MS = DAY_MS + 300_000;
 export const ACCOUNT_APP_LIMIT = 3;
+const PENDING_LINK_MS = 15 * 60_000;
 const ACCOUNT_DAILY_TOOL_CALLS = 300;
 export const PHONE_CONNECT_CALLBACK = "openmausbot://connected-apps/done";
 
@@ -50,10 +51,10 @@ export async function presentAccountGrant(request: Request, installation: Instal
     return json({ error: "This grant isn't valid. Ask MausBot for a new one.", code: "invalid_grant" }, 403);
   }
   const user = accountUser(grant.accountId);
-  // One statement, so a revoke can never land between the checks and the write.
+  // One statement, so a revoke can never land between the checks and the write. A fresh Session each bind, so one
+  // created with connection management on never survives.
   const bound = await env.DB.prepare(
-    `UPDATE installations SET account_id = ?2, account_until = ?3, shared_user_id = ?4,
-       session_id = CASE WHEN account_id IS NULL THEN NULL ELSE session_id END
+    `UPDATE installations SET account_id = ?2, account_until = ?3, shared_user_id = ?4, session_id = NULL
      WHERE id = ?1 AND disabled_at IS NULL AND (account_id IS NULL OR account_id = ?2)
        AND NOT EXISTS (SELECT 1 FROM revoked_accounts WHERE account_id = ?2)`,
   ).bind(installation.id, grant.accountId, grant.exp * 1000, user).run();
@@ -72,11 +73,24 @@ export async function presentAccountGrant(request: Request, installation: Instal
   return json({ accountUntil: grant.exp * 1000, appLimit: ACCOUNT_APP_LIMIT, user: await userDigest({ ...installation, shared_user_id: user }) });
 }
 
-/** A 402 once the account has ACCOUNT_APP_LIMIT apps signed in besides `slug`; another sign-in to an app it has is fine. */
-export function appLimitRefusal(accounts: ConnectedAccountResponse[], slug: string): Response | null {
-  const apps = [...new Set(accounts.filter((account) => /^active$/i.test(account.status ?? ""))
-    .map((account) => account.toolkit?.slug?.toLowerCase() ?? "").filter((app) => app && app !== slug))].sort();
-  if (apps.length < ACCOUNT_APP_LIMIT) return null;
+/** Records the sign-in link the account opens for `slug`, or answers 402 when its working apps (`accounts`) and the links
+ *  it opened in the last 15 minutes already make ACCOUNT_APP_LIMIT other apps. An app it has or has opened stays allowed. */
+export async function reserveAppLink(env: Env, accountId: string, accounts: ConnectedAccountResponse[], slug: string, now = Date.now()) {
+  const active = [...new Set(accounts.filter((account) => /^active$/i.test(account.status ?? ""))
+    .map((account) => account.toolkit?.slug?.toLowerCase() ?? "").filter(Boolean))];
+  const since = now - PENDING_LINK_MS;
+  // One statement, so the account's phones opening different apps at once can never pass the allowance together.
+  const reserved = await env.DB.prepare(
+    `WITH apps(toolkit) AS (SELECT value FROM json_each(?4) UNION SELECT toolkit FROM account_links WHERE account_id = ?1 AND minted_at > ?5)
+     INSERT INTO account_links (account_id, toolkit, minted_at)
+     SELECT ?1, ?2, ?3 WHERE ?2 IN (SELECT toolkit FROM apps) OR (SELECT COUNT(*) FROM apps) < ?6
+     ON CONFLICT (account_id, toolkit) DO UPDATE SET minted_at = excluded.minted_at
+     RETURNING toolkit`,
+  ).bind(accountId, slug, now, JSON.stringify(active), since, ACCOUNT_APP_LIMIT).first();
+  if (reserved) return null;
+  const { results: pending } = await env.DB.prepare("SELECT toolkit FROM account_links WHERE account_id = ? AND minted_at > ?")
+    .bind(accountId, since).all<{ toolkit: string }>();
+  const apps = [...new Set([...active, ...pending.map((link) => link.toolkit)])].sort();
   return json({
     error: "A free MausBot account connects up to 3 apps. Disconnect one, or get MausBot Cloud for more.",
     code: "app_limit",
@@ -94,20 +108,21 @@ export async function accountToolCallRefusal(body: Uint8Array, installation: Ins
     messages = JSON.parse(new TextDecoder().decode(body));
   } catch {
     // Forwarded unparsed, a body Composio reads differently could run a call we never counted.
-    return json({ error: "invalid JSON body" }, 400);
+    return json({ error: "This request isn't valid JSON.", code: "invalid_request" }, 400);
   }
   const calls = [messages].flat().filter((message) => (message as { method?: unknown } | null)?.method === "tools/call").length;
   if (!calls) return null;
   const configured = Number(env.ACCOUNT_DAILY_TOOL_CALLS);
   const limit = Number.isSafeInteger(configured) && configured > 0 ? configured : ACCOUNT_DAILY_TOOL_CALLS;
-  // One statement, so the account's phones calling at once can never pass the cap together.
+  // One statement, so the account's phones calling at once can never pass the cap together. The day only moves forward:
+  // a call from an isolate whose clock is behind counts toward the newer day.
   const counted = calls <= limit && await env.DB.prepare(
     `INSERT INTO account_tool_calls (account_id, day, calls) VALUES (?1, ?2, ?3)
      ON CONFLICT (account_id) DO UPDATE SET
-       calls = CASE WHEN day = excluded.day THEN calls + excluded.calls ELSE excluded.calls END, day = excluded.day
-     WHERE day != excluded.day OR calls + excluded.calls <= ?4
+       calls = CASE WHEN excluded.day > day THEN excluded.calls ELSE calls + excluded.calls END, day = MAX(day, excluded.day)
+     WHERE excluded.day > day OR calls + excluded.calls <= ?4
      RETURNING calls`,
   ).bind(installation.account_id, utcDay(now), calls, limit).first();
   if (counted) return null;
-  return json({ error: `A free MausBot account makes up to ${limit} app actions a day. Try again tomorrow, or get MausBot Cloud for more.`, code: "daily_limit" }, 429);
+  return json({ error: `A free MausBot account makes up to ${limit} connected-app tool calls a day. Try again tomorrow, or get MausBot Cloud for more.`, code: "daily_limit" }, 429);
 }

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { planAccountLink } from "../../../shared/connector-account-link";
-import { accountLeaseLapsed, accountToolCallRefusal, appLimitRefusal, PHONE_CONNECT_CALLBACK, presentAccountGrant } from "./accounts";
+import { accountLeaseLapsed, accountToolCallRefusal, PHONE_CONNECT_CALLBACK, presentAccountGrant, reserveAppLink } from "./accounts";
 import { appEventStats, composioWebhook, pollEvents, presentCloudGrant, queueTestEvent, runHourly } from "./app-events";
 import {
   ACCOUNT_ID,
@@ -608,16 +608,14 @@ async function authorize(
   ctx: ExecutionContext,
 ) {
   const session = await ensureSession(installation, env, ctx);
-  const bound = Boolean(installation.account_id);
+  const accountId = installation.account_id;
   let accounts: ConnectedAccountResponse[];
-  if (bound) {
+  if (accountId) {
     try {
       accounts = await listConnectedAccounts(env, actingUser(installation), []);
     } catch {
       return json({ error: "Connected apps can't be checked right now. Try again in a minute.", code: "provider_error" }, 502);
     }
-    const refused = appLimitRefusal(accounts, slug);
-    if (refused) return refused;
   } else {
     // Listing can be denied to the broker's key scope; authorize must still
     // work, with the alias guardrails degrading to first-account behavior.
@@ -632,13 +630,15 @@ async function authorize(
     () => `omb-retry-${crypto.randomUUID()}`,
   );
   if (!plan.ok) return json({ error: plan.error }, plan.status);
+  const overAllowance = accountId ? await reserveAppLink(env, accountId, accounts, slug) : null;
+  if (overAllowance) return overAllowance;
   for (const id of plan.replace) {
     const removed = await composioRequest(env, `/connected_accounts/${encodeURIComponent(id)}?revoke_on_delete=true`, { method: "DELETE" });
     if (!removed.ok) return json({ error: await upstreamError(removed, "Removing the earlier sign-in failed") }, 502);
   }
   const linkRequest: AccountLinkRequest = { toolkit: slug };
   if (plan.alias) linkRequest.alias = plan.alias;
-  if (bound) linkRequest.callback_url = PHONE_CONNECT_CALLBACK;
+  if (accountId) linkRequest.callback_url = PHONE_CONNECT_CALLBACK;
   const response = await composioRequest(env, `/tool_router/session/${encodeURIComponent(session.sessionId)}/link`, {
     method: "POST",
     body: JSON.stringify(linkRequest),

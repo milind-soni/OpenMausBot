@@ -42,7 +42,12 @@ export async function shareUser(request: Request, installation: InstallationRow,
   const target = parsed.data.for;
   if (target === installation.id) return json({ error: "an installation already reaches its own connected apps" }, 400);
   if (await limited(installation, env)) return json({ error: "too many connected-app requests" }, 429);
-  const exists = await env.DB.prepare("SELECT id FROM installations WHERE id = ? AND disabled_at IS NULL").bind(target).first<{ id: string }>();
+  // A free MausBot account's apps reach only a paid Cloud, which brings its own allowance.
+  const cloudOnly = installation.account_id ? " AND cloud_machine_id IS NOT NULL" : "";
+  const exists = await env.DB.prepare(`SELECT id FROM installations WHERE id = ? AND disabled_at IS NULL${cloudOnly}`).bind(target).first<{ id: string }>();
+  if (!exists && cloudOnly) {
+    return json({ error: "A MausBot account's connected apps can be shared only with a MausBot Cloud.", code: "cloud_only" }, 403);
+  }
   if (!exists) return json({ error: "no such installation" }, 404);
   const code = randomCode();
   const expiresAt = now + SHARE_TTL_MS;
@@ -57,8 +62,9 @@ export async function shareUser(request: Request, installation: InstallationRow,
 /**
  * POST /v1/installation/adopt {code}: from now on this installation acts as the user the code shares. Refused while it
  * has connected accounts of its own, which its Sessions could no longer use: they stay reachable, and the person
- * connects the shared apps here instead. Either way the code is spent, unless the installation is bound to a MausBot
- * account, which it refuses first.
+ * connects the shared apps here instead. An installation bound to a MausBot account is refused (409 account_bound)
+ * before the code is read, so the code stays valid; every later answer spends it, including account_bound for a bind
+ * that lands during the request.
  */
 export async function adoptSharedUser(request: Request, installation: InstallationRow, env: Env, now = Date.now()): Promise<{ ok: boolean; response: Response }> {
   const refuse = (response: Response) => ({ ok: false, response });
