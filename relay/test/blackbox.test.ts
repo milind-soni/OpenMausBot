@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { after, before, describe, test } from "node:test";
 import { performance } from "node:perf_hooks";
@@ -67,6 +67,48 @@ describe("a session end to end", () => {
     assert.equal(await phone.closeCode(), 1001);
     phone.ws.terminate();
     host.control.ws.close();
+  });
+});
+
+describe("Node's built-in WebSocket client", () => {
+  /** The desktop dials the relay with Node's own WebSocket, which sends no Origin and cannot add headers. */
+  function builtIn(path: string): Promise<{ socket: globalThis.WebSocket; messages: Array<string | ArrayBuffer>; next: () => Promise<string | ArrayBuffer> }> {
+    const socket = new globalThis.WebSocket(`${relay.url}${path}`, ["omb-relay.v1"]);
+    socket.binaryType = "arraybuffer";
+    const messages: Array<string | ArrayBuffer> = [];
+    const waiting: Array<(message: string | ArrayBuffer) => void> = [];
+    socket.addEventListener("message", (event) => {
+      const waiter = waiting.shift();
+      if (waiter) waiter(event.data);
+      else messages.push(event.data);
+    });
+    const next = () => (messages.length > 0 ? Promise.resolve(messages.shift()!) : new Promise<string | ArrayBuffer>((resolve) => waiting.push(resolve)));
+    return new Promise((resolve, reject) => {
+      socket.addEventListener("open", () => resolve({ socket, messages, next }));
+      socket.addEventListener("error", () => reject(new Error("could not connect")));
+    });
+  }
+
+  test("works as the host: control socket, admission, data socket and binary both ways", async () => {
+    const adm = randomBytes(32);
+    const hid = randomBytes(16).toString("base64url");
+    const token = mintToken(key, { hid });
+    const control = await builtIn("/v1/host");
+    control.socket.send(JSON.stringify({ t: "auth", v: 1, token }));
+    assert.deepEqual(JSON.parse(String(await control.next())), V9.relay[0]);
+    control.socket.send(JSON.stringify({ t: "admit", set: [createHash("sha256").update(adm).digest("base64url")] }));
+    const phone = await phoneHello(relay.url, hid, adm);
+    const { sid } = JSON.parse(String(await control.next()));
+    const data = await builtIn("/v1/host/data");
+    data.socket.send(JSON.stringify({ t: "data", v: 1, sid, token }));
+    assert.equal((await phone.json()).t, "ready");
+    phone.sendBinary(Buffer.from("msg1"));
+    assert.equal(Buffer.from((await data.next()) as ArrayBuffer).toString(), "msg1");
+    data.socket.send(new TextEncoder().encode("msg2"));
+    assert.equal((await phone.next()).data.toString(), "msg2");
+    data.socket.close(4001);
+    assert.equal(await phone.closeCode(), 4001);
+    control.socket.close();
   });
 });
 
