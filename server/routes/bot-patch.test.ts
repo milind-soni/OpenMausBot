@@ -391,6 +391,13 @@ describe("PATCH /api/bots/:id under a phone's move", () => {
     expect(refused.body.error).toBe(`forbidden: a phone's move may bring a bot's profile, look, model, voice and memory settings, not "approvalMode"; set that on the host computer`);
   });
 
+  it("lets a phone's move carry its own bot's phone-app grant", async () => {
+    const { store, bot, patch } = fixture((_auth, id) => id === store.bots[0]?.id);
+    const ok = await patch(bot.id, { phoneApps: { calendar: "read" } }, phone);
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect(store.bot(bot.id)?.phoneApps).toEqual({ calendar: "read" });
+  });
+
   it("keeps today's look-only rule for every bot the move did not bring", async () => {
     const { bot, patch } = fixture(() => false);
     const refused = await patch(bot.id, { soul: "x" }, phone);
