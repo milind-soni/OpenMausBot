@@ -1,11 +1,19 @@
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { arrivedRoute } from "./cloud-send-arrived.ts";
+import { cloudSendChatsRoute } from "./cloud-send-chats.ts";
+import { moveFilesRoute, REPEATED_QUERY } from "./cloud-send-files.ts";
+import { moveKindsRoute } from "./cloud-send-kinds.ts";
+import { moveMemoryRoute } from "./cloud-send-memory.ts";
 import { createPhoneMoveIn, PHONE_MOVE_REFUSAL, type PhoneMoveInDeps } from "./phone-move-in.ts";
 import type { RequestAuth } from "./request-auth.ts";
-import { PASS, type RouteContext } from "./routes/table.ts";
+import { createBotCreateRoutes } from "./routes/bots-create.ts";
+import { dispatchRoutes, PASS, type RouteContext, type RouteHandler } from "./routes/table.ts";
 
 const SCOUT = "pocket-scout-0001";
 const DAY = 24 * 60 * 60 * 1000;
@@ -218,6 +226,62 @@ describe("a phone's move into this computer", () => {
     expect(ok.out).toBe(PASS);
     expect(ok.handedOn).toEqual({ v: 1, key: "routine:r-new", dataDir: "/phone", record: { botId: SCOUT, target: "bot" }, mainIfUnused: true });
     expect((await put("r-new", { botId: SCOUT, target: "bot", resultsThreadId: `${SCOUT}-t1` })).out).toBe(PASS);
+  });
+
+  it("refuses a move whose query names a key twice, and writes in neither folder", async () => {
+    const moveIn = setup();
+    await create(moveIn);
+    const text = "x";
+    const target = new URL(`http://127.0.0.1/api/cloud-send/files?path=workspaces/${SCOUT}/a.md&path=workspaces/here-bot-0001/b.md&size=1&sha256=${createHash("sha256").update(text).digest("hex")}&offset=0&mode=new`);
+    let answered: { status: number; body: unknown } | null = null;
+    const files: RouteHandler = async (ctx) => ((await moveFilesRoute({ dataDir: dir, bots: () => bots, owner: () => ({ person: "", name: "Omkar" }) }, ctx)) ? undefined : PASS);
+    await dispatchRoutes([moveIn.guard, files], {
+      req: Readable.from([Buffer.from(text)]) as never, res: { setHeader() {} } as never, url: target, path: target.pathname, method: "POST", auth: phone,
+      json: ((_res: unknown, status: number, body: unknown) => { answered = { status, body }; }) as never, readBody: (async () => null) as never,
+    });
+    expect(answered).toEqual({ status: 400, body: REPEATED_QUERY });
+    expect(existsSync(join(dir, "workspaces", SCOUT, "a.md"))).toBe(false);
+    expect(existsSync(join(dir, "workspaces", "here-bot-0001", "b.md"))).toBe(false);
+    for (const [method, path] of [["POST", "/api/cloud-send/chats?v=1&v=2"], ["GET", `/api/bots/${SCOUT}/skills?a=1&a=1`], ["PATCH", "/api/bots/here-bot-0001?a=1&a=2"]] as const) {
+      const answer = await run(moveIn, phone, method, path, { v: 1 });
+      expect([answer.status, answer.body, answer.reads, answer.resumed], `${method} ${path}`).toEqual([400, REPEATED_QUERY, 0, 1]);
+    }
+  });
+
+  it("refuses a body that is not a JSON object", async () => {
+    const moveIn = setup();
+    await create(moveIn);
+    for (const path of ["/api/bots", "/api/cloud-send/chats", "/api/cloud-send/chats/verify", "/api/cloud-send/memory", "/api/cloud-send/arrived"]) {
+      for (const body of [[SCOUT], "text", 1]) expect(await run(moveIn, phone, "POST", path, body), `${path} ${JSON.stringify(body)}`).toMatchObject(refused);
+    }
+    expect(await run(moveIn, phone, "PUT", "/api/cloud-send/kind", [`bot:${SCOUT}`])).toMatchObject(refused);
+  });
+
+  it("reads each body at the limit its route reads it with", async () => {
+    const moveIn = setup();
+    await create(moveIn);
+    const owner = () => ({ person: "", name: "Omkar" });
+    const routes: Record<string, RouteHandler> = {
+      "POST /api/bots": createBotCreateRoutes({ routines: () => null } as never),
+      "PUT /api/cloud-send/kind": async (ctx) => { await moveKindsRoute({ owner } as never, ctx); },
+      "POST /api/cloud-send/chats": async (ctx) => { await cloudSendChatsRoute({ store: {} } as never, ctx); },
+      "POST /api/cloud-send/chats/verify": async (ctx) => { await cloudSendChatsRoute({ store: {} } as never, ctx); },
+      "POST /api/cloud-send/memory": async (ctx) => { await moveMemoryRoute({ owner } as never, ctx); },
+      "POST /api/cloud-send/arrived": async (ctx) => { await arrivedRoute({ owner, dataDir: dir } as never, ctx); },
+    };
+    const limit = async (route: RouteHandler, method: string, path: string) => {
+      let read: number | undefined | "unread" = "unread";
+      const url = new URL(`http://127.0.0.1${path}`);
+      await route({ req: { resume() {}, headers: {} } as never, res: { setHeader() {} } as never, url, path, method, auth: phone, json: (() => {}) as never,
+        readBody: (async (_req: unknown, max?: number) => { read = max; return null; }) as never });
+      return read;
+    };
+    for (const [route, handler] of Object.entries(routes)) {
+      const [method, path] = route.split(" ") as [string, string];
+      const handlerLimit = await limit(handler, method, path);
+      expect(handlerLimit, route).not.toBe("unread");
+      expect(await limit(moveIn.guard, method, path), route).toBe(handlerLimit);
+    }
   });
 
   it("hands a bot record on without a package, asking to be main only over an unused MausBot", async () => {

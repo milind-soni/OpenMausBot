@@ -44,6 +44,7 @@ export interface ArrivedDeps {
   stayed?(language?: string): void;
 }
 
+export const ARRIVED_BODY_MAX = 64 * 1024;
 const arrivedBody = z.object({ v: z.literal(1), computer: z.string().trim().min(1).max(120), webhooks: z.array(z.string().regex(/^[\w-]{1,128}$/u)).max(500),
   place: z.string().trim().min(1).max(120).optional() });
 
@@ -54,7 +55,7 @@ export async function arrivedRoute(deps: ArrivedDeps, { req, res, path, method, 
   if (method !== "POST") return refuse(405, "method not allowed");
   const owner = deps.owner(auth);
   if (!owner) return refuse(403, "Only My Cloud's owner can finish a move into it.");
-  const body = arrivedBody.safeParse(await readBody(req, 64 * 1024));
+  const body = arrivedBody.safeParse(await readBody(req, ARRIVED_BODY_MAX));
   if (!body.success) return refuse(400, "send { v: 1, computer, webhooks }");
   const kept = movedFrom(deps.dataDir);
   const told = new Set(kept?.told ?? []);

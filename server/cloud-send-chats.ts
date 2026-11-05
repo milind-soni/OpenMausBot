@@ -25,6 +25,7 @@ export const CHAT_PAGE_BYTES = 2 * 1024 * 1024;
 export const CHATS_BODY_MAX = 64 * 1024 * 1024;
 /** A check of a move's chats asks about at most this many row ids of a conversation, and of its path, at a time. */
 export const VERIFY_IDS = 5_000;
+export const VERIFY_BODY_MAX = 2 * 1024 * 1024;
 const PREFIX = "/api/cloud-send/chats";
 const ROOM_NAME_MAX = 100, ROOM_MEMBERS_MAX = 200, ROOM_BULLETIN_MAX = 12_000;
 
@@ -361,7 +362,7 @@ export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, 
     return true;
   }
   if (path === `${PREFIX}/verify` && method === "POST") {
-    const parsed = verifySchema.safeParse(await readBody(req, 2 * 1024 * 1024));
+    const parsed = verifySchema.safeParse(await readBody(req, VERIFY_BODY_MAX));
     if (!parsed.success) { json(res, 400, { error: `send { v: 1, conversations: [{ threadId, ids, path }] }, at most ${VERIFY_IDS} ids of each` }); return true; }
     json(res, 200, { v: 1, conversations: verifyChats(store, parsed.data.conversations) });
     return true;

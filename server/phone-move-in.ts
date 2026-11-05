@@ -1,14 +1,14 @@
-// A paired phone moving its bots into this computer, under the move grant the computer's owner gave it in the companion.
-// The phone drives the routes a move into My Cloud uses, and this keeps those writes to the bots a phone made here under
-// a grant. A bot stays open to a phone's move until the phone says it arrived or for 24 hours, whichever comes first;
-// after that it is the computer's own, and a phone changes it only as a paired device changes any bot.
+// Security invariant: a phone's move writes only to bots a phone made here under a grant, and each stays open to a
+// phone's move until `arrived` names it or for 24 hours, whichever comes first; after that it is the computer's own.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 
 import { writeFileAtomic } from "./atomic.ts";
 import type { CloudOwner } from "./cloud-owner-lines.ts";
-import { CHATS_BODY_MAX } from "./cloud-send-chats.ts";
+import { ARRIVED_BODY_MAX } from "./cloud-send-arrived.ts";
+import { CHATS_BODY_MAX, VERIFY_BODY_MAX } from "./cloud-send-chats.ts";
+import { REPEATED_QUERY, repeatsQueryKey } from "./cloud-send-files.ts";
 import { KIND_BODY_MAX } from "./cloud-send-kinds.ts";
 import { MEMORY_BODY_MAX } from "./cloud-send-memory.ts";
 import type { RequestAuth } from "./request-auth.ts";
@@ -88,7 +88,7 @@ export function createPhoneMoveIn(deps: PhoneMoveInDeps) {
       check: (body) => conversations(body).every((entry) => record(entry) && open(entry.bot) && entry.room === undefined && thread(entry.threadId, entry.bot as string)) ? body : null,
     },
     "POST /api/cloud-send/chats/verify": {
-      limit: 2 * 1024 * 1024,
+      limit: VERIFY_BODY_MAX,
       check: (body) => conversations(body).every((entry) => record(entry) && thread(entry.threadId)) ? body : null,
     },
     "POST /api/cloud-send/memory": {
@@ -96,7 +96,7 @@ export function createPhoneMoveIn(deps: PhoneMoveInDeps) {
       check: (body) => open(body.bot) && !Object.hasOwn(body, "about") && !Object.hasOwn(body, "teams") ? body : null,
     },
     "POST /api/cloud-send/arrived": {
-      limit: 64 * 1024,
+      limit: ARRIVED_BODY_MAX,
       check(body) {
         const done = (Array.isArray(body.bots) ? body.bots : []).filter((id): id is string => typeof id === "string" && opened.has(id));
         for (const id of done) opened.delete(id);
@@ -114,6 +114,7 @@ export function createPhoneMoveIn(deps: PhoneMoveInDeps) {
    * that names no such bot and that a paired phone may make anyway (a PATCH, a new bot) goes on as that request. */
   const guard: RouteHandler = async (ctx: RouteContext) => {
     if (!moving(ctx.auth)) return PASS;
+    if (repeatsQueryKey(ctx.url)) { ctx.req.resume(); ctx.json(ctx.res, 400, REPEATED_QUERY); return; }
     const refuse = () => { ctx.json(ctx.res, 403, { error: PHONE_MOVE_REFUSAL }); };
     const files = ctx.path === "/api/cloud-send/files";
     const named = files ? /^(?:task-)?workspaces\/([\w-]+)\//u.exec(ctx.url.searchParams.get("path") ?? "")?.[1]
@@ -126,7 +127,7 @@ export function createPhoneMoveIn(deps: PhoneMoveInDeps) {
     const route = BODIES[`${ctx.method} ${ctx.path}`];
     if (!route) return PASS;
     const body = await ctx.readBody(ctx.req, route.limit);
-    const next = record(body) ? route.check(body) : body;
+    const next = record(body) ? route.check(body) : null;
     if (next === null) return refuse();
     ctx.readBody = (async () => next) as RouteContext["readBody"];
     return PASS;
