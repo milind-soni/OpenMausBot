@@ -6573,6 +6573,8 @@
   "settings.recovery.ownBackups": "Боты со своими резервными моделями (Модель → Резервные модели для этого бота) используют их, независимо от того, включено ли это.",
   "limits.windowAtLimit": "Достигнут лимит",
   "limits.clearsOnReply": "Сбросится само, как только {engine} снова ответит.",
+  "limits.cardTitle": "Использование {engine}",
+  "limits.checked": "проверено {when}",
   "botAccess.share": "Поделиться",
   "botAccess.title": "Поделиться {bot}",
   "botAccess.addPlaceholder": "Добавьте людей по имени или email",

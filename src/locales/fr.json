@@ -2776,6 +2776,8 @@
   "limits.resets": "réinitialisation {time}",
   "limits.windowAtLimit": "Limite atteinte",
   "limits.clearsOnReply": "Se débloque tout seul dès que {engine} répond à nouveau.",
+  "limits.cardTitle": "Utilisation de {engine}",
+  "limits.checked": "vérifié {when}",
   "botAccess.share": "Partager",
   "botAccess.title": "Partager {bot}",
   "botAccess.addPlaceholder": "Ajouter des personnes par nom ou e-mail",

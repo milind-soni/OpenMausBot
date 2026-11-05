@@ -359,6 +359,16 @@ function AntigravityAccountAction({ instance, action }: { instance: InstanceInfo
   </>;
 }
 
+function AntigravityAddAccount({ source }: { source: InstanceInfo }) {
+  const { state } = useStore();
+  const [addedId, setAddedId] = useState<string | null>(null);
+  const added = addedId ? state.instances.find((instance) => instance.instanceId === addedId && instance.snapshot.authenticated !== true) : undefined;
+  return <>
+    <AddAccount label={t("engineSetup.antigravity.addAccount")} endpoint="/api/instances/antigravity-accounts" extra={{ sourceInstanceId: source.instanceId }} onAdded={setAddedId} />
+    {added && <div data-antigravity-added={added.instanceId}><EngineSetup instance={added} unframed /></div>}
+  </>;
+}
+
 function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: boolean }) {
   const policyNote = instance.policy && <p className="mb-2 text-[12px] leading-relaxed text-ink-secondary">
     <span className="font-medium text-ink">{t("policy.managedBy", { organization: instance.policy.organizationName })}</span> · {instance.policy.reason}
@@ -393,7 +403,7 @@ function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: 
       {instance.driverKind === "antigravityAgent" && (
         <div className="mt-3 space-y-3">
           {instance.snapshot.authenticated && <p className="break-words text-[12px] text-ink-secondary">{instance.snapshot.account?.email ?? t("engineSetup.antigravity.emailUnavailable")}</p>}
-          <AddAccount label={t("engineSetup.antigravity.addAccount")} endpoint="/api/instances/antigravity-accounts" extra={{ sourceInstanceId: instance.instanceId }} onAdded={() => {}} />
+          <AntigravityAddAccount source={instance} />
           {instance.snapshot.authenticated === true && instance.authentication?.signOut === true && <AntigravityAccountAction instance={instance} action="signOut" />}
           {instance.instanceId.startsWith("antigravity-") && <AntigravityAccountAction instance={instance} action="remove" />}
         </div>
