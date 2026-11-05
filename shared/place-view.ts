@@ -71,7 +71,7 @@ export interface PlaceView {
 }
 
 /** Where this server runs, as the Auto line describes it. */
-export type ServerKind = "my-cloud" | "mac" | "pc" | "linux";
+export type ServerKind = "my-cloud" | "mac" | "pc" | "linux" | "remote";
 
 /** The facts a place's state is read from. */
 export interface PlaceFacts {
@@ -358,7 +358,7 @@ function sourceAction(source: PlaceSource, state: PlaceState): PlaceActionId | n
 function lineKey(state: PlaceState, params: PlaceParams, server?: ServerKind): PlaceKey {
   const segment = STATE[state].key;
   if (state === "auto") {
-    return server === "my-cloud" ? "place.view.auto.lineMyCloud" : server === "linux" ? "place.view.auto.lineLinux" : "place.view.auto.lineDesktop";
+    return server === "my-cloud" ? "place.view.auto.lineMyCloud" : server === "linux" || server === "remote" ? "place.view.auto.lineLinux" : "place.view.auto.lineDesktop";
   }
   if (state === "cc-sign-in" && server === "my-cloud") return "place.view.ccSignIn.lineMyCloud";
   // A refusal read from a code alone has no numbers or names to give.
