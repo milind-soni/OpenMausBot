@@ -50,7 +50,7 @@ export const VITEST_SUBSETS = {
       "server/routine-run-card.test.ts", "server/host/chief-notices-retry.test.ts", "server/connector-card-text.test.ts", "server/host/secret-cards.test.ts",
       "server/notify.test.ts", "server/room-lines.test.ts", "server/post-to-room.test.ts",
       "server/teammate-lines.test.ts", "server/cloud-send-arrived.test.ts", "scripts/ci-workflow.test.ts", "scripts/pre-push-check.test.ts",
-      "server/host/wait-words.test.ts"],
+      "server/host/wait-words.test.ts", "server/skill-switch.test.ts"],
     shards: 2,
     nodeTests: true,
   },

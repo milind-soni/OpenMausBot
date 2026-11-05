@@ -11833,6 +11833,75 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("turns a bot's own skill on, off or deletes it at once, with a receipt the person can undo", async () => {
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).status).toBe(200);
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { skillAuthoring: true });
+      const post = (body: Record<string, unknown>) => fetch(`${BASE}/api/internal/skills/stage`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, ...body }),
+      });
+      const latestCard = async (action: string) => {
+        const messages = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id).messages;
+        return messages.filter((message: any) => message.card?.skillRequest?.name === "switch-me" && message.card.skillRequest.action === action).at(-1).card;
+      };
+      const skill = async () => (await api("GET", `/api/bots/${bot.id}/skills`)).body.skills.find((entry: { name: string }) => entry.name === "switch-me");
+      const skillText = async () => (await api("GET", `/api/bots/${bot.id}/skills/switch-me`)).body.text;
+      const undo = (requestId: string) => api("POST", `/api/threads/${bot.threadId}/undo`, { requestId });
+      const skillMd = "---\nname: switch-me\ndescription: Keeps notes.\n---\n\n# Switch me\n";
+      const create = async () => expect((await post({ action: "create", source: "conversation", skill_md: skillMd })).status).toBe(201);
+      const change = async (action: string, title: string) => {
+        const response = await post({ action, skill_name: "switch-me" });
+        expect(response.status).toBe(201);
+        expect(await response.json()).toMatchObject({ state: "applied", name: "switch-me", action });
+        const receipt = await latestCard(action);
+        expect(receipt).toMatchObject({ answered: "allow", autoApplied: true, options: [], title });
+        return receipt;
+      };
+
+      await create();
+      expect(await skill()).toMatchObject({ enabled: true });
+
+      const off = await change("disable", "Skill \"switch-me\" turned off");
+      expect(await skill()).toMatchObject({ enabled: false });
+      expect((await post({ action: "disable", skill_name: "switch-me" })).status).toBe(422);
+      expect((await undo(off.requestId)).status).toBe(200);
+      expect(await skill()).toMatchObject({ enabled: true });
+      expect(await latestCard("disable")).toMatchObject({ undone: true });
+
+      const offAgain = await change("disable", "Skill \"switch-me\" turned off");
+      const on = await change("enable", "Skill \"switch-me\" turned on");
+      expect(await skill()).toMatchObject({ enabled: true });
+      expect((await undo(offAgain.requestId)).status, "the skill is on again since, so turning it back on is stale").toBe(409);
+      expect((await undo(on.requestId)).status).toBe(200);
+      expect(await skill()).toMatchObject({ enabled: false });
+
+      const gone = await change("delete", "Skill \"switch-me\" deleted");
+      expect(await skill()).toBeUndefined();
+      expect(gone.skillRequest.previous).toMatchObject({ preview: skillMd, enabled: false });
+      expect((await undo(gone.requestId)).status).toBe(200);
+      expect(await skill(), "a skill that was off comes back off").toMatchObject({ enabled: false });
+      expect(await skillText()).toBe(skillMd);
+
+      expect((await post({ action: "enable", skill_name: "switch-me" })).status).toBe(201);
+      const goneAgain = await change("delete", "Skill \"switch-me\" deleted");
+      await create();
+      expect((await undo(goneAgain.requestId)).status, "a skill of that name exists again").toBe(409);
+
+      const missing = await post({ action: "enable", skill_name: "not-there" });
+      expect(missing.status).toBe(422);
+      expect(((await missing.json()) as { error: string }).error).toContain("no skill named");
+      expect((await post({ action: "delete" })).status).toBe(400);
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  }, 60_000);
+
   it("applies a bot's own learned skill at once and undoes it from its receipt", async () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {

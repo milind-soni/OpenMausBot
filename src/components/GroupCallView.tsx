@@ -18,6 +18,7 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { speechBridge } from "@/lib/speech";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
+import { titledCard } from "./ApprovalCard";
 
 const YES = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|allow|approve|approved|fine|please do)\b/i;
 const NO = /^(no|nope|don'?t|do not|stop|deny|denied|cancel|never|skip it)\b/i;
@@ -240,7 +241,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
           if (allow && openApproval.skill) {
             setHeard("");
             enqueueSpeech(
-              "Open the group thread to review the complete skill before enabling it. You can say no now to deny it.",
+              "Open the group thread to review the complete skill before approving it. You can say no now to deny it.",
               openApproval.member,
               true,
             );
@@ -373,7 +374,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       const skillPrompt = approval.message.card?.skillRequest?.action === "update"
         ? `${name} wants to update a learned skill. Open the group thread to review the complete skill before replacing the current version. You can say no to deny it.`
         : `${name} wants to enable a new learned skill. Open the group thread to review the complete skill before enabling it. You can say no to deny it.`;
-      enqueueSpeech(isSkillApproval(approval) ? skillPrompt : spokenApprovalPrompt(approval, name), member, true);
+      enqueueSpeech(isSkillApproval(approval) && !titledCard(approval.message.card) ? skillPrompt : spokenApprovalPrompt(approval, name), member, true);
     }
 
     if (question?.card?.requestId && askedQuestion.current?.requestId !== question.card.requestId) {

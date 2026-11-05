@@ -385,7 +385,7 @@ import { pickBotName } from "./names.ts";
 import { botSkillTemplateSchema, newBotDefaultsSchema } from "./new-bot-defaults.ts";
 import { expandLearnTurnText, learnSource } from "./skill-learn.ts";
 import { connectedAppsForSetup, expandSetupTurnText, setupModeActive, setupSystemPrompt, type SetupConnectedApps } from "./setup-mode.ts"; import { forgetSetupPresser, setupPresser, setupTurnText, takeSetupRequest } from "./setup-request.ts"; import { setupSuggestionsFor } from "./setup-suggestions.ts"; import { createSetupRequestRoutes } from "./routes/setup-request.ts";
-import type { SkillRequestCardData } from "../shared/skill-request.ts";
+import { isSkillSwitchAction, type SkillRequestCardData } from "../shared/skill-request.ts"; import { createSkillSwitchHost } from "./host/skill-switch-host.ts";
 import { checkSoulDrift, readSoulDrift, soulFile, writeSoulMirror } from "./bot-folder.ts";
 import {
   botPersona,
@@ -9467,14 +9467,10 @@ function undoSkillCard(botId: string, threadId: string, messageId: string): Undo
   if (!card.autoApplied || card.answered !== "allow") {
     return { claimed: true, state: "invalid", error: "Only a change that applied on its own can be undone here.", status: 409 };
   }
-  if (request.botId !== botId || request.threadId !== threadId) {
-    return { claimed: true, state: "invalid", error: "this skill request belongs to a different bot", status: 403 };
-  }
-  if (request.shared) return skillsHost.undoReceipt(botId, threadId, message, { ...request, shared: request.shared });
-  const undone = undoSkillWrite(botId, {
-    stagedId: request.stagedId,
-    name: request.name,
-    action: request.action,
+  if (request.botId !== botId || request.threadId !== threadId) return { claimed: true, state: "invalid", error: "this skill request belongs to a different bot", status: 403 };
+  const action = request.action; if (isSkillSwitchAction(action)) return skillSwitch.undo(botId, threadId, message, { ...request, action });
+  if (request.shared) return skillsHost.undoReceipt(botId, threadId, message, { ...request, action, shared: request.shared });
+  const undone = undoSkillWrite(botId, { stagedId: request.stagedId, name: request.name, action,
     ...(request.previous ? { previous: { skillMd: request.previous.preview, source: request.previous.source, references: request.previous.references ?? [] } } : {}),
   });
   if ("stale" in undone) return { claimed: true, state: "invalid", error: UNDO_STALE, status: 409, stale: true };
@@ -11348,6 +11344,7 @@ function appendSkillRequestCard(args: {
   };
 }
 
+const skillSwitch = createSkillSwitchHost({ store, dataDir: DATA_DIR, persistence: skillProposalPersistence, listBotSkills, readBotSkillFile, noteSkillChange: (botId, threadId) => skillReview.noteSkillChange(botId, threadId) });
 function resolveSkillRequest(args: {
   botId: string;
   botName?: string;
@@ -11368,6 +11365,7 @@ function resolveSkillRequest(args: {
   if (request.botId !== args.botId) {
     return { claimed: true, status: 403, error: "this skill request belongs to a different bot" };
   }
+  if (isSkillSwitchAction(request.action)) return skillSwitch.resolve(args, message.id, card, { ...request, action: request.action });
   if (card.answered || card.dismissed) {
     const cleanup = rejectStagedSkillWrite(args.botId, request.stagedId);
     if ("applied" in cleanup && cleanup.applied && card.answered !== "allow") {
@@ -13722,6 +13720,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 403, { error: "source conversation does not belong to sender" });
         }
         const direct = appliesDirectly(from.id, fromThreadId);
+        if (isSkillSwitchAction(body.action)) { const staged = skillSwitch.stage(from, fromThreadId, body.action, body, direct); return json(res, staged.status, staged.body); }
         const persistence = skillProposalPersistence(from.id, fromThreadId, !direct);
         if (!persistence.ok) return json(res, persistence.status, { error: persistence.error });
         const action = body.action === "create" || body.action === "update" ? body.action : "";
