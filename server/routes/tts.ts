@@ -92,22 +92,12 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
       const audio = await new Promise<Buffer | null>((resolve, reject) => {
         const chunks: Buffer[] = [];
         let received = 0;
-        let settled = false;
-        // Past the cap the listeners stay attached and drop the rest, so the request drains.
+        // Answering before the upload is read to its end resets the connection on Windows instead of delivering the 413.
         req.on("data", (chunk: Buffer) => {
-          if (settled) return;
           received += chunk.byteLength;
-          if (received > TRANSCRIBE_MAX_BYTES) {
-            settled = true;
-            return resolve(null);
-          }
-          chunks.push(chunk);
+          if (received <= TRANSCRIBE_MAX_BYTES) chunks.push(chunk);
         });
-        req.on("end", () => {
-          if (settled) return;
-          settled = true;
-          resolve(Buffer.concat(chunks));
-        });
+        req.on("end", () => resolve(received > TRANSCRIBE_MAX_BYTES ? null : Buffer.concat(chunks)));
         req.on("error", reject);
       });
       if (!audio) return json(res, 413, { error: `audio exceeds ${TRANSCRIBE_MAX_BYTES} bytes` });

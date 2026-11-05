@@ -6371,7 +6371,7 @@
   "call.capability.turnsNeedFishKey": "Add a Fish Audio key to take turns on calls",
   "call.capability.turnsNeedFishKeyReason": "On this computer, Take turns hears you through Fish Audio speech-to-text. Add a Fish Audio key in Settings → API keys.",
   "call.capability.turnsNeedDesktop": "Calls where you take turns need the desktop app",
-  "call.capability.turnsNeedDesktopReason": "They listen from this computer, so they need the MausBot app on a Mac, Windows or Linux computer.",
+  "call.capability.turnsNeedDesktopReason": "They listen from this computer, so they need {app} on a Mac, Windows or Linux computer.",
   "call.capability.turnsOnThisComputerAnyOs": "Calls where you take turns work with bots on this computer",
   "call.capability.turnsOnThisComputerAnyOsReason": "They listen from this computer's own window, so only bots on this computer can use them.",
   "call.capability.turnsOnThisComputer": "Calls where you take turns work with bots on this Mac",
