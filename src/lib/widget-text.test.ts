@@ -51,7 +51,7 @@ describe("a server card in the person's language", () => {
       const translated = localizedCard(payload, true);
       expect(translated.root.title).toBe("Seu resumo");
       expect(nodes(translated.root).some((node) => node.value === "Ideias")).toBe(true);
-      expect(nodes(translated.root).some((node) => node.value === "Percebido em conversas: 3")).toBe(true);
+      expect(nodes(translated.root).some((node) => node.value === "Conversas em que isso foi percebido: 3")).toBe(true);
       expect(nodes(translated.root).some((node) => node.value === idea)).toBe(true);
       expect(JSON.stringify(payload)).toBe(original);
       setLocale("en");

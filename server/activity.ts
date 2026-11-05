@@ -105,6 +105,7 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   list_triggers: "activity.tool.team.listTriggers",
   manage_room: "activity.tool.team.manageRoom",
   manage_trigger: "activity.tool.team.manageTrigger",
+  mcp_server: "activity.tool.team.mcpServer",
   memory_log: "activity.tool.team.memoryLog",
   memory_update: "activity.tool.team.memoryUpdate",
   message_person: "activity.tool.team.messagePerson",
@@ -135,6 +136,7 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   unpublish_page: "activity.tool.team.unpublishPage",
   update_html: "activity.tool.team.updateHtml",
   update_widget: "activity.tool.team.updateWidget",
+  usage_limits: "activity.tool.team.usageLimits",
   use_tool: "activity.tool.team.useTool",
   vm_exec: "activity.tool.team.vmExec",
 };

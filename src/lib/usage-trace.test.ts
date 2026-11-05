@@ -75,7 +75,7 @@ describe("trace helpers", () => {
       .toEqual(["X search", "Research call", "Use tool", toolStepLabel({ name: "mcp__agents__list_bots", summary: undefined })]);
     setLocale("pt-br");
     expect(["mcp__agents__x_search", "mcp__agents__x_user_posts", "mcp__agents__research_call", "mcp__agents__use_tool", "mcp__agents__list_bots", "mcp__other__x_search"].map((name) => toolLabel({ name, icon: "app" })))
-      .toEqual(["Buscar no X", "Ler posts de um usuário no X", "Fazer uma consulta de pesquisa", "Usar ferramenta", toolStepLabel({ name: "mcp__agents__list_bots", summary: undefined }), "X search"]);
+      .toEqual(["Buscar no X", "Ler posts de um usuário no X", "Consultar uma ferramenta de pesquisa", "Usar ferramenta", toolStepLabel({ name: "mcp__agents__list_bots", summary: undefined }), "X search"]);
     expect(["agent_browser_click", "agent_browser_get_url", "mcp__computer__type_text", "agent_browser_frobnicate"].map((name) => toolLabel({ name, icon: "computer" })))
       .toEqual(["Clicar", "Ler o endereço", "Digitar texto", "Frobnicate"]);
     setLocale("en");

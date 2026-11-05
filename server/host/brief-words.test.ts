@@ -21,6 +21,9 @@ describe("pt-BR brief rows", () => {
   const words = briefWords("pt-br");
 
   it("keeps static rows in sync with the catalog", () => {
+    expect(words.intro).toBe(ptBr["brief.card.intro"]);
+    expect(words.needsYou).toBe(ptBr["brief.card.needsYou"]);
+    expect(words.nothingNeedsYou).toBe(ptBr["brief.card.nothingNeedsYou"]);
     expect(words.waitingMany).toBe(ptBr["brief.card.waitingMany"]);
     expect(words.didNotFinish).toBe(ptBr["brief.row.didNotFinish"]);
     expect(words.unsorted).toBe(ptBr["brief.row.unfenced"]);
@@ -33,6 +36,7 @@ describe("pt-BR brief rows", () => {
   });
 
   it("keeps app and bot details in sync with the catalog", () => {
+    expect(words.draftReply("Ada")).toBe(ptBr["brief.card.draftReply"].replace("{who}", "Ada"));
     expect(words.couldNotRead("Gmail")).toBe(ptBr["brief.row.cantRead"].replace("{app}", "Gmail"));
     expect(words.unsortedNote("Scout")).toBe(ptBr["brief.row.unfencedNote"].replace("{name}", "Scout"));
     expect(words.unpreparedNote("Scout")).toBe(ptBr["brief.row.unpreparedNote"].replace("{name}", "Scout"));

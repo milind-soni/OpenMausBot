@@ -116,9 +116,9 @@ const en: BriefWords = {
 
 const ptBr: BriefWords = {
   title: "Seu resumo",
-  intro: "Fico de olho na sua agenda e no seu e-mail e coloco aqui o que precisa da sua atenção, uma vez por dia e quando você volta. Me diga para parar ou o que observar.",
+  intro: "Fico de olho na sua agenda e no seu e-mail e coloco aqui o que precisa da sua atenção, uma vez por dia e quando você volta. Peça para eu parar ou diga o que observar.",
   needsYou: "Precisa da sua atenção",
-  nothingNeedsYou: "Nada precisa de você agora.",
+  nothingNeedsYou: "Nada precisa da sua atenção agora.",
   yourDay: "Seu dia",
   noMoreMeetings: "Não há mais reuniões hoje.",
   importantEmails: "E-mails importantes",
@@ -126,7 +126,7 @@ const ptBr: BriefWords = {
   open: "Abrir",
   join: "Participar",
   openInGmail: "Abrir no Gmail",
-  draftReply: (who) => `Rascunhar resposta para ${who}`,
+  draftReply: (who) => `Criar rascunho de resposta para ${who}`,
   dismiss: (who) => `Dispensar o e-mail de ${who}`,
   waitingOnReply: "Aguardando sua resposta",
   important: "Importante",
@@ -171,7 +171,7 @@ const ptBr: BriefWords = {
   unpreparedNote: (name) => `Para isso, a IA de ${name} precisa ser um modelo Claude. Seus e-mails continuam organizados, e a agenda do dia, os lembretes e os conflitos de horário aparecem aqui.`,
   isAsking: (bot) => `${bot} está perguntando a você`,
   ideas: "Ideias",
-  noticedAcross: (n) => `Percebido em conversas: ${n}`,
+  noticedAcross: (n) => `Conversas em que isso foi percebido: ${n}`,
 };
 
 const es: BriefWords = {
