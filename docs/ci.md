@@ -1,8 +1,12 @@
 # CI job selection
 
 Every PR still runs the workflow, its `static` job and the `CI` gate: locale
-validation, lint, the CI-selection tests and the verification-documentation
-checks always run. Selection never skips the entire workflow.
+validation, lint, the CI-selection tests, the verification-documentation
+checks and the source guards always run. Selection never skips the entire
+workflow. The source guards are the tests that only read the source (the
+vocabulary and locale checks, the size and route ratchets, and the like): they
+take seconds, and they run in `static` as well as in the shards, so a change
+that breaks one fails before the run asks for its runners.
 
 `scripts/ci-scope.mjs` sorts a pull request's changed files (a local
 merge-base diff, rename detection off, so a moved file selects its old path
@@ -89,10 +93,19 @@ run in the Windows Vitest/Electron jobs.
 
 ## Vitest shards
 
-The suite runs one file at a time, so a shard takes as long as its files added
-up, and the slowest shard sets how long a PR and a release wait. Linux and
-Windows run eight shards each, macOS four (the full lane only);
-`scripts/ci-scope.mjs` builds the matrix.
+The slowest shard sets how long a PR and a release wait. Linux and Windows run
+eight shards each, macOS four (the full lane only); `scripts/ci-scope.mjs`
+builds the matrix.
+
+**Files at once.** A Linux shard runs four files at a time (`VITEST_WORKERS`,
+`OMB_VITEST_WORKERS` in `vite.config.ts`), one for each of the runner's vCPUs.
+Most of a shard's time is waiting on real servers and fake engines: one file at
+a time it took 16 minutes with the machine 70% idle, and four at a time 5.
+Windows and macOS shards, and every local run, still run one file at a time. So
+that files side by side never share a port, each worker picks from its own
+(`server/testing/worker-port.ts`); a test that picks a port some other way can
+meet another file's. Four files share the runner's CPU, so test and hook
+timeouts double there, as on Windows (`server/testing/host-timeout.ts`).
 
 **Which files run where.** Linux runs every file. Most e2e files drive
 OMB's own logic through a real server and fake engines, which is the same on
@@ -126,13 +139,38 @@ three platforms) when shards drift apart:
 node scripts/testing/update-shard-weights.mjs --run <run id> --run <run id> --run <run id>
 ```
 
-To run one CI shard locally, use the same OS, `--shard` and `OMB_VITEST_E2E`:
-`OMB_VITEST_E2E=host pnpm exec vitest run --shard=3/8` is Windows shard 3 on a
-Windows machine.
-The locale and docs tests are the same command with their files first:
-`pnpm exec vitest run src/ scripts/generate-locale.test.mjs --shard=1/2` is
-locale tests 1/2 (those jobs set `OMB_VITEST_SUBSET`, so the sequencer does not
-warn that most weighted files are missing).
+To reproduce a failing Vitest job locally:
+
+1. Use the checkout revision shown in that job's log and install its locked
+   dependencies with `pnpm install --frozen-lockfile`. A PR's CI checkout may
+   be a merge commit rather than the branch tip.
+2. Use the same OS. Shard weights are platform-specific, so Windows shard 3
+   and Linux shard 3 do not contain the same files.
+3. Copy the expanded command from **Run tests**, including any file filters
+   and the complete `--shard=n/count` fraction. Copy its `OMB_VITEST_E2E`,
+   `OMB_VITEST_SUBSET` and `OMB_VITEST_WORKERS` environment values too. On Boat, the static job
+   contains each shard's output in a `vitest (ubuntu-latest, ...)` lane's
+   log group; the lane uses the same matrix values.
+
+For example, a full Windows shard 3/8 uses PowerShell syntax:
+
+```powershell
+$env:OMB_VITEST_E2E = "host"
+$env:OMB_VITEST_SUBSET = ""
+pnpm exec vitest run --shard=3/8
+```
+
+The full Linux shard 3/8 uses a POSIX shell:
+
+```sh
+OMB_VITEST_E2E=all OMB_VITEST_SUBSET= OMB_VITEST_WORKERS=4 pnpm exec vitest run --shard=3/8
+```
+
+Docs and locale jobs select smaller file lists and have their own shard
+counts. Keep their file filters: removing them changes the set the sequencer
+divides, even with the same `--shard`. `OMB_VITEST_SUBSET` suppresses the CI
+warning about missing weighted files; the command's file filters select the
+tests. Copy the current job's list rather than assuming it is the full suite.
 
 Deleting or renaming a test file in the weights fails
 `scripts/testing/duration-sequencer.test.ts` until its entry is removed or

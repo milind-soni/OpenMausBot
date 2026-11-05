@@ -172,6 +172,37 @@ export interface CloudAccountBridge {
   onState(callback: (state: CloudAccountState) => void): () => void;
   files?: import("./cloud-sync.mjs").CloudFilesBridge;
 }
+/** Who is signed in on this device, as the You menu shows it. `signIn`: this account's sign-in has ended here. */
+export interface AccountRow { id: string; email: string; signIn?: true }
+export interface AccountsView { active: AccountRow | null }
+export interface AccountSwitchResult { outcome: "switched" | "signed-out" | "moving" | "sign-in" | "gone" | "failed"; email?: string; view: AccountsView }
+/** What a click on a place of another account answers when it didn't switch: nothing moved. `sign-in`: that sign-in has ended. */
+export interface RailOpenResult { outcome: "switched" | "moving" | "sign-in" | "gone" | "failed"; email?: string }
+/** `added`: kept signed in, not switched to, while this computer's move finishes; `already`: that account is the one signed in. */
+export type AccountAddResult =
+  | { outcome: "switched" | "added" | "already"; email?: string; view: AccountsView }
+  | { outcome: "wrong-code"; triesLeft: number }
+  | { outcome: Exclude<import("./cloud-signin.mjs").CloudSignInVerifyFailure, "wrong-code"> };
+/** This app's own pages only: main refuses any other page. Absent on an older app. */
+export interface AccountsBridge {
+  list(): Promise<AccountsView>;
+  /** Removes that account from this device; the window goes to another signed in here, else the app is signed out. */
+  signOut(id: string): Promise<AccountSwitchResult>;
+  /** Add another account: the active account goes on until this succeeds. The attempt and the token stay in main. */
+  addStart(email: string): Promise<CloudSignInStart>;
+  addVerify(code: string): Promise<AccountAddResult>;
+  addBrowser(): Promise<{ outcome: "browser" | "failed"; code?: string }>;
+  addReopen(): Promise<void>;
+  /** How the browser's way ended, asked once the list changes: null until it has. */
+  addResult(): Promise<{ outcome: "switched" | "added" | "already" | "failed"; email?: string } | null>;
+  addCancel(): Promise<void>;
+  sheetPending(): Promise<boolean>;
+  sheetClosed(): Promise<void>;
+  onChanged(callback: () => void): () => void;
+  onOpenSheet(callback: () => void): () => void;
+}
+/** Any place's own page, from the person's click: the accounts sheet opens on the rail's page, and this page learns nothing of them. */
+export interface AccountSheetBridge { offered(): Promise<boolean>; open(): Promise<void> }
 /** On the person's own Cloud, open in this app's window: the plan, read
  * only, Manage in the browser, and Sign in again. No account, credential or address. */
 /** `signin`: this computer's sign-in ended; `tier` names the plan last verified, if any. */
@@ -217,7 +248,7 @@ export declare const STAGING_CLOUD_ORIGIN: string;
 export declare function cloudTarget(env?: Record<string, string | undefined>): {
   origin: string; staging: boolean;
   /** Under userData: the sign-in, saved servers, Files' folder, the Cloud's chosen name. */
-  file: string; environments: string; sync: string; look: string;
+  file: string; saved: string; places: string; environments: string; sync: string; look: string;
 };
 export declare const CHECKOUT_SOURCES: readonly string[];
 export declare const UPGRADE_SOURCES: readonly string[];
@@ -311,6 +342,10 @@ export interface CloudAccountClient {
   reportMove(options: { installation: string }): Promise<boolean>;
   /** This computer keeps its bots on itself again: it no longer counts as moved. False when the Admin can't take it yet. */
   reportKept(options: { installation: string }): Promise<boolean>;
+  /** The Admin's word on this account's own Cloud at `origin` (POST /api/cloud/desktop/moved-to): deleted, ended (stopped and
+   * kept only until it is deleted), live, or unknown (none of this account's). Null without a verified sign-in, or from an
+   * Admin that doesn't say. */
+  movedTo(origin: string): Promise<"deleted" | "ended" | "live" | "unknown" | null>;
   /** Tells the Admin where this computer's move to My Cloud stands (POST /api/cloud/desktop/move-status); false without a
    * sign-in or when the Admin doesn't take it yet. */
   reportMoveStatus(report: import("./move-status.mjs").MoveStatusReport): Promise<boolean>;
@@ -324,6 +359,12 @@ export interface CloudAccountClient {
   /** No sign-in needed: returns the Admin's receipt for this email-only answer. */
   updatesConsentByEmail(input: { email: string; installId: string; textVersion: string }): Promise<string>;
   withdrawUpdatesConsent(input: { status: "declined" | "withdrawn"; receipt: string }): Promise<void>;
+  /** Another account takes over: nothing more is asked or written for this sign-in. */
+  quiesce(): void;
+  /** Reads the sign-in saved in `store` afresh, keeping nothing of the one before. */
+  reload(): Promise<CloudAccountState>;
+  /** Ends a sign-in that waits on this device, at the Admin. */
+  revokeSaved(record: unknown): Promise<void>;
   close(): void;
 }
 export declare function createCloudAccountClient(options: {

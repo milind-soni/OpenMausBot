@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Cdp, CdpListeners } from "../../browser-sites.ts";
 import { NO_PASSKEY_AUTHENTICATOR } from "../cdp/passkeys.ts";
 import type { ChromeIdentity } from "./identity.ts";
-import { IdentitySidecars, startIdentitySidecar } from "./sidecar.ts";
+import { IDENTITY_LANDS_MS, IdentitySidecars, startIdentitySidecar } from "./sidecar.ts";
 
 const IDENTITY: ChromeIdentity = {
   userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
@@ -29,7 +29,53 @@ function fakeBrowser() {
   return { sent, connect, attach, settle, on, drop: () => listeners.closed?.() };
 }
 
+/** A browser with a tab open: it attaches as auto-attach is asked for, and its override is answered when the test says. */
+function browserWithOpenTab() {
+  const sent: string[] = [];
+  let listeners: CdpListeners = {};
+  let answer = () => {};
+  const answered = new Promise<void>((resolve) => { answer = () => resolve(); });
+  const cdp: Cdp = {
+    send: async (method, _params, sessionId) => {
+      sent.push(sessionId ? `${sessionId} ${method}` : method);
+      if (method === "Target.setAutoAttach" && !sessionId) listeners.event?.({ method: "Target.attachedToTarget", params: { sessionId: "tab-1", targetInfo: { type: "page", url: "about:blank" }, waitingForDebugger: false } });
+      if (method === "Emulation.setUserAgentOverride") await answered;
+      return {};
+    },
+    close: () => listeners.closed?.(),
+  };
+  const connect = async (_url: string, _timeoutMs?: number, given: CdpListeners = {}) => { listeners = given; return cdp; };
+  return { sent, connect, answer: () => answer() };
+}
+
 describe("the identity sidecar", () => {
+  it("doesn't hand the browser over until a tab already open has its identity, so the next page can't commit without it", async () => {
+    const browser = browserWithOpenTab();
+    let started = false;
+    const start = startIdentitySidecar("ws://127.0.0.1:9/devtools/browser/x", IDENTITY, browser.connect).then(() => { started = true; });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(browser.sent).toContain("tab-1 Emulation.setUserAgentOverride");
+    expect(started).toBe(false);
+    browser.answer();
+    await start;
+    expect(started).toBe(true);
+    expect(browser.sent).toContain("tab-1 Runtime.runIfWaitingForDebugger");
+  });
+
+  it("a tab that never answers holds the browser's start only so long", async () => {
+    vi.useFakeTimers();
+    try {
+      const browser = browserWithOpenTab();
+      let started = false;
+      const start = startIdentitySidecar("ws://127.0.0.1:9/devtools/browser/x", IDENTITY, browser.connect).then(() => { started = true; });
+      await vi.advanceTimersByTimeAsync(IDENTITY_LANDS_MS - 1);
+      expect(started).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await start;
+      expect(started).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("holds every new page and worker until it has the browser's own identity, then lets it run", async () => {
     const browser = fakeBrowser();
     await startIdentitySidecar("ws://127.0.0.1:9/devtools/browser/x", IDENTITY, browser.connect);

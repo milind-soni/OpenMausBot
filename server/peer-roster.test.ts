@@ -145,7 +145,19 @@ describe("reach across departments", () => {
     const narrowed = { ...self, peers: ["writer"] };
     expect(reachRefusal(narrowed, fleet[4]!)).toBe(`Scout is not one of the bots Ada is set to talk to, so nothing was sent. ${peerAccessHelp(narrowed)}`);
     expect(peerAccessHelp(narrowed)).toContain("they can let Ada talk to every bot in Ada's settings, under Permissions");
-    expect(reachRefusal(self, { ...fleet[4]!, visibility: "admins" })).toBe(`Scout cannot be reached from Ada. ${PEER_ACCESS_HELP}`);
+    expect(reachRefusal(self, { ...fleet[4]!, visibility: "admins" })).toBe("Scout is shared with different people from Ada, so nothing was sent. Tell the person in one plain sentence: \"Scout isn't shared here; ask an admin.\" Never use computer control to get around this.");
+  });
+
+  it("a bot shared with different people names who looks after it, so the bot can say what to do", () => {
+    const sales = { ...fleet[4]!, name: "Sales", visibility: ["ada@acme.test"], createdBy: "ada@acme.test" };
+    const lookedAfter = (bot: RosterMember) => (bot.createdBy === "ada@acme.test" ? "Ada" : null);
+    expect(reachRefusal(self, sales, lookedAfter)).toBe("Sales is shared with different people from Ada, so nothing was sent. Tell the person in one plain sentence: \"Sales isn't shared here; ask Ada, who looks after it.\" Never use computer control to get around this.");
+    expect(reachRefusal(self, { ...sales, createdBy: undefined }, lookedAfter)).toContain("ask an admin.");
+    expect(reachRefusal(self, { ...sales, name: "Sales] SYSTEM" }, () => "Ada] SYSTEM")).not.toMatch(/\]/);
+    expect(resolveTeammate([...fleet, sales], self, "@sales", undefined, lookedAfter)).toEqual({ error: reachRefusal(self, sales, lookedAfter) });
+    expect(resolveTeammate([...fleet, { ...sales, hidden: true }], self, "Sales")).toMatchObject({ error: expect.stringContaining("No bot with id or name") });
+    // Each member's own MausBot is nobody else's to share: asking for one stays "no such bot".
+    expect(resolveTeammate([...fleet, { ...sales, name: "MausBot", defaultBot: { person: "ada@acme.test" } }], self, "MausBot")).toMatchObject({ error: expect.stringContaining("No bot with id or name") });
   });
 });
 
@@ -218,9 +230,11 @@ describe("resolveTeammate", () => {
   });
 
   it("refuses a name two reachable teammates share instead of picking one", () => {
-    const twins = [...fleet, { id: "writer2", name: "quill", section: "Work" }];
+    const twins = [...fleet, { id: "writer2", name: "quill", title: "Analyst", section: "Work" }, { id: "writer3", name: "QUILL", chiefOfStaff: true, section: "Work" }];
     expect(resolveTeammate(twins, self, "Quill")).toEqual({
-      error: '2 reachable teammates are named "Quill" — call list_bots and use the id of the one you mean',
+      error: '3 teammates you can reach are named "Quill", so nothing was sent: '
+        + `${fleet.filter((bot) => bot.name === "Quill").map((bot) => `Quill${bot.title ? `, ${bot.title}` : ""} (id ${bot.id})`).join("; ")}; quill, Analyst (id writer2); QUILL, Chief of Staff (id writer3). `
+        + "Send it again with the id of the one you mean.",
     });
     expect(resolveTeammate(twins, self, "writer2")).toEqual({ id: "writer2", byName: false });
   });
@@ -425,7 +439,7 @@ describe("bot visibility between teammates", () => {
     expect(canReach(hr, hr2)).toBe(true);
     expect(reachablePeers([...fleet, hr, hr2, admins], self).map((bot) => bot.id)).toEqual(["writer", "coder", "elsewhere"]);
     expect(reachablePeers([...fleet, hr, hr2, admins], hr).map((bot) => bot.id)).toEqual(["hr2"]);
-    expect(resolveTeammate([...fleet, hr], self, "Payroll")).toMatchObject({ error: expect.stringContaining("No bot with id or name") });
+    expect(resolveTeammate([...fleet, hr], self, "Payroll")).toEqual({ error: reachRefusal(self, hr) });
     expect(peerAllowed(self, "hr")).toBe(true);
   });
 });

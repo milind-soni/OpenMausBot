@@ -7,7 +7,7 @@ import { isCancelledTranscriptRow } from "../../shared/client-cancel";
 export interface TranscriptSnapshot {
   busy: boolean;
   reply?: { id: string; name: string; text: string };
-  failure?: { id: string; name: string; cause: string };
+  failure?: { id: string; name: string; cause: string; partial?: boolean };
   approval?: { id: string; name: string };
 }
 
@@ -54,7 +54,7 @@ export function nextAnnouncement(
     } else if (snapshot.failure && snapshot.failure.id !== memory.failureId && !isUserStop(snapshot.failure.cause)) {
       const summary = replySummary(snapshot.failure.cause);
       said.push(summary
-        ? t("chat.announce.failed", { name: snapshot.failure.name, text: summary })
+        ? t(snapshot.failure.partial ? "chat.announce.partial" : "chat.announce.failed", { name: snapshot.failure.name, text: summary })
         : t("chat.announce.failedEmpty", { name: snapshot.failure.name }));
     }
   }
@@ -81,7 +81,7 @@ export function latestFailure(
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]!;
     const cause = message.kind === "activity" && message.tool ? failedTurnCause(message.tool.name) : null;
-    if (cause) return { id: message.id, name: nameOf(message), cause };
+    if (cause) return { id: message.id, name: nameOf(message), cause, ...(message.tool!.partial ? { partial: true } : {}) };
   }
   return undefined;
 }

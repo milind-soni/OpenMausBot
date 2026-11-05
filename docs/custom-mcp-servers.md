@@ -32,6 +32,13 @@ Compatible bots get it on their next task; no app restart is needed. On a
 Team Cloud everyone on the team can use a server an Admin adds; **Only for
 me**, offered for a server with one key, keeps that key as the Admin's own.
 
+A server you run as a command keeps running between a bot's tasks. A bot that
+changes the server's code reloads it with `mcp_server` action `restart`, which
+keeps the server's saved keys and sign-in; its next task starts the new code.
+Turning the server off and on does the same. Removing it deletes its saved
+keys, and a key the person entered on a card works once, so they would have to
+enter it again.
+
 Header and environment values are write-only: typed like passwords, never shown
 again, and a saved one left blank is kept. Tokens for URL servers go in
 headers, never in the address.
@@ -61,6 +68,21 @@ manage, and its own consequential-action confirmations still apply. See the
 [official Whop MCP documentation](https://github.com/whopio/whop-mcp-server).
 This is an optional connected tool, not a change to OMB's subscription billing.
 
+### Agentcard
+
+In Plugins, find **Agentcard** beside Whop and click **Connect**. The card uses
+Agentcard's official hosted MCP endpoint, `https://mcp.agentcard.sh/mcp`, and
+opens Agentcard's browser sign-in with your own Agentcard account. No API key
+is needed. After sign-in and tool discovery it enables the connection, and
+**Disconnect** and **Bot access** work as they do for Whop.
+
+OpenMausBot owns no cards, approvals or orders here. Agentcard keeps your cards
+and handles purchase approvals; OpenMausBot stores no card details. A bot that
+can use Agentcard can call all of its tools, including the ones that buy and
+the ones that show card details, so choose which bots get it under **Bot
+access**. Existing custom entries at the official HTTP endpoint are recognized
+rather than replaced.
+
 ### Servers that ask you to sign in
 
 Some URL servers take no token; they want you to sign in with your browser
@@ -69,7 +91,9 @@ details (RFC 9728 protected-resource metadata, then the authorization
 server's own metadata), the server shows **Needs sign-in** and a **Sign in**
 button. Sign in opens the provider's page in your browser, which returns to
 OpenMausBot when you approve. The server then shows **Signed in**, and Test
-lists its tools.
+lists its tools. A server that lists its tools before you sign in but refuses
+tool calls the same way (an HTTP 401 pointing at those sign-in details) shows
+**Sign in** too.
 
 - **Which servers work.** The authorization server must support PKCE with
   S256. If it lets apps register themselves (dynamic client registration),
@@ -291,9 +315,19 @@ Known limits:
   Codex lets a server's read-only tools run without asking, but here every
   tool runs through the one tool that runs them all, which cannot carry each
   tool's own read-only hint. Each Whop call shows a card, naming the tool.
-- **Command servers are not searched yet.** Only URL servers are. A command
-  server with hundreds of tools is still listed whole, and API-model bots
-  refuse more than 128 tools in one turn.
+- **Command servers are searched only on API models.** On other engines a
+  command server with hundreds of tools is still listed whole.
+
+API-model bots take at most 128 tools in one turn, and every server of the
+turn shares them with the built-in tools. When a bot's servers offer more,
+the turn lists as many whole servers as fit, in the order they are set up
+after the built-ins, and reaches the rest through one tool search of three
+tools (`mcp_search_tools`, `mcp_describe_tool`, `mcp_call_tool`) that count
+toward the 128. No server is left out for the limit; the chat says in one
+line which servers were reached through the search. The bot's MCP servers
+card in Access shows the last turn's count against the limit and those
+servers, and a server's **Test** says when it alone has more tools than the
+limit, or half of it or more.
 
 ### Which engines reach which servers
 
@@ -469,7 +503,10 @@ servers gets the enabled tools on its next task.
 - **Testing is bounded.** A command is stopped after the handshake (or eight
   seconds), its output is capped, and its stderr is never sent to the UI. It
   inherits none of OpenMausBot's workspace or provider credentials; only the
-  environment variables configured for that MCP server are added. A test
+  environment variables configured for that MCP server are added. Where bots
+  are boxed, a command server is tested in the box, as a bot's turn starts
+  it, and its configured variables pass the box's allow-list there, in the
+  test and in an API-model bot's turn alike. A test
   reads at most 32 MB (Whop's tool list alone is 1.2 MB), and a URL test
   reports only the HTTP status of a refusal.
 - **Addresses are checked.** A URL server needs a full `http://` or

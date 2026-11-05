@@ -17,6 +17,8 @@ import { Switch } from "../SettingsPrimitives";
 import { PhoneAppsCard } from "./PhoneAppsCard";
 import { ProposalStatus } from "./ProposalStatus";
 import { ToolSelectionCard } from "./ToolSelectionCard";
+import { BotApiCard } from "./BotApiCard";
+import { ToolBudgetLine } from "./ToolBudgetLine";
 import { useCloudPlan } from "../ProIntroduction";
 import { xResearchAction } from "@/lib/cloud-plan";
 import { HIGHLEVEL_SLUG } from "@/lib/highlevel-sign-in";
@@ -182,6 +184,7 @@ export function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpS
           ))}
         </div>
       )}
+      <ToolBudgetLine botId={bot.id} busy={!!bot.busy} />
       <div className="mt-3 flex items-center gap-2">
         <button type="button" onClick={openPlugins} className="flex items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover">
           <Plus size={14} /> {t("botAccess.mcpAdd")}
@@ -797,6 +800,8 @@ export function AccessSection({
       </div>}
 
       {!draft && shows("xResearch") && <ResearchCard bot={bot} patch={patch} />}
+
+      {!draft && shows("webhooks") && <BotApiCard bot={bot} />}
 
       {!draft && shows("webhooks") && <div className="rounded-xl bg-card p-4">
         <div className="text-[15px] font-medium text-ink">{t("botAccess.webhooks.title")}</div>

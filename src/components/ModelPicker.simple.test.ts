@@ -534,6 +534,28 @@ describe("the model picker in Simple mode", () => {
     }));
   });
 
+  it("shows the picked Antigravity thinking level on the closed picker, so the pick visibly lands (#4160)", () => {
+    const variants = [{ id: "low", label: "Low" }, { id: "medium", label: "Medium" }];
+    fixture.instances = [{ ...engine("antigravity", "antigravityAgent", "Google Gemini", "subscription", [
+      { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", variants },
+    ]), capabilities: { modelVariants: true } }];
+    const forBot = { ...bot(undefined, "antigravity", "gemini-3.8-flash"), modelSelection: {
+      instanceId: "antigravity", model: "gemini-3.8-flash", variant: "medium",
+    } };
+    expect(render(forBot, { contained: true }).html).toContain(">Gemini 3.8 Flash</span><span class=\"shrink-0 whitespace-pre\"> · Medium</span>");
+  });
+
+  it("dispatches a picked Antigravity thinking level from its menu row (#4160)", () => {
+    const variants = [{ id: "low", label: "Low" }, { id: "medium", label: "Medium" }];
+    fixture.instances = [{ ...engine("antigravity", "antigravityAgent", "Google Gemini", "subscription", [
+      { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", variants },
+    ]), capabilities: { modelVariants: true } }];
+    pane(open(bot(undefined, "antigravity", "gemini-3.8-flash"), { contained: true }))!.props.onPick(instance("antigravity"), "gemini-3.8-flash", "medium");
+    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "setModel", selection: expect.objectContaining({ instanceId: "antigravity", model: "gemini-3.8-flash", variant: "medium" }),
+    }));
+  });
+
   it.each([[true, true], [false, false], [null, false]] as const)(
     "lets the bot panel's picker, given the open thread, set the default only for the Cloud owner (owner: %s)",
     (ownerOrAdmin, updatesDefault) => {
@@ -898,12 +920,14 @@ describe("a thread's picker and its bot's model", () => {
     expect(closed).not.toContain("data-thread-models-notice");
   });
 
-  it("right after a pick changes the bot's model, says how many threads keep their own, until it opens again", () => {
+  it("once the menu closes after a pick changes the bot's model, says how many threads keep their own, until it opens again", () => {
     const forBot = scout(null, [{ threadId: "kept", model: haiku }, { threadId: "follows", model: null }]);
     const opened = open(forBot);
     pane(opened)!.props.onPick(instance("claude"), "claude-sonnet-5-5");
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ type: "setModel", updateBotDefault: true }));
-    const closed = render(forBot);
+    // Sonnet 5.5 has effort levels, so the menu stays open for them; the chip closes it.
+    expect(render(forBot).html).not.toContain("data-thread-models-notice");
+    const closed = open(forBot);
     expect(closed.html).toContain("data-thread-models-notice");
     expect(closed.html).toContain("menu-surface");
     expect(closed.html).toContain("1 thread uses its own model.");
@@ -981,6 +1005,28 @@ describe("every capability of the picker stays reachable", () => {
     const onMissing = open({ ...forBot, modelSelection: { instanceId: "cursor", model: "auto" } });
     expect(group(onMissing, "cursor")?.body.kind).toBe("setUp");
     expect(list(onMissing).current).toMatchObject({ meta: "Setup required", warning: true });
+  });
+
+  it.each([false, true])("on a paired desktop (Advanced: %s), still picks models but leaves provider settings to the host", (advanced) => {
+    fixture.advanced = advanced;
+    fixture.instances = rich();
+    const forBot = followed();
+    window.ogb = { remoteClient: { active: true } } as NonNullable<Window["ogb"]>;
+    try {
+      const html = menu(open(forBot).html);
+      expect(html).toContain("Sonnet 5.5");
+      for (const hostOnly of ["data-simple-manage", "Model providers and accounts", "data-model-add-api-keys"]) {
+        expect(html, hostOnly).not.toContain(hostOnly);
+      }
+      // Nothing follows the thinking levels, so no divider hangs under them.
+      if (!advanced) {
+        const band = region(html, "data-simple-effort-band");
+        expect(band).toContain(">X-High</button>");
+        expect(band).not.toContain('role="separator"');
+      }
+    } finally {
+      delete window.ogb;
+    }
   });
 
   it("in Advanced mode, from the chip and the full picker", () => {

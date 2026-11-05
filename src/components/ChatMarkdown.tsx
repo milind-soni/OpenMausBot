@@ -1,15 +1,16 @@
 // Security: model output never reaches the DOM as raw HTML (no rehype-raw); Shiki's output is generator-escaped.
 import { createContext, memo, use, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
-import Markdown, { defaultUrlTransform, type Components, type ExtraProps } from "react-markdown";
+import Markdown, { defaultUrlTransform, type Components, type ExtraProps, type Options as MarkdownOptions } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { fromMarkdown, type Options as MarkdownParseOptions } from "mdast-util-from-markdown";
-import { Check, Copy, Download, LoaderCircle, RotateCcw, WrapText, X } from "lucide-react";
+import { Check, Copy, Download, Eye, LoaderCircle, RotateCcw, WrapText, X } from "lucide-react";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { remarkMentions, sameMentionPerson, type MentionPeer, type MentionPerson } from "@/lib/mentions";
+import { createMarkdownRenderCache } from "@/lib/markdown-render-cache";
 
 import { parseFenceInfo } from "../lib/code-block";
 import { markdownImageName, markdownImageOpenUrl } from "../lib/markdown-image";
@@ -27,6 +28,7 @@ import { MarkdownTable } from "./MarkdownTable";
 import { CodeBlock, CodePlate, codeHash } from "./CodeBlock";
 export { CodeBlock, HIGHLIGHT_CACHE_MAX, HIGHLIGHT_CACHE_MAX_CHARS, HIGHLIGHT_MAX_CHARS, type CodeBlockProps } from "./CodeBlock";
 import { FilePreviewButton } from "./FilePreviewButton";
+import { SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
 
 const mermaidCache = new Map<string, string>();
 const MERMAID_CACHE_MAX = 50;
@@ -85,7 +87,9 @@ const gfmParseData: {
   micromarkExtensions?: MarkdownParseOptions["extensions"];
   fromMarkdownExtensions?: MarkdownParseOptions["mdastExtensions"];
 } = {};
-remarkGfm.call({ data: () => gfmParseData });
+// A spoiler is "~~text~~" only: a lone "~" in a range such as "77~82" must not hide what follows it.
+const GFM_OPTIONS = { singleTilde: false };
+remarkGfm.call({ data: () => gfmParseData }, GFM_OPTIONS);
 const normalizationParseOptions: MarkdownParseOptions = {
   extensions: gfmParseData.micromarkExtensions,
   mdastExtensions: [...(gfmParseData.fromMarkdownExtensions ?? []), windowsPathDestinations],
@@ -318,6 +322,7 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
 // which calls shell.openExternal without main's containment check.
 function LocalFileLink({ filePath, name, children, message }: { filePath: string; name?: string; children?: ReactNode; message?: MessageAttachmentContext }) {
   const save = useLocalFileSave(filePath, name, message);
+  const preview = useHtmlPreview(filePath, name ?? fileName(filePath), message);
   if (!message) {
     return <span title="Unavailable legacy file reference" className="break-words text-ink-secondary">{children}</span>;
   }
@@ -331,16 +336,20 @@ function LocalFileLink({ filePath, name, children, message }: { filePath: string
 
   return (
     <span dir="ltr" className="inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]">
-      <FilePreviewButton path={filePath} name={name ?? fileName(filePath)} message={message} />
+      {preview.html
+        ? <SaveIconButton name={name ?? fileName(filePath)} save={save} retryable={save.state === "failed" && !save.outsideWorkspace} />
+        : <FilePreviewButton path={filePath} name={name ?? fileName(filePath)} message={message} />}
       <button
         type="button"
-        onClick={() => void save.save()}
-        disabled={save.state === "saving"}
-        title="Save a copy"
+        onClick={preview.html ? preview.show : () => void save.save()}
+        disabled={!preview.html && save.state === "saving"}
+        title={preview.html ? t("html.preview", { name: name ?? fileName(filePath) }) : "Save a copy"}
         className="inline-flex items-center gap-1 break-words text-start text-accent underline decoration-accent/40 hover:decoration-accent disabled:cursor-wait"
       >
         {children}
-        {save.state === "saving" ? (
+        {preview.html ? (
+          <Eye size={12} className="shrink-0" aria-hidden="true" />
+        ) : save.state === "saving" ? (
           <LoaderCircle size={12} className="shrink-0 animate-spin" aria-hidden="true" />
         ) : save.state === "saved" ? (
           <Check size={12} className="shrink-0 text-success" aria-hidden="true" />
@@ -365,6 +374,7 @@ function LocalFileLink({ filePath, name, children, message }: { filePath: string
         </span>
       )}
       {save.folder && <MessageFolderFiles folderPath={filePath} listing={save.folder} message={message} />}
+      {preview.dialog}
     </span>
   );
 }
@@ -712,8 +722,44 @@ const MARKDOWN_COMPONENTS: Components = {
   },
 };
 
-const MAY_LINK_THREAD = /#|openmausbot/i;
+// A thread link is "#" directly before a title, or an app link. A heading's "## " never reaches the plugin as text.
+const MAY_LINK_THREAD = /#[^\s#]|openmausbot/i;
 const NO_THREAD_REFS: ThreadRefsValue = { threads: [] };
+
+// One plugin list for everything every message shares; a message adds mentions only when it has an "@" and thread
+// links only when it may name one, so most messages render the same way whatever the bot list holds.
+const BASE_REMARK_PLUGINS: NonNullable<MarkdownOptions["remarkPlugins"]> = [[remarkGfm, GFM_OPTIONS], remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, remarkSoftBreaks, remarkGithubRefs];
+const NO_REHYPE_PLUGINS: NonNullable<MarkdownOptions["rehypePlugins"]> = [];
+let katexPlugins: { plugin: KatexPlugin; list: NonNullable<MarkdownOptions["rehypePlugins"]> } | null = null;
+const rehypePluginsFor = (math: KatexPlugin | null) => {
+  if (!math) return NO_REHYPE_PLUGINS;
+  if (katexPlugins?.plugin !== math) katexPlugins = { plugin: math, list: [math] };
+  return katexPlugins.list;
+};
+
+const markdownCache = createMarkdownRenderCache();
+const peerSignatures = new WeakMap<readonly MentionPeer[], string>();
+const peerSignature = (peers: readonly MentionPeer[]) => {
+  let signature = peerSignatures.get(peers);
+  if (signature === undefined) {
+    signature = peers.map((peer) => `${peer.name}\u0001${peer.hidden ? 1 : 0}${peer.person ? 1 : 0}${peer.color ?? ""}`).join("\u0002");
+    peerSignatures.set(peers, signature);
+  }
+  return signature;
+};
+// The thread list keeps its identity while its contents hold (ThreadRefsProvider), so a number per list stands for it.
+const threadListIds = new WeakMap<object, number>();
+let threadListCount = 0;
+const threadListId = (threads: object) => {
+  let id = threadListIds.get(threads);
+  if (id === undefined) threadListIds.set(threads, (id = ++threadListCount));
+  return id;
+};
+
+/** Test seam: drops every cached message. */
+export function clearChatMarkdownCache(): void {
+  markdownCache.clear();
+}
 
 function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS, everyone = false, mentionPerson, delivered }: {
   text: string; message?: MessageAttachmentContext;
@@ -741,18 +787,18 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
     };
   }, [needsMath]);
   const mathPlugin = needsMath && katexReady ? katexPlugin : null;
+  const mentions = source.includes("@"), linksThreads = threads.length > 0;
+  const variant = `${mathPlugin ? "math" : ""}\u0003${mentions ? `${peerSignature(mentionPeers)}\u0001${everyone ? 1 : 0}\u0001${mentionPerson?.profileName ?? ""}` : ""}\u0003${linksThreads ? `${threadListId(threads)}\u0001${currentBotId ?? ""}` : ""}`;
+  // Markdown is a plain function of its options (no hooks), so its elements can be kept and drawn again.
+  const markdown = markdownCache.render(text, variant, () => {
+    const remarkPlugins = [...BASE_REMARK_PLUGINS];
+    if (mentions) remarkPlugins.push([remarkMentions, { peers: mentionPeers, everyone, person: mentionPerson }]);
+    if (linksThreads) remarkPlugins.push(remarkThreadRefs(threads, currentBotId));
+    return Markdown({ children: source, remarkPlugins, rehypePlugins: rehypePluginsFor(mathPlugin), urlTransform: chatUrlTransform, components: MARKDOWN_COMPONENTS });
+  });
   return (
     <MessageScopeContext.Provider value={{ message, imageOffsets, threads, currentBotId, delivered }}>
-      <div className="chat-md min-w-0 [&>*+*]:mt-2">
-        <Markdown
-          remarkPlugins={[remarkGfm, remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, remarkSoftBreaks, remarkGithubRefs, [remarkMentions, { peers: mentionPeers, everyone, person: mentionPerson }], remarkThreadRefs(threads, currentBotId)]}
-          rehypePlugins={mathPlugin ? [mathPlugin] : []}
-          urlTransform={chatUrlTransform}
-          components={MARKDOWN_COMPONENTS}
-        >
-          {source}
-        </Markdown>
-      </div>
+      <div className="chat-md min-w-0 [&>*+*]:mt-2">{markdown}</div>
     </MessageScopeContext.Provider>
   );
 }

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -118,6 +118,21 @@ describe("show_html", () => {
   });
 });
 
+describe("a frameless page", () => {
+  it("is drawn without the card frame only when the bot asks, and keeps that look through updates unless changed", () => {
+    const { call, row } = setup();
+    call({ tool: "show_html", html: PAGE, title: "Framed" });
+    expect(row("m1").app).toMatchObject({ border: true });
+    call({ tool: "show_html", html: PAGE, title: "Inline", frameless: true });
+    expect(row("m2").app).toMatchObject({ border: false });
+    call({ tool: "update_html", app_id: "m2", html: "<p>New numbers</p>" });
+    expect(row("m2").app).toMatchObject({ border: false, rev: 1 });
+    call({ tool: "update_html", app_id: "m2", html: "<p>New numbers</p>", frameless: false });
+    expect(row("m2").app).toMatchObject({ border: true, rev: 1 });
+    expect(call({ tool: "show_html", html: PAGE, title: "Bad", frameless: "yes" })).toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/^frameless:/) });
+  });
+});
+
 describe("update_html", () => {
   it("replaces the page in place: a new document, the next revision, the title kept unless given, context dropped", () => {
     const { call, row, store } = setup();
@@ -225,6 +240,39 @@ describe("a folder page", () => {
     expect(appDocument({ store, docs, threadId: THREAD, messageId: "m2", files: FILES })!.srcdoc).not.toContain("<base");
   });
 
+  it("records a video where it is, for the chat only: not stored, not counted, not published", async () => {
+    const { docs, store, row } = setup([], 2_000);
+    const where = folders();
+    const film = join(where.mine, "dash", "clip.mp4");
+    writeFileSync(film, "");
+    truncateSync(film, 6 * 1024 * 1024 * 1024);
+    writeFileSync(join(where.mine, "dash", "notes.mkv"), "not a page's video");
+    expect(await createAppCard({ store, docs, bot: SCOUT, threadId: THREAD, input: { tool: "show_html", path: "dash", title: "Dash" }, folders: where.of })).toEqual({ ok: true, messageId: "m1" });
+    const doc = row("m1").app!.doc;
+    const before = statSync(film, { bigint: true });
+    expect(docs.video(doc, "clip.mp4")).toEqual({ file: realpathSync.native(film), bytes: 6 * 1024 * 1024 * 1024, dev: String(before.dev), ino: String(before.ino), mtimeNs: String(before.mtimeNs) });
+    expect(docs.video(doc, "notes.mkv")).toBeNull();
+    expect(row("m1").app!.bytes).toBe(58 + 6 * 1024 * 1024 * 1024);
+    expect(docs.usage()).toBeLessThan(2_000);
+    expect(docs.readFile(doc, "clip.mp4")).toBeNull();
+    const page = publishablePage({ store, docs, threadId: THREAD, messageId: "m1" });
+    if (!page.ok) throw new Error(page.error);
+    expect(page.files.map((file) => file.path).sort()).toEqual(["app.js", "data.parquet", "index.html"]);
+
+    const published = await readPageBundle("dash", [where.mine]);
+    expect(published.skipped.sort()).toEqual(["clip.mp4", "notes.mkv"]);
+    expect(published.videos).toBeUndefined();
+  });
+
+  it("will not record a video reached by a link out of the bot's folders", async () => {
+    const { docs, store, row } = setup();
+    const where = folders();
+    writeFileSync(join(where.theirs, "secret", "theirs.mp4"), "moov");
+    symlinkSync(join(where.theirs, "secret", "theirs.mp4"), join(where.mine, "dash", "link.mp4"));
+    await createAppCard({ store, docs, bot: SCOUT, threadId: THREAD, input: { tool: "show_html", path: "dash", title: "Dash" }, folders: where.of });
+    expect(docs.video(row("m1").app!.doc, "link.mp4")).toBeNull();
+  });
+
   it("is refused outside the bot's own folders, without index.html, or where folders aren't known", async () => {
     const { rows, docs, store } = setup();
     const where = folders();
@@ -288,6 +336,20 @@ describe("publish_page in the chat", () => {
     expect(docs.readFile(row("m1").app!.doc, "data.csv")?.toString()).toBe("a\n2");
     expect(showPublishedPage({ store, docs, threadId: THREAD, card: { ...LIVE, url: `${LIVE.url}?again` }, bundle: await bundle() })).toBe("m1");
     expect(row("m1")).toMatchObject({ app: { rev: 1 }, publishedPage: { url: `${LIVE.url}?again` } });
+  });
+
+  it("keeps the card's video playing when the same folder is published", async () => {
+    const { store, docs, row } = setup();
+    const { base, bundle } = await folder();
+    writeFileSync(join(base, "dash", "clip.webm"), "webm");
+    await createAppCard({ store, docs, bot: SCOUT, threadId: THREAD, input: { tool: "show_html", path: "dash", title: "Dash" }, folders: async () => ({ roots: [base], vmWorkspace: null }) });
+    writeFileSync(join(base, "dash", "index.html"), "<h1>Dash, edited</h1>");
+    const published = await bundle();
+    expect(published.skipped).toEqual(["clip.webm"]);
+    expect(showPublishedPage({ store, docs, threadId: THREAD, card: LIVE, bundle: published })).toBe("m1");
+    expect(row("m1")).toMatchObject({ publishedPage: LIVE, app: { rev: 1 } });
+    expect(docs.read(row("m1").app!.doc)!.html).toBe("<h1>Dash, edited</h1>");
+    expect(docs.video(row("m1").app!.doc, "clip.webm")).toMatchObject({ bytes: 4 });
   });
 
   it("leaves a room, a limit card and a page with no index.html to the plain link card", async () => {

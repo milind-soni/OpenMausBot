@@ -349,6 +349,7 @@ test("the window's IPC: the screen reads and retries, My Cloud's page renews its
   w.url = `${LOCAL}${HOME_SCREEN_PATH}`;
   assert.deepEqual(handlers.get("home:state")(page), { screen: "opening" });
   assert.throws(() => handlers.get("home:repair")(page), /only available/);
+  w.state = { status: "signed-out" };
   await handlers.get("home:sign-in")(page);
   w.url = "https://other.example.test/";
   assert.throws(() => handlers.get("home:sign-in")(page), /only available/);
@@ -357,10 +358,10 @@ test("the window's IPC: the screen reads and retries, My Cloud's page renews its
 });
 
 const PRELOAD = readFileSync(new URL("./preload.cjs", import.meta.url), "utf8");
-function preload(origin, { home = false, activation = false } = {}) {
+function preload(origin, { home = false, activation = false, pairedElsewhere = false } = {}) {
   let bridge; const invoked = [], synced = [], listeners = new Map();
   vm.runInNewContext(PRELOAD, {
-    process: { platform: "darwin", argv: [`--omb-local-origin=${LOCAL}`, "--omb-company-desktop=1"] },
+    process: { platform: "darwin", argv: [`--omb-local-origin=${LOCAL}`, ...(pairedElsewhere ? ["--openmausbot-remote-client"] : ["--omb-company-desktop=1"])] },
     location: { origin }, navigator: { userActivation: { isActive: activation } }, TextEncoder, localStorage: { getItem: () => null },
     queueMicrotask,
     require: () => ({ webUtils: {}, contextBridge: { exposeInMainWorld: (_name, value) => { bridge = value; } },
@@ -370,6 +371,12 @@ function preload(origin, { home = false, activation = false } = {}) {
   const tell = (channel, ...args) => listeners.get(channel)?.({}, ...args);
   return { bridge, invoked, synced, tell };
 }
+
+test("My Cloud's page in the app is the Cloud's own page, never a remote client: only a desktop paired to another computer is one", () => {
+  assert.equal(preload(CLOUD, { home: true }).bridge.remoteClient, undefined, "a Cloud's own page isn't told it is remote at all");
+  assert.equal(preload(LOCAL).bridge.remoteClient?.active, false);
+  assert.equal(preload(LOCAL, { pairedElsewhere: true }).bridge.remoteClient?.active, true);
+});
 
 test("My Cloud's own page, once it is home, gets this app's chat links, diagnostics and its session renewal; any other server's page doesn't", async () => {
   const keys = ["home", "onChatLink", "onPackageInstall", "exportDiagnostics", "openLogsFolder"];
@@ -586,8 +593,18 @@ test("signed out, a team shows the sign-in screen with its name; the Admin refus
   assert.deepEqual(w.remembers.at(-1), null);
   const problem = world({ state: { ...connected(), teams: [{ ...ACME, machine: { status: "stopped", hold: { until: 9 } } }] } });
   await problem.home.show({ place: { team: "team-acme" } });
-  assert.deepEqual(problem.home.view(), { screen: "plan", machine: "stopped", name: "Acme" }, "a team's Cloud that ended: its plan screen, by name");
+  assert.deepEqual(problem.home.view(), { screen: "plan", machine: "stopped", name: "Acme", member: true }, "a team's Cloud that ended: its plan screen, by name");
   assert.deepEqual(problem.teamPairs, []);
+  const stoppedFor = async (role, machine) => {
+    const seen = world({ state: { ...connected(), teams: [{ ...ACME, role, machine }] } });
+    await seen.home.show({ place: { team: "team-acme" } });
+    return seen.home.view();
+  };
+  for (const machine of [{ status: "stopped", hold: { until: 9 } }, { status: "payment-problem" }, { status: "stopped", origin: TEAM }, { status: "payment-problem", origin: TEAM }]) {
+    assert.deepEqual(await stoppedFor("member", machine), { screen: "plan", machine: machine.status, name: "Acme", member: true }, "a team's User is sent to its owner");
+    for (const role of ["owner", "admin"]) assert.equal((await stoppedFor(role, machine)).member, undefined, role);
+  }
+  assert.equal((await stoppedFor("member", null)).member, true, "no machine at all: stopped, for a User too");
 });
 
 test("on the team's page, a session that ends is renewed through the team pairing, the page counts as this app's, and its new version reloads at a quiet moment", async () => {
@@ -844,4 +861,27 @@ test("another Cloud the Admin says is no longer theirs is dropped at once and My
   await setup.home.show({ place: { cloud: "c-a" } });
   assert.deepEqual(setup.home.view(), { screen: "setup", step: "starting", name: "Client A" });
   assert.deepEqual(setup.ownPairs, [], "never paired while it is set up");
+});
+
+test("an account leaving: nothing under way for it goes on, and the next show takes the window off its place", async () => {
+  const w = world({ journal: null, state: { status: "signed-out" }, url: `${CLOUD}/` });
+  w.home.accountLeaving();
+  assert.equal(w.home.shown(), null);
+  await w.home.show();
+  assert.deepEqual(w.local, [true], "the window showed that account's Cloud: this computer's page now");
+  const here = world({ journal: null, state: { status: "signed-out" }, url: `${LOCAL}/` });
+  here.home.accountLeaving();
+  await here.home.show();
+  assert.deepEqual(here.local, [false], "already on this computer's page: nothing moves");
+});
+
+const B_CLOUD = "https://omb-b.fly.dev";
+const accountB = (machine) => ({ status: "connected", account: { id: "acct-2", email: "b@example.test" }, ...(machine ? { machine } : {}) });
+
+test("moved to A's Cloud, B signed in with a Cloud of its own: B's Cloud opens, and A's frozen copy is never shown", () => {
+  assert.deepEqual(homeOf({ journal: done(), state: accountB({ status: "ready", origin: B_CLOUD }) }), { kind: "cloud", origin: B_CLOUD, otherAccount: true });
+  assert.deepEqual(homeOf({ journal: done(), state: accountB(null) }), { kind: "signin", other: true }, "B has no Cloud: the screen says where the bots are");
+  assert.deepEqual(homeOf({ journal: done(), state: accountB({ status: "stopped", hold: { until: 9 } }) }), { kind: "signin", other: true }, "B's Cloud ended: never this computer's frozen copy");
+  assert.deepEqual(homeOf({ journal: done(), state: { status: "unavailable", account: { id: "acct-2" } } }), { kind: "signin", other: true }, "before the Admin answers");
+  assert.deepEqual(homeOf({ journal: done(), state: { status: "reauth-required", account: { id: "acct-2" } } }), { kind: "signin", other: true });
 });

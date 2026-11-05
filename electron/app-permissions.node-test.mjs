@@ -222,7 +222,7 @@ test("the verified Cloud open in this window may write the clipboard, by the rem
   assert.equal(ask(write, onCloud(), { getURL: () => `${CLOUD}/` }), false, "the main window is gone");
 });
 
-test("once My Cloud is home its page may show notifications, in the main window's main frame only; any other page still may not", () => {
+test("once My Cloud is home its page may show notifications and go fullscreen, in the main window's main frame only; any other page still may not", () => {
   const state = { home: null, main: { getURL: () => `${CLOUD}/chat` } };
   const handlers = appPermissionHandlers({ rendererOrigin: () => LOCAL_ORIGIN, mainContents: () => state.main, cloudHomeOrigin: () => CLOUD, homeOrigin: () => state.home });
   const ask = (details, contents = state.main) => { let granted; handlers.request(contents, "notifications", (value) => { granted = value; }, details); return granted; };
@@ -235,7 +235,9 @@ test("once My Cloud is home its page may show notifications, in the main window'
   assert.equal(check(CLOUD, {}), false, "a frame it cannot vouch for");
   assert.equal(ask(onCloud(), { getURL: () => `${CLOUD}/` }), false, "another window");
   assert.equal(ask({ requestingUrl: "https://bots.example.test/", isMainFrame: true }), false, "another server");
-  for (const permission of ["geolocation", "camera", "clipboard-read", "fullscreen"]) {
+  let fullscreen; handlers.request(state.main, "fullscreen", (value) => { fullscreen = value; }, onCloud());
+  assert.equal(fullscreen, true, "a chat video's fullscreen button");
+  for (const permission of ["geolocation", "camera", "clipboard-read"]) {
     let granted; handlers.request(state.main, permission, (value) => { granted = value; }, onCloud());
     assert.equal(granted, false, permission);
   }
@@ -271,7 +273,7 @@ test("the app installs these handlers, with its one rule for My Cloud and a wait
   assert.match(main, /cloudPageSenderAllowed\(event, \{ contents, homeOrigin: myCloud\(\),/);
   assert.doesNotMatch(main, /rememberedHome\??\.accountId/);
   assert.doesNotMatch(main, /remembered: true/);
-  assert.match(main, /cloudAccountRestoring = true;\n\s+cloudAccountStarted = ensureCloudAccount\(\)\.start\(\)\.catch\(\(\) => \{\}\)\.finally\(\(\) => \{ cloudAccountRestoring = false; \}\);/);
+  assert.match(main, /cloudAccountRestoring = true;\n\s+cloudAccountStarted = ensureCloudAccount\(\)\.start\(\)\.catch\(\(\) => \{\}\)\.then\(\(\) => accountRing\(\)\?\.start\(\)\)\.finally\(\(\) => \{ cloudAccountRestoring = false; \}\);/);
 });
 
 const ADMIN = "http://127.0.0.1:9";
@@ -524,4 +526,32 @@ test("the base policy itself still grants a remote origin nothing", () => {
   for (const permission of ["clipboard-sanitized-write", "clipboard-read", "notifications", "fullscreen"]) {
     assert.equal(appPermissionAllowed(permission, REMOTE, LOCAL_ORIGIN, { isMainFrame: true }), false, permission);
   }
+});
+
+test("the active remote server's page may show notifications and go fullscreen, in the main window's main frame only", () => {
+  const state = { remote: REMOTE, main: { getURL: () => `${REMOTE}/chat` } };
+  const handlers = appPermissionHandlers({ rendererOrigin: () => LOCAL_ORIGIN, mainContents: () => state.main, cloudHomeOrigin: () => null,
+    activeRemoteOrigin: () => state.remote });
+  const onRemote = (extra = {}) => ({ requestingUrl: `${REMOTE}/settings`, isMainFrame: true, ...extra });
+  const ask = (details, contents = state.main, permission = "notifications") => {
+    let granted; handlers.request(contents, permission, (value) => { granted = value; }, details); return granted;
+  };
+  assert.equal(ask(onRemote()), true);
+  assert.equal(handlers.check(state.main, "notifications", REMOTE, { isMainFrame: true }), true);
+  assert.equal(ask(onRemote({ isMainFrame: false })), false, "a frame inside it");
+  assert.equal(handlers.check(state.main, "notifications", REMOTE, {}), false, "a frame it cannot vouch for");
+  assert.equal(ask(onRemote(), { getURL: () => `${REMOTE}/` }), false, "another window");
+  assert.equal(ask(onRemote({ requestingUrl: "https://other.tail1.ts.net:9444/" })), false, "another server");
+  assert.equal(ask(onRemote(), state.main, "fullscreen"), true, "a chat video's fullscreen button");
+  assert.equal(handlers.check(state.main, "fullscreen", REMOTE, { isMainFrame: true }), true);
+  assert.equal(ask(onRemote({ isMainFrame: false }), state.main, "fullscreen"), false, "fullscreen from a frame inside it");
+  assert.equal(ask(onRemote({ requestingUrl: "https://other.tail1.ts.net:9444/" }), state.main, "fullscreen"), false, "fullscreen for another server");
+  assert.equal(ask(onRemote(), { getURL: () => `${REMOTE}/` }, "fullscreen"), false, "fullscreen in another window");
+  for (const permission of ["geolocation", "camera", "clipboard-read"]) {
+    assert.equal(ask(onRemote(), state.main, permission), false, permission);
+  }
+  state.remote = null;
+  assert.equal(ask(onRemote()), false, "no active remote: at once");
+  assert.equal(ask(onRemote(), state.main, "fullscreen"), false, "no active remote: no fullscreen");
+  for (const requesting of ["about:blank", "data:text/html,x", ""]) assert.equal(ask(onRemote({ requestingUrl: requesting })), false, `${requesting || "(empty)"}`);
 });

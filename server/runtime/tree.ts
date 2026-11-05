@@ -1,6 +1,6 @@
 // "Since this turn began" is read from event ids (one global order), never timestamps: a clock can step back.
 import type { RuntimeStore } from "./store.ts";
-import { terminal, type Assignment, type Owner, type TurnEvidence } from "./types.ts";
+import { terminal, type Assignment, type Mode, type Owner, type TurnEvidence } from "./types.ts";
 
 export const CUT_TWICE = "Interrupted by another OpenMausBot restart after resuming once; not resumed again. Some of its steps may already have taken effect.";
 
@@ -74,6 +74,13 @@ export const awaited = (children: readonly Assignment[]): Assignment[] => childr
  * the rest of the work moves on while the person acts on it. Another card park waits on its card. */
 export const asking = (a: Assignment): boolean => a.status === "needs_input" && (!(a.cards && a.cards.length > 0) || a.level === "full");
 
+/** A one-way notice from the turn running `parent` back into the conversation that handed it that work with reply none.
+ * Nothing returns from such work on its own, so this is the only way its answer gets back: the ancestor rule lets it
+ * through, but never as new work and never into another conversation of that bot. */
+export const answersSender = (parent: Assignment | undefined, mode: Mode, target: { botId: string; threadId: string; groupId?: string | undefined }): boolean =>
+  mode === "notify" && parent?.reply === "none" && parent.requester.botId === target.botId && parent.requester.threadId === target.threadId
+  && parent.assignee.destination.groupId === undefined && target.groupId === undefined;
+
 export function path(store: RuntimeStore, n: Assignment): Assignment[] {
   const out: Assignment[] = [];
   const seen = new Set<string>();
@@ -107,6 +114,12 @@ export function continuations(store: RuntimeStore, id: string): number {
 export function childrenSince(store: RuntimeStore, n: Assignment): Assignment[] {
   const since = lastStartedId(store, n.id);
   return store.children(n.id).filter(c => (store.events(c.id)[0]?.id ?? 0) > since);
+}
+
+/** Awaited children whose results the next turn of `n` would bring as news: finished since its last turn started. */
+export function settledSince(store: RuntimeStore, n: Assignment): Assignment[] {
+  const since = lastStartedId(store, n.id);
+  return awaited(store.children(n.id)).filter(c => isTerminal(c) && (store.events(c.id).at(-1)?.id ?? 0) > since);
 }
 
 export function wakeOwner(n: Assignment): Owner {

@@ -130,6 +130,8 @@ export interface CoordinatorHost {
   /** Recheck addresses and route permission immediately before every dispatch. */
   validate(node: HandoffView, parent?: HandoffView): string | undefined;
   busy(node: HandoffView): boolean;
+  /** Why a busy node waits, in words for the record. */
+  holdReason?(node: HandoffView): string;
   /** For a root this is the person's own conversation continuing: person-visible, never internal. */
   run(node: HandoffView, resumed: boolean, signal: AbortSignal, composed: ComposedTurn): Promise<HostTurnResult>;
   report(child: HandoffView, parent?: HandoffView): void;
@@ -149,10 +151,17 @@ export interface CoordinatorHost {
   shareAnswer?(first: HandoffView, joiner: HandoffView): boolean;
   /** `node` waits for `first`'s answer instead of running its own turn (only ever a request outside a room). */
   joined?(node: HandoffView, first: HandoffView): void;
+  /** One word from a small model about a teammate's reply (runtime/status-reply.ts), on `requesterBotId`'s own engine: the
+   * requester's turn is what the answer may save, and the teammate's engine is busy with the teammate's work. Absent,
+   * undefined or a throw: the requester wakes. */
+  statusReply?(requesterBotId: string, prompt: string, signal: AbortSignal): Promise<string | undefined>;
 }
 
 export interface Coordinator {
   node(id: string): HandoffView | undefined;
+  /** The conversation the running assignment `id` may answer with a one-way notice: its requester, when it was handed
+   * with reply none outside rooms. */
+  answersTo(id: string): { botId: string; threadId: string } | undefined;
   has(id: string): boolean;
   all(): HandoffView[];
   active(): HandoffView[];
@@ -175,6 +184,10 @@ export interface Coordinator {
   /** Live nodes assigned to this bot that are parked on the person or on their requester. */
   parkedFor(botId: string): HandoffView[];
   parkedDirect(threadId: string): HandoffView | undefined;
+  /** A newer card replaced `from`: work parked on it in this conversation waits on `to`. */
+  followCard(threadId: string, from: string, to: string): void;
+  /** Nothing can answer what this parked work waits on any more: it ends, and whoever waits on it hears why. */
+  releaseParked(id: string, reason: string): void;
   prune(before: number): number;
   sharedRequest(node: HandoffView): { id: string; botIds: string[] };
   cancelRoom(groupId: string, threadId?: string, reason?: string, status?: "failed" | "cancelled"): void;
@@ -185,13 +198,18 @@ export interface Coordinator {
   /** Direct conversations whose turn waits on teammates: an open handoff it made that owes a reply, or a root parked to resume with no question for the person. */
   awaitingTeammateThreads(): Set<string>;
   liveEdges(): LiveHandoffEdge[];
-  stopAwaitingDirect(threadId: string, reason?: string): HandoffView[];
+  /** The conversation stopped: its work and everything that work handed out end, and nothing resumes it. */
+  stopAwaitingDirect(threadId: string, reason?: string): void;
   /** The next start goes on with this thread's turn, so a shutdown's "cut" line would be false. */
   continuesAfterRestart(threadId: string): boolean;
   note(id: string): string | undefined;
   tick(): void;
+  /** How soon the next tick() matters (Runtime.pace). */
+  pace(): "busy" | "parked" | "idle";
   close(): void;
   progress(threadId: string): void;
+  /** What the turn this thread is running waits for, for the record. */
+  held(threadId: string, why: string): void;
   /** True when a parked assignment took the text as its answer: the host must not start an ordinary turn. */
   answer(threadId: string, text: string): boolean;
   awaitingAnswer(threadId: string): boolean;
@@ -204,6 +222,8 @@ export interface CoordinatorOptions {
   runtimeLimits?: Partial<Limits>;
   log?: (line: string) => void;
   legacyThreads?: LegacyThreadResolver;
+  /** After every write to the assignment store, so a host that ticks only when work is due can tick again. */
+  wrote?: () => void;
 }
 
 export function createCoordinator(options: CoordinatorOptions): Coordinator {

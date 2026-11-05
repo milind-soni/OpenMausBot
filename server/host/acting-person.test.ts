@@ -52,6 +52,7 @@ describe("a turn started by a person's own line acts for them", () => {
     expect(world({ threads: { t: [...base, said("s1", 12, ADA, { steered: true })] }, direct }).people.requester("t", "g1"), "her own follow-up").toBe(ADA);
     expect(world({ threads: { t: [...base, said("s1", 12, BEN, { steered: true })] }, direct }).people.requester("t", "g1"), "Ben's line sent into her turn").toBeNull();
     expect(world({ threads: { t: [...base, said("s1", 12, undefined, { steered: true })] }, direct }).people.requester("t", "g1"), "a line from someone the server can't name").toBeNull();
+    expect(world({ threads: { t: [...base, said("r1", 12, undefined, { relayed: true })] }, direct }).people.requester("t", "g1"), "a line another app relayed").toBeNull();
     const card = (person: string) => ({ id: "c1", at: 12, role: "bot", card: { answered: "yes", answeredBy: { kind: "session", person } } });
     expect(world({ threads: { t: [...base, card(ADA)] }, direct }).people.requester("t", "g1")).toBe(ADA);
     expect(world({ threads: { t: [...base, card(BEN)] }, direct }).people.requester("t", "g1"), "Ben answered her turn's card").toBeNull();

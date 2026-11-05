@@ -461,6 +461,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     result.connections += moved.moved.length + moved.runsHere.length;
     for (const failure of moved.failed) failed(failure.id, failure.label, failure.message, failure.final);
     for (const held of moved.held ?? []) result.notes.push({ kind: "held", connection: held.label });
+    for (const stayed of moved.runsHere) if (!stayed.off) result.notes.push({ kind: "stayed", connection: stayed.label, ...(stayed.needs ? { needs: stayed.needs } : {}) });
     if (moved.release.length) {
       kept.release = [...kept.release.filter((held) => !moved.release.some((next) => next.id === held.id)), ...moved.release];
       persist();
@@ -896,7 +897,14 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       const chats = await checkChats({ localJson, session, threads });
       const attachments = await missingAttachments(session, Array.isArray(here.attachments) ? here.attachments : []);
       const secrets = team ? { equal: [], differs: [], missing: [] } : await checkSecrets({ handoff, session, skip: new Set([...removed, ...refused]) });
-      return { ok: checkPassed({ gaps, chats, attachments, secrets }), gaps, chats, attachments, secrets };
+      const ok = checkPassed({ gaps, chats, attachments, secrets });
+      // What the person knows things by, for what stayed behind (move-gaps.mjs): bots and rooms by name, and the bot or room
+      // each conversation the check found short belongs to.
+      const short = new Set([...gaps.conversations, ...gaps.settings, ...chats.filter((entry) => entry.missing || entry.unstamped || entry.path === "broken").map((entry) => entry.threadId)]);
+      const names = ok ? {} : Object.fromEntries([...(here.items ?? []).filter((item) => item.kind === "bot" && item.id).map((item) => [item.id, item.label]),
+        ...(here.rooms ?? []).map((room) => [`room:${room.id}`, room.name])]);
+      const owners = ok ? {} : Object.fromEntries((here.conversations ?? []).filter((head) => short.has(head.threadId)).map((head) => [head.threadId, head.bot ?? `room:${head.room}`]));
+      return { ok, gaps, chats, attachments, secrets, names, owners };
     } finally {
       try { await session.close(); } catch {}
     }

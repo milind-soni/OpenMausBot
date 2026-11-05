@@ -48,6 +48,7 @@ describe("discoverMcpAuth", () => {
       revocationEndpoint: "https://auth.example.com/revoke",
       scopes: ["read", "write"],
       resource: "https://mcp.example.com/mcp",
+      source: "protected-resource",
     });
   });
 
@@ -58,7 +59,19 @@ describe("discoverMcpAuth", () => {
     });
     const meta = await discoverMcpAuth("https://mcp.example.com/mcp", null, { fetch: impl });
     expect(meta?.issuer).toBe("https://auth.example.com");
+    expect(meta?.source).toBe("protected-resource");
     expect(asked[0]).toBe("https://mcp.example.com/.well-known/oauth-protected-resource/mcp");
+  });
+
+  it.each([
+    ["the path-specific address", "https://mcp.example.com/.well-known/oauth-protected-resource/mcp"],
+    ["the root address", "https://mcp.example.com/.well-known/oauth-protected-resource"],
+  ])("reports a protected-resource source when %s names the authorization server", async (_label, address) => {
+    const { impl } = stubFetch({
+      [address]: { authorization_servers: ["https://auth.example.com"] },
+      "https://auth.example.com/.well-known/oauth-authorization-server": AS,
+    });
+    expect((await discoverMcpAuth("https://mcp.example.com/mcp", null, { fetch: impl }))?.source).toBe("protected-resource");
   });
 
   it("treats the MCP origin as the authorization server when there is no resource metadata", async () => {
@@ -67,6 +80,17 @@ describe("discoverMcpAuth", () => {
     });
     const meta = await discoverMcpAuth("https://mcp.example.com/mcp", null, { fetch: impl });
     expect(meta?.issuer).toBe("https://mcp.example.com");
+    expect(meta?.source).toBe("origin");
+  });
+
+  it("reports an origin source when the resource document names no authorization server", async () => {
+    const { impl } = stubFetch({
+      "https://mcp.example.com/.well-known/oauth-protected-resource/mcp": { resource: "https://mcp.example.com/mcp" },
+      "https://mcp.example.com/.well-known/openid-configuration": { ...AS, issuer: "https://mcp.example.com" },
+    });
+    const meta = await discoverMcpAuth("https://mcp.example.com/mcp", null, { fetch: impl });
+    expect(meta?.issuer).toBe("https://mcp.example.com");
+    expect(meta?.source).toBe("origin");
   });
 
   it("keeps the issuer from the authorization server metadata, not the listed spelling", async () => {

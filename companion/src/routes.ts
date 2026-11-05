@@ -123,6 +123,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "GET", path: /^\/api\/bots\/[\w-]+\/overview$/ },
   // Read-only: no settings reachable through it.
   { method: "GET", path: /^\/api\/bots\/[\w-]+\/activity$/ },
+  // Names and on/off only. The MCP settings list, which carries commands and
+  // addresses, stays closed.
+  { method: "GET", path: /^\/api\/bots\/[\w-]+\/mcp-servers$/ },
   // Team memory edits are content, not execution policy. The section rides as
   // a query string.
   { method: "GET", path: /^\/api\/team-memory$/ },
@@ -159,6 +162,7 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
 
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages$/ },
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/image$/ },
+  { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/tool$/ },
   // An app row's document is transcript data, scoped to its thread. `rpc` reaches only the app's own MCP
   // server, under the bot's tool selection and approval rules; `context` is bounded text.
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/app$/ },

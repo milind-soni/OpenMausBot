@@ -1,4 +1,5 @@
 import type { WireBot } from "../../shared/wire.ts";
+import type { BotLimit } from "../host/starter-bot-limit.ts";
 import { freshLook } from "../bot-look.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
 import { parseBotProfilePatch } from "../bot-profile.ts";
@@ -31,6 +32,7 @@ export interface BotCreateRouteDeps {
   hostedFullAccessRefusal: string;
   desktopManaged: boolean;
   maxWorkspaceBots: number;
+  botLimit: Pick<BotLimit, "refusal">;
   cloudOwnerKey: string | null;
   hostedModels: ReturnType<typeof hostedModelPolicy>;
   cloudRoutineAuthors: ReturnType<typeof createCloudRoutineAuthors> | null;
@@ -180,6 +182,9 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       if (store.bots.length >= MAX_WORKSPACE_BOTS) {
         return json(res, 409, { error: `this workspace is limited to ${MAX_WORKSPACE_BOTS} bots` });
       }
+      // A bot with its own id is arriving from the person's other computer: a move never loses a bot to a plan's limit.
+      const overPlan = kept.id ? null : deps.botLimit.refusal();
+      if (overPlan) return json(res, 409, overPlan);
       // Apply the audience before creation can announce the bot to members.
       const created = body.visibility === undefined ? null : parseVisibility(body.visibility);
       if (created && !created.ok) return json(res, 400, { error: created.error });
