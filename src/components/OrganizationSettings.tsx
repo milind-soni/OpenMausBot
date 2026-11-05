@@ -1,11 +1,34 @@
 import { useEffect, useRef, useState } from "react";
-import type { ManagedDesktopState } from "../../electron/managed-desktop.mjs";
+import type { ManagedDesktopState, ManagedMessageCode } from "../../electron/managed-desktop.mjs";
 import { activeLocale, t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 import { Card } from "./SettingsPrimitives";
 import { CompanyModels } from "./CompanyModels";
 
 const providerNames: Record<string, string> = { anthropic: "Anthropic", openai: "OpenAI", openrouter: "OpenRouter" };
 const DEFAULT_PORTAL_ORIGIN = "https://admin.openmausbot.com";
+const STATUS_TEXT: Record<ManagedMessageCode, LocaleKey> = {
+  clearFailed: "organization.status.clearFailed",
+  disconnected: "organization.status.disconnected",
+  runtimeRunning: "organization.status.runtimeRunning",
+  portalUnreachable: "organization.status.portalUnreachable",
+  confirmStopped: "organization.status.confirmStopped",
+  expired: "organization.status.expired",
+  accessEnded: "organization.status.accessEnded",
+  retrying: "organization.status.retrying",
+  codeExpired: "organization.status.codeExpired",
+  denied: "organization.status.denied",
+  completeFailed: "organization.status.completeFailed",
+  removed: "organization.status.removed",
+  restoreFailed: "organization.status.restoreFailed",
+  startFailed: "organization.status.startFailed",
+};
+
+export function connectionMessage(connection: Pick<ManagedDesktopState, "message" | "messageCodes">): string | undefined {
+  const codes = connection.messageCodes;
+  if (!codes?.length || !codes.every((code) => Object.hasOwn(STATUS_TEXT, code))) return connection.message;
+  return codes.map((code) => t(STATUS_TEXT[code])).join(" ");
+}
 
 /** Security: only the trusted desktop bridge can enroll this computer or hold its token. */
 export function OrganizationSettings() {
@@ -80,7 +103,7 @@ export function OrganizationSettings() {
     <p className="text-[13px] leading-relaxed text-ink-secondary">{t("organization.additive")}</p>
     <Card title={t("settings.section.organization")} subtitle={t("organization.privacy")}>
       {!connection && <p role="status" className="text-[13px] text-ink-secondary">{error || t("organization.loading")}</p>}
-      {connection?.message && <p role="status" className="mb-3 text-[13px] text-ink-secondary">{connection.message}</p>}
+      {connection?.message && <p role="status" className="mb-3 text-[13px] text-ink-secondary">{connectionMessage(connection)}</p>}
       {licenseExpired && <p role="alert" className="mb-3 text-[13px] text-ink">{t("organization.licenseExpired")}</p>}
       {connection?.status === "signed-out" && <div className="flex flex-col gap-3">
         <p className="text-[13px] text-ink-secondary">{t("organization.signInHelp")}</p>
@@ -116,7 +139,7 @@ export function OrganizationSettings() {
         </div>
       </div>}
       {enrolled && <div className="flex flex-col gap-3">
-        <div>{connection.branding?.logo && <img src={connection.branding.logo} alt="Organization logo" className="mb-2 size-12 rounded-lg object-contain" />}<div className="break-words text-[15px] font-medium text-ink">{connection.organization?.name}</div>
+        <div>{connection.branding?.logo && <img src={connection.branding.logo} alt={t("organization.logo")} className="mb-2 size-12 rounded-lg object-contain" />}<div className="break-words text-[15px] font-medium text-ink">{connection.organization?.name}</div>
           <div className="break-all text-[13px] text-ink-secondary">{connection.email}</div></div>
         {connection.status === "reauth-required" ? <p role="alert" className="text-[13px] text-ink-secondary">{t("organization.reauth")}</p> : connection.status === "license-expired" ? <>
           {connection.providers?.some((provider) => provider.configured && provider.models.length > 0) && <ul className="divide-y divide-hairline/40">{connection.providers.filter((provider) => provider.configured && provider.models.length > 0).map((provider) => <li key={provider.id} className="flex flex-wrap justify-between gap-2 py-2 text-[13px]">

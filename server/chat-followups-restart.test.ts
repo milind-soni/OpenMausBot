@@ -232,7 +232,7 @@ it("survives a real server crash: queued sends keep receipts, cancellation and u
     const interrupted = await messages(later.threadId);
     expect(interrupted.filter((message) => message.queueId === claimed.queueId)).toEqual([
       expect.objectContaining({ role: "user", text: uncertainBody.text, sendId: uncertainBody.sendId }),
-      expect.objectContaining({ kind: "activity", tool: { name: expect.stringContaining("Review the result"), ok: false } }),
+      expect.objectContaining({ kind: "activity", tool: { name: expect.stringContaining("Review the result"), ok: false, nameCode: "chat.notice.followupInterrupted" } }),
     ]);
     expect((await api("POST", `/api/bots/${uncertain.id}/messages`, uncertainBody, 202)).message.queueId).toBe(claimed.queueId);
     expect(prompts(later.threadId)).toHaveLength(1);

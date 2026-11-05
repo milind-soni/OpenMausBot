@@ -68,7 +68,7 @@ import { ChatNotice } from "@/components/ChatErrorBanner";
 import { loadingLine } from "@/lib/app-loading";
 import { useAiSwitchKeeper } from "@/lib/ai-switch";
 import { useChiefStepOpen } from "@/lib/default-bot";
-import { SESSION_ENDED_REASON, useSessionEnded } from "@/lib/session-ended";
+import { useSessionEnded } from "@/lib/session-ended";
 import { PairPage } from "./pair/PairPage";
 import { WebPanelPage } from "@/components/WebPanelPage";
 
@@ -323,7 +323,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       {!calendarFocus && <button
         type="button"
         ref={menuButtonRef}
-        aria-label="Open bot list"
+        aria-label={t("app.openBotList")}
         aria-expanded={drawerOpen}
         onClick={() => setDrawerOpen(true)}
         className="absolute left-3 top-3 z-30 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink max-md:flex max-md:size-9 max-md:items-center max-md:justify-center max-md:rounded-full max-md:border max-md:border-hairline max-md:bg-card max-md:p-0 max-md:text-ink md:hidden"
@@ -476,6 +476,6 @@ function Application() {
 
 export default function App() {
   const ended = useSessionEnded();
-  if (ended) return <PairPage initialCode={null} reason={SESSION_ENDED_REASON} />;
+  if (ended) return <PairPage initialCode={null} reason={t("pair.sessionEnded")} />;
   return <WorkspaceBackupRecovery><Application /></WorkspaceBackupRecovery>;
 }

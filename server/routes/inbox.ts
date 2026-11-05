@@ -1,3 +1,4 @@
+import { userError } from "../user-errors.ts";
 import type { InboxView } from "../../shared/inbox.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -18,7 +19,7 @@ export function createInboxRoutes(deps: InboxRouteDeps): RouteHandler {
     if (path === "/api/inbox") {
       if (method !== "GET") return json(res, 405, { error: "method not allowed" });
       const view = deps.view(auth);
-      return view ? json(res, 200, view) : json(res, 404, { error: "There is no inbox here." });
+      return view ? json(res, 200, view) : json(res, 404, { ...userError("serverError.inbox.missing") });
     }
     if (path === "/api/inbox/count") {
       if (method !== "GET") return json(res, 405, { error: "method not allowed" });
@@ -29,9 +30,9 @@ export function createInboxRoutes(deps: InboxRouteDeps): RouteHandler {
     if (!m) return PASS;
     if (method !== "POST") return json(res, 405, { error: "method not allowed" });
     const marked = m[2] === "read" ? (deps.markRead(auth, m[1]!) ? "done" : "unknown") : deps.markDone(auth, m[1]!);
-    if (marked === "unknown") return json(res, 404, { error: "That line is not in your inbox." });
-    if (marked === "an ask") return json(res, 409, { error: "This waits on your answer: answer it, or close it, where it asks." });
+    if (marked === "unknown") return json(res, 404, { ...userError("serverError.inbox.lineMissing") });
+    if (marked === "an ask") return json(res, 409, { ...userError("serverError.inbox.answerRequired") });
     const view = deps.view(auth);
-    return view ? json(res, 200, view) : json(res, 404, { error: "There is no inbox here." });
+    return view ? json(res, 200, view) : json(res, 404, { ...userError("serverError.inbox.missing") });
   };
 }

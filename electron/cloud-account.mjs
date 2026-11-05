@@ -3,6 +3,9 @@ import { CLOUD_MACHINE_CONNECTABLE, cloudUnreachableText, parseCloudCredit, pars
 import { CLOUD_ID, CLOUD_SWATCHES, cleanCloudListName, ORGANIZATION_BLOCKS, otherOwnClouds, ownCloud, parseCloudList, parseCloudRenewal, parseOrganizations, releaseVersion } from "./cloud-list.mjs";
 import { planTeam, teamPlan } from "./cloud-team-plan.mjs";
 import { cleanCode, cleanEmail, parseSignInStart, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
+import nativeText from "./native-text.cjs";
+
+const { englishText } = nativeText;
 
 export const CLOUD_ORIGIN = "https://cloud.openmausbot.com";
 /** The staging Admin (Dodo test mode, real test Clouds): a fixed address, on only with OMB_CLOUD_STAGING=1. */
@@ -95,7 +98,7 @@ function addOffer(result) {
 
 export function createCloudAccountClient({ store, openBrowser, platform, deviceName, appVersion,
   origin = CLOUD_ORIGIN, fixture = false, fetch: fetcher = globalThis.fetch, now = Date.now, onState = () => {},
-  setTimer = setTimeout, clearTimer = clearTimeout, warn = message => console.warn(message), awaitingWake = () => false }) {
+  setTimer = setTimeout, clearTimer = clearTimeout, warn = message => console.warn(message), awaitingWake = () => false, t = englishText.t }) {
   origin = cloudOrigin(origin, fixture);
   const staging = origin === STAGING_CLOUD_ORIGIN;
   let grant = null, issued = null, cleanup = null, pending = null, cleanupNeeded = false;
@@ -655,12 +658,12 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       const current = grant;
       if (cloudId !== null) {
         const cloud = otherOwnCloud(cloudId);
-        if (!current || !cloud) throw Object.assign(new Error("That Cloud is no longer one of yours."), { gone: true });
-        if (!cloud.origin || !["ready", "offline"].includes(cloud.status)) throw new Error(`${cloud.name} isn't ready to open yet.`);
+        if (!current || !cloud) throw Object.assign(new Error(t("native.cloud.otherGone")), { gone: true });
+        if (!cloud.origin || !["ready", "offline"].includes(cloud.status)) throw new Error(t("native.cloud.otherNotReady", { name: cloud.name }));
         let result;
         try { result = await request("pairing", { method: "POST", body: { cloudId }, token: current.token }); } catch (error) {
-          if (error?.status === 404 && !error.opaque) { void refresh().catch(() => {}); throw Object.assign(new Error(`${cloud.name} is no longer one of your Clouds.`), { gone: true }); }
-          if (error?.status === 409) throw new Error(`${cloud.name} isn't running right now.`);
+          if (error?.status === 404 && !error.opaque) { void refresh().catch(() => {}); throw Object.assign(new Error(t("native.cloud.otherNoLongerYours", { name: cloud.name })), { gone: true }); }
+          if (error?.status === 409) throw new Error(t("native.cloud.otherNotRunning", { name: cloud.name }));
           throw error;
         }
         const pairing = parsePairingGrant(result, cloud.origin, now());
@@ -668,7 +671,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
         return pairing;
       }
       const target = homeTarget();
-      if (!target || !current) throw new Error("My Cloud is not ready to connect yet.");
+      if (!target || !current) throw new Error(t("native.cloud.notReady"));
       let result;
       try { result = await request("pairing", { method: "POST", body: {}, token: current.token }); } catch (error) {
         const why = cloudUnreachableText(await refresh().catch(() => state()), target.origin);
@@ -692,7 +695,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       const cleanName = cleanCloudListName(name);
       if (typeof tier !== "string" || !TIER.test(tier) || !ADD_INTERVALS.includes(interval) || !cleanName || !(color === null || CLOUD_SWATCHES.includes(color))
         || !(source === null || CHECKOUT_SOURCES.includes(source))) {
-        throw new Error("Invalid Cloud to add.");
+        throw new Error(t("native.cloud.invalidAdd"));
       }
       const signedIn = grant;
       if (!signedIn || state().status !== "connected") return { outcome: "failed" };
@@ -733,7 +736,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
      * with the Admin's reason; `taken` when another of the plan's has that name; `unsupported` from an Admin without it. */
     async addOrganization({ name, color = null } = {}) {
       const cleanName = cleanCloudListName(name);
-      if (!cleanName || !(color === null || CLOUD_SWATCHES.includes(color))) throw new Error("Invalid organization to add.");
+      if (!cleanName || !(color === null || CLOUD_SWATCHES.includes(color))) throw new Error(t("native.cloud.invalidOrganization"));
       const signedIn = grant;
       if (!signedIn || state().status !== "connected") return { outcome: "failed" };
       if (!value.organizations) return { outcome: "unsupported" };
@@ -753,7 +756,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
      * change: `saved` once the Admin keeps it (the session is read again, so every place follows); `refused` when the
      * Admin says it is someone else's to change; `unsupported` from an Admin without the route or the list. */
     async setCloudColor(cloudId, color) {
-      if (typeof cloudId !== "string" || !CLOUD_ID.test(cloudId) || !(color === null || CLOUD_SWATCHES.includes(color))) throw new Error("Invalid Cloud color.");
+      if (typeof cloudId !== "string" || !CLOUD_ID.test(cloudId) || !(color === null || CLOUD_SWATCHES.includes(color))) throw new Error(t("native.cloud.invalidColor"));
       const signedIn = grant;
       if (!signedIn || state().status !== "connected") return { outcome: "failed" };
       if (!value.clouds?.some(cloud => cloud.id === cloudId && cloud.managed !== false)) return { outcome: "unsupported" };
@@ -772,7 +775,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
      * when it says that Cloud can't be removed now; `gone` when it is not theirs any more; `unsupported` from an Admin without
      * Remove from list (whose session never says `removable`). */
     async hideCloud(cloudId) {
-      if (typeof cloudId !== "string" || !CLOUD_ID.test(cloudId)) throw new Error("Invalid Cloud to remove.");
+      if (typeof cloudId !== "string" || !CLOUD_ID.test(cloudId)) throw new Error(t("native.cloud.invalidRemove"));
       const signedIn = grant;
       if (!signedIn || state().status !== "connected") return { outcome: "failed" };
       if (!value.clouds?.some(cloud => cloud.id === cloudId && cloud.removable === true)) return { outcome: "unsupported" };
@@ -944,14 +947,14 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
   };
 }
 
-export function cloudMenuSublabel(state, date) {
+export function cloudMenuSublabel(state, date, t = englishText.t) {
   if (state?.status !== "connected") return null;
   const trial = state.trial;
   if (state.entitlement?.plan === "pro" && state.entitlement.status === "active") {
-    if (trial?.state === "active" || trial?.state === "ending") return `Free trial until ${date(trial.endsAt)}`;
-    return state.machine?.power?.sleeps ? "Sleeps when idle" : "Always on";
+    if (trial?.state === "active" || trial?.state === "ending") return t("native.cloud.sub.trialUntil", { date: date(trial.endsAt) });
+    return t(state.machine?.power?.sleeps ? "native.cloud.sub.sleeps" : "native.cloud.sub.alwaysOn");
   }
-  return state.machine || trial ? "Stopped" : null;
+  return state.machine || trial ? t("native.cloud.sub.stopped") : null;
 }
 
 /** What the person's own Cloud page may show of the plan: never the account, a credential or an address. */

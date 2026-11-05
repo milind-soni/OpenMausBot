@@ -1,3 +1,4 @@
+import { userError, userErrorFields } from "./user-errors.ts";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
@@ -61,7 +62,7 @@ export class BrowserBusyError extends BrowserLiveError {
 
 /** The engine left a status read unanswered with no bot or person working in it: it hung, and its session is being reset. */
 class BrowserUnresponsiveError extends BrowserLiveError {
-  constructor() { super("The browser stopped responding, so it is being restarted. The live view reconnects by itself.", 503); this.name = "BrowserUnresponsiveError"; }
+  constructor() { super("The browser stopped responding, so it is being restarted. The live view reconnects by itself.", 503); this.name = "BrowserUnresponsiveError"; Object.assign(this, userErrorFields(userError("serverError.browser.restartingUnresponsive"))); }
 }
 
 /** A person's input or command went unanswered, but the engine answered a read queued behind it, so it has ended. */
@@ -839,7 +840,7 @@ export class BrowserLive {
       if (options.res.headersSent) {
         const busy = error instanceof BrowserBusyError;
         const explained = busy || error instanceof BrowserUnresponsiveError;
-        this.send(viewer, { type: "error", retryable: !busy, message: explained ? error.message : "The browser stream could not start." });
+        this.send(viewer, { type: "error", retryable: !busy, message: explained ? error.message : "The browser stream could not start.", ...userErrorFields(error) });
         this.close(viewer); return;
       }
       this.close(viewer, options.res.headersSent);

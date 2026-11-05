@@ -1,3 +1,4 @@
+import { userError } from "../user-errors.ts";
 import { markNotificationLogRead, markThreadNotificationLogRead, recentNotificationLog } from "../message-db.ts";
 import type { NotificationLogEntry } from "../../shared/notification.ts";
 import { ownerOrAdmin, type RequestAuth } from "../request-auth.ts";
@@ -32,7 +33,7 @@ export function createNotificationRoutes(deps = {
     }
     const m = path.match(/^\/api\/notifications\/([\w-]+)\/read$/);
     if (!m) return PASS;
-    if (!visible(auth).some((entry) => entry.id === m[1])) return json(res, 404, { error: "no such notification" });
+    if (!visible(auth).some((entry) => entry.id === m[1])) return json(res, 404, userError("serverError.notification.missing"));
     deps.markRead([m[1]!]);
     return json(res, 200, { ok: true });
   };

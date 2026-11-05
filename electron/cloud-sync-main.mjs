@@ -22,10 +22,10 @@ export function filesFolderOf(root, accountId, read = (file) => { try { return J
 /** `stateDir`: Files' own folder under userData; the staging Admin keeps its own (cloud-account.mjs cloudTarget).
  * `lending`: main's pieces for lending to My Cloud ({ environment, sharing, validate }): each lent folder gets a copy,
  * and a folder added here is lent, read only (lent-folders.mjs). */
-export function installCloudFiles({ app, ipcMain, dialog, shell, powerMonitor, fetch, localWorkspaceOnly, send, cloudOrigin, cloudAccount, localDataDir, power, lending: lendingParts = null, now = Date.now, stateDir = "cloud-sync", makeService = createCloudFilesService }) {
+export function installCloudFiles({ app, ipcMain, dialog, shell, powerMonitor, fetch, localWorkspaceOnly, send, cloudOrigin, cloudAccount, localDataDir, power, lending: lendingParts = null, now = Date.now, stateDir = "cloud-sync", makeService = createCloudFilesService, t }) {
   const lending = lendingParts ? lendingForFiles(lendingParts) : null;
   const root = path.join(app.getPath("userData"), stateDir);
-  const open = (dir) => makeService({
+  const open = (dir) => makeService({ t,
     settingsFile: path.join(dir, "settings.json"), stateFile: path.join(dir, "state.db"),
     documentsDir: app.getPath("documents"), homeDir: app.getPath("home"), localDataDir, cloudOrigin, fetch, ...(power ? { power } : {}),
     trashItem: (file) => shell.trashItem(file), markDownloaded: createDownloadMarker(),

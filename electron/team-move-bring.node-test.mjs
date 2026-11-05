@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { bringableBots, installTeamMove, teamMoveConfirmWords } from "./team-move-main.mjs";
+import nativeText from "./native-text.cjs";
 
 const HOME = "https://home.example.test", TEAM = "https://acme.example.test", OTHER = "https://other.example.test";
 const state = { status: "connected", teams: [
@@ -21,11 +22,12 @@ const BOTS = [
   { id: "gone-bot-01", name: "Gone", movedTo: { state: "moved", team: { id: "team-acme", name: "Acme" } } },
 ];
 
-function fixture({ agrees = false, home = true, bots = BOTS } = {}) {
+function fixture({ agrees = false, home = true, bots = BOTS, listedStatus = 200, t = nativeText.englishText.t } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "omb-team-bring-"));
-  const handlers = new Map(), asked = [], pairs = [];
+  const handlers = new Map(), asked = [], pairs = [], labels = [];
   const journal = { value: null, read() { return this.value; }, write(next) { this.value = next; } };
   const move = installTeamMove({
+    t,
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
     cloudPage: () => null,
     pageOrigin: (event) => event.origin ?? null,
@@ -34,13 +36,13 @@ function fixture({ agrees = false, home = true, bots = BOTS } = {}) {
     account: () => ({ state: () => state, pairTeam: async () => { throw new Error("no team pairing in this test"); } }),
     file: () => join(dir, "send.json"), journalFile: () => join(dir, "moves.json"), journal,
     fetch: async (url, init) => {
-      if (String(url).endsWith("/api/auth/pair")) return new Response(JSON.stringify({ token: "omb_sess_fixture" }), { status: 200 });
-      if (String(url).endsWith("/api/bots?messages=0")) return new Response(JSON.stringify({ bots }), { status: 200 });
+      if (String(url).endsWith("/api/auth/pair")) { labels.push(JSON.parse(init.body).label); return new Response(JSON.stringify({ token: "omb_sess_fixture" }), { status: 200 }); }
+      if (String(url).endsWith("/api/bots?messages=0")) return new Response(JSON.stringify({ bots }), { status: listedStatus });
       if (String(url).endsWith("/api/auth/logout")) return new Response("{}", { status: 200 });
       return new Response(JSON.stringify({ url, method: init?.method }), { status: 503 });
     },
   });
-  return { handlers, asked, pairs, journal, move, done: () => { move.close(); rmSync(dir, { recursive: true, force: true }); } };
+  return { handlers, asked, pairs, labels, journal, move, done: () => { move.close(); rmSync(dir, { recursive: true, force: true }); } };
 }
 const OWN = { origin: TEAM };
 
@@ -123,4 +125,39 @@ test("its confirm says what the page's confirm says, word for word", () => {
   assert.equal(words.message, fill("teamMove.title"));
   assert.equal(words.buttons[0], fill("teamMove.confirm"));
   for (const key of ["teamMove.everyone", "teamMove.goes", "teamMove.private", "teamMove.staysOnMyCloud", "teamMove.noWayBack"]) assert.ok(words.detail.includes(fill(key)), key);
+});
+
+test("the native confirm and IPC refusals follow the app's current language", async () => {
+  const text = nativeText.createNativeText({ saved: "en" });
+  const { handlers, asked, labels, done } = fixture({ t: text.t });
+  try {
+    const move = handlers.get("cloud-send:team-bring-move");
+    await move(OWN, "atlas-bot-1");
+    assert.equal(asked[0].message, "Move Atlas to Acme?");
+    assert.deepEqual(labels, ["Move to a team"]);
+    text.set("pt-br");
+    await move(OWN, "atlas-bot-1");
+    assert.deepEqual(asked[1], {
+      message: "Mover Atlas para Acme?",
+      detail: [
+        "Todos em Acme podem usar Atlas. Só os administradores de Acme podem alterá-lo.",
+        "Vão com Atlas: instruções, habilidades, arquivos, rotinas e suas conversas com Atlas",
+        "Suas conversas continuam privadas lá: só você pode vê-las.",
+        "Ficam no My Cloud: o que Atlas lembra, suas conexões e o MausBot",
+        "Não é possível desfazer: você não pode mover o bot de volta para o My Cloud.",
+      ].join("\n\n"),
+      buttons: ["Mover para Acme", "Cancelar"],
+    });
+    await assert.rejects(move({}, "atlas-bot-1"), { message: "Abra a equipe para a qual você quer mover o bot." });
+    await assert.rejects(move(OWN, "maus-bot-1"), { message: "Escolha um dos seus bots para mover." });
+  } finally { done(); }
+});
+
+test("the new My Cloud read uses the app's language for its session and failure", async () => {
+  const text = nativeText.createNativeText({ saved: "pt-br" });
+  const { handlers, labels, done } = fixture({ t: text.t, listedStatus: 503 });
+  try {
+    await assert.rejects(handlers.get("cloud-send:team-bring-move")(OWN, "atlas-bot-1"), { message: "O Cloud não respondeu." });
+    assert.deepEqual(labels, ["Mover para uma equipe"]);
+  } finally { done(); }
 });

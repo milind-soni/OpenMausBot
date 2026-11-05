@@ -3,7 +3,8 @@
 export type OneHomeView = OneHomePhase & { place?: string };
 /** Something a move could not carry, by its name, and why. */
 export type OneHomeNotCarried = { label: string; error: string };
-export type OneHomeFailing = { error: string | null; items?: OneHomeNotCarried[] };
+/** Why the move fails, including the server's error code and parameters when provided. */
+export type OneHomeFailing = { error: string | null; errorKey?: string; errorParams?: Record<string, string | number>; items?: OneHomeNotCarried[] };
 /** A connector that stayed on this computer. */
 export type OneHomeStayed = { name: string; needs?: string };
 type OneHomePhase =
@@ -58,6 +59,7 @@ export function automationsOn(manifest: unknown): Record<string, boolean>;
 export function keptSwitches(brought: Record<string, boolean>, there: Record<string, boolean> | null | undefined): Record<string, boolean>;
 export function switchOn(key: string): { method: string; route: string; body: unknown } | null;
 export function arrivedCounts(here: unknown, there: unknown): OneHomeCounts;
+export function missingOf(report: unknown): string;
 
 export function createOneHome(deps: {
   journal: { read(): unknown; write(value: unknown): void };
@@ -84,6 +86,8 @@ export function createOneHome(deps: {
   openHome?(): void;
   openLocal?(): void;
   lastInput?(): number;
+  /** Whether this computer's own copy is the server answering now. */
+  ownCopy?(): boolean;
   again?: { bring(): Promise<{ restored: string; switches: Record<string, boolean> } | { deleted: true } | { later: number }> };
   /** The person's choice to keep this computer's bots here. */
   keep?: { read(): unknown; write(value: unknown): void };
@@ -104,6 +108,7 @@ export function createOneHome(deps: {
   now?(): number;
   timers?: { set(work: () => void, ms: number): unknown; clear(timer: unknown): void };
   log?(line: string): void;
+  t?(key: string, params?: Record<string, string | number>): string;
 }): {
   kick(): Promise<void>;
   view(): OneHomeView | null;

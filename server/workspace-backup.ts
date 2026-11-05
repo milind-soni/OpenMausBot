@@ -11,6 +11,7 @@ import { backup, DatabaseSync } from "node:sqlite";
 import { pipeline } from "node:stream/promises";
 import { Worker } from "node:worker_threads";
 import { writeFileAtomic } from "./atomic.ts";
+import { userErrorFields, userErrorThrown } from "./user-errors.ts";
 import { WORKSPACE_BACKUP_CLIENT_KEYS } from "../shared/workspace-backup-client.ts";
 import { INSTRUCTION_FILE, restorePaths, validRelative } from "./workspace-backup-paths.ts";
 import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, liveDataEnginePath, managedTaskSkillLink, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
@@ -280,9 +281,9 @@ export async function createWorkspaceBackup(dataDir: string, options: CreateWork
     });
     const result = await new Promise<CreatedWorkspaceBackup>((resolveBackup, reject) => {
       const failed = () => reject(new Error("The backup worker stopped before completing. Try again."));
-      worker!.once("message", (reply: { result?: CreatedWorkspaceBackup; error?: string }) => {
+      worker!.once("message", (reply: { result?: CreatedWorkspaceBackup; error?: string } & ReturnType<typeof userErrorFields>) => {
         if (reply.result) resolveBackup(reply.result);
-        else if (reply.error) reject(new Error(reply.error));
+        else if (reply.error) reject(Object.assign(new Error(reply.error), userErrorFields(reply)));
         else failed();
       });
       worker!.once("error", failed);
@@ -371,7 +372,7 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
             throw new Error(`Cannot back up user-created symbolic link; replace it with regular files first: ${path}`);
           }
           if (chain.some((folder) => folder === target || folder.startsWith(`${target}${sep}`))) {
-            throw new Error(`Cannot back up a symbolic link to the folder that contains it: ${path}`);
+            throw userErrorThrown("serverError.backup.recursiveLink", { path });
           }
           source = target;
           stat = lstatSync(source);

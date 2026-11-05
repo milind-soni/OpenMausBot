@@ -297,6 +297,22 @@ describe("sharing my New bot defaults as a preset", () => {
     expect(second.document.package).toMatchObject({ id: "support-agent", release: "1.0.1", name: "Renamed" });
     expect(() => app.exporter.createLibraryPackageExport({ published: null, preset: null })).toThrow("Your New bot defaults are empty");
     expect(() => app.exporter.createLibraryPackageExport({ published: null, preset: built.value, release: "one" })).toThrow("Use a version like 1.2.3.");
+    const caught = (run: () => unknown) => { try { run(); } catch (error) { return error; } throw new Error("expected a refusal"); };
+    const badVersion = caught(() => app.exporter.createLibraryPackageExport({ published: null, preset: built.value, release: "one" }));
+    expect(badVersion).toMatchObject({ errorKey: "serverError.share.version" });
+    expect(badVersion).not.toHaveProperty("errorParams");
+    const empty = caught(() => app.exporter.createLibraryPackageExport({ published: null, preset: null }));
+    expect(empty).toMatchObject({ errorKey: "serverError.preset.empty" });
+    expect(empty).not.toHaveProperty("errorParams");
+    const big = app.presets.presetFromDefaults(defaults({
+      skills: Array.from({ length: 17 }, (_, index) => ({
+        name: `big-${index}`, description: `big-${index} steps.`, source: "fixture", text: skillText(`big-${index}`, "a".repeat(250_000)), enabled: true, warnings: [],
+      })),
+    }), { includeNotes: false });
+    const tooLarge = caught(() => app.exporter.createLibraryPackageExport({ published: null, preset: big.value }));
+    expect((tooLarge as Error).message).toBe("This preset is too large to share (4 MB). Leave out starter notes or some skills and try again.");
+    expect(tooLarge).toMatchObject({ errorKey: "serverError.preset.tooLarge" });
+    expect(tooLarge).not.toHaveProperty("errorParams");
 
     const imported = app.importer.importPackageDocument(app.parsePackageDocument(JSON.parse(JSON.stringify(first.document))), { trust: "file", mode: "add" }, app.deps);
     if (imported.alreadyAdded) throw new Error("unexpected");

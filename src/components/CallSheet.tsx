@@ -6,7 +6,7 @@ import { formatCallDuration } from "../../shared/live-call";
 import { stripLeakedSystemHarnessMessages } from "../../shared/system-message-guard";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
 import { callConversation, type CallConversationEntry, type CallRecordLine } from "@/lib/call-record";
-import { t } from "@/lib/i18n";
+import { intlLocale, t } from "@/lib/i18n";
 import { activityStepLabel } from "@/lib/live-activity";
 import type { Message } from "@/state/store";
 import { approvalCardOutcome, toolLabel } from "./ApprovalCard";
@@ -99,7 +99,7 @@ export function CallSheet({ message, transcript, botName, threadId, busy, partia
   const blocks = useMemo(() => (callId === undefined ? [] : blocksOf(callConversation(transcript, callId))), [transcript, callId]);
   if (!call) return null;
   const title = call.title?.trim() || t("chat.callRecord.title", { name: botName });
-  const when = new Date(call.startedAt || call.endedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  const when = new Date(call.startedAt || call.endedAt).toLocaleString(intlLocale(), { dateStyle: "medium", timeStyle: "short" });
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 sm:p-6"

@@ -131,10 +131,11 @@ export type CloudTeamRole = "owner" | "admin" | "member";
 /** A team this account is in, from the verified session: its Cloud as the Admin describes it, null while it has none. */
 export interface CloudTeam { id: string; name: string; role: CloudTeamRole; machine: CloudMachine | null }
 export declare const CLOUD_TEAM_ROLES: readonly CloudTeamRole[];
-/** owner → Super admin, admin → Admin, member → User. */
-export declare function teamRoleLabel(role: string | null | undefined): "Super admin" | "Admin" | "User";
+/** owner → Super admin, admin → Admin, member → User, in `t`'s language (English by default). */
+export declare function teamRoleLabel(role: string | null | undefined, t?: (key: string, params?: Record<string, unknown>) => string): string;
 export declare function parseCloudTeams(input: unknown): CloudTeam[];
-export declare function cloudUnreachableText(state: unknown, origin?: string | null): string | null;
+export declare function cloudUnreachableCause(state: unknown, origin?: string | null): "host" | "no_answer" | null;
+export declare function cloudUnreachableText(state: unknown, origin?: string | null, t?: (key: string, params?: Record<string, string | number>) => string): string | null;
 export declare function parseCloudPurchase(input: unknown): CloudPurchase | null;
 export declare const CLOUD_TRIAL_STATES: readonly CloudTrialState[];
 export declare function parseCloudTrial(input: unknown): CloudTrial | null;

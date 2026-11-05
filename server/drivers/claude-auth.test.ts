@@ -3,9 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import { claudeAuthStatus, claudeSignedIn } from "./claude-auth-status.ts";
 import { claudeAuthFailure } from "./claude-auth-recovery.ts";
-import { claudeVersionTooOld } from "./claude-limits.ts";
 import { claudeResultError } from "./claude.ts";
-import { claudeApiErrorMessage, claudeEngineReset, claudeLimitFacts, claudeLimitMessage, claudeLimitRefusal, claudeUsageLimit } from "./claude-limits.ts";
+import { claudeApiErrorMessage, claudeEngineReset, claudeLimitFacts, claudeLimitError, claudeLimitMessage, claudeLimitRefusal, claudeUsageLimit, claudeVersionTooOld } from "./claude-limits.ts";
 import { classifyError } from "./retry.ts";
 
 describe("claudeSignedIn", () => {
@@ -204,5 +203,19 @@ describe("claudeApiErrorMessage", () => {
   it("keeps Claude's own words for a cause it does not name", () => {
     const text = "There's an issue with the selected model (claude-fixture). It may not exist or you may not have access to it.";
     expect(claudeApiErrorMessage({ error: "model_not_found" }, `${text} `)).toBe(text);
+  });
+});
+
+describe("a Claude limit's catalog key", () => {
+  it("names the window and what to do meanwhile as parts, and the reset as a moment in its zone", () => {
+    const at = { window: "five_hour", resetsAt: 1791795600 } as const;
+    expect(claudeLimitError(at, undefined, 0, "UTC")).toEqual({
+      message: claudeLimitMessage(at, undefined, 0, "UTC"),
+      text: { key: "chat.notice.claudeLimitResets", params: { limit: "chat.notice.part.fiveHourLimit", meanwhile: "chat.notice.part.switchAccount", resetsAt: 1791795600_000, timeZone: "UTC", resets: expect.stringMatching(/ \(UTC\)$/) } },
+    });
+    expect(claudeLimitError({ window: "seven_day_opus" } as never, "Weekly limit reached.", 0, "UTC").text)
+      .toEqual({ key: "chat.notice.claudeLimitSaid", params: { limit: "chat.notice.part.weeklyOpusLimit", meanwhile: "chat.notice.part.chooseModel", said: "Weekly limit reached" } });
+    expect(claudeLimitError({ credits: true } as never, undefined, 0, "UTC").text).toEqual({ key: "chat.notice.claudeExtraUsage" });
+    expect(claudeLimitError(at, undefined, 0, "Not/AZone").text).toBeUndefined();
   });
 });

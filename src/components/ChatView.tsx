@@ -37,7 +37,7 @@ import { CODEX_USAGE_URL, codexUsageLimitReached } from "../../shared/codex-usag
 import { ClaudeUpdatePrompt } from "./ClaudeUpdatePrompt";
 import { MacCuaRecoveryActions } from "./MacCuaRecoveryActions";
 import { macCuaPermissionMessage, missingMacCuaPermissions } from "@/lib/mac-cua-permissions";
-import { claudeUpdateTarget, failedTurnCause, signedOutEngine } from "@/lib/failed-turn";
+import { claudeUpdateTarget, failedTurnCause, failedTurnNotice, signedOutEngine } from "@/lib/failed-turn";
 import { plainErrorLine } from "@/lib/plain-error";
 import { openPlaceAction, placeRowViewFor, usePlaceSeat, worksOnSimpleLabel } from "@/lib/place-view";
 import type { PlaceRow } from "../../shared/place-view";
@@ -47,7 +47,7 @@ import { PartlyDoneRow } from "./PartlyDoneRow";
 import { isPureLeakedSystemHarnessMessage, stripLeakedSystemHarnessMessages } from "../../shared/system-message-guard.ts";
 import { ConversationalReply, QuickModelNote, isConversational, useReplySegments, useThreadOpenedAt } from "./ConversationalReply";
 import type { LocaleKey } from "@/locales";
-import { isProviderSafetyBlock, PROVIDER_SAFETY_GUIDANCE, PROVIDER_SAFETY_HELP_URL } from "../../shared/provider-safety";
+import { isProviderSafetyBlock, PROVIDER_SAFETY_HELP_URL } from "../../shared/provider-safety";
 import { isCancelledTranscriptRow, PERSON_STOPPED_TURN_NAME } from "../../shared/client-cancel";
 import { stopNoticeDue, useStoppedAt } from "@/lib/stop-turn";
 import { THIS_COMPUTER_NOT_READY } from "../../shared/your-computer";
@@ -104,7 +104,7 @@ import { LiveCallBar } from "./LiveCallBar";
 import { LiveCallChip } from "./LiveCallPill";
 import { effectivePlace, toolPlace, type EffectivePlace } from "@/lib/place";
 import { cn } from "@/lib/cn";
-import { activeLocale, t } from "@/lib/i18n";
+import { activeLocale, intlLocale, t } from "@/lib/i18n";
 import { COMPACT_BUBBLE } from "@/lib/compact-chip";
 import { groupTranscript, isStatusActivity, turnDurations, workedLabel } from "@/lib/activity-runs";
 import { StatusActivityRow } from "@/components/StatusActivityRow";
@@ -122,7 +122,7 @@ import { useUnreadDivider } from "@/hooks/use-unread-divider";
 import { NewMessagesDivider } from "./NewMessagesDivider";
 import { unreadMessageIds } from "@/lib/unread-divider";
 import { appendComposerDraft, appendDraftAttachments, useReplyDraft } from "@/lib/drafts";
-import { localDay, transcriptLookups, type TranscriptLookups } from "@/lib/transcript-derivations"; import { DaySeparator } from "./DaySeparator";
+import { botLineText, localDay, transcriptLookups, type TranscriptLookups } from "@/lib/transcript-derivations"; import { DaySeparator } from "./DaySeparator";
 import { splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { EmptyChat } from "./ChatEmptyState";
 import { PinnedBanner } from "./ChatPinnedBanner";
@@ -216,8 +216,8 @@ export function ErrorRow({
           <ClaudeUpdatePrompt instance={claudeUpdateInstance} onRetry={onRetry} />
         ) : isProviderSafetyBlock(message) ? (
           <p className="mt-2 text-[13px] leading-relaxed text-ink-secondary">
-            {PROVIDER_SAFETY_GUIDANCE}{" "}
-            <a href={PROVIDER_SAFETY_HELP_URL} target="_blank" rel="noreferrer" className="underline">About provider safety checks</a>
+            {t("chat.providerSafety.guidance")}{" "}
+            <a href={PROVIDER_SAFETY_HELP_URL} target="_blank" rel="noreferrer" className="underline">{t("chat.providerSafety.about")}</a>
           </p>
         ) : setupInstance &&
         !(setupInstance.snapshot.state === "available" && setupInstance.snapshot.authenticated !== false) ? (
@@ -284,13 +284,13 @@ export function FailedTurnRow({ tool, engine, onRetry, botId, threadId }: {
   if (tool.place && botId) return <PlaceFailedRow place={tool.place} botId={botId} threadId={threadId} onRetry={onRetry} />;
   const credit = trialCreditKind(failedTurnCause(tool.name) ?? "");
   if (credit) return <TrialCreditFailedRow kind={credit} onRetry={onRetry} />;
-  const cause = failedTurnCause(tool.name) ?? tool.name;
-  if (tool.partial) return <PartlyDoneRow cause={cause} onRetry={onRetry} />;
+  const { cause, notice } = failedTurnNotice(tool);
+  if (tool.partial) return <PartlyDoneRow cause={notice ?? cause} onRetry={onRetry} />;
   const signedOut = signedOutEngine(tool, engine);
   return (
     <ErrorRow
-      message={cause}
-      headline={signedOut ? t("chat.error.signedOut", { name: signedOut.displayName }) : plainErrorLine(cause)}
+      message={notice ?? cause}
+      headline={signedOut ? t("chat.error.signedOut", { name: signedOut.displayName }) : notice ?? plainErrorLine(cause)}
       onRetry={onRetry}
       action={resume}
       setupInstance={tool.setup ? engine : undefined}
@@ -355,7 +355,7 @@ const Bubble = memo(function Bubble({
   const [viewRaw, setViewRaw] = useState(false);
   const speech = useSpeech();
   const speaking = speech.messageId === message.id && speech.status !== "idle";
-  const rawText = peer ? peer.body : (message.text ?? "");
+  const rawText = peer ? peer.body : botLineText(message);
   const text = user ? rawText : stripLeakedSystemHarnessMessages(rawText);
   const botMenu = useBotMessageMenu({
     text,
@@ -472,7 +472,7 @@ const Bubble = memo(function Bubble({
             simple && join && !split && !attachmentsOnly && !tabled && joinedCorners(user ? "end" : "start", join),
           )}
           style={user && !webhookView && !attachmentsOnly ? ownBubbleStyle : undefined}
-          title={workedFor === undefined ? new Date(message.at).toLocaleString() : `${workedLabel(workedFor)} · ${new Date(message.at).toLocaleString()}`}
+          title={workedFor === undefined ? new Date(message.at).toLocaleString(intlLocale()) : `${workedLabel(workedFor)} · ${new Date(message.at).toLocaleString(intlLocale())}`}
         >
           {replyTarget && (
             <div className="mb-2">
@@ -733,7 +733,7 @@ const MessagesList = memo(function MessagesList({
           }
           switch (richRowKind(m)) {
             case "secret":
-              return m.secret ? <SecretRequestCard botId={botId} color={botColor} threadId={threadId} message={m} /> : null;
+              return m.secret ? <SecretRequestCard botId={botId} botName={botName} color={botColor} threadId={threadId} message={m} /> : null;
             case "signin":
               return m.signIn ? <SignInRequestCard botId={botId} botName={botName} color={botColor} threadId={threadId} message={m} /> : null;
             case "connector":
@@ -1081,7 +1081,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
             </button>
           )}
           {!phone && !simpleHead && <ChatHeadRole bot={bot} />}<span role="status" className="sr-only" data-chathead-status>{bot.busy ? t("sidebar.preview.working") : ""}</span>{!simpleHead && privateChat && <TeamPrivateHeader />}{!simpleHead && ownHelper && <TeamOwnHelperHeader />}{!simpleHead && sharedChat && team && <TeamSharedHeader team={team} onlyPeopleAdded={bot.onlyPeopleAdded} />}
-          {!simpleHead && !bot.busy && bot.waitingForTeammates && <span className="truncate text-[12px] text-ink-secondary" role="status">Teammates working</span>}
+          {!simpleHead && !bot.busy && bot.waitingForTeammates && <span className="truncate text-[12px] text-ink-secondary" role="status">{t("chat.teammatesWorking")}</span>}
           {(advanced || remoteClient) && awayFromMainThread(profile, showThreads) && (
             <button
               type="button"

@@ -1,3 +1,4 @@
+import { userErrorThrown } from "./user-errors.ts";
 // "This computer" is the desktop app's own computer, and only the server the app launched may drive it. The app proves
 // that by handing the driver connection to that one child over Electron's private utility-process port, which only the
 // app's main process can write to and which plain Node never has. No file, environment variable or HTTP route supplies
@@ -58,4 +59,12 @@ export function thisComputerNotReady(desktop: DesktopComputer = desktopComputer,
   if (!reason) return `${THIS_COMPUTER_NOT_READY}make sure OpenMausBot has the permissions it asks for, then restart it`;
   const permission = platform === "darwin" && /(?:Screen Recording|Accessibility).*required/i.test(reason);
   return `${THIS_COMPUTER_NOT_READY}${reason}${permission ? ". Relaunch OpenMausBot after granting the missing macOS permission." : ""}`;
+}
+
+export function thisComputerNotReadyError(desktop: DesktopComputer = desktopComputer, platform: NodeJS.Platform = process.platform): Error {
+  if (!desktop.granted()) return userErrorThrown("serverError.computer.desktopOnly");
+  const reason = desktop.unavailableReason();
+  if (!reason) return userErrorThrown("serverError.computer.permissionsThenRestart");
+  const permission = platform === "darwin" && /(?:Screen Recording|Accessibility).*required/i.test(reason);
+  return userErrorThrown(permission ? "serverError.computer.notReadyMacPermission" : "serverError.computer.notReadyDetail", { reason });
 }

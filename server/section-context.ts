@@ -1,3 +1,4 @@
+import { userErrorThrown } from "./user-errors.ts";
 // Never writable by agents: a compromised or mistaken bot must not persist instructions into every teammate's turns.
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -67,7 +68,7 @@ function loadFile(forWrite = false): SectionContextFile {
       ...(candidate.data.sections ?? []), ...Object.keys(contexts),
     ].map(sectionContextKey).filter(Boolean))], contexts };
   } catch {
-    if (forWrite) throw new Error("Saved departments and shared instructions could not be read; the existing file was left unchanged");
+    if (forWrite) throw userErrorThrown("serverError.department.readFailed");
     return emptyFile();
   }
 }
@@ -109,7 +110,7 @@ export function changeEmptySection(name: string, nextName: string | null): void 
   const index = data.sections.indexOf(name);
   if (index < 0) throw new Error("No such department");
   if (nextName !== null && nextName !== name && data.sections.includes(nextName)) {
-    throw new Error("A department with that name already exists");
+    throw userErrorThrown("serverError.department.duplicate");
   }
   if (nextName === name) return;
   const memoryKey = data.memoryKeys[name] ?? name;

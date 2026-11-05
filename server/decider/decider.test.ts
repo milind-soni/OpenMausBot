@@ -727,7 +727,7 @@ describe("settings rules with two providers", () => {
   it("switching on needs some key, and the error names every kind", () => {
     expect(deciderSavePatch({ provider: "openrouter", enabled: true }, { enabled: false, key: KEY })).toEqual({ ok: true, patch: { provider: "openrouter", enabled: true } });
     expect(deciderSavePatch({ enabled: true }, { provider: "openrouter", openrouterKey: "sk-or" })).toEqual({ ok: true, patch: { enabled: true } });
-    expect(deciderSavePatch({ enabled: true }, {})).toEqual({ ok: false, error: "Save a Cloudflare Workers AI, Jev or OpenRouter key before turning on fast decisions." });
+    expect(deciderSavePatch({ enabled: true }, {})).toEqual({ ok: false, error: "Save a Cloudflare Workers AI, Jev or OpenRouter key before turning on fast decisions.", errorKey: "serverError.decider.keyRequired" });
     expect(deciderSavePatch({ enabled: true }, { workersAiToken: "cf-token" })).toMatchObject({ ok: false });
     expect(deciderSavePatch({ provider: "openrouter", enabled: true }, {}, { included: true })).toMatchObject({ ok: true });
   });

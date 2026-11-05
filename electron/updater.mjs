@@ -13,6 +13,7 @@ import {
 import { canInstallElevated, installPackageElevated } from "./elevated-install.mjs";
 import { releaseSingleInstanceLock } from "./single-instance.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
+import { UPDATE_TEXT } from "./update-errors.mjs";
 import { createUpdaterCoordinator } from "./updater-coordinator.mjs";
 import { createQuietInstall, installFailed, launchAfter, LOOK_EVERY_MS, updateSeen } from "./update-when-quiet.mjs";
 
@@ -109,7 +110,8 @@ function relaunchAfterInstall() {
 }
 
 function setState(patch) {
-  state = { ...state, ...patch };
+  const { messageCode: _stale, messageKey: _key, messageParams: _params, ...kept } = state;
+  state = { ...(Object.hasOwn(patch, "message") ? kept : state), ...patch };
   if (quiet && patch.status === "error") installFailed(quietRecord());
   try {
     const contents = win?.webContents;
@@ -155,7 +157,7 @@ export function startUpdater(signals = null) {
     ({ autoUpdater } = require("./vendor/electron-updater.cjs"));
   } catch {
     updaterCoordinator = null;
-    setState({ status: "error", message: "updater unavailable" });
+    setState({ status: "error", message: UPDATE_TEXT.unavailable, messageCode: "unavailable" });
     return;
   }
   // The coordinator starts each download itself, so it owns macOS staging and quiet failures.

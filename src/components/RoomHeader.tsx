@@ -80,7 +80,7 @@ function memberMauses(group: Group, members: Bot[]) {
             ? t("room.holds.avatarHeld", { name: b.name })
             : queueTitle ?? (busyElsewhere
               ? t("room.memberWorkingElsewhere", { name: b.name })
-              : `${b.name}${busy ? " — working…" : ""}${contextWarning ? ` — ${t("contextWarning.short", { percent: contextWarning.percent })}` : ""}`)
+              : `${b.name}${busy ? ` — ${t("room.member.working")}` : ""}${contextWarning ? ` — ${t("contextWarning.short", { percent: contextWarning.percent })}` : ""}`)
         }
         className={cn(
           "relative inline-flex rounded-full",

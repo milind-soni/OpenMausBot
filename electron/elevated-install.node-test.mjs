@@ -86,10 +86,14 @@ test("each way the install can end maps to a reason the card can act on", async 
       });
     const coded = (code, extra = {}) => Object.assign(new Error(`exit ${code}`), { code, ...extra });
 
-    assert.equal((await outcome(coded(126))).reason, "declined");
-    assert.equal((await outcome(coded(127))).reason, "refused");
-    assert.equal((await outcome(coded(65))).reason, "checksum");
-    assert.equal((await outcome(coded("ENOENT"))).reason, "unavailable");
+    for (const [code, reason, key, detail] of [
+      [126, "declined", "native.update.promptClosed", "The password prompt was closed."],
+      [127, "refused", "native.update.noAdmin", "This session could not ask for administrator rights."],
+      [65, "checksum", "native.update.checksumMismatch", "The downloaded update did not match its checksum. Check again to download it fresh."],
+      ["ENOENT", "unavailable", "native.update.noPkexec", "pkexec is not installed."],
+    ]) assert.deepEqual(await outcome(coded(code)), { ok: false, reason, detail, detailKey: key });
+    const timedOut = await outcome(coded(null, { killed: true }));
+    assert.deepEqual(timedOut, { ok: false, reason: "failed", detail: "The install did not finish: The install took too long.", detailKey: "native.update.installFailed", detailParams: { reason: "The install took too long.", timedOut: "true" } });
 
     const failed = await outcome(coded(100), "W: noise\nE: Unable to acquire the dpkg frontend lock\n");
     assert.equal(failed.reason, "failed");

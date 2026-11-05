@@ -416,9 +416,12 @@ describe("publishablePage", () => {
     const { call, store, docs } = setup();
     call({ tool: "show_html", html: PAGE, title: "Sales" });
     store.appendMessage(THREAD, { role: "bot", kind: "app", text: "x", app: { v: 1, source: "mcp", title: "Excalidraw", doc: "", rev: 0, bytes: 1, border: true, network: { connect: [], resources: [] }, mcp: { server: "excalidraw", tool: "create_view", resourceUri: "ui://excalidraw/mcp-app.html" } } });
-    expect(publishablePage({ store, docs, threadId: "elsewhere", messageId: "m1" })).toMatchObject({ ok: false, status: 404 });
-    expect(publishablePage({ store, docs, threadId: THREAD, messageId: "m2" })).toMatchObject({ ok: false, status: 409 });
-    expect(publishablePage({ store, docs, threadId: THREAD, messageId: "m1", rev: 4 })).toMatchObject({ ok: false, status: 404 });
+    expect(publishablePage({ store, docs, threadId: "elsewhere", messageId: "m1" })).toMatchObject({ ok: false, status: 404,
+      error: "That page is not in this conversation.", errorKey: "serverError.page.notHere" });
+    expect(publishablePage({ store, docs, threadId: THREAD, messageId: "m2" })).toMatchObject({ ok: false, status: 409,
+      error: "That app came from an MCP server; only a page a bot made can be published.", errorKey: "serverError.page.fromMcp" });
+    expect(publishablePage({ store, docs, threadId: THREAD, messageId: "m1", rev: 4 })).toMatchObject({ ok: false, status: 404,
+      error: "That version of the page is no longer kept.", errorKey: "serverError.page.versionGone" });
   });
 });
 

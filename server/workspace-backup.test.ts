@@ -682,7 +682,11 @@ describe("encrypted full workspace backups", () => {
     expect(readFileSync(join(data, "CLAUDE.md"), "utf8")).toBe("Be brief.");
 
     symlinkSync(".", join(project, "loop"), process.platform === "win32" ? "junction" : "dir");
-    await expect(createWorkspaceBackup(root, { password: PASSWORD })).rejects.toThrow(/folder that contains it: workspaces\/ws\/project\/loop/);
+    await expect(createWorkspaceBackup(root, { password: PASSWORD })).rejects.toMatchObject({
+      message: "Cannot back up a symbolic link to the folder that contains it: workspaces/ws/project/loop",
+      errorKey: "serverError.backup.recursiveLink",
+      errorParams: { path: "workspaces/ws/project/loop" },
+    });
     rmSync(join(project, "loop"));
     mkdirSync(join(root, "workspaces", "other"), { recursive: true });
     writeFileSync(join(root, "workspaces", "other", "notes.md"), "theirs");
