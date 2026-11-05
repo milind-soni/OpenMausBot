@@ -1,6 +1,6 @@
 import { withMcpSignIn, type McpOAuthManager } from "../mcp-oauth.ts";
 import { brokeredServer, type BrokerPath } from "../bot-box/broker-probe.ts";
-import { probeMcpServer, type McpProbeOptions, type McpProbeResult } from "../mcp-probe.ts";
+import { probeMcpServer, sendsCredentials, type McpProbeOptions, type McpProbeResult } from "../mcp-probe.ts";
 import { MAX_MCP_SERVERS, isRemoteMcpServer, parseStoredMcpServer, type McpRunsOn, type StoredMcpServer, type StoredRemoteMcpServer } from "../mcp-registry.ts";
 import { postizKeyHeaders } from "../postiz/connection.ts";
 import type { AppConfig } from "../config.ts";
@@ -26,7 +26,7 @@ export interface McpConfigDeps {
   appCatalog?: Pick<ChatAppsMcp, "probeOptions" | "serverChanged" | "forgetServer"> & Partial<Pick<ChatAppsMcp, "hasApps">>;
   /** A Team Cloud: each member's own key and sign-in for a removed server go with it. */
   forgetPeople?(name: string): void;
-  /** Whether each command server starts for each bot: checked again when one is added, changed or turned on. */
+  /** Whether each command server starts for each bot: checked again when one is added, changed, turned on or restarted. */
   health?: { changed(name: string): void };
   /** A server was added or removed on purpose: a Cloud home's routines wait while every connection is gone. */
   connectionsChanged?(change: "added" | "removed"): void;
@@ -46,6 +46,8 @@ export interface McpConfig {
    * refused for the whole request, its body included. */
   addMany(read: () => Promise<{ servers: Record<string, StoredMcpServer> } | McpConfigRefusal>): Promise<McpConfigResult>;
   setEnabled(name: string, enabled: boolean): McpConfigResult;
+  /** The next turn of every bot that uses it starts a new process, with what is saved today: keys, sign-in and all. */
+  restart(name: string): McpConfigResult;
   setApps(name: string, apps: boolean): McpConfigResult;
   remove(name: string): McpConfigResult;
   /** A 200 carries the probe result as its body, failures included: only a refusal to probe is an error. */
@@ -80,7 +82,7 @@ async function probeAsBots(path: BrokerPath, name: string, target: StoredRemoteM
 export const runsElsewhere = (runsOn: McpRunsOn) => `This server runs on ${runsOn.label}, so it isn't started here.`;
 
 const personalHeaderValueRefusal = (personal: string[], name: string, server: StoredMcpServer) =>
-  personal.includes(name) && isRemoteMcpServer(server) && Object.values(server.headers).some((value) => value !== "")
+  personal.includes(name) && isRemoteMcpServer(server) && sendsCredentials(server)
     ? "Personal MCP header values cannot be saved in shared configuration. Save your key in your personal connection."
     : null;
 
@@ -196,6 +198,12 @@ export function createMcpConfig(deps: McpConfigDeps & { changed(): void }): McpC
       health?.changed(name);
       return saved(200);
     }),
+    restart: (name) => write(() => {
+      const found = stored(name);
+      if (!found.existing) return found.result!;
+      health?.changed(name);
+      return saved(200);
+    }),
     setApps: (name, apps) => write(() => {
       const found = stored(name);
       if (!found.existing) return found.result!;
@@ -238,16 +246,24 @@ export function createMcpConfig(deps: McpConfigDeps & { changed(): void }): McpC
         } else if (!personal && isRemoteMcpServer(target)) {
           target = { ...target, headers: { ...target.headers, ...postizKeyHeaders(cfg.postiz, name, target) } };
         }
+        let sentSignIn = false;
         if (isRemoteMcpServer(target) && oauth.authState(name, target.url) === "signed-in") {
           const signedIn = (await withMcpSignIn({ [name]: target }, oauth))[name];
-          if (signedIn) target = { ...signedIn, enabled: target.enabled } as typeof target;
+          if (signedIn) {
+            target = { ...signedIn, enabled: target.enabled } as typeof target;
+            sentSignIn = true;
+          }
         }
         const options = { ...(personal ? {} : appCatalog?.probeOptions(name, parsed.server) ?? {}), ...(asBot ? { asBot } : isRemoteMcpServer(target) ? {} : { asBot: deps.probeAs?.(target) ?? {} }) };
         const viaBots = isRemoteMcpServer(target) ? deps.botsPath?.() ?? null : null;
         const result = viaBots && isRemoteMcpServer(target)
           ? await probeAsBots(viaBots, name, target, signal, options)
           : await probeMcpServer(target, undefined, signal, options);
-        if (!result.ok && result.auth === "required" && isRemoteMcpServer(target)) oauth.markNeedsSignIn(name, target.url);
+        if (!result.ok && result.auth === "required" && isRemoteMcpServer(target)) {
+          // Only a Bearer we sent and the server refused drops the sign-in; a probe that sent none must not sign anyone out.
+          if (sentSignIn) oauth.markNeedsSignIn(name, target.url);
+          else oauth.requireSignIn(name, target.url);
+        }
         return { status: 200, body: result };
       } finally {
         mcpProbesInFlight -= 1;

@@ -122,7 +122,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   ownerToken = await ownerPairing();
-  // Chief first makes the seeded bot its team's Chief, which answers a teammate's failed run with a Team incidents turn
+  // Chief first makes the seeded bot its team's Chief, which answers a teammate's failed run with a Problems to look at turn
   // of its own on the same Claude: a second failed turn in the health read. Stepped down, each test's turns are its own.
   const seeded = ((await api("GET", "/api/bots?messages=0")).body.bots as any[]).find((bot) => bot.chiefOfStaff);
   expect((await api("PATCH", `/api/bots/${seeded.id}`, { body: { chiefOfStaff: false } })).status).toBe(200);

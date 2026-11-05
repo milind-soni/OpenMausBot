@@ -190,6 +190,23 @@ describe("ProviderRegistry", () => {
     expect(registry.get("b")?.displayName).toBe("Rebuilt");
   });
 
+  it("warns on Windows when an engine's custom command starts it inside WSL", async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    const registry = new ProviderRegistry([makeFakeDriver().driver]);
+    Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+    try {
+      await registry.load({
+        wsl: { driver: "fake", config: { cli: "wsl.exe -d Ubuntu -- hermes" } },
+        native: { driver: "fake", config: { cli: "C:\\Users\\me\\hermes.exe" } },
+      });
+      const described = Object.fromEntries((await registry.describe()).map((d) => [d.instanceId, d]));
+      expect(described.wsl.snapshot).toMatchObject({ state: "available", warning: { title: "This engine runs inside WSL" } });
+      expect(described.native.snapshot).not.toHaveProperty("warning");
+    } finally {
+      Object.defineProperty(process, "platform", platform);
+    }
+  });
+
   it("describe() reports a snapshot() failure as unavailable rather than throwing", async () => {
     const fake = makeFakeDriver({ failSnapshot: "provider probe exploded" });
     const registry = new ProviderRegistry([fake.driver]);

@@ -1,5 +1,6 @@
 // The config pins one deliberately unknown driver, so the suite is deterministic with or without agent CLIs installed.
 import { HIGHLEVEL_TOOLS } from "./highlevel/tools.js";
+import { EMAIL_TOOLS } from "./email/tools.ts";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
@@ -34,14 +35,15 @@ import {
   phoneSecretAAD,
   type PhoneSecretContext,
 } from "./phone-secret.ts";
+import { workerPort } from "./testing/worker-port.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
 const FAKE_CLAUDE_CLI = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
 const FAKE_MCP_SERVER = join(SERVER_DIR, "testing", "fake-mcp-server.ts");
-const PORT = 18800 + Math.floor(Math.random() * 10_000);
+const PORT = workerPort(18800, 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
-const WEBHOOK_PORT = 39000 + Math.floor(Math.random() * 10_000);
+const WEBHOOK_PORT = workerPort(39000, 10_000);
 const WEBHOOK_BASE = `http://127.0.0.1:${WEBHOOK_PORT}`;
 const TEST_CAPABILITY_KEY = "index-fixture-internal-capability";
 
@@ -337,6 +339,16 @@ const delayedJsonBody = async (
 const claudePrompts = (file = fakeClaudePrompts): string[] =>
   existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : [];
 const COMPUTER_FREE_NOTE = "OpenMausBot computer update: the computer this conversation waited for is free again. Continue the task that parked waiting for it.";
+
+/** The running turn's first screen call, which is what takes a cloud computer; the answer waits while another turn has it. */
+const reachForComputer = async () => {
+  const dump = await readJsonFileWhenReady<{ mcpConfig: { mcpServers: { computer: { env: Record<string, string> } } } }>(fakeClaudeDump);
+  const env = dump.mcpConfig.mcpServers.computer.env;
+  return fetch(`${env.OMB_HARNESS_URL}/api/internal/computer/mcp`, {
+    method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${env.OMB_MCP_TOKEN_COMPUTER}` },
+    body: JSON.stringify({ method: "tools/call", params: { name: "screenshot", arguments: {} } }),
+  }).catch(() => undefined);
+};
 
 const readJsonFileWhenReady = async <T = unknown>(file: string, timeout = 5_000): Promise<T> => {
   let parsed: unknown;
@@ -2441,6 +2453,14 @@ describe("harness HTTP API", () => {
       expect(renamed.status).toBe(200);
       expect(renamed.body.task.title).toBe("Release plan");
 
+      const archived = await api("PATCH", `/api/groups/${room.id}/tasks/${newThread}`, { archivedAt: 1234 });
+      expect(archived.status).toBe(200);
+      expect(archived.body.task.archivedAt).toBe(1234);
+      expect((await api("PATCH", `/api/groups/${room.id}/tasks/${newThread}`, { archivedAt: "soon" })).status).toBe(400);
+      const unarchived = await api("PATCH", `/api/groups/${room.id}/tasks/${newThread}`, { archivedAt: null });
+      expect(unarchived.status).toBe(200);
+      expect(unarchived.body.task).not.toHaveProperty("archivedAt");
+
       const switched = await api("POST", `/api/groups/${room.id}/tasks/${originalThread}`);
       expect(switched.status).toBe(200);
       expect(switched.body.group.threadId).toBe(originalThread);
@@ -2615,6 +2635,17 @@ describe("harness HTTP API", () => {
       expect((await manage({ action: "set_bulletin", bulletin: "Updated brief ✓" })).status).toBe(200);
       const readRoom = async () => (await api("GET", "/api/bots?messages=20")).body.groups.find((group: { id: string }) => group.id === roomId);
       expect(await readRoom()).toMatchObject({ name: "Renamed room", bulletin: "Updated brief ✓", section, memberIds: [chief.id, peer.id], defaultResponder: { kind: "member", botId: chief.id }, messages: [] });
+      const opened = await manage({ action: "new_thread", name: "Launch plan" });
+      expect(opened.status).toBe(201);
+      expect(opened.body).toMatchObject({ ok: true, title: "Launch plan" });
+      expect(opened.body.message).toContain(String(opened.body.threadId));
+      expect(await readRoom()).toMatchObject({
+        threadId: opened.body.threadId,
+        tasks: expect.arrayContaining([expect.objectContaining({ threadId: opened.body.threadId, title: "Launch plan" })]),
+      });
+      expect((await manage({ action: "new_thread", name: "x".repeat(101) })).status).toBe(400);
+      expect((await manage({ action: "new_thread", name: "x".repeat(81) })).status).toBe(400);
+      expect((await manage({ action: "new_thread", name: "Line one\nLine two" })).status).toBe(400);
       for (const memberId of [foreign.id, excluded.id, "missing-bot"]) {
         expect((await create({ name: "Forbidden room", memberIds: [memberId] })).status).toBe(403);
         expect((await manage({ action: "add_members", memberIds: [memberId] })).status).toBe(403);
@@ -2633,6 +2664,7 @@ describe("harness HTTP API", () => {
         const otherRoom = (await api("POST", "/api/groups", { name: "Unmanaged room", memberIds, section: roomSection })).body.group;
         roomIds.push(otherRoom.id);
         expect((await manage({ roomId: otherRoom.id, action: "rename", name: "Forbidden" })).status).toBe(403);
+        expect((await manage({ roomId: otherRoom.id, action: "new_thread" })).status).toBe(403);
       }
       expect(await readRoom()).toMatchObject({ name: "Renamed room", bulletin: "Updated brief ✓", memberIds: [chief.id, peer.id] });
       expect((await api("PATCH", `/api/bots/${second.id}`, { hidden: true })).status).toBe(200);
@@ -2640,6 +2672,7 @@ describe("harness HTTP API", () => {
       expect((await manage({ action: "add_members", memberIds: [second.id] })).status).toBe(403);
       expect((await api("PATCH", `/api/bots/${chief.id}`, { approvePeerComms: true })).status).toBe(200);
       expect((await manage({ action: "rename", name: "No review" })).body.error).toMatch(/peer approval is required/);
+      expect((await manage({ action: "new_thread" })).status).toBe(403);
       expect((await create({ name: "No review", memberIds: [peer.id] })).status).toBe(403);
       expect((await api("PATCH", `/api/bots/${chief.id}`, { approvePeerComms: false })).status).toBe(200);
       for (let count = 1; count < 4; count += 1) {
@@ -2648,6 +2681,8 @@ describe("harness HTTP API", () => {
         roomIds.push(String(created.body.id));
       }
       expect((await create({ name: "Fifth room", memberIds: [peer.id] })).status).toBe(429);
+      for (let count = 2; count <= 4; count += 1) expect((await manage({ action: "new_thread" })).status).toBe(201);
+      expect((await manage({ action: "new_thread", name: "Fifth thread" })).status).toBe(429);
       expect((await api("GET", "/api/bots?messages=0")).body.bots.find((bot: { id: string }) => bot.id === foreign.id).section).toBe(`${section} foreign`);
       expect((await api("PATCH", `/api/bots/${chief.id}`, { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).status).toBe(200);
       const busyToken = await mintTestCapability(BASE, chief.id, chief.threadId);
@@ -3521,9 +3556,12 @@ describe("harness HTTP API", () => {
       await promptedOnTeamComputer(1, botIds[0]);
       expect((await readJsonFileWhenReady<ComputerDump>(fakeClaudeDump)).mcpConfig.mcpServers.computer?.args)
         .toEqual([expect.stringMatching(/harness-mcp-proxy\.(?:ts|js)$/), "computer"]);
+      await reachForComputer();
       const firstThread = (await api("GET", "/api/bots?messages=0")).body.bots.find((b: { id: string }) => b.id === botIds[0]).threadId;
       const sibling = (await api("POST", `/api/bots/${botIds[0]}/tasks`, { title: "Waiting sibling" })).body.task;
+      rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${botIds[0]}/messages`, { text: "wait then cancel", threadId: sibling.threadId })).status).toBe(202);
+      void reachForComputer();
       await expect.poll(async () => JSON.stringify((await api("GET", `/api/threads/${sibling.threadId}/messages`)).body),
         { timeout: 5_000 }).toMatch(/Waiting for its turn on this computer/);
       expect((await api("POST", `/api/bots/${botIds[0]}/interrupt`, { threadId: sibling.threadId })).status).toBe(200);
@@ -3545,7 +3583,7 @@ describe("harness HTTP API", () => {
         outcome: "stopped",
       });
       expect(siblingEvents.find((event) => event.type === "turn.wait_ended").waitedMs).toBeGreaterThanOrEqual(0);
-      expect(claudePrompts().length - promptBaseline).toBe(1);
+      expect(claudePrompts().length - promptBaseline, "the sibling ran from the start").toBe(2);
       expect((await api("POST", `/api/bots/${botIds[0]}/tasks/${firstThread}`, {})).status).toBe(200);
       for (const action of ["sleep", "provision"]) {
         expect((await api("POST", `/api/team-computers/${requestId}/${action}`, { acknowledgeCost: true })).status).toBe(409);
@@ -3553,15 +3591,16 @@ describe("harness HTTP API", () => {
       expect((await api("PATCH", `/api/team-computers/${requestId}`, { section: null, acknowledgeSharedAccess: true })).status).toBe(409);
       expect((await api("PATCH", `/api/bots/${botIds[0]}`, { computer: "off" })).status).toBe(409);
 
+      rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/groups/${roomId}/messages`, { text: "use the occupied shared desktop" })).status).toBe(202);
+      void reachForComputer();
       await expect.poll(async () => JSON.stringify((await api("GET", "/api/bots?messages=30")).body.groups.find(
         (group: { id: string }) => group.id === roomId,
       )), { timeout: 5_000 }).toMatch(/Waiting for its turn on this computer/);
-      expect(claudePrompts().length - promptBaseline).toBe(1);
+      expect(claudePrompts().length - promptBaseline, "the room's speaker ran from the start too").toBe(3);
       expect((await api("POST", `/api/bots/${botIds[0]}/interrupt`, {})).status).toBe(200);
       await idle(botIds[0]);
 
-      await promptedOnTeamComputer(2, botIds[1]);
       await expect.poll(async () => JSON.stringify((await api("GET", "/api/bots?messages=30")).body.groups.find(
         (group: { id: string }) => group.id === roomId,
       )), { timeout: 5_000 }).toMatch(/Computer free — continuing after waiting /);
@@ -3586,11 +3625,11 @@ describe("harness HTTP API", () => {
       managedBoatCreatedIds.clear();
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${botIds[0]}/messages`, { text: "do not create a replacement" })).status).toBe(202);
+      void reachForComputer();
       await expect.poll(async () => JSON.stringify((await api("GET", "/api/bots?messages=30")).body.bots.find(
         (bot: { id: string }) => bot.id === botIds[0],
       )), { timeout: 5_000 }).toMatch(/team's cloud computer is missing/);
       await idle(botIds[0]);
-      expect(existsSync(fakeClaudeDump)).toBe(false);
       expect(boatRouteCalls.filter(call => call.method === "POST" && call.path === "/sandboxes")).toHaveLength(createCount);
     } finally {
       if (roomId) await api("POST", `/api/groups/${roomId}/interrupt`, {}).catch(() => undefined);
@@ -3618,7 +3657,7 @@ describe("harness HTTP API", () => {
     const waiterThreads: string[] = [];
     try {
       expect((await api("PUT", "/api/config", { box: { token: "box_route" } })).status).toBe(200);
-      // Four live threads on one bot: at the default cap of 3 the fourth would park in the send queue instead.
+      // Four live threads on one bot: on a small machine's default of 3 the fourth would park in the send queue instead.
       expect((await api("PUT", "/api/config", { threads: { maxConcurrentPerBot: 6 } })).status).toBe(200);
       const bot = (await api("POST", "/api/bots", { name: "Queue probe", section,
         modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot;
@@ -3638,13 +3677,17 @@ describe("harness HTTP API", () => {
         (((await api("GET", `/api/threads/${threadId}/events`)).body.entries as Array<{ kind: string; data: any }>)
           .filter(entry => entry.kind === "runtime").map(entry => entry.data));
 
+      rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${botId}/messages`, { text: "hold the queue desktop" })).status).toBe(202);
       await expect.poll(promptsOnBox, { timeout: 5_000 }).toBe(1);
+      await reachForComputer();
 
       for (const [index, title] of ["First waiter", "Second waiter", "Third waiter"].entries()) {
         const task = (await api("POST", `/api/bots/${botId}/tasks`, { title })).body.task;
         waiterThreads.push(task.threadId);
+        rmSync(fakeClaudeDump, { force: true });
         expect((await api("POST", `/api/bots/${botId}/messages`, { text: `arrival ${index + 1} of the queue`, threadId: task.threadId })).status).toBe(202);
+        void reachForComputer();
         await expect.poll(async () => JSON.stringify(await threadMessages(task.threadId)), { timeout: 5_000 })
           .toMatch(new RegExp(`${index + 1}(st|nd|rd) in queue`));
         expect((await threadMessages(task.threadId)).some(message => (message.tool?.name ?? "").includes("recent waits here"))).toBe(false);
@@ -3652,16 +3695,17 @@ describe("harness HTTP API", () => {
           .toMatchObject({ position: index + 1 });
       }
 
+      expect(promptsOnBox(), "every waiter ran from the start").toBe(4);
       expect((await api("POST", `/api/bots/${botId}/interrupt`, { threadId: holderThread })).status).toBe(200);
-      await expect.poll(promptsOnBox, { timeout: 10_000 }).toBe(2);
-      expect(claudePrompts().at(-1)).toContain("arrival 1 of the queue");
       await expect.poll(async () => JSON.stringify(await threadMessages(waiterThreads[0]!)), { timeout: 5_000 })
         .toMatch(/Computer free — continuing after waiting /);
-      expect(promptsOnBox()).toBe(2);
+      expect(JSON.stringify(await threadMessages(waiterThreads[1]!))).not.toMatch(/Computer free/);
 
       const fourth = (await api("POST", `/api/bots/${botId}/tasks`, { title: "Fourth waiter" })).body.task;
       waiterThreads.push(fourth.threadId);
+      rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${botId}/messages`, { text: "arrival 4 wants an estimate", threadId: fourth.threadId })).status).toBe(202);
+      void reachForComputer();
       await expect.poll(async () => JSON.stringify(await threadMessages(fourth.threadId)), { timeout: 5_000 }).toMatch(/3rd in queue/);
       await expect.poll(async () => JSON.stringify(await threadMessages(fourth.threadId)), { timeout: 5_000 }).toMatch(/recent waits here have taken /);
       for (const threadId of waiterThreads.slice(0, 3)) {
@@ -3670,8 +3714,8 @@ describe("harness HTTP API", () => {
       }
 
       expect((await api("POST", `/api/bots/${botId}/interrupt`, { threadId: waiterThreads[0] })).status).toBe(200);
-      await expect.poll(promptsOnBox, { timeout: 10_000 }).toBe(3);
-      expect(claudePrompts().at(-1)).toContain("arrival 2 of the queue");
+      await expect.poll(async () => JSON.stringify(await threadMessages(waiterThreads[1]!)), { timeout: 10_000 })
+        .toMatch(/Computer free — continuing after waiting /);
     } finally {
       if (holderThread) await api("POST", `/api/bots/${botId}/interrupt`, { threadId: holderThread }).catch(() => undefined);
       for (const threadId of waiterThreads) await api("POST", `/api/bots/${botId}/interrupt`, { threadId }).catch(() => undefined);
@@ -3721,9 +3765,11 @@ describe("harness HTTP API", () => {
         OMB_STATIC_DIR: isolatedStatic,
         OMB_BOAT_API: `http://127.0.0.1:${boatStubPort}`,
         FAKE_CLAUDE_MODE: "hang",
+        FAKE_CLAUDE_USES_CLOUD_COMPUTER: "1",
         FAKE_CLAUDE_PROMPTS: join(isolatedHome, "desktop-prompts.jsonl"),
         // seconds, not minutes: the point of this test is the computer cap firing
         OMB_COMPUTER_WAIT_MAX_MS: "2000",
+        OMB_COMPUTER_CALL_WAIT_MS: "500",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -3793,7 +3839,7 @@ describe("harness HTTP API", () => {
       expect(settledMessages.filter((message: any) => message.tool?.ok === false && /Computer still busy|Parked/.test(message.tool.name))).toHaveLength(0);
 
       expect((await isolatedApi("POST", `/api/bots/${botId}/interrupt`, { threadId: holderThreadId })).status).toBe(200);
-      await expect.poll(promptsOnParkBox, { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
+      await expect.poll(promptsOnParkBox, { timeout: 10_000 }).toBeGreaterThanOrEqual(3);
 
       const roomBot = (await isolatedApi("POST", "/api/bots", {
         name: "Park room speaker", section,
@@ -3820,19 +3866,23 @@ describe("harness HTTP API", () => {
       }, { timeout: 5_000 }).toMatchObject([{ data: { outcome: "parked" } }]);
 
       expect((await isolatedApi("POST", `/api/bots/${botId}/interrupt`, { threadId: sibling.threadId })).status).toBe(200);
-      await expect.poll(promptsOnParkBox, { timeout: 10_000 }).toBeGreaterThanOrEqual(3);
+      await expect.poll(promptsOnParkBox, { timeout: 10_000 }).toBeGreaterThanOrEqual(5);
       await expect.poll(roomRows, { timeout: 5_000 }).toEqual([[roomBot.id, null, "running", 2, null]]);
       expect(claudePrompts(join(isolatedHome, "desktop-prompts.jsonl")).at(-1)).toContain("Continue the task that parked waiting for it");
 
-      // Every turn that reaches the hanging Box prompt counts once, so a stale resume would show as a fifth prompt.
+      // Every turn counts once as it starts, and a resume once more: a stale resume would show as one prompt too many.
       expect((await isolatedApi("POST", `/api/bots/${botId}/messages`, { text: "wait past the ceiling a second time", threadId: siblingThreadId })).status).toBe(202);
       await expect.poll(async () => JSON.stringify((await isolatedApi("GET", `/api/threads/${siblingThreadId}/messages`)).body),
         { timeout: 8_000 }).toMatch(/wait past the ceiling a second time[\s\S]*Parked — it continues automatically when the computer is free/);
+      // Parked once its engine has gone: until then a message would go into the turn that is being stopped.
+      await expect.poll(async () => (await isolatedApi("GET", "/api/bots?messages=0")).body.bots
+        .find((entry: any) => entry.id === botId)?.tasks.find((task: any) => task.threadId === siblingThreadId)?.activity,
+      { timeout: 8_000 }).toBe("parked.computer");
       expect((await isolatedApi("POST", `/api/bots/${botId}/messages`, { text: "newer work replaces the parked wait", threadId: siblingThreadId })).status).toBe(202);
       expect((await isolatedApi("POST", `/api/groups/${roomId}/interrupt`, {})).status).toBe(200);
-      await expect.poll(promptsOnParkBox, { timeout: 10_000 }).toBeGreaterThanOrEqual(4);
+      await expect.poll(promptsOnParkBox, { timeout: 10_000 }).toBeGreaterThanOrEqual(7);
       await new Promise((resolve) => setTimeout(resolve, 3_000));
-      expect(promptsOnParkBox()).toBe(4);
+      expect(promptsOnParkBox()).toBe(7);
       expect(roomRows()).toEqual([[roomBot.id, null, "cancelled", 2, null]]);
       await expect.poll(async () => {
         const task = (await isolatedApi("GET", "/api/bots?messages=0")).body.bots
@@ -3855,9 +3905,10 @@ describe("harness HTTP API", () => {
       await expect.poll(roomRows, { timeout: 5_000 }).toEqual([[roomBot.id, null, "cancelled", 2, null], [roomBot.id, null, "queued", 1, COMPUTER_FREE_NOTE]]);
       expect((await isolatedApi("POST", `/api/groups/${roomId}/interrupt`, {})).status).toBe(200);
       await expect.poll(roomRows, { timeout: 5_000 }).toEqual([[roomBot.id, null, "cancelled", 2, null], [roomBot.id, null, "cancelled", 1, COMPUTER_FREE_NOTE]]);
+      const beforeFreed = promptsOnParkBox();
       expect((await isolatedApi("POST", `/api/bots/${botId}/interrupt`, { threadId: siblingThreadId })).status).toBe(200);
       await new Promise((resolve) => setTimeout(resolve, 3_000));
-      expect(promptsOnParkBox()).toBe(4);
+      expect(promptsOnParkBox(), `nothing stopped resumes once the computer frees: ${claudePrompts(join(isolatedHome, "desktop-prompts.jsonl")).slice(beforeFreed).join("\n").slice(-1_500)}`).toBe(beforeFreed);
       expect((await isolatedApi("GET", "/api/bots?messages=0")).body.bots
         .find((entry: any) => entry.id === botId)?.tasks.find((task: any) => task.threadId === stoppedThreadId)?.busy).toBe(false);
 
@@ -3908,7 +3959,7 @@ describe("harness HTTP API", () => {
         holder: {
           driver: "claudeAgent",
           displayName: "Fixture holder",
-          environment: { FAKE_CLAUDE_MODE: "hang", FAKE_CLAUDE_PROMPTS: join(isolatedHome, "desktop-prompts.jsonl") },
+          environment: { FAKE_CLAUDE_MODE: "hang", FAKE_CLAUDE_USES_CLOUD_COMPUTER: "1", FAKE_CLAUDE_PROMPTS: join(isolatedHome, "desktop-prompts.jsonl") },
           config: { cli: FAKE_CLAUDE_CLI },
         },
         lead: {
@@ -3926,9 +3977,8 @@ describe("harness HTTP API", () => {
           displayName: "Fixture worker",
           environment: {
             FAKE_CLAUDE_PROMPTS: join(isolatedHome, "desktop-prompts.jsonl"),
-            FAKE_CLAUDE_MODE: "happy",
-            FAKE_CLAUDE_REPLIES: JSON.stringify(["The parked computer work is complete."]),
-            FAKE_CLAUDE_REPLY_STATE: join(isolatedHome, "worker-replies.txt"),
+            FAKE_CLAUDE_USES_CLOUD_COMPUTER: "1",
+            FAKE_CLAUDE_MODE: "hang",
           },
           config: { cli: FAKE_CLAUDE_CLI },
         },
@@ -3947,6 +3997,7 @@ describe("harness HTTP API", () => {
         OMB_STATIC_DIR: isolatedStatic,
         OMB_BOAT_API: `http://127.0.0.1:${boatStubPort}`,
         OMB_COMPUTER_WAIT_MAX_MS: "2000",
+        OMB_COMPUTER_CALL_WAIT_MS: "500",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -4039,7 +4090,7 @@ describe("harness HTTP API", () => {
 
       expect((await isolatedApi("POST", `/api/bots/${holderBotId}/interrupt`, { threadId: holderThreadId })).status).toBe(200);
       await new Promise((resolve) => setTimeout(resolve, 3_000));
-      expect(promptsOnGoalBox()).toBe(1);
+      expect(promptsOnGoalBox(), "the holder, and the worker's one start: its parked step never runs again").toBe(2);
       expect(goalRows()).toHaveLength(3);
       expect((await goalCard()).working).toBe(false);
     } finally {
@@ -8699,6 +8750,84 @@ describe("harness HTTP API", () => {
     }
   });
 
+  async function signInThroughBrowser(name: string) {
+    const started = await api("POST", `/api/mcp/servers/${name}/sign-in`);
+    expect(started.status).toBe(200);
+    await fetch(started.body.auth.authorizationUrl, { redirect: "follow" });
+    let auth = started.body.auth;
+    for (let i = 0; i < 50 && auth.phase === "waiting"; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      auth = (await api("GET", `/api/mcp/servers/${name}/sign-in/${auth.flowId}`)).body.auth;
+    }
+    expect(auth.phase).toBe("succeeded");
+  }
+  /** Where mcp.agentcard.sh serves its RFC 9728 document: on its own origin, which is how sign-in finds it when initialize is not refused. */
+  const protectedResourceOf = (oauth: { issuer: string }) =>
+    ({ "/.well-known/oauth-protected-resource/mcp": (origin: string) => ({ resource: `${origin}/mcp`, authorization_servers: [oauth.issuer] }) });
+  const serverListing = async (name: string) => ((await api("GET", "/api/mcp/servers")).body.servers as Array<{ name: string }>).find((server) => server.name === name);
+
+  it("asks for a sign-in when a server lists its tools to anyone and refuses to run one", async () => {
+    const oauth = await startFakeOAuth();
+    const fake = await startFakeHttpMcp({ guard: "tools/call", acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge, wellKnown: protectedResourceOf(oauth), tools: [{ name: "buy", description: "Buy something" }] });
+    try {
+      expect((await api("POST", "/api/mcp/servers", { name: "shop", url: fake.url })).status).toBe(201);
+      const first = await api("POST", "/api/mcp/servers/shop/test");
+      expect(first.body).toEqual({ ok: false, auth: "required", error: "This server needs you to sign in." });
+      expect(await serverListing("shop")).toMatchObject({ auth: "needs-sign-in", enabled: false });
+      expect(fake.refusedCalls).toHaveLength(1);
+      expect(fake.calls).toEqual([]);
+
+      await signInThroughBrowser("shop");
+      const tested = await api("POST", "/api/mcp/servers/shop/test");
+      expect(tested.body).toEqual({ ok: true, tools: [{ name: "buy", description: "Buy something" }] });
+      expect(fake.refusedCalls).toHaveLength(1);
+      expect(fake.seenHeaders.at(-1)?.authorization).toMatch(/^Bearer /);
+
+      expect((await api("PATCH", "/api/mcp/servers/shop", { enabled: true })).status).toBe(200);
+      expect(await serverListing("shop")).toMatchObject({ auth: "signed-in", enabled: true });
+    } finally {
+      await api("DELETE", "/api/mcp/servers/shop").catch(() => undefined);
+      await fake.close();
+      await oauth.close();
+    }
+  });
+
+  it("keeps a sign-in whose refresh failed on the network, and drops one whose token the server refuses", async () => {
+    const oauth = await startFakeOAuth({ refreshStatus: 503 });
+    const flaky = await startFakeHttpMcp({ guard: "tools/call", acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge, wellKnown: protectedResourceOf(oauth), tools: [{ name: "buy" }] });
+    const refusing = await startFakeHttpMcp({ guard: "every-request", acceptBearer: () => false, wwwAuthenticate: oauth.challenge });
+    const oauthFile = join(home, ".openmausbot", "mcp-oauth.json");
+    const tokensOf = (name: string) => JSON.parse(readFileSync(oauthFile, "utf8")).servers[name]?.tokens;
+    const expire = (name: string) => {
+      const saved = JSON.parse(readFileSync(oauthFile, "utf8"));
+      saved.servers[name].tokens.expiresAt = Date.now() - 1_000;
+      writeFileSync(oauthFile, JSON.stringify(saved));
+    };
+    try {
+      expect((await api("POST", "/api/mcp/servers", { name: "flaky", url: flaky.url })).status).toBe(201);
+      expect((await api("POST", "/api/mcp/servers", { name: "refusing", url: refusing.url })).status).toBe(201);
+      await signInThroughBrowser("flaky");
+      await signInThroughBrowser("refusing");
+      expect(tokensOf("flaky").refresh).toEqual(expect.any(String));
+      expire("flaky");
+
+      expect((await api("POST", "/api/mcp/servers/flaky/test")).body).toMatchObject({ ok: false, auth: "required" });
+      expect(oauth.counts.refresh).toBeGreaterThan(0);
+      expect(await serverListing("flaky")).toMatchObject({ auth: "signed-in" });
+      expect(tokensOf("flaky").refresh).toEqual(expect.any(String));
+
+      expect((await api("POST", "/api/mcp/servers/refusing/test")).body).toMatchObject({ ok: false, auth: "required" });
+      expect(await serverListing("refusing")).toMatchObject({ auth: "needs-sign-in" });
+      expect(tokensOf("refusing")).toBeUndefined();
+    } finally {
+      await api("DELETE", "/api/mcp/servers/flaky").catch(() => undefined);
+      await api("DELETE", "/api/mcp/servers/refusing").catch(() => undefined);
+      await flaky.close();
+      await refusing.close();
+      await oauth.close();
+    }
+  });
+
   it("signs in as a pre-registered app where self-registration is off, keeping its secret write-only", async () => {
     const secret = "corp-app-secret-that-must-never-render";
     const oauth = await startFakeOAuth({ noRegistration: true, preRegistered: { "corp-app": secret } });
@@ -12431,6 +12560,8 @@ describe("harness HTTP API", () => {
         slack: [{ name: "SLACK_POST_MESSAGE", description: "a".repeat(240) }],
         // HighLevel's tools are listed whenever its relay is configured, so grants can be set before connecting.
         highlevel: HIGHLEVEL_TOOLS.map(({ name, description }) => ({ name, description })),
+        // So are email's, wherever a mailbox can be connected here.
+        email: EMAIL_TOOLS.map(({ name, description }) => ({ name, description })),
       },
     });
   });

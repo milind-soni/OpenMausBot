@@ -50,6 +50,21 @@ const OPENAI_MODELS: ModelCatalog = {
   ],
 };
 
+/** Google's Gemini API, added as an OpenAI-compatible server (Settings → API keys → Other). */
+function isGeminiOrigin(url: string): boolean {
+  try {
+    return new URL(url).origin === "https://generativelanguage.googleapis.com";
+  } catch {
+    return false;
+  }
+}
+
+/** Gemini's /models names each model "models/<id>" and also lists embedding, speech, image and live-audio models. */
+function geminiChatModelId(id: string): string | null {
+  const bare = id.replace(/^models\//, "");
+  return bare.startsWith("gemini-") && !/embedding|tts|image|live|native-audio/.test(bare) ? bare : null;
+}
+
 /** OpenAI's /models also lists embeddings, speech, images, moderation and Responses-only models. */
 export function isOpenAIChatModel(id: string): boolean {
   if (!/^(gpt-|chatgpt-|o\d)/i.test(id)) return false;
@@ -179,6 +194,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
         }
       : seeded;
     const openRouter = Boolean(apiKey) && !config.managedModels && isOpenRouterOrigin(config.url);
+    const gemini = isGeminiOrigin(config.url);
     const freeTier = () => openRouter ? openRouterFreeTier(apiKey, config.url) : Promise.resolve(null);
 
     const fetchModels = async () => {
@@ -233,7 +249,8 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
         const seen = new Set<string>();
         const options: ModelCatalog["options"] = [];
         for (const row of rows) {
-          const id = typeof row.id === "string" ? row.id : "";
+          const rawId = typeof row.id === "string" ? row.id : "";
+          const id = gemini ? geminiChatModelId(rawId) ?? "" : rawId;
           if (!id || seen.has(id) || isContextName(id)) continue;
           seen.add(id);
           const label = typeof row.name === "string" && row.name.trim() ? row.name : id;

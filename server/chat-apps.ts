@@ -7,7 +7,7 @@ import {
 import { BOT_HTML_NETWORK } from "../shared/app-frame/csp.ts";
 import { botHtmlDocument, mcpAppDocument, publishedBotHtml } from "../shared/app-frame/document.ts";
 import { jsxPublishedHtml } from "../shared/app-frame/jsx-page.ts";
-import { AppDocs, type AppDocPut } from "./app-docs.ts";
+import { AppDocs, type AppDocData, type AppDocPut } from "./app-docs.ts";
 import type { AgentCardResult, AgentCardStore } from "./chat-widgets.ts";
 import { compileJsxPage } from "./jsx-compile.ts";
 import { appDocRefs } from "./message-db.ts";
@@ -46,7 +46,7 @@ function scrubbed(html: string, title: string): { html: string; title: string; m
 }
 
 /** A folder page also carries the files beside its index.html and where they were read. */
-type PageText = { html: string; format?: "jsx"; files?: PageFile[]; folder?: string };
+type PageText = { html: string; format?: "jsx"; files?: PageFile[]; folder?: string; videos?: AppDocData["videos"] };
 type MadePage = { ok: true; page: PageText; title: string; masked: boolean };
 
 /** The page's text, scrubbed; a jsx page is transpiled first, so one that cannot run is refused with where. */
@@ -68,7 +68,8 @@ export function bundlePage(bundle: PageBundle, title: string): MadePage | { ok: 
     return { ok: false, error: `path: index.html is over the ${APP_LIMITS.htmlBytes}-byte limit; move data into files beside it.` };
   }
   const page = scrubbed(html, title);
-  return { ok: true, page: { html: page.html, files: bundle.files.filter((file) => file !== index), folder: bundle.source }, title: page.title, masked: page.masked };
+  const videos = bundle.videos && Object.keys(bundle.videos).length ? { videos: bundle.videos } : {};
+  return { ok: true, page: { html: page.html, files: bundle.files.filter((file) => file !== index), folder: bundle.source, ...videos }, title: page.title, masked: page.masked };
 }
 
 async function folderPage(path: string, title: string, folders: BotFolders): Promise<MadePage | { ok: false; status: 400 | 403 | 404; error: string }> {
@@ -83,11 +84,12 @@ async function folderPage(path: string, title: string, folders: BotFolders): Pro
 }
 
 function storePage(docs: AppDocs, page: PageText): AppDocPut {
-  const data = { ...(page.format ? { format: page.format } : {}), ...(page.folder ? { folder: page.folder } : {}) };
+  const data = { ...(page.format ? { format: page.format } : {}), ...(page.folder ? { folder: page.folder } : {}), ...(page.videos ? { videos: page.videos } : {}) };
   return docs.put({ source: "html", html: page.html, ...(Object.keys(data).length ? { data } : {}), ...(page.files ? { files: page.files } : {}) });
 }
 
-const pageBytes = (page: PageText) => Buffer.byteLength(page.html) + (page.files ?? []).reduce((sum, file) => sum + file.data.byteLength, 0);
+const pageBytes = (page: PageText) => Buffer.byteLength(page.html) + (page.files ?? []).reduce((sum, file) => sum + file.data.byteLength, 0) +
+  Object.values(page.videos ?? {}).reduce((sum, video) => sum + video.bytes, 0);
 
 const pageFallback = (title: string, page: PageText, given?: string) =>
   redactSecretsInText(htmlFallbackText(title, page.format === "jsx" ? "" : page.html, given));
@@ -123,7 +125,7 @@ export function createAppCard(args: {
 
 function placePage(
   args: { store: AgentCardStore; docs: AppDocs; bot: { id: string }; threadId: string; authored?(messageId: string): void },
-  value: { appId?: string; height?: number; fallbackText?: string },
+  value: { appId?: string; height?: number; fallbackText?: string; frameless?: boolean },
   made: MadePage,
 ): AgentCardResult {
   const { store, docs, bot, threadId } = args;
@@ -135,7 +137,7 @@ function placePage(
       doc: stored.ok ? stored.doc : "", rev: 0, bytes: pageBytes(page),
       ...(page.format ? { format: page.format } : {}),
       ...(value.height !== undefined ? { height: value.height } : {}),
-      border: true,
+      border: value.frameless !== true,
       network: { connect: [...BOT_HTML_NETWORK.connect], resources: [...BOT_HTML_NETWORK.resources] },
       ...(stored.ok ? {} : { blocked: "too-large" as const }),
     };
@@ -147,17 +149,22 @@ function placePage(
   const existing = appRow(store, threadId, value.appId);
   if (!existing || (existing.from && existing.from.botId !== bot.id)) return { ok: false, status: 404, error: NO_SUCH_PAGE };
   if (existing.app.source !== "html") return { ok: false, status: 409, error: NOT_A_PAGE };
-  const patched = replacePage(store, docs, threadId, existing, made);
+  const patched = replacePage(store, docs, threadId, existing, made, value.frameless);
   if (!patched) return { ok: false, status: 404, error: NO_SUCH_PAGE };
   args.authored?.(patched.id);
   return { ok: true, messageId: patched.id, ...(made.masked ? { masked: true as const } : {}) };
 }
 
 /** The next version of a row's page; the row is unchanged when the page is the same document. */
-function replacePage(store: Pick<AgentCardStore, "patchMessage">, docs: AppDocs, threadId: string, existing: Message & { app: AppPayload }, made: MadePage): Message | null {
+function replacePage(
+  store: Pick<AgentCardStore, "patchMessage">, docs: AppDocs, threadId: string, existing: Message & { app: AppPayload }, made: MadePage, frameless?: boolean,
+): Message | null {
   const { page } = made;
   const stored = storePage(docs, page);
-  if (stored.ok && stored.doc === existing.app.doc && made.title === existing.app.title) return existing;
+  const border = frameless === undefined ? existing.app.border : !frameless;
+  if (stored.ok && stored.doc === existing.app.doc && made.title === existing.app.title) {
+    return border === existing.app.border ? existing : store.patchMessage(threadId, existing.id, { app: { ...existing.app, border } });
+  }
   // The page reloads: what the old one told the model about itself no longer holds.
   const { context: _context, blocked: _blocked, format: _format, history: earlier, ...kept } = existing.app;
   const history = [...(earlier ?? []), ...(existing.app.doc ? [existing.app.doc] : [])].slice(-(APP_PAGE_VERSIONS - 1));
@@ -167,6 +174,7 @@ function replacePage(store: Pick<AgentCardStore, "patchMessage">, docs: AppDocs,
     doc: stored.ok ? stored.doc : "",
     rev: (existing.app.rev ?? 0) + 1,
     bytes: pageBytes(page),
+    border,
     ...(history.length ? { history } : {}),
     ...(page.format ? { format: page.format } : {}),
     ...(stored.ok ? {} : { blocked: "too-large" as const }),
@@ -270,6 +278,8 @@ export function showPublishedPage(args: {
     message.kind === "app" && isRecord(message.app) && message.app.source === "html" && !message.from)
     .reverse().find((message) => message.app.doc && docs.read(message.app.doc)?.data?.folder === bundle.source);
   if (shown) {
+    const videos = docs.read(shown.app.doc)?.data?.videos;
+    if (videos) made.page.videos = videos;
     const replaced = replacePage(store, docs, threadId, shown, made);
     return replaced && store.patchMessage(threadId, shown.id, { publishedPage: card }) ? shown.id : null;
   }

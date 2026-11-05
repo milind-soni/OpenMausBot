@@ -10,7 +10,7 @@ const FUCHS = bot("fuchs", "Fuchs", { chiefOfStaff: true });
 const DACHS = bot("dachs", "Dachs");
 const OTTER = bot("otter", "Otter");
 
-function world(options: { live?: string[]; privateTo?: string; steers?: boolean; takesAnswers?: boolean; unattended?: string[] } = {}) {
+function world(options: { live?: string[]; privateTo?: string; steers?: boolean; takesAnswers?: boolean; unattended?: string[]; confined?: string[] } = {}) {
   const threads = new Map<string, Message[]>();
   let ids = 0;
   const rows = (threadId: string) => threads.get(threadId) ?? [];
@@ -66,6 +66,7 @@ function world(options: { live?: string[]; privateTo?: string; steers?: boolean;
     settleSignIns: (parked) => { settled.push(parked.id); },
     keptPrivate: (child, requester) => child.threadId === options.privateTo && requester.threadId !== options.privateTo,
     steer: async (threadId, text) => { if (options.steers === false) return false; steered.push({ threadId, text }); return true; },
+    mayReach: (fromThreadId, toThreadId) => !(options.confined ?? []).includes(fromThreadId) || (options.confined ?? []).includes(toThreadId),
   };
   return { routing: createQuestionRouting(deps), store, rows, node, nodes, answeredNodes, answeredLive, settled, steered };
 }
@@ -153,6 +154,21 @@ describe("an answer passed on by another bot", () => {
     expect(await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Prüf auch die Unterseiten", threadId: "work" })).toBeUndefined();
     expect(w.answeredNodes).toEqual([]);
     expect(w.settled).toEqual([]);
+  });
+
+  it("refuses a teammate's answer to which of the person's own accounts to use: only the person settles it, where it was asked", async () => {
+    const w = world();
+    const node = parked(w, { question: "Which email account should be connected — Gmail or another provider?" });
+    const named = await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Gmail, the person's address", answers: node.id });
+    expect(named).toMatchObject({ botId: "dachs", outcome: "failed" });
+    expect(named?.detail).toContain("only the person can answer");
+    // Unnamed too: from the turn that was resumed with it, and to the thread the requester's earlier work waits in.
+    expect(await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", senderNode: { id: "root", carrying: [node.id] } as HandoffView, target: DACHS, message: "Gmail" }))
+      .toMatchObject({ outcome: "failed" });
+    expect(await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", senderNode: { id: "root-2" } as HandoffView, target: DACHS, message: "Gmail", threadId: "work" }))
+      .toMatchObject({ outcome: "failed" });
+    expect(w.answeredNodes).toEqual([]);
+    expect(w.rows("work")[0]!.card?.answered).toBeUndefined();
   });
 
   it("answers the question card the turn of the requester's earlier work waits on, from a later turn, unnamed", async () => {
@@ -248,7 +264,10 @@ describe("a Chief's answer, for the person, to a question a teammate asks them",
   it("lists the questions teammates wait on the person for, leaving out threads the Chief opened, archived ones and ones it may not read", () => {
     const w = world({ live: ["req-p"] });
     for (const threadId of ["chat", "old-chat", "chief-work"]) asks(w, threadId);
-    expect(w.routing.waitingForPerson(FUCHS, [DACHS, OTTER])).toEqual([{ bot: "Dachs", threadId: "chat", thread: "Dachs", question: QUESTION }]);
+    const waiting = w.routing.waitingForPerson(FUCHS, [DACHS, OTTER]);
+    expect(waiting).toEqual([{ bot: "Dachs", threadId: "chat", thread: "Dachs", question: QUESTION, since: expect.any(Number) }]);
+    // Since when: the card's own time, so a Chief can say how long it has waited.
+    expect(waiting[0]!.since).toBe(w.rows("chat").find((row) => row.card)!.at);
     expect(w.routing.waitingForPerson(FUCHS, [DACHS], (threadId) => threadId !== "chat")).toEqual([]);
   });
 });
@@ -261,7 +280,7 @@ describe("a message to the thread where work the sender handed on is running", (
     expect(receipt).toMatchObject({ botId: "dachs", outcome: "injected", threadId: "work", requestId: node.id });
     expect(w.steered).toHaveLength(1);
     expect(w.steered[0]!.threadId).toBe("work");
-    expect(w.steered[0]!.text).toContain(`[OpenMausBot assignment ${node.id}: @Fuchs adds this while you work on it]`);
+    expect(w.steered[0]!.text).toContain(`[From @Fuchs (bot) · addition to assignment ${node.id}, while you work on it · `);
     expect(w.steered[0]!.text).toContain(JSON.stringify("Nimm auch die Steuerspalte mit"));
     expect(w.rows("work")).toEqual([expect.objectContaining({ role: "user", text: "Nimm auch die Steuerspalte mit", peerAsk: { botId: "fuchs", name: "Fuchs" }, aside: true, steered: true })]);
     expect(w.rows("inbox")).toEqual([expect.objectContaining({ kind: "activity", tool: expect.objectContaining({ name: "Sent to Dachs" }), threadRef: { botId: "dachs", threadId: "work", title: "Fix" } })]);
@@ -281,5 +300,29 @@ describe("a message to the thread where work the sender handed on is running", (
     expect(await send(w, OTTER)).toBeUndefined();
     expect(await send(w, FUCHS, new Set([node.id]))).toBeUndefined();
     expect(w.steered).toEqual([]);
+  });
+});
+
+describe("work from outside stays out of a person's work", () => {
+  it("neither answers a parked question nor steers into running work in a thread that is not confined", async () => {
+    const parked = world({ confined: ["inbox"] });
+    parked.node({ question: "Which format?" });
+    expect(await parked.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Excel", threadId: "work" })).toBeUndefined();
+    expect(parked.answeredNodes).toEqual([]);
+    const named = world({ confined: ["inbox"] });
+    const asked = named.node({ question: "Which format?" });
+    expect(await named.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Excel", answers: asked.id })).toMatchObject({ outcome: "failed" });
+    expect(named.answeredNodes).toEqual([]);
+    const running = world({ confined: ["inbox"] });
+    running.node({ status: "running" });
+    expect(await running.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Excel", threadId: "work" })).toBeUndefined();
+    expect(running.steered).toEqual([]);
+  });
+
+  it("still reaches work of its own lineage", async () => {
+    const own = world({ confined: ["inbox", "work"] });
+    own.node({ status: "running" });
+    expect(await own.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Excel", threadId: "work" })).toMatchObject({ outcome: "injected" });
+    expect(own.steered).toHaveLength(1);
   });
 });

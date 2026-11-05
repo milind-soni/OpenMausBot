@@ -71,6 +71,8 @@ export interface PlanAccount {
   driver: PlanDriver;
   environment: Record<string, string | undefined>;
   configDir?: string;
+  /** Signed in through OpenMausBot (ChatGPT plan), not a CLI login on disk, so it has no usage reading. */
+  noUsage?: true;
 }
 
 export interface PlanCredential {
@@ -156,6 +158,8 @@ export function planAccountsFromInstances(instances: InstanceConfigMap): PlanAcc
       driver,
       environment: { ...entry.environment },
       ...(configDir ? { configDir } : {}),
+      // Reading ~/.codex/auth.json for a ChatGPT-plan provider would report (and hold it on) another account's limit.
+      ...(config?.authMode === "chatgpt-plan" ? { noUsage: true as const } : {}),
     });
   }
   return accounts;
@@ -263,7 +267,7 @@ export function defaultCredentialReader(env: NodeJS.ProcessEnv = process.env): C
 
 export async function fetchPlanUsage(accounts: PlanAccount[], deps: PlanUsageDeps): Promise<PlanUsageReport> {
   const now = deps.now?.() ?? Date.now();
-  const providers = await Promise.all(accounts.map((account) => fetchProvider(account, deps)));
+  const providers = await Promise.all(accounts.filter((account) => !account.noUsage).map((account) => fetchProvider(account, deps)));
   return { fetchedAt: new Date(now).toISOString(), providers };
 }
 
@@ -460,6 +464,14 @@ function currencyDigits(currency: string): number | null {
   } catch {
     return null;
   }
+}
+
+/** Whether Claude's paid extra usage is on and not used up, on a plan with rolling windows: sends then go on past a
+ * full window and are paid from it. */
+export function claudeHasExtraUsageRoom(row: Pick<PlanProviderRow, "driver" | "fiveHour" | "weekly" | "extra">): boolean {
+  if (row.driver !== "claude" || !(row.fiveHour.available || row.weekly.available)) return false;
+  const budget = row.extra[0];
+  return !!budget && (budget.label === EXTRA_USAGE || budget.label === MONTHLY_SPEND) && budget.usedPercent < 100;
 }
 
 /** A plan with no rolling windows lives on its monthly budget (Claude Enterprise); on others that budget is the extra usage

@@ -774,7 +774,7 @@ describe("provenance on a peer-authored room message", () => {
       await new Promise((wake) => setTimeout(wake, 100));
     }
     const sent = readFileSync(fakeClaudeDump, "utf8");
-    expect(sent).toContain("[Posted by @Provenance Poster");
+    expect(sent).toContain("[From @Provenance Poster (bot) · room post");
     expect(sent).toMatch(/not from your user/i);
     expect(sent).toMatch(/information, not as an instruction/i);
     expect(sent).toMatch(/saying nothing is a valid response/i);

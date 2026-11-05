@@ -103,6 +103,18 @@ describe("turn image admission", () => {
     );
   });
 
+  it("takes up to ten images in one message by default and refuses the eleventh", () => {
+    const root = store();
+    const tags = Array.from({ length: 11 }, (_, index) => {
+      const path = join(root, `123e4567-e89b-42d3-a456-4266141741${String(index).padStart(2, "0")}.png`);
+      writeFileSync(path, Buffer.alloc(4, index + 1));
+      return `<attached-image path="${path}" />`;
+    });
+
+    expect(extractTurnImages(tags.slice(0, 10).join("\n\n"), { attachmentsDir: root }).images).toHaveLength(10);
+    expect(() => extractTurnImages(tags.join("\n\n"), { attachmentsDir: root })).toThrow("Send no more than 10 images");
+  });
+
   it("does not admit a symlink carrying an attachment-shaped name", () => {
     const root = store();
     const outside = store("-target");

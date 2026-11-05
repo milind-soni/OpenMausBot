@@ -81,3 +81,40 @@ export function acpModelOption(result: unknown, configId = "model"): {
 export function offeredModels(result: unknown, configId: string): string[] {
   return acpModelOption(result, configId)?.options.map(({ id }) => id) ?? [];
 }
+
+const UNANSWERED = Symbol("unanswered");
+
+function answerWithin(answer: Promise<unknown>, ms: number): Promise<unknown> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    answer.catch(() => null),
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(UNANSWERED), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+/** Switches a discovery session to each offered model in turn, within the budget, and records the effort choices
+ * the session then names; an empty list means that model has none, a missing entry that it was not surveyed. */
+export async function surveyModelVariants(
+  request: (method: string, params: unknown) => Promise<unknown>,
+  session: unknown,
+  budgetMs: number,
+): Promise<Map<string, ModelVariantOption[]>> {
+  const efforts = new Map<string, ModelVariantOption[]>();
+  const sessionId = (session as { sessionId?: unknown } | null)?.sessionId;
+  if (typeof sessionId !== "string") return efforts;
+  const deadline = Date.now() + budgetMs;
+  for (const id of new Set(offeredModels(session, "model"))) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    const selected = await answerWithin(
+      request("session/set_config_option", { sessionId, configId: "model", value: id }),
+      remaining,
+    );
+    if (selected === UNANSWERED) break;
+    if (acpModelOption(selected, "model")?.currentValue !== id) continue;
+    efforts.set(id, acpVariantOption(selected)?.options ?? []);
+  }
+  return efforts;
+}

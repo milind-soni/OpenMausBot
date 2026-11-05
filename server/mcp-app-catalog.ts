@@ -37,12 +37,17 @@ function isRecord(value: unknown): value is Json {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-/** Headers are left out, so a refreshed sign-in token is the same server; hashed, so no credential is stored. */
+/** How many times a command server was restarted, in the spec a turn mounts (host/mcp-servers-host.ts). */
+export const MCP_RESTART_ENV = "OMB_MCP_RESTART";
+
+/** Headers are left out, so a refreshed sign-in token is the same server, and so is the restart count, so a restarted
+ * server keeps its apps; hashed, so no credential is stored. */
 export function mcpServerConfigHash(server: McpServerSpec | Json): string {
   const record = server as Json;
+  const { [MCP_RESTART_ENV]: _restarts, ...env } = isRecord(record.env) ? record.env : {};
   const identity = typeof record.url === "string"
     ? { type: record.type === "sse" ? "sse" : "http", url: record.url }
-    : { command: record.command, args: Array.isArray(record.args) ? record.args : [], env: isRecord(record.env) ? record.env : {} };
+    : { command: record.command, args: Array.isArray(record.args) ? record.args : [], env };
   return createHash("sha256").update(JSON.stringify(identity)).digest("hex");
 }
 

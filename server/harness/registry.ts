@@ -7,6 +7,7 @@ import { withEngineHomes } from "../engine-homes/engine-homes.ts";
 import { withLocalContext } from "../drivers/local-inject.ts";
 import { engineStatusFile, snapshotFrom } from "./engine-status-file.ts";
 import { withUnaskedStops } from "./unasked-stop.ts";
+import { withWslNotice } from "./wsl-launch.ts";
 export { engineMemory } from "../engine-memory.ts";
 import { clientInstall } from "../contracts.ts";
 import type {
@@ -472,13 +473,15 @@ export class ProviderRegistry {
           };
         }
         const inst = entry.live;
-        const snapshot = await statusOf(inst);
+        const cli = this.cliByInstance.get(inst.instanceId);
+        const snapshot = withWslNotice(await statusOf(inst), cli);
         return {
           instanceId: inst.instanceId,
           driverKind: inst.driverKind,
           displayName: inst.displayName ?? inst.driverKind,
           snapshot,
           models: inst.models,
+          ...(inst.modelsUnconfirmed ? { modelsUnconfirmed: true } : {}),
           capabilities: {
             computerMcp: inst.adapter.capabilities.computerMcp === true,
             agentsMcp: inst.adapter.capabilities.agentsMcp === true,
@@ -497,7 +500,7 @@ export class ProviderRegistry {
             backgroundText: inst.generateText !== undefined || inst.generateMemoryText !== undefined,
           },
           access: driver?.metadata.access ?? "subscription",
-          install: withServerInstall(driver?.install, npmPresent, this.appStandaloneCopy(driver, this.cliByInstance.get(inst.instanceId) ?? cliDefaultOf(driver))),
+          install: withServerInstall(driver?.install, npmPresent, this.appStandaloneCopy(driver, cli ?? cliDefaultOf(driver))),
           authentication: inst.startAuthentication
             ? {
                 method: inst.authenticationMethod ?? (inst.getAuthentication && inst.completeAuthentication
@@ -508,7 +511,7 @@ export class ProviderRegistry {
                 signOut: inst.signOut !== undefined,
               }
             : undefined,
-          cli: this.cliByInstance.get(inst.instanceId),
+          cli,
           cliDefault: cliDefaultOf(driver),
           cliCandidates: candidatesFor(driver),
         };

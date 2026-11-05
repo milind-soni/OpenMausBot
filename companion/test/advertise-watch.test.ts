@@ -130,4 +130,14 @@ describe("address watcher", () => {
     await Promise.all([first, second]);
     expect(advertises).toBe(1);
   });
+
+  it("re-advertises when the computer is renamed", async () => {
+    let name = "OpenMausBot";
+    const { watcher, calls } = rig(["192.168.1.42"], { name: () => name });
+    await watcher.check();
+    await watcher.check();
+    name = "AdamPC";
+    await watcher.check();
+    expect(calls).toEqual(["advertise 192.168.1.42", "advertise 192.168.1.42"]);
+  });
 });
