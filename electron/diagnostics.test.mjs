@@ -123,6 +123,14 @@ describe("buildDiagnosticsReport", () => {
     expect(report).toContain("Groq HTTP 401");
   });
 
+  it("masks long-term and temporary AWS access key ids", () => {
+    const longTerm = `AKIA${"ABCDEFGHIJKLMNOP"}`;
+    const temporary = `ASIA${"QRSTUVWXYZ234567"}`;
+    const redacted = redactSecretsInLine(`aws ${longTerm} then sts ${temporary} done`);
+    for (const id of [longTerm, temporary]) expect(redacted).not.toContain(id);
+    expect(redacted).toContain("done");
+  });
+
   it("includes privacy-safe desktop crash metadata separately from the server log", () => {
     const desktopLogTail =
       "[2026-08-31T11:00:00.000Z] event=render-process-gone surface=main-window reason=crashed exitCode=5";

@@ -55,7 +55,7 @@ const CREDENTIAL_TOKEN_FORMATS = [
   /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/g,
   /\bgithub_pat_[A-Za-z0-9_]{20,}/g,
   /\bxox[abposr]-[A-Za-z0-9-]{20,}/g,
-  /\bAKIA[0-9A-Z]{16}\b/g,
+  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g,
   /\bAIza[0-9A-Za-z_-]{30,}/g,
   /\bnpm_[A-Za-z0-9]{20,}/g,
 ];
