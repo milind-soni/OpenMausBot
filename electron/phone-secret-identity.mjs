@@ -149,6 +149,11 @@ export function phoneSecretSaveResult(requestId, ok, error) {
   return result;
 }
 
+function withoutKey(text, value) {
+  const key = value.trim();
+  return key ? text.replaceAll(key, "[key]") : text;
+}
+
 /** A retried operation id gets the cached result and never a second provider write; only the non-secret target and status are kept. */
 export function createPhoneSecretSaveCoordinator(save, maximumCompleted = 512) {
   const active = new Map();
@@ -192,7 +197,8 @@ export function createPhoneSecretSaveCoordinator(save, maximumCompleted = 512) {
           (error) => phoneSecretSaveResult(
             request.requestId,
             false,
-            error instanceof Error ? error.message : String(error),
+            // The refusal text comes from outside (a provider check, an OS store); cut short, a key in it would leak in part.
+            withoutKey(error instanceof Error ? error.message : String(error), request.value),
           ),
         )
         .then((result) => {
