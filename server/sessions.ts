@@ -273,7 +273,12 @@ export class SessionRegistry {
     if (expired.length) {
       this.sessions = this.sessions.filter((s) => s.expiresAt > now);
       for (const s of expired) this.forget(s.id);
-      this.persist();
+      try {
+        this.persist();
+      } catch {
+        // The heartbeat reaches prune() through isLive(), where an escaping write failure would exit the process.
+        console.error("Could not persist session pruning.");
+      }
     }
   }
 
