@@ -3,10 +3,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createControlServer, hostCandidates, initialControlToken, originIsLoopback } from "../src/control.ts";
 import { DeviceRegistry } from "../src/devices.ts";
+import { MoveGrants } from "../src/move-grants.ts";
 
 let control: Server;
 let port = 0;
 let devices: DeviceRegistry;
+const moves = new MoveGrants();
 let connectedDeviceIds: string[] = [];
 let disconnectedDeviceIds: string[] = [];
 let revokedDeviceIds: string[] = [];
@@ -37,6 +39,7 @@ beforeAll(async () => {
   let hostedUrl: string | null = null;
   control = createControlServer({
     devices,
+    moves,
     controlToken: () => controlToken,
     companionPort: 8810,
     secretPublicKey: () => "BIPBQ12_dWnF1DZLsTZO3Vg0NGjds5-jp9h3jhjr2To7bJelczS0LM82rfXV68PmSJhz2ePosj3fL974XckCpDU",
@@ -70,7 +73,7 @@ afterAll(async () => {
 
 describe("the per-launch control token", () => {
   it("refuses every route without it, so a page served from the control port cannot pair a device", async () => {
-    for (const [method, path] of [["POST", "/pairing"], ["GET", "/state"], ["DELETE", "/pairing"], ["POST", "/tailscale/refresh"], ["POST", "/devices/x/browser-control"], ["DELETE", "/devices/x"]]) {
+    for (const [method, path] of [["POST", "/pairing"], ["GET", "/state"], ["DELETE", "/pairing"], ["POST", "/tailscale/refresh"], ["POST", "/devices/x/browser-control"], ["POST", "/devices/x/move"], ["DELETE", "/devices/x"]]) {
       const tokenless = await ask(method, path, { origin: `http://127.0.0.1:${port}` }, undefined, {});
       expect(tokenless.status, `${method} ${path}`).toBe(403);
       expect(JSON.stringify(tokenless.body)).not.toMatch(/omb_pair_|"code"/);
@@ -140,6 +143,27 @@ describe("origins the control server will change state for", () => {
     expect(devices.authenticate(paired.token)?.cloudDesktopAccess).toBe(false);
     expect(disconnectedDeviceIds).toEqual([paired.device.id]);
     expect((await ask("POST", "/devices/missing/cloud-desktop")).status).toBe(404);
+  });
+
+  it("allows and refuses a phone's move per device, and unpairing ends its grant", async () => {
+    const { code } = devices.openPairing();
+    const paired = devices.redeem(code, "Moving phone");
+    if ("error" in paired) throw new Error(paired.error);
+    const id = paired.device.id;
+
+    expect(await ask("POST", `/devices/${id}/move`)).toMatchObject({ status: 409, body: { error: "no move to allow" } });
+    moves.ask(id, 4);
+    expect((await ask("POST", `/devices/${id}/move`)).status).toBe(200);
+    expect(moves.live(id)).toBe(true);
+    expect((await ask("DELETE", `/devices/${id}/move`)).status).toBe(200);
+    expect(moves.state(id)).toEqual({ state: "refused" });
+    expect(await ask("POST", "/devices/nobody/move")).toMatchObject({ status: 404, body: { error: "no such device" } });
+    expect((await ask("DELETE", "/devices/nobody/move")).status).toBe(404);
+
+    moves.ask(id, 4);
+    moves.allow(id);
+    expect((await ask("DELETE", `/devices/${id}`)).status).toBe(200);
+    expect(moves.live(id)).toBe(false);
   });
 
   it("reports a permission write failure without dropping the control server", async () => {

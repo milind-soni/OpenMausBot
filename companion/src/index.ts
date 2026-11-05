@@ -11,6 +11,7 @@ import { createAddressWatcher } from "./advertise-watch.ts";
 import { createControlServer, hostCandidates, initialControlToken } from "./control.ts";
 import { createConnectedDeviceTracker } from "./connected-devices.ts";
 import { DeviceRegistry } from "./devices.ts";
+import { MoveGrants } from "./move-grants.ts";
 import { companionEndpointCandidates, hostedCompanionUrl } from "./endpoints.ts";
 import { lanAddresses, refreshTailnetName, tailnetName, tailscaleAddress } from "./listener.ts";
 import {
@@ -149,6 +150,7 @@ managedOrigin?.on("upgrade", proxy.upgrade);
 
 const control = createControlServer({
   devices,
+  moves: new MoveGrants(),
   controlToken: () => controlToken,
   companionPort: COMPANION_PORT,
   secretPublicKey: () => SECRET_PUBLIC_KEY,

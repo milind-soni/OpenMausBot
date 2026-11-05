@@ -9,12 +9,14 @@ import type { DeviceRegistry } from "./devices.ts";
 import { companionEndpointCandidates, hostedCompanionUrl } from "./endpoints.ts";
 import { lanAddresses, lanInterfaces, tailnetName, tailscaleAddress } from "./listener.ts";
 import { defaultHostName } from "./mdns.ts";
+import type { MoveGrants } from "./move-grants.ts";
 import { publicNetworks } from "./windows-network.ts";
 
 export const CONTROL_TOKEN_HEADER = "x-openmausbot-control-token";
 
 export interface ControlOptions {
   devices: DeviceRegistry;
+  moves?: MoveGrants;
   /** Null until the launching app has sent it: every route but the page answers 403. */
   controlToken: () => string | null;
   companionPort: number;
@@ -281,6 +283,18 @@ export function createControlServer(options: ControlOptions): Server {
       options.disconnectDevice?.(browserControl[1]);
       return json(res, 200, companionState(options));
     }
+    const move = path.match(/^\/devices\/([\w-]+)\/move$/);
+    if (move && (method === "POST" || method === "DELETE")) {
+      if (!options.devices.list().some((device) => device.id === move[1])) {
+        return json(res, 404, { error: "no such device" });
+      }
+      if (method === "POST") {
+        if (!options.moves?.allow(move[1])) return json(res, 409, { error: "no move to allow" });
+      } else {
+        options.moves?.refuse(move[1]);
+      }
+      return json(res, 200, companionState(options));
+    }
     const revoke = path.match(/^\/devices\/([\w-]+)$/);
     if (revoke && method === "DELETE") {
       try {
@@ -288,6 +302,7 @@ export function createControlServer(options: ControlOptions): Server {
       } catch {
         return json(res, 500, { error: "could not save the device removal" });
       }
+      options.moves?.refuse(revoke[1]);
       options.disconnectDevice?.(revoke[1]);
       options.revoked?.(revoke[1]);
       return json(res, 200, companionState(options));
