@@ -1,7 +1,9 @@
 import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { resetPathCache } from "../../env-path.ts";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
 import {
@@ -386,6 +388,38 @@ describe("resolveHermesModels when Hermes has no model to list", () => {
     for (const provider of ["ollama", "lmstudio"]) {
       const { cli, env } = setup("", `model:\n  provider: ${provider}\n  default: llama3\n`);
       await expect(resolveHermesModels(env, { cli })).resolves.toEqual({ default: "", options: [] });
+    }
+  });
+
+  it("offers the default for an Ollama base_url the local probe never checks (another host or port)", async () => {
+    for (const baseUrl of ["http://192.168.1.20:11434/v1", "http://127.0.0.1:11500/v1"]) {
+      const { cli, env } = setup("", `model:\n  provider: ollama\n  default: llama3\n  base_url: ${baseUrl}\n`);
+      await expect(resolveHermesModels(env, { cli })).resolves.toEqual({ default: HERMES_CONFIG_MODEL_ID, options: [DEFAULT] });
+    }
+    const { cli, env } = setup("", "model:\n  provider: lmstudio\n  default: qwen\nproviders:\n  lmstudio:\n    base_url: http://localhost:1234/v1\n");
+    await expect(resolveHermesModels(env, { cli })).resolves.toEqual({ default: "", options: [] });
+  });
+
+  it("finds Hermes behind a wrapper command, as it is launched", async () => {
+    const { cli, env } = setup("");
+    await expect(resolveHermesModels(env, { cli: `${cli} hermes` })).resolves.toEqual({ default: HERMES_CONFIG_MODEL_ID, options: [DEFAULT] });
+  });
+
+  it.skipIf(process.platform === "win32")("looks past a PATH entry that can't run to a later runnable hermes", async () => {
+    const { cli, env } = setup("");
+    const blocked = join(dirname(cli), "blocked");
+    const runnable = join(dirname(cli), "runnable");
+    mkdirSync(blocked);
+    mkdirSync(runnable);
+    writeFileSync(join(blocked, "hermes"), "", { mode: 0o644 });
+    writeFileSync(join(runnable, "hermes"), "#!/bin/sh\n", { mode: 0o755 });
+    vi.stubEnv("PATH", [blocked, runnable].join(delimiter));
+    resetPathCache();
+    try {
+      await expect(resolveHermesModels(env, { cli: "hermes" })).resolves.toEqual({ default: HERMES_CONFIG_MODEL_ID, options: [DEFAULT] });
+    } finally {
+      vi.unstubAllEnvs();
+      resetPathCache();
     }
   });
 

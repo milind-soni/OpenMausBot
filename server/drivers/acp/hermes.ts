@@ -2,13 +2,13 @@
 // forward it), and OPENAI_API_KEY makes provider:auto resolve to OpenRouter without its key ("HTTP 401:
 // Missing Authentication header"), so injects write providers.<host> and set_model `custom:<host>:<model>`.
 import { spawn } from "node:child_process";
-import { accessSync, constants, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
-import { findCliCandidates, harnessHome } from "../../env-path.ts";
+import { findCliCandidates, harnessHome, splitCliString } from "../../env-path.ts";
 import { resolveCli } from "../../procs.ts";
 import { decodeInjectId, hostApiKey, INJECT_SEP, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
@@ -203,28 +203,47 @@ export function hermesConfiguredModel(
   return hermesConfigOption(configuredDefault?.model ?? "");
 }
 
-/** A runnable file, so the default entry never points at a directory or a file that can't start. */
+/** A runnable file, so the default entry never points at a directory or a file that can't start. A wrapper such as
+ * `wsl hermes` is looked up by its first word, as resolveCliSpawn launches it, and any runnable PATH match counts. */
 function hermesInstalled(cli: string): boolean {
-  const found = findCliCandidates(cli)[0];
-  if (!found) return false;
-  try {
-    if (!statSync(found).isFile()) return false;
-    if (process.platform !== "win32") accessSync(found, constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
+  const trimmed = cli.trim();
+  const head = trimmed.includes(" ") && existsSync(trimmed) ? trimmed : (splitCliString(trimmed)[0] ?? "");
+  return findCliCandidates(head).some((found) => {
+    try {
+      if (!statSync(found).isFile()) return false;
+      if (process.platform !== "win32") accessSync(found, constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 
-// The local probes list Ollama's and LM Studio's models: with none listed that server is down, and an empty
-// answer keeps the catalog's earlier models instead of replacing them with the default.
+// The local probes list Ollama's and LM Studio's models on their usual local port: with none listed that server is
+// down, and an empty answer keeps the catalog's earlier models instead of replacing them with the default. A
+// base_url elsewhere (another host or port) is never probed, so it gets the default like a custom endpoint.
 const HERMES_PROBED_PROVIDERS = new Set(["ollama", "lmstudio"]);
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+function yamlMap(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
 
 function hermesUsesProbedProvider(env: Record<string, string | undefined>): boolean {
   const dir = env.HERMES_HOME || harnessHome("hermes", env);
   try {
-    const provider = hermesConfigDefault(readFileSync(join(dir, "config.yaml"), "utf8"))?.provider.toLowerCase() ?? "";
-    return HERMES_PROBED_PROVIDERS.has(provider);
+    const text = readFileSync(join(dir, "config.yaml"), "utf8");
+    const provider = hermesConfigDefault(text)?.provider.toLowerCase() ?? "";
+    const probe = HERMES_PROBED_PROVIDERS.has(provider) ? localHost(provider) : undefined;
+    if (!probe) return false;
+    const config = yamlMap(parseYaml(text));
+    const baseUrl =
+      yamlString(yamlMap(config.model).base_url) ||
+      yamlString(yamlMap(yamlMap(config.providers)[provider]).base_url) ||
+      yamlString(config.base_url);
+    if (!baseUrl) return true;
+    const configured = new URL(baseUrl);
+    return LOOPBACK_HOSTS.has(configured.hostname) && configured.port === new URL(probe.baseUrl).port;
   } catch {
     return false;
   }
