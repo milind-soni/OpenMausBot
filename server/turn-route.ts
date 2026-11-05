@@ -46,6 +46,12 @@ export function fastModelFor(catalog: ModelCatalog | undefined, current: string,
   return pick?.id;
 }
 
+/** A routine step's quick model on this engine; undefined when it has none, refuses small models, or already runs one. */
+export function quickStepModel(instance: { models?: ModelCatalog; quickModelsUsable?: () => boolean }, current: string, refused?: ReadonlySet<string>): string | undefined {
+  const model = fastModelFor(instance.quickModelsUsable?.() === false ? undefined : instance.models, current, refused);
+  return model === current ? undefined : model;
+}
+
 export interface RouteInput {
   conversational: boolean;
   /** false when a person picked this thread's own model. */

@@ -75,7 +75,7 @@ import {
   avatarImageStatus,
 } from "./avatar-image.ts";
 import { fitsOnOneLine, parseBotProfilePatch } from "./bot-profile.ts";
-import { routeDirectTurn } from "./turn-route.ts"; import { QuickModelFallback } from "./quick-model-fallback.ts"; import { COMPUTER_JOURNAL_PATH, createSavedSteps, personRequest, savedStepsEnabled } from "./saved-steps/saved-steps.ts";
+import { quickStepModel, routeDirectTurn } from "./turn-route.ts"; import { QuickModelFallback } from "./quick-model-fallback.ts"; import { COMPUTER_JOURNAL_PATH, createSavedSteps, personRequest, savedStepsEnabled } from "./saved-steps/saved-steps.ts";
 import { groupTurnCwd } from "./room-cwd.ts";
 import { RoomTurnDeadline, RoomTurnStallRegistry, effectiveRoomTurnTimeoutMinutes, parseConversationTurnTimeout, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
 import { roomTurnEnd, type RoomClaimEnd } from "./room-turn-end.ts";
@@ -121,7 +121,7 @@ import { createSideJobs, helperSelection } from "./side-jobs.ts";
 import type { CaptureTurn, RoomLine } from "./memory-capture.ts";
 import { createAboutMe } from "./about-me.ts"; import { createPersonPreference } from "./host/person-preference.ts";
 import { botMemoryUpdate, ownersOwnAsk } from "./memory-forget.ts";
-import { canManage, canReach, hasTeamAuthority, livePeerRoster, livePeerRosterBlock, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts"; import { roomPostRefusal, sharedNamesNote, unreachedMentionLines } from "./same-name-mentions.ts";
+import { canManage, canReach, hasTeamAuthority, livePeerRoster, livePeerRosterBlock, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, reachRefusal, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts"; import { roomPostRefusal, sharedNamesNote, unreachedMentionLines } from "./same-name-mentions.ts";
 import {
   containerComputerAction,
   containerComputerFrame,
@@ -426,7 +426,7 @@ import { claudeUserSkillsEnabled, settingsTurnFields } from "./turn-settings.ts"
 import { addHeldSecretScrubber, redactSecretsInText, scrubHeldSecrets } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
 import { vpsConfigForBot, vpsSshAliasForBot } from "./vps-hosts.ts";
-import { ROUTINE_RESTARTED, RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts"; import { routineRunsFor } from "./routine-run-window.ts"; import { batchSaves } from "./save-batch.ts";
+import { ROUTINE_RESTARTED, RoutineManager, runningBotId, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts"; import { routineRunsFor } from "./routine-run-window.ts"; import { batchSaves } from "./save-batch.ts";
 import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
 import { BROWSER_UPLOAD_TOOL, browserRuntimeEnv } from "./browser-runtime.ts";
 import { BrowserUploadRefusal, uploadableFiles } from "./browser-upload.ts";
@@ -450,7 +450,7 @@ import { asSchedule, RoutineRequestService } from "./routine-requests.ts"; impor
 import { activeRoutinesContext } from "./active-routines-context.ts";
 import { createRefusedHandoffs } from "./host/refused-handoffs.ts"; import { automationContextText, createAutomationReports, newestAutomationLines } from "./automation-reports.ts"; import { createAutomationDestinations } from "./automation-destinations.ts"; import { createProactive } from "./host/proactive.ts"; import { createFirstHourHooks, startFirstHour, welcomeDonePatch } from "./host/first-hour-host.ts"; import { greetingMessage } from "./host/first-hour.ts"; import { READ_AND_DRAFT_PARTS, READ_AND_DRAFT_REFUSAL, READ_AND_DRAFT_TOOLS, recordsAnswer } from "./read-and-draft.ts"; import { createPresenceRoutes } from "./routes/presence.ts"; import { needsYouNow } from "./today.ts";
 import { engineLabel, LimitResetClock, nearLimitNote } from "./limit-resets.ts"; import { loadPlanUsage, planAccountsFromInstances } from "./plan-usage.ts"; import { LimitFailovers, limitBackupAllowed } from "./limit-failover.ts"; import { createLimitResetRoutes } from "./routes/limit-resets.ts";
-import { parseTriggerRequest, triggerTarget } from "./trigger-tools.ts"; import { WebhookRequestError, WebhookRequestService } from "./webhook-requests.ts"; import { createAppTriggerHost } from "./app-trigger-host.ts";
+import { parseTriggerRequest, resolveStepBots, triggerTarget } from "./trigger-tools.ts"; import { WebhookRequestError, WebhookRequestService } from "./webhook-requests.ts"; import { createAppTriggerHost } from "./app-trigger-host.ts";
 import { appliesNow, directApply, UNDO_STALE, type DirectApply } from "./direct-apply.ts";
 import { createTeamMemoryRequests } from "./team-memory-requests.ts";
 import { createAgentCard } from "./chat-widgets.ts";
@@ -6846,7 +6846,8 @@ bus.subscribe((event: RuntimeEvent) => {
         liveTurnByThread.delete(event.threadId);
         const routineReportThread = routineRun ? routineSourceThread(routineRun) : null;
         if (!routineReportThread && (!internal || reviewAnswer)) store.patchTask(bot.id, event.threadId, { unread: true });
-        if (routineRun && routineReportThread !== event.threadId) automationReports.runSettled(routineRun, completedTurnId);
+        // A run that ended on a check reports the reply before it, in another thread.
+        if (routineRun && routineReportThread !== event.threadId) automationReports.runSettled(routineRun, routineRun.threadId === event.threadId ? completedTurnId : undefined);
         else if ((!routineRun || routineRun.status === "completed") && (!internal || reviewAnswer) && !computerSelectionTurns.get(event.threadId)?.selected && doneNotice.atTurnEnd({ botId: bot.id, threadId: event.threadId, review: reviewAnswer, ok: event.ok, routine: Boolean(routineRun) }) === "notify" && !personWaits.atTurnEnd(event.threadId, reply)) {
           notify(buildNotification("done", bot, event.threadId, routineRun ? reply || routineRun.output || routineRun.routineName : reply, { avatarUrl: bot.avatarUrl }), routineRun ? { routine: true } : undefined);
         }
@@ -6931,7 +6932,7 @@ function delegatorOf(threadId: string): { threadId: string; botId?: string } | u
 
 function activeRoutineRunForThread(threadId: string): RoutineRun | null {
   const run = routines?.runForThread(threadId);
-  return run && ["running", "waiting"].includes(run.status) ? run : null;
+  return run && run.threadId === threadId && ["running", "waiting"].includes(run.status) ? run : null;
 }
 
 function handoffOpener(capability: Pick<InternalCapability, "botId" | "threadId" | "externalRuntime">, threadId: string): HandoffOpener | undefined {
@@ -8694,12 +8695,23 @@ function routineSourceThread(run: RoutineRun): string | null {
   return routineSourceOwner(run)?.threadId ?? null;
 }
 
+/** The model a routine step's thread runs on, labelled as the picker shows it: a quick step with no usable quick model runs on the bot's own. */
+function routineStepModel(botId: string, quick: boolean): { selection?: ModelSelection; label: string } | undefined {
+  const bot = store.bot(botId), instance = bot ? registry.get(bot.modelSelection.instanceId) : undefined;
+  if (!bot || !instance) return undefined;
+  const label = (model: string) => instance.models?.options.find((option) => option.id === model)?.label ?? model;
+  const fast = quick ? quickStepModel(instance, bot.modelSelection.model, quickFallback.refused(instance.instanceId)) : undefined;
+  const picked = fast ? checkedModelSelection({ instanceId: instance.instanceId, model: fast }, undefined, true) : null;
+  if (fast && picked?.ok && !validateModelProposal(picked.selection, bot)) return { selection: picked.selection, label: label(fast) };
+  return { label: label(bot.modelSelection.model) };
+}
+
 function syncRoutineRunToSource(run: RoutineRun): string | null {
   const source = routineSourceOwner(run);
   if (!source) {
-    const execution = run.threadId ? store.taskByThread(run.botId, run.threadId) : null;
+    const execution = run.threadId ? store.taskByThread(runningBotId(run), run.threadId) : null;
     if (execution?.routineRunId === run.id) {
-      store.patchTask(run.botId, execution.threadId, {
+      store.patchTask(runningBotId(run), execution.threadId, {
         routineRunId: undefined,
         ...(["waiting", "completed", "failed", "missed"].includes(run.status) ? { unread: true } : {}),
       });
@@ -8723,13 +8735,13 @@ function syncRoutineRunToSource(run: RoutineRun): string | null {
 
   // Mark only the fresh execution: on its first running update, before dispatch adds any transcript.
   if (run.target === "bot" && run.threadId && run.threadId !== sourceThreadId) {
-    const execution = store.taskByThread(run.botId, run.threadId);
+    const execution = store.taskByThread(runningBotId(run), run.threadId);
     const freshExecution = execution && run.status === "running" && !execution.routineRunId &&
       store.messagesFor(run.threadId).length === 0;
     if (execution && freshExecution) {
-      store.patchTask(run.botId, run.threadId, { routineRunId: run.id, unread: false });
+      store.patchTask(runningBotId(run), run.threadId, { routineRunId: run.id, unread: false });
     } else if (execution?.routineRunId === run.id && execution.unread) {
-      store.patchTask(run.botId, run.threadId, { unread: false });
+      store.patchTask(runningBotId(run), run.threadId, { unread: false });
     }
   }
 
@@ -8837,14 +8849,21 @@ routines = new RoutineManager({
     return groupIsWorking(group) || coordinator.busy ? "busy" : "ready";
   },
   createTask: (botId, title, run) => {
-    const task = store.createTask(botId, title, false);
+    const step = run?.plan?.[run.stepAt ?? 0], model = step ? routineStepModel(botId, step.model === "quick") : undefined;
+    const task = store.createTask(botId, title, false, undefined, undefined, undefined, model?.selection);
     // On a Cloud home the routine's writer opens a run's conversation; a webhook run is the owner's, but its payload never reaches the lent Mac.
     if (task && CLOUD_HOME && run) {
       threadStarters.set(task.threadId, run.triggerSource === "webhook" ? CLOUD_OWNER_KEY! : routineOpener(run.routineId));
     }
     if (task && run?.triggerSource === "webhook") outsideLineage.mark(task.threadId);
-    return task;
+    return task && model ? { threadId: task.threadId, model: model.label } : task;
   },
+  stepBotProblem: (ownerBotId, stepBotId) => {
+    const owner = store.bot(ownerBotId), bot = store.bot(stepBotId);
+    if (!bot) return `No bot with id "${stepBotId}" — call list_bots and copy the exact id from the result`;
+    return owner ? reachRefusal(owner, bot) : null;
+  },
+  botName: (botId) => store.bot(botId)?.name,
   joinConversation: (run) => {
     if (run.eventSource === "wait") return waitRunChat(run, directChatOf, Boolean(CLOUD_HOME));
     const continues = routines?.listRoutines().some((routine) => routine.id === run.routineId && routine.schedule.type === "limit_reset");
@@ -9029,6 +9048,7 @@ const routineRequests = new RoutineRequestService({
   cloudReady: cloudRoutineReadiness,
   canPersist: proposalPersistence,
   // The card can sit open indefinitely, so the target is re-authorized at confirm, not just at proposal.
+  botName: (botId) => store.bot(botId)?.name,
   validateTarget: (proposerBotId, target) => {
     const proposer = store.bot(proposerBotId);
     const targetBot = store.bot(target.botId);
@@ -13457,6 +13477,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 201, { ...applied, ...(applied.action === "create" && hookOwner ? addressFor({ from, owner: hookOwner, guestDriven: false, outsideDriven: outsideDrivenThread(fromThreadId) }, webhooks, applied.resultId, webhookIngressStatus().baseUrl) : {}) });
         }
         const proposedInput = { ...request.proposal, forBot };
+        const stepOwner = store.bot(forBot?.botId ?? from.id), stepsRefused = stepOwner ? resolveStepBots(proposedInput, stepOwner, store.bots) : null;
+        if (stepsRefused) return json(res, 400, { error: stepsRefused });
         if (proposedInput.action !== "create" && (proposedInput.action === "update" ? outsideWorkStaysHere(fromThreadId) : cloudGuestDriven(fromThreadId)) && !outsideLineage.routineRunsConfined(String(proposedInput.routineId))) return json(res, 403, { error: OUTSIDE_STAYS_HERE });
         const wasOwners = proposedInput.action !== "create" && typeof proposedInput.routineId === "string" ? cloudRoutineIsOwners(proposedInput.routineId) : false;
         const run = activeRoutineRunForThread(fromThreadId);
