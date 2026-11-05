@@ -4,6 +4,7 @@ import { api, ApiError, useStore, type Bot, type BotAnnouncement, type BrowserPr
 import { browserProfileDeletionBlockReason, browserProfilesMutation, newBrowserProfileId } from "@/lib/browser-profiles";
 import { isOwnerOrAdmin, readSessionState } from "@/lib/session";
 import { t } from "@/lib/i18n";
+import { computerDeviceText } from "@/lib/computer-device";
 import { SignedInSites } from "./SignedInSites";
 import { Select } from "./Select";
 import { browserScope } from "@/lib/team-browser";
@@ -153,7 +154,7 @@ export function BrowserProfilesManager({ bot, onProfileChanged, disabled = false
   const usesMyChrome = (profile: BrowserProfile | undefined) => profile?.browser === "chrome" && (myChrome || myChromeLendable);
   const chromeNote = <>
     <p className="text-[11px] leading-relaxed text-ink-secondary">{t("settings.profiles.myChromeHint")}</p>
-    {myChromeOn && <p className="text-[11px] leading-relaxed text-ink-secondary">{t("settings.profiles.myChromeLent", { name: myChromeOn.name, device: myChromeOn.device })}</p>}
+    {myChromeOn && <p className="text-[11px] leading-relaxed text-ink-secondary">{t("settings.profiles.myChromeLent", { name: myChromeOn.name, device: computerDeviceText(myChromeOn.device) })}</p>}
     {myChromeOn?.online === false && <p className="text-[11px] leading-relaxed text-ink-secondary">{t("settings.profiles.myChromeLentOffline", { name: myChromeOn.name })}</p>}
   </>;
   return (

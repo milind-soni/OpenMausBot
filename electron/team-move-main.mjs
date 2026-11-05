@@ -7,7 +7,8 @@ import { dirname } from "node:path";
 
 import { createCloudSend } from "./cloud-send.mjs";
 import { openOwnerSession } from "./cloud-send-main.mjs";
-import { createTeamMove } from "./team-move.mjs";
+import { createTeamMove, teamMoveRefusal } from "./team-move.mjs";
+import nativeText from "./native-text.cjs";
 
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const sentence = (value) => (typeof value === "string" && value.trim() ? value.trim().replace(/\s+/gu, " ").slice(0, 300) : null);
@@ -39,17 +40,17 @@ export function moveTeams(state) {
 }
 
 /** What a native confirm says when a team's own page asks to bring a bot in: main's words, so no page can soften them. */
-export function teamMoveConfirmWords({ bot, team }) {
+export function teamMoveConfirmWords(names, t = nativeText.englishText.t) {
   return {
-    message: `Move ${bot} to ${team}?`,
+    message: t("teamMove.title", names),
     detail: [
-      `Everyone in ${team} can use ${bot}. Only ${team}'s admins can change it.`,
-      `Goes with ${bot}: instructions, skills, files, routines, and your chats with ${bot}`,
-      "Your chats stay private there: only you can see them.",
-      `Stays on My Cloud: what ${bot} remembers, your connections, and MausBot`,
-      "There's no way back: you can't move it back to My Cloud.",
+      t("teamMove.everyone", names),
+      t("teamMove.goes", names),
+      t("teamMove.private"),
+      t("teamMove.staysOnMyCloud", names),
+      t("teamMove.noWayBack"),
     ].join("\n\n"),
-    buttons: [`Move to ${team}`, "Cancel"],
+    buttons: [t("teamMove.confirm", names), t("native.common.cancel")],
   };
 }
 
@@ -107,12 +108,13 @@ function bearerSession(origin, token, fetchImpl) {
  *   fetch?: typeof fetch,
  *   journal?: { read(): unknown, write(value: unknown): void },
  *   log?(line: string): void,
+ *   t?(key: string, params?: Record<string, string | number>): string,
  * }} deps `home`: My Cloud and the Admin's code for it. `account`: the MausBot Cloud sign-in, whose verified session
  * names the person's teams. `file`: the send's own state; `journalFile`: the moves'. `openTeam`: shows the team's page.
  * `pageOrigin`: the origin of the page asking, when it is this window's active server's main frame. `confirmMove`: asks
  * the person outside any page.
  */
-export function installTeamMove({ ipcMain, cloudPage, pageOrigin = () => null, confirmMove = async () => false, home, account, file, journalFile, openTeam, onChange = () => {}, fetch: fetchImpl = globalThis.fetch, journal, log = () => {} }) {
+export function installTeamMove({ ipcMain, cloudPage, pageOrigin = () => null, confirmMove = async () => false, home, account, file, journalFile, openTeam, onChange = () => {}, fetch: fetchImpl = globalThis.fetch, journal, log = () => {}, t = nativeText.englishText.t }) {
   const teams = () => moveTeams(account()?.state());
   const teamOf = (id) => teams().find((team) => team.id === id) ?? null;
   const sendStore = jsonFile(file);
@@ -205,12 +207,19 @@ export function installTeamMove({ ipcMain, cloudPage, pageOrigin = () => null, c
     if (cloudPage(event) !== "cloud") return { teams: [] };
     return { teams: teams().map(({ id, name, ready }) => ({ id, name, ready })) };
   });
-  ipcMain.handle("cloud-send:team-move", myCloudPage("cloud-send:team-move", (botId, teamId, name) => {
+  const moveToTeam = (botId, teamId, name) => {
     const team = teamOf(String(teamId));
-    if (!team) throw new Error("You're not in that team.");
-    if (!ID.test(String(botId))) throw new Error("Choose one of your bots to move.");
+    if (!team) throw teamMoveRefusal("notInTeam");
+    if (!ID.test(String(botId))) throw teamMoveRefusal("notABot");
     void moves.start({ bot: { id: String(botId), name: sentence(name) ?? "This bot" }, team: { id: team.id, name: team.name, origin: team.origin } });
     return moves.view();
+  };
+  ipcMain.handle("cloud-send:team-move", myCloudPage("cloud-send:team-move", moveToTeam));
+  ipcMain.handle("cloud-send:team-move-coded", myCloudPage("cloud-send:team-move-coded", (...args) => {
+    try { return { view: moveToTeam(...args) }; } catch (error) {
+      if (!error?.refusal) throw error;
+      return { refused: { ...error.refusal, message: error.message } };
+    }
   }));
   ipcMain.handle("cloud-send:team-retry", myCloudPage("cloud-send:team-retry", () => { void moves.retry(); return moves.view(); }));
   ipcMain.handle("cloud-send:team-open", myCloudPage("cloud-send:team-open", (teamId) => {
@@ -231,10 +240,10 @@ export function installTeamMove({ ipcMain, cloudPage, pageOrigin = () => null, c
     if (bringList && Date.now() - bringList.at < BRING_LIST_MS) return bringList.bots;
     const target = home();
     if (!target) return [];
-    const session = await openOwnerSession(target, fetchImpl, { label: "Move to a team", background: false });
+    const session = await openOwnerSession(target, fetchImpl, { label: t("native.teamMove.sessionLabel"), background: false });
     try {
       const listed = await session.call("GET", "/api/bots?messages=0");
-      if (!listed.ok) throw new Error("My Cloud did not answer.");
+      if (!listed.ok) throw new Error(t("native.teamMove.homeNoAnswer"));
       bringList = { at: Date.now(), bots: bringableBots(listed.body?.bots) };
       return bringList.bots;
     } finally { await session.close().catch(() => {}); }
@@ -246,10 +255,10 @@ export function installTeamMove({ ipcMain, cloudPage, pageOrigin = () => null, c
   });
   ipcMain.handle("cloud-send:team-bring-move", async (event, botId) => {
     const team = pageTeam(event);
-    if (!team?.ready) throw new Error("Open the team you're moving a bot into.");
+    if (!team?.ready) throw new Error(t("native.teamMove.openTeam"));
     const bot = (await myCloudBots()).find((entry) => entry.id === String(botId));
-    if (!bot || bot.stays) throw new Error("Choose one of your bots to move.");
-    if (!(await confirmMove(teamMoveConfirmWords({ bot: bot.name, team: team.name })))) return { started: false, move: moves.view() };
+    if (!bot || bot.stays) throw new Error(t("teamMove.refused.notABot"));
+    if (!(await confirmMove(teamMoveConfirmWords({ bot: bot.name, team: team.name }, t)))) return { started: false, move: moves.view() };
     void moves.start({ bot: { id: bot.id, name: bot.name }, team: { id: team.id, name: team.name, origin: team.origin } });
     bringList = null;
     return { started: true, move: moves.view() };

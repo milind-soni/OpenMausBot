@@ -1,6 +1,7 @@
 import type { Message } from "@/state/store";
 import { formatElapsed } from "@/lib/working-time";
 import { t } from "@/lib/i18n";
+import { activityText } from "@/lib/activity-text";
 import { failedTurnCause } from "../../shared/failed-turn";
 import { isStoppedTurnName } from "../../shared/client-cancel";
 import { localDay } from "@/lib/transcript-derivations";
@@ -14,9 +15,10 @@ export type TranscriptItem =
   | { kind: "turn"; id: string; turnId: string; label: string; messages: Message[] };
 
 export function statusActivity(message: Message): { kind: "recovery" | "notice" | "stopped"; text: string } | null {
-  const name = message.kind === "activity" ? message.tool?.name : undefined;
-  if (name?.startsWith("recovery:")) return { kind: "recovery", text: name.slice("recovery:".length).trim() };
-  if (name?.startsWith("notice:")) return { kind: "notice", text: name.slice("notice:".length).trim() };
+  const tool = message.kind === "activity" ? message.tool : undefined;
+  const name = tool?.name;
+  if (name?.startsWith("recovery:")) return { kind: "recovery", text: activityText(tool!, name.slice("recovery:".length).trim()) };
+  if (name?.startsWith("notice:")) return { kind: "notice", text: activityText(tool!, name.slice("notice:".length).trim()) };
   if (name && isStoppedTurnName(name)) return { kind: "stopped", text: name.slice("stopped:".length).trim() };
   return null;
 }
@@ -175,7 +177,7 @@ export function groupTranscript(messages: Message[]): TranscriptItem[] {
 
 const MAX_NAMES = 3;
 
-export function describeRun(messages: Message[], label: (tool: NonNullable<Message["tool"]>) => string = (tool) => tool.label ?? tool.name): string {
+export function describeRun(messages: Message[], label: (tool: NonNullable<Message["tool"]>) => string = (tool) => tool.label ?? activityText(tool, tool.name)): string {
   const counts = new Map<string, number>();
   for (const message of messages) {
     const name = message.tool ? label(message.tool) : "";

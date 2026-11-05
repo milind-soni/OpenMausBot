@@ -16,6 +16,7 @@ import { createHomeAgain } from "./one-home-again.mjs";
 import { awayIn, createOneHome, parseJournal, underWay } from "./one-home.mjs";
 import { teamPlan } from "./cloud-team-plan.mjs";
 import { installTeamMove } from "./team-move-main.mjs";
+import nativeText from "./native-text.cjs";
 
 const MOVE_LABEL = "Move to My Cloud";
 const HOME_LABEL = "Bring My Cloud home";
@@ -131,7 +132,7 @@ async function answer(response) {
  * installCloudSend's.
  */
 export function installOneHome({ localRequest: anyServer, clean = null, account, journalFile, tempRoot, lend, phone, openHome, openLocal, restart, version, log = () => {}, journal: kept, keep: keptChoice, openTeam, teamJournal,
-  reportTimers, other = () => null, accountsHere = () => 1, ...sendDeps }) {
+  reportTimers, other = () => null, accountsHere = () => 1, t = nativeText.englishText.t, ...sendDeps }) {
   const fetchImpl = sendDeps.fetch ?? globalThis.fetch;
   const localRequest = clean ? clean.realCopy(anyServer) : anyServer;
   const onOwnCopy = (work) => (clean ? clean.holding(work) : work());
@@ -141,9 +142,9 @@ export function installOneHome({ localRequest: anyServer, clean = null, account,
   let teamMove = null;
   // One owner session for the whole move, every pass and check and the switch: each new one is one of the Admin's codes.
   const moveSession = createMoveSession({ open: (target) => openOwnerSession(target, fetchImpl, { label: MOVE_LABEL, background: false }) });
-  const send = installCloudSend({ ...sendDeps, local: (route, init) => localRequest(route, { method: init?.method ?? "GET", signal: AbortSignal.timeout(30_000) }),
+  const send = installCloudSend({ ...sendDeps, t, local: (route, init) => localRequest(route, { method: init?.method ?? "GET", signal: AbortSignal.timeout(30_000) }),
     move: () => (home?.view() === null && other()?.view() ? other() : home), teamMove: () => teamMove, moveSession });
-  teamMove = installTeamMove({ ipcMain: sendDeps.ipcMain, cloudPage: sendDeps.cloudPage, pageOrigin: sendDeps.pageOrigin, confirmMove: sendDeps.confirmMove, home: sendDeps.home, account: () => account(), fetch: fetchImpl, openTeam,
+  teamMove = installTeamMove({ t, ipcMain: sendDeps.ipcMain, cloudPage: sendDeps.cloudPage, pageOrigin: sendDeps.pageOrigin, confirmMove: sendDeps.confirmMove, home: sendDeps.home, account: () => account(), fetch: fetchImpl, openTeam,
     file: () => join(dirname(journalFile()), "team-move-send.json"), journalFile: () => join(dirname(journalFile()), "team-moves.json"), ...(teamJournal ? { journal: teamJournal } : {}),
     onChange: () => send.publish(), log });
   const journal = kept ?? jsonFile(journalFile);
@@ -224,6 +225,7 @@ export function installOneHome({ localRequest: anyServer, clean = null, account,
 
   home = createOneHome({
     journal,
+    t,
     // Every run starts here: the key watch is set up before any wait asks, so a key pressed since then counts.
     cloud: () => {
       typed();
@@ -279,7 +281,7 @@ export function installOneHome({ localRequest: anyServer, clean = null, account,
   };
   sendDeps.ipcMain.handle("one-home:keep", onPage("one-home:keep", keepState));
   sendDeps.ipcMain.handle("one-home:keep-set", onPage("one-home:keep-set", (on) => {
-    if (on === true && !keepState().shown) throw new Error("This computer has no My Cloud to keep its bots from.");
+    if (on === true && !keepState().shown) throw new Error(t("native.cloud.keepNoCloud"));
     void home.keep(on === true).catch((error) => log(`one home: ${error?.message ?? error}`));
     return keepState();
   }));

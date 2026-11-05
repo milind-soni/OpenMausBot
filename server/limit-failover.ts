@@ -1,3 +1,4 @@
+import { type ServerText } from "../shared/server-text.ts";
 // A conversation whose engine hit its usage limit, or was signed out, continues on the configured backup, and goes back to
 // its own engine once that limit has reset or it is signed in again.
 import { readFileSync } from "node:fs";
@@ -81,7 +82,7 @@ export interface LimitFailoverDeps {
   /** Switches the thread back; false when that is not allowed now (a busy thread, a permission change). */
   switchBack: (failover: LimitFailover) => boolean;
   /** One plain line in the conversation. */
-  note: (threadId: string, line: string) => void;
+  note: (threadId: string, line: string, text?: ServerText) => void;
   engineName: (engine: string) => string;
 }
 
@@ -129,7 +130,7 @@ export class LimitFailovers {
     if (row.why === "signed-out" && this.deps.signedOut?.(row.from.instanceId)) return false;
     if (!this.deps.switchBack(row)) return false;
     this.forget(threadId);
-    this.deps.note(threadId, backLine(this.deps.engineName(row.from.instanceId), row.why));
+    this.deps.note(threadId, backLine(this.deps.engineName(row.from.instanceId), row.why), row.why === "signed-out" ? { key: "chat.notice.failoverSignedInAgain", params: { engine: this.deps.engineName(row.from.instanceId) } } : undefined);
     return true;
   }
 

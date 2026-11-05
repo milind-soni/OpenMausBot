@@ -1,3 +1,5 @@
+import { engineDisplayName } from "@/lib/engine-rail";
+import { modelLabel, modelProvider } from "@/lib/model-label";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, KeyRound, Loader2, RefreshCw, X } from "lucide-react";
@@ -40,13 +42,6 @@ import { Select } from "./Select";
 
 const COMPACT_MODEL_COUNT = 5;
 
-function modelLabel(instance: InstanceInfo | undefined, model: string): string {
-  return instance?.models.options.find((option) => option.id === model)?.label ?? model;
-}
-
-function modelProvider(instance: InstanceInfo | undefined, model: string): string | undefined {
-  return instance?.models.options.find((option) => option.id === model)?.provider;
-}
 
 export function effortLabel(level: EffortLevel): string {
   return t(`model.effort.${level}` as Parameters<typeof t>[0]);
@@ -447,7 +442,7 @@ export function ModelPicker({
   const profile = state.bots.find((candidate) => candidate.id === bot.id) ?? bot;
   const follows = threadId ? profile.tasks?.find((task) => task.threadId === threadId)?.followsBotModel : undefined;
   const botModelInstance = state.instances.find((instance) => instance.instanceId === profile.modelSelection.instanceId);
-  const botModelName = botModelInstance ? `${botModelInstance.displayName} · ${modelLabel(botModelInstance, profile.modelSelection.model)}${variantSuffix(botModelInstance, profile.modelSelection.model, profile.modelSelection.variant)}` : profile.modelSelection.model;
+  const botModelName = botModelInstance ? `${engineDisplayName(botModelInstance)} · ${modelLabel(botModelInstance, profile.modelSelection.model)}${variantSuffix(botModelInstance, profile.modelSelection.model, profile.modelSelection.variant)}` : profile.modelSelection.model;
   const ownModelThreads = threadsOnOwnModel(profile.modelSelection, profile.tasks ?? []).length;
 
   const pickBotModel = () => {
@@ -577,7 +572,7 @@ export function ModelPicker({
       : needsCli(active) ? t("model.setupRequired")
         : needsSignIn(active) && !isCustomOnly(active) && !currentOption?.custom ? t("model.signInRequired") : currentOption?.orgBlocked ? t("model.orgBlocked") : undefined;
   const summary = active
-    ? `${active.displayName} · ${modelLabel(active, selection.model)}${
+    ? `${engineDisplayName(active)} · ${modelLabel(active, selection.model)}${
         modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""
       }${selectedVariantLabel ? ` · ${selectedVariantLabel}` : selection.effort
         ? ` · ${t(advanced ? "model.effort.summary" : "model.simple.thinkingSummary", { level: effortLabel(selection.effort) })}` : ""}`
@@ -623,12 +618,12 @@ export function ModelPicker({
         ? <InstanceProviderMark instance={active} size={14} subtle />
         : <span className="flex shrink-0 group-disabled:opacity-50"><InstanceProviderMark instance={active} size={14} subtle /></span>)}
       {!contained && active && showActiveAccount && (
-        <span data-model-account-compact className="hidden max-w-20 truncate @max-4xl/chathead:inline">{active.displayName}</span>
+        <span data-model-account-compact className="hidden max-w-20 truncate @max-4xl/chathead:inline">{engineDisplayName(active)}</span>
       )}
       <span className={cn("flex min-w-0 items-center gap-1", !contained && active && "@max-4xl/chathead:hidden")}>
         <span className="max-w-[160px] truncate">
           {active && showActiveAccount && (
-            <span data-model-account className="text-ink-secondary">{active.displayName} · </span>
+            <span data-model-account className="text-ink-secondary">{engineDisplayName(active)} · </span>
           )}
           {modelLabel(active, selection.model)}
           {active && modelProvider(active, selection.model) && (
@@ -727,7 +722,7 @@ export function ModelPicker({
             <>
               <div className="shrink-0 px-3.5 pb-2 pt-3">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="truncate text-[14px] font-semibold leading-5 text-ink">{signInFamily(railInstance) ? SIGN_IN_FAMILY_LABEL[signInFamily(railInstance)!] : railInstance.displayName}</div>
+                  <div className="truncate text-[14px] font-semibold leading-5 text-ink">{signInFamily(railInstance) ? SIGN_IN_FAMILY_LABEL[signInFamily(railInstance)!] : engineDisplayName(railInstance)}</div>
                   <div className="flex shrink-0 items-center gap-1">
                     <button
                       type="button"
@@ -736,8 +731,8 @@ export function ModelPicker({
                       onClick={() => refreshModels(railInstance.instanceId)}
                       aria-label={
                         loadingInstances || refreshingId !== null
-                          ? t("model.refreshing", { name: railInstance.displayName })
-                          : t("model.refresh", { name: railInstance.displayName })
+                          ? t("model.refreshing", { name: engineDisplayName(railInstance) })
+                          : t("model.refresh", { name: engineDisplayName(railInstance) })
                       }
                       title={t("model.refreshTitle")}
                       className="flex size-7 items-center justify-center rounded-full text-ink-tertiary hover:bg-ink/[0.06] hover:text-ink disabled:cursor-wait"
@@ -785,7 +780,7 @@ export function ModelPicker({
                     className={cn(MENU_ROW, "text-ink-secondary hover:text-ink")}
                   >
                     <ChevronLeft size={16} strokeWidth={MENU_STROKE} className="shrink-0 rtl:-scale-x-100" aria-hidden="true" />
-                    <span className="min-w-0 flex-1 truncate">{t("model.backTo", { name: railInstance.displayName })}</span>
+                    <span className="min-w-0 flex-1 truncate">{t("model.backTo", { name: engineDisplayName(railInstance) })}</span>
                   </button>
                 </div>
               )}
@@ -830,7 +825,7 @@ export function ModelPicker({
                     {pane === "main" && loadingList ? (
                       <div role="status" className={cn(MENU_LINE, "justify-center text-ink-tertiary")}>
                         <Loader2 size={14} className="shrink-0 animate-spin" aria-hidden="true" />
-                        {t("model.loadingModels", { name: railInstance.displayName })}
+                        {t("model.loadingModels", { name: engineDisplayName(railInstance) })}
                       </div>
                     ) : pane === "main" ? (
                       <>

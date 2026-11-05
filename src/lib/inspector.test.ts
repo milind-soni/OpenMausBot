@@ -14,6 +14,8 @@ describe("summarizeRuntime", () => {
       summary: "turn ok · end_turn · $0.0123",
       tone: "boundary",
     });
+    expect(summarizeRuntime({ ...base, type: "turn.completed", ok: true, cost: 0.00005 }).summary).toBe("turn ok · $0.0001");
+    expect(summarizeRuntime({ ...base, type: "turn.completed", ok: true, cost: 1234.5 }).summary).toBe("turn ok · $1234.5000");
     expect(summarizeRuntime({ ...base, type: "turn.completed", ok: false }).tone).toBe("error");
     expect(summarizeRuntime({ ...base, type: "runtime.error", message: "boom", setup: true }).summary).toBe("setup: boom");
     expect(summarizeRuntime({ ...base, type: "runtime.notice", message: "OpenCode no longer offers x" })).toEqual({

@@ -27,14 +27,15 @@ function engine() {
     for (const listener of listeners) listener({ eventId: "e", provider: "claude", createdAt: "", threadId, turnId: "turn-1", ...event } as RuntimeEvent);
   };
   const lastError = () => (seen.findLast((event) => event.type === "runtime.error") as { message: string } | undefined)?.message;
-  return { decorated, interrupted, emit, lastError };
+  return { decorated, interrupted, emit, lastError, seen };
 }
 
 describe("an engine that ends a turn saying only that its request was aborted", () => {
   it("reads as a failure in words when nothing asked it to stop", () => {
-    const { emit, lastError } = engine();
+    const { emit, lastError, seen } = engine();
     emit("t1", { type: "turn.started" });
     emit("t1", { type: "runtime.error", message: "Request was aborted." });
+    expect(seen.at(-1)).toMatchObject({ text: { key: "chat.notice.unaskedStop", params: { said: "Request was aborted." } } });
     expect(lastError()).toBe(unaskedStopMessage("Request was aborted."));
     expect(errorTranscript(lastError()!).kind).toBe("error");
     expect(lastError()).toContain("nobody stopped it");

@@ -167,8 +167,8 @@ export function createLendingLifts(deps: LendingLiftDeps) {
       const card = message?.card, lift = card?.lendingLift;
       if (!message || !card || !lift) return null;
       if (!open(card)) return { status: 200, body: { ok: true, outcome: card.answered === "allow" ? "allowed-once" : card.answered === "deny" ? "rejected" : "unavailable", alreadySettled: true } };
-      if (behavior !== "allow" && behavior !== "deny") return { status: 400, body: { error: "Choose Allow or Not now." } };
-      if (!deps.ownersAnswer(card)) return { status: 403, body: { error: "Only you can allow this, from one of your own devices." } };
+      if (behavior !== "allow" && behavior !== "deny") return { status: 400, body: { error: serverLine(deps.language(threadId), "server.lendingLift.chooseAnswer") } };
+      if (!deps.ownersAnswer(card)) return { status: 403, body: { error: serverLine(deps.language(threadId), "server.lendingLift.ownerDeviceOnly") } };
       const botId = message.from?.botId ?? store.botByThread(threadId)?.id ?? "";
       const bot = store.bot(botId);
       const allowed = behavior === "allow";

@@ -1,3 +1,4 @@
+import { userError, userErrorFields } from "./user-errors.ts";
 // An AI's own standalone build, installed without Node.js or npm. The release is pinned in code (URLs, archive and
 // program SHA-256, size, hosts, macOS signer), downloaded over HTTPS from those hosts only, and checked before anything
 // is unpacked. The new build must start before it replaces anything, the old folder is moved aside rather than deleted
@@ -327,7 +328,7 @@ function checkRelease(release: StandaloneRelease, asset: StandaloneAsset): void 
     || typeof asset.executableSha256 !== "string" || !SHA256.test(asset.executableSha256)
     || !safeArchivePath(asset.executable) || !Number.isSafeInteger(asset.approxBytes) || asset.approxBytes <= 0
     || (release.macTeamId !== undefined && !TEAM_ID.test(release.macTeamId))
-  ) throw new StandaloneInstallError(`${release.name}'s install details are invalid. Nothing was downloaded.`);
+  ) throw Object.assign(new StandaloneInstallError(`${release.name}'s install details are invalid. Nothing was downloaded.`), userErrorFields(userError("serverError.install.invalidDetails", { name: release.name })));
 }
 
 function trustedUrl(url: URL, hosts: readonly string[]): boolean {
@@ -348,17 +349,17 @@ function warn(release: StandaloneRelease, detail: unknown): void {
 }
 
 function httpRefusal(name: string, status: number): StandaloneInstallError {
-  if (status === 404 || status === 410) return new StandaloneInstallError(`This version of ${name} is no longer available to download. Update OpenMausBot, then try again.`);
-  if (status === 403 || status === 429) return new StandaloneInstallError(`The download site is limiting downloads right now. Try again in a few minutes.`);
-  if (status >= 500) return new StandaloneInstallError(`${name}'s download site isn't answering right now. Try again later.`);
-  return new StandaloneInstallError(`${name} couldn't be downloaded. Check the internet connection and try again.`);
+  if (status === 404 || status === 410) return Object.assign(new StandaloneInstallError(`This version of ${name} is no longer available to download. Update OpenMausBot, then try again.`), userErrorFields(userError("serverError.install.versionGone", { name: name })));
+  if (status === 403 || status === 429) return Object.assign(new StandaloneInstallError(`The download site is limiting downloads right now. Try again in a few minutes.`), userErrorFields(userError("serverError.install.downloadLimited")));
+  if (status >= 500) return Object.assign(new StandaloneInstallError(`${name}'s download site isn't answering right now. Try again later.`), userErrorFields(userError("serverError.install.siteNotAnswering", { name: name })));
+  return Object.assign(new StandaloneInstallError(`${name} couldn't be downloaded. Check the internet connection and try again.`), userErrorFields(userError("serverError.install.downloadFailed", { name: name })));
 }
 
 /** Streams the asset to `destination` while hashing it; every hop must be HTTPS to a release host. */
 async function download(release: StandaloneRelease, asset: StandaloneAsset, destination: string, options: StandaloneInstallOptions): Promise<void> {
   const name = release.name;
   const cap = asset.approxBytes * 2;
-  const tooLarge = () => new StandaloneInstallError(`The ${name} download was larger than expected, so it was stopped. Nothing was installed.`);
+  const tooLarge = () => Object.assign(new StandaloneInstallError(`The ${name} download was larger than expected, so it was stopped. Nothing was installed.`), userErrorFields(userError("serverError.install.downloadTooLarge", { name: name })));
   const controller = new AbortController();
   let timedOut = false;
   let stalled = false;
@@ -381,7 +382,7 @@ async function download(release: StandaloneRelease, asset: StandaloneAsset, dest
     let response: Response;
     for (let hop = 0; ; hop += 1) {
       if (!trustedUrl(url, release.hosts)) {
-        throw new StandaloneInstallError(`The ${name} download did not come from its official site, so it was stopped. Nothing was installed.`);
+        throw Object.assign(new StandaloneInstallError(`The ${name} download did not come from its official site, so it was stopped. Nothing was installed.`), userErrorFields(userError("serverError.install.unofficialDownload", { name: name })));
       }
       progressed();
       response = await (options.fetchImpl ?? fetch)(url.href, { redirect: "manual", signal: controller.signal });
@@ -389,7 +390,7 @@ async function download(release: StandaloneRelease, asset: StandaloneAsset, dest
       const location = response.headers.get("location");
       await response.body?.cancel().catch(() => {});
       if (!location || hop >= MAX_REDIRECTS) {
-        throw new StandaloneInstallError(`The ${name} download kept redirecting, so it was stopped. Nothing was installed.`);
+        throw Object.assign(new StandaloneInstallError(`The ${name} download kept redirecting, so it was stopped. Nothing was installed.`), userErrorFields(userError("serverError.install.redirects", { name: name })));
       }
       url = new URL(location, url);
     }
@@ -415,16 +416,16 @@ async function download(release: StandaloneRelease, asset: StandaloneAsset, dest
       await handle.close();
     }
     if (hash.digest("hex") !== asset.sha256) {
-      throw new StandaloneInstallError(`The ${name} download failed its safety check, so nothing was installed. Try again later.`);
+      throw Object.assign(new StandaloneInstallError(`The ${name} download failed its safety check, so nothing was installed. Try again later.`), userErrorFields(userError("serverError.install.safetyCheck", { name: name })));
     }
   } catch (error) {
     if (error instanceof StandaloneInstallError) throw error;
-    if (timedOut) throw new StandaloneInstallError(`The ${name} download took too long and was stopped. Check the internet connection and try again.`);
+    if (timedOut) throw Object.assign(new StandaloneInstallError(`The ${name} download took too long and was stopped. Check the internet connection and try again.`), userErrorFields(userError("serverError.install.downloadTimeout", { name: name })));
     if (stalled) throw new StandaloneInstallError(`The ${name} download stopped partway. Check the internet connection and try again.`);
     // A file-system error (no space, a locked folder) is the caller's to describe; anything else is the network.
     if (typeof (error as NodeJS.ErrnoException).code === "string") throw error;
     warn(release, error instanceof Error && error.cause instanceof Error ? `${error.message}: ${error.cause.message}` : error);
-    throw new StandaloneInstallError(`${name} couldn't be downloaded. Check the internet connection and try again.`);
+    throw Object.assign(new StandaloneInstallError(`${name} couldn't be downloaded. Check the internet connection and try again.`), userErrorFields(userError("serverError.install.downloadFailed", { name: name })));
   } finally {
     clearTimeout(timer);
     clearTimeout(stallTimer);
@@ -467,13 +468,13 @@ async function normaliseModes(directory: string): Promise<void> {
     } else if (entry.isFile()) {
       await chmod(path, ((await stat(path)).mode & 0o111) !== 0 ? 0o755 : 0o644);
     } else {
-      throw new StandaloneInstallError("The archive contains an unexpected or unsafe file. Nothing was installed.");
+      throw Object.assign(new StandaloneInstallError("The archive contains an unexpected or unsafe file. Nothing was installed."), userErrorFields(userError("serverError.install.unsafeArchive")));
     }
   }
 }
 
 async function unpack(release: StandaloneRelease, archivePath: string, staging: string, asset: StandaloneAsset): Promise<void> {
-  const unsafe = new StandaloneInstallError(`The ${release.name} download holds an unexpected or unsafe file, so nothing was installed.`);
+  const unsafe = Object.assign(new StandaloneInstallError(`The ${release.name} download holds an unexpected or unsafe file, so nothing was installed.`), userErrorFields(userError("serverError.install.unsafeFile", { name: release.name })));
   try {
     if (asset.archive === "zip") await extractZip(archivePath, staging, { maxEntries: MAX_ZIP_MEMBERS });
     else if (asset.archive === "tar.gz") {
@@ -587,7 +588,7 @@ async function realFolder(path: string, release: StandaloneRelease): Promise<voi
     return;
   }
   if (!info.isDirectory()) {
-    throw new StandaloneInstallError(`OpenMausBot's folder for ${release.name} is not a plain folder (${path}), so nothing was changed. Move it away, then try again.`);
+    throw Object.assign(new StandaloneInstallError(`OpenMausBot's folder for ${release.name} is not a plain folder (${path}), so nothing was changed. Move it away, then try again.`), userErrorFields(userError("serverError.install.notPlainFolder", { name: release.name, path: path })));
   }
 }
 
@@ -597,7 +598,7 @@ async function checkBinFolder(binDir: string, release: StandaloneRelease): Promi
   await realFolder(binDir, release);
   const folder = (await readdir(binDir, { withFileTypes: true })).find((entry) => entry.isDirectory());
   if (folder) {
-    throw new StandaloneInstallError(`OpenMausBot's folder for ${release.name} holds something it did not put there (${join(binDir, folder.name)}), so nothing was changed. Move it away, then try again.`);
+    throw Object.assign(new StandaloneInstallError(`OpenMausBot's folder for ${release.name} holds something it did not put there (${join(binDir, folder.name)}), so nothing was changed. Move it away, then try again.`), userErrorFields(userError("serverError.install.unexpectedFolder", { name: release.name, path: join(binDir, folder.name) })));
   }
 }
 
@@ -665,21 +666,21 @@ export function plainInstallError(release: StandaloneRelease, asset: StandaloneA
   const { code, syscall } = error as NodeJS.ErrnoException;
   if (code === "ENOSPC") {
     const megabytes = Math.ceil((asset.approxBytes * 4) / 1024 / 1024);
-    return new StandaloneInstallError(`There is not enough free disk space to install ${release.name}. Free up about ${megabytes} MB, then try again.`);
+    return Object.assign(new StandaloneInstallError(`There is not enough free disk space to install ${release.name}. Free up about ${megabytes} MB, then try again.`), userErrorFields(userError("serverError.install.diskSpace", { name: release.name, megabytes: megabytes })));
   }
   if (code === "EBUSY" || code === "ENOTEMPTY" || (code === "EPERM" && (syscall === "rename" || syscall === "unlink" || syscall === "rmdir"))) {
-    return new StandaloneInstallError(`${release.name} is open in another window. Close it, then try again.`);
+    return Object.assign(new StandaloneInstallError(`${release.name} is open in another window. Close it, then try again.`), userErrorFields(userError("serverError.install.openElsewhere", { name: release.name })));
   }
   if (code === "EACCES" || code === "EPERM" || code === "EROFS") {
-    return new StandaloneInstallError(`OpenMausBot can't write to its folder for ${release.name}. Check the folder's permissions, then try again.`);
+    return Object.assign(new StandaloneInstallError(`OpenMausBot can't write to its folder for ${release.name}. Check the folder's permissions, then try again.`), userErrorFields(userError("serverError.install.cannotWrite", { name: release.name })));
   }
-  return new StandaloneInstallError(`${release.name} couldn't be installed. Try again.`);
+  return Object.assign(new StandaloneInstallError(`${release.name} couldn't be installed. Try again.`), userErrorFields(userError("serverError.install.failed", { name: release.name })));
 }
 
 async function installOnce(release: StandaloneRelease, options: StandaloneInstallOptions): Promise<StandaloneInstalled> {
   const key = options.platformKey ?? standalonePlatformKey();
   const asset = standaloneAssetFor(release, key);
-  if (!asset) throw new StandaloneInstallError(`${release.name} has no download for this computer.`);
+  if (!asset) throw Object.assign(new StandaloneInstallError(`${release.name} has no download for this computer.`), userErrorFields(userError("serverError.install.noDownload", { name: release.name })));
   checkRelease(release, asset);
   const codesign = options.codesign ?? runCodesign;
   const engineDir = standaloneEngineDir(release.engine, options.baseDir);
@@ -702,7 +703,7 @@ async function installOnce(release: StandaloneRelease, options: StandaloneInstal
       // The bytes are the pinned ones, so downloading them again would not help: say so and change nothing.
       const failure = await probeVersion(existing.executable, release);
       if (failure !== null) {
-        throw new StandaloneInstallError(`${release.name} is installed, but it doesn't start on this computer (${failure}). Nothing was changed.`);
+        throw Object.assign(new StandaloneInstallError(`${release.name} is installed, but it doesn't start on this computer (${failure}). Nothing was changed.`), userErrorFields(userError("serverError.install.existingDoesNotStart", { name: release.name, failure: failure })));
       }
       const installed = await activate(engineDir, release, asset, existing.sha256);
       await prune(engineDir, versionDir, release.engine).catch(() => {});
@@ -714,19 +715,19 @@ async function installOnce(release: StandaloneRelease, options: StandaloneInstal
     await unpack(release, archivePath, staging, asset);
     const stagedProgram = executableIn(staging, asset.executable);
     if (!(await lstat(stagedProgram).catch(() => null))?.isFile()) {
-      throw new StandaloneInstallError(`The ${release.name} download did not contain the program it should, so nothing was installed.`);
+      throw Object.assign(new StandaloneInstallError(`The ${release.name} download did not contain the program it should, so nothing was installed.`), userErrorFields(userError("serverError.install.programMissing", { name: release.name })));
     }
     if (process.platform !== "win32") await chmod(stagedProgram, 0o755);
     const programSha256 = await hashFile(stagedProgram);
     if (programSha256 !== asset.executableSha256) {
-      throw new StandaloneInstallError(`The ${release.name} download failed its safety check, so nothing was installed. Try again later.`);
+      throw Object.assign(new StandaloneInstallError(`The ${release.name} download failed its safety check, so nothing was installed. Try again later.`), userErrorFields(userError("serverError.install.safetyCheck", { name: release.name })));
     }
     if (signedHere(key, release) && !(await macSignerOk(stagedProgram, release, codesign))) {
-      throw new StandaloneInstallError(`The downloaded ${release.name} is not signed by its maker, so nothing was installed.`);
+      throw Object.assign(new StandaloneInstallError(`The downloaded ${release.name} is not signed by its maker, so nothing was installed.`), userErrorFields(userError("serverError.install.notSigned", { name: release.name })));
     }
     const failure = await probeVersion(stagedProgram, release);
     if (failure !== null) {
-      throw new StandaloneInstallError(`${release.name} was downloaded, but it doesn't start on this computer (${failure}). Nothing was installed.`);
+      throw Object.assign(new StandaloneInstallError(`${release.name} was downloaded, but it doesn't start on this computer (${failure}). Nothing was installed.`), userErrorFields(userError("serverError.install.downloadDoesNotStart", { name: release.name, failure: failure })));
     }
     const record: InstallRecord = {
       engine: release.engine, version: release.version, sha256: asset.sha256, executable: asset.executable, executableSha256: programSha256, installedAt: Date.now(),

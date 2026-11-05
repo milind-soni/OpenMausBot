@@ -4,6 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 
 import { createLendingDialogs, serverAccessDetail } from "./lending-dialogs.mjs";
+import nativeText from "./native-text.cjs";
 
 function fakeDialog({ response = 1, picked = { canceled: true, filePaths: [] } } = {}) {
   const calls = [];
@@ -56,6 +57,23 @@ test("the terminal is lent only after its warning's own yes, one question at a t
   let stopped = 0;
   await createLendingDialogs({ dialog: off.dialog, window: liveWindow, validate: named }).lendTerminal(false, async () => { stopped += 1; });
   assert.deepEqual([stopped, off.calls.length], [1, 0]);
+});
+
+test("the terminal warning follows the app's language and keeps Cancel as its default", async () => {
+  const text = nativeText.createNativeText({ saved: "en" });
+  const { dialog, calls } = fakeDialog();
+  const dialogs = createLendingDialogs({ dialog, window: liveWindow, validate: named, t: text.t });
+  for (const [language, message, buttons] of [
+    ["en", "Let your Clouds run commands on this computer?", ["Let them run commands", "Cancel"]],
+    ["pt-br", "Permitir que seus Clouds executem comandos neste computador?", ["Permitir que executem comandos", "Cancelar"]],
+  ]) {
+    text.set(language);
+    assert.equal(await dialogs.lendTerminal(true, () => assert.fail("Cancel never grants access")), false);
+    const options = calls.at(-1)[1];
+    assert.equal(options.message, message);
+    assert.deepEqual(options.buttons, buttons);
+    assert.deepEqual([options.defaultId, options.cancelId], [1, 1]);
+  }
 });
 
 test("the whole home folder is lent only after its own warning, and is named in the access dialog", async () => {
@@ -113,7 +131,7 @@ function mainSharing({ response }) {
   const { dialog, calls } = fakeDialog({ response, picked: { canceled: false, filePaths: ["/Users/me/Plans"] } });
   const team = { id: "team", name: "Team server", origin: "https://team.example.test" };
   const context = vm.createContext({
-    createLendingDialogs, dialog, mainWindow: win, validateSharedFolders: named, isHomeFolder: async () => false,
+    createLendingDialogs, nativeT: nativeText.englishText.t, dialog, mainWindow: win, validateSharedFolders: named, isHomeFolder: async () => false,
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, localWorkspaceOnly: (_channel, handler) => handler,
     requireSharedComputers: async () => {}, savedWorkspace: () => team,
     sharingController: () => ({ identity: async () => ({ id: "info" }), save: async (env, grant, info) => { saved.push([env.id, grant, info]); } }),

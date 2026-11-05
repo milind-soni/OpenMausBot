@@ -1,11 +1,12 @@
 /** What this computer's screen says while the window can't show the place. `reason`: the Admin's words on why My Cloud
- * doesn't answer; `machine`: a plan problem's state; `other`: another MausBot Cloud account is signed in; `name`: the
- * team whose Cloud is being opened (absent for My Cloud). */
+ * doesn't answer, in English; `cause`: the same as a code the page says in its own language; `machine`: a plan
+ * problem's state; `other`: another MausBot Cloud account is signed in; `name`: the team whose Cloud is being opened
+ * (absent for My Cloud). */
 export type HomeView = { name?: string } & (
   | { screen: "opening" | "waking" | "moving" }
   /** The Admin is setting it up (or a brand-new one's name isn't found yet, at `checking`): the step it reports. */
   | { screen: "setup"; step?: import("./cloud-home.mjs").CloudSetupStep; slow?: true }
-  | { screen: "offline"; reason?: string }
+  | { screen: "offline"; reason?: string; cause?: "host" | "no_answer" }
   | { screen: "signin"; other?: true }
   /** `member`: a team's User, who can't subscribe or pay for it and is sent to its owner. */
   | { screen: "plan"; machine: "stopped" | "payment-problem" | "failed"; member?: true }
@@ -58,7 +59,7 @@ export declare const NAME_WAIT_MS: number;
 export declare const NAME_RETRY_MS: readonly number[];
 export function nameNotFound(code: number): boolean;
 export function createReadyClock(input?: { store?: { read(): unknown; write(value: unknown): void } | null; now?(): number }): { seen(state: unknown): void; fresh(origin: string | null): boolean };
-export function splashText(status: "opening" | "waking", name?: string | null): string;
+export function splashText(status: "opening" | "waking", name?: string | null, t?: (key: string, params?: Record<string, string | number>) => string): string;
 export function placeOf(input: { ask?: HomeAsk; remembered?: RememberedPlace; state?: any }): { kind: "cloud"; left?: string | null } | { kind: "team" | "own"; id: string; name: string; role: string | null; origin: string | null; machine: any };
 
 export function homeOf(input: { journal?: any; frozenCloud?: string | true | null; state?: any }): Home;
@@ -128,6 +129,7 @@ export function createHomeWindow(deps: {
   hosts?(): { clearHostResolverCache(): Promise<void>; resolveHost(host: string, options?: { cacheUsage?: "allowed" | "staleAllowed" | "disallowed" }): Promise<{ endpoints: unknown[] }> } | null;
   readyStore?: { read(): unknown; write(value: unknown): void } | null;
   log?(line: string): void;
+  t?(key: string, params?: Record<string, string | number>): string;
 }): HomeWindow;
 
 export function installHomeWindowIpc(deps: {

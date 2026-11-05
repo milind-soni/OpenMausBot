@@ -4,6 +4,8 @@
 // Unanswered, the tool call failed "No response to elicitation prompt within the allowed time". A plain confirmation
 // becomes an approval card; a form with fields or a link to open is declined at once with a note in the chat.
 import type { RuntimeEvent } from "../../shared/runtime-events.ts";
+import { noticeFailure, noticeSummary } from "../chat-notices.ts";
+import type { DRIVER_NOTICE } from "./driver-notices.ts";
 
 type Body<T> = T extends unknown ? Omit<T, "threadId" | "turnId" | "provider" | "providerInstanceId" | "createdAt" | "eventId"> : never;
 type ElicitationEvent = Body<Extract<RuntimeEvent, { type: "request.opened" | "request.resolved" | "runtime.notice" }>>;
@@ -38,7 +40,7 @@ export function claudeElicitations(write: (frame: unknown) => Promise<boolean>, 
       const id: string = o.request_id;
       const r = o.request;
       const serverName = text(r.mcp_server_name);
-      const server = text(r.display_name) || serverName || "An MCP server";
+      const server = text(r.display_name) || serverName;
       const message = text(r.message);
       const properties = r.requested_schema?.properties;
       const required = r.requested_schema?.required;
@@ -50,21 +52,32 @@ export function claudeElicitations(write: (frame: unknown) => Promise<boolean>, 
       if (r.mode === "url" || fields > 0) {
         void reply(id, { action: "decline" });
         const url = text(r.url);
+        const withUrl = /^https:\/\//i.test(url);
+        const key: keyof typeof DRIVER_NOTICE = r.mode === "url"
+          ? `chat.notice.elicitationUrlDeclined${server ? "" : "Generic"}${withUrl ? "WithUrl" : ""}`
+          : `chat.notice.elicitationFormDeclined${server ? "" : "Generic"}${fields === 1 ? "One" : "Many"}${message ? "Message" : ""}`;
         emit({
           type: "runtime.notice",
-          message: r.mode === "url"
-            ? `${server} asked you to open a link to continue${/^https:\/\//i.test(url) ? `: ${url}` : ""}. OpenMausBot can't open it from here, so the request was declined. Open the link yourself, then ask the bot to try again.`
-            : `${server} asked you to fill in ${fields === 1 ? "a field" : `${fields} fields`}${message ? ` ("${message}")` : ""}. OpenMausBot can't show that form yet, so the request was declined.`,
+          ...noticeFailure(key, {
+            ...(server ? { server } : {}),
+            ...(r.mode === "url" ? withUrl ? { url } : {} : {
+              ...(fields === 1 ? {} : { fields }),
+              ...(message ? { message } : {}),
+            }),
+          }),
         });
         return true;
       }
       pending.add(id);
+      const summary = message
+        ? server ? { summary: `${server}: ${message}` } : noticeSummary("chat.notice.elicitationMessageGeneric", { message })
+        : server ? noticeSummary("chat.notice.elicitationContinue", { server }) : noticeSummary("chat.notice.elicitationContinueGeneric");
       emit({
         type: "request.opened",
         requestId: CARD_PREFIX + id,
         requestType: "permission",
         tool: serverName ? `mcp__${serverName}` : "mcp",
-        summary: message ? `${server}: ${message}` : `${server} asks to continue`,
+        ...summary,
         // The server asks, not a tool: Auto mode and remembered tool grants never answer it.
         requiresExplicitApproval: true,
       });

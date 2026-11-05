@@ -1,3 +1,4 @@
+import type { ServerText } from "../../shared/server-text.ts";
 // A routine's checks: plain code that reads Calendar and Gmail and other routines' runs on each tick, with no AI. What
 // needs no judgement goes to the brief straight away; what needs judgement goes to one run, and the cursors move only
 // once that run's answer is kept. State is ids and times only, one entry per routine, in routine-checks.json.
@@ -72,7 +73,7 @@ export interface CheckReport {
   /** Whether Gmail is connected, and the person's address once read: the add-a-key suggestion's cue. */
   gmail?: { connected: boolean; address?: string };
   /** Emails the helper models picked for the brief, with a why built in plain code. */
-  picked?: Array<{ email: EmailHeader; why: string; needsReply: boolean }>;
+  picked?: Array<{ email: EmailHeader; why: string; whyText?: ServerText; needsReply: boolean }>;
   /** The reads of this check, for the brief's own follow-ups (a reply already sent). */
   session?: ReadSession;
 }
@@ -273,7 +274,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
           // Sorted with no AI turn: every email of the batch is judged, and the picks become brief rows.
           report.picked = picked.flatMap((pick) => {
             const email = plan.batch.find((one) => one.id === pick.id);
-            return email ? [{ email, why: pick.why, needsReply: pick.needsReply }] : [];
+            return email ? [{ email, why: pick.why, ...(pick.whyText ? { whyText: pick.whyText } : {}), needsReply: pick.needsReply }] : [];
           });
           entry.judged = keepNewest([...new Set([...(entry.judged ?? []), ...plan.batch.map((email) => email.id), ...plan.quiet.map((email) => email.id)])], MAX_JUDGED);
           if (plan.batch.length) deps.sorted?.(routine.id, plan.batch.length);

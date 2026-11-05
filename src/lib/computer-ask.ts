@@ -1,4 +1,5 @@
 import { t } from "./i18n";
+import { computerDeviceText } from "./computer-device";
 import type { LocaleKey } from "@/locales";
 import {
   computerAskHeadline, computerAskReasonLine, needsTheApp, turnsOnFromHere, type ComputerAskCard,
@@ -35,10 +36,11 @@ export function computerAskWords(card: Pick<OptionCardData, "computerAsk"> | und
   const reason = computerAskReasonLine(ask, name);
   const failed = ask.state === "failed";
   const outcome = OUTCOME[ask.state];
+  const device = computerDeviceText(ask.device);
   return {
-    line: t(headline.key as LocaleKey, { ...headline.params, name }),
+    line: t(headline.key as LocaleKey, { ...headline.params, device, name }),
     ...(ask.why ? { why: ask.why } : {}),
-    reason: `${failed ? `${t("computerAsk.state.failed")} ` : ""}${t(reason.key as LocaleKey, reason.params)}`,
+    reason: `${failed ? `${t("computerAsk.state.failed")} ` : ""}${t(reason.key as LocaleKey, { ...reason.params, device })}`,
     ...(turnsOnFromHere(ask.reason) ? { turnOn: t(failed ? "computerAsk.action.tryAgain" : "computerAsk.action.turnOn") } : {}),
     ...(needsTheApp(ask.reason) ? { getApp: t("computerAsk.action.getApp") } : {}),
     ...(outcome ? { outcome: t(outcome, { name }) } : {}),

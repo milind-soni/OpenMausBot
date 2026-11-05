@@ -13,6 +13,7 @@ import {
   type WorkspaceBackupSummary,
 } from "./workspace-backup.ts";
 import type { RequestAuth } from "./request-auth.ts";
+import { userErrorFields } from "./user-errors.ts";
 
 const PREFIX = "/api/workspace-backup";
 const MAX_UPLOAD_BYTES = MAX_WORKSPACE_BACKUP_UPLOAD_BYTES;
@@ -200,6 +201,7 @@ export function createWorkspaceBackupRoutes(options: {
       if (res.headersSent) { res.destroy(); return true; }
       json(res, error instanceof z.ZodError ? 400 : (error as { status?: number }).status ?? 400, {
         error: error instanceof z.ZodError ? error.issues[0]?.message ?? "Invalid backup request." : error instanceof Error ? error.message : "Backup failed.",
+        ...userErrorFields(error),
       });
     }
     return true;

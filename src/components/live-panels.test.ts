@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeEvent } from "../../shared/runtime-events";
 import type { AppState, Bot } from "@/state/store";
+import { setLocale } from "@/lib/i18n";
 
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
@@ -65,6 +66,7 @@ afterEach(() => {
   root.unmount();
   document.body.replaceChildren();
   vi.unstubAllGlobals();
+  setLocale("en");
 });
 
 describe("Inspector on the app's live stream", () => {
@@ -92,6 +94,19 @@ describe("Inspector on the app's live stream", () => {
 });
 
 describe("Activity on the app's live stream", () => {
+  it.each([["en", "Email"], ["pt-br", "E-mail"]])("shows the email app in %s without translating the tool identifier", async (language, app) => {
+    setLocale(language);
+    const tool = "mcp__email__EMAIL_SEND_EMAIL";
+    vi.stubGlobal("fetch", () => Promise.resolve(new Response(JSON.stringify({ rows: [{
+      at: "2026-10-04T09:00:00.000Z", threadId: "thread", tool, app: "Email", appKey: "activity.app.email", label: "Send email", outcome: "ran",
+    }] }))));
+    await mount(ActivityPanel);
+    const line = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.title === tool)!;
+    expect(line.querySelector(".font-medium")?.textContent).toBe(app);
+    expect(line.textContent).toContain("Send email");
+    expect(line.title).toBe(tool);
+  });
+
   it("reloads when one of the bot's turns settles, with no stream of its own", async () => {
     await mount(ActivityPanel);
     expect(fetched).toEqual(["/api/bots/bot/activity?limit=300"]);

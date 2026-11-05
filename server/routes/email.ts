@@ -3,6 +3,7 @@
 import { z } from "zod";
 
 import type { EmailService } from "../email/service.ts";
+import { userError } from "../user-errors.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 const body = z.object({
@@ -21,14 +22,14 @@ export function createEmailRoutes(deps: { service: EmailService }): RouteHandler
   const { service } = deps;
   return async ({ req, res, path, method, auth, json, readBody }) => {
     if (path !== "/api/email" && !path.startsWith("/api/email/")) return PASS;
-    if (!auth.scopes.includes("admin")) return json(res, 403, { error: "Only the owner or an admin can manage the mailboxes." });
+    if (!auth.scopes.includes("admin")) return json(res, 403, userError("serverError.mailbox.adminOnly"));
     res.setHeader("Cache-Control", "no-store");
     if (path === "/api/email") return method === "GET" ? json(res, 200, service.status()) : json(res, 405, { error: "method not allowed" });
     if (path === "/api/email/accounts") {
       if (method !== "POST") return json(res, 405, { error: "method not allowed" });
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) return json(res, 415, { error: "content-type must be application/json" });
       const parsed = body.safeParse(await readBody(req, 20_480));
-      if (!parsed.success) return json(res, 400, { error: "Enter your email address and password." });
+      if (!parsed.success) return json(res, 400, userError("serverError.mailbox.addressAndPassword"));
       const answer = await service.connect(parsed.data);
       return json(res, 200, answer);
     }

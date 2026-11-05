@@ -170,7 +170,9 @@ describe("one-on-one goal runs (a room of one)", () => {
     const bot = await newBot("Stopper", "slow");
     expect((await sendGoal(bot, "Keep going")).status).toBe(202);
     await expect.poll(() => busy(bot.id)).toBe(true);
-    expect((await sendGoal(bot, "A second goal")).status).toBe(409);
+    const refused = await sendGoal(bot, "A second goal");
+    expect(refused.status).toBe(409);
+    expect(refused.body).toEqual({ error: "A goal is already running in this chat. Stop it before starting another.", errorKey: "serverError.goal.alreadyRunning" });
 
     expect((await api("POST", `/api/bots/${bot.id}/interrupt`, { threadId: bot.threadId })).status).toBe(200);
     await expect.poll(() => cardIn(bot.threadId)).toMatchObject({ status: "stopped", detail: "Stopped by you.", turnCount: 1 });
@@ -190,7 +192,9 @@ describe("one-on-one goal runs (a room of one)", () => {
     await expect.poll(() => cardIn(bot.threadId)).toMatchObject({
       status: "working",
       turnCount: 0,
-      detail: expect.stringMatching(/finishing what it is doing/),
+      detail: "Patient is finishing what it is doing. This goal will continue when it is free.",
+      detailCode: "chat.notice.goalWaiting",
+      detailParams: { name: "Patient" },
     });
     writeFileSync(patientGate, "observed the waiting goal");
     // The fixture's goal turn ends without a marker, so the run stops after exactly the one turn it waited for.

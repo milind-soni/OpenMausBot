@@ -10,7 +10,6 @@ import {
   isAttachment,
   isLongPaste,
   pasteAttachment,
-  pasteSummary,
 } from "../src/lib/composer-attachments.ts";
 
 describe("composer paste attachments", () => {
@@ -25,7 +24,6 @@ describe("composer paste attachments", () => {
     expect(attachment.size).toBe(byteLength(attachment.text));
     expect(attachment.size).toBeGreaterThan(attachment.text.length);
     expect(attachment.lines).toBe(2);
-    expect(pasteSummary(attachment)).toMatch(/^2 lines, /);
   });
 
   it("composes attachment-only and mixed messages in a stable order", () => {

@@ -244,6 +244,13 @@ describe("the Activity view", () => {
     expect(parseActivityWhat("nonsense")).toBeNull();
   });
 
+  it("carries coded phone summaries into the global activity view without changing CSV words", () => {
+    const row: DecisionRow = { ...decisions[0]!, summary: "allowed PHONE_CREATE_EVENT", summaryCode: "chat.notice.phone.allowed", summaryParams: { tool: "PHONE_CREATE_EVENT" } };
+    const entries = activityEntries([row], [], { what: "decisions" });
+    expect(entries).toEqual([expect.objectContaining({ summary: row.summary, summaryCode: row.summaryCode, summaryParams: row.summaryParams })]);
+    expect(activityCsv(entries)).toContain("allowed PHONE_CREATE_EVENT");
+  });
+
   it("exports CSV with formula cells neutralised", () => {
     const csv = activityCsv(activityEntries(decisions, actions, { what: "all" }));
     const lines = csv.trim().split("\n");

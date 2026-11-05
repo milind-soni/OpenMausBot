@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { applyBrand, DEFAULT_BRAND } from "./brand";
-import { documentLanguage, resolveLocale, setLocale, t, tFromServer } from "./i18n";
+import { activePackComplete, documentLanguage, intlLocale, resolveLocale, setLocale, t, tFromServer } from "./i18n";
 import { en, localeChoices, locales } from "@/locales";
 
 afterEach(() => {
@@ -136,6 +136,21 @@ describe("t", () => {
   });
 });
 
+describe("activePackComplete", () => {
+  it("is true only for a pack other than English that has every English key", () => {
+    expect(activePackComplete()).toBe(false);
+    setLocale("pt-br");
+    expect(activePackComplete()).toBe(true);
+    locales["zz"] = { "approval.held.native": "x" };
+    try {
+      setLocale("zz");
+      expect(activePackComplete()).toBe(false);
+    } finally {
+      delete locales["zz"];
+    }
+  });
+});
+
 describe("tFromServer", () => {
   it("translates a key the catalog knows", () => {
     locales["zz"] = { "approval.held.native": "Der Anbieter verlangt deine Zustimmung." };
@@ -162,6 +177,19 @@ describe("tFromServer", () => {
     expect(tFromServer(undefined, "Routine could not be applied: disk full"))
       .toBe("Routine could not be applied: disk full");
     expect(tFromServer(undefined, undefined)).toBeUndefined();
+  });
+
+  it("fills the params, and keeps the English when one the template needs is missing", () => {
+    expect(tFromServer("chat.notice.cutOffByRestart", "Scout was cut off by a restart; resuming", { name: "Scout" }))
+      .toBe("Scout was cut off by a restart; resuming");
+    setLocale("pt-br");
+    try {
+      expect(tFromServer("chat.notice.cutOffByRestart", "English", { name: "Scout" })).toBe("Uma reinicialização interrompeu Scout. Retomando.");
+      expect(tFromServer("chat.notice.cutOffByRestart", "English")).toBe("English");
+      expect(tFromServer("chat.notice.cutOffByRestart", "English", { other: "x" })).toBe("English");
+    } finally {
+      setLocale("en");
+    }
   });
 
   it("prefers the catalog over stale text saved with an older card", () => {
@@ -271,5 +299,45 @@ describe("page language", () => {
     vi.stubGlobal("document", undefined);
     expect(setLocale("fr")).toBe("fr");
     expect(t("engines.local")).not.toBe("");
+  });
+});
+
+describe("intlLocale", () => {
+  afterEach(() => {
+    setLocale("en");
+  });
+
+  it("formats in the app language, not the system's", () => {
+    setLocale("pt-br");
+    expect(intlLocale("en-US")).toBe("pt-BR");
+    setLocale("pt");
+    expect(intlLocale("pt-PT")).toBe("pt-BR");
+    setLocale("zh-hant");
+    expect(intlLocale("en-US")).toBe("zh-TW");
+    setLocale("de");
+    expect(intlLocale("ja-JP")).toBe("de");
+    setLocale("en");
+    expect(intlLocale("pt-BR")).toBe("en");
+    expect(intlLocale(undefined)).toBe("en");
+  });
+
+  it("keeps the system region when it speaks the app language", () => {
+    expect(intlLocale("en-GB")).toBe("en-GB");
+    expect(intlLocale("en-gb")).toBe("en-GB");
+    setLocale("de");
+    expect(intlLocale("de-AT")).toBe("de-AT");
+  });
+
+  it("falls back to the app language for a missing, empty or malformed system tag", () => {
+    for (const system of [undefined, "", "en-!", "en--US", "!!"]) {
+      expect(intlLocale(system), String(system)).toBe("en");
+      expect(() => new Intl.DateTimeFormat(intlLocale(system))).not.toThrow();
+    }
+  });
+
+  it("gives Intl a tag it formats in the app language", () => {
+    setLocale("pt-br");
+    expect(new Intl.DateTimeFormat(intlLocale("en-US"), { month: "long", timeZone: "UTC" }).format(Date.UTC(2024, 9, 1))).toBe("outubro");
+    expect(new Intl.NumberFormat(intlLocale("en-US")).format(1440.5)).toBe("1.440,5");
   });
 });

@@ -5,6 +5,7 @@ import { redactSecretsInText } from "../redact.ts";
 import * as fish from "../tts/fish.ts";
 import * as tts from "../tts/index.ts";
 import { toUtterances, VOICE_FIRST_BLOCK_MAX_CHARS } from "../tts/speech-text.ts";
+import { userError, userErrorFields } from "../user-errors.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 /** About six minutes of 16 kHz mono 16-bit PCM. */
@@ -57,7 +58,7 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
       const text = String(body.text ?? "").trim();
       if (!text) return json(res, 400, { error: "text required" });
       // A hard ceiling, so an arbitrary local request cannot turn the hosted voice account into an unbounded billable job.
-      if (text.length > 500) return json(res, 413, { error: "voice utterances are limited to 500 characters" });
+      if (text.length > 500) return json(res, 413, userError("serverError.voice.utteranceTooLong"));
       try {
         const audio = await tts.speak(cfg, text, typeof body.voiceId === "string" ? body.voiceId : undefined);
         res.writeHead(200, {
@@ -82,7 +83,7 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
       const key = cfg.tts?.fishKey;
       if (!key) {
         req.resume();
-        return json(res, 409, { error: "Add a Fish Audio key in Settings → API keys to talk to your bots here." });
+        return json(res, 409, userError("serverError.voice.fishKeyRequired"));
       }
       const declared = Number(req.headers["content-length"] ?? 0);
       if (declared > TRANSCRIBE_MAX_BYTES) {
@@ -104,7 +105,7 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
       try {
         return json(res, 200, { text: await fish.transcribe(audio, mime, key) });
       } catch (e) {
-        return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
+        return json(res, 502, { error: e instanceof Error ? e.message : String(e), ...userErrorFields(e) });
       }
     }
     return PASS;
