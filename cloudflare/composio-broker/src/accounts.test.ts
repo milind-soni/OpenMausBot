@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { accountToolCallRefusal, clearRevokedAccounts, presentAccountGrant, reserveAppLink, revokeAccount, verifyAccountGrant } from "./accounts";
-import { DAY_MS, utcDay, utf8, type InstallationRow } from "./common";
+import { connectedAccountsPageSchema, DAY_MS, utcDay, utf8, type InstallationRow } from "./common";
 import worker, { createSession } from "./index";
 import { adoptSharedUser, shareUser } from "./sharing";
 import { accountGrant, brokerHarness, CLOUD_GRANT_SECRET, cloudGrant, message, type Installation } from "./test-harness";
@@ -627,6 +627,10 @@ describe("a deleted MausBot account", () => {
       { message: "revoked account cleanup skipped another user's sign-ins", skipped: 1 },
     ]);
     for (const id of [theirs, desktop.userId, ACCOUNT]) expect(lines.join("\n")).not.toContain(id);
+  });
+
+  it("still reads a sign-in listing whose item has no user, so no listing breaks for desktops or Clouds", () => {
+    expect(connectedAccountsPageSchema.safeParse({ items: [{ id: "ca_1", user_id: null }], next_cursor: null }).success).toBe(true);
   });
 
   it("finishes deleting a revoked account's sign-ins even when the rest of the hourly run fails", async () => {
