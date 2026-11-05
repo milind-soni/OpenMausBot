@@ -112,6 +112,7 @@ export function createSendblueApi(options: SendblueApiOptions = {}) {
   async function listInbound(packed: string, since: number, signal?: AbortSignal): Promise<ReadResult<SendblueMessage>> {
     const credentials = unpackCredentials(packed);
     if (!credentials) return { ok: false, error: "The saved Sendblue key could not be read. Connect it again." };
+    // shortcut: a full page of received messages sharing one timestamp would be read again forever; page with offset if a line ever gets that busy.
     const query = new URLSearchParams({
       is_outbound: "false", sendblue_number: credentials.number, order_by: "createdAt", order_direction: "asc",
       limit: String(SENDBLUE_PAGE), created_at_gte: new Date(since).toISOString(),
