@@ -37,6 +37,7 @@ import {
 import { LAST_CONVERSATION_KEY } from "@/lib/last-conversation";
 import { cacheDesktopCapabilities, desktopCapabilitiesNow } from "@/lib/desktop";
 import { LAST_BOT_SECTION_KEY } from "@/lib/last-bot-section";
+import { NOTIFICATION_TRAY_PINNED_KEY } from "@/lib/notification-preferences";
 import { transcriptLookups } from "@/lib/transcript-derivations";
 import { openLiveEvents, type LiveEventSourceLike, type LiveEventsPlatform } from "../lib/live-events";
 import type { ModelVariantState, RuntimeEvent } from "../../shared/runtime-events";
@@ -2998,6 +2999,13 @@ describe("restoring the open conversation", () => {
       expect(stored.get(LAST_CONVERSATION_KEY)).toBe("room-1");
     });
 
+    it("the provider restores the notification tray pin remembered on this device (email 1a1a4fb0)", async () => {
+      const { stream } = await boot({ [NOTIFICATION_TRAY_PINNED_KEY]: "1" });
+      stream.send(hello());
+      await settle();
+      expect(seen.notificationsPinned).toBe(true);
+    });
+
     it("the provider remembers a section only while it is expanded", async () => {
       const { stored, stream } = await boot({ [LAST_BOT_SECTION_KEY]: "model" });
       stream.send(hello());
@@ -3136,10 +3144,74 @@ describe("notifications feed", () => {
     expect(state).toMatchObject({ notificationsPinned: true, notificationsOpen: false });
   });
 
-  it("survives a bot switch: select/switchTask never reset it", () => {
-    const withOpen = reducer(initialState, { type: "toggleNotifications", open: true });
-    const afterSwitch = reducer(withOpen, { type: "switchTask", botId: "other-bot", threadId: "other-thread" });
-    expect(afterSwitch.notificationsOpen).toBe(true);
+  it("unpinned, switching chats closes it; pinned, it stays open (email 1a1a4fb0)", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1" };
+    const switches = [
+      { type: "select", id: "other-bot" } as const,
+      { type: "switchTask", botId: "other-bot", threadId: "other-thread" } as const,
+    ];
+    for (const action of switches) expect(reducer(open, action).notificationsOpen).toBe(false);
+    const pinned = reducer(open, { type: "toggleNotificationsPinned" });
+    for (const action of switches) expect(reducer(pinned, action).notificationsOpen).toBe(true);
+    const inRoom = { ...open, selectedId: "room-1", groups: [{ id: "room-1", threadId: "room-t" }] as AppState["groups"] };
+    const roomSwitch = { type: "switchGroupTask", groupId: "room-1", threadId: "room-thread" } as const;
+    expect(reducer(inRoom, roomSwitch).notificationsOpen).toBe(false);
+    expect(reducer({ ...inRoom, notificationsPinned: true }, roomSwitch).notificationsOpen).toBe(true);
+  });
+
+  it("unpinned, a new thread in the room on screen closes it; a background room leaves it", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "room-1",
+      groups: [{ id: "room-1", threadId: "room-t" }] as AppState["groups"] };
+    const action = { type: "newGroupTask", groupId: "room-1" } as const;
+    expect(reducer(open, action).notificationsOpen).toBe(false);
+    expect(reducer({ ...open, notificationsPinned: true }, action).notificationsOpen).toBe(true);
+    expect(reducer({ ...open, selectedId: "bot-1" }, action).notificationsOpen).toBe(true);
+    expect(reducer({ ...open, activeView: "team-map" as const }, action).notificationsOpen).toBe(true);
+  });
+
+  it("a thread switch in a room that is not on screen leaves the tray as it is", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1",
+      groups: [{ id: "room-1", threadId: "room-t" }] as AppState["groups"] };
+    expect(reducer(open, { type: "switchGroupTask", groupId: "room-1", threadId: "room-thread" }).notificationsOpen).toBe(true);
+  });
+
+  it("re-selecting a thread the bot is already switching to leaves the tray as it is", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1",
+      bots: [{ id: "bot-1", threadId: "t-1", switchingTo: "t-2" }] as AppState["bots"] };
+    expect(reducer(open, { type: "switchTask", botId: "bot-1", threadId: "t-2" }).notificationsOpen).toBe(true);
+    expect(reducer(open, { type: "switchTask", botId: "bot-1", threadId: "t-3" }).notificationsOpen).toBe(false);
+  });
+
+  it("re-selecting the open chat or its open thread leaves the tray as it is", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1",
+      bots: [{ id: "bot-1", threadId: "t-1" }] as AppState["bots"], groups: [{ id: "room-1", threadId: "room-t" }] as AppState["groups"] };
+    expect(reducer(open, { type: "select", id: "bot-1" }).notificationsOpen).toBe(true);
+    expect(reducer(open, { type: "switchTask", botId: "bot-1", threadId: "t-1" }).notificationsOpen).toBe(true);
+    expect(reducer({ ...open, selectedId: "room-1" }, { type: "switchGroupTask", groupId: "room-1", threadId: "room-t" }).notificationsOpen).toBe(true);
+    expect(reducer(open, { type: "switchTask", botId: "bot-1", threadId: "t-2" }).notificationsOpen).toBe(false);
+  });
+
+  it("unpinned, re-selecting the open chat from another view closes it", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1", activeView: "team-map" as const,
+      bots: [{ id: "bot-1", threadId: "t-1" }] as AppState["bots"], groups: [{ id: "room-1", threadId: "room-t" }] as AppState["groups"] };
+    expect(reducer(open, { type: "select", id: "bot-1" }).notificationsOpen).toBe(false);
+    expect(reducer({ ...open, selectedId: "room-1" }, { type: "select", id: "room-1" }).notificationsOpen).toBe(false);
+    expect(reducer(open, { type: "switchTask", botId: "bot-1", threadId: "t-1" }).notificationsOpen).toBe(false);
+    expect(reducer({ ...open, notificationsPinned: true }, { type: "select", id: "bot-1" }).notificationsOpen).toBe(true);
+  });
+
+  it("unpinned, starting a new chat closes it", () => {
+    const open = reducer(initialState, { type: "toggleNotifications", open: true });
+    expect(reducer(open, { type: "newTask", botId: "bot-1" }).notificationsOpen).toBe(false);
+  });
+
+  it("unpinned, adding a bot that takes the chat closes it; a background add keeps it", () => {
+    const open = reducer(initialState, { type: "toggleNotifications", open: true });
+    const bot = { id: "bot-new", threadId: "thread-new", name: "New", messages: [] } as never as Bot;
+    expect(reducer(open, { type: "botAdded", bot }).notificationsOpen).toBe(false);
+    expect(reducer(open, { type: "botAdded", bot, preserveSelection: true }).notificationsOpen).toBe(true);
+    const pinned = { ...open, notificationsPinned: true };
+    expect(reducer(pinned, { type: "botAdded", bot }).notificationsOpen).toBe(true);
   });
 
   it("pinned, the feed survives Computer/Inspector/Activity/AppSettings opening", () => {
