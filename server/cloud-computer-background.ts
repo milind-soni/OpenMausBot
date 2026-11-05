@@ -13,6 +13,10 @@ export const STATUS_WAIT_MAX_SECONDS = 60;
 export const STDOUT_TAIL_CHARS = 4_000;
 export const STDERR_TAIL_CHARS = 2_000;
 const POLL_MS = 2_000;
+/** Bounds what a forgotten background server can cost: Boat bills while a computer is on. */
+export const BACKGROUND_KEEPS_AWAKE_MS = 2 * 60 * 60_000;
+const MAX_TRACKED_PER_COMPUTER = 20;
+const AWAKE_CHECK_MS = 20_000;
 const MAX_UTF8_BYTES_PER_UTF16_UNIT = 3;
 const TAIL_BYTES = MAX_UTF8_BYTES_PER_UTF16_UNIT * STDOUT_TAIL_CHARS;
 
@@ -60,6 +64,41 @@ function ranInForeground(body: any): CloudComputerResult {
   }), body.exitCode !== 0);
 }
 
+/** Process ids started on each computer, by box id, with when they started: its idle sleep waits for them. */
+const started = new Map<string, Map<number, number>>();
+
+function track(boxId: string, processId: number): void {
+  const mine = started.get(boxId) ?? new Map<number, number>();
+  mine.set(processId, Date.now());
+  while (mine.size > MAX_TRACKED_PER_COMPUTER) mine.delete(mine.keys().next().value!);
+  started.set(boxId, mine);
+}
+
+function untrack(boxId: string, processId: number): void {
+  const mine = started.get(boxId);
+  mine?.delete(processId);
+  if (mine?.size === 0) started.delete(boxId);
+}
+
+/** An answer that does not say it ended counts as running; BACKGROUND_KEEPS_AWAKE_MS still ends the wait. */
+async function mayStillRun(cfg: AppConfig, boxId: string, processId: number): Promise<boolean> {
+  try {
+    const response = await boatFetch(cfg, `/sandboxes/${boxId}/commands/${processId}?tailBytes=1`, { signal: AbortSignal.timeout(AWAKE_CHECK_MS) });
+    const body: any = await response.json().catch(() => null);
+    return response.status !== 404 && !(response.ok && body?.running === false);
+  } catch {
+    return true;
+  }
+}
+
+export async function backgroundCommandRunning(cfg: AppConfig, boxId: string): Promise<boolean> {
+  for (const [processId, at] of started.get(boxId) ?? []) {
+    if (Date.now() - at < BACKGROUND_KEEPS_AWAKE_MS && await mayStillRun(cfg, boxId, processId)) return true;
+    untrack(boxId, processId);
+  }
+  return false;
+}
+
 export async function startInBackground(cfg: AppConfig, boxId: string, command: string, signal: AbortSignal): Promise<CloudComputerResult> {
   assertBoatNotDeleting(boxId);
   const response = await boatFetch(cfg, `/sandboxes/${boxId}/commands`, {
@@ -73,6 +112,7 @@ export async function startInBackground(cfg: AppConfig, boxId: string, command: 
   const processId = body?.processId;
   if (Number.isInteger(body?.exitCode) && processId === undefined) return ranInForeground(body);
   if (!Number.isSafeInteger(processId) || processId < 1) return text(`The cloud computer did not say which process it started. The command may have started. ${CHECK_BEFORE_RERUN}.`, true);
+  track(boxId, processId);
   return text(JSON.stringify({ processId: processIdOn(boxId, processId), status: "running", next: "It keeps running after this call. Follow it with exec_status." }));
 }
 
@@ -105,6 +145,7 @@ export async function backgroundStatus(
     if (response.status === 404) return text(UNKNOWN_PROCESS, true);
     if (!response.ok) return text(boatErrorMessage(response.status, "Reading the command's status", body, included(cfg)), true);
     if (typeof body?.running !== "boolean") return text("The cloud computer gave an unreadable answer about this command. Call exec_status again.", true);
+    if (!body.running) untrack(boxId, processId);
     if (!body.running || Date.now() + POLL_MS > until) return describeStatus(args.process_id, body);
     await delay(POLL_MS, undefined, { signal });
   }

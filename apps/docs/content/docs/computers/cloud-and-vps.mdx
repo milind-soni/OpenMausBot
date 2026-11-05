@@ -34,10 +34,11 @@ A bot's `exec` call waits for its command to finish, so a long one (a big
 download, a build, a data job) can run out of time while it keeps going on the
 Boat. For those, the bot starts the command with `background: true`, which
 answers at once with a process id, and follows it with `exec_status`, which shows
-whether it is still running, its exit code and the end of its output. When a
-plain `exec` runs out of time, the bot is told the command may still be running,
-so it checks instead of starting a second copy. This works with your own Boat key
-and with the cloud computers included in a Cloud plan.
+whether it is still running, its exit code and the end of its output. The Boat
+doesn't go to sleep while a background command runs, for up to two hours after it
+started. When a plain `exec` runs out of time, the bot is told the command may
+still be running, so it checks instead of starting a second copy. This works with
+your own Boat key and with the cloud computers included in a Cloud plan.
 
 ## Bring your own VPS
 

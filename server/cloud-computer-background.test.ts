@@ -1,6 +1,6 @@
 // One loopback stub plays Boat (/boat/api/v1, sandboxes) and the Admin's included-Boat relay (/relay/api/box/v1, boxes).
 import { createServer, type Server } from "node:http";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "./config.ts";
 
 const BOX = "bx_23456789", OTHER_BOX = "bx_3456789a";
@@ -17,6 +17,7 @@ let nextProcessId = 41;
 let hold = false;
 let syncReply: Record<string, unknown> = { exitCode: 0, stdout: "done", stderr: "" };
 let startReply: { status: number; body: unknown } | undefined;
+let statusReply: { status: number; body: unknown } | undefined;
 
 beforeAll(async () => {
   server = createServer(async (req, res) => {
@@ -38,6 +39,7 @@ beforeAll(async () => {
     }
     if (req.method === "GET" && pid) {
       if (hold) return;
+      if (statusReply) return send(statusReply.status, statusReply.body);
       const process = processes.get(`${box}:${pid}`);
       if (!process) return send(404, { ok: false, code: "not_found", message: "No such process." });
       const running = process.polls++ < process.runningFor;
@@ -56,7 +58,7 @@ beforeAll(async () => {
 });
 afterAll(async () => { vi.unstubAllEnvs(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
 beforeEach(() => {
-  calls.length = 0; processes.clear(); hold = false; startReply = undefined;
+  calls.length = 0; processes.clear(); hold = false; startReply = undefined; statusReply = undefined;
   syncReply = { exitCode: 0, stdout: "done", stderr: "" };
 });
 
@@ -199,6 +201,50 @@ describe.each([
     startReply = { status: 200, body: { ok: true } };
     expect((await call("exec", { command: "make all", background: true }).done).content[0].text).toContain("did not say which process it started");
     expect(calls.filter(entry => entry.method === "POST")).toHaveLength(2);
+  });
+
+  describe("keeping the computer awake", () => {
+    /** Commands earlier tests left behind are gone from the fake, so this first check forgets them. */
+    beforeEach(async () => {
+      await background.backgroundCommandRunning(cfg, BOX);
+      await background.backgroundCommandRunning(cfg, OTHER_BOX);
+      calls.length = 0;
+    });
+    afterEach(() => { vi.restoreAllMocks(); });
+
+    it("while a background command runs, and not once it has ended", async () => {
+      const processId = await start();
+      processes.get(`${BOX}:${processId.split("-")[1]}`)!.runningFor = 2;
+      expect(await background.backgroundCommandRunning(cfg, BOX)).toBe(true);
+      expect(await background.backgroundCommandRunning(cfg, BOX)).toBe(true);
+      expect(await background.backgroundCommandRunning(cfg, OTHER_BOX)).toBe(false);
+      expect(await background.backgroundCommandRunning(cfg, BOX)).toBe(false);
+      const reads = calls.filter(entry => entry.method === "GET");
+      expect(reads.map(entry => [entry.path, entry.query, entry.authorization])).toEqual(Array(3).fill([`${root}/${BOX}/commands/${processId.split("-")[1]}`, "?tailBytes=1", authorization]));
+      calls.length = 0;
+      expect(await background.backgroundCommandRunning(cfg, BOX)).toBe(false);
+      expect(calls).toEqual([]);
+    });
+
+    it("not after exec_status saw the command end", async () => {
+      const processId = await start();
+      processes.get(`${BOX}:${processId.split("-")[1]}`)!.runningFor = 0;
+      expect(json(await call("exec_status", { process_id: processId }).done)).toMatchObject({ status: "finished" });
+      calls.length = 0;
+      expect(await background.backgroundCommandRunning(cfg, BOX)).toBe(false);
+      expect(calls).toEqual([]);
+    });
+
+    it("while the computer cannot say, but never past the cap", async () => {
+      await start();
+      statusReply = { status: 503, body: { ok: false, message: "unavailable" } };
+      expect(await background.backgroundCommandRunning(cfg, BOX)).toBe(true);
+      const now = Date.now();
+      vi.spyOn(Date, "now").mockReturnValue(now + background.BACKGROUND_KEEPS_AWAKE_MS);
+      calls.length = 0;
+      expect(await background.backgroundCommandRunning(cfg, BOX)).toBe(false);
+      expect(calls).toEqual([]);
+    });
   });
 
   it("tells the bot a plain exec that ran out of time may still be running, and not to repeat it blindly", async () => {
