@@ -10,6 +10,7 @@ import {
   IMAGE as CUA_IMAGE,
   cuaExecArgs,
   dockerSecurityIsHardened,
+  imageBuildArgs,
   imageLabelsMatch,
   managedImageDockerfile,
   wholeScreenshot,
@@ -896,7 +897,7 @@ function assertUsableContainer(status: VpsComputerStatus) {
 
 async function prepareVpsImage(alias: string, runner: VpsCommandRunner) {
   await runner(vpsDockerArgs(alias, ["pull", BASE_IMAGE]), { timeoutMs: 10 * 60_000 });
-  await runner(vpsDockerArgs(alias, ["build", "-t", VPS_IMAGE, "-"]), {
+  await runner(vpsDockerArgs(alias, imageBuildArgs("docker", VPS_IMAGE, "-")), {
     input: managedImageDockerfile(),
     timeoutMs: 10 * 60_000,
   });
