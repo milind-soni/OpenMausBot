@@ -7,6 +7,13 @@ import {
   instanceSettingsSchema,
   newClaudeAccount,
 } from "../claude-accounts.ts";
+import {
+  claudeEndpointSchema,
+  claudeEndpointUpdateSchema,
+  newClaudeEndpoint,
+  updateClaudeEndpoint,
+  withClaudeEndpointInfo,
+} from "../claude-endpoints.ts";
 import { updateClaudeCli } from "../claude-update.ts";
 import { persistableInstanceConfigs, saveConfig, withInstanceCli, type AppConfig } from "../config.ts";
 import { addEndpoint, addEndpointSchema, isAddedEndpoint, withEndpointUrls } from "../openai-compat-endpoints.ts";
@@ -53,7 +60,8 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
     persistProviderInstance, configStatus, broadcast, testCliBinary, cliProbeEnvironment, threadBusy,
     botForThread, activeGroupTurnForBot,
   } = deps;
-  const describeInstances = async () => hostedModels ? deps.describeInstances() : withEndpointUrls(await deps.describeInstances(), cfg.instances ?? {});
+  const describeInstances = async () => hostedModels ? deps.describeInstances()
+    : withEndpointUrls(withClaudeEndpointInfo(await deps.describeInstances(), cfg.instances ?? {}), cfg.instances ?? {});
   /** Bots, their backups and threads, the new-bot default, or a turn running on it: a provider in use can't go away. */
   const providerInUse = (instanceId: string): boolean => cfg.defaultModelSelection?.instanceId === instanceId || store.bots.some((bot) =>
     bot.modelSelection.instanceId === instanceId || bot.fallback?.some(candidate => candidate.instanceId === instanceId) || store.tasks(bot.id).some((task) => task.modelSelection?.instanceId === instanceId)) ||
@@ -159,6 +167,51 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         await persistProviderInstance(added.instanceId, instances);
         return json(res, 201, { instanceId: added.instanceId, instances: await describeInstances() });
       } finally { providerConfigBusy.set(false); }
+    }
+
+    if (method === "POST" && path === "/api/instances/claude-endpoint") {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      const parsed = claudeEndpointSchema.safeParse(await readBody(req, 16384));
+      if (!parsed.success) return json(res, 400, { error: "Enter a name, an http(s) base URL, a token and the model the endpoint serves." });
+      if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
+      providerConfigBusy.set(true);
+      try {
+        const { instanceId, instances } = newClaudeEndpoint(cfg, parsed.data);
+        await persistProviderInstance(instanceId, instances);
+        return json(res, 201, { instanceId, instances: await describeInstances() });
+      } catch (error) {
+        const status = (error as { status?: unknown }).status;
+        return json(res, typeof status === "number" ? status : 400, { error: error instanceof Error ? error.message : String(error) });
+      } finally { providerConfigBusy.set(false); }
+    }
+
+    const endpointPatch = /^\/api\/instances\/([\w.-]+)\/claude-endpoint$/.exec(path);
+    if (method === "PATCH" && endpointPatch) {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      const instanceId = endpointPatch[1];
+      const parsed = claudeEndpointUpdateSchema.safeParse(await readBody(req, 16384));
+      if (!parsed.success) return json(res, 400, { error: "Check the address, token and model ids." });
+      if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
+      if (busyProviderSelections().some((selection) => selection.instanceId === instanceId)) {
+        return json(res, 409, { error: "Wait for bots using this endpoint to finish before changing its settings." });
+      }
+      providerConfigBusy.set(true);
+      providerInstancesChanging.add(instanceId);
+      try {
+        const { instances } = updateClaudeEndpoint(cfg, instanceId, parsed.data);
+        await persistProviderInstance(instanceId, instances);
+        return json(res, 200, { instances: await describeInstances() });
+      } catch (error) {
+        const status = (error as { status?: unknown }).status;
+        return json(res, typeof status === "number" ? status : 400, { error: error instanceof Error ? error.message : String(error) });
+      } finally {
+        providerInstancesChanging.delete(instanceId);
+        providerConfigBusy.set(false);
+      }
     }
 
     if (method === "POST" && path === "/api/instances/claude-accounts") {

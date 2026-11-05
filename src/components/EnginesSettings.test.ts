@@ -455,3 +455,29 @@ describe("Settings → AI in Simple mode", () => {
     expect(simple(true)).toContain('data-engine-card="kimi"');
   });
 });
+
+describe("Settings → Engines → custom Claude endpoints", () => {
+  const hostedClaude = (): InstanceInfo => ({
+    instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", readOnly: true,
+    snapshot: { state: "available", authenticated: true }, models: { default: "claude-sonnet-5", options: [] },
+  });
+
+  it("leaves the endpoint section out of a hosted workspace, which refuses instance changes", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.instances = [hostedClaude()];
+    fixture.bots = [];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("data-claude-endpoints");
+  });
+
+  it("offers the endpoint section while Claude is not listed on this computer", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.instances = [{
+      instanceId: "codex", driverKind: "codexAgent", displayName: "Codex", cliDefault: "codex",
+      snapshot: { state: "available", authenticated: true }, models: { default: "model", options: [] },
+    }];
+    fixture.bots = [];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain("data-claude-endpoints");
+  });
+});
