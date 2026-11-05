@@ -1,45 +1,17 @@
-import { createHash, webcrypto } from "node:crypto";
-
-import {
-  Aes256Gcm,
-  CipherSuite,
-  DhkemP256HkdfSha256,
-  HkdfSha256,
-} from "@hpke/core";
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  PHONE_SECRET_INFO,
   PhoneSecretBridge,
   PhoneSecretError,
   PhoneSecretSubmissionRegistry,
   assertPhoneSecretRequestMatches,
+  phoneMoveKeyAAD,
   phoneSecretAAD,
   phoneSecretOperationId,
+  sealedOperationId,
   type PhoneSecretContext,
 } from "./phone-secret.ts";
-
-const suite = new CipherSuite({
-  kem: new DhkemP256HkdfSha256(),
-  kdf: new HkdfSha256(),
-  aead: new Aes256Gcm(),
-});
-
-async function keyMaterial() {
-  const pair = await webcrypto.subtle.generateKey(
-    { name: "ECDH", namedCurve: "P-256" },
-    true,
-    ["deriveBits"],
-  );
-  const raw = Buffer.from(await webcrypto.subtle.exportKey("raw", pair.publicKey));
-  const privateKey = await webcrypto.subtle.exportKey("jwk", pair.privateKey);
-  const keyId = createHash("sha256").update(raw).digest().subarray(0, 16).toString("base64url");
-  return {
-    publicKey: await suite.kem.deserializePublicKey(raw),
-    message: { type: "openmausbot:phone-secret-key", version: 1, keyId, privateKey },
-    keyId,
-  };
-}
+import { keyMaterial, seal } from "./testing/phone-secret-seal.ts";
 
 const baseContext = (keyId: string): Omit<PhoneSecretContext, "encapsulatedKey" | "ciphertext"> => ({
   version: 1,
@@ -52,21 +24,21 @@ const baseContext = (keyId: string): Omit<PhoneSecretContext, "encapsulatedKey" 
   requestKey: "credential-request-1",
 });
 
-async function seal(
-  context: Omit<PhoneSecretContext, "encapsulatedKey" | "ciphertext">,
-  publicKey: CryptoKey,
-  value = "elevenlabs-secret",
-): Promise<PhoneSecretContext> {
-  const encrypted = await suite.seal(
-    { recipientPublicKey: publicKey, info: new TextEncoder().encode(PHONE_SECRET_INFO) },
-    new TextEncoder().encode(value),
-    phoneSecretAAD(context),
-  );
-  return {
-    ...context,
-    encapsulatedKey: Buffer.from(encrypted.enc).toString("base64url"),
-    ciphertext: Buffer.from(encrypted.ct).toString("base64url"),
-  };
+const sealCard = (context: Omit<PhoneSecretContext, "encapsulatedKey" | "ciphertext">, publicKey: CryptoKey, value?: string) =>
+  seal(context, phoneSecretAAD(context), publicKey, value);
+
+const moveKey = (keyId: string) => ({ version: 1 as const, keyId, deviceId: "phone-1", target: "anthropicApiKey", requestKey: "move-key-1" });
+
+function answeringBridge(result: { ok: boolean; error?: string } = { ok: true }) {
+  let bridge!: PhoneSecretBridge;
+  const sent: unknown[] = [];
+  const send = vi.fn((message: { requestId: string }) => {
+    sent.push(message);
+    queueMicrotask(() => bridge.receive({ type: "openmausbot:phone-secret-save-result", requestId: message.requestId, ...result }));
+    return true;
+  });
+  bridge = new PhoneSecretBridge(send, 200);
+  return { bridge, send, sent };
 }
 
 describe("PhoneSecretBridge", () => {
@@ -115,7 +87,7 @@ describe("PhoneSecretBridge", () => {
     const send = vi.fn(() => true);
     const bridge = new PhoneSecretBridge(send, 50);
     bridge.receive(material.message);
-    const envelope = await seal({ ...baseContext(material.keyId), target: "customSecret" }, material.publicKey, "sk_live_phone_canary");
+    const envelope = await sealCard({ ...baseContext(material.keyId), target: "customSecret" }, material.publicKey, "sk_live_phone_canary");
     await expect(bridge.open(envelope)).resolves.toBe("sk_live_phone_canary");
     await expect(bridge.open({ ...envelope, messageId: "message-2" })).rejects.toMatchObject({ message: "The encrypted credential could not be verified" });
     expect(send).not.toHaveBeenCalled();
@@ -137,7 +109,7 @@ describe("PhoneSecretBridge", () => {
     bridge = new PhoneSecretBridge(send, 200);
     expect(bridge.receive(material.message)).toBe(true);
 
-    await expect(bridge.provide(await seal(baseContext(material.keyId), material.publicKey))).resolves.toBeUndefined();
+    await expect(bridge.provide(await sealCard(baseContext(material.keyId), material.publicKey))).resolves.toBeUndefined();
     expect(send).toHaveBeenCalledTimes(1);
   });
 
@@ -146,7 +118,7 @@ describe("PhoneSecretBridge", () => {
     const send = vi.fn(() => true);
     const bridge = new PhoneSecretBridge(send, 50);
     bridge.receive(material.message);
-    const envelope = await seal(baseContext(material.keyId), material.publicKey);
+    const envelope = await sealCard(baseContext(material.keyId), material.publicKey);
 
     await expect(bridge.provide({ ...envelope, botId: "another-bot" })).rejects.toMatchObject({
       message: "The encrypted credential could not be verified",
@@ -158,7 +130,7 @@ describe("PhoneSecretBridge", () => {
     const material = await keyMaterial();
     const bridge = new PhoneSecretBridge(() => true, 50);
     bridge.receive(material.message);
-    const envelope = await seal(baseContext(material.keyId), material.publicKey);
+    const envelope = await sealCard(baseContext(material.keyId), material.publicKey);
 
     await expect(bridge.provide({
       ...envelope,
@@ -208,7 +180,7 @@ describe("PhoneSecretBridge", () => {
     }, 200);
     bridge.receive(material.message);
 
-    await expect(bridge.provide(await seal(baseContext(material.keyId), material.publicKey))).rejects.toMatchObject({
+    await expect(bridge.provide(await sealCard(baseContext(material.keyId), material.publicKey))).rejects.toMatchObject({
       status: 503,
       message: "The operating-system credential store is unavailable",
     });
@@ -216,7 +188,7 @@ describe("PhoneSecretBridge", () => {
 
   it("bounds the entire decrypt-and-save operation under concurrent load", async () => {
     const material = await keyMaterial();
-    const envelope = await seal(baseContext(material.keyId), material.publicKey);
+    const envelope = await sealCard(baseContext(material.keyId), material.publicKey);
     let markStarted!: () => void;
     const started = new Promise<void>((resolve) => { markStarted = resolve; });
     let firstRequestId = "";
@@ -236,6 +208,43 @@ describe("PhoneSecretBridge", () => {
       ok: true,
     });
     await expect(first).resolves.toBeUndefined();
+  });
+
+  it("opens a move key sealed for this computer and the paired phone, and saves it through the private parent", async () => {
+    const material = await keyMaterial();
+    const { bridge, sent } = answeringBridge();
+    bridge.receive(material.message);
+    const aad = phoneMoveKeyAAD(moveKey(material.keyId));
+    const envelope = await seal(moveKey(material.keyId), aad, material.publicKey, "sk-ant-fake-123");
+
+    await expect(bridge.provideMoveKey(envelope)).resolves.toBeUndefined();
+    expect(sent).toEqual([{ type: "openmausbot:phone-secret-save", requestId: sealedOperationId(aad, envelope), target: "anthropicApiKey", value: "sk-ant-fake-123" }]);
+  });
+
+  it("never opens a card's envelope as a move key, nor a move key as a card", async () => {
+    const material = await keyMaterial();
+    const { bridge, send } = answeringBridge();
+    bridge.receive(material.message);
+    const card = { ...baseContext(material.keyId), deviceId: "phone-1", target: "anthropicApiKey", requestKey: "move-key-1" };
+    const cardEnvelope = await sealCard(card, material.publicKey, "sk-ant-fake-123");
+    const moveEnvelope = await seal(moveKey(material.keyId), phoneMoveKeyAAD(moveKey(material.keyId)), material.publicKey, "sk-ant-fake-123");
+
+    await expect(bridge.provideMoveKey(cardEnvelope)).rejects.toMatchObject({ message: "The encrypted credential could not be verified" });
+    await expect(bridge.provide({ ...card, ...moveEnvelope })).rejects.toMatchObject({ message: "The encrypted credential could not be verified" });
+    await expect(bridge.open({ ...card, ...moveEnvelope })).rejects.toMatchObject({ message: "The encrypted credential could not be verified" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("never carries a key back in a refusal from the private store", async () => {
+    const material = await keyMaterial();
+    const { bridge } = answeringBridge({ ok: false, error: "The provider refused sk-ant-fake-123" });
+    bridge.receive(material.message);
+    const envelope = await seal(moveKey(material.keyId), phoneMoveKeyAAD(moveKey(material.keyId)), material.publicKey, "sk-ant-fake-123");
+
+    const refusal = await bridge.provideMoveKey(envelope).catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(PhoneSecretError);
+    expect(refusal).toMatchObject({ status: 503, message: "The credential could not be saved" });
+    expect(String((refusal as Error).stack)).not.toContain("sk-ant-fake-123");
   });
 });
 
@@ -289,11 +298,35 @@ describe("phoneSecretAAD", () => {
 
   it("gives an exact encrypted retry one stable desktop operation id", async () => {
     const material = await keyMaterial();
-    const envelope = await seal(baseContext(material.keyId), material.publicKey);
+    const envelope = await sealCard(baseContext(material.keyId), material.publicKey);
     const operationId = phoneSecretOperationId(envelope);
     expect(operationId).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(phoneSecretOperationId({ ...envelope })).toBe(operationId);
     expect(phoneSecretOperationId({
+      ...envelope,
+      ciphertext: `${envelope.ciphertext.slice(0, -1)}${envelope.ciphertext.endsWith("A") ? "B" : "A"}`,
+    })).not.toBe(operationId);
+  });
+
+  it("keeps a card's desktop operation id byte for byte", () => {
+    expect(phoneSecretOperationId({ ...baseContext("AAAAAAAAAAAAAAAAAAAAAA"), encapsulatedKey: "B".repeat(87), ciphertext: "C".repeat(24) }))
+      .toBe("m35wsJAwFx1uQvjB8m4Aa-HSXbOrMlL5RPXCBX-lFk0");
+  });
+
+  it("has the exact stable cross-platform move-key serialization", () => {
+    expect(new TextDecoder().decode(phoneMoveKeyAAD(moveKey("AAAAAAAAAAAAAAAAAAAAAA"))))
+      .toBe(["openmausbot-phone-move-key-v1", "AAAAAAAAAAAAAAAAAAAAAA", "phone-1", "anthropicApiKey", "move-key-1"].join("\n"));
+    expect(() => phoneMoveKeyAAD({ ...moveKey("AAAAAAAAAAAAAAAAAAAAAA"), deviceId: "phone\n1" })).toThrow("The credential request metadata is invalid");
+  });
+
+  it("gives a move key's exact retry one stable desktop operation id", async () => {
+    const material = await keyMaterial();
+    const aad = phoneMoveKeyAAD(moveKey(material.keyId));
+    const envelope = await seal(moveKey(material.keyId), aad, material.publicKey, "sk-ant-fake-123");
+    const operationId = sealedOperationId(aad, envelope);
+    expect(operationId).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(sealedOperationId(aad, { ...envelope })).toBe(operationId);
+    expect(sealedOperationId(aad, {
       ...envelope,
       ciphertext: `${envelope.ciphertext.slice(0, -1)}${envelope.ciphertext.endsWith("A") ? "B" : "A"}`,
     })).not.toBe(operationId);

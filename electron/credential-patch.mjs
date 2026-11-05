@@ -17,6 +17,19 @@ export const CREDENTIAL_PATCH = {
   postizApiKey: (value) => ({ postiz: { key: value } }),
 };
 
+// AI provider keys live in the server's config, as Settings → Keys saves them, never in the encrypted credential store.
+export const PROVIDER_KEY_PATCH = {
+  openaiApiKey: (value) => ({ openai: { key: value } }),
+  anthropicApiKey: (value) => ({ anthropic: { key: value, everyClaudeBot: false } }),
+  openrouterApiKey: (value) => ({ openrouter: { key: value } }),
+  mistralApiKey: (value) => ({ mistral: { key: value } }),
+  cerebrasApiKey: (value) => ({ cerebras: { key: value } }),
+  groqApiKey: (value) => ({ groq: { key: value } }),
+  greenferenceApiKey: (value) => ({ greenference: { key: value } }),
+  metaApiKey: (value) => ({ meta: { key: value } }),
+  deepseekApiKey: (value) => ({ deepseek: { key: value } }),
+};
+
 /** Electron 43's ipcMain.handle sends a thrown error to the page as its toString(), so a key the provider refused travels as its name. */
 export function credentialSaveError(status, body) {
   const error = new Error(body?.error || `Could not save credential (HTTP ${status})`);
