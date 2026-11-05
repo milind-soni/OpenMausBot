@@ -7,10 +7,15 @@
 export const PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE = 4503;
 export const PREVIEW_STREAM_TAB_GONE_CODE = 4404;
 
-export interface PreviewStreamHostSetup {
-  readonly need: "sandbox" | "libraries";
-  readonly command: string;
-}
+/** A sandbox has no command to run, only steps for an administrator; missing libraries have one. */
+export type PreviewStreamHostSetup =
+  | { readonly need: "sandbox" }
+  | { readonly need: "libraries"; readonly command: string };
+
+/** The server's LIBRARIES_COMMAND and SANDBOX_STEPS_URL: a close reason is too short to carry the link. */
+export const PREVIEW_STREAM_LIBRARIES_COMMAND = "sudo openmausbot browser install --with-deps";
+export const PREVIEW_STREAM_SANDBOX_STEPS_URL =
+  "https://github.com/milind-soni/OpenMausBot/blob/main/docs/deploy-vps.md#ubuntu-2404-browser-sandbox";
 
 export type PreviewViewportSetting =
   | { readonly mode: "fill" }
@@ -532,22 +537,17 @@ export function createPreviewFramePainter(
   };
 }
 
-/** A malformed reason still stops the viewer and offers the usual command. */
+/** A malformed reason still stops the viewer, with the sandbox steps. */
 const decodeHostSetup = (reason: string): PreviewStreamHostSetup => {
   try {
-    const value = JSON.parse(reason) as Partial<PreviewStreamHostSetup>;
-    if (
-      (value.need === "sandbox" || value.need === "libraries") &&
-      typeof value.command === "string"
-    ) {
-      return { need: value.need, command: value.command };
-    }
+    // An older server's command for either need was `openmausbot browser setup`, which never existed.
+    if ((JSON.parse(reason) as { need?: unknown }).need === "libraries") return { need: "libraries", command: PREVIEW_STREAM_LIBRARIES_COMMAND };
   } catch {}
-  return { need: "sandbox", command: "sudo openmausbot browser setup" };
+  return { need: "sandbox" };
 };
 
-/** What a viewer tells the person; `command` is shown beside it, ready to copy. */
+/** What a viewer tells the person; beside it, the libraries `command` ready to copy or a link to the sandbox steps. */
 export const previewStreamHostSetupMessage = (setup: PreviewStreamHostSetup) =>
   setup.need === "sandbox"
-    ? "This server's host blocks the sandbox its browser runs in. Run this once on the host, then try again:"
+    ? "This server's host blocks the sandbox its browser runs in. An administrator can allow it for one copy of Chrome with these steps, then try again:"
     : "This server's host is missing libraries its browser needs. Run this once on the host, then try again:";

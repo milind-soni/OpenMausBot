@@ -104,6 +104,10 @@ export interface CloudSendPageBridge {
   teams?(): Promise<{ teams: Array<{ id: string; name: string; ready: boolean }> }>;
   /** Moves one bot into one of those teams (a real click). */
   moveToTeam?(botId: string, teamId: string, name: string): Promise<import("./team-move.mjs").TeamMoveView | null>;
+  /** A team's own page: the bots its person has on My Cloud, and one moved in once they agree in main's own confirm. */
+  teamBring?(): Promise<{ team?: { id: string; name: string; ready: boolean }; bots: Array<{ id: string; name: string; stays?: "default" | "chief" | "last" }> }>;
+  teamBringMove?(botId: string): Promise<{ started: boolean; move: import("./team-move.mjs").TeamMoveView | null }>;
+  teamBringStatus?(): Promise<import("./team-move.mjs").TeamMoveView | null>;
   teamRetry?(): Promise<import("./team-move.mjs").TeamMoveView | null>;
   /** Shows that team's page, where the bot now lives. */
   openTeam?(teamId: string): Promise<void>;

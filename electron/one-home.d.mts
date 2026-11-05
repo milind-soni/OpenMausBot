@@ -4,6 +4,8 @@ export type OneHomeView = OneHomePhase & { place?: string };
 /** Something a move could not carry, by its name, and why. */
 export type OneHomeNotCarried = { label: string; error: string };
 export type OneHomeFailing = { error: string | null; items?: OneHomeNotCarried[] };
+/** A connector that stayed on this computer. */
+export type OneHomeStayed = { name: string; needs?: string };
 type OneHomePhase =
   /** `chats`: conversations gone of those to go; `failing`: it has failed for a day, or its check found things missing pass
    * after pass, with why and what did not go; `updating`: My Cloud is too old
@@ -13,8 +15,8 @@ type OneHomePhase =
    * neither while it waits for a quiet moment or has not asked yet. */
   | { phase: "wait"; waitingFor?: string; waitingWhat?: "bot" | "room" | "sign-in"; failing?: OneHomeFailing }
   | { phase: "finishing"; failing?: OneHomeFailing }
-  /** What arrived, checked on both sides; `at`: when the move was done; `phone`: a phone was paired with this computer; `held`: keys a trial's Cloud keeps unused while its Claude credit lasts; `left`: what My Cloud refused for good, which stayed where it was. */
-  | { phase: "done"; at?: number; counts?: OneHomeCounts; phone: boolean; held: string[]; left?: OneHomeNotCarried[] }
+  /** What arrived, checked on both sides; `at`: when the move was done; `phone`: a phone was paired with this computer; `held`: keys a trial's Cloud keeps unused while its Claude credit lasts; `left`: what My Cloud refused for good, which stayed where it was; `stayed`: connectors that work only on this computer (`needs`: a program My Cloud lacks). */
+  | { phase: "done"; at?: number; counts?: OneHomeCounts; phone: boolean; held: string[]; left?: OneHomeNotCarried[]; stayed?: OneHomeStayed[] }
   /** This computer's bots are on their way home from a My Cloud that goes on, because the person keeps them here;
    * `updating`: My Cloud is too old to stop their automations and updates first. */
   | { phase: "keeping"; updating?: true }
@@ -108,6 +110,8 @@ export function createOneHome(deps: {
   away(): boolean;
   /** A move or a send under way that restarting this app would cut into. */
   busy(): boolean;
+  /** The move of the account signed in is past where it can stop by itself: that account can't be left for a moment. */
+  moving(): boolean;
   keeps(): boolean;
   /** Throws once this computer's bots are on their way home past turning back and `on` is false. */
   keep(on: boolean): Promise<void>;

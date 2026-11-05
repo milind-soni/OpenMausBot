@@ -7,7 +7,7 @@ import { appBlockedText } from "../../../shared/app";
 import { APP_FRAME_LIMITS } from "../../../shared/app-frame/bridge";
 import { AppDocumentError, fetchAppDocument, type AppFetchFailure } from "./app-api";
 import { APP_POOL_LIMITS, useAppPoolSlot, type AppPool } from "./app-pool";
-import { AppHeader, AppInfo, AppOpenButton, AppPlaceholder, AppStrip, APP_SURFACE } from "./AppChrome";
+import { AppDone, AppHeader, AppInfo, AppOpenButton, AppPlaceholder, AppStrip, APP_SURFACE } from "./AppChrome";
 import { AppFrame, type AppFrameHandle, type AppFrameProblem } from "./AppFrame";
 import { PAGE_HEIGHT, PageFullScreen, PageNotes, PageToolbar, usePagePoint, usePageShare, usePageVersion } from "./PageTools";
 
@@ -253,6 +253,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
           </div>
         )}
         {body}
+        {payload.done && <AppDone done={payload.done} bordered={bordered} />}
         {strip && <AppStrip text={strip.text} action={strip.action} bordered={bordered} />}
       </div>
       {page && fullScreen && current && (

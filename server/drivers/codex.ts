@@ -1,6 +1,8 @@
 import { codexToolSurfaceArgs } from "./codex-tool-surface.ts";
 import { codexShellDisabled, GUEST_CONFINED_CODEX_ARGS } from "./codex-guest.ts";
 import { TEAM_TOOLS_FAILED, teamToolsFailed } from "./team-tools.ts";
+import { enabledMcpMounts, mcpStartupTracker, supportsMcpStartup } from "./codex-mcp-startup.ts";
+import { type McpApprovalMode, mountMcpServer } from "./codex-mcp-mount.ts";
 import { reportUnsupportedCalls, rolloutMark, type RolloutMark } from "./codex-unsupported-calls.ts";
 // The `codex` CLI headless over its app-server JSON-RPC (NDJSON on stdio): completion is
 // `turn/completed`, approvals arrive as server→client requests, resumeCursor is the codex thread id.
@@ -17,7 +19,7 @@ import { cloudHomeConfigured } from "../cloud-home.ts";
 import { serverVersion } from "../environment.ts";
 import { ChatGptPlanAuthController } from "./chatgpt-plan-auth.ts";
 import { captureCliTree, cliVersionReader, describeSpawnFailure, execCli, killCliTree, spawnCli, waitForExit } from "../procs.ts";
-import { codexLaunch, codexLaunchesStarting, codexLaunchSlot, codexRpcTimeoutMs, keepStopping, RELAUNCH_EXIT_WAIT_MS, spawnHoldingSlot, tomlInlineTable, tryCodexLaunchSlot } from "./codex-process.ts";
+import { codexLaunch, codexLaunchesStarting, codexLaunchSlot, codexRpcTimeoutMs, keepStopping, RELAUNCH_EXIT_WAIT_MS, spawnHoldingSlot, tryCodexLaunchSlot } from "./codex-process.ts";
 import { isReservedMcpEnvEntry } from "../mcp-registry.ts";
 
 import type {
@@ -342,34 +344,6 @@ export function codexNativeIncomingLogMessage(
   return withoutInlineImages(message);
 }
 
-/** Codex's default for one MCP server's tools (openai/codex#17843): "auto"
- * runs without asking only tools the server marks read-only, "approve" runs
- * every tool without asking, "prompt" asks for each call. */
-type McpApprovalMode = "approve" | "auto" | "prompt";
-
-function mountMcpServer(
-  appServerArgs: string[],
-  env: Record<string, string | undefined>,
-  name: string,
-  server: StdioMcpSpec,
-  approval: McpApprovalMode = "auto",
-  /** Written into the mount's own `env` table: its process gets them, Codex's command shell does not. */
-  literalEnv: Record<string, string> = {},
-  written: Set<string> = new Set(),
-): void {
-  const prefix = `mcp_servers.${name}`;
-  Object.assign(env, server.env);
-  for (const name of Object.keys(server.env)) written.add(name);
-  appServerArgs.push(
-    "-c", `${prefix}.command=${JSON.stringify(server.command)}`,
-    "-c", `${prefix}.args=${JSON.stringify(server.args)}`,
-    // argv carries names only, so credentials never appear in process listings.
-    "-c", `${prefix}.env_vars=${JSON.stringify(Object.keys(server.env))}`,
-  );
-  if (Object.keys(literalEnv).length) appServerArgs.push("-c", `${prefix}.env=${tomlInlineTable(literalEnv)}`);
-  if (approval !== "prompt") appServerArgs.push("-c", `${prefix}.default_tools_approval_mode="${approval}"`);
-}
-
 export const CodexDriver: ProviderDriver<CodexConfig> = {
   driverKind: DRIVER_KIND,
   metadata: { displayName: "Codex", supportsMultipleInstances: true },
@@ -569,7 +543,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         decodeCodexSelection(turn.model || models.default).modelProvider === OFFICIAL_CODEX_PROVIDER;
       const route: CodexRoute = plan ? "plan" : chatgptTurn ? "own" : "other";
       const hideRefusedModel = (raw: string) => hidePlanRefusedModel(turn.model, raw, route);
-      const signedOut = chatgptTurn && await loginCheck(childEnv()) === "missing";
+      const signedOut = chatgptTurn && await loginCheck.check(childEnv()) === "missing";
       assertPlanCurrent();
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
       const turnId = newId();
@@ -610,6 +584,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const selectedMcp = new Map<string, StdioMcpSpec>();
         const selectedApprovals = new Map<string, McpApprovalMode>();
         const directoryMounts = new Set<string>();
+        const directMounts: string[] = [];
         const literalEnvs = new Map<string, Record<string, string>>();
         const scopedServer = (name: string, mountName: string, server: McpServerSpec): StdioMcpSpec | null => {
           if (!canUseMcpServer(turn.toolScope, name)) return null;
@@ -656,7 +631,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (turn.integrations?.browser) {
           mountSelected("browser", "browser", turn.integrations.browser);
         }
-        for (const name of ["data", "highlevel", "device"] as const) if (turn.integrations?.[name]) mountSelected(name, name, turn.integrations[name]);
+        for (const name of ["data", "highlevel", "email", "device"] as const) if (turn.integrations?.[name]) mountSelected(name, name, turn.integrations[name]);
         // A `-c` override merges with a same-named server in config.toml, and stdio over url is
         // "invalid configuration" that kills the turn, so such a server mounts under its own name.
         const codexConfig = codexConfigMcp(env), declaredInCodexConfig = codexConfig.names;
@@ -676,6 +651,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           Object.assign(env, bridge.env);
           for (const name of Object.keys(bridge.env)) mountedNames.add(name);
           const prefix = "mcp_servers.openmausbot_phone";
+          directMounts.push("openmausbot_phone");
           appServerArgs.push(
             "-c", `${prefix}.command=${JSON.stringify(bridge.command)}`,
             "-c", `${prefix}.args=${JSON.stringify(bridge.args)}`,
@@ -718,6 +694,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       let codexTurnId: string | null = null;
       let startingNativeTurn = false;
       const earlyNotifications: any[] = [];
+      const mcpStartup = mcpStartupTracker(child);
       const state = {
         settled: false,
         lastError: "",
@@ -1051,7 +1028,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const refused = chatgptTurn && loginMark() !== null && (codexSignInRefused(error) ||
           (state.authRecovery && !/\b403\b|forbidden/i.test(raw) && /\b401\b|unauthorized/i.test(raw)));
         if (retryLoginRace(raw, refused)) return;
-        if (refused) loginRefused();
+        if (refused) loginRefused(); else if (chatgptTurn && CODEX_MISSING_CREDENTIALS.test(raw)) loginCheck.forget();
         const message = refused ? codexSignInExpired(raw) : codexUserError(raw, route, error.codexErrorInfo);
         const setup = refused || classifyError({ text: raw }).reason === "auth";
         if (message === state.lastError && (state.lastErrorSetup || !setup)) return;
@@ -1064,6 +1041,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const p = msg.params ?? {};
         // MCP servers start with the thread, before it has an id; this process serves this turn alone.
         if (msg.method === "mcpServer/startupStatus/updated") {
+          mcpStartup.record(p);
           if (!teamToolsNoticed && teamToolsFailed(p)) {
             teamToolsNoticed = true;
             emit({ ...base(threadId, turnId), type: "runtime.notice", message: TEAM_TOOLS_FAILED });
@@ -1351,7 +1329,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       if (attempt === 0 && !announced) emit({ ...base(threadId, turnId), type: "turn.started" });
 
       try {
-        await request("initialize", {
+        const initialized = await request("initialize", {
           clientInfo: { name: "openmausbot", title: "OpenMausBot", version: serverVersion() },
           // Named permission profiles are an experimental app-server field in Codex 0.151.
           capabilities: { experimentalApi: true },
@@ -1539,6 +1517,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             ...(turn.effort ? { effort: turn.effort } : {}),
           });
         };
+        const waitNames = supportsMcpStartup(initialized?.userAgent) ? enabledMcpMounts([...selectedMcp.keys(), ...directMounts], effectiveConfig, turn.toolScope !== undefined) : [];
+        const mcpReady = await mcpStartup.settled(waitNames, stopSignal.signal);
+        if (!mcpReady || stopRequested || state.settled) return releaseSlot();
         try {
           await startTurn();
         } catch (error) {
@@ -1561,7 +1542,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           return relaunch(verdict.reason, message, "rpc_error");
         }
         if (!state.settled && !abandoned) {
-          if (refused) loginRefused();
+          if (refused) loginRefused(); else if (chatgptTurn && CODEX_MISSING_CREDENTIALS.test(raw)) loginCheck.forget();
           emit({
             ...base(threadId, turnId), type: "runtime.error",
             message: earlyNotifications.some((event) => ["commandExecution", "fileChange", "mcpToolCall", "webSearch"].includes(event.params?.item?.type))

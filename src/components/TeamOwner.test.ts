@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { initialState, StoreContext, type AppState, type Bot } from "@/state/store";
+import { setInboxSupport } from "@/state/inbox";
 import { setTeamPeople, type TeamPeople } from "@/state/team-people";
 
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
@@ -124,12 +125,21 @@ describe("a card waiting on someone", () => {
   });
 });
 
-describe("Needs you", () => {
+describe("Needs you, on a server older than this page", () => {
+  afterEach(() => setInboxSupport("unknown"));
+  const render = () => renderToStaticMarkup(withStore({ ...initialState, bots: [bot()] } as AppState, createElement(NeedsYouButton)));
+
   it("counts what bots ask of this person, and hides when nothing does", () => {
-    const render = () => renderToStaticMarkup(withStore({ ...initialState, bots: [bot()] } as AppState, createElement(NeedsYouButton)));
+    setInboxSupport("no");
     setTeamPeople(asBob([{ kind: "question", id: "q1", at: 1, botId: "fox", threadId: "fox-main", text: "Which landing page?" }]));
     expect(render()).toContain('aria-label="Needs you, 1"');
     setTeamPeople(asBob());
+    expect(render()).toBe("");
+  });
+
+  it("gives way to the Inbox row on any server that has an inbox", () => {
+    setInboxSupport("yes");
+    setTeamPeople(asBob([{ kind: "question", id: "q1", at: 1, botId: "fox", threadId: "fox-main", text: "Which landing page?" }]));
     expect(render()).toBe("");
   });
 });

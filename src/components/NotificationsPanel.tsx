@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, AtSign, Bell, CheckCircle2, CircleHelp, HandHelping, Info, LogIn, Newspaper, Pin, RotateCcw, Wallet, X, type LucideIcon } from "lucide-react";
-import { api, useStore, openNotificationTarget, type Action } from "@/state/store";
+import { AlertTriangle, AtSign, Bell, CheckCircle2, CircleHelp, HandHelping, Info, KeyRound, LogIn, Newspaper, Pin, RotateCcw, Wallet, X, type LucideIcon } from "lucide-react";
+import { api, useStore, openThread, type Action } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useShowThreads } from "@/lib/thread-preferences";
@@ -16,6 +16,7 @@ const KIND_LOOK: Record<NotifyKind, { Icon: LucideIcon; className: string; statu
   approval: { Icon: HandHelping, className: "text-warning", status: "notifications.status.approval" },
   question: { Icon: CircleHelp, className: "text-warning", status: "notifications.status.question" },
   "sign-in": { Icon: LogIn, className: "text-warning", status: "notifications.status.signIn" },
+  secret: { Icon: KeyRound, className: "text-warning", status: "notifications.status.secret" },
   mention: { Icon: AtSign, className: "text-accent", status: "notifications.status.mention" },
   incident: { Icon: AlertTriangle, className: "text-danger", status: "notifications.status.problem" },
   "turn-failed": { Icon: AlertTriangle, className: "text-danger", status: "notifications.status.failed" },
@@ -123,7 +124,7 @@ export function NotificationsPanel() {
       dispatch({ type: "notificationRead", id: entry.id });
       void postNotificationRead(`/api/notifications/${entry.id}/read`, dispatch);
     }
-    openNotificationTarget(dispatch, { botId: entry.botId, threadId: entry.threadId }, state, showThreads);
+    openThread(dispatch, { botId: entry.botId, threadId: entry.threadId }, state, showThreads);
   };
 
   const markAllRead = () => {
