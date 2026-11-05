@@ -8,6 +8,8 @@ export const MAX_DESCRIPTOR_CHARS = 1024;
 export const MAX_RELAY_NODES = 4;
 export const RELAY_HOST = /^relay[1-9][0-9]?\.openmausbot\.com$/;
 
+export type DescriptorRoutes = "any" | "local";
+
 export interface E2EDescriptor {
   v: 1;
   /** b64u of the 65-byte transport key `T.pub` */
@@ -16,16 +18,24 @@ export interface E2EDescriptor {
   h?: string;
   /** relay hostnames in the order to try */
   r?: string[];
+  /** "local": the computer restricted this device to Wi-Fi and Tailscale, so it never has `h` or `r`. Absent means
+   * "any"; then a missing relay only means the computer has none (signed out, or outside the rollout). */
+  routes?: DescriptorRoutes;
 }
 
 export function encodeDescriptor(descriptor: E2EDescriptor): string {
-  const json = JSON.stringify(
-    descriptor.h && descriptor.r ? { v: 1, k: descriptor.k, h: descriptor.h, r: descriptor.r } : { v: 1, k: descriptor.k },
-  );
+  const relay = descriptor.h && descriptor.r ? { h: descriptor.h, r: descriptor.r } : {};
+  const json = JSON.stringify({ v: 1, k: descriptor.k, ...relay, ...(descriptor.routes ? { routes: descriptor.routes } : {}) });
   return b64u(Buffer.from(json, "utf8"));
 }
 
-export function descriptorFor(transportPublicKey: Uint8Array, relay?: { hostId: Uint8Array; nodes: readonly string[] }): E2EDescriptor {
+/** A restricted device's descriptor says so and never carries the relay. */
+export function descriptorFor(
+  transportPublicKey: Uint8Array,
+  relay?: { hostId: Uint8Array; nodes: readonly string[] },
+  routes?: DescriptorRoutes,
+): E2EDescriptor {
+  if (routes === "local") return { v: 1, k: b64u(transportPublicKey), routes: "local" };
   return relay && relay.nodes.length > 0
     ? { v: 1, k: b64u(transportPublicKey), h: b64u(relay.hostId), r: [...relay.nodes] }
     : { v: 1, k: b64u(transportPublicKey) };
@@ -61,11 +71,14 @@ export function parseDescriptor(input: unknown): DescriptorParse {
   const hasHost = fields.h !== undefined;
   const hasRelays = fields.r !== undefined;
   if (hasHost !== hasRelays) return reject("relay_pair");
-  if (!hasHost) return { outcome: "ok", descriptor: { v: 1, k: fields.k as string }, transportKey, hostId: null };
+  if (fields.routes !== undefined && fields.routes !== "any" && fields.routes !== "local") return reject("routes");
+  const routes = fields.routes === undefined ? {} : { routes: fields.routes as DescriptorRoutes };
+  if (routes.routes === "local" && hasHost) return reject("local_with_relay");
+  if (!hasHost) return { outcome: "ok", descriptor: { v: 1, k: fields.k as string, ...routes }, transportKey, hostId: null };
   const hostId = typeof fields.h === "string" ? fromB64u(fields.h) : null;
   if (!hostId || hostId.length !== HOST_ID_BYTES) return reject("host_id");
   const relays = fields.r;
   if (!Array.isArray(relays) || relays.length < 1 || relays.length > MAX_RELAY_NODES) return reject("relays");
   if (!relays.every((host): host is string => typeof host === "string" && RELAY_HOST.test(host))) return reject("relay_host");
-  return { outcome: "ok", descriptor: { v: 1, k: fields.k as string, h: fields.h as string, r: [...relays] }, transportKey, hostId };
+  return { outcome: "ok", descriptor: { v: 1, k: fields.k as string, h: fields.h as string, r: [...relays], ...routes }, transportKey, hostId };
 }

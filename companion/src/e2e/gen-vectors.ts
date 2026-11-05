@@ -519,6 +519,9 @@ function v7() {
     { name: "four_relays", value: raw({ v: 1, k, h, r: ["relay1.openmausbot.com", "relay2.openmausbot.com", "relay3.openmausbot.com", "relay99.openmausbot.com"] }) },
     { name: "key_order_and_unknown_field", value: raw({ r, x: 1, h, k, v: 1 }) },
     { name: "at_1024_chars", value: padded(768) },
+    { name: "routes_local", value: encodeDescriptor({ v: 1, k, routes: "local" }) },
+    { name: "routes_any_with_relay", value: encodeDescriptor({ v: 1, k, h, r, routes: "any" }) },
+    { name: "routes_any_without_relay", value: raw({ v: 1, k, routes: "any" }) },
   ];
   const offCurve = b64u(flip(T.publicKey, 64));
   const invalid = [
@@ -544,6 +547,9 @@ function v7() {
     { name: "key_standard_alphabet", value: raw({ v: 1, k: Buffer.from(T.publicKey).toString("base64") }) },
     { name: "not_json", value: b64u(Buffer.from("not json")) },
     { name: "json_array", value: raw([1]) },
+    { name: "routes_unknown", value: raw({ v: 1, k, routes: "wifi" }) },
+    { name: "routes_not_a_string", value: raw({ v: 1, k, routes: 1 }) },
+    { name: "routes_local_with_relay", value: raw({ v: 1, k, h, r, routes: "local" }) },
     { name: "v2", value: raw({ v: 2, k }) },
     { name: "v2_unknown_shape", value: raw({ v: 2, keys: [1, 2, 3] }) },
   ];
