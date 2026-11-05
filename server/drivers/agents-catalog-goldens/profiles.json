@@ -1084,8 +1084,8 @@
     ]
   },
   "skills+shared+voice+escalations+x+team+images": {
-    "bytes": 70647,
-    "sha256": "6d6532b3fd436d84d03023bfcab158483ce420bd3ff2ee863b707ad8f1fad4d3",
+    "bytes": 70755,
+    "sha256": "66dec6f1a6ea0a4750f5d3bd9293306b19640998e0aaa9d1e0c319590fcd5374",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
