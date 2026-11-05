@@ -86,12 +86,18 @@ export function providerName(instance: InstanceInfo): string {
   return instance.displayName.replace(/\s*\((?:API key|API)\)$/i, "") || instance.displayName;
 }
 
-/** With a variant, names the same choice its menu row does (Antigravity's thinking level), so a pick shows. */
+export function variantSuffix(instance: InstanceInfo | undefined, model: string, variant?: string): string {
+  const option = instance?.models.options.find((candidate) => candidate.id === model);
+  if (!instance || !option || variant === undefined) return "";
+  const listed = modelChoices(instance, [option]).some((choice) => choiceIsSelected(choice, { instanceId: instance.instanceId, model, variant }));
+  const label = listed ? option.variants?.find((candidate) => candidate.id === variant)?.label : undefined;
+  return label ? ` · ${label}` : "";
+}
+
 export function modelName(instance: InstanceInfo | undefined, model: string, variant?: string): string {
   const option = instance?.models.options.find((candidate) => candidate.id === model);
   if (!instance || !option) return model;
-  const choice = modelChoices(instance, [option]).find((candidate) => choiceIsSelected(candidate, { instanceId: instance.instanceId, model, variant }));
-  return displayModelLabel((choice ?? option).label, providerName(instance), option.custom);
+  return displayModelLabel(option.label, providerName(instance), option.custom) + variantSuffix(instance, model, variant);
 }
 
 export function repeatedModelLabels(options: readonly ModelOption[]): Set<string> {
@@ -128,7 +134,7 @@ function currentRow(input: SimpleMenuInput): MenuCurrent {
   const active = instances.find((instance) => instance.instanceId === selection.instanceId);
   const option = active?.models.options.find((candidate) => candidate.id === selection.model);
   const name = option?.label ?? selection.model;
-  const row = { instance: active, label: modelName(active, selection.model, selection.variant), title: active ? `${active.displayName} · ${name}` : name, warning: false, pending: false };
+  const row = { instance: active, label: modelName(active, selection.model, selection.variant), title: active ? `${active.displayName} · ${name}${variantSuffix(active, selection.model, selection.variant)}` : name, warning: false, pending: false };
   if (!active) return loading ? { ...row, pending: true } : { ...row, meta: t("model.simple.unavailable"), warning: true };
   if (!option && input.refreshing === active.instanceId) return { ...row, pending: true };
   if (option?.orgBlocked) return { ...row, meta: t("model.orgBlocked"), warning: true, blocked: true };
