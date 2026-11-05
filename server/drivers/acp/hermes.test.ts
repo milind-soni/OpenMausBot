@@ -14,6 +14,7 @@ import {
   fetchHermesAcpModels,
   hermesAcpModelId,
   hermesConfiguredModel,
+  resolveHermesModels,
 } from "./hermes.ts";
 
 describe("Hermes OpenMaus screenshot compatibility binding", () => {
@@ -326,5 +327,61 @@ process.stdin.on("data", (chunk) => {
     await expect(fetchHermesAcpModels(cli, env)).resolves.toEqual([]);
     // An EPIPE emitted a tick after settling is still an uncaught exception: wait until it would fire.
     await new Promise((resolve) => setTimeout(resolve, 200));
+  });
+});
+
+describe("resolveHermesModels when Hermes has no model to list", () => {
+  const dirs: string[] = [];
+  afterEach(async () => {
+    for (const d of dirs.splice(0)) await removeTempDir(d);
+  });
+
+  const DEFAULT = { id: HERMES_CONFIG_MODEL_ID, label: "Hermes default (config)", custom: true };
+
+  // A Hermes home plus a stand-in `hermes` that never answers, so a catalog probe ends at its deadline.
+  function setup(dotenv: string, configYaml?: string): { cli: string; missing: string; env: Record<string, string> } {
+    const root = mkdtempSync(join(tmpdir(), "omb-hermes-models-"));
+    dirs.push(root);
+    const home = join(root, ".hermes");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, ".env"), dotenv);
+    if (configYaml !== undefined) writeFileSync(join(home, "config.yaml"), configYaml);
+    const cli = join(root, "fake-hermes.ts");
+    writeFileSync(cli, "#!/usr/bin/env node\nprocess.stdin.resume();\n", { mode: 0o755 });
+    return {
+      cli,
+      missing: join(root, "not-installed", "hermes"),
+      env: {
+        PATH: process.env.PATH ?? "", ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+        HOME: root, USERPROFILE: root, HERMES_HOME: home, [HERMES_ACP_MODELS_TIMEOUT_ENV]: "300",
+      },
+    };
+  }
+
+  it("offers Hermes' own default when config.yaml uses a custom endpoint and nothing local answers", async () => {
+    const { cli, env } = setup("", "model:\n  provider: custom\n  default: gpt-6.1-sol\n  base_url: http://127.0.0.1:9/v1\n");
+    await expect(resolveHermesModels(env, { cli })).resolves.toEqual({ default: HERMES_CONFIG_MODEL_ID, options: [DEFAULT] });
+  });
+
+  it("offers Hermes' own default when there is no config.yaml and no key (Hermes set up elsewhere, e.g. WSL)", async () => {
+    const { cli, env } = setup("");
+    await expect(resolveHermesModels(env, { cli })).resolves.toEqual({ default: HERMES_CONFIG_MODEL_ID, options: [DEFAULT] });
+  });
+
+  it("offers nothing when Hermes is not installed", async () => {
+    const { missing, env } = setup("");
+    await expect(resolveHermesModels(env, { cli: missing })).resolves.toEqual({ default: "", options: [] });
+  });
+
+  it("keeps today's list when a hosted provider is configured", async () => {
+    const { cli, env } = setup("OPENROUTER_API_KEY=sk-or-v1-test\n", "model:\n  default: anthropic/claude-opus-4.6\n");
+    await expect(resolveHermesModels(env, { cli })).resolves.toEqual({
+      default: HERMES_CONFIG_MODEL_ID,
+      options: [{ id: HERMES_CONFIG_MODEL_ID, label: "anthropic/claude-opus-4.6 (Hermes config)", custom: true }],
+    });
+  });
+
+  it("starts Hermes without choosing a model for the default entry", () => {
+    expect(hermesAcpModelId(HERMES_CONFIG_MODEL_ID)).toBeNull();
   });
 });
