@@ -64,6 +64,8 @@ export interface ComputerAsk {
 export interface LendingSummary {
   lending: string[];
   clouds: string[];
+  /** Lent Clouds that haven't accepted this computer yet (asleep ones excluded). */
+  waiting?: string[];
   using: string[];
   paused: boolean;
   terminal?: boolean;

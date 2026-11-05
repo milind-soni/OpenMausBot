@@ -241,6 +241,9 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     return {
       lending: lent.map(env => env.id),
       clouds: (paused ? ownClouds() : lent).map(env => env.name),
+      // Lent, but the Cloud hasn't accepted this computer yet (or lost it): the menu must not say it can use it. A
+      // sleeping My Cloud still can; it wakes when a bot needs this computer.
+      waiting: lent.filter(env => !status.get(env.id)?.connected && status.get(env.id)?.problem !== "asleep").map(env => env.name),
       using: using.map(env => env.name),
       paused,
       terminal: terminalAccount !== null && terminalAccount === signedInAccount(),

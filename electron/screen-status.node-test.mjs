@@ -98,3 +98,24 @@ test("a failed start keeps the reason Windows gave, not only the kind of failure
   assert.equal(driverFailure(Object.assign(new Error("EmbeddedDriverError.StartupTimeout"), { tag: "StartupTimeout", inner: { timeoutMs: 10_000n } })), "StartupTimeout: timeoutMs 10000");
   assert.equal(driverFailure(new Error("plain")), "plain");
 });
+
+test("the menu never says a Cloud can use this computer before that Cloud accepts it (#4078)", () => {
+  const ready = { ready: true, reason: null };
+  assert.deepEqual(indicatorText({ clouds: ["Debian Server"], using: [], paused: false, screen: ready, waiting: ["Debian Server"] }, "Mac"),
+    { line: "Waiting for Debian Server to accept this Mac", title: "", screen: null });
+  assert.deepEqual(indicatorText({ clouds: ["My Cloud", "Debian Server"], using: [], paused: false, screen: ready, waiting: ["Debian Server"] }, "Mac"),
+    { line: "My Cloud can use this Mac", title: "", screen: null, pending: "Waiting for Debian Server to accept this Mac" });
+  assert.equal(indicatorText({ clouds: ["Debian Server"], using: [], paused: true, screen: ready, waiting: [] }, "Mac").line,
+    "Paused: Debian Server can't use this Mac", "paused is unchanged");
+
+  const trays = [];
+  class Tray { constructor() { trays.push(this); } on() {} setToolTip(tip) { this.tip = tip; } setTitle() {} setContextMenu(menu) { this.menu = menu; } isDestroyed() { return false; } destroy() {} }
+  const indicator = createLendingIndicator({ Tray, Menu: { buildFromTemplate: items => items }, nativeImage: { createFromPath: () => ({ resize: () => ({}) }) }, iconPath: "",
+    onPause: () => {}, onResume: () => {}, onActivity: () => {}, onTerminal: () => {}, device: "Mac" });
+  indicator.update({ clouds: ["My Cloud", "Debian Server"], waiting: ["Debian Server"], screen: ready });
+  assert.deepEqual(trays[0].menu.filter(item => item.label).map(item => item.label),
+    ["My Cloud can use this Mac", "Waiting for Debian Server to accept this Mac", "Pause", "Let Clouds run commands on this Mac", "See activity"]);
+  assert.equal(trays[0].tip, "OpenMausBot: My Cloud can use this Mac. Waiting for Debian Server to accept this Mac");
+  indicator.update({ clouds: ["My Cloud", "Debian Server"], waiting: [], screen: ready });
+  assert.equal(trays[0].menu[0].label, "My Cloud and Debian Server can use this Mac", "accepted: the waiting line goes away");
+});
