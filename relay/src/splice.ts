@@ -197,7 +197,7 @@ export class Session {
   private overBudget(): void {
     this.ctx.metrics.inc("relay_host_budget_exceeded_total");
     this.ctx.log({ ev: "budget", hid8: this.entry.hid8 });
-    for (const session of [...this.entry.sessions.values()]) session.end(Close.Limited);
+    for (const session of this.entry.sessions.values()) session.end(Close.Limited);
   }
 
   /** One of the two sockets closed: the other gets the same code when it is one the ends use with each other. */

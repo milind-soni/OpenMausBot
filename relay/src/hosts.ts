@@ -127,7 +127,7 @@ function checkToken(ctx: Context, token: string, expectHid?: string): TokenResul
 
 /** Closes every session of `entry` whose phone the current admission set no longer holds. */
 function enforceAdmission(ctx: Context, entry: HostEntry): void {
-  for (const session of [...entry.sessions.values()]) {
+  for (const session of entry.sessions.values()) {
     if (!ctx.hosts.admitted(entry, session.admHash)) session.end(Close.NotFound);
   }
 }

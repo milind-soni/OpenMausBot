@@ -16,11 +16,10 @@
     "typescript": "5.9.3"
   },
   "scripts": {
-    "start": "node src/main.ts",
+    "start": "node --disable-warning=ExperimentalWarning src/main.ts",
     "check": "tsc -p tsconfig.json",
-    "test": "node --test --test-concurrency=1 test/*.test.ts",
-    "fuzz": "node --test test/fuzz.test.ts",
-    "load": "node load/load.ts",
+    "test": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 test/*.test.ts",
+    "load": "node --disable-warning=ExperimentalWarning load/load.ts",
     "audit": "pnpm audit --prod --audit-level high"
   }
 }

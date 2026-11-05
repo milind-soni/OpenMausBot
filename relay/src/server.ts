@@ -194,8 +194,8 @@ export async function startRelay(config: RelayConfig, options: RelayOptions = {}
     server.close();
     server.closeIdleConnections();
     const retry = JSON.stringify({ retryInMs: limits.restartPhoneRetryMs });
-    for (const entry of [...ctx.hosts.all()]) {
-      for (const session of [...entry.sessions.values()]) {
+    for (const entry of ctx.hosts.all()) {
+      for (const session of entry.sessions.values()) {
         sessions += 1;
         session.end(Close.Unavailable, retry);
       }
