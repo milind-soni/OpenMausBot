@@ -1,6 +1,6 @@
 import { PAGE_ID, type PublishedPageCard } from "../../shared/published-page.ts";
 import { redactSecretsInText } from "../../shared/redact.ts";
-import { PageBundleError, pageSource, readPageBundle, type PageBundle } from "./bundle.ts";
+import { PageBundleError, pageSource, readPageBundle, skippedNote, type PageBundle } from "./bundle.ts";
 import type { PagesCall, PagesClient, PagesFailure, PageUsage } from "./client.ts";
 import type { PublishedPagesStore } from "./store.ts";
 
@@ -122,9 +122,9 @@ export function createPagePublisher(deps: {
       `Page id ${result.pageId}. This account now has ${usageWords(result.usage)}.`,
       "A card with the link, Copy link and Unpublish is in the chat. Publishing the same file or folder again updates this same link.",
       ...(result.badge ? ["Free pages carry a small “Made with MausBot” badge."] : []),
-      ...(bundle.skipped.length ? [`Left out ${bundle.skipped.length} file${bundle.skipped.length === 1 ? "" : "s"} a page can't serve: ${bundle.skipped.slice(0, 5).join(", ")}${bundle.skipped.length > 5 ? ", …" : ""}.`] : []),
+      skippedNote(bundle.skipped),
     ];
-    return { status: 200, text: lines.join("\n"), card };
+    return { status: 200, text: lines.filter(Boolean).join("\n"), card };
   }
 
   return {

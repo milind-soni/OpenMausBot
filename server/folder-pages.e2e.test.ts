@@ -69,10 +69,13 @@ it("shows a dashboard folder inline, serves its Parquet to the frame by token on
   writeFileSync(join(dash, "index.html"), "<!doctype html><h1>Sales</h1><script src=\"app.js\"></script>");
   writeFileSync(join(dash, "app.js"), "fetch(new URL(\"data.parquet\", document.baseURI));");
   writeFileSync(join(dash, "data.parquet"), PARQUET);
+  writeFileSync(join(dash, "regions.geojson"), "{\"type\":\"FeatureCollection\",\"features\":[]}");
+  writeFileSync(join(dash, "regions.kml"), "<kml/>");
 
   const [shown] = await turn(analyst, [{ tool: "show_html", arguments: { path: "dash", title: "Sales dashboard" } }]);
   const appId = /^Shown as app ([\w-]+)\./.exec(shown!)?.[1];
   expect(appId, shown).toBeTruthy();
+  expect(shown).toMatch(/ Left out regions\.kml \(pages can't carry \.kml files\)\.$/);
   const doc = await api(`/api/threads/${analyst.activeTaskId}/messages/${appId}/app?origin=${encodeURIComponent(fixture.info.url)}`);
   const base = /<base href="([^"]+)">/.exec(doc.body.srcdoc)?.[1] ?? "";
   expect(base).toMatch(new RegExp(`^${fixture.info.url}/api/page-files/[A-Za-z0-9_-]{43}/$`));
@@ -86,6 +89,8 @@ it("shows a dashboard folder inline, serves its Parquet to the frame by token on
   expect(Buffer.from(await ranged.arrayBuffer()).toString()).toBe("PAR1");
   const whole = await realFetch(`${base}data.parquet`);
   expect(Buffer.from(await whole.arrayBuffer()).equals(PARQUET)).toBe(true);
+  const regions = await realFetch(`${base}regions.geojson`);
+  expect([regions.status, regions.headers.get("content-type"), await regions.text()]).toEqual([200, "application/geo+json", "{\"type\":\"FeatureCollection\",\"features\":[]}"]);
   // A dot segment, even percent-encoded, is folded away by the URL itself and lands outside the token's folder.
   expect((await realFetch(`${base}%2e%2e/index.html`)).status).toBe(404);
   expect((await realFetch(`${base}..%2Fapp.js`)).status).toBe(400);
@@ -135,7 +140,7 @@ it("streams a folder's video to the card by byte range, leaves it out of a publi
   expect(Buffer.from(await seek.arrayBuffer()).equals(movie.subarray(2_000_000, 2_000_100))).toBe(true);
 
   const published = await turn(bot, { tool: "publish_page", arguments: { path: "film", title: "Film" } });
-  expect(published).toContain("Left out 1 file a page can't serve: clip.webm");
+  expect(published).toContain("Left out clip.webm (published pages can't carry video).");
   expect([...[...stub.service.pages.values()].at(-1)!.files.keys()]).not.toContain("clip.webm");
   const kept = await realFetch(`${await base()}clip.webm`, { headers: { range: "bytes=0-9" } });
   expect(kept.status).toBe(206);

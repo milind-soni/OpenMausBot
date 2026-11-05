@@ -32,10 +32,11 @@ async function callAppTool(name: "show_html" | "update_html", args: Json, contex
   if (!answer.ok) return { text: String(answer.body.error ?? (updating ? "Could not update that page." : "Could not show that page.")), isError: true };
   const messageId = String(answer.body.messageId ?? "");
   const masked = answer.body.masked === true ? MASKED : "";
+  const leftOut = typeof answer.body.leftOut === "string" && answer.body.leftOut ? ` ${answer.body.leftOut}` : "";
   return {
     text: (updating
       ? `Updated app ${messageId}.`
-      : `Shown as app ${messageId}. To change it, call show_html again with app_id "${messageId}".`) + masked,
+      : `Shown as app ${messageId}. To change it, call show_html again with app_id "${messageId}".`) + leftOut + masked,
   };
 }
 
