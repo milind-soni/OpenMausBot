@@ -40,8 +40,9 @@ async function boot(home: string, knobs: Record<string, string> = {}) {
   });
   children.push(child);
   let output = "";
-  child.stdout!.on("data", (chunk) => { output += chunk; });
-  child.stderr!.on("data", (chunk) => { output += chunk; });
+  const capture = (chunk: Buffer) => { output += chunk; };
+  child.stdout!.on("data", capture);
+  child.stderr!.on("data", capture);
   await expect.poll(async () => {
     if (child.exitCode !== null) throw new Error(`server exited during boot:\n${output}`);
     try { return (await fetch(base + "/api/health")).ok; } catch { return false; }
@@ -62,6 +63,33 @@ const probeCount = (log: string, probe: "version" | "help" | "auth") =>
   existsSync(log) ? readFileSync(log, "utf8").split("\n").filter((line) => line.startsWith(`${probe} `)).length : 0;
 const claudeStatus = (body: { instances: Array<{ instanceId: string; snapshot: Record<string, unknown> }> }) =>
   body.instances.find((instance) => instance.instanceId === "claude")!.snapshot;
+
+it.each(["slow", "empty-once"])("detects a %s CLI across concurrent status reads and continues a saved chat", async (mode) => {
+  const home = freshHome();
+  const probes = join(home, "probes.log");
+  const server = await boot(home, {
+    FAKE_CLAUDE_PROBE_LOG: probes,
+    ...(mode === "slow" ? { FAKE_CLAUDE_VERSION_DELAY_MS: "9000" } : { FAKE_CLAUDE_EMPTY_VERSION_ONCE: join(home, "empty-version-returned") }),
+  });
+  const lists = await Promise.all([server.call("GET", "/api/instances"), server.call("GET", "/api/instances"), server.call("GET", "/api/instances")]);
+  for (const list of lists) expect(claudeStatus(list)).toMatchObject({ state: "available", authenticated: true, version: expect.stringContaining("Claude Code") });
+  expect(probeCount(probes, "version")).toBe(mode === "slow" ? 1 : 2);
+  const { bot } = await server.control("new-bot", "--name", "Detection fixture");
+  const read = async () => (await server.call("GET", "/api/bots?messages=0")).bots.find((item: { id: string }) => item.id === bot.id);
+  const selection = (await read()).modelSelection;
+  const replies = (messages: Array<{ role: string; kind: string }>) => messages.filter((message) => message.role === "bot" && message.kind === "text");
+  const initial = await server.control("messages", "--bot", bot.id);
+  const turns = [];
+  for (const text of ["First fixture turn", "Continue with the saved model"]) {
+    await server.control("send", "--bot", bot.id, "--text", text);
+    const settled = await server.control("wait", "--bot", bot.id, "--timeout", "30");
+    turns.push({ text, settled });
+    expect(settled).toMatchObject({ status: "settled" });
+  }
+  const transcript = await server.control("messages", "--bot", bot.id);
+  expect(replies(transcript.messages)).toHaveLength(replies(initial.messages).length + 2);
+  expect((await read()).modelSelection).toEqual(selection);
+}, 90_000);
 
 it("probes the engine's CLI once on a later start while the model lists arrive and the engine list is read", async () => {
   const home = freshHome();

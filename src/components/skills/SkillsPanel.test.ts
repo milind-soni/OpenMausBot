@@ -35,6 +35,12 @@ beforeEach(() => {
 describe("how a skill reads", () => {
   it("names a skill in words, where it came from, and who can use it", () => {
     expect(skillTitle({ name: "weekly-report" })).toBe("Weekly report");
+    expect(skillTitle({ name: "review-pr" })).toBe("Review PR");
+    expect(skillTitle({ name: "pdf-forms" })).toBe("PDF forms");
+    expect(skillTitle({ name: "mcp" })).toBe("MCP");
+    expect(skillTitle({ name: "fix-ui-and-api-docs" })).toBe("Fix UI and API docs");
+    expect(skillTitle({ name: "prepare-draft" })).toBe("Prepare draft");
+    expect(skillTitle({ name: "s3-upload" })).toBe("s3-upload");
     expect(fromLabel({ kind: "tool", tool: "codex" }, name)).toBe("From Codex");
     expect(fromLabel({ kind: "learned", botId: "pepper" }, name)).toBe("Learned by Pepper");
     expect(fromLabel({ kind: "learned", botId: "gone" }, name)).toBe("Learned by a bot");

@@ -1,4 +1,6 @@
 import type { SendKey } from "./send-key";
+import { t } from "@/lib/i18n";
+import { en, type LocaleKey } from "@/locales";
 
 export interface ShortcutItem {
   id: string;
@@ -131,6 +133,22 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
   },
 ];
 
+const CATEGORY_KEY: Record<string, LocaleKey> = {
+  Navigation: "shortcuts.category.navigation",
+  "Chat & Composer": "shortcuts.category.chat",
+  Calls: "shortcuts.category.calls",
+  "Management & Groups": "shortcuts.category.groups",
+};
+
+export const shortcutDescription = (item: ShortcutItem): string => {
+  const key = `shortcuts.${item.id}`;
+  return Object.hasOwn(en, key) ? t(key as LocaleKey) : item.description;
+};
+export const shortcutCategory = (group: ShortcutGroup): string => {
+  const key = CATEGORY_KEY[group.category];
+  return key ? t(key) : group.category;
+};
+
 type Keys = Pick<ShortcutItem, "macKeys" | "winKeys">;
 const ENTER: Keys = { macKeys: ["Return"], winKeys: ["Enter"] };
 const SHIFT_ENTER: Keys = { macKeys: ["⇧", "Return"], winKeys: ["Shift", "Enter"] };
@@ -155,6 +173,17 @@ export function shortcutGroupsFor(sendKey: SendKey): readonly ShortcutGroup[] {
 
 export function isSidebarToggle(event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey" | "defaultPrevented">): boolean {
   return !event.defaultPrevented && event.key === "\\" && (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey;
+}
+
+/**
+ * The step of ⌘⇧] / ⌘⇧[ (Ctrl+Shift outside macOS) through the bots: 1, -1, or null for any other key. Outside
+ * macOS, Shift turns the key into "}" / "{", so those count too. The physical key (`code`) is not used: on many
+ * layouts BracketRight types another character.
+ */
+export function botCycleStep(event: Pick<KeyboardEvent, "key">): 1 | -1 | null {
+  if (event.key === "]" || event.key === "}") return 1;
+  if (event.key === "[" || event.key === "{") return -1;
+  return null;
 }
 
 export function shouldOpenKeyboardShortcuts(event: KeyboardEvent): boolean {
@@ -198,8 +227,8 @@ export function filterShortcutGroups(
       const filteredItems = group.items.filter((item) => {
         const keys = shortcutKeysForPlatform(item, isMac).join(" ").toLowerCase();
         return (
-          item.description.toLowerCase().includes(normalized) ||
-          group.category.toLowerCase().includes(normalized) ||
+          shortcutDescription(item).toLowerCase().includes(normalized) ||
+          shortcutCategory(group).toLowerCase().includes(normalized) ||
           keys.includes(normalized)
         );
       });

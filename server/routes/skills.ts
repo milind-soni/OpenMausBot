@@ -6,8 +6,10 @@ import {
   listSkillCatalog, readCatalogSkill, removeCatalogSkill, setBotSkill, setSkillAccess, type CatalogResult, type SkillCatalogDeps,
 } from "../skill-catalog.ts";
 import { fetchSkillFromSource } from "../skill-fetch.ts";
+import { prepareSkillFolder, skillImportSummary } from "../skill-folder.ts";
 import { installLibrarySkill } from "../skill-library.ts";
 import { parseSkillMd, scanSkillText, type SkillListing } from "../skills.ts";
+import type { GitHubSkillOrigin, SkillImportSummary } from "../../shared/skill-import.ts";
 import type { BotRecord, Store } from "../store.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 
@@ -24,13 +26,16 @@ const addSchema = z.union([
 ]);
 
 /** A new skill is for every bot, unless the scan flagged it: then it waits, off, for a person to choose. */
-function addToLibrary(text: string, source: string, scanned: string): { name: string } | { error: string } {
+function addToLibrary(text: string, source: string, warnings: string[], folder: {
+  files?: ReadonlyArray<{ path: string; content: Buffer; executable: boolean }>; skipped?: string[]; github?: GitHubSkillOrigin;
+} = {}): { name: string } | { error: string } {
   const parsed = parseSkillMd(text);
   if ("error" in parsed) return parsed;
-  const warnings = scanSkillText(scanned);
   const installed = installLibrarySkill({
     name: parsed.name, instructions: text, source, license: parsed.license, compatibility: parsed.compatibility, tags: parsed.tags,
     warnings, reviewState: warnings.length ? "disabled" : "approved", everyBot: warnings.length === 0,
+    ...(folder.files?.length ? { files: folder.files } : {}), ...(folder.skipped?.length ? { skippedFiles: folder.skipped } : {}),
+    ...(folder.github ? { github: folder.github } : {}),
   });
   return "error" in installed ? installed : { name: installed.name };
 }
@@ -62,19 +67,24 @@ export function createSkillsRoutes(deps: SkillsRouteDeps): RouteHandler {
       if ("link" in body) {
         const fetched = await fetchSkillFromSource(body.link);
         if ("error" in fetched) return json(res, 422, { error: fetched.error });
-        const results = fetched.skills.map((skill) => {
-          const text = skill.files.find((file) => file.path === "SKILL.md")?.content ?? "";
-          return addToLibrary(text, skill.source, skill.files.map((file) => file.content).join("\n"));
+        const results = fetched.skills.map((skill): { name: string; imported: SkillImportSummary } | { error: string } => {
+          const folder = prepareSkillFolder(skill.files);
+          if ("error" in folder) return folder;
+          const skipped = [...skill.skipped, ...folder.skipped];
+          const added = addToLibrary(folder.skillMd, skill.source, folder.warnings, { files: folder.files, skipped: skipped.map((file) => file.path), github: skill.github });
+          return "error" in added ? added : { name: added.name, imported: skillImportSummary(added.name, [{ path: "SKILL.md" }, ...folder.files], skipped) };
         });
-        const added = results.flatMap((result) => ("name" in result ? [result.name] : []));
+        const added = results.flatMap((result) => ("name" in result ? [result] : []));
         const errors = results.flatMap((result) => ("error" in result ? [result.error] : []));
-        return added.length ? json(res, 201, { added, errors }) : json(res, 422, { error: errors.join("; ") || "no skill found there" });
+        return added.length
+          ? json(res, 201, { added: added.map((result) => result.name), imported: added.map((result) => result.imported), errors })
+          : json(res, 422, { error: errors.join("; ") || "no skill found there" });
       }
       const taken = listSkillCatalog(deps.catalog()).map((row) => row.name);
       const problem = writtenSkillProblem(body, taken);
       if (problem) return json(res, 422, { error: problem, code: problem });
       const text = writtenSkillMd(body);
-      const added = addToLibrary(text, WRITTEN_SKILL_SOURCE, text);
+      const added = addToLibrary(text, WRITTEN_SKILL_SOURCE, scanSkillText(text));
       return "error" in added ? json(res, 422, { error: added.error }) : json(res, 201, { added: [added.name], errors: [] });
     }
     const m = path.match(/^\/api\/skills\/([^/]+)(?:\/(access)|\/bots\/([\w-]+))?$/);

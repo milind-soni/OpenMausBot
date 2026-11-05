@@ -1,6 +1,6 @@
 // Per-bot skill copies move into the shared library; originals are archived write-once, and a manifest entry is dropped only after its archive and assignment are durable.
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
@@ -65,8 +65,14 @@ export function migrateBotSkillsToLibrary(botId: string, root: string = skillsLi
       outcomes.push({ botId, name: copy.name, outcome: "skipped", detail: "stored SKILL.md is missing or changed after review" });
       continue;
     }
+    let folder: Array<{ path: string; content: Buffer; executable: boolean }> = [];
     try {
-      if (readdirSync(copy.directory).some((name) => name !== "SKILL.md")) {
+      if (copy.files?.length) folder = copy.files.map((path) => {
+        const full = join(copy.directory!, path);
+        if (!lstatSync(full).isFile()) throw new Error(`${path} is not a plain file`);
+        return { path, content: readFileSync(full), executable: (lstatSync(full).mode & 0o100) !== 0 };
+      });
+      else if (readdirSync(copy.directory).some((name) => name !== "SKILL.md")) {
         outcomes.push({ botId, name: copy.name, outcome: "skipped", detail: "skill has auxiliary files — keeping its complete private directory" });
         continue;
       }
@@ -110,6 +116,8 @@ export function migrateBotSkillsToLibrary(botId: string, root: string = skillsLi
         compatibility: copy.compatibility,
         reviewState: copy.enabled ? "approved" : "disabled",
         ...(copy.source.startsWith(LEARN_SOURCE_PREFIX) ? { learnedBy: botId } : {}),
+        ...(folder.length ? { files: folder } : {}),
+        ...(copy.github ? { github: copy.github } : {}),
         package: copy.package,
         root,
       });

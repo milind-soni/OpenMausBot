@@ -8,6 +8,7 @@ import { createLendingIndicator, indicatorText } from "./lending-indicator.mjs";
 import { screenStatus } from "./screen-status.mjs";
 import { askPromptWords, screenFixLabel, screenLine } from "./screen-words.mjs";
 import { driverFailure } from "./cua-failure.mjs";
+import nativeText from "./native-text.cjs";
 
 const embedded = (extra = {}) => ({
   mode: "embedded", socketPath: "\\\\.\\pipe\\cua-driver-1234", mcpCommand: "C:\\Program Files\\OpenMausBot\\resources\\cua-driver.exe",
@@ -92,9 +93,48 @@ test("the app's own prompt names the bot, its Cloud, what it wants and why, and 
   assert.equal(askPromptWords({ bot: "Scout", need: "terminal", reason: "terminal-off" }, { cloud: "My Cloud", device: "computer" }).message, "Scout on My Cloud wants to run commands on this computer");
 });
 
+test("screen words follow the app language, including the device and the prompt's actions", () => {
+  const text = nativeText.createNativeText({ saved: "en" });
+  const stopped = { ready: false, reason: "not-running", fix: "start" };
+  const indicator = () => indicatorText({ clouds: ["My Cloud"], using: [], paused: false, screen: stopped }, "computer", text.t);
+  assert.equal(indicator().line, "My Cloud can use this computer, but not its apps and screen");
+  text.set("pt-br");
+  assert.deepEqual(indicator(), {
+    line: "My Cloud com acesso a este computador, mas não aos apps e à tela dele", title: "", screen: "O controle de tela não está rodando neste computador",
+  });
+  assert.equal(screenFixLabel(stopped, text.t), "Iniciar o controle de tela");
+  assert.equal(screenFixLabel({ ready: false, reason: "permissions", fix: "allow" }, text.t), "Permitir o controle de tela…");
+  assert.deepEqual(askPromptWords({ bot: "Scout", need: "terminal", reason: "terminal-off" }, { cloud: "My Cloud", device: "computer", t: text.t }), {
+    message: "Scout em My Cloud quer executar comandos neste computador",
+    detail: "A execução de comandos não está ligada neste computador.",
+    buttons: ["Ligar", "Agora não"],
+  });
+});
+
 test("a failed start keeps the reason Windows gave, not only the kind of failure", () => {
   const spawn = Object.assign(new Error("EmbeddedDriverError.Spawn"), { tag: "Spawn", inner: { binaryPath: "C:\\x\\cua-driver-background.exe", reason: "Access is denied. (os error 5)" } });
   assert.equal(driverFailure(spawn), "Spawn: binaryPath C:\\x\\cua-driver-background.exe; reason Access is denied. (os error 5)");
   assert.equal(driverFailure(Object.assign(new Error("EmbeddedDriverError.StartupTimeout"), { tag: "StartupTimeout", inner: { timeoutMs: 10_000n } })), "StartupTimeout: timeoutMs 10000");
   assert.equal(driverFailure(new Error("plain")), "plain");
+});
+
+test("the menu never says a Cloud can use this computer before that Cloud accepts it (#4078)", () => {
+  const ready = { ready: true, reason: null };
+  assert.deepEqual(indicatorText({ clouds: ["Debian Server"], using: [], paused: false, screen: ready, waiting: ["Debian Server"] }, "Mac"),
+    { line: "Waiting for Debian Server to accept this Mac", title: "", screen: null });
+  assert.deepEqual(indicatorText({ clouds: ["My Cloud", "Debian Server"], using: [], paused: false, screen: ready, waiting: ["Debian Server"] }, "Mac"),
+    { line: "My Cloud can use this Mac", title: "", screen: null, pending: "Waiting for Debian Server to accept this Mac" });
+  assert.equal(indicatorText({ clouds: ["Debian Server"], using: [], paused: true, screen: ready, waiting: [] }, "Mac").line,
+    "Paused: Debian Server can't use this Mac", "paused is unchanged");
+
+  const trays = [];
+  class Tray { constructor() { trays.push(this); } on() {} setToolTip(tip) { this.tip = tip; } setTitle() {} setContextMenu(menu) { this.menu = menu; } isDestroyed() { return false; } destroy() {} }
+  const indicator = createLendingIndicator({ Tray, Menu: { buildFromTemplate: items => items }, nativeImage: { createFromPath: () => ({ resize: () => ({}) }) }, iconPath: "",
+    onPause: () => {}, onResume: () => {}, onActivity: () => {}, onTerminal: () => {}, device: "Mac" });
+  indicator.update({ clouds: ["My Cloud", "Debian Server"], waiting: ["Debian Server"], screen: ready });
+  assert.deepEqual(trays[0].menu.filter(item => item.label).map(item => item.label),
+    ["My Cloud can use this Mac", "Waiting for Debian Server to accept this Mac", "Pause", "Let Clouds run commands on this Mac", "See activity"]);
+  assert.equal(trays[0].tip, "OpenMausBot: My Cloud can use this Mac. Waiting for Debian Server to accept this Mac");
+  indicator.update({ clouds: ["My Cloud", "Debian Server"], waiting: [], screen: ready });
+  assert.equal(trays[0].menu[0].label, "My Cloud and Debian Server can use this Mac", "accepted: the waiting line goes away");
 });

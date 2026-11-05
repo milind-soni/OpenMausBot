@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import { writeFileAtomic } from "./atomic.ts";
+import { chatNotice } from "./chat-notices.ts";
 import type { CloudOwner } from "./cloud-owner-lines.ts";
 import { switchAutomationsOff, type MoveAutomations } from "./move-freeze.ts";
 import { serverLine, type LineLanguage } from "./server-lines.ts";
@@ -31,8 +32,10 @@ export function movedFrom(dataDir: string): MovedFrom | null {
 export const webhookMovedLine = (name: string, place = "My Cloud", language?: string) =>
   serverLine(language, "server.moves.webhookMoved", { name, place });
 
-export const webhookHomeLine = (name: string) =>
-  `I'm back on this computer, so my webhook "${name}" has an address here again. Open Automations, choose Copy address on "${name}", and paste it into the app that sends to it.`;
+export const webhookHomeLine = (name: string) => chatNotice("chat.notice.webhookHome", { name });
+
+const botLine = (key: "chat.notice.webhookHome", name: string) =>
+  ({ role: "bot" as const, kind: "text" as const, text: chatNotice(key, { name }), textCode: key, textParams: { name } });
 
 export interface ArrivedDeps {
   dataDir: string;
@@ -40,6 +43,8 @@ export interface ArrivedDeps {
   webhooks(): Pick<WebhookManager, "list"> | null;
   owner(auth: RequestAuth): CloudOwner | null;
   lineLanguage?: LineLanguage;
+  /** The person hears what stayed on the computer the bots came from (cloud-connections-stayed.ts). */
+  stayed?(language?: string): void;
 }
 
 const arrivedBody = z.object({ v: z.literal(1), computer: z.string().trim().min(1).max(120), webhooks: z.array(z.string().regex(/^[\w-]{1,128}$/u)).max(500),
@@ -66,6 +71,7 @@ export async function arrivedRoute(deps: ArrivedDeps, { req, res, path, method, 
   // Recorded before the lines go: a move cut short here never has a bot say it twice.
   writeFileAtomic(join(deps.dataDir, FILE), JSON.stringify({ computer: body.data.computer, at: kept?.at ?? Date.now(), told: [...told] }), { mode: 0o600 });
   for (const line of telling) deps.store.appendMessage(line.threadId, { role: "bot", kind: "text", text: webhookMovedLine(line.name, body.data.place, deps.lineLanguage?.(owner.person)) });
+  deps.stayed?.(deps.lineLanguage?.(owner.person));
   json(res, 200, { v: 1, told: telling.length });
   return true;
 }
@@ -92,7 +98,7 @@ export async function homeRoute(deps: Omit<ArrivedDeps, "owner">, { req, res, pa
   });
   // Gone before the lines go: coming home again after a crash here never has a bot say it twice.
   rmSync(join(deps.dataDir, FILE), { force: true });
-  for (const line of telling) deps.store.appendMessage(line.threadId, { role: "bot", kind: "text", text: webhookHomeLine(line.name) });
+  for (const line of telling) deps.store.appendMessage(line.threadId, botLine("chat.notice.webhookHome", line.name));
   json(res, 200, { v: 1, told: telling.length });
   return true;
 }

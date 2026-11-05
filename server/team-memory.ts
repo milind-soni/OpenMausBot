@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { redactSecretsInText } from "./redact.ts";
+import { USER_ERROR, type UserErrorKey } from "./user-errors.ts";
 import { recallTerms } from "./message-db.ts";
 import { canonicalJson } from "../shared/package-format.ts";
 
@@ -76,7 +77,11 @@ const emptyFile = (): TeamMemoryFile => ({ version: 2, sections: Object.create(n
 const clean = (value: unknown, max: number): string => (typeof value === "string" ? redactSecretsInText(value).replace(/\s+/g, " ").trim().slice(0, max + 1) : "");
 export class TeamMemoryConflict extends Error {
   readonly status = 409;
-  constructor(message = "This department memory changed. Reload it before saving or approving.") { super(message); }
+  declare readonly errorKey?: UserErrorKey;
+  constructor(message?: string) {
+    super(message ?? USER_ERROR["serverError.department.memoryChanged"]);
+    if (message === undefined) this.errorKey = "serverError.department.memoryChanged";
+  }
 }
 export function teamMemoryRevision(entry: TeamMemoryEntry): string {
   const { revision: _revision, ...stored } = entry;

@@ -17,6 +17,8 @@ import {
 } from "./routine-requests.ts";
 import { RoutineManager, type RoutineInput } from "./routines.ts";
 import type { JsonValue } from "./schema.ts";
+import "./server-line-packs.ts";
+import { setConversationLanguage } from "./server-lines.ts";
 import { directApply, type DirectApplyCheck } from "./direct-apply.ts";
 
 class MemoryStore implements RoutineRequestStore {
@@ -52,6 +54,7 @@ class MemoryStore implements RoutineRequestStore {
 
 const tempDirs: string[] = [];
 afterEach(() => {
+  setConversationLanguage(() => undefined);
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -284,6 +287,14 @@ describe("RoutineRequestService", () => {
       .rejects.toThrow("scheduler write failed");
     expect(routines.listRoutines()).toHaveLength(0);
     expect(store.messagesFor("thread-a")[0]?.card).toMatchObject({ dismissed: true, options: [] });
+  });
+
+  it("writes a cron schedule in the conversation person's language", async () => {
+    setConversationLanguage((threadId) => threadId === "thread-a" ? "pt-br" : undefined);
+    const { service, store } = harness();
+    const schedule = { type: "cron" as const, expression: "0 9 * * 6#L", timeZone: "UTC" };
+    await service.propose({ botId: "bot-a", threadId: "thread-a", proposal: createProposal({ schedule }) });
+    expect(store.messagesFor("thread-a")[0]!.card?.subtitle).toContain("Schedule: Todo mês no último sábado às 09:00 UTC · Cron: 0 9 * * 6#L");
   });
 
   it("keeps a monthly cron rule and its own timezone through confirmation, update, pause and resume", async () => {

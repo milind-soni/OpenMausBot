@@ -5,7 +5,7 @@ import type { Action, AppState, BotProject, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { MENU_SHEET } from "./menu-recipe";
 import { useHeldMenuMotion } from "./MenuMotion";
-import { t } from "@/lib/i18n";
+import { intlLocale, t } from "@/lib/i18n";
 import { nextRename } from "@/lib/rename";
 import { isTickable, opensRowMenuFromKey } from "@/lib/bulk-select";
 import { threadRefUrl } from "@/lib/thread-refs";
@@ -19,7 +19,7 @@ import { localizedTaskTitle } from "@/lib/task-title";
 
 export { isSnoozed, orderedThreadList };
 
-type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil" | "waitingForTeammates" | "link" | "turnStartedAt"> & {
+type ThreadRowTask = Pick<Task, "threadId" | "title" | "sharedChat" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil" | "waitingForTeammates" | "link" | "turnStartedAt"> & {
   queued?: boolean;
   pinned?: boolean;
   createdAt?: number;
@@ -29,7 +29,7 @@ type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "a
 
 export function formatUpdatedAt(at: number): string {
   if (!Number.isFinite(at) || at <= 0) return "";
-  return new Date(at).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+  return new Date(at).toLocaleString(intlLocale(), { dateStyle: "short", timeStyle: "short" });
 }
 
 export function threadUpdatedLabel(at: number, now: number): string {
@@ -99,15 +99,14 @@ export function partitionHelperThreads<T extends ThreadRowTask>(tasks: T[], acti
   const helpers: T[] = [];
   for (const task of tasks) {
     const filed = folders.some((folder) => folder.id === task.projectId);
-    const needsPerson = task.threadId === activeId || task.activity === "waiting-on-you" || Boolean(task.unread);
-    const helper = Boolean(task.openedBy) && task.pinned !== true && !filed && !needsPerson &&
+    const helper = Boolean(task.openedBy) && task.pinned !== true && !filed && !demandsAttention(task, activeId) &&
       !task.closedBy && !isArchived(task) && !isSnoozed(task);
     (helper ? helpers : own).push(task);
   }
   return { own, helpers };
 }
 
-export function HelperThreadGroup<T>({ tasks, busy, renderThread }: { tasks: T[]; busy: boolean; renderThread: (task: T) => ReactNode }) {
+export function HelperThreadGroup<T>({ tasks, renderThread }: { tasks: T[]; renderThread: (task: T) => ReactNode }) {
   const [open, setOpen] = useState(false);
   if (tasks.length === 0) return null;
   const label = t("task.helperGroup");
@@ -117,7 +116,6 @@ export function HelperThreadGroup<T>({ tasks, busy, renderThread }: { tasks: T[]
       <ChevronRight aria-hidden="true" size={11} className={cn("shrink-0 transition-transform", open && "rotate-90")} />
       <span className="truncate">{label}</span>
       <span className="shrink-0 text-[10px] opacity-50">{tasks.length}</span>
-      {!open && busy && <Loader2 size={10} className="shrink-0 animate-spin text-success" />}
     </button>
     {open && <div role="group" aria-label={label}>{tasks.map(renderThread)}</div>}
   </div>;
@@ -266,7 +264,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
   const choose = (event: React.MouseEvent) => { if (!selectMode) onSelect(task); else if (tickable) onToggleSelect?.(task, event.shiftKey); };
   const contextMenu = (event: React.MouseEvent) => { event.preventDefault(); if (!selectMode) openMenu(event.clientX, event.clientY); };
   const openMenu = (x: number, y: number) => setMenu({ left: Math.max(8, Math.min(x, window.innerWidth - 228)), top: Math.max(8, Math.min(y, window.innerHeight - 230)) });
-  const startRename = () => { finishing.current = false; setDraft(task.title); setRenaming(true); setMenu(null); };
+  const startRename = () => { if (task.sharedChat) return; finishing.current = false; setDraft(task.title); setRenaming(true); setMenu(null); };
   const copyLink = () => {
     setMenu(null);
     void copyText(threadRefUrl({ botId: ownerId, threadId: task.threadId }));
@@ -354,8 +352,8 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
       className={cn("fixed z-50 max-h-[calc(100vh-16px)] w-[220px] overflow-y-auto", MENU_SHEET, menuMotion.className)} {...menuMotion.exitProps}
       onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setMenu(null); actionRef.current?.focus(); } }}>
       <button type="button" onClick={copyLink} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Link2 size={16} />{t("task.copyLink")}</button>
-      <button type="button" onClick={startRename} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Pencil size={16} />{t("task.renameAria")}</button>
-      {onRegenerateTitle && <button type="button" disabled={regenerating} aria-busy={regenerating} onClick={regenerateTitle} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40">{regenerating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}{regenerating ? t("task.regeneratingTitle") : t("task.regenerateTitle")}</button>}
+      {!task.sharedChat && <button type="button" onClick={startRename} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Pencil size={16} />{t("task.renameAria")}</button>}
+      {onRegenerateTitle && !task.sharedChat && <button type="button" disabled={regenerating} aria-busy={regenerating} onClick={regenerateTitle} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40">{regenerating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}{regenerating ? t("task.regeneratingTitle") : t("task.regenerateTitle")}</button>}
       {onMove && Boolean(folders?.length) && <label className="block rounded-md px-2 py-1.5 text-[13px] text-ink"><span className="mb-1 flex items-center gap-2 text-ink-secondary"><FolderInput size={16} />{t("folder.move")}</span>
         <Select size="sm" className="w-full" aria-label={t("folder.moveNamed", { title: task.title })} value={folders?.some((folder) => folder.id === task.projectId) ? task.projectId : ""}
           onChange={(event) => { onMove(task, event.target.value || null); setMenu(null); }}>

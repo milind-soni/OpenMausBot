@@ -1,15 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { Readable } from "node:stream";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "../config.ts";
 import { addHeldSecretScrubber } from "../redact.ts";
 import { VOICE_FIRST_BLOCK_MAX_CHARS } from "../tts/speech-text.ts";
 import { PASS } from "./table.ts";
-import { createTtsRoutes } from "./tts.ts";
+import { createTtsRoutes, TRANSCRIBE_MAX_BYTES } from "./tts.ts";
 
-async function call(method: string, path: string, body: unknown = {}, cfg = {} as AppConfig) {
+async function call(method: string, path: string, body: unknown = {}, cfg = {} as AppConfig, req = {} as never) {
   const answers: Array<[number, unknown]> = [];
   const out = await createTtsRoutes({ config: () => cfg })({
-    req: {} as never, res: {} as never, url: new URL(`http://x${path}`), path: new URL(`http://x${path}`).pathname, method,
+    req, res: {} as never, url: new URL(`http://x${path}`), path: new URL(`http://x${path}`).pathname, method,
     auth: { kind: "loopback", scopes: ["admin", "client"] },
     json: ((_res: unknown, status: number, value: unknown) => { answers.push([status, value]); }) as never, readBody: (async () => body) as never,
   });
@@ -26,6 +27,12 @@ describe("voice routes", () => {
     for (const body of [{}, { publicOwnerId: "owner1", voiceId: "../voices", name: "x" }, { publicOwnerId: "owner1", voiceId: "v1", name: " " }]) {
       expect((await call("POST", "/api/tts/voices/add", body)).answers).toEqual([[400, { error: "publicOwnerId, voiceId and name required" }]]);
     }
+  });
+
+  it("keeps the 413 and English refusal above the utterance ceiling", async () => {
+    expect((await call("POST", "/api/tts/speak", { text: "a".repeat(501) })).answers).toEqual([[413, {
+      error: "voice utterances are limited to 500 characters", errorKey: "serverError.voice.utteranceTooLong",
+    }]]);
   });
 
   it("prepare a reply with a short first block, and never a held secret", async () => {
@@ -48,4 +55,52 @@ describe("voice routes", () => {
     expect(answers[0]![0]).toBe(200);
     expect((answers[0]![1] as { voices: unknown[] }).voices).toEqual([]);
   });
+});
+
+describe("transcribe route", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const withKey = { tts: { fishKey: "fish-key" } } as AppConfig;
+  const upload = (bytes: Buffer, type = "audio/wav") =>
+    Object.assign(Readable.from([bytes]), { headers: { "content-type": type, "content-length": String(bytes.byteLength) } }) as never;
+
+  it("refuses anything but WAV audio", async () => {
+    const { answers } = await call("POST", "/api/tts/transcribe", {}, withKey, upload(Buffer.from("x"), "application/json"));
+    expect(answers).toEqual([[400, { error: "content-type must be audio/wav" }]]);
+  });
+
+  it("asks for a Fish key when none is saved", async () => {
+    const { answers } = await call("POST", "/api/tts/transcribe", {}, {} as AppConfig, upload(Buffer.from("x")));
+    expect(answers[0]![0]).toBe(409);
+    expect((answers[0]![1] as { error: string }).error).toContain("Fish Audio key");
+  });
+
+  it("refuses audio over the cap", async () => {
+    const { answers } = await call("POST", "/api/tts/transcribe", {}, withKey, upload(Buffer.alloc(TRANSCRIBE_MAX_BYTES + 1)));
+    expect(answers[0]![0]).toBe(413);
+  });
+
+  it("returns the text Fish heard", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ text: "hi bot" }), { status: 200 })));
+    const { answers } = await call("POST", "/api/tts/transcribe", {}, withKey, upload(Buffer.from("RIFF")));
+    expect(answers).toEqual([[200, { text: "hi bot" }]]);
+  });
+
+  it("answers 502 with Fish's message when Fish fails", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ message: "nope" }), { status: 401 })));
+    const { answers } = await call("POST", "/api/tts/transcribe", {}, withKey, upload(Buffer.from("RIFF")));
+    expect(answers[0]![0]).toBe(502);
+    expect((answers[0]![1] as { error: string }).error).toContain("rejected that API key");
+  });
+});
+
+it("keeps the English network refusal and its translation fields", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
+  try {
+    const req = Object.assign(Readable.from([Buffer.from("RIFF")]), { headers: { "content-type": "audio/wav", "content-length": "4" } });
+    const { answers } = await call("POST", "/api/tts/transcribe", {}, { tts: { fishKey: "fish-key" } } as AppConfig, req as never);
+    expect(answers).toEqual([[502, {
+      error: "Couldn't reach Fish Audio to hear you — check your connection.",
+      errorKey: "serverError.voice.fishTranscribeConnection",
+    }]]);
+  } finally { vi.unstubAllGlobals(); }
 });

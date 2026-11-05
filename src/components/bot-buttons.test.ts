@@ -14,7 +14,7 @@ vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => false }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/state/store")>()),
-  useStore: () => ({ state: {}, dispatch: fixture.dispatch }),
+  useStore: () => ({ state: { bots: [] }, dispatch: fixture.dispatch }),
 }));
 
 const { BOT_BUTTON, botButtonTone } = await import("@/lib/bot-button");

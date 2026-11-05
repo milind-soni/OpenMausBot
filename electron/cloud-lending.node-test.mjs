@@ -6,11 +6,21 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { cloudLendingVerdict, createComputerSharing } from "./computer-sharing.mjs";
+import nativeText from "./native-text.cjs";
 import { PERSON_AWAY_SECONDS, personActiveText } from "./lent-screen-presence.mjs";
 
 const ORIGIN = "https://omb-u-fixture.fly.dev";
 const binding = { accountId: "acct_1", origin: ORIGIN };
 const env = { id: "my-cloud", name: "My Cloud", origin: ORIGIN };
+
+test("an empty Cloud grant follows the current native language without changing its English", async t => {
+  const text = nativeText.createNativeText({ saved: "en" });
+  const { sharing } = await lendingFixture(t, { t: text.t });
+  for (const language of ["en", "pt-br"]) {
+    text.set(language);
+    await assert.rejects(sharing.saveCloud(env, { folders: [], screen: false }), { message: text.t("native.lend.chooseCapability") });
+  }
+});
 
 test("the Cloud verdict: same account and machine run, anything else ends or pauses", () => {
   const connected = { status: "connected", accountId: "acct_1", origin: ORIGIN };
@@ -90,6 +100,7 @@ async function lendingFixture(t, options = {}) {
   const sharing = createComputerSharing({
     file: path.join(dir, "profile", "computer-sharing.json"), fetch: home.fetch, environments: () => [options.env ?? env],
     ...(options.reconnect ? { reconnect: options.reconnect } : {}), ...(options.now ? { now: options.now } : {}), ...(options.ownClouds ? { ownClouds: options.ownClouds } : {}),
+    ...(options.t ? { t: options.t } : {}),
     // The maintainer flag is off, as for every Cloud Pro user.
     enabled: async () => { maintainerChecks++; return false; },
     cloud: asked => (typeof cloud === "function" ? cloud(asked) : cloud), home: path.join(dir, "home"),
@@ -349,7 +360,7 @@ test("Pause is instant: the Cloud is told, running work is cancelled, nothing mo
   home.push({ action: "computer_call", tool_name: "click", arguments: {} });
   await delay(300);
   assert.equal((await readFile(driver.calls, "utf8")).trim(), "drag");
-  assert.deepEqual(summaries.at(-1), { lending: [], clouds: ["My Cloud"], using: [], paused: true, terminal: false, busy: null, screen: null });
+  assert.deepEqual(summaries.at(-1), { lending: [], clouds: ["My Cloud"], waiting: [], using: [], paused: true, terminal: false, busy: null, screen: null });
   assert.equal(sharing.cloudState(env).problem, "paused");
 });
 

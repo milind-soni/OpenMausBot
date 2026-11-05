@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { AlertTriangle } from "lucide-react";
 
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
 
 export type ConfirmTone = "danger" | "neutral";
 
@@ -21,6 +22,8 @@ export interface ConfirmDialogProps {
   alternative?: { label: string; onClick: () => void };
   pending?: boolean;
   returnFocusRef?: RefObject<HTMLElement | null>;
+  /** Where it sits among open dialogs, when another one above the usual layer asked it. */
+  layer?: string;
 }
 
 /**
@@ -76,7 +79,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-6"
+      className={`fixed inset-0 ${props.layer ?? "z-50"} flex items-center justify-center bg-black/55 p-6`}
       onMouseDown={(event) => event.target === event.currentTarget && onCancel()}
     >
       <ConfirmDialogCard ref={dialogRef} cancelRef={cancelRef} {...props} />
@@ -91,7 +94,7 @@ export function ConfirmDialogCard({
   title,
   body,
   confirmLabel,
-  cancelLabel = "Cancel",
+  cancelLabel = t("common.cancel"),
   tone = "danger",
   icon,
   onCancel,

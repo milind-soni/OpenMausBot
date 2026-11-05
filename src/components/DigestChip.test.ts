@@ -52,6 +52,14 @@ describe("DigestChip", () => {
     expect(html).toContain("&lt;script&gt;");
     expect(html).not.toContain("<script>");
   });
+  it("says one tool call and one file in the singular", () => {
+    const one = { ...message.digest!, tools: [], toolsDropped: 0, toolCalls: 1, files: { changed: ["a.ts"], added: [], deleted: [] } };
+    expect(renderToStaticMarkup(createElement(DigestChip, { message: { ...message, digest: one } }))).toContain("Did 1 tool call · 1 file changed");
+    expect(renderToStaticMarkup(createElement(DigestChip, { message: { ...message, digest: { ...one, files: undefined } } }))).toContain("Did 1 tool call<");
+    expect(renderToStaticMarkup(createElement(DigestChip, { message: { ...message, digest: { ...one, toolCalls: 3 } } }))).toContain("Did 3 tool calls · 1 file changed");
+    expect(renderToStaticMarkup(createElement(DigestChip, { message: { ...message, digest: { ...one, files: { ...one.files, added: ["b.ts"] } } } }))).toContain("Did 1 tool call · 2 files changed");
+  });
+
 
   it("does not call an excerpt-only fallback a summary", () => {
     const chip = (summary: string) => renderToStaticMarkup(createElement(CompactionChip, { message: {

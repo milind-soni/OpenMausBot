@@ -7,6 +7,7 @@ import type { MemoryDoc } from "@/lib/memory";
 import type { Bot, BotSettingsSection, InstanceInfo } from "@/state/store";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN } from "../../shared/bot-avatar";
 import type { SkillWire } from "@/lib/skills";
+import type { McpServerSummary } from "@/lib/mcp-servers";
 import type { BotApps } from "./bot-settings/useBotApps";
 
 // Hook-by-call-order harness: component state survives between renders, effects never run, and handlers are read off
@@ -37,6 +38,7 @@ const fixture = vi.hoisted(() => {
     derived: {} as Record<string, unknown>,
     apps: { phase: "ready", apps: [], connectedSlugs: [] } as BotApps,
     places: {} as Record<string, [boolean, boolean, string]>,
+    mcp: { servers: null as McpServerSummary[] | null, error: false },
   };
 });
 vi.mock("react", async (original) => ({
@@ -53,6 +55,10 @@ vi.mock("react", async (original) => ({
 vi.mock("@/lib/interface-mode", () => ({
   useAdvancedMode: () => fixture.advanced,
   setAdvancedMode: (enabled: boolean) => fixture.setAdvanced(enabled),
+}));
+vi.mock("@/lib/mcp-servers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/mcp-servers")>()),
+  useMcpServers: () => ({ ...fixture.mcp, refresh: () => Promise.resolve(fixture.mcp.servers ?? []) }),
 }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.ownerOrAdmin }));
 vi.mock("@/lib/app-links", async (importOriginal) => ({
@@ -255,6 +261,7 @@ beforeEach(() => {
     canUseConnectedApps: true, connectedAppsConfigured: true, connectedAppsEnabled: true, browserEnabled: true,
   };
   fixture.apps = { phase: "ready", apps: [], connectedSlugs: [] };
+  fixture.mcp = { servers: [], error: false };
   fixture.places = {
     cloud: [true, true, "Cloud desktop"], vm: [true, true, "Private desktop"], local: [true, true, "Your screen"], browser: [true, true, "Web pages only"],
   };
@@ -381,9 +388,9 @@ describe("the bot panel in Simple mode", () => {
     expect(sectionTarget("soul")).toMatchObject({ page: "settings", anchor: "instructions" });
   });
 
-  // App tool grants (PluginsPanel) and the working folder (the files pane) name a Simple page; MCP and tool
-  // selection name none, so they land where Access does.
-  it.each([["apps", "apps"], ["folder", "folder"], ["mcp", undefined], ["tools", undefined]] as const)("lands an Access link naming %s on %s", (page, landing) => {
+  // App tool grants (PluginsPanel) and the working folder (the files pane) name a Simple page; MCP servers live on the
+  // apps page, and tool selection names none, so it lands where Access does.
+  it.each([["apps", "apps"], ["folder", "folder"], ["mcp", "apps"], ["tools", undefined]] as const)("lands an Access link naming %s on %s", (page, landing) => {
     try {
       openBotSettings(fixture.dispatch, "access", { page });
       const rendered = panel(makeBot(), "access");
@@ -397,7 +404,7 @@ describe("the bot panel in Simple mode", () => {
     expect(shown(panel(makeBot(), "access"))).toEqual({ tab: "computer", page: undefined });
   });
 
-  it("shows no switch on any tab or on Bot settings: memory, upkeep, browser, record steps and Work until done live elsewhere", () => {
+  it("shows no switch on any tab, and on Bot settings only Bot API's: memory, upkeep, browser, record steps and Work until done live elsewhere", () => {
     const bot = makeBot();
     expect(switches(panel(bot).html)).toBe(0);
     expect(panel(bot).html).not.toContain('aria-label="Work until done"');
@@ -408,7 +415,9 @@ describe("the bot panel in Simple mode", () => {
       for (const text of ["Memory", "Upkeep", "Record"]) expect(rendered.html).not.toContain(`>${text}<`);
     }
     click(find(panel(bot), "data-panel-gear"));
-    expect(switches(panel(bot).html)).toBe(0);
+    const settings = panel(bot).html;
+    expect(switches(settings)).toBe(1);
+    expect(settings).toContain('aria-label="Let apps talk to this bot"');
   });
 });
 
@@ -644,7 +653,8 @@ describe("the Bot settings page", () => {
       .map((marker) => rendered.html.indexOf(marker));
     expect(order.every((index) => index > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(switches(rendered.html)).toBe(0);
+    expect(switches(rendered.html)).toBe(1);
+    expect(rendered.html).toContain('aria-label="Let apps talk to this bot"');
     expect(rendered.html.match(/pl-\[38px\]/g)).toHaveLength(4);
   });
 
@@ -760,6 +770,16 @@ describe("the Bot settings page", () => {
     expect(rowValue(rendered, "skills")).toBe("2 on");
     click(find(rendered, "data-panel-page", "skills"));
     expect(onOpen).toHaveBeenLastCalledWith("skills");
+  });
+
+  it("lists the MCP servers the bot can use after its apps, and None yet when there are neither", () => {
+    fixture.mcp.servers = [{ name: "dodopayments-remote", enabled: true }, { name: "linear", enabled: true }, { name: "paused", enabled: false }];
+    expect(rowValue(settingsPage(makeBot()), "apps")).toBe("dodopayments-remote, linear");
+    expect(rowValue(settingsPage(makeBot({ mcpServers: ["linear"] })), "apps")).toBe("linear");
+    fixture.apps = { phase: "ready", connectedSlugs: ["gmail"], apps: [app("gmail", "write")] };
+    expect(rowValue(settingsPage(makeBot({ mcpServers: ["linear"] })), "apps")).toBe("Gmail, linear");
+    fixture.apps = { phase: "ready", apps: [], connectedSlugs: [] };
+    expect(rowValue(settingsPage(makeBot({ mcpServers: [] })), "apps")).toBe("None yet");
   });
 
   it("edits the bot's job: saved on blur, Enter leaves the field, Escape puts it back", () => {
@@ -992,6 +1012,45 @@ describe("the drill-in pages", () => {
     const cannot = body("apps");
     expect(cannot.html).toContain("The model Scout runs on can&#x27;t use apps.");
     expect(switches(cannot.html)).toBe(0);
+  });
+
+  it("lists the MCP servers under the apps with a switch each, that writes the explicit list like Access", () => {
+    fixture.mcp.servers = [{ name: "dodopayments-remote", enabled: true }, { name: "linear", enabled: true }];
+    const rendered = body("apps");
+    expect(rendered.html).toContain("MCP servers");
+    expect(find(rendered, "aria-label", "Scout can use dodopayments-remote").props.checked).toBe(true);
+    click(find(rendered, "aria-label", "Scout can use dodopayments-remote"));
+    expect(patch).toHaveBeenLastCalledWith({ mcpServers: ["linear"] });
+
+    const narrowed = body("apps", makeBot({ mcpServers: ["linear"] }));
+    expect(find(narrowed, "aria-label", "Scout can use dodopayments-remote").props.checked).toBe(false);
+    click(find(narrowed, "aria-label", "Scout can use dodopayments-remote"));
+    expect(patch).toHaveBeenLastCalledWith({ mcpServers: ["linear", "dodopayments-remote"] });
+  });
+
+  it("shows a server that is off everywhere or for this bot as a disabled switch with why, and ignores it while busy", () => {
+    fixture.mcp.servers = [{ name: "paused", enabled: false }, { name: "linear", enabled: true, offFor: ["scout"] }];
+    const rendered = body("apps");
+    expect(find(rendered, "aria-label", "Scout can use paused").props).toMatchObject({ checked: false, disabled: true });
+    expect(rendered.html).toContain("Switched off in Apps");
+    expect(rendered.html).toContain("Off for Scout, because it doesn&#x27;t start for them.");
+    expect(find(rendered, "aria-label", "Scout can use linear").props.disabled).toBe(false);
+
+    const busy = body("apps", makeBot({ busy: true }));
+    expect(find(busy, "aria-label", "Scout can use linear").props.disabled).toBe(true);
+    click(find(busy, "aria-label", "Scout can use linear"));
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it("draws no MCP card while loading or when the bot has no server, and says so when the list cannot load", () => {
+    fixture.mcp = { servers: null, error: false };
+    expect(body("apps").html).not.toContain("MCP servers");
+    fixture.mcp = { servers: [{ name: "theirs", enabled: true, bot: "other" }], error: false };
+    expect(body("apps").html).not.toContain("MCP servers");
+    fixture.mcp = { servers: null, error: true };
+    const failed = body("apps");
+    expect(failed.html).toContain("Could not refresh MCP servers.");
+    expect(switches(failed.html)).toBe(0);
   });
 
   it("lists routines with switches, adds one locked to this bot, and says to ask in chat; no logs page, no schedules link", () => {

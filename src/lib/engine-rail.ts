@@ -1,5 +1,7 @@
 import type { InstanceInfo } from "@/state/store";
 
+export { engineDisplayName } from "@/lib/engine-name";
+
 export function configuredModelInstances(instances: readonly InstanceInfo[], selectedInstanceId?: string): InstanceInfo[] {
   return instances.filter((instance) =>
     instance.instanceId === selectedInstanceId
@@ -8,6 +10,13 @@ export function configuredModelInstances(instances: readonly InstanceInfo[], sel
 
 export function isCustomOnly(instance: { access?: InstanceInfo["access"] } | undefined): boolean {
   return instance?.access === "custom";
+}
+
+/** A signed-in engine whose list it never gave is worth asking: a signed-out one would only refuse. */
+export function modelsAwaitEngine(instance: Pick<InstanceInfo, "modelsUnconfirmed" | "snapshot"> | undefined): boolean {
+  return instance?.modelsUnconfirmed === true
+    && instance.snapshot.state === "available"
+    && instance.snapshot.authenticated !== false;
 }
 
 export type SignInFamily = "claude" | "openai";

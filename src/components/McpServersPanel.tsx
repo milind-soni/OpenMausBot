@@ -80,7 +80,7 @@ export async function signedInToolsCheck(
 /** Security: names the headers, never their values. */
 function failureReason(server: McpServerListing, result: ProbeResult): string {
   if (result.reason !== "keys" || !isRemoteMcpListing(server)) return result.error ?? "";
-  const reason = result.status ? `HTTP ${result.status}` : "unauthorized";
+  const reason = result.status ? `HTTP ${result.status}` : t("mcp.check.unauthorized");
   if (!server.headerKeys.length) return t("mcp.check.keysNeeded", { reason });
   return t("mcp.check.keysRefused", { reason, names: new Intl.ListFormat(activeLocale(), { style: "long", type: "conjunction" }).format(server.headerKeys) });
 }
@@ -273,7 +273,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
         if (connections.mcp.some((connection: { name: string }) => connection.name === item.name)) {
           const headers = (body.headers ?? {}) as Record<string, string | true>;
           if (Object.keys(headers).length > 1) {
-            throw new Error("Personal MCP connections support one header. Remove the extra headers before saving.");
+            throw new Error(t("mcp.personal.oneHeader"));
           }
           const value = Object.values(headers)[0];
           ownKey = typeof value === "string" ? value : undefined;

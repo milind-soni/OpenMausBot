@@ -58,10 +58,15 @@ export function skillFlag(warnings: readonly string[]): SkillFlag | undefined {
   return SCAN_FLAGS.find(([pattern]) => pattern.test(first))?.[1] ?? "other";
 }
 
-/** "weekly-report" reads as "Weekly report". */
+/** Short parts of a skill's name that read as letters, not a word. */
+const LETTERS = new Set(["ai", "api", "aws", "ci", "cli", "crm", "css", "csv", "gcp", "html", "http", "id", "json", "llm", "mcp", "pdf", "pr", "qa", "sdk", "seo", "sql", "ssh", "ui", "url", "ux", "xml"]);
+
+/** "weekly-report" reads as "Weekly report" and "review-pr" as "Review PR"; a name with digits stays as written. */
 export function skillTitle(skill: Pick<SkillWire, "name">): string {
-  const words = skill.name.replace(/-/g, " ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
+  if (/\d/.test(skill.name)) return skill.name;
+  const words = skill.name.split("-").map((word) => (LETTERS.has(word) ? word.toUpperCase() : word));
+  const first = words[0] ?? "";
+  return [first.charAt(0).toUpperCase() + first.slice(1), ...words.slice(1)].join(" ");
 }
 
 /** Where a stored `source` says a skill came from. */

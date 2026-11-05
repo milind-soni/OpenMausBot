@@ -275,7 +275,7 @@ export function readCatalogSkill(deps: SkillCatalogDeps, id: string): SkillDetai
   if (!row) return null;
   if (id.startsWith("library:")) {
     const text = instructionsOf(readLibrarySkillFile(row.name, root));
-    return text === null ? null : { instructions: text, files: filesBeside(join(root, "skills", row.name), ["SKILL.md"]) };
+    return text === null ? null : { instructions: text, files: [...readSkillLibraryIndex(root)[row.name]?.files ?? []].sort() };
   }
   if (id.startsWith("tool:")) {
     const text = instructionsOf(readImportedSkillFile(row.name));

@@ -240,7 +240,8 @@ createInterface({ input: process.stdin }).on('line', line => {
 `);
     const runtime = await resolveAntigravityRuntime(fake.executable);
     const profile = await prepareAntigravityProfile({ instanceId: "auth-lifecycle", runtime, baseDir: fake.directory });
-    const controller = new AntigravityAuthController();
+    const signedIn = vi.fn();
+    const controller = new AntigravityAuthController(signedIn);
     try {
       const flow = await controller.start(runtime, profile);
       expect(flow.phase).toBe("waiting");
@@ -249,6 +250,33 @@ createInterface({ input: process.stdin }).on('line', line => {
       await new Promise((resolve) => setTimeout(resolve, 300));
       await expect(controller.complete(flow.flowId!, "http://127.0.0.1:54321/?code=test&state=fixture"))
         .rejects.toThrow(/no longer active/u);
+      expect(signedIn).not.toHaveBeenCalled();
+    } finally {
+      controller.cancel();
+    }
+  });
+
+  it("reports a sign-in Google finishes on its own, so the account's models are read", async () => {
+    const fake = fakeRuntime();
+    const url = "https://accounts.google.com/o/oauth2/v2/auth?response_type=code&state=fixture&redirect_uri=http%3A%2F%2F127.0.0.1%3A54321%2F";
+    writeFileSync(fake.executable, `#!/usr/bin/env node
+import { createInterface } from 'node:readline';
+createInterface({ input: process.stdin }).on('line', line => {
+  const message = JSON.parse(line);
+  if (message.method === 'authenticate') {
+    console.error(${JSON.stringify(ANTIGRAVITY_AUTH_PREFIX + url)});
+    setTimeout(() => console.log(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} })), 100);
+  } else console.log(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} }));
+});
+`);
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    const profile = await prepareAntigravityProfile({ instanceId: "auth-finishes", runtime, baseDir: fake.directory });
+    let signedIn!: () => void;
+    const reported = new Promise<void>((resolve) => { signedIn = resolve; });
+    const controller = new AntigravityAuthController(() => signedIn());
+    try {
+      expect((await controller.start(runtime, profile)).phase).toBe("waiting");
+      await expect(reported).resolves.toBeUndefined();
     } finally {
       controller.cancel();
     }
@@ -901,9 +929,7 @@ describe("Antigravity driver over shared ACP", () => {
   it("keeps a suffixed Gemini 3.8 Flash pick unchanged when the runtime still offers it", async () => {
     const { calls, selection } = await legacyPickTurn("antigravity-suffixed-offered", "gemini-3.8-flash,gemini-3.8-flash-medium", "gemini-3.8-flash-medium");
     expect(selection).toEqual({ sessionId: expect.any(String), model: "gemini-3.8-flash-medium" });
-    expect(calls.filter((call: any) => call.params.configId !== "mode")).toEqual([
-      { method: "session/set_config_option", params: { sessionId: selection.sessionId, configId: "model", value: "gemini-3.8-flash-medium" } },
-    ]);
+    expect(calls.filter((call: any) => call.params.configId !== "mode")).toEqual([]);
   });
 
   it("maps only a retired suffixed id the session lacks, and never overrides a chosen thinking level", () => {
@@ -940,6 +966,8 @@ describe("Antigravity driver over shared ACP", () => {
       enabled: true,
       config: { cli: fake.executable, fullAuto: false },
     });
+    await instance.startupModelRefresh;
+    rmSync(launches, { force: true });
     recorder = recordEvents(instance.adapter);
     const run = async (approvalMode: "ask" | "full" | "edits", model: string, threadId = "thread-pooled") => {
       const { turnId } = await instance!.adapter.sendTurn({
@@ -1086,6 +1114,8 @@ describe("Antigravity driver over shared ACP", () => {
       enabled: true,
       config: { cli: fake.executable, fullAuto: true },
     });
+    await instance.startupModelRefresh;
+    rmSync(launches, { force: true });
     recorder = recordEvents(instance.adapter);
     const promptModes = () => readFileSync(`${dump}.prompts.jsonl`, "utf8").trim().split("\n")
       .map((line) => JSON.parse(line).mode as string);
@@ -1139,6 +1169,8 @@ describe("Antigravity driver over shared ACP", () => {
         enabled: true,
         config: { cli: fake.executable, fullAuto: false },
       });
+      await instance.startupModelRefresh;
+      rmSync(launches, { force: true });
       recorder = recordEvents(instance.adapter);
       const promptModes = () => existsSync(`${dump}.prompts.jsonl`)
         ? readFileSync(`${dump}.prompts.jsonl`, "utf8").trim().split("\n").map((line) => JSON.parse(line).mode as string)

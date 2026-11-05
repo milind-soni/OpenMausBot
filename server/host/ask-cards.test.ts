@@ -91,6 +91,16 @@ describe("a teammate's NEEDS INPUT question", () => {
     expect(w.notified.map((notification) => [notification.kind, notification.threadId])).toEqual([["question", "work"]]);
   });
 
+  it("keeps the localized chip's question identical to its English fallback, without the default answer", () => {
+    const w = world();
+    w.cards.park(w.node(), "CSV or Excel?\nDefault: CSV");
+    expect(w.rows("inbox")[0]?.tool).toMatchObject({
+      name: "Ledger needs your input: CSV or Excel?",
+      nameCode: "chat.notice.teammateNeedsInput",
+      nameParams: { name: "Ledger", question: "CSV or Excel?" },
+    });
+  });
+
   it("turns a reply that is only the question into the card itself", () => {
     const w = world();
     w.say("work", `NEEDS INPUT: ${QUESTION}`);
@@ -151,11 +161,11 @@ describe("a teammate's NEEDS INPUT question", () => {
     expect(room.cards.answerParked("work", "needs-input-as_1-1", "once more")).toBe(false);
   });
 
-  it("keeps a parked card's wait as it was: a chip and the work's notice", () => {
+  it("keeps a parked card's chip, and leaves telling the person to the card itself", () => {
     const card = world({ inboxThread: "inbox" });
     card.cards.park(card.node({ cards: ["m9"] }), "Waiting on the person: connect Gmail");
     expect(card.rows("inbox").map((row) => row.tool?.name)).toEqual(["Ledger needs your input: Waiting on the person: connect Gmail"]);
-    expect(card.notified.map((notification) => notification.kind)).toEqual(["delegation-settled"]);
+    expect(card.notified).toEqual([]);
   });
 });
 
@@ -212,7 +222,7 @@ describe("nothing stale waits on the person", () => {
     w.say("inbox", "Scout: something else");
     w.cards.park(node, "Waiting on the person: sign in to notion.so", true);
     expect(w.rows("inbox").filter((row) => row.tool?.name.includes("needs your input"))).toHaveLength(1);
-    expect(w.notified).toHaveLength(1);
+    expect(w.notified).toEqual([]);
   });
 
   it("a newer question closes the bot's older one that no turn waits on any more, but not one a turn still waits on", () => {

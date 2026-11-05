@@ -45,6 +45,7 @@ Use only mapped, tested commands:
 
 - [The headless command line](headless-cli.md)
 - [Chat turns](chat-turns.md)
+- [OpenAI reply readout](openai-readout.md)
 - [Conversation context compaction](context-compaction.md)
 - [Work summaries and engine hooks](digests.md)
 - [OpenAI-compatible structured tools](openai-tools.md)
@@ -69,6 +70,7 @@ Use only mapped, tested commands:
 - [Waits: tell me when, with no AI while waiting](waits.md)
 - [A new Cloud's first hour](first-hour.md)
 - [Chat widgets](widgets.md)
+- [The Inbox on every plan](inbox.md)
 - [Reactions](reactions.md)
 - [Chat widgets: prompts to try with a real bot](widget-prompts.md)
 - [Phone web app installation and safe areas](phone-web-app.md)
@@ -296,6 +298,11 @@ responsive layouts, theme contrast, and status refreshes without losing drafts.
 The [Claude account recipe](claude-account.md) checks sign-out, cancellation and
 retry against an offline Claude CLI confined to a disposable home.
 
+The [Claude custom endpoints](claude-endpoint.md) checks a per-bot DeepSeek/GLM
+endpoint in Settings and its turn against the fake Claude CLI: its own
+directory, its model and routing, the token kept out of the engine list, and
+edits that keep the saved token.
+
 The [provider recovery recipe](provider-recovery.md) verifies real Grok image
 transport and Claude authentication against loopback APIs, plus scoped thread
 approvals and provider safety errors in an isolated desktop UI.
@@ -321,6 +328,10 @@ The [Group and Goal Local VM recipe](group-local-vm.md) checks per-speaker
 desktop routing, cancellation, and computer authority cleanup.
 
 ## Evidence
+
+The [Gemini speech fixture](gemini-speech.md) checks write-only credentials,
+voice selection and WAV synthesis against an offline provider in an isolated
+server, with manual steps for real Google access and playback.
 
 The [persistence responsiveness benchmark](persistence-performance.md) measures
 synthetic message/log bursts and history scans, with isolated chat, visibility

@@ -72,7 +72,7 @@ export async function openOwnerSession(target, fetchImpl, { label = SESSION_LABE
  * `moveSession`: the one session every pass of the move uses (move-session.mjs); without it each pass opens its own.
  */
 export function installCloudSend({ ipcMain, cloudPage, server, local, home, cookieFetch, reconnect, power, file, window, localOrigin,
-  fetch: fetchImpl = globalThis.fetch, engineWaitMs, space, move = () => null, teamMove = () => null, moveSession = null }) {
+  fetch: fetchImpl = globalThis.fetch, engineWaitMs, space, move = () => null, teamMove = () => null, moveSession = null, t }) {
   const handoff = createLoginHandoffClient();
   const pageOf = () => {
     const win = window();
@@ -121,6 +121,7 @@ export function installCloudSend({ ipcMain, cloudPage, server, local, home, cook
     onChange: deliver,
     engineWaitMs,
     space,
+    t,
   });
   const onPage = (channel, handler) => (event, ...args) => {
     const asking = cloudPage(event);

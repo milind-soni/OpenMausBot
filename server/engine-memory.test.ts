@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
 import { TurnNotStartedError, type ProviderInstance, type RuntimeEvent, type RuntimeEventListener, type SendTurnInput } from "./contracts.ts";
 import {
-  BROWSER_BYTES, EngineMemory, memoryStallText, memoryStillWaitingText, memoryStopped, memoryStopText, memoryWaitText, PressureLedger, processGroupBytes, readHostMemory,
+  BOT_TURN_GIVES_WAY_MS, BROWSER_BYTES, EngineMemory, memoryStallText, memoryStillWaitingText, memoryStopped, memoryStopText, memoryWaitText, PressureLedger, processGroupBytes, readHostMemory,
   withEngineMemory, type HostMemory,
 } from "./engine-memory.ts";
 import { OOM_SCORE, protectSupervisor, spawnBotWork, spawnWithOomScore } from "./oom-score.ts";
@@ -210,6 +210,103 @@ describe("admitting engines", () => {
     expect(await off.admit("a", new AbortController().signal, () => { throw new Error("no notice"); })).toBe(true);
     const unknown = new EngineMemory({ enabled: true, read: () => null });
     expect(await unknown.admit("a", new AbortController().signal, () => {})).toBe(true);
+  });
+});
+
+describe("who goes first when memory holds several", () => {
+  const waiting = (h: ReturnType<typeof host>, threadId: string, order: string[]) =>
+    h.memory.admit(threadId, new AbortController().signal, () => {}).then((admitted) => { if (admitted) order.push(threadId); h.memory.turnStarted(threadId); h.spawn(threadId); });
+  /** One engine runs and no second fits. */
+  const full = async (personal: readonly string[]) => {
+    const h = host({ available: 1.4 * GB });
+    h.memory.useTurnOrder((threadId) => personal.includes(threadId));
+    await h.memory.admit("running", new AbortController().signal, () => {});
+    h.memory.turnStarted("running");
+    h.spawn("running");
+    h.advance(100_000);
+    return h;
+  };
+  const finish = async (h: ReturnType<typeof host>, threadId: string) => {
+    h.memory.turnEnded(threadId);
+    for (const child of h.children.values()) child.exit();
+    await settle();
+  };
+
+  it("starts a person's line ahead of bot work that came first, and the bot work after it", async () => {
+    const h = await full(["person"]);
+    const order: string[] = [];
+    void waiting(h, "handoff-1", order);
+    void waiting(h, "handoff-2", order);
+    await settle();
+    void waiting(h, "person", order);
+    await settle();
+    expect(order).toEqual([]);
+    await finish(h, "running");
+    expect(order[0]).toBe("person");
+    await finish(h, "person");
+    expect(order).toEqual(["person", "handoff-1"]);
+    await finish(h, "handoff-1");
+    expect(order).toEqual(["person", "handoff-1", "handoff-2"]);
+  });
+
+  it("never lets more start than fit: an order only, each still waits for its room", async () => {
+    const h = await full(["person"]);
+    const order: string[] = [];
+    void waiting(h, "handoff", order);
+    void waiting(h, "person", order);
+    await settle();
+    expect(order).toEqual([]);
+    expect(h.memory.busy()).toBe(1);
+  });
+
+  it("lets people's own turns go in the order they came", async () => {
+    const h = await full(["first", "second"]);
+    const order: string[] = [];
+    void waiting(h, "first", order);
+    await settle();
+    void waiting(h, "second", order);
+    await settle();
+    await finish(h, "running");
+    expect(order).toEqual(["first"]);
+    await finish(h, "first");
+    expect(order).toEqual(["first", "second"]);
+  });
+
+  it("says what runs and what is ahead in the order they will go, and whether anything waits", async () => {
+    const h = await full(["person"]);
+    const said: string[] = [], began: string[] = [];
+    let changes = 0;
+    h.memory.useWaits({ text: (threadId, wait) => `${threadId} ${wait.first ? "first" : "again"} ${wait.running} ${wait.ahead}`, began: (threadId, wait) => began.push(`${threadId} ${wait.ahead}`), changed: () => { changes += 1; } });
+    const order: string[] = [];
+    void h.memory.admit("handoff", new AbortController().signal, (text) => said.push(text)).then(() => order.push("handoff"));
+    await settle();
+    void h.memory.admit("person", new AbortController().signal, (text) => said.push(text)).then(() => order.push("person"));
+    await settle();
+    expect(said).toEqual(["handoff first 1 0", "person first 1 0"]);
+    expect(began).toEqual(["handoff 0", "person 0"]);
+    expect(h.memory.waiting()).toBe(true);
+    expect(changes).toBe(1);
+    h.advance(10 * 60_000);
+    await settle();
+    expect(said.at(-1)).toMatch(/again 1 [01]$/);
+    await finish(h, "running");
+    await finish(h, "person");
+    await finish(h, "handoff");
+    expect(h.memory.waiting()).toBe(false);
+    expect(changes).toBe(2);
+  });
+
+  it("does not starve bot work: past its wait it goes ahead of a person's newer line", async () => {
+    const h = await full(["person"]);
+    const order: string[] = [];
+    void waiting(h, "handoff", order);
+    await settle();
+    h.advance(BOT_TURN_GIVES_WAY_MS - 1);
+    void waiting(h, "person", order);
+    await settle();
+    h.advance(1);
+    await finish(h, "running");
+    expect(order[0]).toBe("handoff");
   });
 });
 
@@ -492,6 +589,7 @@ describe("an engine's adapter on a Cloud home", () => {
     await settle();
     expect(seen.map((event) => event.type === "runtime.error" ? event.message : event.type)).toEqual([
       `${memoryStopText(false)} (opencodeGo exited null before the prompt result)`, "turn.completed"]);
+    expect(seen[0]).toMatchObject({ text: { key: "chat.notice.memoryReclaimedTaskDetail", params: { detail: "opencodeGo exited null before the prompt result" } } });
     expect(h.memory.stopText("b")).toBeNull();
     // An engine that ends its turn without an error of its own: the reason comes first.
     h.oomKill();

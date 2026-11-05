@@ -57,14 +57,16 @@ describe("claudeElicitations", () => {
     const { elicit, written, events } = harness();
     expect(elicit.frame(ask("e4", { requested_schema: { type: "object", properties: { token: { type: "string" } } } }))).toBe(true);
     expect(written).toEqual([sent("e4", { action: "decline" })]);
-    expect(events).toEqual([{ type: "runtime.notice", message: expect.stringContaining("github asked you to fill in a field") }]);
+    expect(events).toEqual([{ type: "runtime.notice", message: 'github asked you to fill in a field ("Allow access to your repos?"). OpenMausBot can\'t show that form yet, so the request was declined.',
+      text: { key: "chat.notice.elicitationFormDeclinedOneMessage", params: { server: "github", message: "Allow access to your repos?" } } }]);
   });
 
   it("declines a form whose required fields are not listed as properties", async () => {
     const { elicit, written, events } = harness();
     expect(elicit.frame(ask("e4b", { requested_schema: { type: "object", properties: {}, required: ["token"] } }))).toBe(true);
     expect(written).toEqual([sent("e4b", { action: "decline" })]);
-    expect(events).toEqual([{ type: "runtime.notice", message: expect.stringContaining("github asked you to fill in a field") }]);
+    expect(events).toEqual([{ type: "runtime.notice", message: 'github asked you to fill in a field ("Allow access to your repos?"). OpenMausBot can\'t show that form yet, so the request was declined.',
+      text: { key: "chat.notice.elicitationFormDeclinedOneMessage", params: { server: "github", message: "Allow access to your repos?" } } }]);
   });
 
   it("declines a link request and passes on only a web link", async () => {
@@ -73,9 +75,44 @@ describe("claudeElicitations", () => {
     elicit.frame(ask("e6", { mode: "url", url: "javascript:alert(1)" }));
     elicit.frame(ask("e6b", { mode: "url", url: "http://example.com/auth" }));
     expect(written).toEqual([sent("e5", { action: "decline" }), sent("e6", { action: "decline" }), sent("e6b", { action: "decline" })]);
-    expect(events[0].message).toContain(": https://example.com/auth.");
+    expect(events[0].message).toBe("github asked you to open a link to continue: https://example.com/auth. OpenMausBot can't open it from here, so the request was declined. Open the link yourself, then ask the bot to try again.");
+    expect(events[0].text).toEqual({ key: "chat.notice.elicitationUrlDeclinedWithUrl", params: { server: "github", url: "https://example.com/auth" } });
     expect(events[1].message).not.toContain("javascript:");
     expect(events[2].message).not.toContain("http://");
+    expect(events[1].text).toEqual({ key: "chat.notice.elicitationUrlDeclined", params: { server: "github" } });
+    expect(events[2].text).toEqual(events[1].text);
+  });
+
+  it.each([
+    ["github", "", "chat.notice.elicitationContinue", { server: "github" }, "github asks to continue"],
+    ["", "", "chat.notice.elicitationContinueGeneric", undefined, "An MCP server asks to continue"],
+    ["", "External words", "chat.notice.elicitationMessageGeneric", { message: "External words" }, "An MCP server: External words"],
+  ])("codes the app-owned confirmation words for %s / %s", (server, message, key, params, summary) => {
+    const { elicit, events } = harness();
+    elicit.frame(ask("confirmation", { mcp_server_name: server, message }));
+    expect(events[0]).toMatchObject({ summary, summaryCode: key });
+    expect(events[0].summaryParams).toEqual(params);
+  });
+
+  it.each([false, true])("keeps the generic server out of raw params in URL notices (%s)", (withUrl) => {
+    const { elicit, events } = harness();
+    elicit.frame(ask("url", { mcp_server_name: "", mode: "url", url: withUrl ? "https://example.com" : "http://example.com" }));
+    expect(events[0].message).toBe(`An MCP server asked you to open a link to continue${withUrl ? ": https://example.com" : ""}. OpenMausBot can't open it from here, so the request was declined. Open the link yourself, then ask the bot to try again.`);
+    expect(events[0].text).toEqual({ key: `chat.notice.elicitationUrlDeclinedGeneric${withUrl ? "WithUrl" : ""}`, params: withUrl ? { url: "https://example.com" } : {} });
+  });
+
+  it.each([1, 2])("codes named and generic forms with %i fields and preserves external words", (fields) => {
+    for (const server of ["", "External name"]) {
+      for (const message of ["", "External message"]) {
+        const { elicit, events } = harness();
+        elicit.frame(ask("form", { display_name: server, mcp_server_name: "", message,
+          requested_schema: { properties: Object.fromEntries(Array.from({ length: fields }, (_, i) => [`field${i}`, { type: "string" }])) } }));
+        expect(events[0].message).toBe(`${server || "An MCP server"} asked you to fill in ${fields === 1 ? "a field" : `${fields} fields`}${message ? ` ("${message}")` : ""}. OpenMausBot can't show that form yet, so the request was declined.`);
+        expect(events[0].text).toEqual({ key: `chat.notice.elicitationFormDeclined${server ? "" : "Generic"}${fields === 1 ? "One" : "Many"}${message ? "Message" : ""}`, params: {
+          ...(server ? { server } : {}), ...(fields === 1 ? {} : { fields }), ...(message ? { message } : {}),
+        } });
+      }
+    }
   });
 
   it("withdraws every open card when the session closes", async () => {

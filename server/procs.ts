@@ -240,19 +240,33 @@ export function execCli(
     return;
   }
   let escalate: NodeJS.Timeout | undefined;
+  let deadline: NodeJS.Timeout | undefined;
+  let timedOut = false;
   const child = execFile(resolved.command, resolved.args, { ...opts, windowsHide: true, encoding: "utf8" }, (err, stdout, stderr) => {
     clearTimeout(escalate);
-    cb(err, stdout, stderr);
+    clearTimeout(deadline);
+    cb(err ?? (timedOut ? cutOffError(cli, opts.timeout) : null), stdout, stderr);
   });
   // Node (24) calls back only once the child exits, and a CLI wrapper that traps SIGTERM outlives the timeout's signal.
   // Only the child is stopped: execFile starts no process group, so a grandchild that ignores SIGTERM can outlive it.
+  // When its timeout fires after the child exited but before Node saw the exit, Node (24) drops the output and still
+  // reports success; this timer is queued just after Node's, so it marks that run as timed out.
   if (opts.timeout) {
     escalate = setTimeout(() => void killCliTree(child, 0), opts.timeout + EXEC_KILL_GRACE_MS);
     escalate.unref?.();
+    deadline = setTimeout(() => {
+      timedOut = true;
+    }, opts.timeout);
+    deadline.unref?.();
   }
 }
 
-/** Concurrent probes on a busy machine can outlast the timeout, so a CLI that answered before keeps its last version. */
+function cutOffError(cli: string, timeout: number | undefined): Error {
+  return Object.assign(new Error(`${cli} timed out after ${timeout} ms`), { killed: true, code: null, signal: null });
+}
+
+export const CLI_VERSION_TIMEOUT_MS = 30_000;
+
 export function cliVersionReader(cli: string): (err: Error | null, stdout: string) => { version: string } | { reason: string } {
   let last: string | null = null;
   return (err, stdout) => {
@@ -260,8 +274,18 @@ export function cliVersionReader(cli: string): (err: Error | null, stdout: strin
     if (version) return { version: (last = version) };
     const failure = err as (NodeJS.ErrnoException & { killed?: boolean }) | null;
     const timedOut = failure?.killed === true && typeof failure.code !== "string";
-    if (timedOut && last) return { version: last };
-    return { reason: timedOut ? `\`${cli}\` took longer than 8 seconds to answer --version. The machine may be busy; check again.` : `\`${cli}\` CLI not found` };
+    if (failure?.code === "ENOENT") {
+      last = null;
+      return { reason: `\`${cli}\` CLI not found` };
+    }
+    if (failure?.code === "EACCES" || failure?.code === "EPERM") {
+      last = null;
+      return { reason: `\`${cli}\` could not run --version. Check its file permissions.` };
+    }
+    if (last && (timedOut || !err || typeof failure?.code === "number")) return { version: last };
+    return { reason: timedOut
+      ? `\`${cli}\` took longer than ${CLI_VERSION_TIMEOUT_MS / 1000} seconds to answer --version. The machine may be busy; check again.`
+      : !err ? `\`${cli}\` returned no version. Check again.` : `\`${cli}\` could not report its version. Check that it starts in a terminal, then check again.` };
   };
 }
 

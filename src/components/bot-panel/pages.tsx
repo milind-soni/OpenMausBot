@@ -1,8 +1,9 @@
 import { useState, type ReactNode } from "react";
-import { FolderOpen, Plus } from "lucide-react";
+import { FolderOpen, Plus, Server } from "lucide-react";
 
 import { appSwitchPatch } from "@/lib/bot-app-access";
 import { t } from "@/lib/i18n";
+import { mcpServersForBot, mcpServersOfBot, mcpSwitch, useMcpServers } from "@/lib/mcp-servers";
 import { deleteMemoryDoc, MEMORY_INDEX, saveMemoryDoc, type MemoryDoc } from "@/lib/memory";
 import type { Routine } from "@/lib/routines";
 import { shortPath } from "@/lib/short-path";
@@ -20,7 +21,7 @@ import { useOpenComputer, WherePage } from "./ComputerTab";
 import { SettingsPage } from "./SettingsPage";
 import { panelMemoryNotes, withMemoryNote, withoutMemoryNote, type PanelMemoryNote } from "./memory-notes";
 import type { SimplePageId } from "./page-registry";
-import { BotSwitch, buttonCls, Card, LinkRow, NoteRow, RadioRow, rowCls, TextRow, TrashButton } from "./rows";
+import { BotSwitch, buttonCls, Card, LinkRow, NoteRow, RadioRow, RowIcon, rowCls, RowText, TextRow, TrashButton } from "./rows";
 import { useMemoryDoc } from "./use-memory-doc";
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
@@ -39,11 +40,18 @@ function errorText(error: unknown, fallback: string): string {
 export function AppsPage({ bot, derived }: PageContext) {
   const { dispatch } = useStore();
   const apps = useBotApps(bot);
+  const { servers: allServers, error: mcpError } = useMcpServers();
   const { patch, canUseConnectedApps } = derived;
+  const servers = allServers ? mcpServersOfBot(allServers, bot.id) : [];
+  const mounted = new Set(mcpServersForBot(servers, bot.mcpServers, bot.id).map((server) => server.name));
 
   const toggle = (app: BotApp) => {
     const next = appSwitchPatch(bot, apps.connectedSlugs, app.slug, app.scope === null);
     if (Object.keys(next).length > 0) patch(next);
+  };
+  const toggleServer = (name: string) => {
+    if (bot.busy || mcpError) return;
+    patch({ mcpServers: mcpSwitch(servers, bot.mcpServers, name) });
   };
   const note = !canUseConnectedApps
     ? t("botSettings.simple.appsCannot", { name: bot.name })
@@ -74,6 +82,28 @@ export function AppsPage({ bot, derived }: PageContext) {
           </div>
         ))}
       </Card>
+      {(servers.length > 0 || mcpError) && (
+        <Card label={t("connectors.tab.mcp")}>
+          {mcpError && <NoteRow>{t("botAccess.mcpRefreshError")}</NoteRow>}
+          {servers.map((server) => (
+            <div key={server.name} data-simple-mcp={server.name} className={rowCls}>
+              <RowIcon icon={Server} />
+              <RowText
+                title={<span className="block truncate">{server.name}</span>}
+                hint={!server.enabled ? t("botAccess.mcpDisabled") : server.offFor?.includes(bot.id) ? t("mcp.offFor", { bots: bot.name }) : undefined}
+              />
+              <BotSwitch
+                color={bot.color}
+                checked={mounted.has(server.name)}
+                aria-label={t("botSettings.simple.appToggle", { name: bot.name, app: server.name })}
+                disabled={!server.enabled || Boolean(bot.busy) || mcpError}
+                onClick={() => toggleServer(server.name)}
+                className="disabled:cursor-not-allowed"
+              />
+            </div>
+          ))}
+        </Card>
+      )}
       <Card>
         <LinkRow
           data-panel-link="add-app"

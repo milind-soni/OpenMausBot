@@ -1,5 +1,5 @@
-import type { ConnectorCall } from "../shared/outbound.ts";
-import { DEFAULT_OUTBOUND_POLICY } from "../shared/outbound.ts";
+import type { ConnectorCall, OutboundPolicy } from "../shared/outbound.ts";
+import { DEFAULT_OUTBOUND_POLICY, OUTBOUND_DEFAULT_CAP } from "../shared/outbound.ts";
 import type { Notification } from "../shared/notification.ts";
 import { HELD_NOTE } from "./auto-approve.ts";
 import { appendDecision } from "./decision-log.ts";
@@ -8,6 +8,7 @@ import type { OutboundCounts } from "./outbound-counts.ts";
 import type { OutboundRequestService } from "./outbound-requests.ts";
 import { outboundCard } from "./outbound-requests.ts";
 import type { BotRecord, GroupRecord, Store } from "./store.ts";
+import { turnWaitedOnPerson } from "./waiting-on-person.ts";
 
 /** How long a "Send on your behalf?" card waits on the person before it times out. */
 export const OUTBOUND_HOLD_MS = 9 * 60_000;
@@ -29,9 +30,19 @@ export interface OutboundHoldDeps {
 
 export type OutboundHoldAnswer = { ok: true; approved: boolean } | { ok: false; text: string };
 
+/** How many sends a day go out on their own, or null when each waits on the card. At Full access a bot with no sending
+ * rule of its own sends without asking, up to the default cap; a stored rule is kept exactly as set. */
+function outboundDailyCap(rule: OutboundPolicy | undefined, fullAccess: boolean, opaque: boolean): { cap: number; fullAccess: boolean } | null {
+  if (fullAccess && rule === undefined) return { cap: OUTBOUND_DEFAULT_CAP, fullAccess: true };
+  const policy = rule ?? DEFAULT_OUTBOUND_POLICY;
+  return policy.policy === "allow" && !opaque ? { cap: policy.dailyCap, fullAccess: false } : null;
+}
+
 export interface OutboundHold {
-  hold(input: { bot: OutboundHoldBot; threadId: string; tool: string; calls: ConnectorCall[]; opaque: boolean; active: () => boolean }): Promise<OutboundHoldAnswer>;
-  reserve(input: { bot: OutboundHoldBot; threadId: string; tool: string; calls: ConnectorCall[]; opaque: boolean; approved: boolean }): void;
+  /** A send spends the day's allowance (Full access with no rule of its own, or "allow") or waits on the "Send on your behalf?" card. `fullAccess`: the turn runs at Full access. */
+  hold(input: { bot: OutboundHoldBot; threadId: string; tool: string; calls: ConnectorCall[]; opaque: boolean; fullAccess: boolean; active: () => boolean }): Promise<OutboundHoldAnswer>;
+  /** At dispatch time: a send with an allowance reserves against its cap; otherwise the hold must have been approved. Throws the refusal text. */
+  reserve(input: { bot: OutboundHoldBot; threadId: string; tool: string; calls: ConnectorCall[]; opaque: boolean; fullAccess: boolean; approved: boolean }): void;
 }
 
 export function createOutboundHold(deps: OutboundHoldDeps): OutboundHold {
@@ -40,20 +51,22 @@ export function createOutboundHold(deps: OutboundHoldDeps): OutboundHold {
   const { holdMs } = deps;
 
   return {
-    async hold({ bot: currentSender, threadId, tool: outboundTool, calls: outboundCalls, opaque, active }) {
+    async hold({ bot: currentSender, threadId, tool: outboundTool, calls: outboundCalls, opaque, fullAccess, active }) {
       const refuseOutbound = (text: string): OutboundHoldAnswer => ({ ok: false, text });
-      const policy = currentSender.outbound ?? DEFAULT_OUTBOUND_POLICY;
+      const allowance = outboundDailyCap(currentSender.outbound, fullAccess, opaque);
       const { app, calls, summary } = outboundCard(outboundCalls);
-      const capNote = (count: number) =>
-        `OpenMausBot did not send this. ${currentSender.name} has reached its daily limit of ${count} outbound action${count === 1 ? "" : "s"}. Ask the user to raise the limit under the bot's Permissions before trying again.`;
-      if (policy.policy === "allow" && !opaque) {
-        const today = outboundCounts.today(currentSender.id);
-        if (today + outboundCalls.length > policy.dailyCap) {
+      const capNote = (count: number, full: boolean) =>
+        `OpenMausBot did not send this. ${currentSender.name} has reached its daily limit of ${count} outbound action${count === 1 ? "" : "s"}${full ? " at Full access" : ""}. Tell the user it was not sent, and ask them to ${full ? "set a sending rule" : "raise the limit"} under the bot's Permissions before trying again.`;
+      if (allowance) {
+        let today: number;
+        try { today = outboundCounts.today(currentSender.id); }
+        catch { return refuseOutbound("OpenMausBot did not send this: the daily allowance could not be read. Nothing was sent."); }
+        if (today + outboundCalls.length > allowance.cap) {
           appendDecision(DATA_DIR, {
             threadId, botId: currentSender.id, botName: currentSender.name,
-            tool: outboundTool, summary, decision: "auto-denied", source: "outbound", rule: `daily-cap:${policy.dailyCap}`,
+            tool: outboundTool, summary, decision: "auto-denied", source: "outbound", rule: `${allowance.fullAccess ? "full-access-cap" : "daily-cap"}:${allowance.cap}`,
           });
-          return refuseOutbound(capNote(policy.dailyCap));
+          return refuseOutbound(capNote(allowance.cap, allowance.fullAccess));
         }
       } else {
         const owner = connectorThread(currentSender.id, threadId);
@@ -88,8 +101,8 @@ export function createOutboundHold(deps: OutboundHoldDeps): OutboundHold {
         if (active()) {
           const waiting = store.bot(currentSender.id);
           if (owner?.group) {
-            if (activeGroupTurnForBot(currentSender.id)?.threadId === threadId && waiting?.activity === "waiting-on-you") store.setActivity(waiting.id, "working");
-          } else if (store.taskByThread(currentSender.id, threadId)?.activity === "waiting-on-you") {
+            if (activeGroupTurnForBot(currentSender.id)?.threadId === threadId && turnWaitedOnPerson(waiting)) store.setActivity(waiting.id, "working");
+          } else if (turnWaitedOnPerson(store.taskByThread(currentSender.id, threadId))) {
             store.setTaskActivity(currentSender.id, threadId, "working");
           }
         }
@@ -110,18 +123,18 @@ export function createOutboundHold(deps: OutboundHoldDeps): OutboundHold {
       }
       return { ok: true, approved: false };
     },
-    reserve({ bot: fresh, threadId, tool: outboundTool, calls: outboundCalls, opaque, approved: outboundApproved }) {
+    reserve({ bot: fresh, threadId, tool: outboundTool, calls: outboundCalls, opaque, fullAccess, approved: outboundApproved }) {
       const refuseDispatch: (text: string) => never = (text) => {
         throw new Error(text);
       };
-      const policy = fresh.outbound ?? DEFAULT_OUTBOUND_POLICY;
-      if (policy.policy === "allow" && !opaque) {
+      const allowance = outboundDailyCap(fresh.outbound, fullAccess, opaque);
+      if (allowance) {
         let reserved: number | null;
-        try { reserved = outboundCounts.reserve(fresh.id, outboundCalls.length, policy.dailyCap); }
+        try { reserved = outboundCounts.reserve(fresh.id, outboundCalls.length, allowance.cap); }
         catch { refuseDispatch("The daily allowance could not be saved. Nothing was sent."); }
         if (reserved === null) refuseDispatch("This bot has reached its daily outbound limit. Nothing was sent.");
         appendDecision(DATA_DIR, { threadId, botId: fresh.id, botName: fresh.name,
-          tool: outboundTool, decision: "auto-approved", source: "outbound", rule: `daily-allowance:${reserved}/${policy.dailyCap}` });
+          tool: outboundTool, decision: "auto-approved", source: "outbound", rule: `${allowance.fullAccess ? "full-access" : "daily-allowance"}:${reserved}/${allowance.cap}` });
       } else if (!outboundApproved) {
         refuseDispatch("The outbound policy changed. Ask for approval again before sending.");
       }

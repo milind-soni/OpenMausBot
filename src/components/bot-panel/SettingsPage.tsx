@@ -3,9 +3,11 @@ import { AppWindow, AudioLines, BookOpen, ChevronRight, FileText, ShieldCheck, T
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { CALL_MODES, effectiveCallMode, setCallMode, useCallMode, type CallMode } from "@/lib/call-mode";
+import { mcpServersForBot, useMcpServers } from "@/lib/mcp-servers";
+import { CALL_MODES, callModeHint, effectiveCallMode, setCallMode, useCallMode, type CallMode } from "@/lib/call-mode";
 import { callCapabilityHelp } from "@/lib/call-capability";
 import { useSkills } from "@/lib/skills";
+import { fishListeningReady, listensHere, speechBridge } from "@/lib/speech";
 import { firstSentence } from "@/lib/soul";
 import { currentTaskBot, useStore, type Bot } from "@/state/store";
 import type { ApprovalMode } from "../../../shared/approval-mode";
@@ -14,6 +16,7 @@ import { ApprovalChip } from "../ComposerPlusMenu";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { DefaultBotHideRow } from "../DefaultBotControls";
 import { SoulField } from "../SoulField";
+import { BotApiCard } from "../bot-settings/BotApiCard";
 import { useBotApps } from "../bot-settings/useBotApps";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import { useThreadApproval } from "../thread-approval";
@@ -38,10 +41,11 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
   editingInstructions?: boolean;
   onEditInstructions?: (open: boolean) => void;
 }) {
-  const { dispatch, flushBotPatches } = useStore();
+  const { state, dispatch, flushBotPatches } = useStore();
   const { capabilities, ready } = useDesktopCapabilities();
   const apps = useBotApps(bot);
   const skillsOn = useSkills(bot.id).skills?.filter((skill) => skill.bots.includes(bot.id)).length;
+  const { servers: allServers } = useMcpServers();
   const approval = useThreadApproval(currentTaskBot(bot));
   const storedCallMode = useCallMode();
   const [jobDraft, setJobDraft] = useState<string | null>(null);
@@ -67,18 +71,21 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
   };
 
   // As the call button: where this device cannot listen in turns, a call is always Live.
-  const turnsHere = !ready || capabilities.dictation.available;
+  const turnsHere = !ready || listensHere(capabilities, state.config);
   const callMode = effectiveCallMode(storedCallMode, { turnsHere, canLive: true });
-  const turnsHelp = turnsHere ? null : callCapabilityHelp(capabilities, Boolean(window.ogb?.speechStart));
+  const turnsHelp = turnsHere ? null : callCapabilityHelp(capabilities, Boolean(speechBridge()?.speechStart), fishListeningReady(state.config));
   const callOptions: SegmentOption<CallMode>[] = CALL_MODES.map((entry) => ({
     value: entry.id,
     label: t(entry.label),
     disabled: entry.id === "turns" && turnsHelp !== null,
-    tooltip: entry.id === "turns" && turnsHelp ? `${turnsHelp.label}. ${turnsHelp.reason}` : t(entry.id === "live" ? "call.mode.liveHint" : "call.mode.turnsHint"),
+    tooltip: entry.id === "turns" && turnsHelp ? `${turnsHelp.label}. ${turnsHelp.reason}` : entry.id === "live" ? t("call.mode.liveHint") : callModeHint("turns"),
   }));
 
   const soulOpen = editingInstructions || Boolean(bot.soulDrift);
-  const enabledApps = apps.apps.filter((app) => app.scope !== null).map((app) => app.label);
+  const enabledApps = [
+    ...apps.apps.filter((app) => app.scope !== null).map((app) => app.label),
+    ...(allServers ? mcpServersForBot(allServers, bot.mcpServers, bot.id).map((server) => server.name) : []),
+  ];
 
   return (
     <div data-panel-settings>
@@ -199,6 +206,8 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
           />
         </label>
       </Card>
+
+      <BotApiCard bot={bot} webhooksLink className="mt-3.5" />
 
       <DefaultBotHideRow bot={bot} />
       {approval.dialogs}

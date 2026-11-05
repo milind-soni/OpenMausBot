@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { LocaleKey } from "@/locales";
 import { api } from "@/state/api";
 import { skillTitle, type AddSkillWire, type SkillDetailWire, type SkillFlag, type SkillFrom, type SkillWho, type SkillWire } from "../../shared/skill-catalog";
+import type { SkillImportSummary } from "../../shared/skill-import";
 import type { WrittenSkillProblem } from "../../shared/written-skill";
 import { t } from "./i18n";
 
@@ -58,7 +59,8 @@ export function matchesSkill(skill: SkillWire, query: string): boolean {
 
 export const readSkill = (id: string) => api<SkillDetailWire>(path(id));
 
-export const addSkill = (body: AddSkillWire) => api<{ added: string[] }>("/api/skills", { method: "POST", body: JSON.stringify(body) });
+export const addSkill = (body: AddSkillWire) =>
+  api<{ added: string[]; imported?: SkillImportSummary[] }>("/api/skills", { method: "POST", body: JSON.stringify(body) });
 
 /** Every skill, and a bot's skills from its working folder when `botId` is given. Changes go one at a time. */
 export function useSkills(botId?: string) {

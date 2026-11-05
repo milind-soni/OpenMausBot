@@ -3,6 +3,7 @@
 import type { PlaceRow } from "./place-view.ts";
 import type { OutcomeCategory, OutcomeCounts } from "./today-outcomes.ts";
 import type { RoutineRunTrigger } from "./routines.ts";
+import type { ServerTextParams } from "./server-text.ts";
 import type { TrialCreditRefusal } from "./trial-credit.ts";
 
 /** Who opened a piece of work: a schedule, a webhook, another bot, a call
@@ -30,7 +31,9 @@ export interface TodayLine {
  * one next action in the clients. */
 export type NeedsYouItem =
   | { kind: "signed-out"; id: string; at: number; instanceId: string; botIds: string[]; threadId?: string }
-  | { kind: "usage-limit"; id: string; at: number; instanceId?: string; botIds: string[]; threadId: string; text: string }
+  | { kind: "usage-limit"; id: string; at: number; instanceId?: string; botIds: string[]; threadId: string; text: string;
+      /** `text` as the failed turn's `chat.notice.*` key and params, when its cause had one. */
+      textCode?: string; textParams?: ServerTextParams }
   | { kind: "out-of-credit"; id: string; at: number; credit: TrialCreditRefusal; botIds: string[]; threadId: string }
   | { kind: "connection"; id: string; at: number; app: string; botIds: string[]; threadId: string; text: string }
   | { kind: "place"; id: string; at: number; place: PlaceRow; botIds: string[]; threadId: string }

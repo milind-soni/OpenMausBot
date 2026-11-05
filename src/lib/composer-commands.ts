@@ -1,4 +1,4 @@
-import { offersSkillCommand } from "../../shared/skill-command";
+import { blankCode, offersSkillCommand } from "../../shared/skill-command";
 
 export type ComposerSlashCommandId = "goal" | "learn" | "setup";
 
@@ -35,7 +35,8 @@ export function composerSlashTrigger(text: string, caretInput: number): Composer
   const match = /(?:^|\s)\/([a-z0-9-]*)$/i.exec(prefix);
   if (!match) return null;
   const query = match[1] ?? "";
-  return { query, start: caret - query.length - 1, end: caret };
+  const start = caret - query.length - 1;
+  return blankCode(text)[start] === "/" ? { query, start, end: caret } : null;
 }
 
 export function goalTextFromComposer(text: string): string | null {

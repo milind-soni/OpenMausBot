@@ -6,7 +6,8 @@
 //     (FAKE_ACP_REJECT_LIVE_LOAD_DSH=1: with dsh 0.2's -32602 "session is already active" instead of -32000)
 //   FAKE_ACP_CACHED_LIVE_LOAD  a live session/load is acknowledged but keeps the old MCP credentials, like Qwen
 //   FAKE_ACP_TEXT_REPLY  answer every session/prompt with only this text
-//   FAKE_ACP_MODE  happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | crash-in-prompt | hang
+//   FAKE_ACP_MODE  happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | crash-in-prompt
+//     | abort-in-prompt (a sign-in link, then a TCMalloc CHECK line on stderr, then exit 134 as bubblewrap reports SIGABRT) | hang
 //     | hang-initialize | unkeyed-tool | finished-tools (tool_call frames that arrive already completed or failed, one updated again)
 //     | no-auth | auth-required | permission | question
 //     | ask-question (a mid-prompt vendor question: FAKE_ACP_ASK_METHOD, default cursor/ask_question, params
@@ -28,6 +29,7 @@
 //   FAKE_ACP_PERMISSION_OPTIONS  JSON options override in permission mode
 //   FAKE_ACP_DUMP  path for {argv, env}; with FAKE_ACP_MODES or FAKE_ACP_MODELS also <dump>.prompts.jsonl
 //   FAKE_ACP_LAUNCH_COUNT_FILE  process counter incremented at startup
+//   FAKE_ACP_VERSION  what `--version` prints (default "fake-acp 1.0.0"); a CLI the driver checks the shape of needs its own
 //   FAKE_ACP_RPC_DUMP  this process's method list, rewritten after every request
 //   FAKE_ACP_RPC_APPEND_FILE  one {"pid","method","cwd"} line appended per request
 //   FAKE_ACP_RPC_FAILURE_FILE  JSON-RPC error for session/prompt; once read the process stays poisoned
@@ -286,7 +288,7 @@ if (process.env.FAKE_ACP_LAUNCH_COUNT_FILE) {
   } catch {}
 }
 if (argv.includes("--version")) {
-  console.log("fake-acp 1.0.0");
+  console.log(process.env.FAKE_ACP_VERSION ?? "fake-acp 1.0.0");
   process.exit(0);
 }
 // Cursor's driver probes `agent status` / `agent models` on the binary it spawns for ACP.
@@ -410,6 +412,23 @@ type McpEntry = { command: string; args?: string[]; env?: Array<{ name: string; 
 let agentsMcp: McpEntry | null = null;
 type AnyMcpEntry = { name: string; command?: string; args?: string[]; env?: Array<{ name: string; value: string }>; url?: string; headers?: Array<{ name: string; value: string }> };
 let sessionMcp: AnyMcpEntry[] = [];
+const additionalMcp = argv.indexOf("--additional-mcp-config");
+const launchMcp: AnyMcpEntry[] = additionalMcp < 0 ? [] : Object.entries(
+  JSON.parse(readFileSync(argv[additionalMcp + 1].slice(1), "utf8")).mcpServers,
+).map(([name, value]) => {
+  const server = value as { command: string; args: string[]; env: Record<string, string> };
+  return { name, command: server.command, args: server.args,
+    env: Object.entries(server.env).map(([name, value]) => ({ name, value })) };
+});
+const acceptedMcp = (servers: AnyMcpEntry[]) => [
+  ...launchMcp,
+  // Copilot CLI 1.0.105 rejects client-supplied stdio servers, but accepts launcher-owned MCP configuration.
+  ...servers.filter((server) => process.env.FAKE_ACP_REJECT_STDIO_MCP !== "1" || !server.command),
+];
+function offeredAgents(servers: AnyMcpEntry[]): McpEntry | null {
+  const server = acceptedMcp(servers).find((server) => server.name === "agents");
+  return server?.command ? { command: server.command, args: server.args, env: server.env } : null;
+}
 /** grok 1.0.25's initialize (`grok mcp doctor`) */
 const GROK_MCP_HANDSHAKE = { protocolVersion: "2025-11-25", capabilities: { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] } } }, clientInfo: { name: "grok-shell", version: "1.0.25" } };
 
@@ -609,6 +628,7 @@ function heldByHoldFile(msg: any): boolean {
   return true;
 }
 
+/** Applies one ACP message while preserving the fake CLI's launcher-owned MCP behavior. */
 function handle(msg: any) {
   if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined) && msg.id === pendingAskQuestionId) {
     pendingAskQuestionId = null;
@@ -694,15 +714,15 @@ function handle(msg: any) {
         });
         break;
       }
-      const servers: McpEntry[] = Array.isArray(msg.params?.mcpServers) ? msg.params.mcpServers : [];
+      const servers: AnyMcpEntry[] = Array.isArray(msg.params?.mcpServers) ? msg.params.mcpServers : [];
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.session.json`, JSON.stringify(msg.params));
         dumpState.mcpServers = servers;
         writeDumpAtomic(process.env.FAKE_ACP_DUMP, JSON.stringify(dumpState, null, 2));
       }
-      const offered = servers.find((s: any) => s?.name === "agents") ?? null;
+      const offered = offeredAgents(servers);
       agentsMcp = mode === "list-peers" ? agentsMcp ?? offered : offered;
-      sessionMcp = servers as AnyMcpEntry[];
+      sessionMcp = acceptedMcp(servers);
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(servers, null, 2));
       }
@@ -741,15 +761,15 @@ function handle(msg: any) {
       }
       const cachedLiveLoad = process.env.FAKE_ACP_CACHED_LIVE_LOAD === "1" && liveSession === msg.params?.sessionId;
       if ((mode === "safe-agent-reads" || mode === "chief-delegate" || mode === "create-peer") && !cachedLiveLoad) {
-        agentsMcp = (msg.params?.mcpServers ?? []).find((server: any) => server.name === "agents") ?? null;
+        agentsMcp = offeredAgents(msg.params?.mcpServers ?? []);
       }
       if (mode === "list-peers") {
-        agentsMcp ??= (msg.params?.mcpServers ?? []).find((server: any) => server.name === "agents") ?? null;
+        agentsMcp ??= offeredAgents(msg.params?.mcpServers ?? []);
       }
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(msg.params?.mcpServers ?? []));
       }
-      if (!cachedLiveLoad) sessionMcp = msg.params?.mcpServers ?? [];
+      if (!cachedLiveLoad) sessionMcp = acceptedMcp(msg.params?.mcpServers ?? []);
       const opts = configOptions();
       const mdls = sessionModels();
       liveSession = typeof msg.params?.sessionId === "string" ? msg.params.sessionId : liveSession;
@@ -912,6 +932,11 @@ function handle(msg: any) {
         hangingPromptId = msg.id;
         hangKeepAlive = setInterval(() => {}, 1_000);
         return;
+      }
+      if (mode === "abort-in-prompt") {
+        process.stderr.write("Open https://accounts.google.com/o/oauth2/v2/auth?state=private-state&code=4/0AVGzR1private-code-value\n");
+        process.stderr.write("2 third_party/tcmalloc/internal/sysinfo.h:76] CHECK in NumCPUs: maybe_cpus.has_value() (false) \n");
+        process.exit(134);
       }
       if (mode === "crash-in-prompt") {
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "working" } } } });
@@ -1145,9 +1170,25 @@ function handle(msg: any) {
           (tools) => `${entry.name}: ${tools.join(",")}`,
           (error: Error) => `${entry.name} failed: ${error.message}`,
         ))).then((lines) => {
-          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: lines.join("\n") } } } });
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: lines.join("\n") || "No MCP servers configured." } } } });
           complete();
         });
+        return;
+      }
+      if (mode === "mcp-calls") {
+        const calls = JSON.parse(readFileSync(process.env.FAKE_ACP_MCP_CALLS_FILE!, "utf8")) as Array<{ server: string; name: string; arguments: Record<string, unknown> }>;
+        void (async () => {
+          for (const call of calls) {
+            const server = sessionMcp.find((entry) => entry.name === call.server);
+            if (!server?.command) throw new Error(`Fixture MCP server unavailable: ${call.server}`);
+            const text = await driveMcp({ command: server.command, args: server.args, env: server.env },
+              [{ name: call.name, args: () => call.arguments }], true);
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: {
+              sessionUpdate: "agent_message_chunk", content: { text: `${call.name}: ${text}\n` },
+            } } });
+          }
+          complete();
+        })().catch((error) => out({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: String(error) } }));
         return;
       }
       if (mode === "ask-peer" && agentsMcp) {

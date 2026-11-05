@@ -28,6 +28,12 @@ export const CREDENTIAL_TARGETS = {
     placeholder: "Paste your ElevenLabs API key",
     helpUrl: "https://elevenlabs.io/app/settings/api-keys",
   },
+  geminiTtsKey: {
+    label: "Gemini speech API key",
+    description: "Generates spoken replies, voice notes and call speech with Gemini.",
+    placeholder: "Paste your Google AI Studio API key",
+    helpUrl: "https://aistudio.google.com/api-keys",
+  },
   fishAudioKey: {
     label: "Fish Audio API key",
     description: "Enables Fish Audio voices in calls.",
@@ -36,7 +42,7 @@ export const CREDENTIAL_TARGETS = {
   },
   openaiImageApiKey: {
     label: "OpenAI API key",
-    description: "Used only to generate custom bot avatar images.",
+    description: "Used to generate images in chats and bot avatars when OpenAI is the image provider.",
     placeholder: "sk-…",
     helpUrl: "https://platform.openai.com/api-keys",
   },
@@ -121,7 +127,7 @@ export type CredentialConfig = {
   xai?: { key?: string };
   box?: { token?: string };
   opencodeGo?: { apiKey?: string };
-  tts?: { key?: string; fishKey?: string };
+  tts?: { key?: string; fishKey?: string; geminiKey?: string };
   imageGen?: { key?: string };
   composio?: { apiKey?: string };
   openai?: { key?: string };
@@ -179,6 +185,8 @@ export function credentialConfigPatch(id: ConfigCredentialTargetId, value: strin
       return { opencodeGo: { apiKey: value } };
     case "ttsKey":
       return { tts: { key: value } };
+    case "geminiTtsKey":
+      return { tts: { geminiKey: value } };
     case "fishAudioKey":
       return { tts: { fishKey: value } };
     case "openaiImageApiKey":
@@ -217,6 +225,8 @@ export function credentialIsConfigured(config: CredentialConfig, id: CredentialT
       return Boolean(config.opencodeGo?.apiKey);
     case "ttsKey":
       return Boolean(config.tts?.key);
+    case "geminiTtsKey":
+      return Boolean(config.tts?.geminiKey);
     case "fishAudioKey":
       return Boolean(config.tts?.fishKey);
     case "openaiImageApiKey":

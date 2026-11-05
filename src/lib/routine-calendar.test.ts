@@ -17,7 +17,9 @@ import {
   startOfWeek,
   toLocalDateInput,
   toLocalTimeInput,
+  calendarRangeLabel,
 } from "./routine-calendar";
+import { setLocale } from "./i18n";
 
 describe("routine editor timestamp precision", () => {
   it("uses the next cadence point as an edited interval's end-date floor", () => {
@@ -404,5 +406,23 @@ describe("routine calendar projection", () => {
 
     expect(items).toHaveLength(12);
     expect(items.at(-1)?.at).toBe(from + 99 * 5 * 60_000);
+  });
+});
+
+describe("calendarRangeLabel", () => {
+  const label = (from: Date, days: number) => calendarRangeLabel(from.getTime(), days).replace(/\s+/g, " ");
+
+  it("names one day, a week inside a month and a week across a year in the app language", () => {
+    expect(label(new Date(2026, 4, 3), 1)).toBe("May 3, 2026");
+    expect(label(new Date(2026, 4, 3), 7)).toBe("May 3 – 9, 2026");
+    expect(label(new Date(2026, 11, 29), 7)).toBe("Dec 29, 2026 – Jan 4, 2027");
+    try {
+      setLocale("pt-br");
+      expect(label(new Date(2026, 4, 3), 1)).toBe("3 de maio de 2026");
+      expect(label(new Date(2026, 4, 3), 7)).toBe("3 – 9 de maio de 2026");
+      expect(label(new Date(2026, 11, 29), 7)).toBe("29 de dez. de 2026 – 4 de jan. de 2027");
+    } finally {
+      setLocale("en");
+    }
   });
 });

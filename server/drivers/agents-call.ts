@@ -2,6 +2,8 @@
 // per-turn limits are the harness's, since one proxy can serve many turns of a warm engine.
 import { agentsCallMember, resolveAgentsCall } from "../../shared/agents-tool-names.ts";
 import { CREDENTIAL_TARGETS, isCredentialTargetId } from "../../shared/credential-request.ts";
+import { isSkillSwitchAction, skillSwitchVerb } from "../../shared/skill-request.ts";
+import { EMAIL_CREDENTIAL } from "../../shared/email.ts";
 
 import { peerName } from "../peer-roster.ts";
 import { callCardTool, CARD_TOOL_NAMES } from "./agents-call-cards.ts";
@@ -17,6 +19,7 @@ import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.ts";
 import { callUsageLimitsTool, USAGE_LIMITS_TOOL } from "./agents-usage-tool.ts";
 import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts";
 import { callComputerAskTool, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
+import { callImageTool, IMAGE_TOOL_NAMES } from "./agents-image-tools.ts";
 import { callMausBotTool, MAUSBOT_TOOL_NAMES } from "./agents-mausbot-tools.ts";
 import { callPageTool, PAGE_TOOL_NAMES } from "./agents-pages-tools.ts";
 import { callPersonTool, PERSON_TOOL_NAMES } from "./agents-person-tools.ts";
@@ -216,6 +219,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   if (CARD_TOOL_NAMES.has(name)) return callCardTool(name, args, context);
   if (RESEARCH_TOOL_NAMES.has(name)) return callResearchTool(name, args, context);
   if (HELPER_TOOL_NAMES.has(name)) return callHelperTool(name, args, context);
+  if (IMAGE_TOOL_NAMES.has(name)) return callImageTool(name, args, context);
   if (MAUSBOT_TOOL_NAMES.has(name)) return callMausBotTool(name, args, context);
   if (PAGE_TOOL_NAMES.has(name)) return callPageTool(name, args, context);
   if (PERSON_TOOL_NAMES.has(name)) return callPersonTool(name, args, context);
@@ -358,7 +362,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     }
     const r = await api("/api/internal/post-to-room", {
       method: "POST",
-      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, groupId, message, attachVoiceNote }),
+      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, groupId, message, attachVoiceNote, ...(args.mention_ids !== undefined ? { mentionIds: args.mention_ids } : {}) }),
     });
     if (r.error) return { text: String(r.error), isError: true };
     return {
@@ -546,6 +550,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   if (name === "request_credential") {
     const credentialId = args.credential_id;
     if (credentialId === undefined || credentialId === "") return requestCustomSecret(args, context);
+    if (credentialId === EMAIL_CREDENTIAL) return requestEmailCard(args, context);
     if (!isCredentialTargetId(credentialId)) {
       return { text: "request_credential needs a supported credential_id.", isError: true };
     }
@@ -566,7 +571,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       return { text: `A secure ${r.label ?? CREDENTIAL_TARGETS[credentialId].label} request is ready: the person pastes it into its card in OpenMausBot, on their computer or in My Cloud, and OpenMausBot checks it with 1Password before keeping it. End this turn; OpenMausBot will resume the task after they save or decline. Never ask them to paste the token into chat, and never pass it to a command line.` };
     }
     return {
-      text: `A secure ${r.label ?? CREDENTIAL_TARGETS[credentialId].label} request is ready. The desktop app and a freshly QR-paired mobile app show its secure entry card; older mobile pairings explain how to pair again or finish on the computer. End this turn; OpenMausBot will resume the task after the user saves or declines. Never ask them to paste the key into chat.`,
+      text: `A secure ${r.label ?? CREDENTIAL_TARGETS[credentialId].label} request is now in this conversation, and the person was notified. The desktop app and a freshly QR-paired mobile app show its secure entry card; older mobile pairings explain how to pair again or finish on the computer. End this turn; OpenMausBot will resume the task after the user saves or declines. Never ask them to paste the key into chat.`,
     };
   }
   if (name === "request_sign_in") {
@@ -830,8 +835,22 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     return { text: `Imported skills:\n${live}\n\nStaged (waiting for the user's decision):\n${pending}` };
   }
   if (name === "skill_manage") {
+    if (isSkillSwitchAction(args.action)) {
+      const skillName = typeof args.skill_name === "string" ? args.skill_name.trim() : "";
+      const verb = skillSwitchVerb(args.action);
+      if (!skillName) return { text: `skill_manage needs skill_name to ${verb} a skill. Copy the exact name from skills_list.`, isError: true };
+      const r = await api("/api/internal/skills/stage", {
+        method: "POST",
+        body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, action: args.action, skill_name: skillName }),
+      });
+      const completed = completedProposalResult(r, `a request to ${verb} skill “${skillName}”`);
+      if (completed) return completed;
+      return {
+        text: `A confirmation card is now visible to the user to ${verb} skill “${skillName}”. Nothing changes until they approve it. End this turn and wait for the decision.`,
+      };
+    }
     if (args.action !== "create" && args.action !== "update") {
-      return { text: 'skill_manage action must be "create" or "update".', isError: true };
+      return { text: 'skill_manage action must be "create", "update", "enable", "disable" or "delete".', isError: true };
     }
     const skillMd = typeof args.skill_md === "string" ? args.skill_md : "";
     if (!skillMd.trim()) {
@@ -878,6 +897,17 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   return { text: `Unknown tool: ${name}`, isError: true };
 }
 
+/** One card for a mailbox's address and password: the bot never sees either go by, and the email tools arrive when it is done. */
+async function requestEmailCard(args: Json, context: ToolCallContext): Promise<ToolCallResult> {
+  const r = await context.client.apiResponse("/api/internal/request-credential", {
+    method: "POST",
+    body: JSON.stringify({ fromBotId: context.botId, fromThreadId: context.threadId, credentialId: EMAIL_CREDENTIAL, address: args.address, reason: args.reason }),
+  });
+  if (!r.ok) return { text: String(r.body.error ?? `request_credential failed (HTTP ${r.status}).`), isError: true };
+  if (r.body.alreadyConfigured === true) return { text: `${String(r.body.label)} is already connected. Use the email tools.` };
+  return { text: "A secure card for the mailbox is ready in OpenMausBot, on the computer and on a freshly QR-paired phone. End this turn now and say in one line that you are waiting for it; OpenMausBot resumes you when the person connects it or declines." };
+}
+
 /** A secret OpenMausBot does not keep: the person agrees to one use, and the bot gets a secretRef or a file path back. */
 async function requestCustomSecret(args: Json, context: ToolCallContext): Promise<ToolCallResult> {
   const r = await context.client.apiResponse("/api/internal/request-credential", {
@@ -891,6 +921,6 @@ async function requestCustomSecret(args: Json, context: ToolCallContext): Promis
     ? ` ${label} was saved earlier for OpenMausBot's tools only, not as a file for your commands (not a file request), so this card asks for it again.`
     : r.body.savedAs === "file" ? ` ${label} was saved earlier as a file for your commands, not as a secretRef, so this card asks for it again.` : "";
   return {
-    text: `A secure card for ${label} is ready in OpenMausBot, on the computer and on a freshly QR-paired phone.${asked} End this turn now and say in one line that you are waiting for it; OpenMausBot resumes you when the person saves or declines, and tells you how to use it. Never ask for it in chat.`,
+    text: `A secure card for ${label} is now in this conversation, in the app and on a QR-paired phone, and the person was notified. If they can't find it, tell them it is in this conversation, and the notification opens it.${asked} End this turn now and say in one line that you are waiting for it; OpenMausBot resumes you when the person saves or declines, and tells you how to use it. Never ask for it in chat.`,
   };
 }

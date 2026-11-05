@@ -1,5 +1,7 @@
-import { serverLine } from "../server-lines.ts";
+import { isServerLine, serverLine } from "../server-lines.ts";
 import type { Message } from "../store.ts";
+
+export const WAIT_CARD_CLOSED_REASON = "The card it waited on was replaced or closed";
 
 type Who = { id: string; name: string; color: string };
 
@@ -50,5 +52,7 @@ export function teammateResultRow(language: string | undefined, child: { status:
       : serverLine(language, "server.teammates.replied", { bot });
   }
   const key = child.status === "failed" ? "server.teammates.failed" : child.status === "cancelled" ? "server.teammates.cancelled" : "server.teammates.other";
-  return serverLine(language, key, { bot, status: child.status, detail: child.result.split("\n", 1)[0]!.slice(0, 180) });
+  const detail = child.status === "cancelled" && isServerLine("server.teammates.waitCardClosed", child.result)
+    ? serverLine(language, "server.teammates.waitCardClosed") : child.result;
+  return serverLine(language, key, { bot, status: child.status, detail: detail.split("\n", 1)[0]!.slice(0, 180) });
 }

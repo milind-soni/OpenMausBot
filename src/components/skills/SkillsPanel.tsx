@@ -174,7 +174,7 @@ export function SkillsPanel() {
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-7 sm:px-7">
           <SkillsBody skills={skills} onAdd={() => setAdding(true)} />
         </div>
-        {adding && <AddSkillDialog onClose={() => setAdding(false)} onAdded={() => { setAdding(false); void skills.refresh(); }} />}
+        {adding && <AddSkillDialog onClose={() => setAdding(false)} onAdded={() => void skills.refresh()} />}
       </div>
     </div>
   );

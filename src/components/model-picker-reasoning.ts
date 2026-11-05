@@ -1,5 +1,10 @@
 import { useEffect, useRef, type RefObject } from "react";
-import type { AppState, InstanceInfo, ModelSelection } from "@/state/store";
+import type { AppState, Bot, InstanceInfo, ModelSelection } from "@/state/store";
+import type { ModelVariantOption } from "../../shared/runtime-events";
+import { t } from "@/lib/i18n";
+
+export const variantLabel = (option: ModelVariantOption, driverKind?: string): string =>
+  option.id === "default" && driverKind === "opencodeGo" ? t("model.variant.openCodeDefault") : option.label;
 
 /** ACP variant ids are opaque; their model/session declares the available choices. */
 export function variantChoices(state: Pick<AppState, "instances" | "modelVariantSessions">, selection: ModelSelection, threadId: string | undefined) {
@@ -17,6 +22,16 @@ export function offersReasoning(state: Pick<AppState, "instances" | "modelVarian
   return instance.capabilities?.modelVariants
     ? Boolean(variantChoices(state, next, threadId))
     : Boolean(instance.capabilities?.effortLevels?.length);
+}
+
+/**
+ * While a bot works its menu stays locked, unless it offers a reasoning row: the reasoning level is the one change
+ * allowed mid-turn, and it applies from the next turn.
+ */
+export function lockedWhileBusy(state: Pick<AppState, "instances" | "modelVariantSessions">, bot: Pick<Bot, "busy" | "modelSelection" | "threadId">, contained: boolean | undefined, threadId: string | undefined): boolean {
+  if (!bot.busy) return false;
+  const instance = contained ? undefined : state.instances.find((candidate) => candidate.instanceId === bot.modelSelection.instanceId);
+  return !(instance && offersReasoning(state, instance, bot.modelSelection, threadId ?? bot.threadId));
 }
 
 /**

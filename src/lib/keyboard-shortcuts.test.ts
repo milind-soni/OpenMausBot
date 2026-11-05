@@ -1,15 +1,34 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  botCycleStep,
   filterShortcutGroups,
   isSidebarToggle,
   SHORTCUT_GROUPS,
   shortcutGroupsFor,
   shouldOpenKeyboardShortcuts,
   shortcutKeysForPlatform,
+  shortcutDescription,
 } from "./keyboard-shortcuts";
+import { setLocale } from "./i18n";
+
+afterEach(() => setLocale("en"));
 
 describe("keyboard-shortcuts", () => {
+  it("localizes the follow-up shortcut without changing its English description", () => {
+    const items = SHORTCUT_GROUPS.flatMap((group) => group.items);
+    const followUp = items.find((item) => item.id === "send-follow-up")!;
+    expect(shortcutDescription(followUp)).toBe(followUp.description);
+    setLocale("pt-br");
+    expect(shortcutDescription(followUp)).toBe("Enquanto um bot trabalha: colocar na fila em vez de enviar agora, ou o contrário");
+    expect(shortcutDescription(items.find((item) => item.id === "toggle-sidebar")!)).toBe("Recolher ou expandir a barra lateral");
+  });
+
+  it("keeps an uncatalogued shortcut's own description", () => {
+    setLocale("pt-br");
+    expect(shortcutDescription({ id: "future-shortcut", description: "Future action", macKeys: [], winKeys: [] })).toBe("Future action");
+  });
+
   it("lists ⌘\\ or Ctrl+\\ for collapsing the sidebar, and matches only that chord", () => {
     const item = SHORTCUT_GROUPS.flatMap((group) => group.items).find((entry) => entry.id === "toggle-sidebar")!;
     expect(item).toMatchObject({ description: "Collapse or expand the sidebar", macKeys: ["⌘", "\\"], winKeys: ["Ctrl", "\\"] });
@@ -141,5 +160,22 @@ describe("keyboard shortcut opening guard", () => {
     }
     expect(shouldOpenKeyboardShortcuts(event("?", { ctrlKey: true }))).toBe(false);
     expect(shouldOpenKeyboardShortcuts(event("/", { metaKey: true, shiftKey: true }))).toBe(false);
+  });
+});
+
+describe("botCycleStep", () => {
+  it("steps forward on ] and back on [, as macOS reports them with ⌘⇧", () => {
+    expect(botCycleStep({ key: "]" })).toBe(1);
+    expect(botCycleStep({ key: "[" })).toBe(-1);
+  });
+
+  it("also steps on } and {, which Ctrl+Shift reports on Windows and Linux", () => {
+    expect(botCycleStep({ key: "}" })).toBe(1);
+    expect(botCycleStep({ key: "{" })).toBe(-1);
+  });
+
+  it("ignores other keys", () => {
+    expect(botCycleStep({ key: "+" })).toBeNull();
+    expect(botCycleStep({ key: "1" })).toBeNull();
   });
 });

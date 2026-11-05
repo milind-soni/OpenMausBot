@@ -4,6 +4,7 @@ import { Check, ChevronDown, FileText, X } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { skillImportLines } from "@/lib/skill-import";
 import { addSkill, FLAG_KEY, fromLabel, readSkill, skillTitle, WRITE_PROBLEM_KEY, type SkillWire } from "@/lib/skills";
 import { useStore } from "@/state/store";
 import type { SkillDetailWire } from "../../../shared/skill-catalog";
@@ -161,8 +162,9 @@ export function ChooseBotsDialog({ skill, busy, onDone, onClose }: {
 
 const inputCls = "w-full rounded-[10px] border border-ink/[0.1] bg-transparent px-3 py-2 text-[14px] text-ink placeholder:text-ink-tertiary focus:border-focus focus:outline-none";
 
-/** Add skill: a link to one on GitHub, or one written here. Either goes to every bot. */
-export function AddSkillDialog({ onClose, onAdded }: { onClose: () => void; onAdded: (names: string[]) => void }) {
+/** Add skill: a link to one on GitHub, or one written here. Either goes to every bot. One from GitHub then says what
+ * came in with it and what was left out. */
+export function AddSkillDialog({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
   const [way, setWay] = useState<"link" | "write">("link");
   const [link, setLink] = useState("");
   const [name, setName] = useState("");
@@ -170,6 +172,7 @@ export function AddSkillDialog({ onClose, onAdded }: { onClose: () => void; onAd
   const [instructions, setInstructions] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [arrived, setArrived] = useState<string[]>([]);
   const written = { name: name.trim(), description, instructions };
   const problem = writtenSkillProblem(written);
   const touched = Boolean(name.trim() || description.trim() || instructions.trim());
@@ -181,7 +184,10 @@ export function AddSkillDialog({ onClose, onAdded }: { onClose: () => void; onAd
     setError("");
     try {
       const added = await addSkill(way === "link" ? { link: link.trim() } : written);
-      onAdded(added.added);
+      onAdded();
+      const lines = skillImportLines(added.imported ?? []);
+      if (lines.length) setArrived(lines);
+      else onClose();
     } catch (cause) {
       const code = (cause as { body?: { code?: string } })?.body?.code;
       setError(code && code in WRITE_PROBLEM_KEY ? t(WRITE_PROBLEM_KEY[code as keyof typeof WRITE_PROBLEM_KEY]) : t(way === "link" ? "skills.linkFailed" : "skills.saveFailed"));
@@ -193,7 +199,12 @@ export function AddSkillDialog({ onClose, onAdded }: { onClose: () => void; onAd
   return (
     <Dialog label={t("skills.addTitle")} onClose={onClose}>
       <DialogHeader title={t("skills.addTitle")} onClose={onClose} />
-      <form data-skill-add-form className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-5 pb-5 pt-2" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+      {arrived.length > 0 ? (
+        <div data-skill-arrived className="flex flex-col gap-2 px-5 pb-5 pt-2">
+          {arrived.map((line) => <p key={line} className="text-[14px] leading-5 text-ink">{line}</p>)}
+          <button type="button" onClick={onClose} className="ui-button ui-button-primary mt-2 self-end rounded-full px-4">{t("common.done")}</button>
+        </div>
+      ) : <form data-skill-add-form className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-5 pb-5 pt-2" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
         <Segmented attr="data-skill-add-way" label={t("skills.addTitle")} value={way} onChange={(next) => { setWay(next); setError(""); }}
           options={[{ value: "link", label: t("skills.fromLink") }, { value: "write", label: t("skills.writeOne") }]} />
         {way === "link" ? (
@@ -223,7 +234,7 @@ export function AddSkillDialog({ onClose, onAdded }: { onClose: () => void; onAd
             {saving ? t("skills.adding") : t("skills.add")}
           </button>
         </div>
-      </form>
+      </form>}
     </Dialog>
   );
 }

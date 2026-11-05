@@ -54,7 +54,7 @@ jobs:
       && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner
       && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
       && github.event.pull_request.user.login == github.repository_owner)
-      && 'typecheck + lint + Linux tests (Boat)' || 'typecheck + lint' }}
+      && 'preflight + Linux tests (Boat)' || 'preflight' }}
     runs-on: >-
       ${{ vars.BOAT_CI == 'on' && contains(fromJSON('["push", "pull_request", "merge_group"]'), github.event_name)
       && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner
@@ -105,15 +105,6 @@ jobs:
         # The tests that only read the source: seconds here, and they stay in the shards. On Nov 3-4 2026 one of them was
         # red on main for 11 hours, and each PR heard about it after about 70 minutes, once its shards had found a runner.
         run: pnpm exec vitest run src/locales/ scripts/testing/file-size-ratchet.test.ts scripts/testing/index-route-ratchet.test.ts scripts/testing/tighten-ratchets.test.ts scripts/testing/comment-history.test.ts scripts/testing/lazy-server-modules.test.ts scripts/testing/duration-sequencer.test.ts scripts/testing/host-e2e.test.ts scripts/testing/ci-retry-list.test.ts src/lib/copy-text.guard.test.ts src/components/Select.guard.test.ts --reporter=default --reporter=github-actions
-      # A pull request that changes only docs, tests under scripts/ or the
-      # control plane cannot change what these three check.
-      - if: steps.scope.outputs.build == 'true'
-        run: pnpm typecheck
-      - if: steps.scope.outputs.build == 'true'
-        run: pnpm check:electron
-      - name: production UI build
-        if: steps.scope.outputs.build == 'true'
-        run: pnpm exec vite build
       # The rest runs only on a Boat VM, where ci-scope moved the Linux jobs' work into this job.
       - name: Remove what Boat installs and GitHub's runners lack
         if: steps.scope.outputs.linux_lanes
@@ -151,6 +142,30 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  build:
+    needs: static
+    if: contains(needs.static.outputs.jobs, '"build"')
+    # The slow checks, about three minutes, beside the shards rather than ahead
+    # of them. A pull request that changes only docs, tests under scripts/ or
+    # the control plane cannot change what they check.
+    name: typecheck + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm check:electron
+      - name: production UI build
+        run: pnpm exec vite build
+
   vitest:
     # Admit the expensive runner fan-out only after the quick checks pass.
     # A failing preflight still fails the required gates; nothing is waived.
@@ -174,9 +189,10 @@ jobs:
       matrix: ${{ fromJSON(needs.static.outputs.vitest_matrix) }}
     runs-on: ${{ matrix.os }}
     # scripts/testing/duration-sequencer.ts splits each platform's files by
-    # their recorded seconds on that platform, about 17 minutes a Linux shard
-    # and 10 to 15 a Windows one. The cap catches a hang, not normal suite
-    # growth; Windows runners are about 1.45x slower and vary more.
+    # their recorded seconds on that platform, about 6 minutes a Linux shard
+    # (four files at once) and 10 to 15 a Windows one (one at a time). The cap
+    # catches a hang, not normal suite growth; Windows runners are about 1.45x
+    # slower and vary more.
     timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 25 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -201,6 +217,7 @@ jobs:
           OMB_VITEST_RETRY_LOG: ${{ runner.temp }}/vitest-retries.jsonl
           OMB_VITEST_E2E: ${{ matrix.e2e }}
           OMB_VITEST_SUBSET: ${{ matrix.files }}
+          OMB_VITEST_WORKERS: ${{ matrix.workers }}
         run: pnpm exec vitest run ${{ matrix.files }} --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=default --reporter=github-actions
       - name: Report flaky tests that needed a retry
         # Known flakes (scripts/testing/ci-retry-list.json) get two retries in
@@ -350,7 +367,7 @@ jobs:
   gate:
     # One aggregation, not three queued runners doing the same check.
     name: CI
-    needs: [static, vitest, behavior-evals, packaged-server, windows-cua, electron-smokes]
+    needs: [static, build, vitest, behavior-evals, packaged-server, windows-cua, electron-smokes]
     # Still report failed/skipped dependencies, but don't keep a superseded
     # workflow alive just to schedule its summary jobs.
     if: ${{ !cancelled() }}

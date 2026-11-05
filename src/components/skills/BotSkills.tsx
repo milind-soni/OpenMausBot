@@ -56,7 +56,7 @@ export function BotSkills({ bot }: { bot: Bot }) {
         <NavRow data-panel-action="add-skill" icon={Plus} title={t("skills.add")} drill={false} onClick={() => setAdding(true)} />
         <LinkRow data-panel-link="all-skills" onClick={() => dispatch({ type: "togglePlugins", open: true, surface: "skills" })}>{t("skills.all")}</LinkRow>
       </Card>
-      {adding && <AddSkillDialog onClose={() => setAdding(false)} onAdded={() => { setAdding(false); void skills.refresh(); }} />}
+      {adding && <AddSkillDialog onClose={() => setAdding(false)} onAdded={() => void skills.refresh()} />}
     </>
   );
 }
