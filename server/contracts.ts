@@ -469,6 +469,8 @@ export interface ModelCatalog {
     /** The organization of the signed-in account turned this model off: the engine would answer with another. */
     orgBlocked?: true;
   }>;
+  /** The driver's built-in list, still waiting for its first read from the engine: the picker asks for one. */
+  placeholder?: boolean;
 }
 
 /** "gpt-5.4-mini" → "Gpt 5.4 Mini", splitting on the caller's word breaks. */

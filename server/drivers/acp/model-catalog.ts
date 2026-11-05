@@ -18,7 +18,7 @@ export function acpModelCatalog(input: {
   resolve?: (fresh: boolean) => ModelCatalog | Promise<ModelCatalog>;
 }): AcpModelCatalog {
   const { instanceId, resolve } = input;
-  const saved = resolve ? readStartupModelCacheEntry(instanceId) : null;
+  const saved = resolve ? readStartupModelCacheEntry(instanceId, input.fixed) : null;
   let models = input.startFromSaved ? saved?.catalog ?? input.fixed : input.fixed;
   let readFromEngine = Boolean(saved?.checkedAt);
   let accountModels: ReadonlySet<string> | null = saved?.checkedAt ? idsOf(saved.catalog) : null;

@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, it, vi } from "vitest";
-import { StoreProvider, useStore } from "./store";
+import { initialState, reducer, StoreProvider, useStore, type InstanceInfo } from "./store";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -52,4 +52,16 @@ it("releases a hung shared probe after its bounded timeout so retry can work", a
   timeout.abort(new Error("fixture timeout"));
   await request;
   await expect(store.refreshInstances({ reportErrors: true })).resolves.toBeUndefined();
+});
+
+it("keeps an engine's read catalog when a list answered before that read arrives after it", () => {
+  const copilot = (models: InstanceInfo["models"]): InstanceInfo => ({ instanceId: "githubCopilot", driverKind: "copilotAgent",
+    displayName: "GitHub Copilot", access: "subscription", snapshot: { state: "available", authenticated: true }, models });
+  const stub = { default: "auto", options: [{ id: "auto", label: "Auto" }], placeholder: true };
+  const read = { default: "auto", options: [{ id: "auto", label: "Auto" }, { id: "claude-haiku-4.5", label: "Claude Haiku 4.5 · 0.33x" }] };
+  const found = reducer({ ...initialState, instances: [copilot(stub)] }, { type: "instances", instances: [copilot(read)] });
+  const late = reducer(found, { type: "instances", instances: [{ ...copilot(stub), snapshot: { state: "available", authenticated: false } }] });
+  expect(late.instances[0]!.models).toEqual(read);
+  expect(late.instances[0]!.snapshot.authenticated).toBe(false);
+  expect(reducer(initialState, { type: "instances", instances: [copilot(stub)] }).instances[0]!.models).toEqual(stub);
 });

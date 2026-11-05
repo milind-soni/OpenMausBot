@@ -88,34 +88,40 @@ export interface StartupModelCacheEntry {
   build: string | null;
 }
 
-export function readStartupModelCacheEntry(instanceId: string): StartupModelCacheEntry | null {
+/** `standIn`: the engine's own stand-in list. A saved copy of it, which builds before `placeholder` wrote after a failed
+ * read, is no catalog: it reads as nothing, so the stand-in comes back marked. A list this build saved is `discovered`
+ * and always kept, even one that lists only what the stand-in lists. */
+export function readStartupModelCacheEntry(instanceId: string, standIn?: ModelCatalog): StartupModelCacheEntry | null {
   const path = startupModelCachePath(instanceId);
   if (!path) return null;
   try {
-    const raw = JSON.parse(readFileSync(path, "utf8")) as { checkedAt?: unknown; build?: unknown };
+    const raw = JSON.parse(readFileSync(path, "utf8")) as { checkedAt?: unknown; build?: unknown; discovered?: unknown } | null;
     const catalog = catalogFrom(raw);
-    return catalog ? {
+    const ids = (listed: ModelCatalog) => listed.options.map((option) => option.id).join("\0");
+    if (!catalog || (raw?.discovered !== true && standIn?.placeholder && ids(catalog) === ids(standIn))) return null;
+    return {
       catalog,
-      checkedAt: typeof raw.checkedAt === "number" && Number.isFinite(raw.checkedAt) ? raw.checkedAt : null,
-      build: typeof raw.build === "string" ? raw.build : null,
-    } : null;
+      checkedAt: typeof raw?.checkedAt === "number" && Number.isFinite(raw.checkedAt) ? raw.checkedAt : null,
+      build: typeof raw?.build === "string" ? raw.build : null,
+    };
   } catch {
     return null;
   }
 }
 
-export function readStartupModelCache(instanceId: string): ModelCatalog | null {
-  return readStartupModelCacheEntry(instanceId)?.catalog ?? null;
+export function readStartupModelCache(instanceId: string, standIn?: ModelCatalog): ModelCatalog | null {
+  return readStartupModelCacheEntry(instanceId, standIn)?.catalog ?? null;
 }
 
+/** A stand-in list (`placeholder`) is never saved: it would come back unmarked at the next start. */
 export function writeStartupModelCache(instanceId: string, catalog: ModelCatalog, read: { checkedAt?: number; build?: string } = {}): void {
-  if (!catalog.options.length) return;
+  if (!catalog.options.length || catalog.placeholder) return;
   const path = startupModelCachePath(instanceId);
   if (!path) return;
   const stored = catalogFrom(catalog);
   if (!stored) return;
   mkdirSync(dirname(path), { recursive: true });
-  writeFileAtomic(path, JSON.stringify({ ...stored, checkedAt: read.checkedAt ?? (unconfirmed.has(catalog) ? 0 : Date.now()), build: read.build ?? buildStamp() }), { durable: false });
+  writeFileAtomic(path, JSON.stringify({ ...stored, discovered: true, checkedAt: read.checkedAt ?? (unconfirmed.has(catalog) ? 0 : Date.now()), build: read.build ?? buildStamp() }), { durable: false });
 }
 
 /** An object, not a promise: an async function cannot hand back a promise without `await` following it. */

@@ -16,7 +16,8 @@ import { offeredModels } from "./config-options.ts";
 import { writeFileAtomicIfChanged } from "../../atomic.ts";
 
 const AUTO = "auto";
-const MODELS: ModelCatalog = { default: AUTO, options: [{ id: AUTO, label: "Auto" }] };
+/** A stand-in until the first read, and marked as one: the picker reads Copilot when it opens. */
+const MODELS: ModelCatalog = { default: AUTO, options: [{ id: AUTO, label: "Auto" }], placeholder: true };
 const SPAWN_ARGS = ["--acp", "--stdio"];
 const SIGN_IN = "copilot login";
 const LOGIN_NOTE = `GitHub Copilot is not signed in. Run ${SIGN_IN} in a terminal, then check again.`;
@@ -206,7 +207,7 @@ const SUPPORT: AcpSupport = {
   },
   resolveModels: (env, config) => resolveCopilotModels(env, config),
   // Every fleet has this instance, and any `copilot` on PATH (VS Code's shim included) would otherwise be started
-  // at launch: the catalog comes from the startup cache and refreshes when the engine is picked.
+  // at launch: the catalog comes from the startup cache, or is read once when the picker opens.
   resolveModelsOnCreate: false,
   selectModel: { configId: "model", unsetIds: [AUTO] },
   modelVariants: true,
