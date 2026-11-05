@@ -7,7 +7,8 @@ import type { RuntimeEvent } from "../shared/runtime-events.ts";
 import type { RoutineRetryCause } from "../shared/routines.ts";
 import { engineFailureKind } from "./drivers/engine-errors.ts";
 import { classifyError } from "./drivers/retry.ts";
-import type { RoutineRun } from "./routines.ts";
+import { nextOccurrence } from "./routine-schedules.ts";
+import type { Routine, RoutineRun } from "./routines.ts";
 import { hostTimeZone } from "./turn-clock.ts";
 import { classifyContinuable } from "./turn-continuation.ts";
 
@@ -27,6 +28,8 @@ export interface RoutineFailureFacts {
   limit?: "engine" | "model" | "credits";
   /** A backup engine takes over from one whose usage limit refused the run, or that is signed out. */
   backupReady?: boolean;
+  /** The next run a recurring routine's schedule starts, for a run that schedule started, and one interval of that schedule. */
+  nextScheduled?: { at: number; interval: number };
   /** The turn's reply came back; only a step it ran failed or wasn't allowed (the runtime error's `partial`). */
   partial?: boolean;
 }
@@ -51,7 +54,7 @@ export const ROUTINE_BUSY_WAIT_MS = 60 * 60_000;
 /** Past this, a usage limit fails the run instead: the routine's next scheduled runs come sooner. */
 const LIMIT_WAIT_MS = 12 * 60 * 60_000;
 const AFTER_RESET_MS = 60_000;
-const WEEK_MS = 7 * 24 * 60 * 60_000;
+const DAY_MS = 24 * 60 * 60_000, WEEK_MS = 7 * DAY_MS;
 /** startTurn's codes for a bot or thread that is busy for now. */
 const BUSY_CODES = new Set(["thread_busy", "thread_limit", "workspace_busy", "settling"]);
 /** Stop reasons of a turn someone ended on purpose (Stop, a typed "stop", a settings change that cut it short), the AI
@@ -181,7 +184,9 @@ export function recoverRun(run: RoutineRun, failure: string, facts: RoutineFailu
   }
   const first = firstNotice(notices, run.botId, verdict.cause, now);
   const reset = verdict.resetsAt;
-  if (reset && reset > now && reset - now <= LIMIT_WAIT_MS && requeueOnce(run, "usage_limit", failure, now, reset + AFTER_RESET_MS)) {
+  // A recurring routine's next scheduled run, due within one interval after the reset, does the same work: no start at the reset.
+  const nextCovers = reset !== undefined && facts.nextScheduled !== undefined && facts.nextScheduled.at <= reset + facts.nextScheduled.interval;
+  if (reset && !nextCovers && reset > now && reset - now <= LIMIT_WAIT_MS && requeueOnce(run, "usage_limit", failure, now, reset + AFTER_RESET_MS)) {
     return { queued: true, ...(first ? { alert: { detail: `This bot's AI reached its usage limit. This run starts again at ${when(reset + AFTER_RESET_MS)}.` } } : {}) };
   }
   const action = verdict.cause === "setup" ? failure : verdict.cause === "credits" && facts.trialCredit ? TRIAL_ACTION : OWNER_ACTION[verdict.cause];
@@ -202,4 +207,17 @@ export function weekRuns(runs: readonly RoutineRun[], routineId: string, now: nu
     if (run.status === "completed") ok += 1;
   }
   return total ? { ok, total } : undefined;
+}
+
+/** A scheduled run's next scheduled occurrence and one interval of its schedule; none for a run started by hand, at startup or
+ * by an event, or for a one-time or limit-reset routine. */
+export function nextScheduledRun(run: RoutineRun, routines: readonly Routine[]): RoutineFailureFacts["nextScheduled"] {
+  if ((run.triggerSource ?? (run.manual ? "manual" : "schedule")) !== "schedule") return undefined;
+  const routine = routines.find((candidate) => candidate.id === run.routineId);
+  if (!routine?.enabled || routine.nextRunAt == null) return undefined;
+  const { schedule, nextRunAt: at } = routine;
+  const following = schedule.type === "cron" ? nextOccurrence(schedule, at) : null;
+  const interval = schedule.type === "interval" ? schedule.everyMinutes * 60_000 : schedule.type === "daily" ? DAY_MS
+    : following !== null ? following - at : null;
+  return interval === null ? undefined : { at, interval };
 }

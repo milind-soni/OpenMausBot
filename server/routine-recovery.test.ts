@@ -6,9 +6,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { RuntimeEvent } from "../shared/runtime-events.ts";
 import { TRIAL_CREDIT_REFUSED } from "../shared/trial-credit.ts";
 import {
-  classifyRoutineFailure, dispatchRefusal, retryNote, ROUTINE_BUSY_RECHECK_MS, ROUTINE_BUSY_WAIT_MS, weekRuns, type RoutineAlert,
+  classifyRoutineFailure, dispatchRefusal, nextScheduledRun, retryNote, ROUTINE_BUSY_RECHECK_MS, ROUTINE_BUSY_WAIT_MS, weekRuns, type RoutineAlert,
 } from "./routine-recovery.ts";
-import { RoutineManager, type RoutineManagerOptions, type RoutineRun } from "./routines.ts";
+import { RoutineManager, type Routine, type RoutineManagerOptions, type RoutineRun } from "./routines.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -414,6 +414,57 @@ describe("an unattended run only its owner can fix", () => {
     expect(h.run(run.id)).toMatchObject({ status: "failed", error: limit });
     expect(h.failed[0]!.alert).toBeNull();
     expect(h.deferred).toHaveLength(1);
+  });
+
+  it("lets a recurring routine's next scheduled run do the work a usage limit stopped, when it comes within one interval of the reset", async () => {
+    const h = harness();
+    const limit = "This Claude account has reached its 5-hour limit, which resets soon. Until then, switch this bot to another AI or Claude account.";
+    const hourly = h.manager.create({ name: "Price check", prompt: "Check the price", botId: "maus-1", schedule: { type: "interval", everyMinutes: 60, anchorAt: START } });
+    const daily = h.manager.create({ name: "Brief", prompt: "Write the brief", botId: "maus-2", schedule: { type: "daily", time: "09:00", weekdays: [0, 1, 2, 3, 4, 5, 6] } });
+    await h.advance(60 * MINUTE);
+    const scheduled = [hourly, daily].map((routine) => h.runs().find((run) => run.routineId === routine.id)!);
+    for (const run of scheduled) {
+      expect(run).toMatchObject({ status: "running", triggerSource: "schedule" });
+      h.fail(run.threadId!, limit, { stopReason: "quota", limitResetsAt: START + 3 * 3_600_000 });
+      expect(h.run(run.id)).toMatchObject({ status: "failed", error: limit });
+    }
+    const action = "This bot's AI reached its usage limit. Its routines work again once it resets, or choose another AI for this bot now.";
+    expect(h.failed.map(({ run, alert }) => [run.id, alert])).toEqual(scheduled.map((run) => [run.id, { detail: action }]));
+    expect(h.deferred).toEqual([]);
+  });
+
+  it("still starts a run again at the reset when its routine's next run is further off, or it was started by hand, or runs once", async () => {
+    const h = harness();
+    const limit = "This Claude account has reached its 5-hour limit.";
+    const resetsAt = START + 3 * 3_600_000;
+    const mondays = h.manager.create({ name: "Weekly plan", prompt: "Plan the week", botId: "maus-1", schedule: { type: "daily", time: "09:00", weekdays: [1] } });
+    const once = h.manager.create({ name: "Reminder", prompt: "Remind me", botId: "maus-2", schedule: { type: "once", at: START + 30 * MINUTE } });
+    await h.advance(30 * MINUTE);
+    const oneTime = h.runs().find((run) => run.routineId === once.id)!;
+    h.fail(oneTime.threadId!, limit, { stopReason: "quota", limitResetsAt: resetsAt });
+    expect(h.run(oneTime.id)).toMatchObject({ status: "queued", retried: "usage_limit", retryAt: resetsAt + MINUTE });
+    await h.advance(30 * MINUTE);
+    const weekly = h.runs().find((run) => run.routineId === mondays.id)!;
+    expect(weekly).toMatchObject({ status: "running", triggerSource: "schedule" });
+    h.fail(weekly.threadId!, limit, { stopReason: "quota", limitResetsAt: resetsAt });
+    expect(h.run(weekly.id)).toMatchObject({ status: "queued", retried: "usage_limit", retryAt: resetsAt + MINUTE });
+    const hourly = h.manager.create({ name: "Price check", prompt: "Check the price", botId: "maus-3", schedule: { type: "interval", everyMinutes: 60, anchorAt: START } });
+    const manual = await h.start(hourly.id);
+    h.fail(manual.threadId!, limit, { stopReason: "quota", limitResetsAt: resetsAt });
+    expect(h.run(manual.id)).toMatchObject({ status: "queued", retried: "usage_limit", retryAt: resetsAt + MINUTE });
+    expect(h.failed).toEqual([]);
+  });
+
+  it("measures a cron routine's interval to the occurrence after its next one, and gives none for a run not its schedule started", () => {
+    const routine = (schedule: Routine["schedule"], nextRunAt: number) => ({ id: "routine-1", enabled: true, schedule, nextRunAt }) as Routine;
+    const weekdays = { type: "cron" as const, expression: "0 9 * * 1-5", timeZone: "UTC" };
+    const thursday = Date.UTC(2026, 7, 20, 9), friday = Date.UTC(2026, 7, 21, 9);
+    const scheduled = { routineId: "routine-1", triggerSource: "schedule" } as RoutineRun;
+    expect(nextScheduledRun(scheduled, [routine(weekdays, thursday)])).toEqual({ at: thursday, interval: 24 * 60 * MINUTE });
+    expect(nextScheduledRun(scheduled, [routine(weekdays, friday)])).toEqual({ at: friday, interval: 3 * 24 * 60 * MINUTE });
+    expect(nextScheduledRun({ ...scheduled, triggerSource: "manual" }, [routine(weekdays, thursday)])).toBeUndefined();
+    expect(nextScheduledRun({ ...scheduled, triggerSource: "startup" }, [routine(weekdays, thursday)])).toBeUndefined();
+    expect(nextScheduledRun(scheduled, [routine({ type: "once", at: thursday }, thursday)])).toBeUndefined();
   });
 
   it("fails a usage limit with no reset time, or one too far off, and tells the owner", async () => {
