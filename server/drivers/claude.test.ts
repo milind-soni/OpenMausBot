@@ -2017,7 +2017,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const both = Promise.all([instance.snapshot(), instance.snapshot()]);
     await vi.waitFor(() => {
       const log = readFileSync(probes, "utf8");
-      expect(log.match(/^version /gm)).toHaveLength(2);
+      expect(log.match(/^version /gm)).toHaveLength(1);
       expect(log).toMatch(/^help /m);
     }, { timeout: 10_000 });
     await new Promise((resolve) => setTimeout(resolve, 300));

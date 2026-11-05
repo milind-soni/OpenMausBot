@@ -29,6 +29,7 @@
 //   FAKE_ACP_PERMISSION_OPTIONS  JSON options override in permission mode
 //   FAKE_ACP_DUMP  path for {argv, env}; with FAKE_ACP_MODES or FAKE_ACP_MODELS also <dump>.prompts.jsonl
 //   FAKE_ACP_LAUNCH_COUNT_FILE  process counter incremented at startup
+//   FAKE_ACP_VERSION  what `--version` prints (default "fake-acp 1.0.0"); a CLI the driver checks the shape of needs its own
 //   FAKE_ACP_RPC_DUMP  this process's method list, rewritten after every request
 //   FAKE_ACP_RPC_APPEND_FILE  one {"pid","method","cwd"} line appended per request
 //   FAKE_ACP_RPC_FAILURE_FILE  JSON-RPC error for session/prompt; once read the process stays poisoned
@@ -287,7 +288,7 @@ if (process.env.FAKE_ACP_LAUNCH_COUNT_FILE) {
   } catch {}
 }
 if (argv.includes("--version")) {
-  console.log("fake-acp 1.0.0");
+  console.log(process.env.FAKE_ACP_VERSION ?? "fake-acp 1.0.0");
   process.exit(0);
 }
 // Cursor's driver probes `agent status` / `agent models` on the binary it spawns for ACP.

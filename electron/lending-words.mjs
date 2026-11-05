@@ -110,7 +110,7 @@ export const WORDS = Object.freeze({
     "lending.action.screenTools": "アプリと画面の操作機能を確認",
     "lending.action.screen": "アプリと画面を操作",
     "lending.action.website": "ウェブサイトを開いた",
-    "lending.action.chrome": "Used your Chrome",
+    "lending.action.chrome": "Chrome を使用",
     "lending.action.invalid": "形式が不正なリクエスト",
     "lending.action.other": "その他のリクエスト",
   }),

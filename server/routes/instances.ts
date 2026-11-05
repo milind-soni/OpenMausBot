@@ -29,7 +29,7 @@ import { PASS, type RouteHandler } from "./table.ts";
 export interface InstanceRouteDeps {
   store: Pick<Store, "bots" | "tasks">;
   cfg: AppConfig;
-  registry: Pick<ProviderRegistry, "get" | "refreshModels" | "installRuntime" | "cliTarget" | "forgetSnapshots">;
+  registry: Pick<ProviderRegistry, "get" | "refreshModels" | "installRuntime" | "cliTarget" | "forgetSnapshots" | "onWrongCli">;
   sessions: Pick<SessionRegistry, "isLive">;
   providerAuthSessions: Pick<ProviderAuthSessions, "status" | "start" | "revokeOwner" | "signOut" | "complete" | "cancel">;
   hostedModels: boolean;
@@ -82,6 +82,9 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       providerConfigBusy.set(false);
     }
   };
+  // A saved CLI path that runs another program (an install command pasted as the path) gives way to the engine's own CLI
+  // once one is installed, by itself: nobody has to find Reset.
+  registry?.onWrongCli?.((instanceId, cli) => useAppCopy(instanceId, cli));
   // One updater per executable: Claude instances can share an install, and two self-updates would race its files.
   const claudeUpdatesInFlight = new Set<string>();
   return async ({ req, res, url, path, method, auth, json, readBody }) => {

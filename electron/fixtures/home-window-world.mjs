@@ -27,6 +27,9 @@ export function world({ clean = null, journal = done(), marker = null, state = c
     /** Another Cloud of the person's own, answering at CLIENT; `gone`: the Admin's pairing says it is no longer theirs. */
     client: { down: false, signedIn: true, version: "0.1.130", health: 200, gone: false, ...client },
     went: [], calls: [], fetched: [], pairs: 0, teamPairs: [], ownPairs: [], wakes: 0, waking: [], splash: [], published: [], local: [], reloads: 0, signIns: [],
+    /** The servers this computer's bots moved to, asked for again (`reopen`), and what main answers. `reopenGate`: a
+     * recovery whose navigation is still loading. */
+    reopened: [], reopenAnswer: true, reopenGate: null,
     remembered, remembers: [], left: [], dropped: [], redeemed: [], rehomes: [], rehomeThrows: false,
     url, timers: [], intervals: [],
     /** Remove from list on the Admin: each Cloud asked about, and what the Admin answers (`removed` takes it off the session's list). */
@@ -103,6 +106,7 @@ export function world({ clean = null, journal = done(), marker = null, state = c
     power: { asleep: () => w.power?.state === "asleep", hold: () => { w.power = { state: "asleep", since: 1 }; }, woke: () => w.calls.push("woke") },
     go: async (url, origin, place) => { w.went.push(place?.kind === "team" || place?.kind === "own" ? [url, origin, place.id] : [url, origin]); w.url = url; if (w.stall(url)) await new Promise(() => {}); },
     showLocal: (leaving) => { w.local.push(leaving); if (leaving) w.url = `${LOCAL}/`; },
+    reopen: async (place) => { w.reopened.push(place); if (w.reopenGate) await w.reopenGate; if (!w.reopenAnswer) return false; w.url = `${place.origin}/`; return true; },
     remembered: () => w.remembered,
     remember: (place) => { w.remembers.push(place); w.remembered = place ? { ...place, name: ACME.name, origin: TEAM } : null; },
     left: (name) => w.left.push(name),

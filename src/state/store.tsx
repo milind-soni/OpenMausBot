@@ -309,7 +309,7 @@ export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor" |
   speakReplies?: boolean;
   replyStyle?: import("../../shared/wire").WireBot["replyStyle"];
   voice?: string;
-  voiceNotes?: boolean; xResearch?: boolean;
+  voiceNotes?: boolean; xResearch?: boolean; voiceNoteEveryReply?: boolean | null; // null or absent: follows the Voice setting
   memoryEnabled?: boolean;
   pinned?: boolean;
   hidden?: boolean;
@@ -468,7 +468,7 @@ export interface InstanceInfo {
   snapshot: {
     state: "available" | "unavailable";
     reason?: string;
-    authenticated?: boolean;
+    authenticated?: boolean; /** The CLI path runs another program, not this engine's CLI. */ notEngineCli?: true;
     chatgptPlan?: boolean;
     /** Ready only through OpenCode's free no-login models: a backup, never "an AI already works". */
     freeFallback?: boolean;

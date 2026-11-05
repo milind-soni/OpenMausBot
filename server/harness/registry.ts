@@ -381,18 +381,42 @@ export class ProviderRegistry {
   private async appCopyAdvice(instanceId: InstanceId, driver: AnyProviderDriver, installed: StandaloneInstalled): Promise<{ useCli: string } | null> {
     const live = this.get(instanceId);
     const cli = cliDefaultOf(driver);
-    // A CLI the person set with Set CLI is theirs to change; only the default name gets pointed elsewhere.
+    // A CLI the person set with Set CLI is theirs to change, unless it runs another program altogether (an install
+    // command pasted as the path); otherwise only the default name gets pointed elsewhere.
     const configured = this.cliByInstance.get(instanceId);
-    if (configured !== undefined && configured !== cli) return null;
-    if (!live || !cli || !installed.executablePath || this.appStandaloneCopy(driver, cli)) return null;
+    const theirs = configured !== undefined && configured !== cli;
+    if (!live || !cli || !installed.executablePath || (!theirs && this.appStandaloneCopy(driver, cli))) return null;
     this.forgetSnapshots();
-    let state: ProviderSnapshot["state"];
+    let snapshot: ProviderSnapshot;
     try {
-      state = (await live.snapshot()).state;
+      snapshot = await live.snapshot();
     } catch {
-      state = "unavailable";
+      snapshot = { state: "unavailable" };
     }
-    return state === "available" ? null : { useCli: installed.executablePath };
+    if (snapshot.state === "available" || (theirs && snapshot.notEngineCli !== true)) return null;
+    return { useCli: installed.executablePath };
+  }
+
+  /** Set by the instance routes: points an engine whose saved CLI path runs another program at its own installed CLI, as
+   * Set CLI would, and reloads it. */
+  private cliHealer: ((instanceId: InstanceId, cli: string) => Promise<unknown>) | null = null;
+  private healing = new Set<InstanceId>();
+  onWrongCli(heal: (instanceId: InstanceId, cli: string) => Promise<unknown>): void {
+    this.cliHealer = heal;
+  }
+
+  /** A saved CLI path that answered as another program, while the engine's own CLI is installed (the app's copy, or one
+   * on PATH): the engine runs its own instead, with nobody having to Reset the path. */
+  private healWrongCli(instanceId: InstanceId, snapshot: ProviderSnapshot): void {
+    const driver = this.driversByKind.get(this.byId.get(instanceId)?.live?.driverKind ?? "");
+    const cli = cliDefaultOf(driver);
+    const saved = this.cliByInstance.get(instanceId);
+    if (snapshot.notEngineCli !== true || !this.cliHealer || !cli || saved === undefined || saved === cli || this.healing.has(instanceId)) return;
+    const own = findCliCandidates(cli, driver?.install?.standalone ? standaloneLookupPath(this.enginesBaseDir) : undefined)[0];
+    // The path found is the one already saved: it is that one that answers as another program.
+    if (!own || own === saved) return;
+    this.healing.add(instanceId);
+    void this.cliHealer(instanceId, own).catch(() => {}).finally(() => this.healing.delete(instanceId));
   }
 
   /** Whether this engine's CLI runs the app's own standalone copy, looked up the way its spawns look it up. */
@@ -431,6 +455,7 @@ export class ProviderRegistry {
       this.lastSnapshots.set(instance.instanceId, snapshot);
       this.unread?.delete(instance.instanceId);
       this.saveStatus();
+      this.healWrongCli(instance.instanceId, snapshot);
     }
     return snapshot;
   }

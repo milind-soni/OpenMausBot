@@ -20,7 +20,7 @@ const ALL = ["macos-latest", "ubuntu-latest", "windows-latest"];
 const PR = ["ubuntu-latest", "windows-latest"];
 const LINUX = ["ubuntu-latest"];
 const MAIN = ["ubuntu-latest", "windows-latest"];
-const SERVER_JOBS = ["vitest", "behavior-evals", "packaged-server", "electron-smokes", "foss", "ui-smoke", "browser-identity", "package-linux", "browser-driver"];
+const SERVER_JOBS = ["build", "vitest", "behavior-evals", "packaged-server", "electron-smokes", "foss", "ui-smoke", "browser-identity", "package-linux", "browser-driver"];
 const temporaryDirectories: string[] = [];
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
@@ -66,11 +66,11 @@ function outputs(text: string) {
 }
 
 const packaged = (oses: string[]) => oses.filter((os) => os !== "macos-latest");
-const everything = (oses: string[]) => ({ build: true, jobs: SELECTABLE_JOBS, vitest_os: oses, packaged_server_os: packaged(oses), vitest_matrix: vitestMatrix(oses) });
-const staticOnly = (oses: string[], build: boolean) => ({ build, jobs: [], vitest_os: oses, packaged_server_os: packaged(oses), vitest_matrix: vitestMatrix(oses) });
+const everything = (oses: string[]) => ({ jobs: SELECTABLE_JOBS, vitest_os: oses, packaged_server_os: packaged(oses), vitest_matrix: vitestMatrix(oses) });
+const staticOnly = (oses: string[], build: boolean) => ({ jobs: build ? ["build"] : [], vitest_os: oses, packaged_server_os: packaged(oses), vitest_matrix: vitestMatrix(oses) });
 /** What a push to main and a merge group run: Linux's and Windows' shards, the macOS smokes and the short Linux checks. */
-const MAIN_JOBS = ["vitest", "behavior-evals", "packaged-server", "electron-smokes", "foss", "control-plane", "ui-smoke", "browser-identity"];
-const mainLane = () => ({ build: true, jobs: MAIN_JOBS, vitest_os: MAIN, packaged_server_os: MAIN, vitest_matrix: vitestMatrix(MAIN) });
+const MAIN_JOBS = ["build", "vitest", "behavior-evals", "packaged-server", "electron-smokes", "foss", "control-plane", "ui-smoke", "browser-identity"];
+const mainLane = () => ({ jobs: MAIN_JOBS, vitest_os: MAIN, packaged_server_os: MAIN, vitest_matrix: vitestMatrix(MAIN) });
 
 describe("vitest matrix", () => {
   it("gives Linux and Windows eight shards each and macOS four, and only Linux every e2e file", () => {
@@ -166,16 +166,16 @@ describe("CI path scope", () => {
 describe("CI outputs", () => {
   it("runs a renderer change's tests on Linux only", () => {
     const out = ciOutputs(selectCiScope(["src/App.tsx"]), PR);
-    expect(out).toEqual({ build: true, jobs: ["vitest", "ui-smoke"], vitest_os: PR, packaged_server_os: PR, vitest_matrix: vitestMatrix(["ubuntu-latest"]) });
+    expect(out).toEqual({ jobs: ["build", "vitest", "ui-smoke"], vitest_os: PR, packaged_server_os: PR, vitest_matrix: vitestMatrix(["ubuntu-latest"]) });
   });
 
   it("runs a server change's tests on Linux and Windows, and its other checks", () => {
-    expect(ciOutputs(selectCiScope(["server/index.ts"]), PR)).toEqual({ build: true, jobs: SERVER_JOBS, vitest_os: PR, packaged_server_os: PR, vitest_matrix: vitestMatrix(PR) });
+    expect(ciOutputs(selectCiScope(["server/index.ts"]), PR)).toEqual({ jobs: SERVER_JOBS, vitest_os: PR, packaged_server_os: PR, vitest_matrix: vitestMatrix(PR) });
   });
 
   it("runs the locale tests in their own shards, with the Electron node tests, when no full Linux run covers them", () => {
     const out = ciOutputs(selectCiScope(["src/locales/de.json"]), PR);
-    expect(out.jobs).toEqual(["vitest"]);
+    expect(out.jobs).toEqual(["build", "vitest"]);
     expect(VITEST_SUBSETS["locale-tests"].files).toEqual([
       "src/",
       "electron/menu.test.mjs",
@@ -287,7 +287,7 @@ describe("CI outputs", () => {
 
   it("runs the docs tests in one job for docs, and skips the build", () => {
     const out = ciOutputs(selectCiScope(["docs/analytics.md"]), PR);
-    expect(out).toMatchObject({ build: false, jobs: ["vitest"] });
+    expect(out).toMatchObject({ jobs: ["vitest"] });
     expect(out.vitest_matrix.include).toEqual([{
       os: "ubuntu-latest", part: "docs tests", shard: 1, shards: 1, files: VITEST_SUBSETS["docs-tests"].files.join(" "), e2e: "all", node_tests: false, workers: 4,
     }]);
@@ -552,7 +552,7 @@ describe("CI scope CLI", () => {
       pull_request: { base: { sha: base }, head: { sha: git("rev-parse", "HEAD") } },
     });
     expect(output).toEqual(ciOutputs({ checks: ["docs-tests"] }, LINUX));
-    expect(output).toMatchObject({ build: false, jobs: ["vitest"] });
+    expect(output).toMatchObject({ jobs: ["vitest"] });
     expect(stderr).toBe("");
   });
 
@@ -569,7 +569,7 @@ describe("CI scope CLI", () => {
       pull_request: { base: { sha: base }, head: { sha: git("rev-parse", "HEAD") } },
     });
     expect(output).toEqual(ciOutputs({ checks: ["docs-tests"] }, LINUX));
-    expect(output).toMatchObject({ build: false, jobs: ["vitest"] });
+    expect(output).toMatchObject({ jobs: ["vitest"] });
     expect(stderr).toBe("");
   });
 
@@ -583,12 +583,12 @@ describe("CI scope CLI", () => {
       pull_request: { base: { sha: base }, head: { sha: git("rev-parse", "HEAD") } },
     });
     // A server change that cannot break Windows first: its Windows jobs wait for main.
-    expect(output).toEqual({ build: true, jobs: SERVER_JOBS, vitest_os: LINUX, packaged_server_os: LINUX, vitest_matrix: vitestMatrix(LINUX) });
+    expect(output).toEqual({ jobs: SERVER_JOBS, vitest_os: LINUX, packaged_server_os: LINUX, vitest_matrix: vitestMatrix(LINUX) });
     expect(stderr).toBe("");
   });
 
   it("runs a renderer pull request's tests on Linux, and a translation pull request's locale tests", () => {
-    for (const [source, jobs, oses] of [["src/App.tsx", ["vitest", "ui-smoke"], ["ubuntu-latest"]], ["src/locales/de.json", ["vitest"], []]] as const) {
+    for (const [source, jobs, oses] of [["src/App.tsx", ["build", "vitest", "ui-smoke"], ["ubuntu-latest"]], ["src/locales/de.json", ["build", "vitest"], []]] as const) {
       const { directory, git, base } = fixture(source);
       writeFileSync(join(directory, source), "changed\n");
       git("commit", "--quiet", "-am", "change");
@@ -861,7 +861,7 @@ describe("CI scope CLI on a pull request's Windows jobs", () => {
     return { output: outputs(readFileSync(outputPath, "utf8")), stdout, stderr };
   }
 
-  const serverJobs = (oses: string[]) => ({ build: true, jobs: SERVER_JOBS, vitest_os: oses, packaged_server_os: oses, vitest_matrix: vitestMatrix(oses) });
+  const serverJobs = (oses: string[]) => ({ jobs: SERVER_JOBS, vitest_os: oses, packaged_server_os: oses, vitest_matrix: vitestMatrix(oses) });
 
   it("runs the Windows jobs for a changed line that names Windows, and says why", async () => {
     const { directory, payload } = serverChange('if (process.platform === "win32") quote();\n');

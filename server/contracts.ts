@@ -346,6 +346,8 @@ export interface ProviderSnapshot {
   state: "available" | "unavailable";
   reason?: string;
   authenticated?: boolean;
+  /** The CLI path runs another program: it answered --version as something other than this engine's own CLI. */
+  notEngineCli?: true;
   /** Display identity from the provider CLI, never credentials; `method` is a personal login or the workspace API key. */
   account?: { email?: string; organization?: string; method?: "login" | "api-key" };
   version?: string | null;
@@ -435,6 +437,9 @@ export interface StandaloneRelease {
   /** Environment for the app's own copy only, such as turning off the vendor's self-updater. */
   runEnv?: Readonly<Record<string, string>>;
   assets: Partial<Record<StandalonePlatform, StandaloneAsset>>;
+  /** The program is a launcher that runs the rest of its folder (Cursor's runs a node and scripts beside it), so bin/
+   * holds a link to it rather than a copy. POSIX only. */
+  launcher?: true;
   /** Program SHA-256s of earlier pinned versions, per platform: a copy of one of those stays usable after the pin moves
    * on, until it is updated. Nothing in the data folder can add to this list. */
   previousPrograms?: Partial<Record<StandalonePlatform, readonly string[]>>;
@@ -578,6 +583,8 @@ export interface ProviderDriver<Config = unknown> {
     displayName: string;
     supportsMultipleInstances?: boolean;
     access?: EngineAccess;
+    /** What the engine's own CLI answers to `--version`; another answer means the CLI path runs another program. */
+    cliVersion?: RegExp;
   };
   /** Omit for engines that need no local binary (API-key drivers). */
   readonly install?: EngineInstall;
