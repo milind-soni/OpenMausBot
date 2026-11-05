@@ -4,7 +4,7 @@ import Markdown, { defaultUrlTransform, type Components, type ExtraProps, type O
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { fromMarkdown, type Options as MarkdownParseOptions } from "mdast-util-from-markdown";
-import { Check, Copy, Download, LoaderCircle, RotateCcw, WrapText, X } from "lucide-react";
+import { Check, Copy, Download, Eye, LoaderCircle, RotateCcw, WrapText, X } from "lucide-react";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
@@ -28,6 +28,7 @@ import { MarkdownTable } from "./MarkdownTable";
 import { CodeBlock, CodePlate, codeHash } from "./CodeBlock";
 export { CodeBlock, HIGHLIGHT_CACHE_MAX, HIGHLIGHT_CACHE_MAX_CHARS, HIGHLIGHT_MAX_CHARS, type CodeBlockProps } from "./CodeBlock";
 import { FilePreviewButton } from "./FilePreviewButton";
+import { SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
 
 const mermaidCache = new Map<string, string>();
 const MERMAID_CACHE_MAX = 50;
@@ -321,6 +322,7 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
 // which calls shell.openExternal without main's containment check.
 function LocalFileLink({ filePath, name, children, message }: { filePath: string; name?: string; children?: ReactNode; message?: MessageAttachmentContext }) {
   const save = useLocalFileSave(filePath, name, message);
+  const preview = useHtmlPreview(filePath, name ?? fileName(filePath), message);
   if (!message) {
     return <span title="Unavailable legacy file reference" className="break-words text-ink-secondary">{children}</span>;
   }
@@ -334,16 +336,20 @@ function LocalFileLink({ filePath, name, children, message }: { filePath: string
 
   return (
     <span dir="ltr" className="inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]">
-      <FilePreviewButton path={filePath} name={name ?? fileName(filePath)} message={message} />
+      {preview.html
+        ? <SaveIconButton name={name ?? fileName(filePath)} save={save} retryable={save.state === "failed" && !save.outsideWorkspace} />
+        : <FilePreviewButton path={filePath} name={name ?? fileName(filePath)} message={message} />}
       <button
         type="button"
-        onClick={() => void save.save()}
-        disabled={save.state === "saving"}
-        title="Save a copy"
+        onClick={preview.html ? preview.show : () => void save.save()}
+        disabled={!preview.html && save.state === "saving"}
+        title={preview.html ? t("html.preview", { name: name ?? fileName(filePath) }) : "Save a copy"}
         className="inline-flex items-center gap-1 break-words text-start text-accent underline decoration-accent/40 hover:decoration-accent disabled:cursor-wait"
       >
         {children}
-        {save.state === "saving" ? (
+        {preview.html ? (
+          <Eye size={12} className="shrink-0" aria-hidden="true" />
+        ) : save.state === "saving" ? (
           <LoaderCircle size={12} className="shrink-0 animate-spin" aria-hidden="true" />
         ) : save.state === "saved" ? (
           <Check size={12} className="shrink-0 text-success" aria-hidden="true" />
@@ -368,6 +374,7 @@ function LocalFileLink({ filePath, name, children, message }: { filePath: string
         </span>
       )}
       {save.folder && <MessageFolderFiles folderPath={filePath} listing={save.folder} message={message} />}
+      {preview.dialog}
     </span>
   );
 }

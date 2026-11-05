@@ -184,6 +184,8 @@ export interface SendTurnInput {
     data?: { command: string; args: string[]; env: Record<string, string> };
     /** The HighLevel CRM tools' MCP proxy: the harness holds the tokens and the per-bot verdict. */
     highlevel?: { command: string; args: string[]; env: Record<string, string> };
+    /** The Email tools' MCP proxy: the harness holds the passwords and the per-bot verdict. */
+    email?: { command: string; args: string[]; env: Record<string, string> };
     /** The paired phone's app tools' MCP proxy: the harness holds the jobs and the per-bot verdict. */
     device?: { command: string; args: string[]; env: Record<string, string> };
     /** dweb daemon tools; `url` is the dweb HTTP base. */
@@ -197,6 +199,8 @@ export interface SendTurnInput {
     customResultBudgets?: Record<string, number>;
   };
   cwd?: string;
+  /** Engines with no working folder (the chat drivers): where an MCP result too big for the model is saved whole; a folder attach_file can deliver from. */
+  toolResultFolder?: string;
   /** Also load the person's own CLI MCP setup (Claude Code user scope, claude.ai connectors). */
   mcpFromUserConfig?: boolean;
   /** Claude Code loads the person's own `~/.claude/skills` from this folder's `.claude/skills` (`--add-dir`). */
@@ -249,7 +253,7 @@ export interface ProviderAdapter {
     browserMcp?: boolean;
     /** The driver can mount the Data tools MCP. */
     dataMcp?: boolean;
-    /** The driver can mount the HighLevel CRM tools MCP. */
+    /** The driver can mount the HighLevel CRM tools MCP, and the Email tools the same way. */
     highlevelMcp?: boolean;
     /** The driver can mount the phone apps MCP. */
     deviceMcp?: boolean;

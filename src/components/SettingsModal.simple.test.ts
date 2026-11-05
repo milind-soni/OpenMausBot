@@ -183,7 +183,7 @@ describe("Settings in Simple mode", () => {
       .map((needle) => appearance.indexOf(needle));
     expect(order.every((at) => at > -1), String(order)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
-    expect(appearance).toContain("A circle for each place your bots live, at the window&#x27;s left edge.");
+    expect(appearance).toContain("An icon for each place your bots live");
     const toggle = fixture.switches.find((props) => props["aria-label"] === "Show your computers")!;
     expect(toggle.checked).toBe(true);
     toggle.onClick!({} as never);

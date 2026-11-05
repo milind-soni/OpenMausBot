@@ -7,6 +7,7 @@ import {
   generateImage, imageGenerationReady, imageProviderName, imageSlots,
   type GeneratedImage, type ImageCredentials,
 } from "../image-generation.ts";
+import { createImageDailyCap, type ImageDailyCap } from "../image-daily-cap.ts";
 import type { json } from "../harness/http.ts";
 import { PASS } from "./table.ts";
 
@@ -14,6 +15,8 @@ export const IMAGE_MESSAGES = {
   notSetUp: "Image generation isn't set up on this computer. Ask the person to choose an image provider in Settings → AI → Image generation (shown in advanced mode).",
   noTurn: "This turn has not started yet or already ended, so the image could not be attached.",
   notSaved: "The image could not be saved on this computer. Try again shortly.",
+  notPerson: "Images are made only for a person's own message in a chat. This turn was started another way (a routine, a webhook, an app, a guest or a room goal's coordinator), so no image was made. Tell the person they can ask for the image in a chat.",
+  dailyCap: (cap: number) => `Bots on this computer have made ${cap} images today, the most allowed in one day, so no image was made. Tell the person it starts again after midnight.`,
 } as const;
 
 const requestSchema = z.object({
@@ -30,6 +33,10 @@ export interface ImageTurn {
 
 export interface ImageToolDeps {
   cfg: ImageCredentials;
+  /** A person's own line started this turn's work, from the harness's records (server/peer-provenance.ts, and a room
+   * run's request line): never a routine, a webhook, an app, a guest or a goal's coordinator, whose images never land. */
+  personTurn: boolean;
+  daily: ImageDailyCap;
   fetchImpl?: typeof fetch;
   turn: ImageTurn | null;
   /** Images still being made, per turn key: they count toward the limit before they are attached. */
@@ -45,6 +52,7 @@ export async function generateImageForTurn(raw: unknown, deps: ImageToolDeps): P
     return { status: 400, body: { error: `generate_image takes a prompt (1 to ${IMAGE_PROMPT_MAX_CHARS} characters), an optional aspect (1:1, 16:9 or 9:16) and an optional provider.` } };
   }
   const { prompt, aspect, provider } = parsed.data;
+  if (!deps.personTurn) return { status: 403, body: { error: IMAGE_MESSAGES.notPerson } };
   const { turn } = deps;
   if (!turn) return { status: 409, body: { error: IMAGE_MESSAGES.noTurn } };
   const limit = deps.cfg.imageGen?.maxPerTurn ?? IMAGE_MAX_PER_TURN_DEFAULT;
@@ -66,9 +74,12 @@ export async function generateImageForTurn(raw: unknown, deps: ImageToolDeps): P
     return { status: 409, body: { error: IMAGE_MESSAGES.notSetUp } };
   }
 
+  if (!deps.daily.reserve()) return { status: 429, body: { error: IMAGE_MESSAGES.dailyCap(deps.daily.cap) } };
+  let made = false;
   deps.inFlight.set(turn.key, (deps.inFlight.get(turn.key) ?? 0) + 1);
   try {
     const image = await generateImage(deps.cfg, { prompt, aspect }, { slot, fetchImpl: deps.fetchImpl, signal: deps.signal });
+    made = true;
     if (!turn.attach({ bytes: image.bytes, mime: image.mime })) return { status: 409, body: { error: IMAGE_MESSAGES.noTurn } };
     const backup = image.usedFallback ? `, the person's backup image provider${image.baseError ? `, because the base failed: ${image.baseError}` : ""}` : "";
     const by = `${imageProviderName(image.provider)} (${image.model})${backup}`;
@@ -78,6 +89,7 @@ export async function generateImageForTurn(raw: unknown, deps: ImageToolDeps): P
     if (typeof status !== "number" || !(error instanceof Error)) return { status: 500, body: { error: IMAGE_MESSAGES.notSaved } };
     return { status, body: { error: error.message } };
   } finally {
+    deps.daily.settle(made);
     const left = (deps.inFlight.get(turn.key) ?? 1) - 1;
     if (left > 0) deps.inFlight.set(turn.key, left); else deps.inFlight.delete(turn.key);
   }
@@ -91,6 +103,7 @@ export interface ImageRouteContext {
   readBody: () => Promise<unknown>;
   threadId: string;
   requireActive: () => void;
+  personTurn: boolean;
 }
 
 export interface ImageTurnStore {
@@ -117,15 +130,16 @@ export function imageTurn(store: ImageTurnStore, threadId: string, requireActive
   };
 }
 
-export function createImageToolRoutes(deps: ImageTurnStore & { config: () => ImageCredentials; fetchImpl?: typeof fetch }) {
+export function createImageToolRoutes(deps: ImageTurnStore & { config: () => ImageCredentials; dataDir: string; fetchImpl?: typeof fetch }) {
   const inFlight = new Map<string, number>();
+  const daily = createImageDailyCap(deps.dataDir);
   return {
     async internal(ctx: ImageRouteContext): Promise<typeof PASS | void> {
       if (ctx.method !== "POST" || ctx.path !== "/api/internal/images/generate") return PASS;
       const turn = imageTurn(deps, ctx.threadId, ctx.requireActive);
       const call = new AbortController();
       ctx.res.once("close", () => { if (!ctx.res.writableEnded) call.abort(); });
-      const outcome = await generateImageForTurn(await ctx.readBody(), { cfg: deps.config(), fetchImpl: deps.fetchImpl, turn, inFlight, signal: call.signal });
+      const outcome = await generateImageForTurn(await ctx.readBody(), { cfg: deps.config(), personTurn: ctx.personTurn, daily, fetchImpl: deps.fetchImpl, turn, inFlight, signal: call.signal });
       ctx.json(ctx.res, outcome.status, outcome.body);
     },
   };

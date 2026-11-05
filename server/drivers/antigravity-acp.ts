@@ -11,6 +11,7 @@ import type { ModelCatalog } from "../contracts.ts";
 import type { ChildProcess } from "node:child_process";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
 import { acpVariantOption, surveyModelVariants } from "./acp/config-options.ts";
+import { StderrTail, exitDetail } from "./acp/exit-report.ts";
 import {
   VERIFICATION_TEMP_KEY,
   antigravityTempDir,
@@ -216,6 +217,8 @@ export class AntigravityAcpClient {
   private startupOutputBytes = 0;
   private startupDiagnosticBytes = 0;
   private nativeStartupHint?: string;
+  /** What it printed since it last answered, masked (sign-in links are taken out before), for the exit message. */
+  private readonly stderrTail = new StderrTail();
   private closed = false;
   private stopping?: Promise<boolean>;
   private readonly onAuthorizationUrl?: (url: string) => void;
@@ -239,16 +242,16 @@ export class AntigravityAcpClient {
     );
     this.child.stdout!.setEncoding("utf8");
     this.child.stdout!.on("data", (chunk: string) => this.consume(chunk));
-    // Never surface raw stderr: it can contain authorization codes.
+    // Never surface raw stderr: it can contain authorization codes. Only masked last lines reach the exit message.
     this.child.stderr!.setEncoding("utf8");
     this.child.stderr!.on("data", (chunk: string) => this.consumeDiagnostics(chunk));
     this.child.once("error", (error) => this.failAll(error));
     this.exited = new Promise((resolve) => {
       this.child.once("close", (code, signal) => {
-        this.noteStartupDiagnostic(this.diagnosticBuffer);
+        if (authorizationUrlFromLine(this.diagnosticBuffer) === null) this.noteDiagnostic(this.diagnosticBuffer);
         this.diagnosticBuffer = "";
         if (!this.closed) this.failAll(new Error(
-          `Antigravity ACP exited ${code ?? signal ?? "unexpectedly"}.${this.nativeStartupHint ? ` ${this.nativeStartupHint}` : ""}`,
+          `Antigravity ACP exited ${code ?? signal ?? "unexpectedly"}${exitDetail(code, signal, this.stderrTail.text)}.${this.nativeStartupHint ? ` ${this.nativeStartupHint}` : ""}`,
         ));
         resolve();
       });
@@ -305,8 +308,13 @@ export class AntigravityAcpClient {
     const { lines, rest } = takeLines(this.diagnosticBuffer + chunk);
     this.diagnosticBuffer = rest.length > MAX_DIAGNOSTIC_LINE_CHARS ? "" : rest;
     for (const line of lines) {
-      if (!this.announceAuthorizationUrl(line)) this.noteStartupDiagnostic(line);
+      if (!this.announceAuthorizationUrl(line)) this.noteDiagnostic(line);
     }
+  }
+
+  private noteDiagnostic(line: string) {
+    this.noteStartupDiagnostic(line);
+    this.stderrTail.note(line);
   }
 
   private noteStartupDiagnostic(line: string) {
@@ -386,6 +394,7 @@ export class AntigravityAcpClient {
     }, Math.min(windowMs, Math.max(0, deadline - Date.now())), expired);
     this.initializationComplete = true;
     this.nativeStartupHint = undefined;
+    this.stderrTail.clear();
     return initialized;
   }
 

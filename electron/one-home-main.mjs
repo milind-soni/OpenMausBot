@@ -117,8 +117,10 @@ async function answer(response) {
  *   keep?: { read(): unknown, write(value: unknown): void },
  *   reportTimers?: { set(work: () => void, ms: number): unknown, clear(timer: unknown): void },
  *   other?(): null | { view(): unknown, seen(): unknown, retry(): Promise<unknown>, active(): boolean },
+ *   accountsHere?(): number,
  *   clean?: import("./clean-workspace.mjs").CleanWorkspace | null,
- * }} deps `localRequest`: this computer's server, as its owner (main adds the owner's header), and only its own copy while `clean`
+ * }} deps `accountsHere`: how many accounts are signed in on this device: with more than one, which Cloud this computer's bots
+ * belong in is the person's to say, so no first move starts by itself. `localRequest`: this computer's server, as its owner (main adds the owner's header), and only its own copy while `clean`
  * (the clean workspace) runs. `account`: the MausBot
  * Cloud sign-in (cloud-account.mjs). `journal`: where the move's journal is kept, journalFile by default; `keep`: the
  * person's choice to keep this computer's bots here, one-home-keep.json beside it by default. `openTeam`:
@@ -129,7 +131,7 @@ async function answer(response) {
  * installCloudSend's.
  */
 export function installOneHome({ localRequest: anyServer, clean = null, account, journalFile, tempRoot, lend, phone, openHome, openLocal, restart, version, log = () => {}, journal: kept, keep: keptChoice, openTeam, teamJournal,
-  reportTimers, other = () => null, ...sendDeps }) {
+  reportTimers, other = () => null, accountsHere = () => 1, ...sendDeps }) {
   const fetchImpl = sendDeps.fetch ?? globalThis.fetch;
   const localRequest = clean ? clean.realCopy(anyServer) : anyServer;
   const onOwnCopy = (work) => (clean ? clean.holding(work) : work());
@@ -141,7 +143,7 @@ export function installOneHome({ localRequest: anyServer, clean = null, account,
   const moveSession = createMoveSession({ open: (target) => openOwnerSession(target, fetchImpl, { label: MOVE_LABEL, background: false }) });
   const send = installCloudSend({ ...sendDeps, local: (route, init) => localRequest(route, { method: init?.method ?? "GET", signal: AbortSignal.timeout(30_000) }),
     move: () => (home?.view() === null && other()?.view() ? other() : home), teamMove: () => teamMove, moveSession });
-  teamMove = installTeamMove({ ipcMain: sendDeps.ipcMain, cloudPage: sendDeps.cloudPage, home: sendDeps.home, account: () => account(), fetch: fetchImpl, openTeam,
+  teamMove = installTeamMove({ ipcMain: sendDeps.ipcMain, cloudPage: sendDeps.cloudPage, pageOrigin: sendDeps.pageOrigin, confirmMove: sendDeps.confirmMove, home: sendDeps.home, account: () => account(), fetch: fetchImpl, openTeam,
     file: () => join(dirname(journalFile()), "team-move-send.json"), journalFile: () => join(dirname(journalFile()), "team-moves.json"), ...(teamJournal ? { journal: teamJournal } : {}),
     onChange: () => send.publish(), log });
   const journal = kept ?? jsonFile(journalFile);
@@ -223,7 +225,11 @@ export function installOneHome({ localRequest: anyServer, clean = null, account,
   home = createOneHome({
     journal,
     // Every run starts here: the key watch is set up before any wait asks, so a key pressed since then counts.
-    cloud: () => { typed(); const cloud = oneHomeCloud(account()?.state()); return cloud && other()?.active() ? { ...cloud, moves: false } : cloud; },
+    cloud: () => {
+      typed();
+      const cloud = oneHomeCloud(account()?.state()), moved = parseJournal(journal.read());
+      return cloud && (other()?.active() || (accountsHere() > 1 && (!moved || moved.phase === "back"))) ? { ...cloud, moves: false } : cloud;
+    },
     send,
     local: {
       ...local,
@@ -264,7 +270,7 @@ export function installOneHome({ localRequest: anyServer, clean = null, account,
    * applies to; `moved`, turning it on brings this computer's bots home; `coming`, they are on their way past turning back. */
   const keepState = () => {
     const cloud = oneHomeCloud(account()?.state()), moving = parseJournal(journal.read());
-    return { shown: Boolean(cloud?.origin) && (cloud.moves || Boolean(moving) || home.keeps()), on: home.keeps(), moved: awayIn(moving) && moving.phase !== "keeping",
+    return { shown: Boolean(cloud?.origin) && (!moving || moving.cloud.account === cloud.account) && (cloud.moves || Boolean(moving) || home.keeps()), on: home.keeps(), moved: awayIn(moving) && moving.phase !== "keeping",
       coming: underWay(moving) };
   };
   const onPage = (channel, handler) => (event, ...args) => {
@@ -282,6 +288,8 @@ export function installOneHome({ localRequest: anyServer, clean = null, account,
     ...send,
     /** The switch "Keep this computer's bots on this computer", as Settings shows it, and the person turning it. */
     keep: { state: keepState, set: (on) => home.keep(on === true) },
+    /** Why the account signed in can't be left now: its move, or a bot of its own moving into a team, is under way. */
+    holding: () => { const bot = teamMove.view()?.phase; return home.moving() || (bot && !["done", "failed"].includes(bot)) ? "moving" : null; },
     /** Goes on with the move, and with any bot moving into a team: at launch, and whenever the MausBot Cloud sign-in changes. */
     kick: () => { void teamMove.kick(); return home.kick(); },
     /** Home is My Cloud: this computer's own server is frozen for good, and its phone link stays off. */

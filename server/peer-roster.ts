@@ -192,7 +192,7 @@ export function resolveTeammate<T extends RosterMember>(
 
 const CHOICES_MAX = 12;
 
-function sharedNameChoices(matches: readonly RosterMember[]): string {
+export function sharedNameChoices(matches: readonly RosterMember[]): string {
   const listed = matches.slice(0, CHOICES_MAX).map((bot) => {
     const role = bot.chiefOfStaff ? "Chief of Staff" : peerName(bot.title ?? "");
     return `${peerName(bot.name)}${role ? `, ${role}` : ""} (id ${bot.id})`;

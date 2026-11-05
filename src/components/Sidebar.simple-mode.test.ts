@@ -38,6 +38,7 @@ const bot: Bot = {
     { threadId: "unread", title: "Finished reply", createdAt: 6, unread: true },
   ],
 };
+const quiet: Bot = { ...bot, unread: false, tasks: bot.tasks!.filter((task) => !task.busy && !task.unread && !task.activity) };
 const densities: SidebarDensity[] = ["comfortable", "icons"];
 const botRow = (BotListItem as MemoExoticComponent<(props: BotRowProps) => ReactNode>).type;
 const pinnedCircle = (PinnedBotCircle as MemoExoticComponent<(props: BotRowProps) => ReactNode>).type;
@@ -111,12 +112,12 @@ describe("bot-first sidebar", () => {
     it.each(densities)(`opens the last selected conversation on mouse or keyboard, %s density, threads ${enabled ? "on" : "off"}`, (density) => {
       fixture.showThreads = enabled;
       let tree: ReactNode;
-      function Capture() { tree = botRow(rowProps(density)); return tree; }
+      function Capture() { tree = botRow(rowProps(density, quiet)); return tree; }
       renderToStaticMarkup(createElement(Capture));
       const row = findElement(tree, "data-sidebar-bot-row", bot.id)!;
       row.props.onClick!({ type: "click", target: {} } as MouseEvent);
       expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "select", id: bot.id });
-      expect(bot.threadId).toBe("last-selected");
+      expect(quiet.threadId).toBe("last-selected");
       for (const key of ["Enter", " "]) {
         fixture.dispatch.mockClear();
         const preventDefault = vi.fn();
@@ -323,8 +324,25 @@ describe("bot-first sidebar", () => {
     expect(markup).not.toContain("waiting-dot");
   });
 
+  it.each(densities)("opens the thread a row or circle is marked for, on mouse or keyboard, %s density", (density) => {
+    fixture.showThreads = false;
+    const trees: ReactNode[] = [];
+    function Capture() { const tree = [botRow(rowProps(density)), pinnedCircle(rowProps(density))]; trees.push(...tree); return tree; }
+    renderToStaticMarkup(createElement(Capture));
+    for (const tree of trees) {
+      const row = findElement(tree, "data-sidebar-bot-row", bot.id)!;
+      fixture.dispatch.mockClear();
+      row.props.onClick!({ type: "click", target: {} } as MouseEvent);
+      expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "switchTask", botId: bot.id, threadId: "approval" });
+      if (!row.props.onKeyDown) continue;
+      fixture.dispatch.mockClear();
+      row.props.onKeyDown({ key: "Enter", preventDefault: vi.fn() } as unknown as KeyboardEvent);
+      expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "switchTask", botId: bot.id, threadId: "approval" });
+    }
+  });
+
   it.each(densities)("opens the thread the person last wrote in when threads are hidden, %s density", (density) => {
-    const used = { ...bot, mainThreadId: "idle-history" };
+    const used = { ...quiet, mainThreadId: "idle-history" };
     for (const enabled of [false, true]) {
       fixture.showThreads = enabled;
       const opened = enabled ? { type: "select", id: bot.id } : { type: "switchTask", botId: bot.id, threadId: "idle-history" };

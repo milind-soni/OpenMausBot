@@ -437,3 +437,29 @@ test("while the chats go, the move's progress counts chats only: the automations
   assert.ok(counted.every((progress) => progress.total === 2 && progress.done <= 2), `every count is of the 2 chats: ${JSON.stringify(counted)}`);
   assert.deepEqual(counted.at(-1), { done: 2, total: 2 });
 });
+
+test("a check that finds things missing names, for what may stay behind, each short chat's bot and every bot and room by name", async () => {
+  // Seen on a customer's PC: the check found things missing pass after pass, and only this computer's log said what.
+  const manifest = (side) => ({ v: 1, appVersion: "0.1.140", items: [bot("b1", { soul: "s" }), bot("b2", { soul: "s" })], memory: [], journal: [], learned: [], forgotten: [], teams: [],
+    rooms: [{ id: "r1", name: "Launch room", members: ["b1"], threads: ["t-r1"] }], connections: [],
+    conversations: [{ threadId: "t-b1", bot: "b1", rows: 1, newest: "t-b1-1", settings: {} }, { threadId: "t-b2", bot: "b2", rows: 1, newest: "t-b2-1", settings: {} }],
+    attachments: side === "here" ? ["0b6c9f2e-1d4a.mp3"] : [], files: [], automations: [], runs: [] });
+  const s = sides({ here: [bot("b1", { soul: "s" }), bot("b2", { soul: "s" })], there: [bot("b1", { soul: "s" }), bot("b2", { soul: "s" })], onCall: (method, route, body) => {
+    if (route === "/api/cloud-send/manifest") return reply(200, { ...manifest("there"), rooms: [{ id: "r1", name: "Launch room", members: ["b1"], threads: ["t-r1"] }] });
+    if (route === "/api/cloud-send/chats/verify") {
+      const threadId = body.conversations[0].threadId;
+      return reply(200, { v: 1, conversations: [{ threadId, missing: threadId === "t-b1" ? body.conversations[0].ids : [], unstamped: 0, path: { holds: true, at: null, leaf: `${threadId}-1`, length: 1 } }] });
+    }
+    if (route === "/api/cloud-send/chats/attachments") return reply(200, { missing: body.names });
+    if (route === "/api/cloud-send/verify-secrets") return reply(200, { v: 1, secrets: {} });
+    return null;
+  } });
+  const local = s.deps.local;
+  s.deps.local = async (route, init) => (route === "/api/cloud-send/manifest" ? json(manifest("here")) : local(route, init));
+  s.deps.handoff = async (what) => (what.kind === "verify-secrets" ? { secrets: {} } : {});
+  const report = await createCloudSend(s.deps).check();
+  assert.equal(report.ok, false);
+  assert.deepEqual(report.attachments, ["0b6c9f2e-1d4a.mp3"], "one this computer no longer has is missing pass after pass");
+  assert.deepEqual(report.names, { b1: "b1", b2: "b2", "room:r1": "Launch room" });
+  assert.deepEqual(report.owners, { "t-b1": "b1" }, "only the chats found short");
+});

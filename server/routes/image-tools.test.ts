@@ -1,7 +1,11 @@
+import { mkdtempSync } from "node:fs";
 import { IncomingMessage, ServerResponse } from "node:http";
 import { Socket } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
+import { createImageDailyCap } from "../image-daily-cap.ts";
 import type { GeneratedImage } from "../image-generation.ts";
 import { createImageToolRoutes, generateImageForTurn, IMAGE_MESSAGES } from "./image-tools.ts";
 
@@ -15,13 +19,17 @@ function okFetch(): typeof fetch {
   return vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ data: [{ b64_json: PNG.toString("base64") }] })));
 }
 
-function deps(overrides: { cfg?: Parameters<typeof generateImageForTurn>[1]["cfg"]; fetchImpl?: typeof fetch; parked?: number; live?: boolean; noTurn?: boolean } = {}) {
+const scratch = () => mkdtempSync(join(tmpdir(), "omb-image-tools-"));
+
+function deps(overrides: { cfg?: Parameters<typeof generateImageForTurn>[1]["cfg"]; fetchImpl?: typeof fetch; parked?: number; live?: boolean; noTurn?: boolean; personTurn?: boolean; dailyCap?: number; dataDir?: string } = {}) {
   const attached: GeneratedImage[] = [];
   const live = overrides.live ?? true;
   return {
     attached,
     deps: {
       cfg: overrides.cfg ?? CFG,
+      personTurn: overrides.personTurn ?? true,
+      daily: createImageDailyCap(overrides.dataDir ?? scratch(), { cap: overrides.dailyCap }),
       fetchImpl: overrides.fetchImpl ?? okFetch(),
       inFlight: new Map<string, number>(),
       turn: overrides.noTurn ? null : {
@@ -120,6 +128,25 @@ describe("generate_image for a turn", () => {
     expect(attached).toHaveLength(1);
   });
 
+  it("makes no image in a turn no person started, such as a routine's or a webhook's", async () => {
+    const fetchImpl = okFetch();
+    const { deps: d, attached } = deps({ fetchImpl, personTurn: false });
+    expect(await generateImageForTurn({ prompt: "owl" }, d)).toEqual({ status: 403, body: { error: IMAGE_MESSAGES.notPerson } });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(attached).toEqual([]);
+  });
+
+  it("stops at the day's image cap without calling a provider, across turns and restarts", async () => {
+    const dataDir = scratch();
+    const first = deps({ dataDir, dailyCap: 2 });
+    expect((await generateImageForTurn({ prompt: "owl" }, first.deps)).status).toBe(201);
+    const fetchImpl = okFetch();
+    const restarted = deps({ dataDir, dailyCap: 2, fetchImpl, cfg: { ...CFG, imageGen: { ...CFG.imageGen, maxPerTurn: 9 } } });
+    expect((await generateImageForTurn({ prompt: "fox" }, restarted.deps)).status).toBe(201);
+    expect(await generateImageForTurn({ prompt: "cat" }, restarted.deps)).toEqual({ status: 429, body: { error: IMAGE_MESSAGES.dailyCap(2) } });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses when no turn is running, and drops an image whose turn ended meanwhile", async () => {
     const idle = deps({ noTurn: true });
     expect((await generateImageForTurn({ prompt: "owl" }, idle.deps)).status).toBe(409);
@@ -143,11 +170,12 @@ describe("generate_image for a turn", () => {
 });
 
 describe("the generate_image route", () => {
-  function route(options: { fetchImpl: typeof fetch; requireActive?: () => void }) {
+  function route(options: { fetchImpl: typeof fetch; requireActive?: () => void; personTurn?: boolean }) {
     const live = new Map([["thread", "turn-1"]]);
     const parked = new Map<string, GeneratedImage[]>();
     const routes = createImageToolRoutes({
       config: () => ({ ...CFG, imageGen: { ...CFG.imageGen, maxPerTurn: 1 } }),
+      dataDir: scratch(),
       fetchImpl: options.fetchImpl,
       liveTurn: (threadId) => live.get(threadId),
       key: (threadId, turnId) => `${threadId}:${turnId}`,
@@ -161,7 +189,7 @@ describe("the generate_image route", () => {
         method: "POST", path: "/api/internal/images/generate", res,
         json: (_res: ServerResponse, status: number, body: unknown) => { answer = { status, body }; },
         readBody: async () => ({ prompt: "owl" }),
-        threadId: "thread", requireActive: options.requireActive ?? (() => {}),
+        threadId: "thread", requireActive: options.requireActive ?? (() => {}), personTurn: options.personTurn ?? true,
       });
       return answer!;
     };
@@ -197,11 +225,19 @@ describe("the generate_image route", () => {
     expect((await r.call()).status).toBe(201);
   });
 
+  it("answers a turn no person started with a refusal the bot can pass on, and parks nothing", async () => {
+    const fetchImpl = okFetch();
+    const r = route({ fetchImpl, personTurn: false });
+    expect(await r.call()).toEqual({ status: 403, body: { error: IMAGE_MESSAGES.notPerson } });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect([...r.parked.values()].flat()).toEqual([]);
+  });
+
   it("leaves other requests to the next route", async () => {
-    const routes = createImageToolRoutes({ config: () => CFG, liveTurn: () => "turn", key: (a, b) => a + b, images: () => 0, park: () => {} });
+    const routes = createImageToolRoutes({ config: () => CFG, dataDir: scratch(), liveTurn: () => "turn", key: (a, b) => a + b, images: () => 0, park: () => {} });
     const answered = vi.fn<(res: ServerResponse, status: number, body: unknown) => void>();
     const res = new ServerResponse(new IncomingMessage(new Socket()));
-    const out = await routes.internal({ method: "POST", path: "/api/internal/voice-note", res, json: answered, readBody: async () => ({}), threadId: "t", requireActive: () => {} });
+    const out = await routes.internal({ method: "POST", path: "/api/internal/voice-note", res, json: answered, readBody: async () => ({}), threadId: "t", requireActive: () => {}, personTurn: true });
     expect(typeof out).toBe("symbol");
     expect(answered).not.toHaveBeenCalled();
   });

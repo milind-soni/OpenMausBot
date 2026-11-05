@@ -20,6 +20,14 @@ link from the avatar editor opens it in Simple mode too). Choose:
 - **Images per reply**: the most images a bot may create in one turn (1–10,
   default 4). Images still being made count, so parallel calls cannot pass it.
   Images from Codex's own image tool count toward the same limit.
+- **A day's images**: bots make at most 50 images a day on one installation,
+  counted on disk so a restart does not reset it, starting again at local
+  midnight. There is no setting for it. Avatars made in Settings are not
+  counted.
+- **Only for a person**: `generate_image` makes an image only in a turn a
+  person's own message started (or work handed on from one). A routine, a
+  webhook, an outside app or a guest's turn is refused with a line the bot
+  can pass on, so nothing spends the image key unattended.
 - **Keys**: each chosen provider gets a key field on this page. The Grok and
   OpenRouter fields save the same key as **API keys**. A key pasted into a
   model field is refused.

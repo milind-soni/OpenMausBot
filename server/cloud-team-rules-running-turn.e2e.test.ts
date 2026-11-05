@@ -160,7 +160,10 @@ it("a hand-off it starts after the change gets the new rules", async () => {
   const helper = dump() as Dump & { prompt?: unknown };
   expect(JSON.stringify(helper.prompt)).toContain("Please check the stock.");
   expect(Object.keys(helper.mcpConfig?.mcpServers ?? {})).not.toContain("orders");
-  await expect.poll(idle, { timeout: 60_000, interval: 100 }).toBe(true);
+  // Helper's answer then wakes Scout for one more turn in this chat. Wait for that turn here: started after this test,
+  // it would play the next test's scripted calls, and its Gmail call would count as that test's own.
+  await expect.poll(async () => existsSync(dumpPath()) && JSON.stringify(dump()).includes("own account, not verification") && await idle(),
+    { timeout: 60_000, interval: 100 }).toBe(true);
 }, hostTimeout(120_000));
 
 it("a connected-app tool is refused from the moment the rule lands, mid-turn, and the turn still finishes", async () => {

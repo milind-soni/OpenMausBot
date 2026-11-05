@@ -174,9 +174,10 @@ jobs:
       matrix: ${{ fromJSON(needs.static.outputs.vitest_matrix) }}
     runs-on: ${{ matrix.os }}
     # scripts/testing/duration-sequencer.ts splits each platform's files by
-    # their recorded seconds on that platform, about 17 minutes a Linux shard
-    # and 10 to 15 a Windows one. The cap catches a hang, not normal suite
-    # growth; Windows runners are about 1.45x slower and vary more.
+    # their recorded seconds on that platform, about 6 minutes a Linux shard
+    # (four files at once) and 10 to 15 a Windows one (one at a time). The cap
+    # catches a hang, not normal suite growth; Windows runners are about 1.45x
+    # slower and vary more.
     timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 25 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -201,6 +202,7 @@ jobs:
           OMB_VITEST_RETRY_LOG: ${{ runner.temp }}/vitest-retries.jsonl
           OMB_VITEST_E2E: ${{ matrix.e2e }}
           OMB_VITEST_SUBSET: ${{ matrix.files }}
+          OMB_VITEST_WORKERS: ${{ matrix.workers }}
         run: pnpm exec vitest run ${{ matrix.files }} --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=default --reporter=github-actions
       - name: Report flaky tests that needed a retry
         # Known flakes (scripts/testing/ci-retry-list.json) get two retries in

@@ -40,19 +40,24 @@ export function showNotification(
   if (frame.kind === "done" && !finishedNotificationsEnabled()) return;
   const spend = frame.kind === "spend";
   if (!spend && document.hasFocus() && visibleThreadId === frame.threadId) return;
+  if (Notification.permission !== "granted") return;
 
-  const open = () => {
-    window.focus();
-    onOpen({ botId: frame.botId, threadId: frame.threadId });
+  const title = placeName ? `${placeName} · ${frame.title}` : frame.title;
+  const options: NotificationOptions = {
+    body: frame.body,
+    ...buildNotificationOptions({ id: frame.botId, avatarUrl }),
+    ...(spend ? { tag: "openmausbot:spend", icon: undefined } : {}),
+    ...(notificationSoundsEnabled() ? {} : { silent: true }),
   };
-
-  if (Notification.permission === "granted") {
-    const options: NotificationOptions = {
-      body: frame.body,
-      ...buildNotificationOptions({ id: frame.botId, avatarUrl }),
-      ...(spend ? { tag: "openmausbot:spend", icon: undefined } : {}),
-      ...(notificationSoundsEnabled() ? {} : { silent: true }),
+  const shownByPage = () => {
+    new Notification(title, options).onclick = () => {
+      window.focus();
+      onOpen({ botId: frame.botId, threadId: frame.threadId });
     };
-    new Notification(placeName ? `${placeName} · ${frame.title}` : frame.title, options).onclick = open;
-  }
+  };
+  const desktop = window.ogb?.desktopNotifications;
+  if (!desktop) return shownByPage();
+  void desktop.show({
+    title, body: frame.body, tag: options.tag, silent: options.silent === true, picture: options.icon, botId: frame.botId, threadId: frame.threadId,
+  }).then((shown) => { if (!shown) shownByPage(); }, shownByPage);
 }

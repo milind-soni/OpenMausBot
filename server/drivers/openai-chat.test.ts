@@ -416,8 +416,11 @@ describe("createOpenAIChatRuntime tool approvals", () => {
         .toEqual({ requests: 5, corrective: 1, ok: false, stopReason: "tool_error" });
     }, 20_000);
 
-    it("without rounds, a later call that succeeds does not clear the failure", async () => {
+    it("without rounds, a bot that went on to run tools after a failure ends ok; one whose last calls failed does not", async () => {
+      // Seen on a hosted model: 137 turns in a week ended failed for one bad query the bot had already worked around.
       expect(await run([toolCall("c1", "nope"), toolCall("c2", "fx_write"), answer], undefined, { custom: { fx: toolServer() } }))
+        .toEqual({ requests: 3, corrective: 0, ok: true, stopReason: null });
+      expect(await run([toolCall("c1", "fx_write"), toolCall("c2", "nope"), answer], undefined, { custom: { fx: toolServer() } }))
         .toEqual({ requests: 3, corrective: 0, ok: false, stopReason: "tool_error" });
     }, 20_000);
   });

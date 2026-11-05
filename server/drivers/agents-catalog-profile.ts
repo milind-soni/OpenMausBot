@@ -16,7 +16,7 @@ export interface CatalogProfile {
   memoryEnabled?: boolean;
   /** The section's Chief of Staff; the server refuses Chief-only tools to every other bot. */
   chief: boolean;
-  /** Written into start_thread's schema: the only bot_id it accepts. */
+  /** Only for Watcher's own tool. Never written into a schema: a list that names its bot can't share a prompt cache with other bots. */
   botId: string;
   /** features.chiefEscalations: raise_escalation is mounted. */
   escalations?: boolean;
