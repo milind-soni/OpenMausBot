@@ -26,7 +26,6 @@ import {
   companionPairingRoute,
   companionPairingRoutePin,
   companionPairingRoutePinAvailable,
-  type CompanionEndpoint,
   type CompanionPairingRoutePin,
   type CompanionPairingRouteMode,
 } from "../lib/companion-pairing";
@@ -65,49 +64,11 @@ import {
   phonePairingManualCodeMode,
 } from "../lib/companion-state";
 import { ConnectionDetail } from "./ConnectionDetail";
+import { PhonePairingQr } from "./PhonePairingQr";
 import { productName } from "../lib/brand";
 
-export interface PhoneDevice {
-  id: string;
-  name: string;
-  createdAt: number;
-  lastSeenAt: number;
-  cloudDesktopAccess: boolean;
-  /** Absent (older sidecars) means no browser access. */
-  browserControlAccess?: boolean;
-}
-
-export interface CompanionState {
-  enabled: boolean;
-  keepAwake: boolean;
-  port: number;
-  devices: PhoneDevice[];
-  connectedDeviceIds?: string[];
-  pairing: { code: string; token: string; expiresAt: number } | null;
-  addresses?: string[];
-  tailscale?: string;
-  tailnetName?: string;
-  lan?: string | null;
-  hosts?: string[];
-  endpoints?: CompanionEndpoint[];
-  secretPublicKey?: string;
-  discovery?: { advertising: boolean; name: string };
-  /** Windows has that network down as Public, where its firewall drops a phone's connection. */
-  publicNetwork?: string;
-  error?: string;
-}
-
-export type CompanionBridge = {
-  state: () => Promise<CompanionState>;
-  start: () => Promise<CompanionState>;
-  stop: () => Promise<CompanionState>;
-  keepAwake: (enabled: boolean) => Promise<CompanionState>;
-  refreshTailscale: () => Promise<CompanionState>;
-  pairing: (open: boolean, expectedToken?: string) => Promise<CompanionState>;
-  cloudDesktop: (deviceId: string, allowed: boolean) => Promise<CompanionState>;
-  browserControl: (deviceId: string, allowed: boolean) => Promise<CompanionState>;
-  revoke: (deviceId: string) => Promise<CompanionState>;
-};
+import type { CompanionBridge, CompanionState } from "../lib/companion-types";
+export type { CompanionBridge, CompanionState, PhoneDevice } from "../lib/companion-types";
 
 type AccountBridge = NonNullable<NonNullable<Window["ogb"]>["companionAccount"]>;
 type StateBridge<T> = { state: () => Promise<T> };
@@ -779,13 +740,9 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
   );
   const pairingLink = useMemo(() => {
     if (!state?.pairing || !pairingRoute) return null;
-    return phonePairingLink({
-      ...pairingRoute,
-      code: state.pairing.code,
-      token: state.pairing.token,
-      name: state.discovery?.name,
-      secretPublicKey: state.secretPublicKey,
-    });
+    // An encrypted-connection QR carries no six-digit code: phones pair by the QR or a pasted link only.
+    return phonePairingLink({ ...pairingRoute, code: state.e2e?.enabled ? undefined : state.pairing.code, token: state.pairing.token,
+      name: state.discovery?.name, secretPublicKey: state.secretPublicKey, e2e: state.e2e?.descriptor });
   }, [pairingRoute, state]);
 
   const cancel = useCallback(() => {
@@ -902,6 +859,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
   const actionError = companionAccountActionError(c.account, c.accountError);
   const canSubmitEmail = /^\S+@\S+\.\S+$/.test(c.email.trim());
   const manualCodeMode = phonePairingManualCodeMode(Boolean(c.state?.pairing), c.pairingLink);
+  if (c.phase === "qr" && c.state?.e2e?.enabled && c.pairingLink) return <PhonePairingQr c={c} signedIn={Boolean(c.account?.email)} />;
 
   if (c.phase === "intro") {
     return (

@@ -26,7 +26,6 @@ describe("the connection key", () => {
     const identity = createE2EIdentity();
     const curve = createECDH("prime256v1");
     curve.setPrivateKey(Buffer.from(identity.privateKey, "base64url"));
-    expect(curve.getPublicKey(undefined, "base64url")).toBeDefined();
     expect(Buffer.from(identity.publicKey, "base64url")).toEqual(curve.getPublicKey(undefined, "uncompressed"));
     const document = withE2EIdentity({ other: 1 }, identity);
     expect(readE2EIdentity(document)).toEqual(identity);
@@ -76,8 +75,8 @@ describe("relay tokens", () => {
   it("fetch at once, refresh after refreshAfter, and keep a valid token through a failed refresh", async () => {
     const timers = manualTimers();
     const grants = [];
-    const answers = [grant(), Promise.reject(Object.assign(new Error("down"), { code: "network_unavailable" })), grant({ token: "eyJ2IjoyfQ.c2ln" })];
-    const fetchGrant = vi.fn(() => answers.shift());
+    const answers = [() => grant(), () => Promise.reject(Object.assign(new Error("down"), { code: "network_unavailable" })), () => grant({ token: "eyJ2IjoyfQ.c2ln" })];
+    const fetchGrant = vi.fn(async () => answers.shift()());
     const service = createRelayTokenService({ fetchGrant, onGrant: (next) => grants.push(next), ...timers, now: () => 0, random: () => 0.5 });
     service.start();
     await new Promise((resolve) => setImmediate(resolve));
@@ -95,8 +94,8 @@ describe("relay tokens", () => {
   it("drop the token and wait half an hour when the relay is off for this computer", async () => {
     const timers = manualTimers();
     const grants = [];
-    const answers = [grant(), Promise.reject(Object.assign(new Error("off"), { code: "relay_unavailable", status: 503 }))];
-    const service = createRelayTokenService({ fetchGrant: () => answers.shift(), onGrant: (next) => grants.push(next), ...timers, now: () => 0, random: () => 0.5 });
+    const answers = [() => grant(), () => Promise.reject(Object.assign(new Error("off"), { code: "relay_unavailable", status: 503 }))];
+    const service = createRelayTokenService({ fetchGrant: async () => answers.shift()(), onGrant: (next) => grants.push(next), ...timers, now: () => 0, random: () => 0.5 });
     service.start();
     await new Promise((resolve) => setImmediate(resolve));
     await service.refreshNow();
