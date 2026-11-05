@@ -193,7 +193,7 @@
   "server.mcp.signIn.card": "{label} の MCP サーバーにはサインインが必要です。OpenMausBot でこの会話を開いてサインインしてください。",
   "server.mcp.signIn.description": "{bot} が {label} の MCP サーバー（{host}）を追加しました。{bot} が使えるようにサインインしてください。",
   "server.mcp.signIn.onYourMac": "{label} にサインインするには、Mac でこのチャットを開いてください。",
-  "server.mcp.signIn.inSettings": "このサインインは 設定 → MCP サーバー で完了してください。",
+  "server.mcp.signIn.inSettings": "このサインインは アプリ → MCP サーバー で完了してください。",
   "server.mcp.signIn.onlyPerson": "ここでサインインできるのは {name} だけです。",
   "server.mcp.signIn.onlyOwner": "ここでサインインできるのは、このチャットの持ち主だけです。",
   "server.mcp.signIn.adminOnly": "{label} にサインインできるのは、このインストールの管理者だけです。",

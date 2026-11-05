@@ -171,7 +171,7 @@
   "server.mcp.signIn.card": "{label} MCP sunucusu için oturum açmanız gerekiyor. Oturum açmak için bu konuşmayı OpenMausBot'ta açın.",
   "server.mcp.signIn.description": "{bot}, {label} MCP sunucusunu ({host}) ekledi. {bot} kullanabilsin diye oturum açın.",
   "server.mcp.signIn.onYourMac": "{label} için oturum açmak üzere bu sohbeti Mac'inizde açın.",
-  "server.mcp.signIn.inSettings": "Bu oturum açma işlemini Ayarlar → MCP sunucuları bölümünde tamamlayın.",
+  "server.mcp.signIn.inSettings": "Bu oturum açma işlemini Uygulamalar → MCP sunucuları bölümünde tamamlayın.",
   "server.mcp.signIn.onlyPerson": "Burada yalnızca {name} oturum açabilir.",
   "server.mcp.signIn.onlyOwner": "Burada yalnızca bu sohbetin sahibi oturum açabilir.",
   "server.mcp.signIn.adminOnly": "{label} için yalnızca bu kurulumun bir yöneticisi oturum açabilir.",

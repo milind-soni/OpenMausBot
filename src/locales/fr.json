@@ -140,7 +140,7 @@
   "server.mcp.signIn.card": "Le serveur MCP de {label} demande une connexion. Ouvrez cette conversation dans OpenMausBot pour vous connecter.",
   "server.mcp.signIn.description": "{bot} a ajouté le serveur MCP de {label} ({host}). Connectez-vous pour que {bot} puisse l'utiliser.",
   "server.mcp.signIn.onYourMac": "Ouvrez cette discussion sur votre Mac pour vous connecter à {label}.",
-  "server.mcp.signIn.inSettings": "Terminez cette connexion dans Paramètres → Serveurs MCP.",
+  "server.mcp.signIn.inSettings": "Terminez cette connexion dans Apps → Serveurs MCP.",
   "server.mcp.signIn.onlyPerson": "Cette connexion ne peut être faite que par {name}.",
   "server.mcp.signIn.onlyOwner": "Cette connexion ne peut être faite que par la personne à qui appartient cette discussion.",
   "server.mcp.signIn.adminOnly": "Seul un administrateur de cette installation peut se connecter à {label}.",

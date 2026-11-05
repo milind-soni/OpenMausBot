@@ -155,7 +155,7 @@
   "server.mcp.signIn.card": "Der MCP-Server von {label} braucht eine Anmeldung. Öffne diese Unterhaltung in OpenMausBot, um dich anzumelden.",
   "server.mcp.signIn.description": "{bot} hat den MCP-Server von {label} hinzugefügt ({host}). Melde dich an, damit {bot} ihn nutzen kann.",
   "server.mcp.signIn.onYourMac": "Öffne diesen Chat auf deinem Mac, um dich bei {label} anzumelden.",
-  "server.mcp.signIn.inSettings": "Schließe diese Anmeldung unter Einstellungen → MCP-Server ab.",
+  "server.mcp.signIn.inSettings": "Schließe diese Anmeldung unter Apps → MCP-Server ab.",
   "server.mcp.signIn.onlyPerson": "Nur {name} kann sich hier anmelden.",
   "server.mcp.signIn.onlyOwner": "Nur die Person, der dieser Chat gehört, kann sich hier anmelden.",
   "server.mcp.signIn.adminOnly": "Nur ein Admin dieser Installation kann sich bei {label} anmelden.",

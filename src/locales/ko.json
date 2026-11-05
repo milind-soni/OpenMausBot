@@ -236,7 +236,7 @@
   "server.mcp.signIn.card": "{label}의 MCP 서버에 로그인해야 해요. 로그인하려면 OpenMausBot에서 이 대화를 여세요.",
   "server.mcp.signIn.description": "{bot}이(가) {label}의 MCP 서버({host})를 추가했어요. {bot}이(가) 사용할 수 있도록 로그인하세요.",
   "server.mcp.signIn.onYourMac": "{label}에 로그인하려면 Mac에서 이 채팅을 여세요.",
-  "server.mcp.signIn.inSettings": "이 로그인은 설정 → MCP 서버에서 마무리하세요.",
+  "server.mcp.signIn.inSettings": "이 로그인은 앱 → MCP 서버에서 마무리하세요.",
   "server.mcp.signIn.onlyPerson": "{name}만 여기에 로그인할 수 있어요.",
   "server.mcp.signIn.onlyOwner": "이 채팅의 주인만 여기에 로그인할 수 있어요.",
   "server.mcp.signIn.adminOnly": "이 설치의 관리자만 {label}에 로그인할 수 있어요.",

@@ -170,7 +170,7 @@
   "server.mcp.signIn.card": "{label} 的 MCP 伺服器需要登入。請在 OpenMausBot 中開啟這段對話進行登入。",
   "server.mcp.signIn.description": "{bot} 新增了 {label} 的 MCP 伺服器（{host}）。登入後 {bot} 才能使用它。",
   "server.mcp.signIn.onYourMac": "請在你的 Mac 上開啟這個聊天以登入 {label}。",
-  "server.mcp.signIn.inSettings": "請在 設定 → MCP 伺服器 中完成這次登入。",
+  "server.mcp.signIn.inSettings": "請在 應用程式 → MCP 伺服器 中完成這次登入。",
   "server.mcp.signIn.onlyPerson": "只有 {name} 可以在這裡登入。",
   "server.mcp.signIn.onlyOwner": "只有這個聊天的主人可以在這裡登入。",
   "server.mcp.signIn.adminOnly": "只有此安裝的管理員可以登入 {label}。",
