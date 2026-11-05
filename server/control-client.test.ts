@@ -113,12 +113,13 @@ describe("computer control client", () => {
   });
 
   it("says the turn ended, not 'retry in a few seconds', when the gate no longer accepts the turn's capability (401)", async () => {
-    // A self-woken engine (e.g. Claude's ScheduleWakeup) keeps calling after its turn settled and its capability was revoked;
-    // "Retry in a few seconds" made it retry for hours.
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ error: "unauthorized" }, { status: 401 }));
     const state = await createControlClient({ ...options, fetchImpl }).state(true);
     expect(state).toEqual({ held: true, helpOpen: false, blockedReason: CONTROL_TURN_ENDED });
     expect(controlRefusal(state)).toBe(CONTROL_TURN_ENDED);
+    expect(CONTROL_TURN_ENDED).toMatch(/NOT performed/);
+    expect(CONTROL_TURN_ENDED).toMatch(/Retrying will not help/);
+    expect(CONTROL_TURN_ENDED).not.toMatch(/retry in a few seconds/i);
   });
 
   it("fails closed when the request rejects", async () => {
