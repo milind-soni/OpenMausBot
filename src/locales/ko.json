@@ -664,7 +664,6 @@
   "voice.chatterboxHowTo": "로컬에서 실행하는 방법",
   "voice.loading": "목소리 불러오는 중…",
   "voice.macDefault": "Mac 시스템 기본값",
-  "voice.installDefault": "설치 기본값",
   "voice.search": "목소리 검색 또는 링크 붙여 넣기",
   "voice.noMatches": "일치하는 목소리가 없어요",
   "voice.noMatchesHint": "다른 이름으로 찾거나 목소리 링크를 붙여 넣으세요.",

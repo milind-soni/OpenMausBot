@@ -705,7 +705,6 @@
   "voice.chatterboxHowTo": "ローカルで実行する方法",
   "voice.loading": "音声を読み込んでいます…",
   "voice.macDefault": "Macのシステム既定",
-  "voice.installDefault": "インストールの既定",
   "voice.search": "音声を検索、またはリンクを貼り付け",
   "voice.noMatches": "一致する音声はありません",
   "voice.noMatchesHint": "別の名前を試すか、音声のリンクを貼り付けてください。",

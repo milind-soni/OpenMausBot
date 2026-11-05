@@ -628,7 +628,6 @@
   "voice.chatterboxHowTo": "Как запустить такой сервер локально",
   "voice.loading": "Загрузка голосов…",
   "voice.macDefault": "Системный голос Mac по умолчанию",
-  "voice.installDefault": "Голос по умолчанию при установке",
   "voice.search": "Поиск голосов или вставьте ссылку",
   "voice.noMatches": "Подходящих голосов нет",
   "voice.noMatchesHint": "Попробуйте другое имя или вставьте ссылку на голос.",
