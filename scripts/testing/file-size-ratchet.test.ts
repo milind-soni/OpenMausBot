@@ -39,6 +39,7 @@ const LINES: Record<string, number> = {
   "scripts/mcp-server.ts": 1414,
   "server/boat.ts": 1258,
   "server/drivers/pi.ts": 1036,
+  "server/plan-usage.ts": 1050,
   "server/container-computer.ts": 1225,
   "src/components/ModelPicker.tsx": 1046,
   "src/components/PhoneSetupFlow.tsx": 1146,
