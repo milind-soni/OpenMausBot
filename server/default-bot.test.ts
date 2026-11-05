@@ -409,6 +409,28 @@ describe("MausBot, every person's helper", () => {
         expect(cloud.bot(seed.id)?.defaultBot).toBeUndefined();
       });
 
+      it("a department Chief made after the unused starter does not stop a phone's MausBot taking the place's Chief", async () => {
+        const { cloud, seed, arriving } = place();
+        cloud.createBot({ name: "Sales" }, { id: "desk-sales-000001", seedMessages: false });
+        cloud.patchBot("desk-sales-000001", { section: "Sales" });
+        cloud.setChiefOfStaff("desk-sales-000001");
+        expect(await arriveWith(cloud, arriving.id, phoneMaus, { mainIfUnused: true })).toEqual({ status: 200, body: { v: 1, ok: true, mainBot: true } });
+        expect(cloud.bot(arriving.id)).toMatchObject({ defaultBot: {}, chiefOfStaff: true, managedSections: ["phone-section"] });
+        expect(cloud.bot(seed.id)).toMatchObject({ hidden: true });
+        expect(cloud.bot(seed.id)?.chiefOfStaff).toBeFalsy();
+        expect(cloud.bot("desk-sales-000001")?.chiefOfStaff).toBe(true);
+      });
+
+      it("a hidden place Chief someone uses keeps Chief and its sections when a phone's MausBot takes main", async () => {
+        const { cloud, arriving } = place();
+        const jarvis = cloud.createBot({ name: "Jarvis" }, { id: "desk-jarvis-0002", seedMessages: false });
+        cloud.setChiefOfStaff(jarvis.id);
+        cloud.patchBot(jarvis.id, { managedSections: ["mine"], hidden: true });
+        expect(await arriveWith(cloud, arriving.id, phoneMaus, { mainIfUnused: true })).toMatchObject({ body: { mainBot: true } });
+        expect(cloud.bot(jarvis.id)).toMatchObject({ chiefOfStaff: true, managedSections: ["mine"] });
+        expect(cloud.bot(arriving.id)?.chiefOfStaff).toBeFalsy();
+      });
+
       it("without mainIfUnused, an arriving MausBot takes over as before", async () => {
         const { cloud, seed, arriving } = place();
         cloud.appendMessage(seed.threadId, { role: "user", kind: "text", text: "Hi" });

@@ -79,7 +79,7 @@ An older computer answers `404 { error: "no route: GET /api/companion/move" }`: 
 | `GET /api/bots?messages=0` | — | today's list; find the ids already here |
 | `POST /api/bots` | `{ id, threadId, name, useDefaults: false, modelSelection?, requireAvailableModel? }` (ids `^[\w-]{8,128}$`) | `201 { bot }`; `409 { error: "a bot with this id already exists here" }` (already moved: continue); `403` for any field beyond profile, look and model. A model the computer lacks: retry without `modelSelection` |
 | `POST /api/attachments` | image bytes (avatar) | today's answer; then `PATCH avatarUrl` |
-| `PATCH /api/bots/:id` | profile, look, model, voice and memory fields: `name, title, description, soul, notifications, color, mascot*, avatar*, voice, speakReplies, replyStyle, voiceNotes, memoryEnabled, memoryUpkeep, modelSelection, fallback, projects, playbooks, assignedSkills, hidden, pinned, sidebarHidden, welcomed, unread` | `200 { bot }`; `403 { error: "forbidden: a phone's move may bring a bot's profile, look, model, voice and memory settings, not \"<field>\"; set that on the host computer" }`. Approval level and tools are the computer's defaults |
+| `PATCH /api/bots/:id` | profile, look, model, voice, memory and phone-app fields: `name, title, description, soul, notifications, color, mascot*, avatar*, voice, speakReplies, replyStyle, voiceNotes, memoryEnabled, memoryUpkeep, phoneApps, modelSelection, fallback, projects, playbooks, assignedSkills, hidden, pinned, sidebarHidden, welcomed, unread` | `200 { bot }`; `403 { error: "forbidden: a phone's move may bring a bot's profile, look, model, voice, memory and phone-app settings, not \"<field>\"; set that on the host computer" }`. Approval level and tools are the computer's defaults |
 | `PUT /api/cloud-send/kind` (bot) | `{ v: 1, key: "bot:<id>", dataDir, record: { defaultBot?: {}, chiefOfStaff?, welcomed?, pinned?, hidden?, sidebarHidden?, projects?, playbooks?, assignedSkills?, fallback?, managedSections? } }` | `200 { v: 1, ok: true, mainBot? }`. With `defaultBot`, `mainBot: true` means it is now the main MausBot; `false` means the computer's MausBot has history: `PATCH { name: "MausBot from iPhone" }` (phone-localized). Send `chiefOfStaff: true` with `defaultBot` so the computer's unused starter is archived |
 | `GET /api/bots/:id/skills` | — | `{ skills: [{ name, … }] }`; install only names not listed |
 | `POST /api/bots/:id/skill-template` | `{ name, description, warnings: [], source: "iPhone", text, enabled }` (`text` is SKILL.md, its `name` equal to `name`) | `201 { installed }`; `422` invalid |
@@ -496,7 +496,7 @@ it("lets a phone's move set its own bot's profile, model, voice and memory, neve
   expect(store.bot(bot.id)?.soul).toBe("Plans trips");
   const refused = await patch(bot.id, { approvalMode: "full" }, phone);
   expect(refused.status).toBe(403);
-  expect(refused.body.error).toBe(`forbidden: a phone's move may bring a bot's profile, look, model, voice and memory settings, not "approvalMode"; set that on the host computer`);
+  expect(refused.body.error).toBe(`forbidden: a phone's move may bring a bot's profile, look, model, voice, memory and phone-app settings, not "approvalMode"; set that on the host computer`);
 });
 it("keeps today's look-only rule for every bot the move did not bring", async () => {
   // fixture with movesIn: () => false; patch(bot.id, { soul: "x" }, phone) → 403, error matches /a paired device may change how a bot looks, not "soul"/

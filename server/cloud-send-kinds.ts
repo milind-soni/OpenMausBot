@@ -11,6 +11,7 @@ import { z } from "zod";
 import { EMPTY, MOVE_BOT_PARTS, itemKey } from "../electron/cloud-send-parts.mjs";
 import type { MoveKind } from "../electron/cloud-send-parts.mjs";
 import type { AppTrigger } from "../shared/app-triggers.ts";
+import { chiefScope } from "../shared/bot-owner.ts";
 import { defaultBotPerson } from "../shared/default-bot.ts";
 import { canonicalJson } from "../shared/package-format.ts";
 import { isSkillName } from "../shared/skill-md.ts";
@@ -293,7 +294,7 @@ function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown, mainIfUnu
   // only when the place's Chief is absent, the unused starter, or the arrival itself.
   const main = !!bot.defaultBot && !defaultBotPerson(bot);
   const takes = !mainIfUnused || (!!fields.defaultBot && (main || placeMausBotUnused(deps.store, deps.dataDir)));
-  const chief = deps.store.bots.find((held) => held.chiefOfStaff && !held.hidden);
+  const chief = deps.store.bots.find((held) => held.chiefOfStaff && chiefScope(held) === chiefScope(bot));
   const chiefMoves = !mainIfUnused || (takes && (!chief || chief.id === id || chief.id === unusedStarter(deps.store, deps.dataDir)?.id));
   if (chiefMoves) {
     set("managedSections", fields.managedSections ? [...new Set(fields.managedSections.filter(Boolean))] : undefined);
