@@ -10,11 +10,13 @@ import {
   MAX_COMPANION_ENDPOINTS,
   type CompanionEndpoint,
 } from "./endpoints.ts";
+import { MOVE_MAX_BOTS, type MoveGrants, type MoveState } from "./move-grants.ts";
 import {
   denyReason,
   isBrowserControlAccess,
   isCloudDesktopAccess,
   isMessageFileDownload,
+  isMoveRoute,
 } from "./routes.ts";
 import { sendTunnelJson } from "./tunnel-gzip.ts";
 import { CompanionViewerRelay, requestTarget } from "./viewer-relay.ts";
@@ -26,7 +28,7 @@ export interface ProxyOptions {
   mutationToken?: () => string | null;
   authenticate: (
     token: string | undefined,
-  ) => { id?: string; cloudDesktopAccess: boolean; browserControlAccess: boolean } | null;
+  ) => { id?: string; name?: string; cloudDesktopAccess: boolean; browserControlAccess: boolean } | null;
   /** Pairing is handled here and never forwarded: the harness has no such route. */
   redeem: (
     code: string,
@@ -43,6 +45,9 @@ export interface ProxyOptions {
    * it synchronously on revoke; the returned disposer is called exactly once. */
   connected?: (deviceId: string, disconnect: () => void) => () => void;
   headersTimeoutMs?: number;
+  moves?: Pick<MoveGrants, "ask" | "state" | "live" | "end">;
+  /** Hands the ask to the desktop app; false or absent when no app can ask the owner. */
+  askOwner?(ask: { deviceId: string; deviceName: string; bots: number }): boolean;
 }
 
 export interface CompanionEndpointSnapshot {
@@ -58,9 +63,9 @@ const HEADERS_TIMEOUT_MS = 30_000;
 const PHONE_SECRET_HEADERS_TIMEOUT_MS = 105_000;
 const PHONE_SECRET_PROVIDE_PATH = /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/provide(?:\?|$)/;
 
-export function proxyHeadersTimeoutMs(url: string, override?: number): number {
+export function proxyHeadersTimeoutMs(url: string, override?: number, move?: boolean): number {
   return override
-    ?? (PHONE_SECRET_PROVIDE_PATH.test(url) ? PHONE_SECRET_HEADERS_TIMEOUT_MS : HEADERS_TIMEOUT_MS);
+    ?? (move || PHONE_SECRET_PROVIDE_PATH.test(url) ? PHONE_SECRET_HEADERS_TIMEOUT_MS : HEADERS_TIMEOUT_MS);
 }
 
 const MAX_JSON_BODY_BYTES = 32 * 1024 * 1024;
@@ -172,7 +177,7 @@ const endpointSnapshot = (options: ProxyOptions): CompanionEndpointSnapshot => {
   };
 };
 
-export function companionIdentityHeaders(authenticatedDeviceId?: string, mutationToken?: string): Record<string, string> {
+export function companionIdentityHeaders(authenticatedDeviceId?: string, mutationToken?: string, move?: boolean): Record<string, string> {
   const out: Record<string, string> = {
     // Carries no authority; it only narrows behavior at the harness.
     "x-openmausbot-companion": "1",
@@ -181,17 +186,26 @@ export function companionIdentityHeaders(authenticatedDeviceId?: string, mutatio
   // that authenticated the bearer.
   if (authenticatedDeviceId && /^[\w-]{1,128}$/.test(authenticatedDeviceId)) {
     out["x-openmausbot-companion-device"] = authenticatedDeviceId;
-    if (mutationToken) out["x-openmausbot-companion-auth"] = mutationToken;
+    if (mutationToken) {
+      out["x-openmausbot-companion-auth"] = mutationToken;
+      // The harness honours the move mark only beside the relay token.
+      if (move) out["x-openmausbot-companion-move"] = "1";
+    }
   }
   return out;
 }
 
 /** An allowlist: `host` and `origin` must not travel, `authorization` is the
  * sidecar's own credential, and hop-by-hop headers are not ours to relay. */
-const forwardHeaders = (req: IncomingMessage, authenticatedDeviceId?: string, mutationToken?: string): Record<string, string> => {
+const forwardHeaders = (
+  req: IncomingMessage,
+  authenticatedDeviceId?: string,
+  mutationToken?: string,
+  move?: boolean,
+): Record<string, string> => {
   const out: Record<string, string> = {
     accept: String(req.headers.accept ?? "*/*"),
-    ...companionIdentityHeaders(authenticatedDeviceId, mutationToken),
+    ...companionIdentityHeaders(authenticatedDeviceId, mutationToken, move),
   };
   const contentType = req.headers["content-type"];
   if (contentType) out["content-type"] = String(contentType);
@@ -216,6 +230,51 @@ const forwardHeaders = (req: IncomingMessage, authenticatedDeviceId?: string, mu
   }
   return out;
 };
+
+const INVALID_MOVE_ASK = { error: "send { v: 1, bots }" };
+
+const moveAnswer = (move: MoveState) => move.state === "pending" || move.state === "granted"
+  ? { v: 1, state: move.state, expiresAt: move.expiresAt }
+  : { v: 1, state: move.state };
+
+/** Sidecar-owned, like the endpoint list: the grant lives here and never reaches the harness. */
+function answerMove(
+  options: ProxyOptions,
+  req: IncomingMessage,
+  res: ServerResponse,
+  device: { id?: string; name?: string },
+): void {
+  const { moves } = options;
+  const deviceId = device.id;
+  if (req.method === "GET") {
+    return sendJson(res, 200, moveAnswer(moves && deviceId ? moves.state(deviceId) : { state: "none" }));
+  }
+  if (req.method === "DELETE") {
+    if (deviceId) moves?.end(deviceId);
+    return sendJson(res, 200, { v: 1, state: "none" });
+  }
+  const noApp = () => sendJson(res, 409, { error: "Open OpenMausBot on this computer to move bots here." });
+  readJson(req).then(
+    (body) => {
+      const { bots } = body;
+      if (body.v !== 1 || typeof bots !== "number" || !Number.isInteger(bots) || bots < 1 || bots > MOVE_MAX_BOTS) {
+        return sendJson(res, 400, INVALID_MOVE_ASK);
+      }
+      if (!moves || !deviceId) return noApp();
+      const { state, created } = moves.ask(deviceId, bots);
+      if (created && !options.askOwner?.({ deviceId, deviceName: device.name ?? "", bots })) {
+        moves.end(deviceId);
+        return noApp();
+      }
+      return sendJson(res, state.state === "granted" ? 200 : 202, moveAnswer(state));
+    },
+    () => sendJson(res, 400, INVALID_MOVE_ASK),
+  ).catch((error: unknown) => {
+    if (deviceId) moves?.end(deviceId);
+    console.error("companion: the move ask failed", error);
+    sendJson(res, 500, { error: "could not ask this computer" });
+  });
+}
 
 /** Read-only (`action: "check"`); every failure is "no". */
 function harnessControlCheck(options: ProxyOptions) {
@@ -278,6 +337,8 @@ export function createProxyHandler(options: ProxyOptions) {
 
     const token = bearerToken(req.headers.authorization);
     const device = options.authenticate(token);
+    // Read once: a request that began under the grant finishes under it.
+    const moving = Boolean(device?.id && options.moves?.live(device.id));
     const browserRequest = isBrowserControlAccess(method, path);
     const browserRefusal = () => {
       if (!browserRequest) return null;
@@ -298,6 +359,7 @@ export function createProxyHandler(options: ProxyOptions) {
       path,
       method,
       authenticated: Boolean(device),
+      move: moving,
     });
     if (denial) return sendJson(res, denial.status, { error: denial.error });
 
@@ -359,7 +421,9 @@ export function createProxyHandler(options: ProxyOptions) {
     if (method === "GET" && path === "/api/companion/endpoints") {
       return sendJson(res, 200, endpointSnapshot(options));
     }
+    if (path === "/api/companion/move") return answerMove(options, req, res, device ?? {});
 
+    const moveRequest = moving && isMoveRoute(method, path);
     const mutationToken = device ? options.mutationToken?.() : undefined;
     if (device && options.mutationToken && !mutationToken) {
       return sendJson(res, 503, { error: "The desktop connection is starting. Please try again shortly." });
@@ -370,7 +434,7 @@ export function createProxyHandler(options: ProxyOptions) {
         port: options.harnessPort,
         path: req.url,
         method,
-        headers: forwardHeaders(req, device?.id, mutationToken ?? undefined),
+        headers: forwardHeaders(req, device?.id, mutationToken ?? undefined, moveRequest),
       },
       (harness) => {
         clearTimeout(headersDeadline);
@@ -608,7 +672,7 @@ export function createProxyHandler(options: ProxyOptions) {
 
     // `http.request` has no deadline of its own for the headers phase.
     let timedOut = false;
-    const headersTimeoutMs = proxyHeadersTimeoutMs(req.url ?? "", options.headersTimeoutMs);
+    const headersTimeoutMs = proxyHeadersTimeoutMs(req.url ?? "", options.headersTimeoutMs, moveRequest);
     const headersDeadline = setTimeout(() => {
       timedOut = true;
       upstream.destroy(new Error("the harness sent no response headers"));

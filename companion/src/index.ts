@@ -31,7 +31,10 @@ import { machineNameFromConfig } from "./machine-name.ts";
 
 // Only Electron supplies this port; Electron children fail closed until initialized.
 const parentPort = (process as NodeJS.Process & {
-  parentPort?: { on(event: "message", listener: (event: { data?: unknown }) => void): void };
+  parentPort?: {
+    on(event: "message", listener: (event: { data?: unknown }) => void): void;
+    postMessage(message: unknown): void;
+  };
 }).parentPort;
 let mutationToken: string | null = null;
 let controlToken = initialControlToken(process.env, Boolean(parentPort));
@@ -129,6 +132,7 @@ const service = (): ServiceInfo => ({
 });
 
 const connectedDevices = createConnectedDeviceTracker();
+const moves = new MoveGrants();
 const proxy = createProxyHandler({
     harnessPort: HARNESS_PORT,
     mutationToken: parentPort ? () => mutationToken : undefined,
@@ -139,6 +143,13 @@ const proxy = createProxyHandler({
     hosts: () => hostCandidates(),
     endpoints: () => companionEndpointCandidates(COMPANION_PORT, undefined, undefined, hostedUrl),
     connected: connectedDevices.open,
+    moves,
+    askOwner: parentPort
+      ? (ask) => {
+          parentPort.postMessage({ type: "openmausbot:companion-move-ask", ...ask });
+          return true;
+        }
+      : undefined,
   });
 const companion = createServer(proxy);
 // `createServer(proxy)` handles plain HTTP only; noVNC's WebSocket arrives as
@@ -150,7 +161,7 @@ managedOrigin?.on("upgrade", proxy.upgrade);
 
 const control = createControlServer({
   devices,
-  moves: new MoveGrants(),
+  moves,
   controlToken: () => controlToken,
   companionPort: COMPANION_PORT,
   secretPublicKey: () => SECRET_PUBLIC_KEY,
