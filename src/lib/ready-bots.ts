@@ -1,8 +1,7 @@
 import type { BotRoutineTemplate, NewBotDefaults } from "../../shared/new-bot-defaults";
 import type { MascotBodyId } from "../../shared/mascot-bodies";
 import type { MausColor } from "../../shared/wire";
-import { t } from "@/lib/i18n";
-import type { LocaleKey } from "@/locales";
+import { t, tFromServer } from "@/lib/i18n";
 
 export type ReadyBotCategory = "everyday" | "work" | "writing" | "design" | "sales" | "personal";
 
@@ -351,7 +350,7 @@ export function readyBotTemplate(defaults: NewBotDefaults, bot: ReadyBot): NewBo
 }
 
 export function readyBotCopy(bot: ReadyBot): { title: string; description: string; tryAsking: string } {
-  const copy = (field: string, english: string) => t(`readyBots.bot.${bot.id}.${field}` as LocaleKey) || english;
+  const copy = (field: string, english: string) => tFromServer(`readyBots.bot.${bot.id}.${field}`, english);
   return { title: copy("title", bot.title), description: copy("description", bot.description), tryAsking: copy("try", bot.tryAsking[0]!) };
 }
 
