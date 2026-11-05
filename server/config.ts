@@ -396,6 +396,8 @@ const appConfigSchema = z.object({
       .optional(),
     model: optionalText,
     fishModel: z.enum(FISH_TTS_MODELS).optional(),
+    /** Every bot's replies come with a voice note unless the bot's own `voiceNoteEveryReply` says otherwise. */
+    everyReply: z.boolean().optional(),
   }).optional(),
   decider: deciderConfigSchema.optional(),
   live: liveConfigSchema.optional(),
@@ -503,7 +505,7 @@ export interface AppConfig extends HelperConfig {
   /** A named host from the user's SSH config. Authentication stays with SSH. */
   vps?: { sshAlias?: string };
   opencodeGo?: { apiKey?: string; providerKeys?: Record<string, string> };
-  tts?: { key?: string; fishKey?: string; geminiKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini"; baseUrl?: string; model?: string; fishModel?: FishTtsModel };
+  tts?: { key?: string; fishKey?: string; geminiKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini"; baseUrl?: string; model?: string; fishModel?: FishTtsModel; everyReply?: boolean };
   decider?: DeciderConfig;
   imageGen?: ImageGenerationConfig;
   live?: LiveConfig;
