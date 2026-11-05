@@ -14966,14 +14966,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if ("error" in fetched) return json(res, 422, { error: fetched.error });
       const skills = [];
       for (const skill of fetched.skills) {
-        const file = skill.files.find(file => file.path === "SKILL.md" || file.path.endsWith("/SKILL.md"));
-        if (!file) continue;
-        const parsed = parseSkillMd(file.content);
+        const text = skill.files.find(file => file.path === "SKILL.md")?.content.toString("utf8");
+        if (text === undefined) continue;
+        const parsed = parseSkillMd(text);
         if ("error" in parsed) return json(res, 422, { error: parsed.error });
-        const skippedWarnings = skill.files.filter(candidate => candidate !== file)
-          .map(candidate => `skipped supporting file "${candidate.path}" — v1 imports only SKILL.md`);
-        const template = botSkillTemplateSchema.safeParse({ name: parsed.name, description: parsed.description, source: skill.source, text: file.content,
-          enabled: false, warnings: [...scanSkillText(file.content), ...skippedWarnings] });
+        const extra = skill.files.length - 1, skippedWarnings = extra > 0 ? [`${extra} supporting file${extra === 1 ? "" : "s"} left out — a skill added while making a bot keeps only SKILL.md; import it from the bot's Skills afterwards for the whole folder`] : [];
+        const template = botSkillTemplateSchema.safeParse({ name: parsed.name, description: parsed.description, source: skill.source, text,
+          enabled: false, warnings: [...scanSkillText(text), ...skippedWarnings] });
         if (!template.success) return json(res, 422, { error: template.error.message });
         skills.push(template.data);
       }

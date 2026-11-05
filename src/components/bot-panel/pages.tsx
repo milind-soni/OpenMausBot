@@ -7,7 +7,9 @@ import { t } from "@/lib/i18n";
 import { deleteMemoryDoc, MEMORY_INDEX, saveMemoryDoc, type MemoryDoc } from "@/lib/memory";
 import { openExternalLink } from "@/lib/app-links";
 import type { Routine } from "@/lib/routines";
+import type { SkillImportSummary } from "../../../shared/skill-import";
 import { shortPath } from "@/lib/short-path";
+import { skillImportLines } from "@/lib/skill-import";
 import { useStore, type Bot } from "@/state/store";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { ServiceIcon } from "../ServiceIcon";
@@ -218,6 +220,7 @@ export function SkillsPage({ bot }: PageContext) {
   const skills = useManagedSkills(bot);
   const [source, setSource] = useState("");
   const [importing, setImporting] = useState(false);
+  const [imported, setImported] = useState<string[]>([]);
   const libraryOn = skillsLibraryEnabled(state.config);
 
   const remove = async (skill: ManagedSkill) => {
@@ -242,8 +245,10 @@ export function SkillsPage({ bot }: PageContext) {
     if (!trimmed || importing) return;
     setImporting(true);
     skills.setError("");
+    setImported([]);
     try {
-      await api(`/api/bots/${bot.id}/skills`, { method: "POST", body: JSON.stringify({ source: trimmed }) });
+      const result = await api<{ imported?: SkillImportSummary[] }>(`/api/bots/${bot.id}/skills`, { method: "POST", body: JSON.stringify({ source: trimmed }) });
+      setImported(skillImportLines(result.imported ?? []));
       setSource("");
       await skills.refresh();
     } catch (cause) {
@@ -295,6 +300,7 @@ export function SkillsPage({ bot }: PageContext) {
           onChange={setSource}
           onSubmit={() => void importSkill()}
         />
+        {imported.map((line) => <NoteRow key={line}>{line}</NoteRow>)}
         <LinkRow data-panel-link="browse-skills" onClick={browse}>{t("botPanel.skills.browse")}</LinkRow>
       </Card>
       {skills.reviewing && (
