@@ -1,3 +1,4 @@
+import { userErrorThrown } from "./user-errors.ts";
 import { z } from "zod";
 import { profilePatchSchema, fitsOnOneLine } from "./bot-profile.ts";
 import { EFFORT_LEVELS, MAUS_COLOR_NAMES } from "../shared/wire.ts";
@@ -108,12 +109,14 @@ export type BotRoutineTemplate = NewBotDefaults["routines"][number];
 export type BotSkillTemplate = NewBotDefaults["skills"][number];
 
 /** The first thing wrong, as one sentence: a field's own message, else which field is not valid. */
-function settingsError(error: z.ZodError): string {
+function settingsError(error: z.ZodError): Error {
   const issue = error.issues[0];
-  if (!issue) return "These bot settings are not valid.";
-  if (issue.code === "unrecognized_keys") return `unsupported bot field: ${issue.keys[0] ?? "unknown"}`;
+  if (!issue) return userErrorThrown("serverError.botDefaults.invalid");
+  if (issue.code === "too_big" && issue.path[0] === "name") return userErrorThrown("serverError.botDefaults.nameLength");
+  if (issue.code === "too_big" && issue.path[0] === "section") return userErrorThrown("serverError.botDefaults.sectionLength");
+  if (issue.code === "unrecognized_keys") return new Error(`unsupported bot field: ${issue.keys[0] ?? "unknown"}`);
   const field = issue.path.join(".");
-  return field && issue.message.startsWith(String(issue.path[0])) ? issue.message : `${field || "the bot"} is not valid`;
+  return new Error(field && issue.message.startsWith(String(issue.path[0])) ? issue.message : `${field || "the bot"} is not valid`);
 }
 
 export function resolveBotCreationDefaults(saved: NewBotDefaults | undefined, body: Record<string, unknown>) {
@@ -122,14 +125,14 @@ export function resolveBotCreationDefaults(saved: NewBotDefaults | undefined, bo
   }
   const template = newBotDefaultsSchema.parse(body.useDefaults === false ? {} : saved ?? {});
   const checked = botDefaultsProfileSchema.safeParse(body.settings === undefined ? {} : body.settings);
-  if (!checked.success) throw Object.assign(new Error(settingsError(checked.error)), { status: 400 });
+  if (!checked.success) throw Object.assign(settingsError(checked.error), { status: 400 });
   const explicit = checked.data;
   const profile = { ...template.profile, ...explicit };
   for (const key of ["name", "title", "description", "modelSelection", "section"] as const) {
     if (Object.hasOwn(body, key)) Object.assign(profile, { [key]: key === "section" && body[key] === null ? "" : body[key] });
   }
   const resolved = botDefaultsProfileSchema.safeParse(profile);
-  if (!resolved.success) throw Object.assign(new Error(settingsError(resolved.error)), { status: 400 });
+  if (!resolved.success) throw Object.assign(settingsError(resolved.error), { status: 400 });
   if (!resolved.data.name?.trim()) delete resolved.data.name;
   return { ...template, profile: resolved.data };
 }

@@ -7,6 +7,7 @@ import { POINT_LIMITS, pointedLabel } from "../shared/app-frame/point.ts";
 import { appRow } from "./chat-apps.ts";
 import type { AgentCardStore } from "./chat-widgets.ts";
 import { clean, recordsBlock } from "./records-block.ts";
+import { userError, type UserError } from "./user-errors.ts";
 
 const part = z.object({
   appId: z.string().regex(/^[\w-]{1,128}$/),
@@ -22,7 +23,7 @@ const parts = z.array(part).min(1).max(POINT_LIMITS.perMessage);
 const BAD = `pointed must list 1 to ${POINT_LIMITS.perMessage} parts of a page in this conversation.`;
 const NOTE = "While writing this message the person pointed at parts of your page. To change them, call show_html with that page's app_id.";
 
-export type Pointed = { ok: true; block: string; refs: AppPointedRef[] } | { ok: false; status: 400 | 404; error: string };
+export type Pointed = { ok: true; block: string; refs: AppPointedRef[] } | ({ ok: false; status: 400 | 404; error: string } & Partial<UserError>);
 
 /** Security invariant: a pick's words reach the model only through recordsBlock. null when nothing was pointed at. */
 export function preparePointed(store: Pick<AgentCardStore, "messagesFor">, threadId: string, value: unknown): Pointed | null {
@@ -34,7 +35,7 @@ export function preparePointed(store: Pick<AgentCardStore, "messagesFor">, threa
   const blocks: string[] = [];
   for (const [appId, picks] of byPage) {
     const row = appRow(store, threadId, appId);
-    if (!row || row.app.source !== "html") return { ok: false, status: 404, error: "That page is not in this conversation." };
+    if (!row || row.app.source !== "html") return { ok: false, status: 404, ...userError("serverError.page.notHere") };
     const title = clean(row.app.title, 80);
     const current = (row.app.rev ?? 0) + 1;
     const versions = [...new Set(picks.map((pick) => pick.rev + 1))].map((version) => `version ${version}`).join(" and ");

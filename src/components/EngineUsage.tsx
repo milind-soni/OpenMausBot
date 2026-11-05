@@ -4,12 +4,13 @@ import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import {
-  limitLine, loadLimits, reportsUsage, resetTime, usageBars, usageRows, usageTone, useEngineLimits, USAGE_BARS, windowLabel,
+  limitLine, limitsCheckedAt, loadLimits, reportsUsage, resetTime, usageBars, usageRows, usageTone, useEngineLimits, USAGE_BARS, windowLabel,
   type EngineLimit, type UsageTone,
 } from "@/lib/limit-resets";
 import type { Routine } from "@/lib/routines";
 import { api, useStore } from "@/state/store";
 import { openBotSettings } from "./bot-panel/panel-link";
+import { threadUpdatedLabel } from "./SidebarThreadRow";
 
 /** The stopped turn's "Continue at 3:40 PM when your limit resets": one click sets up a one-time automation in this
  * conversation that picks up where it stopped. Undefined when there is nothing to offer. */
@@ -66,38 +67,41 @@ export function UsageGlyph({ limit, className }: { limit: EngineLimit; className
   );
 }
 
-/** Each window's share left, its reset and a thin bar; at the limit, how it clears and a fresh check. */
+/** When the usage was last read, each window's share left with its reset and a track filled by use; at the limit, how it
+ * clears and a fresh check. */
 export function UsageRows({ limit }: { limit: EngineLimit }) {
   const [checking, setChecking] = useState(false);
   const now = Date.now();
+  const checkedAt = limitsCheckedAt();
   return (
-    <div data-usage-rows className="flex flex-col gap-2">
-      <div className="text-[13px] font-medium leading-[18px] text-ink">{limit.name}</div>
+    <div data-usage-rows className="flex flex-col gap-2.5">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="min-w-0 truncate text-[13px] font-semibold leading-[18px] text-ink">{t("limits.cardTitle", { engine: limit.name })}</span>
+        {checkedAt > 0 && <span data-usage-checked className="shrink-0 text-[12px] leading-4 text-ink-tertiary">{t("limits.checked", { when: threadUpdatedLabel(checkedAt, now) })}</span>}
+      </div>
       {usageRows(limit).map((row) => (
-        <div key={row.window} data-usage-row={row.window} className="flex flex-col gap-1">
-          <div className="flex items-baseline gap-2 text-[12px] leading-4">
-            <span className="text-ink-secondary">{windowLabel(row.window)}</span>
-            <span className={cn("font-medium tabular-nums", row.tone === "fine" ? "text-ink" : "text-warning")}>
-              {row.tone === "out" ? t("limits.windowAtLimit") : t("planUsage.left", { remaining: row.left })}
+        <div key={row.window} data-usage-row={row.window} className="flex flex-col gap-1.5">
+          <div className="flex items-baseline gap-3 text-[12px] leading-4">
+            <span className="shrink-0 text-ink-secondary">{windowLabel(row.window)}</span>
+            <span className={cn("ms-auto min-w-0 truncate text-end tabular-nums", row.tone === "fine" ? "text-ink" : "text-warning")}>
+              <span className="font-medium">{row.tone === "out" ? t("limits.windowAtLimit") : t("planUsage.left", { remaining: row.left })}</span>
+              {row.resetsAt !== null && row.resetsAt > now && ` · ${t("limits.resets", { time: resetTime(row.resetsAt, now) })}`}
             </span>
-            {row.resetsAt !== null && row.resetsAt > now && (
-              <span className="ms-auto shrink-0 tabular-nums text-ink-tertiary">{t("limits.resets", { time: resetTime(row.resetsAt, now) })}</span>
-            )}
           </div>
           <div aria-hidden="true" className="h-1 overflow-hidden rounded-full bg-ink/[0.08]">
-            <div className={cn("h-full rounded-full", row.tone === "fine" ? "bg-ink-tertiary" : "bg-warning")} style={{ width: `${row.left}%` }} />
+            <div data-usage-track className={cn("h-full rounded-full", row.tone === "fine" ? "bg-ink-tertiary" : "bg-warning")} style={{ width: `${100 - row.left}%` }} />
           </div>
         </div>
       ))}
       {limit.blocked && (
-        <p className="text-[12px] leading-4 text-ink-tertiary">
-          {t("limits.clearsOnReply", { engine: limit.name })}{" "}
+        <div className="flex items-start justify-between gap-3 border-t-[0.5px] border-ink/10 pt-2.5 text-[12px] leading-4">
+          <p className="min-w-0 text-ink-tertiary">{t("limits.clearsOnReply", { engine: limit.name })}</p>
           <button type="button" data-usage-check disabled={checking} aria-busy={checking}
             onClick={() => { setChecking(true); void loadLimits(true).finally(() => setChecking(false)); }}
-            className="font-medium text-accent-text hover:underline disabled:cursor-wait disabled:opacity-60">
+            className="shrink-0 font-medium text-ink underline underline-offset-2 hover:text-ink-secondary disabled:cursor-wait disabled:opacity-60">
             {t("common.checkAgain")}
           </button>
-        </p>
+        </div>
       )}
     </div>
   );

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { AFTER_RESET_MS, NEAR_LIMIT_PERCENT, nearLimit, type EngineLimit, type EngineLimitsReport, type LimitResetSchedule, type LimitWindowName } from "../../shared/limit-reset";
-import { t } from "@/lib/i18n";
+import { intlLocale, t } from "@/lib/i18n";
 import type { Routine } from "@/lib/routines";
 import { unlessRefused } from "@/lib/admin-scope";
 import { api } from "@/state/store";
@@ -41,6 +41,9 @@ export function loadLimits(refresh = false): Promise<void> {
   return loading;
 }
 
+/** When the server last read the engines' usage; 0 before any read. */
+export const limitsCheckedAt = () => report?.checkedAt ?? 0;
+
 /** Every engine's limit, kept fresh while something on screen shows it. */
 export function useEngineLimits(): EngineLimit[] {
   const [engines, setEngines] = useState<EngineLimit[]>(() => report?.engines ?? []);
@@ -62,7 +65,7 @@ export function useEngineLimits(): EngineLimit[] {
 export function resetTime(at: number, now = Date.now()): string {
   const date = new Date(at);
   const sameDay = date.toDateString() === new Date(now).toDateString();
-  return date.toLocaleString([], sameDay ? { hour: "numeric", minute: "2-digit" } : { weekday: "short", hour: "numeric", minute: "2-digit" });
+  return date.toLocaleString(intlLocale(), sameDay ? { hour: "numeric", minute: "2-digit" } : { weekday: "short", hour: "numeric", minute: "2-digit" });
 }
 
 /** "Claude: 92% used · resets 3:40 PM", or "Claude: at its limit · resets 3:40 PM"; a screen reader's copy joins with a comma. */

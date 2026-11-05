@@ -1097,6 +1097,43 @@
       }
     },
     {
+      "name": "generate_image",
+      "description": "Create one image from a text description with the person's image provider; it is attached to your reply when the turn ends, so do not describe or link it again. Write the prompt in English, concrete and visual. Name a provider only when the person asked for that one.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "What the image shows: subject, setting, style, lighting."
+          },
+          "aspect": {
+            "type": "string",
+            "enum": [
+              "1:1",
+              "16:9",
+              "9:16"
+            ],
+            "description": "Shape; square when omitted."
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "openai",
+              "xai",
+              "gemini",
+              "openrouter",
+              "custom"
+            ],
+            "description": "Only when the person named one; it must be their base or backup."
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
+    },
+    {
       "name": "message_person",
       "description": "Reach a person in their Inbox, with news they may miss here or when asked to tell someone something. Their answer comes back here. Only what you write goes.",
       "inputSchema": {
@@ -1811,7 +1848,7 @@
     },
     {
       "name": "skill_manage",
-      "description": "Submit a new or updated reusable SKILL.md. Never update unless the user explicitly asked to revise that named skill. If the result is pending, a create stays inactive and an update leaves the current version unchanged. Read the result: it applies immediately at every access level, and the person sees it with an Undo where possible. If applied, continue the work without another confirmation. Only a pending result (a Cloud conversation its owner did not drive) means ending the turn to wait for the owner. Never claim success without an applied result; report failures honestly. This does not elevate another bot's execution permissions.",
+      "description": "Submit a new or updated reusable SKILL.md, or turn one of your own skills on or off, or delete it. Never change a skill unless the user explicitly asked for that named skill. If the result is pending, a create stays inactive and an update leaves the current version unchanged. Read the result: it applies immediately at every access level, and the person sees it with an Undo where possible. If applied, continue the work without another confirmation. Only a pending result (a Cloud conversation its owner did not drive) means ending the turn to wait for the owner. Never claim success without an applied result; report failures honestly. This does not elevate another bot's execution permissions.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -1820,17 +1857,20 @@
             "type": "string",
             "enum": [
               "create",
-              "update"
+              "update",
+              "enable",
+              "disable",
+              "delete"
             ],
-            "description": "Create a uniquely named skill, or update one existing learned skill."
+            "description": "Create a uniquely named skill, update a learned one, or switch or delete one of your own."
           },
           "skill_name": {
             "type": "string",
-            "description": "Required for update: the exact existing name from skills_list. Omit for create."
+            "description": "Required for every action but create: the exact existing name from skills_list."
           },
           "skill_md": {
             "type": "string",
-            "description": "The full SKILL.md including YAML frontmatter. Example: ---\\nname: file-expense\\ndescription: Files an expense in the company portal.\\n---\\n\\n# File expense\\n"
+            "description": "Create/update: the full SKILL.md including YAML frontmatter. Example: ---\\nname: file-expense\\ndescription: Files an expense in the company portal.\\n---\\n\\n# File expense\\n"
           },
           "references": {
             "type": "array",
@@ -1865,13 +1905,11 @@
           },
           "source": {
             "type": "string",
-            "description": "Required provenance label: the URL, folder, or 'conversation' used to author the skill."
+            "description": "Create/update: provenance label: the URL, folder, or 'conversation' used to author the skill."
           }
         },
         "required": [
-          "action",
-          "skill_md",
-          "source"
+          "action"
         ]
       }
     },

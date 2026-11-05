@@ -3,14 +3,17 @@ import { EventEmitter } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
 import test, { mock } from "node:test";
 import { fileURLToPath } from "node:url";
+import nativeText from "./native-text.cjs";
 import { TALK_LABELS, TALK_PANEL, createTalkPanel, isTalkPanel, replyPreview, talkPanelBounds, talkPanelHtml } from "./talk-panel.mjs";
 
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const pick = (object, keys) => Object.fromEntries(keys.map(key => [key, object[key]]));
+const painted = win => JSON.parse(win.webContents.scripts.at(-1).slice(7, -1));
+const englishLabels = { labels: TALK_LABELS, dismiss: "Dismiss", release: "Let go to send" };
 
 const APP_ICON = fileURLToPath(new URL("./resources/app-icon.png", import.meta.url));
 
-function harness({ cursor = { x: 100, y: 100 }, workArea = { x: 0, y: 25, width: 1440, height: 875 }, loadFails = false, boundsFail = false, iconPath = APP_ICON, theme } = {}) {
+function harness({ cursor = { x: 100, y: 100 }, workArea = { x: 0, y: 25, width: 1440, height: 875 }, loadFails = false, boundsFail = false, iconPath = APP_ICON, theme, t } = {}) {
   const made = [];
   const resized = [];
   const nativeImage = {
@@ -50,7 +53,7 @@ function harness({ cursor = { x: 100, y: 100 }, workArea = { x: 0, y: 25, width:
   const screen = { getCursorScreenPoint: () => state.cursor, getDisplayNearestPoint: () => ({ workArea: state.workArea }) };
   const opened = [];
   const dismissed = [];
-  const panel = createTalkPanel({ BrowserWindow: FakeBrowserWindow, screen, nativeImage, iconPath, onOpen: () => opened.push(1), onDismiss: () => dismissed.push(1), theme });
+  const panel = createTalkPanel({ BrowserWindow: FakeBrowserWindow, screen, nativeImage, iconPath, onOpen: () => opened.push(1), onDismiss: () => dismissed.push(1), theme, t });
   return { panel, made, opened, dismissed, state, resized };
 }
 
@@ -78,7 +81,7 @@ test("the box is a non-activating panel on every Space, shown without focus on t
   assert.ok(win.url.startsWith("data:text/html"));
   win.webContents.emit("did-finish-load");
   await flush();
-  assert.match(win.webContents.scripts[0], /^render\(\{"state":"listening","text":""\}\)$/);
+  assert.deepEqual(painted(win), { state: "listening", text: "", ...englishLabels });
   assert.deepEqual(win.bounds, { x: 1960, y: 780, width: 400, height: 96 });
   assert.deepEqual(win.calls.map(c => c[0]).filter(n => ["show", "focus", "showInactive"].includes(n)), ["showInactive"]);
 });
@@ -93,7 +96,7 @@ test("later renders resize without showing again, and use only the latest view",
   assert.match(made[0].webContents.scripts[0], /"state":"thinking"/);
   panel.render({ state: "reply", text: "**Hi** there" });
   await flush();
-  assert.match(made[0].webContents.scripts[1], /^render\(\{"state":"reply","text":"Hi there"\}\)$/);
+  assert.deepEqual(painted(made[0]), { state: "reply", text: "Hi there", ...englishLabels });
   assert.deepEqual(made[0].calls.filter(c => c[0] === "showInactive").length, 1);
 });
 
@@ -260,10 +263,10 @@ test("the box takes the app's skin, light or dark, over macOS's appearance, and 
   panel.render({ state: "reply", text: "Hi" });
   made[0].webContents.emit("did-finish-load");
   await flush();
-  assert.equal(made[0].webContents.scripts.at(-1), 'render({"state":"reply","text":"Hi","theme":"light"})');
+  assert.deepEqual(painted(made[0]), { state: "reply", text: "Hi", ...englishLabels, theme: "light" });
   panel.setTheme("dark");
   await flush();
-  assert.equal(made[0].webContents.scripts.at(-1), 'render({"state":"reply","text":"Hi","theme":"dark"})');
+  assert.deepEqual(painted(made[0]), { state: "reply", text: "Hi", ...englishLabels, theme: "dark" });
   panel.setTheme("dark");
   await flush();
   assert.equal(made[0].webContents.scripts.length, 2, "the same skin again repaints nothing");
@@ -294,4 +297,32 @@ test("a box that fails to place itself is not an unhandled rejection", async () 
   } finally {
     process.off("unhandledRejection", record);
   }
+});
+
+
+test("an open box follows the current language without translating a reply or caching labels in its page", async () => {
+  const text = nativeText.createNativeText({ saved: "en" });
+  const { panel, made } = harness({ t: text.t });
+  panel.render({ state: "error", text: "Turn on Dictation in System Settings → Keyboard, then try again.", textCode: "native.talk.dictationOff" });
+  made[0].webContents.emit("did-finish-load");
+  await flush();
+  assert.equal(painted(made[0]).text, "Turn on Dictation in System Settings → Keyboard, then try again.");
+  const page = made[0].url;
+  text.set("pt-br");
+  panel.relabel();
+  await flush();
+  assert.equal(painted(made[0]).text, text.t("native.talk.dictationOff"));
+  assert.equal(painted(made[0]).labels.listening, "Ouvindo…");
+  assert.equal(painted(made[0]).labels.reply, "MausBot");
+  assert.equal(painted(made[0]).dismiss, "Fechar");
+  assert.equal(painted(made[0]).release, text.t("native.talk.releaseToSend"));
+  panel.render({ state: "reply", text: "Turn on Dictation in System Settings → Keyboard, then try again." });
+  await flush();
+  assert.equal(painted(made[0]).text, "Turn on Dictation in System Settings → Keyboard, then try again.");
+  text.set("en");
+  panel.relabel();
+  await flush();
+  assert.deepEqual(painted(made[0]).labels, TALK_LABELS);
+  assert.equal(made.length, 1);
+  assert.equal(made[0].url, page);
 });

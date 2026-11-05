@@ -1,3 +1,4 @@
+import type { ServerTextParams } from "./server-text.ts";
 /** Durable progress receipt for one goal-driven channel run. */
 export type GroupGoalRunStatus =
   | "working"
@@ -19,6 +20,9 @@ export interface GroupGoalRunCardData {
   turnCount: number;
   maxTurns: number;
   detail?: string;
+  /** Fixed detail words, used only while they reconstruct the stored English. */
+  detailCode?: string;
+  detailParams?: ServerTextParams;
   startedAt: number;
   finishedAt?: number;
 }

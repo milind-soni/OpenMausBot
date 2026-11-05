@@ -232,15 +232,15 @@ export class OnePasswordLogins {
   }
 
   /** A vault narrowed to other bots is invisible to this one. */
-  private usable(botId: string): Entry[] {
+  private usable(botId: string | readonly string[]): Entry[] {
     return this.token() ? this.entries.filter((entry) => loginUsableBy({ bots: this.botsFor(entry.vaultId) }, botId)) : [];
   }
 
-  sitesFor(botId: string): Array<LoginPlace & { username: string }> {
+  sitesFor(botId: string | readonly string[]): Array<LoginPlace & { username: string }> {
     return this.usable(botId).map((entry) => ({ site: entry.site, hosts: [...entry.hosts], exactHost: false, username: entry.username }));
   }
 
-  candidates(pageHost: string, botId: string): FillCandidate[] {
+  candidates(pageHost: string, botId: string | readonly string[]): FillCandidate[] {
     const token = this.token();
     if (!token) return [];
     return this.usable(botId).filter((entry) => loginMatchesHost(entry, pageHost)).map((entry) => ({

@@ -9,6 +9,7 @@ import { HELPER_TOOL_DEFINITIONS } from "./agents-helper-tools.ts";
 import { USAGE_LIMITS_TOOL_DEFINITION } from "./agents-usage-tool.ts";
 import { WAIT_TOOL_DEFINITIONS, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts";
 import { COMPUTER_ASK_TOOL_DEFINITIONS, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
+import { IMAGE_TOOL_DEFINITIONS, IMAGE_TOOL_NAMES } from "./agents-image-tools.ts";
 import { MAUSBOT_TOOL_DEFINITIONS } from "./agents-mausbot-tools.ts";
 import { PERSON_TOOL_DEFINITIONS } from "./agents-person-tools.ts";
 import { RESEARCH_TOOL_DEFINITIONS, RESEARCH_TOOL_NAMES, X_TOOL_NAMES } from "./agents-research-tools.ts";
@@ -525,7 +526,7 @@ const TOOL_DEFINITIONS = [
       required: ["text"],
     },
   },
-  ...RESEARCH_TOOL_DEFINITIONS, ...HELPER_TOOL_DEFINITIONS, ...PERSON_TOOL_DEFINITIONS, ...DEVS_TOOL_DEFINITIONS,
+  ...RESEARCH_TOOL_DEFINITIONS, ...HELPER_TOOL_DEFINITIONS, ...IMAGE_TOOL_DEFINITIONS, ...PERSON_TOOL_DEFINITIONS, ...DEVS_TOOL_DEFINITIONS,
   {
     name: "memory_update",
     description:
@@ -747,24 +748,24 @@ const TOOL_DEFINITIONS = [
   {
     name: "skill_manage",
     description:
-      "Submit a new or updated reusable SKILL.md. Never update unless the user explicitly asked to revise that named skill. If the result is pending, a create stays inactive and an update leaves the current version unchanged." + APPLIES_OUTCOME,
+      "Submit a new or updated reusable SKILL.md, or turn one of your own skills on or off, or delete it. Never change a skill unless the user explicitly asked for that named skill. If the result is pending, a create stays inactive and an update leaves the current version unchanged." + APPLIES_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         action: {
           type: "string",
-          enum: ["create", "update"],
-          description: "Create a uniquely named skill, or update one existing learned skill.",
+          enum: ["create", "update", "enable", "disable", "delete"],
+          description: "Create a uniquely named skill, update a learned one, or switch or delete one of your own.",
         },
         skill_name: {
           type: "string",
-          description: "Required for update: the exact existing name from skills_list. Omit for create.",
+          description: "Required for every action but create: the exact existing name from skills_list.",
         },
         skill_md: {
           type: "string",
           description:
-            "The full SKILL.md including YAML frontmatter. Example: ---\\nname: file-expense\\ndescription: Files an expense in the company portal.\\n---\\n\\n# File expense\\n",
+            "Create/update: the full SKILL.md including YAML frontmatter. Example: ---\\nname: file-expense\\ndescription: Files an expense in the company portal.\\n---\\n\\n# File expense\\n",
         },
         references: {
           type: "array",
@@ -791,10 +792,10 @@ const TOOL_DEFINITIONS = [
         },
         source: {
           type: "string",
-          description: "Required provenance label: the URL, folder, or 'conversation' used to author the skill.",
+          description: "Create/update: provenance label: the URL, folder, or 'conversation' used to author the skill.",
         },
       },
-      required: ["action", "skill_md", "source"],
+      required: ["action"],
     },
   },
   {
@@ -914,7 +915,8 @@ function catalogTools(profile: CatalogProfile) {
     (profile.memoryEnabled !== false || (tool.name !== "memory_update" && tool.name !== "memory_log")) &&
     (profile.escalations === true || tool.name !== "raise_escalation") &&
     (profile.computerSelection === true || tool.name !== "select_computer") &&
-    (profile.room !== true || !ROOM_REFUSED_TOOL_NAMES.has(tool.name)));
+    (profile.room !== true || !ROOM_REFUSED_TOOL_NAMES.has(tool.name)) &&
+    (profile.imageGeneration === true || !IMAGE_TOOL_NAMES.has(tool.name)));
   const AUTHORING_TOOLS = profile.skillAuthoring
     ? BOT_SCOPED_TOOLS
     : BOT_SCOPED_TOOLS.filter((tool) => !SKILL_TOOL_NAMES.has(tool.name));

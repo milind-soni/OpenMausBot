@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Check, Hand, KeyRound, Loader2, LockKeyhole, LogIn, RefreshCw, X } from "lucide-react";
 
 import type { ComputerHelpRef } from "../../shared/wire";
+import { browserMatesOf } from "../../shared/logins";
 import { signInOutcome } from "../../shared/sign-in-request";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -35,8 +36,10 @@ export function SignInRequestCard({
   threadId: string;
   message: Message;
 }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
   const card = message.signIn!;
+  // A login saved here is kept to every bot this browser signs in (server/bot-logins.ts cardBots).
+  const mates = browserMatesOf(state.bots, botId).flatMap((id) => state.bots.find((bot) => bot.id === id)?.name ?? []);
   const [pending, setPending] = useState<"done" | "cancel" | null>(null);
   const [explained, setExplained] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -157,7 +160,9 @@ export function SignInRequestCard({
       )}
       {saving ? (
         <div className="mt-2.5" data-testid="sign-in-save">
-          <p className="mb-2 text-[13px] leading-snug text-ink-secondary">{t("signIn.save.note", { name: botName, site: target?.site ?? pageHost })}</p>
+          <p className="mb-2 text-[13px] leading-snug text-ink-secondary">{mates.length
+            ? t("signIn.save.noteShared", { name: botName, site: target?.site ?? pageHost, bots: mates.join(", ") })
+            : t("signIn.save.note", { name: botName, site: target?.site ?? pageHost })}</p>
           <LoginForm submitLabel={t("signIn.save.submit")} autoFocus onCancel={() => setSaving(false)}
             onSubmit={async (fields) => {
               await saveLoginFromCard({ botId, threadId, messageId: message.id }, fields, alsoThere ? target?.signInHost : undefined);

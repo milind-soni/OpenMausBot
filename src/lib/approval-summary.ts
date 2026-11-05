@@ -1,5 +1,10 @@
 import { t } from "@/lib/i18n";
 import type { OptionCardData } from "@/state/store";
+import { noticeText } from "./activity-text";
+
+export function approvalDetailText(card: Pick<OptionCardData, "subtitle" | "summaryCode" | "summaryParams">): string {
+  return noticeText(card.summaryCode, card.subtitle, card.summaryParams);
+}
 
 export interface OutboundCall {
   app: string | null;

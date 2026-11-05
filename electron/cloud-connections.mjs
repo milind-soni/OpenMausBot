@@ -9,6 +9,8 @@
 // `local`: this computer's server, `{ json(route), handoff(what) }`: a loopback read, and the private port's answer.
 // `target`: the owner session on My Cloud, `{ call(method, route, body?) }` answering `{ ok, status, body }`.
 
+import nativeText from "./native-text.cjs";
+
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const sentence = (value) => (typeof value === "string" && value.trim() ? value.trim().slice(0, 300) : null);
 const pick = (source, names) => Object.fromEntries(names.filter((name) => source[name] !== undefined && source[name] !== null).map((name) => [name, source[name]]));
@@ -118,10 +120,10 @@ async function letGo(local, target, item, digest) {
  * are connected keeps them, and says which apps connected here it lacks (`missing`).
  * `here` and `there`: the "composio" connection of this computer and of My Cloud (null when My Cloud has none yet).
  */
-export async function adoptComposioId(target, { local, here, there, managedApps = true }) {
+export async function adoptComposioId(target, { local, here, there, managedApps = true, t = nativeText.englishText.t }) {
   if (here.account && there?.account === here.account) return { shared: true };
   if (here.mode === "managed" && !managedApps) {
-    throw new ConnectionMoveError("no_service", "Your connected apps stay on this computer: that server has no connected-apps service of its own. Connect them again there in Apps.", true);
+    throw new ConnectionMoveError("no_service", t("native.cloud.connectedAppsStay"), true);
   }
   const listed = await local.json("/api/connectors/connected").catch(() => null);
   const apps = Object.entries(record(listed?.services) ? listed.services : {}).filter(([slug, state]) => SLUG.test(slug) && record(state) && state.connected === true)
@@ -158,7 +160,7 @@ export async function adoptComposioId(target, { local, here, there, managedApps 
  * it); the sign-ins My Cloud took that this computer still holds; the sign-ins left for a later pass; and the keys a
  * trial's Cloud keeps unused while its Claude credit lasts.
  */
-export async function sendConnections(collected, target, { local, release = true, signIns = true, waitMs = ENGINE_WAIT_MS, onProgress = () => {} } = {}) {
+export async function sendConnections(collected, target, { local, release = true, signIns = true, waitMs = ENGINE_WAIT_MS, onProgress = () => {}, t = nativeText.englishText.t } = {}) {
   const answer = await target.call("GET", "/api/cloud-connections").catch(() => null);
   if (answer?.status === 404) throw new ConnectionMoveError("outdated", "My Cloud needs an update before it can take this computer's apps and keys. It updates by itself.");
   let cloud = answer?.ok ? parseConnections(answer.body) : null;
@@ -221,14 +223,14 @@ export async function sendConnections(collected, target, { local, release = true
     },
     async email(item) {
       const accounts = (await secrets(local, item)).connection.email;
-      if (!Array.isArray(accounts)) throw new ConnectionMoveError("local", "The mailboxes could not be read on this computer.");
+      if (!Array.isArray(accounts)) throw new ConnectionMoveError("local", t("native.cloud.mailRead"));
       const answer = await target.call("PUT", "/api/cloud-connections/email", { accounts });
-      if (answer.status === 404) throw new ConnectionMoveError("outdated", "My Cloud can't take your mailboxes yet. Connect them there under Connected apps.", true);
-      if (!answer.ok) throw refused(answer, "My Cloud did not take your mailboxes.");
+      if (answer.status === 404) throw new ConnectionMoveError("outdated", t("native.cloud.mailOutdated"), true);
+      if (!answer.ok) throw refused(answer, t("native.cloud.mailRefused"));
       done(item);
     },
     async composio(item) {
-      const outcome = await adoptComposioId(target, { local, here: item, there: cloud.connections.find((theirs) => theirs.id === "composio") ?? null, managedApps: cloud.managedApps !== false });
+      const outcome = await adoptComposioId(target, { local, here: item, there: cloud.connections.find((theirs) => theirs.id === "composio") ?? null, managedApps: cloud.managedApps !== false, t });
       if (outcome.kept) {
         result.kept.push({ id: item.id, label: item.label });
         result.missing.push(...outcome.missing.map((slug) => ({ slug })));

@@ -47,6 +47,24 @@ describe("engineLimitFromUsage", () => {
     expect(engineLimitFromUsage(claude([100, null], [20, NOW + 50 * HOUR]))).toMatchObject({ blocked: true, resetsAt: null });
   });
 
+  it("does not hold Claude at a full window while its paid extra usage has room", () => {
+    const withCredit = (fiveHour: number, extra: Record<string, unknown>, spend?: Record<string, unknown>) => row("claude", "claude", parseClaudeUsage({
+      five_hour: { utilization: fiveHour, resets_at: iso(NOW + 2 * HOUR) },
+      seven_day: { utilization: 60, resets_at: iso(NOW + 50 * HOUR) },
+      extra_usage: extra,
+      ...(spend ? { spend } : {}),
+    }));
+    const room = { is_enabled: true, used_credits: 1_200, monthly_limit: 5_000, utilization: 24, currency: "USD" };
+    expect(engineLimitFromUsage(withCredit(100, room))).toMatchObject({ blocked: false, window: "5-hour", usedPercent: 100, resetsAt: NOW + 2 * HOUR });
+    expect(engineLimitFromUsage(withCredit(100, { is_enabled: true, utilization: 40 }))).toMatchObject({ blocked: false });
+    const spendRoom = { enabled: true, used: { amount_minor: 100, currency: "USD", exponent: 2 }, limit: { amount_minor: 1_000, currency: "USD", exponent: 2 } };
+    expect(engineLimitFromUsage(withCredit(100, { is_enabled: false }, spendRoom))).toMatchObject({ blocked: false });
+    // Extra usage that is off or used up still holds, as before.
+    expect(engineLimitFromUsage(withCredit(100, { ...room, is_enabled: false }))).toMatchObject({ blocked: true, resetsAt: NOW + 2 * HOUR });
+    expect(engineLimitFromUsage(withCredit(100, { ...room, used_credits: 5_000, utilization: 100 }))).toMatchObject({ blocked: true });
+    expect(engineLimitFromUsage(withCredit(92, room))).toMatchObject({ blocked: false, usedPercent: 92 });
+  });
+
   it("reads Codex's primary and secondary windows by their length", () => {
     expect(engineLimitFromUsage(codex([100, NOW + HOUR], [50, NOW + 90 * HOUR]))).toMatchObject({
       engine: "codex", driver: "codex", blocked: true, window: "5-hour", resetsAt: Math.floor((NOW + HOUR) / 1000) * 1000,

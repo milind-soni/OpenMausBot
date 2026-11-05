@@ -168,7 +168,7 @@ describe("the brief", () => {
     expect(shown).toContain("Aguardando sua resposta · Ada precisa dos números.");
     expect(shown).toContain("Sessão encerrada em Claude");
     expect(shown).not.toMatch(/Needs you|Waiting on your reply|Thursday/);
-    expect(widgetActions(root).map((entry) => entry.label)).toEqual(expect.arrayContaining(["Rascunhar resposta para Ada", "Abrir no Gmail", "Dispensar o e-mail de Ada"]));
+    expect(widgetActions(root).map((entry) => entry.label)).toEqual(expect.arrayContaining(["Criar rascunho de resposta para Ada", "Abrir no Gmail", "Dispensar o e-mail de Ada"]));
     expect(s.notified).toEqual(["Seu resumo: 2 precisam de você"]);
   });
 

@@ -1,7 +1,9 @@
 import { api } from "@/state/store";
-import { t } from "@/lib/i18n";
+import { activeLocale, t } from "@/lib/i18n";
+import { namesLocale } from "@/lib/clock-time";
+import { en, type LocaleKey } from "@/locales";
 import { toolStepLabel } from "@/lib/tool-step-label";
-import { formatUsd, hasFiniteCost } from "@/lib/usage";
+import { formatUsd, hasFiniteCost, usdText } from "@/lib/usage";
 import type {
   TraceDetail, TraceGroup, TraceList, TraceNode, TraceStep, TraceTokens, TraceTool, TraceTurn,
 } from "../../shared/usage-trace.ts";
@@ -25,7 +27,7 @@ export function usagePeriodRange(period: UsagePeriod, now = new Date()): { from:
 /** A cost as the trace prints it: a sliver of a cent reads "<$0.001", never "$0.000". */
 export function formatCost(usd: number | null | undefined): string {
   if (!hasFiniteCost(usd)) return "—";
-  return usd > 0 && usd < 0.001 ? "<$0.001" : formatUsd(usd);
+  return usd > 0 && usd < 0.001 ? `<${usdText(0.001, 3)}` : formatUsd(usd);
 }
 
 export function usageExportHref(range: { from: string; to: string }): string {
@@ -40,18 +42,28 @@ export function fetchTrace(id: string, at?: number): Promise<TraceDetail> {
   return api(`/api/usage/traces/${encodeURIComponent(id)}${at ? `?at=${Math.round(at)}` : ""}`);
 }
 
+type TimeUnit = "millisecond" | "second" | "minute" | "hour";
+const unitFormats = new Map<string, Intl.NumberFormat>();
+const unit = (value: number, name: TimeUnit, digits = 0): string => {
+  const id = `${namesLocale()} ${name} ${digits}`;
+  if (!unitFormats.has(id)) unitFormats.set(id, new Intl.NumberFormat(namesLocale(), { style: "unit", unit: name, unitDisplay: "narrow", maximumFractionDigits: digits, useGrouping: false }));
+  return unitFormats.get(id)!.format(value).replaceAll(" ", "\u00a0");
+};
+const pair = (big: number, bigUnit: TimeUnit, small: number, smallUnit: TimeUnit) =>
+  small ? `${unit(big, bigUnit)}${activeLocale() === "en" ? " " : "\u00a0"}${unit(small, smallUnit)}` : unit(big, bigUnit);
+
 /** "450ms", "6.9s", "51s", "1m 40s", "2h 5m": rounded before the unit is picked. */
 export function formatDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "";
-  if (ms < 1_000) return `${Math.round(ms)}ms`;
+  if (ms < 1_000) return unit(Math.round(ms), "millisecond");
   const tenths = Math.round(ms / 100);
-  if (tenths < 100) return `${(tenths / 10).toFixed(1).replace(/\.0$/, "")}s`;
+  if (tenths < 100) return unit(tenths / 10, "second", 1);
   const seconds = Math.round(ms / 1_000);
-  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 60) return unit(seconds, "second");
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return seconds % 60 ? `${minutes}m ${seconds % 60}s` : `${minutes}m`;
+  if (minutes < 60) return pair(minutes, "minute", seconds % 60, "second");
   const hours = Math.floor(minutes / 60);
-  return minutes % 60 ? `${hours}h ${minutes % 60}m` : `${hours}h`;
+  return pair(hours, "hour", minutes % 60, "minute");
 }
 
 const STEPS_MS = [1_000, 2_000, 5_000, 10_000, 20_000, 30_000, 60_000, 120_000, 300_000, 600_000, 1_200_000, 1_800_000, 3_600_000, 7_200_000, 14_400_000];
@@ -67,10 +79,9 @@ export function timeAxis(spanMs: number): { max: number; ticks: number[] } {
 }
 
 export function formatTick(ms: number): string {
-  if (ms === 0) return "0s";
-  if (ms < 60_000) return `${Math.round(ms / 1_000)}s`;
-  if (ms < 3_600_000) return ms % 60_000 ? `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1_000)}s` : `${ms / 60_000}m`;
-  return ms % 3_600_000 ? `${Math.floor(ms / 3_600_000)}h ${Math.round((ms % 3_600_000) / 60_000)}m` : `${ms / 3_600_000}h`;
+  if (ms < 60_000) return unit(Math.round(ms / 1_000), "second");
+  if (ms < 3_600_000) return pair(Math.floor(ms / 60_000), "minute", Math.round((ms % 60_000) / 1_000), "second");
+  return pair(Math.floor(ms / 3_600_000), "hour", Math.round((ms % 3_600_000) / 60_000), "minute");
 }
 
 /** Where a node sits on the axis: a turn spans everything under it. */
@@ -107,13 +118,66 @@ export function tokensOf(node: TraceNode): TraceTokens | null {
 const ACTION_PREFIX = /^(?:mcp__.+?__|[a-z][a-z0-9_-]{0,31}__)?(?:agent_browser_|browser_|computer_)?/i;
 const sentence = (words: string) => words ? words[0]!.toLocaleUpperCase() + words.slice(1) : words;
 
+const ACTIONS: Record<string, LocaleKey> = {
+  "open": "trace.action.open",
+  "click": "trace.action.click",
+  "double click": "trace.action.doubleClick",
+  "right click": "trace.action.rightClick",
+  "snapshot": "trace.action.snapshot",
+  "eval": "trace.action.eval",
+  "status": "trace.action.status",
+  "fill": "trace.action.fill",
+  "tabs": "trace.action.tabs",
+  "get url": "trace.action.getUrl",
+  "open url": "trace.action.openUrl",
+  "read": "trace.action.read",
+  "close": "trace.action.close",
+  "screenshot": "trace.action.screenshot",
+  "navigate": "trace.action.navigate",
+  "wait": "trace.action.wait",
+  "wait for": "trace.action.waitFor",
+  "wait for text": "trace.action.waitForText",
+  "wait for load": "trace.action.waitForLoad",
+  "type": "trace.action.type",
+  "type text": "trace.action.typeText",
+  "scroll": "trace.action.scroll",
+  "press": "trace.action.press",
+  "key": "trace.action.key",
+  "key press": "trace.action.keyPress",
+  "get text": "trace.action.getText",
+  "get title": "trace.action.getTitle",
+  "check": "trace.action.check",
+  "uncheck": "trace.action.uncheck",
+  "select": "trace.action.select",
+  "select option": "trace.action.selectOption",
+  "dialog": "trace.action.dialog",
+  "upload": "trace.action.upload",
+  "tab new": "trace.action.tabNew",
+  "tab list": "trace.action.tabList",
+  "tab switch": "trace.action.tabSwitch",
+  "tab close": "trace.action.tabClose",
+  "hover": "trace.action.hover",
+  "back": "trace.action.back",
+  "forward": "trace.action.forward",
+  "reload": "trace.action.reload",
+  "drag": "trace.action.drag",
+  "move": "trace.action.move",
+  "tap": "trace.action.tap",
+  "swipe": "trace.action.swipe",
+};
+
 /** What a tool did, in words: a browser or computer step names its action, other tools their kind. */
 export function toolLabel(tool: Pick<TraceTool, "name" | "icon">): string {
   if (tool.icon === "browser" || tool.icon === "computer" || tool.icon === "phone") {
     const action = tool.name.replace(ACTION_PREFIX, "").replace(/[_-]+/g, " ").trim().toLowerCase();
+    if (Object.hasOwn(ACTIONS, action)) return t(ACTIONS[action]!);
     if (action) return sentence(action);
   }
-  return toolStepLabel({ name: tool.name, summary: undefined });
+  const step = toolStepLabel({ name: tool.name, summary: undefined });
+  const agents = /^mcp__agents__([a-z0-9_]+)$/.exec(tool.name)?.[1];
+  if (!agents || step !== sentence(agents.replace(/_+/g, " "))) return step;
+  const key = `activity.tool.team.${agents.replace(/_([a-z0-9])/g, (_, letter: string) => letter.toUpperCase())}`;
+  return Object.hasOwn(en, key) ? t(key as LocaleKey) : step;
 }
 
 export function groupLabel(group: Pick<TraceGroup, "icon" | "count" | "name" | "app" | "server">, appName?: string): string {

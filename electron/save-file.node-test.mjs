@@ -345,3 +345,10 @@ describe("openHtmlCopy (#4406)", () => {
     assert.match(main, /ipcMain\.handle\("desktop:open-html", localOnly\("desktop:open-html", \(_event, source, name\) =>\s*openHtmlCopy\(source, name, \{ dir: path\.join\(app\.getPath\("userData"\), "open-html"\)/);
   });
 });
+
+it("HTML validation uses the caller's translator before opening anything", async () => {
+  const t = (key) => ({ "native.html.nothingToOpen": "Não há nada para abrir", "native.html.tooLarge": "Esta página é grande demais para abrir (2 MB)" })[key];
+  const options = { t, dir: home, open: () => assert.fail("nothing should open") };
+  await assert.rejects(openHtmlCopy(null, "page", options), { message: "Não há nada para abrir" });
+  await assert.rejects(openHtmlCopy("x".repeat(2 * 1024 * 1024 + 1), "page", options), { message: "Esta página é grande demais para abrir (2 MB)" });
+});

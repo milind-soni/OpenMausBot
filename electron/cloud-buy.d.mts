@@ -20,6 +20,7 @@ export declare function createCloudReadyNotice(options: {
   focused(): boolean; sheetOpen(): boolean; name(): string; open(): void;
   /** Told once the notification is shown (main marks the checkout done). */
   shown?(): void;
+  t?(key: string, params?: Record<string, string | number>): string;
 }): (state: unknown) => boolean;
 export declare function installCloudBuy(options: {
   ipcMain: { handle(channel: string, handler: (...args: any[]) => unknown): void };

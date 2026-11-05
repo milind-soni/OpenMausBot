@@ -39,6 +39,13 @@ it("while the Admin sets My Cloud up, the screen says so plainly, with its step,
   for (const words of Object.values(setup)) expect(String(words)).not.toMatch(/Server menu|choose it again|DNS|resolv|ERR_/i);
 });
 
+it("says why My Cloud can't be reached in the app's language, and keeps the Admin's English when no cause comes", () => {
+  setLocale("pt-br");
+  expect(homeScreenText({ screen: "offline", reason: "The server My Cloud runs on is being restarted.", cause: "host" }).reason).toMatch(/^Nosso provedor de hospedagem/);
+  expect(homeScreenText({ screen: "offline", reason: "My Cloud hasn't answered.", cause: "no_answer" }).reason).toMatch(/^O Cloud não responde/);
+  expect(homeScreenText({ screen: "offline", reason: "An older desktop's words." }).reason).toBe("An older desktop's words.");
+});
+
 it("a Cloud that isn't running says what it is in plain words with its one action; one that doesn't answer says Try again, with no endless spinner", () => {
   const now = new Date(2026, 9, 30, 12).getTime(), day = new Date(2026, 10, 1, 9).getTime();
   expect(homeScreenText({ screen: "ended", name: "My Cloud", deleteAt: day }, now))

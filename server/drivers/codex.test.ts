@@ -24,6 +24,7 @@ import { unsupportedCallsNotice } from "./codex-unsupported-calls.ts";
 import { rebuiltSessionNotice } from "../resume-recovery.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import * as procs from "../procs.ts";
+import { botBox } from "../bot-box/box.ts";
 import { autoVerdict } from "../auto-approve.ts";
 import { formatQuestionAnswers } from "../../shared/ask-question.ts";
 
@@ -1230,6 +1231,22 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(argv).toContain("mcp_servers.notes.command");
   });
 
+  it("hands a person's own stdio server the bot box's proxy, its only way out of the box's network", async () => {
+    await create();
+    const servers = { custom: { todo: { command: "python3", args: ["todo.py"], env: { LIST: "x" } } } };
+    const envVars = async (threadId: string) => {
+      const dump = join(scratch, `${threadId}.json`);
+      process.env.FAKE_CODEX_DUMP = dump;
+      await instance.adapter.sendTurn({ threadId, text: "go", integrations: servers });
+      await recorder.until((event) => event.type === "turn.completed" && event.threadId === threadId);
+      const argv: string[] = JSON.parse(readFileSync(dump, "utf8")).argv;
+      return JSON.parse(argv.find((arg) => arg.startsWith("mcp_servers.todo.env_vars="))!.split("=").slice(1).join("="));
+    };
+    expect(await envVars("t-unboxed-proxy")).toEqual(["LIST"]);
+    vi.spyOn(botBox, "enabled").mockReturnValue(true);
+    expect(await envVars("t-boxed-proxy")).toEqual(["LIST", "HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "NO_PROXY", "no_proxy"]);
+  }, 20_000);
+
   it("reaches a url server through OpenMausBot's connector on Codex's own login, header values off argv", async () => {
     await create();
     const dump = join(scratch, "remote-mcp.json");
@@ -1461,7 +1478,10 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       await recorder.until((event) => event.type === "turn.completed" && event.turnId === first.turnId);
       const errors = recorder.events.filter((event) => event.type === "runtime.error" && event.turnId === first.turnId);
       expect(errors).toHaveLength(1);
-      expect((errors[0] as { message: string }).message).toContain("isn't available on your ChatGPT plan");
+      expect(errors[0]).toMatchObject({
+        message: "This model isn't available on your ChatGPT plan, so it's now hidden from this account's model list. Pick another model.",
+        text: { key: "chat.notice.codexModelUnavailable" },
+      });
       expect(refuse).toHaveBeenCalledExactlyOnceWith("gpt-6.1-sol");
       const dump = join(scratch, "plan-refused.json");
       process.env.FAKE_CODEX_DUMP = dump;
@@ -2754,6 +2774,30 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     });
   });
 
+  it("carries the app-access fallback code to the approval card", async () => {
+    process.env.FAKE_CODEX_APPROVAL_REQUEST = JSON.stringify({ method: "mcpServer/elicitation/request", params: {
+      mode: "form", _meta: { app_name: "Safari" },
+      requestedSchema: { properties: { approval: { enum: ["once"] } }, required: ["approval"] },
+    } });
+    await create({ mode: "approval" });
+    await instance.adapter.sendTurn({ threadId: "t-app-fallback", text: "use Safari" });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    expect(opened).toMatchObject({ summary: "App access requested", summaryCode: "chat.notice.appAccessRequested" });
+    await instance.adapter.respondToRequest("t-app-fallback", opened.requestId!, { behavior: "deny" });
+    await recorder.until((event) => event.type === "turn.completed");
+  });
+
+  it("codes a declined generic MCP elicitation without an English server-name param", async () => {
+    process.env.FAKE_CODEX_APPROVAL_REQUEST = JSON.stringify({ method: "mcpServer/elicitation/request", params: { mode: "url" } });
+    await create({ mode: "approval" });
+    await instance.adapter.sendTurn({ threadId: "t-generic-elicitation", text: "go" });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(recorder.events.find((event) => event.type === "runtime.notice")).toMatchObject({
+      message: "An MCP server asked for input OpenMausBot can't show yet, so the request was declined.",
+      text: { key: "chat.notice.codexElicitationDeclinedGeneric" },
+    });
+  });
+
   it("auto-approves a schema-backed app-access form only once in Full access", async () => {
     await create({ mode: "mcp-app-approval" });
     const dump = join(scratch, "mcp-app-full.json");
@@ -2787,7 +2831,10 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
 
     expect(recorder.events.some((event) => event.type === "request.opened")).toBe(false);
     expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ action: "decline" });
-    expect(recorder.events.find((event) => event.type === "runtime.notice")?.message).toBe("example asked for input OpenMausBot can't show yet, so the request was declined.");
+    expect(recorder.events.find((event) => event.type === "runtime.notice")).toMatchObject({
+      message: "example asked for input OpenMausBot can't show yet, so the request was declined.",
+      text: { key: "chat.notice.codexElicitationDeclined", params: { server: "example" } },
+    });
   });
 
   it("grants Codex additional permissions with their native response shape", async () => {

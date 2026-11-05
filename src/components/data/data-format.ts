@@ -1,4 +1,5 @@
 import type { DataCard, DataColumn, DataPage } from "../../../shared/data-surface";
+import { intlLocale } from "@/lib/i18n";
 
 export type Cell = DataPage["rows"][number][number];
 
@@ -62,5 +63,5 @@ export function cardsLatestFirst(cards: DataCard[]): DataCard[] {
 }
 
 export function formatCount(value: number | undefined | null): string {
-  return typeof value === "number" && Number.isFinite(value) ? value.toLocaleString() : "";
+  return typeof value === "number" && Number.isFinite(value) ? value.toLocaleString(intlLocale()) : "";
 }

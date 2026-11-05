@@ -1,7 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VoiceProbeSample } from "../../../shared/voice-latency-probe";
 
+import { setLocale } from "../i18n";
 import { Speaker } from "./index";
+import { toUtterances } from "../../../server/tts/speech-text";
+import { userError } from "../../../server/user-errors";
 
 class FakeAudio {
   static latest: FakeAudio | null = null;
@@ -175,6 +178,52 @@ describe("Speaker lifecycle", () => {
     expect(speaker.state).toMatchObject({ status: "speaking", messageId: "current" });
     audio.onended?.();
     await current.end();
+  });
+});
+
+describe("coded voice refusals", () => {
+  beforeEach(() => { FakeAudio.latest = null; });
+
+  afterEach(() => {
+    setLocale("en");
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    ["en", "voice utterances are limited to 500 characters"],
+    ["pt-br", "Cada trecho de fala pode ter no máximo 500 caracteres"],
+  ])("shows an oversized prepared utterance refusal in %s", async (locale, expected) => {
+    setLocale(locale);
+    const text = "Tudo bem. ".repeat(80);
+    const utterances = toUtterances(text);
+    expect(utterances.some((utterance) => utterance.length > 500)).toBe(true);
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => String(input).endsWith("/prepare")
+      ? json({ ready: true, utterances })
+      : Response.json(userError("serverError.voice.utteranceTooLong"), { status: 413 })));
+    const speaker = new Speaker();
+    await speaker.speak(text);
+    expect(speaker.state).toEqual({ status: "idle", error: expected });
+    expect(FakeAudio.latest).toBeNull();
+  });
+
+  it.each(["prepare", "speak"])("consumes string error params from /%s", async (phase) => {
+    setLocale("pt-br");
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => String(input).endsWith("/prepare") && phase === "speak"
+      ? json({ ready: true, utterances: ["Hello there."] })
+      : Response.json(userError("serverError.owner.choose", { team: "Aurora" }), { status: 400 })));
+    const speaker = new Speaker();
+    await speaker.speak("Hello there.");
+    expect(speaker.state.error).toBe("Escolha alguém de Aurora.");
+  });
+
+  it.each([undefined, "activity.tool.team.decide", "serverError.future.voice"])("keeps the raw diagnostic for unsupported error key %s", async (errorKey) => {
+    setLocale("pt-br");
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => String(input).endsWith("/prepare")
+      ? json({ ready: true, utterances: ["Hello there."] })
+      : Response.json({ error: "upstream technical diagnostic", errorKey }, { status: 502 })));
+    const speaker = new Speaker();
+    await speaker.speak("Hello there.");
+    expect(speaker.state.error).toBe("upstream technical diagnostic");
   });
 });
 
@@ -648,5 +697,26 @@ describe("local system voice stream", () => {
     second.cancel();
     expect(speaker.state).toEqual({ status: "idle" });
     expect(synth.cancel.mock.calls.length).toBe(cancelsBefore + 1);
+  });
+});
+
+
+describe("OpenAI voice error language", () => {
+  beforeEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  it("localizes a new server error and preserves an unknown error fallback", async () => {
+    const fetch = vi.fn(async (input: string | URL | Request) => String(input).endsWith("/prepare")
+      ? json({ ready: true, utterances: ["fixture text"] })
+      : new Response(JSON.stringify({ error: "English fallback", errorKey: "voice.openai.error.auth" }), { status: 502 }));
+    vi.stubGlobal("fetch", fetch);
+    const speaker = new Speaker();
+    try {
+      await speaker.speak("fixture text");
+      expect(speaker.state.error).toContain("OpenAI rejected the API key");
+      fetch.mockImplementation(async (input) => String(input).endsWith("/prepare")
+        ? json({ ready: true, utterances: ["fixture text"] })
+        : new Response(JSON.stringify({ error: "future fallback", errorKey: "voice.future" }), { status: 502 }));
+      await speaker.speak("fixture text");
+      expect(speaker.state.error).toBe("future fallback");
+    } finally { setLocale("en"); }
   });
 });

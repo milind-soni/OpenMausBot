@@ -15,6 +15,7 @@ import nodeFs from "node:fs";
 import path from "node:path";
 
 import { WELCOME_VERSION } from "./onboarding-record.mjs";
+import nativeText from "./native-text.cjs";
 
 /** This first conversation stays quiet: no corner notices until a reply, no spotlights (src/lib/onboarding.ts MET_CHIEF_HINT). */
 const QUIET_HINT = "met-chief-v1";
@@ -43,7 +44,7 @@ export function cleanWorkspaceConfig(language = null, now = new Date()) {
  * `swap`: starts the server on that folder instead, and moves the window to its page. `changed`: the clean workspace started or
  * ended, so whatever depends on it (lending) looks again.
  */
-export function createCleanWorkspace({ dataDir, running, swap, allowed = () => true, changed = () => {}, log = () => {}, fs = nodeFs }) {
+export function createCleanWorkspace({ dataDir, running, swap, allowed = () => true, changed = () => {}, log = () => {}, fs = nodeFs, t = nativeText.englishText.t }) {
   const folder = () => cleanWorkspaceDir(dataDir());
   const active = () => running() === folder();
   let held = 0, swapping = false;
@@ -101,7 +102,7 @@ export function createCleanWorkspace({ dataDir, running, swap, allowed = () => t
     async holding(work) {
       held++;
       try {
-        if (!(await leave())) throw new Error("OpenMausBot on this computer could not go back to its own copy yet.");
+        if (!(await leave())) throw new Error(t("native.home.ownCopyNotReady"));
         return await work();
       } finally { held--; }
     },
@@ -117,7 +118,7 @@ export function createCleanWorkspace({ dataDir, running, swap, allowed = () => t
             return Response.json(id ? { environmentId: id } : {});
           }
         }
-        throw Object.assign(new Error("This computer's own copy isn't running."), { code: CLEAN });
+        throw Object.assign(new Error(t("native.home.ownCopyNotRunning")), { code: CLEAN });
       };
     },
   };

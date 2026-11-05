@@ -6,8 +6,6 @@ import { lstatSync, readFileSync } from "node:fs";
 import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
 
-export const CLOUD_PERSONAL_REFUSAL = "My Cloud is personal: only your own devices can connect.";
-
 const KEY = /^p_[\w-]{22}$/;
 const keys = z.array(z.string().regex(KEY)).max(100_000);
 const recordFile = z.object({

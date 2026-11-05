@@ -49,6 +49,8 @@ describe("GET /api/threads/:threadId/messages/:messageId/tool", () => {
     expect((await get(`/api/threads/${bot.threadId}/messages/${silent.id}/tool`)).status).toBe(404);
     expect((await get(`/api/threads/${bot.threadId}/messages/${text.id}/tool`)).status).toBe(404);
     expect((await get(`/api/threads/${bot.threadId}/messages/no-such-message/tool`)).status).toBe(404);
-    expect((await get(`/api/threads/no-such-thread/messages/${tool.id}/tool`)).status).toBe(404);
+    expect(await get(`/api/threads/no-such-thread/messages/${tool.id}/tool`)).toEqual({
+      status: 404, body: { error: "no such conversation", errorKey: "serverError.chat.missingConversation" },
+    });
   });
 });

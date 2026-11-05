@@ -20,6 +20,7 @@ import { tagsDevs, withoutDevsTags } from "../../shared/devs-mention.ts";
 import { versionAtLeast, type BugReportStatus } from "../../shared/devs-report-status.ts";
 import { failedTurnCause } from "../../shared/failed-turn.ts";
 import type { ResolvedSender } from "../../shared/wire.ts";
+import { splitTranscriptCitations } from "../../src/lib/citations.ts";
 import { writeFileAtomic } from "../atomic.ts";
 import { startDueTimer } from "../due-timer.ts";
 import type { ProviderSnapshot } from "../contracts.ts";
@@ -33,6 +34,7 @@ import { PASS } from "../routes/table.ts";
 import { serverLine, type LineLanguage } from "../server-lines.ts";
 import type { PublicSession } from "../sessions.ts";
 import type { BotRecord, Message, Store, StoreChange } from "../store.ts";
+import { droppedLine, fullLine, laterLine, notYetLine, refusedLine, sentLine } from "./devs-report-words.ts";
 import { clip } from "./text-clip.ts";
 
 export const DEVS_REPORTS_FILE = "devs-reports.json";
@@ -129,28 +131,21 @@ export interface DevsReportContext {
   readBody: () => Promise<unknown>;
 }
 
-// What the person is told, in their language (server/server-lines.ts). The bot passes it on word for word.
-export const sentLine = (reportId: string, contact?: string, language?: string) => contact
-  ? serverLine(language, "server.reports.sentReply", { report: reportId, contact }) : serverLine(language, "server.reports.sent", { report: reportId });
-const laterLine = (reportId: string, contact: string | undefined, language: string | undefined) => contact
-  ? serverLine(language, "server.reports.sentLaterReply", { report: reportId, contact }) : serverLine(language, "server.reports.sentLater", { report: reportId });
-function notYetLine(outcome: Extract<SendOutcome, { retry: true }>, language: string | undefined): string {
-  const minutes = outcome.retryAfterMs ? Math.max(1, Math.ceil(outcome.retryAfterMs / 60_000)) : 0;
-  const why = serverLine(language, outcome.why === "limited" ? "server.reports.why.limited" : outcome.why === "offline" ? "server.reports.why.offline" : "server.reports.why.busy");
-  const when = minutes ? serverLine(language, minutes === 1 ? "server.reports.when.minute" : "server.reports.when.minutes", { count: minutes })
-    : serverLine(language, "server.reports.when.soon");
-  return serverLine(language, "server.reports.notYet", { why, when });
-}
-const refusedLine = (detail: string, language: string | undefined) => serverLine(language, "server.reports.refused", { detail: detail.replace(/[.\s]+$/, "") });
-const fullLine = (language: string | undefined) => serverLine(language, "server.reports.full", { count: MAX_OUTBOX });
+export { sentLine } from "./devs-report-words.ts";
 /** The one line in the chat once this app runs the fix, in the reporter's language (clients say it from `bugReport`). */
 export const fixedLine = (version: string, language?: string) => serverLine(language, "server.reports.fixed", { version });
 /** Rides on the bot's next turn in that chat, once, so an answer to the line above makes sense to it. */
 const fixedNote = (entry: Tracked, version: string) => `\n\n[From OpenMausBot, not the person: the problem they reported with @devs on ${new Date(entry.at).toISOString().slice(0, 10)}${
   entry.words ? ` ("${entry.words}")` : ""} is fixed in ${version}, which this app now runs. The chat told them so and asked whether they want to try again; if their message answers that, help them try it again.]`;
-const droppedLine = (language: string | undefined) => serverLine(language, "server.reports.dropped");
 /** A failure line names MausBot in every language: a bot reply that does has passed it on. */
 const FAILED_MARKER = "MausBot";
+
+/** The person's own words: the text outside quotes and each quote's comment. Only a @devs there tags the message,
+ * never one inside a message they quoted. */
+function ownWords(message: string): string[] {
+  const { display, citations } = splitTranscriptCitations(message);
+  return [display, ...citations.map((citation) => citation.comment ?? "")];
+}
 
 /** Rides on the turn that answers a @devs message. */
 const TURN_NOTE = "\n\n[From OpenMausBot, not the person: this message tags @devs, so it is a bug report for the MausBot team, OpenMausBot's developers. Call report_bug once, first: what the person says went wrong; what you saw yourself in this conversation (errors, failed tools, stuck steps), or that you saw nothing unusual; and steps to reproduce. Leave out passwords, keys, tokens and file contents; OpenMausBot adds the app's own diagnostics. Then tell the person, word for word, the line report_bug returns, and help with the problem if you can.]";
@@ -349,7 +344,7 @@ export function createDevsReports(deps: DevsReportsDeps) {
       return { ok: true, line: sentLine(outcome.id, contact, language), marker: outcome.id };
     }
     if (!outcome.retry) return { ok: false, line: refusedLine(outcome.detail, language), marker: FAILED_MARKER };
-    if (outbox.length >= MAX_OUTBOX) return { ok: false, line: fullLine(language), marker: FAILED_MARKER };
+    if (outbox.length >= MAX_OUTBOX) return { ok: false, line: fullLine(MAX_OUTBOX, language), marker: FAILED_MARKER };
     outbox.push({ messageId: entry.messageId, threadId: entry.threadId, payload, firstAt: now(), attempts: 1,
       nextAt: now() + (outcome.retryAfterMs ?? RETRY_MS[0]), ...(person ? { person } : {}) });
     timer?.poke();
@@ -450,14 +445,15 @@ export function createDevsReports(deps: DevsReportsDeps) {
   function personWrote(threadId: string, line: Message): void {
     if (seen.has(line.id) || !line.text || now() - line.at > FRESH_MS) return;
     if (!line.sendId && deps.automated(threadId)) return;
-    if (!tagsDevs(line.text)) return;
+    const own = ownWords(line.text);
+    if (!own.some((part) => tagsDevs(part))) return;
     const names = namesBeforeDevs();
-    if (!tagsDevs(line.text, names)) return;
+    if (!own.some((part) => tagsDevs(part, names))) return;
     seen.add(line.id);
     if (seen.size > 1_000) seen.delete(seen.values().next().value!);
-    if (waiting.length >= MAX_WAITING) return notice(threadId, { ok: false, line: fullLine(languageFor(line.sender?.id)), marker: "" });
+    if (waiting.length >= MAX_WAITING) return notice(threadId, { ok: false, line: fullLine(MAX_OUTBOX, languageFor(line.sender?.id)), marker: "" });
     const redact = (text: string) => clip(redactReportText(text, secrets()), 3_000);
-    waiting.push({ messageId: line.id, threadId, at: line.at, text: redact(line.text), words: redact(withoutDevsTags(line.text, names)),
+    waiting.push({ messageId: line.id, threadId, at: line.at, text: redact(line.text), words: redact(own.map((part) => withoutDevsTags(part, names)).filter(Boolean).join("\n\n")),
       ...(line.sender ? { sender: { name: line.sender.name, ...(line.sender.id ? { id: line.sender.id } : {}) } } : {}) });
     save();
     timer?.poke();

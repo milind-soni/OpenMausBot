@@ -4,6 +4,8 @@ import { z } from "zod";
 
 import type { RoutineRequestOperation } from "../shared/routine-request.ts";
 import { ROUTINE_CHECKS, type RoutineCheck } from "../shared/routines.ts";
+import { isEffortLevel, type ModelSelection } from "../shared/wire.ts";
+import { isModelVariant } from "./contracts.ts";
 import { ROUTINE_PARTS, type PartPair, type RoutinePart } from "./package-parts.ts";
 import { loadAttachments, loadTimeoutMinutes } from "./routine-attachments.ts";
 import { isRoutineHoldCause } from "./routine-holds.ts";
@@ -76,6 +78,15 @@ function withoutUndefined<T extends object>(record: T, keys: ReadonlyArray<keyof
 }
 
 /** Null when its schedule cannot load: the caller keeps it on disk, unscheduled. */
+export function loadModelSelection(value: unknown): ModelSelection | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const { instanceId, model, effort, variant } = value as Record<keyof ModelSelection, unknown>;
+  if (typeof instanceId !== "string" || !instanceId.trim() || typeof model !== "string" || !model.trim()) return undefined;
+  if (effort !== undefined && (!isEffortLevel(effort) || variant !== undefined)) return undefined;
+  if (variant !== undefined && !isModelVariant(variant)) return undefined;
+  return { instanceId: instanceId.trim(), model: model.trim(), ...(effort === undefined ? {} : { effort }), ...(variant === undefined ? {} : { variant }) };
+}
+
 export function loadRoutine(routine: Routine, now: number): Routine | null {
   const schedule = loadSchedule(routine.schedule, now);
   if (!schedule) return null;
@@ -92,16 +103,18 @@ export function loadRoutine(routine: Routine, now: number): Routine | null {
     resultsThreadId: persistedSourceThreadId.parse(routine.resultsThreadId),
     overlap: routine.overlap === "queue" ? "queue" : undefined,
     runOnStartup: routine.runOnStartup === true ? true : undefined,
+    modelSelection: routine.target === "room-goal" ? undefined : loadModelSelection(routine.modelSelection),
     skippedRuns: Number.isSafeInteger(routine.skippedRuns) && routine.skippedRuns! > 0 ? routine.skippedRuns : undefined,
     lastSkippedAt: Number.isSafeInteger(routine.lastSkippedAt) && routine.lastSkippedAt! >= 0 && routine.lastSkippedAt! <= MAX_DATE_MS ? routine.lastSkippedAt : undefined,
     installedPackage: loadInstalledPackage(routine.installedPackage),
     checkedAt: instant(routine.checkedAt),
     checkTrouble: typeof routine.checkTrouble === "string" && routine.checkTrouble ? routine.checkTrouble.slice(0, 300) : undefined,
+    checkTroubleCode: typeof routine.checkTrouble === "string" && routine.checkTrouble && typeof routine.checkTroubleCode === "string" ? routine.checkTroubleCode.slice(0, 80) : undefined,
     wakeAt: instant(routine.wakeAt),
     heldFor: isRoutineHoldCause(routine.heldFor) ? routine.heldFor : undefined,
   };
   delete loaded.failureStreak;
-  return withCheckFields(withoutUndefined(loaded, ["timeoutMinutes", "runOnStartup", "installedPackage", "checkedAt", "checkTrouble", "wakeAt", "heldFor"]));
+  return withCheckFields(withoutUndefined(loaded, ["timeoutMinutes", "runOnStartup", "modelSelection", "installedPackage", "checkedAt", "checkTrouble", "checkTroubleCode", "wakeAt", "heldFor"]));
 }
 
 export function loadRun(run: RoutineRun): RoutineRun {

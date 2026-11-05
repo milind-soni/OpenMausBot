@@ -1,6 +1,7 @@
 import { Check, KeyRound, Plus, Search } from "lucide-react";
 import type { InstanceInfo } from "@/state/store";
-import { isClaudeAccount, SIGN_IN_FAMILY_LABEL, signInFamily, splitEngineRail, type SignInFamily } from "@/lib/engine-rail";
+import { engineDisplayName, isClaudeAccount, SIGN_IN_FAMILY_LABEL, signInFamily, splitEngineRail, type SignInFamily } from "@/lib/engine-rail";
+import { modelOptionLabel } from "@/lib/model-label";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { InstanceProviderMark } from "./ProviderIcons";
@@ -42,7 +43,7 @@ export function ModelRow({ option, current, defaultId, botModel = false, onPick 
       onClick={onPick}
       className={MENU_ROW}
     >
-      <span className="min-w-0 flex-1 truncate">{option.label}</span>
+      <span className="min-w-0 flex-1 truncate">{modelOptionLabel(option)}</span>
       {botModel && <span data-bot-model className="shrink-0 text-[12px] leading-4 text-ink-tertiary">{t("model.botModelTag")}</span>}
       {meta && <span className={MENU_META}>{meta}</span>}
       {option.loaded && (
@@ -115,7 +116,7 @@ export function railProviders(instances: InstanceInfo[], selectedInstance: Insta
     return {
       instance,
       target: family ? opensOn[family] ?? instance : instance,
-      label: family ? SIGN_IN_FAMILY_LABEL[family] : instance.displayName,
+      label: family ? SIGN_IN_FAMILY_LABEL[family] : engineDisplayName(instance),
       selected: family ? signInFamily(selectedInstance) === family : instance.instanceId === selectedInstance?.instanceId,
     };
   };
@@ -201,7 +202,7 @@ export function ClaudeAccountSelect({ accounts, selectedId, onSelect }: {
           if (account) onSelect(account);
         }}
       >
-        {accounts.map((account) => <option key={account.instanceId} value={account.instanceId}>{account.displayName}</option>)}
+        {accounts.map((account) => <option key={account.instanceId} value={account.instanceId}>{engineDisplayName(account)}</option>)}
       </Select>
     </label>
   );
