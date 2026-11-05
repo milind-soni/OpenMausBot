@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
@@ -39,7 +40,7 @@ describe("custom Claude endpoint", () => {
       access: "custom",
       config: {
         cli: "claude-wrapper",
-        configDir: `${DATA_DIR}/providers/${instanceId}`,
+        configDir: join(DATA_DIR, "providers", instanceId),
         requireApiKey: true,
         endpointModels: ["deepseek-chat", "deepseek-reasoner"],
       },
