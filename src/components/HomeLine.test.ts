@@ -63,9 +63,10 @@ it("the clean workspace's line says the bots are safe in their Cloud, on every l
   ais.instances = [{ ready: true, instanceId: "claude", driver: "claudeCode" }];
   const line = vi.fn().mockResolvedValue({ kind: "clean" });
   await mount(line);
-  await vi.waitFor(() => expect(host.querySelector("[data-home-line='clean']")?.textContent).toBe("Your bots are in your Cloud. Sign in to get them."));
+  await vi.waitFor(() => expect(host.querySelector("[data-home-line='clean']")?.textContent).toBe("Your bots are in the Cloud. Sign in to get them."));
   expect(host.querySelector("button")).toBeNull();
-  expect(homeLineText({ kind: "clean" })).toBe("Your bots are in your Cloud. Sign in to get them.");
+  expect(homeLineText({ kind: "clean" })).toBe("Your bots are in the Cloud. Sign in to get them.");
+  expect(homeLineText({ kind: "clean", saved: true })).toBe("Your bots are in your other account's Cloud. Click its icon on the left of the app to get them.");
 });
 
 it("with the new-user setup skipped, the clean workspace still offers connecting an AI while none is ready", async () => {

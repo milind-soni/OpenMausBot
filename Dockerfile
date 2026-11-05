@@ -124,12 +124,21 @@ FROM runtime AS cloud-home
 # runs every bot turn in its own namespaces, socat bridges a box's loopback
 # ports to the server's gates. Their own layer, so the Chrome layers beneath
 # stay cached. pnpm, so a bot's shell can install what its project asks for.
+# uv and uvx, so a connector someone runs with uvx comes along when they move here
+# (server/cloud-connections.ts) as an npx one does: about 32 MB, on every user's
+# PATH and out of the volume. What it downloads lives in the volume's cache.
+ARG UV_VERSION=0.13.4
+ARG TARGETARCH
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 poppler-utils unzip bubblewrap socat \
   && rm -rf /var/lib/apt/lists/* \
   && HOME=/tmp/omb-build-home npm install -g pnpm@10.33.0 \
-  && bwrap --version && socat -V | head -1 && HOME=/tmp/omb-build-home pnpm --version \
-  && rm -rf /tmp/omb-build-home /tmp/node-compile-cache
+  && uv_arch=x86_64 && if [ "$TARGETARCH" = arm64 ]; then uv_arch=aarch64; fi \
+  && mkdir -p /tmp/uv-install \
+  && curl -fsSL "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${uv_arch}-unknown-linux-gnu.tar.gz" | tar -xz -C /tmp/uv-install --strip-components=1 \
+  && install -m 0755 /tmp/uv-install/uv /tmp/uv-install/uvx /usr/local/bin/ \
+  && bwrap --version && socat -V | head -1 && HOME=/tmp/omb-build-home pnpm --version && uv --version | grep -qF "uv ${UV_VERSION}" \
+  && rm -rf /tmp/omb-build-home /tmp/uv-install /tmp/node-compile-cache
 # Caddy and Grok are pinned, so they sit beneath the engines, which change
 # more often.
 COPY --from=edge /caddy /usr/local/bin/caddy

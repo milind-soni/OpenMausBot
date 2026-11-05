@@ -476,6 +476,25 @@ describe("transcript viewport", () => {
     expect(view.current.following).toBe(true);
   });
 
+  it("reveals earlier rows on an upward scroll when the shown rows are too short to scroll (#4365)", () => {
+    // Hidden tool steps can leave a whole window shorter than the screen: no scrollbar, so no scroll events.
+    scroller.clientHeight = 20_000;
+    const view = mount({ messages: rows(300) });
+    expect(view.current.hiddenCount).toBe(180);
+    view.act(() => view.current.scrollHandlers.onWheel({ deltaY: -40 } as never));
+    expect(view.current.hiddenCount).toBe(60);
+    view.act(() => view.current.scrollHandlers.onTouchStart({ touches: [{ clientY: 100 }] } as never));
+    view.act(() => view.current.scrollHandlers.onTouchMove({ touches: [{ clientY: 200 }] } as never));
+    expect(view.current.hiddenCount).toBe(0);
+  });
+
+  it("loads an older page on an upward scroll when the whole thread so far is too short to scroll (#4365)", () => {
+    scroller.clientHeight = 10_000;
+    const view = mount({ messages: rows(50), hasMore: true });
+    view.act(() => view.current.scrollHandlers.onWheel({ deltaY: -40 } as never));
+    expect(dispatched).toEqual([{ type: "loadOlderMessages", threadId: "thread" }]);
+  });
+
   it("keeps following when arrow keys move through a menu or list", () => {
     const view = mount({ messages: rows(30) });
     const inMenu = { closest: (selector: string) => (selector.includes('[role="menu"]') ? {} : null) };

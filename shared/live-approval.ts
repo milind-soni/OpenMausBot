@@ -13,7 +13,7 @@ export type LiveCardKind = "approval" | "review" | "question";
  * can answer it any more. */
 export function liveCardKind(card: OptionCardData | undefined): LiveCardKind | null {
   if (!card?.requestId || card.answered || card.dismissed || card.expired) return null;
-  if (card.skillRequest || card.routineRequest || card.profileRequest || card.modelRequest || card.teamSetupRequest || card.mcpRequest || card.quotaSwitch) {
+  if (card.skillRequest || card.routineRequest || card.profileRequest || card.modelRequest || card.teamSetupRequest || card.mcpRequest || card.quotaSwitch || card.lendingLift) {
     return "review";
   }
   return card.tool ? "approval" : "question";
@@ -141,5 +141,6 @@ export const LIVE_COPY = {
       lastStep ? `; last step: ${lastStep}, ${duration(lastStepAgoMs)} ago` : ""}).`,
   signedOut: "The call has ended because the sign-in that started it has ended. Sign in again to start a new call.",
   unpaired: "The call has ended because the phone that started it was unpaired from this computer.",
+  goodbye: "The user asked to end the call. Say a short goodbye in one sentence and nothing else; the call ends right after.",
   permissionRequest: (prompt: string) => `You need the user's permission. Say it in your own words: ${prompt} Ask for a clear yes or no, then delegate their answer.`,
 };

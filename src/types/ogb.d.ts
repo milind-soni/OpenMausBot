@@ -138,6 +138,7 @@ const __APP_VERSION__: string;
       /** This computer's page, and My Cloud's own page once it is the person's home: the window onto My Cloud. */
       home?: import("../../electron/home-window.mjs").HomeBridge;
       desktopNotices?: import("../../electron/desktop-prefs.mjs").DesktopNoticesBridge;
+      desktopNotifications?: import("../../electron/desktop-notifications.mjs").DesktopNotificationsBridge;
       /** This computer's own page only: the account's full name, for a first run's profile (system-name.mjs). */
       desktopProfile?: { systemName(): Promise<string | null> };
       desktopAnalytics?: import("../../electron/desktop-prefs.mjs").DesktopAnalyticsBridge;
@@ -171,7 +172,8 @@ const __APP_VERSION__: string;
          * places). Absent on an older app. */
         places?: () => Promise<import("../../electron/cloud-rail.mjs").RailState>;
         /** Opens a circle main listed, by its id, through main's own switch: only from the person's click. */
-        open?: (id: string) => Promise<unknown>;
+        /** Nothing for a place of the account in use; for another account's, how its switch went. */
+        open?: (id: string) => Promise<import("../../electron/cloud-account.mjs").RailOpenResult | undefined>;
         /** ＋'s fixed choices: buy a Cloud (this computer's own sheet), a server's pairing link (`link`: the one pasted on the
          * sheet; without it, the clipboard's), or type its address. Resolves false when the person cancels Connect. */
         add?: (choice: "cloud" | "link" | "address", link?: string) => Promise<unknown>;
@@ -415,7 +417,7 @@ const __APP_VERSION__: string;
       openAtLogin?: { state(): Promise<{ available: boolean; on: boolean }>; set(on: boolean): Promise<{ available: boolean; on: boolean }> };
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(
-        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey",
+        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey",
         value: string,
       ): Promise<ConfigStatus>;
       /** In-app auto-update (packaged app only; dormant in dev). Updates

@@ -5,6 +5,7 @@ import {
   attachmentImageUrl,
   intakeFiles,
   formatSize,
+  imageBytesLeft,
   imageSlotsLeft,
   pasteSummary,
   type Attachment,
@@ -48,8 +49,9 @@ export function ComposerAttachments({
   const depth = useRef(0);
   // A drop past the images the message can still take is left out with a notice.
   const imageSlots = imageSlotsLeft(items);
-  const callbacks = useRef({ onAdd, onNotice, onPendingChange, allowImages, imageSlots, uploadImage });
-  callbacks.current = { onAdd, onNotice, onPendingChange, allowImages, imageSlots, uploadImage };
+  const imageBytes = imageBytesLeft(items);
+  const callbacks = useRef({ onAdd, onNotice, onPendingChange, allowImages, imageSlots, imageBytes, uploadImage });
+  callbacks.current = { onAdd, onNotice, onPendingChange, allowImages, imageSlots, imageBytes, uploadImage };
   const pendingDrops = useRef(new Set<symbol>());
 
   useEffect(() => {
@@ -84,6 +86,7 @@ export function ComposerAttachments({
           getPath: pathForFile,
           uploadImage: callbacks.current.uploadImage,
           imageSlots: callbacks.current.imageSlots,
+          imageBytes: callbacks.current.imageBytes,
         });
         if (attachments.length) callbacks.current.onAdd(attachments);
         if (message) callbacks.current.onNotice(message);

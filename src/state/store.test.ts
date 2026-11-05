@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { createElement } from "react";
+import { Component, createElement, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -15,7 +15,6 @@ import {
   liveCallFromFrame,
   loadSnapshotBoundary,
   openBot,
-  openNotificationTarget,
   openThread,
   persistBotUpdate,
   persistTaskApproval,
@@ -189,6 +188,13 @@ describe("independent bot threads", () => {
     for (const action of actions) expect(pinBotThreadAction(action, [bot])).toMatchObject({ threadId: "first" });
     const pinned: Action = { type: "send", botId: bot.id, text: "Background", threadId: "second" };
     expect(pinBotThreadAction(pinned, [bot])).toBe(pinned);
+  });
+
+  it("a frame without onlyPeopleAdded clears it: the bot is back to everyone", () => {
+    const limited = reducer(start(), { type: "botPatched", bot: { ...bot, onlyPeopleAdded: true } });
+    expect(limited.bots[0]?.onlyPeopleAdded).toBe(true);
+    const open = reducer(limited, { type: "botPatched", bot: { ...bot, onlyPeopleAdded: undefined } });
+    expect(open.bots[0]?.onlyPeopleAdded).toBeUndefined();
   });
 
   it("keeps background bot frames from switching the visible transcript or clearing unread", () => {
@@ -831,57 +837,34 @@ describe("notification routing", () => {
     ],
   }];
 
-  it("selects the bot and switches to the notification's exact task", () => {
-    const dispatch = vi.fn();
-
-    openNotificationTarget(dispatch, { botId: "bot-1", threadId: "detached-thread" }, { bots, groups }, true);
-
-    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
-      { type: "select", id: "bot-1" },
-      { type: "switchTask", botId: "bot-1", threadId: "detached-thread" },
-    ]);
-  });
-
-  it("opens the room when the thread is a group's — never a bot task switch that would 404", () => {
-    const dispatch = vi.fn();
-
-    openNotificationTarget(dispatch, { botId: "bot-1", threadId: "room-thread" }, { bots, groups }, true);
-
-    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "select", id: "room-1" }]);
-  });
-
-  it("opens the requesting conversation when a teammate's routine reports there", () => {
-    const dispatch = vi.fn();
-    openNotificationTarget(dispatch, { botId: "runner", threadId: "detached-thread" }, {
-      bots: [...bots, { id: "runner", threadId: "runner-thread", tasks: [] }], groups,
-    }, true);
-    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
-      { type: "select", id: "bot-1" },
-      { type: "switchTask", botId: "bot-1", threadId: "detached-thread" },
-    ]);
-  });
-
-  it("opens the room and restores the exact inactive channel task", () => {
-    const dispatch = vi.fn();
-
-    openNotificationTarget(dispatch, { botId: "bot-1", threadId: "older-room-thread" }, { bots, groups }, true);
-
-    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
-      { type: "select", id: "room-1" },
-      { type: "switchGroupTask", groupId: "room-1", threadId: "older-room-thread" },
-    ]);
-  });
-
-  it("lands on a plain bot select for a thread it cannot place, not an error", () => {
-    const dispatch = vi.fn();
-
-    openNotificationTarget(dispatch, { botId: "bot-1", threadId: "deleted-task-thread" }, { bots, groups }, true);
-
-    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "select", id: "bot-1" }]);
-  });
-
   describe("openThread", () => {
     const named = bots.map((bot) => ({ ...bot, name: "Scout" }));
+
+    it("opens the room when a notification's thread is a group's, never a bot switch that would 404", () => {
+      const dispatch = vi.fn();
+      openThread(dispatch, { botId: "bot-1", threadId: "room-thread" }, { bots: named, groups }, true);
+      expect(dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "select", id: "room-1" }, { type: "revealThread", threadId: "room-thread" }]);
+    });
+
+    it("opens the conversation that owns the thread when a teammate's routine reports there", () => {
+      const dispatch = vi.fn();
+      openThread(dispatch, { botId: "runner", threadId: "detached-thread" }, { bots: [...named, { id: "runner", name: "Runner", threadId: "runner-thread", tasks: [] }], groups }, true);
+      expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+        { type: "select", id: "bot-1" },
+        { type: "switchTask", botId: "bot-1", threadId: "detached-thread" },
+        { type: "revealThread", threadId: "detached-thread" },
+      ]);
+    });
+
+    it("shows the thread in the sidebar whichever list a switch came from", () => {
+      const switched = reducer({ ...initialState, bots: named as never }, { type: "switchTask", botId: "bot-1", threadId: "detached-thread" });
+      expect(switched.revealThread?.threadId).toBe("detached-thread");
+    });
+
+    it("takes down what covers the chat, so the click is seen to land", () => {
+      const covered = { ...initialState, appSettingsOpen: true, shortcutsOpen: true, pluginsOpen: true };
+      expect(reducer(covered, { type: "revealThread", threadId: "t" })).toMatchObject({ appSettingsOpen: false, shortcutsOpen: false, pluginsOpen: false });
+    });
 
     it("selects the bot, switches the view to the thread and reveals its row", () => {
       const dispatch = vi.fn();
@@ -908,6 +891,7 @@ describe("notification routing", () => {
       expect(openThread(dispatch, { botId: "bot-1", threadId: "deleted-thread" }, { bots: named, groups }, true)).toBe(false);
       expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
         { type: "select", id: "bot-1" },
+        { type: "revealThread", threadId: "deleted-thread" },
         { type: "notice", notice: { kind: "thread-gone", botName: "Scout" } },
       ]);
     });
@@ -916,6 +900,7 @@ describe("notification routing", () => {
       const dispatch = vi.fn();
       expect(openThread(dispatch, { botId: "deleted-bot", threadId: "deleted-thread" }, { bots: named, groups }, true)).toBe(false);
       expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+        { type: "revealThread", threadId: "deleted-thread" },
         { type: "notice", notice: { kind: "thread-gone", botName: null } },
       ]);
     });
@@ -962,8 +947,8 @@ describe("notification routing", () => {
 
     const followed = (threadId: string, threadsShown: boolean) => {
       const dispatch = vi.fn();
-      openNotificationTarget(dispatch, { botId: "bot-1", threadId }, { bots: [bot], groups: [] }, threadsShown);
-      return dispatch.mock.calls.map(([action]) => action as Action);
+      openThread(dispatch, { botId: "bot-1", threadId }, { bots: [bot], groups: [] }, threadsShown);
+      return dispatch.mock.calls.map(([action]) => action as Action).filter((action) => action.type !== "revealThread" && action.type !== "notice");
     };
 
     it("opens a thread a notification names without passing the reply the bot was left on as read, with threads hidden", () => {
@@ -993,6 +978,7 @@ describe("notification routing", () => {
       expect(openThread(dispatch, { botId: "bot-1", threadId: "deleted-thread" }, { bots: named, groups: [] }, false)).toBe(false);
       expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
         { type: "switchTask", botId: "bot-1", threadId: "later-chat" },
+        { type: "revealThread", threadId: "deleted-thread" },
         { type: "notice", notice: { kind: "thread-gone", botName: "Scout" } },
       ]);
     });
@@ -2847,6 +2833,11 @@ describe("restoring the open conversation", () => {
   });
 
   describe("the provider's own effect", () => {
+    class TestErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+      state = { failed: false };
+      static getDerivedStateFromError() { return { failed: true }; }
+      render() { return this.state.failed ? createElement("div", { id: "snapshot-crash" }) : this.props.children; }
+    }
     // The provider opens the one stream and pulls the snapshot itself, so the fixture answers both.
     class FixtureEventSource {
       static opened: FixtureEventSource[] = [];
@@ -2906,7 +2897,7 @@ describe("restoring the open conversation", () => {
       container = document.createElement("div");
       document.body.append(container);
       root = createRoot(container);
-      flushSync(() => root!.render(createElement(StoreProvider, null, createElement(Probe))));
+      flushSync(() => root!.render(createElement(TestErrorBoundary, null, createElement(StoreProvider, null, createElement(Probe)))));
       await settle();
       const [stream] = FixtureEventSource.opened;
       expect(FixtureEventSource.opened).toHaveLength(1);
@@ -2914,6 +2905,45 @@ describe("restoring the open conversation", () => {
       return { stored, stream };
     };
     const hello = () => ({ kind: "hello", resumed: false, cursor: "run:0" });
+
+    it("keeps the UI mounted when a reconnect receives a malformed bots snapshot", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      expect(seen.selectedId).toBe("bot-1");
+      vi.stubGlobal("fetch", () => Promise.resolve(new Response("{}")));
+      stream.send(hello());
+      await settle();
+      expect(container?.querySelector("#snapshot-crash")).toBeNull();
+      expect(seen.selectedId).toBe("bot-1");
+    });
+
+    it("keeps the UI mounted when a reconnect receives a malformed routines snapshot", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      vi.stubGlobal("fetch", (path: string) => Promise.resolve(new Response(JSON.stringify(
+        path.startsWith("/api/bots?") ? { bots: [first, second], groups: [room] } : {},
+      ))));
+      stream.send(hello());
+      await settle();
+      expect(container?.querySelector("#snapshot-crash")).toBeNull();
+      expect(seen.routinesLoadState).toBe("error");
+    });
+
+    it("keeps the engines and webhooks it had when a reconnect receives empty answers for them", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      vi.stubGlobal("fetch", (path: string) => Promise.resolve(new Response(JSON.stringify(
+        path.startsWith("/api/bots?") ? { bots: [first, second], groups: [room] } : {},
+      ))));
+      stream.send(hello());
+      await settle();
+      expect(container?.querySelector("#snapshot-crash")).toBeNull();
+      expect(Array.isArray(seen.instances)).toBe(true);
+      expect(Array.isArray(seen.webhooks)).toBe(true);
+    });
 
     it("the provider remembers each non-empty selection and never an empty one", async () => {
       const { stored, stream } = await boot();

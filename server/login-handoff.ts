@@ -45,7 +45,7 @@ export type LoginHandoffResult = { type: typeof LOGIN_HANDOFF_RESULT; requestId:
 
 const REQUEST_ID = /^[\w-]{8,64}$/u;
 const LOGIN_ID = /^[\w-]{1,128}$/u;
-const CONNECTION_ID = /^(?:mcp:[a-z][a-z0-9_-]{0,31}|key:\w{1,40}|composio|highlevel)$/u;
+const CONNECTION_ID = /^(?:mcp:[a-z][a-z0-9_-]{0,31}|key:\w{1,40}|composio|highlevel|email)$/u;
 const INSTALLATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const DIGEST = /^[0-9a-f]{64}$/u;
 

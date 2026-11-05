@@ -94,7 +94,7 @@ async function setup(options: { team?: boolean; origins?: string[]; lifetimeMs?:
     composio: { configured: () => false } as never,
   });
   const cards = createMcpSignInCards({
-    store, cfg: () => cfg, mcpOAuth,
+    store, cfg: () => cfg, mcpOAuth, followCard: () => {},
     personal: () => team.personMcp(),
     turnPerson: (threadId) => team.turnPerson(threadId),
     oauthFor: (person) => team.people.oauth(person),
