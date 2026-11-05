@@ -5,15 +5,16 @@
 //
 // tools/standalone/<engine>/
 //   <version>/      what the archive held, plus its install record
-//   bin/<program>   the only thing on PATH: a hard link to (or copy of) the current version's program
+//   bin/<program>   the only thing on PATH: a hard link to (or copy of) the current version's program, or for a launcher
+//                   (a program that runs the rest of its folder) a link to it inside that folder
 //   current.json    which version bin/ holds
 // bin/ goes on PATH after the person's own PATH and the vendors' default folders, so their own copy always wins.
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
-  closeSync, createReadStream, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, unlinkSync,
+  closeSync, createReadStream, existsSync, lstatSync, openSync, readdirSync, readFileSync, readlinkSync, readSync, realpathSync, renameSync, rmSync, unlinkSync,
 } from "node:fs";
-import { chmod, copyFile, link, lstat, mkdir, open, readdir, rename, rm, stat, unlink, writeFile, type FileHandle } from "node:fs/promises";
+import { chmod, copyFile, link, lstat, mkdir, open, readdir, rename, rm, stat, symlink, unlink, writeFile, type FileHandle } from "node:fs/promises";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
@@ -275,13 +276,29 @@ function verifiedCurrent(engineDir: string, release: StandaloneRelease): Standal
   // Nothing but the program goes on PATH; a rename Windows could not finish (.old-) is never a command anyone types.
   if (readdirSync(binDir).some((entry) => entry !== name && !entry.startsWith(OLD_PREFIX))) return null;
   const executablePath = join(binDir, name);
-  if (!realFile(executablePath)) return null;
+  const program = release.launcher ? launcherTarget(executablePath, pointer.version, asset.executable) : executablePath;
+  if (!program || !realFile(program)) return null;
   try {
-    if (hashFileSync(executablePath) !== expected) return null;
+    if (hashFileSync(program) !== expected) return null;
   } catch {
     return null;
   }
   return { version: pointer.version, executablePath, binDir };
+}
+
+/** bin/'s entry for a launcher is a link to exactly this version's program, written relative to bin/: anything else is
+ * not the app's (a link elsewhere is never followed). */
+function launcherLink(version: string, executable: string): string {
+  return join("..", version, ...executable.split("/"));
+}
+
+function launcherTarget(entry: string, version: string, executable: string): string | null {
+  try {
+    if (!lstatSync(entry).isSymbolicLink() || readlinkSync(entry) !== launcherLink(version, executable)) return null;
+  } catch {
+    return null;
+  }
+  return join(dirname(entry), launcherLink(version, executable));
 }
 
 /** At boot: the bin/ folder of each engine this app pins, once its program is checked, goes on PATH after everything else. */
@@ -612,7 +629,10 @@ async function activate(engineDir: string, release: StandaloneRelease, asset: St
   const target = join(binDir, name);
   const fresh = join(binDir, `${NEW_PREFIX}${randomUUID()}${extname(name)}`);
   try {
-    try {
+    if (release.launcher) {
+      // A launcher finds the rest of its folder from where it really is, so bin/ links to it rather than holding a copy.
+      await symlink(launcherLink(release.version, asset.executable), fresh);
+    } else try {
       await link(source, fresh);
     } catch {
       // A file system without hard links gets a copy.

@@ -26,7 +26,7 @@ import {
 } from "./quiet-status.ts";
 import { readSessionReport } from "./session-reports.ts";
 import { pickSessionModel, SessionModelControls, type AcpModelSelection } from "./session-model-controls.ts";
-import { versionFromProbe } from "./version-probe.ts"; import { engineHomes } from "../../engine-homes/engine-homes.ts";
+import { notThisCli, versionFromProbe } from "./version-probe.ts"; import { engineHomes } from "../../engine-homes/engine-homes.ts";
 
 export function skipSubscriptionAuthForLocalInject(model: string | undefined): boolean {
   return Boolean(decodeInjectId(model));
@@ -93,7 +93,7 @@ export interface AcpSupport {
   /** Existing native restrictions also participate in scoped session reuse. */
   toolScopeCacheKey?(context: { config: AcpConfig; env: Record<string, string | undefined>; cwd: string }): string;
   driverKind: string;
-  displayName: string;
+  displayName: string; /** What this CLI's own `--version` looks like: any other answer is another program behind the CLI path. */ cliVersion?: RegExp;
   /** Omit for subscription CLIs. Custom-only CLIs have no first-party cloud catalog. */
   access?: "subscription" | "custom";
   models: ModelCatalog;
@@ -313,7 +313,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
     metadata: {
       displayName: support.displayName,
       supportsMultipleInstances: true,
-      access: support.access ?? "subscription",
+      access: support.access ?? "subscription", ...(support.cliVersion ? { cliVersion: support.cliVersion } : {}),
     },
     install: support.install,
     models: support.models,
@@ -1587,7 +1587,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       const snapshot = async (): Promise<ProviderSnapshot> => {
         const env = childEnv();
         if (support.snapshot) return support.snapshot(env, config, instanceId);
-        const probe = await new Promise<{ version?: string; reason?: string }>((resolve) => {
+        const probe = await new Promise<{ version?: string; reason?: string; other?: true }>((resolve) => {
           execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout, stderr) => {
             if (err) {
               const failure = err as NodeJS.ErrnoException & { killed?: boolean };
@@ -1603,10 +1603,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               return;
             }
             const version = versionFromProbe(stdout, stderr);
-            resolve(version ? { version } : { reason: `\`${config.cli}\` returned no version. Check the configured executable with --version, then try again.` });
+            resolve(!version ? { reason: `\`${config.cli}\` returned no version. Check the configured executable with --version, then try again.` }
+              : support.cliVersion && !support.cliVersion.test(version) ? { reason: notThisCli(config.cli, support.displayName), other: true } : { version });
           });
         });
-        if (!probe.version) return { state: "unavailable", reason: probe.reason };
+        if (!probe.version) return { state: "unavailable", reason: probe.reason, ...(probe.other ? { notEngineCli: true } : {}) };
         return { state: "available", version: probe.version, authenticated: await support.isAuthenticated(env, config, instanceId) };
       };
 
