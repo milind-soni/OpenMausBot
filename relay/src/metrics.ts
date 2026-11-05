@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { monitorEventLoopDelay } from "node:perf_hooks";
+import { performance } from "node:perf_hooks";
 import { sha256 } from "./wire.ts";
 
 const COUNTERS = {
@@ -23,13 +23,39 @@ export interface Gauge {
   value: number;
 }
 
-export class Metrics {
-  private readonly counts = new Map<string, number>();
-  private readonly loopDelay = monitorEventLoopDelay({ resolution: 10 });
+const LAG_TICK_MS = 100;
+const LAG_SAMPLES_MAX = 4_096;
+
+/** How late a 100 ms timer fires, sample by sample: the time the event loop was busy with something else. */
+class LoopLag {
+  private samples: number[] = [];
+  private last = performance.now();
+  private readonly timer = setInterval(() => {
+    const now = performance.now();
+    if (this.samples.length < LAG_SAMPLES_MAX) this.samples.push(Math.max(0, now - this.last - LAG_TICK_MS));
+    this.last = now;
+  }, LAG_TICK_MS);
 
   constructor() {
-    this.loopDelay.enable();
+    this.timer.unref();
   }
+
+  /** p99 and max in seconds since the last call. */
+  take(): { p99: number; max: number } {
+    const sorted = this.samples.sort((a, b) => a - b);
+    this.samples = [];
+    if (sorted.length === 0) return { p99: 0, max: 0 };
+    return { p99: sorted[Math.floor(0.99 * (sorted.length - 1))]! / 1000, max: sorted.at(-1)! / 1000 };
+  }
+
+  stop(): void {
+    clearInterval(this.timer);
+  }
+}
+
+export class Metrics {
+  private readonly counts = new Map<string, number>();
+  private readonly lag = new LoopLag();
 
   inc(name: CounterName, label?: string | number, by = 1): void {
     const key = label === undefined ? name : `${name}\u0000${label}`;
@@ -54,16 +80,16 @@ export class Metrics {
     }
     const usage = process.cpuUsage();
     const memory = process.memoryUsage();
+    const lag = this.lag.take();
     const all: Gauge[] = [
       ...gauges,
-      { name: "relay_event_loop_lag_p99_seconds", help: "Event-loop delay p99 since the last scrape", value: this.loopDelay.percentile(99) / 1e9 },
-      { name: "relay_event_loop_lag_max_seconds", help: "Event-loop delay max since the last scrape", value: this.loopDelay.max / 1e9 },
+      { name: "relay_event_loop_lag_p99_seconds", help: "Event-loop lag p99 since the last scrape", value: lag.p99 },
+      { name: "relay_event_loop_lag_max_seconds", help: "Event-loop lag max since the last scrape", value: lag.max },
       { name: "process_resident_memory_bytes", help: "Resident memory", value: memory.rss },
       { name: "process_heap_used_bytes", help: "V8 heap in use", value: memory.heapUsed },
       { name: "process_cpu_seconds_total", help: "User and system CPU time", value: (usage.user + usage.system) / 1e6 },
       { name: "process_start_time_seconds", help: "Start time, Unix seconds", value: Math.round(Date.now() / 1000 - process.uptime()) },
     ];
-    this.loopDelay.reset();
     for (const { name, help, value } of all) {
       const type = name.endsWith("_total") ? "counter" : "gauge";
       lines.push(`# HELP ${name} ${help}`, `# TYPE ${name} ${type}`, `${name} ${Number.isFinite(value) ? value : 0}`);
@@ -72,7 +98,7 @@ export class Metrics {
   }
 
   close(): void {
-    this.loopDelay.disable();
+    this.lag.stop();
   }
 }
 

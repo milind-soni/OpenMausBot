@@ -179,7 +179,7 @@ async function scrape(url: string, bearer: string): Promise<Record<string, numbe
   const text = await (await fetch(`${url}/metrics`, { headers: { authorization: `Bearer ${bearer}` } })).text();
   const out: Record<string, number> = {};
   for (const line of text.split("\n")) {
-    const match = /^([a-z_]+(?:\{[^}]*\})?) ([0-9.e+-]+)$/.exec(line);
+    const match = /^([a-z0-9_]+(?:\{[^}]*\})?) ([0-9.e+-]+)$/.exec(line);
     if (match) out[match[1]!] = Number(match[2]);
   }
   return out;
