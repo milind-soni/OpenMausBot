@@ -31,7 +31,7 @@ export function BotProfileAvatarCard({
   mascotMotion: { kind: Exclude<MausMotion, "none">; nonce: number } | null;
   onPatch: (patch: AvatarPatch) => void;
 }) {
-  const { fileRef, crop, uploading, generating, setSavingConnection, busy, error, upload, removeImage, generate } = useAvatarImage(bot, onPatch);
+  const { fileRef, crop, uploading, generating, busy, error, upload, removeImage, generate } = useAvatarImage(bot, onPatch);
 
   return (
     <div className="overflow-hidden rounded-xl border border-hairline/40 bg-card">
@@ -188,7 +188,6 @@ export function BotProfileAvatarCard({
           disabled={uploading}
           generating={generating}
           onGenerate={generate}
-          onSavingChange={setSavingConnection}
         />
 
         {error && <div role="alert" className="mt-3 text-[12px] text-danger">{error}</div>}

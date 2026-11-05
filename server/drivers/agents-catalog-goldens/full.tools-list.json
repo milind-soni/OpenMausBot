@@ -1097,6 +1097,43 @@
       }
     },
     {
+      "name": "generate_image",
+      "description": "Create one image from a text description with the person's image provider; it is attached to your reply when the turn ends, so do not describe or link it again. Write the prompt in English, concrete and visual. Name a provider only when the person asked for that one.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "What the image shows: subject, setting, style, lighting."
+          },
+          "aspect": {
+            "type": "string",
+            "enum": [
+              "1:1",
+              "16:9",
+              "9:16"
+            ],
+            "description": "Shape; square when omitted."
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "openai",
+              "xai",
+              "gemini",
+              "openrouter",
+              "custom"
+            ],
+            "description": "Only when the person named one; it must be their base or backup."
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
+    },
+    {
       "name": "message_person",
       "description": "Reach a person in their Inbox, with news they may miss here or when asked to tell someone something. Their answer comes back here. Only what you write goes.",
       "inputSchema": {

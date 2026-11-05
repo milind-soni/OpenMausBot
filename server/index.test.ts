@@ -12683,14 +12683,15 @@ describe("harness HTTP API", () => {
       });
       expect(saved.status).toBe(200);
       expect(saved.body.imageGen).toEqual({ provider: "custom", configured: true, model: "local/image",
+        primary: { provider: "custom", model: "local/image", configured: true }, fallback: null, ready: true, maxPerTurn: 4,
         customUrl: "http://127.0.0.1:4321/v1", customModel: "local/image",
-        openaiConfigured: true, xaiConfigured: false, customKeyConfigured: true });
+        openaiConfigured: true, xaiConfigured: false, customKeyConfigured: true, geminiConfigured: false, openrouterConfigured: false });
       for (const secret of ["openai-avatar-fixture", "custom-avatar-fixture"]) {
         expect(JSON.stringify(saved.body)).not.toContain(secret);
         expect(readFileSync(join(home, ".openmausbot", "config.json"), "utf8")).not.toContain(secret);
       }
       const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
-      expect(disk.imageGen).toMatchObject({ key: "", customApiKey: "", provider: "custom" });
+      expect(disk.imageGen).toMatchObject({ key: "", customApiKey: "", primary: { provider: "custom" }, customModel: "local/image" });
 
       const preset = await api("PUT", "/api/config", { imageGen: { provider: "openai" } });
       expect(preset.body.imageGen).toMatchObject({ provider: "openai", configured: true, customKeyConfigured: true });

@@ -102,7 +102,7 @@ export function MausBotCustomize({ preview, name, nameRef, image, onName, onPatc
         {image.error && <p role="alert" data-mausbot-welcome-error="" className="mt-1 px-2 text-[13px] text-danger">{image.error}</p>}
         {generating && (
           <div className="mt-2">
-            <AvatarImageGenerator botLabel={name || "MausBot"} disabled={image.uploading} generating={image.generating} onGenerate={image.generate} onSavingChange={image.setSavingConnection} />
+            <AvatarImageGenerator botLabel={name || "MausBot"} disabled={image.uploading} generating={image.generating} onGenerate={image.generate} />
           </div>
         )}
       </div>
