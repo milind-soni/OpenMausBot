@@ -9,6 +9,7 @@ import { loadWebhookCredentials, webhookCredentialStore } from "@/lib/webhook-cr
 import { useStore } from "@/state/store";
 import { AppEventsSection } from "./AppEventsSection";
 import { useAllAutomationActions } from "./app-actions";
+import { RoutinePlan } from "../RoutinePlan";
 import { FixButton, StatusMark } from "./parts";
 
 const RECENT = 5;
@@ -115,6 +116,8 @@ export function AutomationPanel({ automation, sentence, onClose, onEdit, onDelet
         {name && instructions && <p data-testid="automation-instructions" className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-ink">{instructions}</p>}
 
         {automation.appTrigger && <AppEventsSection trigger={automation.appTrigger} />}
+
+        {automation.kind === "schedule" && <RoutinePlan routineId={automation.id} />}
 
         <section>
           <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wider text-ink-tertiary">{t("automations.panel.recent")}</h3>

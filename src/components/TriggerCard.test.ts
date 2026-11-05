@@ -89,6 +89,57 @@ describe("the chat card a bot-made automation leaves", () => {
     expect(html).not.toContain("Next: ");
   });
 
+  describe("the plan of a routine with steps", () => {
+    const scout2 = { id: "bot-2", name: "Chief", hidden: false };
+    const steps = [
+      { botId: "bot-1", instructions: "Find three AI news items." },
+      { botId: "bot-2", instructions: "Write a five-line summary.", model: "quick" },
+      { botId: "bot-1", instructions: "It mentions a release", check: true },
+    ];
+    const stepped = () => { fixture.state.bots = [bot, scout2]; fixture.state.routines = [{ ...routine, steps }]; };
+
+    it("lists each step with its bot, the quick model and an Only if question; a plain routine shows no plan", () => {
+      expect(render(scheduleCard)).not.toContain("data-routine-plan");
+      stepped();
+      const html = render(scheduleCard);
+      expect(html).toContain('data-routine-plan="routine-1"');
+      expect(html).toMatch(/<ol[^>]*aria-label="Steps"/);
+      expect(html).toContain("Find three AI news items.");
+      expect(html).toContain("Chief</span><span class=\"shrink-0 text-ink-tertiary\">· Quick model");
+      expect(html).toContain("Only if: It mentions a release");
+    });
+
+    it("follows the newest run: the model it recorded, and each step's state in words", () => {
+      stepped();
+      const run = (id: string, createdAt: number, stepRuns: unknown[]) => ({ id, routineId: "routine-1", botId: "bot-1", status: "running", scheduledFor: createdAt, createdAt, plan: steps, stepRuns });
+      fixture.state.routineRuns = [
+        run("old", now - 5_000, [{ status: "failed" }, { status: "skipped" }, { status: "skipped" }]),
+        run("new", now, [{ status: "done" }, { status: "running", model: "Haiku 5.5" }, { status: "pending" }]),
+      ];
+      const html = render(scheduleCard);
+      expect(html).toContain(">Done</span>");
+      expect(html).toContain("· Haiku 5.5");
+      expect(html).toContain(">running now</span>");
+      expect(html).not.toContain("Skipped");
+      expect(html).not.toContain("It didn&#x27;t finish");
+    });
+
+    it("shows the failed and skipped words", () => {
+      stepped();
+      fixture.state.routineRuns = [{ id: "r", routineId: "routine-1", botId: "bot-1", status: "failed", scheduledFor: now, createdAt: now, plan: steps, stepRuns: [{ status: "done" }, { status: "failed" }, { status: "skipped" }] }];
+      const html = render(scheduleCard);
+      expect(html).toContain("It didn&#x27;t finish</span>");
+      expect(html).toContain(">Skipped</span>");
+    });
+
+    it("sits under the receipt of an applied update that changed the steps", () => {
+      stepped();
+      const update = (changes: object) => card({ tool: "trigger", routineRequest: { ...base, operation: { action: "update", routineId: "routine-1", expectedUpdatedAt: now, changes }, undo: { name: "Morning brief" } } as never });
+      expect(render(update({ steps }))).toContain('data-routine-plan="routine-1"');
+      expect(render(update({ name: "Brief" }))).not.toContain("data-routine-plan");
+    });
+  });
+
   it("says Needs you with the plain reason when a run is waiting on the person", () => {
     fixture.state.routineRuns = [{ id: "run-3", routineId: "routine-1", botId: "bot-1", status: "waiting", attention: "Approve the reply to Ada?", scheduledFor: now, createdAt: now }];
     expect(render(scheduleCard)).toContain("Needs you: It&#x27;s waiting for your answer.");

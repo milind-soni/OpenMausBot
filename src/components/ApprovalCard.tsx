@@ -18,6 +18,7 @@ import { yourComputerAsk } from "@/lib/your-computer";
 import { computerAskWords } from "@/lib/computer-ask";
 import { TriggerCard } from "./TriggerCard";
 import { CardHint } from "./CardHint";
+import { RoutinePlan } from "./RoutinePlan";
 
 interface ToolLabels {
   [tool: string]: LocaleKey;
@@ -430,7 +431,13 @@ export function ApprovalCard({
   const applied = card.autoApplied === true && card.answered === "allow" && !card.held
     ? appliedChange(card, bot?.name ?? t("approval.someone"))
     : undefined;
-  if (applied) return <AppliedChangeLine card={card} name={bot?.name ?? t("approval.someone")} threadId={threadId} summary={applied} />;
+  if (applied) {
+    const operation = card.routineRequest?.operation;
+    // The server adds `steps` to an update's changes; the shared type does not carry it yet.
+    const planned = operation?.action === "update" && (operation.changes as { steps?: unknown[] | null }).steps?.length ? operation.routineId : undefined;
+    const line = <AppliedChangeLine card={card} name={bot?.name ?? t("approval.someone")} threadId={threadId} summary={applied} />;
+    return planned ? <div className="w-full max-w-[840px]">{line}<RoutinePlan routineId={planned} /></div> : line;
+  }
   const settled = card.answered;
   const expired = card.expired === true || staleRoutineCard(card);
   const via = card.answeredBy?.via;
