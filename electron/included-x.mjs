@@ -52,7 +52,9 @@ export function createIncludedXSync({ fetchAccess, send, device = paidDevice }) 
         if (access) { held = { deviceId, access }; refused = null; send(access); }
         else { held = null; refused = key; send(null, { offered: false }); }
       } catch {
-        // Offline or the Admin is down: the next state change tries again.
+        // Offline or the Admin is down: the next state change tries again. Another sign-in's token never stays with the server
+        // meanwhile: the account in use just changed, and its bots would run on the one before.
+        if (held && held.deviceId !== deviceId && planKey(latest) === key) { held = null; send(null); }
       } finally {
         inflight = null;
       }

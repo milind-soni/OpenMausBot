@@ -1,5 +1,6 @@
 // What a bot's turn is told about its teammates' open work: the assignments it still waits on, and, for a Chief, the
 // questions teammates it manages wait on the person for.
+import type { PersonWait } from "../../shared/person-wait.ts";
 import { chiefLevel } from "../chief-level.ts";
 import type { HandoffView } from "../coordinator.ts";
 import { escapeNotes } from "../peer-provenance.ts";
@@ -12,7 +13,7 @@ type WaitingQuestion = { bot: string; threadId: string; thread: string; question
 export interface TeammatePromptDeps {
   store: Pick<Store, "bots" | "bot">;
   outstandingDirect(threadId: string): readonly HandoffView[];
-  openPersonCard(threadId: string): { kind: "approval" | "question" | "review"; question?: string } | undefined;
+  openPersonCard(threadId: string): Pick<PersonWait, "kind" | "label"> | undefined;
   queuedStatus(node: HandoffView): string;
   isUnattended(botId: string, threadId: string): boolean;
   fullAccess(botId: string, threadId: string): boolean;
@@ -36,8 +37,8 @@ export function createTeammatePrompts(deps: TeammatePromptDeps) {
       return { requestId: node.id, bot: store.bot(node.botId)?.name ?? "Teammate", threadId: node.threadId, assignment: node.text.slice(0, 1_000),
         status: node.status === "queued" ? deps.queuedStatus(node)
           : card?.kind === "question" ? "stopped on its question in that teammate's thread; once you have the answer, send it there with coordinate_bots, or tell the person to open it"
-          : card ? "stopped on a card waiting for the person's approval in that teammate's thread; tell the person to open it" : "working on it now",
-        ...(card?.kind === "question" && card.question ? { question: escapeNotes(card.question).slice(0, 400) } : {}) };
+          : card ? "stopped on a card waiting for the person in that teammate's thread; tell the person to open it" : "working on it now",
+        ...(card?.kind === "question" && card.label ? { question: escapeNotes(card.label).slice(0, 400) } : {}) };
     });
     return ` Assignments you already sent are still outstanding, and nothing in this conversation cancelled them: ${JSON.stringify(listed)}. Do not resend them, do not poll or wait for them, and do not tell the user they were lost. Each result returns to this conversation on its own and resumes you then. To change or add to one, send the change to the same teammate with coordinate_bots, with its threadId as thread: it goes into that work, answering the question it waits on or reaching the turn running it. Answer the message above with that work still in flight.`;
   }

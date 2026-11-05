@@ -10,7 +10,7 @@ vi.mock("react", async (original) => ({
 }));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.showThreads }));
 
-import { useExternalChatLinks } from "./use-external-chat-links";
+import { useDesktopNotificationOpens, useExternalChatLinks } from "./use-external-chat-links";
 
 const scout: Bot = {
   id: "scout", threadId: "scout-main", name: "Scout", title: "", description: "", notifications: true,
@@ -85,6 +85,42 @@ describe("useExternalChatLinks", () => {
     vi.stubGlobal("window", {});
     const dispatch = vi.fn();
     expect(render(loaded, dispatch)).toEqual([undefined, undefined]);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+});
+
+describe("useDesktopNotificationOpens", () => {
+  const work = { ...scout, tasks: [...scout.tasks!, { threadId: "scout-work", title: "@CoS · work", createdAt: 2 }] };
+  const ready: AppState = { ...initialState, bots: [work], selectedId: "scout", hydrated: true };
+  const opens = (state: AppState, dispatch: (action: Action) => void) => {
+    fixture.effects = [];
+    useDesktopNotificationOpens(state, dispatch);
+    return fixture.effects.map((effect) => effect());
+  };
+
+  it("holds a click until a page just loaded for it has its bots, then opens that thread once", () => {
+    let deliver: ((target: unknown) => void) | undefined;
+    const unsubscribe = vi.fn();
+    vi.stubGlobal("window", { ogb: { desktopNotifications: { onOpen: (cb: (target: unknown) => void) => { deliver = cb; return unsubscribe; } } } });
+    const dispatch = vi.fn();
+    const [cleanup] = opens(loading, dispatch);
+    expect(cleanup).toBe(unsubscribe);
+    deliver!({ botId: "scout", threadId: "scout-work" });
+    opens(loading, dispatch);
+    expect(dispatch).not.toHaveBeenCalled();
+    opens(ready, dispatch);
+    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+      { type: "select", id: "scout" },
+      { type: "switchTask", botId: "scout", threadId: "scout-work" },
+      { type: "revealThread", threadId: "scout-work" },
+    ]);
+    expect(fixture.link).toBeNull();
+  });
+
+  it("subscribes to nothing on a browser or an older app", () => {
+    vi.stubGlobal("window", {});
+    const dispatch = vi.fn();
+    expect(opens(ready, dispatch)[0]).toBeUndefined();
     expect(dispatch).not.toHaveBeenCalled();
   });
 });

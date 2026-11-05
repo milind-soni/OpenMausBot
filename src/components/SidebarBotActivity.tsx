@@ -61,7 +61,7 @@ export function sidebarGroupActivityTasks(group: Group, bots: Bot[], queued: Rec
     const waiting = Boolean(speakerId) && bots.find((bot) => bot.id === speakerId)?.activity === "waiting-on-you";
     return {
       ...task, busy: roomThreadWorking(group, task.threadId), unread: task.threadId === group.threadId && Boolean(group.unread),
-      activity: waiting ? "waiting-on-you" as const : undefined,
+      activity: waiting || task.activity === "waiting-on-you" ? "waiting-on-you" as const : undefined,
     };
   });
   return tasks.map((task) => ({ ...task, queued: Boolean(queued[task.threadId]?.length) }))

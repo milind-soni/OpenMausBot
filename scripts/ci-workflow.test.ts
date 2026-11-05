@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { EVALS_LANE, PACKAGED_SERVER_LANE, vitestLane } from "./ci-linux-lanes.mjs";
@@ -91,6 +91,7 @@ describe("CI concurrency", () => {
     expect(run.run).toContain("pnpm exec vitest run ${{ matrix.files }} --shard=${{ matrix.shard }}/${{ matrix.shards }} ");
     expect(run.env?.OMB_VITEST_E2E).toBe("${{ matrix.e2e }}");
     expect(run.env?.OMB_VITEST_SUBSET).toBe("${{ matrix.files }}");
+    expect(run.env?.OMB_VITEST_WORKERS).toBe("${{ matrix.workers }}");
     const { include } = vitestMatrix(["macos-latest", "ubuntu-latest", "windows-latest"]);
     for (const os of ["macos-latest", "ubuntu-latest", "windows-latest"]) {
       const shards = include.filter((entry) => entry.os === os);
@@ -199,6 +200,21 @@ describe("CI concurrency", () => {
       const check = runGate({ ...gateNeeds(SELECTABLE_JOBS), [job]: { result } });
       expect(check.status, check.stderr).toBe(result === "success" ? 0 : 1);
     }
+  });
+
+  it("fails a broken source guard in static, before any runner is asked for", () => {
+    const steps = workflow.jobs.static.steps as { name?: string; run?: string; if?: string }[];
+    const guards = steps.find((step) => step.name === "Source guards")!;
+    expect(guards.if).toBeUndefined();
+    const named = guards.run!.split(" ").filter((word) => /\.test\.ts$|\/$/.test(word));
+    // A name vitest cannot match would silently drop that guard.
+    for (const path of named) expect(existsSync(new URL(`../${path}`, import.meta.url)), path).toBe(true);
+    expect(named).toContain("src/locales/");
+    expect(named).toContain("scripts/testing/file-size-ratchet.test.ts");
+    // Before the slow checks, so a failed guard reports within a minute.
+    expect(steps.indexOf(guards)).toBeLessThan(steps.findIndex((step) => step.run === "pnpm typecheck"));
+    // Every test the guards run stays in the suite: vitest's include has them, so the shards still deal them out.
+    expect(workflow.jobs.vitest.needs).toBe("static");
   });
 
   it.each(requiredRuntimeJobs)("accepts %s skipped only when static left it out", (job) => {

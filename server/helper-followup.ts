@@ -35,6 +35,7 @@ export function followupFacts(
   seen: { ai: HelperFollowupFacts["ai"]; apps: readonly string[] },
   bots: readonly BotRecord[],
   routines: readonly { botId: string; enabled: boolean }[],
+  connects?: string,
 ): HelperFollowupFacts {
   const person = defaultBotPerson(maus);
   const others = bots.filter((bot) => bot.id !== maus.id && !bot.hidden && !bot.defaultBot && !bot.movedTo && seenBy(bot, person));
@@ -44,6 +45,7 @@ export function followupFacts(
     apps: [...new Set(seen.apps)],
     bots: others.length,
     routines: routines.filter((routine) => routine.enabled && theirs.has(routine.botId)).length,
+    ...(connects === undefined ? {} : { connects }),
   };
 }
 
