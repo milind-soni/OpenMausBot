@@ -146,14 +146,27 @@ export function takeArrivingDefaultBot(store: Pick<Store, "bots" | "patchBot">, 
   if (!arriving.defaultBot || defaultBotPerson(arriving)) store.patchBot(id, { defaultBot: {} });
 }
 
+/** The MausBot this place made for itself, while nobody has used it: no soul, title, description or picture, one conversation, no line from a person. */
+export function unusedStarter(store: Pick<Store, "bot" | "messagesFor">, dataDir: string): BotRecord | null {
+  const own = ledger(dataDir)[""];
+  const seed = own ? store.bot(own) : null;
+  if (!seed) return null;
+  if (seed.soul?.trim() || seed.title || seed.description || seed.avatarUrl || (seed.tasks?.length ?? 1) > 1) return null;
+  if (store.messagesFor(seed.threadId).some((message) => message.role === "user")) return null;
+  return seed;
+}
+
+/** The place's main MausBot is absent or is that unused starter. */
+export function placeMausBotUnused(store: Pick<Store, "bots" | "bot" | "messagesFor">, dataDir: string): boolean {
+  const main = store.bots.find((bot) => bot.defaultBot && !defaultBotPerson(bot));
+  return !main || unusedStarter(store, dataDir)?.id === main.id;
+}
+
 /** After a bot arrives by a move: the MausBot this place made for itself (by id, from the ledger), once it is neither
  * the MausBot nor the Chief and nobody has used it, is archived, so the move leaves one MausBot and nothing of the
  * person's is lost. */
 export function retireUnusedStarter(store: Pick<Store, "bot" | "patchBot" | "messagesFor">, dataDir: string): void {
-  const own = ledger(dataDir)[""];
-  const seed = own ? store.bot(own) : null;
+  const seed = unusedStarter(store, dataDir);
   if (!seed || seed.defaultBot || seed.chiefOfStaff || seed.hidden) return;
-  if (seed.soul?.trim() || seed.title || seed.description || seed.avatarUrl || (seed.tasks?.length ?? 1) > 1) return;
-  if (store.messagesFor(seed.threadId).some((message) => message.role === "user")) return;
   store.patchBot(seed.id, { hidden: true, pinned: undefined });
 }
