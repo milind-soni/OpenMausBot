@@ -343,6 +343,7 @@ it("P7 keeps Mira's question from a Clive turn a scheduled routine started: it i
   await expect.poll(() => f.keys(f.clive.id), { timeout: 30_000 }).toEqual(["C-ROUTINE"]);
   expect(f.given("C-ROUTINE")).not.toContain("Teammates you manage wait on the person's answer");
   expect(f.replies("C-ROUTINE")).toEqual([`"${chat}" is not a thread you opened on Mira: use a threadId one of your coordinate_bots receipts gave, or one list_threads shows on them`]);
+  expect(await asking(f, chat)).toBeDefined();
   expect((await asking(f, chat))?.answered).toBeUndefined();
   expect(f.children()).toEqual([]);
 }), hostTimeout(90_000));

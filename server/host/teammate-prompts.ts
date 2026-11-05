@@ -28,6 +28,20 @@ export interface TeammatePromptDeps {
   now?(): number;
 }
 
+/** Security invariant: on a team a Chief answers a teammate's question only for the person it is for, and only in a turn that person drives.
+ * A room's turn names its person only through its generation. */
+export function createAsksActingPerson(deps: {
+  team: boolean;
+  requester(threadId: string, generation?: string): string | null;
+  askedPerson(botId: string, threadId: string): string | null;
+}) {
+  return (chiefThreadId: string, generation?: string): ((threadId: string, botId: string) => boolean) => {
+    if (!deps.team) return () => true;
+    const person = deps.requester(chiefThreadId, generation);
+    return (threadId, botId) => person !== null && deps.askedPerson(botId, threadId) === person;
+  };
+}
+
 export function createTeammatePrompts(deps: TeammatePromptDeps) {
   const { store } = deps;
 

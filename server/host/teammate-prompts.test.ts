@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { BotRecord } from "../store.ts";
 import { LONG_WAIT_MS, waitedWords } from "./long-waits.ts";
-import { createAsksActingPerson, createTeammatePrompts, type TeammatePromptDeps } from "./teammate-prompts.ts";
+import { createAsksActingPerson, createAsksActingPerson, createTeammatePrompts, type TeammatePromptDeps } from "./teammate-prompts.ts";
 
 vi.mock("../peer-roster.ts", () => ({ canManage: () => true }));
 
@@ -66,6 +66,18 @@ describe("what a Chief is told about its teammates' questions", () => {
     expect(forOther).toBe("");
     expect(asked).toEqual([["job", "t1", "mira"]]);
     expect(questions(true)).toContain("Keep the old page?");
+  });
+
+  it("on a team, a question counts only for the person the Chief's turn acts for; a room's turn names them through its generation", () => {
+    const asks = createAsksActingPerson({ team: true,
+      requester: (threadId, generation) => (threadId === "room" ? (generation === "turn" ? "ada" : null) : threadId === "ada-chat" ? "ada" : null),
+      askedPerson: (botId) => (botId === "mira" ? "ada" : botId === "fox" ? "bob" : null) });
+    expect(asks("ada-chat")("t1", "mira")).toBe(true);
+    expect(asks("ada-chat")("t1", "fox")).toBe(false);
+    expect(asks("room", "turn")("t1", "mira")).toBe(true);
+    expect(asks("room")("t1", "mira")).toBe(false);
+    expect(asks("nobody")("t1", "stray")).toBe(false);
+    expect(createAsksActingPerson({ team: false, requester: () => null, askedPerson: () => null })("nobody")("t1", "stray")).toBe(true);
   });
 
   it("a teammate's words stay in the JSON list, never loose in the sentence that tells the Chief what to do", () => {
