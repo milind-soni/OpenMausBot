@@ -81,7 +81,8 @@ const unusedPhone = { id: "phone-1", name: "Ada", lastSeenAt: Date.now() - 40 * 
 function visit() {
   f.index = 0; f.effects = [];
   const markup = renderToStaticMarkup(createElement(() => CompanionSection({})));
-  for (const effect of f.effects) effect();
+  // CompanionSection's own effects come first: the reveal, then the resume. Later ones belong to child lists.
+  f.effects[1]!();
   return markup;
 }
 
