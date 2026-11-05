@@ -9,41 +9,27 @@ import { Select } from "./Select";
 import { KEY_FIELD } from "./keys/KeyRow";
 
 type Engine = "claude" | "codex";
-const OFFICIAL = { claude: { name: "Anthropic", url: "https://api.anthropic.com", model: "claude-sonnet-5" }, codex: { name: "OpenAI", url: "https://api.openai.com/v1", model: "gpt-6.1-sol" } };
+const OFFICIAL = { claude: { name: "Anthropic", url: "https://api.anthropic.com" }, codex: { name: "OpenAI", url: "https://api.openai.com/v1" } };
 const INPUT = cn(KEY_FIELD, "font-sans");
-const MAPPINGS = [
-  ["opusModel", "claudeEndpoints.opus"],
-  ["sonnetModel", "claudeEndpoints.sonnet"],
-  ["haikuModel", "claudeEndpoints.haiku"],
-] as const;
-
 interface Draft {
   name: string;
   url: string;
   token: string;
-  model: string;
-  opusModel: string;
-  sonnetModel: string;
-  haikuModel: string;
 }
 
-const EMPTY: Draft = { name: "", url: "", token: "", model: "", opusModel: "", sonnetModel: "", haikuModel: "" };
+const EMPTY: Draft = { name: "", url: "", token: "" };
 
 const draftOf = (instance: InstanceInfo): Draft => ({
   name: instance.displayName,
   url: (instance.claudeEndpoint ?? instance.codexEndpoint)?.baseUrl ?? "",
   token: "",
-  model: (instance.claudeEndpoint ?? instance.codexEndpoint)?.models[0] ?? "",
-  opusModel: instance.claudeEndpoint?.opusModel ?? "",
-  sonnetModel: instance.claudeEndpoint?.sonnetModel ?? "",
-  haikuModel: instance.claudeEndpoint?.haikuModel ?? "",
 });
 
 function EndpointForm({ instance, engine, onDone }: { instance?: InstanceInfo; engine: Engine; onDone: () => void }) {
   const { dispatch } = useStore();
   const official = OFFICIAL[engine];
   const [provider, setProvider] = useState(instance && (instance.claudeEndpoint ?? instance.codexEndpoint)?.baseUrl !== official.url ? "custom" : "official");
-  const [draft, setDraft] = useState<Draft>(instance ? draftOf(instance) : { ...EMPTY, name: official.name, url: official.url, model: official.model });
+  const [draft, setDraft] = useState<Draft>(instance ? draftOf(instance) : { ...EMPTY, name: official.name, url: official.url });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const field = (key: keyof Draft) => ({
@@ -52,7 +38,7 @@ function EndpointForm({ instance, engine, onDone }: { instance?: InstanceInfo; e
     spellCheck: false,
     disabled: saving,
   });
-  const ready = Boolean(draft.name.trim() && draft.url.trim() && draft.model.trim() && (instance || draft.token.trim()));
+  const ready = Boolean(draft.name.trim() && draft.url.trim() && (instance || draft.token.trim()));
 
   const save = async () => {
     if (saving || !ready) return;
@@ -61,8 +47,6 @@ function EndpointForm({ instance, engine, onDone }: { instance?: InstanceInfo; e
     const body = {
       displayName: draft.name.trim(),
       baseUrl: draft.url.trim(),
-      model: draft.model.trim(),
-      ...(engine === "claude" ? { opusModel: draft.opusModel.trim(), sonnetModel: draft.sonnetModel.trim(), haikuModel: draft.haikuModel.trim() } : {}),
       ...(draft.token.trim() ? { token: draft.token.trim() } : {}),
     };
     try {
@@ -86,7 +70,7 @@ function EndpointForm({ instance, engine, onDone }: { instance?: InstanceInfo; e
         <Select aria-label={t("agentEndpoints.provider")} value={provider} disabled={saving} onChange={event => {
           const value = event.target.value;
           setProvider(value);
-          setDraft(current => ({ ...current, token: "", ...(value === "official" ? { name: official.name, url: official.url, model: official.model } : { name: "", url: "", model: "" }) }));
+          setDraft(current => ({ ...current, token: "", ...(value === "official" ? { name: official.name, url: official.url } : { name: "", url: "" }) }));
         }}>
           <option value="official">{official.name}</option>
           <option value="custom">{t("agentEndpoints.custom")}</option>
@@ -106,20 +90,7 @@ function EndpointForm({ instance, engine, onDone }: { instance?: InstanceInfo; e
         <input {...field("token")} type="password" maxLength={4096} autoComplete="off" aria-label={t("claudeEndpoints.token")} className={cn(INPUT, "font-mono")}
           placeholder={instance ? t("claudeEndpoints.tokenKeep") : ""} />
       </label>
-      <label className="flex flex-col gap-1 text-[12px] font-medium text-ink">
-        {t("claudeEndpoints.model")}
-        <input {...field("model")} maxLength={160} placeholder={official.model} aria-label={t("claudeEndpoints.model")} className={cn(INPUT, "font-mono")} />
-      </label>
       <p className="text-[12px] leading-4 text-ink-secondary">{t("claudeEndpoints.modelHint")}</p>
-      {engine === "claude" && <details className="text-[12px] text-ink-secondary">
-        <summary className="cursor-pointer select-none hover:text-ink">{t("claudeEndpoints.mappings")}</summary>
-        <div className="mt-2 flex flex-col gap-1.5">
-          {MAPPINGS.map(([key, label]) => (
-            <input key={key} {...field(key)} maxLength={160} aria-label={t(label)} placeholder={t(label)} className={cn(INPUT, "font-mono")} />
-          ))}
-          <p className="leading-relaxed">{t("claudeEndpoints.mappingsHint")}</p>
-        </div>
-      </details>}
       {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onDone} disabled={saving} className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-control disabled:opacity-50">{t("common.cancel")}</button>
@@ -159,7 +130,6 @@ function EndpointRow({ instance, onEdit }: { instance: InstanceInfo; onEdit: () 
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13px] font-medium text-ink" title={instance.displayName}>{instance.displayName}</div>
           <div className="truncate font-mono text-[11px] text-ink-secondary" title={endpoint?.baseUrl}>{endpoint?.baseUrl}</div>
-          <div className="truncate text-[12px] text-ink-secondary">{endpoint?.models.join(" · ")}</div>
         </div>
         <button type="button" onClick={onEdit} disabled={removing} className="shrink-0 rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50">
           {t("claudeEndpoints.edit")}

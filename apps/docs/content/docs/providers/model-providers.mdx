@@ -161,14 +161,13 @@ To run Claude bots on DeepSeek, GLM or another host that speaks Claude
 Code's API, add a **custom endpoint** in Settings → Engines, in the Claude
 card:
 
-- **Add endpoint** takes a name, the endpoint's base URL, its token and the
-  model id the endpoint serves. Model mappings for Opus, Sonnet and Haiku
-  are optional.
+- **Add endpoint** takes a provider, name, base URL and API key. Choose a
+  model separately in each bot's configuration. Official providers use the
+  standard catalog; custom gateways supply their models through `/v1/models`.
 - Each endpoint is its own engine with its own directory, so a bot chooses
   it like any other AI. It never reads or writes this computer's
   `~/.claude`, and the Claude Code on this computer keeps its own sign-in.
-- Its bots run the model the endpoint serves. A bot that still has a Claude
-  model selected runs the endpoint's main model instead.
+- Each bot can choose a different model from the endpoint's catalog.
 - The token is saved in OpenMausBot's own `config.json` and sent only to the
   base URL you enter. Removing an endpoint removes only that entry.
 
@@ -203,7 +202,7 @@ to ChatGPT sign-in and your organisation's models.
 1. Open **Settings → Engines** and expand the Codex/ChatGPT card.
 2. Under **Codex direct API**, choose **Add endpoint**.
 3. Select **OpenAI** for the official API, or **Custom gateway (CLIProxyAPI or compatible)**.
-4. Enter the API key and model ID. For a custom gateway, also enter its name
+4. Enter the API key. For a custom gateway, also enter its name
    and base URL, such as `https://gateway.example.com/v1`.
 5. Save, then select the new engine and model for a bot.
 
@@ -217,8 +216,11 @@ Remove an endpoint after moving any bots and the default model off it.
 A Codex gateway must implement **streaming Responses** (`POST /v1/responses`)
 and tool calls. A Chat Completions-only gateway cannot run the native Codex
 agent; use the chat engine for that protocol. Codex direct endpoints use
-HTTP streaming and load their MCP tools up front. Enter the exact model ID
-served by the gateway; this setup does not discover models automatically.
+HTTP streaming and load their MCP tools up front. Models are selected per bot.
+Official providers use the standard catalog. Custom gateways must expose a
+`/models` catalog at their API root; saving discovers the available models.
+If discovery fails or returns no valid models, the form keeps your draft and
+asks you to check the URL, API key and catalog support.
 
 For Claude Code, use **Add endpoint** in the Claude card and select
 **Anthropic** or **Custom gateway**. The official preset uses an API key

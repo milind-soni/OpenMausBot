@@ -6,10 +6,11 @@ import type { CodexEndpointInfo } from "../shared/claude-endpoint.ts";
 import { claudeEndpointSchema } from "./claude-endpoints.ts";
 import { DATA_DIR, persistableInstanceConfigs, type AppConfig } from "./config.ts";
 import type { InstanceConfig, InstanceConfigMap } from "./contracts.ts";
+import { STATIC_CODEX_MODELS } from "./drivers/codex-catalog.ts";
 import { endpointBaseUrl } from "./openai-compat-endpoints.ts";
 
 export const codexEndpointSchema = claudeEndpointSchema.pick({ displayName: true, baseUrl: true, token: true, model: true })
-  .extend({ model: z.string().trim().min(1).max(160).regex(/^[\w][\w./+-]*$/, "Use the model id the Responses endpoint serves."), baseUrl: claudeEndpointSchema.shape.baseUrl.refine(value => {
+  .extend({ model: z.string().trim().min(1).max(160).regex(/^[\w][\w./+-]*$/, "Use the model id the Responses endpoint serves.").optional(), baseUrl: claudeEndpointSchema.shape.baseUrl.refine(value => {
     const address = endpointBaseUrl(value);
     if (!address) return false;
     const url = new URL(address);
@@ -50,7 +51,7 @@ export function newCodexEndpoint(cfg: AppConfig, body: z.infer<typeof codexEndpo
   const cli = source ? configOf(source).cli : undefined;
   instances[instanceId] = {
     driver: "codex", access: "custom", displayName: body.displayName,
-    config: { ...(cli ? { cli } : {}), endpoint: { url: endpointBaseUrl(body.baseUrl)!, models: [body.model] } },
+    config: { ...(cli ? { cli } : {}), endpoint: { url: endpointBaseUrl(body.baseUrl)!, models: body.model ? [body.model] : [...new Set([STATIC_CODEX_MODELS.default, ...STATIC_CODEX_MODELS.options.map(option => option.id)])] } },
     environment: { CODEX_HOME: join(DATA_DIR, "providers", instanceId), OPENMAUSBOT_CODEX_API_KEY: body.token },
   };
   return { instanceId, instances };

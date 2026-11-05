@@ -43,12 +43,12 @@ describe("Claude custom endpoints settings", () => {
     expect(html).toContain("Add endpoint");
   });
 
-  it("lists each endpoint's address and models, and never its token", () => {
+  it("lists each endpoint's address, and never its token", () => {
     const html = render([endpoint()]);
     expect(html).toContain("DeepSeek");
     expect(html).toContain("https://api.deepseek.test/anthropic");
-    expect(html).toContain("deepseek-chat");
-    expect(html).toContain("deepseek-reasoner");
+    expect(html).not.toContain("deepseek-chat");
+    expect(html).not.toContain("deepseek-reasoner");
     expect(html).toContain("Edit");
     expect(html).toContain("Remove DeepSeek");
     // The API answer carries only whether a token is saved, so no field holds one.

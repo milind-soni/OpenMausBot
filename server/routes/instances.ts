@@ -1,3 +1,4 @@
+import { agentEndpointAddress, discoverAgentEndpointModels } from "../agent-endpoint-models.ts";
 import { codexEndpointSchema, codexEndpointUpdateSchema, newCodexEndpoint, updateCodexEndpoint, withCodexEndpointInfo, isCodexEndpoint } from "../codex-endpoints.ts";
 import { userError, userErrorFields } from "../user-errors.ts";
 import { randomUUID } from "node:crypto";
@@ -177,11 +178,12 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       }
       const codex = path.endsWith("/codex-endpoint");
       const parsed = (codex ? codexEndpointSchema : claudeEndpointSchema).safeParse(await readBody(req, 16384));
-      if (!parsed.success) return json(res, 400, { error: codex ? parsed.error.issues[0]?.message ?? "Check the endpoint settings." : "Enter a name, an http(s) base URL, a token and the model the endpoint serves." });
+      if (!parsed.success) return json(res, 400, { error: codex ? parsed.error.issues[0]?.message ?? "Check the endpoint settings." : "Enter a name, an http(s) base URL, an API key." });
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
       providerConfigBusy.set(true);
       try {
         const { instanceId, instances } = (codex ? newCodexEndpoint : newClaudeEndpoint)(cfg, parsed.data);
+        if (!parsed.data.model) await discoverAgentEndpointModels(instances[instanceId]);
         await persistProviderInstance(instanceId, instances);
         return json(res, 201, { instanceId, instances: await describeInstances() });
       } catch (error) {
@@ -198,7 +200,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       const instanceId = endpointPatch[1];
       const codex = endpointPatch[2] === "codex";
       const parsed = (codex ? codexEndpointUpdateSchema : claudeEndpointUpdateSchema).safeParse(await readBody(req, 16384));
-      if (!parsed.success) return json(res, 400, { error: "Check the address, token and model ids." });
+      if (!parsed.success) return json(res, 400, { error: "Check the address and API key." });
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
       if (busyProviderSelections().some((selection) => selection.instanceId === instanceId)) {
         return json(res, 409, { error: "Wait for bots using this endpoint to finish before changing its settings." });
@@ -207,6 +209,9 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       providerInstancesChanging.add(instanceId);
       try {
         const { instances } = (codex ? updateCodexEndpoint : updateClaudeEndpoint)(cfg, instanceId, parsed.data);
+        const previous = persistableInstanceConfigs(cfg)[instanceId];
+        const addressChanged = agentEndpointAddress(previous) !== agentEndpointAddress(instances[instanceId]);
+        if (!parsed.data.model && (parsed.data.token !== undefined || addressChanged)) await discoverAgentEndpointModels(instances[instanceId]);
         await persistProviderInstance(instanceId, instances);
         return json(res, 200, { instances: await describeInstances() });
       } catch (error) {

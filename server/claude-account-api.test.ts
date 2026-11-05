@@ -109,7 +109,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   clientToken = paired.token;
   const port = await freePortBlock([0, 1]);
   base = `http://127.0.0.1:${port}`;
-  const offlinePrelude = `data:text/javascript,${encodeURIComponent('globalThis.fetch = async () => new Response("offline fixture", { status: 503 });')}`;
+  const offlinePrelude = `data:text/javascript,${encodeURIComponent('globalThis.fetch = async (url) => String(url).startsWith("https://catalog-fixture.example/") ? Response.json({ data: [{ id: "model-a" }, { id: "model-b" }] }) : new Response("offline fixture", { status: 503 });')}`;
   child = spawn(process.execPath, ["--import", offlinePrelude, join(SERVER_DIR, "index.ts")], {
     cwd: join(SERVER_DIR, ".."),
     env: {
@@ -139,6 +139,42 @@ afterAll(async () => {
 });
 
 describe("Claude account HTTP API", () => {
+  it.each(["claude", "codex"])("connects %s without a model and keeps independent bot choices", async engine => {
+    const created = await api("POST", `/api/instances/${engine}-endpoint`, { displayName: "Catalog fixture", baseUrl: "https://catalog-fixture.example/v1", token: "catalog-fixture-key" });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const id = created.body.instanceId;
+    const instance = created.body.instances.find((row: any) => row.instanceId === id);
+    expect(instance.models.options).toEqual(expect.arrayContaining([expect.objectContaining({ id: "model-a", custom: true }), expect.objectContaining({ id: "model-b", custom: true })]));
+    const first = await addBotOn(id, "model-a");
+    const second = await addBotOn(id, "model-b");
+    expect((await bot(first.id)).modelSelection.model).toBe("model-a");
+    expect((await bot(second.id)).modelSelection.model).toBe("model-b");
+    expect((await api("PATCH", `/api/instances/${id}/${engine}-endpoint`, { displayName: "Renamed", baseUrl: "https://catalog-fixture.example/v1" })).status).toBe(200);
+    const configs = saved().instances[id].config;
+    expect(engine === "codex" ? configs.endpoint.models : configs.endpointModels).toEqual(["model-a", "model-b"]);
+  });
+
+  it.each([
+    ["claude", "https://api.anthropic.com"],
+    ["codex", "https://api.openai.com/v1"],
+  ])("connects official %s without choosing a provider-wide model", async (engine, baseUrl) => {
+    const result = await api("POST", `/api/instances/${engine}-endpoint`, { displayName: "Official fixture", baseUrl, token: "official-fixture-key" });
+    expect(result.status, JSON.stringify(result.body)).toBe(201);
+    const instance = result.body.instances.find((row: any) => row.instanceId === result.body.instanceId);
+    expect(instance.models.options.length).toBeGreaterThan(1);
+    expect(instance.models.options.every((option: any) => option.custom)).toBe(true);
+    expect(saved().instances[result.body.instanceId].environment).not.toHaveProperty("ANTHROPIC_MODEL");
+  });
+
+  it("does not persist an endpoint when gateway model discovery fails", async () => {
+    const before = Object.keys(saved().instances);
+    const result = await api("POST", "/api/instances/codex-endpoint", { displayName: "Failed fixture", baseUrl: "https://offline.example/v1", token: "failed-fixture-secret" });
+    expect(result.status).toBe(400);
+    expect(result.body.error).toContain("Could not discover gateway models");
+    expect(JSON.stringify(result.body)).not.toContain("failed-fixture-secret");
+    expect(Object.keys(saved().instances)).toEqual(before);
+  });
+
   it("creates, edits and removes an isolated Codex API endpoint without OAuth or key disclosure", async () => {
     const fields = { displayName: "CLIProxyAPI", baseUrl: "https://gateway.example/v1", token: "codex-api-fixture-secret", model: "gateway-model" };
     const created = await api("POST", "/api/instances/codex-endpoint", fields);

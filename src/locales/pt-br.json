@@ -4140,7 +4140,7 @@
   "claudeEndpoints.token": "Token",
   "claudeEndpoints.tokenKeep": "Deixe em branco para manter o token salvo",
   "claudeEndpoints.model": "Modelo",
-  "claudeEndpoints.modelHint": "O ID do modelo que o endpoint oferece, como deepseek-chat. Os bots deste endpoint usam esse modelo, a menos que você escolha outro dos modelos dele.",
+  "claudeEndpoints.modelHint": "Escolha os modelos na configuração de cada agente. Provedores oficiais usam a lista padrão; gateways personalizados fornecem seus modelos automaticamente.",
   "claudeEndpoints.mappings": "Mapeamento de modelos (opcional)",
   "claudeEndpoints.mappingsHint": "Qual modelo o endpoint usa para tarefas do Opus, do Sonnet e do Haiku.",
   "claudeEndpoints.opus": "Modelo para Opus",

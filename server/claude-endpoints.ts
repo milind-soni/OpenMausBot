@@ -9,7 +9,7 @@ import type { ClaudeEndpointInfo } from "../shared/claude-endpoint.ts";
 import { assertSeparateClaudeAccount } from "./claude-accounts.ts";
 import { DATA_DIR, persistableInstanceConfigs, type AppConfig } from "./config.ts";
 import type { InstanceConfig, InstanceConfigMap } from "./contracts.ts";
-import { CLAUDE_MODEL_ID } from "./drivers/claude-model-extras.ts";
+import { CLAUDE_MODEL_ID, STATIC_CLAUDE_MODELS } from "./drivers/claude-model-extras.ts";
 import { endpointBaseUrl } from "./openai-compat-endpoints.ts";
 
 const displayName = z.string().trim().min(1).max(80).refine((value) => !/\p{Cc}/u.test(value), "Name cannot contain control characters");
@@ -22,7 +22,7 @@ export const claudeEndpointSchema = z.object({
   displayName,
   baseUrl,
   token,
-  model,
+  model: model.optional(),
   opusModel: optionalModel.optional(),
   sonnetModel: optionalModel.optional(),
   haikuModel: optionalModel.optional(),
@@ -96,7 +96,7 @@ function endpointEnvironment(url: string, secret: string, fields: EndpointFields
     ...(address === "https://api.anthropic.com" ? {} : { ANTHROPIC_AUTH_TOKEN: secret }),
     // Claude Code's own auth probe and a turn both need a key they recognize; the endpoint's token is that key.
     ANTHROPIC_API_KEY: secret,
-    ANTHROPIC_MODEL: (fields.model ?? "").trim(),
+    ...(fields.model ? { ANTHROPIC_MODEL: fields.model.trim() } : {}),
   };
   for (const [field, key] of TIERS) {
     const value = fields[field]?.trim();
@@ -133,7 +133,7 @@ export function newClaudeEndpoint(cfg: AppConfig, body: z.infer<typeof claudeEnd
       ...(cli ? { cli } : {}),
       configDir: join(DATA_DIR, "providers", instanceId),
       requireApiKey: true,
-      endpointModels: endpointModels(body),
+      endpointModels: body.model ? endpointModels(body) : [...new Set([STATIC_CLAUDE_MODELS.default, ...STATIC_CLAUDE_MODELS.options.map(option => option.id)])],
     },
     environment: endpointEnvironment(body.baseUrl, body.token, body),
   };
@@ -154,7 +154,7 @@ export function updateClaudeEndpoint(cfg: AppConfig, instanceId: string, body: E
   if (!address) throw Object.assign(new Error("Enter an http(s) base URL."), { status: 400 });
   // A saved token belongs to the address it was entered for.
   if (body.token === undefined && address !== endpointBaseUrl(saved.baseUrl)) throw Object.assign(new Error("Enter the endpoint's token again for the new address."), { status: 400 });
-  const fields: EndpointFields = { baseUrl: address, model: body.model ?? saved.models[0] };
+  const fields: EndpointFields = { baseUrl: address, model: body.model ?? entry.environment?.ANTHROPIC_MODEL };
   if (body.displayName !== undefined) fields.displayName = body.displayName;
   for (const [field, key] of TIERS) {
     const value = body[field] !== undefined ? body[field] : entry.environment?.[key];
@@ -166,7 +166,7 @@ export function updateClaudeEndpoint(cfg: AppConfig, instanceId: string, body: E
     ...entry,
     ...(fields.displayName ? { displayName: fields.displayName } : {}),
     environment: endpointEnvironment(address, secret, fields),
-    config: { ...rawConfig(entry), endpointModels: endpointModels(fields) },
+    config: { ...rawConfig(entry), endpointModels: body.model !== undefined || TIERS.some(([field]) => body[field] !== undefined) ? endpointModels(fields) : saved.models },
   };
   return { instances };
 }
