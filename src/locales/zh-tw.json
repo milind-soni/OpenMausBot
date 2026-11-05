@@ -4600,6 +4600,8 @@
   "limits.resets": "{time} 重置",
   "limits.windowAtLimit": "已達上限",
   "limits.clearsOnReply": "等 {engine} 能再次回覆後會自動解除。",
+  "limits.cardTitle": "{engine} 用量",
+  "limits.checked": "{when}檢查",
   "botAccess.share": "分享",
   "botAccess.title": "分享 {bot}",
   "botAccess.addPlaceholder": "依姓名或電子郵件新增成員",

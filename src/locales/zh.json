@@ -4885,6 +4885,8 @@
   "limits.resets": "{time} 重置",
   "limits.windowAtLimit": "已达上限",
   "limits.clearsOnReply": "等 {engine} 能再次回复后会自动解除。",
+  "limits.cardTitle": "{engine} 用量",
+  "limits.checked": "{when}检查",
   "limits.dueOne": "在此之前有 1 个自动化会运行",
   "limits.dueMany": "在此之前有 {count} 个自动化会运行",
   "limits.moveAfterReset": "移到重置之后",

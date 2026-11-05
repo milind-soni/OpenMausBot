@@ -6511,6 +6511,8 @@
   "settings.recovery.ownBackups": "Boty z własnymi modelami zapasowymi (Model → Modele zapasowe dla tego bota) używają ich, niezależnie od tego, czy to jest włączone.",
   "limits.windowAtLimit": "Osiągnięto limit",
   "limits.clearsOnReply": "Blokada zniknie sama, gdy {engine} znów odpowie.",
+  "limits.cardTitle": "Wykorzystanie {engine}",
+  "limits.checked": "sprawdzono {when}",
   "botAccess.share": "Udostępnij",
   "botAccess.title": "Udostępnij {bot}",
   "botAccess.addPlaceholder": "Dodaj osoby po imieniu lub e-mailu",

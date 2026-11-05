@@ -5725,6 +5725,8 @@
   "settings.recovery.ownBackups": "Los bots con sus propios respaldos (Modelo → Modelos de respaldo de este bot) usan esos en su lugar, esté esto activado o no.",
   "limits.windowAtLimit": "En su límite",
   "limits.clearsOnReply": "Se resuelve solo cuando {engine} vuelva a responder.",
+  "limits.cardTitle": "Uso de {engine}",
+  "limits.checked": "comprobado {when}",
   "botAccess.share": "Compartir",
   "botAccess.title": "Compartir {bot}",
   "botAccess.addPlaceholder": "Añade personas por nombre o correo",
