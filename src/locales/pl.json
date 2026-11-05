@@ -193,7 +193,7 @@
   "server.mcp.signIn.card": "Serwer MCP {label} wymaga zalogowania. Otwórz tę rozmowę w OpenMausBot, aby się zalogować.",
   "server.mcp.signIn.description": "{bot} dodał(a) serwer MCP {label} ({host}). Zaloguj się, aby {bot} mógł z niego korzystać.",
   "server.mcp.signIn.onYourMac": "Otwórz ten czat na swoim Macu, aby zalogować się do {label}.",
-  "server.mcp.signIn.inSettings": "Dokończ to logowanie w Ustawienia → Serwery MCP.",
+  "server.mcp.signIn.inSettings": "Dokończ to logowanie w Aplikacje → Serwery MCP.",
   "server.mcp.signIn.onlyPerson": "Zalogować się tutaj może tylko {name}.",
   "server.mcp.signIn.onlyOwner": "Zalogować się tutaj może tylko osoba, do której należy ten czat.",
   "server.mcp.signIn.adminOnly": "Zalogować się do {label} może tylko administrator tej instalacji.",

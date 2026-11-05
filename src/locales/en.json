@@ -263,7 +263,7 @@
   "server.mcp.signIn.card": "{label}'s MCP server needs a sign-in. Open this conversation in OpenMausBot to sign in.",
   "server.mcp.signIn.description": "{bot} added {label}'s MCP server ({host}). Sign in so {bot} can use it.",
   "server.mcp.signIn.onYourMac": "Open this chat on your Mac to sign in to {label}.",
-  "server.mcp.signIn.inSettings": "Finish this sign-in in Settings → MCP servers.",
+  "server.mcp.signIn.inSettings": "Finish this sign-in in Apps → MCP servers.",
   "server.mcp.signIn.onlyPerson": "Only {name} can sign in to this.",
   "server.mcp.signIn.onlyOwner": "Only the person this chat is for can sign in to this.",
   "server.mcp.signIn.adminOnly": "Only an admin of this installation can sign in to {label}.",

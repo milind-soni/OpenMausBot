@@ -140,7 +140,7 @@
   "server.mcp.signIn.card": "MCP-серверу {label} потрібен вхід. Відкрийте цю розмову в OpenMausBot, щоб увійти.",
   "server.mcp.signIn.description": "{bot} додав MCP-сервер {label} ({host}). Увійдіть, щоб {bot} міг ним користуватися.",
   "server.mcp.signIn.onYourMac": "Відкрийте цей чат на своєму Mac, щоб увійти в {label}.",
-  "server.mcp.signIn.inSettings": "Завершіть цей вхід у розділі Налаштування → MCP-сервери.",
+  "server.mcp.signIn.inSettings": "Завершіть цей вхід у розділі Apps → MCP-сервери.",
   "server.mcp.signIn.onlyPerson": "Увійти тут може лише {name}.",
   "server.mcp.signIn.onlyOwner": "Увійти тут може лише людина, якій належить цей чат.",
   "server.mcp.signIn.adminOnly": "Увійти в {label} може лише адміністратор цієї інсталяції.",

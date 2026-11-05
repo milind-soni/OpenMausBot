@@ -285,12 +285,12 @@ describe("the Sign in card", () => {
     expect(f.current(card).connector).toMatchObject({ status: "connected", resumed: true });
   });
 
-  it("a flow that would need paste-back is refused with \"Finish this sign-in in Settings → MCP servers.\"", async () => {
+  it("a flow that would need paste-back is refused with \"Finish this sign-in in Apps → MCP servers.\"", async () => {
     const f = await setup();
     const { card } = await f.signIn();
     const olive = session("olive@acme.test", ["admin", "client"]);
     const noVouchedOrigin = { host: "omb.example.com", "x-forwarded-proto": "https" };
-    expect(await f.authorize(card, olive, noVouchedOrigin)).toEqual({ status: 409, body: { error: "Finish this sign-in in Settings → MCP servers." } });
+    expect(await f.authorize(card, olive, noVouchedOrigin)).toEqual({ status: 409, body: { error: "Finish this sign-in in Apps → MCP servers." } });
     expect(f.provider.counts.register, "decided before any client is registered").toBe(0);
     expect(f.current(card).connector).toMatchObject({ status: "required" });
     const onTheMac = await f.authorize(card);
@@ -301,7 +301,7 @@ describe("the Sign in card", () => {
     (preRegistered.cfg.mcpServers!.linear as { oauth?: unknown }).oauth = { clientId: "omb-app" };
     const other = (await preRegistered.signIn()).card;
     const away = { host: "omb.example.com", origin: "https://omb.example.com", "x-forwarded-proto": "https" };
-    expect(await preRegistered.authorize(other, olive, away)).toEqual({ status: 409, body: { error: "Finish this sign-in in Settings → MCP servers." } });
+    expect(await preRegistered.authorize(other, olive, away)).toEqual({ status: 409, body: { error: "Finish this sign-in in Apps → MCP servers." } });
     expect(preRegistered.mcpOAuth.authState("linear", preRegistered.url)).toBe("none");
     expect(preRegistered.current(other).connector).toMatchObject({ status: "required" });
   });
