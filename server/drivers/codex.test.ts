@@ -2003,6 +2003,38 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     }
   });
 
+  it("does not count an API-key login as plan authentication on a device-lane instance", async () => {
+    vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockResolvedValue({ default: "gpt-6.1-sol", options: [{ id: "gpt-6.1-sol", label: "GPT-6.1 Sol" }] });
+    await create({ authMode: "chatgpt-plan", mode: "api-key-configured" });
+    const codexHome = join(DATA_DIR, "providers", "chatgpt-plan", createHash("sha256").update("codex-test").digest("hex"), "codex");
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-test" }));
+    try {
+      await expect(instance.snapshot()).resolves.toMatchObject({
+        state: "available", chatgptPlan: true, billing: "subscription", authenticated: false,
+        reason: expect.stringMatching(/API key/),
+      });
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps custom Codex providers out of a device-lane plan turn", async () => {
+    const token = vi.spyOn(ChatGptPlanAuthController.prototype, "accessToken").mockResolvedValue("synthetic-plan-token");
+    vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockResolvedValue({ default: "gpt-6.1-sol", options: [{ id: "gpt-6.1-sol", label: "GPT-6.1 Sol" }] });
+    await create({ authMode: "chatgpt-plan", mode: "approval" });
+    const codexHome = join(DATA_DIR, "providers", "chatgpt-plan", createHash("sha256").update("codex-test").digest("hex"), "codex");
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: null, tokens: { access_token: "synthetic", refresh_token: "synthetic", account_id: "acc" }, last_refresh: "2026-01-01T00:00:00.000Z" }));
+    try {
+      await expect(instance.adapter.sendTurn({ threadId: "t-device-custom", text: "Continue", model: "fixture::local-model" }))
+        .rejects.toThrow(/not available to the selected ChatGPT plan/);
+      expect(token).not.toHaveBeenCalled();
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     ["Cloud home", "OMB_CLOUD_ROLE", "home"],
     ["hosted enterprise", "OMB_ADMIN_URL", "https://admin.example.test"],

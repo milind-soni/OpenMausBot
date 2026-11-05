@@ -51,7 +51,7 @@ import { CodexDeviceAuthController } from "./codex-device-auth.ts";
 import { codexAccountEmail, codexHome } from "./codex-identity.ts";
 import { boundedLabel, containsControlCharacter, mcpAppApprovalForm, plainRecord } from "./codex-app-approval.ts";
 import { archivedNativeCodexThread, CODEX_MISSING_CREDENTIALS, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, CodexRpcError, codexSignInExpired, codexPlanModelRefused, codexSignInRefused, codexUserError, missingNativeCodexThread, type CodexRoute } from "./codex-errors.ts";
-import { codexLoginCheck, codexLoginStatus, storedCodexLogin } from "./codex-login.ts";
+import { codexLoginCheck, codexLoginKind, codexLoginStatus, storedCodexLogin } from "./codex-login.ts";
 import { keyRejected, noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
 import { extractMcpImages } from "../mcp-tool-images.ts"; import { codexImageInputs, withoutInlineImages } from "./codex-images.ts";
@@ -431,8 +431,14 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           try {
             const generation = planGeneration;
             const resolved = await readCodexModelCatalog(catalogEnv, fetch, config.cli);
+            // A device-lane ChatGPT account routes only through OpenAI: custom Codex providers would
+            // bill outside the subscription, so they never reach a plan instance's catalog.
+            const options = planAuth
+              ? resolved.options.filter(option => decodeCodexSelection(option.id).modelProvider === OFFICIAL_CODEX_PROVIDER)
+              : resolved.options;
+            const usableDefault = resolved.default && options.some(option => option.id === resolved.default) ? resolved.default : options[0]?.id ?? "";
             if (generation === planGeneration && !planSigningOut && !disposed) {
-              if (resolved.options.length) models = resolved; else unconfirmedModelCatalog(models);
+              if (options.length) models = { default: usableDefault, options }; else unconfirmedModelCatalog(models);
             }
           } catch { unconfirmedModelCatalog(models); }
         }
@@ -1600,7 +1606,15 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       planLane = await detectPlanLane();
       if (planLane === "legacy") {
         // Codex owns the credentials (device-code sign-in): report what Codex itself sees.
-        const authenticated = await codexLoginStatus(config.cli, env) === "signed-in";
+        const kind = await codexLoginKind(config.cli, env);
+        if (kind === "api-key") {
+          // codexLoginStatus counts an API-key home as signed in; a plan-labeled instance may not:
+          // Codex would bill those turns through the API, not the subscription.
+          return { state: "available", version, chatgptPlan: true, billing: "subscription", authenticated: false,
+            reason: "This Codex home is signed in with an API key, not the ChatGPT plan. Sign in again with the device code in Settings → Model providers → Codex.",
+            update: await codexReleaseUpdate(version, config.cli) };
+        }
+        const authenticated = kind === "chatgpt";
         if (authenticated && loginRejected()) {
           return { state: "available", version, authenticated: false, reason: CODEX_SIGN_IN_EXPIRED,
             update: await codexReleaseUpdate(version, config.cli), billing: "subscription", chatgptPlan: true };
