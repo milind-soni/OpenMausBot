@@ -169,6 +169,9 @@ card:
   it like any other AI. It never reads or writes this computer's
   `~/.claude`, and the Claude Code on this computer keeps its own sign-in.
 - Each bot can choose a different model from the endpoint's catalog.
+- Another gateway must support streaming Messages (`POST /v1/messages`) with
+  tool use. Enter its root URL without `/v1/messages`, such as
+  `https://gateway.example.com`.
 - The token is saved in OpenMausBot's own `config.json` and sent only to the
   base URL you enter. Removing an endpoint removes only that entry.
 
@@ -197,60 +200,40 @@ DeepSeek, and your Claude bots follow it:
 
 ### Codex
 
-Codex bots can use a direct API key with the native Codex agent, in addition
-to ChatGPT sign-in and your organisation's models.
+Codex bots can also run on an API key instead of a ChatGPT sign-in:
 
 1. Open **Settings → Engines** and expand the Codex/ChatGPT card.
 2. Under **Codex direct API**, choose **Add endpoint**.
-3. The base URL starts as `https://api.openai.com/v1`. Keep it for OpenAI,
-   or change it to your gateway's URL, such as `https://gateway.example.com/v1`.
-4. Enter a name and API key.
-5. Save, then select the new engine and model for a bot.
+3. The base URL starts as `https://api.openai.com/v1`. Keep it for OpenAI, or
+   replace it with another gateway's URL, such as
+   `https://gateway.example.com/v1`.
+4. Enter a name and API key, then save.
+5. Choose the new engine and a model in a bot's settings.
 
-API usage is billed by the selected provider. Saving an endpoint does not
-start OAuth or replace an existing account. Each endpoint keeps its own
-Codex home and key in OpenMausBot's data directory. The key is saved in the
-protected `config.json`, never returned in the engine list or passed in
-command arguments. Changing the base URL requires entering the key again.
-Remove an endpoint after moving any bots and the default model off it.
+- Usage is billed by the provider behind the URL. Saving an endpoint doesn't
+  start a sign-in or replace an existing account.
+- Each endpoint has its own Codex home in OpenMausBot's data directory. The
+  key is saved in `config.json` and is never shown in the app or passed in
+  command arguments. Changing the URL asks for the key again.
+- A gateway must support streaming Responses (`POST /v1/responses`) with tool
+  calls. A gateway that only offers Chat Completions works with the chat
+  engine instead.
+- Each bot chooses its model. OpenAI uses the standard catalog; another
+  gateway must list its models at `/models` under its base URL.
+- Remove an endpoint after moving its bots and the default model off it.
 
-A Codex gateway must implement **streaming Responses** (`POST /v1/responses`)
-and tool calls. A Chat Completions-only gateway cannot run the native Codex
-agent; use the chat engine for that protocol. Codex direct endpoints use
-HTTP streaming and load their MCP tools up front. Models are selected per bot.
-Official providers use the standard catalog. Custom gateways must expose a
-`/models` catalog at their API root; saving discovers the available models.
-If discovery fails or returns no valid models, the form keeps your draft and
-asks you to check the URL, API key and catalog support.
+### When an endpoint won't save
 
-For Claude Code, use **Add endpoint** in the Claude card. The base URL
-starts as `https://api.anthropic.com` and stays editable for custom gateways.
-The official API uses an API key without OAuth. Custom Claude gateways must implement streaming Anthropic
-Messages (`POST /v1/messages`) and tool use. Enter the API root without
-`/v1/messages`, such as `https://gateway.example.com`.
+Saving checks the endpoint and says whether the network, the API key, the
+HTTP response or an empty model list failed. Check that:
 
-#### CLIProxyAPI in Docker or on a NAS
-
-Configure CLIProxyAPI separately, then edit the base URL in the appropriate
-agent's endpoint form. Use its Responses base URL for Codex
-(typically ending in `/v1`), or its Anthropic API root for Claude. Use a model
-alias supported by that gateway and protocol. No proxy is installed or
-started by OpenMausBot.
-
-The URL must be reachable **from the OpenMausBot server or container**. A
-Tailscale hostname that resolves on your desktop may not resolve in Docker.
-`localhost` and `127.0.0.1` refer to that server or container, not the
-computer displaying the app. If both processes run on the same computer,
-try `127.0.0.1` if the gateway listens only on IPv4. Saving reports network,
-API-key, HTTP and empty-catalog failures separately.
-Check the container's DNS and network route if a connection fails. Codex
-endpoints require HTTPS, with HTTP allowed only on localhost. For a LAN-only
-HTTP proxy, expose HTTPS or use a secure tunnel whose local listener is
-reachable by the OpenMausBot server. Do not disable certificate validation.
-
-Automated verification uses disposable servers and synthetic agents. Real
-CLIProxyAPI versions, accounts and model compatibility still need testing
-before relying on this draft integration.
+- The URL is reachable from the computer or container running OpenMausBot,
+  not just from the one showing the app. Inside a container, `localhost`
+  means the container itself.
+- Codex endpoints use HTTPS. Plain HTTP is accepted only on `localhost` or
+  `127.0.0.1`.
+- The gateway serves the right protocol for the agent and lists models for
+  your key.
 
 ## Ollama's context window
 

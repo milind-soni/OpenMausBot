@@ -137,7 +137,8 @@ Codex endpoint creation, persistence, updates, removal guards, admin-only
 mutations and write-only keys. Driver fixtures check direct routing across
 native thread restarts, background calls, missing-key refusal, and exclusion
 of the key from shell environments and command arguments. Renderer tests
-exercise official Anthropic/OpenAI presets and a custom CLIProxyAPI form.
+check that both forms start with the official URL, keep it editable, and
+save a custom gateway URL.
 
 These fixtures do not prove a real gateway's Responses or Messages protocol,
 streaming, tool execution, TLS, DNS, or account authentication. Verify those
