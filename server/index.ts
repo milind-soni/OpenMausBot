@@ -324,7 +324,7 @@ import { turnStartLogLine } from "./turn-log.ts";
 import { TurnStops, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh, replaysNatively } from "./turn-context.ts";
 import { Handoffs, handedStateUsable, isContextMessage, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts";
-import { extractReplayImages, extractTurnImages } from "./turn-images.ts";
+import { extractReplayImages, extractTurnImages, videoFramesWithin } from "./turn-images.ts";
 import { callTitleExcerpt } from "./thread-title.ts";
 import { generateThreadTitle, llmThreadTitlesEnabled } from "./thread-title-generate.ts";
 import { stallLimitMs, TurnWatchdog } from "./turn-watchdog.ts";
@@ -7817,6 +7817,7 @@ async function beginTurn(
         if (!readiness.ready) throw new Error(readiness.reason ?? "The cloud computer is not ready");
       }
       await warmSummaries.beforeTurn(threadId, () => directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId));
+      if (usesNativeImageInput && !opts?.compactOnly) turnImages.push(...await videoFramesWithin(turnImages.length, resolvedImages.videos));
       await compactConversation({ bot, threadId, generation: dispatchClaimId, instance, model,
         excludedIds: new Set([userMessage.id, ...(opts?.excludeMessageIds ?? [])]), manual: opts?.compactOnly === true });
       if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) throw new DirectTurnSetupCancelled("turn stopped during context setup");
@@ -9823,14 +9824,13 @@ async function runClaimedGroupMemberTurn(
       if (!message.queueId || !burstIds.has(message.queueId)) continue;
       const resolved = extractTurnImages(message.text);
       burstOverrides.push({ messageId: message.id, text: resolved.text });
-      burstImages.push(...resolved.images);
+      burstImages.push(...resolved.images, ...await videoFramesWithin(burstImages.length + resolved.images.length, resolved.videos));
     }
   }
   // The latest line is usually the burst's last: extracting it again would double-count its attachments.
   const latestInBurst = latestUser?.queueId !== undefined && burstIds.has(latestUser.queueId);
   const resolvedLatestImages = latestUser?.text && !cardContinuation && !latestInBurst
-    ? extractTurnImages(latestUser.text)
-    : { text: latestUser?.text ?? "", images: [] };
+    ? extractTurnImages(latestUser.text) : { text: latestUser?.text ?? "", images: [], videos: [] };
   const roomWindow = roomTranscript.window(
     threadId,
     userName,
@@ -9843,7 +9843,7 @@ async function runClaimedGroupMemberTurn(
     bot.id,
   );
   const roomContext = roomWindow.text;
-  const turnImages = usesNativeImageInput ? [...burstImages, ...resolvedLatestImages.images] : [];
+  const turnImages = usesNativeImageInput ? [...burstImages, ...resolvedLatestImages.images, ...await videoFramesWithin(burstImages.length + resolvedLatestImages.images.length, resolvedLatestImages.videos)] : [];
   const skills = availableSkills(), phoneOffered = usbPhoneOffered(instance, skills);
   const selectedSkills = mergeSkills(
     selectBundledSkills(
