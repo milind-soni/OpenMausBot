@@ -11,6 +11,7 @@ import {
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { CALL_MODES, effectiveCallMode, useCallMode } from "@/lib/call-mode";
 import { callCapabilityHelp } from "@/lib/call-capability";
+import { speechBridge } from "@/lib/speech";
 import { requestCallStart } from "@/lib/call-start-request";
 import { useOnCall } from "@/lib/call";
 import { isLiveCallRunning, useLiveMedia } from "@/lib/live-call-media";
@@ -186,7 +187,7 @@ export function ComposerPlusMenu({ onAttach, goal, teach, approval, callBotId, e
   const media = useLiveMedia();
   const turnsHere = !ready || capabilities.dictation.available;
   const callMode = effectiveCallMode(storedMode, { turnsHere, canLive: true });
-  const turnsHelp = turnsHere ? null : callCapabilityHelp(capabilities, Boolean(window.ogb?.speechStart));
+  const turnsHelp = turnsHere ? null : callCapabilityHelp(capabilities, Boolean(speechBridge()?.speechStart));
   const { state } = useStore();
   // As the call button, which hides while Live is the mode and its line is held on another device.
   const lineHeldElsewhere = callMode === "live" && liveLineHeldElsewhere(media, state.liveCall);

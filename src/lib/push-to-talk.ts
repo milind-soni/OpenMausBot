@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { currentCall } from "./call";
+import { speechBridge } from "./speech";
 
 type ModifierEvent = Pick<KeyboardEvent, "altKey" | "ctrlKey" | "code" | "repeat">;
 
@@ -28,7 +29,7 @@ export function usePushToTalk(targetId: string, enabled: boolean, onError: () =>
   }, [enabled]);
 
   useEffect(() => {
-    const bridge = window.ogb;
+    const bridge = speechBridge();
     if (!bridge?.speechFinish) return;
 
     const finish = () => {

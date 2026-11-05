@@ -15,6 +15,7 @@ import { cn } from "@/lib/cn";
 import { BotAvatar } from "./Avatar";
 import { CallTargetButton, type CallButtonPlacement } from "./CallView";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { speechBridge } from "@/lib/speech";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
 
@@ -121,7 +122,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   }, []);
 
   const hush = useCallback(() => {
-    void window.ogb?.speechStop();
+    void speechBridge()?.speechStop();
   }, []);
 
   const listen = useCallback(() => {
@@ -130,7 +131,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
     setSpeakingMemberId(null);
     setHeard("");
     setNote(null);
-    void window.ogb?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
+    void speechBridge()?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
       if (alive.current && currentCall() === group.id) {
         setNote("The microphone couldn't start. Check Microphone and Speech Recognition access.");
       }
@@ -213,7 +214,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   }, [group.id]);
 
   useEffect(() => {
-    const bridge = window.ogb;
+    const bridge = speechBridge();
     if (!bridge) return;
     const offTranscript = bridge.onSpeechTranscript((line) => {
       if (!alive.current || currentCall() !== group.id || phaseRef.current !== "listening") return;
@@ -310,7 +311,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       dispatch({ type: "sendGroup", groupId: group.id, text: routed.text, threadId: group.threadId });
       scheduleListen(false, 600);
     });
-    const offEnd = bridge.onSpeechEnd(({ code, reason }) => {
+    const offEnd = bridge.onSpeechEnd(({ code, reason, message }) => {
       if (!alive.current || currentCall() !== group.id) return;
       if (code === 2) {
         setNote("Calls need macOS dictation, which isn't available here yet.");
@@ -318,13 +319,14 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       }
       if (code === 1) {
         setNote(
-          reason === "helper-build-failed"
+          message ??
+          (reason === "helper-build-failed"
             ? "The dictation helper couldn't be built. Install Apple's Command Line Tools and try again."
             : reason === "dictation-disabled"
               ? "Turn on Dictation in System Settings → Keyboard, then try again."
               : reason === "speech-not-authorized"
                 ? "Allow Speech Recognition in System Settings → Privacy & Security, then try again."
-                : "Dictation couldn't start. Try again.",
+                : "Dictation couldn't start. Try again."),
         );
         return;
       }
@@ -335,7 +337,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
     return () => {
       offTranscript();
       offEnd();
-      void window.ogb?.speechStop();
+      void speechBridge()?.speechStop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch, enqueueSpeech, group.id, group.threadId, hush, listen, move, scheduleListen]);
