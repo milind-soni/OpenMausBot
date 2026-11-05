@@ -81,6 +81,15 @@ describe("streamed tool calls without an index (Gemini's OpenAI-compatible endpo
     expect(calls.finish("stop", false)).toEqual([completeCall]);
   });
 
+  it("counts a signature repeated on every chunk once toward the size limit", () => {
+    const calls = new ChatToolCalls();
+    const extra_content = { google: { thought_signature: "s".repeat(100_000) } };
+    calls.add([{ index: 0, ...completeCall, extra_content }], true);
+    calls.add([{ index: 0, extra_content }], true);
+    calls.add([{ index: 0, extra_content }], true);
+    expect(calls.finish("stop", false)).toEqual([{ ...completeCall, extra_content }]);
+  });
+
   const whole = (id: string, name: string, args = "{}") => ({ id, type: "function", function: { name, arguments: args } });
 
   it("keeps two whole calls sent in one chunk", () => {

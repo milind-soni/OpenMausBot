@@ -71,8 +71,10 @@ export class ChatToolCalls {
       }
       const extra = object(delta.extra_content);
       if (extra) {
+        // A later chunk replaces the earlier value, so count only the size change.
+        const previous = call.extra_content ? JSON.stringify(call.extra_content).length : 0;
         call.extra_content = extra;
-        this.argumentChars += JSON.stringify(extra).length;
+        this.argumentChars += JSON.stringify(extra).length - previous;
       }
       if (call.function.name.length > 64 || this.argumentChars > MAX_ARGUMENT_CHARS) {
         throw new ChatProtocolError("provider tool calls exceeded the size limit");
