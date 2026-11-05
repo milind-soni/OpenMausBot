@@ -60,7 +60,7 @@ export async function connectVerb(ctx: VerbContext): Promise<VerbOutcome> {
   }
   const paired = await call(origin, "/api/auth/pair", { method: "POST", body: JSON.stringify({ code, label }) });
   if (paired.status !== 200 || typeof paired.body.token !== "string") {
-    throw new HeadlessError(`the code was not accepted${paired.body.error ? `: ${paired.body.error}` : ""}`, EXIT.unreachable, "codes are single use and expire after five minutes: get a new one");
+    throw new HeadlessError(`the code was not accepted${paired.body.error ? `: ${paired.body.error}` : ""}`, EXIT.unreachable, "codes are single use and expire (after five minutes, unless made with openmausbot pair --ttl): get a new one");
   }
   writeTokenFile(out, paired.body.token, ctx.flags.force === true);
   const session = paired.body.session ?? {};

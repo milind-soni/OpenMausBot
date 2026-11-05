@@ -1,4 +1,4 @@
-// Pairing codes (60-bit, single use, 5 min), sessions (256-bit, only the sha256 stored) and stream tickets (EventSource cannot set headers).
+// Pairing codes (60-bit, single use, 5 min unless asked for up to a day), sessions (256-bit, only the sha256 stored) and stream tickets (EventSource cannot set headers).
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
@@ -13,6 +13,7 @@ export const SCOPES: readonly Scope[] = ["admin", "client"];
 export const PAIRING_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 export const PAIRING_CODE_LENGTH = 12;
 export const PAIRING_CODE_TTL_MS = 5 * 60_000;
+export const PAIRING_CODE_MAX_TTL_MS = 24 * 3_600_000;
 /** Not clamped: an invalid value falls back to the default, so a typo never becomes a policy. */
 export function daysMs(value: string | undefined, fallbackDays: number): number {
   const days = Number(value);
@@ -29,7 +30,7 @@ export function cookieMaxAgeSeconds(session: { expiresAt: number }, now = Date.n
   return Math.max(1, Math.floor((session.expiresAt - now) / 1000));
 }
 export const STREAM_TICKET_TTL_MS = 5 * 60_000;
-/** Slow-down only: a 60-bit code cannot be guessed online in five minutes, and sources are shared (NAT), so the lock stays short. */
+/** Slow-down only: a 60-bit code cannot be guessed online in a day, and sources are shared (NAT), so the lock stays short. */
 export const LOCKOUT = { failures: 10, windowMs: 60_000, lockMs: 60_000 } as const;
 /** A consumed code re-presented with the same client-made attempt id gets the same answer; sharing an address is not enough. */
 export const EXCHANGE_REPLAY_MS = 60_000;
@@ -61,6 +62,8 @@ const sessionSchema = z.object({
   owner: z.string().max(254).optional(),
   /** A Team Cloud's sign-in for moving one bot in (server/team-move-in.ts): it reaches that bot's move routes only. */
   moveIn: z.string().regex(/^[\w-]{1,128}$/).optional(),
+  /** An access token for a script (`openmausbot token create`): it ends at expiresAt and never renews. */
+  token: z.literal(true).optional(),
 });
 
 const fileSchema = z.object({ version: z.literal(1), sessions: z.array(sessionSchema) });
@@ -78,6 +81,7 @@ export interface PublicSession {
   email?: string;
   owner?: string;
   teamRole?: TeamRole;
+  token?: true;
 }
 
 export interface PairingCode {
@@ -95,6 +99,8 @@ export interface PairingCode {
   member?: TeamMember;
   /** A code a member made from their own session: when the Admin last vouched for them. Absent on the Admin's own. */
   memberCheckedAt?: number;
+  /** The session it opens is an access token that lasts exactly this long. */
+  tokenTtlMs?: number;
 }
 
 export interface PublicPairing {
@@ -171,7 +177,34 @@ function publicSession(record: SessionRecord): PublicSession {
   if (record.email) view.email = record.email;
   if (record.owner) view.owner = record.owner;
   if (record.teamRole) view.teamRole = record.teamRole;
+  if (record.token) view.token = true;
   return view;
+}
+
+export interface PairingRequest {
+  label?: string;
+  scopes?: Scope[];
+  ttlMs?: number;
+  tokenTtlMs?: number;
+}
+
+const DAY_MS = 24 * 3_600_000;
+const within = (value: unknown, min: number, max: number): number | null | undefined =>
+  value === undefined ? undefined : typeof value === "number" && Number.isInteger(value) && value >= min && value <= max ? value : null;
+
+/** POST /api/auth/pairing's body: `ttlMs` keeps the code open up to a day; `tokenTtlMs` makes the session it opens an
+ * access token, bounded by OMB_SESSION_MAX_DAYS like every session. */
+export function pairingRequest(body: unknown): PairingRequest | { error: string } {
+  const record: Record<string, unknown> = body && typeof body === "object" && !Array.isArray(body) ? Object(body) : {};
+  const ttlMs = within(record.ttlMs, 60_000, PAIRING_CODE_MAX_TTL_MS);
+  if (ttlMs === null) return { error: "ttlMs must be a whole number of milliseconds, from one minute to 24 hours" };
+  const tokenTtlMs = within(record.tokenTtlMs, 60_000, SESSION_MAX_AGE_MS);
+  if (tokenTtlMs === null) return { error: `a token lasts from one minute to ${Math.floor(SESSION_MAX_AGE_MS / DAY_MS)} days on this server (OMB_SESSION_MAX_DAYS)` };
+  const scopes = Array.isArray(record.scopes) ? record.scopes.filter((v): v is Scope => v === "admin" || v === "client") : undefined;
+  return {
+    ...(typeof record.label === "string" ? { label: record.label } : {}), ...(scopes ? { scopes } : {}),
+    ...(ttlMs !== undefined ? { ttlMs } : {}), ...(tokenTtlMs !== undefined ? { tokenTtlMs } : {}),
+  };
 }
 
 export type EmailScopesResolver = (email: string) => readonly Scope[] | null;
@@ -316,7 +349,7 @@ export class SessionRegistry {
     }
   }
 
-  openPairing(input: { scopes?: Scope[]; label?: string; ttlMs?: number; browser?: boolean; owner?: string; member?: TeamMember; memberCheckedAt?: number } = {}): { id: string; code: string; credential: string; expiresAt: number } {
+  openPairing(input: { scopes?: Scope[]; label?: string; ttlMs?: number; tokenTtlMs?: number; browser?: boolean; owner?: string; member?: TeamMember; memberCheckedAt?: number } = {}): { id: string; code: string; credential: string; expiresAt: number } {
     this.prune();
     const now = this.now();
     const code = generatePairingCode();
@@ -333,6 +366,7 @@ export class SessionRegistry {
       expiresAt: now + (input.ttlMs ?? PAIRING_CODE_TTL_MS),
       ...(input.browser ? { browser: true as const, ...(input.owner ? { owner: input.owner } : {}) } : {}),
       ...(input.member ? { member: input.member, ...(input.memberCheckedAt !== undefined ? { memberCheckedAt: input.memberCheckedAt } : {}) } : {}),
+      ...(input.tokenTtlMs !== undefined && !input.browser && !input.member ? { tokenTtlMs: input.tokenTtlMs } : {}),
     };
     this.pairings.push(pairing);
     return { id: pairing.id, code, credential, expiresAt: pairing.expiresAt };
@@ -421,7 +455,8 @@ export class SessionRegistry {
       scopes: [...pairing.scopes],
       createdAt: now,
       lastSeenAt: now,
-      expiresAt: pairing.member ? teamSessionExpiresAt(checkedAt, now + SESSION_TTL_MS) : now + Math.min(SESSION_TTL_MS, SESSION_MAX_AGE_MS),
+      expiresAt: pairing.member ? teamSessionExpiresAt(checkedAt, now + SESSION_TTL_MS) : now + Math.min(pairing.tokenTtlMs ?? SESSION_TTL_MS, SESSION_MAX_AGE_MS),
+      ...(pairing.tokenTtlMs !== undefined ? { token: true as const } : {}),
       ...(pairing.browser ? { cookieOnly: true as const, ...(pairing.owner ? { owner: pairing.owner } : {}) } : {}),
       ...(pairing.member ? { email: pairing.member.email, teamRole: pairing.member.role, membershipAuthority: "team" as const } : {}),
       ...(pairing.member && pairing.memberCheckedAt !== undefined ? { memberCheckedAt: pairing.memberCheckedAt } : {}),
@@ -586,7 +621,7 @@ export class SessionRegistry {
     this.recheckMembership();
     const record = this.sessions.find((s) => s.id === sessionId);
     const now = this.now();
-    if (!record || record.expiresAt <= now) return false;
+    if (!record || record.expiresAt <= now || record.token) return false;
     if (record.expiresAt - now > SESSION_RENEW_WHEN_LEFT_MS) return false;
     const proposed = Math.min(now + SESSION_TTL_MS, record.createdAt + SESSION_MAX_AGE_MS);
     const next = record.membershipAuthority === "team" ? teamSessionExpiresAt(record.memberCheckedAt ?? record.createdAt, proposed) : proposed;
