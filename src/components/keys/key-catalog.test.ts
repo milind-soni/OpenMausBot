@@ -92,7 +92,7 @@ describe("every credential has one home on the keys page", () => {
     expect(live.env).toEqual([]);
     const config = { openai: { configured: true, last4: "a1b2" } } as ConfigStatus;
     expect(savedState(live, config)).toEqual({ configured: true, last4: "a1b2" });
-    expect(t(live.labelKey)).toBe("OpenAI API key");
+    expect(t(live.labelKey)).toBe("OpenAI key");
     expect(t(keyEntry("openai").labelKey)).toBe("OpenAI API key");
   });
 });

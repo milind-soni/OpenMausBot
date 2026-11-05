@@ -1,4 +1,4 @@
-import { t } from "./i18n";
+import { t } from "@/lib/i18n";
 import type { Bot, InstanceInfo } from "@/state/store";
 
 export function instanceSupportsLocalComputer(

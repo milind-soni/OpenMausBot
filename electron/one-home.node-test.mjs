@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { arrivedCounts, CHECK_PASSES, COPY_RETRY_MS, createOneHome, FAILING_LINE_MS, FROZEN_RETRY_MAX_MS, FROZEN_RETRY_MS, INCOMPLETE, KEPT_MS, missingOf, QUIET_MS, switchOn } from "./one-home.mjs";
 import { oneHomeCloud } from "./one-home-main.mjs";
+import nativeText from "./native-text.cjs";
 
 const CLOUD = "https://omb-t-1.fly.dev";
 const reply = (status, body = {}) => ({ ok: status < 400, status, body });
@@ -333,6 +334,19 @@ test("a check that still fails after three passes lifts the freeze and tries aga
   assert.ok(failing.passes.length > 25, "Try again goes now, not at the next hourly try");
 });
 
+test("a refusal My Cloud named by a serverError key reaches the failing line with that key beside its English", async () => {
+  const named = () => Object.assign(new Error("Nothing personal comes into Acme."), { errorKey: "serverError.team.personalMove", errorParams: { team: "Acme" } });
+  const w = world({ moves: Array.from({ length: 40 }, named) });
+  await w.home.kick();
+  for (let hour = 0; hour < 25; hour++) { w.advance(FROZEN_RETRY_MS); await w.tick(); }
+  assert.deepEqual(w.home.view().failing, { error: "Nothing personal comes into Acme.", errorKey: "serverError.team.personalMove", errorParams: { team: "Acme" } });
+
+  const other = world({ moves: Array.from({ length: 40 }, () => Object.assign(new Error("No."), { errorKey: "cloudHome.connect" })) });
+  await other.home.kick();
+  for (let hour = 0; hour < 25; hour++) { other.advance(FROZEN_RETRY_MS); await other.tick(); }
+  assert.deepEqual(other.home.view().failing, { error: "No." }, "no key but a serverError one is kept");
+});
+
 test("a frozen pass the Admin refused for too many connections lifts the freeze and goes again in minutes, never an hour", async () => {
   // Seen in the real app on Oct 22: killed in the final pass and relaunched, the move's next owner session got 429 from the
   // Admin's pairing limit (10 a device in 10 minutes; every pass opens one), and the move waited an hour.
@@ -527,4 +541,12 @@ test("a move left off while My Cloud was away goes on as soon as it is back; a s
   await s.tick();
   assert.equal(s.journal.phase, "done");
   assert.equal(s.server.unfreezes, 0, "never lifted after the switch");
+});
+
+test("turning the switch back while the bots are on their way home is refused in the app's language", () => {
+  const journal = { v: 1, phase: "keeping", offThere: true, cloud: { origin: "https://omb-u-1.fly.dev", account: "acct-1" } };
+  const home = (t) => createOneHome({ journal: { read: () => journal, write: () => {} }, cloud: () => null, send: {}, local: {}, session: async () => ({}), keep: { read: () => null, write: () => {} }, ...(t ? { t } : {}) });
+  assert.throws(() => home().keep(false), { message: "This computer's bots are on their way back. Try again once they're here." });
+  const { t } = nativeText.createNativeText({ saved: "pt-br" });
+  assert.throws(() => home(t).keep(false), { message: "Os bots deste computador estão voltando. Tente novamente quando eles chegarem." });
 });

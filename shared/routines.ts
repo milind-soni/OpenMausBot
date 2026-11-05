@@ -3,6 +3,7 @@
 import type { LimitResetSchedule, LimitResetScheduleInput } from "./limit-reset.ts";
 import type { RoutineCronSchedule } from "./routine-schedule.ts";
 import type { ModelSelection } from "./wire.ts";
+import type { ServerTextParams } from "./server-text.ts";
 
 export interface RoutineIntervalWindow {
   start: string;
@@ -144,6 +145,8 @@ export interface Routine {
   checkedAt?: number;
   /** A plain sentence while its checks cannot read an app, so a failed read never looks like nothing new. */
   checkTrouble?: string;
+  /** Catalog key for `checkTrouble` when it is one of the server's fixed lines; `checkTrouble` keeps the English. */
+  checkTroubleCode?: string;
   /** The next time its checks have something to do on time (a reminder, meeting prep): only this may keep the
    * computer awake or wake a sleeping Cloud. */
   wakeAt?: number;
@@ -193,6 +196,14 @@ export interface RoutineRun {
   startedAt?: number;
   finishedAt?: number;
   output?: string;
+  /** Catalog key for `output` when it is one of the server's fixed lines; `output` keeps the English. */
+  outputCode?: string;
+  /** Catalog key and params for `error` and for `attention` when the server wrote them from a fixed line. A client words
+   * one only while its field still reads as that line's English; the field always keeps the English. */
+  errorCode?: string;
+  errorParams?: ServerTextParams;
+  attentionCode?: string;
+  attentionParams?: ServerTextParams;
   error?: string;
   /** A failed run whose reply still came back: only a step it ran failed or wasn't allowed. */
   partial?: boolean;

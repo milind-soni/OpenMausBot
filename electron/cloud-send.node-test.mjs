@@ -201,7 +201,7 @@ function preload({ remote = false, activation = false } = {}) {
 }
 
 test("the bridge: either page gets only the move's line and the switch that keeps this computer's bots here; its Try again, moving a bot into a team, and turning that switch go only from the person's click on My Cloud's page", async () => {
-  const keys = ["notice", "dismiss", "moveRetry", "teams", "moveToTeam", "teamRetry", "openTeam", "teamBring", "teamBringMove", "teamBringStatus", "keepHere", "setKeepHere", "onNotice"];
+  const keys = ["notice", "dismiss", "moveRetry", "teams", "moveToTeam", "moveToTeamCoded", "teamRetry", "openTeam", "teamBring", "teamBringMove", "teamBringStatus", "keepHere", "setKeepHere", "onNotice"];
   const local = preload();
   assert.equal(local.bridge.cloudSend, undefined);
   assert.equal(local.bridge.cloudLogins, undefined);
@@ -212,6 +212,7 @@ test("the bridge: either page gets only the move's line and the switch that keep
   assert.deepEqual(JSON.parse(JSON.stringify(Object.keys(page.bridge.cloudSendPage))), keys);
   await assert.rejects(page.bridge.cloudSendPage.moveRetry(), /Try again/);
   await assert.rejects(page.bridge.cloudSendPage.moveToTeam("scout", "team-acme", "Scout"), /Choose Move/);
+  await assert.rejects(page.bridge.cloudSendPage.moveToTeamCoded("scout", "team-acme", "Scout"), /Choose Move/);
   await assert.rejects(page.bridge.cloudSendPage.teamRetry(), /Try again/);
   await assert.rejects(page.bridge.cloudSendPage.teamBringMove("scout"), /Choose Move/);
   await assert.rejects(page.bridge.cloudSendPage.setKeepHere(true), /Turn the switch/);
@@ -222,12 +223,13 @@ test("the bridge: either page gets only the move's line and the switch that keep
   await clicked.bridge.cloudSendPage.moveRetry();
   await clicked.bridge.cloudSendPage.dismiss({ toString: () => "one-home" });
   await clicked.bridge.cloudSendPage.moveToTeam({ toString: () => "scout" }, "team-acme", "Scout");
+  await clicked.bridge.cloudSendPage.moveToTeamCoded("scout", { toString: () => "team-acme" }, "Scout");
   await clicked.bridge.cloudSendPage.teamRetry();
   await clicked.bridge.cloudSendPage.teams();
   await clicked.bridge.cloudSendPage.openTeam("team-acme");
   await clicked.bridge.cloudSendPage.setKeepHere("yes");
   assert.deepEqual(JSON.parse(JSON.stringify(clicked.invoked.filter(([channel]) => channel.startsWith("cloud-send") || channel.startsWith("one-home")))), [["cloud-send:move-retry"], ["cloud-send:dismiss", "one-home"],
-    ["cloud-send:team-move", "scout", "team-acme", "Scout"], ["cloud-send:team-retry"], ["cloud-send:teams"], ["cloud-send:team-open", "team-acme"], ["one-home:keep-set", false]]);
+    ["cloud-send:team-move", "scout", "team-acme", "Scout"], ["cloud-send:team-move-coded", "scout", "team-acme", "Scout"], ["cloud-send:team-retry"], ["cloud-send:teams"], ["cloud-send:team-open", "team-acme"], ["one-home:keep-set", false]]);
   await local.bridge.cloudSendPage.setKeepHere(true);
   assert.deepEqual(local.invoked, [["one-home:keep-set", true]], "this computer's own page needs no click check: main checks the sender");
 });
@@ -294,6 +296,27 @@ test("a send that stops as a whole is that send's outcome, so the strip and Sett
   assert.equal(last.error, "Too many connection links. Wait a few minutes and try again.");
   const told = sendNotice(send.snapshot()).last;
   assert.deepEqual({ failed: told.failed, error: told.error, reason: told.reason, seen: told.seen }, { failed: 0, error: "Too many connection links. Wait a few minutes and try again.", reason: "my-cloud", seen: false });
+});
+
+test("a 403 My Cloud names by a serverError key goes on with its English and key; an older server's bare 403 keeps the generic sentence", async () => {
+  const refusedWith = async (body) => {
+    const sides = fakeSides({ localItems: [bot("ember", { soul: "s" })] });
+    const open = sides.deps.cloud.open;
+    sides.deps.cloud.open = async () => {
+      const session = await open();
+      return { ...session, call: async (method, route) => (route.startsWith("/api/cloud-send") ? { status: 403, ok: false, body } : session.call(method, route)) };
+    };
+    return createCloudSend(sides.deps).send({ reason: "move" }).then(() => assert.fail("the send went"), (error) => error);
+  };
+  const english = "Moving a computer's bots, chats and logins goes to My Cloud only. Nothing personal comes into Acme.";
+  const named = await refusedWith({ error: english, errorKey: "serverError.team.personalMove", errorParams: { team: "Acme", bad: { x: 1 } } });
+  assert.ok(named instanceof CloudSendError);
+  assert.deepEqual({ message: named.message, errorKey: named.errorKey, errorParams: named.errorParams }, { message: english, errorKey: "serverError.team.personalMove", errorParams: { team: "Acme" } });
+  const generic = "My Cloud did not let this app make the change. Open My Cloud in this app once, then try again.";
+  for (const body of [{ error: "Forbidden" }, { error: "Forbidden", errorKey: "cloudHome.connect" }, { errorKey: "serverError.team.personalMove" }, null]) {
+    const older = await refusedWith(body);
+    assert.deepEqual({ message: older.message, errorKey: older.errorKey }, { message: generic, errorKey: undefined }, JSON.stringify(body));
+  }
 });
 
 test("My Cloud's notice says what did not go, by kind, with each reason: logins only counted, never a site", async () => {

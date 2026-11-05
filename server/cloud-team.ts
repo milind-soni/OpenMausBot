@@ -3,6 +3,7 @@
 // and the lines the server says. The role words on the wire are the Admin's (`owner`, `admin`, `member`); the app shows
 // Super admin, Admin and User.
 import type { Scope } from "./sessions.ts";
+import { userError, type UserError } from "./user-errors.ts";
 
 export type TeamRole = "owner" | "admin" | "member";
 export const TEAM_ROLES: readonly TeamRole[] = ["owner", "admin", "member"];
@@ -66,11 +67,11 @@ export function personalConnectionRefusal(team: Pick<CloudTeam, "name">, what = 
 }
 
 /** A computer's one-time move goes to its owner's My Cloud only: nothing personal is carried into a team. */
-export function personalMoveRefusal(team: Pick<CloudTeam, "name">): string {
-  return `Moving a computer's bots, chats and logins goes to My Cloud only. Nothing personal comes into ${team.name}.`;
+export function personalMoveRefusal(team: Pick<CloudTeam, "name">): UserError {
+  return userError("serverError.team.personalMove", { team: team.name });
 }
 
 /** On a team a login belongs to the whole team, so only an admin saves one. */
-export function memberLoginRefusal(team: Pick<CloudTeam, "name">): string {
-  return `On ${team.name} only an admin can save a login, and it is then used by every bot in ${team.name}.`;
+export function memberLoginRefusal(team: Pick<CloudTeam, "name">): UserError {
+  return userError("serverError.team.memberLogin", { team: team.name });
 }

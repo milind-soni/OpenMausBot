@@ -3,6 +3,8 @@
 // MCP tool's function_call without the `namespace` codex sent it under (seen with non-OpenAI models behind an
 // OpenAI-compatible gateway). The only trace is the thread's rollout file, so the turn reads what it appended there.
 import { closeSync, fstatSync, openSync, readSync, statSync } from "node:fs";
+import { noticeFailure } from "../chat-notices.ts";
+import type { ServerText } from "../../shared/server-text.ts";
 
 /** Where the thread's rollout file ended when the turn started. */
 export interface RolloutMark {
@@ -78,16 +80,20 @@ export function unsupportedCallsSince(mark: RolloutMark | null, maxBytes = ROLLO
   }
 }
 
+export function unsupportedCallsFailure(tools: readonly string[]) {
+  const key = tools.length > 6 ? "chat.notice.codexUnsupportedMore" : tools.length === 1 ? "chat.notice.codexUnsupportedOne" : "chat.notice.codexUnsupportedMany";
+  return noticeFailure(key, { tools: tools.slice(0, 6).join(", "), ...(tools.length > 6 ? { count: String(tools.length - 6) } : {}) });
+}
+
 export function unsupportedCallsNotice(tools: readonly string[]): string {
-  const named = tools.slice(0, 6).join(", ") + (tools.length > 6 ? ` and ${tools.length - 6} more` : "");
-  return `Codex could not run ${tools.length === 1 ? "the tool" : "the tools"} ${named} ("unsupported call"): the AI provider sent ` +
-    "the call back without the tool's app name, so it never reached the tool. Pick a model for this bot whose provider handles tool calls fully.";
+  return unsupportedCallsFailure(tools).message;
 }
 
 /** Logs and tells the thread about every call codex refused since `mark`, so a dropped namespace is never silent. */
-export function reportUnsupportedCalls(mark: RolloutMark | null, notice: (message: string) => void): void {
+export function reportUnsupportedCalls(mark: RolloutMark | null, notice: (message: string, text?: ServerText) => void): void {
   const tools = unsupportedCallsSince(mark);
   if (!tools.length) return;
   console.warn(`[codex] unsupported tool call (provider dropped the MCP namespace): ${tools.join(", ")}`);
-  notice(unsupportedCallsNotice(tools));
+  const failure = unsupportedCallsFailure(tools);
+  notice(failure.message, failure.text);
 }

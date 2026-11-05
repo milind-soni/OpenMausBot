@@ -73,14 +73,14 @@ export function AutomationsCalendar({ botFilter, selectedAutomationId, onOpenAut
       if (dragged.kind === "routine") {
         const routine = state.routines.find((candidate) => candidate.id === dragged.id);
         if (!routine) return;
-        if (routine.schedule.type === "cron") throw new Error("Open this automation to change its repeating schedule.");
-        if (routine.schedule.type !== "once" && !window.confirm("Move every time it repeats?")) return;
+        if (routine.schedule.type === "cron") throw new Error(t("automations.calendar.cronMove"));
+        if (routine.schedule.type !== "once" && !window.confirm(t("automations.calendar.moveSeries"))) return;
         const response = await api(`/api/routines/${routine.id}`, { method: "PATCH", body: JSON.stringify({ schedule: scheduleAt(routine.schedule, dragged.at, nextAt) }) });
         dispatch({ type: "routinePatched", routine: response.routine });
       } else {
         const call = calls.find((candidate) => candidate.id === dragged.id);
         if (!call) return;
-        if (call.schedule.type === "daily" && !window.confirm("Move every time it repeats?")) return;
+        if (call.schedule.type === "daily" && !window.confirm(t("automations.calendar.moveSeries"))) return;
         const response = await api(`/api/calendar-calls/${call.id}`, { method: "PATCH", body: JSON.stringify({ schedule: scheduleAt(call.schedule, dragged.at, nextAt) }) });
         upsertCall(response.call);
       }

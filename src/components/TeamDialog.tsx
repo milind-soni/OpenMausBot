@@ -27,7 +27,7 @@ export function TeamDialog({ section, rename = false, onClose, onRenamed }: {
     return () => { if (opener?.isConnected) opener.focus(); };
   }, []);
   const moving = section !== undefined && !rename;
-  const title = rename ? t("team.rename") : managing ? t(initialMembers.current.size ? "team.manageBots" : "team.addBots") : moving ? t("team.moveTo", { name: section || "General" }) : t("team.create");
+  const title = rename ? t("team.rename") : managing ? t(initialMembers.current.size ? "team.manageBots" : "team.addBots") : moving ? t("team.moveTo", { name: section || t("teamSettings.general") }) : t("team.create");
   const candidates = state.bots.filter((bot) => !bot.hidden && (managing || !moving || (bot.section?.trim() ?? "") !== section));
   const addBotIds = [...picked].filter(id => !initialMembers.current.has(id));
   const removeBotIds = [...initialMembers.current].filter(id => !picked.has(id));

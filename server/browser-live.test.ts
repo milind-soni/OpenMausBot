@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import type { ServerResponse } from "node:http";
+import { createServer, get, type ServerResponse } from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserRuntime } from "./browser-runtime.ts";
 import { HOLD_LIMITS } from "./browser/hold.ts";
@@ -1170,7 +1170,7 @@ describe("opening a view while the bot holds the browser", () => {
     const { res, opening } = start();
     await opening;
     expect(res.events("waiting")).toHaveLength(0);
-    expect(res.events("error")).toEqual([{ retryable: true, message: expect.stringMatching(/browser stopped responding/) }]);
+    expect(res.events("error")).toEqual([{ retryable: true, message: "The browser stopped responding, so it is being restarted. The live view reconnects by itself.", errorKey: "serverError.browser.restartingUnresponsive" }]);
     expect(nativeClose).toHaveBeenCalledTimes(1);
     expect(nativeClose).toHaveBeenCalledWith("/engine", expect.objectContaining({ AGENT_BROWSER_SESSION: "profile-a" }));
     // The next view waits for that reset, then meets the fresh session.
@@ -1178,6 +1178,41 @@ describe("opening a view while the bot holds the browser", () => {
     await again.opening;
     expect(again.res.events("ready")).toHaveLength(1);
     expect(nativeClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("carries the restart error code and original English over an isolated HTTP event stream", async () => {
+    vi.mocked(runtime.working).mockReturnValue(false);
+    execute.mockRejectedValueOnce(busy());
+    const server = createServer((_req, res) => {
+      void live.open({ botId: "bot-a", session: "profile-a", owner: "admin-a", isCurrent: () => true, res,
+        spec: { command: "/engine", env: { AGENT_BROWSER_SESSION: "profile-a" } } })
+        .catch(error => res.destroy(error instanceof Error ? error : new Error(String(error))));
+    });
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("The isolated SSE fixture has no TCP address");
+      const received = await new Promise<{ status?: number; contentType?: string; body: string }>((resolve, reject) => {
+        const request = get(`http://127.0.0.1:${address.port}/`, response => {
+          let body = "";
+          response.setEncoding("utf8");
+          response.on("data", chunk => { body += chunk; });
+          response.on("error", reject);
+          response.on("end", () => resolve({ status: response.statusCode, contentType: response.headers["content-type"], body }));
+        });
+        request.on("error", reject);
+        request.setTimeout(5_000, () => request.destroy(new Error("The isolated SSE fixture timed out")));
+      });
+      expect(received).toEqual({ status: 200, contentType: "text/event-stream", body: `event: error\ndata: ${JSON.stringify({
+        retryable: true,
+        message: "The browser stopped responding, so it is being restarted. The live view reconnects by itself.",
+        errorKey: "serverError.browser.restartingUnresponsive",
+      })}\n\n` });
+      expect(nativeClose).toHaveBeenCalledOnce();
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    }
   });
 
   it("keeps waiting, and resets nothing, while a bot call still works in the browser", async () => {

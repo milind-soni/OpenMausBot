@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { JsonValue } from "../../shared/json";
+import { t } from "./i18n";
 
 export interface LocalVmWorkspaceBot {
   id: string;
@@ -88,7 +89,7 @@ export async function switchLocalVmWorkspaceControl(
 
   // Atomic on the server: a read followed by a take cannot prove ownership.
   const taken = await port.take(nextBotId);
-  if (!taken.held) throw new Error("The Local VM control hold was not acquired");
+  if (!taken.held) throw new Error(t("vm.workspace.holdNotAcquired"));
   if (taken.owned !== true) {
     return { status: "held-elsewhere", botId: nextBotId, snapshot: taken };
   }

@@ -6,6 +6,7 @@ import { loadChecks, loadModelSelection } from "./routine-load.ts";
 import { cleanSchedule } from "./routine-schedules.ts";
 import type { ModelSelection } from "../shared/wire.ts";
 import type { Routine, RoutineInput } from "./routines.ts";
+import { userErrorThrown } from "./user-errors.ts";
 
 type Refusal = { status: number; error: string };
 
@@ -83,10 +84,10 @@ export function sanitizeInput(input: RoutineInput, after: number): Omit<Routine,
   if (modelSelection && schedule.type === "limit_reset") throw new Error("A limit-reset routine continues its conversation on that conversation's model");
   const asked = Array.isArray(input.checks) && input.checks.length === 0 ? null : input.checks;
   const checks = asked == null ? undefined : loadChecks(asked);
-  if (asked != null && (!checks || checks.length !== new Set(asked).size)) throw new Error("Choose checks from calendar, mail and runs");
-  if (checks && (target !== "bot" || runsOnce(schedule))) throw new Error("Checks need a bot routine that repeats");
-  if (input.access != null && input.access !== "read-and-draft") throw new Error("Choose read-and-draft access or none");
-  if (input.deliver != null && (input.deliver !== "brief" || target !== "bot")) throw new Error("Only a bot routine can deliver to the brief");
+  if (asked != null && (!checks || checks.length !== new Set(asked).size)) throw userErrorThrown("serverError.routine.checks");
+  if (checks && (target !== "bot" || runsOnce(schedule))) throw userErrorThrown("serverError.routine.checksRepeat");
+  if (input.access != null && input.access !== "read-and-draft") throw userErrorThrown("serverError.routine.access");
+  if (input.deliver != null && (input.deliver !== "brief" || target !== "bot")) throw userErrorThrown("serverError.routine.deliver");
   return {
     name,
     prompt,

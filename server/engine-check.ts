@@ -2,8 +2,10 @@
 import type { ProviderInstance } from "./contracts.ts";
 import { engineFailureMessage } from "./drivers/engine-errors.ts";
 import { redactSecretsInText } from "./redact.ts";
+import { userError } from "./user-errors.ts";
+import type { ServerErrorBody } from "../shared/server-text.ts";
 
-export type EngineCheck = { ok: true } | { ok: false; error: string } | { ok: null };
+export type EngineCheck = { ok: true } | ({ ok: false } & ServerErrorBody) | { ok: null };
 
 const PROMPT = "This is a connection check. Reply with the single word OK.";
 const TIMEOUT_MS = 90_000;
@@ -36,7 +38,7 @@ export function checkEngine(instance: CheckableEngine, options: { timeoutMs?: nu
     const stop = new AbortController();
     const timer = setTimeout(() => {
       stop.abort();
-      resolve({ ok: false, error: `${name} didn't answer within ${Math.round(timeoutMs / 1000)} seconds.` });
+      resolve({ ok: false, ...userError("serverError.engineCheck.timeout", { name, seconds: String(Math.round(timeoutMs / 1000)) }) });
     }, timeoutMs);
     timer.unref?.();
     // Wrapped so a call that throws synchronously fails the check too.

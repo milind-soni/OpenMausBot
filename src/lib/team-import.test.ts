@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { teamImportPreview } from "./team-import";
 import { takeImportName } from "../../shared/import-name";
 import { NEWER_PACKAGE_MESSAGE } from "../../shared/package-format";
+import { en } from "@/locales";
 
 const fixture = (name: string) =>
   JSON.parse(readFileSync(join(import.meta.dirname, "..", "..", "shared", "package-fixtures", name), "utf8"));
@@ -162,6 +163,10 @@ Create the team.`);
       kind: "package", version: 2, library: true, name: "Sales skills", members: [], rooms: 0, routines: 0, skills: [],
       presets: ["Support agent"], offeredSkills: ["follow-up"],
     });
+  });
+
+  it("shows the newer-file message from the catalog, word for word", () => {
+    expect(en["teamImport.newer"]).toBe(NEWER_PACKAGE_MESSAGE);
   });
 
   it("names the problem in a shared team before anything is added", () => {

@@ -145,6 +145,7 @@ describe("a message that tags @devs", () => {
     expect(fx.sent).toHaveLength(1);
     expect(fx.sent[0]!.description).toContain("No summary from a bot: the bot did not call report_bug.");
     expect(fx.notices("scout-main")).toEqual([`notice: ${sentLine("report-1", "ada@example.com")}`]);
+    expect(fx.store.activePath("scout-main").at(-1)?.tool).toEqual({ name: `notice: ${sentLine("report-1", "ada@example.com")}`, ok: true });
     fx.stop();
   });
 
@@ -279,6 +280,16 @@ describe("a message that tags @devs", () => {
 });
 
 describe("what the person is told, in their language", () => {
+  it("writes the reporter's receipt in Portuguese without client translation metadata", async () => {
+    const fx = fixture({ profileEmail: "ada@example.com", lineLanguage: () => "pt-br" });
+    fx.person("scout-main", "@devs o botão travou");
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.notices("scout-main")).toEqual(["notice: Enviado à equipe do MausBot (relatório report-1). Milind e Omkar recebem por e-mail e vão responder para ada@example.com."]);
+    expect(fx.store.activePath("scout-main").at(-1)?.tool?.nameCode).toBeUndefined();
+    fx.stop();
+  });
+
   const german = (person?: string) => (person === "p-ada" ? "de" : undefined);
   const ada = { sender: { name: "Ada", id: "p-ada" } };
 

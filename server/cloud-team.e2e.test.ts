@@ -284,7 +284,10 @@ it("a person's own connected apps cannot be brought into the team, and the team'
   for (const [method, route] of [["GET", "/api/cloud-send/manifest"], ["POST", "/api/cloud-send/chats"], ["GET", "/api/cloud-send?move=1"]] as const) {
     const moved = await team.as(owner, method, route, method === "POST" ? { conversations: [] } : undefined);
     expect(moved.status, route).toBe(403);
-    expect(moved.body.error).toBe("Moving a computer's bots, chats and logins goes to My Cloud only. Nothing personal comes into Acme.");
+    expect(moved.body).toEqual({
+      error: "Moving a computer's bots, chats and logins goes to My Cloud only. Nothing personal comes into Acme.",
+      errorKey: "serverError.team.personalMove", errorParams: { team: "Acme" },
+    });
   }
   expect((await fx.onCloud("GET", "/api/cloud-send/manifest")).status).toBe(200);
   // My Cloud still takes its owner's share (the one-time move), as before.
@@ -297,6 +300,22 @@ it("a person's own connected apps cannot be brought into the team, and the team'
   expect((await team.as(cleo, "GET", "/api/config")).body.composio).toEqual({ configured: true, mode: "managed" });
   const seen = await turn(cleo, await newThread(cleo, "Cleo and Scout"), "Check my mail.");
   expect(Object.keys(seen.mcpConfig.mcpServers)).toContain("composio");
+}, hostTimeout(120_000));
+
+it("a member cannot save a login from a sign-in card: the team's refusal arrives with its key, and nothing is saved", async () => {
+  const before = await team.as(admin, "GET", "/api/logins");
+  expect(before.status, JSON.stringify(before.body)).toBe(200);
+  const threadId = await newThread(ada, "Ada signs in");
+  const refused = await team.as(ada, "POST", `/api/bots/${bot.id}/sign-in-cards/card-1/save-login`, {
+    threadId, username: "ada@acme.test", password: "correct horse battery staple",
+  });
+  expect(refused.status).toBe(403);
+  expect(refused.body).toEqual({
+    error: "On Acme only an admin can save a login, and it is then used by every bot in Acme.",
+    errorKey: "serverError.team.memberLogin",
+    errorParams: { team: "Acme" },
+  });
+  expect((await team.as(admin, "GET", "/api/logins")).body.logins).toEqual(before.body.logins);
 }, hostTimeout(120_000));
 
 it("a member's private chat keeps its own folder when the team's bot is given a working folder; the Owner's own thread moves there", async () => {

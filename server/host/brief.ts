@@ -1,3 +1,4 @@
+import type { ServerText } from "../../shared/server-text.ts";
 // The main agent's brief: one server-built card a day in a fixed chat of the proactive bot's, edited in place, rendered
 // with no AI from what the checks found and what the watch run sorted. It exists only once it has something for the person, opens
 // on the first open of the day and after three hours away, and tells the person once per update. Presence, the brief's home and its rows live in brief.json,
@@ -8,6 +9,7 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import type { NeedsYouItem } from "../../shared/today.ts";
+import type { WidgetText } from "../../shared/widget-text.ts";
 import type { WidgetAction, WidgetRoot } from "../../shared/widget.ts";
 import { writeFileAtomic } from "../atomic.ts";
 import { createAgentCard } from "../chat-widgets.ts";
@@ -18,7 +20,7 @@ import type { RoutineRun } from "../routines.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
 import { answered, localDate, qualifies, validZone } from "./check-plan.ts";
 import { parseWatchResult } from "./check-prompts.ts";
-import { briefCard, clockTime, DISMISS_ACTION, DRAFT_ACTION, prepCard, reminderCard, type BriefEmail, type BriefFacts, type BriefRow, type BuiltCard, type NeedRow } from "./brief-cards.ts";
+import { briefCard, clockTime, DISMISS_ACTION, DRAFT_ACTION, moment, prepCard, reminderCard, words, type BriefEmail, type BriefFacts, type BriefRow, type BuiltCard, type NeedRow } from "./brief-cards.ts";
 import { briefWords, type BriefWords } from "./brief-words.ts";
 import { proactiveOwner } from "./proactive-owner.ts";
 import type { CheckReport } from "./routine-checks.ts";
@@ -134,6 +136,15 @@ export interface PresenceAnswer {
   open?: { botId: string; threadId: string };
 }
 
+export const WATCH_FAILURE = {
+  "brief.row.watchUnreadable": "The watch's answer could not be read, so nothing was posted. Its emails and meetings wait for the next check.",
+  "brief.row.watchRestarted": "OpenMausBot restarted before this run's answer was read; its emails and meetings wait for the next check.",
+} as const;
+const watchFailureWords = (note: string): { note?: WidgetText } => {
+  const key = (Object.keys(WATCH_FAILURE) as Array<keyof typeof WATCH_FAILURE>)
+    .find((one) => WATCH_FAILURE[one] === note || (note.endsWith("…") && WATCH_FAILURE[one].startsWith(note.slice(0, -1))));
+  return key ? { note: words(key) } : {};
+};
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const addressOf = (from: string): string => (/<([^<>\s]+)>/.exec(from)?.[1] ?? from).trim().toLowerCase();
 const firstSentence = (text: string): string => {
@@ -174,7 +185,7 @@ export function createBrief(deps: BriefDeps) {
   let waiting: CheckReport["waiting"];
   let unfenced = false;
   let helpersSort = false;
-  const headers = new Map<string, EmailHeader & { why?: string }>();
+  const headers = new Map<string, EmailHeader & { why?: string; whyText?: ServerText }>();
   let dirty = false;
   let rendering = false;
   /** The card last written, so a check that changed nothing leaves it (and a press on it) alone. */
@@ -238,10 +249,11 @@ export function createBrief(deps: BriefDeps) {
       const bot = deps.store.bot(run.botId);
       if (!bot || bot.hidden) continue;
       const open = run.threadId && deps.store.taskByThread(run.botId, run.threadId) ? { botId: run.botId, threadId: run.threadId } : undefined;
-      const name = oneLine(run.routineName, 80);
+      const name = oneLine(run.routineName, 80), note = run.status === "completed" ? firstSentence(run.output ?? "") : oneLine(run.error ?? "", 140);
       const page = run.status === "completed" && open ? publishedPage(run) : undefined;
-      if (run.status === "completed") done.push({ text: name, note: clip(firstSentence(run.output ?? "") || w.finished, 140), ...(open ? { open } : {}), ...(page ? { page } : {}) });
-      else needs.push({ key: `routine:${name}:${run.status}`, text: run.status === "missed" ? w.missed(name) : w.failed(name), note: clip(oneLine(run.error ?? "", 140) || w.didNotFinish, 140), ...(open ? { open } : {}) });
+      if (run.status === "completed") done.push({ text: name, note: clip(firstSentence(run.output ?? "") || w.finished, 140), ...(open ? { open } : {}), ...(page ? { page } : {}), ...(note ? {} : { said: { note: words("brief.row.finished") } }) });
+      else needs.push({ key: `routine:${name}:${run.status}`, text: run.status === "missed" ? w.missed(name) : w.failed(name), note: clip(oneLine(run.error ?? "", 140) || w.didNotFinish, 140), ...(open ? { open } : {}),
+        said: { text: words(run.status === "missed" ? "brief.row.missed" : "brief.row.failed", { name }), ...(note ? watchFailureWords(note) : { note: words("brief.row.didNotFinish") }) } });
     }
     return { needs, done };
   }
@@ -249,16 +261,16 @@ export function createBrief(deps: BriefDeps) {
   function needsYouRows(w: BriefWords): NeedRow[] {
     return deps.needsYou().map((item): NeedRow => {
       const open = item.threadId ? { botId: "botId" in item ? item.botId : item.botIds[0]!, threadId: item.threadId } : undefined;
-      const row = (about: string, text: string, note: string): NeedRow =>
-        ({ key: `${item.kind}:${about}`, text, note, ...(open && deps.store.taskByThread(open.botId, open.threadId) ? { open } : {}) });
+      const row = (about: string, text: string, note: string, said: BriefRow["said"]): NeedRow =>
+        ({ key: `${item.kind}:${about}`, text, note, said, ...(open && deps.store.taskByThread(open.botId, open.threadId) ? { open } : {}) });
       switch (item.kind) {
-        case "signed-out": { const engine = deps.engineName(item.instanceId); return row(engine, w.signedOut(engine), w.signInAgain); }
-        case "usage-limit": return row("", w.usageLimit, clip(item.text, 140));
-        case "out-of-credit": return row("", w.outOfCredit, w.ownAccount);
-        case "connection": return row(item.app, w.reconnecting(item.app), clip(item.text, 140));
-        case "place": return row("", w.unreachable, w.chooseAnother);
-        case "question": { const bot = deps.store.bot(item.botId)?.name; return row(bot ?? "", w.asked(bot ?? w.aBot), clip(item.text, 140)); }
-        case "message": return row(item.from, w.asked(item.from), clip(item.text, 140));
+        case "signed-out": { const engine = deps.engineName(item.instanceId); return row(engine, w.signedOut(engine), w.signInAgain, { text: words("brief.row.signedOut", { engine }), note: words("brief.row.signInAgain") }); }
+        case "usage-limit": return row("", w.usageLimit, clip(item.text, 140), { text: words("brief.row.usageLimit"), ...(item.textCode ? { note: words(item.textCode, item.textParams) } : {}) });
+        case "out-of-credit": return row("", w.outOfCredit, w.ownAccount, { text: words("brief.row.trialCredit"), note: words("brief.row.trialCreditNote") });
+        case "connection": return row(item.app, w.reconnecting(item.app), clip(item.text, 140), { text: words("brief.row.reconnect", { app: item.app }) });
+        case "place": return row("", w.unreachable, w.chooseAnother, { text: words("brief.row.place"), note: words("brief.row.placeNote") });
+        case "question": { const bot = deps.store.bot(item.botId)?.name; return row(bot ?? "", w.asked(bot ?? w.aBot), clip(item.text, 140), { text: words("brief.row.asked", { name: bot ?? words("brief.part.aBot") }) }); }
+        case "message": return row(item.from, w.asked(item.from), clip(item.text, 140), { text: words("brief.row.asked", { name: item.from }) });
       }
     });
   }
@@ -270,25 +282,27 @@ export function createBrief(deps: BriefDeps) {
       key: `clash:${oneLine(first.title, 52)}:${oneLine(second.title, 52)}`,
       text: w.overlap(oneLine(first.title, 52), oneLine(second.title, 52)),
       note: w.both(clockTime(first.start, zone, language), clockTime(second.start, zone, language)),
+      said: { text: words("brief.row.clash", { first: oneLine(first.title, 52), second: oneLine(second.title, 52) }), note: words("brief.row.clashNote", { first: moment(first.start, "clock", zone), second: moment(second.start, "clock", zone) }) },
     }));
     const troubleRows: NeedRow[] = (trouble ?? []).map((one) => {
       const app = one.app === "gmail" ? "Gmail" : "Google Calendar";
-      return { key: `trouble:${one.app}`, text: w.couldNotRead(app), note: one.signedOut ? w.reconnect(app) : w.tryAgainSoon };
+      return { key: `trouble:${one.app}`, text: w.couldNotRead(app), note: one.signedOut ? w.reconnect(app) : w.tryAgainSoon,
+        said: { text: words("brief.row.cantRead", { app }), note: one.signedOut ? words("brief.row.reconnectIn", { app }) : words("brief.row.tryAgainSoon") } };
     });
     const unfencedRows: NeedRow[] = !unfenced ? []
       : helpersSort
-        ? [{ key: "unfenced:meetings", text: w.unpreparedMeetings, note: w.unpreparedNote(chiefBot.name) }]
-        : [{ key: "unfenced:all", text: w.unsorted, note: w.unsortedNote(chiefBot.name) }];
+        ? [{ key: "unfenced:meetings", text: w.unpreparedMeetings, note: w.unpreparedNote(chiefBot.name), said: { text: words("brief.row.unpreparedMeetings"), note: words("brief.row.unpreparedNote", { name: chiefBot.name }) } }]
+        : [{ key: "unfenced:all", text: w.unsorted, note: w.unsortedNote(chiefBot.name), said: { text: words("brief.row.unfenced"), note: words("brief.row.unfencedNote", { name: chiefBot.name }) } }];
     const meetings = calendar === undefined ? null : calendar.meetings
       .filter((meeting) => qualifies(meeting) || (meeting.ownedCalendar === true && meeting.status !== "cancelled" && !meeting.allDay && !meeting.selfDeclined))
       .filter((meeting) => meeting.end > at && localDate(meeting.start, zone) === day)
       .map((meeting) => ({ title: meeting.title, start: meeting.start, ...(meeting.joinUrl ? { joinUrl: meeting.joinUrl } : {}) }));
     const emails = liveImportant(at).flatMap((row): BriefEmail[] => {
       const header = headers.get(row.messageId);
-      return header ? [{ messageId: row.messageId, threadId: row.threadId, from: header.from, subject: header.subject, needsReply: row.needsReply, ...(header.why ? { why: header.why } : {}) }] : [];
+      return header ? [{ messageId: row.messageId, threadId: row.threadId, from: header.from, subject: header.subject, needsReply: row.needsReply, ...(header.why ? { why: header.why, ...(header.whyText ? { whyText: header.whyText } : {}) } : {}) }] : [];
     });
     const dreamt = deps.ideas?.(chiefBot.id);
-    const ideas = (dreamt?.ideas ?? []).map((idea): BriefRow => ({ text: idea, note: w.noticedAcross(dreamt!.conversations) }));
+    const ideas = (dreamt?.ideas ?? []).map((idea): BriefRow => ({ text: idea, note: w.noticedAcross(dreamt!.conversations), said: { note: words("brief.row.noticedAcross", { count: String(dreamt!.conversations) }) } }));
     return {
       now: at, ...(zone ? { timeZone: zone } : {}), ...(language ? { language } : {}), intro: state.introducedOn === undefined || state.introducedOn === day,
       ...(state.morningLine?.day === day ? { overnight: state.morningLine.text } : {}),
@@ -398,8 +412,8 @@ export function createBrief(deps: BriefDeps) {
   }
 
   /** An email picked for the brief, by a watch run or by the helper models: its row, with the why kept for this process. */
-  function keepImportant(email: EmailHeader, why: string, needsReply: boolean, at: number): void {
-    headers.set(email.id, { ...email, why });
+  function keepImportant(email: EmailHeader, why: string, needsReply: boolean, at: number, whyText?: ServerText): void {
+    headers.set(email.id, { ...email, why, ...(whyText ? { whyText } : {}) });
     state.important = [...state.important.filter((row) => row.messageId !== email.id), { messageId: email.id, threadId: email.threadId, at: email.at, judgedAt: at, needsReply }].slice(-MAX_ROWS);
   }
 
@@ -414,7 +428,7 @@ export function createBrief(deps: BriefDeps) {
     helpersSort = found.helpersSort === true;
     for (const event of found.remind ?? []) postCard(reminderCard({ event, timeZone: timeZone(), now: now() }));
     const picked = found.picked ?? [];
-    for (const pick of picked) keepImportant(pick.email, pick.why, pick.needsReply, found.at);
+    for (const pick of picked) keepImportant(pick.email, pick.why, pick.needsReply, found.at, pick.whyText);
     if (picked.length) save();
     await followUpReplies(found.session);
     if (picked.length) await render({ create: true, notify: true });
@@ -444,7 +458,7 @@ export function createBrief(deps: BriefDeps) {
     const given = { mail: new Set(items?.mail.map((email) => email.id) ?? []), prep: new Set(items?.prep.map((one) => one.key) ?? []) };
     const result = items ? parseWatchResult(reply, given) : null;
     if (!items || !result) {
-      deps.failRun(run.id, items ? "The watch's answer could not be read, so nothing was posted. Its emails and meetings wait for the next check." : "OpenMausBot restarted before this run's answer was read; its emails and meetings wait for the next check.");
+      deps.failRun(run.id, WATCH_FAILURE[items ? "brief.row.watchUnreadable" : "brief.row.watchRestarted"]);
       return;
     }
     const at = now();

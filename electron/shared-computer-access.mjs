@@ -229,7 +229,7 @@ export async function sharedCommand(command, cwd, signal, seconds = COMMAND_SECO
 }
 
 /** Persistent transport: Cua observation references survive to the next call. Ending sharing closes this, not the app's daemon. */
-export function createSharedCua(connection, { platform = process.platform } = {}) {
+export function createSharedCua(connection, { platform = process.platform, t } = {}) {
   const child = spawn(connection.mcpCommand, connection.mcpArgs, {
     stdio: ["pipe", "pipe", "ignore"], windowsHide: true,
     env: { ...driverEnvironment(), ...connection.mcpEnv },
@@ -238,7 +238,7 @@ export function createSharedCua(connection, { platform = process.platform } = {}
   const pending = new Map();
   const fail = error => {
     closed = true;
-    const reason = child.pid === undefined ? new Error(helperMissing()) : error;
+    const reason = child.pid === undefined ? new Error(helperMissing(platform, t)) : error;
     for (const item of pending.values()) item.reject(reason);
     pending.clear(); child.kill();
   };

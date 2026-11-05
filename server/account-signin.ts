@@ -3,6 +3,7 @@
 import { resolveCompanionControlPlaneURL } from "../electron/companion-account-service.mjs";
 import { ControlPlaneError, createControlPlaneClient, normalizeAccountEmail, type ControlPlaneClient } from "../electron/control-plane-client.mjs";
 import type { Scope } from "./sessions.ts";
+import { userError, type UserError } from "./user-errors.ts";
 
 /** Who may sign in. `a@b.com` is that address; `@b.com` is everyone at b.com. */
 export interface SignInAllowList {
@@ -31,7 +32,7 @@ export function signInEnabled(list: SignInAllowList): boolean {
   return list.admins.length + list.members.length > 0;
 }
 
-export type SignInFailure = { ok: false; status: number; error: string };
+export type SignInFailure = { ok: false; status: number } & UserError;
 
 export interface EmailSignIn {
   enabled(): boolean;
@@ -39,7 +40,7 @@ export interface EmailSignIn {
   verify(email: string, code: string): Promise<{ ok: true; email: string; userId: string; scopes: Scope[] } | SignInFailure>;
 }
 
-const NOT_WELCOME: SignInFailure = { ok: false, status: 403, error: "this email is not on this server's sign-in list; ask the server's owner to add it" };
+const NOT_WELCOME: SignInFailure = { ok: false, status: 403, ...userError("serverError.email.notAllowed") };
 
 export function createEmailSignIn(options: {
   allow: SignInAllowList | (() => SignInAllowList);
@@ -61,7 +62,7 @@ export function createEmailSignIn(options: {
     enabled: () => signInEnabled(allow()),
     async start(rawEmail) {
       const email = normalizeAccountEmail(rawEmail);
-      if (!email) return { ok: false, status: 400, error: "enter a valid email address" };
+      if (!email) return { ok: false, status: 400, ...userError("serverError.email.invalid") };
       if (!allowedScopes(email, allow())) return NOT_WELCOME;
       try {
         await controlPlane().requestOTP(email);
@@ -80,13 +81,13 @@ export function createEmailSignIn(options: {
         // The client refuses a malformed code before any request (status 0);
         // the control plane's own "invalid_otp" is a wrong or expired code.
         if (error instanceof ControlPlaneError && error.code === "invalid_otp" && !error.status) {
-          return { ok: false, status: 400, error: "enter the 8-digit code from the email" };
+          return { ok: false, status: 400, ...userError("serverError.email.codeFormat") };
         }
         if (error instanceof ControlPlaneError && error.status === 429) {
-          return { ok: false, status: 429, error: "too many attempts; wait a minute and request a new code" };
+          return { ok: false, status: 429, ...userError("serverError.email.tooMany") };
         }
         if (error instanceof ControlPlaneError && (error.status === 400 || error.status === 401 || error.status === 403)) {
-          return { ok: false, status: 401, error: "that code is wrong or has expired; request a new one" };
+          return { ok: false, status: 401, ...userError("serverError.email.codeWrong") };
         }
         return unavailable(error);
       }
@@ -102,5 +103,5 @@ export function createEmailSignIn(options: {
 
 function unavailable(error: unknown): SignInFailure {
   const detail = error instanceof ControlPlaneError ? `${error.code}${error.status ? ` (${error.status})` : ""}` : error instanceof Error ? error.message : String(error);
-  return { ok: false, status: 502, error: `the sign-in service could not be reached (${detail}); try again in a moment` };
+  return { ok: false, status: 502, ...userError("serverError.email.unavailable", { detail }) };
 }

@@ -1,8 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VoiceProbeSample } from "../../../shared/voice-latency-probe";
 
 import { setLocale } from "../i18n";
 import { Speaker } from "./index";
+import { toUtterances } from "../../../server/tts/speech-text";
+import { userError } from "../../../server/user-errors";
 
 class FakeAudio {
   static latest: FakeAudio | null = null;
@@ -176,6 +178,52 @@ describe("Speaker lifecycle", () => {
     expect(speaker.state).toMatchObject({ status: "speaking", messageId: "current" });
     audio.onended?.();
     await current.end();
+  });
+});
+
+describe("coded voice refusals", () => {
+  beforeEach(() => { FakeAudio.latest = null; });
+
+  afterEach(() => {
+    setLocale("en");
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    ["en", "voice utterances are limited to 500 characters"],
+    ["pt-br", "Cada trecho de fala pode ter no máximo 500 caracteres"],
+  ])("shows an oversized prepared utterance refusal in %s", async (locale, expected) => {
+    setLocale(locale);
+    const text = "Tudo bem. ".repeat(80);
+    const utterances = toUtterances(text);
+    expect(utterances.some((utterance) => utterance.length > 500)).toBe(true);
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => String(input).endsWith("/prepare")
+      ? json({ ready: true, utterances })
+      : Response.json(userError("serverError.voice.utteranceTooLong"), { status: 413 })));
+    const speaker = new Speaker();
+    await speaker.speak(text);
+    expect(speaker.state).toEqual({ status: "idle", error: expected });
+    expect(FakeAudio.latest).toBeNull();
+  });
+
+  it.each(["prepare", "speak"])("consumes string error params from /%s", async (phase) => {
+    setLocale("pt-br");
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => String(input).endsWith("/prepare") && phase === "speak"
+      ? json({ ready: true, utterances: ["Hello there."] })
+      : Response.json(userError("serverError.owner.choose", { team: "Aurora" }), { status: 400 })));
+    const speaker = new Speaker();
+    await speaker.speak("Hello there.");
+    expect(speaker.state.error).toBe("Escolha alguém de Aurora.");
+  });
+
+  it.each([undefined, "activity.tool.team.decide", "serverError.future.voice"])("keeps the raw diagnostic for unsupported error key %s", async (errorKey) => {
+    setLocale("pt-br");
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => String(input).endsWith("/prepare")
+      ? json({ ready: true, utterances: ["Hello there."] })
+      : Response.json({ error: "upstream technical diagnostic", errorKey }, { status: 502 })));
+    const speaker = new Speaker();
+    await speaker.speak("Hello there.");
+    expect(speaker.state.error).toBe("upstream technical diagnostic");
   });
 });
 

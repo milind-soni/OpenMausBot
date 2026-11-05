@@ -9,6 +9,7 @@ import { connectorAccessDecision, describeConnectorScopes, type ConnectorScopes 
 import type { ConnectorToolGrant } from "../../shared/wire.ts";
 import { connectorRefusalText, connectorScopeRefusalText, evaluateConnectorTools } from "../connector-verdict.ts";
 import { appendDecision } from "../decision-log.ts";
+import { conversationLanguage, serverLine } from "../server-lines.ts";
 import { boxUploadsDir } from "../bot-box/plan.ts";
 import { harnessMcpTokenEnv } from "../harness-mcp-token.ts";
 import { AGENTS_NODE_FLAG, SPAWNED_PROXIES } from "../proxy-paths.ts";
@@ -167,7 +168,7 @@ export function createEmailHost(deps: EmailHostDeps) {
       if (mailbox.problem && !result.isError) service.store.markProblem(mailbox.address, mailbox.password, mailbox.smtp ? undefined : mailbox.problem);
       if (name === "EMAIL_SEND_MESSAGE" && !result.isError) {
         deps.appendMessage(capability.threadId, {
-          role: "bot", kind: "activity", tool: { name: `mcp__${EMAIL_MCP_SERVER}__${name}`, ok: true, summary: `Sent from ${mailbox.address} to ${(args.to as string[]).length} recipient(s)` },
+          role: "bot", kind: "activity", tool: { name: `mcp__${EMAIL_MCP_SERVER}__${name}`, ok: true, summary: serverLine(conversationLanguage(capability.threadId), "server.email.sent", { address: mailbox.address, count: (args.to as string[]).length }) },
           ...(bot && deps.inRoom(capability.threadId) ? { from: { botId: bot.id, name: bot.name, color: bot.color } } : {}),
         });
       }

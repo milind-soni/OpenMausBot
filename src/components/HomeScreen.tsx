@@ -9,6 +9,7 @@ const MACHINE: Record<string, LocaleKey> = {
   "payment-problem": "cloudHome.paymentProblem",
   failed: "cloudHome.failed",
 };
+const UNREACHABLE: Record<string, LocaleKey> = { host: "cloudHome.unreachableHost", no_answer: "cloudHome.unreachable" };
 
 /** What the screen's one button does: sign in again, open the Plan page, look again, or, for a Cloud that isn't running, buy
  * it again, continue its checkout or update the card (each on the Cloud page in the browser, or its checkout reopened). */
@@ -26,8 +27,7 @@ export function homeScreenText(view: HomeView | null, now = Date.now()): { title
   const name = view?.name ?? null;
   const named = (plain: LocaleKey, withName: LocaleKey) => (name ? t(withName, { name }) : t(plain));
   if (view?.screen === "setup") return { title: named("homeScreen.setup", "homeScreen.setupNamed"), body: t(view.slow ? "cloudHome.slow" : "homeScreen.setupBody"), reason: null, action: null, busy: true };
-  // It didn't answer: said once, with Try again, never a spinner that goes on for ever (it still looks again by itself).
-  if (view?.screen === "offline") return { title: named("homeScreen.offline", "homeScreen.offlineNamed"), body: t("homeScreen.offlineBack"), reason: view.reason ?? null, action: "retry", busy: false };
+  if (view?.screen === "offline") return { title: named("homeScreen.offline", "homeScreen.offlineNamed"), body: t("homeScreen.offlineBack"), reason: view.cause && Object.hasOwn(UNREACHABLE, view.cause) ? t(UNREACHABLE[view.cause]!) : view.reason ?? null, action: "retry", busy: false };
   if (view?.screen === "signin") return { title: named("homeScreen.signIn", "homeScreen.signInNamed"), body: t(view.other ? "homeScreen.signInOther" : "homeScreen.signInEnded"), reason: null, action: "sign-in", busy: false };
   if (view?.screen === "plan" && view.member && view.machine !== "failed") return { title: named("homeScreen.plan", "homeScreen.planNamed"), body: t("cloudHome.stoppedMember"), reason: null, action: null, busy: false };
   if (view?.screen === "plan") return { title: named("homeScreen.plan", "homeScreen.planNamed"), body: t(MACHINE[view.machine] ?? "cloudHome.failed"), reason: null, action: view.machine === "failed" ? null : "manage", busy: false };

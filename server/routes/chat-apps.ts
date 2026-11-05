@@ -4,6 +4,7 @@ import { webOrigin } from "../../shared/app-frame/csp.ts";
 import { appRow, createChatApps, rowRate, type ChatApps } from "../chat-apps.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
+import { userError } from "../user-errors.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export { createChatApps };
@@ -55,7 +56,7 @@ export function createChatAppRoutes(deps: ChatAppRouteDeps): RouteHandler {
       // A folder page's files load from wherever this client reaches the app; it names that origin itself.
       const origin = webOrigin(url.searchParams.get("origin")) ?? webOrigin(url.origin) ?? undefined;
       const doc = apps.appDocument(threadId, m[2]!, asked === null ? undefined : Number(asked), origin);
-      if (!doc) return json(res, 404, { error: asked === null ? "This app's page is not stored on this computer." : "That version of the page is no longer kept." });
+      if (!doc) return json(res, 404, userError(asked === null ? "serverError.page.notStored" : "serverError.page.versionGone"));
       // `can` and `blocked` change with sign-in and settings: never cached.
       res.setHeader("cache-control", "private, no-store");
       return json(res, 200, doc);

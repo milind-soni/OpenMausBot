@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import "../server-line-packs.ts";
 import { CLOUD_OUTSIDE_KEY } from "../cloud-sharing.ts";
 import type { HandoffView } from "../coordinator.ts";
 import type { RoutineRun } from "../routines.ts";
@@ -131,5 +132,21 @@ describe("work from outside stays with that work", () => {
     const w = world();
     w.lineage.mark("hook-run");
     expect(w.lineage.guestEngineRefusal("hook-run")).toContain("Work from outside came into this conversation");
+  });
+});
+
+describe("confinement explanations follow the conversation language without choosing branches by translated text", () => {
+  it.each([
+    ["en", "Work from outside came into this conversation", "This bot's AI can't run it that way.", "This conversation is from before the Cloud was only yours"],
+    ["pt-br", "Esta conversa recebeu trabalho de fora", "A IA deste bot não pode trabalhar dessa forma.", "Esta conversa é de antes de o Cloud ser só seu"],
+    ["de", "Arbeit von außerhalb ist in diese Unterhaltung gelangt", "Die KI dieses Bots kann so nicht arbeiten.", "Diese Unterhaltung stammt aus der Zeit, bevor die Cloud nur dir gehörte"],
+  ])("keeps both refusal branches in %s", (language, outside, prefix, old) => {
+    const w = world({ language: () => language });
+    w.lineage.mark("hook-run");
+    expect(w.lineage.confinedWhy("hook-run")).toContain(outside);
+    expect(w.lineage.guestEngineRefusal("hook-run")).toContain(prefix);
+    expect(w.lineage.guestEngineRefusal("hook-run")).toContain(outside);
+    expect(w.lineage.guestEngineRefusal("chat")).toContain(old);
+    expect(w.lineage.guestEngineRefusal("chat")).not.toContain(prefix);
   });
 });

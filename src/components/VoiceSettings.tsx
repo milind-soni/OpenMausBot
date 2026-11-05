@@ -370,8 +370,8 @@ export function VoiceSettings({
             value={key}
             onChange={(e) => setKeyDraft({ provider: cloudProvider.id, value: e.target.value })}
             onKeyDown={(e) => e.key === "Enter" && key.trim() && void saveKey()}
-            placeholder={configured && !included ? "••••••••  (paste to replace)" : cloudProvider.placeholder}
-            aria-label={`${cloudProvider.name} key`}
+            placeholder={configured && !included ? t("voice.keySavedPlaceholder") : cloudProvider.placeholder}
+            aria-label={t("voice.keyLabel", { name: cloudProvider.name })}
             autoComplete="off"
             className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
           />
@@ -510,13 +510,13 @@ export function VoiceSettings({
                 onPick={pickVoice}
                 pending={addingVoice ?? undefined}
                 defaultLabel={tts.voice ? t("voice.yourVoice", { provider: providerName }) : t("voice.pick")}
-                ariaLabel={`${bot.name}'s voice`}
+                ariaLabel={t("voice.pickerLabel", { name: bot.name })}
               />
             ) : (
               <Select
                 value={selectedVoice}
                 onChange={(e) => chooseVoice(e.target.value)}
-                aria-label={`${bot.name}'s voice`}
+                aria-label={t("voice.pickerLabel", { name: bot.name })}
                 data-voice-picker
                 className="w-full"
               >
