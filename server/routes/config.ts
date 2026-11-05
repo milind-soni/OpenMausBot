@@ -43,6 +43,7 @@ import * as vps from "../vps-computer.ts";
 import { refusalBody, userError, userErrorFields } from "../user-errors.ts";
 import type { ServerErrorBody } from "../../shared/server-text.ts";
 import type { Postiz } from "../postiz/service.ts";
+import type { OpenConnector } from "../openconnector/service.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface BusyFlag {
@@ -102,6 +103,8 @@ export interface ConfigRouteDeps {
   drainQueuedSends(): void;
   /** Postiz: a key is checked at its address before it is saved, and the `postiz` server follows the saved key. */
   postiz?: Pick<Postiz, "configCheck" | "configSaved">;
+  /** OpenConnector: the address and command are checked before they are saved. */
+  openconnector?: Pick<OpenConnector, "configCheck" | "configSaved">;
 }
 
 export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
@@ -111,7 +114,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
     localVmIdleMs, localVmIdles, localVmActiveThreads, localVmLifecycleBusy, localVmImageBusy, localVmModeChangeBusy,
     providerConfigBusy, computerProviderConfigTransitions, managedBoatOwners, providerOperationConflict,
     perBotLocalVmCountForModeChange, checkedModelSelection, policyModelRefusal, browserSessionSpec, configStatus,
-    configForAccess, resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, ownProfile, postiz,
+    configForAccess, resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, ownProfile, postiz, openconnector,
   } = deps;
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     // API keys are never echoed back: booleans only.
@@ -369,6 +372,8 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       }
       const postizRefusal = await postiz?.configCheck(patch);
       if (postizRefusal) return json(res, postizRefusal.status, { error: postizRefusal.error, code: postizRefusal.code, ...userErrorFields(postizRefusal) });
+      const openconnectorRefusal = await openconnector?.configCheck(patch);
+      if (openconnectorRefusal) return json(res, openconnectorRefusal.status, { error: openconnectorRefusal.error, code: openconnectorRefusal.code });
       const newBoatToken = patch.box?.token;
       if (newBoatToken?.trim()) {
         const check = await boat.verifyToken(newBoatToken);
@@ -566,6 +571,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       }
       for (const key of resetKeys) if (key) forgetKey(key);
       postiz?.configSaved(patch);
+      openconnector?.configSaved(patch);
       // A saved key reaches an engine through the environment its status read uses, often with no reload.
       registry.forgetSnapshots();
       if (patch.localVm?.idleTimeoutMinutes !== undefined) {

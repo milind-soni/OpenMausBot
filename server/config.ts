@@ -338,6 +338,8 @@ const appConfigSchema = z.object({
   }).optional(),
   mistral: z.object({ key: optionalText }).optional(),
   cerebras: z.object({ key: optionalText }).optional(), treg: z.object({ key: optionalText }).optional(), postiz: z.object({ key: optionalText, url: optionalText }).optional(),
+  /** OpenConnector: the local app catalog's MCP address and, when OpenMausBot should run it, the command and args. */
+  openconnector: z.object({ url: optionalText, command: optionalText, args: z.array(z.string().max(500)).max(50).optional() }).optional(),
   groq: z.object({ key: optionalText, url: optionalText }).optional(),
   greenference: z.object({ key: optionalText }).optional(),
   meta: z.object({ key: optionalText, url: optionalText }).optional(),
@@ -468,6 +470,8 @@ export interface AppConfig extends HelperConfig {
   xai?: { key?: string; url?: string };
   mistral?: { key?: string };
   cerebras?: { key?: string }; treg?: { key?: string }; /** Postiz: an organisation API key and the server it belongs to (blank: Postiz Cloud). */ postiz?: { key?: string; url?: string };
+  /** OpenConnector: the MCP address of the local app catalog, and the command that starts it when managed. */
+  openconnector?: { url?: string; command?: string; args?: string[] };
   groq?: { key?: string; url?: string };
   greenference?: { key?: string };
   meta?: { key?: string; url?: string };
@@ -752,6 +756,8 @@ export function loadConfig(): AppConfig {
     cfg[name] = { ...cfg[name], ...(process.env[env] !== undefined ? { key: process.env[env] } : {}) };
   }
   if (process.env.OMB_TREG_KEY !== undefined) cfg.treg = { ...cfg.treg, key: process.env.OMB_TREG_KEY }; if (process.env.OMB_POSTIZ_API_KEY !== undefined) cfg.postiz = { ...cfg.postiz, key: process.env.OMB_POSTIZ_API_KEY };
+  if (process.env.OMB_OPENCONNECTOR_URL !== undefined) cfg.openconnector = { ...cfg.openconnector, url: process.env.OMB_OPENCONNECTOR_URL };
+  if (process.env.OMB_OPENCONNECTOR_COMMAND !== undefined) cfg.openconnector = { ...cfg.openconnector, command: process.env.OMB_OPENCONNECTOR_COMMAND };
   // Never ANTHROPIC_API_KEY: an operator's stray variable must not move every Claude bot onto API billing.
   cfg.anthropic = { ...cfg.anthropic };
   if (process.env.OMB_ANTHROPIC_API_KEY !== undefined) cfg.anthropic.key = process.env.OMB_ANTHROPIC_API_KEY;
@@ -930,7 +936,7 @@ export function saveConfig(
   const keepImageModels = keepKeysOutOfImageModels(disk, checkedPatch.imageGen);
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "mistral", "cerebras", "treg", "postiz", "groq", "greenference", "meta", "deepseek", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "loopGuard", "onboarding", "browserEngine", "newBots", "safetyFloor"] as const) {
+  for (const key of ["xai", "anthropic", "mistral", "cerebras", "treg", "postiz", "openconnector", "groq", "greenference", "meta", "deepseek", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "loopGuard", "onboarding", "browserEngine", "newBots", "safetyFloor"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);

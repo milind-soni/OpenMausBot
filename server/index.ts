@@ -101,7 +101,7 @@ import { DATA_INTERNAL_MCP_PATH, dataRpc } from "./data/rpc.ts";
 import { createHighLevelHost } from "./highlevel/host.ts";
 import { HIGHLEVEL_INTERNAL_MCP_PATH } from "./highlevel/rpc.ts";
 import { createHighLevelService } from "./highlevel/service.ts";
-import { createHighLevelRoutes } from "./routes/highlevel.ts"; import { createEmailRoutes } from "./routes/email.ts"; import { createEmailHost, EMAIL_INTERNAL_MCP_PATH } from "./email/host.ts"; import { createEmailService } from "./email/service.ts"; import { createPostizRoutes } from "./routes/postiz.ts"; import { createPostiz } from "./postiz/service.ts";
+import { createHighLevelRoutes } from "./routes/highlevel.ts"; import { createEmailRoutes } from "./routes/email.ts"; import { createEmailHost, EMAIL_INTERNAL_MCP_PATH } from "./email/host.ts"; import { createEmailService } from "./email/service.ts"; import { createPostizRoutes } from "./routes/postiz.ts"; import { createPostiz } from "./postiz/service.ts"; import { createOpenConnectorRoutes } from "./routes/openconnector.ts"; import { createOpenConnector } from "./openconnector/service.ts";
 import { createPhones } from "./host/phones.ts";
 import { NOT_THE_OWNER } from "./phones/owner.ts";
 import { PHONE_INTERNAL_MCP_PATH } from "./phones/rpc.ts";
@@ -12411,7 +12411,7 @@ const mcpConfig = createMcpConfig({
   connectionsChanged: (change) => void routineHolds?.connections(change), probeAs: mcpServersHost.probeAs,
   changed: () => broadcast({ kind: "mcp.changed" }) });
 const persistAnnouncedMcpServers = (next: Record<string, unknown>) => { persistMcpServers(next); broadcast({ kind: "mcp.changed" }); };
-const postiz = createPostiz({ cfg: () => cfg, mcpOAuth, persistMcpServers: persistAnnouncedMcpServers, mcpConfigBusy: mcpConfig.busy, mcpPolicyRefusal, appCatalog: chatAppsMcp, team: teamConnections, loopback: !CLOUD_HOME && !HOSTED_WORKSPACE }); ROUTES.push(createPostizRoutes({ postiz }), createConfigRoutes({
+const postiz = createPostiz({ cfg: () => cfg, mcpOAuth, persistMcpServers: persistAnnouncedMcpServers, mcpConfigBusy: mcpConfig.busy, mcpPolicyRefusal, appCatalog: chatAppsMcp, team: teamConnections, loopback: !CLOUD_HOME && !HOSTED_WORKSPACE }); const openconnector = createOpenConnector({ cfg: () => cfg, persistMcpServers: persistAnnouncedMcpServers, mcpConfigBusy: mcpConfig.busy, mcpPolicyRefusal, appCatalog: chatAppsMcp, dataDir: DATA_DIR, loopback: !CLOUD_HOME && !HOSTED_WORKSPACE }); openconnector.startHealth(); ROUTES.push(createOpenConnectorRoutes({ openconnector })); ROUTES.push(createPostizRoutes({ postiz }), createConfigRoutes({
   store, cfg, registry, sessions, browserCleanup, browserLive, browserRuntime, usedBrowserSessions, decider,
   sharedComputers, sharedComputerControl, closeBrowser, browserEngineSwitched,
   hostedModels: Boolean(hostedModels),
@@ -12424,7 +12424,7 @@ const postiz = createPostiz({ cfg: () => cfg, mcpOAuth, persistMcpServers: persi
   checkedModelSelection, policyModelRefusal, browserSessionSpec, configStatus,
   configForAccess: (status, auth) => configForAccess(status as ReturnType<typeof configStatus>, auth.scopes.includes("admin"), auth.kind === "session" ? auth.session : null),
   ...(CLOUD_TEAM ? { ownProfile: (auth: RequestAuth, profile: { name?: string; avatarUrl?: string; aboutMe?: string }) => auth.kind === "session" ? (teamHost.saveMemberProfile(auth.session, profile), true) : false } : {}),
-  resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, postiz,
+  resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, postiz, openconnector,
 }));
 ROUTES.push(createInstanceRoutes({
   store, cfg, registry, sessions, providerAuthSessions,

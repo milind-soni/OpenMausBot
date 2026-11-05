@@ -64,6 +64,9 @@ vi.mock("./EmailCard", () => ({
 vi.mock("./PostizCard", () => ({
   PostizCard: () => createElement("div", { "data-postiz-card": true }, "Postiz"),
 }));
+vi.mock("./OpenConnectorCard", () => ({
+  OpenConnectorCard: () => createElement("div", { "data-openconnector-card": true }, "OpenConnector"),
+}));
 import { HOSTED_MCP_APPS } from "@/lib/hosted-mcp-apps";
 import { APPS_PREVIEW_COUNT, PluginsPanel, USED_BY_AVATAR_SIZE, botsUsingService } from "./PluginsPanel";
 import { FACE_BOX } from "./cursor-face-data";
@@ -253,6 +256,25 @@ describe("Apps pop-up", () => {
     fixture.overrides.set(SEARCH, "imap");
     expect(wrapper(render().nodes).props.className).toBe("contents");
     fixture.overrides.set(SEARCH, "twitter");
+    expect(wrapper(render().nodes).props.className).toBe("hidden");
+  });
+  it("shows the OpenConnector card in the grid and counts it once connected", () => {
+    const OPENCONNECTOR_CONNECTED = 25;
+    const wrapper = (tree: Node[]) => tree.find((node) => node.props["data-native-card"] === "openconnector")!;
+    const { html, nodes: tree } = render();
+    expect(nodes(wrapper(tree)).some((node) => node.props.onConnection !== undefined && node.props.refreshKey !== undefined)).toBe(true);
+    expect(wrapper(tree).props.className).toBe("contents");
+    expect(html).toContain("1 connected");
+    fixture.overrides.set(OPENCONNECTOR_CONNECTED, true);
+    expect(render().html).toContain("2 connected");
+    fixture.overrides.set(TAB, "connected");
+    expect(wrapper(render().nodes).props.className).toBe("contents");
+    fixture.overrides.set(OPENCONNECTOR_CONNECTED, false);
+    expect(wrapper(render().nodes).props.className).toBe("hidden");
+    fixture.overrides.set(TAB, "marketplace");
+    fixture.overrides.set(SEARCH, "connector");
+    expect(wrapper(render().nodes).props.className).toBe("contents");
+    fixture.overrides.set(SEARCH, "gmail");
     expect(wrapper(render().nodes).props.className).toBe("hidden");
   });
   it("leaves out the managed install's dead Twitter tile, which the X card replaces, unless it is already connected", () => {

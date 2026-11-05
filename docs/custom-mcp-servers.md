@@ -83,6 +83,14 @@ the ones that show card details, so choose which bots get it under **Bot
 access**. Existing custom entries at the official HTTP endpoint are recognized
 rather than replaced.
 
+### OpenConnector
+
+In Plugins, find **OpenConnector** beside Postiz and the other apps. It connects the
+self-hosted [OpenConnector](https://openconnector.dev) app catalog as one ordinary
+`openconnector` MCP server and can run the local process for you — start on demand,
+health checks, bounded restarts, clean stop. See [docs/openconnector.md](openconnector.md)
+for the settings, the process lifecycle and the limits.
+
 ### Servers that ask you to sign in
 
 Some URL servers take no token; they want you to sign in with your browser
