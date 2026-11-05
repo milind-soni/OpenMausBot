@@ -45,7 +45,7 @@ The audio itself is an mp3 file in the attachments directory on your computer, w
 
 ## Call mode
 
-On macOS, call mode combines native on-device speech recognition with the configured voice. It is deliberately half-duplex: the microphone pauses while the bot speaks to prevent the app from transcribing its own audio.
+Call mode combines speech recognition with the configured voice. On macOS the recognition is native and on-device. On Windows and Linux it is Fish Audio speech-to-text, which needs a Fish Audio key. Call mode is deliberately half-duplex: the microphone pauses while the bot speaks to prevent the app from transcribing its own audio.
 
 Tool progress and approval requests can be narrated during a call so long-running work does not sound disconnected.
 
@@ -53,7 +53,7 @@ Tool progress and approval requests can be narrated during a call so long-runnin
 
 On the desktop, the call button starts the kind of call you picked last; the arrow next to it picks **Take turns** or **Live** and starts that call.
 
-- **Take turns** is the call described above: on-device listening, the bot's own voice, one side talks at a time. It needs the macOS app on This computer.
+- **Take turns** is the call described above: the bot's own voice, one side talks at a time. It works in the desktop app on This computer. On a Mac it listens on-device. On Windows and Linux it listens through Fish Audio, so it needs a Fish Audio key in **Settings → API keys**; until one is saved, **Take turns** is off and says so. Each turn's recorded clip, with the silence trimmed, goes to Fish Audio to be turned into text, and the bot still answers in its own voice. Fish Audio has no live talking model, so **Live** stays on OpenAI or Azure.
 - **Live** runs the conversation through [OpenAI GPT-Live](https://developers.openai.com/api/docs/guides/live). You can talk over it and interrupt at any time. It works on the desktop, iPhone and Android.
 
 A Live call keeps the chat open: a call bar above the composer shows the call time and a caption of what the voice says, with a settings gear, **Mute** and **Hang up**. On the desktop, Cmd+Shift+M mutes or unmutes and Cmd+Shift+H hangs up (Ctrl+Shift+M and Ctrl+Shift+H on Windows and Linux).
@@ -68,7 +68,7 @@ A message typed during a call is answered by the bot, and the voice reads that a
 
 A Live call hangs up after 5 minutes in which nobody speaks and the bot is not working (the gear changes the minutes). It drops if its audio does not connect within 20 seconds, and on a phone it ends when you switch away from the app or lock the phone. It also ends at once when the phone that started it is unpaired, or the sign-in that started it is signed out or revoked. Voice notes do not play while you are on a Live call.
 
-Live calls are free for everyone, from the desktop app, a web browser or your phone; no plan is needed. They use your own OpenAI API key, from a project with GPT-Live access: the OpenAI key in **Settings → API keys**, or a separate key for Live calls set from the call's settings, which wins when both are saved. Without a key, the **Live** button says "Live calls use your own OpenAI key. Add it in Settings → API keys." and offers **Open API keys**; a phone shows the same message, since keys are added on your computer. The key stays where you saved it, on This computer or on My Cloud; phones never receive it. OpenAI bills Live audio at about $0.05 per minute; the bot's own work is billed as usual. Live calls work in any desktop build with a microphone (no on-device dictation needed), and are for one bot at a time. Room calls always take turns.
+Live calls are free for everyone, from the desktop app, a web browser or your phone; no plan is needed. They use your own OpenAI API key, from a project with GPT-Live access: the OpenAI key in **Settings → API keys**, or a separate key for Live calls set from the call's settings, which wins when both are saved. Without a key, the **Live** button says "Live calls use your own OpenAI key. Add it in Settings → API keys." and offers **Open API keys**; a phone shows the same message, since keys are added on your computer. The key stays where you saved it, on This computer or on My Cloud; phones never receive it. OpenAI bills Live audio at about $0.05 per minute; the bot's own work is billed as usual. Live calls work in any desktop build with a microphone (no speech-to-text needed), and are for one bot at a time. Room calls always take turns.
 
 **Live calls through Azure OpenAI.** If your organisation runs OpenAI models on Azure, a Live call can use a GPT-Live deployment on your own Azure OpenAI or Microsoft Foundry resource instead of OpenAI. Deploy `gpt-live-1` on the resource, then in the call's settings (or the prompt the **Live** button shows when a call is not set up) choose **Azure OpenAI** as the **Service**, paste the resource endpoint (for example `https://my-resource.openai.azure.com`) and the deployment name (empty means `gpt-live-1`), and add a key of that resource. Azure bills the call to that resource. The OpenAI API key is never used for Azure. A saved Live key goes only to the service it was saved for and, on Azure, to that endpoint's host: changing the **Service** or the endpoint's host asks for the key again, even if you change it back. Calls go only to an `https` address on `*.openai.azure.com`, `*.services.ai.azure.com`, `*.cognitiveservices.azure.com`, `*.openai.azure.us`, `*.openai.azure.cn` or `*.azure-api.net` (API Management); any other address is refused, and so is a redirect. On a server you can set the same thing with `OMB_LIVE_PROVIDER=azure`, `OMB_AZURE_OPENAI_LIVE_ENDPOINT`, `OMB_AZURE_OPENAI_LIVE_DEPLOYMENT` and `OMB_OPENAI_LIVE_KEY` (the resource key); set together there, the key belongs to that endpoint. With Azure, everything below that goes to OpenAI goes to your Azure resource instead.
 
@@ -78,7 +78,7 @@ Live calls are free for everyone, from the desktop app, a web browser or your ph
 
 ## Dictation
 
-The composer microphone uses Apple's local speech recognition in the macOS desktop build. Linux and Windows dictation are not currently shipped.
+On macOS, the composer microphone uses Apple's local speech recognition. On Windows and Linux it uses Fish Audio speech-to-text with the Fish Audio key you saved for voices. Click the microphone to start and click it again to stop. The clip is sent to Fish Audio when you stop, with the silence trimmed, and the text lands in the composer. The microphone is hidden until a Fish Audio key is saved. A server's page in a browser has no dictation.
 
 ## Memory
 

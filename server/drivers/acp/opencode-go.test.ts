@@ -1289,7 +1289,8 @@ describe("OpenCode session variants", () => {
   it("is stored as a status row the person always sees", () => {
     const source = readFileSync(new URL("../../index.ts", import.meta.url), "utf8");
     const handler = source.slice(source.indexOf('case "runtime.notice":'), source.indexOf('case "runtime.error":'));
-    expect(handler).toContain("name: `notice: ${event.message.slice(0, 240)}`");
+    // Room for a memory wait in full, Starter line included, in the longer languages.
+    expect(handler).toContain("name: `notice: ${event.message.slice(0, 400)}`");
   });
 
   it("still switches to a model the session offers", async () => {

@@ -18,6 +18,7 @@ let fullBot: any;
 let draftBot: any;
 let draftHelper: any;
 let outboundPolicyBot: any;
+let capBot: any;
 const gmailDrafts = new Map<string, Record<string, unknown>>();
 let brokerOrigin = "";
 const relayed: unknown[] = [];
@@ -114,11 +115,14 @@ beforeAll(async () => {
   const policyCreated = await fetch(fixture.info.url + "/api/bots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Full outbound policy fixture" }) });
   expect(policyCreated.status).toBe(201);
   outboundPolicyBot = (await policyCreated.json() as any).bot;
+  const capCreated = await fetch(fixture.info.url + "/api/bots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Full default cap fixture" }) });
+  expect(capCreated.status).toBe(201);
+  capBot = (await capCreated.json() as any).bot;
   await waitForExit(fixture.child, { signal: "SIGTERM" });
   const botsFile = join(fixture.info.dataDir, "bots.json");
   const bots = JSON.parse(readFileSync(botsFile, "utf8"));
   const saved = bots.find((row: any) => row.id === fullBot.id);
-  for (const full of [saved, ...[draftBot, draftHelper, outboundPolicyBot].map(bot => bots.find((row: any) => row.id === bot.id))]) {
+  for (const full of [saved, ...[draftBot, draftHelper, outboundPolicyBot, capBot].map(bot => bots.find((row: any) => row.id === bot.id))]) {
     full.approvalMode = "full";
     full.autoApprove = false;
     for (const task of full.tasks) { task.approvalMode = "full"; task.autoApprove = false; }
@@ -375,6 +379,35 @@ it("honors Ask every time on Full-access delegated and resumed turns without rel
   evidence.push({ outboundPolicyDelegation: readFileSync(join(fixture.info.dataDir, "gmail-plan.json.evidence.jsonl"), "utf8") });
 }, 90_000);
 
+it("sends 25 a day at Full access with no sending rule, refuses the 26th, and a routine at the cap reports it with no card", async () => {
+  const b = capBot;
+  const email = (to: string) => ({ recipient_email: to, subject: "Reminder", body: "See you at nine." });
+  const token = await mint(b.id, b.threadId);
+  const before = relayed.length;
+  const sent = () => relayed.slice(before).filter((frame: any) => frame.method === "tools/call").length;
+  for (let count = 0; count < 25; count++) expect((await relay(token, "GMAIL_SEND_EMAIL", email(`person${count}@example.test`))).body.result.isError).not.toBe(true);
+  expect(sent()).toBe(25);
+  expect((await api("GET", `/api/bots/${b.id}/outbound`)).body.today).toBe(25);
+  const refused = (await relay(token, "GMAIL_SEND_EMAIL", email("late@example.test"))).body.result;
+  expect(refused.isError).toBe(true);
+  expect(refused.content[0].text).toMatch(/did not send this\. Full default cap fixture has reached its daily limit of 25 outbound actions at Full access/);
+  expect(sent(), "nothing was sent").toBe(25);
+
+  expect((await api("PATCH", `/api/bots/${b.id}`, { modelSelection: { instanceId: "gmailFixture", model: "claude-sonnet-5" }, threadId: b.threadId })).status).toBe(200);
+  writeFileSync(join(fixture.info.dataDir, "gmail-plan.json"), JSON.stringify({ [b.id]: { timeoutMs: 60_000,
+    steps: [{ server: "composio", tool: "GMAIL_SEND_EMAIL", arguments: email("team@example.test"), expectError: true }],
+    reply: "Report: the reminder was not sent, the daily sending limit is reached." } }));
+  const created = await api("POST", "/api/routines", { name: "Morning reminder", prompt: "Send the morning reminder email to the team.", botId: b.id, schedule: { type: "interval", everyMinutes: 1440, anchorAt: Date.now() + 86_400_000 } });
+  expect(created.status, JSON.stringify(created.body)).toBe(201);
+  const { run } = (await api("POST", `/api/routines/${created.body.routine.id}/run`)).body;
+  let finished: any;
+  await expect.poll(async () => (finished = (await api("GET", "/api/routines")).body.runs.find((item: any) => item.id === run.id))?.status, { timeout: 45_000 }).toBe("completed");
+  expect(finished.output).toContain("Report: the reminder was not sent");
+  expect(sent()).toBe(25);
+  const threads = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === b.id).tasks.map((task: any) => task.threadId);
+  for (const thread of threads) expect((await cards(thread)).filter((row: any) => row.card?.outboundRequest), "no card waits on anyone").toEqual([]);
+}, 90_000);
+
 it("shows each outbound batch recipient and amount with explicit preview truncation before consent", async () => {
   const b = await bot("Batch consent preview");
   const token = await mint(b.id, b.threadId);
@@ -607,6 +640,15 @@ it("settles only the source task after approval or Stop, leaving the selected si
     await expect.poll(async () => (await state()).activity, { timeout: 8_000 }).toBe("idle");
     expect((await state()).tasks.find((row: any) => row.threadId === siblingId)).toMatchObject({ busy: false, activity: "idle" });
   }
+});
+
+it("keeps two backups on one account with different models, and drops an exact repeat", async () => {
+  const b = await bot("Same-account backups");
+  const sonnet = { instanceId: "claude", model: "claude-sonnet-5" }, opus = { instanceId: "claude", model: "claude-opus-5" };
+  const saved = await api("PATCH", `/api/bots/${b.id}`, { fallback: [sonnet, opus, { ...sonnet, model: " claude-sonnet-5 " }] });
+  expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+  const fleet = await api("GET", "/api/bots");
+  expect(fleet.body.bots.find((row: any) => row.id === b.id).fallback).toEqual([sonnet, opus]);
 });
 
 it("preserves accounts referenced by a fallback chain before delete or credential-directory change", async () => {
