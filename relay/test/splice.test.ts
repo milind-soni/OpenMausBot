@@ -131,6 +131,38 @@ describe("limits that need a short clock", () => {
     }
   });
 
+  test("a new set that still holds a phone leaves its session alone; only the set that drops it closes it", async () => {
+    const t = await startTestRelay();
+    try {
+      const { phone, data, host, adm } = await splicedPair(t.url, t.key);
+      const others = Array.from({ length: 31 }, () => randomBytes(32));
+      host.admit([...others, adm]);
+      host.admit([adm, ...others]);
+      phone.sendBinary(Buffer.from("kept"));
+      assert.equal((await data.next()).data.toString(), "kept");
+      host.admit(others);
+      assert.equal(await phone.closeCode(), Close.NotFound);
+      assert.equal(await data.closeCode(), Close.NotFound);
+      host.control.ws.close();
+    } finally {
+      await t.stop();
+    }
+  });
+
+  test("a full set of 32 admits the phone in its last slot", async () => {
+    const t = await startTestRelay();
+    try {
+      const adm = randomBytes(32);
+      const host = await fakeHost(t.url, t.key, [...Array.from({ length: 31 }, () => randomBytes(32)), adm]);
+      const phone = await phoneHello(t.url, host.hidText, adm);
+      assert.equal((await host.control.json()).t, "open");
+      phone.ws.close();
+      host.control.ws.close();
+    } finally {
+      await t.stop();
+    }
+  });
+
   test("an admit set that drops a phone closes its pending session too", async () => {
     const t = await startTestRelay();
     try {

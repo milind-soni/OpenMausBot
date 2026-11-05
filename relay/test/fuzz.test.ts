@@ -265,6 +265,7 @@ describe("malformed frames before auth", () => {
 
 describe(`${SLOW_SOCKETS} slow sockets`, () => {
   test("upgraded sockets that say nothing, half-sent headers and half-sent frames are all gone within the deadlines", async () => {
+    const opening = performance.now();
     const silent = await inBatches(SLOW_SOCKETS, () => Client.open(t.url, pick(PATHS)));
     const halfHeaders = await inBatches(Math.min(SLOW_SOCKETS, 500), async () => {
       const socket = await connected();
@@ -273,24 +274,23 @@ describe(`${SLOW_SOCKETS} slow sockets`, () => {
         socket.once("close", () => (clearTimeout(timer), resolve(true)));
       });
       socket.write("GET /v1/phone HTTP/1.1\r\nHost: relay\r\nUpgrade: websocket\r\n");
-      return ended;
+      return { ended };
     });
     const halfFrames = await inBatches(Math.min(SLOW_SOCKETS, 500), async () => {
       const socket = await rawUpgrade();
       const code = closeCodeOf(socket, 15_000);
       socket.write(frame(0x1, Buffer.alloc(2_000)).subarray(0, 100));
-      return code;
+      return { code };
     });
-    const lastOpened = performance.now();
     const [silentCodes, frameCodes, headerEnds] = await Promise.all([
       Promise.all(silent.map((client) => client.closeCode(15_000))),
-      Promise.all(halfFrames),
-      Promise.all(halfHeaders),
+      Promise.all(halfFrames.map(({ code }) => code)),
+      Promise.all(halfHeaders.map(({ ended }) => ended)),
     ]);
     assert.ok(silentCodes.every((code) => code === Close.Malformed), JSON.stringify([...new Set(silentCodes)]));
     assert.ok(frameCodes.every((code) => code === Close.Malformed), JSON.stringify([...new Set(frameCodes)]));
     assert.ok(headerEnds.every(Boolean), "a half-sent request outlived the header deadline");
-    assert.ok(performance.now() - lastOpened < 10_000);
+    assert.ok(performance.now() - opening < 15_000, "every slow socket was opened before the first deadline and gone soon after it");
     for (let i = 0; i < 50 && t.relay.sockets().size > 0; i++) await sleep(100);
     assert.equal(t.relay.sockets().size, 0);
   });
