@@ -1346,7 +1346,7 @@ export class RoutineManager {
 
   /** False when the step failed the run, which failRun already told. */
   private finishStep(run: RoutineRun): boolean {
-    const reply = redactSecretsInText(this.stepReplies.get(run.id) ?? run.output ?? "").trim();
+    const reply = redactSecretsInText(this.stepReplies.get(run.id) ?? "").trim();
     this.stepReplies.delete(run.id);
     const next = advanceStep({ plan: run.plan!, stepAt: run.stepAt ?? 0, stepRuns: run.stepRuns ?? [], handoff: run.handoff }, reply, this.now());
     run.stepRuns = next.stepRuns;

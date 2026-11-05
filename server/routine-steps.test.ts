@@ -125,6 +125,16 @@ describe("a routine that splits its work into steps", () => {
     expect(runOf(h, run.id).stepRuns!.map((step) => step.status)).toEqual(["done", "done", "failed"]);
   });
 
+  it("hands on nothing from a step that ended without a reply, never the step before it", async () => {
+    const h = harness();
+    await startRun(h);
+    h.reply("thread-1", "Model X shipped.");
+    await h.settle();
+    h.event("thread-2", { type: "turn.completed", ok: true } as Partial<RuntimeEvent>);
+    await h.settle();
+    expect(h.started[2]!.prompt).not.toContain("Model X shipped.");
+  });
+
   it("retries a failed step once in its own thread, then fails the run with the rest skipped", async () => {
     const h = harness();
     const run = await startRun(h);
