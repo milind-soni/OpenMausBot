@@ -31,7 +31,6 @@ export interface TelegramHostDeps {
   dataDir: string;
   teamCloud: boolean;
   store: Pick<Store, "bot" | "taskByThread" | "createTask" | "activePath" | "onChange">;
-  /** A message from the person, as if they typed it in the thread. */
   deliver(botId: string, threadId: string, text: string, sendId: string): Promise<void>;
   needsInput(message: Message): boolean;
   apiBase?: string;

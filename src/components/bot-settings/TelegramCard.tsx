@@ -21,7 +21,6 @@ type StartedLink = TelegramView & { code: string; url: string; expiresAt: number
 const buttonCls = "rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50";
 const WATCH_MS = 2_000;
 
-/** One Telegram bot for this bot: paste BotFather's token, link the person's own chat with a t.me link, disconnect. */
 export function TelegramCard({ bot, className }: { bot: Bot; className?: string }) {
   const [view, setView] = useState<TelegramView | null>(null);
   const [token, setToken] = useState("");

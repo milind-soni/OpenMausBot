@@ -73,7 +73,6 @@ export function createTelegramApi(options: TelegramApiOptions = {}) {
     return { ok: true, result: parsed.data.result };
   }
 
-  /** Checks a token: the bot's username, or why Telegram refused it. */
   async function getMe(token: string): Promise<{ ok: true; username: string } | { ok: false; error: string }> {
     if (!TELEGRAM_TOKEN.test(token)) return { ok: false, error: "That doesn't look like a bot token. Copy the whole token BotFather gave you." };
     const answer = await call(token, "getMe", {});

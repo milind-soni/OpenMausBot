@@ -20,7 +20,6 @@ const SEEN_MAX = 500;
 const LINK_COMMAND = /^\/start(?:\s+(\S{1,64}))?$/i;
 export const WAITING_NOTE = "The bot is waiting for your OK in OpenMausBot. Open the app to answer it.";
 
-/** One message from a person, as the transport read it. */
 export interface InboundMessage {
   /** Unique per bot: the transport's own id, so a redelivery is dropped. */
   id: string;
@@ -35,7 +34,6 @@ export interface InboundMessage {
 export type SendResult = { ok: true } | { ok: false; error: string };
 
 export interface ChannelTransport {
-  /** The longest text one message carries. */
   maxChars: number;
   send(token: string, chatId: string, text: string): Promise<SendResult>;
 }
@@ -133,7 +131,6 @@ export function createChannelStore(dataDir: string, name: string) {
     save(all);
   }
 
-  /** Bots with a token: the ones a transport reads for. */
   const connected = (): string[] => Object.entries(load()).filter(([, state]) => state.sealedToken).map(([botId]) => botId);
 
   const token = (botId: string): string => open(bot(botId).sealedToken);
@@ -147,7 +144,6 @@ export function createChannelStore(dataDir: string, name: string) {
     });
   }
 
-  /** True the first time a message id is seen for this bot. */
   function firstSighting(botId: string, id: string): boolean {
     let fresh = false;
     update(botId, (state) => {
@@ -157,7 +153,6 @@ export function createChannelStore(dataDir: string, name: string) {
     return fresh;
   }
 
-  /** A fresh one-time code for this bot; only its hash is kept. */
   function startLink(botId: string, now: number): { code: string; expiresAt: number } {
     const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
     const expiresAt = now + LINK_TTL_MS;
@@ -195,7 +190,6 @@ export function createChannelStore(dataDir: string, name: string) {
     update(botId, (state) => { state.chats[chatId] = { ...state.chats[chatId], ...patch }; });
   }
 
-  /** The chat whose thread this is, if any. */
   function chatForThread(threadId: string): { botId: string; chatId: string } | null {
     for (const [botId, state] of Object.entries(load())) {
       for (const [chatId, chat] of Object.entries(state.chats)) if (chat.threadId === threadId && state.allowed.includes(chatId)) return { botId, chatId };
@@ -229,7 +223,6 @@ export interface ChannelDeps {
   log?: (line: string) => void;
 }
 
-/** Splits at paragraph or line ends where it can, so no message exceeds `max` characters. */
 export function chunks(text: string, max: number): string[] {
   const out: string[] = [];
   for (let rest = text.trim(); rest;) {
@@ -306,7 +299,6 @@ export function createChannel(deps: ChannelDeps) {
     }
   }
 
-  /** One message for one bot, however it arrived. */
   async function handleInbound(botId: string, message: InboundMessage): Promise<void> {
     if (!deps.store.firstSighting(botId, message.id)) return;
     const lane = `${botId}:${message.chatId}`;
@@ -325,7 +317,6 @@ export function createChannel(deps: ChannelDeps) {
     await inLane(lane, () => receive(botId, message));
   }
 
-  /** Sends what the bot said since the last reply. Called on every finished turn; a no-op for any other thread. */
   function noteTurnCompleted(threadId: string): Promise<void> {
     const found = deps.store.chatForThread(threadId);
     if (!found) return Promise.resolve();
