@@ -124,6 +124,25 @@ const serialize = (work) => {
 };
 
 /** Resolves with the panel's state; a failed start is a message, never a thrown error. */
+let e2eHooks = { initialMessage: () => null, tokenRejected: () => {}, changed: () => {} };
+
+/** The end-to-end connection's part: its configuration goes to every new sidecar over the port, a refused relay token
+ * comes back the same way, and pairing changes may need the relay. */
+export function setCompanionE2EHooks(hooks) {
+  e2eHooks = { ...e2eHooks, ...hooks };
+}
+
+/** In-memory port only. False when no sidecar runs. */
+export function postCompanionMessage(message) {
+  if (!proc) return false;
+  try {
+    proc.postMessage(message);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function startCompanion(options) {
   return serialize(() => start(options));
 }
@@ -191,10 +210,15 @@ async function start({ resourcesPath, harnessPort, mutationToken, hostedUrl = nu
     // Never expose this capability in argv, environment, logs or the renderer.
     try {
       child.postMessage({ type: "openmausbot:companion-mutation-token", token: mutationToken, controlToken });
+      const e2e = e2eHooks.initialMessage();
+      if (e2e) child.postMessage(e2e);
     } catch {
       log?.("companion authorization could not be initialized");
       child.kill();
     }
+  });
+  child.on("message", (message) => {
+    if (message?.type === "openmausbot:companion-e2e-token-rejected") e2eHooks.tokenRejected();
   });
   child.stdout?.on("data", (d) => log?.(`[companion] ${String(d).trimEnd()}`));
   child.stderr?.on("data", (d) => log?.(`[companion err] ${String(d).trimEnd()}`));
@@ -352,6 +376,7 @@ export async function companionPairing(open, expectedToken) {
     : "/pairing";
   try {
     const state = await control(open ? "POST" : "DELETE", path);
+    e2eHooks.changed();
     return {
       enabled: true,
       keepAwake: companionKeepAwakeAtRest(),
@@ -371,6 +396,26 @@ export async function companionRevoke(deviceId) {
   // the id came from the renderer, so it does not get to shape a path
   if (!/^[\w-]{1,64}$/.test(String(deviceId ?? ""))) return companionState();
   await control("DELETE", `/devices/${deviceId}`).catch(() => {});
+  e2eHooks.changed();
+  return companionState();
+}
+
+/** A fresh code while the pairing screen stays open; the previous one keeps its last seconds. */
+export async function companionPairingRenew() {
+  if (!proc) return companionState();
+  try {
+    return { enabled: true, keepAwake: companionKeepAwakeAtRest(), ...(await control("POST", "/pairing/renew")) };
+  } catch {
+    return companionPairing(true);
+  }
+}
+
+/** "any" or "local" (Wi-Fi and Tailscale only). */
+export async function companionDeviceRoutes(deviceId, routes) {
+  if (!proc) return companionState();
+  if (!/^[\w-]{1,64}$/.test(String(deviceId ?? "")) || (routes !== "any" && routes !== "local")) return companionState();
+  await control("PUT", `/devices/${deviceId}/routes`, { routes }).catch(() => {});
+  e2eHooks.changed();
   return companionState();
 }
 

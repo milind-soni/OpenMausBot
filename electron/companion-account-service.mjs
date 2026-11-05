@@ -80,11 +80,17 @@ export function companionAccountCleanupPending(credentials) {
   return credentials?.[COMPANION_ACCOUNT_CLEANUP_PENDING_FIELD] === true;
 }
 
-/** true, false, or null when that cannot be told; only false ever gives an address back. */
-export function managedEndpointNeed(state) {
+/** A phone paired before the encrypted connection still needs the tunnel while it was seen this recently. */
+const LEGACY_DEVICE_WINDOW_MS = 30 * 24 * 60 * 60_000;
+
+/** true, false, or null when that cannot be told; only false ever gives an address back. Once this computer serves
+ * the encrypted connection, only an old phone seen in the last 30 days needs a tunnel: new pairings never make one. */
+export function managedEndpointNeed(state, now = Date.now()) {
   if (!state || typeof state !== "object" || state.enabled !== true || state.error) return null;
   if (state.devicesUnreadable === true || !Array.isArray(state.devices)) return null;
-  return state.devices.length > 0 || Boolean(state.pairing);
+  if (state.e2e?.enabled !== true) return state.devices.length > 0 || Boolean(state.pairing);
+  return state.devices.some((device) =>
+    !Number.isSafeInteger(device?.e2eAt) && now - (Number(device?.lastSeenAt) || 0) < LEGACY_DEVICE_WINDOW_MS);
 }
 
 function storedAccount(credentials) {
@@ -258,6 +264,9 @@ export function createCompanionAccountService({
   firstEndpointCheckMs = DEFAULT_FIRST_ENDPOINT_CHECK_MS,
   onDemand = false,
   managedEndpointNeeded = async () => null,
+  /** This computer reaches its phones through MausBot Relay: a "no" from managedEndpointNeeded then holds even right
+   * after sign-in. */
+  relayCapable = () => false,
   releaseGraceMs = DEFAULT_RELEASE_GRACE_MS,
   releaseJitterMs = DEFAULT_RELEASE_JITTER_MS,
   // Only the code, HTTP status, request id and retry delay: never an email, token, credential or address.
@@ -545,6 +554,12 @@ export function createCompanionAccountService({
       }
       throw error;
     }
+    if (onDemand && (await currentNeed()) === false) {
+      await updateCredentials((document) => withAuthenticatedAccount(document, { accountToken, user, clientInstanceId }));
+      resetAutoRetry();
+      phase = null;
+      return settledState();
+    }
     const endpoint = await client.ensureEndpoint(installation.credential, {
       appVersion: identity.appVersion,
     });
@@ -766,13 +781,15 @@ export function createCompanionAccountService({
   const savedAddress = (document) => normalizeManagedCompanionEndpoint(document[MANAGED_COMPANION_ENDPOINT_FIELD]);
 
   const currentNeed = async () => {
-    if (requestedRecently()) return true;
+    let need = null;
     try {
-      const need = await managedEndpointNeeded();
-      return typeof need === "boolean" ? need : null;
+      const answer = await managedEndpointNeeded();
+      need = typeof answer === "boolean" ? answer : null;
     } catch {
-      return null;
+      need = null;
     }
+    if (need === false && relayCapable()) return false;
+    return requestedRecently() ? true : need;
   };
 
   const releaseScheduledAt = () => {
