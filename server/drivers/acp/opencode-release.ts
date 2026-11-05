@@ -6,8 +6,8 @@
 // unpacked from that same verified archive (`unzip -p` / `tar -xzO`); the app checks it after unpacking, before reusing
 // an installed copy and at every start. The 1.x executables keep their place in `previousPrograms`, so copies installed
 // by earlier pins stay usable until they update. x64 takes the "baseline" builds, which need no AVX2 (older Intel CPUs,
-// Rosetta); a Linux without glibc takes the musl builds. macOS signing was not re-verified for the 2.x line: the Team
-// ID is carried over from the 1.x pin and worth a codesign spot-check.
+// Rosetta); a Linux without glibc takes the musl builds. The macOS arm64 executable is signed with Anomaly Innovations'
+// Developer ID, Team 5NZ4Q7NXJ4 (checked with codesign on 2026-11-05).
 import type { StandaloneRelease } from "../../contracts.ts";
 
 const VERSION = "2.2.5";

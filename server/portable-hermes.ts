@@ -28,7 +28,7 @@ env["PIP_TARGET"] = packages
 env["PYTHONPATH"] = packages
 env["HERMES_PYTHON"] = sys.executable
 env["HERMES_ROOT"] = root
-env.setdefault("TERMINAL_CWD", root)
+env.setdefault("TERMINAL_CWD", os.getcwd())
 env["PYTHONIOENCODING"] = "utf-8"
 sys.stdin.reconfigure(encoding="utf-8")
 sys.stdout.reconfigure(encoding="utf-8")

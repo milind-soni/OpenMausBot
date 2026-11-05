@@ -1600,7 +1600,7 @@ export function ComputerPanel({
           </button>
         )}
         {!advanced && (cloudPreviewReady || phase === "vm") && (
-          <div className="mt-3 flex gap-2" data-testid="computer-actions">
+          <div className="mt-3 flex flex-wrap gap-2" data-testid="computer-actions">
             {!control.held && !bannerTakesControl && (
               <button
                 type="button"
@@ -1638,7 +1638,7 @@ export function ComputerPanel({
           </div>
         )}
         {advanced && cloudPreviewReady && (
-          <div className="mt-3 flex gap-2">
+          <div className="mt-3 flex flex-wrap gap-2">
             {!control.held && !bannerTakesControl && (
               <button
                 onClick={() => void takeControl()}
