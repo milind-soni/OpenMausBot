@@ -39,6 +39,8 @@ export interface McpSignInCardDeps {
   language(threadId: string): string | undefined;
   /** Answers the turn parked on this card; false while no turn waits on it. */
   answer(threadId: string, messageId: string, text: string): boolean;
+  /** A newer card replaced `from`: a turn parked on it waits on `to`. */
+  followCard(threadId: string, from: string, to: string): void;
   threadVisible(auth: RequestAuth, threadId: string): boolean;
   /** A sign-in finished: whatever shows sign-in state refreshes. */
   changed(): void;
@@ -235,14 +237,16 @@ export function createMcpSignInCards(deps: McpSignInCardDeps) {
       if (!signer(name, at.threadId)) {
         return { status: 409, error: `${name} is each person's own, and this chat isn't one person's alone, so nobody can sign in to it here. Each person signs in to their own on their team's page in MausBot Cloud.` };
       }
+      const replaced: string[] = [];
       for (const old of store.messagesFor(at.threadId)) {
         if (!isMcpSignInCard(old) || old.connector.slug !== name || old.from?.botId !== at.from?.botId) continue;
         if (old.connector.dismissed || old.connector.stopped || old.connector.status === "connected") continue;
         patch(at.threadId, old.id, { dismissed: true, superseded: true });
         cancel(name, at.threadId, old.id);
+        replaced.push(old.id);
       }
       const language = deps.language(at.threadId), label = appLabel(name);
-      store.appendMessage(at.threadId, {
+      const card = store.appendMessage(at.threadId, {
         role: "bot", kind: "connector", text: mcpSignInCardText(label, language),
         ...(at.from ? { from: at.from } : {}),
         connector: {
@@ -250,6 +254,7 @@ export function createMcpSignInCards(deps: McpSignInCardDeps) {
           description: mcpSignInCardDescription(at.bot.name, label, new URL(server.url).host, language),
         },
       });
+      for (const old of replaced) deps.followCard(at.threadId, old, card.id);
       return { posted: true };
     },
 

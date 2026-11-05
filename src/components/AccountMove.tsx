@@ -32,8 +32,8 @@ function failingWhy(line: AccountMoveLine, unanswered: string | null): string {
   return [unanswered && unanswered !== plain ? unanswered : line.reason, ...line.extra].filter(Boolean).join(" ") || plain;
 }
 
-/** The move's rows at the top of the account menu, each the size of every other row there. Failed: Try again, with why
- * in its tooltip and a spinner while it runs. On its way: one row, the progress in its tooltip. Done: what arrived, the
+/** The move's rows at the top of the account menu. Failed: Try again, with why written under it (and in its tooltip),
+ * and a spinner while it runs. On its way: one row, the progress in its tooltip. Done: what arrived, the
  * phone to pair, and Got it, which closes it for good. A row that does not retry opens My Cloud in Settings. */
 export function moveMenuItems(line: AccountMoveLine | null, { retrying = false, unanswered = null, onOpen, onRetry, onPairPhone, onClose }: {
   retrying?: boolean;
@@ -46,11 +46,13 @@ export function moveMenuItems(line: AccountMoveLine | null, { retrying = false, 
   if (!line) return [];
   if (line.kind === "failed") {
     const title = failingWhy(line, unanswered);
-    if (!line.retry) return [{ key: "cloud-move", label: accountMoveWords("failed", line.place)!, title, icon: <CloudAlert size={16} className="text-warning" />, onSelect: onOpen }];
+    if (!line.retry) return [{ key: "cloud-move", label: accountMoveWords("failed", line.place)!, title, note: title, wrap: true, icon: <CloudAlert size={16} className="text-warning" />, onSelect: onOpen }];
     return [{
       key: "cloud-move",
       label: line.place ? t("sidebar.account.moveRetryNamed", { place: line.place }) : t("sidebar.account.moveRetry"),
       title,
+      note: title,
+      wrap: true,
       icon: retrying ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} className="text-warning" />,
       disabled: retrying,
       keepOpen: true,
@@ -135,8 +137,8 @@ export function useAccountMoveLine(cloudHome: boolean): { kind: AccountMoveKind 
 }
 
 /** The account's line for the move: amber while it needs the person, quiet while it goes, nothing otherwise. With
- * `onOpen` its words are a button that opens the account menu, followed by Try again when `retry` allows one; without,
- * words inside a trigger. The words shorten before Try again does. */
+ * `onOpen` its words are a button that opens the account menu, followed by Try again when `retry` allows one, and why it
+ * failed written out under them; without, words inside a trigger. The words shorten before Try again does. */
 export function AccountMoveStatus({ kind, place, retry = null, onOpen, className }: { kind: AccountMoveKind | null; place?: string; retry?: AccountMoveRetry | null; onOpen?: () => void; className?: string }) {
   const words = accountMoveWords(kind, place);
   if (!words) return null;
@@ -148,23 +150,26 @@ export function AccountMoveStatus({ kind, place, retry = null, onOpen, className
   </>;
   if (!onOpen) return <span data-account-move={kind} className={cn(look, className)}>{body}</span>;
   return (
-    <div role="status" data-account-move={kind} className={cn("flex min-w-0 items-center gap-1.5", className)}>
-      <button type="button" onClick={onOpen} className={cn(look, kind === "failed" ? "hover:underline" : "hover:text-ink")}>{body}</button>
-      {kind === "failed" && retry && (
-        <button
-          type="button"
-          data-move-retry
-          aria-label={place ? t("sidebar.account.moveRetryNameNamed", { place }) : t("sidebar.account.moveRetryName")}
-          aria-busy={retry.retrying || undefined}
-          aria-disabled={retry.retrying || undefined}
-          title={retry.why}
-          onClick={retry.retrying ? undefined : retry.onRetry}
-          className={cn("ui-button ui-button-sm shrink-0", retry.retrying && "cursor-progress")}
-        >
-          {retry.retrying && <Loader2 aria-hidden="true" className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" />}
-          {t("cloudSend.strip.retry")}
-        </button>
-      )}
+    <div role="status" data-account-move={kind} className={cn("flex min-w-0 flex-col gap-0.5", className)}>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <button type="button" onClick={onOpen} className={cn(look, kind === "failed" ? "hover:underline" : "hover:text-ink")}>{body}</button>
+        {kind === "failed" && retry && (
+          <button
+            type="button"
+            data-move-retry
+            aria-label={place ? t("sidebar.account.moveRetryNameNamed", { place }) : t("sidebar.account.moveRetryName")}
+            aria-busy={retry.retrying || undefined}
+            aria-disabled={retry.retrying || undefined}
+            title={retry.why}
+            onClick={retry.retrying ? undefined : retry.onRetry}
+            className={cn("ui-button ui-button-sm shrink-0", retry.retrying && "cursor-progress")}
+          >
+            {retry.retrying && <Loader2 aria-hidden="true" className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" />}
+            {t("cloudSend.strip.retry")}
+          </button>
+        )}
+      </div>
+      {kind === "failed" && retry?.why && <p data-move-why className="line-clamp-4 text-[12px] leading-4 text-ink-secondary">{retry.why}</p>}
     </div>
   );
 }

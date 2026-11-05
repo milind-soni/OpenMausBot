@@ -1,10 +1,43 @@
+import { Children, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ALL_BOTS, filterNotifications, notificationBots, notificationBotForAvatar, notificationThreadName, postNotificationRead } from "./NotificationsPanel";
+import { initialState, StoreContext, type Bot } from "@/state/store";
+import { ALL_BOTS, filterNotifications, notificationBots, notificationBotForAvatar, notificationThreadName, NotificationsPanel, postNotificationRead } from "./NotificationsPanel";
 
 const state = {
   bots: [{ id: "b1", threadId: "t-main", tasks: [{ threadId: "t-main", title: "Notification Pane" }, { threadId: "t-2", title: "Hotpatches" }] }],
   groups: [{ threadId: "g-main", name: "Mantis-email & co.", tasks: [{ threadId: "g-task", title: "Skill rollout" }] }],
 };
+
+describe("a row in the bell", () => {
+  const scout: Bot = { id: "scout", threadId: "main", name: "Scout", title: "", description: "", notifications: true, color: "green", unread: false, modelSelection: { instanceId: "fake", model: "m" }, messages: [],
+    tasks: [{ threadId: "main", title: "Main", createdAt: 1 }, { threadId: "work", title: "@CoS · work", createdAt: 2 }] };
+  const entry = (threadId: string) => ({ id: threadId, at: 1, read: true, kind: "done" as const, botId: "scout", botName: "Scout", threadId, title: "Scout finished", body: "Done" });
+  function click(threadId: string) {
+    const dispatch = vi.fn();
+    const rows: ReactElement<{ onOpen: () => void }>[] = [];
+    const walk = (node: ReactNode) => Children.forEach(node, (child) => {
+      if (!isValidElement<{ children?: ReactNode; onOpen?: () => void }>(child)) return;
+      if (child.props.onOpen) rows.push(child as ReactElement<{ onOpen: () => void }>);
+      walk(child.props.children);
+    });
+    const state = { ...initialState, bots: [scout], notifications: [entry(threadId)] };
+    function Capture() { walk(NotificationsPanel()); return null; }
+    renderToStaticMarkup(createElement(StoreContext.Provider, { value: { state, dispatch } as never }, createElement(Capture)));
+    rows[0]!.props.onOpen();
+    return dispatch.mock.calls.map(([action]) => action);
+  }
+
+  it("lands on a thread another bot opened, and reveals its row in the sidebar", () => {
+    const actions = click("work");
+    expect(actions).toContainEqual({ type: "switchTask", botId: "scout", threadId: "work" });
+    expect(actions).toContainEqual({ type: "revealThread", threadId: "work" });
+  });
+
+  it("says so when that thread is gone, never landing silently on another chat", () => {
+    expect(click("deleted")).toContainEqual({ type: "notice", notice: { kind: "thread-gone", botName: "Scout" } });
+  });
+});
 
 describe("notificationThreadName", () => {
   it("finds a bot task title", () => {
