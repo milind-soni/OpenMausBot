@@ -18,6 +18,8 @@ export function stallLimitMs(raw: string | undefined, fallback: number): number 
   return Number.isFinite(ms) && ms > 0 ? ms : fallback;
 }
 
+const SUSPENDED_SWEEPS = 3;
+
 const parked = (turn: WatchedTurn): boolean => turn.waitingOnHuman || turn.waitingOnComputer;
 
 export interface TurnWatchdogOptions {
@@ -45,7 +47,15 @@ export class TurnWatchdog {
 
   start(): void {
     if (this.timer) return;
-    this.timer = setInterval(() => this.sweep(), this.opts.checkMs);
+    // Real time, not now(): a sleeping computer suspends the process while the wall clock runs on, so the timer fires
+    // that much late, and that time was not the turns' silence.
+    let lastTickAt = Date.now();
+    this.timer = setInterval(() => {
+      const at = Date.now();
+      const gap = at - lastTickAt;
+      lastTickAt = at;
+      this.sweep(gap > SUSPENDED_SWEEPS * this.opts.checkMs ? gap : 0);
+    }, this.opts.checkMs);
     this.timer.unref?.();
   }
 
@@ -110,9 +120,11 @@ export class TurnWatchdog {
     return false;
   }
 
-  sweep(): void {
+  /** sleptMs: time the process was suspended since the last sweep; it is forgiven, not counted as silence. */
+  sweep(sleptMs = 0): void {
     const at = this.now();
     for (const turn of this.turns.values()) {
+      if (sleptMs) turn.lastEventAt = Math.min(at, turn.lastEventAt + sleptMs);
       if (parked(turn)) continue;
       const silentMs = turn.runningTools.size > 0 ? Math.max(this.opts.stallMs, this.opts.toolStallMs) : this.opts.stallMs;
       if (at - turn.lastEventAt < silentMs) continue;
