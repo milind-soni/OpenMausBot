@@ -425,6 +425,26 @@ describe("resolveHermesModels when Hermes has no model to list", () => {
     await expect(resolveHermesModels(env, { cli })).resolves.toEqual({ default: HERMES_CONFIG_MODEL_ID, options: [DEFAULT] });
   });
 
+  it("offers the default for an Ollama on IPv6 loopback, which the 127.0.0.1 probe can't reach", async () => {
+    const { cli, env } = setup("", "model:\n  provider: ollama\n  default: llama3\n  base_url: http://[::1]:11434/v1\n");
+    await expect(resolveHermesModels(env, { cli })).resolves.toEqual({ default: HERMES_CONFIG_MODEL_ID, options: [DEFAULT] });
+  });
+
+  it("does not offer the default for a Windows .cmd shim that can't launch without a shell", async () => {
+    const { cli, env } = setup("");
+    const bare = join(dirname(cli), "hermes");
+    writeFileSync(`${bare}.CMD`, "@echo off\r\nsomething-unknown %*\r\n");
+    const platform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    vi.stubEnv("PATHEXT", ".CMD");
+    try {
+      await expect(resolveHermesModels(env, { cli: bare })).resolves.toEqual({ default: "", options: [] });
+    } finally {
+      Object.defineProperty(process, "platform", { value: platform });
+      vi.unstubAllEnvs();
+    }
+  });
+
   it.skipIf(process.platform === "win32")("looks past a PATH entry that can't run to a later runnable hermes", async () => {
     const { cli, env } = setup("");
     const blocked = join(dirname(cli), "blocked");

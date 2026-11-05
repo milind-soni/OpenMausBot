@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
-import { findCliCandidates, harnessHome, splitCliString, whichWin } from "../../env-path.ts";
+import { findCliCandidates, harnessHome, resolveCliSpawn, splitCliString, whichWin } from "../../env-path.ts";
 import { resolveCli } from "../../procs.ts";
 import { decodeInjectId, hostApiKey, INJECT_SEP, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
@@ -208,7 +208,10 @@ export function hermesConfiguredModel(
 function hermesInstalled(cli: string): boolean {
   const trimmed = cli.trim();
   const head = trimmed.includes(" ") && existsSync(trimmed) ? trimmed : (splitCliString(trimmed)[0] ?? "");
-  if (process.platform === "win32") return whichWin(head) !== null;
+  // An unrecognized .cmd/.bat shim stays a shim after resolution, and Node can't spawn it without a shell.
+  if (process.platform === "win32") {
+    return whichWin(head) !== null && !/\.(cmd|bat)$/i.test(resolveCliSpawn(trimmed, []).command);
+  }
   return findCliCandidates(head).some((found) => {
     try {
       if (!statSync(found).isFile()) return false;
@@ -221,7 +224,8 @@ function hermesInstalled(cli: string): boolean {
 }
 
 const HERMES_PROBED_PROVIDERS = new Set(["ollama", "lmstudio"]);
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+/** Hosts the IPv4 probe reaches; IPv6 loopback ([::1]) is not one of them. */
+const PROBED_LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost"]);
 
 function yamlMap(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -243,7 +247,7 @@ function hermesUsesProbedProvider(env: Record<string, string | undefined>): bool
     const configured = new URL(baseUrl);
     const probed = new URL(probe.baseUrl);
     return (
-      LOOPBACK_HOSTS.has(configured.hostname) &&
+      PROBED_LOOPBACK_HOSTS.has(configured.hostname) &&
       configured.protocol === probed.protocol &&
       configured.port === probed.port
     );
