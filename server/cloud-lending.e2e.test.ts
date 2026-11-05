@@ -278,7 +278,8 @@ it("the person's Mac, lent by itself through the real connector, is usable by th
   const inGuestsRoom = JSON.parse((await guestRoomCall("list_shared_computers")).content[0].text);
   expect(inGuestsRoom.computers).toEqual([]);
   expect(inGuestsRoom.say).toMatch(/^Someone else wrote in this conversation, so it can't use your (?:Mac|PC|computer)\. Start a new thread in this group chat to use it\.$/u);
-  expect(inGuestsRoom.unavailable).toBe(inGuestsRoom.say);
+  expect(inGuestsRoom.unavailable).toContain(inGuestsRoom.say);
+  expect(inGuestsRoom.unavailable).toContain("Only the person can change this");
   const guestRoomRead = await reads(guestRoomCall);
   expect(guestRoomRead.isError).toBe(true);
   expect(guestRoomRead.content[0].text).toContain("Start a new thread in this group chat");
@@ -333,7 +334,7 @@ it("the person's Mac, lent by itself through the real connector, is usable by th
   const updatesTurn = turn;
   expect(updatesTurn.argv).not.toContain("--restricted");
   expect(await sees(updatesCall)).toBe(0);
-  expect(JSON.parse((await updatesCall("list_shared_computers")).content[0].text).unavailable).toContain("Someone else wrote in this conversation");
+  expect(JSON.parse((await updatesCall("list_shared_computers")).content[0].text).unavailable).toContain("A webhook or a routine you didn't write posted in this conversation");
   expect((await reads(updatesCall)).isError).toBe(true);
 
   expect(await sees(await run(rewritten))).toBe(0);

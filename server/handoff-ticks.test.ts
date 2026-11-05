@@ -47,6 +47,20 @@ describe("hand-off ticks", () => {
     expect(tick).toHaveBeenCalledTimes(3);
   });
 
+  it("ticks at once on a write after a wake, though the clock has passed the timer the sleep left behind", async () => {
+    const tick = vi.fn();
+    const ticks = createHandoffTicks();
+    ticks.start({ tick, pace: () => "idle" });
+    await vi.advanceTimersByTimeAsync(HANDOFF_TICK_MS.busy);
+    expect(tick).toHaveBeenCalledTimes(1);
+    // A suspended machine's clock jumps when it wakes, and its timers carry on from where they stopped: this one still has an hour to go.
+    vi.setSystemTime(Date.now() + 9 * 60 * 60_000);
+    ticks.kick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(tick).toHaveBeenCalledTimes(2);
+    ticks.stop();
+  });
+
   it("keeps ticking after a tick throws", async () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const tick = vi.fn(() => { throw new Error("boom"); });

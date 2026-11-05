@@ -29,6 +29,8 @@ interface Host extends CoordinatorHost {
   validateAnswer: string | undefined;
   levels: Record<string, { level: Level; driverKind?: string }>;
   chiefs: Set<string>;
+  statusAsks?: string[];
+  statusAskers?: string[];
   release(id: string, outcome: Outcome): Promise<void>;
 }
 
@@ -891,6 +893,57 @@ describe("RuntimeCoordinator: modes and openers", () => {
     if (!parentId) begun(w, source, generation, sourceText, opener ? { opener, origin: undefined } : {});
     return w.coordinator.enqueue(source, generation, parentId, target, text, rest);
   };
+
+  describe("a reply that only acknowledges", () => {
+    const after = async (w: World, ask: { mode?: "consult" }, outcome: { text?: string; evidence?: { toolCalls?: number } }) => {
+      w.host.script = (node) => node.botId === "tester" ? { ok: true, text: outcome.text ?? "Noted, thanks.", ...(outcome.evidence ? { evidence: outcome.evidence } : {}) } : undefined;
+      handoff(w, chief, "gen-1", undefined, tester, "FYI: the mailbox moved.", ask);
+      ended(w, "gen-1");
+      w.coordinator.tick(); await flush(); w.coordinator.tick(); await flush();
+      return { resumed: w.host.runs.some(run => run.node.id === "gen-1"), asked: w.host.statusAsks, askers: w.host.statusAskers };
+    };
+    const asking = (answer: string | undefined | Error) => {
+      const w = world();
+      w.host.statusAsks = [];
+      w.host.statusAskers = [];
+      w.host.statusReply = async (asker, prompt) => {
+        w.host.statusAskers!.push(asker);
+        w.host.statusAsks!.push(prompt);
+        if (answer instanceof Error) throw answer;
+        return answer;
+      };
+      return w;
+    };
+
+    it("spends no requester turn on a plain ACK, and shows the helper both messages as data", async () => {
+      const { resumed, asked, askers } = await after(asking("ACK"), {}, {});
+      expect(resumed).toBe(false);
+      // The requester's engine answers, never the teammate's, whose engine is busy with the work itself.
+      expect(askers).toEqual(["chief"]);
+      expect(asked).toHaveLength(1);
+      expect(asked![0]).toContain("<sender_message>\nFYI: the mailbox moved.\n</sender_message>");
+      expect(asked![0]).toContain("<teammate_reply>\nNoted, thanks.\n</teammate_reply>");
+    });
+
+    it.each([["NEEDS", "NEEDS"], ["no answer", undefined], ["a chatty answer", "ACK, nothing needed"], ["a failed call", new Error("no engine")]])("wakes the requester on %s", async (_name, answer) => {
+      const { resumed, asked } = await after(asking(answer as string | undefined | Error), {}, {});
+      expect(resumed).toBe(true);
+      expect(asked).toHaveLength(1);
+    });
+
+    it("never asks about a question the requester sent, or work that used a tool, or a long reply", async () => {
+      for (const [ask, outcome] of [[{ mode: "consult" }, {}], [{}, { evidence: { toolCalls: 1 } }], [{}, { text: "x".repeat(601) }]] as const) {
+        const { resumed, asked } = await after(asking("ACK"), ask, outcome);
+        expect(resumed).toBe(true);
+        expect(asked).toEqual([]);
+      }
+    });
+
+    it("wakes the requester on a host with no helper", async () => {
+      const { resumed } = await after(world(), {}, {});
+      expect(resumed).toBe(true);
+    });
+  });
 
   it("consult: the child is a consultation, its turn opens with the consultation envelope, and the asker is resumed with the answer", async () => {
     const w = world((node) => node.botId === "tester" ? { ok: true, text: "Use the staging bucket." } : undefined);

@@ -1,7 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type DragEvent, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRight, FolderPlus, Plus } from "lucide-react";
-import { openBot, visibleMessages, type Bot, type Message } from "@/state/store";
+import { openBotRow, visibleMessages, type Bot, type Message } from "@/state/store";
 import { avatarCropRadius, botAvatarProfile } from "../../shared/bot-avatar";
 import { liveActivityLabel } from "@/lib/live-activity";
 import { BotAvatar } from "./Avatar";
@@ -203,7 +203,7 @@ export const PinnedBotCircle = memo(function PinnedBotCircle({
         aria-keyshortcuts={drag ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
         aria-label={`${bot.name}${waiting ? ` · ${t("sidebar.preview.waiting")}` : working ? ` · ${t("chat.activity.working")}` : ""}${unread ? ` · ${t("task.unread")}` : ""}`}
         title={bot.name}
-        onClick={() => openBot(dispatch, bot, showThreads)}
+        onClick={() => openBotRow(dispatch, bot, showThreads, selected)}
         {...pinnedCircleDragHandlers(bot.id, { drag, dragging, prevId, nextId })}
         onContextMenu={(event) => {
           event.preventDefault();

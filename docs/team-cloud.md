@@ -86,6 +86,18 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
 - **Never asleep, kept across restarts.** A Team Cloud refuses the Admin's sleep request (`busy: ["team"]`) and keeps
   every member's session across a restart; a My Cloud revokes every session that is not its owner's at each boot.
 
+
+### Off a team
+
+Everyone has an Inbox: on a personal Cloud and in the desktop app with no account, the same row at the top of the sidebar
+opens the same panel. Each place keeps its own, where its bots live, and nothing syncs; the rail's "{name}: needs you"
+says which place to open. There is one person, so nothing is routed and nobody's assistant answers. An approval or a
+question is the open card itself, listed from where it was asked, so one answer settles it however many surfaces show it
+and whatever was waiting before an upgrade is listed. `message_person` leaves out `to`: it posts one line in its
+conversation and sends one notification, and a reply is an ordinary line there. A routine's report and a failure of work
+nobody watches each get a line, in `place-inbox.json`. A guest's conversation left on a Cloud reaches its owner labelled
+with who asked, and its news stays out of the owner's list. See [Verifying the Inbox](verification/inbox.md).
+
 ## Rules
 
 The team's rules live on the Admin (openmaus-cloud `docs/team-cloud.md` "Rules"): one document, `{ schema: 1, limits }`, that
@@ -410,6 +422,18 @@ or posts in one.
 
 On a My Cloud and on a desktop no bot has an owner: nothing is routed, and one Chief per department holds as before.
 Every bot still reaches every bot there.
+
+## Bringing a bot in from My Cloud
+
+Someone with a My Cloud moves a bot into a team from two places: **Move to Acme** in the bot's menu on My Cloud, and on the
+team's own page in the desktop app, **Bring your stuff**, which lists My Cloud's bots with one **Move** each. Both say the
+same before anything moves: who can use it there, what goes (instructions, skills, files, routines, their chats), what
+stays on My Cloud (what the bot remembers, their connections, MausBot), and that there is no way back.
+
+A team's server isn't the person's own, so its page gets less than My Cloud's does (`electron/team-move-main.mjs`). It reads
+only the names of My Cloud's bots and which can go, and only while it is the window's active page and the Admin's verified
+session says the person is in that team. It names a bot by id, and main reads the name from My Cloud. The confirm is main's
+own window, in English, because a page could soften or skip one of its own.
 
 ## Who can use a bot
 

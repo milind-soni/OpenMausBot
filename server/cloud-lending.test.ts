@@ -20,6 +20,10 @@ describe("who may use a Mac lent to a Cloud home (review: guests, webhooks)", ()
   it("the owner's own conversation from one of their devices may", () => {
     expect(mayLend(turn({}))).toBe(true);
   });
+  it("a conversation a bot opened may not, even for the owner's line: another bot's words start its session", () => {
+    expect(cloudHomeLendingRefusal(turn({ botOpened: true }))).toBe("someone-else");
+    expect(mayLend(turn({ botOpened: false }))).toBe(true);
+  });
   it("a guest's conversation, a sender-less line (a local process) or a bot's line may not", () => {
     expect(mayLend(turn({ thread: [said("m1", GUEST)] }))).toBe(false);
     expect(mayLend(turn({ thread: [said("m1")] }))).toBe(false);
@@ -146,10 +150,16 @@ describe("cloudLendingRefusalText", () => {
     expect(cloudLendingRefusalText("someone-else", { ...mac, fromBefore: true })).toBe("This conversation has messages from before My Cloud, so it can't use your Mac. Start a new conversation with this bot to use it.");
     expect(cloudLendingRefusalText("someone-else", mac)).toBe("Someone else wrote in this conversation, so it can't use your Mac. Start a new conversation to use it.");
     expect(cloudLendingRefusalText("not-owner", mac)).toBe("Only conversations you start with a bot, and routines you wrote, can use your Mac. Start a new conversation with this bot to use it.");
-    expect(cloudLendingRefusalText("memory-changed", room)).toBe("This bot's memory was changed in a conversation you didn't write. Review it in Memory to use your Mac again.");
+    expect(cloudLendingRefusalText("memory-changed", room)).toBe("This bot's memory was changed in a conversation you didn't write, so it can't use your Mac. In this bot's settings, open Memory, check what changed and tap Mark reviewed, then ask again here.");
     for (const why of ["unproven", "not-owner", "someone-else", "memory-changed"] as const) {
       for (const where of [mac, room, { ...room, fromBefore: true }]) expect(cloudLendingRefusalText(why, where)).not.toMatch(/Use my Mac/u);
     }
+  });
+  it("says when a bot opened the conversation, or a webhook posted in it, and names both steps when the bot's memory is locked too", () => {
+    expect(cloudLendingRefusalText("someone-else", { ...mac, botOpened: true })).toBe("A bot opened this conversation, so it can't use your Mac. Start a new conversation with this bot to use it.");
+    expect(cloudLendingRefusalText("someone-else", { ...mac, outside: true })).toBe("A webhook or a routine you didn't write posted in this conversation, so it can't use your Mac. Start a new conversation with this bot to use it.");
+    expect(cloudLendingRefusalText("someone-else", { ...mac, botOpened: true, memoryChanged: true })).toBe("This bot's memory was changed in a conversation you didn't write, so it can't use your Mac. In this bot's settings, open Memory, check what changed and tap Mark reviewed, then start a new conversation with this bot and ask there.");
+    expect(cloudLendingRefusalText("unproven", { ...room, memoryChanged: true })).toContain("tap Mark reviewed, then ask here yourself.");
   });
   it("in a group chat, points to a new thread there or to asking there", () => {
     expect(cloudLendingRefusalText("someone-else", { ...room, fromBefore: true })).toBe("This conversation has messages from before My Cloud, so it can't use your Mac. Start a new thread in this group chat to use it.");

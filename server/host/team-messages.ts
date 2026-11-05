@@ -1,7 +1,8 @@
 // A Team Cloud's people as people a bot can name. Whatever is addressed to a teammate reaches their inbox
 // (person-inbox.ts): a tag of @Bob anywhere a teammate writes it, or in a bot's reply where Bob can see it, and
 // message_person ("tell Bob that…"), which passes one message, whose answer comes back to the conversation that asked.
-// Only the message travels: a turn still reads only its own audience (audience.ts). Off a team nothing here exists.
+// Only the message travels: a turn still reads only its own audience (audience.ts). Off a team there is one person, and
+// place-inbox.ts is their inbox.
 import { escapeNotes } from "../peer-provenance.ts";
 import { SAY_LONG_WAIT, waitedLong, waitedWords, waitNow } from "./long-waits.ts";
 import type { ServerResponse } from "node:http";
@@ -24,6 +25,7 @@ import type { BotRecord, GroupRecord, Message, Store, StoreChange } from "../sto
 import type { TeamPeople } from "../team-people.ts";
 import { currentTimeZone } from "../time-zone.ts";
 import { loadMemory } from "../workspace.ts";
+import type { PlaceInbox } from "./place-inbox.ts";
 import { createPersonInbox, type Delivery, type Item, type Passed, type PersonInbox, type PersonInboxDeps } from "./person-inbox.ts";
 import { createRepresentative, type RepresentativeDeps } from "./representative.ts";
 import { oneLine } from "./text-clip.ts";
@@ -40,6 +42,7 @@ const PROMPT_PEOPLE = 30;
 const PROMPT_WAITING = 12;
 
 const bodySchema = z.object({ to: z.string().trim().min(1).max(254), message: z.string().trim().min(1).max(MESSAGE_PERSON_MAX) }).strict();
+const placeBodySchema = z.object({ to: z.string().trim().max(254).optional(), message: z.string().trim().min(1).max(MESSAGE_PERSON_MAX) }).strict();
 
 type Person = { email: string; role: TeamRole; key: string; name: string; left: boolean };
 type Where = { bot: BotRecord; group?: GroupRecord };
@@ -57,6 +60,8 @@ export interface TeamMessagesDeps {
   /** What one person may see, as their own session would. */
   sees(person: { email: string; role: TeamRole }): { bot(botId: string): boolean; thread(threadId: string): boolean };
   notify(notification: Notification): void;
+  /** The inbox of a place that is no team's. */
+  place?: PlaceInbox | null;
   /** What the inbox needs from the server: whose asks are whose, hand-offs, a bot carrying on, the assistant's reads. */
   inbox: Pick<PersonInboxDeps, "askedPerson" | "handedFrom" | "continueTurn"> & Partial<Pick<PersonInboxDeps, "notes" | "ensureOwnBot" | "changed">> & {
     representative?: Omit<RepresentativeDeps, "timeZone"> & Partial<Pick<RepresentativeDeps, "timeZone">>;
@@ -305,6 +310,12 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
     async internal(ctx: MessagePersonContext): Promise<typeof PASS | void> {
       if (ctx.path !== MESSAGE_PERSON_PATH) return PASS;
       if (ctx.method !== "POST") return ctx.json(ctx.res, 405, { error: "method not allowed" });
+      if (!team && deps.place) {
+        const body = placeBodySchema.safeParse(await ctx.readBody());
+        if (!body.success) return ctx.json(ctx.res, 400, { error: `message_person needs message (up to ${MESSAGE_PERSON_MAX} characters).` });
+        const sent = deps.place.message(ctx.botId, ctx.threadId, body.data.message);
+        return ctx.json(ctx.res, sent.status, sent.status === 200 ? { text: sent.text } : { error: sent.text });
+      }
       if (!team || !deps.people) return ctx.json(ctx.res, 404, { error: "Passing a message to a person works only on a team's Cloud." });
       const body = bodySchema.safeParse(await ctx.readBody());
       if (!body.success) return ctx.json(ctx.res, 400, { error: `message_person needs to (a teammate's name or email) and message (up to ${MESSAGE_PERSON_MAX} characters).` });
@@ -352,18 +363,28 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       if (passed.status >= 400) return Promise.reject(Object.assign(new Error(passed.error ?? "That answer can't be passed back."), { status: passed.status }));
       return Promise.resolve(repeated ? { queued: false, repeated: true } : { queued: false });
     },
-    /** The session's person's inbox as its panel lists it; null off a team or for someone without one. */
+    /** The viewer's inbox as its panel lists it; null for someone on a team without one. */
     view(auth: RequestAuth): InboxView | null {
+      if (!team && deps.place) return deps.place.view(auth);
       const me = sessionPerson(auth);
       return team && me ? inbox.view(me.key) : null;
     },
-    /** The session's person is done with a line of news in their inbox. */
+    /** How many of the viewer's lines wait on them. */
+    count(auth: RequestAuth): number | null {
+      if (!team && deps.place) return deps.place.count(auth);
+      const me = sessionPerson(auth);
+      const view = team && me ? inbox.view(me.key) : null;
+      return view ? view.rows.filter((row) => row.tab === "needs-you" || (row.tab === "info" && row.unread)).length : null;
+    },
+    /** The viewer is done with a line of news in their inbox. */
     markDone(auth: RequestAuth, id: string): ReturnType<PersonInbox["markDone"]> {
+      if (!team && deps.place) return deps.place.markDone(auth, id);
       const me = sessionPerson(auth);
       return team && me ? inbox.markDone(me.key, id) : "unknown";
     },
-    /** The session's person read a line of their inbox. */
+    /** The viewer read a line of their inbox. */
     markRead(auth: RequestAuth, id: string): boolean {
+      if (!team && deps.place) return deps.place.markRead(auth, id);
       const me = sessionPerson(auth);
       return Boolean(team && me && inbox.markRead(me.key, id));
     },
@@ -378,6 +399,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
     },
     /** The person opened this conversation: what waited there for them is seen. */
     seen(auth: RequestAuth, threadId: string): void {
+      if (!team) deps.place?.seen(auth, threadId);
       const me = sessionPerson(auth);
       if (me) inbox.seen(me.key, threadId);
     },
@@ -392,10 +414,13 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       return waiting ? { returned: false, open: { botId: waiting.botId, threadId: waiting.threadId } } : { returned: false };
     },
     /** A notification about to go out: an ask, a failure or a routine's report routed to a person reaches their inbox. */
-    route: inbox.route,
+    route(notification: Notification, how: { routine?: boolean } = {}): Notification | null {
+      return !team && deps.place ? deps.place.route(notification, how) : inbox.route(notification, how);
+    },
     stop(): void {
       unsubscribe();
       inbox.stop();
+      deps.place?.stop();
     },
   };
 }

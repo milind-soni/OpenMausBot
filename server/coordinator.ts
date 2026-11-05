@@ -130,6 +130,8 @@ export interface CoordinatorHost {
   /** Recheck addresses and route permission immediately before every dispatch. */
   validate(node: HandoffView, parent?: HandoffView): string | undefined;
   busy(node: HandoffView): boolean;
+  /** Why a busy node waits, in words for the record. */
+  holdReason?(node: HandoffView): string;
   /** For a root this is the person's own conversation continuing: person-visible, never internal. */
   run(node: HandoffView, resumed: boolean, signal: AbortSignal, composed: ComposedTurn): Promise<HostTurnResult>;
   report(child: HandoffView, parent?: HandoffView): void;
@@ -149,6 +151,10 @@ export interface CoordinatorHost {
   shareAnswer?(first: HandoffView, joiner: HandoffView): boolean;
   /** `node` waits for `first`'s answer instead of running its own turn (only ever a request outside a room). */
   joined?(node: HandoffView, first: HandoffView): void;
+  /** One word from a small model about a teammate's reply (runtime/status-reply.ts), on `requesterBotId`'s own engine: the
+   * requester's turn is what the answer may save, and the teammate's engine is busy with the teammate's work. Absent,
+   * undefined or a throw: the requester wakes. */
+  statusReply?(requesterBotId: string, prompt: string, signal: AbortSignal): Promise<string | undefined>;
 }
 
 export interface Coordinator {
@@ -178,6 +184,10 @@ export interface Coordinator {
   /** Live nodes assigned to this bot that are parked on the person or on their requester. */
   parkedFor(botId: string): HandoffView[];
   parkedDirect(threadId: string): HandoffView | undefined;
+  /** A newer card replaced `from`: work parked on it in this conversation waits on `to`. */
+  followCard(threadId: string, from: string, to: string): void;
+  /** Nothing can answer what this parked work waits on any more: it ends, and whoever waits on it hears why. */
+  releaseParked(id: string, reason: string): void;
   prune(before: number): number;
   sharedRequest(node: HandoffView): { id: string; botIds: string[] };
   cancelRoom(groupId: string, threadId?: string, reason?: string, status?: "failed" | "cancelled"): void;
@@ -197,6 +207,8 @@ export interface Coordinator {
   pace(): "busy" | "parked" | "idle";
   close(): void;
   progress(threadId: string): void;
+  /** What the turn this thread is running waits for, for the record. */
+  held(threadId: string, why: string): void;
   /** True when a parked assignment took the text as its answer: the host must not start an ordinary turn. */
   answer(threadId: string, text: string): boolean;
   awaitingAnswer(threadId: string): boolean;
