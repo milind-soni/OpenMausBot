@@ -157,3 +157,16 @@ export function citationTabShortcut() {
     },
   };
 }
+
+type CitationShortcutEvent = Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey" | "isComposing" | "defaultPrevented">;
+
+/** Cmd+L on Mac, Ctrl+L elsewhere: opens the cite card for the selected chat text. */
+export function isCitationShortcut(event: CitationShortcutEvent, isMac: boolean): boolean {
+  if (event.defaultPrevented || event.isComposing || event.altKey || event.shiftKey) return false;
+  if (isMac ? !event.metaKey || event.ctrlKey : !event.ctrlKey || event.metaKey) return false;
+  return event.key.toLowerCase() === "l";
+}
+
+export function citationShortcutHint(isMac: boolean): string {
+  return isMac ? "⌘L" : "Ctrl+L";
+}
