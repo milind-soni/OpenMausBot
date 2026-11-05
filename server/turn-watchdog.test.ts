@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { RuntimeEvent } from "./contracts.ts";
 import { EngineMemory } from "./engine-memory.ts";
@@ -184,6 +184,45 @@ describe("TurnWatchdog", () => {
     dog.sweep();
     expect(stalls).toHaveLength(1);
     expect(limits).toEqual([STALL]);
+  });
+
+  it("does not count the time the computer slept as a turn's silence", () => {
+    vi.useFakeTimers({ now: 0 });
+    const stalls: WatchedTurn[] = [];
+    const dog = new TurnWatchdog({ stallMs: STALL, toolStallMs: TOOL_STALL, checkMs: 1_000, onStall: (turn) => stalls.push(turn) });
+    try {
+      dog.start();
+      dog.watch("t1", "bot1");
+      vi.advanceTimersByTime(STALL / 2);
+      // The Mac sleeps for an hour: the process is suspended, so no sweep runs while the wall clock keeps going.
+      vi.setSystemTime(Date.now() + 60 * 60_000);
+      vi.advanceTimersByTime(1_000);
+      expect(stalls).toHaveLength(0);
+      vi.advanceTimersByTime(STALL / 2 - 2_000);
+      expect(stalls).toHaveLength(0);
+      vi.advanceTimersByTime(STALL);
+      expect(stalls).toEqual([expect.objectContaining({ threadId: "t1" })]);
+    } finally {
+      dog.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("still counts silence across sweeps that are only a little late", () => {
+    vi.useFakeTimers({ now: 0 });
+    const stalls: WatchedTurn[] = [];
+    const dog = new TurnWatchdog({ stallMs: STALL, toolStallMs: TOOL_STALL, checkMs: 1_000, onStall: (turn) => stalls.push(turn) });
+    try {
+      dog.start();
+      dog.watch("t1", "bot1");
+      vi.advanceTimersByTime(STALL - 3_000);
+      vi.setSystemTime(Date.now() + 2_000);
+      vi.advanceTimersByTime(1_000);
+      expect(stalls).toHaveLength(1);
+    } finally {
+      dog.stop();
+      vi.useRealTimers();
+    }
   });
 
   it("says a bot is answering while one of its turns runs unparked, and not once it waits or ends", () => {
