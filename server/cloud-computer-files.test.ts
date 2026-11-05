@@ -62,7 +62,8 @@ async function sandbox(req: IncomingMessage, res: ServerResponse, url: URL) {
     res.writeHead(200, { "content-type": "application/octet-stream", ...(file.declared === false ? {} : { "content-length": String(file.lies ?? file.bytes.length) }) });
     for (let at = 0; at < file.bytes.length; at += MiB) {
       if (at === Math.floor(file.bytes.length / 2 / MiB) * MiB && at > 0) await midDownload?.();
-      if (!res.write(file.bytes.subarray(at, at + MiB))) await new Promise(resolve => res.once("drain", resolve));
+      if (res.destroyed) return;
+      if (!res.write(file.bytes.subarray(at, at + MiB))) await new Promise(resolve => { res.once("drain", resolve); res.once("close", resolve); });
     }
     res.end();
     return;
@@ -90,7 +91,8 @@ beforeAll(async () => {
     const url = new URL(req.url ?? "/", base);
     if (url.pathname.startsWith("/sandbox/")) {
       calls.push({ method: req.method ?? "", path: url.pathname.replace(/\/[^/]+$/, "/<token>"), body: null, authorization: req.headers.authorization, contentLength: req.headers["content-length"] });
-      await sandbox(req, res, url);
+      // A copy stopped mid-transfer closes its request; the sandbox just lets it go.
+      await sandbox(req, res, url).catch(() => res.destroy());
       return;
     }
     const chunks: Buffer[] = [];
