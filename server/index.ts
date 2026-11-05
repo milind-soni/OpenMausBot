@@ -8958,8 +8958,9 @@ routines = new RoutineManager({
   },
   joinConversation: (run) => {
     if (run.eventSource === "wait") return waitRunChat(run, directChatOf, Boolean(CLOUD_HOME));
-    const continues = routines?.listRoutines().some((routine) => routine.id === run.routineId && routine.schedule.type === "limit_reset");
-    if (!continues || run.target !== "bot") return null;
+    const routine = routines?.listRoutines().find((each) => each.id === run.routineId);
+    // A routine with its own model opens its own thread: a joined conversation keeps the conversation's model.
+    if (routine?.schedule.type !== "limit_reset" || routine.modelSelection || run.target !== "bot") return null;
     const source = routineSourceOwner(run);
     if (!source || source.group || source.bot.id !== run.botId) return null;
     return source.threadId;

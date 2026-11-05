@@ -150,6 +150,29 @@ it("with no other AI to carry on, the stopped turn's Continue sets up a run that
   });
 }, 120_000);
 
+it("a limit-reset routine with its own model opens its own thread on that model, instead of continuing the conversation", async () => {
+  await withLimitFixture({ codex: false }, async ({ api, control, limit, lift, evidence }) => {
+    const resetsAt = Math.floor(Date.now() / 1000) + 10;
+    limit(resetsAt);
+    const { bot } = await control("new-bot", "--name", "Scout");
+    const threadId = bot.activeTaskId;
+    await control("send", "--bot", bot.id, "--task", threadId, "--text", "Write the quarterly report");
+    expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status).toBe("failed");
+    const { routine } = await api("POST", "/api/limit-resets/continue", { botId: bot.id, threadId }, 201);
+    const own = { instanceId: bot.modelSelection.instanceId, model: `${bot.modelSelection.model}-routine` };
+    await api("PATCH", `/api/routines/${routine.id}`, { modelSelection: own });
+
+    lift();
+    await expect.poll(async () => (await api("GET", "/api/routines")).runs.find((run: any) => run.routineId === routine.id)?.status, { timeout: 40_000 }).toBe("completed");
+    const run = (await api("GET", "/api/routines")).runs.find((candidate: any) => candidate.routineId === routine.id);
+    expect(run.threadId).not.toBe(threadId);
+    const { tasks } = (await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === bot.id);
+    expect(tasks.find((task: any) => task.threadId === run.threadId).modelSelection).toEqual(own);
+    expect(tasks.find((task: any) => task.threadId === threadId).modelSelection).toEqual(bot.modelSelection);
+    evidence.push({ routine, run });
+  });
+}, 120_000);
+
 it("continues on the backup engine with one line, and goes back to its own engine after the reset", async () => {
   await withLimitFixture({ recovery: { enabled: true, backup: codex } }, async ({ api, control, limit, lift, claudePrompts, evidence }) => {
     const resetsAt = Math.floor(Date.now() / 1000) + 25;

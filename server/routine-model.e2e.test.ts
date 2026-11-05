@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 
@@ -24,6 +25,9 @@ it("opens each run of a routine with its own model in the run's thread, and refu
     const threadId = (await api("GET", "/api/routines")).body.runs.find((item: any) => item.id === run.id).threadId;
     const task = (await api("GET", "/api/bots")).body.bots.find((each: any) => each.id === bot.id).tasks.find((item: any) => item.threadId === threadId);
     expect(task.modelSelection).toEqual(own);
+    await expect.poll(() => existsSync(fixture.fixtureDumpPath), { timeout: 30_000 }).toBe(true);
+    const { argv } = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")) as { argv: string[] };
+    expect(argv[argv.indexOf("--model") + 1]).toBe(own.model);
     const refused = await api("POST", "/api/routines", { name: "Inbox sweep", prompt: "Sweep the inbox", botId: bot.id,
       schedule: { type: "daily", time: "09:00", weekdays: [1] }, modelSelection: { instanceId: own.instanceId, model: own.model, effort: "galaxy" } });
     expect(refused).toMatchObject({ status: 400, body: { error: 'effort "galaxy" is not recognized' } });
