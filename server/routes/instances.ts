@@ -210,6 +210,28 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         if (action === "auth/start") {
           const instance = registry.get(instanceId);
           if (!instance) return json(res, 404, { error: "unknown instance" });
+          // Opt-in device-code sign-in for ChatGPT plan accounts: Codex's own login, for
+          // workspace seats whose organization blocks third-party delegated access
+          // (`3p_delegated_access_policy_denied`). Persisted, so later sign-ins stay on this lane.
+          if (instance.authenticationMethod === "browser-pkce") {
+            let requestedMethod: unknown = null;
+            try { requestedMethod = (await readBody(req, 512) as Record<string, unknown> | undefined)?.method; } catch { /* no or unreadable body: keep the current method */ }
+            if (requestedMethod === "device" && !providerConfigBusy.get()) {
+              const raw = cfg.instances?.[instanceId] as { driver?: unknown; config?: Record<string, unknown> } | undefined;
+              if (raw?.driver === "codex" && raw.config?.authMode === "chatgpt-plan" && raw.config.authFlow !== "device") {
+                providerConfigBusy.set(true);
+                try {
+                  const instances = persistableInstanceConfigs(cfg);
+                  const target = instances[instanceId] as { config?: Record<string, unknown> } | undefined;
+                  if (target) {
+                    target.config = { ...raw.config, authFlow: "device" };
+                    await persistProviderInstance(instanceId, instances);
+                    return json(res, 200, { instances: await describeInstances() });
+                  }
+                } finally { providerConfigBusy.set(false); }
+              }
+            }
+          }
           // The official local OAuth callback terminates on this machine, not a phone or a remote browser.
           if (instance.authenticationMethod === "browser-pkce" && (isProxied(req) || !isLoopbackHost(req.socket.remoteAddress))) {
             return json(res, 403, { error: "Continue with ChatGPT on the computer running OpenMausBot. Hosted Pro sign-in requires OpenAI's hosted-app approval." });

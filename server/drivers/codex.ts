@@ -6,7 +6,7 @@ import { type McpApprovalMode, mountMcpServer } from "./codex-mcp-mount.ts";
 import { reportUnsupportedCalls, rolloutMark, type RolloutMark } from "./codex-unsupported-calls.ts";
 // The `codex` CLI headless over its app-server JSON-RPC (NDJSON on stdio): completion is
 // `turn/completed`, approvals arrive as server→client requests, resumeCursor is the codex thread id.
-import { mkdirSync } from "node:fs";
+import { mkdirSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -73,17 +73,24 @@ export interface CodexConfig {
   cli: string;
   fullAuto: boolean;
   authMode?: "chatgpt-plan";
+  /** ChatGPT plan accounts sign in with a device code (Codex's own login) instead of the
+   * browser flow. Works for Business/workspace seats whose organization blocks third-party
+   * delegated access (`3p_delegated_access_policy_denied`): Codex stays the sole owner of
+   * its credentials, so there is no token-sharing scope to refuse and no refresh overlap. */
+  authFlow?: "device";
   managed?: { url: string; models: string[] };
 }
 
 function decodeConfig(raw: unknown): CodexConfig {
   const o = (raw ?? {}) as Record<string, unknown>;
   if (o.authMode !== undefined && o.authMode !== "chatgpt-plan") throw new Error("Unknown Codex sign-in mode.");
+  if (o.authFlow !== undefined && o.authFlow !== "device") throw new Error("Unknown Codex sign-in flow.");
   if (o.authMode && o.managed) throw new Error("ChatGPT plan and Company billing cannot be combined.");
   return {
     cli: typeof o.cli === "string" ? o.cli : "codex",
     fullAuto: o.fullAuto === true,
     ...(o.authMode === "chatgpt-plan" ? { authMode: "chatgpt-plan" as const } : {}),
+    ...(o.authFlow === "device" ? { authFlow: "device" as const } : {}),
     ...(o.managed && typeof o.managed === "object" ? { managed: decodeManagedCodex(o.managed) } : {}),
   };
 }
@@ -388,10 +395,27 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     let planSigningOut = false;
     let disposed = false;
     let planWarning: string | undefined;
+    /** Which store owns the ChatGPT credentials for a plan instance: maus's own OAuth
+     * registration (browser flow, token-sharing scopes) or Codex itself (device-code flow,
+     * `auth.json` under the instance's plan directory — the only lane workspace seats whose
+     * organization blocks third-party delegated access can use). Codex stays the sole
+     * refresher of its own tokens, so maus never exchanges or revokes in the legacy lane. */
+    let planLane: "maus" | "legacy" = config.authFlow === "device" ? "legacy" : "maus";
+    const detectPlanLane = async (): Promise<"maus" | "legacy"> => {
+      if (!planAuth) return "maus";
+      if (config.authFlow === "device") return "legacy";
+      try {
+        const mausCredentials = await planAuth.snapshot();
+        if (mausCredentials.authenticated || !mausCredentials.reason) return "maus";
+      } catch { /* fall through to the Codex-owned store */ }
+      try { if (statSync(join(planDirectory, "codex", "auth.json")).isFile()) return "legacy"; } catch { /* no Codex login either */ }
+      return "maus";
+    };
     let models = plan ? { default: "", options: [] } : config.managed ? { default: config.managed.models[0], options: config.managed.models.map(id => ({ id, label: id })) } : STATIC_CODEX_MODELS;
     const refreshModels = async (preserveExisting = false) => {
       if (config.managed) return;
-      if (planAuth) {
+      if (planAuth) planLane = await detectPlanLane();
+      if (planAuth && planLane === "maus") {
         const generation = planGeneration;
         const kept = preserveExisting && models.options.length > 0 ? models : null;
         if (!kept) models = { default: "", options: [] };
@@ -404,16 +428,19 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           if (!kept) throw error; unconfirmedModelCatalog(kept);
         }
       } else {
-        try {
-          const resolved = await readCodexModelCatalog(catalogEnv, fetch, config.cli);
-          if (resolved.options.length) models = resolved; else unconfirmedModelCatalog(models);
-        } catch { unconfirmedModelCatalog(models); }
+        // Non-plan instances and legacy-lane plan instances both read the catalog through Codex itself.
+        if (!(planAuth && planUnavailable)) {
+          try {
+            const resolved = await readCodexModelCatalog(catalogEnv, fetch, config.cli);
+            if (resolved.options.length) models = resolved; else unconfirmedModelCatalog(models);
+          } catch { unconfirmedModelCatalog(models); }
+        }
       }
       try { writeStartupModelCache(instanceId, models); } catch {}
     };
     // Only ChatGPT's refusal of a model for this account hides it from the account's list; other errors never do.
     const hidePlanRefusedModel = (model: string | undefined, raw: string, route: CodexRoute) => {
-      if (!planAuth || !model || !codexPlanModelRefused(raw, route)) return;
+      if (!planAuth || planLane !== "maus" || !model || !codexPlanModelRefused(raw, route)) return;
       const options = models.options.filter(option => option.id !== model);
       models = { default: models.default === model ? options[0]?.id ?? "" : models.default, options };
       void planAuth.refuseModel(model).then(() => refreshModels(true)).catch(() => {});
@@ -492,11 +519,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       };
       assertPlanCurrent();
       if (planUnavailable) throw new Error(planUnavailable);
-      const planToken = planAuth ? await planAuth.accessToken() : undefined;
+      if (planAuth) planLane = await detectPlanLane();
+      const planToken = planAuth && planLane === "maus" ? await planAuth.accessToken() : undefined;
       assertPlanCurrent();
       if (planAuth) {
         // ChatGPT refused this model for this account in an earlier turn: carry on with the account's first usable model.
-        const refused = planAuth.refusedModels();
+        const refused = planLane === "maus" ? planAuth.refusedModels() : [];
         if (turn.model && refused.includes(turn.model)) {
           if (!models.options.length) { await refreshModels(); assertPlanCurrent(); }
           const usable = models.options.find(option => !refused.includes(option.id));
@@ -1567,8 +1595,21 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     });
     if (!("version" in probe)) return { state: "unavailable", reason: probe.reason, ...(plan ? { chatgptPlan: true } : {}) };
     const { version } = probe;
-    if (planAuth) return { state: "available", version, chatgptPlan: true, billing: "subscription", ...await planAuth.snapshot(), update: await codexReleaseUpdate(version, config.cli),
+    if (planAuth) {
+      planLane = await detectPlanLane();
+      if (planLane === "legacy") {
+        // Codex owns the credentials (device-code sign-in): report what Codex itself sees.
+        const authenticated = await codexLoginStatus(config.cli, env) === "signed-in";
+        const email = authenticated ? await codexAccountEmail(config.cli, env) : null;
+        return {
+          state: "available", version, chatgptPlan: true, billing: "subscription", authenticated,
+          ...(email ? { account: { email } } : {}),
+          ...(planWarning ? { warning: { title: "Check ChatGPT connection", message: planWarning } } : {}),
+        };
+      }
+      return { state: "available", version, chatgptPlan: true, billing: "subscription", ...await planAuth.snapshot(), update: await codexReleaseUpdate(version, config.cli),
       ...(planWarning ? { warning: { title: "Check ChatGPT connection", message: planWarning } } : {}) };
+    }
     if (config.managed) return { state: "available", version, authenticated: Boolean(input.environment.OPENMAUSBOT_COMPANY_API_KEY && input.environment.CODEX_HOME), billing: "metered" };
     const previousCliVersion = modelsCliVersion;
     modelsCliVersion = version;
@@ -1600,10 +1641,14 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     if (planAuth) {
       if (planSigningOut) throw new Error("This ChatGPT account is being disconnected.");
       if (!models.options.length) await refreshModels();
-      env.OPENMAUSBOT_CHATGPT_TOKEN = await planAuth.accessToken();
+      planLane = await detectPlanLane();
+      if (planLane === "maus") {
+        env.OPENMAUSBOT_CHATGPT_TOKEN = await planAuth.accessToken();
+        providerArgs = chatgptPlanCodexArgs();
+      }
       if (planSigningOut || disposed) throw new Error("This ChatGPT account is being disconnected.");
       mkdirSync(join(planDirectory, "codex"), { recursive: true, mode: 0o700 });
-      providerArgs = chatgptPlanCodexArgs();
+
     } else if (config.managed) {
       if (!input.environment.OPENMAUSBOT_COMPANY_API_KEY || !input.environment.CODEX_HOME) {
         throw new Error("Company model access is unavailable. Reconnect your organization; personal billing will not be used.");
@@ -1640,20 +1685,36 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     refreshModels,
     ...(startupModelRefresh ? { startupModelRefresh } : {}),
     generateMemoryText,
-    ...(plan ? { authenticationMethod: "browser-pkce" as const } : {}),
+    ...(plan ? { authenticationMethod: (config.authFlow === "device" ? "device-code" : "browser-pkce") as "browser-pkce" | "device-code" } : {}),
     startAuthentication: async () => {
       if (planUnavailable) throw new Error(planUnavailable);
       if (planSigningOut || disposed) throw new Error("This account is being disconnected. Wait before signing in again.");
+      if (plan && config.authFlow === "device") return authentication.start();
       return (planAuth ?? authentication).start();
     },
     getAuthentication: async (flowId) => {
-      const result = await (planAuth ?? authentication).get(flowId);
-      if (planAuth && result.phase === "succeeded") planWarning = undefined;
-      if (planAuth && result.phase === "succeeded" && !models.options.length) await refreshModels();
+      const lane = plan && config.authFlow === "device" ? authentication : (planAuth ?? authentication);
+      const result = await lane.get(flowId);
+      if (planAuth && result.phase === "succeeded") {
+        planWarning = undefined;
+        if (!models.options.length) await refreshModels();
+      }
       return result;
     },
-    cancelAuthentication: () => (planAuth ?? authentication).cancel(),
+    cancelAuthentication: () => (plan && config.authFlow === "device" ? authentication.cancel() : (planAuth ?? authentication).cancel()),
     signOut: async () => {
+      if (plan && config.authFlow === "device") {
+        planSigningOut = true;
+        planGeneration++;
+        try {
+          const stopped = await Promise.all([...active.values()].map(({ stop }) => stop()));
+          if (stopped.some(value => !value)) throw new Error("A ChatGPT task could not stop safely. Stop the task before signing out.");
+          models = { default: "", options: [] };
+          await authentication.signOut();
+          planWarning = undefined;
+        } finally { planSigningOut = false; }
+        return;
+      }
       if (!planAuth) {
         const mark = loginMark();
         await authentication.signOut();
