@@ -68,6 +68,19 @@ describe("complete chat tool calls", () => {
 });
 
 describe("streamed tool calls without an index (Gemini's OpenAI-compatible endpoint)", () => {
+  it("keeps each call's thought signature", () => {
+    const calls = new ChatToolCalls();
+    const extra_content = { google: { thought_signature: "c2ln" } };
+    calls.add([{ ...completeCall, extra_content }, { ...completeCall, id: "call_two" }], true);
+    expect(calls.finish("stop", false)).toEqual([{ ...completeCall, extra_content }, { ...completeCall, id: "call_two" }]);
+  });
+
+  it("ignores extra content that is not an object", () => {
+    const calls = new ChatToolCalls();
+    calls.add([{ ...completeCall, extra_content: "sig" }], true);
+    expect(calls.finish("stop", false)).toEqual([completeCall]);
+  });
+
   const whole = (id: string, name: string, args = "{}") => ({ id, type: "function", function: { name, arguments: args } });
 
   it("keeps two whole calls sent in one chunk", () => {
