@@ -14,7 +14,7 @@ export interface PreviewStreamHostSetup {
 
 export type PreviewViewportSetting =
   | { readonly mode: "fill" }
-  | { readonly mode: "preset"; readonly preset: "desktop" | "tablet" | "phone"; readonly landscape?: boolean };
+  | { readonly mode: "preset"; readonly preset: "desktop" | "fullHd" | "tablet" | "phone"; readonly landscape?: boolean };
 
 /** Where a bot's browser is served: `httpBase` and `wsBase` end in `/api/bots/<id>/browser`. */
 export interface PreviewStreamAccess {
