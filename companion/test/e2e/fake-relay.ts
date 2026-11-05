@@ -171,7 +171,7 @@ export async function startFakeRelay(options: FakeRelayOptions): Promise<FakeRel
     url: `ws://127.0.0.1:${port}`,
     hosts,
     closes,
-    admitted: (hid) => hosts.get(hid)?.set ?? new Set(),
+    admitted: (hid: string) => hosts.get(hid)?.set ?? new Set<string>(),
     restart() {
       for (const host of hosts.values()) host.control.send(JSON.stringify({ t: "restarting", reconnectInMs: 0, tryForMs: 200 }));
     },
