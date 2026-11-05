@@ -24,6 +24,7 @@ import { unsupportedCallsNotice } from "./codex-unsupported-calls.ts";
 import { rebuiltSessionNotice } from "../resume-recovery.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import * as procs from "../procs.ts";
+import { botBox } from "../bot-box/box.ts";
 import { autoVerdict } from "../auto-approve.ts";
 import { formatQuestionAnswers } from "../../shared/ask-question.ts";
 
@@ -1229,6 +1230,22 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(argv).not.toContain("mcp_servers.sentry.command");
     expect(argv).toContain("mcp_servers.notes.command");
   });
+
+  it("hands a person's own stdio server the bot box's proxy, its only way out of the box's network", async () => {
+    await create();
+    const servers = { custom: { todo: { command: "python3", args: ["todo.py"], env: { LIST: "x" } } } };
+    const envVars = async (threadId: string) => {
+      const dump = join(scratch, `${threadId}.json`);
+      process.env.FAKE_CODEX_DUMP = dump;
+      await instance.adapter.sendTurn({ threadId, text: "go", integrations: servers });
+      await recorder.until((event) => event.type === "turn.completed" && event.threadId === threadId);
+      const argv: string[] = JSON.parse(readFileSync(dump, "utf8")).argv;
+      return JSON.parse(argv.find((arg) => arg.startsWith("mcp_servers.todo.env_vars="))!.split("=").slice(1).join("="));
+    };
+    expect(await envVars("t-unboxed-proxy")).toEqual(["LIST"]);
+    vi.spyOn(botBox, "enabled").mockReturnValue(true);
+    expect(await envVars("t-boxed-proxy")).toEqual(["LIST", "HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "NO_PROXY", "no_proxy"]);
+  }, 20_000);
 
   it("reaches a url server through OpenMausBot's connector on Codex's own login, header values off argv", async () => {
     await create();
