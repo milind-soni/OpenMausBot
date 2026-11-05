@@ -252,6 +252,8 @@ describe("a phone's move into this computer", () => {
     const withRuns = (runs: unknown[]) => run(moveIn, phone, "PUT", "/api/cloud-send/kind", { v: 1, key: "routine:r-new", dataDir: "/phone", record: { botId: SCOUT, target: "bot" }, runs });
     expect(await withRuns([{ id: "run-1", routineId: "r-new", botId: SCOUT }, { id: "run-2", routineId: "r-new", botId: "here-bot-0001" }])).toMatchObject(refused);
     expect(await withRuns(["run-3"])).toMatchObject(refused);
+    expect(await withRuns([{ id: "run-1", routineId: "r-new", botId: SCOUT, threadId: "here-thread-01" }])).toMatchObject(refused);
+    expect((await withRuns([{ id: "run-1", routineId: "r-new", botId: SCOUT, threadId: `${SCOUT}-t1` }])).out).toBe(PASS);
     expect((await withRuns([{ id: "run-1", routineId: "r-new", botId: SCOUT }])).out).toBe(PASS);
     const ok = await put("r-new", { botId: SCOUT, target: "bot" });
     expect(ok.out).toBe(PASS);

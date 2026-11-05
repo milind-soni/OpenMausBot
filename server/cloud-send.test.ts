@@ -88,5 +88,7 @@ describe("a bot sent from the person's other computer keeps its id", () => {
     for (const threadId of ["TAKEN-0001", "THREAD-TAKEN", "room-task-0001", "EMBER-0001"]) {
       expect(keptBotIds({ id: "ember-0001", threadId }, store), threadId).toEqual({ error: "this conversation id is already used here" });
     }
+    const capitals = { bots: [{ id: "Here-Caps-0001", threadId: "Thread-Caps-0001" }] as BotRecord[], groups: [] as never };
+    expect(keptBotIds({ id: "here-caps-0001" }, capitals), "an id here in capitals").toEqual({ error: "a bot with this id already exists here" });
   });
 });

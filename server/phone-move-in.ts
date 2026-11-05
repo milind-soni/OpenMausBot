@@ -79,7 +79,7 @@ export function createPhoneMoveIn(deps: PhoneMoveInDeps) {
     const held = record(body.record) ? body.record : null;
     // The routine's own id is the one that arrives, whatever the key says.
     if (!routine || !held || (held.id !== undefined && held.id !== routine) || !open(held.botId) || held.target !== "bot") return null;
-    if ((Array.isArray(body.runs) ? body.runs : []).some((run) => !record(run) || run.botId !== held.botId)) return null;
+    if ((Array.isArray(body.runs) ? body.runs : []).some((run) => !record(run) || run.botId !== held.botId || (run.threadId !== undefined && (typeof run.threadId !== "string" || deps.store.botByThread(run.threadId)?.id !== held.botId)))) return null;
     if (held.resultsThreadId !== undefined && (typeof held.resultsThreadId !== "string" || deps.store.botByThread(held.resultsThreadId)?.id !== held.botId)) return null;
     if (deps.routines()?.listRoutines().some((other) => other.id === routine && other.botId !== held.botId)) return null;
     return { ...body, mainIfUnused: true };
