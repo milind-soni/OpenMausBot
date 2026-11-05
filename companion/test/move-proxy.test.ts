@@ -81,7 +81,7 @@ describe("a phone moving its bots in", () => {
     expect(askOwner).toHaveBeenCalledTimes(1);
     expect(seen).toEqual([]);
 
-    moves.allow("phone-1");
+    moves.allow("phone-1", 1_000 + MOVE_ASK_TTL_MS);
     const granted = await phone("GET", "/api/companion/move");
     expect(granted.status).toBe(200);
     expect(JSON.parse(granted.text)).toEqual({ v: 1, state: "granted", expiresAt: expect.any(Number) });
@@ -129,7 +129,7 @@ describe("a phone moving its bots in", () => {
     expect(seen.at(-1)?.headers["x-openmausbot-companion-move"]).toBeUndefined();
 
     await phone("POST", "/api/companion/move", { v: 1, bots: 4 });
-    moves.allow("phone-1");
+    moves.allow("phone-1", 1_000 + MOVE_ASK_TTL_MS);
     expect((await phone("POST", "/api/cloud-send/chats", { v: 1 }, forged)).status).toBe(200);
     expect(seen.at(-1)).toMatchObject({
       method: "POST",
@@ -155,7 +155,7 @@ describe("a phone moving its bots in", () => {
   it("a request that began under the grant finishes; the next one gets today's 404", async () => {
     const { phone, moves, answerWith } = await companion();
     await phone("POST", "/api/companion/move", { v: 1, bots: 4 });
-    moves.allow("phone-1");
+    moves.allow("phone-1", 1_000 + MOVE_ASK_TTL_MS);
 
     let release = () => {};
     const reached = new Promise<void>((resolve) => {
@@ -182,7 +182,7 @@ describe("a phone moving its bots in", () => {
   it("closes the move routes again once the grant runs out", async () => {
     const { phone, moves, advance } = await companion();
     await phone("POST", "/api/companion/move", { v: 1, bots: 4 });
-    moves.allow("phone-1");
+    moves.allow("phone-1", 1_000 + MOVE_ASK_TTL_MS);
     expect((await phone("POST", "/api/cloud-send/memory", { v: 1 })).status).toBe(200);
     advance(MOVE_GRANT_TTL_MS);
     const next = await phone("POST", "/api/cloud-send/memory", { v: 1 });
@@ -194,7 +194,7 @@ describe("a phone moving its bots in", () => {
   it("lets the phone end its own grant", async () => {
     const { phone, moves } = await companion();
     await phone("POST", "/api/companion/move", { v: 1, bots: 4 });
-    moves.allow("phone-1");
+    moves.allow("phone-1", 1_000 + MOVE_ASK_TTL_MS);
     const ended = await phone("DELETE", "/api/companion/move");
     expect(ended.status).toBe(200);
     expect(JSON.parse(ended.text)).toEqual({ v: 1, state: "none" });
@@ -253,7 +253,7 @@ describe("a phone moving its bots in", () => {
   it("gives the long deadline to a move route under the grant and to nothing else", async () => {
     const { phone, moves } = await companion();
     await phone("POST", "/api/companion/move", { v: 1, bots: 4 });
-    moves.allow("phone-1");
+    moves.allow("phone-1", 1_000 + MOVE_ASK_TTL_MS);
     const timers = vi.spyOn(globalThis, "setTimeout");
     const deadlines = async (method: string, path: string, body?: unknown) => {
       timers.mockClear();

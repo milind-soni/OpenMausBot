@@ -2707,7 +2707,7 @@ ipcMain.handle("sharing:state", localWorkspaceOnly("sharing:state", async (_even
   await requireSharedComputers();
   return sharingController().state(savedWorkspace(id).id);
 }));
-const lendingDialogs = createLendingDialogs({ dialog, window: () => mainWindow, validate: validateSharedFolders, isHome: isHomeFolder }); setCompanionMoveAskListener(createMoveInAsks({ dialog, locale: () => { try { return jsonFile(path.join(app.getPath("userData"), "desktop-prefs.json")).read()?.language || app.getLocale(); } catch { return app.getLocale(); } }, answer: companionMoveAccess }).ask);
+const lendingDialogs = createLendingDialogs({ dialog, window: () => mainWindow, validate: validateSharedFolders, isHome: isHomeFolder }); setCompanionMoveAskListener(createMoveInAsks({ dialog, locale: () => { try { return jsonFile(path.join(app.getPath("userData"), "desktop-prefs.json")).read()?.language || app.getLocale(); } catch { return app.getLocale(); } }, answer: companionMoveAccess, window: () => mainWindow ?? (openWindowForLink?.(), mainWindow), log: slog }).ask);
 ipcMain.handle("sharing:folder", localWorkspaceOnly("sharing:folder", async () => {
   await requireSharedComputers();
   return lendingDialogs.chooseFolder("Choose a folder or drive to share");

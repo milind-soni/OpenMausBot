@@ -38,10 +38,10 @@ export class MoveGrants {
     return { state: { state: "pending", bots, expiresAt }, created: true };
   }
 
-  /** The owner's yes: only an unexpired pending ask becomes a grant. */
-  allow(deviceId: string): boolean {
+  /** The owner's yes to the ask expiring at `expiresAt`: a yes to an earlier ask, before a restart too, never grants a newer one. */
+  allow(deviceId: string, expiresAt: number): boolean {
     const entry = this.entries.get(deviceId);
-    if (entry?.kind !== "pending" || entry.expiresAt <= this.now()) return false;
+    if (entry?.kind !== "pending" || entry.expiresAt !== expiresAt || entry.expiresAt <= this.now()) return false;
     this.entries.set(deviceId, { ...entry, kind: "granted", expiresAt: this.now() + MOVE_GRANT_TTL_MS });
     return true;
   }

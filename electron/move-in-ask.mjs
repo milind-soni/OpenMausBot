@@ -1,5 +1,6 @@
 // Security: a paired phone's move writes bots and API keys into this computer. Only main's own dialog, which no page,
 // server or phone can draw or answer, opens it, and it defaults to Don't Allow.
+import { showClosableMessageBox } from "./ask-prompt.mjs";
 import { wordsIn } from "./lending-words.mjs";
 
 // The packaged app ships the renderer's catalog only inside its page bundle, so main keeps these keys itself; a test holds
@@ -38,42 +39,51 @@ export const MOVE_IN_WORDS = Object.freeze({
   }),
 });
 
-export function decodeMoveAsk(raw) {
+export const MOVE_ASK_TTL_MS = 300_000;
+
+export function decodeMoveAsk(raw, now = Date.now()) {
   if (!raw || typeof raw !== "object" || raw.type !== "openmausbot:companion-move-ask") return null;
-  const { deviceId, deviceName, bots, expiresAt } = raw;
+  const { deviceId, bots, expiresAt } = raw;
   if (typeof deviceId !== "string" || !/^[\w-]{1,128}$/.test(deviceId)) return null;
-  if (typeof deviceName !== "string" || !deviceName || deviceName.length > 80) return null;
+  if (typeof raw.deviceName !== "string") return null;
+  // Security: the name is the phone's own text inside the owner's yes, so nothing in it may reorder or break that line.
+  const deviceName = raw.deviceName.replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, "");
+  if (!deviceName || deviceName.length > 80) return null;
   if (!Number.isInteger(bots) || bots < 1 || bots > 200) return null;
-  if (!Number.isFinite(expiresAt)) return null;
+  if (!Number.isFinite(expiresAt) || expiresAt > now + MOVE_ASK_TTL_MS + 10_000) return null;
   return { deviceId, deviceName, bots, expiresAt };
 }
 
-/** One dialog at a time. An answer counts only before its own ask expires, so a dialog left open never answers the
- * phone's next ask. */
-export function createMoveInAsks({ dialog, locale, answer, now = Date.now }) {
+/** One dialog at a time. An answer counts only before its own ask expires and names that ask, so a dialog left open
+ * never answers the phone's next ask. `window()`: the app's window to attach the box to on macOS, opened if need be. */
+export function createMoveInAsks({ dialog, locale, answer, window = () => null, platform = process.platform, log = () => {}, now = Date.now }) {
   const show = async ({ deviceId, deviceName, bots, expiresAt }) => {
     if (now() >= expiresAt) return false;
     const words = wordsIn(MOVE_IN_WORDS, locale());
     const signal = AbortSignal.timeout(Math.ceil(expiresAt - now()));
-    const { response } = await dialog.showMessageBox({
+    const shown = showClosableMessageBox(dialog, {
       type: "question",
-      message: words[bots === 1 ? "moveIn.ask.one" : "moveIn.ask.other"].replaceAll("{count}", String(bots)).replaceAll("{device}", () => deviceName),
+      message: words[bots === 1 ? "moveIn.ask.one" : "moveIn.ask.other"].replaceAll("{count}", String(bots)).replaceAll("{device}", () => `\u2068${deviceName}\u2069`),
       detail: words["moveIn.ask.detail"],
       buttons: [words["moveIn.ask.allow"], words["moveIn.ask.deny"]],
       defaultId: 1,
       cancelId: 1,
       noLink: true,
       signal,
-    });
-    // Electron 43 cannot close a message box without a parent window on macOS, so a click after expiry is checked here too.
+    }, { window, platform });
+    if (!shown) return false;
+    const { response } = await shown;
     if (signal.aborted || now() >= expiresAt) return false;
-    await answer(deviceId, response === 0);
+    await answer(deviceId, response === 0, expiresAt);
     return response === 0;
   };
   let queue = Promise.resolve(false);
   return {
     ask(request) {
-      queue = queue.then(() => show(request)).catch(() => false);
+      queue = queue.then(() => show(request)).catch((error) => {
+        log(`the phone's move ask could not be answered: ${error instanceof Error ? error.message : String(error)}`);
+        return false;
+      });
       return queue;
     },
   };

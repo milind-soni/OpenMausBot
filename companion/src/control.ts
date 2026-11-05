@@ -289,7 +289,9 @@ export function createControlServer(options: ControlOptions): Server {
         return json(res, 404, { error: "no such device" });
       }
       if (method === "POST") {
-        if (!options.moves?.allow(move[1])) return json(res, 409, { error: "no move to allow" });
+        if (!options.moves?.allow(move[1], Number(requestUrl.searchParams.get("expiresAt") || Number.NaN))) {
+          return json(res, 409, { error: "no move to allow" });
+        }
       } else {
         options.moves?.refuse(move[1]);
       }

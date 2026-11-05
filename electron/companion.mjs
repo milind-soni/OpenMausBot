@@ -393,9 +393,10 @@ export async function companionCloudDesktopAccess(deviceId, allowed) {
   return companionState();
 }
 
-export async function companionMoveAccess(deviceId, allowed) {
-  if (!proc || !/^[\w-]{1,128}$/.test(String(deviceId ?? ""))) return;
-  await control(allowed ? "POST" : "DELETE", `/devices/${deviceId}/move`);
+/** `expiresAt` names the ask the owner answered, so a yes never grants a newer one. */
+export async function companionMoveAccess(deviceId, allowed, expiresAt) {
+  if (!proc || !/^[\w-]{1,128}$/.test(String(deviceId ?? "")) || !Number.isFinite(expiresAt)) return;
+  await control(allowed ? "POST" : "DELETE", allowed ? `/devices/${deviceId}/move?expiresAt=${expiresAt}` : `/devices/${deviceId}/move`);
 }
 
 /** Browser access is its own per-device grant, never inherited from VM access. */

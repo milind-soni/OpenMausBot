@@ -151,9 +151,14 @@ describe("origins the control server will change state for", () => {
     if ("error" in paired) throw new Error(paired.error);
     const id = paired.device.id;
 
-    expect(await ask("POST", `/devices/${id}/move`)).toMatchObject({ status: 409, body: { error: "no move to allow" } });
-    moves.ask(id, 4);
-    expect((await ask("POST", `/devices/${id}/move`)).status).toBe(200);
+    expect(await ask("POST", `/devices/${id}/move?expiresAt=1`)).toMatchObject({ status: 409, body: { error: "no move to allow" } });
+    const asked = moves.ask(id, 4);
+    if (!asked.created) throw new Error("the ask was not raised");
+    for (const stale of [`?expiresAt=${asked.state.expiresAt - 1}`, "?expiresAt=", ""]) {
+      expect(await ask("POST", `/devices/${id}/move${stale}`)).toMatchObject({ status: 409, body: { error: "no move to allow" } });
+    }
+    expect(moves.state(id).state).toBe("pending");
+    expect((await ask("POST", `/devices/${id}/move?expiresAt=${asked.state.expiresAt}`)).status).toBe(200);
     expect(moves.live(id)).toBe(true);
     expect((await ask("DELETE", `/devices/${id}/move`)).status).toBe(200);
     expect(moves.state(id)).toEqual({ state: "refused" });
@@ -162,8 +167,9 @@ describe("origins the control server will change state for", () => {
 
     const second = devices.redeem(devices.openPairing().code, "Second moving phone");
     if ("error" in second) throw new Error(second.error);
-    moves.ask(second.device.id, 4);
-    moves.allow(second.device.id);
+    const secondAsk = moves.ask(second.device.id, 4);
+    if (!secondAsk.created) throw new Error("the ask was not raised");
+    moves.allow(second.device.id, secondAsk.state.expiresAt);
     expect(moves.live(second.device.id)).toBe(true);
     expect((await ask("DELETE", `/devices/${second.device.id}`)).status).toBe(200);
     expect(moves.live(second.device.id)).toBe(false);
