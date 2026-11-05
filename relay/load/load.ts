@@ -146,7 +146,7 @@ async function runWorker(input: WorkerInput): Promise<WorkerReport> {
   }
   const tickMs = 20;
   const perTick = (input.bytesPerSecondEachWay * tickMs) / 1000 / Math.max(1, sessions.length);
-  let owed = 0;
+  const owed = sessions.map(() => Math.random() * input.size);
   const stopAt = performance.now() + input.seconds * 1000;
   await new Promise<void>((resolve) => {
     const timer = setInterval(() => {
@@ -155,10 +155,10 @@ async function runWorker(input: WorkerInput): Promise<WorkerReport> {
         resolve();
         return;
       }
-      owed += perTick;
-      const messages = Math.floor(owed / input.size);
-      owed -= messages * input.size;
-      for (const { phone, data } of sessions) {
+      sessions.forEach(({ phone, data }, i) => {
+        owed[i]! += perTick;
+        const messages = Math.floor(owed[i]! / input.size);
+        owed[i]! -= messages * input.size;
         for (let m = 0; m < messages; m++) {
           for (const ws of [phone, data]) {
             if (ws.readyState !== WebSocket.OPEN || ws.bufferedAmount > 4 * 1024 * 1024) continue;
@@ -168,7 +168,7 @@ async function runWorker(input: WorkerInput): Promise<WorkerReport> {
             report.sent += message.length;
           }
         }
-      }
+      });
     }, tickMs);
   });
   await new Promise((resolve) => setTimeout(resolve, 1_000));

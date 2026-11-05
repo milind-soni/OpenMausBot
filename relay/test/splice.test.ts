@@ -19,14 +19,18 @@ describe("limits that need a short clock", () => {
       const pump = setInterval(() => {
         if (phone.ws.bufferedAmount < 4 * MiB) for (let i = 0; i < 16; i++) phone.sendBinary(randomBytes(60_000));
       }, 5);
-      const stopAt = performance.now() + 6_000;
-      while (t.relay.ctx.metrics.count("relay_throttled_sessions_total") === 0 && performance.now() < stopAt) await sleep(20);
-      assert.equal(t.relay.ctx.metrics.count("relay_throttled_sessions_total"), 1);
-      await sleep(300);
-      const before = bytes;
-      await sleep(2_000);
-      const rate = ((bytes - before) * 8) / 2;
-      clearInterval(pump);
+      let rate: number;
+      try {
+        const stopAt = performance.now() + 6_000;
+        while (t.relay.ctx.metrics.count("relay_throttled_sessions_total") === 0 && performance.now() < stopAt) await sleep(20);
+        assert.equal(t.relay.ctx.metrics.count("relay_throttled_sessions_total"), 1);
+        await sleep(300);
+        const before = bytes;
+        await sleep(2_000);
+        rate = ((bytes - before) * 8) / 2;
+      } finally {
+        clearInterval(pump);
+      }
       assert.ok(rate < throttleBps * 1.5, `${Math.round(rate / 1e6)} Mbit/s after the throttle`);
       assert.ok(rate > throttleBps * 0.3, `${Math.round(rate / 1e6)} Mbit/s: the session must keep moving`);
       assert.ok(t.logs.some((event) => event.ev === "throttle"));

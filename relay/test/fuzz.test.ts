@@ -115,6 +115,21 @@ describe("pre-auth fuzzing", () => {
     for (const code of [Close.Malformed, 1009]) assert.ok(seen.has(code), `never saw ${code} in ${JSON.stringify([...seen])}`);
   });
 
+  test("the first message may be 4,096 bytes and not one more, even when it is otherwise valid", async () => {
+    const sized = (bytes: number) => {
+      const message = { t: "auth", v: 1, token: mintToken(t.key), pad: "" };
+      message.pad = "x".repeat(bytes - Buffer.byteLength(JSON.stringify(message)));
+      return JSON.stringify(message);
+    };
+    const fits = await Client.open(t.url, "/v1/host");
+    fits.send(sized(4_096));
+    assert.equal((await fits.json()).t, "hello");
+    fits.ws.close();
+    const over = await Client.open(t.url, "/v1/host");
+    over.send(sized(4_097));
+    assert.equal(await over.closeCode(), Close.Malformed);
+  });
+
   test("the expected code for each kind of bad first frame", async () => {
     const cases: Array<[string, (client: Client) => void, number]> = [
       ["binary", (c) => c.sendBinary(Buffer.from("{}")), Close.Malformed],
