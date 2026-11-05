@@ -120,7 +120,11 @@ export class TurnWatchdog {
     return false;
   }
 
-  /** sleptMs: time the process was suspended since the last sweep; it is forgiven, not counted as silence. */
+  /**
+   * sleptMs: the real time since the last sweep when the process was suspended; it is forgiven, not counted as silence.
+   * It may include up to one checkMs of awake time, so a stall after a sleep is caught up to one checkMs late, the
+   * same lag a sweep already has; never early.
+   */
   sweep(sleptMs = 0): void {
     const at = this.now();
     for (const turn of this.turns.values()) {
