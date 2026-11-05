@@ -453,8 +453,9 @@ the Cloud's address.
   browser's call shows in other windows' call bars as "Ada is on a Live call
   from a web browser". The phone apps show a client they don't know as
   "another device".
-- **Take turns stays on the Mac.** Take-turns calls listen with the Mac app's
-  on-device speech recognition, which a Cloud's page can't use. On a Cloud,
+- **Take turns stays on This computer.** Take-turns calls listen in the
+  desktop app (on-device on a Mac, through Fish Audio on Windows and Linux),
+  which a Cloud's page can't use. On a Cloud,
   the call with one bot is a Live call, and a room has no call
   (`effectiveCallMode` in `src/lib/call-mode.ts`, `GroupCallButton`).
 

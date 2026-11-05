@@ -71,7 +71,6 @@ import { ApprovalChip, ComposerPlusMenu, GoalToggle, TeachTaskButton } from "./C
 import { PhonePlus } from "./PhonePlus";
 import { useThreadApproval } from "./thread-approval";
 import { useStackedField, useTallPill } from "./composer-wrap";
-import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { ComposerReplyStrip } from "./ReplyQuote";
 import { escapeCancelsReply } from "@/lib/replies";
 import { useThreadRefs } from "./ThreadRefs";
@@ -127,7 +126,6 @@ export function Composer({
   const locked = setupLocked || Boolean(bot?.awaitingThreadSnapshot);
   const { state, dispatch } = useStore();
   const { threads, currentBotId } = useThreadRefs();
-  const { capabilities } = useDesktopCapabilities();
   const advanced = useAdvancedMode();
   // On a phone the composer is a dock: a round + (attach and every other tool), then one pill with the field, the mic and the voice button.
   const singleRow = useMediaQuery(PHONE_LAYOUT);
@@ -221,9 +219,7 @@ export function Composer({
     },
     [text, editText, editAttachments],
   );
-  const { recording, speechError, toggle: toggleMic, stop: stopDictation } = useComposerDictation({
-    draftId, text, onText: editText, available: capabilities.dictation.available,
-  });
+  const { recording, ready: micReady, speechError, toggle: toggleMic, stop: stopDictation } = useComposerDictation({ draftId, text, onText: editText });
   const [caret, setCaret] = useState(0);
   const shellRef = useRef<HTMLDivElement>(null);
   const tall = useTallPill(shellRef, simpleDock);
@@ -963,7 +959,7 @@ export function Composer({
             <Square size={simpleDock ? 10 : 14} className="fill-current" />
           </button>
         )}
-        {!locked && !busy && capabilities.dictation.available && (
+        {!locked && !busy && micReady && (
           <button
             onClick={toggleMic}
             aria-label={recording ? t("composer.dictation.stop") : t("composer.dictation.start")}

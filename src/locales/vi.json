@@ -171,7 +171,7 @@
   "server.mcp.signIn.card": "Máy chủ MCP của {label} cần đăng nhập. Hãy mở cuộc trò chuyện này trong OpenMausBot để đăng nhập.",
   "server.mcp.signIn.description": "{bot} đã thêm máy chủ MCP của {label} ({host}). Hãy đăng nhập để {bot} có thể dùng nó.",
   "server.mcp.signIn.onYourMac": "Hãy mở cuộc trò chuyện này trên máy Mac của bạn để đăng nhập vào {label}.",
-  "server.mcp.signIn.inSettings": "Hãy hoàn tất việc đăng nhập này trong Cài đặt → Máy chủ MCP.",
+  "server.mcp.signIn.inSettings": "Hãy hoàn tất việc đăng nhập này trong Ứng dụng → Máy chủ MCP.",
   "server.mcp.signIn.onlyPerson": "Chỉ {name} mới có thể đăng nhập ở đây.",
   "server.mcp.signIn.onlyOwner": "Chỉ người sở hữu cuộc trò chuyện này mới có thể đăng nhập ở đây.",
   "server.mcp.signIn.adminOnly": "Chỉ quản trị viên của bản cài đặt này mới có thể đăng nhập vào {label}.",

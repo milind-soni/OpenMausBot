@@ -133,6 +133,14 @@ if (isLocalPage && !desktopRemoteClient && process.argv.includes("--omb-company-
 // main passes app.getVersion(): a server's page carries that server's version, so About asks this for the app's own.
 const appVersion = (process.argv.find((arg) => arg.startsWith("--omb-app-version="))?.slice("--omb-app-version=".length) ?? "").slice(0, 64);
 
+/** ipcRenderer wraps a main-process throw in "Error invoking remote method"; the page shows the text verbatim. */
+function invokeWithPlainError(channel, ...args) {
+  return ipcRenderer.invoke(channel, ...args).catch((error) => {
+    const message = String(error?.message ?? error);
+    throw new Error(message.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, ""));
+  });
+}
+
 const bridge = {
   platform: process.platform,
   /** This app's version, and whether this page is this app's own (served by this computer, not a server from the Server menu). */
@@ -376,13 +384,9 @@ const bridge = {
   },
   pickFolder: (current) => ipcRenderer.invoke("desktop:pick-folder", current),
   exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
-  /** ipcRenderer wraps a main-process throw in "Error invoking remote method"; the bubble shows the text verbatim. */
-  saveFile: (filePath) =>
-    ipcRenderer.invoke("desktop:save-file", filePath).catch((error) => {
-      const message = String(error?.message ?? error);
-      throw new Error(message.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, ""));
-    }),
+  saveFile: (filePath) => invokeWithPlainError("desktop:save-file", filePath),
   revealInFolder: (filePath) => ipcRenderer.invoke("desktop:reveal-file", filePath),
+  openHtmlInBrowser: (source, name) => invokeWithPlainError("desktop:open-html", source, name),
   // This app's own logs folder (server.log, desktop-crashes.log, updater.log); the page names no path.
   openLogsFolder: () => ipcRenderer.invoke("desktop:open-logs"),
   openAtLogin: {

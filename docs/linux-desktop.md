@@ -21,7 +21,7 @@ of Linux desktop on your own server instead of this machine, see [byo-vps.md](by
 The local preview does **not** give the bot control of this computer by itself. On Xorg, local control requires both
 the global **Enable local control** choice and assigning a bot to **This computer**; every action still enters the
 approval flow. On Wayland, local control is disabled and legacy opt-ins are cleared automatically. Automatic Wayland
-helper installation, Linux dictation, and ARM64 remain unavailable and fail closed; follow their
+helper installation, native on-device dictation, and ARM64 remain unavailable and fail closed; follow their
 progress in [issue #29](https://github.com/milind-soni/OpenMausBot/issues/29) and the safety hold in
 [issue #345](https://github.com/milind-soni/OpenMausBot/issues/345). Bundled
 CUA supply-chain work is tracked in [issue #113](https://github.com/milind-soni/OpenMausBot/issues/113). Xorg is tracked in

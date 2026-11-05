@@ -140,7 +140,7 @@
   "server.mcp.signIn.card": "{label} के MCP सर्वर में साइन इन करना ज़रूरी है। साइन इन करने के लिए यह बातचीत OpenMausBot में खोलें।",
   "server.mcp.signIn.description": "{bot} ने {label} का MCP सर्वर ({host}) जोड़ा। साइन इन करें ताकि {bot} इसका इस्तेमाल कर सके।",
   "server.mcp.signIn.onYourMac": "{label} में साइन इन करने के लिए यह चैट अपने Mac पर खोलें।",
-  "server.mcp.signIn.inSettings": "यह साइन इन सेटिंग्स → MCP सर्वर में पूरा करें।",
+  "server.mcp.signIn.inSettings": "यह साइन इन Apps → MCP सर्वर में पूरा करें।",
   "server.mcp.signIn.onlyPerson": "इसमें सिर्फ़ {name} साइन इन कर सकते हैं।",
   "server.mcp.signIn.onlyOwner": "इसमें सिर्फ़ वही व्यक्ति साइन इन कर सकता है जिसकी यह चैट है।",
   "server.mcp.signIn.adminOnly": "{label} में सिर्फ़ इस इंस्टॉलेशन का एडमिन साइन इन कर सकता है।",

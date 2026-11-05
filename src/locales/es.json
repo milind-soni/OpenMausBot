@@ -186,7 +186,7 @@
   "server.mcp.signIn.card": "El servidor MCP de {label} necesita que inicies sesión. Abre esta conversación en OpenMausBot para iniciar sesión.",
   "server.mcp.signIn.description": "{bot} añadió el servidor MCP de {label} ({host}). Inicia sesión para que {bot} pueda usarlo.",
   "server.mcp.signIn.onYourMac": "Abre este chat en tu Mac para iniciar sesión en {label}.",
-  "server.mcp.signIn.inSettings": "Termina este inicio de sesión en Ajustes → Servidores MCP.",
+  "server.mcp.signIn.inSettings": "Termina este inicio de sesión en Apps → Servidores MCP.",
   "server.mcp.signIn.onlyPerson": "Solo {name} puede iniciar sesión aquí.",
   "server.mcp.signIn.onlyOwner": "Solo la persona a la que pertenece este chat puede iniciar sesión aquí.",
   "server.mcp.signIn.adminOnly": "Solo un administrador de esta instalación puede iniciar sesión en {label}.",
