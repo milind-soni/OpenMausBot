@@ -100,6 +100,8 @@ A 403 on a routine is final, never retried: it covers a run of another bot, a ru
 
 **Sealing a key** (iOS 17+, the pairing QR's `secretPublicKey`): HPKE base mode, DHKEM(P-256, HKDF-SHA256), HKDF-SHA256, AES-256-GCM, info `"OpenMausBot phone credential v1"`, plaintext the key (1–4096 bytes UTF-8), AAD the UTF-8 of these five lines joined by `\n`: `openmausbot-phone-move-key-v1`, `keyId`, `deviceId`, `target`, `requestKey`. `requestKey` is a fresh `^[\w-]{1,128}$` id per key; resending the same envelope is safe. `target` is a desktop credential id: `anthropicApiKey`, `openaiApiKey`, `openrouterApiKey`, `mistralApiKey`, `cerebrasApiKey`, `groqApiKey`, `greenferenceApiKey`, `metaApiKey`, `deepseekApiKey`, `xaiApiKey`, `ttsKey` (ElevenLabs), and the other `CREDENTIAL_TARGETS` except `onePasswordToken`. A key with no target (a Gemini chat key) does not move: the sheet says to add it on the computer.
 
+After a resend of a key the phone itself saved, `{ v: 1, saved: false, kept: true }` means success: the first send saved it.
+
 **Call order:** ask → poll until `granted` → `GET /api/bots?messages=0` → per bot, MausBot first: create, avatar, PATCH, bot kind (rename on `mainBot: false`), skills → per bot: chats in pages, verify, attachments → routine kinds → memory → files → ticked keys → `PATCH /api/routines/:id { enabled: true }` → `arrived` → `DELETE /api/companion/move` → switch to the computer.
 
 ---
