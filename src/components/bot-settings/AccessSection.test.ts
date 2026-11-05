@@ -2,7 +2,8 @@ import { Children, createElement, isValidElement, type ReactElement, type ReactN
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { StoreProvider, type Bot, type ConfigStatus } from "@/state/store";
+import { api, StoreProvider, type Bot, type ConfigStatus } from "@/state/store";
+import { BotEditorContext } from "./BotEditorContext";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
 
 const fixture = vi.hoisted(() => ({
@@ -28,7 +29,7 @@ vi.mock("@/lib/mcp-servers", async (importOriginal) => ({
 
 // DesktopCapabilities reads window.ogb at module scope, and this suite runs in the node environment.
 vi.mock("../DesktopCapabilities", () => ({
-  useDesktopCapabilities: () => ({ capabilities: { host: { homeDir: undefined } } }),
+  useDesktopCapabilities: () => ({ capabilities: { host: { homeDir: undefined }, localComputer: { available: false, reasonCode: "unsupported" } } }),
 }));
 
 const { AccessSection } = await import("./AccessSection");
@@ -206,6 +207,27 @@ describe("AccessSection Works on", () => {
       [{ type: "toggleSettings", open: false }],
       [{ type: "toggleComputer", open: true }],
     ]);
+  });
+
+  it("offers the place itself in a bot not made yet, which has no Screen panel to open", () => {
+    const derived = makeDerived();
+    const draft = (bot: Bot) => {
+      let tree!: ReturnType<typeof AccessSection>;
+      function Capture() { tree = AccessSection({ bot, derived }); return tree; }
+      const editor = createElement(BotEditorContext.Provider, { value: { request: api, draft: true } }, createElement(Capture));
+      return { html: renderToStaticMarkup(createElement(StoreProvider, null, editor)), tree };
+    };
+    const { html } = draft(makeBot({ name: "" }));
+    expect(html).not.toContain("Open the Screen panel");
+    expect(html).not.toContain("Auto cloud preference");
+    expect(html).toContain("Works on");
+    expect(html).toContain("Cloud desktop");
+    expect(html).toMatch(/aria-pressed="true"[^>]*>.*?Auto/);
+
+    fixture.config = { box: { configured: true } } as Partial<ConfigStatus>;
+    const chosen = draft(makeBot({ computer: "cloud" }));
+    expect(chosen.html).toMatch(/aria-pressed="true"[^>]*>.*?Cloud desktop/);
+    expect(chosen.html).toContain("Cloud backend");
   });
 
   it("hides the Boat or VPS choice on My Cloud, whose cloud computers are the plan's", () => {
