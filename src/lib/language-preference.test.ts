@@ -7,6 +7,8 @@ const hook = vi.hoisted(() => ({
 }));
 
 vi.mock("react", () => ({
+  useState: (initial: unknown) => [initial, () => {}],
+  useEffect: (effect: () => void) => { effect(); },
   useSyncExternalStore: (
     subscribe: (listener: () => void) => () => void,
     snapshot: () => string | null,
@@ -138,6 +140,7 @@ function desktopApp(saved: string | null = null) {
           return true;
         }),
         onChange: (next: (language: string) => void) => { listener = next; return () => { listener = undefined; }; },
+        shown: vi.fn(),
       };
     },
   };
@@ -196,6 +199,17 @@ describe("app language in the desktop app", () => {
     expect(page.preference.effectiveLanguage(page.preference.languageChoice(), "fr")).toBe("fr");
     expect(page.preference.effectiveLanguage(page.preference.languageChoice(), undefined)).toBe("");
     expect(page.bridge.set).not.toHaveBeenCalled();
+  });
+
+  it("tells the app the language the window shows, so its menus read in that one too, never the rail's or a stale one", async () => {
+    const page = await openPage(desktopApp());
+    page.preference.usePageLanguage("", false);
+    page.preference.usePageLanguage(page.preference.effectiveLanguage(page.preference.languageChoice(), "pt-br"), true);
+    await vi.waitFor(() => expect(page.bridge.shown).toHaveBeenCalledOnce());
+    expect(page.bridge.shown).toHaveBeenCalledWith("pt-br");
+    page.preference.usePageLanguage("xx-unknown", true);
+    await vi.waitFor(() => expect(page.bridge.shown).toHaveBeenLastCalledWith("en"));
+    expect(page.bridge.set, "showing a language is not a pick").not.toHaveBeenCalled();
   });
 
   it("carries a pick saved in a page's own storage into the app once", async () => {
