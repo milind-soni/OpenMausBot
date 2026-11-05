@@ -1692,12 +1692,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const threadId = action.threadId ?? bot?.threadId;
       if (!bot || threadId !== bot.threadId) return animated;
       if (bot.messages.some((message) => message.sendId === action.sendId)) return animated;
-      const message = optimisticUserMessage(
-        action.text,
-        action.sendId,
-        action.replyToId,
-        bot.activeLeafId,
-      );
+      const message = optimisticUserMessage(action.text, action.sendId, action.replyToId, bot.activeLeafId);
       message.optimisticThreadOrderAt = bot.tasks?.find((task) => task.threadId === threadId)?.lastThreadOrderAt;
       return bumpThreadUpdatedAt(updateBot(animated, bot.id, (current) => ({
         ...current,
