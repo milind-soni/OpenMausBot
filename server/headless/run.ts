@@ -1,8 +1,9 @@
 // Exit codes: 0 done, 1 failed or stopped, 3 needs you, 4 timed out, 130 Ctrl-C (the work keeps running).
 import { messageFileTargets } from "../message-file.ts";
-import { EXIT, flag, HeadlessError, oneOf, parseCount, usageError } from "./args.ts";
+import { EXIT, flag, HeadlessError, oneOf, parseCount } from "./args.ts";
 import { readJob, type HeadlessClient } from "./client.ts";
-import { newSendId, readMessage, resolveTarget, waitPolicy, type Target, type VerbContext, type VerbOutcome } from "./context.ts";
+import { conversationFor, conversationTitle, newSendId, readMessage, resolveTarget, waitPolicy, type Target, type VerbContext,
+  type VerbOutcome } from "./context.ts";
 import { exportFolder, exportJob } from "./export.ts";
 import { oneLine } from "./output.ts";
 
@@ -172,17 +173,7 @@ export async function runVerb(ctx: VerbContext): Promise<VerbOutcome> {
   const task = flag(ctx.flags, "task")?.trim() || (flag(ctx.flags, "thread") ? undefined : "new");
   const target = await resolveTarget({ ...ctx, flags: { ...ctx.flags, task: undefined } }, named ? undefined : first);
   const client = await ctx.client();
-  let threadId: string;
-  if (target.taskId) threadId = target.taskId;
-  else if (task === "new") {
-    const title = (flag(ctx.flags, "title") ?? text.split("\n")[0]!).trim().slice(0, 80) || "Headless run";
-    threadId = (await client.tool("create_task", { target_type: target.type, target_id: target.id, title })).task.taskId;
-  } else if (task === "current") {
-    const fleet = await client.json<Rec>("/api/bots?messages=0");
-    const owner = (target.type === "bot" ? fleet.bots : fleet.groups)?.find((record: Rec) => record.id === target.id);
-    if (!owner) throw usageError(`no ${target.type === "bot" ? "bot" : "room"} with id ${target.id}`);
-    threadId = owner.threadId;
-  } else threadId = task!;
+  const threadId = target.taskId ?? await conversationFor(client, target, task!, conversationTitle(ctx, text));
   const since = Number((await readJob(client, threadId)).now);
   const sendId = flag(ctx.flags, "send-id") ?? newSendId();
   const tool = target.type === "bot" ? "send_bot_message" : "send_channel_message";

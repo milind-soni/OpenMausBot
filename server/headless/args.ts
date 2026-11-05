@@ -59,8 +59,8 @@ const VERBS: Record<string, { options: ParseArgsOptionsConfig; positionals: numb
   channels: { options: {}, positionals: 0 },
   models: { options: {}, positionals: 0 },
   messages: { options: { ...TARGET, limit: { type: "string" } }, positionals: 1 },
-  send: { options: { ...TARGET, ...TEXT, "send-id": { type: "string" }, "dry-run": { type: "boolean" } }, positionals: 2 },
-  "send-channel": { options: { ...TARGET, ...TEXT, "send-id": { type: "string" }, "dry-run": { type: "boolean" } }, positionals: 2 },
+  send: { options: { ...TARGET, ...TEXT, title: { type: "string" }, "send-id": { type: "string" }, "dry-run": { type: "boolean" } }, positionals: 2 },
+  "send-channel": { options: { ...TARGET, ...TEXT, title: { type: "string" }, "send-id": { type: "string" }, "dry-run": { type: "boolean" } }, positionals: 2 },
   run: {
     options: { ...TARGET, ...TEXT, ...WAITING, title: { type: "string" }, wait: { type: "string" }, export: { type: "string" }, force: { type: "boolean" },
       "send-id": { type: "string" } },
