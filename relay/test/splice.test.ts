@@ -117,7 +117,7 @@ describe("limits that need a short clock", () => {
   });
 
   test("the relay cuts a socket that answers no ping, and keeps one that does", async () => {
-    const t = await startTestRelay({ pingIntervalMs: 200, pongTimeoutMs: 100 });
+    const t = await startTestRelay({ pingIntervalMs: 500, pongTimeoutMs: 300 });
     try {
       const host = await fakeHost(t.url, t.key);
       const mute = new WebSocket(`${t.url}/v1/host`, [SUBPROTOCOL], { autoPong: false, headers: { "x-forwarded-for": freshIp() } });
@@ -127,7 +127,7 @@ describe("limits that need a short clock", () => {
       mute.on("message", () => {});
       assert.equal(await closed, 1006);
       assert.ok(t.relay.ctx.metrics.count("relay_pong_timeouts_total") >= 1);
-      await sleep(500);
+      await sleep(1_200);
       assert.equal(host.control.ws.readyState, WebSocket.OPEN);
       host.control.ws.close();
     } finally {

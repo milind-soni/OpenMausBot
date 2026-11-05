@@ -148,6 +148,10 @@ async function runWorker(input: WorkerInput): Promise<WorkerReport> {
   const perTick = (input.bytesPerSecondEachWay * tickMs) / 1000 / Math.max(1, sessions.length);
   const owed = sessions.map(() => Math.random() * input.size);
   const stopAt = performance.now() + input.seconds * 1000;
+  const progress = setInterval(() => {
+    const open = sessions.filter(({ phone, data }) => phone.readyState === WebSocket.OPEN && data.readyState === WebSocket.OPEN).length;
+    process.stderr.write(`worker ${input.index}: sent ${(report.sent / 1e6).toFixed(1)} MB, received ${(report.received / 1e6).toFixed(1)} MB, ${open}/${sessions.length} sessions open\n`);
+  }, 5_000);
   await new Promise<void>((resolve) => {
     const timer = setInterval(() => {
       if (performance.now() >= stopAt) {
@@ -171,6 +175,7 @@ async function runWorker(input: WorkerInput): Promise<WorkerReport> {
       });
     }, tickMs);
   });
+  clearInterval(progress);
   await new Promise((resolve) => setTimeout(resolve, 1_000));
   return report;
 }
