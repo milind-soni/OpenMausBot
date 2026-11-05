@@ -15,7 +15,7 @@ differences with OpenCode 2.x.
 | Fireworks AI | Yes | Yes | Custom endpoint, or Claude Code's own settings | Not yet |
 | DeepSeek | Yes | Yes | Custom endpoint, or Claude Code's own settings | Not yet |
 | Cline | Yes | Yes | No | No |
-| Your own OpenAI-compatible address | Yes, in OpenCode's config file | Yes | No | Not yet |
+| Your own OpenAI-compatible address | Yes, in OpenCode's config file | Yes | No | Direct API endpoint, if it supports Responses |
 | Your own Anthropic-compatible address | Not tested | No | Custom endpoint, or Claude Code's own settings | No |
 
 "Chat engine" is OpenMausBot's built-in engine for OpenAI-compatible services.
@@ -197,7 +197,53 @@ DeepSeek, and your Claude bots follow it:
 
 ### Codex
 
-Not yet. Codex bots use your ChatGPT sign-in, or your organisation's models.
+Codex bots can use a direct API key with the native Codex agent, in addition
+to ChatGPT sign-in and your organisation's models.
+
+1. Open **Settings → Engines** and expand the Codex/ChatGPT card.
+2. Under **Codex direct API**, choose **Add endpoint**.
+3. Select **OpenAI** for the official API, or **Custom gateway (CLIProxyAPI or compatible)**.
+4. Enter the API key and model ID. For a custom gateway, also enter its name
+   and base URL, such as `https://gateway.example.com/v1`.
+5. Save, then select the new engine and model for a bot.
+
+API usage is billed by the selected provider. Saving an endpoint does not
+start OAuth or replace an existing account. Each endpoint keeps its own
+Codex home and key in OpenMausBot's data directory. The key is saved in the
+protected `config.json`, never returned in the engine list or passed in
+command arguments. Changing the base URL requires entering the key again.
+Remove an endpoint after moving any bots and the default model off it.
+
+A Codex gateway must implement **streaming Responses** (`POST /v1/responses`)
+and tool calls. A Chat Completions-only gateway cannot run the native Codex
+agent; use the chat engine for that protocol. Codex direct endpoints use
+HTTP streaming and load their MCP tools up front. Enter the exact model ID
+served by the gateway; this setup does not discover models automatically.
+
+For Claude Code, use **Add endpoint** in the Claude card and select
+**Anthropic** or **Custom gateway**. The official preset uses an API key
+without OAuth. Custom Claude gateways must implement streaming Anthropic
+Messages (`POST /v1/messages`) and tool use. Enter the API root without
+`/v1/messages`, such as `https://gateway.example.com`.
+
+#### CLIProxyAPI in Docker or on a NAS
+
+Configure CLIProxyAPI separately, then select **Custom gateway** in the
+appropriate agent's endpoint form. Use its Responses base URL for Codex
+(typically ending in `/v1`), or its Anthropic API root for Claude. Use a model
+alias supported by that gateway and protocol. No proxy is installed or
+started by OpenMausBot.
+
+The URL must be reachable **from the OpenMausBot server or container**. A
+Tailscale hostname that resolves on your desktop may not resolve in Docker.
+Check the container's DNS and network route if a connection fails. Codex
+endpoints require HTTPS, with HTTP allowed only on localhost. For a LAN-only
+HTTP proxy, expose HTTPS or use a secure tunnel whose local listener is
+reachable by the OpenMausBot server. Do not disable certificate validation.
+
+Automated verification uses disposable servers and synthetic agents. Real
+CLIProxyAPI versions, accounts and model compatibility still need testing
+before relying on this draft integration.
 
 ## Ollama's context window
 

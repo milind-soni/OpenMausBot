@@ -93,7 +93,7 @@ function endpointEnvironment(url: string, secret: string, fields: EndpointFields
   if (!address) throw Object.assign(new Error("Enter an http(s) base URL."), { status: 400 });
   const environment: Record<string, string> = {
     ANTHROPIC_BASE_URL: address,
-    ANTHROPIC_AUTH_TOKEN: secret,
+    ...(address === "https://api.anthropic.com" ? {} : { ANTHROPIC_AUTH_TOKEN: secret }),
     // Claude Code's own auth probe and a turn both need a key they recognize; the endpoint's token is that key.
     ANTHROPIC_API_KEY: secret,
     ANTHROPIC_MODEL: (fields.model ?? "").trim(),

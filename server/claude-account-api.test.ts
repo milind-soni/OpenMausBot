@@ -96,6 +96,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       "broken-account": {
         driver: "claudeAgent", displayName: "Repairable shadow", config: { cli, configDir: "relative/saved-directory" },
       },
+      codex: { driver: "codex", config: { cli: join(SERVER_DIR, "testing", "fake-codex-app-server.ts") } },
       claude: {
         driver: "claudeAgent", displayName: "Default fixture", config: { cli },
         environment: { ANTHROPIC_AUTH_TOKEN: "fixture-base-secret", BASE_ONLY_SENTINEL: "base-only" },
@@ -138,6 +139,32 @@ afterAll(async () => {
 });
 
 describe("Claude account HTTP API", () => {
+  it("creates, edits and removes an isolated Codex API endpoint without OAuth or key disclosure", async () => {
+    const fields = { displayName: "CLIProxyAPI", baseUrl: "https://gateway.example/v1", token: "codex-api-fixture-secret", model: "gateway-model" };
+    const created = await api("POST", "/api/instances/codex-endpoint", fields);
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const id = created.body.instanceId;
+    const instance = created.body.instances.find((row: any) => row.instanceId === id);
+    expect(instance.codexEndpoint).toEqual({ baseUrl: fields.baseUrl, models: ["gateway-model"], tokenSaved: true });
+    expect(instance.authentication).toBeUndefined();
+    expect(JSON.stringify(created.body)).not.toContain(fields.token);
+    expect(saved().instances[id].environment.CODEX_HOME).toContain(id);
+    expect(saved().instances[id].environment.OPENMAUSBOT_CODEX_API_KEY).toBe(fields.token);
+    expect((await api("POST", `/api/instances/${id}/auth/start`)).status).not.toBe(200);
+    expect((await api("PATCH", `/api/instances/${id}/codex-endpoint`, { baseUrl: "https://other.example/v1" })).status).toBe(400);
+    expect((await api("PATCH", `/api/instances/${id}/codex-endpoint`, { model: "another-model" })).status).toBe(200);
+    expect(saved().instances[id].config.endpoint.models).toEqual(["another-model"]);
+    const bot = await addBotOn(id, "another-model");
+    expect((await api("DELETE", `/api/instances/${id}`)).status).toBe(409);
+    expect((await api("PATCH", `/api/bots/${bot.id}/model`, { instanceId: "claude", model: MODEL })).status).toBe(200);
+    expect((await api("DELETE", `/api/instances/${id}`)).status).toBe(200);
+    expect(saved().instances[id]).toBeUndefined();
+    for (const baseUrl of ["http://gateway.example/v1", "https://user:secret@gateway.example/v1", "invalid"]) {
+      expect((await api("POST", "/api/instances/codex-endpoint", { ...fields, baseUrl })).status).toBe(400);
+    }
+    expect((await api("POST", "/api/instances/codex-endpoint", fields, { authorization: `Bearer ${clientToken}` })).status).toBe(403);
+  });
+
   it("creates beside an invalid saved directory and repairs that unused shadow without accepting invalid replacements", async () => {
     const initial = (await api("GET", "/api/instances")).body.instances.find((row: any) => row.instanceId === "broken-account");
     expect(initial.snapshot.state).toBe("unavailable");

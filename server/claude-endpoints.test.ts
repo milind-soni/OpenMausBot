@@ -28,6 +28,12 @@ const cfg = () => ({
 }) as never;
 
 describe("custom Claude endpoint", () => {
+  it("uses the official Anthropic API key header without a bearer token", () => {
+    const { instanceId, instances } = newClaudeEndpoint(cfg(), { ...BASE, baseUrl: "https://api.anthropic.com", model: "claude-sonnet-5" });
+    expect(instances[instanceId].environment?.ANTHROPIC_API_KEY).toBe(BASE.token);
+    expect(instances[instanceId].environment?.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+  });
+
   it("creates its own instance with the endpoint's routing, its own directory and no parent credentials", () => {
     const source = cfg();
     const { instanceId, instances } = newClaudeEndpoint(source, { ...BASE, opusModel: "deepseek-reasoner", sonnetModel: "" });

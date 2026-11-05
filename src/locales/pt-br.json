@@ -9598,5 +9598,11 @@
   "connectedWorkspaces.switchError": "Não foi possível trocar de ambiente. Tente novamente.",
   "connectedWorkspaces.forgetName": "Esquecer {name}",
   "connectedWorkspaces.forgetError": "Não foi possível esquecer o ambiente. Tente novamente.",
-  "connectedWorkspaces.createError": "Não foi possível criar o ambiente. Confira a pasta de dados e tente novamente."
+  "connectedWorkspaces.createError": "Não foi possível criar o ambiente. Confira a pasta de dados e tente novamente.",
+  "agentEndpoints.provider": "Provedor de API",
+  "agentEndpoints.custom": "Gateway personalizado (CLIProxyAPI ou compatível)",
+  "agentEndpoints.responses": "Usa uma chave de API sem OAuth. O gateway deve oferecer suporte à API Responses (/v1/responses) com streaming e chamadas de ferramentas. Apenas Chat Completions não é suficiente. Use HTTPS ou um túnel seguro para localhost.",
+  "agentEndpoints.messages": "Usa uma chave de API sem OAuth. O gateway deve oferecer suporte à API Messages da Anthropic (/v1/messages) com streaming e chamadas de ferramentas. HTTP envia sua chave sem criptografia; prefira HTTPS ou um túnel seguro.",
+  "agentEndpoints.codexTitle": "API direta do Codex",
+  "agentEndpoints.codexHint": "Conecte a OpenAI ou um gateway compatível com Responses, como o CLIProxyAPI. Cada conexão executa o agente nativo do Codex com chave de API, modelo e configuração próprios. O provedor selecionado cobra pelo uso da API."
 }

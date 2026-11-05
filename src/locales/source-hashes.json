@@ -32127,7 +32127,13 @@
       "connectedWorkspaces.switchError": "6cb4eabbc4ec7e5c8f9ee96723d3770e3a7a19b779fd42b6fcf1c69a641db9f1",
       "connectedWorkspaces.forgetName": "aa553b0835130001c7cafd2f2785cc46b858e78284db11b1a780e7d8580cfef4",
       "connectedWorkspaces.forgetError": "6426192c4c32258117650b57029d6bb95102ab0eede1967d962a750817df5f85",
-      "connectedWorkspaces.createError": "d6393fe1d84bccf5308d15cec7b87cba70c84c7cc098403c58067ad540709763"
+      "connectedWorkspaces.createError": "d6393fe1d84bccf5308d15cec7b87cba70c84c7cc098403c58067ad540709763",
+      "agentEndpoints.provider": "aa64ce92ba3c1829645f44cbd5c90b1e054be1bea38764a5f0136d0505ea9d1e",
+      "agentEndpoints.custom": "e21d16c7bb00612fd88cce0900479f6d7d2a2bc059011b3cd029f0ea3d0ebcfb",
+      "agentEndpoints.responses": "a5b94e2daf77c066a9e04639acfc6e5469ff099f8740454b8e6aee015518ec3e",
+      "agentEndpoints.messages": "87c79df077f74c8cd652e38b38c31813de114c7a653af469098847ff0b83c784",
+      "agentEndpoints.codexTitle": "f538b4b1573cac1d66f8f11e7e528fbc71f20c2732df67ba81be89588522fb51",
+      "agentEndpoints.codexHint": "a49a1a9dfb3e2842187b1eae35d451c3a19d5ee1a569eb23931751d71ffafa73"
     },
     "zh": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",

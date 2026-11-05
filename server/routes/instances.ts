@@ -1,3 +1,4 @@
+import { codexEndpointSchema, codexEndpointUpdateSchema, newCodexEndpoint, updateCodexEndpoint, withCodexEndpointInfo, isCodexEndpoint } from "../codex-endpoints.ts";
 import { userError, userErrorFields } from "../user-errors.ts";
 import { randomUUID } from "node:crypto";
 import { providerIconError } from "../../shared/provider-icon.ts";
@@ -62,7 +63,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
     botForThread, activeGroupTurnForBot,
   } = deps;
   const describeInstances = async () => hostedModels ? deps.describeInstances()
-    : withEndpointUrls(withClaudeEndpointInfo(await deps.describeInstances(), cfg.instances ?? {}), cfg.instances ?? {});
+    : withEndpointUrls(withCodexEndpointInfo(withClaudeEndpointInfo(await deps.describeInstances(), cfg.instances ?? {}), cfg.instances ?? {}), cfg.instances ?? {});
   /** Bots, their backups and threads, the new-bot default, or a turn running on it: a provider in use can't go away. */
   const providerInUse = (instanceId: string): boolean => cfg.defaultModelSelection?.instanceId === instanceId || store.bots.some((bot) =>
     bot.modelSelection.instanceId === instanceId || bot.fallback?.some(candidate => candidate.instanceId === instanceId) || store.tasks(bot.id).some((task) => task.modelSelection?.instanceId === instanceId)) ||
@@ -170,16 +171,17 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       } finally { providerConfigBusy.set(false); }
     }
 
-    if (method === "POST" && path === "/api/instances/claude-endpoint") {
+    if (method === "POST" && (path === "/api/instances/claude-endpoint" || path === "/api/instances/codex-endpoint")) {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
-      const parsed = claudeEndpointSchema.safeParse(await readBody(req, 16384));
-      if (!parsed.success) return json(res, 400, { error: "Enter a name, an http(s) base URL, a token and the model the endpoint serves." });
+      const codex = path.endsWith("/codex-endpoint");
+      const parsed = (codex ? codexEndpointSchema : claudeEndpointSchema).safeParse(await readBody(req, 16384));
+      if (!parsed.success) return json(res, 400, { error: codex ? parsed.error.issues[0]?.message ?? "Check the endpoint settings." : "Enter a name, an http(s) base URL, a token and the model the endpoint serves." });
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
       providerConfigBusy.set(true);
       try {
-        const { instanceId, instances } = newClaudeEndpoint(cfg, parsed.data);
+        const { instanceId, instances } = (codex ? newCodexEndpoint : newClaudeEndpoint)(cfg, parsed.data);
         await persistProviderInstance(instanceId, instances);
         return json(res, 201, { instanceId, instances: await describeInstances() });
       } catch (error) {
@@ -188,13 +190,14 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       } finally { providerConfigBusy.set(false); }
     }
 
-    const endpointPatch = /^\/api\/instances\/([\w.-]+)\/claude-endpoint$/.exec(path);
+    const endpointPatch = /^\/api\/instances\/([\w.-]+)\/(claude|codex)-endpoint$/.exec(path);
     if (method === "PATCH" && endpointPatch) {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
       const instanceId = endpointPatch[1];
-      const parsed = claudeEndpointUpdateSchema.safeParse(await readBody(req, 16384));
+      const codex = endpointPatch[2] === "codex";
+      const parsed = (codex ? codexEndpointUpdateSchema : claudeEndpointUpdateSchema).safeParse(await readBody(req, 16384));
       if (!parsed.success) return json(res, 400, { error: "Check the address, token and model ids." });
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
       if (busyProviderSelections().some((selection) => selection.instanceId === instanceId)) {
@@ -203,7 +206,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       providerConfigBusy.set(true);
       providerInstancesChanging.add(instanceId);
       try {
-        const { instances } = updateClaudeEndpoint(cfg, instanceId, parsed.data);
+        const { instances } = (codex ? updateCodexEndpoint : updateClaudeEndpoint)(cfg, instanceId, parsed.data);
         await persistProviderInstance(instanceId, instances);
         return json(res, 200, { instances: await describeInstances() });
       } catch (error) {
@@ -434,8 +437,8 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       if (!Object.hasOwn(instances, instanceId)) return json(res, 404, { error: "unknown instance" });
       const addedChatgpt = instances[instanceId].driver === "codex" && instanceId.startsWith("chatgpt-");
       const addedAntigravity = instances[instanceId].driver === "antigravityAgent" && instanceId.startsWith("antigravity-");
-      if (!addedChatgpt && !addedAntigravity && !isAddedEndpoint(instanceId, instances[instanceId]) && (instances[instanceId].driver !== "claudeAgent" || instanceId === "claude")) {
-        return json(res, 400, { error: "Only added Claude, ChatGPT, and Antigravity accounts and OpenAI-compatible endpoints can be removed here." });
+      if (!addedChatgpt && !addedAntigravity && !isCodexEndpoint(instances[instanceId]) && !isAddedEndpoint(instanceId, instances[instanceId]) && (instances[instanceId].driver !== "claudeAgent" || instanceId === "claude")) {
+        return json(res, 400, { error: "Only added accounts and custom endpoints can be removed here." });
       }
       if (providerInUse(instanceId)) {
         return json(res, 409, { error: "Choose another account for the bots and default model using this account before removing it." });
