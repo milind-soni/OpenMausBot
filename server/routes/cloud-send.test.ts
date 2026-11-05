@@ -1,4 +1,9 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+
+import { movedFrom } from "../cloud-send-arrived.ts";
 import { createCloudSendRoutes } from "./cloud-send.ts";
 
 const handler = (messages: Array<{ role: string; text?: string }>, hasMore = false) => createCloudSendRoutes({
@@ -74,5 +79,21 @@ describe("what a move asks of a server", () => {
     expect(JSON.stringify(answered.body)).not.toContain(PASSWORD);
     const other = await ask(withLogins(true), "/api/cloud-send/verify-secrets", "POST", { nonce: "m".repeat(43) });
     expect(other.body.secrets["login:example.test|alice"]).not.toBe(answered.body.secrets["login:example.test|alice"]);
+  });
+});
+
+describe("a phone's move at the arrived route", () => {
+  it("is told apart from a computer's: its arrival is kept as the phone's", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-cs-phone-"));
+    try {
+      const route = createCloudSendRoutes({ appVersion: "0.1.120", bots: () => [], messagesTail: () => ({ messages: [], hasMore: false }), skills: () => [],
+        logins: { changes: () => [], get: () => null, onePasswordConnectedAt: () => null, onePasswordGrants: () => ({}), onePasswordToken: () => null },
+        config: () => ({}), ownHome: () => true, phoneMove: () => true,
+        move: { dataDir, store: { bots: [], bot: () => undefined, appendMessage() {} } as never, routines: () => null, calls: () => null, webhooks: () => null, appEvents: () => null,
+          claudeCodeSkills: () => [], instanceExists: () => true, owner: () => ({ person: "", name: "Omkar" }), teamMemory: { list: () => [], adopt: () => 0 } as never, aboutMe: () => "", saveAboutMe() {} } });
+      await route({ path: "/api/cloud-send/arrived", method: "POST", url: new URL("http://127.0.0.1/api/cloud-send/arrived"), req: {} as never, res: { setHeader() {} }, auth: {} as never,
+        json: () => {}, readBody: async () => ({ v: 1, computer: "Omkar's iPhone", webhooks: [] }) } as never);
+      expect(movedFrom(dataDir)).toMatchObject({ computer: "Omkar's iPhone", phone: true });
+    } finally { rmSync(dataDir, { recursive: true, force: true }); }
   });
 });

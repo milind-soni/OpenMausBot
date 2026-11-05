@@ -107,7 +107,9 @@ export function createPhoneMoveIn(deps: PhoneMoveInDeps) {
       const done = (Array.isArray(body.bots) ? body.bots : []).filter((id): id is string => typeof id === "string" && opened.has(id));
       for (const id of done) opened.delete(id);
       if (done.length) save();
-      return body;
+      // A phone brings no webhooks, and no line a phone words is posted into a computer bot's chat.
+      const { place: _place, ...rest } = body;
+      return { ...rest, webhooks: [] };
     },
   };
 

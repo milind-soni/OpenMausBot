@@ -385,6 +385,7 @@ describe("PATCH /api/bots/:id under a phone's move", () => {
     const ok = await patch(bot.id, { soul: "Plans trips", memoryEnabled: true }, phone);
     expect(ok.status).toBe(200);
     expect(store.bot(bot.id)?.soul).toBe("Plans trips");
+    expect(store.bot(bot.id)?.memoryEnabled).toBe(true);
     const refused = await patch(bot.id, { approvalMode: "full" }, phone);
     expect(refused.status).toBe(403);
     expect(refused.body.error).toBe(`forbidden: a phone's move may bring a bot's profile, look, model, voice and memory settings, not "approvalMode"; set that on the host computer`);

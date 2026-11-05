@@ -122,6 +122,23 @@ describe("a phone's move into this computer", () => {
     expect(setup().brings(phone, SCOUT)).toBe(false);
   });
 
+  it("a phone's arrived announces no webhook and names no place: the computer's bots say nothing, and no told list is kept", async () => {
+    const moveIn = setup();
+    await create(moveIn);
+    const sent = await run(moveIn, phone, "POST", "/api/cloud-send/arrived", { v: 1, computer: "Omkar's iPhone", webhooks: ["wh_known"], place: "evil.example", bots: [SCOUT] });
+    expect(sent.handedOn).toEqual({ v: 1, computer: "Omkar's iPhone", webhooks: [], bots: [SCOUT] });
+    const lines: string[] = [];
+    let answered: unknown;
+    await arrivedRoute({ dataDir: dir, owner: moveIn.owner, phone: (auth: RequestAuth) => moveIn.moving(auth) !== null, lineLanguage: () => "en",
+      store: { bot: () => ({ threadId: "here-thread-01" }), appendMessage: (threadId: string) => { lines.push(threadId); } },
+      webhooks: () => ({ list: () => [{ id: "wh_known", name: "Orders", botId: "here-bot-0001" }] }) } as never,
+    { path: "/api/cloud-send/arrived", method: "POST", req: {} as never, res: {} as never, auth: phone, url: new URL("http://x/"),
+      json: (_res: unknown, _status: number, value: unknown) => { answered = value; }, readBody: async () => sent.handedOn } as never);
+    expect(answered).toEqual({ v: 1, told: 0 });
+    expect(lines).toEqual([]);
+    expect(JSON.parse(readFileSync(join(dir, "moved-from.json"), "utf8")).told).toEqual([]);
+  });
+
   it("a bot's move ends when the phone says it arrived", async () => {
     const moveIn = setup();
     await create(moveIn);
