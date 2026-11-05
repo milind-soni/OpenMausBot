@@ -147,7 +147,12 @@ export function CitationSelectionToolbar({
     viewportRef.current?.addEventListener("pointerup", update);
     viewportRef.current?.addEventListener("keyup", update);
     const focusAction = (event: KeyboardEvent) => {
-      if (!captured || editing) return;
+      if (!captured) return;
+      if (editing) {
+        // Holding the shortcut keeps repeating it after the card opens; keep those repeats from reaching the browser.
+        if (event.repeat && isCitationShortcut(event, isMac)) event.preventDefault();
+        return;
+      }
       if (isCitationShortcut(event, isMac)) {
         if (captured.citation.quote.length > CITATION_MAX_QUOTE_LENGTH) return;
         event.preventDefault();
