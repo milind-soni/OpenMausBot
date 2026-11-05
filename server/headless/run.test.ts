@@ -175,6 +175,27 @@ describe("wait", () => {
     expect(result.stopped.map((node: Rec) => node.botName)).toEqual(["Priya", "Marcus", "Kenji"]);
   });
 
+  it("counts a teammate the conversation's Stop ended with it as stopped, and presses Stop again only where work is left", async () => {
+    const needs = waited("needs-user", "needs-input", job("needs-input", "v1", { needsInput: [{ botName: "Priya", question: "Which tier?" }] }));
+    const before = [
+      { id: "root", botId: "lead", threadId: "t1", status: "waiting" },
+      { id: "a1", botId: "priya", botName: "Priya", threadId: "p1", status: "running" },
+      { id: "a2", botId: "lena", botName: "Lena", threadId: "l1", status: "queued" },
+      { id: "a3", botId: "kenji", botName: "Kenji", threadId: "k1", status: "cancelled" },
+    ];
+    const after = [{ ...before[0], status: "cancelled" }, { ...before[1], status: "cancelled" }, { ...before[2], status: "cancelled" }, before[3],
+      { id: "a4", botId: "marcus", botName: "Marcus", threadId: "m1", status: "running" }];
+    let reads = 0;
+    const stopped = harness([needs], { jobRead: () => job("needs-input", "v1", { nodes: reads++ === 0 ? before : after }) });
+    const { code, result } = await stopped.run(["wait", "--bot", "lead", "--on-input", "stop", "--json"]);
+    expect(code).toBe(3);
+    // Priya was at work and ended with the Stop; Lena never started and Kenji had ended before it.
+    expect(result.stopped.map((node: Rec) => node.botName)).toEqual(["Priya", "Marcus"]);
+    expect(stopped.requests.filter((request) => request.method === "POST")).toEqual([
+      { path: "/api/bots/marcus/interrupt", method: "POST", body: { threadId: "m1" } },
+    ]);
+  });
+
   it("times out (4) and leaves the work running unless --on-timeout stop; --strict fails a run whose teammate failed", async () => {
     const running = waited("timed-out", "timed-out", job("running", "v1"));
     const left = harness([running], { delayMs: 20 });
