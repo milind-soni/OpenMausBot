@@ -85,6 +85,7 @@ test("with nothing picked, main's words follow the language the window shows, no
   assert.equal(text.follow("en"), true, "an English window, say a team's default, on a Portuguese system");
   assert.equal(text.t("native.x"), "en");
   assert.equal(text.follow("en"), false);
+  assert.equal(text.followed(), "en", "what the rail beside the window follows");
   for (const code of ["../en", "xx", null]) {
     text.follow("en");
     assert.equal(text.follow(code), true, String(code));

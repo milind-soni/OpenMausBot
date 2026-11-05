@@ -5,7 +5,7 @@ import { PageBoundary } from "./components/PageBoundary";
 import { bootstrapBrand } from "./lib/brand";
 import { applyFont, readFont } from "./lib/fonts";
 import { settleAdvancedModeDefault } from "./lib/interface-mode";
-import { loadPageLanguage } from "./lib/language-preference";
+import { loadPageLanguage, windowLanguage } from "./lib/language-preference";
 import { applySkinChoice, readSkinChoice } from "./lib/skins";
 import "./styles.css";
 
@@ -16,7 +16,7 @@ if (window.ogb?.rail?.expand) {
   applySkinChoice(readSkinChoice());
   applyFont(readFont());
   document.documentElement.style.background = document.body.style.background = "transparent";
-  void Promise.all([bootstrapBrand(), loadPageLanguage()]).then(() => {
+  void Promise.all([bootstrapBrand(), loadPageLanguage(windowLanguage())]).then(() => {
     createRoot(document.getElementById("root")!).render(<StrictMode><PageBoundary><ChromeRail /></PageBoundary></StrictMode>);
   });
 } else {

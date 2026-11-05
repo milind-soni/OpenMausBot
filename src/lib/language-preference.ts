@@ -109,9 +109,24 @@ export function useLanguageChoice(): string | null {
   return useSyncExternalStore(subscribe, languageChoice, () => null);
 }
 
-/** The person's own language, loaded before a page first draws, so they never see another one first. */
-export function loadPageLanguage(): Promise<string> {
-  return loadLocale(effectiveLanguage(languageChoice(), undefined) || globalThis.navigator?.language);
+/** The person's own language, loaded before a page first draws, so they never see another one first. `fallback`: the
+ * language to show while nothing is picked. */
+export function loadPageLanguage(fallback?: string): Promise<string> {
+  return loadLocale(effectiveLanguage(languageChoice(), fallback) || globalThis.navigator?.language);
+}
+
+/** In the desktop app's rail: the language the window beside it shows, which the rail (like main's menus) follows while
+ * nothing is picked; undefined before the window has said, in an older desktop app, or anywhere else. */
+export function windowLanguage(): string | undefined {
+  return desktop()?.windowShows?.() ?? undefined;
+}
+
+function subscribeWindow(listener: () => void): () => void {
+  return desktop()?.onWindowShows?.(listener) ?? (() => {});
+}
+
+export function useWindowLanguage(): string | undefined {
+  return useSyncExternalStore(subscribeWindow, () => windowLanguage() ?? null, () => null) ?? undefined;
 }
 
 /** Shows `language` (the system's when empty) once its pack has loaded, and draws the caller again then. `windowPage`:
