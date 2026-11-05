@@ -11,6 +11,7 @@ import type { ControlPlaneConfig, EndpointAccount } from "./config";
 import {
   ACTED_ON_ENDPOINT_SQL,
   actedOnAccounts,
+  appVersionAtLeast,
   chooseNewEndpointAccount,
   endpointAccountFor,
   neverReady,
@@ -235,15 +236,27 @@ async function shouldLeave(allocation: Allocation, account: EndpointAccount): Pr
   return rejectionActive(snapshot, now) || scannedFull(account, snapshot, now);
 }
 
-const provisionRequestSchema = z.strictObject({ appVersion: printableVersion.optional() });
+const provisionRequestSchema = z.strictObject({
+  appVersion: printableVersion.optional(),
+  /** Paired phones that can't use the encrypted connection yet; only they still need a tunnel. */
+  legacyDevices: z.number().int().min(0).max(100).optional(),
+});
 
-/** POST may carry `{ "appVersion": "0.1.103" }`, or no body. */
-async function reportedAppVersion(request: Request): Promise<string | null> {
+/** POST may carry `{ "appVersion": "0.1.103", "legacyDevices": 1 }`, or no body. */
+async function provisionRequest(request: Request): Promise<{ appVersion: string | null; legacyDevices: number | null }> {
   const body = await readOptionalBoundedJSON(request);
-  if (body === undefined) return null;
+  if (body === undefined) return { appVersion: null, legacyDevices: null };
   const parsed = provisionRequestSchema.safeParse(body);
   if (!parsed.success) throw new HTTPError(400, "invalid_request");
-  return parsed.data.appVersion ?? null;
+  return { appVersion: parsed.data.appVersion ?? null, legacyDevices: parsed.data.legacyDevices ?? null };
+}
+
+/** A desktop that reaches its phones through the relay gets no new tunnel unless an old phone still needs one.
+ * Off until RELAY_CAPABLE_MIN_VERSION names the first release that can. */
+function relayCapableWithoutLegacy(env: Env, appVersion: string | null, legacyDevices: number | null): boolean {
+  const minimum = (env as unknown as Partial<Record<string, unknown>>).RELAY_CAPABLE_MIN_VERSION;
+  return typeof minimum === "string" && /^[0-9]+\.[0-9]+\.[0-9]+$/.test(minimum)
+    && legacyDevices === 0 && appVersionAtLeast(appVersion, minimum);
 }
 
 async function enforceEndpointRateLimit(
@@ -1159,13 +1172,15 @@ export async function provisionManagedEndpoint(
 ): Promise<Response> {
   const installation = await requireInstallation(request, env);
   await enforceEndpointRateLimit(env, installation.installation_id, "reconcile_endpoint");
-  const reportedVersion = await reportedAppVersion(request);
+  const { appVersion: reportedVersion, legacyDevices } = await provisionRequest(request);
   if (reportedVersion !== null && reportedVersion !== installation.app_version) {
     await recordReportedAppVersion(env, installation.installation_id, reportedVersion);
   }
   const allocation = allocationFor(env, config, reportedVersion ?? installation.app_version);
+  const existing = await endpointRow(env, installation.installation_id);
+  if (!existing && relayCapableWithoutLegacy(env, reportedVersion, legacyDevices)) throw new HTTPError(409, "relay_capable");
   // Only a new row chooses its account; an existing one keeps its own.
-  const row = await endpointRow(env, installation.installation_id)
+  const row = existing
     ?? await ensureEndpointRow(env, installation.installation_id, await newEndpointAccount(config, allocation));
   const account = endpointAccountFor(config, row);
   if (!account) {
