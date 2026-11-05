@@ -157,6 +157,17 @@ export function isSidebarToggle(event: Pick<KeyboardEvent, "key" | "metaKey" | "
   return !event.defaultPrevented && event.key === "\\" && (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey;
 }
 
+/**
+ * The step of ⌘⇧] / ⌘⇧[ (Ctrl+Shift outside macOS) through the bots: 1, -1, or null for any other key. Outside
+ * macOS, Shift turns the key into "}" / "{", so those count too. The physical key (`code`) is not used: on many
+ * layouts BracketRight types another character.
+ */
+export function botCycleStep(event: Pick<KeyboardEvent, "key">): 1 | -1 | null {
+  if (event.key === "]" || event.key === "}") return 1;
+  if (event.key === "[" || event.key === "{") return -1;
+  return null;
+}
+
 export function shouldOpenKeyboardShortcuts(event: KeyboardEvent): boolean {
   if (event.defaultPrevented || event.isComposing || event.altKey) return false;
   const helpKey = event.key === "?" && !event.metaKey && !event.ctrlKey;

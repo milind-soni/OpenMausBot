@@ -174,7 +174,7 @@ describe("ClaudeDriver catalog", () => {
       writeStartupModelCache(instanceId, {
         default: "claude-sonnet-5",
         options: [{ id: "claude-haiku-4-5", label: "Claude Haiku 4.5" }],
-      });
+      }, { build: "an earlier release" });
     }
     const instance = await ClaudeDriver.create({
       instanceId,

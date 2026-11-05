@@ -422,14 +422,14 @@ describe("Store", () => {
     store.setResumeCursor(bot.id, "claude", { sessionId: "s-1" }, bot.threadId);
     store.patchTask(bot.id, bot.threadId, { lastContextModel: "claude-sonnet-5" });
     expect(statSync(file).ino).toBe(saved);
-    expect(events).toEqual([{ type: "bot", botId: bot.id }, { type: "bot", botId: bot.id }]);
+    expect(events).toEqual([{ type: "bot", botId: bot.id }]);
 
     store.setResumeCursor(bot.id, "claude", { sessionId: "s-2" }, bot.threadId);
     expect(statSync(file).ino).not.toBe(saved);
     expect(new Store(selection).taskByThread(bot.id, bot.threadId)?.resumeCursors).toEqual({ claude: { sessionId: "s-2" } });
   });
 
-  it("still overwrites a bots.json changed on disk when the next save differs from it", () => {
+  it("overwrites a bots.json changed on disk with the next change it saves", () => {
     const file = join(DATA_DIR, "bots.json");
     const store = new Store(selection);
     const bot = store.createBot({ name: "Original" }, { seedMessages: false });
@@ -438,7 +438,7 @@ describe("Store", () => {
     edited[0].name = "Edited on disk";
     writeFileSync(file, JSON.stringify(edited, null, 2));
 
-    store.setResumeCursor(bot.id, "claude", { sessionId: "s-1" }, bot.threadId);
+    store.setResumeCursor(bot.id, "claude", { sessionId: "s-2" }, bot.threadId);
     expect(JSON.parse(readFileSync(file, "utf8"))[0].name).toBe("Original");
   });
 

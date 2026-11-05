@@ -27,6 +27,8 @@ it("says in words that a turn nobody stopped was cut off, and retries the room r
       res.end(JSON.stringify({ data: [{ id: "fixture-model" }] }));
       return;
     }
+    // The chat engine asks a local server whether it is Ollama (/api/version); this one is not.
+    if (req.method === "GET") { res.statusCode = 404; res.end(); return; }
     let body = "";
     for await (const chunk of req) body += chunk;
     const request = JSON.parse(body) as ChatRequest;

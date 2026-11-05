@@ -1,5 +1,5 @@
 import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
-import type { ConnectorCardData } from "../../shared/wire";
+import type { ConnectorCardData } from "../../shared/connector-card";
 import type { DefaultBotFields } from "../../shared/default-bot";
 import { hiddenFromSidebar } from "./default-bot";
 
@@ -134,6 +134,16 @@ export function withPrimaryTile<T extends SidebarBot>(parts: ReturnType<typeof p
   if (!primary) return { ...parts, primary };
   const others = (bots: T[]) => bots.filter((bot) => bot.id !== primary.id);
   return { ...parts, primary, unsectionedChief: null, pinnedBots: others(parts.pinnedBots), unsectionedBots: others(parts.unsectionedBots) };
+}
+
+/** Bots that are working or waiting on the person move to the top of their own list (pinned, main, each department),
+ * keeping the person's order among them; the rest follow in that same order. Only how the list is shown changes. */
+export function activeBotsFirst<T>(parts: { pinnedBots: T[]; sectionedBots: T[]; unsectionedBots: T[] }, active: (bot: T) => boolean) {
+  const first = (bots: T[]) => {
+    const flags = bots.map(active);
+    return [...bots.filter((_, index) => flags[index]), ...bots.filter((_, index) => !flags[index])];
+  };
+  return { pinnedBots: first(parts.pinnedBots), sectionedBots: first(parts.sectionedBots), unsectionedBots: first(parts.unsectionedBots) };
 }
 
 export function partitionSidebarGroups<T extends SidebarGroup>(groups: T[]) {

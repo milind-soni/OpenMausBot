@@ -50,7 +50,7 @@ vi.mock("./ActivitySection", () => ({ ActivitySection: marker("activity") }));
 vi.mock("./UsageSection", () => ({ UsageSection: marker("usage") }));
 vi.mock("./ImportSettings", () => ({ ImportSettings: marker("import") }));
 vi.mock("./LoginsSettings", () => ({ LoginsSettings: marker("logins") }));
-vi.mock("./BrowserSettingsRows", () => ({ BuiltInBrowserRow: marker("browser") }));
+vi.mock("./BrowserSettingsRows", () => ({ BuiltInBrowserRow: marker("browser"), ServerSitesRow: () => null }));
 
 const { SettingsModal } = await import("./SettingsModal");
 

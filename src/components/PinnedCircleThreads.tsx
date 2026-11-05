@@ -1,7 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type DragEvent, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRight, FolderPlus, Plus } from "lucide-react";
-import { openBot, visibleMessages, type Bot, type Message } from "@/state/store";
+import { openBotRow, visibleMessages, type Bot, type Message } from "@/state/store";
 import { avatarCropRadius, botAvatarProfile } from "../../shared/bot-avatar";
 import { liveActivityLabel } from "@/lib/live-activity";
 import { BotAvatar } from "./Avatar";
@@ -18,6 +18,7 @@ import { PINNED_CIRCLE_DRAG_TYPE, pinnedCircleDropPlace, rankPinnedCircles, reor
 import { sidebarSectionAttention } from "@/lib/sidebar-attention";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { BotListItem, BotThreadList, type BotRowProps } from "./Sidebar";
+import { useUnreadNotice } from "./unread-notice";
 
 function useVisibleMessages(bot: Bot): Message[] {
   const { messages, activeLeafId } = bot;
@@ -189,6 +190,7 @@ export const PinnedBotCircle = memo(function PinnedBotCircle({
   const waiting = bot.activity === "waiting-on-you" || activityTasks.some((task) => task.activity === "waiting-on-you");
   const working = !waiting && (Boolean(bot.busy) || activityTasks.some((task) => task.busy || task.activity === "working"));
   const unread = bot.unread || activityTasks.some((task) => task.unread);
+  const noticing = useUnreadNotice(Boolean(bot.unread));
   const radius = avatarCropRadius(botAvatarProfile(bot).avatarCrop);
   return (
     <div className="flex w-full min-w-0 flex-col items-center">
@@ -201,7 +203,7 @@ export const PinnedBotCircle = memo(function PinnedBotCircle({
         aria-keyshortcuts={drag ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
         aria-label={`${bot.name}${waiting ? ` · ${t("sidebar.preview.waiting")}` : working ? ` · ${t("chat.activity.working")}` : ""}${unread ? ` · ${t("task.unread")}` : ""}`}
         title={bot.name}
-        onClick={() => openBot(dispatch, bot, showThreads)}
+        onClick={() => openBotRow(dispatch, bot, showThreads, selected)}
         {...pinnedCircleDragHandlers(bot.id, { drag, dragging, prevId, nextId })}
         onContextMenu={(event) => {
           event.preventDefault();
@@ -226,7 +228,7 @@ export const PinnedBotCircle = memo(function PinnedBotCircle({
               size={64}
               motion={mascotMotion?.kind ?? "none"}
               motionKey={mascotMotion?.nonce ?? 0}
-              animated={working || Boolean(bot.unread) || (mascotMotion?.kind ?? "none") !== "none"}
+              animated={working || noticing || (mascotMotion?.kind ?? "none") !== "none"}
             />
           </span>
           {unread && (

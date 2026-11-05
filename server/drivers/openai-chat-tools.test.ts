@@ -103,6 +103,8 @@ async function fixture(script: Script, provider: Provider = "openai-compat", api
       return;
     }
     let data = "";
+    // Only a turn's POST carries a body; the Ollama probe GETs /api/version first (ollama-context.ts).
+    if (request.method !== "POST") { response.writeHead(404); response.end(); return; }
     for await (const part of request) data += part.toString();
     if (request.url === "/mcp-start") {
       rpcStarted.resolve(JSON.parse(data));
@@ -213,8 +215,28 @@ describe("bounded action announcement recovery", () => {
       : answer(response, "I'll write the receipt now."));
     await f.start({ approvalMode: "full" });
     expect(await f.completed()).toMatchObject({ ok: false });
-    expect(f.requests).toHaveLength(2);
+    // This fixture is on this machine, so the model is sent back twice to fix the call before the turn ends on it.
+    expect(f.requests).toHaveLength(4);
     expect(f.effects()).toEqual([]);
+  });
+
+  it("marks a turn whose final reply came back after a failed step as partly done, and no other stop", async () => {
+    const run = async (reply: (response: Parameters<typeof answer>[0]) => void) => {
+      const f = await fixture((_body, response, round) => round === 1
+        ? sse(response, [chunk({ tool_calls: [toolCall("audit_fail")] }, "tool_calls")])
+        : reply(response));
+      await f.start({ approvalMode: "full" });
+      const completed = await f.completed();
+      return { completed, errors: f.recorder.events.filter((event) => event.type === "runtime.error") };
+    };
+    const done = await run((response) => answer(response, "Here is the summary; one file could not be read."));
+    expect(done.completed).toMatchObject({ ok: false, stopReason: "tool_error" });
+    expect(done.errors).toEqual([expect.objectContaining({ partial: true, terminal: true, message: expect.stringContaining("Stopped because the tool call") })]);
+    // A reply the provider cut off is not a finished one, even after a failed step.
+    const cut = await run((response) => sse(response, [chunk({ content: "Here is the sum" }, "length")]));
+    expect(cut.completed).toMatchObject({ ok: false, stopReason: "error" });
+    expect(cut.errors).toHaveLength(1);
+    expect(cut.errors[0]).not.toHaveProperty("partial");
   });
 
   // Whether to run an operation again is the model's call under the engine's own permissions: the nudge only asks it not to.
@@ -703,7 +725,8 @@ describe.each<Provider>(["openai-compat", "grok", "minimax"])("%s structured too
 
   it("preserves ordinary transcript chat and leaves textual tool imitations as text", async () => {
     const imitation = '<tool_call>{"name":"audit_write","arguments":{"value":"pretend"}}</tool_call>';
-    const f = await fixture((_body, response) => answer(response, imitation), provider);
+    // Only a hosted model: a server on this machine counts as a local one, covered in openai-chat-local-model.test.ts.
+    const f = await fixture((_body, response) => answer(response, imitation), provider === "openai-compat" ? "grok" : provider);
     await f.start({ integrations: undefined, system: "Fixture persona", transcript: [{ role: "user", text: "Earlier question" }, { role: "assistant", text: "Earlier answer" }] });
     expect(await f.completed()).toMatchObject({ ok: true });
     expect(f.requests).toHaveLength(1);
@@ -1008,9 +1031,9 @@ describe("structured tool execution boundaries", () => {
     expect(readFileSync(join(NATIVE_DIR, `${f.threadId}.ndjson`), "utf8")).not.toContain(API_KEY_CANARY);
   });
 
-  it("never promotes textual tool syntax into execution, even when that tool is mounted", async () => {
+  it("never promotes a hosted model's textual tool syntax into execution, even when that tool is mounted", async () => {
     const imitation = '<tool_call>{"name":"audit_write","arguments":{"name":"receipt","value":"pretend"}}</tool_call>';
-    const f = await fixture((_body, response) => answer(response, imitation));
+    const f = await fixture((_body, response) => answer(response, imitation), "grok");
     await f.start();
     expect(await f.completed()).toMatchObject({ ok: true });
     expect(f.requests[0].tools?.some((tool) => tool.function.name === "audit_write")).toBe(true);
@@ -1207,7 +1230,7 @@ describe("structured tool execution boundaries", () => {
   it("stops a model that keeps requesting tools after 64 steps, with one next action that does not repeat the steps that ran", async () => {
     const f = await fixture((_body, response, round) => sse(response, [
       chunk({ tool_calls: [toolCall("audit_write", '{"name":"receipt","value":"done"}', `call_${round}`)] }, "tool_calls"),
-    ]));
+    ]), "grok");
     const stop = f.instance.adapter.onEvent((event) => {
       if (event.type === "request.opened") void f.instance.adapter.respondToRequest(f.threadId, event.requestId!, { behavior: "allow" });
     });
@@ -1390,6 +1413,23 @@ describe("a turn with the person's Windows computer, the built-in browser and th
 });
 
 describe("a provider that streams whole tool calls without an index", () => {
+  it("sends Gemini's thought signature back with its call on the next round", async () => {
+    const signed = { google: { thought_signature: "c2lnbmF0dXJl" } };
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) sse(response, [chunk({ tool_calls: [
+        { id: "function-call-1", type: "function", function: { name: "audit_write", arguments: '{"name":"first","value":"done"}' }, extra_content: signed },
+      ] }, "stop")]);
+      else answer(response);
+    });
+    await f.start();
+    await f.decide();
+    expect(await f.completed()).toMatchObject({ ok: true });
+    const replayed = f.requests[1].messages.find((message) => message.role === "assistant");
+    expect(replayed?.tool_calls).toEqual([
+      { id: "function-call-1", type: "function", function: { name: "audit_write", arguments: '{"name":"first","value":"done"}' }, extra_content: signed },
+    ]);
+  });
+
   it("runs both of Gemini's calls from one chunk and answers each by its id", async () => {
     const f = await fixture((_body, response, round) => {
       if (round === 1) sse(response, [chunk({ tool_calls: [

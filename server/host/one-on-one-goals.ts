@@ -21,6 +21,8 @@ export interface OneOnOneGoalDeps {
     requestMessageId: string;
     origin: WorkOrigin;
     unattended: boolean;
+    /** The goal run this step belongs to: the step is its own turn, so it can hand work to teammates. */
+    goalRunId: string;
     onSettled: (outcome: HostTurnResult) => void;
   }): Promise<unknown>;
   isUnattended(botId: string, threadId: string): boolean;
@@ -115,6 +117,7 @@ export function createOneOnOneGoals(deps: OneOnOneGoalDeps) {
             requestMessageId: request.id,
             origin: request.origin,
             unattended: deps.isUnattended(bot.id, threadId),
+            goalRunId: run.runId,
             onSettled: settle,
           });
         } catch (error) {
@@ -209,7 +212,12 @@ export function createOneOnOneGoals(deps: OneOnOneGoalDeps) {
     return true;
   }
 
-  return { start, stop };
+  function isLive(threadId: string, runId: string): boolean {
+    const goal = live.get(threadId);
+    return Boolean(goal && !goal.cancelled && goal.run.runId === runId);
+  }
+
+  return { start, stop, isLive };
 }
 
 export type OneOnOneGoals = ReturnType<typeof createOneOnOneGoals>;

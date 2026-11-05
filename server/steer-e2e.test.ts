@@ -7,12 +7,13 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { splitLaunchNote } from "./testing/launch-note.ts";
 import { withoutTurnClock } from "./testing/turn-clock-text.ts";
+import { workerPort } from "./testing/worker-port.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLAUDE = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
 const FAKE_ACP = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
 const FAKE_CODEX = join(SERVER_DIR, "testing", "fake-codex-app-server.ts");
-const PORT = 18800 + Math.floor(Math.random() * 10_000);
+const PORT = workerPort(18800, 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const posixOnly = describe.skipIf(process.platform === "win32");
 
@@ -217,6 +218,11 @@ posixOnly("mid-turn steering e2e", () => {
     expect(bot.messages.some((m: any) => m.role === "bot" && m.kind === "text" && m.text.includes("steered: a new task for later"))).toBe(false);
     expect(bot.messages.some((m: any) => m.role === "bot" && m.kind === "text" && withoutTurnClock(m.text).startsWith("reply to: first"))).toBe(true);
     expect(bot.messages.filter((m: any) => m.role === "user" && m.kind === "text").map((m: any) => m.text)).toEqual(["first", "a new task for later"]);
+    // The first turn's end was not the end: the queued message ran next. One "done", for the turn that finished last.
+    await waitFor(async () => ((await api("GET", "/api/notifications")).body.notifications ?? []).some((n: any) => n.botId === created.id && n.kind === "done"), "the done notification");
+    const dones = ((await api("GET", "/api/notifications")).body.notifications as any[]).filter((n) => n.botId === created.id && n.kind === "done");
+    expect(dones).toHaveLength(1);
+    expect(dones[0].body).toContain("a new task for l");
   }, 40_000);
 
   it("a message sent with followUp: restart during a Claude turn stops that turn and runs as the next one, never steered", async () => {

@@ -13,6 +13,7 @@ import type { RoutineManager, RoutineRun } from "./routines.ts";
 import { serverLine } from "./server-lines.ts";
 import type { BotRecord, Message, Store } from "./store.ts";
 import { hostTimeZone } from "./turn-clock.ts";
+import { AUTHORITY, fromNote, routineWho } from "./provenance-label.ts";
 
 const QUIET = /^[\s*_`"'.!-]*nothing new[\s*_`"'.!-]*$/i;
 const NEEDS_INPUT = /^\s*needs input:\s*/i;
@@ -49,8 +50,8 @@ export function recoveredText(name: string, at: number, language?: string): stri
 
 /** How the chat's own session reads an automation's line: as its own report, named and dated. */
 export function automationContextText(line: AutomationLine, at: number, text: string): string {
-  const what = line.failed ? "could not finish" : line.needsYou ? "asked" : line.recovered ? "recovered" : "reported";
-  return `[Your automation ${JSON.stringify(line.name)} ${what} at ${localTime(at)}:]\n${text}`;
+  const what = line.partial ? "was partly done" : line.failed ? "could not finish" : line.needsYou ? "asked" : line.recovered ? "recovered" : "reported";
+  return `${fromNote(routineWho(line.name), `run, ${what} at ${localTime(at)}`, AUTHORITY.info)}\n${text}`;
 }
 
 /** A sign-in, connection or credential card still waiting on the person, in plain words in their language; null once
@@ -109,7 +110,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     return bot && task && !task.routineRunId ? { bot, threadId: task.threadId } : null;
   };
 
-  const lineOf = (run: RoutineRun, extra: Pick<AutomationLine, "needsYou" | "failed" | "recovered" | "copyOf">): AutomationLine => ({
+  const lineOf = (run: RoutineRun, extra: Pick<AutomationLine, "needsYou" | "failed" | "partial" | "recovered" | "copyOf">): AutomationLine => ({
     routineId: run.routineId, runId: run.id, name: run.routineName, trigger: run.eventSource ?? run.triggerSource ?? (run.manual ? "manual" : "schedule"),
     executionThreadId: run.threadId!, scheduledFor: run.scheduledFor, ...extra,
   });
@@ -171,7 +172,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     const source = line.kind === "reply" ? replyOf(run, line.messageId) : undefined;
     const language = deps.threadLanguage?.(target.threadId);
     const said: RunReply = line.kind === "reply" ? read(source)
-      : { quiet: false, text: line.detail ? serverLine(language, "server.runs.didNotFinishWhy", { detail: line.detail }) : serverLine(language, "server.runs.didNotFinish") };
+      : { quiet: false, text: line.detail ? serverLine(language, run.partial ? "server.runs.partlyDoneWhy" : "server.runs.didNotFinishWhy", { detail: line.detail }) : serverLine(language, "server.runs.didNotFinish") };
     const recovered = said.quiet && lastSaidFailed(run, target.threadId);
     if (said.quiet && !recovered) {
       deps.routines()?.noteReport(run.id, { state: "quiet" });
@@ -181,7 +182,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     const posted = store.appendMessage(target.threadId, {
       role: "bot", kind: "text", text: reply.text,
       ...(source?.attachments?.length && !recovered ? { attachments: source.attachments } : {}),
-      automation: lineOf(run, line.kind === "failure" ? { failed: true } : recovered ? { recovered: true } : reply.question ? { needsYou: true } : {}),
+      automation: lineOf(run, line.kind === "failure" ? { failed: true, ...(run.partial ? { partial: true as const } : {}) } : recovered ? { recovered: true } : reply.question ? { needsYou: true } : {}),
     });
     deps.routines()?.noteReport(run.id, { state: "posted", threadId: target.threadId, messageId: posted.id });
     deps.wrote(target.bot, target.threadId);

@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { removeTempDir, waitForExit } from "../../server/testing/cleanup.ts";
 
 type Params = Record<string, unknown>;
+const CDP_ANSWER_MS = 120_000;
 
 class Cdp {
   private nextId = 0;
@@ -18,6 +19,10 @@ class Cdp {
   private socket: WebSocket;
   constructor(socket: WebSocket) {
     this.socket = socket;
+    socket.addEventListener("close", () => {
+      for (const waiter of this.pending.values()) waiter.reject(new Error(`${waiter.method}: Chrome closed the connection`));
+      this.pending.clear();
+    });
     socket.addEventListener("message", (event) => {
       const message = JSON.parse(String(event.data)) as { id?: number; result?: Params; error?: { message: string }; method?: string; params?: Params; sessionId?: string };
       if (message.id !== undefined) {
@@ -33,7 +38,12 @@ class Cdp {
   send(method: string, params: Params = {}, sessionId?: string): Promise<Params> {
     const id = (this.nextId += 1);
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject, method });
+      // A page stuck in a loop never answers: fail by name rather than wait forever.
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`${method}: no answer in ${CDP_ANSWER_MS / 1000} s`));
+      }, CDP_ANSWER_MS);
+      this.pending.set(id, { resolve: (value) => { clearTimeout(timer); resolve(value); }, reject: (error) => { clearTimeout(timer); reject(error); }, method });
       this.socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     });
   }
@@ -56,12 +66,13 @@ function probe(options: ProbeOptions): void {
   const bench = {
     marks: {} as Record<string, number>, commits: 0, commitMs: 0, probeMs: 0, renderedTotal: 0, maxRendered: 0,
     renders: {} as Record<string, number>, selfMs: {} as Record<string, number>, mounts: {} as Record<string, number>,
+    why: {} as Record<string, Record<string, number>>,
     timerFires: {} as Record<string, number>, liveIntervals: new Map<number, string>(),
     sse: { frames: 0, bytes: 0, kinds: {} as Record<string, { n: number; bytes: number }> },
     longTasks: [] as Array<[number, number]>,
     reset() {
       bench.commits = 0; bench.commitMs = 0; bench.probeMs = 0; bench.renderedTotal = 0; bench.maxRendered = 0;
-      bench.renders = {}; bench.selfMs = {}; bench.mounts = {}; bench.timerFires = {}; bench.longTasks = [];
+      bench.renders = {}; bench.selfMs = {}; bench.mounts = {}; bench.why = {}; bench.timerFires = {}; bench.longTasks = [];
       bench.sse = { frames: 0, bytes: 0, kinds: {} };
     },
   };
@@ -116,7 +127,7 @@ function probe(options: ProbeOptions): void {
     } as typeof EventSource;
   }
 
-  interface Fiber { tag: number; type: { displayName?: string; name?: string; render?: { displayName?: string; name?: string } } | null; alternate: Fiber | null; child: Fiber | null; sibling: Fiber | null; flags: number; actualDuration?: number }
+  interface Fiber { tag: number; type: { displayName?: string; name?: string; render?: { displayName?: string; name?: string } } | null; alternate: Fiber | null; child: Fiber | null; sibling: Fiber | null; flags: number; actualDuration?: number; memoizedProps?: Record<string, unknown> | null }
   const COMPOSITE = new Set([0, 1, 11, 15]);
   const nameOf = (fiber: Fiber) => {
     const type = fiber.type;
@@ -143,6 +154,14 @@ function probe(options: ProbeOptions): void {
           if (mounted || fiber.flags & 1) {
             const counts = mounted ? bench.mounts : bench.renders;
             counts[name] = (counts[name] ?? 0) + 1;
+            if (previous) {
+              // Why a component rendered again: the props that changed, a parent's new props object with equal values,
+              // or the same props (its own state, a context or a store it reads).
+              const before = previous.memoizedProps ?? {}, after = fiber.memoizedProps ?? {};
+              const changed = before === after ? ["self"] : Object.keys(after).filter((key) => after[key] !== before[key]).map((key) => `prop:${key}`);
+              const reasons = bench.why[name] ?? (bench.why[name] = {});
+              for (const reason of changed.length ? changed : [before === after ? "self" : "parent"]) reasons[reason] = (reasons[reason] ?? 0) + 1;
+            }
             rendered += 1;
             if (typeof fiber.actualDuration === "number") {
               let self = fiber.actualDuration;

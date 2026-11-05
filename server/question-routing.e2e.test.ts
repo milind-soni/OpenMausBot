@@ -156,7 +156,7 @@ describe("Just do it: nothing a bot can settle reaches the person", () => {
       { key: "JD3-L", match: ["JD3-JOB"], steps: [
         { arguments: { bot_ids: [dachs.id], message: "JD3-BRIEF-B: Lade die Notion-Seite herunter." } },
         { arguments: { bot_ids: [otter.id], message: "JD3-BRIEF-O: Fasse die Notizen zusammen." } }], reply: "JD3-L: verteilt." },
-      { key: "JD3-L-MID", match: ["[OpenMausBot note from @Dachs", "JD3-JOB"], reply: "JD3-L-MID: Otter ist fertig; Dachs wartet auf deine Notion-Anmeldung." },
+      { key: "JD3-L-MID", match: ["[From @Dachs (bot) · note on assignment", "JD3-JOB"], reply: "JD3-L-MID: Otter ist fertig; Dachs wartet auf deine Notion-Anmeldung." },
       done("JD3"));
     script(dachs.id,
       { key: "JD3-B2", match: ["JD3-BRIEF-B", "instead of pressing Done"], reply: "JD3-B2: Seite geladen." },

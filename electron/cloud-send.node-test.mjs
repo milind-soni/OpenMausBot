@@ -8,6 +8,7 @@ import vm from "node:vm";
 import { BOT_PARTS, differenceSignature, itemKey, parseSendSummary, pendingRows, planSend } from "./cloud-send-parts.mjs";
 import { botPatch, CloudSendError, createCloudSend, parseSendState, sendNotice, unanswered } from "./cloud-send.mjs";
 import { installCloudSend, openOwnerSession } from "./cloud-send-main.mjs";
+import { installTeamMove } from "./team-move-main.mjs";
 
 const LOCAL = "http://127.0.0.1:4100";
 const CLOUD = "https://omb-u-1.fly.dev";
@@ -172,6 +173,21 @@ test("either page asks only for the move's line, its Try again and closing it; n
   }
 });
 
+test("cloud-send:teams returns empty teams outside My Cloud without throwing", async () => {
+  const handlers = new Map();
+  installTeamMove({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    cloudPage: (event) => event.page ?? null,
+    home: () => ({ origin: CLOUD, grant: async () => ({ origin: CLOUD, code: "C" }) }),
+    account: () => ({ state: () => ({ status: "connected", teams: [{ id: "team-acme", name: "Acme Corp", machine: { origin: CLOUD, status: "ready" } }] }) }),
+    file: () => "/nonexistent/cloud-send.json",
+    journalFile: () => "/nonexistent/team-move.json",
+  });
+  assert.deepEqual(await handlers.get("cloud-send:teams")({ page: "local" }), { teams: [] }, "local page gets empty teams");
+  assert.deepEqual(await handlers.get("cloud-send:teams")({ page: null }), { teams: [] }, "no page context gets empty teams");
+  assert.deepEqual(await handlers.get("cloud-send:teams")({ page: "cloud" }), { teams: [{ id: "team-acme", name: "Acme Corp", ready: true }] }, "My Cloud page gets actual teams");
+});
+
 function preload({ remote = false, activation = false } = {}) {
   let bridge; const invoked = [];
   vm.runInNewContext(readFileSync(new URL("./preload.cjs", import.meta.url), "utf8"), {
@@ -185,7 +201,7 @@ function preload({ remote = false, activation = false } = {}) {
 }
 
 test("the bridge: either page gets only the move's line and the switch that keeps this computer's bots here; its Try again, moving a bot into a team, and turning that switch go only from the person's click on My Cloud's page", async () => {
-  const keys = ["notice", "dismiss", "moveRetry", "teams", "moveToTeam", "teamRetry", "openTeam", "keepHere", "setKeepHere", "onNotice"];
+  const keys = ["notice", "dismiss", "moveRetry", "teams", "moveToTeam", "teamRetry", "openTeam", "teamBring", "teamBringMove", "teamBringStatus", "keepHere", "setKeepHere", "onNotice"];
   const local = preload();
   assert.equal(local.bridge.cloudSend, undefined);
   assert.equal(local.bridge.cloudLogins, undefined);
@@ -197,6 +213,7 @@ test("the bridge: either page gets only the move's line and the switch that keep
   await assert.rejects(page.bridge.cloudSendPage.moveRetry(), /Try again/);
   await assert.rejects(page.bridge.cloudSendPage.moveToTeam("scout", "team-acme", "Scout"), /Choose Move/);
   await assert.rejects(page.bridge.cloudSendPage.teamRetry(), /Try again/);
+  await assert.rejects(page.bridge.cloudSendPage.teamBringMove("scout"), /Choose Move/);
   await assert.rejects(page.bridge.cloudSendPage.setKeepHere(true), /Turn the switch/);
   await page.bridge.cloudSendPage.keepHere();
   assert.deepEqual(page.invoked.filter(([channel]) => channel.startsWith("cloud-send") || channel === "one-home:keep-set"), []);

@@ -127,7 +127,7 @@ it("moves no main thread for a teammate's work or results or a team incident; re
         { key: "books", match: ["BOOKS: check the books."], reply: "The books balance." },
         { key: "crash", match: ["Reconcile the invoices."], fail: true },
       ] },
-      [chief.id]: { script: [{ key: "incident", match: ["Incident report"], reply: "Incident noted." }] },
+      [chief.id]: { script: [{ key: "incident", match: ["incident report"], reply: "Incident noted." }] },
     }));
 
     await cli("send", "--bot", asker.id, "--task", asker.activeTaskId, "--text", "Open a side job that asks Teammate.");
@@ -138,7 +138,7 @@ it("moves no main thread for a teammate's work or results or a team incident; re
     await idle(teammate.id);
 
     await cli("send", "--bot", teammate.id, "--task", teammate.activeTaskId, "--text", "Reconcile the invoices.");
-    const incidents = await thread(chief.id, "Team incidents");
+    const incidents = await thread(chief.id, "Problems to look at");
     await replied(chief.id, incidents.threadId, "Incident noted.");
 
     expect(Object.keys(stamps(asker.id))).toEqual([asker.activeTaskId]);

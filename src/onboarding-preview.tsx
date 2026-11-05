@@ -54,7 +54,7 @@ function fixture(url: string, ai: boolean, bots: number): unknown {
   }
   if (path === "/api/config") return { onboarding: EMPTY_ONBOARDING, profile: { name: "", email: "", aboutMe: "" } };
   if (path === "/api/auth/session") return { kind: "local" };
-  if (path === "/api/routines") return { routines: [], runs: [] };
+  if (path.startsWith("/api/routines?since=")) return { routines: [], runs: [] };
   if (path === "/api/notifications") return { notifications: [] };
   if (path === "/api/webhooks") return { webhooks: [], attempts: [], ingress: null };
   if (path === "/api/phones") return { phones: [] };

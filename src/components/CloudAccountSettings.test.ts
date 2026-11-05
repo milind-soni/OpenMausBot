@@ -144,6 +144,15 @@ it("a payment being linked says so, with its date, and asks nobody to pay again"
   push({ ...free, purchase: { state: "held" } });
   all(render().html, ["MausBot Cloud · payment received", "linking your payment"]); none(render().html, BUY);
 });
+it("where this app can keep another account beside this one, the other email is added, with nothing signed out", async () => {
+  vi.stubGlobal("window", { ogb: { cloudAccount: bridge, accounts: { addCancel: vi.fn(), list: vi.fn(), onChanged: vi.fn() } } });
+  await ready(free);
+  none(render({ onAddCloud: vi.fn() }).html, ["Sign out and use that email"]);
+  all(render({ onAddCloud: vi.fn() }).html, ["Bought a plan or joined a team with a different email?"]);
+  button("Add that email")!.props.onClick!();
+  all(render({ onAddCloud: vi.fn() }).html, ["data-accounts-sheet", "cloud-add-email"]);
+  expect(bridge.signOut).not.toHaveBeenCalled();
+});
 it("a free account may add a Cloud, and is told what to do if it bought with another email", async () => {
   await ready(free);
   all(render({ onAddCloud: vi.fn() }).html, ["No plan yet", ">Add a Cloud<", "Bought a plan with a different email?"]);

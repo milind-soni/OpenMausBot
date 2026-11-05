@@ -28,6 +28,9 @@ import type { BotRecord, GroupRecord, GroupTaskPatch, Message, Store } from "../
 import type { ThreadStarters } from "../thread-starters.ts";
 import { extractSteerImages } from "../turn-images.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
+import { parseMentionPicks } from "../../shared/room-mentions.ts";
+import { sameNameRefusal, sameNameRefusalForBots } from "../same-name-mentions.ts";
+import { conversationLanguage } from "../server-lines.ts";
 import { bulkDeleteThreadIds, type BulkDeleteRefusal } from "./bulk-delete.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { sawThread } from "../thread-presence.ts";
@@ -83,9 +86,9 @@ export interface ChannelRouteDeps {
     sendId: string | undefined,
     channelMode: "chat" | "goal",
     queueId: undefined,
-    options: { via?: "api"; sender?: ResolvedSender; trigger?: UsageTrigger; threadId?: string },
+    options: { via?: "api"; sender?: ResolvedSender; trigger?: UsageTrigger; threadId?: string; mentions?: string[] },
   ): Message;
-  applyRoomHoldsFromMessage(groupId: string, text: string): void;
+  applyRoomHoldsFromMessage(groupId: string, text: string, mentions?: readonly string[]): void;
   cancelGroupTurnOperations(groupId: string, threadId: string): void;
   drainQueuedChannelSends(): void;
   clearTurnDigestState(threadId: string): void;
@@ -205,16 +208,20 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "body must be a JSON object" });
       }
-      const allowed = new Set(["title", "pinned", "turnTimeoutMinutes"]);
+      const allowed = new Set(["title", "pinned", "turnTimeoutMinutes", "archivedAt"]);
       if (Object.keys(body).some((key) => !allowed.has(key))) return json(res, 400, { error: "unsupported channel thread setting" });
       const existing = store.groupTaskByThread(group.id, m[2]);
       if (!existing) return json(res, 404, { error: "no such channel task" });
       const pinning = body.pinned !== undefined;
       const renaming = body.title !== undefined;
       const limiting = Object.prototype.hasOwnProperty.call(body, "turnTimeoutMinutes");
-      if (!pinning && !renaming && !limiting) return json(res, 400, { error: "unsupported channel thread setting" });
+      const archiving = body.archivedAt !== undefined;
+      if (!pinning && !renaming && !limiting && !archiving) return json(res, 400, { error: "unsupported channel thread setting" });
       if (pinning && typeof body.pinned !== "boolean") return json(res, 400, { error: "pinned must be a boolean" });
       if (renaming && typeof body.title !== "string") return json(res, 400, { error: "title must be a string" });
+      if (archiving && body.archivedAt !== null && !(typeof body.archivedAt === "number" && Number.isFinite(body.archivedAt) && body.archivedAt >= 0)) {
+        return json(res, 400, { error: "archivedAt must be a timestamp, or null to unarchive" });
+      }
       const parsedLimit = limiting ? parseConversationTurnTimeout(body.turnTimeoutMinutes) : null;
       if (parsedLimit && !parsedLimit.ok) return json(res, 400, { error: parsedLimit.error });
       // Echoing the current title is not a rename: newer clients send it so an older server keeps the title.
@@ -227,6 +234,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       const patch: GroupTaskPatch = {
         ...(parsedLimit?.ok ? { turnTimeoutMinutes: parsedLimit.minutes } : {}),
         ...(pinning ? { pinned: body.pinned === true } : {}),
+        ...(archiving ? { archivedAt: body.archivedAt as number | null } : {}),
         ...(titleChange ? { title: body.title } : {}),
       };
       const task = Object.keys(patch).length ? store.patchGroupTask(group.id, m[2], patch) : existing;
@@ -325,6 +333,8 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       if (body.threadId !== undefined && (typeof body.threadId !== "string" || !/^[\w-]+$/.test(body.threadId))) {
         return json(res, 400, { error: "threadId must be a task id" });
       }
+      const mentions = parseMentionPicks(body.mentions);
+      if (mentions === null) return json(res, 400, { error: "mentions must be a list of up to 20 bot ids" });
       const threadId = body.threadId ?? group.threadId;
       const trigger = usageTriggerFor(auth);
       try {
@@ -383,7 +393,13 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
               status: 404,
             });
           }
-          if (channelMode === "chat") applyRoomHoldsFromMessage(current.id, text);
+          const members = current.memberIds.map((id) => store.bot(id)).filter((bot): bot is BotRecord => Boolean(bot));
+          // A program on this machine (a bot's shell, a script) reads the ids it can send again with; a person never sees them.
+          const sameName = auth.kind === "loopback" && !browserOrigin
+            ? sameNameRefusalForBots(text, members, mentions, current.name, "sent")
+            : sameNameRefusal(text, members, mentions, conversationLanguage(threadId));
+          if (sameName) throw Object.assign(new Error(sameName), { status: 409 });
+          if (channelMode === "chat") applyRoomHoldsFromMessage(current.id, text, mentions);
           const threadWorking = groupThreadIsWorking(current.id, threadId);
           const decision = admit("room", {}, { roomWorking: threadWorking, threadWorking });
           if (decision.action === "queue") {
@@ -394,10 +410,11 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
               via,
               sender: messageSender(auth),
               trigger,
+              mentions,
             });
             return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
           }
-          const message = startGroupTurn(current.id, text, replyTo, sendId, channelMode, undefined, { via, sender: messageSender(auth), trigger, threadId });
+          const message = startGroupTurn(current.id, text, replyTo, sendId, channelMode, undefined, { via, sender: messageSender(auth), trigger, threadId, mentions });
           return { ok: true as const, threadId, message };
         },
       );

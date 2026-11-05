@@ -61,7 +61,7 @@ beforeAll(async () => {
   vi.stubGlobal("EventSource", FixtureEventSource);
   vi.stubGlobal("fetch", (path: string, init?: RequestInit) => {
     requests.push({ path, method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : undefined });
-    return path.startsWith("/api/bots?") ? json({ bots: [bot], groups: [] }) : json(answers[path] ?? {});
+    return path.startsWith("/api/bots?") ? json({ bots: [bot], groups: [] }) : json(answers[path.replace(/\?since=[^&]*$/, "")] ?? {});
   });
   const container = document.createElement("div");
   document.body.append(container);
@@ -125,7 +125,7 @@ describe("data sheets in the store", () => {
   it("tell the panel, not the app, when the route refuses", async () => {
     vi.stubGlobal("fetch", (path: string) => path === DATA_ROUTES.sheet("other")
       ? Promise.resolve(new Response(JSON.stringify({ error: "Not Found" }), { status: 404 }))
-      : json(answers[path] ?? {}));
+      : json(answers[path.replace(/\?since=[^&]*$/, "")] ?? {}));
     const onError = vi.fn();
     dispatch({ type: "loadDataSheet", botId: "other", onError });
     await settle();
