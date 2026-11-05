@@ -2614,13 +2614,8 @@ function checkedModelSelection(
     }
     selection.variant = value.variant;
   }
-  const changed = current && (
-    selection.instanceId !== current.selection.instanceId ||
-    selection.model !== current.selection.model ||
-    selection.effort !== current.selection.effort ||
-    selection.variant !== current.selection.variant
-  );
-  if (current?.busy && changed) {
+  const modelChanged = current && (selection.instanceId !== current.selection.instanceId || selection.model !== current.selection.model);
+  if (current?.busy && modelChanged) {
     return { ok: false, status: 409, error: "the bot is working — stop it before changing models" };
   }
   const target = registry.get(selection.instanceId);
