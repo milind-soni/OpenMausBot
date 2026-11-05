@@ -13,7 +13,7 @@ import { KIND_BODY_MAX } from "./cloud-send-kinds.ts";
 import { MEMORY_BODY_MAX } from "./cloud-send-memory.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { RoutineManager } from "./routines.ts";
-import { keptBotIds } from "./routes/bots-create.ts";
+import { idsHere, keptBotIds } from "./routes/bots-create.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./routes/table.ts";
 import type { Store } from "./store.ts";
 
@@ -22,9 +22,20 @@ const OPEN_MS = 24 * 60 * 60 * 1000;
 const fileSchema = z.object({ v: z.literal(1), bots: z.record(z.string(), z.number().finite()) });
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 
+/** The routes whose JSON body a phone's move is checked by, each read at its handler's own limit. */
+export const MOVE_BODY_LIMITS = {
+  "POST /api/bots": undefined,
+  "PUT /api/cloud-send/kind": KIND_BODY_MAX,
+  "POST /api/cloud-send/chats": CHATS_BODY_MAX,
+  "POST /api/cloud-send/chats/verify": VERIFY_BODY_MAX,
+  "POST /api/cloud-send/memory": MEMORY_BODY_MAX,
+  "POST /api/cloud-send/arrived": ARRIVED_BODY_MAX,
+} as const;
+type BodyRoute = keyof typeof MOVE_BODY_LIMITS;
+
 export interface PhoneMoveInDeps {
   dataDir: string;
-  store: Pick<Store, "bot" | "botByThread" | "groupByThread">;
+  store: Pick<Store, "bots" | "groups" | "botByThread" | "groupByThread">;
   routines(): Pick<RoutineManager, "listRoutines"> | null;
   ownerName(): string;
   now?: () => number;
@@ -46,11 +57,12 @@ export function createPhoneMoveIn(deps: PhoneMoveInDeps) {
     const at = typeof bot === "string" ? opened.get(bot) : undefined;
     return at !== undefined && now() - at < OPEN_MS;
   };
-  /** A conversation a phone's move may write to or check: one not here yet, or one of a bot still open to the move. */
-  const thread = (threadId: unknown, bot?: string): boolean => {
+  /** A conversation a phone's move may write to or check: one not here yet in any case, or one of a bot still open to the move. */
+  const thread = (threadId: unknown, used: Set<string>, bot?: string): boolean => {
     if (typeof threadId !== "string" || deps.store.groupByThread(threadId)) return false;
     const held = deps.store.botByThread(threadId)?.id;
-    return held === undefined || (bot === undefined ? open(held) : held === bot);
+    if (held === undefined) return !used.has(threadId.toLowerCase());
+    return bot === undefined ? open(held) : held === bot;
   };
   const conversations = (body: Record<string, unknown>) => (Array.isArray(body.conversations) ? body.conversations : []) as unknown[];
 
@@ -67,42 +79,35 @@ export function createPhoneMoveIn(deps: PhoneMoveInDeps) {
     const held = record(body.record) ? body.record : null;
     // The routine's own id is the one that arrives, whatever the key says.
     if (!routine || !held || (held.id !== undefined && held.id !== routine) || !open(held.botId) || held.target !== "bot") return null;
+    if ((Array.isArray(body.runs) ? body.runs : []).some((run) => !record(run) || run.botId !== held.botId)) return null;
     if (held.resultsThreadId !== undefined && (typeof held.resultsThreadId !== "string" || deps.store.botByThread(held.resultsThreadId)?.id !== held.botId)) return null;
     if (deps.routines()?.listRoutines().some((other) => other.id === routine && other.botId !== held.botId)) return null;
     return { ...body, mainIfUnused: true };
   }
 
-  /** The routes whose body a move's check reads, at the handler's own limit; null refuses. */
-  const BODIES: Record<string, { limit?: number; check(body: Record<string, unknown>): Record<string, unknown> | null }> = {
-    "POST /api/bots": {
-      check(body) {
-        const kept = keptBotIds(body, deps.store);
-        // Recorded before the bot is made: a create cut short here still lets the phone go on with it.
-        if (!("error" in kept) && kept.id) { opened.set(kept.id, now()); save(); }
-        return body;
-      },
+  /** Each body route's check: the body to hand on, or null to refuse. */
+  const CHECKS: Record<BodyRoute, (body: Record<string, unknown>) => Record<string, unknown> | null> = {
+    "POST /api/bots": (body) => {
+      const kept = keptBotIds(body, deps.store);
+      // Recorded before the bot is made: a create cut short here still lets the phone go on with it.
+      if (!("error" in kept) && kept.id) { opened.set(kept.id, now()); save(); }
+      return body;
     },
-    "PUT /api/cloud-send/kind": { limit: KIND_BODY_MAX, check: kind },
-    "POST /api/cloud-send/chats": {
-      limit: CHATS_BODY_MAX,
-      check: (body) => conversations(body).every((entry) => record(entry) && open(entry.bot) && entry.room === undefined && thread(entry.threadId, entry.bot as string)) ? body : null,
+    "PUT /api/cloud-send/kind": kind,
+    "POST /api/cloud-send/chats": (body) => {
+      const used = idsHere(deps.store);
+      return conversations(body).every((entry) => record(entry) && open(entry.bot) && entry.room === undefined && thread(entry.threadId, used, entry.bot as string)) ? body : null;
     },
-    "POST /api/cloud-send/chats/verify": {
-      limit: VERIFY_BODY_MAX,
-      check: (body) => conversations(body).every((entry) => record(entry) && thread(entry.threadId)) ? body : null,
+    "POST /api/cloud-send/chats/verify": (body) => {
+      const used = idsHere(deps.store);
+      return conversations(body).every((entry) => record(entry) && thread(entry.threadId, used)) ? body : null;
     },
-    "POST /api/cloud-send/memory": {
-      limit: MEMORY_BODY_MAX,
-      check: (body) => open(body.bot) && !Object.hasOwn(body, "about") && !Object.hasOwn(body, "teams") ? body : null,
-    },
-    "POST /api/cloud-send/arrived": {
-      limit: ARRIVED_BODY_MAX,
-      check(body) {
-        const done = (Array.isArray(body.bots) ? body.bots : []).filter((id): id is string => typeof id === "string" && opened.has(id));
-        for (const id of done) opened.delete(id);
-        if (done.length) save();
-        return body;
-      },
+    "POST /api/cloud-send/memory": (body) => open(body.bot) && !Object.hasOwn(body, "about") && !Object.hasOwn(body, "teams") ? body : null,
+    "POST /api/cloud-send/arrived": (body) => {
+      const done = (Array.isArray(body.bots) ? body.bots : []).filter((id): id is string => typeof id === "string" && opened.has(id));
+      for (const id of done) opened.delete(id);
+      if (done.length) save();
+      return body;
     },
   };
 
@@ -124,10 +129,10 @@ export function createPhoneMoveIn(deps: PhoneMoveInDeps) {
       ctx.req.resume();
       return refuse();
     }
-    const route = BODIES[`${ctx.method} ${ctx.path}`];
-    if (!route) return PASS;
-    const body = await ctx.readBody(ctx.req, route.limit);
-    const next = record(body) ? route.check(body) : null;
+    const route = `${ctx.method} ${ctx.path}`;
+    if (!Object.hasOwn(MOVE_BODY_LIMITS, route)) return PASS;
+    const body = await ctx.readBody(ctx.req, MOVE_BODY_LIMITS[route as BodyRoute]);
+    const next = record(body) ? CHECKS[route as BodyRoute](body) : null;
     if (next === null) return refuse();
     ctx.readBody = (async () => next) as RouteContext["readBody"];
     return PASS;

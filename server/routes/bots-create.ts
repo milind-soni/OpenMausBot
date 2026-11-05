@@ -50,16 +50,27 @@ export interface BotCreateRouteDeps {
 
 const OWN_ID = /^[\w-]{8,128}$/;
 
+/** Every bot id, bot conversation id and room conversation id here, lowercased. Security invariant: a new id must differ
+ * from all of them in more than case, since a bot's folder and a conversation's files are named by their ids and the
+ * macOS and Windows file systems ignore case. */
+export function idsHere(store: Pick<Store, "bots" | "groups">): Set<string> {
+  return new Set([
+    ...store.bots.flatMap((bot) => [bot.id, bot.threadId, ...(bot.tasks ?? []).map((task) => task.threadId)]),
+    ...store.groups.flatMap((group) => [group.threadId, ...(group.tasks ?? []).map((task) => task.threadId)]),
+  ].map((id) => id.toLowerCase()));
+}
+
 /** A bot sent from the person's other computer keeps its id and its conversation's, so later sends and Bring newer
  * chats find it. Only ids in the server's own form, and only while nothing here uses them. */
-export function keptBotIds(body: Record<string, unknown>, store: Pick<Store, "bot" | "botByThread" | "groupByThread">): { id?: string; threadId?: string } | { error: string } {
+export function keptBotIds(body: Record<string, unknown>, store: Pick<Store, "bots" | "groups">): { id?: string; threadId?: string } | { error: string } {
   const { id, threadId } = body;
   if (id === undefined && threadId === undefined) return {};
   if (typeof id !== "string" || !OWN_ID.test(id) || (threadId !== undefined && (typeof threadId !== "string" || !OWN_ID.test(threadId)))) {
     return { error: "id and threadId must be ids of letters, digits, - and _ (8 to 128)" };
   }
-  if (store.bot(id) || store.botByThread(id) || store.groupByThread(id)) return { error: "a bot with this id already exists here" };
-  if (threadId !== undefined && (threadId === id || store.bot(threadId) || store.botByThread(threadId) || store.groupByThread(threadId))) {
+  const used = idsHere(store);
+  if (used.has(id.toLowerCase())) return { error: "a bot with this id already exists here" };
+  if (threadId !== undefined && (threadId.toLowerCase() === id.toLowerCase() || used.has(threadId.toLowerCase()))) {
     return { error: "this conversation id is already used here" };
   }
   return { id, ...(threadId === undefined ? {} : { threadId }) };

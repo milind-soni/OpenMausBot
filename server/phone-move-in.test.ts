@@ -10,7 +10,7 @@ import { cloudSendChatsRoute } from "./cloud-send-chats.ts";
 import { moveFilesRoute, REPEATED_QUERY } from "./cloud-send-files.ts";
 import { moveKindsRoute } from "./cloud-send-kinds.ts";
 import { moveMemoryRoute } from "./cloud-send-memory.ts";
-import { createPhoneMoveIn, PHONE_MOVE_REFUSAL, type PhoneMoveInDeps } from "./phone-move-in.ts";
+import { createPhoneMoveIn, MOVE_BODY_LIMITS, PHONE_MOVE_REFUSAL, type PhoneMoveInDeps } from "./phone-move-in.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import { createBotCreateRoutes } from "./routes/bots-create.ts";
 import { dispatchRoutes, PASS, type RouteContext, type RouteHandler } from "./routes/table.ts";
@@ -32,14 +32,17 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
+const store = () => ({
+  get bots() { return bots as never; },
+  groups: [{ id: "room-1", threadId: "room-thread-01", tasks: [] }] as never,
+  botByThread: (threadId: string) => (bots.find((bot) => bot.threadId === threadId || bot.tasks.some((task) => task.threadId === threadId)) ?? null) as never,
+  groupByThread: (threadId: string) => (threadId === "room-thread-01" ? { id: "room-1" } : undefined) as never,
+});
+
 function setup(over: Partial<PhoneMoveInDeps> = {}) {
   return createPhoneMoveIn({
     dataDir: dir,
-    store: {
-      bot: (id: string) => (bots.find((bot) => bot.id === id) ?? null) as never,
-      botByThread: (threadId: string) => (bots.find((bot) => bot.threadId === threadId || bot.tasks.some((task) => task.threadId === threadId)) ?? null) as never,
-      groupByThread: (threadId: string) => (threadId === "room-thread-01" ? { id: "room-1" } : undefined) as never,
-    },
+    store: store(),
     routines: () => ({ listRoutines: () => [{ id: "r-here", botId: "here-bot-0001", target: "bot" }] as never }),
     ownerName: () => "Omkar",
     now: () => clock,
@@ -143,6 +146,27 @@ describe("a phone's move into this computer", () => {
     expect(moveIn.brings(phone, "pocket-new-0003")).toBe(false);
   });
 
+  it("a computer bot's id or conversation in other capitals is taken: the create answers 409 and nothing opens", async () => {
+    const moveIn = setup();
+    const created = createBotCreateRoutes({ store: store(), routines: () => null } as never);
+    const make = async (auth: RequestAuth, body: Record<string, unknown>) => {
+      let answered: { status: number; body: any } | null = null;
+      const url = new URL("http://127.0.0.1/api/bots");
+      await dispatchRoutes([moveIn.guard, created], { req: { headers: { "x-openmausbot-companion": "1" }, resume() {} } as never, res: {} as never, url, path: url.pathname,
+        method: "POST", auth, json: ((_res: unknown, status: number, sent: any) => { answered = { status, body: sent }; }) as never, readBody: (async () => body) as never });
+      return answered as { status: number; body: any } | null;
+    };
+    for (const body of [{ id: "HERE-BOT-0001" }, { id: "Here-Thread-01" }, { id: "ROOM-THREAD-01" }, { id: "pocket-new-0005", threadId: "HERE-THREAD-01" },
+      { id: "pocket-new-0006", threadId: "Here-Bot-0001" }, { id: "pocket-new-0007", threadId: "POCKET-NEW-0007" }]) {
+      expect((await make(phone, body))?.status, JSON.stringify(body)).toBe(409);
+      expect(moveIn.brings(phone, body.id), body.id).toBe(false);
+    }
+    expect(existsSync(join(dir, "phone-move-ins.json"))).toBe(false);
+    // An everyday paired phone's create, with no move, is held to the same rule.
+    expect((await make(everyday, { id: "Here-Bot-0001" }))?.status).toBe(409);
+    expect((await make(everyday, { id: "pocket-new-0008", threadId: "HERE-THREAD-01" }))?.status).toBe(409);
+  });
+
   it("refuses every move write for a bot the phone did not bring", async () => {
     const moveIn = setup();
     await create(moveIn);
@@ -152,6 +176,9 @@ describe("a phone's move into this computer", () => {
       ["PUT", "/api/cloud-send/kind", { v: 1, key: "bot:here-bot-0001", dataDir: "/phone", record: {} }],
       ["POST", "/api/cloud-send/chats", { v: 1, dataDir: "/phone", conversations: [{ bot: "here-bot-0001", threadId: "new-thread-01" }] }],
       ["POST", "/api/cloud-send/chats", { v: 1, dataDir: "/phone", conversations: [{ bot: SCOUT, threadId: "here-thread-01" }] }],
+      ["POST", "/api/cloud-send/chats", { v: 1, dataDir: "/phone", conversations: [{ bot: SCOUT, threadId: "HERE-THREAD-01" }] }],
+      ["POST", "/api/cloud-send/chats", { v: 1, dataDir: "/phone", conversations: [{ bot: SCOUT, threadId: "Room-Thread-01" }] }],
+      ["POST", "/api/cloud-send/chats/verify", { v: 1, conversations: [{ threadId: "HERE-THREAD-01", ids: [] }] }],
       ["POST", "/api/cloud-send/chats/verify", { v: 1, conversations: [{ threadId: "here-thread-01", ids: [] }] }],
       ["POST", "/api/cloud-send/memory", { v: 1, bot: "here-bot-0001", files: [] }],
       ["POST", "/api/cloud-send/files?path=workspaces/here-bot-0001/a.md&size=1&sha256=x&offset=0&mode=new"],
@@ -222,6 +249,10 @@ describe("a phone's move into this computer", () => {
     expect(await put("r-new", { botId: "here-bot-0001", target: "bot" })).toMatchObject(refused);
     expect(await put("r-new", { botId: SCOUT, target: "room-goal", groupId: "room-1" })).toMatchObject(refused);
     expect(await put("r-new", { id: "r-here", botId: SCOUT, target: "bot" })).toMatchObject(refused);
+    const withRuns = (runs: unknown[]) => run(moveIn, phone, "PUT", "/api/cloud-send/kind", { v: 1, key: "routine:r-new", dataDir: "/phone", record: { botId: SCOUT, target: "bot" }, runs });
+    expect(await withRuns([{ id: "run-1", routineId: "r-new", botId: SCOUT }, { id: "run-2", routineId: "r-new", botId: "here-bot-0001" }])).toMatchObject(refused);
+    expect(await withRuns(["run-3"])).toMatchObject(refused);
+    expect((await withRuns([{ id: "run-1", routineId: "r-new", botId: SCOUT }])).out).toBe(PASS);
     const ok = await put("r-new", { botId: SCOUT, target: "bot" });
     expect(ok.out).toBe(PASS);
     expect(ok.handedOn).toEqual({ v: 1, key: "routine:r-new", dataDir: "/phone", record: { botId: SCOUT, target: "bot" }, mainIfUnused: true });
@@ -276,9 +307,11 @@ describe("a phone's move into this computer", () => {
         readBody: (async (_req: unknown, max?: number) => { read = max; return null; }) as never });
       return read;
     };
-    for (const [route, handler] of Object.entries(routes)) {
+    for (const route of Object.keys(MOVE_BODY_LIMITS)) {
+      const handler = routes[route];
+      expect(handler, `no handler to compare ${route} with`).toBeDefined();
       const [method, path] = route.split(" ") as [string, string];
-      const handlerLimit = await limit(handler, method, path);
+      const handlerLimit = await limit(handler!, method, path);
       expect(handlerLimit, route).not.toBe("unread");
       expect(await limit(moveIn.guard, method, path), route).toBe(handlerLimit);
     }
