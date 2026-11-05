@@ -12,7 +12,7 @@ export function instanceSupportsLocalComputer(
 }
 
 export function pageOnRemoteServer(capabilities: DesktopCapabilities): boolean {
-  return capabilities.localComputer.reasonCode === "remote-server";
+  return capabilities.localComputer?.reasonCode === "remote-server";
 }
 
 export function localComputerSelectable({

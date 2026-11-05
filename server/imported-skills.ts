@@ -14,7 +14,6 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 
-import { parseSkillCommand } from "../shared/skill-command.ts";
 import { isSkillName } from "../shared/skill-md.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
@@ -406,18 +405,6 @@ export function importedSkillsPrompt(skills: readonly ImportedSkillView[]): stri
     lines.push(line);
   }
   return block(lines, skills.length - lines.length);
-}
-
-/** `/name` for an imported skill, the way a bot's own skill command reads. */
-export function expandImportedSkillCommand(text: string, skills: readonly ImportedSkillView[]): string {
-  if (!text.trimStart().startsWith("/")) return text;
-  const command = parseSkillCommand(text, skills.map((skill) => skill.name));
-  const skill = command && skills.find((candidate) => candidate.name === command.name);
-  if (!command || !skill) return text;
-  const lead = `The user ran your ${command.name} skill with /${command.name}. Read ${JSON.stringify(skill.file)} with your file tools and follow it for this turn.`;
-  return command.request
-    ? `${lead} Where the skill says {input}, use the request.\n\nRequest: ${command.request}`
-    : `${lead} There is no further request, so run it as the skill describes.`;
 }
 
 const NATIVE_SKILL_DIRS = [".claude/skills", ".agents/skills", ".grok/skills"];

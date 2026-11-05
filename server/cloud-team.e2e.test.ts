@@ -115,12 +115,12 @@ it("a member's private chat with a team bot reads her notes and the team's, neve
   mkdirSync(ws(bot.id, "memory"), { recursive: true });
   writeFileSync(ws(bot.id, "MEMORY.md"), "# Memory\n\n- The office plant is called Fernando (team)\n");
   mkdirSync(ws(layerOf(`member-${benKey}`), "memory"), { recursive: true });
-  writeFileSync(ws(layerOf(`member-${benKey}`), "MEMORY.md"), "# Memory\n\n- Ben's badge code is 4471\n");
+  writeFileSync(ws(layerOf(`member-${benKey}`), "MEMORY.md"), "# Memory\n\n- Ben's badge code is BADGE-4471\n");
   adaThread = await newThread(ada, "Ada and Scout");
   scriptToolCalls([{ name: "memory_update", server: "agents", input: { action: "append", text: "Ada prefers oolong tea" } }]);
   const seen = await turn(ada, adaThread, "My cat is called Kumquat.");
   expect(seen.systemPrompt).toContain("Fernando");
-  expect(seen.systemPrompt).not.toContain("4471");
+  expect(seen.systemPrompt).not.toContain("BADGE-4471");
   // Named as the prompt quotes a path (workspace.ts, JSON.stringify): Windows' backslashes come doubled.
   expect(seen.systemPrompt).toContain(JSON.stringify(ws(layerOf(`member-${adaKey}`), "MEMORY.md")));
   // Her note landed in her own layer, not the team's.
@@ -154,7 +154,7 @@ it("a room's turn reads the room's layer and the team's, never a member's notes,
   const seen = await turn(ada, roomThread, "@Scout when do we launch?", roomId);
   expect(seen.systemPrompt).toContain("Fernando");
   expect(seen.systemPrompt).not.toContain("oolong");
-  expect(seen.systemPrompt).not.toContain("4471");
+  expect(seen.systemPrompt).not.toContain("BADGE-4471");
   expect(readFileSync(ws(layerOf(`room-${roomId}`), "MEMORY.md"), "utf8")).toContain("Tuesday");
   expect(readFileSync(ws(layerOf(`member-${adaKey}`), "MEMORY.md"), "utf8")).not.toContain("Tuesday");
   expect(readFileSync(ws(bot.id, "MEMORY.md"), "utf8")).not.toContain("Tuesday");

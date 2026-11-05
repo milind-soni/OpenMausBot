@@ -48,13 +48,13 @@ function messageText(message: Message): string {
 
 /** `shown`: on a Team Cloud someone else's private chat is never in the exporting person's backup. */
 export function createTeamBackup(store: Store, routines: Routine[], name: string, shown: (threadId: string) => boolean = () => true): TeamBackup {
-  const botIds = new Set(store.bots.map((bot) => bot.id));
   const warnings: string[] = [];
   const history = (record: BotRecord | GroupRecord): BackupTask[] => {
     const tasks = record.tasks?.length ? record.tasks : [{ threadId: record.threadId, title: "Conversation", createdAt: record.createdAt }];
     return tasks.filter((task) => shown(task.threadId)).map((task) => ({
       key: task.threadId, title: task.title, createdAt: task.createdAt,
       titleFromFirstMessage: "titleFromFirstMessage" in task && task.titleFromFirstMessage || undefined,
+      outside: "outside" in task && task.outside || undefined,
       openedBy: "openedBy" in task && task.openedBy
         ? { botId: task.openedBy.botId, name: task.openedBy.name, at: task.openedBy.at,
             ...(task.openedBy.kind ? { kind: task.openedBy.kind } : {}) }
@@ -74,9 +74,13 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
       })),
     }));
   };
+  // A bot none of whose conversations the exporter may read (another member's own MausBot) is not theirs to export.
+  const histories = new Map(store.bots.map((bot) => [bot.id, history(bot)]));
+  const exported = store.bots.filter((bot) => histories.get(bot.id)!.length > 0);
+  const botIds = new Set(exported.map((bot) => bot.id));
   const groups = store.groups.map((group) => {
     const memberIds = group.memberIds.filter((id) => botIds.has(id));
-    if (memberIds.length !== group.memberIds.length) warnings.push(`Room “${group.name}” contains deleted bots. Its conversation is included with the remaining members.`);
+    if (group.memberIds.some((id) => !store.bot(id))) warnings.push(`Room “${group.name}” contains deleted bots. Its conversation is included with the remaining members.`);
     return {
       key: group.id, name: group.name, section: group.section, dm: Boolean(group.dm) && memberIds.length === 2,
       bulletin: group.bulletin, memberIds,
@@ -101,7 +105,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
   const document = parseTeamBackup({
     format: "openmaus.backup", version: 1, name, exportedAt: Date.now(),
     warnings,
-    bots: store.bots.map((bot) => ({
+    bots: exported.map((bot) => ({
       key: bot.id, name: bot.name, title: bot.title, description: bot.description, soul: bot.soul,
       section: bot.section, color: bot.color,
       mascotExpression: bot.mascotExpression ?? undefined, mascotBody: bot.mascotBody ?? undefined,
@@ -114,7 +118,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
       ...(helperModelAllowed(bot) ? {} : { helperModel: false }),
       memory: memoryFor(bot.id),
       // Someone else's private chat selected: the backup opens on the first conversation it carries instead.
-      ...((tasks) => ({ activeTask: tasks.some((task) => task.key === bot.threadId) ? bot.threadId : tasks[0]?.key ?? bot.threadId, tasks }))(history(bot)),
+      ...((tasks) => ({ activeTask: tasks.some((task) => task.key === bot.threadId) ? bot.threadId : tasks[0]?.key ?? bot.threadId, tasks }))(histories.get(bot.id)!),
     })),
     groups,
     routines: validRoutines.map((routine) => ({
@@ -192,7 +196,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
         const record: TaskRecord = {
           threadId: i === 0 ? bot.threadId : newId(), title: task.title, createdAt: task.createdAt, resumeCursors: {},
           activity: "idle" as const, busy: false, unread: false,
-          ...(task.titleFromFirstMessage ? { titleFromFirstMessage: true } : {}),
+          ...(task.titleFromFirstMessage ? { titleFromFirstMessage: true } : {}), ...(task.outside ? { outside: true } : {}),
         };
         const opener = task.openedBy && botIds.get(task.openedBy.botId);
         if (task.openedBy && opener) record.openedBy = { botId: opener, name: task.openedBy.name, at: task.openedBy.at, ...(task.openedBy.kind ? { kind: task.openedBy.kind } : {}) };

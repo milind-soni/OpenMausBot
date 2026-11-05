@@ -101,14 +101,15 @@ it.each(["zcode", "codebuddy", "qoder", "qodercn"])("offers discovered models in
   expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "setModel", botId: selected.id, threadId: selected.threadId,
     updateBotDefault: true, selection: { instanceId, model: "glm-5.3-flash" } });
   const saved = { ...selected, modelSelection: { instanceId, model: "glm-5.3-flash" } };
-  const reopened = openPicker(saved);
-  const savedPane = reopened.nodes.find((entry) => entry.type === SimpleModelMenu) as unknown as ReactElement<ComponentProps<typeof SimpleModelMenu>>;
+  // A model with thinking choices keeps the menu open, so its thinking row is offered right away.
+  const stillOpen = renderPicker(saved);
+  const savedPane = stillOpen.nodes.find((entry) => entry.type === SimpleModelMenu) as unknown as ReactElement<ComponentProps<typeof SimpleModelMenu>>;
   const variants = (savedPane.props.thinking as { variants: ReactElement<ComponentProps<typeof ModelVariantRow>> }).variants;
   expect(variants.type).toBe(ModelVariantRow);
   const nativeRow = ModelVariantRow(variants.props);
   const thinking = elements(nativeRow).find((entry) => entry.type === Select)!;
-  expect(reopened.html).toContain(">high</option>");
-  expect(reopened.html).not.toContain(">Max</option>");
+  expect(stillOpen.html).toContain(">high</option>");
+  expect(stillOpen.html).not.toContain(">Max</option>");
   thinking.props.onChange!({ target: { value: "1" } } as ChangeEvent<HTMLSelectElement>);
   expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "setModel", botId: selected.id, threadId: selected.threadId,
     updateBotDefault: true, selection: { instanceId, model: "glm-5.3-flash", variant: "high" } });

@@ -9,7 +9,8 @@ import {
   api,
   useStore,
   formatTime,
-  openNotificationTarget,
+  openRoomThread,
+  openThread,
   type Bot,
   type Group,
   type GroupDefaultResponder,
@@ -71,7 +72,7 @@ import { TurnNarrationRun } from "./TurnNarrationRun";
 import { ActivityRun } from "./ActivityRun";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
-import { liveToolIds } from "@/lib/tool-liveness";
+import { useLiveToolIds } from "@/hooks/use-live-tool-ids";
 import { roomNeedsSetup } from "@/lib/room-setup";
 import { useComposerDockPad } from "@/lib/composer-dock";
 import { GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
@@ -110,13 +111,7 @@ export function RoomToolChip({ message, roomId, threadId, live = false }: { mess
   }
   const comm = message.comm;
   if (comm && comm.groupId !== roomId) {
-    return <HandoffChip message={message} bots={state.bots} title={t("room.openBot", { name: comm.withName })} onClick={() => {
-      dispatch({ type: "select", id: comm.groupId });
-      const destination = state.groups.find(g => g.id === comm.groupId);
-      if (comm.threadId && destination?.tasks?.some(task => task.threadId === comm.threadId)) {
-        dispatch({ type: "switchGroupTask", groupId: comm.groupId, threadId: comm.threadId });
-      }
-    }} />;
+    return <HandoffChip message={message} bots={state.bots} title={t("room.openBot", { name: comm.withName })} onClick={() => openRoomThread(dispatch, comm, state.groups)} />;
   }
   if (!comm) return <ToolActivity tool={tool} live={live} source={threadId ? { threadId, messageId: message.id } : undefined} />;
   return (
@@ -355,7 +350,7 @@ export const Transcript = memo(function Transcript({
     const newest = transcript[retryableIndex];
     return newest && isCancelledTranscriptRow(newest) ? roomRetryRequest(transcript, retryableIndex) : null;
   }, [transcript, retryableIndex]);
-  const liveTools = useMemo(() => liveToolIds(transcript, { busy: roomBusy, turnStartedAt: group.turnStartedAt }), [transcript, roomBusy, group.turnStartedAt]);
+  const liveTools = useLiveToolIds(transcript, { busy: roomBusy, turnStartedAt: group.turnStartedAt });
   const retryRoom = useCallback(() => {
     if (!retryRequest || roomBusy) return;
     dispatch({
@@ -453,7 +448,7 @@ export const Transcript = memo(function Transcript({
               <RoutineRunCard
                 message={m}
                 onOpen={routineTarget
-                  ? () => openNotificationTarget(dispatch, routineTarget, state, showThreads)
+                  ? () => openThread(dispatch, routineTarget, state, showThreads)
                   : undefined}
               />
             </div>

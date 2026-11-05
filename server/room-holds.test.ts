@@ -99,6 +99,30 @@ describe("isStopCommand", () => {
     }
   });
 
+  it("reads the app's own word for Stop in each of its languages as a stop", () => {
+    for (const text of ["stopp", "alles stoppen", "Bitte stoppen!", "STOPP", "detener", "detener todo", "arrêter", "arrêter tout", "रोकें", "interrompi", "ferma tutto", "停止",
+      "중지", "멈추기", "zatrzymaj", "zatrzymaj wszystko", "parar", "parar agora", "стоп", "остановить всё", "durdur", "lütfen durdur", "зупинити", "dừng", "D\u1EEB\u006E\u0067", "Du\u031B\u0300ng"]) {
+      expect(isStopCommand(text), text).toBe(true);
+    }
+  });
+
+  it("reads a real sentence that merely has a stop word in it as a message, in every language", () => {
+    for (const text of ["stoppen wir das Projekt?", "bitte nicht stoppen", "Stopp-Schild bestellen", "wann soll ich stoppen", "no detener", "detener el servidor", "arrêter de fumer", "ne pas arrêter",
+      "रोकें नहीं", "non interrompi", "ferma il server", "停止服务", "不要停止", "停止してください", "중지 말고 계속", "nie zatrzymaj", "parar de compartilhar", "não parar", "не остановить", "стоп-лосс на 5%",
+      "durdur ve yeniden başlat", "не зупинити", "dừng lại sau khi xong", "alles", "bitte", "todo", "`stopp`", "\"alles stoppen\"", "> alles stoppen"]) {
+      expect(isStopCommand(text), text).toBe(false);
+    }
+  });
+
+  it("takes @everyone and the bot's own name as a tag, and any other tag as a message about them", () => {
+    expect(isStopCommand("@everyone stop")).toBe(true);
+    expect(isStopCommand("@everyone alles stoppen")).toBe(true);
+    expect(isStopCommand("@Chris Assistent stop", "Chris Assistent")).toBe(true);
+    expect(isStopCommand("@Ben stop", "Ada")).toBe(false);
+    expect(isStopCommand("@Adam stop", "Ada")).toBe(false);
+    expect(isStopCommand("@everyone-else stop")).toBe(false);
+  });
+
   it("reads any other message as a message, including a quoted or coded stop", () => {
     for (const text of ["", "all right", "stop using tabs", "don't stop", "pause", "stop the build and run tests", "`stop`", "\"stop\"", "> stop",
       "why did it stop?", "it stopped", "never stop", "non-stop", "stop-loss at 5%", "cancel my 3pm", "please stop the server and restart it", "stop\nthen deploy"]) {

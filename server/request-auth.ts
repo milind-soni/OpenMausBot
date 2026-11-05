@@ -317,6 +317,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET", "POST"], path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/file$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/job$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/messages$/ },
+  // Only says whether a line is a stop, so the Team map knows where an @everyone line goes (routes/stop-line.ts).
+  { methods: ["POST"], path: /^\/api\/stop-line$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/messages\/[\w-]+\/edit$/ },
   { methods: ["POST", "DELETE"], path: /^\/api\/bots\/[\w-]+\/setup-request$/ }, // Set me up: what a typed /setup could do
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/active-branch$/ },
@@ -405,8 +407,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/presence\/active$/ },
   // what a bot asks of this person: their own questions and approvals only
   { methods: ["GET"], path: /^\/api\/needs-you$/ },
-  // a Team Cloud person's own inbox: its lines, and one of them read or done; the handler serves the session's own alone
-  { methods: ["GET"], path: /^\/api\/inbox$/ },
+  // a person's own inbox: its lines, how many wait, and one of them read or done; the handler serves the session's own alone
+  { methods: ["GET"], path: /^\/api\/inbox(?:\/count)?$/ },
   { methods: ["POST"], path: /^\/api\/inbox\/[\w-]+\/(?:read|done)$/ },
   // who a Team Cloud bot can report to, and handing over a bot the member owns: the handler checks who may
   { methods: ["GET"], path: /^\/api\/team\/people$/ },
@@ -417,6 +419,9 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["PUT"], path: /^\/api\/bots\/[\w-]+\/reports-to$/ },
   // a Team Cloud bot's sharing: the handler lets only someone who can edit the bot change it
   { methods: ["PUT"], path: /^\/api\/bots\/[\w-]+\/access$/ },
+  // a bot's API: anyone who sees the bot reads whether it is on; the handler lets only someone who can edit the bot change it
+  { methods: ["GET", "POST"], path: /^\/api\/bots\/[\w-]+\/bot-api$/ },
+  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/bot-api\/new-key$/ },
   // asking to chat with a team bot one can view: the handler puts a card in the inbox of whoever can let them in
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/access-request$/ },
 ];
@@ -509,6 +514,8 @@ export interface ResolveOptions {
   trustLocalBrowser?: boolean;
   /** Why a session made for one task may not make this request (a Team Cloud's sign-in that moves one bot in), else null. */
   restricted?(session: SessionRecord, method: string, path: string, url: URL): string | null;
+  /** The sentence a person reads when their session lacks the scope for this request; null keeps the bare refusal. */
+  scopeRefusal?(method: string, path: string): string | null;
 }
 
 const CLI_OWNER_HEADER = "x-openmausbot-cli-owner";
@@ -527,6 +534,8 @@ function mutatingPublicRoute(method: string, path: string): boolean {
   if (path.startsWith("/api/desktop-viewer/")) return true;
   // Hand out a stored secret to a loopback reader: a webhook's address, a Local VM's viewer password.
   if (upper === "GET" && (/^\/api\/webhooks\/[\w-]+\/address$/.test(path) || /^\/api\/(?:bots\/[\w-]+\/)?local-computer$/.test(path))) return true;
+  // Hands out what a Grok Bot wrote about the person, from their Downloads folder.
+  if (upper === "GET" && path === "/api/setup-import/grok") return true;
   // Drives a bot's browser: a WebSocket upgrade is a GET, but what it carries is input.
   if (/^\/api\/bots\/[\w-]+\/browser\/stream$/.test(path)) return true;
   if (["GET", "HEAD", "OPTIONS"].includes(upper)) return false;
@@ -578,7 +587,7 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
     if (narrowed) return deny(403, narrowed);
     const needed = requiredScope(method, path, options.features ?? {});
     if (!session.scopes.includes(needed)) {
-      return deny(403, `forbidden: this session lacks the ${needed} scope`);
+      return deny(403, options.scopeRefusal?.(method, path) ?? `forbidden: this session lacks the ${needed} scope`);
     }
     // Redeeming a stream ticket does not renew: an unattended open stream must not keep a session alive.
     if (via !== "ticket") options.sessions.renew(session.id);

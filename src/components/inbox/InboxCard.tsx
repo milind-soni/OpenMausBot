@@ -12,7 +12,7 @@ import { pendingApprovals, PendingApprovalActions } from "../PendingApproval";
 import { ASK_QUIET_ANSWER, ASK_QUIET_BUTTON, AskChoices, AskError } from "../AskCard";
 import { ELEVATED_CARD } from "../elevated";
 import { InboxRowItem } from "./InboxRow";
-import { asMessage } from "./InboxReading";
+import { asMessage } from "./inbox-answer";
 import { askOf, CARD_ROWS, choiceResponse, choicesOf, rowsIn, tabCounts } from "./inbox-view";
 import { accessRequestWords } from "../bot-access/access-card";
 import { useInboxActions } from "./use-inbox-actions";
@@ -70,7 +70,7 @@ export function InboxCard({ view }: { view: InboxView }) {
   const counts = tabCounts(view);
   const rows = rowsIn(view, "needs-you").slice(0, CARD_ROWS);
   const openRow = (row: InboxRow) => { readInboxRow(row); openInbox({ reading: row.id }); };
-  const openAll = () => openInbox({ tab: counts["needs-you"] ? "needs-you" : "info" });
+  const openAll = () => openInbox();
   const shell = cn("my-1 w-full max-w-[560px] rounded-[24px]", ELEVATED_CARD);
   if (!rows.length) {
     return (

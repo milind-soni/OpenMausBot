@@ -73,6 +73,7 @@ export const InspectorPanel = lazyScreen("InspectorPanel", async () => (await im
 export const KeyboardShortcutsModal = lazyScreen("KeyboardShortcutsModal", async () => (await import("./KeyboardShortcutsModal")).KeyboardShortcutsModal);
 export const LocalVmWorkspace = lazyScreen("LocalVmWorkspace", async () => (await import("./LocalVmWorkspace")).LocalVmWorkspace);
 export const NewBotDialog = lazyScreen("NewBotDialog", async () => (await import("./NewBotDialog")).NewBotDialog);
+export const PluginsPanel = lazyScreen("PluginsPanel", async () => (await import("./PluginsPanel")).PluginsPanel);
 export const RemoteAgentSettingsPanel = lazyScreen("RemoteAgentSettingsPanel", async () => (await import("./RemoteAgentSettingsPanel")).RemoteAgentSettingsPanel);
 export const RoomPanel = lazyScreen("RoomPanel", async () => (await import("./room-panel/RoomPanel")).RoomPanel);
 export const RemoteDesktopPanel = lazyScreen("RemoteDesktopPanel", async () => (await import("./remote-desktop-panel")).RemoteDesktopPanel);
@@ -80,24 +81,56 @@ export const TriggersPage = lazyScreen("TriggersPage", async () => (await import
 export const SettingsModal = lazyScreen("SettingsModal", async () => (await import("./SettingsModal")).SettingsModal);
 export const TeamMapPage = lazyScreen("TeamMapPage", async () => (await import("./TeamMapPage")).TeamMapPage);
 
+// Rarely opened, so never fetched ahead. The team library is what brings the YAML parser in.
+export const CloudAddDialog = lazyScreen("CloudAddDialog", async () => (await import("./CloudAddDialog")).CloudAddDialog);
+export const PhoneAppDialog = lazyScreen("PhoneAppDialog", async () => (await import("./PhoneAppDialog")).PhoneAppDialog);
+export const ShareTeamDialog = lazyScreen("ShareTeamDialog", async () => (await import("./ShareTeamDialog")).ShareTeamDialog);
+export const GrokMoveDialog = lazyScreen("GrokMoveDialog", async () => (await import("./GrokMoveDialog")).GrokMoveDialog);
+export const TeamLibraryPanel = lazyScreen("TeamLibraryPanel", async () => (await import("./TeamLibraryPanel")).TeamLibraryPanel);
+
+// Most opened first: a Cloud page fetches these in this order.
 const SCREENS = [
-  ActivityPanel, BotSettingsDialog, ComputerPanel, FilesView, InspectorPanel, KeyboardShortcutsModal, LocalVmWorkspace, NewBotDialog,
-  RemoteAgentSettingsPanel, RemoteDesktopPanel, RoomPanel, SettingsModal, TeamMapPage, TriggersPage,
+  SettingsModal, BotSettingsDialog, PluginsPanel, ComputerPanel, TriggersPage, ActivityPanel, FilesView, InspectorPanel, KeyboardShortcutsModal,
+  LocalVmWorkspace, NewBotDialog, RemoteAgentSettingsPanel, RemoteDesktopPanel, RoomPanel, TeamMapPage,
 ];
 
 if (typeof location !== "undefined" && new URLSearchParams(location.search).has("desktop-settings")) {
   void SettingsModal.preload().catch(() => {});
 }
 
-export function preloadScreens(): () => void {
-  const run = () => {
-    for (const screen of SCREENS) void screen.preload().catch(() => {});
+const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+const REMOTE_PRELOAD_AFTER_MS = 5_000;
+
+// On this machine a first open costs 8-28 ms, and fetching every screen during launch held the first paint back by a
+// quarter, so a local page fetches each when it opens. Over a network a first open takes up to a second, so a Cloud page
+// still fetches them, once launch is over and one per idle moment.
+export function preloadScreens(hostname = location.hostname): () => void {
+  if (LOCAL_HOSTS.has(hostname)) return () => {};
+  let stopped = false;
+  let cancelWait = () => {};
+  const whenIdle = (run: () => void) => {
+    if (typeof requestIdleCallback === "function") {
+      const handle = requestIdleCallback(run, { timeout: 2_000 });
+      cancelWait = () => cancelIdleCallback(handle);
+    } else {
+      // Safari has no requestIdleCallback.
+      const timer = setTimeout(run, 1_000);
+      cancelWait = () => clearTimeout(timer);
+    }
   };
-  if (typeof requestIdleCallback === "function") {
-    const handle = requestIdleCallback(run, { timeout: 2_000 });
-    return () => cancelIdleCallback(handle);
-  }
-  // Safari has no requestIdleCallback.
-  const timer = setTimeout(run, 1_000);
-  return () => clearTimeout(timer);
+  const fetchFrom = (index: number) => {
+    const screen = SCREENS[index];
+    if (!screen) return;
+    whenIdle(() => {
+      void screen.preload().catch(() => {}).then(() => {
+        if (!stopped) fetchFrom(index + 1);
+      });
+    });
+  };
+  const start = setTimeout(() => fetchFrom(0), REMOTE_PRELOAD_AFTER_MS);
+  cancelWait = () => clearTimeout(start);
+  return () => {
+    stopped = true;
+    cancelWait();
+  };
 }

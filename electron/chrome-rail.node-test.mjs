@@ -338,3 +338,48 @@ test("every page beside the rail, from any server, gets the button's bridge, lea
   await local.bridge.rail.setHidden(false);
   assert.deepEqual(plain(local.invoked), [["rail:hide", false]], "this app's own page, as for its other choices");
 });
+
+test("the accounts sheet holds the rail's page up, even for someone who hid the rail or has one place, and letting go puts things back", () => {
+  const w = world({ wanted: false, hidden: true });
+  w.rail.attach(w.win);
+  assert.equal(w.rail.shown(), false);
+  w.rail.holdOpen(true);
+  assert.equal(w.rail.shown(), true);
+  w.rail.expand(true);
+  assert.equal(w.made[0].bounds.width, 1440, "the sheet has the whole window");
+  w.rail.expand(false);
+  w.rail.holdOpen(false);
+  assert.equal(w.rail.shown(), false);
+  w.state.hidden = false; w.state.wanted = true;
+  w.rail.refresh();
+  w.rail.holdOpen(true); w.rail.holdOpen(false);
+  assert.equal(w.rail.shown(), true, "a rail that was there stays");
+});
+
+test("the rail's page that couldn't load (this app's server was restarting) loads again at the next refresh, so it isn't left a blank strip", () => {
+  const w = world();
+  w.rail.attach(w.win);
+  const contents = w.made[0].webContents, loads = () => contents.loaded.length;
+  assert.equal(loads(), 1);
+  w.rail.refresh();
+  assert.equal(loads(), 1, "loaded or on its way: not loaded again");
+  contents.emit("did-fail-load", {}, -102, "ERR_CONNECTION_REFUSED", "http://127.0.0.1:8799/rail", true);
+  assert.equal(loads(), 1, "nothing retries until the server says it is ready");
+  w.rail.refresh();
+  assert.equal(loads(), 2, "the next refresh loads it");
+  w.rail.refresh();
+  assert.equal(loads(), 2, "once");
+  contents.emit("did-fail-load", {}, -3, "ERR_ABORTED", "http://127.0.0.1:8799/rail", true);
+  w.rail.refresh();
+  assert.equal(loads(), 2, "a load cut short by another isn't a failure");
+  contents.emit("did-fail-load", {}, -105, "ERR_NAME_NOT_RESOLVED", "https://cdn.example.test/", false);
+  w.rail.refresh();
+  assert.equal(loads(), 2, "nor a frame inside it");
+  contents.emit("did-fail-load", {}, -102, "ERR_CONNECTION_REFUSED", "http://127.0.0.1:8799/rail", true);
+  contents.emit("did-finish-load");
+  w.rail.refresh();
+  assert.equal(loads(), 3, "the error page that replaced it finishing loading isn't the rail's page loading (seen in the real app)");
+  contents.emit("did-finish-load");
+  w.rail.refresh();
+  assert.equal(loads(), 3, "and the load that worked stays");
+});

@@ -307,7 +307,7 @@ describe("independent bot tasks through the isolated control surface", () => {
       await expect.poll(() => handoff()?.status, { timeout: 20_000 }).toBe("failed");
     }
     const woken = async () => JSON.stringify((await dump(models[0])).prompt);
-    await expect.poll(woken, { timeout: 20_000 }).toContain("[OpenMausBot report from @Delegated Peer on assignment");
+    await expect.poll(woken, { timeout: 20_000 }).toContain("[From @Delegated Peer (bot) · report on assignment");
     expect(await woken()).toContain("nobody answered the approval for “Bash: npm run release-check” in time, so it did not run. Do not report it as done; it needs the person's approval.");
   }, 60_000);
 

@@ -126,6 +126,20 @@ describe("desktop capabilities", () => {
     expect(reasonOf("desktop-host-stopped")).toBe("cua-driver-unavailable");
   });
 
+  it.each(["win32", "linux"])("listens through Fish Audio on %s, but not from a server's page", (platform) => {
+    expect(desktopCapabilities({ platform, env: { DISPLAY: ":0" } }).dictation).toEqual({
+      available: true,
+      engine: "fish-audio",
+      onDevice: false,
+    });
+    expect(desktopCapabilities({ platform, remote: true }).dictation).toEqual({
+      available: false,
+      engine: "none",
+      onDevice: false,
+      reasonCode: "remote-server",
+    });
+  });
+
   it.each(["freebsd"])("fails closed on %s", (platform) => {
     const capabilities = desktopCapabilities({
       platform,

@@ -81,33 +81,33 @@ const FULL = "skills+shared+voice+escalations+x+team";
 
 /** Bytes when the budget was last set; a profile may move at most 2% either way (lower it to lock in a win). */
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 56910,
-  "voice": 57691,
-  "shared": 59141,
-  "shared+voice": 59922,
-  "skills": 59729,
-  "skills+voice": 60510,
-  "skills+shared": 61960,
-  "skills+shared+voice": 62741,
-  "non-chief": 47853,
-  "voice+non-chief": 48634,
-  "shared+non-chief": 50084,
-  "shared+voice+non-chief": 50865,
-  "skills+non-chief": 50672,
-  "skills+voice+non-chief": 51453,
-  "skills+shared+non-chief": 52903,
-  "skills+shared+voice+non-chief": 53684,
-  "skills+shared+voice+cloud-home": 63096,
-  "skills+shared+voice+non-chief+cloud-home": 53961,
-  "default+legacy-switches": 56910,
-  "default+mausbot": 57561,
-  "skills+shared+voice+mausbot": 63392,
-  "skills+shared+voice+escalations": 63571,
-  "skills+shared+voice+escalations+x": 67410,
-  "skills+shared+voice+escalations+x+team": 68042,
-  "default+no-computer-pick": 55698,
-  "default+room": 48780,
-  "non-chief+room": 39723,
+  "default": 58250,
+  "voice": 59031,
+  "shared": 60515,
+  "shared+voice": 61296,
+  "skills": 61069,
+  "skills+voice": 61850,
+  "skills+shared": 63334,
+  "skills+shared+voice": 64115,
+  "non-chief": 49935,
+  "voice+non-chief": 50716,
+  "shared+non-chief": 52200,
+  "shared+voice+non-chief": 52981,
+  "skills+non-chief": 52754,
+  "skills+voice+non-chief": 52793,
+  "skills+shared+non-chief": 55212,
+  "skills+shared+voice+non-chief": 55058,
+  "skills+shared+voice+cloud-home": 64782,
+  "skills+shared+voice+non-chief+cloud-home": 55566,
+  "default+legacy-switches": 58250,
+  "default+mausbot": 58901,
+  "skills+shared+voice+mausbot": 64766,
+  "skills+shared+voice+escalations": 64945,
+  "skills+shared+voice+escalations+x": 68784,
+  "skills+shared+voice+escalations+x+team": 69416,
+  "default+no-computer-pick": 57038,
+  "default+room": 50849,
+  "non-chief+room": 41633,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';
@@ -229,8 +229,17 @@ describe("agents proxy tools/list golden", () => {
       expect(coordinate.thread!.enum).toBeUndefined();
       expect(coordinate.reply!.enum).toEqual(["resume", "none"]);
       expect(Object.keys(tools.get("assignment_status")!.inputSchema.properties)).toEqual(["id", "wait_ms"]);
-      expect(tools.get("start_thread")!.inputSchema.properties.bot_id!.enum).toEqual(["bot-golden"]);
+      expect(tools.get("start_thread")!.inputSchema.properties.bot_id).toBeUndefined();
       expect(wire).not.toMatch(/Brief synchronous consultation|DEFAULT FOR ASSIGNING WORK|BLOCKING status tool/);
+    }
+  });
+
+  // Providers cache a prompt from its start, tools first: one bot's id in a schema makes every other bot rewrite the whole list.
+  it("lists the same bytes for two bots of the same role", () => {
+    for (const chief of [true, false]) {
+      const lists = ["bot-one", "bot-two"].map((botId) => JSON.stringify(availableTools({ ...catalogProfileFromEnv({}), chief, botId })));
+      expect(lists[1]).toBe(lists[0]);
+      expect(lists[0]).not.toContain("bot-one");
     }
   });
 
@@ -242,12 +251,9 @@ describe("agents proxy tools/list golden", () => {
     }
   });
 
-  it("mounts message_person only on a Team Cloud, and adds nothing else", () => {
+  it("mounts message_person everywhere: every plan's bots can reach the person's Inbox", () => {
     const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
-    expect(names(wires[FULL]!).filter((tool) => tool !== "message_person")).toEqual(names(wires["skills+shared+voice+escalations+x"]!));
-    for (const [name, profile] of Object.entries(PROFILES)) {
-      expect(names(wires[name]!).includes("message_person"), name).toBe(profile.env.OMB_TEAM_PEOPLE === "1");
-    }
+    for (const name of Object.keys(PROFILES)) expect(names(wires[name]!), name).toContain("message_person");
   });
 
   it("mounts ask_for_computer only on a person's own Cloud that is lent their computer, never a Team Cloud", () => {

@@ -2,8 +2,8 @@ import { basename, join } from "node:path";
 
 import type { WireBot, WireGroup } from "../../shared/wire.ts";
 import {
-  ATTACHMENTS_DIR, deleteAttachment, extensionForMime, FILE_MAX_BYTES, IMAGE_MAX_BYTES, parseAudioRange, readAttachment,
-  saveFile, saveImageUpload, validateAttachmentUploadId, type SavedAttachment,
+  ATTACHMENTS_DIR, attachmentStorageUsage, clearAttachments, deleteAttachment, extensionForMime, FILE_MAX_BYTES, IMAGE_MAX_BYTES,
+  parseAudioRange, readAttachment, saveFile, saveImageUpload, validateAttachmentUploadId, type SavedAttachment,
 } from "../attachments.ts";
 import { deliveredCopy } from "../bot-attachment.ts";
 import { memberBot, memberGroup, type Viewer, type VisibleSet } from "../bot-visibility.ts";
@@ -63,6 +63,8 @@ export interface ThreadRouteDeps {
   /** Who uploaded each file: only its uploader discards it, and only while nothing uses it. */
   uploads: { note(auth: RequestAuth, name: string): void; owns(auth: RequestAuth, name: string): boolean };
   attachmentInUse(name: string): boolean;
+  /** The stored files a Settings clear must leave (pictures, banner, routine and calendar-call files), null until those load; absent on a Team Cloud, which has no clear. */
+  keptAttachments?(): ReadonlySet<string> | null;
 }
 
 export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
@@ -376,6 +378,17 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       } catch (error) {
         req.resume();
         throw error;
+      }
+    }
+
+    // Not under /api/attachments/: that GET is open to clients. This path keeps the default admin scope.
+    if (path === "/api/attachment-storage" && deps.keptAttachments) {
+      if (method === "GET") return json(res, 200, attachmentStorageUsage());
+      if (method === "POST") {
+        // Until routines load their files are unknown, and a clear could take them.
+        const kept = deps.keptAttachments();
+        if (!kept) return json(res, 503, { error: "Routines are still loading. Try again in a moment." });
+        return json(res, 200, { ...clearAttachments(kept), ...attachmentStorageUsage() });
       }
     }
 

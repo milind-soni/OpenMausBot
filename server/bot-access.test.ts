@@ -71,6 +71,9 @@ describe("what a request needs", () => {
   it("reads at view, writes at chat, sharing at edit, and leaves a bot's own PATCH and routines to their routes", () => {
     expect(levelNeeded("GET", "/api/threads/t1/messages")).toBe("view");
     expect(levelNeeded("POST", "/api/bots/b1/read")).toBe("view");
+    expect(levelNeeded("POST", "/api/bots/b1/bot-api")).toBe("edit");
+    expect(levelNeeded("POST", "/api/bots/b1/bot-api/new-key")).toBe("edit");
+    expect(levelNeeded("GET", "/api/bots/b1/bot-api")).toBe("view");
     expect(levelNeeded("POST", "/api/groups/g1/read")).toBe("view");
     expect(levelNeeded("POST", "/api/bots/b1/tasks/t1")).toBe("view");
     expect(levelNeeded("POST", "/api/bots/b1/tasks/delete")).toBe("chat");

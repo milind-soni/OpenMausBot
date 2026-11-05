@@ -3,6 +3,8 @@
 // re-announcing happens exactly on transitions.
 export interface AddressWatchOptions {
   addresses: () => string[];
+  /** The advertised name: a rename re-advertises like an address change. */
+  name?: () => string;
   /** Resolves false when the responder could not start (port 5353 busy,
    * multicast off): a condition, never an error. */
   advertise: () => Promise<boolean>;
@@ -35,7 +37,7 @@ export function createAddressWatcher(options: AddressWatchOptions): AddressWatch
     // must not start a second.
     if (inflight) return;
     const current = [...options.addresses()].sort();
-    const key = current.join(",");
+    const key = `${options.name?.() ?? ""}\n${current.join(",")}`;
     if (key === known) return;
     inflight = true;
     try {

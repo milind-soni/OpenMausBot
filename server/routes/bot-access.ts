@@ -3,12 +3,13 @@
 // person must be a member of the team, and the bot's visibility follows in the same write so the rest of the server's
 // "who sees it" checks stay true.
 import type { BotAccess } from "../../shared/bot-access.ts";
-import { visibilityFromAccess } from "../../shared/bot-access.ts";
+import { sameAccess, visibilityFromAccess } from "../../shared/bot-access.ts";
 import { botOwner } from "../../shared/bot-owner.ts";
 import type { WireBot } from "../../shared/wire.ts";
 import { accessOf, parseBotAccess, sameAudience } from "../bot-visibility.ts";
 import type { CloudTeam } from "../cloud-team.ts";
 import { refusalFor } from "../host/bot-access-gate.ts";
+import type { AdminActionRow } from "../admin-activity.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { BotRecord, GroupRecord, Store } from "../store.ts";
 import type { TeamPeople } from "../team-people.ts";
@@ -25,6 +26,8 @@ export interface BotAccessRouteDeps {
   publicGroupState(group: GroupRecord): unknown;
   broadcast(payload: Record<string, unknown>): void;
   audienceChanged(): void;
+  /** Settings → Activity: the request is client-scoped, so the admin audit never sees it. */
+  record?(auth: RequestAuth, row: Omit<AdminActionRow, "at" | "actor">): void;
 }
 
 /** The bot's sharing with `next` applied: the owner is never listed (they always edit), and nobody new comes in from
@@ -71,7 +74,11 @@ export function createBotAccessRoutes(deps: BotAccessRouteDeps): RouteHandler {
     if (!current) return json(res, 404, { error: "no such bot" });
     const settled = settledAccess(current, parsed.access, (email) => people.has(email));
     if (!settled.ok) return json(res, 400, { error: settled.error });
+    const before = accessOf(current);
     const updated = writeAccess(deps, current, settled.access);
+    if (updated && !sameAccess(before, settled.access)) {
+      deps.record?.(auth, { category: "visibility", action: "access.update", target: { kind: "bot", id: updated.id, name: updated.name }, before: { access: before }, after: { access: settled.access } });
+    }
     return updated ? json(res, 200, { bot: deps.wireBot(updated) }) : json(res, 404, { error: "no such bot" });
   };
 }

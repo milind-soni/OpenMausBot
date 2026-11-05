@@ -13,6 +13,9 @@
 //   FAKE_CLAUDE_ANSWER_MODEL  the `model` of its assistant frames, as when the CLI answers with another model than asked
 //   FAKE_CLAUDE_RELEASE  with hang: the turn ends normally once this file exists; a scripted call's `hold` ends then too
 //   FAKE_CLAUDE_DUMP  path for the latest turn's {argv, env, cwd, prompt, systemPrompt, mcpConfig}
+//   FAKE_CLAUDE_ELICIT  JSON request body: a "hang" turn (or a failing FAKE_CLAUDE_TRANSIENTS launch) first asks it
+//     as control_request "elicit-1"
+//   FAKE_CLAUDE_CONTROL_LOG  JSON-lines file every control_response the host writes is appended to
 //   FAKE_CLAUDE_EXIT_AFTER_TURN  1: exit once the turn is answered, so later turns relaunch with --resume
 //   FAKE_CLAUDE_AUTH_AFTER_TURN  1: from the second turn, answer as not-logged-in; FAKE_CLAUDE_AUTH_AFTER_WORK  1: not-logged-in
 //     calls a tool first
@@ -222,7 +225,7 @@ const replyForPrompt = (prompt: JsonValue): string[] | null => {
 };
 
 const argv = process.argv.slice(2);
-const settingsHooks: Record<string, Array<{ hooks?: Array<{ type?: string; command?: string; timeout?: number }> }>> = (() => {
+const settingsHooks: Record<string, Array<{ hooks?: Array<{ type?: string; command?: string; args?: string[]; timeout?: number }> }>> = (() => {
   if (process.env.FAKE_CLAUDE_HOOKS !== "1") return {};
   const i = argv.indexOf("--settings");
   if (i === -1) return {};
@@ -238,8 +241,9 @@ function runHooks(event: string, payload: Record<string, unknown>): string {
   for (const entry of settingsHooks[event] ?? []) {
     for (const hook of entry.hooks ?? []) {
       if (hook.type !== "command" || !hook.command) continue;
-      const result = spawnSync(hook.command, {
-        shell: true,
+      // Like Claude Code: a hook with `args` starts `command` itself; otherwise `command` is a shell line.
+      const result = spawnSync(hook.command, hook.args ?? [], {
+        shell: !hook.args,
         input: JSON.stringify({ hook_event_name: event, session_id: "fake-session", cwd: process.cwd(), ...payload }),
         env: process.env,
         timeout: ((hook.timeout ?? 5) + 1) * 1000,
@@ -794,7 +798,8 @@ const playHeldCalls = (calls: ScriptedToolCall[], usage: object, done: () => voi
     out({ type: "assistant", message: { id: `msg-${id}`, content: [{ type: "tool_use", id, name: call.name, input: call.input }], usage } });
     event({ type: "message_stop" });
     const answer = () => {
-      out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, is_error: !call.ok, content: call.output ?? "" }] } });
+      const reply = call.server ? mcpToolCall(call.server, call.name, call.input) : { ok: call.ok, content: call.output ?? "" };
+      out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, is_error: !reply.ok, content: reply.content }] } });
       // A model takes a moment to write its next call; back-to-back frames would only test the coalescing.
       setTimeout(() => next(index + 1), 600);
     };
@@ -897,6 +902,8 @@ const playTurn = (prompt: JsonValue, late = false) => {
       if (process.env.FAKE_CLAUDE_PARTIAL_FAILS) {
         out({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "half an answer" } } });
       }
+      // an MCP server's question still open when the launch fails
+      if (process.env.FAKE_CLAUDE_ELICIT) out({ type: "control_request", request_id: "elicit-1", request: { subtype: "elicitation", ...JSON.parse(process.env.FAKE_CLAUDE_ELICIT) } });
       process.stderr.write("claude: API error (503): service temporarily unavailable\n");
       process.exit(5);
     }
@@ -959,7 +966,11 @@ const playTurn = (prompt: JsonValue, late = false) => {
     return;
   }
 
+  if (process.env.FAKE_CLAUDE_USES_CLOUD_COMPUTER === "1") useCloudComputer();
   if (mode === "hang") {
+    if (process.env.FAKE_CLAUDE_ELICIT) {
+      out({ type: "control_request", request_id: "elicit-1", request: { subtype: "elicitation", ...JSON.parse(process.env.FAKE_CLAUDE_ELICIT) } });
+    }
     const release = process.env.FAKE_CLAUDE_RELEASE;
     const finishGate = process.env.FAKE_CLAUDE_FINISH_GATE;
     const held = setInterval(() => {
@@ -1020,7 +1031,6 @@ const playTurn = (prompt: JsonValue, late = false) => {
     });
   }
 
-  if (process.env.FAKE_CLAUDE_USES_CLOUD_COMPUTER === "1") useCloudComputer();
   if (process.env.FAKE_CLAUDE_CONNECT_APPS) connectApps(process.env.FAKE_CLAUDE_CONNECT_APPS.split(",").filter(Boolean));
 
   let replyParts = replyForPrompt(prompt) ?? nextScriptedReply();
@@ -1247,6 +1257,10 @@ process.stdin.on("data", (c) => {
     try {
       prompt = JSON.parse(line);
     } catch {
+      continue;
+    }
+    if ((prompt as { type?: unknown } | null)?.type === "control_response") {
+      if (process.env.FAKE_CLAUDE_CONTROL_LOG) appendFileSync(process.env.FAKE_CLAUDE_CONTROL_LOG, `${line}\n`);
       continue;
     }
     if (turnRunning || lateTurnWaiting) {

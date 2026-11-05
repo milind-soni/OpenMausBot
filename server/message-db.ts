@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type StatementSync } from "node:sqlite";
 
 import { DATA_DIR } from "./config.ts";
 import { peerProvenanceAuthor, type WorkOrigin } from "./peer-provenance.ts";
 import type { ResolvedSender, SteerQueueReason } from "../shared/wire.ts";
 import type { Message } from "./store.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
+import { ensureMemoryIndex } from "./message-db-memory-index.ts";
 import { MessageSearchWorker } from "./message-search-worker.ts";
 import { searchMessagesInDatabase, type SearchHit } from "./message-search-query.ts";
 import type { Notification, NotificationLogEntry } from "../shared/notification.ts";
@@ -17,10 +18,15 @@ const DB_FILE = () => join(DATA_DIR, "messages.db");
 /** The rows the Today page reads, and among them the failed tool calls. JSON.stringify escapes every quote inside a
  * string value, so a stored row holds the bare text "ok":false only as a real key. */
 const WORK_KINDS = "kind IN ('activity', 'digest', 'options')";
+const CARD_KINDS = "kind IN ('secret', 'signin', 'connector')";
 const FAILED_CALL = "kind = 'activity' AND instr(json, '\"ok\":false') > 0";
 
 let handle: DatabaseSync | null = null;
 let handlePath: string | null = null;
+let handleCheckedAt = 0;
+let statements = new Map<string, StatementSync>();
+/** SQLite keeps writing to a database file deleted under it without an error, so the file is looked for again this often. */
+const FILE_RECHECK_MS = 1_000;
 let searchWorker: MessageSearchWorker | null = null;
 let closingSearch: Promise<void> = Promise.resolve();
 
@@ -53,6 +59,7 @@ function open(): DatabaseSync {
     CREATE INDEX IF NOT EXISTS messages_thread_at ON messages(thread_id, at);
     -- Partial, so no other query's plan can move onto them: only a statement that repeats the WHERE may use one.
     CREATE INDEX IF NOT EXISTS messages_work_at ON messages(kind, at) WHERE ${WORK_KINDS};
+    CREATE INDEX IF NOT EXISTS messages_cards_at ON messages(kind, at) WHERE ${CARD_KINDS};
     CREATE INDEX IF NOT EXISTS messages_failed_at ON messages(at) WHERE ${FAILED_CALL};
     CREATE TABLE IF NOT EXISTS thread_state (
       thread_id TEXT PRIMARY KEY,
@@ -95,32 +102,6 @@ function open(): DatabaseSync {
   ensureRecallIndex(db);
   ensureMemoryIndex(db);
   return db;
-}
-
-function ensureMemoryIndex(db: DatabaseSync): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS memory_files (
-      bot_id TEXT NOT NULL,
-      path TEXT NOT NULL,
-      text TEXT NOT NULL,
-      mtime_ms INTEGER NOT NULL,
-      bytes INTEGER NOT NULL,
-      PRIMARY KEY (bot_id, path)
-    );
-    CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
-      text, content='memory_files', content_rowid='rowid', tokenize='unicode61'
-    );
-    CREATE TRIGGER IF NOT EXISTS memory_fts_ai AFTER INSERT ON memory_files BEGIN
-      INSERT INTO memory_fts(rowid, text) VALUES (new.rowid, new.text);
-    END;
-    CREATE TRIGGER IF NOT EXISTS memory_fts_ad AFTER DELETE ON memory_files BEGIN
-      INSERT INTO memory_fts(memory_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
-    END;
-    CREATE TRIGGER IF NOT EXISTS memory_fts_au AFTER UPDATE ON memory_files BEGIN
-      INSERT INTO memory_fts(memory_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
-      INSERT INTO memory_fts(rowid, text) VALUES (new.rowid, new.text);
-    END;
-  `);
 }
 
 export function describeMissingFts5(error: unknown): Error | null {
@@ -166,14 +147,30 @@ const UPSERT_MESSAGE =
   "ON CONFLICT(thread_id, id) DO UPDATE SET at = excluded.at, role = excluded.role, kind = excluded.kind, " +
   "text = excluded.text, json = excluded.json";
 
+const ACTIVE_LEAF = "SELECT active_leaf_id FROM thread_state WHERE thread_id = ?";
 function db(): DatabaseSync {
-  if (handle && handlePath === DB_FILE() && existsSync(DB_FILE())) return handle;
+  const file = DB_FILE();
+  if (handle && handlePath === file && Date.now() - handleCheckedAt < FILE_RECHECK_MS) return handle;
+  if (handle && handlePath === file && existsSync(file)) {
+    handleCheckedAt = Date.now();
+    return handle;
+  }
   try {
     handle?.close();
   } catch {}
+  statements = new Map();
   handle = open();
-  handlePath = DB_FILE();
+  handlePath = file;
+  handleCheckedAt = Date.now();
   return handle;
+}
+
+/** One prepared statement per SQL text for the life of the open database. */
+function prepared(sql: string): StatementSync {
+  const database = db();
+  let statement = statements.get(sql);
+  if (!statement) statements.set(sql, statement = database.prepare(sql));
+  return statement;
 }
 
 let transactionDepth = 0;
@@ -224,7 +221,7 @@ export interface FollowupPayload {
   trigger?: UsageTrigger;
   origin?: WorkOrigin;
   queuedAt?: number;
-  rowId?: string;
+  rowId?: string; mentions?: string[];
 }
 export type FollowupStatus = "pending" | "dispatching" | "interrupted" | "cancelled";
 export interface ChatFollowup {
@@ -386,13 +383,9 @@ export interface ThreadRows {
 }
 
 export function readThread(threadId: string, legacyFile: string): ThreadRows {
-  const rows = db()
-    .prepare("SELECT json FROM messages WHERE thread_id = ? ORDER BY rowid")
-    .all(threadId) as Array<{ json: string }>;
+  const rows = prepared("SELECT json FROM messages WHERE thread_id = ? ORDER BY rowid").all(threadId) as Array<{ json: string }>;
   if (rows.length) {
-    const state = db()
-      .prepare("SELECT active_leaf_id FROM thread_state WHERE thread_id = ?")
-      .get(threadId) as { active_leaf_id: string | null } | undefined;
+    const state = prepared(ACTIVE_LEAF).get(threadId) as { active_leaf_id: string | null } | undefined;
     return { messages: rows.map(rowToMessage), activeLeafId: state?.active_leaf_id ?? null };
   }
   return importLegacy(threadId, legacyFile);
@@ -408,16 +401,12 @@ export interface ThreadTailRows extends ThreadRows {
 }
 
 export function readThreadTail(threadId: string, legacyFile: string, limit: number): ThreadTailRows {
-  const rows = db()
-    .prepare("SELECT json FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT ?")
-    .all(threadId, limit + 1) as Array<{ json: string }>;
+  const rows = prepared("SELECT json FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT ?").all(threadId, limit + 1) as Array<{ json: string }>;
   if (rows.length) {
     const hasMore = rows.length > limit;
     if (hasMore) rows.length = limit;
     rows.reverse();
-    const state = db()
-      .prepare("SELECT active_leaf_id FROM thread_state WHERE thread_id = ?")
-      .get(threadId) as { active_leaf_id: string | null } | undefined;
+    const state = prepared(ACTIVE_LEAF).get(threadId) as { active_leaf_id: string | null } | undefined;
     return { messages: rows.map(rowToMessage), activeLeafId: state?.active_leaf_id ?? null, hasMore };
   }
   return importLegacy(threadId, legacyFile);
@@ -459,9 +448,7 @@ function importLegacy(threadId: string, legacyFile: string): ThreadRows {
 }
 
 export function insertMessage(threadId: string, message: Message): void {
-  db()
-    .prepare(UPSERT_MESSAGE)
-    .run(threadId, message.id, message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message));
+  prepared(UPSERT_MESSAGE).run(threadId, message.id, message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message));
 }
 
 /** `relinked`: adds `messages` to a conversation that has rows; each row it names changes only its parentId, and an id it already has fails the whole import. */
@@ -490,9 +477,7 @@ export function appendMessage(threadId: string, message: Message): void {
 }
 
 export function updateMessage(threadId: string, message: Message): void {
-  db()
-    .prepare("UPDATE messages SET at = ?, role = ?, kind = ?, text = ?, json = ? WHERE thread_id = ? AND id = ?")
-    .run(message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message), threadId, message.id);
+  prepared("UPDATE messages SET at = ?, role = ?, kind = ?, text = ?, json = ? WHERE thread_id = ? AND id = ?").run(message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message), threadId, message.id);
 }
 
 export function workingGoalRunMessages(): Array<{ threadId: string; message: Message }> {
@@ -576,6 +561,25 @@ export function attentionRows(since: number): AttentionRow[] {
   ).all(since, since, since) as unknown as AttentionRow[];
 }
 
+/** Every card still open, oldest first, whenever it was asked. */
+export function openCardRows(): Array<{ threadId: string; id: string; at: number; card: string | null; fromBotId: string | null }> {
+  return db().prepare(
+    `SELECT thread_id AS threadId, id, at, json_extract(json, '$.card') AS card, json_extract(json, '$.from.botId') AS fromBotId FROM messages INDEXED BY messages_work_at WHERE ${WORK_KINDS} AND kind = 'options' ` +
+    "AND json_extract(json, '$.card.requestId') IS NOT NULL AND json_extract(json, '$.card.answered') IS NULL AND coalesce(json_extract(json, '$.card.dismissed'), 0) = 0 " +
+    "AND coalesce(json_extract(json, '$.card.expired'), 0) = 0 AND json_extract(json, '$.helperIntro') IS NULL AND json_extract(json, '$.inbox') IS NULL ORDER BY at",
+  ).all() as Array<{ threadId: string; id: string; at: number; card: string | null; fromBotId: string | null }>;
+}
+
+/** The conversations with a card asked since `since` that has not been answered, oldest first; the caller reads each card. */
+export function threadsWithCardsSince(since: number): string[] {
+  const rows = db().prepare(
+    `SELECT DISTINCT thread_id AS threadId FROM messages INDEXED BY messages_cards_at WHERE ${CARD_KINDS} AND at >= ? ` +
+    `UNION SELECT DISTINCT thread_id AS threadId FROM messages INDEXED BY messages_work_at WHERE ${WORK_KINDS} AND kind = 'options' AND at >= ? ` +
+    "AND json_extract(json, '$.card.requestId') IS NOT NULL AND json_extract(json, '$.card.answered') IS NULL AND coalesce(json_extract(json, '$.card.dismissed'), 0) = 0",
+  ).all(since, since) as Array<{ threadId: string }>;
+  return rows.map((row) => row.threadId);
+}
+
 /** Successful tool calls after a time whose row mentions `word` (case-insensitive), newest last. */
 export function successfulCallsMentioning(since: number, word: string): Array<{ at: number; name: string; input: string | null }> {
   return db().prepare(
@@ -600,12 +604,7 @@ export function requestSenders(keys: ReadonlyArray<{ threadId: string; id: strin
 }
 
 export function setActiveLeaf(threadId: string, leafId: string | null): void {
-  db()
-    .prepare(
-      "INSERT INTO thread_state (thread_id, active_leaf_id) VALUES (?, ?) " +
-        "ON CONFLICT(thread_id) DO UPDATE SET active_leaf_id = excluded.active_leaf_id",
-    )
-    .run(threadId, leafId);
+  prepared("INSERT INTO thread_state (thread_id, active_leaf_id) VALUES (?, ?) ON CONFLICT(thread_id) DO UPDATE SET active_leaf_id = excluded.active_leaf_id").run(threadId, leafId);
 }
 
 /** Each conversation's newest stored row, by its row number, and how many rows it has: what Send to My Cloud compares with what it sent. */
@@ -631,7 +630,7 @@ export function threadRowNumbers(threadId: string): Map<string, number> {
 
 /** The time on a conversation's last stored row, without reading the conversation. */
 export function lastRowAt(threadId: string): number | undefined {
-  const row = db().prepare("SELECT at FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1").get(threadId) as { at: number } | undefined;
+  const row = prepared("SELECT at FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1").get(threadId) as { at: number } | undefined;
   return row?.at;
 }
 
@@ -997,4 +996,5 @@ export function closeMessageDb(): void {
   } catch {}
   handle = null;
   handlePath = null;
+  statements = new Map();
 }
