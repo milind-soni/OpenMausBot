@@ -19,7 +19,7 @@ import { DATA_ROUTES, type DataSheet, type DataTable } from "../../shared/data-s
 import type { NotificationLogEntry } from "../../shared/notification";
 import { isNotificationFeedAction, reduceNotificationFeed, type NotificationFeedAction } from "./notification-feed";
 import { bumpThreadUpdatedAt, mergeTaskStamps, rewindThreadUpdatedAt } from "./thread-stamps";
-import { botOpensTo, openBot, openThread, visibleNotificationThread } from "./thread-navigation";
+import { botOpensTo, closeTrayUnlessShown, closeUnpinnedTray, openBot, openThread, visibleNotificationThread, withRememberedTrayPin } from "./thread-navigation";
 import { patchGroupTask } from "./thread-edits";
 import type { EngineInstall } from "./engine-install";
 import { optimisticMessageId, optimisticUserMessage, sendArrived, sendReconciled } from "./optimistic-send";
@@ -584,7 +584,7 @@ export interface AppState {
   computerOpen: boolean;
   inspectorOpen: boolean;
   activityOpen: boolean;
-  /** Cross-bot, so a bot switch leaves it open; pinned, opening another side panel leaves it open too. */
+  /** Shared across bots. Unpinned, it closes on a chat switch and when another side panel opens; pinned, it stays open. */
   notificationsOpen: boolean;
   notificationsPinned: boolean;
   notifications: NotificationLogEntry[];
@@ -1082,7 +1082,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const room = state.groups.find((g) => g.id === action.id);
       if (room) {
         return {
-          ...state,
+          ...(action.id === state.selectedId && state.activeView === "chat" ? state : closeUnpinnedTray(state)),
           unreadDivider: openedUnreadDivider(state, room.threadId, room.unread, room.messages, room.lastReadMessageId),
           activeView: "chat",
           selectedId: action.id,
@@ -1093,7 +1093,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return updateBot(
         withMascotMotion(
           {
-            ...state,
+            ...(action.id === state.selectedId && state.activeView === "chat" ? state : closeUnpinnedTray(state)),
             unreadDivider: opened
               ? openedUnreadDivider(state, opened.threadId, threadOpensUnread(opened), visibleMessages(opened), threadReadCursor(opened))
               : state.unreadDivider,
@@ -1144,7 +1144,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return state;
     case "botAdded":
       return withMascotMotion({
-        ...state,
+        ...(action.preserveSelection || action.bot.id === state.selectedId ? state : closeUnpinnedTray(state)),
         // The HTTP response and its SSE broadcast race; fold both without showing the bot twice.
         bots: [action.bot.messages ? action.bot : { ...action.bot, messages: [] }, ...state.bots.filter((bot) => bot.id !== action.bot.id)],
         ...(action.preserveSelection ? {} : { activeView: "chat" as const, selectedId: action.bot.id }),
@@ -1727,17 +1727,19 @@ export function reducer(state: AppState, action: Action): AppState {
         activeLeafId: message.id,
       })), threadId, message.at, true);
     }
-    case "deleteTask":
-    case "newGroupTask":
     case "switchGroupTask":
+      return state.selectedId === action.groupId && state.activeView === "chat" ? closeTrayUnlessShown(state, action.groupId, action.threadId) : state;
+    case "newGroupTask":
+      return state.selectedId === action.groupId && state.activeView === "chat" ? closeUnpinnedTray(state) : state;
+    case "deleteTask":
     case "deleteGroupTask":
     case "regenerateTaskTitle":
       return state;
     case "newTask":
-      return action.cwd !== undefined ? state : { ...state, selectedId: action.botId, activeView: "chat" };
+      return action.cwd !== undefined ? state : { ...closeUnpinnedTray(state), selectedId: action.botId, activeView: "chat" };
     case "switchTask": {
       const { [action.threadId]: _old, ...backgroundThreadEvents } = state.backgroundThreadEvents;
-      return updateBot({ ...state, backgroundThreadEvents, selectedId: action.botId, activeView: "chat", revealThread: { threadId: action.threadId, nonce: (state.revealThread?.nonce ?? 0) + 1 } }, action.botId,
+      return updateBot({ ...closeTrayUnlessShown(state, action.botId, action.threadId), backgroundThreadEvents, selectedId: action.botId, activeView: "chat", revealThread: { threadId: action.threadId, nonce: (state.revealThread?.nonce ?? 0) + 1 } }, action.botId,
         (bot) => ({ ...bot, switchingTo: action.threadId }));
     }
     case "switchTaskFailed":
@@ -2111,7 +2113,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     ...bot,
     tasks: bot.tasks?.map((task) => ({ ...task, ...taskPatchFields(taskWrites.get(task.threadId)?.patch ?? {}) })),
   });
-  const [state, rawDispatch] = useReducer(reducer, initialState, restoreBotSettingsSection);
+  const [state, rawDispatch] = useReducer(reducer, initialState, (initial) => withRememberedTrayPin(restoreBotSettingsSection(initial)));
   const stateRef = useRef(state), selectionRevision = useRef(0);
   stateRef.current = state;
   const showThreads = useShowThreads();

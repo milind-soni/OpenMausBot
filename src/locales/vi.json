@@ -5208,6 +5208,8 @@
   "limits.resets": "đặt lại lúc {time}",
   "limits.windowAtLimit": "Đã chạm giới hạn",
   "limits.clearsOnReply": "Sẽ tự hết khi {engine} trả lời lại được.",
+  "limits.cardTitle": "Mức sử dụng {engine}",
+  "limits.checked": "đã kiểm tra {when}",
   "botAccess.share": "Chia sẻ",
   "botAccess.title": "Chia sẻ {bot}",
   "botAccess.addPlaceholder": "Thêm người theo tên hoặc email",

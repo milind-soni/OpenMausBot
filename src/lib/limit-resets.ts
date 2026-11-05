@@ -41,6 +41,9 @@ export function loadLimits(refresh = false): Promise<void> {
   return loading;
 }
 
+/** When the server last read the engines' usage; 0 before any read. */
+export const limitsCheckedAt = () => report?.checkedAt ?? 0;
+
 /** Every engine's limit, kept fresh while something on screen shows it. */
 export function useEngineLimits(): EngineLimit[] {
   const [engines, setEngines] = useState<EngineLimit[]>(() => report?.engines ?? []);

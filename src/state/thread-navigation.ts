@@ -1,3 +1,4 @@
+import { notificationTrayPinned } from "@/lib/notification-preferences";
 import type { Action, AppState } from "./store";
 import { openOwnTeamChat, teamChats } from "./team-chats";
 
@@ -127,4 +128,22 @@ export function openThread(
   if (group || owner) return true;
   dispatch({ type: "notice", notice: { kind: "thread-gone", botName: named?.name ?? null } });
   return false;
+}
+
+type NotificationTray = Pick<AppState, "notificationsOpen" | "notificationsPinned">;
+
+export function closeUnpinnedTray<T extends NotificationTray>(state: T): T {
+  return state.notificationsOpen && !state.notificationsPinned ? { ...state, notificationsOpen: false } : state;
+}
+
+/** Opening the chat already on screen is not leaving it. */
+export function closeTrayUnlessShown(state: AppState, id: string, threadId: string): AppState {
+  const chat = [...state.bots, ...state.groups].find((candidate) => candidate.id === id);
+  const shownThreadId = chat && "switchingTo" in chat ? chat.switchingTo ?? chat.threadId : chat?.threadId;
+  const shown = state.activeView === "chat" && id === state.selectedId && shownThreadId === threadId;
+  return shown ? state : closeUnpinnedTray(state);
+}
+
+export function withRememberedTrayPin<T extends NotificationTray>(state: T): T {
+  return notificationTrayPinned() ? { ...state, notificationsPinned: true } : state;
 }

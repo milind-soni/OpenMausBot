@@ -5019,6 +5019,8 @@
   "limits.resets": "renovação: {time}",
   "limits.windowAtLimit": "No limite",
   "limits.clearsOnReply": "O bloqueio termina automaticamente quando {engine} voltar a responder.",
+  "limits.cardTitle": "Uso do {engine}",
+  "limits.checked": "verificado {when}",
   "limits.dueOne": "1 automação roda antes disso",
   "limits.dueMany": "{count} automações rodam antes disso",
   "limits.moveAfterReset": "Mover para depois da renovação",

@@ -2927,6 +2927,8 @@
   "limits.resets": "wird {time} zurückgesetzt",
   "limits.windowAtLimit": "Am Limit",
   "limits.clearsOnReply": "Löst sich von selbst, sobald {engine} wieder antwortet.",
+  "limits.cardTitle": "{engine}-Nutzung",
+  "limits.checked": "geprüft {when}",
   "mapComposer.willSendViaChief": "Geht an {name}, zum Weitergeben an die Bots, die es betrifft",
   "mapComposer.sentViaChief": "Gesendet an {name} zum Weitergeben",
   "canvas.addToMap": "Zur Teamkarte hinzufügen",
