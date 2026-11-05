@@ -404,8 +404,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     const detectPlanLane = async (): Promise<"maus" | "legacy"> => {
       if (!planAuth) return "maus";
       if (config.authFlow === "device") return "legacy";
-      // Store presence, never planAuth calls: the lane probe runs on every snapshot and must
-      // stay invisible to callers that count controller access (and planAuth may be unavailable).
+      // A maus credential store wins even alongside codex's auth.json (hybrid resolves to maus).
       if (existsSync(join(planDirectory, "credentials.json"))) return "maus";
       if (existsSync(join(planDirectory, "codex", "auth.json"))) return "legacy";
       return "maus";
@@ -430,8 +429,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         // Non-plan instances and legacy-lane plan instances both read the catalog through Codex itself.
         if (!(planAuth && planUnavailable)) {
           try {
+            const generation = planGeneration;
             const resolved = await readCodexModelCatalog(catalogEnv, fetch, config.cli);
-            if (resolved.options.length) models = resolved; else unconfirmedModelCatalog(models);
+            if (generation === planGeneration && !planSigningOut && !disposed) {
+              if (resolved.options.length) models = resolved; else unconfirmedModelCatalog(models);
+            }
           } catch { unconfirmedModelCatalog(models); }
         }
       }
@@ -601,7 +603,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const env = childEnv();
         const launchedLogin = chatgptTurn ? storedCodexLogin(env) : null;
         if (planToken) env.OPENMAUSBOT_CHATGPT_TOKEN = planToken;
-        const appServerArgs = ["app-server", ...(plan ? chatgptPlanCodexArgs() : config.managed ? managedCodexArgs(config.managed) : codexLocalProviderArgs(env, turn.model)), ...codexToolSurfaceArgs(),
+        const appServerArgs = ["app-server", ...(plan && planLane === "maus" ? chatgptPlanCodexArgs() : config.managed ? managedCodexArgs(config.managed) : codexLocalProviderArgs(env, turn.model)), ...codexToolSurfaceArgs(),
           // Native shell snapshots can restore variables the shell policy removed.
           ...(turn.toolScope === undefined ? [] : ["-c", "features.shell_snapshot=false"]),
           // A guest-driven turn: no shell, no file reads (-c wins over config files).
@@ -1599,10 +1601,15 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       if (planLane === "legacy") {
         // Codex owns the credentials (device-code sign-in): report what Codex itself sees.
         const authenticated = await codexLoginStatus(config.cli, env) === "signed-in";
+        if (authenticated && loginRejected()) {
+          return { state: "available", version, authenticated: false, reason: CODEX_SIGN_IN_EXPIRED,
+            update: await codexReleaseUpdate(version, config.cli), billing: "subscription", chatgptPlan: true };
+        }
         const email = authenticated ? await codexAccountEmail(config.cli, env) : null;
         return {
           state: "available", version, chatgptPlan: true, billing: "subscription", authenticated,
           ...(email ? { account: { email } } : {}),
+          update: await codexReleaseUpdate(version, config.cli),
           ...(planWarning ? { warning: { title: "Check ChatGPT connection", message: planWarning } } : {}),
         };
       }
@@ -1706,35 +1713,34 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     },
     cancelAuthentication: () => (plan && config.authFlow === "device" ? authentication.cancel() : (planAuth ?? authentication).cancel()),
     signOut: async () => {
-      if (plan && config.authFlow === "device") {
-        planSigningOut = true;
-        planGeneration++;
-        try {
-          const stopped = await Promise.all([...active.values()].map(({ stop }) => stop()));
-          if (stopped.some(value => !value)) throw new Error("A ChatGPT task could not stop safely. Stop the task before signing out.");
-          models = { default: "", options: [] };
-          await authentication.signOut();
-          planWarning = undefined;
-        } finally { planSigningOut = false; }
-        return;
-      }
-      if (!planAuth) {
+      if (!plan || !planAuth) {
         const mark = loginMark();
         await authentication.signOut();
         loginAccepted(mark);
         return;
       }
+      // Guards go up synchronously, before any await: nothing sneaks a turn or sign-in past a sign-out in progress.
       planSigningOut = true;
       planGeneration++;
       try {
         const stopped = await Promise.all([...active.values()].map(({ stop }) => stop()));
         if (stopped.some(value => !value)) throw new Error("A ChatGPT task could not stop safely. Stop the task before signing out.");
         models = { default: "", options: [] };
-        await planAuth.signOut();
-        planWarning = undefined;
-      } catch (error) {
-        if ((error as { code?: string }).code !== "chatgpt_revocation_unconfirmed") throw error;
-        planWarning = (error as Error).message;
+        // Codex-owned credentials (device lane) revoke through Codex; maus-owned through the plan controller.
+        if (await detectPlanLane() === "legacy") {
+          const mark = loginMark();
+          await authentication.signOut();
+          loginAccepted(mark);
+          planWarning = undefined;
+          return;
+        }
+        try {
+          await planAuth.signOut();
+          planWarning = undefined;
+        } catch (error) {
+          if ((error as { code?: string }).code !== "chatgpt_revocation_unconfirmed") throw error;
+          planWarning = (error as Error).message;
+        }
       } finally { planSigningOut = false; }
     },
     snapshot,

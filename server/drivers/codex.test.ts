@@ -2038,6 +2038,11 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     process.env.FAKE_CODEX_INTERRUPT_SILENT = "1";
     process.env.FAKE_CODEX_INTERRUPT_GRACE_MS = "60";
     await create({ authMode: "chatgpt-plan", mode: "approval" });
+    // The store-presence lane discriminator needs the maus credential store to exist for a
+    // signed-in plan account; the mocked controller never writes one.
+    const planStore = join(DATA_DIR, "providers", "chatgpt-plan", createHash("sha256").update("codex-test").digest("hex"));
+    mkdirSync(planStore, { recursive: true, mode: 0o700 });
+    writeFileSync(join(planStore, "credentials.json"), JSON.stringify({ clientId: "test-client", subject: "test", email: "test@example.test", hostId: "test-host" }));
     await instance.adapter.sendTurn({ threadId: "plan-running", text: "Continue", model: catalog.default });
     await recorder.until(event => event.type === "request.opened");
     const signingOut = instance.signOut!();

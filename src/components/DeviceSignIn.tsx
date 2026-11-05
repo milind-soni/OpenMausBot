@@ -230,11 +230,15 @@ export function DeviceSignIn({ instanceId, browserPkce = false, provider = "code
   const switchToDevice = async () => {
     setSwitching(true);
     setError(null);
+    let flipped = false;
     try {
       await api(`${base}/start`, { method: "POST", body: JSON.stringify({ method: "device" }) });
+      flipped = true;
       await refreshInstances();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : failed);
+      setError(cause instanceof ApiError ? cause.message
+        : flipped ? t("engineSetup.chatgpt.switchRefreshFailed")
+        : cause instanceof Error ? cause.message : failed);
     } finally { setSwitching(false); }
   };
 
