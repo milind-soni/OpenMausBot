@@ -25,7 +25,7 @@ import type { MemoryUpkeep } from "../memory-upkeep.ts";
 import { phoneAppsFor } from "../phones/access.ts";
 import { profileSnapshot } from "../profile-revision.ts";
 import { recordProfileChange } from "../profile-versions.ts";
-import { memberBotPatchViolation, requestSource, type RequestAuth } from "../request-auth.ts"; import { defaultBotPatchRefusal, ownsDefaultBot } from "../default-bot.ts";
+import { memberBotPatchViolation, movedBotSetting, requestSource, type RequestAuth } from "../request-auth.ts"; import { defaultBotPatchRefusal, ownsDefaultBot } from "../default-bot.ts";
 import type { RoutineManager } from "../routines.ts";
 import type { SessionRegistry } from "../sessions.ts";
 import { parseConnectorTools } from "../connector-tools.ts";
@@ -74,6 +74,8 @@ export interface BotPatchRouteDeps {
   forgetTemporaryBrowser(botId: string): Promise<void>;
   /** What this session may do with the bot: off a Team Cloud a member chats with every bot they see. */
   levelOf(auth: RequestAuth, botId: string): "none" | "view" | "chat" | "edit";
+  /** A phone moving its bots in under the owner's grant: the bots it brought take the bounded move settings. */
+  movesIn?(auth: RequestAuth, botId: string): boolean;
   /** A Team Cloud, where a bot's sharing follows its visibility. */
   team: boolean;
   /** The bot's conversations the main-thread resolver may pick: a Team Cloud keeps only team-visible ones. */
@@ -103,10 +105,13 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if ((auth.kind === "session" && !auth.scopes.includes("admin")) || pairedDevice) {
         const session = auth.kind === "session" ? auth.session : undefined;
         const level = pairedDevice ? "chat" : deps.levelOf(auth, m[1]);
-        const field = memberBotPatchViolation(body, level === "none" ? "chat" : level, ownsDefaultBot(store.bot(m[1]), session?.email), session?.membershipAuthority === "team");
+        const moving = pairedDevice && deps.movesIn?.(auth, m[1]) === true;
+        const field = moving ? movedBotSetting(body) : memberBotPatchViolation(body, level === "none" ? "chat" : level, ownsDefaultBot(store.bot(m[1]), session?.email), session?.membershipAuthority === "team");
         if (field) {
           return json(res, 403, {
-            error: pairedDevice
+            error: moving
+              ? `forbidden: a phone's move may bring a bot's profile, look, model, voice and memory settings, not "${field}"; set that on the host computer`
+              : pairedDevice
               ? `forbidden: a paired device may change how a bot looks, not "${field}"; change it on the host computer`
               : level === "edit" ? `forbidden: "${field}" is an admin's to change`
                 : level === "view" ? `forbidden: you can view this bot, not change "${field}"`

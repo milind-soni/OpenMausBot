@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -30,6 +30,16 @@ function cloud(owner = true, language?: string) {
 }
 
 describe("POST /api/cloud-send/arrived", () => {
+  it("a phone's arrival is kept as a phone's, and never replaces a computer's record", async () => {
+    const { dataDir, ask, deps } = cloud();
+    Object.assign(deps, { phone: () => true, owner: () => ({ person: "", name: "Omkar" }) });
+    expect(await ask({ v: 1, computer: "Omkar's iPhone", webhooks: [] })).toEqual({ status: 200, body: { v: 1, told: 0 } });
+    expect(movedFrom(dataDir)).toMatchObject({ computer: "Omkar's iPhone", phone: true });
+    writeFileSync(join(dataDir, "moved-from.json"), JSON.stringify({ computer: "Studio Mac", at: 5, told: ["w1"] }));
+    expect((await ask({ v: 1, computer: "Omkar's iPhone", webhooks: [] })).status).toBe(200);
+    expect(movedFrom(dataDir)).toEqual({ computer: "Studio Mac", at: 5, told: ["w1"] });
+  });
+
   it("has the person told what stayed behind, in their language, once the move is recorded", async () => {
     const { dataDir, ask, deps } = cloud(true, "de");
     const told: Array<string | undefined> = [];

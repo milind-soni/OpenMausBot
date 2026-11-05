@@ -33,6 +33,6 @@ export function createOwnHome({ facts, dataDir }: { facts(): OwnServerFacts; dat
   return {
     owner: (auth: RequestAuth): auth is Extract<RequestAuth, { kind: "session" }> => ownServerOwner(facts(), auth),
     takesMove: () => oneOwner(facts()),
-    here: () => oneOwner(facts()) && movedFrom(dataDir) !== null,
+    here: () => { const from = movedFrom(dataDir); return oneOwner(facts()) && from !== null && from.phone !== true; },
   };
 }

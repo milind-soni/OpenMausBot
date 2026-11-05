@@ -51,3 +51,15 @@ describe("a server of one person's own", () => {
     expect(home.takesMove()).toBe(false);
   });
 });
+
+describe("a phone's move", () => {
+  it("does not make this computer a home other computers work for", () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-own-home-"));
+    dirs.push(dataDir);
+    const home = createOwnHome({ dataDir, facts: () => solo });
+    writeFileSync(join(dataDir, "moved-from.json"), JSON.stringify({ computer: "Omkar's iPhone", at: 1, told: [], phone: true }));
+    expect(home.here()).toBe(false);
+    writeFileSync(join(dataDir, "moved-from.json"), JSON.stringify({ computer: "Studio Mac", at: 1, told: [] }));
+    expect(home.here()).toBe(true);
+  });
+});
