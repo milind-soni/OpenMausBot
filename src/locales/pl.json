@@ -5618,8 +5618,6 @@
   "call.mode.turnsHint": "Ty mówisz, a potem bot odpowiada własnym głosem. Nasłuchiwanie odbywa się na tym komputerze.",
   "call.mode.live": "Na żywo",
   "call.mode.liveHint": "Mów naturalnie i przerywaj w dowolnym momencie; bot nadal wykonuje pracę.",
-  "call.capability.turnsNeedMac": "Rozmowy po kolei wymagają aplikacji na Maca",
-  "call.capability.turnsNeedMacReason": "Nasłuchują za pomocą rozpoznawania mowy na urządzeniu, które ma tylko aplikacja na Maca.",
   "call.capability.turnsOnThisComputer": "Rozmowy po kolei działają z botami na tym Macu",
   "call.capability.turnsOnThisComputerReason": "Nasłuchują za pomocą rozpoznawania mowy samego Maca, z którego mogą korzystać tylko boty na tym Macu.",
   "call.capability.unavailable": "Rozmowy nie są dostępne na tym urządzeniu",

@@ -6044,8 +6044,6 @@
   "call.mode.turnsHint": "내가 말하면 봇이 자기 목소리로 답해요. 듣기는 이 컴퓨터에서 처리돼요.",
   "call.mode.live": "실시간",
   "call.mode.liveHint": "자연스럽게 말하고 언제든 끼어들 수 있어요. 일은 여전히 봇이 해요.",
-  "call.capability.turnsNeedMac": "번갈아 말하는 통화는 Mac 앱이 필요해요",
-  "call.capability.turnsNeedMacReason": "기기 내 음성 인식으로 듣는데, 이 기능은 Mac 앱에만 있어요.",
   "call.capability.turnsOnThisComputer": "번갈아 말하는 통화는 이 Mac의 봇과 작동해요",
   "call.capability.turnsOnThisComputerReason": "Mac 자체 음성 인식으로 듣는데, 이 Mac의 봇만 쓸 수 있어요.",
   "call.capability.unavailable": "이 기기에서는 통화를 쓸 수 없어요",

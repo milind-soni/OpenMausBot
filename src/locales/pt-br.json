@@ -5454,8 +5454,6 @@
   "call.mode.turnsHint": "Você fala e depois o bot responde com a própria voz. A escuta fica neste computador.",
   "call.mode.live": "Ao vivo",
   "call.mode.liveHint": "Fale naturalmente e interrompa quando quiser; o bot continua fazendo o trabalho.",
-  "call.capability.turnsNeedMac": "Chamadas por turnos precisam do app para Mac",
-  "call.capability.turnsNeedMacReason": "Elas usam o reconhecimento de fala do dispositivo, disponível apenas no app para Mac.",
   "call.capability.turnsOnThisComputer": "Chamadas por turnos funcionam com os bots deste Mac",
   "call.capability.turnsOnThisComputerReason": "Elas usam o reconhecimento de fala do próprio Mac, que só os bots deste Mac conseguem usar.",
   "call.capability.unavailable": "Chamadas não estão disponíveis neste dispositivo",
