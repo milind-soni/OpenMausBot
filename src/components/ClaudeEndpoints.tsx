@@ -5,7 +5,6 @@ import { api, useStore, type InstanceInfo } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { Select } from "./Select";
 import { KEY_FIELD } from "./keys/KeyRow";
 
 type Engine = "claude" | "codex";
@@ -28,7 +27,6 @@ const draftOf = (instance: InstanceInfo): Draft => ({
 function EndpointForm({ instance, engine, onDone }: { instance?: InstanceInfo; engine: Engine; onDone: () => void }) {
   const { dispatch } = useStore();
   const official = OFFICIAL[engine];
-  const [provider, setProvider] = useState(instance && (instance.claudeEndpoint ?? instance.codexEndpoint)?.baseUrl !== official.url ? "custom" : "official");
   const [draft, setDraft] = useState<Draft>(instance ? draftOf(instance) : { ...EMPTY, name: official.name, url: official.url });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,17 +63,6 @@ function EndpointForm({ instance, engine, onDone }: { instance?: InstanceInfo; e
   return (
     <form data-claude-endpoint-form={engine === "claude" ? instance?.instanceId ?? "new" : undefined} data-codex-endpoint-form={engine === "codex" ? instance?.instanceId ?? "new" : undefined} className="flex flex-col gap-2 rounded-xl border border-hairline/50 bg-inset p-3"
       onSubmit={(event) => { event.preventDefault(); void save(); }}>
-      <label className="flex flex-col gap-1 text-[12px] font-medium text-ink">
-        {t("agentEndpoints.provider")}
-        <Select aria-label={t("agentEndpoints.provider")} value={provider} disabled={saving} onChange={event => {
-          const value = event.target.value;
-          setProvider(value);
-          setDraft(current => ({ ...current, token: "", ...(value === "official" ? { name: official.name, url: official.url } : { name: "", url: "" }) }));
-        }}>
-          <option value="official">{official.name}</option>
-          <option value="custom">{t("agentEndpoints.custom")}</option>
-        </Select>
-      </label>
       <p className="text-[12px] leading-4 text-ink-secondary">{t(engine === "codex" ? "agentEndpoints.responses" : "agentEndpoints.messages")}</p>
       <label className="flex flex-col gap-1 text-[12px] font-medium text-ink">
         {t("claudeEndpoints.name")}
@@ -83,7 +70,7 @@ function EndpointForm({ instance, engine, onDone }: { instance?: InstanceInfo; e
       </label>
       <label className="flex flex-col gap-1 text-[12px] font-medium text-ink">
         {t("claudeEndpoints.baseUrl")}
-        <input {...field("url")} type="url" maxLength={2048} readOnly={provider === "official"} placeholder={engine === "codex" ? "https://gateway.example.com/v1" : "https://gateway.example.com"} aria-label={t("claudeEndpoints.baseUrl")} className={cn(INPUT, "font-mono")} />
+        <input {...field("url")} type="url" maxLength={2048} placeholder={official.url} aria-label={t("claudeEndpoints.baseUrl")} className={cn(INPUT, "font-mono")} />
       </label>
       <label className="flex flex-col gap-1 text-[12px] font-medium text-ink">
         {t("claudeEndpoints.token")}

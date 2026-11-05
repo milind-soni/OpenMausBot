@@ -33,10 +33,13 @@ async function input(label: string, value: string) {
 it.each([
   { Component: ClaudeEndpoints, provider: "Anthropic", url: "https://api.anthropic.com", path: "/api/instances/claude-endpoint" },
   { Component: CodexEndpoints, provider: "OpenAI", url: "https://api.openai.com/v1", path: "/api/instances/codex-endpoint" },
-])("saves an official $provider API key without an OAuth step", async ({ Component, provider, url, path }) => {
+])("saves an official $provider API key without an OAuth step", async ({ Component, url, path }) => {
   await act(async () => root.render(createElement(Component)));
   await click("Add endpoint");
-  expect(container.querySelector("select")?.textContent).toContain(provider);
+  expect(container.querySelector("select")).toBeNull();
+  const baseUrl = container.querySelector<HTMLInputElement>('input[aria-label="Base URL"]')!;
+  expect(baseUrl.value).toBe(url);
+  expect(baseUrl.readOnly).toBe(false);
   expect(container.querySelector('input[aria-label="Model"]')).toBeNull();
   expect(container.querySelector("details")).toBeNull();
   await input("Token", "fixture-api-key");
@@ -45,14 +48,15 @@ it.each([
   expect(fixture.posts[0]).toMatchObject({ path, body: { baseUrl: url, token: "fixture-api-key" } });
   expect(fixture.posts[0].body).not.toHaveProperty("model");
 });
-it("saves a CLIProxyAPI endpoint without provider-level model selection", async () => {
-  await act(async () => root.render(createElement(CodexEndpoints)));
+it.each([
+  { Component: ClaudeEndpoints, path: "/api/instances/claude-endpoint" },
+  { Component: CodexEndpoints, path: "/api/instances/codex-endpoint" },
+])("saves a custom URL directly from $path", async ({ Component, path }) => {
+  await act(async () => root.render(createElement(Component)));
   await click("Add endpoint");
-  const select = container.querySelector("select")!;
-  await act(async () => { select.value = "custom"; select.dispatchEvent(new Event("change", { bubbles: true })); });
   await input("Name", "My CLIProxyAPI");
   await input("Base URL", "https://gateway.example/v1");
   await input("Token", "fixture-proxy-key");
   await click("Save");
-  expect(fixture.posts).toEqual([{ path: "/api/instances/codex-endpoint", body: { displayName: "My CLIProxyAPI", baseUrl: "https://gateway.example/v1", token: "fixture-proxy-key" } }]);
+  expect(fixture.posts).toEqual([{ path, body: { displayName: "My CLIProxyAPI", baseUrl: "https://gateway.example/v1", token: "fixture-proxy-key" } }]);
 });
