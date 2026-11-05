@@ -108,8 +108,7 @@ export class E2ERegistry {
   descriptor(deviceId: string | null): E2EDescriptor | null {
     if (!this.#key) return null;
     const device = deviceId ? this.#devices.records().find((candidate) => candidate.id === deviceId) : null;
-    const relay = this.#relay && device?.routes !== "local" ? this.#relay : undefined;
-    return descriptorFor(this.#key.publicKey, relay);
+    return descriptorFor(this.#key.publicKey, this.#relay ?? undefined, device?.routes === "local" ? "local" : undefined);
   }
 
   /** One WebSocket that just opened, on a direct route or a relay data socket. Null when refused. */

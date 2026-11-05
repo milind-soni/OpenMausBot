@@ -309,7 +309,7 @@ describe("the sidecar's end-to-end connection", () => {
     await expect(viaRelay(state, deviceToken)).rejects.toEqual(new SessionClosed(4404));
     const session = await direct(state, deviceToken);
     const endpoints = json(await http(session, "GET", "/api/companion/endpoints", { token: deviceToken }));
-    expect(endpoints.e2e).toEqual({ v: 1, k: state.e2e.descriptor!.k });
+    expect(endpoints.e2e).toEqual({ v: 1, k: state.e2e.descriptor!.k, routes: "local" });
     session.shutdown();
     await control("PUT", `/devices/${deviceId}/routes`, { routes: "any" });
     await waitFor(() => relay.admitted(hid).has(adm));
