@@ -1675,7 +1675,7 @@ async function switchLocalEnvironmentTo(targetDir, targetId, quiet = false) {
 }
 
 async function switchEnvironment(id) {
-  if (id === LOCAL_ID && cleanWorkspace.profile() && homeWindow.cloudOrigin()) return void await homeWindow.openProfile(cleanWorkspace.profile()); if ((id === environmentsState.activeId && !homeWindow.asking()) || (id !== LOCAL_ID && !environmentsState.environments.some((entry) => entry.id === id))) return;
+  if (id === LOCAL_ID && homeWindow.cloudOrigin() && cleanWorkspace.profile()) return void await homeWindow.openProfile(cleanWorkspace.profile()); if ((id === environmentsState.activeId && !homeWindow.asking()) || (id !== LOCAL_ID && !environmentsState.environments.some((entry) => entry.id === id))) return;
   homeWindow.cancel();
   const entry = environmentsState.environments.find((candidate) => candidate.id === id);
   if (entry?.team || entry?.cloud) return void await showHome({ place: entry.team ? { team: entry.team.id, name: entry.name } : { cloud: entry.cloud.id, name: entry.name } });
