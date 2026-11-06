@@ -122,10 +122,10 @@ it("a move carries the automations, files, memory, fields and skills, and its ch
     importedAt: new Date().toISOString(), warnings: [] } }));
   mkdirSync(join(fx.root, "desktop", ".claude", "skills", "tidy-notes"), { recursive: true });
   writeFileSync(join(fx.root, "desktop", ".claude", "skills", "tidy-notes", "SKILL.md"), skillMd("tidy-notes", "Tidy the notes."));
-  expect((await local("PATCH", "/api/config", { features: { claudeUserSkills: true, skillsLibrary: true } })).status).toBe(200);
-  expect((await onCloud("PATCH", "/api/config", { features: { skillsLibrary: true } })).status).toBe(200);
-  expect((await local("POST", "/api/skills-library", { text: skillMd("weekly-digest", "Write the weekly digest.") })).status).toBeLessThan(300);
-  expect((await local("PUT", `/api/bots/${nova.id}/skills-library`, { skills: ["weekly-digest"] })).status).toBe(200);
+  expect((await local("PATCH", "/api/config", { features: { claudeUserSkills: true } })).status).toBe(200);
+  expect((await local("POST", "/api/skills", { name: "weekly-digest", description: "Write the weekly digest.", instructions: "Sum up the week." })).status).toBe(201);
+  expect((await local("PUT", `/api/skills/${encodeURIComponent("library:weekly-digest")}/access`, { who: "bots", bots: [nova.id] })).status).toBe(200);
+  expect((await local("POST", "/api/skills", { name: "standup", description: "Write the standup.", instructions: "List what is done and next." })).status).toBe(201);
 
   // Bot files, one of which My Cloud already has another version of.
   mkdirSync(join(dataDir("desktop"), "workspaces", nova.id, "drafts"), { recursive: true });
@@ -218,9 +218,11 @@ it("a move carries the automations, files, memory, fields and skills, and its ch
   expect((await rows(onCloud, nova.threadId)).find((row) => row.text?.length === longRow.length)?.text).toBe(longRow);
 
   // Skill extras.
-  const skillsThere = (await onCloud("GET", `/api/bots/${nova.id}/skills`)).body as { skills: Array<{ name: string; origin?: string }>; assignedSkills?: string[] };
+  const skillsThere = (await onCloud("GET", `/api/bots/${nova.id}/skills`)).body as { skills: Array<{ name: string; origin?: string }> };
   expect(skillsThere.skills.filter((skill) => skill.origin === "imported").map((skill) => skill.name).sort()).toEqual(["invoice-check", "tidy-notes"]);
-  expect(skillsThere.assignedSkills).toEqual(["weekly-digest"]);
+  const libraryThere = ((await onCloud("GET", "/api/skills")).body.skills as Array<{ id: string; who: string; bots: string[] }>);
+  expect(libraryThere.find((skill) => skill.id === "library:weekly-digest")).toMatchObject({ who: "bots", bots: [nova.id] });
+  expect(libraryThere.find((skill) => skill.id === "library:standup")).toMatchObject({ who: "all" });
   expect(readFileSync(join(dataDir("cloud"), "imported-skills", "invoice-check", "references", "rules.md"), "utf8")).toBe("Totals must add up.\n");
 
   // Files: a conflict keeps both, nothing excluded goes, and no part is left over.

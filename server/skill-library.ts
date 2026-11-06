@@ -6,16 +6,12 @@ import { mkdirSync, renameSync } from "node:fs";
 import { z } from "zod";
 
 import { writeFileAtomic } from "./atomic.ts";
-import { DATA_DIR, type AppConfig } from "./config.ts";
+import { DATA_DIR } from "./config.ts";
 import { githubSkillOriginSchema, skillFolderDigest, skillFolderRecordSchema, writeSkillFolder } from "./skill-folder.ts";
 import { entryExistsWithoutFollowing } from "./skill-storage.ts";
 import type { GitHubSkillOrigin } from "../shared/skill-import.ts";
 import { isSkillName, parseSkillMd, SKILL_FILE_MAX_BYTES } from "../shared/skill-md.ts";
 import type { SkillPackageStamp } from "./skills.ts";
-
-export function skillsLibraryEnabled(cfg: AppConfig): boolean {
-  return cfg.features?.skillsLibrary === true;
-}
 
 export interface SkillManifest {
   id: string;
@@ -148,6 +144,8 @@ export interface SkillLibraryEntry {
   reviewState: LibraryReviewState;
   /** Available to every existing and future bot, unless a private skill shadows it. */
   everyBot?: boolean;
+  /** The bot whose learned skill this was, when it came from one. */
+  learnedBy?: string;
   license?: string;
   compatibility?: string;
   tags?: string[];
@@ -176,6 +174,9 @@ export interface LibrarySkillListing {
   description: string;
   enabled: boolean;
   everyBot: boolean;
+  /** Approved by a person: switched on for whoever may use it. */
+  approved: boolean;
+  learnedBy?: string;
   editable: false;
   source: string;
   sha256: string;
@@ -197,6 +198,7 @@ const skillLibraryEntrySchema = z.object({
   importedAt: z.string(),
   reviewState: z.enum(["approved", "disabled"]),
   everyBot: z.boolean().optional(),
+  learnedBy: z.string().max(200).optional(),
   license: z.string().optional(),
   compatibility: z.string().optional(),
   tags: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,23}$/)).max(8).optional(),
@@ -287,6 +289,8 @@ function librarySkillListing(root: string, entry: SkillLibraryEntry): LibrarySki
     description: entry.description,
     enabled: entry.reviewState === "approved" && intact,
     everyBot: entry.everyBot === true,
+    approved: entry.reviewState === "approved",
+    ...(entry.learnedBy ? { learnedBy: entry.learnedBy } : {}),
     editable: false,
     source: entry.source,
     sha256: entry.sha256,
@@ -320,6 +324,26 @@ export function setLibrarySkillEveryBot(
   return librarySkillListing(root, entry);
 }
 
+/** Switching a skill on approves the bytes stored now; a copy that changed after it was added stays off. */
+export function setLibrarySkillAccess(
+  name: string,
+  access: { everyBot: boolean; on: boolean },
+  root: string = skillsLibraryRoot(),
+): LibrarySkillListing | { error: string } {
+  if (!isSkillName(name)) return { error: "invalid skill name" };
+  const indexRead = readSkillLibraryIndexState(root);
+  if ("error" in indexRead) return indexRead;
+  const entry = indexRead.index[name];
+  if (!entry) return { error: `no library skill named "${name}"` };
+  if (access.on && !libraryContentMatches(root, entry)) return { error: "its files changed after it was added — add it again" };
+  entry.reviewState = access.on ? "approved" : "disabled";
+  if (access.everyBot) entry.everyBot = true;
+  else delete entry.everyBot;
+  writeSkillLibraryIndex(root, indexRead.index);
+  skillLibraryEvents.emit("invalidate", { kind: "access", name });
+  return librarySkillListing(root, entry);
+}
+
 export function listLibrarySkills(root: string = skillsLibraryRoot()): LibrarySkillListing[] {
   return Object.values(readSkillLibraryIndex(root))
     .map((entry) => librarySkillListing(root, entry))
@@ -336,6 +360,8 @@ export function installLibrarySkill(input: {
   tags?: string[];
   warnings?: string[];
   reviewState?: LibraryReviewState;
+  everyBot?: boolean;
+  learnedBy?: string;
   package?: SkillPackageStamp;
   /** The files beside SKILL.md, from prepareSkillFolder; with them the skill is stored and checked as a whole folder. */
   files?: ReadonlyArray<{ path: string; content: string | Uint8Array; executable?: boolean }>;
@@ -368,6 +394,8 @@ export function installLibrarySkill(input: {
     sha256,
     importedAt: new Date().toISOString(),
     reviewState: input.reviewState ?? "disabled",
+    ...(input.everyBot ? { everyBot: true } : {}),
+    ...(input.learnedBy ? { learnedBy: input.learnedBy } : {}),
     ...(input.license ? { license: input.license } : {}),
     ...(input.compatibility ? { compatibility: input.compatibility } : {}),
     ...(tags?.length ? { tags } : {}),

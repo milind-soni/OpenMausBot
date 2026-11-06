@@ -521,7 +521,8 @@ describe("Apps pop-up", () => {
 
   it("is titled Apps and shows app tiles and the MCP servers section on one view", () => {
     const { html } = render();
-    expect(html).toContain(">Apps</h2>");
+    expect(html).toContain('id="plugins-title" data-screen-tab="apps" aria-selected="true"');
+    expect(html).toContain('data-screen-tab="skills" aria-selected="false"');
     expect(html).toContain("Connect an app or your own MCP server once. Then choose which bots may use it.");
     expect(html).toContain("glass-surface");
     expect(html).toContain("@container");
@@ -530,7 +531,8 @@ describe("Apps pop-up", () => {
     expect(html.indexOf('data-app-tile="slack"')).toBeLessThan(html.indexOf('data-app-tile="gmail"'));
     expect(html).toContain("MCP inventory");
     expect(html).toContain('data-embedded="true"');
-    expect(html).not.toContain('role="tab"');
+    expect(html.match(/role="tab"/g)).toHaveLength(2);
+    expect([...html.matchAll(/role="tab"[^>]*data-screen-tab="(\w+)"/g)].map((match) => match[1])).toEqual(["apps", "skills"]);
   });
 
   it("filters with chips, keeping the MCP chip on the store's surface", () => {

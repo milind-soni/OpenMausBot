@@ -23,19 +23,19 @@ describe("the bot panel's page registry", () => {
   it.each([
     ["overview", { tab: "details" }], ["identity", { tab: "details" }],
     ["soul", { tab: "details", page: "settings", anchor: "instructions", editInstructions: true }],
-    ["skills", { tab: "library", page: "skills" }], ["memory", { tab: "library", page: "memory" }], ["routines", { tab: "details", page: "routines" }],
+    ["skills", { tab: "details", page: "skills" }], ["memory", { tab: "library", page: "memory" }], ["routines", { tab: "details", page: "routines" }],
     ["access", { tab: "computer" }], ["model", { tab: "details", anchor: "model" }], ["permissions", { tab: "details", page: "settings", anchor: "approval" }],
     ["voice", { tab: "details" }], ["visibility", { tab: "details" }], ["history", { tab: "details" }], ["usage", { tab: "details" }], ["slack", { tab: "details" }],
   ] as const)("sends a %s link to %o", (section, target) => {
     expect(sectionTarget(section)).toEqual(target);
   });
 
-  it("draws the Simple pages on their tabs: settings on Details, what it keeps on Library, where it works on Computer", () => {
+  it("draws the Simple pages on their tabs: settings, apps and skills on Details, what it keeps on Library, where it works on Computer", () => {
     expect(SIMPLE_PAGES).toEqual(["settings", "apps", "routines", "memory", "skills", "folder", "browser", "where"]);
     const home = Object.fromEntries(SIMPLE_PAGES.map((page) => [page, PAGES[page].home]));
     expect(home).toEqual({
-      settings: "details", apps: "details", routines: "details",
-      memory: "library", skills: "library", folder: "library",
+      settings: "details", apps: "details", skills: "details", routines: "details",
+      memory: "library", folder: "library",
       browser: "computer", where: "computer",
     });
     expect(isSimplePage("mcp")).toBe(false);

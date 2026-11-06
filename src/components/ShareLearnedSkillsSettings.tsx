@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { cn } from "@/lib/cn";
-import { shareLearnedSkillsMode, skillAuthoringEnabled, skillsLibraryEnabled } from "@/lib/feature-flags";
+import { shareLearnedSkillsMode, skillAuthoringEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { SkillReviewSettings } from "./SkillReviewSettings";
@@ -16,7 +16,6 @@ export function ShareLearnedSkillsSettings() {
   const { state, dispatch } = useStore();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  if (!skillsLibraryEnabled(state.config)) return null;
   const authoring = skillAuthoringEnabled(state.config);
   const mode = shareLearnedSkillsMode(state.config);
 

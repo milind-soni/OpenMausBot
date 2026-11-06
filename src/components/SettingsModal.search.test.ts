@@ -78,4 +78,14 @@ describe("Settings search in Simple mode", () => {
     expect(scrolled.map((element) => element.getAttribute("data-settings-block"))).toContain("advanced-mode");
     expect(search().value).toBe("");
   });
+
+  it("finds Skills, which live beside Apps, and opens them there", () => {
+    type("s");
+    expect(host.querySelector("[data-settings-skills-result]")).toBeNull();
+    type("skills");
+    const result = host.querySelector<HTMLButtonElement>("[data-settings-skills-result]")!;
+    expect(result.textContent).toBe("Skills");
+    flushSync(() => result.click());
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "togglePlugins", open: true, surface: "skills" });
+  });
 });

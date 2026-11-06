@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { AppWindow, AudioLines, ChevronRight, FileText, ShieldCheck, Tag } from "lucide-react";
+import { AppWindow, AudioLines, BookOpen, ChevronRight, FileText, ShieldCheck, Tag } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { mcpServersForBot, useMcpServers } from "@/lib/mcp-servers";
 import { CALL_MODES, callModeHint, effectiveCallMode, setCallMode, useCallMode, type CallMode } from "@/lib/call-mode";
 import { callCapabilityHelp } from "@/lib/call-capability";
+import { useSkills } from "@/lib/skills";
 import { fishListeningReady, listensHere, speechBridge } from "@/lib/speech";
 import { firstSentence } from "@/lib/soul";
 import { currentTaskBot, useStore, type Bot } from "@/state/store";
@@ -43,6 +44,7 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
   const { state, dispatch, flushBotPatches } = useStore();
   const { capabilities, ready } = useDesktopCapabilities();
   const apps = useBotApps(bot);
+  const skillsOn = useSkills(bot.id).skills?.filter((skill) => skill.bots.includes(bot.id)).length;
   const { servers: allServers } = useMcpServers();
   const approval = useThreadApproval(currentTaskBot(bot));
   const storedCallMode = useCallMode();
@@ -171,6 +173,13 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
           title={t("botPanel.appsRow")}
           value={enabledApps.length > 0 ? enabledApps.join(", ") : t("botPanel.appsNoneYet")}
           onClick={() => onOpen?.("apps")}
+        />
+        <NavRow
+          data-panel-page="skills"
+          icon={BookOpen}
+          title={t("botPanel.skillsRow")}
+          value={skillsOn === undefined ? undefined : skillsOn > 0 ? t("botPanel.routinesOn", { count: skillsOn }) : t("botPanel.appsNoneYet")}
+          onClick={() => onOpen?.("skills")}
         />
         <label data-panel-row="job" className={cn(rowCls, "cursor-text")}>
           <RowIcon icon={Tag} />

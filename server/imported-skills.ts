@@ -40,6 +40,10 @@ const entrySchema = z.object({
   warnings: z.array(z.string()),
   license: z.string().optional(),
   compatibility: z.string().optional(),
+  /** Absent: every bot, now and later. "bots": only bots switched on one by one. "off": no bot. */
+  access: z.enum(["bots", "off"]).optional(),
+  /** The files a person accepted for every bot when the scan had flagged them. */
+  accepted: sha256Hex.optional(),
 });
 export type ImportedSkillEntry = z.infer<typeof entrySchema>;
 const indexSchema = z.record(z.string(), entrySchema);
@@ -271,7 +275,73 @@ export interface ImportedSkillView {
 
 function enabledFor(name: string, entry: ImportedSkillEntry, choices: Choices): boolean {
   if (choices.off.includes(name)) return false;
-  return entry.warnings.length === 0 || choices.on[name] === entry.filesSha256;
+  if (choices.on[name] === entry.filesSha256) return true;
+  if (entry.access) return false;
+  return entry.warnings.length === 0 || entry.accepted === entry.filesSha256;
+}
+
+function writeChoices(botId: string, choices: Choices): void {
+  mkdirSync(dirname(choicesPath(botId)), { recursive: true, mode: 0o700 });
+  writeFileAtomic(choicesPath(botId), `${JSON.stringify(choices, null, 2)}\n`, { mode: 0o600 });
+}
+
+/** Whether each bot uses the skill now: its own switch, then who the skill is for. */
+export function importedSkillUsers(name: string, botIds: readonly string[]): string[] {
+  const entry = readImportedSkills()[name];
+  if (!entry || !importedSkillIntact(name, entry)) return [];
+  return botIds.filter((botId) => enabledFor(name, entry, readChoices(botId)));
+}
+
+/** Who may use it, every bot's own switch reset to match: "bots" switches on exactly `chosen`. */
+export function setImportedSkillAccess(name: string, who: "all" | "bots" | "off", chosen: readonly string[], botIds: readonly string[]): { ok: true } | { error: string } {
+  const index = readImportedSkills();
+  const entry = index[name];
+  if (!entry) return { error: `no skill named "${name}" was brought in from this computer` };
+  if (who !== "off" && !importedSkillIntact(name, entry)) return { error: `"${name}" ${IMPORTED_CHANGED_WARNING}` };
+  for (const botId of botIds) {
+    const choices = readChoices(botId);
+    const { [name]: _was, ...on } = choices.on;
+    const next: Choices = { off: choices.off.filter((other) => other !== name), on: who === "bots" && chosen.includes(botId) ? { ...on, [name]: entry.filesSha256 } : on };
+    if (JSON.stringify(next) !== JSON.stringify(choices)) writeChoices(botId, next);
+  }
+  const { access: _access, accepted: _accepted, ...rest } = entry;
+  index[name] = { ...rest, ...(who === "all" ? (entry.warnings.length ? { accepted: entry.filesSha256 } : {}) : { access: who }) };
+  writeIndex(index);
+  return { ok: true };
+}
+
+/** The copy goes with its entry; the folder it was brought in from is never touched. */
+export function removeImportedSkill(name: string): { ok: true } | { error: string } {
+  const index = readImportedSkills();
+  if (!index[name]) return { error: `no skill named "${name}" was brought in from this computer` };
+  delete index[name];
+  writeIndex(index);
+  rmSync(join(IMPORTED_SKILLS_DIR, name), { recursive: true, force: true });
+  digests.delete(join(IMPORTED_SKILLS_DIR, name));
+  return { ok: true };
+}
+
+/** Every file in the copy but SKILL.md, by its path inside the skill. */
+export function importedSkillFiles(name: string): string[] {
+  if (!isSkillName(name)) return [];
+  const files: string[] = [];
+  const walk = (folder: string, prefix: string, depth: number) => {
+    if (depth > MAX_DIGEST_DEPTH) return;
+    let names: string[];
+    try {
+      names = readdirSync(folder).sort();
+    } catch {
+      return;
+    }
+    for (const entry of names) {
+      const path = prefix ? `${prefix}/${entry}` : entry;
+      const state = directoryEntryState(join(folder, entry));
+      if (state === "directory") walk(join(folder, entry), path, depth + 1);
+      else if (path !== "SKILL.md" && entryExistsWithoutFollowing(join(folder, entry))) files.push(path);
+    }
+  };
+  walk(join(IMPORTED_SKILLS_DIR, name), "", 0);
+  return files;
 }
 
 const comparable = (path: string) => {
@@ -344,11 +414,7 @@ export function setImportedSkillEnabled(botId: string, name: string, enabled: bo
   const choices = readChoices(botId);
   const off = choices.off.filter((other) => other !== name);
   const { [name]: _read, ...on } = choices.on;
-  const next: Choices = enabled
-    ? { off, on: entry.warnings.length ? { ...on, [name]: entry.filesSha256 } : on }
-    : { off: [...off, name].sort(), on };
-  mkdirSync(dirname(choicesPath(botId)), { recursive: true, mode: 0o700 });
-  writeFileAtomic(choicesPath(botId), `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+  writeChoices(botId, enabled ? { off, on: { ...on, [name]: entry.filesSha256 } } : { off: [...off, name].sort(), on });
   return importedSkillListings(botId, new Set()).find((skill) => skill.name === name)!;
 }
 

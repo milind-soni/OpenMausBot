@@ -27,7 +27,7 @@ import {
   githubSkillOriginSchema, prepareSkillFolder, skillFolderDigest, skillFolderRecordSchema, writeSkillFolder, type GitHubSkillOrigin, type SkillFolderFile,
 } from "./skill-folder.ts";
 import { LEARN_SOURCE_PREFIX } from "./skill-learn.ts";
-import { libraryDescriptionsAt, librarySkillFilePath, listLibrarySkills, type LibrarySkillListing } from "./skill-library.ts";
+import { libraryDescriptionsAt, librarySkillFilePath, listLibrarySkills } from "./skill-library.ts";
 import { readManagedLinks, writeManagedLinks } from "./skill-link-registry.ts";
 import {
   directoryEntryState, entryExistsWithoutFollowing, formatKb, isSkillReferencePath, learnedSkillDirectoryMatches, publishReviewedRevision,
@@ -1303,9 +1303,8 @@ export function enabledSkillFiles(botId: string, names: readonly string[], assig
   return new Map(names.filter((name) => on.has(name)).map((name) => [name, manifest[name] ? join(skillTarget(workspaceDir(botId), name, manifest[name]), "SKILL.md") : librarySkillFilePath(name)] as const));
 }
 
-export function resolveBotSkills(botId: string, assignedLibrary: readonly string[] | undefined): SkillListing[] {
+export function resolveBotSkills(botId: string, assignedLibrary: readonly string[] = []): SkillListing[] {
   const own = listSkills(botId);
-  if (assignedLibrary === undefined) return own; // the library is off: no every-bot skills either
   const ownNames = new Set(own.map((skill) => skill.name));
   const assigned = new Set(assignedLibrary);
   return [...own, ...listLibrarySkills().filter((skill) => (skill.everyBot || assigned.has(skill.name)) && !ownNames.has(skill.name))];
@@ -1315,19 +1314,12 @@ export interface BotSkillWithOrigin extends SkillListing {
   origin: "private" | "library";
 }
 
-export function listBotSkillsWithOrigin(
-  botId: string,
-  assignedLibrary: readonly string[] | undefined,
-): { skills: BotSkillWithOrigin[]; library: LibrarySkillListing[] } {
-  const own = listSkills(botId);
-  const ownNames = new Set(own.map((skill) => skill.name));
-  const assigned = new Set(assignedLibrary ?? []);
-  const skills = resolveBotSkills(botId, assignedLibrary ?? []).map((skill) => ({
+export function listBotSkillsWithOrigin(botId: string, assignedLibrary: readonly string[] = []): BotSkillWithOrigin[] {
+  const ownNames = new Set(listSkills(botId).map((skill) => skill.name));
+  return resolveBotSkills(botId, assignedLibrary).map((skill) => ({
     ...skill,
     origin: ownNames.has(skill.name) ? ("private" as const) : ("library" as const),
   }));
-  const library = listLibrarySkills().filter((entry) => !ownNames.has(entry.name) && !entry.everyBot && !assigned.has(entry.name));
-  return { skills, library };
 }
 
 export interface MigratableSkillCopy {

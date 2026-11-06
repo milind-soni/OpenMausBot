@@ -121,7 +121,7 @@ describe("bot draft dialog", () => {
   it("opens immediately with all sections and no creation request", () => {
     const result = render();
     expect(result.html).toContain('role="dialog"');
-    for (const section of ["Identity", "Soul", "Skills", "Memory", "Routines", "Access", "Model", "Permissions", "Voice &amp; alerts"]) {
+    for (const section of ["Identity", "Soul", "Memory", "Routines", "Access", "Model", "Permissions", "Voice &amp; alerts"]) {
       expect(result.html).toContain(section);
     }
     fixture.advanced = false;

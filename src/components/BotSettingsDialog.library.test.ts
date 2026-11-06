@@ -41,7 +41,7 @@ describe("Advanced bot settings", () => {
 
   it("opens the matching settings section from each Library row", () => {
     html();
-    for (const [page, section] of [["memory", "memory"], ["skills", "skills"], ["folder", "access"], ["apps", "overview"]]) {
+    for (const [page, section] of [["memory", "memory"], ["folder", "access"], ["apps", "overview"]]) {
       fixture.dispatch.mockClear();
       fixture.onOpen!(page);
       expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleSettings", open: true, section });

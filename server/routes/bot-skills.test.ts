@@ -4,7 +4,6 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { AppConfig } from "../config.ts";
 import { json, readBody } from "../harness/http.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { Store } from "../store.ts";
@@ -25,7 +24,6 @@ async function serve(botId: string) {
   const store = { bot: (id: string) => (id === botId ? { id } : undefined), bots: [] } as unknown as Store;
   const routes = [createBotSkillsRoutes({
     store,
-    cfg: {} as AppConfig,
     listBotSkills: () => [],
     readBotSkillFile: () => null,
     stagedSkillListing: (staged) => staged,

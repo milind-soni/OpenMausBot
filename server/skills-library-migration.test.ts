@@ -153,16 +153,41 @@ describe("skills library migration", () => {
     expect(reportB.assignments[botB]).toBeUndefined();
   });
 
-  it("maps organization stamps onto library entries so org installs become a source", () => {
+  it("leaves an organization's skill with its bot, where the organization's releases keep updating it", () => {
     const content = SKILL("org-playbook");
     const stamp = { installId: "a".repeat(32), key: "org-playbook", release: "2.0.1", r: "b".repeat(64), w: "c".repeat(64) };
     skills.installOrgSkill(botA, "org:acme/sales-skills@2.0.1", content, stamp);
-    migration.migrateBotSkillsToLibrary(botA);
+    expect(migration.migrateBotSkillsToLibrary(botA).outcomes).toEqual([expect.objectContaining({ name: "org-playbook", outcome: "skipped" })]);
 
-    const entry = library.readSkillLibraryIndex()["org-playbook"]!;
-    expect(entry.source).toBe("org:acme/sales-skills@2.0.1");
-    expect(entry.package).toEqual(stamp);
-    expect(entry.reviewState).toBe("approved");
+    expect(library.readSkillLibraryIndex()["org-playbook"]).toBeUndefined();
+    expect(skills.skillPackageStamps(botA)).toEqual([{ name: "org-playbook", enabled: true, stamp }]);
+  });
+
+  it("moves a skill imported with its whole folder, every file and its origin with it", () => {
+    const github = { owner: "acme", repo: "skills", ref: "main", commit: "a".repeat(40), path: "skills/pdf-forms" };
+    skills.installSkill(botA, "github.com/acme/skills@main/skills/pdf-forms", [
+      { path: "SKILL.md", content: SKILL("pdf-forms", "Read references/fields.md, then run scripts/fill.py.") },
+      { path: "references/fields.md", content: "# Fields\n" },
+      { path: "scripts/fill.py", content: "print('fill')\n", executable: true },
+    ], github);
+    skills.setSkillEnabled(botA, "pdf-forms", true);
+    expect(migration.migrateBotSkillsToLibrary(botA).outcomes).toEqual([expect.objectContaining({ name: "pdf-forms", outcome: "migrated" })]);
+    const entry = library.readSkillLibraryIndex()["pdf-forms"]!;
+    expect(entry).toMatchObject({ github, reviewState: "approved" });
+    expect([...entry.files ?? []].sort()).toEqual(["references/fields.md", "scripts/fill.py"]);
+    const folder = join(library.skillsLibraryRoot(), "skills", "pdf-forms");
+    expect(readFileSync(join(folder, "scripts", "fill.py"), "utf8")).toBe("print('fill')\n");
+    expect(library.listLibrarySkills().find((skill) => skill.name === "pdf-forms")?.enabled).toBe(true);
+    expect(skills.listSkills(botA)).toEqual([]);
+    migration.writePendingAssignments({});
+  });
+
+  it("records which bot learned a skill it moves", () => {
+    skills.installSkill(botA, "learn:weekly notes", [{ path: "SKILL.md", content: SKILL("learned-notes") }]);
+    skills.setSkillEnabled(botA, "learned-notes", true);
+    migration.migrateBotSkillsToLibrary(botA);
+    expect(library.readSkillLibraryIndex()["learned-notes"]).toMatchObject({ learnedBy: botA, reviewState: "approved" });
+    migration.writePendingAssignments({});
   });
 
   it("keeps a deduplicated copy whose on/off differs from the library entry", () => {

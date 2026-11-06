@@ -6,7 +6,7 @@ import type { Routine } from "@/lib/routines";
 import type { MemoryDoc } from "@/lib/memory";
 import type { Bot, BotSettingsSection, InstanceInfo } from "@/state/store";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN } from "../../shared/bot-avatar";
-import type { ManagedSkill } from "./bot-settings/SkillsSection";
+import type { SkillWire } from "@/lib/skills";
 import type { McpServerSummary } from "@/lib/mcp-servers";
 import type { BotApps } from "./bot-settings/useBotApps";
 
@@ -26,16 +26,11 @@ const fixture = vi.hoisted(() => {
     api: (() => Promise.resolve({})) as (...args: unknown[]) => Promise<unknown>,
     storeState: {} as Record<string, unknown>,
     skills: {
-      skills: [] as ManagedSkill[],
-      loading: false,
-      working: "",
+      skills: [] as SkillWire[] | null,
       error: "",
-      reviewing: null as null | { skill: ManagedSkill; text: string },
-      toggle: (() => Promise.resolve()) as (skill: ManagedSkill) => Promise<void>,
-      setWorking: (() => {}) as (name: string) => void,
-      setError: (() => {}) as (error: string) => void,
+      busy: false,
       refresh: (() => Promise.resolve()) as () => Promise<void>,
-      putAssignments: (() => Promise.resolve()) as (name: string, remove?: boolean) => Promise<void>,
+      setForBot: (() => Promise.resolve(true)) as (skill: SkillWire, bot: string, on: boolean) => Promise<boolean>,
     },
     memory: { docs: null as MemoryDoc[] | null, error: false, mine: false, setDoc: (() => {}) as (doc: MemoryDoc) => void, reload: () => Promise.resolve() },
     saveMemory: (() => Promise.resolve({ ok: true })) as (...args: unknown[]) => Promise<unknown>,
@@ -91,9 +86,9 @@ vi.mock("./ModelPicker", async (importOriginal) => ({
   ModelPicker: (props: Record<string, unknown>) => createElement("div", { "data-stub-model-picker": true, "data-thread": props.threadId, "data-contained": props.contained }),
   ModelVariantRow: () => createElement("div", { "data-stub-variants": true }),
 }));
-vi.mock("./bot-settings/SkillsSection", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./bot-settings/SkillsSection")>()),
-  useManagedSkills: () => ({ ...fixture.skills, setReviewing: () => {}, enableReviewed: () => Promise.resolve() }),
+vi.mock("@/lib/skills", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/skills")>()),
+  useSkills: () => fixture.skills,
 }));
 vi.mock("./bot-panel/use-memory-doc", () => ({ useMemoryDoc: () => fixture.memory }));
 vi.mock("./PlaceChip", async (importOriginal) => ({
@@ -134,6 +129,7 @@ const { BrowserLogins } = await import("./bot-panel/browser-logins");
 const { PAGES, sectionTarget } = await import("./bot-panel/page-registry");
 const { openBotSettings } = await import("./bot-panel/panel-link");
 const { PageHeader } = await import("./bot-panel/rows");
+const { BotSkills } = await import("./skills/BotSkills");
 const { ChatShareMenu } = await import("./ChatMoreMenu");
 const { SoulField } = await import("./SoulField");
 const { LocalComputerAutoWarning } = await import("./LocalComputerAutoWarning");
@@ -224,8 +220,8 @@ const shown = (rendered: Rendered) => ({
   page: rendered.nodes.find((node) => node.type === PageBody)?.props.page,
 });
 const rowValue = (rendered: Rendered, page: string) => find(rendered, "data-panel-page", page).props.value;
-const skill = (name: string, enabled: boolean, origin?: ManagedSkill["origin"]): ManagedSkill =>
-  ({ name, description: `${name} helper`, enabled, source: "github:x/y", warnings: [], ...(origin ? { origin } : {}) });
+const skill = (name: string, on: boolean, from: SkillWire["from"] = { kind: "github", where: "x/y" }): SkillWire =>
+  ({ id: `library:${name}`, name, description: `${name} helper`, from, who: on ? "bots" : "off", bots: on ? ["scout"] : [], removable: true });
 const routine = (extra: Partial<Routine> = {}): Routine => ({
   id: "r1", name: "Morning brief", prompt: "Brief me", target: "bot", botId: "scout", runOn: "maus", enabled: true,
   schedule: { type: "daily", time: "09:00", weekdays: [1, 2, 3, 4, 5] }, durationMinutes: 15,
@@ -253,10 +249,7 @@ beforeEach(() => {
   fixture.saveMemory = vi.fn((_bot: unknown, path: unknown, text: unknown) => Promise.resolve({ ok: true, doc: { path, text, hash: "h2", exists: true } }));
   fixture.openExternal = vi.fn(() => Promise.resolve());
   fixture.storeState = { settingsOpen: true, botSettingsSection: "overview", botSettingsExpandAccordion: false };
-  fixture.skills = {
-    skills: [], loading: false, working: "", error: "", reviewing: null, toggle: vi.fn(() => Promise.resolve()),
-    setWorking: vi.fn(), setError: vi.fn(), refresh: vi.fn(() => Promise.resolve()), putAssignments: vi.fn(() => Promise.resolve()),
-  };
+  fixture.skills = { skills: [], error: "", busy: false, refresh: vi.fn(() => Promise.resolve()), setForBot: vi.fn(() => Promise.resolve(true)) };
   fixture.memory = { docs: null, error: false, mine: false, setDoc: vi.fn(), reload: vi.fn(() => Promise.resolve()) };
   patch.mockReset();
   onOpen.mockReset();
@@ -376,7 +369,7 @@ describe("the bot panel in Simple mode", () => {
 
   it.each([
     ["overview", "details", undefined], ["identity", "details", undefined], ["slack", "details", undefined],
-    ["soul", "details", "settings"], ["skills", "library", "skills"], ["memory", "library", "memory"],
+    ["soul", "details", "settings"], ["skills", "details", "skills"], ["memory", "library", "memory"],
     ["routines", "details", "routines"], ["access", "computer", undefined], ["model", "details", undefined],
     ["permissions", "details", "settings"], ["voice", "details", undefined], ["visibility", "details", undefined],
     ["history", "details", undefined], ["usage", "details", undefined],
@@ -654,9 +647,9 @@ describe("the Details tab", () => {
 });
 
 describe("the Bot settings page", () => {
-  it("holds Instructions, Before it acts, Backup AIs, Call mode, Apps, Job and Hide, with every title on one edge", () => {
+  it("holds Instructions, Before it acts, Backup AIs, Call mode, Apps, Skills, Job and Hide, with every title on one edge", () => {
     const rendered = settingsPage(makeBot({ defaultBot: {} }));
-    const order = ['data-panel-edit="soul"', 'data-panel-row="approval"', 'data-panel-row="backups"', 'data-panel-row="call-mode"', 'data-panel-page="apps"', 'data-panel-row="job"', 'data-panel-row="default-bot-hide"']
+    const order = ['data-panel-edit="soul"', 'data-panel-row="approval"', 'data-panel-row="backups"', 'data-panel-row="call-mode"', 'data-panel-page="apps"', 'data-panel-page="skills"', 'data-panel-row="job"', 'data-panel-row="default-bot-hide"']
       .map((marker) => rendered.html.indexOf(marker));
     expect(order.every((index) => index > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
@@ -767,6 +760,18 @@ describe("the Bot settings page", () => {
     expect(rowValue(settingsPage(makeBot()), "apps")).toBe("Gmail, Slack");
   });
 
+  it("values the Skills row by how many this bot uses, beside Apps, and opens the skills page", () => {
+    fixture.skills.skills = null;
+    expect(rowValue(settingsPage(makeBot()), "skills")).toBeUndefined();
+    fixture.skills.skills = [];
+    expect(rowValue(settingsPage(makeBot()), "skills")).toBe("None yet");
+    fixture.skills.skills = [skill("triage", true), skill("summarise", false), skill("deploy", true)];
+    const rendered = settingsPage(makeBot());
+    expect(rowValue(rendered, "skills")).toBe("2 on");
+    click(find(rendered, "data-panel-page", "skills"));
+    expect(onOpen).toHaveBeenLastCalledWith("skills");
+  });
+
   it("lists the MCP servers the bot can use after its apps, and None yet when there are neither", () => {
     fixture.mcp.servers = [{ name: "dodopayments-remote", enabled: true }, { name: "linear", enabled: true }, { name: "paused", enabled: false }];
     expect(rowValue(settingsPage(makeBot()), "apps")).toBe("dodopayments-remote, linear");
@@ -798,10 +803,11 @@ describe("the Bot settings page", () => {
 });
 
 describe("the Library tab", () => {
-  it("says what it will hold while the bot has made nothing, then what it remembers, its skills and its folder", () => {
+  it("says what it will hold while the bot has made nothing, then what it remembers and its folder", () => {
     const rendered = library(makeBot());
     expect(rendered.html).toContain('data-panel-empty="library"');
-    const order = ['data-panel-empty="library"', 'data-panel-page="memory"', 'data-panel-page="skills"', 'data-panel-page="folder"'].map((marker) => rendered.html.indexOf(marker));
+    expect(rendered.html).not.toContain('data-panel-page="skills"');
+    const order = ['data-panel-empty="library"', 'data-panel-page="memory"', 'data-panel-page="folder"'].map((marker) => rendered.html.indexOf(marker));
     expect(order.every((index) => index > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
@@ -818,17 +824,6 @@ describe("the Library tab", () => {
     fixture.memory.docs = [memoryDoc("# Empty\n")];
     expect(rowValue(library(makeBot()), "memory")).toBe("Nothing yet");
     expect(rowValue(library(makeBot({ memoryEnabled: false })), "memory")).toBe("Off");
-  });
-
-  it("values Skills by how many are on, and opens the skills page", () => {
-    expect(rowValue(library(makeBot()), "skills")).toBe("None");
-    fixture.skills.skills = [skill("triage", true), skill("summarise", false), skill("deploy", true)];
-    const rendered = library(makeBot());
-    expect(rowValue(rendered, "skills")).toBe(2);
-    click(find(rendered, "data-panel-page", "skills"));
-    expect(onOpen).toHaveBeenLastCalledWith("skills");
-    fixture.skills.loading = true;
-    expect(rowValue(library(makeBot()), "skills")).toBeUndefined();
   });
 
   it("values Working folder as Private or the folder's short name, and opens the folder page", () => {
@@ -1111,41 +1106,31 @@ describe("the drill-in pages", () => {
     expect(body("memory").html).toContain("Scout changed this file while you were editing.");
   });
 
-  it("switches skills, removes one, adds one from a link and browses the library or skills.sh", async () => {
+  it("switches each skill for this bot, shows a folder's own skills without a switch, and adds one or opens them all", () => {
     const off = skill("summarise", false);
-    const shared = skill("triage", true, "library");
-    fixture.skills.skills = [shared, off];
-    const rendered = body("skills");
-    expect(row(rendered, "skill:summarise").props).toMatchObject({ checked: false, label: "Use summarise", hint: "summarise helper", disabled: false });
+    const on = skill("triage", true);
+    const folder: SkillWire = { ...skill("deploy", true, { kind: "project" }), id: "project:deploy", only: ["scout"], removable: false };
+    fixture.skills.skills = [on, off, folder];
+    const skills = () => capture(() => BotSkills({ bot: makeBot() }));
+    expect(ofType(body("skills"), BotSkills)!.props.bot).toMatchObject({ id: "scout" });
+    const rendered = skills();
+    expect(row(rendered, "skill:summarise").props).toMatchObject({ checked: false, label: "Use Summarise", title: "Summarise", disabled: false });
+    expect(row(rendered, "skill:triage").props).toMatchObject({ checked: true, label: "Use Triage" });
     (row(rendered, "skill:summarise").props.onChange as () => void)();
-    expect(fixture.skills.toggle).toHaveBeenCalledWith(off);
-    expect(rendered.html).not.toContain("Write a command");
+    expect(fixture.skills.setForBot).toHaveBeenLastCalledWith(off, "scout", true);
+    (row(rendered, "skill:triage").props.onChange as () => void)();
+    expect(fixture.skills.setForBot).toHaveBeenLastCalledWith(on, "scout", false);
+    expect(row(rendered, "skill:deploy").props.checked).toBeUndefined();
+    expect(rendered.html).toContain(">In this folder<");
+    expect(switches(rendered.html)).toBe(2);
 
-    click(find(rendered, "data-panel-action", "remove-skill:summarise"));
-    await Promise.resolve();
-    expect(fixture.api).toHaveBeenCalledWith("/api/bots/scout/skills/summarise", { method: "DELETE" });
-    await Promise.resolve();
-    expect(fixture.skills.refresh).toHaveBeenCalled();
-    click(find(rendered, "data-panel-action", "remove-skill:triage"));
-    expect(fixture.skills.putAssignments).toHaveBeenCalledWith("triage", true);
-
-    (find(rendered, "data-panel-form", "skill-import").props.onChange as (value: string) => void)("owner/repo");
-    (find(body("skills"), "data-panel-form", "skill-import").props.onSubmit as () => void)();
-    await Promise.resolve();
-    expect(fixture.api).toHaveBeenCalledWith("/api/bots/scout/skills", { method: "POST", body: JSON.stringify({ source: "owner/repo" }) });
-
-    click(find(rendered, "data-panel-link", "browse-skills"));
-    expect(fixture.openExternal).toHaveBeenCalledWith("https://skills.sh");
-    fixture.storeState = { ...fixture.storeState, config: { features: { skillsLibrary: true } } };
-    click(find(body("skills"), "data-panel-link", "browse-skills"));
-    expect((fixture.dispatch as ReturnType<typeof vi.fn>).mock.calls.slice(-2)).toEqual([
-      [{ type: "toggleSettings", open: false }],
-      [{ type: "toggleAppSettings", open: true, section: "skills" }],
-    ]);
-    fixture.skills.working = "triage";
-    expect(row(body("skills"), "skill:summarise").props.disabled).toBe(true);
+    click(find(rendered, "data-panel-link", "all-skills"));
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "togglePlugins", open: true, surface: "skills" });
+    expect(find(rendered, "data-panel-action", "add-skill")).toBeDefined();
+    fixture.skills.busy = true;
+    expect(row(skills(), "skill:summarise").props.disabled).toBe(true);
     fixture.skills.skills = [];
-    expect(body("skills").html).toContain("No skills yet.");
+    expect(skills().html).toContain("A skill teaches your bots how to do one thing");
   });
 
   it("keeps the bot's own private folder, or a folder chosen with the native picker, saved through the bot route", async () => {

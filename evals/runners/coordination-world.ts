@@ -97,8 +97,10 @@ export class CoordinationWorld extends BaseWorld {
         return "config patched: " + JSON.stringify(step.config);
       }
       case "setSkillAssignment": {
-        const response = await this.api.put("/api/bots/" + this.botId(step.bot) + "/skills-library", { skills: step.skills });
-        if (response.status >= 300) throw new Error("skill assignment failed: " + JSON.stringify(response.body));
+        for (const name of step.skills) {
+          const response = await this.api.put("/api/skills/" + encodeURIComponent("library:" + name) + "/bots/" + this.botId(step.bot), { on: true });
+          if (response.status >= 300) throw new Error("skill assignment failed: " + JSON.stringify(response.body));
+        }
         return "skills assigned to " + step.bot + ": " + step.skills.join(", ");
       }
       case "runRoutine": {

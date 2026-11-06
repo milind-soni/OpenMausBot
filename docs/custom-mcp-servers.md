@@ -233,12 +233,13 @@ and any bot made later with New bot, the API, a template, a Chief
 of Staff team or a package. Each turn lists them after the bot's own skills,
 with a budget of their own, links them into the task folder's `.claude`,
 `.agents` and `.grok` skills, and runs them as `/name`. A bot's own or library
-skill of the same name wins; **Bot Settings → Skills** shows the rest as
-coming from this computer, with a switch for that bot. A skill the scan flags
-(a download piped into a shell, invisible characters, a long encoded blob, in
-SKILL.md or any file beside it) comes in switched off for every bot: read it
-there, then switch it on for that bot; it is off again if it is brought in
-with other files. Inside a skill folder it copies text files only, never
+skill of the same name wins. **Apps → Skills** lists each one as coming from
+Claude Code or Codex, with who can use it (all bots, chosen bots or none), and
+each bot's Skills shows its own switch. A skill the scan flags (a download
+piped into a shell, invisible characters, a long encoded blob, in SKILL.md or
+any file beside it) comes in switched off for every bot with its reason; read
+it there, then choose who can use it; it is off again if it is brought in with
+other files. Inside a skill folder it copies text files only, never
 links, files with another hard link, credential or session files (such as
 `token.json`, `session.json`, `password.txt`, `secrets/`, `*.env`) or a file
 holding a provider key, and counts what it leaves out. A skill folder that is

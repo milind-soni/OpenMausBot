@@ -92,4 +92,11 @@ describe("setup navigation", () => {
     const closed = reducer(next, { type: "togglePlugins", open: false });
     expect(reducer(closed, { type: "togglePlugins", open: true })).toMatchObject({ pluginsSurface: "mcp" });
   });
+
+  it("opens the Skills tab when asked, and Apps again from an entry that names no tab", () => {
+    const skills = reducer(initialState, { type: "togglePlugins", open: true, surface: "skills" });
+    expect(skills).toMatchObject({ pluginsOpen: true, pluginsSurface: "skills" });
+    const closed = reducer(skills, { type: "togglePlugins", open: false });
+    expect(reducer(closed, { type: "togglePlugins", open: true })).toMatchObject({ pluginsOpen: true, pluginsSurface: "apps" });
+  });
 });

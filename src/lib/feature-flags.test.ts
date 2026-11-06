@@ -82,12 +82,10 @@ describe("experimental feature flags", () => {
     expect(roomMemoryCaptureEnabled({ features: { roomMemoryCapture: true } })).toBe(true);
   });
 
-  it("offers sharing learned skills only with the skills library, asking by default", () => {
-    expect(shareLearnedSkillsMode(null)).toBe("off");
-    expect(shareLearnedSkillsMode({ features: { shareLearnedSkills: "auto" } })).toBe("off");
-    expect(shareLearnedSkillsMode({ features: { skillsLibrary: true } })).toBe("ask");
-    expect(shareLearnedSkillsMode({ features: { skillsLibrary: true, shareLearnedSkills: "auto" } })).toBe("auto");
-    expect(shareLearnedSkillsMode({ features: { skillsLibrary: true, shareLearnedSkills: "off" } })).toBe("off");
+  it("asks before sharing a learned skill unless told otherwise", () => {
+    expect(shareLearnedSkillsMode(null)).toBe("ask");
+    expect(shareLearnedSkillsMode({ features: { shareLearnedSkills: "auto" } })).toBe("auto");
+    expect(shareLearnedSkillsMode({ features: { shareLearnedSkills: "off" } })).toBe("off");
   });
 });
 

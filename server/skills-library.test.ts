@@ -149,55 +149,38 @@ describe("skills library store", () => {
       expect(skills.resolveBotSkills(`universal-${Math.random()}`, [])).toEqual(expect.arrayContaining([
         expect.objectContaining({ name, enabled: true }),
       ]));
-      // No assignment list means the library is off: an every-bot skill stays out too.
-      expect(skills.resolveBotSkills(`universal-${Math.random()}`, undefined).map((skill) => skill.name)).not.toContain(name);
-      // The bot's Skills page lists it as the bot's own library skill, not as one still to assign.
-      const page = skills.listBotSkillsWithOrigin(`universal-${Math.random()}`, undefined);
-      expect(page.skills.map((skill) => skill.name)).toContain(name);
-      expect(page.library.map((skill) => skill.name)).not.toContain(name);
+      expect(skills.resolveBotSkills(`universal-${Math.random()}`).map((skill) => skill.name)).toContain(name);
+      expect(skills.listBotSkillsWithOrigin(`universal-${Math.random()}`)).toEqual(expect.arrayContaining([expect.objectContaining({ name, origin: "library" })]));
     } finally {
       expect(library.setLibrarySkillEveryBot(name, false)).toMatchObject({ everyBot: false });
     }
   });
 
-  it("lists an every-bot skill in the turn index of a bot with no assignments, only while the library is on", async () => {
+  it("lists an every-bot skill in the turn index of a bot with no assignments", async () => {
     const { createSkillsLibraryHost } = await import("./host/skills-library.ts");
     const name = `everyone-${Math.random().toString(36).slice(2, 10)}`;
     library.installLibrarySkill({ name, instructions: SKILL(name), source: "lib", reviewState: "approved" });
     library.setLibrarySkillEveryBot(name, true);
     try {
       const record = { id: bot, threadId: "main" } as import("./store.ts").BotRecord;
-      const hostWith = (cfg: AppConfig) => createSkillsLibraryHost({
+      const host = createSkillsLibraryHost({
         store: { bot: () => record, messagesFor: () => [], taskByThread: () => undefined } as unknown as import("./store.ts").Store,
-        cfg,
+        cfg: {} as AppConfig,
         appendSkillRequestCard: () => ({ requestId: "", summary: "" }),
       });
-      const on = hostWith({ features: { skillsLibrary: true } } as AppConfig);
-      expect(on.skillsIndex(record, "main")).toContain(name);
-      expect(on.skillsIndex(record, undefined)).toContain(name);
-      expect(on.expandSkillCommand(record, "main", `/${name}`, undefined, [], true)).toContain(`ran your ${name} skill`);
-      const off = hostWith({} as AppConfig);
-      expect(off.skillsIndex(record, "main")).not.toContain(name);
-      expect(off.expandSkillCommand(record, "main", `/${name}`, undefined, [], true)).toBe(`/${name}`);
+      expect(host.skillsIndex(record, "main")).toContain(name);
+      expect(host.skillsIndex(record, undefined)).toContain(name);
+      expect(host.expandSkillCommand(record, "main", `/${name}`, undefined, [], true)).toContain(`ran your ${name} skill`);
+      library.setLibrarySkillEveryBot(name, false);
+      expect(host.skillsIndex(record, "main")).not.toContain(name);
+      expect(host.expandSkillCommand(record, "main", `/${name}`, undefined, [], true)).toBe(`/${name}`);
     } finally {
       library.setLibrarySkillEveryBot(name, false);
     }
   });
 
-  it("defaults the feature flag off and switches on only via features.skillsLibrary", () => {
-    expect(library.skillsLibraryEnabled({} as AppConfig)).toBe(false);
-    expect(library.skillsLibraryEnabled({ features: {} } as AppConfig)).toBe(false);
-    expect(library.skillsLibraryEnabled({ features: { skillsLibrary: true } } as AppConfig)).toBe(true);
-  });
-
-  it("parseStoredConfig keeps features.skillsLibrary while stripping genuinely unknown keys", () => {
-    const stored = config.parseStoredConfig({ features: { skillsLibrary: true, browser: true } });
-    expect(stored).toEqual({ features: { skillsLibrary: true, browser: true } });
-    expect(library.skillsLibraryEnabled(stored)).toBe(true);
-    expect(library.skillsLibraryEnabled(config.parseStoredConfig({ features: { browser: true } }))).toBe(false);
-    expect(config.parseStoredConfig({ features: { skillsLibrary: true, teleport: true } })).toEqual({
-      features: { skillsLibrary: true },
-    });
+  it("parseStoredConfig drops the retired skillsLibrary flag with the other unknown keys", () => {
+    expect(config.parseStoredConfig({ features: { skillsLibrary: true, browser: true, teleport: true } })).toEqual({ features: { browser: true } });
   });
 });
 
@@ -217,7 +200,7 @@ describe("assignment resolution", () => {
     expect(only.editable).toBe(false);
   });
 
-  it("without assignments, resolution is exactly listSkills (the flag-off contract)", () => {
+  it("without assignments or every-bot skills, resolution is exactly listSkills", () => {
     skills.installSkill(bot, "private:test", [{ path: "SKILL.md", content: SKILL("solo") }]);
     library.installLibrarySkill({ name: "library-only", instructions: SKILL("library-only"), source: "lib", reviewState: "approved" });
     expect(skills.resolveBotSkills(bot, undefined)).toEqual(skills.listSkills(bot));
