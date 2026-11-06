@@ -53,7 +53,7 @@ export function edgeHold(raw: string | undefined): string {
 }
 
 /** How a home on its owner's server is reached (docs/cloud-pro.md, "On your own server"); never set on Fly. */
-export const OWN_SERVER_EDGE_KEYS = ["OMB_CLOUD_EDGE_TLS", "OMB_CLOUD_TRUSTED_PROXIES", "OMB_CLOUD_CLIENT_IP_HEADER"] as const;
+export const OWN_SERVER_EDGE_KEYS = ["OMB_CLOUD_EDGE_TLS", "OMB_CLOUD_TRUSTED_PROXIES", "OMB_CLOUD_CLIENT_IP_HEADER", "OMB_CLOUD_TUNNEL_TOKEN"] as const;
 const EDGE_CONFIG_DIR = "/app/cloud";
 export const EDGE_ROUTES_FILE = "edge-routes.caddy";
 const MAX_TRUSTED_PROXIES = 32;
@@ -69,6 +69,18 @@ export function edgeTerminatesTls(env: NodeJS.ProcessEnv): boolean {
   const raw = env.OMB_CLOUD_EDGE_TLS?.trim() ?? "";
   if (raw !== "" && raw !== "0" && raw !== "1") invalidEdge("OMB_CLOUD_EDGE_TLS must be 1 (the home serves HTTPS on its own domain) or 0");
   return raw === "1";
+}
+
+/**
+ * OMB_CLOUD_TUNNEL_TOKEN: the connector token of this home's Cloudflare tunnel, for a server with no inbound port. The
+ * home runs cloudflared itself and OMB_PUBLIC_URL is the tunnel's address. Only cloudflared ever reads the token.
+ */
+export function edgeTunnelToken(env: NodeJS.ProcessEnv): string | null {
+  const token = env.OMB_CLOUD_TUNNEL_TOKEN?.trim() ?? "";
+  if (!token) return null;
+  if (!/^[A-Za-z0-9+/_=-]{32,4096}$/.test(token)) invalidEdge("OMB_CLOUD_TUNNEL_TOKEN must be the tunnel's connector token");
+  if (edgeTerminatesTls(env)) invalidEdge("OMB_CLOUD_EDGE_TLS and OMB_CLOUD_TUNNEL_TOKEN are two ways to reach the home; set one");
+  return token;
 }
 
 /**
@@ -114,13 +126,32 @@ export function edgeClientAddress(env: NodeJS.ProcessEnv): { OMB_CLOUD_EDGE_CLIE
 
 /** The edge's config, and the file every config imports: both run as root's trusted code. */
 export function edgeConfigFiles(env: NodeJS.ProcessEnv): { config: string; routes: string } {
-  const config = env.OMB_CLOUD_EDGE_CONFIG || posix.join(EDGE_CONFIG_DIR, edgeTerminatesTls(env) ? "Caddyfile.tls" : "Caddyfile");
+  const name = edgeTunnelToken(env) ? "Caddyfile.tunnel" : edgeTerminatesTls(env) ? "Caddyfile.tls" : "Caddyfile";
+  const config = env.OMB_CLOUD_EDGE_CONFIG || posix.join(EDGE_CONFIG_DIR, name);
   return { config, routes: posix.join(posix.dirname(config), EDGE_ROUTES_FILE) };
 }
 
 /** Where the edge keeps its certificate and ACME account: on the volume, never /tmp, so a new container reuses them. */
 export function edgeCertificateStorage(home: string): string {
   return posix.join(home, ".omb-edge", "caddy");
+}
+
+export function tunnelRestartDelay(previousMs: number, ranForMs: number): number {
+  if (ranForMs >= 10 * 60_000 || previousMs <= 0) return 5_000;
+  return Math.min(previousMs * 2, 5 * 60_000);
+}
+
+/** The user cloudflared runs as. Its token rides its environment (TUNNEL_TOKEN), which only that user and root can read:
+ * never `maus`, whose bots could otherwise copy it and serve the home's address elsewhere. cloudflared 2026.10 can't
+ * read --token-file from an inherited socket, which is all Node's stdio gives a child. */
+export const TUNNEL_USER = "omb-tunnel";
+
+export function tunnelCommand(bin: string, token: string): { command: string; args: string[]; env: NodeJS.ProcessEnv } {
+  return {
+    command: bin,
+    args: ["tunnel", "--no-autoupdate", "--loglevel", "info", "run"],
+    env: { PATH: "/usr/local/bin:/usr/bin:/bin", HOME: "/nonexistent", TUNNEL_TOKEN: token },
+  };
 }
 
 /** The server's data directory on the volume. */
@@ -195,7 +226,7 @@ export function cloudHomeChildEnvironments(config: CloudHomeConfig, env: NodeJS.
     ...edgeClientAddress(env),
     ...(edgeTerminatesTls(env) ? { OMB_CLOUD_EDGE_STORAGE: edgeCertificateStorage(home) } : {}),
   };
-  return { server, edge, edgeFiles: edgeConfigFiles(env), secrets: cloudHomeSecrets(env), dropped };
+  return { server, edge, edgeFiles: edgeConfigFiles(env), tunnelToken: edgeTunnelToken(env), secrets: cloudHomeSecrets(env), dropped };
 }
 
 /** What root does to the machine before anything runs as `maus` (docs/bot-box.md, "What each layer stops"): /proc hides
@@ -251,7 +282,7 @@ export function startCloudHome(env: NodeJS.ProcessEnv = process.env) {
   // Logged here once: the server child never sees what they are about.
   for (const warning of config.warnings) console.warn(`cloud home: ${warning}`);
   const home = env.HOME || "/data";
-  const { server, edge, edgeFiles, secrets, dropped } = cloudHomeChildEnvironments(config, env, home);
+  const { server, edge, edgeFiles, tunnelToken, secrets, dropped } = cloudHomeChildEnvironments(config, env, home);
   const prepare = () => prepareCloudHomeData(home, cloudHomeDataDir(env, home), config.machineId);
   let prepared: ReturnType<typeof prepare>;
   let ids: { uid: number; gid: number } | null = null;
@@ -277,8 +308,12 @@ export function startCloudHome(env: NodeJS.ProcessEnv = process.env) {
   for (const record of prepared.cleared) console.log(`cloud home: cleared a stale data-directory record machine ${record.host} (process ${record.pid}) left on this volume: ${record.path}`);
   const here = dirname(fileURLToPath(import.meta.url));
   const edgeBin = env.OMB_CLOUD_EDGE_BIN || "/usr/local/bin/caddy";
+  const tunnelBin = env.OMB_CLOUD_TUNNEL_BIN || "/usr/local/bin/cloudflared";
+  const tunnelIds = ids && tunnelToken ? passwdIds(readFileSync("/etc/passwd", "utf8"), TUNNEL_USER) : null;
+  if (ids && tunnelToken && !tunnelIds) throw new Error(`The ${TUNNEL_USER} user is missing from this image, so its tunnel cannot start.`);
   if (ids) {
-    const problem = codeTrustProblem([process.execPath, fileURLToPath(import.meta.url), join(here, "index.js"), edgeBin, edgeFiles.config, edgeFiles.routes], home);
+    const problem = codeTrustProblem([process.execPath, fileURLToPath(import.meta.url), join(here, "index.js"), edgeBin, edgeFiles.config, edgeFiles.routes,
+      ...(tunnelToken ? [tunnelBin] : [])], home);
     if (problem) throw new Error(`This image's code is not safe to run as root: ${problem}. Rebuild it with docker build --target cloud-home.`);
   }
   // Names only, never values: what the server does not get from here.
@@ -312,6 +347,29 @@ export function startCloudHome(env: NodeJS.ProcessEnv = process.env) {
   runServer();
   watch(spawnWithOomScore(OOM_SCORE.edge, () => spawn(edgeBin, ["run", "--config", edgeFiles.config, "--adapter", "caddyfile"],
     { env: edge, stdio: "inherit", ...(ids ? { uid: ids.uid, gid: ids.gid } : {}) })));
+  if (tunnelToken) {
+    const tunnel = tunnelCommand(tunnelBin, tunnelToken);
+    let delay = 0;
+    const runTunnel = () => {
+      if (stopping) return;
+      const started = Date.now();
+      const child = spawnWithOomScore(OOM_SCORE.edge, () => spawn(tunnel.command, tunnel.args,
+        { env: tunnel.env, stdio: ["ignore", "inherit", "inherit"], ...(tunnelIds ? { uid: tunnelIds.uid, gid: tunnelIds.gid } : {}) }));
+      children.push(child);
+      const ended = (code: number | null) => {
+        const index = children.indexOf(child);
+        if (index < 0) return;
+        children.splice(index, 1);
+        if (stopping) return;
+        delay = tunnelRestartDelay(delay, Date.now() - started);
+        console.warn(`cloud home: the tunnel's connector stopped (${code ?? "signal"}); starting it again in ${delay / 1000} s`);
+        setTimeout(runTunnel, delay).unref();
+      };
+      child.once("error", () => ended(null));
+      child.once("exit", ended);
+    };
+    runTunnel();
+  }
   process.once("SIGTERM", () => stop(false));
   process.once("SIGINT", () => stop(false));
 }

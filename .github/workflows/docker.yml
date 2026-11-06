@@ -223,7 +223,7 @@ jobs:
             if docker exec -u maus home grep -qaF -- "$value" "/proc/$spid/environ"; then echo "a secret is in the server's environment"; exit 1; fi
           done
           # The root launcher runs only code maus cannot change; maus owns only the volume.
-          docker exec -u maus home sh -c 'for f in /app /app/dist-server /app/dist-server/index.js /app/dist-server/cloud-home-start.js /app/cloud/Caddyfile /app/cloud/Caddyfile.tls /app/cloud/edge-routes.caddy /usr/local/bin/caddy; do if test -w "$f"; then echo "maus can write $f"; exit 1; fi; done; test -w /data'
+          docker exec -u maus home sh -c 'for f in /app /app/dist-server /app/dist-server/index.js /app/dist-server/cloud-home-start.js /app/cloud/Caddyfile /app/cloud/Caddyfile.tls /app/cloud/Caddyfile.tunnel /app/cloud/edge-routes.caddy /usr/local/bin/caddy /usr/local/bin/cloudflared; do if test -w "$f"; then echo "maus can write $f"; exit 1; fi; done; test -w /data'
           test "$(docker exec home stat -c %U /app/dist-server/index.js)" = root
           # The shell tools bots use on a Cloud, as the user their engines run as.
           docker exec -u maus home sh -c 'python3 -c "import json, sqlite3, zipfile, csv" && pdftotext -v 2>&1 | grep -q pdftotext && unzip -v | grep -q UnZip'
@@ -370,6 +370,40 @@ jobs:
           docker rm -f tls >/dev/null
           docker volume rm omb-tls-ci >/dev/null
 
+          # No inbound port: the home runs its tunnel's connector itself, as omb-tunnel, whose environment (the token) maus
+          # cannot read. Only the tunnel's loopback listener, :8812, believes Cf-Connecting-IP. The token here is well
+          # formed but names no tunnel, so Cloudflare refuses it and cloudflared keeps trying.
+          token=$(printf '{"a":"0123456789abcdef0123456789abcdef","t":"11111111-2222-3333-4444-555555555555","s":"%s"}' "$(openssl rand -base64 32)" | base64 -w0)
+          thost=c-0123456789abcdef0123456789abcdef.example.com
+          run_home tunnel omb-tunnel-ci 18085 -e "OMB_PUBLIC_URL=https://$thost" -e "OMB_CLOUD_TUNNEL_TOKEN=$token"
+          healthy tunnel 18085
+          grep -qF "caddy run --config /app/cloud/Caddyfile.tunnel --adapter caddyfile" <<<"$(docker top tunnel -eo pid,uid,args)"
+          for i in $(seq 1 15); do cpid=$(docker exec tunnel sh -c 'for p in /proc/[0-9]*; do case "$(tr "\0" " " < "$p/cmdline" 2>/dev/null)" in *"cloudflared tun""nel"*) echo "${p#/proc/}";; esac; done'); [ -n "$cpid" ] && break; sleep 1; done
+          test -n "$cpid"
+          test "$(docker exec tunnel stat -c %u "/proc/$cpid")" = "$(docker exec tunnel id -u omb-tunnel)"
+          if docker exec -u maus tunnel cat "/proc/$cpid/environ" >/dev/null 2>&1; then echo "maus can read the tunnel's token"; exit 1; fi
+          if docker exec tunnel sh -c "tr '\\0' ' ' < /proc/$cpid/cmdline" | grep -qF "$token"; then echo "the token is in cloudflared's command line"; exit 1; fi
+          for p in $(docker exec tunnel sh -c 'for p in /proc/[0-9]*; do case "$(tr "\0" " " < "$p/cmdline" 2>/dev/null)" in *"dist-server/in""dex.js"*|*"caddy r""un"*) echo "${p#/proc/}";; esac; done'); do
+            if docker exec -u maus tunnel grep -qaF "$token" "/proc/$p/environ"; then echo "the token is in a maus process's environment"; exit 1; fi
+          done
+          if docker logs tunnel 2>&1 | grep -qF "$token"; then echo "the token reached the log"; exit 1; fi
+          from_tunnel() { # port [curl options...]: as cloudflared reaches the edge, from the home's loopback
+            local port=$1; shift; local signed; mapfile -t signed < <(bad_pair_headers | sed "s/^Host: .*/Host: $thost/")
+            docker exec tunnel curl -s -o /dev/null -w '%{http_code}' --max-time 5 -X POST "${signed[@]}" "$@" --data-binary '{}' "http://127.0.0.1:$port/api/cloud/pairing"
+          }
+          for i in $(seq 1 10); do test "$(from_tunnel 8812 -H 'Cf-Connecting-IP: 198.51.100.1')" = 401; done
+          test "$(from_tunnel 8812 -H 'Cf-Connecting-IP: 198.51.100.1')" = 429
+          test "$(from_tunnel 8812 -H 'Cf-Connecting-IP: 198.51.100.2')" = 401
+          for i in $(seq 1 10); do test "$(from_tunnel 8080 -H "Cf-Connecting-IP: 198.51.100.$((i + 10))")" = 401; done
+          test "$(from_tunnel 8080 -H 'Cf-Connecting-IP: 198.51.100.30')" = 429
+          docker rm -f tunnel >/dev/null
+          docker volume rm omb-tunnel-ci >/dev/null
+          # Two ways to reach one home never serve.
+          if timeout 60 docker run --name home-bad -v omb-bad-ci:/data "${contract[@]}" -e OMB_CLOUD_EDGE_TLS=1 -e "OMB_CLOUD_TUNNEL_TOKEN=$token" omb-cloud-home:ci; then echo "TLS and a tunnel served"; exit 1; fi
+          grep -q "set one" <<<"$(docker logs home-bad 2>&1)"
+          docker rm -f home-bad >/dev/null
+          docker volume rm omb-bad-ci >/dev/null
+
           # Fly: the proxy's private address names the client in Fly-Client-IP, exactly as before.
           run_home fly omb-fly-ci 18082 -e FLY_APP_NAME=omb-t-ci
           healthy fly 18082
@@ -429,6 +463,8 @@ jobs:
                   assert len(caddy) == 1, f"Caddy is written {len(caddy)} times"
                   assert caddy[0].uid == 0, f"Caddy belongs to uid {caddy[0].uid}"
                   assert not any(key.startswith("SCHILY.xattr.security.") for key in caddy[0].pax_headers), "Caddy keeps a file capability"
+                  tunnel = files["usr/local/bin/cloudflared"]
+                  assert len(tunnel) == 1 and tunnel[0].uid == 0 and tunnel[0].mode & 0o7777 == 0o755, "cloudflared is not one root-owned 0755 binary"
                   grok = files["usr/local/bin/grok"]
                   assert len(grok) == 1 and grok[0].uid == 0 and grok[0].mode & 0o7777 == 0o755, "Grok is not one root-owned 0755 binary"
                   installer = sorted(name for name in files if re.match(r"(data|root)/\.grok/|usr/local/bin/agent$", name))

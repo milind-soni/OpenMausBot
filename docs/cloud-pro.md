@@ -1064,8 +1064,11 @@ layers (Node, Chrome's libraries, agent-browser and its Chrome) and adds:
 
 - Caddy, as the only listener the network can reach: `0.0.0.0:8080` with
   `deploy/fly/Caddyfile`, and also 443 for the home's own domain with
-  `deploy/fly/Caddyfile.tls` (both import the same routes,
+  `deploy/fly/Caddyfile.tls`, or a loopback listener for the home's own
+  tunnel with `deploy/fly/Caddyfile.tunnel` (all import the same routes,
   `deploy/fly/edge-routes.caddy`);
+- `cloudflared`, pinned and digest-checked by `scripts/prepare-cloudflared.mjs`,
+  run only for a home reached through its own tunnel, as the `omb-tunnel` user;
 - Grok Build (`/usr/local/bin/grok`) from xAI's own installer, pinned by
   `GROK_VERSION` to the version the Grok driver is verified against. The
   build fails if the installer cannot be reached, rather than shipping an
@@ -1261,6 +1264,7 @@ start.
 | `OMB_CLOUD_EDGE_TLS` | `1`: the edge gets and renews a Let's Encrypt certificate for that name and serves it on 443. Unset or `0`: the edge serves only `:8080`, for the agent, and something else ends TLS. |
 | `OMB_CLOUD_TRUSTED_PROXIES` | Only when the owner's own proxy stands in front: its addresses or ranges (`10.0.0.5`, `10.0.0.0/24`, `private_ranges`), separated by spaces or commas, at most 32. Unset: none. A `/0` range, a host name or anything else stops the home with a message naming the variable. |
 | `OMB_CLOUD_CLIENT_IP_HEADER` | The header those proxies put the client's address in. Default `X-Forwarded-For`; it needs `OMB_CLOUD_TRUSTED_PROXIES`. |
+| `OMB_CLOUD_TUNNEL_TOKEN` | For a server with no inbound port: the connector token of the home's own Cloudflare tunnel. `OMB_PUBLIC_URL` is then the tunnel's address. Not with `OMB_CLOUD_EDGE_TLS`. |
 
 **Its own domain (`OMB_CLOUD_EDGE_TLS=1`).** The agent publishes the
 container's 443 (and 80 if the owner opens it). Let's Encrypt checks the name
@@ -1293,6 +1297,26 @@ gateway lets anything that arrives from it name a client, so do it only when
 no port is published on `[::]` (Docker's proxy sends IPv6 clients from there
 too). Only the named peers are believed, and only the last address they add,
 so a client's own `X-Forwarded-For` or `Cf-Connecting-IP` changes nothing.
+
+**No inbound port: a Cloudflare tunnel.** The same managed tunnel as
+`openmausbot serve --tunnel`, one per server: the control plane's
+`ensureEndpoint`, called with the server's installation credential
+(`fleetAccess` in `server/tunnel.ts`), returns the address
+(`https://c-<32 hex>.<zone>`) and the connector token, which go into
+`OMB_PUBLIC_URL` and `OMB_CLOUD_TUNNEL_TOKEN`. The home then runs the pinned
+`cloudflared` from its image (`/usr/local/bin/cloudflared`, the release
+`scripts/prepare-cloudflared.mjs` checks) as its own user, `omb-tunnel`: the
+token rides that process's environment, which `maus`, and so no bot or engine,
+can read. If it stops, the launcher starts it again after 5 s, doubling to
+5 minutes. The control plane points every tunnel at `127.0.0.1:8812`, where
+the edge (`deploy/fly/Caddyfile.tunnel`) listens on loopback only and believes
+`Cf-Connecting-IP`, which Cloudflare's edge sets, so each member is counted
+on their own; `:8080` still believes no header. The home lives in one
+container, so a restart brings its tunnel back with it. Cloudflare decrypts
+the traffic at its edge, which EU customers are told plainly. A boxed turn has
+its own loopback, but a process that shares the home's (a bot's browser, or
+a turn when the box is off) could name any address to `:8812`. That changes
+only whose lockout its own failed codes count toward, never who is signed in.
 
 **Private, on a tailnet.** `tailscale serve --bg --https=443
 http://127.0.0.1:8080` on the server serves `https://<machine>.<tailnet>.ts.net`
