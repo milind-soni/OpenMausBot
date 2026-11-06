@@ -206,7 +206,7 @@ export function pageOp(a: any): any {
         const badge = all('button[aria-label^="People" i], button[aria-label*="participants" i]').map(words).join(" ").match(/\b(\d{1,4})\b/);
         const total = Math.max(ids.size, badge ? Number(badge[1]) : 0);
         return {
-          inMeeting: present('button[aria-label*="Leave call" i]'),
+          inMeeting: present('button[aria-label*="Leave call" i], button[aria-label*="leave the call" i], button[jsname="CQylAd"]'),
           lobby: said("asking to be let in|lets you in|let you in|waiting for the host|someone in the call"),
           knockExpired: said("no one responded to your request"),
           denied: said("denied your request|weren.t allowed to join|not allowed to join|your request to join was denied"),
@@ -214,7 +214,7 @@ export function pageOp(a: any): any {
           ended: said("you left the meeting|you.ve left the (call|meeting)|the call (has )?ended|meeting (has )?ended|call ended"),
           blocked: said("can.t join this video call|can.t join this call|cannot join this call|not allowed to join this video call"),
           notFound: said("check your meeting code|meeting not found|invalid video call name|this meeting link is not valid"),
-          others: total > 0 ? Math.max(0, total - 1) : names.length,
+          others: total > 0 ? Math.max(0, total - 1) : names.length || null,
           names,
         };
       }
@@ -223,14 +223,14 @@ export function pageOp(a: any): any {
       const streams = all("[data-stream-type][data-tid]");
       const names = unique(streams.map((el) => el.getAttribute("data-tid") ?? "")).filter(notSelf);
       return {
-        inMeeting: present('#hangup-button, button[data-tid="hangup-main-btn"], button[data-tid="call-hangup"]'),
+        inMeeting: present('#hangup-button, button[data-tid="hangup-main-btn"], button[data-tid="call-hangup"], button[aria-label="Leave"], button[aria-label^="Leave (" i]'),
         lobby: said("let you in shortly|waiting for someone to let you in|you.re in the lobby|know you.re waiting|wait for someone to admit you|request to join has been sent"),
         denied: said("you were denied|denied (entry|access)|request denied|admission denied"),
         removed: said("you.ve been removed|you have been removed|removed from this meeting"),
         ended: said("the meeting has ended|meeting ended|call ended|you left the meeting|you.ve left the meeting"),
         blocked: /^login\.(microsoftonline|live)\.com$/.test(host) || said("sign in to join this meeting|only people with .* can join|anonymous users can.t join|need to sign in"),
         notFound: said("meeting not found|this meeting link isn.t valid|we couldn.t find the meeting"),
-        others: roster ? Math.max(0, Number(roster[1]) - 1) : names.length,
+        others: roster ? Math.max(0, Number(roster[1]) - 1) : names.length || null,
         names,
       };
     }
@@ -334,7 +334,7 @@ class Cdp {
   }
 }
 
-type Probe = { inMeeting: boolean; lobby: boolean; knockExpired?: boolean; denied: boolean; removed: boolean; ended: boolean; blocked: boolean; notFound?: boolean; others: number; names: string[] };
+type Probe = { inMeeting: boolean; lobby: boolean; knockExpired?: boolean; denied: boolean; removed: boolean; ended: boolean; blocked: boolean; notFound?: boolean; /** Null when the page shows no count: the alone rule then never fires. */ others: number | null; names: string[] };
 type Spec = { css?: string; text?: string; within?: string; disabled?: boolean };
 
 /** One call page, driven through the DevTools protocol with real (trusted) mouse and key events. */
@@ -539,9 +539,14 @@ export async function runSession(parts: SessionParts): Promise<EndReason> {
   const capture = await parts.startCapture();
 
   const sent = new Set<string>([config.consent]);
+  const flat = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();
+  const selfNames = [config.name, teamsSafeName(config.name)].map(flat);
+  const mine = (from: string) => !from || /^you$/i.test(from.trim()) || selfNames.some((name) => flat(from).includes(name));
+  /** A platform may show our own line under another sender label, trimmed or with its time: never read it as a question. */
+  const ours = (text: string) => [...sent].some((line) => flat(text) === flat(line) || flat(text).includes(flat(line).slice(0, 60)));
   const seen = new Set<string>();
   let primed = false;
-  let lastOthers = -1;
+  let lastOthers: number | null = -1;
   let lastNames = "";
   let aloneSince: number | null = null;
   let reason: EndReason | null = null;
@@ -558,9 +563,9 @@ export async function runSession(parts: SessionParts): Promise<EndReason> {
       if (probe.others !== lastOthers || names !== lastNames) {
         lastOthers = probe.others;
         lastNames = names;
-        emit("participants", { others: probe.others, names: probe.names });
+        if (probe.others !== null) emit("participants", { others: probe.others, names: probe.names });
       }
-      aloneSince = probe.others > 0 ? null : aloneSince ?? now();
+      aloneSince = probe.others === null || probe.others > 0 ? null : aloneSince ?? now();
       if (aloneSince !== null && now() - aloneSince > config.aloneMs) reason = "alone";
       if (now() - joinedAt > config.maxMs) reason = "max_length";
 
@@ -568,7 +573,7 @@ export async function runSession(parts: SessionParts): Promise<EndReason> {
       for (const line of lines) {
         if (!line.text || seen.has(line.key)) continue;
         seen.add(line.key);
-        if (!primed || sent.has(line.text) || !line.from || line.from.toLowerCase().includes(config.name.toLowerCase()) || /^you$/i.test(line.from)) continue;
+        if (!primed || mine(line.from) || ours(line.text)) continue;
         emit("chat", { from: line.from, text: line.text });
         const asked = noteQuestion(line.text);
         if (asked?.stop) {

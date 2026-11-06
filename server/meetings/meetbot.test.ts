@@ -68,12 +68,20 @@ describe("the meeting bot's session", () => {
     const { page, sent } = fakePage({ chat: [
       [{ key: "0", from: "Alice", text: "earlier line" }],
       [{ key: "0", from: "Alice", text: "earlier line" }, { key: "1", from: "Ada (notes)", text: "@notes from myself" }, { key: "2", from: "Bob", text: "@notes what did we decide?" }],
+      [{ key: "4", from: "Ada notes (Unverified)", text: "Hi, I'm Ada (notes). Ask me with @notes. 10:02" }, { key: "5", from: "Host", text: "Hi, I'm Ada (notes). Ask me with @notes." }],
       [{ key: "3", from: "Alice", text: "@notes stop" }],
     ] });
     const run = parts(page);
     expect(await runSession(run.session)).toBe("stop_requested");
     expect(run.events.filter((e) => e.type === "question").map((e) => e.data)).toEqual([{ from: "Bob", text: "what did we decide?" }]);
     expect(sent.at(-1)).toMatch(/leaving now/i);
+  });
+
+  it("never leaves as alone when the page shows no participant count", async () => {
+    const counted = parts(fakePage({ probes: [{}, ...Array.from({ length: 30 }, () => ({ others: null, names: [] }))] }).page);
+    expect(await runSession(counted.session)).toBe("max_length");
+    const empty = parts(fakePage({ probes: [{}, ...Array.from({ length: 30 }, () => ({ others: 0, names: [] }))] }).page);
+    expect(await runSession(empty.session)).toBe("alone");
   });
 
   it("waits in the lobby and reports a refusal or the lobby limit", async () => {
