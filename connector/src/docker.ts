@@ -143,6 +143,26 @@ export function negotiateApi(version: Pick<DockerVersion, "ApiVersion" | "MinAPI
   return `${chosen[0]}.${chosen[1]}`;
 }
 
+/**
+ * Why the connector cannot talk to this Docker, with the fix, or null. Checked at start, so an engine that has dropped
+ * the API versions the connector speaks gets one plain line instead of a connector that crashes and restarts forever.
+ */
+export async function dockerApiProblem(docker: Pick<Docker, "version">, socket: string): Promise<string | null> {
+  let version: DockerVersion;
+  try {
+    version = await docker.version();
+  } catch (error) {
+    return `Docker does not answer on ${socket} (${error instanceof Error ? error.message : String(error)}). Start it with: sudo systemctl enable --now docker`;
+  }
+  if (negotiateApi(version)) return null;
+  const speaks = `the connector speaks API ${MIN_API.join(".")} to ${MAX_API.join(".")}`;
+  const engine = apiParts(version.ApiVersion);
+  if (!engine || below(engine, MIN_API)) {
+    return `Docker ${version.Version} is too old: it speaks API ${version.ApiVersion}, and ${speaks}. Update it with: curl -fsSL https://get.docker.com | sudo sh`;
+  }
+  return `Docker ${version.Version} no longer speaks an API this connector knows (it needs ${version.MinAPIVersion} or newer, and ${speaks}). Run the install command again to get the current connector.`;
+}
+
 /** Splits an image reference with a digest into what `POST /images/create` takes. */
 export function pullParams(image: string): { fromImage: string; tag: string } {
   const at = image.indexOf("@");

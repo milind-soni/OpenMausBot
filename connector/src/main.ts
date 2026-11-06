@@ -8,7 +8,7 @@ import type { Duplex } from "node:stream";
 
 import { Agent, savedConfig, transferAuthorization } from "./agent.ts";
 import { AuditLog, verifyAudit } from "./audit.ts";
-import { SocketDocker, type DockerInfo } from "./docker.ts";
+import { SocketDocker, dockerApiProblem, type DockerInfo } from "./docker.ts";
 import { adminOrigin, enroll } from "./enroll.ts";
 import { readHealth } from "./home-health.ts";
 import { serveRequest } from "./home-requests.ts";
@@ -109,6 +109,11 @@ async function run(): Promise<void> {
   note({ event: "connector", what: "started", version: CONNECTOR_VERSION, image: identity().image });
   // A connector removed with SIGKILL never said it went offline.
   state.saveStatus({ connected: false });
+  for (let problem = await dockerApiProblem(docker, PATHS.docker); problem; problem = await dockerApiProblem(docker, PATHS.docker)) {
+    log(problem);
+    state.saveStatus({ lastError: problem });
+    await sleep(10 * 60_000);
+  }
   let record: AgentRecord | null = state.agent();
   if (!record) log("waiting for this server to be connected: run the install command with the code MausBot shows");
   const enrolledNow = !record;
@@ -246,15 +251,27 @@ function statusCommand(): void {
   }));
 }
 
-/** One line per check for install.sh: `ok <id>`, `warn <id> <fix>` or `fail <id> <fix>`; exits 1 when any fails. */
+/**
+ * One line per check for install.sh: `ok <id>`, `warn <id> <fix>` or `fail <id> <fix>`. With --json, one object
+ * `{ok, checks}` for `openmausbot doctor --host`, which asks the connector on a server that runs one. Exits 1 when any
+ * check fails.
+ */
 async function probeCommand(): Promise<void> {
   const docker = new SocketDocker(PATHS.docker);
+  const unusable = await dockerApiProblem(docker, PATHS.docker);
+  if (unusable) {
+    console.log(process.argv.includes("--json") ? JSON.stringify({ ok: false, checks: [{ id: "docker", ok: false, fix: unusable }] }) : `fail docker ${unusable}`);
+    process.exitCode = 1;
+    return;
+  }
   const image = process.env.MAUSBOT_CONNECTOR_IMAGE;
   let box: BoxProbeResult | null = null;
   try { box = image ? await probeBox(docker, image, seccomp()) : null; } catch (error) { box = { ok: false, fix: errorText(error) }; }
   const checks = hostChecks(await docker.info(), reader, { clockSkewS: null, box });
-  for (const check of checks) console.log(check.ok && !check.warning ? `ok ${check.id}` : `${check.ok ? "warn" : "fail"} ${check.id} ${check.fix ?? ""}`);
-  if (checks.some((check) => !check.ok)) process.exitCode = 1;
+  const ok = checks.every((check) => check.ok);
+  if (process.argv.includes("--json")) console.log(JSON.stringify({ ok, checks }));
+  else for (const check of checks) console.log(check.ok && !check.warning ? `ok ${check.id}` : `${check.ok ? "warn" : "fail"} ${check.id} ${check.fix ?? ""}`);
+  if (!ok) process.exitCode = 1;
 }
 
 /** `job <type> [args as JSON]`: one job, run by the running connector; prints its reply, exits 1 when it failed. */
@@ -297,7 +314,7 @@ const commands: Record<string, () => Promise<void> | void> = {
 
 const command = commands[process.argv[2] ?? "run"];
 if (!command) {
-  console.error("usage: mausbot-connector run | enroll | status | probe | job <type> [args] | audit [--tail N | --verify] | version");
+  console.error("usage: mausbot-connector run | enroll | status | probe [--json] | job <type> [args] | audit [--tail N | --verify] | version");
   process.exitCode = 2;
 } else {
   Promise.resolve().then(command).catch((error) => {
