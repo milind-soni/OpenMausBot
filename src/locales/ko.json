@@ -4119,6 +4119,7 @@
   "remote.devices.subtitle": "이 {app}을(를) 쓸 수 있는 기기를 관리해요.",
   "remote.devices.empty": "아직 페어링된 기기가 없어요.",
   "remote.devices.lastSeen": "마지막 접속 {when}",
+  "remote.devices.paused": "30일 동안 사용하지 않아 일시 중지됐어요. 이 페이지를 열면 다시 연결돼요.",
   "remote.devices.remove": "{name} 제거",
   "remote.devices.allowView": "컴퓨터 보기 허용",
   "remote.devices.allowViewDetail": "이 기기에서 완전히 조작할 수 있어요.",

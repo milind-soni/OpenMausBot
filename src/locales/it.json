@@ -3749,6 +3749,7 @@
   "remote.devices.subtitle": "Gestisci i dispositivi che possono usare questo {app}.",
   "remote.devices.empty": "Nessun dispositivo abbinato per ora.",
   "remote.devices.lastSeen": "Visto l'ultima volta {when}",
+  "remote.devices.paused": "In pausa dopo 30 giorni di inutilizzo. Si ricollega quando apri questa pagina.",
   "remote.devices.remove": "Rimuovi {name}",
   "remote.devices.allowView": "Consenti la vista del computer",
   "remote.devices.allowViewDetail": "Accesso interattivo completo da questo dispositivo.",
