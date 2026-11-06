@@ -548,7 +548,7 @@ import {
   serializeSessionCookie,
   sessionCookieName, ownerOrAdmin,
 } from "./request-auth.ts";
-import { cookieMaxAgeSeconds, formatPairingCode, SessionRegistry, type Scope, type SessionRecord } from "./sessions.ts";
+import { cookieMaxAgeSeconds, formatPairingCode, pairingRequest, SessionRegistry, type SessionRecord } from "./sessions.ts";
 import { ThreadStarters } from "./thread-starters.ts";
 import {
   appendAdminAction,
@@ -12805,11 +12805,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
         return json(res, 401, { error: "Your session ended. Sign in again before creating a pairing code." });
       }
-      const requested: unknown = body?.scopes;
-      const scopes = Array.isArray(requested) ? requested.filter((v): v is Scope => v === "admin" || v === "client") : undefined;
+      const requested = pairingRequest(body);
+      if ("error" in requested) return json(res, 400, requested);
       let opened: ReturnType<typeof sessions.openPairing>;
       try {
-        opened = sessions.openPairing({ label: typeof body?.label === "string" ? body.label : undefined, scopes });
+        opened = sessions.openPairing(requested);
       } catch (error) {
         if ((error as { code?: unknown }).code === "cloud_personal") return json(res, 403, { error: (error as Error).message, code: "cloud_personal", ...userErrorFields(error) });
         throw error;
@@ -13101,7 +13101,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           input: (body?.tool === "show_html" || body?.tool === "update_html") && cloudGuestDriven(internalCapability.threadId) ? { ...body, frameless: false } : body, authored: (id) => handoffs.authored(internalCapability.threadId, internalCapability.generation, id),
         });
         return result.ok
-          ? json(res, 201, { messageId: result.messageId, ...("masked" in result && result.masked ? { masked: true } : {}) })
+          ? json(res, 201, { messageId: result.messageId, ...("masked" in result && result.masked ? { masked: true } : {}), ...("leftOut" in result && result.leftOut ? { leftOut: result.leftOut } : {}) })
           : json(res, result.status, { error: result.error });
       }
       // Notes from a room fewer people can see than this bot would carry its words to everyone who can see the bot.
@@ -13182,7 +13182,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const abort = new AbortController();
         res.once("close", () => { if (!res.writableEnded) abort.abort(); });
         return json(res, 200, { result: await cloudComputerRpc(body, {
-          cfg, signal: abort.signal,
+          cfg, signal: abort.signal, folder: () => messageFileRootsForThread(internalCapability.botId, internalCapability.threadId)[0],
           boxId: () => internalCapability.boxId ?? claimedBoatId(internalCapability),
           gate: () => computerCallGate(internalCapability, abort.signal),
           assertActive: requireActiveInternalCapability,

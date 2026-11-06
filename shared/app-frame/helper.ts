@@ -78,7 +78,7 @@ const helperSource = (room: boolean) => `(function () {
   // in it, which in a frame that sizes to its content only ever reports the
   // frame's current height while the content spills out above and below.
   // Both are freed for the measurement and put back before the next paint.
-  var measure = function () {
+  var freedHeights = function (elements) {
     var body = document.body;
     var boxes = body ? [root, body] : [root];
     var saved = boxes.map(function (box) { return [box.style.height, box.style.minHeight, box.style.maxHeight]; });
@@ -87,7 +87,7 @@ const helperSource = (room: boolean) => `(function () {
       box.style.setProperty("min-height", "0", "important");
       box.style.setProperty("max-height", "none", "important");
     });
-    var height = Math.ceil(root.getBoundingClientRect().height);
+    var heights = elements.map(function (element) { return element.getBoundingClientRect().height; });
     boxes.forEach(function (box, index) {
       box.style.removeProperty("height");
       box.style.removeProperty("min-height");
@@ -96,18 +96,46 @@ const helperSource = (room: boolean) => `(function () {
       if (saved[index][1]) box.style.minHeight = saved[index][1];
       if (saved[index][2]) box.style.maxHeight = saved[index][2];
     });
-    return height;
+    return heights;
+  };
+  var isLayer = function (element) {
+    var position = window.getComputedStyle(element).position;
+    return position === "absolute" || position === "fixed";
+  };
+  var drawsToWindow = function () {
+    var width = window.innerWidth;
+    var height = window.innerHeight;
+    if (!width || !height || typeof document.elementsFromPoint !== "function") return false;
+    var large = document.elementsFromPoint(width / 2, height / 2).filter(function (element) {
+      var box = element.getBoundingClientRect();
+      return element !== root && element !== document.body && box.width >= width / 2 && box.height >= height / 2;
+    });
+    if (large.some(isLayer)) return true;
+    // Sized from the window with no flow of its own: a map in html, body, #map { height: 100% }.
+    return large.length > 0 && freedHeights(large).some(function (freed) { return freed < 1; });
+  };
+  // A page drawn to its window keeps the frame's starting height until its
+  // flow needs more: its layers follow the frame, so what it reports must not.
+  var SHORT_FLOW = 120;
+  var start = 0;
+  var filling = false;
+  var heightToReport = function () {
+    var flow = Math.ceil(freedHeights([root])[0]);
+    if (!start) start = Math.round(window.innerHeight) || 0;
+    if (filling && flow < Math.max(start, SHORT_FLOW)) return start;
+    filling = start > 0 && flow < SHORT_FLOW && drawsToWindow();
+    return filling ? start : flow;
   };
   var watchSize = function () {
     var last = -1;
     var queued = false;
     var later = typeof requestAnimationFrame === "function" ? requestAnimationFrame : function (fn) { return setTimeout(fn, 16); };
     var report = function () {
-      if (queued) return;
+      if (queued || document.readyState !== "complete") return;
       queued = true;
       later(function () {
         queued = false;
-        var height = measure();
+        var height = heightToReport();
         if (height !== last) { last = height; notify("ui/notifications/size-changed", { height: height }); }
       });
     };

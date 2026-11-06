@@ -18,8 +18,9 @@ export interface AgentCardStore {
 }
 
 export type AgentCardResult =
-  /** `masked`: something in the widget read as a secret and was stored masked. */
-  | { ok: true; messageId: string; masked?: true }
+  /** `masked`: something in the widget read as a secret and was stored masked. `leftOut`: a folder page's sentence naming
+   * the files it left out. */
+  | { ok: true; messageId: string; masked?: true; leftOut?: string }
   | { ok: false; status: 400 | 403 | 404 | 409; error: string };
 
 const NO_SUCH_WIDGET = "No widget with that id in this conversation.";
