@@ -470,8 +470,16 @@ export class MdnsResponder {
         } catch {
         }
       }
-      // On a Mac the default route may be a VPN tunnel (see MAC_TUNNEL_INTERFACE).
-      if (!joined && this.platform !== "darwin") {
+      if (!joined) {
+        // On a Mac the default route may be a VPN tunnel (see MAC_TUNNEL_INTERFACE),
+        // so there is no fallback: with no group joined, discovery is not running.
+        if (this.platform === "darwin") {
+          try {
+            socket.close();
+          } catch {
+          }
+          return false;
+        }
         try {
           socket.addMembership(MDNS_ADDRESS);
         } catch {

@@ -381,7 +381,9 @@ class FakeSocket extends EventEmitter {
     this.packets.push(packet);
     callback?.(null);
   }
+  closed = false;
   close(callback?: () => void) {
+    this.closed = true;
     callback?.();
   }
   address() {
@@ -553,7 +555,7 @@ describe("advertisableAddresses", () => {
 
   it("never falls back to the default-route membership on a Mac", async () => {
     // The LAN address left before its join: the default route may be a utun.
-    for (const [platform, expected] of [["darwin", []], ["linux", [undefined]]] as const) {
+    for (const [platform, expected, advertised] of [["darwin", [], false], ["linux", [undefined], true]] as const) {
       const socket = new FakeSocket();
       const join = socket.addMembership.bind(socket);
       socket.addMembership = (group, membershipInterface) => {
@@ -562,8 +564,10 @@ describe("advertisableAddresses", () => {
       };
       const responder = new MdnsResponder({ socketFactory: () => socket, platform });
       try {
-        expect(await responder.advertise({ ...service, addresses: ["192.168.1.42"] })).toBe(true);
+        expect(await responder.advertise({ ...service, addresses: ["192.168.1.42"] })).toBe(advertised);
         expect(socket.memberships).toEqual(expected);
+        expect(responder.advertising).toBe(advertised);
+        expect(socket.closed).toBe(!advertised);
       } finally {
         await responder.stop();
       }
