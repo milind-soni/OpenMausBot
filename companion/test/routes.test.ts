@@ -116,6 +116,8 @@ describe("what the app may do", () => {
     ["POST", "/api/routines/routine_1/run"],
     ["POST", "/api/routine-runs/run_1/cancel"],
     ["POST", "/api/routine-runs/run_1/seen"],
+    // The stopped turn's "Continue when your limit resets" makes a one-time automation, like POST /api/routines.
+    ["POST", "/api/limit-resets/continue"],
     ["GET", "/api/connectors/catalog"],
     ["GET", "/api/connectors/connected"],
     ["GET", "/api/connectors"],
@@ -304,6 +306,10 @@ describe("what it may not", () => {
     expect(allowed("POST", "/api/bots/bot_123/sign-in-cards/msg_3/resume")).toBe(false);
     expect(allowed("GET", "/api/bots/bot_123/sign-in-cards/msg_3/done")).toBe(false);
     expect(allowed("PATCH", "/api/groups/room-1")).toBe(false);
+    expect(allowed("GET", "/api/limit-resets/continue")).toBe(false);
+    expect(allowed("DELETE", "/api/limit-resets/continue")).toBe(false);
+    expect(allowed("GET", "/api/limit-resets")).toBe(false);
+    expect(allowed("POST", "/api/limit-resets/after-reset")).toBe(false);
   });
 
   it("lets a phone update Claude Code and change nothing else about engines", () => {
