@@ -2306,6 +2306,7 @@
   "chat.error.signedOut": "Você ainda não entrou na conta de {name}. Entre abaixo e envie sua mensagem novamente.",
   "chat.notice.signIn": "Entrar",
   "chat.notice.signInHint": "Abrir as configurações de IA para entrar novamente",
+  "chat.error.pastUsageLimit": "Aviso antigo de limite de uso (horário de redefinição já passou; confira o uso atual)",
   "chat.error.details": "Detalhes",
   "chat.error.partial": "Concluído em parte. A resposta chegou, mas uma etapa não deu certo. Confira essa etapa antes de confiar no resultado.",
   "chat.error.partialPreview": "Concluído em parte: uma etapa não deu certo",

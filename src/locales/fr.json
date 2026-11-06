@@ -821,6 +821,7 @@
   "chat.copyMessage": "Copier le message",
   "chat.retry": "Réessayer",
   "chat.error.signedOut": "{name} n’est pas encore connecté. Connectez-vous ci-dessous, puis renvoyez votre message.",
+  "chat.error.pastUsageLimit": "Ancien avis de limite d’utilisation (réinitialisation passée ; vérifiez l’utilisation actuelle)",
   "chat.error.details": "Détails",
   "chat.error.requestTooLarge": "Ce message est trop volumineux pour {model}. Commencez une nouvelle conversation ou choisissez un modèle qui en accepte davantage.",
   "chat.send": "Envoyer",

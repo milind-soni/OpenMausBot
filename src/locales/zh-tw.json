@@ -1412,6 +1412,7 @@
   "chat.showRenderedMarkdown": "顯示渲染後的 Markdown",
   "chat.retry": "重試",
   "chat.error.signedOut": "{name} 尚未登入。請在下方登入，然後重新傳送你的訊息。",
+  "chat.error.pastUsageLimit": "先前的用量限制通知（重設時間已過；請確認目前用量）",
   "chat.error.details": "詳細資訊",
   "chat.error.requestTooLarge": "這則訊息對 {model} 來說太大了。請開始新的對話，或選擇能接受更多內容的模型。",
   "chat.cloudGuest.notYours": "你只能在自己於此 Cloud 上開始的對話中撰寫訊息。",

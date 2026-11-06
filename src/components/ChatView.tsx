@@ -286,13 +286,17 @@ export function FailedTurnRow({ tool, engine, onRetry, botId, threadId, messageA
   useEffect(() => {
     const at = tool.limitResetsAt;
     if (typeof at !== "number" || !Number.isFinite(at)) return;
-    const delay = at - Date.now();
-    if (delay <= 0) {
-      setClock(Date.now());
-      return;
-    }
-    const timer = setTimeout(() => setClock(Date.now()), Math.min(delay + 1_000, 2_147_483_647));
-    return () => clearTimeout(timer);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const arm = () => {
+      const remaining = at - Date.now();
+      if (remaining <= 0) {
+        setClock(Date.now());
+        return;
+      }
+      timer = setTimeout(arm, Math.min(remaining + 1_000, 2_147_483_647));
+    };
+    arm();
+    return () => { if (timer) clearTimeout(timer); };
   }, [tool.limitResetsAt]);
   if (tool.place && botId) return <PlaceFailedRow place={tool.place} botId={botId} threadId={threadId} onRetry={onRetry} />;
   const credit = trialCreditKind(failedTurnCause(tool.name) ?? "");
@@ -301,7 +305,7 @@ export function FailedTurnRow({ tool, engine, onRetry, botId, threadId, messageA
   if (tool.partial) return <PartlyDoneRow cause={notice ?? cause} onRetry={onRetry} />;
   // A past refusal remains in the transcript for evidence, not as a current blocker.
   // The reset time passing does not prove today's quota is available again.
-  const expired = typeof tool.limitResetsAt === "number" &&
+  const expired = codexUsageLimitReached(cause) && typeof tool.limitResetsAt === "number" &&
     Number.isFinite(tool.limitResetsAt) &&
     typeof messageAt === "number" &&
     messageAt <= tool.limitResetsAt &&
@@ -309,7 +313,7 @@ export function FailedTurnRow({ tool, engine, onRetry, botId, threadId, messageA
   if (expired) {
     return (
       <details className="my-1 w-fit max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-lg border border-hairline/40 bg-raised px-3 py-2 text-[12px] text-ink-secondary">
-        <summary className="cursor-pointer">Past usage-limit notice (reset time passed; check current usage)</summary>
+        <summary className="cursor-pointer">{t("chat.error.pastUsageLimit")}</summary>
         <p className="mt-2 break-words">{notice ?? cause}</p>
       </details>
     );

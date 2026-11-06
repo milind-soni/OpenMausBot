@@ -453,6 +453,13 @@ describe("thread control placement", () => {
       tool: failedTurnTool(CODEX_USAGE_LIMIT_REACHED), engine: codex, messageAt: reset - 10_000,
     }));
     expect(unknown).toContain("Manage usage");
+
+    const auth = renderToStaticMarkup(createElement(FailedTurnRow, {
+      tool: failedTurnTool("Not logged in - please sign in", { setup: true, limitResetsAt: reset }),
+      engine: codex, messageAt: reset - 10_000,
+    }));
+    expect(auth).not.toContain("Past usage-limit notice");
+    expect(auth).toContain("Not logged in");
   });
   it("opens a signed-out engine's failed turn with one sentence and the sign-in, the CLI's words under Details", () => {
     const claude = {
