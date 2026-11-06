@@ -50,6 +50,8 @@ export interface BrowserServiceOptions {
   /** Browsers running at once on this server. */
   maxRunning: number;
   idleMs(): number;
+  /** A running turn holds this session between browser calls too. */
+  held?(session: string): boolean;
   scrub?: (text: string) => string;
   /** What the egress gate of this profile's browser refused since it was last asked, as one line. */
   egressNotice?: (key: string) => string | null;
@@ -204,6 +206,7 @@ export class BrowserService {
   async #open(profile: ProfileState, epoch: number): Promise<Running> {
     const fresh = profile.fresh;
     profile.fresh = false;
+    rmSync(profile.downloadDir, { recursive: true, force: true });
     mkdirSync(profile.downloadDir, { recursive: true, mode: 0o700 });
     const opened = await this.#options.backend(profile.key).open({ key: profile.key, mode: "headless", fresh, viewport: profile.hub.viewport(), downloadDir: profile.downloadDir });
     const run: Running = { opened, browser: opened.browser, offs: [], closing: false };
@@ -273,6 +276,11 @@ export class BrowserService {
     profile.run = null;
     profile.tabs.clear();
     if (run.closing) return;
+    try {
+      rmSync(profile.downloadDir, { recursive: true, force: true });
+    } catch (error) {
+      this.#options.log?.(`browser ${profile.key}: could not remove downloads: ${error}`);
+    }
     profile.reopened = { kind: "crash", pages: [] };
     profile.control.settle();
     this.#options.log?.(`browser ${profile.key}: Chrome exited unexpectedly; the next call starts it again`);
@@ -300,9 +308,13 @@ export class BrowserService {
         if (profile.run === run) profile.run = null;
         profile.tabs.clear();
         if (reopened) profile.reopened = reopened;
-        if (profile.temporary || erase) this.#erase(profile);
-        profile.control.closing = false;
-        profile.control.settle();
+        try {
+          if (profile.temporary || erase) this.#erase(profile);
+          else rmSync(profile.downloadDir, { recursive: true, force: true });
+        } finally {
+          profile.control.closing = false;
+          profile.control.settle();
+        }
       }
     })().finally(() => { if (profile.stopping === stopping) profile.stopping = null; });
     profile.stopping = stopping;
@@ -322,7 +334,8 @@ export class BrowserService {
 
   #unused(profile: ProfileState, idleMs: number): boolean {
     return profile.run !== null && !profile.starting && !profile.stopping && profile.calls === 0
-      && profile.control.owner === null && profile.control.agents === 0 && !this.#lanes.held(profile.key) && Date.now() - profile.lastUsed >= idleMs;
+      && profile.control.owner === null && profile.control.agents === 0 && !this.#lanes.held(profile.key)
+      && !this.#options.held?.(profile.session) && Date.now() - profile.lastUsed >= idleMs;
   }
 
   /** The least recently used unwatched idle browser makes room; with none, the call waits, then is told why it cannot start. */
