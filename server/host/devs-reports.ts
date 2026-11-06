@@ -21,6 +21,7 @@ import { versionAtLeast, type BugReportStatus } from "../../shared/devs-report-s
 import { failedTurnCause } from "../../shared/failed-turn.ts";
 import type { ResolvedSender } from "../../shared/wire.ts";
 import { splitTranscriptCitations } from "../../src/lib/citations.ts";
+import { PASTED_TEXT_CLOSE, PASTED_TEXT_OPEN } from "../../src/lib/composer-attachments.ts";
 import { writeFileAtomic } from "../atomic.ts";
 import { startDueTimer } from "../due-timer.ts";
 import type { ProviderSnapshot } from "../contracts.ts";
@@ -147,10 +148,23 @@ function ownWords(message: string): string[] {
   return [display, ...citations.map((citation) => citation.comment ?? "")];
 }
 
-/** A block the composer wraps around text the person pasted in (composeMessage): like a quote, a @devs inside it is
- * theirs to read, not a tag they typed. */
-const PASTED_TEXT = /^ {0,3}<pasted-text(?:[\t ]+index="\d+")?[\t ]*>[\t ]*\r?\n[\s\S]*?^[\t ]*<\/pasted-text>[\t ]*$/gim;
-const tagsDevsOutsidePastes = (part: string, names?: readonly string[]) => tagsDevs(part.replace(PASTED_TEXT, ""), names);
+/** The message without the blocks the composer wraps around text the person pasted in (composeMessage): like a
+ * quote, a @devs inside a paste is theirs to read, not a tag they typed. One pass over the lines; a block ends at its
+ * first closing line, as the transcript reads it, and an opening line with no closing line after it stays as text. */
+function withoutPastes(message: string): string {
+  const lines = message.split("\n");
+  const kept: string[] = [];
+  let open = -1;
+  lines.forEach((line, index) => {
+    const bare = line.endsWith("\r") ? line.slice(0, -1) : line;
+    if (open < 0) {
+      if (PASTED_TEXT_OPEN.test(bare)) open = index;
+      else kept.push(line);
+    } else if (PASTED_TEXT_CLOSE.test(bare)) open = -1;
+  });
+  if (open >= 0) kept.push(...lines.slice(open));
+  return kept.join("\n");
+}
 
 /** Rides on the turn that answers a @devs message. */
 const TURN_NOTE = "\n\n[From OpenMausBot, not the person: this message tags @devs, so it is a bug report for the MausBot team, OpenMausBot's developers. Call report_bug once, first: what the person says went wrong; what you saw yourself in this conversation (errors, failed tools, stuck steps), or that you saw nothing unusual; and steps to reproduce. Leave out passwords, keys, tokens and file contents; OpenMausBot adds the app's own diagnostics. Then tell the person, word for word, the line report_bug returns, and help with the problem if you can.]";
@@ -450,10 +464,11 @@ export function createDevsReports(deps: DevsReportsDeps) {
   function personWrote(threadId: string, line: Message): void {
     if (seen.has(line.id) || !line.text || now() - line.at > FRESH_MS) return;
     if (!line.sendId && deps.automated(threadId)) return;
-    const own = ownWords(line.text);
-    if (!own.some((part) => tagsDevsOutsidePastes(part))) return;
+    const typed = ownWords(withoutPastes(line.text));
+    if (!typed.some((part) => tagsDevs(part))) return;
     const names = namesBeforeDevs();
-    if (!own.some((part) => tagsDevsOutsidePastes(part, names))) return;
+    if (!typed.some((part) => tagsDevs(part, names))) return;
+    const own = ownWords(line.text);
     seen.add(line.id);
     if (seen.size > 1_000) seen.delete(seen.values().next().value!);
     if (waiting.length >= MAX_WAITING) return notice(threadId, { ok: false, line: fullLine(MAX_OUTBOX, languageFor(line.sender?.id)), marker: "" });

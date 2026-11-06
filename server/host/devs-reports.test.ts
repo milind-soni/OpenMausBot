@@ -252,6 +252,32 @@ describe("a message that tags @devs", () => {
     fx.advance(NO_ANSWER_MS);
     await fx.settle();
     expect(fx.sent).toHaveLength(1);
+    const [words, written] = fx.sent[0]!.description.split("\n\nWhat they wrote: ");
+    expect(words).toContain("<pasted-text index=\"1\">\nWhat's new");
+    expect(written).toContain("Quoted @devs reports send correctly.");
+    fx.stop();
+  });
+
+  it("does not send for a @devs in a quote comment that is itself inside pasted text", async () => {
+    const fx = fixture();
+    const said = fx.bot("scout-main", "I only send a report when your message tags @devs.");
+    const quoted = composeMessage("", [citationAttachment({ ownerType: "bot", ownerId: "scout", threadId: "scout-main", messageId: said.id },
+      createCitationTextSelector(said.text!, 0, said.text!.length)!, "@devs this is wrong")]);
+    fx.person("scout-main", composeMessage("what did I send yesterday?", [pasteAttachment(quoted)]));
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toHaveLength(0);
+    fx.stop();
+  });
+
+  it("keeps an opening paste line with no closing line as the person's text, and reads many of them quickly", async () => {
+    const fx = fixture();
+    const started = performance.now();
+    fx.person("scout-main", `<pasted-text>\n@devs it broke\n${"<pasted-text>\n".repeat(50_000)}`);
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(performance.now() - started).toBeLessThan(2_000);
+    expect(fx.sent).toHaveLength(1);
     fx.stop();
   });
 

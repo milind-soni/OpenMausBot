@@ -519,8 +519,8 @@ type TranscriptBlock =
   | { kind: "untilBlank" }
   | { kind: "untilToken"; closingToken: string; hiddenWrapper?: boolean };
 
-const PASTED_TEXT_OPEN = /^ {0,3}<pasted-text(?:[\t ]+index="\d+")?[\t ]*>[\t ]*$/i;
-const PASTED_TEXT_CLOSE = /^[\t ]*<\/pasted-text>[\t ]*$/i;
+export const PASTED_TEXT_OPEN = /^ {0,3}<pasted-text(?:[\t ]+index="\d+")?[\t ]*>[\t ]*$/i;
+export const PASTED_TEXT_CLOSE = /^[\t ]*<\/pasted-text>[\t ]*$/i;
 
 /** An unterminated fence protects the rest of the message: examples must never become actionable attachments. */
 function transcriptFenceMarker(line: string): (TranscriptFence & { remainder: string }) | null {
