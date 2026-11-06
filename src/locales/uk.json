@@ -3,7 +3,6 @@
   "voice.gemini.model": "Модель синтезу мовлення Gemini",
   "keys.label.geminiTts": "API-ключ синтезу мовлення Gemini",
   "keys.purpose.geminiTts": "Голоси Gemini для озвучення відповідей, голосових нотаток і дзвінків",
-  "highlevel.unavailable": "Тут недоступно.",
   "postiz.description": "Створюйте чернетки, плануйте й публікуйте дописи в соцмережах через Postiz.",
   "postiz.connect": "Підключити Postiz",
   "postiz.reconnect": "Перепідключити Postiz",

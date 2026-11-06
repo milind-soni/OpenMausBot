@@ -1,8 +1,7 @@
 // What a bot on My Cloud is told about the connections it reaches for that need the person, or another computer, read
-// from this Cloud's own state on each turn: an MCP server that needs a sign-in here, HighLevel or connected apps
-// assigned to the bot but not connected here, an MCP server that runs on the person's computer, and what stayed on the
+// from this Cloud's own state on each turn: an MCP server that needs a sign-in here, connected apps assigned to the
+// bot but not connected here, an MCP server that runs on the person's computer, and what stayed on the
 // computer the bots moved here from. So the bot says so in plain words, with the link that connects it.
-import { HIGHLEVEL_SLUG } from "../shared/highlevel.ts";
 import type { ConnectorToolGrant } from "../shared/wire.ts";
 import { toolkitName } from "./activity.ts";
 import type { McpAuthState } from "./mcp-oauth.ts";
@@ -15,7 +14,6 @@ const SLUG = /^[a-z0-9_][a-z0-9_-]{0,80}$/u;
 export interface ConnectionPromptSources {
   mcpServers(): Record<string, unknown> | undefined;
   mcpAuth(name: string, url: string): McpAuthState;
-  highlevelConnected(): boolean;
   /** Which of these connected apps are connected here now. */
   composioConnected(slugs: string[]): Promise<Record<string, boolean>>;
   /** The computer the bots moved here from, once a move is done. */
@@ -67,8 +65,7 @@ export function createConnectionPrompt(sources: ConnectionPromptSources, origin:
       }
     }
     const granted = bot.composio === false ? [] : Object.keys(bot.connectorTools ?? {});
-    if (granted.includes(HIGHLEVEL_SLUG) && !sources.highlevelConnected()) toConnect.push(`HighLevel (connect it here: ${link(HIGHLEVEL_SLUG)})`);
-    const apps = connected(granted.filter((slug) => slug !== HIGHLEVEL_SLUG && SLUG.test(slug))).filter(([, on]) => !on).map(([slug]) => toolkitName(slug.toUpperCase()));
+    const apps = connected(granted.filter((slug) => SLUG.test(slug))).filter(([, on]) => !on).map(([slug]) => toolkitName(slug.toUpperCase()));
     const from = sources.movedFrom?.() ?? null;
     return [
       from ? ` You moved to My Cloud from the person's computer ${from}, with everything in OpenMausBot. What lives outside OpenMausBot stayed on ${from}: its other folders and files, passkeys, the person's own browser sessions and apps, Local VM disks and model servers on its home network. When a task needs one, use ${from} if it is lent to My Cloud and online; otherwise say in plain words that it stayed there.` : "",

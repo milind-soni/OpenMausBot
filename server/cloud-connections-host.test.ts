@@ -6,8 +6,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createCloudConnectionsHost } from "./cloud-connections-host.ts";
 import { signInDigest } from "./cloud-connections.ts";
 import type { AppConfig } from "./config.ts";
-import { createHighLevelService } from "./highlevel/service.ts";
-import type { HighLevelConnection } from "./highlevel/store.ts";
 import { McpOAuthManager } from "./mcp-oauth.ts";
 import type { McpOAuthRecord } from "./mcp-oauth-store.ts";
 import { PASS } from "./routes/table.ts";
@@ -19,15 +17,13 @@ const temp = () => { const dir = mkdtempSync(join(tmpdir(), "omb-connections-hos
 
 const LINEAR = "https://mcp.linear.app/sse";
 const signIn = (access: string, refresh: string): McpOAuthRecord => ({ url: LINEAR, state: "signed-in", clientId: "client", tokenEndpoint: "https://linear.app/token", tokens: { access, refresh, expiresAt: 10 } });
-const HIGHLEVEL: HighLevelConnection = { kind: "oauth", accessToken: "hl-access", refreshToken: "hl-refresh", expiresAt: 5, locationId: "loc_1", scopes: "", connectedAt: 1, state: "signed-in" };
 
 function host(cloudHome: boolean) {
   const dir = temp();
   const config = { mcpServers: { linear: { type: "http", url: LINEAR, headers: {}, enabled: true }, dodo: { command: "npx", args: ["dodo"], env: {}, enabled: true } } } as unknown as AppConfig;
   const mcpOAuth = new McpOAuthManager({ file: join(dir, "mcp-oauth.json") });
-  const highlevel = createHighLevelService({ dataDir: dir, env: {} });
   const connections = createCloudConnectionsHost({ cloudHome: cloudHome ? { publicOrigin: "https://omb-u-1.fly.dev" } : null, config: () => config,
-    environmentId: "env-desktop-1", mcpOAuth, highlevel, engines: async () => ["claude", "openrouter"] });
+    environmentId: "env-desktop-1", mcpOAuth, engines: async () => ["claude", "openrouter"] });
   async function call(method: string, path: string, body?: unknown, type = "application/json") {
     let status = 0, answered: unknown = null;
     const url = new URL(`https://cloud.test${path}`);
@@ -38,7 +34,7 @@ function host(cloudHome: boolean) {
     });
     return { out, status, body: answered as Record<string, any> };
   }
-  return { connections, mcpOAuth, highlevel, call };
+  return { connections, mcpOAuth, call };
 }
 
 describe("a move's routes and private port", () => {
@@ -72,15 +68,6 @@ describe("a move's routes and private port", () => {
     expect((await call("PUT", `${route}?replaces=nope`, signIn("a2", "r2"))).status).toBe(400);
     expect(await call("PUT", `${route}?replaces=${signInDigest({ access: "a1", refresh: "r1", expiresAt: 10 })}`, signIn("a2", "r2"))).toMatchObject({ status: 200, body: { adopted: true } });
     expect(mcpOAuth.signInRecord("linear", LINEAR)?.tokens?.refresh).toBe("r2");
-  });
-
-  it("takes a moved HighLevel connection, keeping one signed in here", async () => {
-    const { call, highlevel } = host(true);
-    expect((await call("PUT", "/api/cloud-connections/highlevel", { kind: "oauth" })).status).toBe(400);
-    expect(await call("PUT", "/api/cloud-connections/highlevel", HIGHLEVEL)).toMatchObject({ status: 200, body: { adopted: true } });
-    expect(highlevel.status()).toMatchObject({ state: "connected", kind: "oauth", location: { id: "loc_1" } });
-    expect(await call("PUT", "/api/cloud-connections/highlevel", { ...HIGHLEVEL, accessToken: "other", locationId: "loc_2" })).toMatchObject({ status: 200, body: { kept: true } });
-    expect(highlevel.store.get()?.locationId).toBe("loc_1");
   });
 
   it("hands over a sign-in over the private port, then forgets it here without signing it out", async () => {

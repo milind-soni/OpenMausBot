@@ -14,7 +14,6 @@
   "hostedMcp.setupFailed": "{service} eklenemedi. Sayfayı yenileyip tekrar deneyin.",
   "hostedMcp.testFailed": "Giriş yapıldı, ancak {service} araçları yüklenemedi: {reason} Yeniden denemek için lütfen tekrar bağlanın.",
   "hostedMcp.loadingTools": "Giriş yapıldı. {service} araçları yükleniyor…",
-  "highlevel.unavailable": "Burada kullanılamıyor.",
   "postiz.description": "Postiz ile sosyal medya gönderilerini taslak olarak hazırlayın, zamanlayın ve yayınlayın.",
   "postiz.connect": "Postiz’i bağla",
   "postiz.reconnect": "Postiz’i yeniden bağla",

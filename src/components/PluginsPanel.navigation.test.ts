@@ -50,10 +50,6 @@ vi.mock("./McpServersPanel", async () => {
 });
 vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
 vi.mock("./Avatar", () => ({ BotAvatar: ({ bot }: { bot: Bot }) => createElement("span", { "data-avatar": bot.id }) }));
-// The native HighLevel card has its own DOM suite; here it is a marker so tile counts stay the catalog's.
-vi.mock("./HighLevelCard", () => ({
-  HighLevelCard: () => createElement("div", { "data-highlevel-card": true }, "Connect HighLevel"),
-}));
 vi.mock("./XCard", () => ({
   X_CARD_SEARCH: "x twitter treg tweets posts",
   XCard: () => createElement("div", { "data-x-card": true }, "X (Twitter)"),
@@ -73,11 +69,10 @@ const CARDS = 0;
 const CONFIGURED = 3;
 const STATUS = 6;
 const PHASE = 13;
-const HIGHLEVEL_CONNECTED = 21;
-const X_CONNECTED = 22;
+const X_CONNECTED = 21;
 const CATEGORY = 20;
-const POSTIZ_CONNECTED = 23;
-const EMAIL_CONNECTED = 24;
+const POSTIZ_CONNECTED = 22;
+const EMAIL_CONNECTED = 23;
 const MODE = 4;
 const SEARCH = 15;
 const HOSTED_CONNECTED = 18;
@@ -176,28 +171,6 @@ describe("Apps pop-up", () => {
     fixture.overrides.set(HOSTED_CONNECTED, Object.fromEntries(HOSTED_MCP_APPS.map((app) => [app.id, true])));
     const html = render().html;
     expect(html).toContain(`Connected: ${new Intl.ListFormat("en", { style: "long", type: "conjunction" }).format(HOSTED_MCP_APPS.map((app) => app.label))}.`);
-  });
-  it("shows the native HighLevel card in the grid and counts it once connected", () => {
-    const { html, nodes: tree } = render();
-    const grid = tree.find((node) => node.props["data-apps-grid"] !== undefined)!;
-    expect(nodes(grid).some((node) => node.props.onConnection !== undefined && node.props.refreshKey !== undefined)).toBe(true);
-    expect(html).toContain("Connect HighLevel");
-    expect(html).toContain("1 connected");
-    fixture.overrides.set(HIGHLEVEL_CONNECTED, true);
-    expect(render().html).toContain("2 connected");
-  });
-  it("hides HighLevel from the Connected tab until it is connected, and from a search that does not name it", () => {
-    fixture.overrides.set(16, "connected");
-    fixture.overrides.set(HIGHLEVEL_CONNECTED, false);
-    const wrapper = (tree: Node[]) => tree.find((node) => node.props["data-native-card"] === "highlevel")!;
-    expect(wrapper(render().nodes).props.className).toBe("hidden");
-    fixture.overrides.set(HIGHLEVEL_CONNECTED, true);
-    expect(wrapper(render().nodes).props.className).toBe("contents");
-    fixture.overrides.set(16, "marketplace");
-    fixture.overrides.set(15, "growably");
-    expect(wrapper(render().nodes).props.className).toBe("contents");
-    fixture.overrides.set(15, "zendesk");
-    expect(wrapper(render().nodes).props.className).toBe("hidden");
   });
   it("shows the Postiz card in the grid and under Social, with a Social pill, and counts it once connected", () => {
     const wrapper = (tree: Node[]) => tree.find((node) => node.props["data-native-card"] === "postiz")!;
