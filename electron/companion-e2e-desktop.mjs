@@ -1,6 +1,7 @@
 import { companionState, postCompanionMessage, setCompanionE2EHooks } from "./companion.mjs";
 import { COMPANION_INSTALLATION_CREDENTIAL_FIELD, resolveCompanionControlPlaneURL } from "./companion-account-service.mjs";
 import { createCompanionE2E } from "./companion-e2e.mjs";
+export { deviceCounts } from "./companion-e2e.mjs";
 import { createControlPlaneClient } from "./control-plane-client.mjs";
 
 const signedOut = () => Promise.reject(Object.assign(new Error("signed out"), { code: "signed_out" }));

@@ -22,7 +22,7 @@ import {
 import { companionPairingMode } from "../lib/phone-setup";
 import { revealPhonePairing } from "../lib/phone-pairing";
 import { PhonesList } from "./PhonesList";
-import { PairedPhones, relayStatusLine } from "./PairedPhones";
+import { PairedPhones, RelayLine } from "./PairedPhones";
 import { ConnectionDetail } from "./ConnectionDetail";
 import { Card, Switch } from "./SettingsPrimitives";
 import { productName } from "../lib/brand";
@@ -241,7 +241,7 @@ export function CompanionSection({ profileEmail = "", focusRequest = 0 }: { prof
             <div className="min-w-0">
               <div className="text-[13px] text-ink">{t("remote.title")}</div>
               <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-                {relayStatusLine(state) ?? t("remote.toggleDetail")}
+                <RelayLine state={state} fallback={t("remote.toggleDetail")} />
               </div>
             </div>
             <Switch

@@ -461,7 +461,7 @@ let logStream = null;
 let desktopShutdownStarted = false;
 import { companionAdvertisedHostedUrl, companionEnabledAtRest, companionOriginTarget, companionPairing, companionPairingRenew, companionDeviceRoutes, companionRefreshTailscale, companionCloudDesktopAccess,
   companionBrowserControlAccess, companionRevoke, companionRunning, companionState, rememberCompanionEnabled, rememberCompanionKeepAwake, setCompanionHostedUrl, setCompanionLifecycleListener, startCompanion, stopCompanion } from "./companion.mjs";
-import { createDesktopCompanionE2E } from "./companion-e2e-desktop.mjs";
+import { createDesktopCompanionE2E, deviceCounts } from "./companion-e2e-desktop.mjs";
 import { autoStartCompanion } from "./companion-autostart.mjs";
 import { createRoutineWakeHold, rememberRoutineWake, routineWakeSettings } from "./routine-wake.mjs";
 import { CREDENTIAL_PATCH, credentialSaveError } from "./credential-patch.mjs";
@@ -761,7 +761,7 @@ function ensureCompanionAccountService() {
     onDemand: true,
     managedEndpointNeeded: async () =>
       companionRunning() ? managedEndpointNeed(await companionState().catch(() => null)) : null,
-    relayCapable: () => companionE2E?.enabled === true,
+    relay: { capable: () => companionE2E?.enabled === true, legacyDevices: async () => (companionRunning() ? deviceCounts(await companionState().catch(() => null)).legacy : null) },
     log: (line) => slog(line),
   });
   return companionAccountService;

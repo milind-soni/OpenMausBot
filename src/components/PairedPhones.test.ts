@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { PhoneRow, phoneSubtitle, relayStatusLine, sortPhones } from "./PairedPhones";
+import { CONNECTING_DELAY_MS, MIN_VISIBLE_MS, PhoneRow, phoneSubtitle, relayStatusLine, sortPhones, steadyAt } from "./PairedPhones";
 import type { CompanionState, PhoneDevice, PhoneSetupController } from "./PhoneSetupFlow";
 
 const NOW = Date.now();
@@ -43,6 +43,14 @@ describe("paired phones", () => {
       new Set(["b"]),
     ).map((each) => each.id);
     expect(order).toEqual(["b", "a", "c"]);
+  });
+
+  it("shows Connecting only once it lasted 1.5 s, and keeps any line up at least 0.4 s", () => {
+    const shown = { text: "Reachable from anywhere · end-to-end encrypted", at: 1_000 };
+    expect(steadyAt(shown, 1_100, true)).toBe(1_100 + CONNECTING_DELAY_MS);
+    expect(steadyAt(shown, 1_100, false)).toBe(1_000 + MIN_VISIBLE_MS);
+    expect(steadyAt({ text: null, at: 0 }, 5_000, false)).toBe(5_000);
+    expect(steadyAt(shown, 9_000, false)).toBe(9_000);
   });
 
   it("names where phones can reach this computer from", () => {

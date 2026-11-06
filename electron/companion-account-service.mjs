@@ -259,8 +259,8 @@ export function createCompanionAccountService({
   firstEndpointCheckMs = DEFAULT_FIRST_ENDPOINT_CHECK_MS,
   onDemand = false,
   managedEndpointNeeded = async () => null,
-  /** Reaches its phones through MausBot Relay: a "no" from managedEndpointNeeded then holds even right after sign-in. */
-  relayCapable = () => false,
+  /** MausBot Relay: `capable` makes a "no" need hold even right after sign-in; `legacyDevices` counts old phones. */
+  relay = { capable: () => false, legacyDevices: async () => null },
   releaseGraceMs = DEFAULT_RELEASE_GRACE_MS,
   releaseJitterMs = DEFAULT_RELEASE_JITTER_MS,
   // Only the code, HTTP status, request id and retry delay: never an email, token, credential or address.
@@ -550,15 +550,15 @@ export function createCompanionAccountService({
       }
       throw error;
     }
-    if (onDemand && (await currentNeed()) === false) {
+    const withoutTunnel = async () => {
       await updateCredentials((document) => withAuthenticatedAccount(document, { accountToken, user, clientInstanceId }));
       resetAutoRetry();
-      phase = null;
-      return settledState();
-    }
-    const endpoint = await client.ensureEndpoint(installation.credential, {
-      appVersion: identity.appVersion,
-    });
+      return (phase = null), settledState();
+    };
+    if (onDemand && (await currentNeed()) === false) return withoutTunnel();
+    const endpoint = await client.ensureEndpoint(installation.credential, { appVersion: identity.appVersion, ...(await relay.legacyDevices().then((count) => (count === null ? {} : { legacyDevices: count }))) })
+      .catch((error) => (error?.code === "relay_capable" ? null : Promise.reject(error)));
+    if (!endpoint) return withoutTunnel();
     try {
       await updateCredentials((document) =>
         withProvisionedAccount(document, {
@@ -782,7 +782,7 @@ export function createCompanionAccountService({
     const answer = await Promise.resolve().then(() => managedEndpointNeeded()).catch(() => null);
     phonesUnused = answer === MANAGED_ENDPOINT_PHONES_UNUSED;
     const need = phonesUnused ? false : typeof answer === "boolean" ? answer : null;
-    if (need === false && relayCapable()) return false;
+    if (need === false && relay.capable()) return false;
     if (requestedRecently()) return (phonesUnused = false), true;
     return need;
   };
