@@ -441,13 +441,17 @@ it("ships an edge and a Fly template that keep the server private", () => {
   expect(edgeFile("Caddyfile")).toMatch(/^:8080 \{\n\timport edge-routes\.caddy\n\}\n/m);
   expect(edgeFile("Caddyfile")).toMatch(/^\tauto_https off$/m);
   expect(edgeFile("Caddyfile.tls")).toMatch(/^http:\/\/:8080 \{\n\timport edge-routes\.caddy\n\}\n\n\{\$OMB_CLOUD_PUBLIC_HOST\} \{\n\timport edge-routes\.caddy\n\}\n/m);
-  for (const config of [edgeFile("Caddyfile"), edgeFile("Caddyfile.tls")]) {
+  expect(edgeFile("Caddyfile.tunnel")).toMatch(/^:8080 \{\n\timport edge-routes\.caddy\n\}\n\n:8812 \{\n\tbind 127\.0\.0\.1\n\timport edge-routes\.caddy\n\}\n/m);
+  // The tunnel's listener, on loopback alone, believes Cloudflare's header; :8080 believes only what the launcher says.
+  expect(edgeFile("Caddyfile.tunnel")).toMatch(/^\tservers 127\.0\.0\.1:8812 \{\n\t\ttrusted_proxies static 127\.0\.0\.1\/32\n\t\ttrusted_proxies_strict\n\t\tclient_ip_headers Cf-Connecting-IP\n\t\}$/m);
+  expect(edgeFile("Caddyfile.tunnel").match(/^\s*(?:trusted_proxies|client_ip_headers)\b/gm)).toHaveLength(4);
+  for (const config of [edgeFile("Caddyfile"), edgeFile("Caddyfile.tls"), edgeFile("Caddyfile.tunnel")]) {
     expect(config.match(/^(?!#)\S[^\n]* \{$/gm)?.length, "every site imports the same routes").toBe(config.match(/^\timport edge-routes\.caddy$/gm)?.length);
     expect(config).not.toMatch(/reverse_proxy|respond/);
-    // Who may name the client, and in which header, is the launcher's to say (edgeClientAddress); no file names either.
+    // Who may name the client on :8080 and 443, and in which header, is the launcher's to say (edgeClientAddress).
     expect(config).toMatch(/^\t\ttrusted_proxies static \{\$OMB_CLOUD_EDGE_TRUSTED_PROXIES\}\r?\n\t\ttrusted_proxies_strict\r?\n\t\tclient_ip_headers \{\$OMB_CLOUD_EDGE_CLIENT_IP_HEADER\}\r?\n/m);
-    expect(config.match(/^\s*(?:trusted_proxies|client_ip_headers)\b/gm)).toHaveLength(2);
   }
+  for (const config of [edgeFile("Caddyfile"), edgeFile("Caddyfile.tls")]) expect(config.match(/^\s*(?:trusted_proxies|client_ip_headers)\b/gm)).toHaveLength(2);
   expect(caddy).not.toMatch(/trusted_proxies|client_ip_headers/);
   const upstreams = [...caddy.matchAll(/reverse_proxy (\S+)/g)].map(match => match[1]);
   expect(new Set(upstreams)).toEqual(new Set(["127.0.0.1:8799", "127.0.0.1:8800"]));
@@ -462,11 +466,11 @@ it("ships an edge and a Fly template that keep the server private", () => {
   // The root supervisor's code is root's, maus owns only the volume; the image's last step refuses to build otherwise.
   const dockerfile = readFileSync(join(import.meta.dirname, "../Dockerfile"), "utf8");
   const image = dockerfile.slice(dockerfile.indexOf("FROM runtime AS cloud-home"), dockerfile.indexOf("FROM runtime AS server"));
-  const check = image.indexOf('untrusted="$(find /app /usr/local/bin/caddy \\( ! -user root -o ! -type l -perm /022 \\) -print)"');
+  const check = image.indexOf('untrusted="$(find /app /usr/local/bin/caddy /usr/local/bin/cloudflared \\( ! -user root -o ! -type l -perm /022 \\) -print)"');
   expect(image.slice(check)).toMatch(/^untrusted=.*\n && if \[ -n "\$untrusted" \]; then .*exit 1; fi \\\n/);
   expect(check).toBeGreaterThan(image.lastIndexOf("COPY "));
   expect(check).toBeLessThan(image.indexOf("CMD ["));
-  expect(image).toContain("COPY deploy/fly/Caddyfile deploy/fly/Caddyfile.tls deploy/fly/edge-routes.caddy /app/cloud/");
+  expect(image).toContain("COPY deploy/fly/Caddyfile deploy/fly/Caddyfile.tls deploy/fly/Caddyfile.tunnel deploy/fly/edge-routes.caddy /app/cloud/");
   // The bot box (server/bot-box) needs bubblewrap and socat in the image; pnpm is what bots' projects ask for.
   expect(image).toMatch(/apt-get install -y --no-install-recommends [^\n]*\bbubblewrap\b[^\n]*\bsocat\b/);
   expect(image).toMatch(/npm install -g pnpm@10\.33\.0/);

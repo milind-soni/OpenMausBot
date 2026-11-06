@@ -5,7 +5,8 @@ import { join, posix } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { cloudHomeConfiguration, cloudRequestSignature, createCloudPairing } from "./cloud-home.ts";
 import {
-  cloudHomeChildEnvironments, edgeCertificateStorage, edgeClientAddress, edgeConfigFiles, edgeTerminatesTls, OWN_SERVER_EDGE_KEYS, trustedProxyList,
+  cloudHomeChildEnvironments, edgeCertificateStorage, edgeClientAddress, edgeConfigFiles, edgeTerminatesTls, edgeTunnelToken, OWN_SERVER_EDGE_KEYS,
+  trustedProxyList, tunnelCommand, tunnelRestartDelay, TUNNEL_USER,
 } from "./cloud-home-start.ts";
 import { requestSource } from "./request-auth.ts";
 import { LOCKOUT, SessionRegistry } from "./sessions.ts";
@@ -80,6 +81,34 @@ it("serves HTTPS on the home's own domain only when asked, with the certificate 
   expect(edgeConfigFiles({ OMB_CLOUD_EDGE_CONFIG: "/etc/omb-edge/Caddyfile", OMB_CLOUD_EDGE_TLS: "1" }))
     .toEqual({ config: "/etc/omb-edge/Caddyfile", routes: "/etc/omb-edge/edge-routes.caddy" });
   expect(() => edgeOf(ownServer({ OMB_CLOUD_EDGE_TLS: "on" }))).toThrow(/OMB_CLOUD_EDGE_TLS/);
+});
+
+it("reaches a home with no open port through its own tunnel, whose token only cloudflared reads", () => {
+  const token = `eyJhIjoi${"x".repeat(120)}==`;
+  expect(edgeTunnelToken({})).toBeNull();
+  expect(edgeTunnelToken({ OMB_CLOUD_TUNNEL_TOKEN: ` ${token} ` })).toBe(token);
+  for (const bad of ["short", `${token}\n--url http://evil`, `${token} x`]) expect(() => edgeTunnelToken({ OMB_CLOUD_TUNNEL_TOKEN: bad }), bad).toThrow(/connector token/);
+  expect(() => edgeTunnelToken({ OMB_CLOUD_TUNNEL_TOKEN: token, OMB_CLOUD_EDGE_TLS: "1" })).toThrow(/set one/);
+
+  const tunnel = edgeOf(ownServer({ OMB_PUBLIC_URL: "https://c-0123456789abcdef0123456789abcdef.example.com", OMB_CLOUD_TUNNEL_TOKEN: token }));
+  expect(tunnel.edgeFiles).toEqual({ config: "/app/cloud/Caddyfile.tunnel", routes: "/app/cloud/edge-routes.caddy" });
+  expect(tunnel.tunnelToken).toBe(token);
+  // :8080 still trusts nobody; only the tunnel's own listener believes Cf-Connecting-IP (Caddyfile.tunnel).
+  expect(tunnel.edge).toMatchObject({ OMB_CLOUD_EDGE_TRUSTED_PROXIES: "", OMB_CLOUD_EDGE_CLIENT_IP_HEADER: "X-Forwarded-For" });
+  for (const env of [tunnel.server, tunnel.edge, tunnel.secrets]) expect(JSON.stringify(env)).not.toContain(token);
+  expect(edgeOf(ownServer()).tunnelToken).toBeNull();
+
+  const command = tunnelCommand("/usr/local/bin/cloudflared", token);
+  expect(command.args).toEqual(["tunnel", "--no-autoupdate", "--loglevel", "info", "run"]);
+  expect(command.args.join(" ")).not.toContain(token);
+  expect(command.env).toEqual({ PATH: "/usr/local/bin:/usr/bin:/bin", HOME: "/nonexistent", TUNNEL_TOKEN: token });
+  expect(TUNNEL_USER).not.toBe("maus");
+
+  expect(tunnelRestartDelay(0, 1_000)).toBe(5_000);
+  expect(tunnelRestartDelay(5_000, 1_000)).toBe(10_000);
+  expect(tunnelRestartDelay(240_000, 1_000)).toBe(300_000);
+  expect(tunnelRestartDelay(300_000, 1_000)).toBe(300_000);
+  expect(tunnelRestartDelay(300_000, 10 * 60_000)).toBe(5_000);
 });
 
 /** A request as the server receives it: the edge on loopback, with X-Forwarded-For set to the address it trusts. */
