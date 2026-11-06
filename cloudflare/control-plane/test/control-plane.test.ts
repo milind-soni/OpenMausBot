@@ -404,6 +404,7 @@ describe("control-plane migrations and health", () => {
       RELAY_ALLOW_INSTALLATIONS: env.RELAY_ALLOW_INSTALLATIONS,
       RELAY_DISABLED: env.RELAY_DISABLED,
       RELAY_CAPABLE_MIN_VERSION: env.RELAY_CAPABLE_MIN_VERSION,
+      RELAY_TOKEN_SIGNING_KEY: "",
       BETTER_AUTH_SECRET: "too-short",
     };
     const request = new Request(`${BASE_URL}/healthz`);
