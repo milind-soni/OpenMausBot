@@ -34,7 +34,7 @@ function fixture(options: { free?: number } = {}) {
   const docker = new FakeDocker(state.dir);
   let clock = 1_800_000_000_000;
   docker.now = () => clock;
-  for (const [ref, version] of [[A, "v0.1.130"], [B, "v0.1.131"], [C, "v0.1.132"], [D, "v0.1.144"]] as const) docker.publish(ref, version);
+  for (const [ref, version] of [[A, "v0.1.130"], [B, "v0.1.131"], [C, "v0.1.132"], [D, "v0.1.145"]] as const) docker.publish(ref, version);
   const healthy = new Set<string>([A, B, C, D]);
   /** What each image's bot box reports; every check passes unless a test says otherwise. */
   const boxes = new Map<string, { box: string; checks: string | null; failed: string[] }>();
@@ -190,8 +190,8 @@ describe("the home on an own server", () => {
     expect(old.HostConfig.Mounts).toEqual([{ Type: "volume", Source: "mausbot-data", Target: "/data" }]);
     expect(old.Env).toContain(`OMB_CLOUD_BOOTSTRAP_SECRET=${SECRET}`);
     expect(launcherOf(null)).toEqual({ secretsFile: false, dropsCapabilities: false });
-    expect(launcherOf([0, 1, 143])).toEqual({ secretsFile: false, dropsCapabilities: false });
-    expect(launcherOf([0, 1, 144])).toEqual({ secretsFile: true, dropsCapabilities: true });
+    expect(launcherOf([0, 1, 144])).toEqual({ secretsFile: false, dropsCapabilities: false });
+    expect(launcherOf([0, 1, 145])).toEqual({ secretsFile: true, dropsCapabilities: true });
     expect(launcherOf([0, 2, 0])).toEqual({ secretsFile: true, dropsCapabilities: true });
   });
 

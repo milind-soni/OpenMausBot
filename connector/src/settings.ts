@@ -70,7 +70,7 @@ export const LEASE_FIXED_VERSION = [0, 1, 131] as const;
  * as soon as it has remounted /proc with hidepid. An older image gets its secrets in its environment and never these
  * two capabilities: it would keep CAP_SYS_ADMIN for life.
  */
-export const HARDENED_LAUNCHER_VERSION = [0, 1, 144] as const;
+export const HARDENED_LAUNCHER_VERSION = [0, 1, 145] as const;
 export const HIDEPID_CAPABILITIES = ["SYS_ADMIN", "SETPCAP"] as const;
 
 /** The home's secrets: kept out of its container's environment (docker inspect shows that) once its launcher reads the file. */
