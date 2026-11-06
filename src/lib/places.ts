@@ -86,6 +86,13 @@ export async function makeHome(id: string): Promise<true | string> {
  * list main gave it (two places or more). */
 export const railShown = (state: RailState): boolean => state.beside === true || state.places.length > 0;
 
+/** This computer's circle: This computer, or once My Cloud is home a workspace of its own (a profile), named as the app names
+ * this computer elsewhere: This Mac, or This PC. */
+export function computerName(place: Pick<RailPlace, "profile">, platform: string | undefined = typeof window === "undefined" ? undefined : window.ogb?.platform): string {
+  if (!place.profile) return t("rail.thisComputer");
+  return t(platform === "darwin" ? "rail.thisMac" : "rail.thisPc");
+}
+
 /** A circle's letters: the first of up to two words, so "Client A" is CA and "Acme" is A. */
 export function placeInitials(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);

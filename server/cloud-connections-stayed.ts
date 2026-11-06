@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { canUseMcpServer } from "../shared/tool-scope.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { isMailConnector, launcherOf } from "./cloud-connections.ts";
-import { isRemoteMcpServer, parseStoredMcpServer } from "./mcp-registry.ts";
+import { isRemoteMcpServer, parseStoredMcpServer, type McpRunsOn } from "./mcp-registry.ts";
 import { serverLine } from "./server-lines.ts";
 
 export type StayedWhy = { kind: "mail" } | { kind: "program"; program: string } | { kind: "here" };
@@ -15,6 +15,7 @@ export interface StayedConnector {
   name: string;
   /** The computer it runs on, by the name the person knows it by. */
   computer: string;
+  runsOn: McpRunsOn;
   why: StayedWhy;
   /** The one bot it serves, when it is that bot's own. */
   bot?: string;
@@ -29,7 +30,7 @@ export function stayedConnectors(servers: Record<string, unknown> | undefined, p
     const remote = isRemoteMcpServer(server);
     const program = remote ? "" : launcherOf(server.command);
     const why: StayedWhy = isMailConnector(server) ? { kind: "mail" } : !remote && !/[\\/]/u.test(server.command) && !programs.includes(program) ? { kind: "program", program } : { kind: "here" };
-    return [{ name, computer: server.runsOn!.label, why, ...(!remote && server.bot ? { bot: server.bot } : {}) }];
+    return [{ name, computer: server.runsOn!.label, runsOn: server.runsOn!, why, ...(!remote && server.bot ? { bot: server.bot } : {}) }];
   });
 }
 
@@ -59,6 +60,8 @@ export interface StayedNoticesDeps {
   programs(): readonly string[];
   /** A mailbox is connected here, so a mail connector left behind is no longer missed. */
   mailConnected?(): boolean;
+  /** The computer it runs on is lent here, so bots reach it through that computer and nothing stayed behind. */
+  lent?(runsOn: McpRunsOn): boolean;
   bots(): readonly Bot[];
   /** A line in a bot's own chat, in the conversation the person is looking at. */
   say(threadId: string, text: string, kind: "line" | "row"): void;
@@ -81,7 +84,7 @@ export function createStayedNotices(deps: StayedNoticesDeps) {
     (all[key(stayed)] ??= []).push(bot.id);
     try { writeFileAtomic(deps.file, JSON.stringify(all), { mode: 0o600 }); } catch (error) { console.warn("[connections] could not save what was said about what stayed:", error); }
   };
-  const stayed = () => stayedConnectors(deps.servers(), deps.programs()).filter((connector) => connector.why.kind !== "mail" || !deps.mailConnected?.());
+  const stayed = () => stayedConnectors(deps.servers(), deps.programs()).filter((connector) => (connector.why.kind !== "mail" || !deps.mailConnected?.()) && !deps.lent?.(connector.runsOn));
   const serves = (bot: Bot, connector: StayedConnector) => (connector.bot ? connector.bot === bot.id : !bot.mcpServers || bot.mcpServers.includes(connector.name)) && canUseMcpServer(bot.toolScope, connector.name);
 
   return {

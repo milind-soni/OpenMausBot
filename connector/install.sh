@@ -90,31 +90,40 @@ install_docker() {
   if command -v systemctl >/dev/null 2>&1; then systemctl enable --now docker >/dev/null 2>&1 || true; fi
 }
 
-offer_docker() {
+offer_docker() { # what is wrong, in one sentence
   if [ "${MAUSBOT_INSTALL_DOCKER:-}" = 1 ]; then
     install_docker
     return
   fi
   if tty_available; then
-    printf "Docker isn't installed. Install it now with Docker's official script (get.docker.com)? [Y/n] " >/dev/tty
+    printf "%s Install the current Docker now with Docker's official script (get.docker.com)? [Y/n] " "$1" >/dev/tty
     answer=""
     read -r answer </dev/tty || answer=n
     case "$answer" in
       "" | y | Y | yes | Yes) install_docker; return ;;
     esac
   fi
-  fail "Docker isn't installed. Install it with: curl -fsSL https://get.docker.com | sudo sh  and then run this command again."
+  fail "$1 Install the current Docker with: curl -fsSL https://get.docker.com | sudo sh  and then run this command again (or run it with --install-docker)."
 }
 
-check_docker() {
-  command -v docker >/dev/null 2>&1 || offer_docker
+docker_server() {
   server=$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)
   if [ -z "$server" ]; then
     fail "Docker is installed but not running. Start it with: sudo systemctl enable --now docker  and then run this command again."
   fi
   major=${server%%.*}
   case "$major" in '' | *[!0-9]*) major=0 ;; esac
-  [ "$major" -ge "$MIN_DOCKER" ] || fail "Docker $server is too old; MausBot needs Docker $MIN_DOCKER or newer. Update it with: curl -fsSL https://get.docker.com | sudo sh"
+}
+
+check_docker() {
+  command -v docker >/dev/null 2>&1 || offer_docker "Docker isn't installed."
+  docker_server
+  # Debian 12's own Docker is 20.10: Docker's script replaces it with the current one, keeping its containers and volumes.
+  if [ "$major" -lt "$MIN_DOCKER" ]; then
+    offer_docker "Docker $server is too old; MausBot needs Docker $MIN_DOCKER or newer."
+    docker_server
+    [ "$major" -ge "$MIN_DOCKER" ] || fail "Docker is still $server after the update (Docker's output is above). Fix that, then run this command again."
+  fi
   security=$(docker info --format '{{json .SecurityOptions}}' 2>/dev/null || true)
   case "$security" in
     *rootless*) fail "Docker runs in rootless mode here. MausBot needs the standard Docker service: run curl -fsSL https://get.docker.com | sudo sh" ;;
@@ -124,6 +133,12 @@ check_docker() {
 
 check_apparmor() {
   enabled=$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null || true)
+  # Debian 12's cloud images run AppArmor in the kernel without its tools; installing them needs no restart.
+  if [ "$enabled" = Y ] && ! command -v apparmor_parser >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+    say "Installing AppArmor's tools..."
+    { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq apparmor; } >/dev/null 2>&1 ||
+      fail "AppArmor's tools could not be installed. Run: sudo apt-get install -y apparmor  and then run this command again."
+  fi
   case "$security" in
     *name=apparmor*name=seccomp* | *name=seccomp*name=apparmor*) docker_confines=yes ;;
     *) docker_confines=no ;;

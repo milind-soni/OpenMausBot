@@ -15,6 +15,7 @@ import { detectBox, type BoxDetection, type BoxKind } from "./detect.ts";
 import { openBoxEgressGate, type BoxEgressGate } from "./egress-gate.ts";
 import { boxEnvironment } from "./env.ts";
 import { openHarnessGate, type HarnessGate } from "./harness-gate.ts";
+import { procHidepid } from "./hidepid.ts";
 import { DENIED_SYSCALLS, seccompBytes, seccompSupported } from "./seccomp.ts";
 import { RELAY_SOCKET_NAME, boxUploadsDir, bwrapArgs, inBoxSocket, planBox, taskWorkspaceIds, type BoxBridge, type BoxPlan, type BoxRequest, type BoxSetup } from "./plan.ts";
 import { openBoxRelay, type BoxRelay } from "./relay.ts";
@@ -156,11 +157,6 @@ export function writeSeccompFile(dir: string): string | null {
   const file = join(dir, "seccomp.bpf");
   writeFileSync(file, seccompBytes(), { mode: 0o600 });
   return file;
-}
-
-/** Whether the host's /proc hides other users' processes (the Cloud supervisor remounts it so at boot). */
-export function procHidepid(mounts: () => string = () => readFileSync("/proc/mounts", "utf8")): boolean {
-  try { return /^proc \/proc proc [^\n]*\bhidepid=(?:2|invisible)\b/m.test(mounts()); } catch { return false; }
 }
 
 /** Whether Fly's local API socket folder is root's alone (no bits for group or others). */

@@ -18,7 +18,7 @@ import { openCredentialBroker } from "./broker.ts";
 import { openBoxEgressGate } from "./egress-gate.ts";
 import { openHarnessGate } from "./harness-gate.ts";
 import type { BoxBridge, BoxMutation } from "./plan.ts";
-import { PROBE_SPEC_ENV, type ProbeResult, type ProbeSpec } from "./box-probe.ts";
+import { PROBE_SPEC_ENV, processStart, type ProbeResult, type ProbeSpec } from "./box-probe.ts";
 
 export interface SelfCheckOptions {
   bwrap: string;
@@ -130,6 +130,7 @@ export async function runBoxSelfCheck(options: SelfCheckOptions): Promise<SelfCh
   const spec: ProbeSpec = {
     dataDir: data, cwd, botFolder, messagesDb: join(data, "messages.db"), configJson: join(data, "config.json"), serverFiles,
     otherWorkspace, otherTaskWorkspace: otherTask, engine: { bin: engineBin, name: engineName, says: engineSays }, marker, canaryPid: canary.pid ?? 0, serverPid: process.pid, hostTmpFile,
+    canaryStart: canary.pid ? processStart(canary.pid) : null, serverStart: processStart("self"),
     harnessPort: serverPort, egressPort: BOX_EGRESS_PORT, privatePort, publicTarget, isolatedNet,
     // Checked whenever a filter is in the setup: the no-seccomp mutation leaves it out of the box, so the check must fail.
     seccomp: Boolean(options.seccompFile),

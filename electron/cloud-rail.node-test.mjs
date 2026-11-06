@@ -376,3 +376,31 @@ test("a place with inbox lines waiting says so on its circle, this computer's to
   assert.equal(places.find(place => place.id === "vps").attention, undefined);
   assert.equal(railPlaces({ saved: saved("home"), mine: HOME, state: session() }).find(place => place.id === "a").attention, undefined, "with nothing to say, nothing fires");
 });
+
+test("once My Cloud is home, This Mac is a circle of its own, first, by its profile id: the frozen copy is never a place again", () => {
+  const places = railPlaces({ saved: saved("home"), home: HOME, mine: HOME, state: session(), profiles: [{ id: "default" }] });
+  assert.deepEqual(places.map(place => place.id), ["profile:default", "home", "a", "acme", "vps"]);
+  assert.deepEqual(places[0], { id: "profile:default", name: "This computer", color: null, kind: "computer", profile: "default", opens: true });
+  assert.equal(places.some(place => place.id === "local"), false, "nothing opens the frozen copy");
+  assert.equal(places.find(place => place.id === "home").active, true, "My Cloud is the place on screen");
+  const shown = railPlaces({ saved: saved("local"), home: HOME, mine: HOME, state: session(), profiles: [{ id: "default", active: true }] });
+  assert.deepEqual(shown.filter(place => place.active).map(place => place.id), ["profile:default"]);
+  const alone = { activeId: "home", environments: [{ id: "home", kind: "remote", name: "My Cloud", origin: HOME, home: true }] };
+  assert.deepEqual(railPlaces({ saved: alone, home: HOME, mine: HOME, state: session({ teams: [], clouds: parseCloudList([PRIMARY]) }), profiles: [{ id: "default" }] }).map(place => place.id),
+    ["profile:default", "home"], "My Cloud and This Mac: a rail of two");
+  assert.deepEqual(railPlaces({ saved: alone, home: null, mine: HOME, state: session({ teams: [], clouds: parseCloudList([PRIMARY]) }), profiles: [] }).map(place => place.id), ["local", "home"],
+    "before the move nothing changes: This computer is the place it always was");
+  assert.deepEqual(railPlaces({ saved: { activeId: "local", environments: [] }, home: null, state: null }), [], "no Cloud: no rail, as before");
+});
+
+test("a profile's circle opens it by main's own word for it: only one main listed, and never through the switch to the frozen copy", async () => {
+  const profiles = [];
+  const r = rail({ places: () => railPlaces({ saved: saved(), home: HOME, mine: HOME, state: session(), profiles: [{ id: "default" }] }), openProfile: id => { profiles.push(id); } });
+  await r.call("workspaces:open", "profile:default");
+  assert.deepEqual([profiles, r.opened], [["default"], []]);
+  assert.throws(() => r.call("workspaces:open", "profile:work"), /isn't here/);
+  assert.throws(() => r.call("workspaces:open", "local"), /isn't here/);
+  const older = rail({ places: () => railPlaces({ saved: saved(), home: HOME, mine: HOME, state: session(), profiles: [{ id: "default" }] }) });
+  assert.throws(() => older.call("workspaces:open", "profile:default"), /isn't here/, "a main with no profiles opens none");
+  assert.deepEqual(older.opened, []);
+});
