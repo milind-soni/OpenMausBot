@@ -11,6 +11,8 @@ export declare const COMPANION_INSTALLATION_ID_FIELD: string;
 export declare const COMPANION_INSTALLATION_CREDENTIAL_FIELD: string;
 export declare const COMPANION_INSTALLATION_EXPIRY_FIELD: string;
 export declare const COMPANION_ACCOUNT_CLEANUP_PENDING_FIELD: string;
+export declare const COMPANION_ENDPOINT_PAUSED_FIELD: string;
+export declare const PHONE_UNUSED_RELEASE_MS: number;
 
 export type CredentialDocument = Record<string, unknown>;
 
@@ -19,9 +21,11 @@ export declare function resolveCompanionControlPlaneURL(options?: {
   environment?: NodeJS.ProcessEnv;
 }): string;
 export declare function companionAccountCleanupPending(credentials: CredentialDocument): boolean;
-/** true while a device is paired or a pairing window is open, false only for
- * a cleanly read empty device list, null when that cannot be told. */
-export declare function managedEndpointNeed(state: unknown): boolean | null;
+/** true while a pairing window is open or a paired device was seen in the
+ * last 30 days (or is connected, or has no known last-seen time); "unused"
+ * when devices are paired but none was seen for 30 days; false only for a
+ * cleanly read empty device list; null when that cannot be told. */
+export declare function managedEndpointNeed(state: unknown, now?: number): boolean | "unused" | null;
 export declare function friendlyCompanionAccountError(error: unknown): string;
 
 export interface CompanionAccountState {
@@ -30,6 +34,8 @@ export interface CompanionAccountState {
   email?: string;
   endpoint?: string;
   message?: string;
+  /** The address was given back after 30 days with no paired phone seen; prepare() brings it back. */
+  paused?: true;
 }
 
 export interface CompanionAccountService {
@@ -70,7 +76,7 @@ export declare function createCompanionAccountService(options: {
   firstEndpointCheckMs?: number;
   /** Hold the address only while something needs it (the desktop app). */
   onDemand?: boolean;
-  managedEndpointNeeded?: () => Promise<boolean | null>;
+  managedEndpointNeeded?: () => Promise<boolean | "unused" | null>;
   releaseGraceMs?: number;
   releaseJitterMs?: number;
   /** One line per failed setup step: code, HTTP status, request id, retry delay. */

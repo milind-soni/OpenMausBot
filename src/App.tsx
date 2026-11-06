@@ -132,7 +132,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   useExternalChatLinks(state, dispatch); useDesktopNotificationOpens(state, dispatch);
   usePresence(state, dispatch);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  usePageLanguage(effectiveLanguage(useLanguageChoice(), state.config?.language));
+  usePageLanguage(effectiveLanguage(useLanguageChoice(), state.config?.language), true);
   const [paletteOpen, setPaletteOpen] = useState(false);
   // Stays mounted once opened: a Cloud bought in it can arrive after the sheet is closed.
   const cloudAddOpened = useRef(false);

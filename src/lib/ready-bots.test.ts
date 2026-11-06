@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { MAUS_COLORS } from "./mascot";
-import { CLASSIC_ROLE_IDS, READY_BOT_CATEGORIES, READY_BOTS, matchesReadyBot, readyBot, readyBotTemplate } from "./ready-bots";
+import { CLASSIC_ROLE_IDS, READY_BOT_CATEGORIES, READY_BOTS, matchesReadyBot, readyBot, readyBotCopy, readyBotTemplate } from "./ready-bots";
+import { setLocale } from "./i18n";
+import en from "@/locales/en.json";
 import { MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
 import type { NewBotDefaults } from "../../shared/new-bot-defaults";
 
@@ -82,6 +84,20 @@ describe("matchesReadyBot", () => {
     const echo = readyBot("humanizer")!;
     expect(["echo", "HUMANIZER", "read like you", "writing", ""].every((query) => matchesReadyBot(echo, query))).toBe(true);
     expect(matchesReadyBot(echo, "spreadsheet")).toBe(false);
+  });
+});
+
+describe("readyBotCopy", () => {
+  it("reads each bot's words from the catalog, and keeps a bot's own English when the catalog has none", () => {
+    for (const bot of READY_BOTS) for (const field of ["title", "description", "try"]) expect(Object.hasOwn(en, `readyBots.bot.${bot.id}.${field}`), `${bot.id}.${field}`).toBe(true);
+    const unlisted = { ...readyBot("humanizer")!, id: "not-in-the-catalog", title: "Its title", description: "Its words", tryAsking: ["Its ask"] };
+    try {
+      setLocale("pt-br");
+      expect(readyBotCopy(unlisted)).toEqual({ title: "Its title", description: "Its words", tryAsking: "Its ask" });
+      expect(readyBotCopy(readyBot("humanizer")!).title).not.toBe(readyBot("humanizer")!.title);
+    } finally {
+      setLocale("en");
+    }
   });
 });
 
