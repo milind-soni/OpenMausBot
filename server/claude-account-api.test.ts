@@ -109,7 +109,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   clientToken = paired.token;
   const port = await freePortBlock([0, 1]);
   base = `http://127.0.0.1:${port}`;
-  const offlinePrelude = `data:text/javascript,${encodeURIComponent('globalThis.fetch = async (url) => String(url).startsWith("https://catalog-fixture.example/") ? Response.json({ data: [{ id: "model-a" }, { id: "model-b" }] }) : new Response("offline fixture", { status: 503 });')}`;
+  const offlinePrelude = `data:text/javascript,${encodeURIComponent('let refreshes = 0; globalThis.fetch = async (url) => String(url).startsWith("https://catalog-fixture.example/") ? Response.json({ data: [{ id: "model-a" }, { id: "model-b" }] }) : String(url).startsWith("https://growing-fixture.example/") ? Response.json({ data: [{ id: "model-a" }, ...(refreshes++ ? [{ id: "model-new" }] : [])] }) : new Response("offline fixture", { status: 503 });')}`;
   child = spawn(process.execPath, ["--import", offlinePrelude, join(SERVER_DIR, "index.ts")], {
     cwd: join(SERVER_DIR, ".."),
     env: {
@@ -173,6 +173,28 @@ describe("Claude account HTTP API", () => {
     expect(result.body.error).toContain("Could not discover gateway models");
     expect(JSON.stringify(result.body)).not.toContain("failed-fixture-secret");
     expect(Object.keys(saved().instances)).toEqual(before);
+  });
+
+  it("reads a gateway's model list again on Refresh models", async () => {
+    const created = await api("POST", "/api/instances/codex-endpoint", { displayName: "Growing fixture", baseUrl: "https://growing-fixture.example/v1", token: "growing-fixture-key" });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const id = created.body.instanceId;
+    expect(saved().instances[id].config.endpoint.models).toEqual(["model-a"]);
+    const refreshed = await api("POST", `/api/instances/${id}/refresh-models`, {});
+    expect(refreshed.status, JSON.stringify(refreshed.body)).toBe(200);
+    expect(saved().instances[id].config.endpoint.models).toEqual(["model-a", "model-new"]);
+    expect(refreshed.body.instances.find((row: any) => row.instanceId === id).models.options.map((option: any) => option.id)).toContain("model-new");
+    expect((await api("DELETE", `/api/instances/${id}`)).status).toBe(200);
+  });
+
+  it("rotates a legacy Claude endpoint's key without a model catalog", async () => {
+    const created = await api("POST", "/api/instances/claude-endpoint", { displayName: "Legacy fixture", baseUrl: "https://offline.example", token: "legacy-fixture-key", model: "legacy-model" });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const id = created.body.instanceId;
+    const rotated = await api("PATCH", `/api/instances/${id}/claude-endpoint`, { token: "legacy-rotated-key" });
+    expect(rotated.status, JSON.stringify(rotated.body)).toBe(200);
+    expect(saved().instances[id].environment).toMatchObject({ ANTHROPIC_API_KEY: "legacy-rotated-key", ANTHROPIC_MODEL: "legacy-model" });
+    expect((await api("DELETE", `/api/instances/${id}`)).status).toBe(200);
   });
 
   it("creates, edits and removes an isolated Codex API endpoint without OAuth or key disclosure", async () => {

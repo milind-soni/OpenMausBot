@@ -224,8 +224,11 @@ Codex bots can also run on an API key instead of a ChatGPT sign-in:
 
 ### When an endpoint won't save
 
-Saving checks the endpoint and says whether the network, the API key, the
-HTTP response or an empty model list failed. Check that:
+Saving a custom gateway reads its model list and says whether the network,
+the API key, the HTTP response or an empty model list failed. Saving the
+official Anthropic or OpenAI URL doesn't check the key; a wrong key shows up
+on the bot's first turn. **Refresh models** reads a gateway's list again.
+Check that:
 
 - The URL is reachable from the computer or container running OpenMausBot,
   not just from the one showing the app. Inside a container, `localhost`

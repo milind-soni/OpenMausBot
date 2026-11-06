@@ -115,6 +115,15 @@ describe("custom Claude endpoint", () => {
     expect(updated.instances.claude).toEqual(instances.claude);
   });
 
+  it("keeps a discovered catalog when only a model mapping changes", () => {
+    const { instanceId, instances } = newClaudeEndpoint(cfg(), { ...BASE, model: undefined });
+    (instances[instanceId].config as { endpointModels: string[] }).endpointModels = ["model-a", "model-b"];
+    for (const opusModel of ["model-b", ""]) {
+      const entry = updateClaudeEndpoint({ instances }, instanceId, { opusModel }).instances[instanceId];
+      expect((entry.config as { endpointModels: string[] }).endpointModels).toEqual(["model-a", "model-b"]);
+    }
+  });
+
   it("requires the token again when the address changes", () => {
     const { instanceId, instances } = newClaudeEndpoint(cfg(), BASE);
     expect(() => updateClaudeEndpoint({ instances }, instanceId, { baseUrl: "https://api.example.test/anthropic" }))
@@ -146,6 +155,7 @@ describe("custom Claude endpoint", () => {
       { ...BASE, token: "has\nnewline" },
       { ...BASE, model: "has space" },
       { ...BASE, model: "" },
+      { ...BASE, model: "default" },
       { ...BASE, displayName: "Bad\nname" },
       { ...BASE, environment: { ANTHROPIC_BASE_URL: "https://x.test" } },
     ]) {

@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import type { InstanceConfig } from "./contracts.ts";
-import { discoverAgentEndpointModels } from "./agent-endpoint-models.ts";
+import { discoverAgentEndpointModels, officialModels } from "./agent-endpoint-models.ts";
 
 function endpoint(codex: boolean, url = "https://gateway.example/v1"): InstanceConfig {
   return codex
@@ -48,4 +48,28 @@ it.each([true, false])("keeps the standard catalog for official connections (Cod
   const request = vi.fn<typeof fetch>();
   await discoverAgentEndpointModels(entry, request);
   expect(request).not.toHaveBeenCalled();
+});
+it.each([true, false])("restores the standard catalog when a gateway moves to the official URL (Codex=%s)", async codex => {
+  const entry = endpoint(codex, codex ? "https://api.openai.com/v1" : "https://api.anthropic.com");
+  await discoverAgentEndpointModels(entry, vi.fn<typeof fetch>());
+  const models = codex ? (entry.config as any).endpoint.models : (entry.config as any).endpointModels;
+  expect(models).toEqual(officialModels(codex));
+  expect(models).not.toContain("old");
+});
+it("refuses a catalog larger than 2 MB without parsing it", async () => {
+  const entry = endpoint(true);
+  const huge = new Response(`{"data":[${'{"id":"m"},'.repeat(300_000)}{"id":"m"}]}`);
+  await expect(discoverAgentEndpointModels(entry, vi.fn<typeof fetch>().mockResolvedValue(huge))).rejects.toThrow("larger than 2 MB");
+  expect(entry.config).toMatchObject({ endpoint: { models: ["old"] } });
+});
+it("keeps at most 1,000 models", async () => {
+  const entry = endpoint(true);
+  const data = Array.from({ length: 1500 }, (_, index) => ({ id: `model-${index}` }));
+  await discoverAgentEndpointModels(entry, vi.fn<typeof fetch>().mockResolvedValue(Response.json({ data })));
+  expect((entry.config as any).endpoint.models).toHaveLength(1000);
+});
+it("never offers Claude Code's reserved `default` as a gateway model", async () => {
+  const entry = endpoint(false);
+  await discoverAgentEndpointModels(entry, vi.fn<typeof fetch>().mockResolvedValue(Response.json({ data: [{ id: "default" }, { id: "model-a" }] })));
+  expect((entry.config as any).endpointModels).toEqual(["model-a"]);
 });

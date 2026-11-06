@@ -9,11 +9,13 @@ import type { ClaudeEndpointInfo } from "../shared/claude-endpoint.ts";
 import { assertSeparateClaudeAccount } from "./claude-accounts.ts";
 import { DATA_DIR, persistableInstanceConfigs, type AppConfig } from "./config.ts";
 import type { InstanceConfig, InstanceConfigMap } from "./contracts.ts";
-import { CLAUDE_MODEL_ID, STATIC_CLAUDE_MODELS } from "./drivers/claude-model-extras.ts";
+import { officialModels } from "./agent-endpoint-models.ts";
+import { CLAUDE_MODEL_ID } from "./drivers/claude-model-extras.ts";
 import { endpointBaseUrl } from "./openai-compat-endpoints.ts";
 
 const displayName = z.string().trim().min(1).max(80).refine((value) => !/\p{Cc}/u.test(value), "Name cannot contain control characters");
-const model = z.string().trim().max(160).regex(CLAUDE_MODEL_ID, "Use the model id the endpoint serves.");
+const model = z.string().trim().max(160).regex(CLAUDE_MODEL_ID, "Use the model id the endpoint serves.")
+  .refine((value) => value !== "default", "Claude Code reserves `default`; use the model id the endpoint serves.");
 const optionalModel = z.union([model, z.literal("")]);
 const token = z.string().trim().min(1).max(4096).refine((value) => !/[\p{Cc}\p{Cf}]/u.test(value), "Token cannot contain control characters");
 const baseUrl = z.string().trim().max(2048).refine((value) => endpointBaseUrl(value) !== null, "Enter an http(s) base URL.");
@@ -133,7 +135,7 @@ export function newClaudeEndpoint(cfg: AppConfig, body: z.infer<typeof claudeEnd
       ...(cli ? { cli } : {}),
       configDir: join(DATA_DIR, "providers", instanceId),
       requireApiKey: true,
-      endpointModels: body.model ? endpointModels(body) : [...new Set([STATIC_CLAUDE_MODELS.default, ...STATIC_CLAUDE_MODELS.options.map(option => option.id)])],
+      endpointModels: body.model ? endpointModels(body) : officialModels(false),
     },
     environment: endpointEnvironment(body.baseUrl, body.token, body),
   };
@@ -166,7 +168,7 @@ export function updateClaudeEndpoint(cfg: AppConfig, instanceId: string, body: E
     ...entry,
     ...(fields.displayName ? { displayName: fields.displayName } : {}),
     environment: endpointEnvironment(address, secret, fields),
-    config: { ...rawConfig(entry), endpointModels: body.model !== undefined || TIERS.some(([field]) => body[field] !== undefined) ? endpointModels(fields) : saved.models },
+    config: { ...rawConfig(entry), endpointModels: fields.model && (body.model !== undefined || TIERS.some(([field]) => body[field] !== undefined)) ? endpointModels(fields) : saved.models },
   };
   return { instances };
 }
