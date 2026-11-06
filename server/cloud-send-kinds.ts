@@ -26,7 +26,7 @@ import type { RequestAuth } from "./request-auth.ts";
 import { withCheckFields } from "./routine-load.ts";
 import type { Routine, RoutineManager, RoutineRun } from "./routines.ts";
 import type { RouteContext } from "./routes/table.ts";
-import { installLibrarySkill, readLibrarySkillFile, readSkillLibraryIndex, setLibrarySkillReviewState, updateLibrarySkill, type SkillLibraryEntry } from "./skill-library.ts";
+import { installLibrarySkill, readLibrarySkillFile, readSkillLibraryIndex, setLibrarySkillAccess, updateLibrarySkill, type SkillLibraryEntry } from "./skill-library.ts";
 import type { BotRecord, Store } from "./store.ts";
 import type { WebhookManager } from "./webhooks.ts";
 import { restorePaths, validRelative } from "./workspace-backup-paths.ts";
@@ -261,7 +261,7 @@ const importedSkillSchema = z.object({ name: z.string().refine(isSkillName), ski
     license: z.string().max(400).optional(), compatibility: z.string().max(400).optional() }) });
 const librarySkillSchema = z.object({ text: z.string().max(512 * 1024), entry: z.object({ name: z.string().refine(isSkillName), description: z.string().max(4000),
   source: z.string().max(2000), reviewState: z.enum(["approved", "disabled"]), license: z.string().max(400).optional(), compatibility: z.string().max(400).optional(),
-  tags: z.array(z.string().max(80)).max(40).optional(), warnings: z.array(z.string().max(2000)).max(100).optional() }).passthrough() });
+  tags: z.array(z.string().max(80)).max(40).optional(), warnings: z.array(z.string().max(2000)).max(100).optional(), everyBot: z.boolean().optional() }).passthrough() });
 
 /** My Cloud sets a bot's move-only fields as they are on this computer: absent ones it clears, its own projects it keeps
  * beside the ones that arrive, and an engine, team or library skill it lacks it leaves out. */
@@ -361,17 +361,19 @@ async function adopt(deps: MoveKindsDeps, kind: Kind, id: string, raw: unknown, 
   const parsed = librarySkillSchema.safeParse(raw);
   if (!parsed.success || parsed.data.entry.name !== id) refuse(400, "send the library skill as this computer holds it");
   const { entry, text } = parsed.data!;
+  // Who may use it goes along: every bot, or the bots whose own fields name it.
+  const access = { everyBot: entry.everyBot === true, on: entry.reviewState === "approved" };
   const held = readSkillLibraryIndex()[id];
   const outcome = !held
-    ? installLibrarySkill({ name: id, description: entry.description, instructions: text, source: entry.source, reviewState: entry.reviewState,
+    ? installLibrarySkill({ name: id, description: entry.description, instructions: text, source: entry.source, reviewState: entry.reviewState, everyBot: access.everyBot,
       ...(entry.license ? { license: entry.license } : {}), ...(entry.compatibility ? { compatibility: entry.compatibility } : {}), ...(entry.tags ? { tags: entry.tags } : {}),
       ...(entry.warnings ? { warnings: entry.warnings } : {}) })
-    : held.sha256 === sha256(text) ? setLibrarySkillReviewState(id, entry.reviewState)
+    : held.sha256 === sha256(text) ? setLibrarySkillAccess(id, access)
       : updateLibrarySkill({ name: id, instructions: text, expectSha256: held.sha256, source: entry.source });
   if ("error" in outcome) refuse(400, outcome.error);
   if ("stale" in outcome) refuse(409, "My Cloud's copy of this library skill changed while it was being replaced.");
-  if (held && held.sha256 !== sha256(text) && held.reviewState !== entry.reviewState) {
-    const state = setLibrarySkillReviewState(id, entry.reviewState);
+  if (held && held.sha256 !== sha256(text) && (held.reviewState !== entry.reviewState || (held.everyBot === true) !== access.everyBot)) {
+    const state = setLibrarySkillAccess(id, access);
     if ("error" in state) refuse(400, state.error);
   }
 }

@@ -208,7 +208,10 @@ export async function verifyWorkspaceBackup(report: (event: unknown) => void = (
     assert.equal(basename(destinationAttachment), basename(attached.path));
     assert.equal(readFileSync(join(destination.info.dataDir, "workspaces", bot.id, "MEMORY.md"), "utf8"), memory);
     assert.equal((await api(destination, "GET", `/api/bots/${bot.id}/skills/backup-check`)).body.text, skill);
-    assert.deepEqual((await api(destination, "GET", `/api/bots/${bot.id}/skills`)).body, sourceSkills);
+    // The restored server starts by moving the bot's own skills into the skills library: the same skill, still on for it.
+    const kept = (listing: Record<string, any>) =>
+      (listing.skills as Array<Record<string, unknown>>).map(({ name, description, enabled, source, sha256 }) => ({ name, description, enabled, source, sha256 }));
+    assert.deepEqual(kept((await api(destination, "GET", `/api/bots/${bot.id}/skills`)).body), kept(sourceSkills));
     const restoredConfig = JSON.parse(readFileSync(join(destination.info.dataDir, "config.json"), "utf8"));
     assert.equal(restoredConfig.profile.name, "Workspace backup fixture");
     assert.deepEqual(restoredConfig.tts, destinationConfig.tts);

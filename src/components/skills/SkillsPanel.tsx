@@ -1,7 +1,6 @@
 import { useRef, useState } from "react";
 import { Plus, Search, Sparkles, X } from "lucide-react";
 
-import { cn } from "@/lib/cn";
 import { glassPopupFrameStyle } from "@/lib/glass-popup";
 import { t } from "@/lib/i18n";
 import { FLAG_KEY, fromLabel, matchesSkill, SKILLS_SEARCH_FROM, skillTitle, useSkills, whoLabel, type SkillWire } from "@/lib/skills";
@@ -153,7 +152,8 @@ export function SkillsPanel() {
         aria-labelledby="skills-title"
         tabIndex={-1}
         onKeyDown={onKeyDown}
-        className={cn("glass-surface glass-popup relative flex max-w-[780px] flex-col overflow-hidden rounded-2xl outline-none", !inPlace && "animate-pop-in")}
+        data-in-place={inPlace || undefined}
+        className="glass-surface glass-popup animate-pop-in relative flex max-w-[780px] flex-col overflow-hidden rounded-2xl outline-none data-in-place:animate-none"
       >
         <header className="px-5 pb-4 pt-5 sm:px-7 sm:pt-6">
           <div className="flex items-center justify-between gap-3">
