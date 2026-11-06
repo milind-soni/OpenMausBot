@@ -107,7 +107,13 @@ try {
   // actual persisted records before fixture cleanup, without calling them an API response.
   const routineFile = join(fixture.info.dataDir, "routines.json");
   const persisted = !final && existsSync(routineFile) ? JSON.parse(readFileSync(routineFile, "utf8")) : undefined;
-  writeFileSync(`${fixture.info.logPath}.json`, JSON.stringify({ evidence, final, persisted }, null, 2));
+  const journal = routineFile.replace(/\.json$/i, "") + ".runs.jsonl";
+  const persistedRuns = !final && existsSync(journal)
+    ? readFileSync(journal, "utf8").trim().split("\n").flatMap((line) => {
+        try { const run = (JSON.parse(line) as { run?: unknown }).run; return run ? [run] : []; } catch { return []; }
+      })
+    : undefined;
+  writeFileSync(`${fixture.info.logPath}.json`, JSON.stringify({ evidence, final, persisted, persistedRuns }, null, 2));
   await ui?.close();
   await fixture.close();
 }

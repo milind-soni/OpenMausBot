@@ -4,6 +4,7 @@ import { setImmediate } from "node:timers/promises";
 import { join } from "node:path";
 
 import { RoutineManager, type RoutineCheckResult } from "../routines.ts";
+import { runJournalFile } from "../routine-run-journal.ts";
 
 const [dir, mode] = process.argv.slice(2);
 let resolve!: (result: RoutineCheckResult) => void;
@@ -39,8 +40,9 @@ resolve({ trouble: "Couldn't read Gmail. Reconnect it in Connected apps." });
 await setImmediate();
 assert.equal(manager.listRoutines()[0]!.checkTrouble, "Couldn't read Gmail. Reconnect it in Connected apps.");
 if (mode === "manual") {
-  const disk = JSON.parse(readFileSync(join(dir!, "routines.json"), "utf8"));
-  assert.equal(disk.runs[0].status, "queued");
+  const log = readFileSync(runJournalFile(join(dir!, "routines.json")), "utf8").trim().split("\n");
+  const saved = JSON.parse(log.at(-1)!) as { run?: { status?: string } };
+  assert.equal(saved.run?.status, "queued");
   manager.close();
   const retry = new RoutineManager({
     file: join(dir!, "routines.json"), botState: () => "ready", createTask: () => null,

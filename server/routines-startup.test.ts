@@ -80,6 +80,8 @@ it("recovers queued/due work and a waiting routine's imported hand-off after res
     disk.routines.find((routine: { id: string }) => routine.id === cron.id).nextRunAt = cronDueAt;
     disk.routines.find((routine: { id: string }) => routine.id === scheduled.id).schedule.at = dueAt;
     disk.routines.find((routine: { id: string }) => routine.id === scheduled.id).nextRunAt = dueAt;
+    // A file an older version left: its runs still live here until the next start moves them into the log.
+    disk.runs = [];
     disk.runs.push({
       id: "interrupted-run", routineId: interrupted.id, routineName: interrupted.name,
       prompt: interrupted.prompt, target: "bot", botId: interruptedBot.id, runOn: "maus",

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import { isRoutineProblemRun } from "../shared/routines.ts";
 import { ROUTINE_SKIPPED_WHILE_WAITING, ROUTINE_SUPERSEDED } from "./routine-execution.ts";
+import { runJournalFile } from "./routine-run-journal.ts";
 import {
   nextOccurrence,
   RoutineManager,
@@ -19,6 +20,34 @@ const dirs: string[] = [];
 
 const routineTurn = (id: string, name: string, text: string, trigger: "schedule" | "manual" = "schedule") =>
   `[${trigger === "schedule" ? "Scheduled routine" : "Routine"} ${JSON.stringify(name)} — do this now:]\nTrigger id: ${id}\n${text}`;
+
+/** The run history the next boot reads: the journal's last line per run, over any runs an older file still holds. */
+function savedRuns(file: string): RoutineRun[] {
+  const byId = new Map<string, RoutineRun>();
+  for (const run of (JSON.parse(readFileSync(file, "utf8")) as { runs?: RoutineRun[] }).runs ?? []) byId.set(run.id, run);
+  let text = "";
+  try { text = readFileSync(runJournalFile(file), "utf8"); } catch { /* no run journal yet */ }
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    let record: { v?: number; run?: RoutineRun; drop?: string };
+    try { record = JSON.parse(line); } catch { continue; }
+    if (record.v !== 1) continue;
+    if (record.drop) byId.delete(record.drop);
+    else if (record.run) byId.set(record.run.id, record.run);
+  }
+  return [...byId.values()];
+}
+
+/** Older versions kept runs in routines.json; a test that edits run history there starts from that shape. */
+function legacyFile(file: string): Record<string, any> {
+  const disk = JSON.parse(readFileSync(file, "utf8"));
+  return { ...disk, runs: savedRuns(file) };
+}
+
+function writeLegacy(file: string, disk: Record<string, any>): void {
+  rmSync(runJournalFile(file), { force: true });
+  writeFileSync(file, JSON.stringify(disk));
+}
 
 function tempFile() {
   const dir = mkdtempSync(join(tmpdir(), "omb-routines-"));
@@ -331,10 +360,10 @@ describe("bounded scheduled overlap and run health", () => {
     const h = harness(start);
     const routine = h.manager.create({ ...input(), enabled: false });
     h.manager.runNow(routine.id); await h.manager.tick();
-    const disk = JSON.parse(readFileSync(h.options.file!, "utf8"));
+    const disk = legacyFile(h.options.file!);
     disk.runs[0].retried = "restarted";
     Object.assign(disk.routines[0], { failureStreak: 99, skippedRuns: -1, lastSkippedAt: 9e15, overlap: "invalid" });
-    writeFileSync(h.options.file!, JSON.stringify(disk));
+    writeLegacy(h.options.file!, disk);
     for (let i = 0; i < 2; i++) {
       const saved = new RoutineManager(h.options).listRoutines()[0];
       expect(saved.failureStreak).toBe(1);
@@ -381,7 +410,7 @@ describe("a run left waiting for the person", () => {
     expect(h.failed).toEqual([]);
     expect(h.manager.listRoutines()[0]).toMatchObject({ nextRunAt: Date.parse("2026-10-14T06:30:00Z") });
     expect(h.manager.listRoutines()[0].skippedRuns).toBeUndefined();
-    expect(JSON.parse(readFileSync(h.options.file!, "utf8")).runs.find((run: RoutineRun) => run.threadId === "thread-1"))
+    expect(savedRuns(h.options.file!).find((run) => run.threadId === "thread-1"))
       .toMatchObject({ status: "cancelled", error: ROUTINE_SUPERSEDED });
   });
 
@@ -507,9 +536,9 @@ describe("a run left waiting for the person", () => {
 
     h.setNow(day1 + minutes(60));
     expect(new RoutineManager(h.options).listRuns()[0]).toMatchObject({ status: "waiting", waitingSince: day1 });
-    const disk = JSON.parse(readFileSync(h.options.file!, "utf8"));
+    const disk = legacyFile(h.options.file!);
     delete disk.runs[0].waitingSince;
-    writeFileSync(h.options.file!, JSON.stringify(disk));
+    writeLegacy(h.options.file!, disk);
     h.setNow(day2 - minutes(20));
     const restarted = new RoutineManager(h.options);
     expect(restarted.listRuns()[0]).toMatchObject({ status: "waiting", waitingSince: day2 - minutes(20) });
@@ -569,7 +598,7 @@ describe("a run waiting on an approval nobody is there to give", () => {
     expect(h.manager.listRuns()[0]).toMatchObject({ status: "failed", error: stopped, finishedAt: at + minutes(16) });
     expect(h.failed.map((run) => run.error)).toEqual([stopped]);
     await vi.waitFor(() => expect(h.interruptedTurns).toEqual([{ botId: "maus-1", threadId: "thread-1" }]));
-    expect(JSON.parse(readFileSync(h.options.file!, "utf8")).runs[0]).toMatchObject({ status: "failed", error: stopped });
+    expect(savedRuns(h.options.file!)[0]).toMatchObject({ status: "failed", error: stopped });
   });
 
   it("counts only the time it worked toward the limit once the person answers", async () => {
@@ -903,7 +932,7 @@ describe("persistent routine results destinations", () => {
       h.emitted.length = 0;
       const observations: Array<{ payload: any; persisted: any }> = [];
       const observe = (payload: Record<string, unknown>) => observations.push({
-        payload, persisted: JSON.parse(readFileSync(h.options.file!, "utf8")),
+        payload, persisted: { ...JSON.parse(readFileSync(h.options.file!, "utf8")), runs: savedRuns(h.options.file!) },
       });
       h.options.emit = (payload) => { h.emitted.push(payload); observe(payload); };
       h.options.onRunChanged = (run) => { h.changed.push(run); observe({ kind: "routine.run", run }); };
@@ -1169,6 +1198,23 @@ describe("nextOccurrence", () => {
 });
 
 describe("RoutineManager", () => {
+  it("keeps run history in its own append-only log, and leaves it alone when only a definition changes", async () => {
+    const h = harness();
+    const routine = h.manager.create({
+      name: "Log check", prompt: "Check the log", botId: "maus-1", enabled: false,
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+    });
+    const run = h.manager.runNow(routine.id)!;
+    await h.manager.tick();
+    const journal = runJournalFile(h.options.file!);
+    const lineCount = () => readFileSync(journal, "utf8").trim().split("\n").length;
+    const lines = lineCount();
+    expect(JSON.parse(readFileSync(h.options.file!, "utf8")).runs).toBeUndefined();
+    expect(savedRuns(h.options.file!).find((each) => each.id === run.id)?.status).toBe("running");
+    h.manager.update(routine.id, { name: "Renamed" });
+    expect(lineCount()).toBe(lines);
+  });
+
   it("accepts five-minute windows and preserves the manager's clamping semantics", () => {
     const h = harness();
     const create = (name: string, durationMinutes?: number) => h.manager.create({
@@ -1227,10 +1273,10 @@ describe("RoutineManager", () => {
     h.manager.runNow(routine.id);
     expect(h.manager.attachmentPaths()).toEqual(["/tmp/brief.pdf", "/tmp/brief.pdf"]);
 
-    const disk = JSON.parse(readFileSync(file, "utf8")) as { routines: Array<{ schedule: unknown }>; runs: Array<{ attachments?: unknown }> };
+    const disk = legacyFile(file) as { routines: Array<{ schedule: unknown }>; runs: Array<{ attachments?: unknown }> };
     disk.routines[0]!.schedule = { type: "never" };
     delete disk.runs[0]!.attachments;
-    writeFileSync(file, JSON.stringify(disk));
+    writeLegacy(file, disk);
     const unloaded = new RoutineManager(h.options);
     expect(unloaded.listRoutines()).toEqual([]);
     expect(unloaded.attachmentPaths()).toEqual(["/tmp/brief.pdf"]);
@@ -1263,9 +1309,9 @@ describe("RoutineManager", () => {
         attachments: [{ id: "file-1", kind: "file", name: "brief.pdf", path: "/tmp/brief.pdf", size: 4_096 }],
       });
       h.manager.runNow(routine.id);
-      const disk = JSON.parse(readFileSync(file, "utf8")) as Record<typeof owner, Array<{ attachments?: unknown[] }>>;
+      const disk = legacyFile(file) as Record<typeof owner, Array<{ attachments?: unknown[] }>>;
       disk[owner][0]!.attachments!.push(null);
-      writeFileSync(file, JSON.stringify(disk));
+      writeLegacy(file, disk);
       const reloaded = new RoutineManager(h.options);
       expect(reloaded.listRoutines()).toHaveLength(1);
       expect(reloaded.attachmentPaths()).toBeNull();
@@ -1502,7 +1548,7 @@ describe("RoutineManager", () => {
     let failureWasPersistedBeforeCallback = false;
     h.options.onRunFailed = (run) => {
       h.failed.push(run);
-      failureWasPersistedBeforeCallback = JSON.parse(readFileSync(routineFile, "utf8")).runs.some((saved: RoutineRun) => saved.status === "failed");
+      failureWasPersistedBeforeCallback = savedRuns(routineFile).some((saved) => saved.status === "failed");
     };
     const cut: RoutineRun[] = [];
     h.options.onRunCut = (run) => cut.push(run);
@@ -1566,7 +1612,7 @@ describe("RoutineManager", () => {
     expect(persisted.listRuns()[0]?.attachments).toEqual(persisted.listRoutines()[0]?.attachments);
 
     const file = h.options.file!;
-    const oldFile = JSON.parse(readFileSync(file, "utf8")) as {
+    const oldFile = legacyFile(file) as {
       routines: Array<{ attachments?: unknown; timeoutMinutes?: unknown }>;
       runs: Array<{ attachments?: unknown; timeoutMinutes?: unknown }>;
     };
@@ -1574,7 +1620,7 @@ describe("RoutineManager", () => {
     delete oldFile.runs[0]!.attachments;
     oldFile.routines[0]!.timeoutMinutes = 2;
     oldFile.runs[0]!.timeoutMinutes = "invalid";
-    writeFileSync(file, JSON.stringify(oldFile));
+    writeLegacy(file, oldFile);
 
     const migrated = new RoutineManager(h.options);
     expect(migrated.listRoutines()[0]?.attachments).toEqual([]);
@@ -1594,7 +1640,7 @@ describe("RoutineManager", () => {
     });
     h.manager.runNow(routine.id);
 
-    const stored = JSON.parse(readFileSync(h.options.file!, "utf8")) as {
+    const stored = legacyFile(h.options.file!) as {
       routines: Array<{ target?: unknown; groupId?: unknown }>;
       runs: Array<{ target?: unknown; groupId?: unknown }>;
     };
@@ -1602,7 +1648,7 @@ describe("RoutineManager", () => {
     delete stored.runs[0]!.target;
     stored.routines[0]!.groupId = "stale-room";
     stored.runs[0]!.groupId = "stale-room";
-    writeFileSync(h.options.file!, JSON.stringify(stored));
+    writeLegacy(h.options.file!, stored);
 
     const migrated = new RoutineManager(h.options);
     expect(migrated.listRoutines()[0]).toMatchObject({ target: "bot", botId: "maus-legacy" });
@@ -2951,7 +2997,7 @@ describe("RoutineManager", () => {
       expect(h.manager.handleRuntimeEvent({ ...base, type: "runtime.error", message: "Later room failure" })).toBeNull();
       expect(h.manager.runForThread(run.threadId!)).toEqual(before);
       expect(h.changed).toHaveLength(changes);
-      expect(JSON.parse(readFileSync(h.options.file!, "utf8")).runs[0]).toMatchObject({
+      expect(savedRuns(h.options.file!)[0]).toMatchObject({
         status: "waiting", goalStatus: status, attention: `${status} detail`,
       });
 
@@ -3805,9 +3851,9 @@ describe("routine continuity", () => {
 
     // An oversized report can only come from a file another version wrote.
     const file = h.options.file!;
-    const disk = JSON.parse(readFileSync(file, "utf8"));
+    const disk = legacyFile(file);
     disk.runs[0].output = "x".repeat(5_000);
-    writeFileSync(file, JSON.stringify(disk));
+    writeLegacy(file, disk);
 
     const reloaded = new RoutineManager(h.options);
     h.setNow(anchorAt + 60 * 60_000);

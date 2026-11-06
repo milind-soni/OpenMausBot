@@ -805,8 +805,14 @@ async function main() {
     const dataDir = fixture.dataDir;
     await fixture.close(true);
     const file = join(dataDir, "routines.json");
-    const saved = JSON.parse(readFileSync(file, "utf8")) as { runs: Array<Record<string, unknown>> };
-    const template = saved.runs[0]!;
+    const saved = JSON.parse(readFileSync(file, "utf8")) as { runs?: Array<Record<string, unknown>> };
+    const journal = file.replace(/\.json$/i, "") + ".runs.jsonl";
+    const lines = existsSync(journal) ? readFileSync(journal, "utf8").trim().split("\n") : [];
+    let template: Record<string, unknown> | undefined;
+    for (let i = lines.length - 1; i >= 0 && !template; i -= 1) {
+      try { template = (JSON.parse(lines[i]!) as { run?: Record<string, unknown> }).run; } catch { /* a torn line */ }
+    }
+    if (!template) throw new Error("the routine benchmark fixture has no saved run");
     const output = "The summary: ".concat("calendar clear, three emails need replies, one invoice overdue. ".repeat(30)).slice(0, 2000);
     saved.runs = Array.from({ length: 1999 }, (_, i) => ({ ...template, id: `bench-run-${i}`, output, scheduledFor: Date.now() - (i + 1) * 3_600_000, startedAt: Date.now() - (i + 1) * 3_600_000, finishedAt: Date.now() - (i + 1) * 3_600_000 + 60_000, status: "completed" })).concat(saved.runs);
     writeFileSync(file, JSON.stringify(saved, null, 2));
@@ -825,7 +831,7 @@ async function main() {
       runs: saved.runs.length, routinesJsonKb: fileKb, serverReadyMs: Math.round(fixture.readyMs),
       getRoutines: { firstMs: Math.round(samples[0]!), medianMs: round(median(samples.slice(1))), kb: kb(bytes) },
       idleServerCpuPct: round(tallyDelta(idleBefore, idleAfter).cpuMs / Math.min(IDLE_MS, 30_000) * 100, 2),
-      oneRun: { status, routinesJson: run.writes["routines.json"] ?? null, writtenKb: run.writtenKb, fsyncs: run.fsyncs, serverCpuMs: run.cpuMs },
+      oneRun: { status, routinesJson: run.writes["routines.json"] ?? null, runJournal: run.writes["routines.runs.jsonl"] ?? null, writtenKb: run.writtenKb, fsyncs: run.fsyncs, serverCpuMs: run.cpuMs },
     };
     await fixture.close();
   }
