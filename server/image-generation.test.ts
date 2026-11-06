@@ -65,6 +65,20 @@ describe("provider requests", () => {
     expect(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body))).toMatchObject({ size: "1536x1024", quality: "auto" });
   });
 
+  it("accepts a Custom provider that sends url and revised_prompt as null next to the image", async () => {
+    const body = { created: 1, data: [{ b64_json: PNG.toString("base64"), url: null, revised_prompt: null }] };
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(body), { status: 200 }));
+    const cfg = { imageGen: { customUrl: "http://127.0.0.1:4711/v1/openai", customApiKey: "custom-secret", customModel: "vendor/image-model", primary: { provider: "custom" as const } } };
+    await expect(generateImage(cfg, { prompt: "owl" }, { fetchImpl: fetchMock })).resolves.toMatchObject({ provider: "custom", model: "vendor/image-model" });
+  });
+
+  it("still asks for inline image data when a provider sends only a url", async () => {
+    const body = { data: [{ b64_json: null, url: "https://images.example/owl.png" }] };
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(body), { status: 200 }));
+    await expect(generateImage({ imageGen: { key: "openai-secret" } }, { prompt: "owl" }, { fetchImpl: fetchMock })).rejects.toThrow("must return base64 image data (b64_json)");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it.each(["gemini", "openrouter"] as const)("treats %s without its key as not set up, so the backup takes over", async (provider) => {
     const fetchMock = vi.fn<typeof fetch>(async () => imageResponse());
     const cfg = { ...BOTH, imageGen: { ...BOTH.imageGen, primary: { provider } } };
