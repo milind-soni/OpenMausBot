@@ -3163,6 +3163,7 @@
   "remote.devices.subtitle": "Quản lý các thiết bị có thể sử dụng {app} này.",
   "remote.devices.empty": "Chưa có thiết bị nào được ghép nối.",
   "remote.devices.lastSeen": "Hoạt động lần cuối {when}",
+  "remote.devices.paused": "Đã tạm dừng sau 30 ngày không dùng. Sẽ kết nối lại khi bạn mở trang này.",
   "remote.devices.remove": "Gỡ {name}",
   "remote.devices.allowView": "Cho phép xem màn hình máy tính",
   "remote.devices.allowViewDetail": "Toàn quyền truy cập tương tác từ thiết bị này.",

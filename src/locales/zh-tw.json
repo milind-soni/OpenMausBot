@@ -2683,6 +2683,7 @@
   "remote.devices.subtitle": "管理可以使用此 {app} 的裝置。",
   "remote.devices.empty": "尚未配對任何裝置。",
   "remote.devices.lastSeen": "上次出現於 {when}",
+  "remote.devices.paused": "30 天未使用，已暫停。開啟此頁面時會重新連線。",
   "remote.devices.remove": "移除 {name}",
   "remote.devices.allowView": "允許存取電腦畫面",
   "remote.devices.allowViewDetail": "可從此裝置進行完整的互動式操作。",

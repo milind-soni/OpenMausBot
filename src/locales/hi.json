@@ -1500,6 +1500,7 @@
   "remote.devices.subtitle": "इस {app} का उपयोग कर सकने वाले डिवाइस प्रबंधित करें।",
   "remote.devices.empty": "अभी कोई डिवाइस जुड़ा नहीं है।",
   "remote.devices.lastSeen": "आख़िरी बार देखा गया {when}",
+  "remote.devices.paused": "30 दिन इस्तेमाल न होने पर रोका गया। यह पेज खोलने पर यह फिर से जुड़ जाता है।",
   "remote.devices.remove": "{name} हटाएँ",
   "remote.devices.allowView": "कंप्यूटर देखने की अनुमति",
   "remote.devices.allowViewDetail": "इस डिवाइस से पूरा इंटरैक्टिव एक्सेस।",

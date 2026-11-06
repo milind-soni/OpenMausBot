@@ -1817,6 +1817,7 @@
   "remote.devices.subtitle": "Керуйте пристроями, що можуть користуватися цим {app}.",
   "remote.devices.empty": "Прив'язаних пристроїв ще немає.",
   "remote.devices.lastSeen": "Остання поява {when}",
+  "remote.devices.paused": "Призупинено після 30 днів без використання. Під'єднається знову, коли ви відкриєте цю сторінку.",
   "remote.devices.remove": "Прибрати {name}",
   "remote.devices.allowView": "Дозволити перегляд комп'ютера",
   "remote.devices.allowViewDetail": "Повний інтерактивний доступ із цього пристрою.",

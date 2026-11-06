@@ -1500,6 +1500,7 @@
   "remote.devices.subtitle": "Gérez les appareils autorisés à utiliser ce {app}.",
   "remote.devices.empty": "Aucun appareil associé pour l'instant.",
   "remote.devices.lastSeen": "Vu pour la dernière fois {when}",
+  "remote.devices.paused": "En pause après 30 jours sans utilisation. Il se reconnecte quand vous ouvrez cette page.",
   "remote.devices.remove": "Retirer {name}",
   "remote.devices.allowView": "Autoriser la vue de l'ordinateur",
   "remote.devices.allowViewDetail": "Accès interactif complet depuis cet appareil.",

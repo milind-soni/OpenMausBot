@@ -3814,6 +3814,7 @@
   "remote.devices.subtitle": "Zarządzaj urządzeniami uprawnionymi do korzystania z aplikacji {app}.",
   "remote.devices.empty": "Nie sparowano jeszcze żadnych urządzeń.",
   "remote.devices.lastSeen": "Ostatnio widziano: {when}",
+  "remote.devices.paused": "Wstrzymano po 30 dniach bez użycia. Połączy się ponownie, gdy otworzysz tę stronę.",
   "remote.devices.remove": "Usuń: {name}",
   "remote.devices.allowView": "Zezwól na widok komputera",
   "remote.devices.allowViewDetail": "Pełny interaktywny dostęp z tego urządzenia.",

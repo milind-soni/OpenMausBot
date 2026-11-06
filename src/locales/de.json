@@ -1556,6 +1556,7 @@
   "remote.devices.subtitle": "Verwalte die Geräte, die dieses {app} nutzen dürfen.",
   "remote.devices.empty": "Noch sind keine Geräte gekoppelt.",
   "remote.devices.lastSeen": "Zuletzt gesehen {when}",
+  "remote.devices.paused": "Nach 30 Tagen ohne Nutzung pausiert. Es verbindet sich wieder, wenn du diese Seite öffnest.",
   "remote.devices.remove": "{name} entfernen",
   "remote.devices.allowView": "Computeransicht erlauben",
   "remote.devices.allowViewDetail": "Vollständiger interaktiver Zugriff von diesem Gerät.",
