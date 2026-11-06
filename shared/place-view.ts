@@ -157,6 +157,8 @@ export const PLACE_EN = {
   "place.view.ccOnMyCloud.line": "Cloud desktops from your plan work for Cloud bots for now.",
   "place.view.ccNeedsKey.short": "Connect Boat first",
   "place.view.ccNeedsKey.line": "Bots here can get their own cloud desktops from Boat, a paid service.",
+  "place.view.ccNeedsKey.lineWorksOn": "{bot} is set to work on a cloud desktop, but no Boat account is connected.",
+  "place.view.ccNeedsKey.linePin": "This conversation is set to work on a cloud desktop, but no Boat account is connected.",
   "place.view.vps.short": "Your own machine",
   "place.view.vps.line": "Uses your own Linux machine, connected over SSH.",
   "place.view.browser.short": "Web pages only",
@@ -196,6 +198,7 @@ export const PLACE_EN = {
   "place.action.changeRoutine": "Change where it runs",
   "place.action.openComputerPanel": "Open the Screen panel",
   "place.askAdmin": "Ask an Admin to change it.",
+  "place.withoutCloudDesktop": "To work without one, choose another place in the Screen panel.",
   "place.backOnAuto": "This conversation is back on Auto.",
 } as const;
 export type PlaceKey = keyof typeof PLACE_EN;
@@ -355,8 +358,10 @@ function sourceAction(source: PlaceSource, state: PlaceState): PlaceActionId | n
   }
 }
 
-function lineKey(state: PlaceState, params: PlaceParams, server?: ServerKind): PlaceKey {
+function lineKey(state: PlaceState, params: PlaceParams, server?: ServerKind, source?: PlaceSource): PlaceKey {
   const segment = STATE[state].key;
+  if (state === "cc-needs-key" && source === "works-on") return "place.view.ccNeedsKey.lineWorksOn";
+  if (state === "cc-needs-key" && source === "pin") return "place.view.ccNeedsKey.linePin";
   if (state === "auto") {
     return server === "my-cloud" ? "place.view.auto.lineMyCloud" : server === "linux" || server === "remote" ? "place.view.auto.lineLinux" : "place.view.auto.lineDesktop";
   }
@@ -404,7 +409,7 @@ export function placeViewOf(state: PlaceState, params: PlaceParams, context: Pla
   const translate = context.translate ?? english;
   const values = templateParams(params, context.locale ?? "en");
   const segment = STATE[state].key;
-  let line = translate(lineKey(state, params, context.server), values);
+  let line = translate(lineKey(state, params, context.server, context.source), values);
   let action: PlaceActionId | null = context.source && PASSING.has(state) ? sourceAction(context.source, state) : STATE[state].action;
   // A failed row never offers what only the panel can do on the spot.
   if (context.source && (action === "start" || action === "wake" || action === "watch")) action = null;
@@ -415,6 +420,8 @@ export function placeViewOf(state: PlaceState, params: PlaceParams, context: Pla
   if (action && context.role === "user" && ADMIN_ONLY.has(action)) {
     action = null;
     line = `${line} ${translate("place.askAdmin")}`;
+  } else if (state === "cc-needs-key" && context.source === "works-on") {
+    line = `${line} ${translate("place.withoutCloudDesktop")}`;
   }
   // Simple mode has no composer chip, so a pin's way back is the grid's
   // choice, by the grid's own name for it.

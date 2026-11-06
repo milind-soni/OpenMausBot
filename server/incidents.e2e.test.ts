@@ -173,7 +173,7 @@ it("queues reports that find the Chief's incidents thread busy, answers them tog
     expect(JSON.stringify(first.prompt)).toContain("Ada's run in its thread #Reconcile the September invoices. failed");
     expect(Object.keys(first.mcpConfig.mcpServers)).toContain("agents");
     expect(Object.keys(first.mcpConfig.mcpServers)).not.toContain("computer");
-    expect(first.systemPrompt).toContain("This turn answers a Team incidents report and your computer could not be prepared for it (Bots here can get their own cloud desktops from Boat, a paid service.");
+    expect(first.systemPrompt).toContain("This turn answers a Team incidents report and your computer could not be prepared for it (Clive is set to work on a cloud desktop, but no Boat account is connected.");
 
     const failsWhileBusy = async (bot: { id: string; activeTaskId: string }, name: string, request: string) => {
       await control(["send", "--bot", bot.id, "--text", request]);
