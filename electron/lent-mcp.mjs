@@ -149,7 +149,13 @@ function stdioClient(server, { environment, home }) {
       });
     },
     notify(method) { if (!closed) write({ jsonrpc: "2.0", method }); },
-    close() { lines.close(); end(failure(`${server.name} stopped`)); },
+    close() {
+      lines.close();
+      const exited = child.exitCode !== null || child.signalCode !== null || !child.pid ? Promise.resolve()
+        : new Promise(resolve => { const timer = setTimeout(resolve, 5_000); child.once("exit", () => { clearTimeout(timer); resolve(); }); });
+      end(failure(`${server.name} stopped`));
+      return exited;
+    },
   };
 }
 
@@ -217,7 +223,7 @@ function httpClient(server, { fetch: fetchImpl }) {
     request: (method, params, signal, ms) => send({ jsonrpc: "2.0", id: ++sequence, method, params }, signal, ms),
     notify(method) { void send({ jsonrpc: "2.0", method }, new AbortController().signal, 10_000).catch(() => {}); },
     started(version) { protocol = typeof version === "string" ? version : PROTOCOL; },
-    close() { session = null; },
+    close() { session = null; return Promise.resolve(); },
   };
 }
 
@@ -225,7 +231,12 @@ function httpClient(server, { fetch: fetchImpl }) {
  * one unused for ten minutes is stopped. */
 export function createLentMcp({ environment = async () => ({ ...inheritedEnvironment(), PATH: await commandPath() }), home = os.homedir(), fetch: fetchImpl = globalThis.fetch } = {}) {
   const running = new Map();
-  const stop = name => { const live = running.get(name); if (!live) return; clearTimeout(live.idle); live.client.close(); running.delete(name); };
+  const stop = name => {
+    const live = running.get(name);
+    if (!live) return Promise.resolve();
+    clearTimeout(live.idle); running.delete(name);
+    return live.client.close();
+  };
   const ready = async (server, signal) => {
     const key = hash(server);
     const known = running.get(server.name);
@@ -277,6 +288,7 @@ export function createLentMcp({ environment = async () => ({ ...inheritedEnviron
       if (typeof operation.tool_name !== "string" || !operation.tool_name) throw failure("Name the tool to call");
       return use(server, signal, client => client.request("tools/call", { name: operation.tool_name, arguments: operation.arguments ?? {} }, signal, CALL_MS));
     },
-    close() { for (const name of running.keys()) stop(name); },
+    /** Resolves once every server it started has exited, or after five seconds. */
+    close: () => Promise.all([...running.keys()].map(stop)).then(() => {}),
   };
 }

@@ -14,5 +14,5 @@ export function createLentMcp(options?: {
   fetch?: typeof fetch;
 }): {
   call(operation: { action: "mcp_tools" | "mcp_call"; server: LentMcpServer; tool_name?: string; arguments?: Record<string, unknown> }, signal: AbortSignal): Promise<unknown>;
-  close(): void;
+  close(): Promise<void>;
 };

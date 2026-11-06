@@ -26,15 +26,18 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
 });
 `;
 
+/** One step of a test, refused after 20 seconds by name, so a hang says where it is. */
+const step = (name, promise) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error(`${name} took over 20 s`)), 20_000).unref())]);
+
 async function stdioFixture(t) {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), "omb-lent-mcp-")));
-  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
   const script = path.join(dir, "server.mjs");
   await writeFile(script, SERVER_SCRIPT);
   const home = path.join(dir, "home");
   await mkdir(home);
   const lent = createLentMcp({ environment: () => ({ ...inheritedEnvironment(), PATH: process.env.PATH ?? "" }), home });
-  t.after(() => lent.close());
+  // Windows keeps a running process's working folder: the servers end before their folder goes.
+  t.after(async () => { await lent.close(); await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); });
   return { dir, home, script, lent, server: { name: "notes", command: process.execPath, args: [script], env: { NOTES_TOKEN: "saved-env-key" } } };
 }
 
@@ -79,16 +82,16 @@ test("the executor refuses before anything starts when the grant doesn't allow i
 
 test("a command server starts once, from the home folder, with its saved key, and keeps running between calls", async t => {
   const { lent, server, home } = await stdioFixture(t);
-  const listed = await lent.call({ action: "mcp_tools", server }, signal());
+  const listed = await step("listing", lent.call({ action: "mcp_tools", server }, signal()));
   assert.deepEqual(listed.tools.map(tool => tool.name), ["whoami", "fail"], "every page");
-  const first = JSON.parse((await lent.call({ action: "mcp_call", server, tool_name: "whoami", arguments: {} }, signal())).content[0].text);
+  const first = JSON.parse((await step("the first call", lent.call({ action: "mcp_call", server, tool_name: "whoami", arguments: {} }, signal()))).content[0].text);
   assert.equal(first.key, "saved-env-key");
   assert.equal(await realpath(first.cwd), await realpath(home));
-  await assert.rejects(lent.call({ action: "mcp_call", server, tool_name: "fail" }, signal()), /no such thing/);
-  const again = JSON.parse((await lent.call({ action: "mcp_call", server, tool_name: "whoami" }, signal())).content[0].text);
+  await assert.rejects(step("a failing call", lent.call({ action: "mcp_call", server, tool_name: "fail" }, signal())), /no such thing/);
+  const again = JSON.parse((await step("the call after it", lent.call({ action: "mcp_call", server, tool_name: "whoami" }, signal()))).content[0].text);
   assert.equal(again.pid, first.pid, "an error from the server leaves it running");
   const changed = { ...server, env: { NOTES_TOKEN: "new-key" } };
-  const fresh = JSON.parse((await lent.call({ action: "mcp_call", server: changed, tool_name: "whoami" }, signal())).content[0].text);
+  const fresh = JSON.parse((await step("the changed server's call", lent.call({ action: "mcp_call", server: changed, tool_name: "whoami" }, signal()))).content[0].text);
   assert.notEqual(fresh.pid, first.pid, "a changed server starts anew");
   assert.equal(fresh.key, "new-key");
 });
@@ -110,7 +113,7 @@ test("a server that refuses to start is started again on the next call, not kept
 test("a command server that can't start says so by its program's name, never with its keys", async t => {
   const { lent } = await stdioFixture(t);
   const missing = { name: "notes", command: path.join(tmpdir(), "omb-no-such-program"), args: [], env: { NOTES_TOKEN: "never-echoed" } };
-  await assert.rejects(lent.call({ action: "mcp_tools", server: missing }, signal()), error => {
+  await assert.rejects(step("a missing program", lent.call({ action: "mcp_tools", server: missing }, signal())), error => {
     assert.match(error.message, /notes could not start: omb-no-such-program is not on this computer/);
     assert.doesNotMatch(error.message, /never-echoed/);
     return true;
