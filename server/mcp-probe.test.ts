@@ -195,10 +195,10 @@ describe("remote MCP probe", () => {
     const gateway = await startFakeHttpMcp({ requireHeaders: { "CF-Access-Client-Id": "id", "CF-Access-Client-Secret": "right" } });
     try {
       const result = await probeMcpServer({ type: "http", url: fake.url, headers: { Authorization: "Bearer wrong-token" }, enabled: false }, 2_000);
-      expect(result).toEqual({ ok: false, error: "The server didn't accept the keys (HTTP 401). Check the header values.", reason: "keys", status: 401 });
+      expect(result).toEqual({ ok: false, said: "unauthorized", error: "The server didn't accept the keys (HTTP 401). Check the header values. It said: \"unauthorized\".", reason: "keys", status: 401 });
       expect(JSON.stringify(result)).not.toContain("wrong-token");
       const gated = await probeMcpServer({ type: "http", url: gateway.url, headers: { "CF-Access-Client-Id": "id", "CF-Access-Client-Secret": "wrong-secret" }, enabled: false }, 2_000);
-      expect(gated).toEqual({ ok: false, error: "The server didn't accept the keys (HTTP 403). Check the header values.", reason: "keys", status: 403 });
+      expect(gated).toEqual({ ok: false, said: "Forbidden", error: "The server didn't accept the keys (HTTP 403). Check the header values. It said: \"Forbidden\".", reason: "keys", status: 403 });
       expect(JSON.stringify(gated)).not.toContain("wrong-secret");
     } finally {
       await fake.close();
@@ -218,9 +218,66 @@ describe("remote MCP probe", () => {
     try {
       const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`;
       await expect(probeMcpServer({ type: "http", url, headers: { "X-Api-Key": "k" }, enabled: false }, 2_000))
-        .resolves.toEqual({ ok: false, error: "The server didn't accept the keys. Check the header values.", reason: "keys" });
+        .resolves.toEqual({ ok: false, said: "Unauthorized: invalid API key", error: "The server didn't accept the keys. Check the header values. It said: \"Unauthorized: invalid API key\".", reason: "keys" });
     } finally {
       await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  async function answering(status: number, contentType: string, body: string, rpcError?: { code: number; message: string }) {
+    const server = createServer((req, res) => {
+      let text = "";
+      req.on("data", (chunk) => { text += chunk; }).on("end", () => {
+        const frame = JSON.parse(text) as { id?: unknown; method?: string };
+        if (!rpcError) return void res.writeHead(status, { "content-type": contentType }).end(body);
+        if (frame.method === "initialize") {
+          return void res.writeHead(200, { "content-type": "application/json" })
+            .end(JSON.stringify({ jsonrpc: "2.0", id: frame.id, result: { protocolVersion: "2025-06-18", capabilities: {}, serverInfo: { name: "fake", version: "1" } } }));
+        }
+        if (frame.id === undefined) return void res.writeHead(202).end();
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id: frame.id, error: rpcError }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`, close: () => new Promise((resolve) => server.close(resolve)) };
+  }
+
+  it("passes on why the server refused, in its own words, without the key it echoes", async () => {
+    const server = await answering(403, "application/json", JSON.stringify({ error: { message: "Your plan has no MCP access for key k-secret-123" } }));
+    try {
+      await expect(probeMcpServer({ type: "http", url: server.url, headers: { "X-Api-Key": "k-secret-123" }, enabled: false }, 2_000)).resolves.toEqual({
+        ok: false, reason: "keys", status: 403,
+        said: "Your plan has no MCP access for key [redacted]", error: "The server didn't accept the keys (HTTP 403). Check the header values. It said: \"Your plan has no MCP access for key [redacted]\".",
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("passes on a plain-text error page, and leaves an HTML one out", async () => {
+    const text = await answering(502, "text/plain; charset=utf-8", "upstream\ttimed out\n");
+    const html = await answering(502, "text/html", "<html><body>Bad gateway</body></html>");
+    try {
+      await expect(probeMcpServer({ type: "http", url: text.url, headers: {}, enabled: false }, 2_000)).resolves.toEqual({
+        ok: false, reason: "unreachable", said: "upstream timed out", error: "The server answered HTTP 502. Check the address and headers. It said: \"upstream timed out\".",
+      });
+      await expect(probeMcpServer({ type: "http", url: html.url, headers: {}, enabled: false }, 2_000)).resolves.toEqual({
+        ok: false, reason: "unreachable", error: "The server answered HTTP 502. Check the address and headers.",
+      });
+    } finally {
+      await text.close();
+      await html.close();
+    }
+  });
+
+  it("passes on the error a server returns for its tools list", async () => {
+    const server = await answering(200, "application/json", "", { code: -32603, message: "Lusha API is temporarily unavailable" });
+    try {
+      await expect(probeMcpServer({ type: "http", url: server.url, headers: {}, enabled: false }, 2_000)).resolves.toEqual({
+        ok: false, said: "Lusha API is temporarily unavailable", error: "The server returned an error. It said: \"Lusha API is temporarily unavailable\".",
+      });
+    } finally {
+      await server.close();
     }
   });
 
@@ -232,6 +289,19 @@ describe("remote MCP probe", () => {
       const result = await probeMcpServer({ type: "http", url: fake.url, headers: {}, enabled: false }, 8_000);
       expect(result).toEqual({ ok: false, auth: "required", error: "This server needs you to sign in." });
       expect(Date.now() - started).toBeLessThan(2_000);
+    } finally {
+      await fake.close();
+      await oauth.close();
+    }
+  });
+
+  it("still offers sign-in when the key it was sent is refused, and passes on what the server said about it", async () => {
+    const oauth = await startFakeOAuth();
+    const fake = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
+    try {
+      await expect(probeMcpServer({ type: "http", url: fake.url, headers: { "x-api-key": "not-the-key" }, enabled: false }, 8_000)).resolves.toEqual({
+        ok: false, auth: "required", said: "unauthorized", error: "This server needs you to sign in. It said: \"unauthorized\".",
+      });
     } finally {
       await fake.close();
       await oauth.close();
@@ -483,9 +553,15 @@ describe("remote MCP probe", () => {
     }
   });
 
-  it("says when the address cannot be reached", async () => {
+  it("says when the address cannot be reached, and the system's reason when it gave one", async () => {
     await expect(probeMcpServer({ type: "http", url: "http://127.0.0.1:9/mcp", headers: {}, enabled: false }, 2_000))
       .resolves.toEqual({ ok: false, error: "Could not reach this address. Check the URL and your network.", reason: "unreachable" });
+    const closed = createServer();
+    await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
+    const { port } = closed.address() as AddressInfo;
+    await new Promise((resolve) => closed.close(resolve));
+    await expect(probeMcpServer({ type: "http", url: `http://127.0.0.1:${port}/mcp`, headers: {}, enabled: false }, 2_000))
+      .resolves.toEqual({ ok: false, error: "Could not reach this address (ECONNREFUSED). Check the URL and your network.", reason: "unreachable" });
   });
 
   it("redacts a header value a server echoes in tool metadata", async () => {

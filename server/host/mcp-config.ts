@@ -79,7 +79,7 @@ async function probeAsBots(path: BrokerPath, name: string, target: StoredRemoteM
   if (result.ok || result.auth === "required" || signal.aborted) return result;
   const direct = await probeMcpServer(target, undefined, signal);
   return direct.ok
-    ? { ok: false, reason: "unreachable", error: `Your bots can't reach this server: ${result.error.replace(/ Check [^.]*\.$/, "")} It answers when tested directly, so the fault is on our side, not in your settings: tell us with @devs in any chat.` }
+    ? { ok: false, reason: "unreachable", error: `Your bots can't reach this server: ${result.error.replace(/ Check the (?:address and headers|header values|URL and your network)\./, "")} It answers when tested directly, so the fault is on our side, not in your settings: tell us with @devs in any chat.` }
     : result;
 }
 

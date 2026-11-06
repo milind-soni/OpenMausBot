@@ -4,6 +4,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { createServer, type Server } from "node:http";
 
 import type { McpServerSpec } from "./contracts.ts";
+import { itSaid, networkReason, serverReason } from "./mcp-http.ts";
 import { discoverMcpAuth, type McpAuthMetadata } from "./mcp-oauth-discovery.ts";
 import { McpOAuthStore, type McpOAuthRecord, type McpOAuthTokens } from "./mcp-oauth-store.ts";
 import type { McpOAuthClientConfig } from "./mcp-registry.ts";
@@ -442,8 +443,11 @@ export class McpOAuthManager {
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     const body = await response.json().catch(() => ({})) as { client_id?: unknown };
-    if (!response.ok || typeof body.client_id !== "string" || !body.client_id) {
-      throw new RegistrationRefused("This server would not register OpenMausBot for sign-in. Try again later.");
+    if (!response.ok) {
+      throw new RegistrationRefused(`This server would not register OpenMausBot for sign-in (HTTP ${response.status}).${itSaid(serverReason(body))}`);
+    }
+    if (typeof body.client_id !== "string" || !body.client_id) {
+      throw new RegistrationRefused("This server registered OpenMausBot for sign-in but sent no client ID.");
     }
     return body.client_id;
   }
@@ -597,7 +601,8 @@ export class McpOAuthManager {
         resource: flow.meta.resource,
       }, flow.client);
       const tokens = answer.status >= 200 && answer.status < 300 ? tokensFrom(answer.body) : null;
-      if (!tokens) return "The server did not accept this sign-in. Start again.";
+      if (!tokens && answer.status >= 200 && answer.status < 300) return "The server did not accept this sign-in. Start again.";
+      if (!tokens) return `The server did not accept this sign-in (HTTP ${answer.status}). Start again.${itSaid(serverReason(answer.body))}`;
       // Ended while the code was being spent: hand the tokens back rather than resurrect a sign-in.
       if (!this.isOwnerLive(flow.owner)) this.finish(flow, "cancelled", "Your session ended. Start again.");
       if (this.flows.get(flow.name) !== flow || flow.status.phase !== "waiting") {
@@ -618,8 +623,9 @@ export class McpOAuthManager {
         tokens,
       });
       return null;
-    } catch {
-      return "Could not reach the sign-in server. Start again.";
+    } catch (error) {
+      const code = networkReason(error);
+      return `Could not reach the sign-in server${code ? ` (${code})` : ""}. Start again.`;
     }
   }
 

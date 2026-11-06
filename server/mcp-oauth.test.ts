@@ -509,6 +509,29 @@ describe("MCP sign-in from another computer", () => {
     expect(oauth.counts.token).toBe(0);
   });
 
+  it("says why the server would not register OpenMausBot", async () => {
+    await setup({ refuseRedirect: () => true });
+    await expect(manager.start("docs", mcp.url)).rejects.toThrow('This server would not register OpenMausBot for sign-in (HTTP 400). It said: "invalid_redirect_uri".');
+  });
+
+  it("says why the server refused the sign-in's code", async () => {
+    await setup();
+    const started = await manager.start("docs", mcp.url);
+    const callback = new URL(await redirect(started));
+    callback.searchParams.set("code", "code_spent");
+    expect(await manager.completeCallback("docs", started.flowId, callback.href))
+      .toMatchObject({ phase: "failed", message: 'The server did not accept this sign-in (HTTP 400). Start again. It said: "invalid_grant".' });
+  });
+
+  it("says what stopped the sign-in server from answering", async () => {
+    await setup();
+    const started = await manager.start("docs", mcp.url);
+    const callback = await redirect(started);
+    await oauth.close();
+    expect(await manager.completeCallback("docs", started.flowId, callback))
+      .toMatchObject({ phase: "failed", message: expect.stringMatching(/^Could not reach the sign-in server \(E[A-Z]+\)\. Start again\.$/) });
+  });
+
   it.each(["cancel", "revoke", "forget", "expire"])("rejects a pasted callback after %s", async (action) => {
     await setup({}, action === "expire" ? 100 : undefined);
     const started = await manager.start("docs", mcp.url);

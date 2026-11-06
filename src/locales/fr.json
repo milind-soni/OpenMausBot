@@ -2631,6 +2631,7 @@
   "mcp.check.failedOff": "Connexion impossible, il reste donc désactivé. {reason}",
   "mcp.check.tryAgain": "Réessayer",
   "mcp.check.keysRefused": "Le serveur n’a pas accepté les clés ({reason}). Vérifiez les valeurs de {names}.",
+  "mcp.check.said": "Le serveur a répondu : « {words} ».",
   "mcp.check.keysNeeded": "Le serveur a refusé l’accès ({reason}). Il lui faut sans doute une clé : ajoutez-la avec « Corriger les clés ».",
   "mcp.check.fixKeys": "Corriger les clés",
   "mcp.fixKeys.title": "Corriger les clés de {name}",

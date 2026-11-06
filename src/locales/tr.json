@@ -5075,6 +5075,7 @@
   "mcp.check.failedOff": "Bağlanılamadı, bu yüzden kapalı kalıyor. {reason}",
   "mcp.check.tryAgain": "Tekrar dene",
   "mcp.check.keysRefused": "Sunucu anahtarları kabul etmedi ({reason}). {names} değerlerini kontrol edin.",
+  "mcp.check.said": "Sunucunun yanıtı: \"{words}\".",
   "mcp.check.keysNeeded": "Sunucu bağlantıya izin vermedi ({reason}). Muhtemelen bir anahtar gerekiyor: Anahtarları düzelt ile ekleyin.",
   "mcp.check.fixKeys": "Anahtarları düzelt",
   "mcp.fixKeys.title": "{name} için anahtarları düzelt",

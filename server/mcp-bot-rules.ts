@@ -109,7 +109,7 @@ export function mergeBotUpdate(existing: StoredMcpServer, patch: Record<string, 
 }
 
 /** One run of 16+ key characters (base64, dotted, percent-encoded) with a letter and a digit: an opaque key, never a word like `mcp-server-production`. */
-const KEY_SEGMENT = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9_\-+=.~%]{16,}$/;
+export const KEY_SEGMENT = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9_\-+=.~%]{16,}$/;
 
 /** A remote server's address as a bot or a card shows it: scheme, host, port and path, with every key-shaped path
  * segment masked. Security: a key can ride in the userinfo, the query or the path (a Zapier-style link), and a bot must

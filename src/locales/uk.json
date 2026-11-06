@@ -3072,6 +3072,7 @@
   "mcp.check.failedOff": "Не вдалося під’єднатися, тому він лишається вимкненим. {reason}",
   "mcp.check.tryAgain": "Спробувати ще",
   "mcp.check.keysRefused": "Сервер не прийняв ключі ({reason}). Перевірте значення: {names}.",
+  "mcp.check.said": "Відповідь сервера: «{words}».",
   "mcp.check.keysNeeded": "Сервер не пустив ({reason}). Імовірно, йому потрібен ключ: додайте його кнопкою «Виправити ключі».",
   "mcp.check.fixKeys": "Виправити ключі",
   "mcp.fixKeys.title": "Виправити ключі для {name}",
