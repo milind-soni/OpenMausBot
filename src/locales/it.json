@@ -1989,6 +1989,7 @@
   "chat.retry": "Riprova",
   "chat.turnStopped": "Interrotto",
   "chat.error.signedOut": "{name} non ha ancora effettuato l'accesso. Accedi qui sotto, poi invia di nuovo il messaggio.",
+  "chat.error.pastUsageLimit": "Avviso precedente sul limite d’uso (ripristino già avvenuto; verifica l’utilizzo attuale)",
   "chat.error.details": "Dettagli",
   "chat.error.requestTooLarge": "Questo messaggio è troppo grande per {model}. Avvia una nuova chat o scegli un modello che ne accetta di più.",
   "chat.error.dismiss": "Chiudi",

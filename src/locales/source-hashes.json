@@ -3184,7 +3184,8 @@
       "server.email.sent": "d8da938ea18285d7cde06ef1538e4441ad64b0a2e8996eb51a0d709b7f3cd552",
       "server.connect.emailOnComputer": "4ea041594c8345ef1a78babe9a01150bb8e8764c20c4719c7393bc80efa85189",
       "server.botApi.engineRefusal": "b954cb31cc29f455bd67b55e7305871bbdda710352f8850d2e317411c86f7baa",
-      "server.botApi.confinedWhy": "bbc0f23afe1ff62674cc1aa1ebef24484f284d2b590e99dbcb09920c092e229b"
+      "server.botApi.confinedWhy": "bbc0f23afe1ff62674cc1aa1ebef24484f284d2b590e99dbcb09920c092e229b",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -9035,7 +9036,8 @@
       "skills.import.reason.large": "0afc1c630ea276ee2e2972de5645e05c83ef8eae811743c71b26eb3dcf6402c5",
       "skills.import.reason.full": "5030f7df5d71eda8acb6fd2d3b2955f13d8094183d8d3b6078965ce900915c1a",
       "skills.import.reason.lfs": "6b95b062dfef6dc357bd8186d099b4ab240cadd214216fa525b00fa629ed9d2c",
-      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0"
+      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "fr": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -12086,7 +12088,8 @@
       "skills.import.reason.large": "0afc1c630ea276ee2e2972de5645e05c83ef8eae811743c71b26eb3dcf6402c5",
       "skills.import.reason.full": "5030f7df5d71eda8acb6fd2d3b2955f13d8094183d8d3b6078965ce900915c1a",
       "skills.import.reason.lfs": "6b95b062dfef6dc357bd8186d099b4ab240cadd214216fa525b00fa629ed9d2c",
-      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0"
+      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "hi": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -14989,7 +14992,8 @@
       "skills.import.reason.large": "0afc1c630ea276ee2e2972de5645e05c83ef8eae811743c71b26eb3dcf6402c5",
       "skills.import.reason.full": "5030f7df5d71eda8acb6fd2d3b2955f13d8094183d8d3b6078965ce900915c1a",
       "skills.import.reason.lfs": "6b95b062dfef6dc357bd8186d099b4ab240cadd214216fa525b00fa629ed9d2c",
-      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0"
+      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -22525,7 +22529,8 @@
       "grokMove.alreadyHere": "d766fe1ecba502194d933287033d948b13dbd5f6c3d3efefdb099cbc343818eb",
       "grokMove.unreadable": "8f8892775d19190555590dc990c20ca8a028f533476438fea9c559b30a2d8f2f",
       "grokMove.notAdded": "ddb3d11e084ab658f3d23efac15ca400cb7414eaf355fda1aac32fc0ec15c980",
-      "grokMove.isHere": "12777cece378dda6de4e248169d9ce3c5fd74fae997470933480167dd37e79fc"
+      "grokMove.isHere": "12777cece378dda6de4e248169d9ce3c5fd74fae997470933480167dd37e79fc",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -32127,7 +32132,8 @@
       "connectedWorkspaces.switchError": "6cb4eabbc4ec7e5c8f9ee96723d3770e3a7a19b779fd42b6fcf1c69a641db9f1",
       "connectedWorkspaces.forgetName": "aa553b0835130001c7cafd2f2785cc46b858e78284db11b1a780e7d8580cfef4",
       "connectedWorkspaces.forgetError": "6426192c4c32258117650b57029d6bb95102ab0eede1967d962a750817df5f85",
-      "connectedWorkspaces.createError": "d6393fe1d84bccf5308d15cec7b87cba70c84c7cc098403c58067ad540709763"
+      "connectedWorkspaces.createError": "d6393fe1d84bccf5308d15cec7b87cba70c84c7cc098403c58067ad540709763",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "zh": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -39549,7 +39555,8 @@
       "skills.import.reason.large": "0afc1c630ea276ee2e2972de5645e05c83ef8eae811743c71b26eb3dcf6402c5",
       "skills.import.reason.full": "5030f7df5d71eda8acb6fd2d3b2955f13d8094183d8d3b6078965ce900915c1a",
       "skills.import.reason.lfs": "6b95b062dfef6dc357bd8186d099b4ab240cadd214216fa525b00fa629ed9d2c",
-      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0"
+      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -44275,7 +44282,8 @@
       "skills.import.reason.large": "0afc1c630ea276ee2e2972de5645e05c83ef8eae811743c71b26eb3dcf6402c5",
       "skills.import.reason.full": "5030f7df5d71eda8acb6fd2d3b2955f13d8094183d8d3b6078965ce900915c1a",
       "skills.import.reason.lfs": "6b95b062dfef6dc357bd8186d099b4ab240cadd214216fa525b00fa629ed9d2c",
-      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0"
+      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "uk": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -47619,7 +47627,8 @@
       "skills.import.reason.large": "0afc1c630ea276ee2e2972de5645e05c83ef8eae811743c71b26eb3dcf6402c5",
       "skills.import.reason.full": "5030f7df5d71eda8acb6fd2d3b2955f13d8094183d8d3b6078965ce900915c1a",
       "skills.import.reason.lfs": "6b95b062dfef6dc357bd8186d099b4ab240cadd214216fa525b00fa629ed9d2c",
-      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0"
+      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -52953,7 +52962,8 @@
       "skills.import.reason.large": "0afc1c630ea276ee2e2972de5645e05c83ef8eae811743c71b26eb3dcf6402c5",
       "skills.import.reason.full": "5030f7df5d71eda8acb6fd2d3b2955f13d8094183d8d3b6078965ce900915c1a",
       "skills.import.reason.lfs": "6b95b062dfef6dc357bd8186d099b4ab240cadd214216fa525b00fa629ed9d2c",
-      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0"
+      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -58287,7 +58297,8 @@
       "skills.import.reason.large": "0afc1c630ea276ee2e2972de5645e05c83ef8eae811743c71b26eb3dcf6402c5",
       "skills.import.reason.full": "5030f7df5d71eda8acb6fd2d3b2955f13d8094183d8d3b6078965ce900915c1a",
       "skills.import.reason.lfs": "6b95b062dfef6dc357bd8186d099b4ab240cadd214216fa525b00fa629ed9d2c",
-      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0"
+      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -64904,7 +64915,8 @@
       "skills.import.reason.large": "0afc1c630ea276ee2e2972de5645e05c83ef8eae811743c71b26eb3dcf6402c5",
       "skills.import.reason.full": "5030f7df5d71eda8acb6fd2d3b2955f13d8094183d8d3b6078965ce900915c1a",
       "skills.import.reason.lfs": "6b95b062dfef6dc357bd8186d099b4ab240cadd214216fa525b00fa629ed9d2c",
-      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0"
+      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -71583,7 +71595,8 @@
       "skills.import.reason.large": "0afc1c630ea276ee2e2972de5645e05c83ef8eae811743c71b26eb3dcf6402c5",
       "skills.import.reason.full": "5030f7df5d71eda8acb6fd2d3b2955f13d8094183d8d3b6078965ce900915c1a",
       "skills.import.reason.lfs": "6b95b062dfef6dc357bd8186d099b4ab240cadd214216fa525b00fa629ed9d2c",
-      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0"
+      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -78060,7 +78073,8 @@
       "skills.import.reason.large": "0afc1c630ea276ee2e2972de5645e05c83ef8eae811743c71b26eb3dcf6402c5",
       "skills.import.reason.full": "5030f7df5d71eda8acb6fd2d3b2955f13d8094183d8d3b6078965ce900915c1a",
       "skills.import.reason.lfs": "6b95b062dfef6dc357bd8186d099b4ab240cadd214216fa525b00fa629ed9d2c",
-      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0"
+      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -85262,7 +85276,8 @@
       "skills.import.reason.large": "0afc1c630ea276ee2e2972de5645e05c83ef8eae811743c71b26eb3dcf6402c5",
       "skills.import.reason.full": "5030f7df5d71eda8acb6fd2d3b2955f13d8094183d8d3b6078965ce900915c1a",
       "skills.import.reason.lfs": "6b95b062dfef6dc357bd8186d099b4ab240cadd214216fa525b00fa629ed9d2c",
-      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0"
+      "skills.import.reason.unlisted": "e48983d49bdf5816e7ae0961daea0498df2f4c2d8966a00143f4ac84123633d0",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     }
   }
 }

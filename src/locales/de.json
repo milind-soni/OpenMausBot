@@ -951,6 +951,7 @@
   "chat.copyMessage": "Nachricht kopieren",
   "chat.retry": "Erneut versuchen",
   "chat.error.signedOut": "{name} ist noch nicht angemeldet. Melde dich unten an und sende deine Nachricht dann noch einmal.",
+  "chat.error.pastUsageLimit": "Frühere Meldung zum Nutzungslimit (Zurücksetzung erfolgt; aktuellen Stand prüfen)",
   "chat.error.details": "Details",
   "chat.error.requestTooLarge": "Diese Nachricht ist zu groß für {model}. Starte einen neuen Chat oder wähle ein Modell, das mehr annimmt.",
   "chat.send": "Senden",
