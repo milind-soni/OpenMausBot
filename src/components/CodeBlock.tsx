@@ -1,5 +1,5 @@
 // Security: Shiki's output is generator-escaped; nothing else reaches the DOM as HTML.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { HighlighterCore } from "shiki/core";
 import { Check, Copy, Download, MoreHorizontal, WrapText, X } from "lucide-react";
 
@@ -7,6 +7,7 @@ import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { useNearScreen } from "@/lib/on-screen";
 import { countLines, downloadSnippetFile, formatLineCount, getLanguageDisplayName, getSnippetFileName } from "../lib/code-block";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 
@@ -196,8 +197,12 @@ export function CodePlate({ copied, onCopy, copyLabel, items }: {
 
 export function CodeBlock({ code, lang, initialWrap = false }: CodeBlockProps) {
   const simple = !useAdvancedMode();
+  const frame = useRef<HTMLDivElement>(null);
+  // A long chat can hold dozens of blocks: coloured ones are thousands of spans to style and lay out on every switch,
+  // so a block is coloured only once it comes near the screen.
+  const near = useNearScreen(frame);
   const highlightable = code.length <= HIGHLIGHT_MAX_CHARS;
-  const [html, setHtml] = useState<string | null>(() => highlightable ? highlightCache.get(highlightKey(lang, code)) ?? null : null);
+  const [html, setHtml] = useState<string | null>(() => highlightable && near ? highlightCache.get(highlightKey(lang, code)) ?? null : null);
   // React compares dangerouslySetInnerHTML by identity: a fresh object each render rebuilds the highlighted DOM.
   const markup = useMemo(() => (html ? { __html: html } : null), [html]);
   const { state: copied, copy } = useCopyFeedback(code);
@@ -208,6 +213,7 @@ export function CodeBlock({ code, lang, initialWrap = false }: CodeBlockProps) {
 
   useEffect(() => {
     if (!highlightable) return setHtml(null);
+    if (!near) return;
     const key = highlightKey(lang, code);
     const cached = highlightCache.get(key);
     if (cached) return setHtml(cached);
@@ -223,7 +229,7 @@ export function CodeBlock({ code, lang, initialWrap = false }: CodeBlockProps) {
     return () => {
       alive = false;
     };
-  }, [code, lang, highlightable]);
+  }, [code, lang, highlightable, near]);
 
   const download = () => {
     const filename = getSnippetFileName(lang);
@@ -247,7 +253,7 @@ export function CodeBlock({ code, lang, initialWrap = false }: CodeBlockProps) {
 
   if (simple) {
     return (
-      <div dir="ltr" className="chat-code-block group/code relative my-2.5 overflow-hidden rounded-lg bg-ink/[0.04]">
+      <div ref={frame} dir="ltr" className="chat-code-block group/code relative my-2.5 overflow-hidden rounded-lg bg-ink/[0.04]">
         <CodePlate copied={copied} onCopy={copy} copyLabel={t("code.copyTitle")} items={[
           { key: "wrap", label: t("code.wrapLines"), icon: <WrapText size={14} aria-hidden="true" />, active: wrapLines, onSelect: () => setWrapLines((wrap) => !wrap) },
           { key: "save", label: t("code.saveAsFile"), icon: <Download size={14} aria-hidden="true" />, onSelect: download },
@@ -259,7 +265,7 @@ export function CodeBlock({ code, lang, initialWrap = false }: CodeBlockProps) {
   }
 
   return (
-    <div dir="ltr" className="chat-code-block my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
+    <div ref={frame} dir="ltr" className="chat-code-block my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline/30 bg-raised/30 px-3 py-1.5 text-xs">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <span title={displayLanguage} className="min-w-0 truncate rounded border border-hairline/40 bg-raised px-1.5 py-0.5 text-[11px] font-medium tracking-wide text-ink select-none">

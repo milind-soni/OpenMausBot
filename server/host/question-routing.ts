@@ -154,9 +154,9 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
 
   /** What the Chief's turns list: the questions `teammates` (those it manages) wait on the person for, in threads the Chief
    * did not open on them and it may read (`readable`); at most ten. */
-  function waitingForPerson(chief: BotRecord, teammates: readonly BotRecord[], readable: (threadId: string) => boolean = () => true): Array<{ bot: string; threadId: string; thread: string; question: string; since: number }> {
+  function waitingForPerson(chief: BotRecord, teammates: readonly BotRecord[], readable: (threadId: string, botId: string) => boolean = () => true): Array<{ bot: string; threadId: string; thread: string; question: string; since: number }> {
     return teammates.flatMap((teammate) => store.tasks(teammate.id)
-      .filter((task) => task.activity === "waiting-on-you" && task.archivedAt === undefined && task.openedBy?.botId !== chief.id && readable(task.threadId))
+      .filter((task) => task.activity === "waiting-on-you" && task.archivedAt === undefined && task.openedBy?.botId !== chief.id && readable(task.threadId, teammate.id))
       .flatMap((task) => {
         const asked = forPerson(teammate.id, task.threadId);
         return asked ? [{ bot: teammate.name, threadId: task.threadId, thread: task.title, question: asked.question, since: asked.row.at }] : [];

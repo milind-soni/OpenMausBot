@@ -67,6 +67,7 @@ any new account row. Apply `0011` before deploying a Worker on Better Auth
 | `POST` | `/v1/installations/self/push/register` | installation credential |
 | `POST` | `/v1/installations/self/push/unregister` | installation credential |
 | `POST` | `/v1/installations/self/push/send` | installation credential |
+| `POST` | `/v1/installations/self/relay-token` | installation credential |
 
 Installation registration requires a stable `clientInstanceId`, a display
 `name`, and a `platform` of `darwin`, `windows`, or `linux`; `appVersion` is
@@ -583,6 +584,50 @@ DNS count), and each move two lookups in the old account. Tokens created by
 the same Cloudflare user share its 1,200 requests per five minutes. On
 Workers Free, four accounts with `OMB_CLEANUP_SWEEP_LIMIT` 4 use the whole
 50-subrequest budget, hence at most three extra accounts.
+
+### MausBot Relay
+
+Phones reach a desktop through MausBot Relay, end-to-end encrypted: the relay passes sealed bytes and can't open them
+(`companion/src/e2e/README.md`). This Worker only lets a computer onto the relay. It mints a 12-hour host token signed
+with Ed25519; the relay holds only the public key and checks tokens offline, so it can't mint one itself.
+
+`POST /v1/installations/self/relay-token` with the installation credential and
+`{"appVersion":"0.1.150","devices":{"e2e":2,"legacy":1}}` (counts of paired phones on the encrypted connection and on the
+old one; no identifiers) answers:
+
+| Status | Body | When |
+| --- | --- | --- |
+| 200 | `{token, hostId, nodes, expiresAt, refreshAfter}` (times in ms) | this computer is in the rollout |
+| 503 | `relay_unavailable` | no signing key yet, `RELAY_DISABLED` on, outside the rollout, or blocked (`relay_blocked_at`). The desktop stays on Wi-Fi and Tailscale |
+| 401 | `unauthorized` | the installation credential is invalid or expired |
+| 429 | `rate_limited` | more than 60 an hour |
+
+- **Host id.** 16 random bytes made once per installation (`installations.relay_host_id`, unique). Phones learn it at
+  pairing; it never changes.
+- **Token.** `b64u(payload) "." b64u(Ed25519 signature over the first part)`, payload
+  `{"v":1,"kid","hid","iid","iat","exp"}` in that order, `exp = iat + 12 h`. The desktop refreshes after an hour.
+  Minted tokens match the V8 test vector byte for byte.
+- **Nodes.** Ordered by rendezvous hash, highest `SHA256(hostId ‖ node)[0:8]` first, so each computer prefers one node
+  and load splits evenly. A node listed in `RELAY_NODES_AMERICAS` goes first for a request whose `cf.continent` is NA or
+  SA.
+- **Rollout.** `RELAY_ROLLOUT_PERCENT` admits a computer when `SHA256(hostId)[0:2] mod 100` is below it, so a computer
+  stays in as the number grows; `RELAY_ALLOW_INSTALLATIONS` admits named installations (the team) at any percentage.
+- **Adoption.** Every request records its counts in `relay_adoption`, in the rollout or not; `/healthz` reports
+  `relayAdoption: {e2eDevices, legacyDevices, installs}` over the last 30 days. The tunnel path retires on these numbers.
+- **Tunnels.** From `RELAY_CAPABLE_MIN_VERSION`, a desktop at that version or later that reports `legacyDevices: 0` gets
+  `409 relay_capable` instead of a new tunnel. An endpoint it already holds keeps working.
+
+Setup, once:
+
+1. `wrangler d1 migrations apply DB --config wrangler.jsonc` (0012).
+2. Make a key pair: a 32-byte Ed25519 seed for this Worker, its public key for the relay's `RELAY_TOKEN_KEYS`
+   (`{"k1":"<b64u public key>"}`). `wrangler secret put RELAY_TOKEN_SIGNING_KEY --config wrangler.jsonc` with the seed as
+   base64url. Until it exists every request answers 503. Once it is set it is listed in `secrets.required`: a deploy
+   keeps only the secrets listed there, so an unlisted one is dropped. Set it before deploying a config that lists it.
+3. Admit the team with `RELAY_ALLOW_INSTALLATIONS`, then raise `RELAY_ROLLOUT_PERCENT` 10, 50, 100 while watching the
+   relay alerts. `RELAY_DISABLED: "1"` turns every token off at once; tokens already issued expire within 12 hours.
+4. To rotate, give the relay both public keys, set `RELAY_TOKEN_KID` and the new secret, deploy, then drop the old key
+   from the relay after 12 hours.
 
 ### HighLevel OAuth relay
 

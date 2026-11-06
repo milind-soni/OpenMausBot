@@ -251,6 +251,8 @@ const bridge = {
     cloudDesktop: (deviceId, allowed) => ipcRenderer.invoke("companion:cloud-desktop", deviceId, allowed),
     browserControl: (deviceId, allowed) => ipcRenderer.invoke("companion:browser-control", deviceId, allowed),
     revoke: (deviceId) => ipcRenderer.invoke("companion:revoke", deviceId),
+    renewPairing: () => ipcRenderer.invoke("companion:pairing-renew"),
+    routes: (deviceId, routes) => ipcRenderer.invoke("companion:routes", deviceId, routes),
   },
   routines: {
     wakeState: () => ipcRenderer.invoke("routines:wake-state"),
@@ -487,6 +489,8 @@ const bridge = {
     teams: () => ipcRenderer.invoke("cloud-send:teams"),
     moveToTeam: (botId, teamId, name) => navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-send:team-move", String(botId), String(teamId), String(name ?? "")) : Promise.reject(new Error("Choose Move to move the bot.")),
+    moveToTeamCoded: (botId, teamId, name) => navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-send:team-move-coded", String(botId), String(teamId), String(name ?? "")) : Promise.reject(new Error("Choose Move to move the bot.")),
     teamRetry: () => navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-send:team-retry") : Promise.reject(new Error("Choose Try again to move.")),
     openTeam: teamId => ipcRenderer.invoke("cloud-send:team-open", String(teamId)),
@@ -671,6 +675,7 @@ const bridge = {
       languageListeners.add(listener);
       return () => { languageListeners.delete(listener); };
     },
+    shown: language => { ipcRenderer.send("desktop-language:shown", String(language)); },
   },
 };
 

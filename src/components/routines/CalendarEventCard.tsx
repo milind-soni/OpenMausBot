@@ -59,7 +59,7 @@ export function CalendarEventCard({
   const ownerIds = isCall ? item.call.botIds : [run?.botId ?? routine?.botId ?? ""];
   const ownerBots = ownerIds.flatMap((id) => bots.find((bot) => bot.id === id) ?? []);
   const primary = ownerBots[0];
-  const name = isCall ? item.call.name : run?.routineName ?? routine?.name ?? "Automation";
+  const name = isCall ? item.call.name : run?.routineName ?? routine?.name ?? t("routines.event.automation");
   const color = isCall ? "var(--color-accent)" : primary ? MAUS_COLORS[primary.color] : "var(--color-ink-tertiary)";
   const paused = Boolean(routine && !run && !routine.enabled);
   const [previewDuration, setPreviewDuration] = useState(item.durationMinutes);
@@ -74,7 +74,7 @@ export function CalendarEventCard({
   const fit = cardLayout(height);
   const who = isCall ? t(ownerBots.length === 1 ? "routines.botCountOne" : "routines.botCountMany", { count: ownerBots.length }) : room ? room.name : primary?.name;
   const details = [name, niceTime(item.at), who, intervalCadence, paused ? (routine && routineHeldNote(routine)) ?? t("routines.pausedSchedule") : statusLabel].filter(Boolean).join(" · ");
-  const cronHint = routine?.schedule.type === "cron" ? "Open this automation to change its repeating schedule and time zone." : "";
+  const cronHint = routine?.schedule.type === "cron" ? t("routines.event.cronMoveHint") : "";
 
   const beginResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -90,7 +90,7 @@ export function CalendarEventCard({
       document.removeEventListener("pointermove", move);
       document.removeEventListener("pointerup", up);
       if (next === item.durationMinutes) return;
-      if (recurring && !window.confirm("Resize this entire recurring series?")) {
+      if (recurring && !window.confirm(t("routines.event.resizeSeries"))) {
         setPreviewDuration(item.durationMinutes);
         return;
       }
@@ -158,7 +158,7 @@ export function CalendarEventCard({
       ) : (
         <div className="flex h-full min-w-0 items-center truncate text-[10px] font-semibold leading-none">{name}</div>
       )}
-      {isCall && <div onPointerDown={beginResize} className="absolute inset-x-1 bottom-0 h-1.5 cursor-ns-resize rounded-full opacity-0 transition group-hover:opacity-100" aria-label="Resize event"><div className="mx-auto mt-0.5 h-0.5 w-5 rounded-full bg-current opacity-50" /></div>}
+      {isCall && <div onPointerDown={beginResize} className="absolute inset-x-1 bottom-0 h-1.5 cursor-ns-resize rounded-full opacity-0 transition group-hover:opacity-100" aria-label={t("routines.event.resize")}><div className="mx-auto mt-0.5 h-0.5 w-5 rounded-full bg-current opacity-50" /></div>}
     </button>
   );
 }

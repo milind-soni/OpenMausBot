@@ -2,6 +2,39 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import approvalModule from "./approval-trusted-mode.cjs";
+import nativeText from "./native-text.cjs";
+
+test("trusted refusals translate only canonical whitelisted errors from the matching process", async () => {
+  const text = nativeText.createNativeText({ saved: "pt-br" });
+  for (const [errorKey, nativeKey] of [
+    ["serverError.approval.allThreads", "native.approval.allThreads"],
+    ["serverError.approval.pending", "native.approval.pending"],
+    ["serverError.approval.provider", "native.approval.provider"],
+  ]) {
+    const english = nativeText.englishText.t(nativeKey);
+    for (const [key, error, expected] of [
+      [errorKey, english, text.t(nativeKey)],
+      [errorKey, "Changed server wording", "Changed server wording"],
+      ["native.update.installing", english, english],
+      ["constructor", english, english],
+      [undefined, english, english],
+    ]) {
+      const proc = fakeProcess();
+      const coordinator = createTrustedApprovalModeCoordinator({ randomId: () => REQUEST_ID, t: text.t });
+      const pending = coordinator.request(proc, "bot-1", "ask");
+      const result = { type: "approval-trusted-mode-result", requestId: REQUEST_ID, ok: false, error, errorKey: key };
+      coordinator.receive(fakeProcess(), result);
+      coordinator.receive(proc, result);
+      await assert.rejects(pending, { message: expected });
+      assert.equal(proc.messages.length, 1);
+    }
+    const proc = fakeProcess();
+    const coordinator = createTrustedApprovalModeCoordinator({ randomId: () => REQUEST_ID });
+    const pending = coordinator.request(proc, "bot-1", "ask");
+    coordinator.receive(proc, { type: "approval-trusted-mode-result", requestId: REQUEST_ID, ok: false, error: english, errorKey });
+    await assert.rejects(pending, { message: english });
+  }
+});
 
 const {
   createTrustedApprovalModeCoordinator,

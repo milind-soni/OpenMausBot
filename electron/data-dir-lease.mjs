@@ -145,7 +145,8 @@ function sameMachine(record) {
   return boot !== null && typeof record.boot === "string" && record.boot === boot;
 }
 
-function otherMachineAdvice(path) {
+function otherMachineAdvice(path, t) {
+  if (t) return t("native.boot.sharedFolderAdvice", { path: JSON.stringify(path) });
   return ` If OpenMausBot is not running on another computer or container that shares this folder, quit OpenMausBot, delete ${JSON.stringify(path)} and start again.`;
 }
 
@@ -407,13 +408,13 @@ function prepareDataDir(dataDir, legacyDataDir) {
   return join(dataDir, LEASE_NAME);
 }
 
-function assertNoLiveDelegatedChild(dataDir) {
+function assertNoLiveDelegatedChild(dataDir, t) {
   const childLeasePath = join(dataDir, DELEGATED_CHILD_DIR, LEASE_NAME);
   const child = readOwner(childLeasePath);
   if (!child) return;
   if (!sameMachine(child)) {
     throw leaseError(
-      `This OpenMausBot data directory still has a delegated server on another machine. Delegated server lease: ${JSON.stringify(childLeasePath)}.${otherMachineAdvice(childLeasePath)}`,
+      `This OpenMausBot data directory still has a delegated server on another machine. Delegated server lease: ${JSON.stringify(childLeasePath)}.${otherMachineAdvice(childLeasePath, t)}`,
     );
   }
   if (ownerIsAlive(child)) {
@@ -482,7 +483,7 @@ function validateChildDelegation(dataDir, encoded) {
 
 function acquireDataDirLeaseInternal(dataDir, options = {}) {
   const leasePath = prepareDataDir(dataDir, options.legacyDataDir);
-  if (options.guardDelegatedChild !== false) assertNoLiveDelegatedChild(dataDir);
+  if (options.guardDelegatedChild !== false) assertNoLiveDelegatedChild(dataDir, options.t);
   const owner = {
     version: 1,
     pid: process.pid,
@@ -517,7 +518,7 @@ function acquireDataDirLeaseInternal(dataDir, options = {}) {
       if (!current) continue;
       if (!sameMachine(current)) {
         throw leaseError(
-          `This OpenMausBot data directory is already owned by a process on another machine. Lease record: ${JSON.stringify(leasePath)}.${otherMachineAdvice(leasePath)}`,
+          `This OpenMausBot data directory is already owned by a process on another machine. Lease record: ${JSON.stringify(leasePath)}.${otherMachineAdvice(leasePath, options.t)}`,
         );
       }
       if (ownerIsAlive(current)) {

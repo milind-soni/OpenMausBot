@@ -1413,6 +1413,23 @@ describe("a turn with the person's Windows computer, the built-in browser and th
 });
 
 describe("a provider that streams whole tool calls without an index", () => {
+  it("sends Gemini's thought signature back with its call on the next round", async () => {
+    const signed = { google: { thought_signature: "c2lnbmF0dXJl" } };
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) sse(response, [chunk({ tool_calls: [
+        { id: "function-call-1", type: "function", function: { name: "audit_write", arguments: '{"name":"first","value":"done"}' }, extra_content: signed },
+      ] }, "stop")]);
+      else answer(response);
+    });
+    await f.start();
+    await f.decide();
+    expect(await f.completed()).toMatchObject({ ok: true });
+    const replayed = f.requests[1].messages.find((message) => message.role === "assistant");
+    expect(replayed?.tool_calls).toEqual([
+      { id: "function-call-1", type: "function", function: { name: "audit_write", arguments: '{"name":"first","value":"done"}' }, extra_content: signed },
+    ]);
+  });
+
   it("runs both of Gemini's calls from one chunk and answers each by its id", async () => {
     const f = await fixture((_body, response, round) => {
       if (round === 1) sse(response, [chunk({ tool_calls: [

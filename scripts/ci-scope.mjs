@@ -5,12 +5,11 @@ import { fileURLToPath } from "node:url";
 
 // The ci.yml jobs a pull request runs only when its change can affect them;
 // `static` and the `CI` gate always run. Besides these job ids a scope's checks
-// name "build" (static's typecheck, Electron syntax check and UI build) and the
-// vitest job's parts: "linux-tests", "host-tests" (Windows, and macOS where the
-// event runs it), and the subsets in VITEST_SUBSETS.
+// name the vitest job's parts: "linux-tests", "host-tests" (Windows, and macOS
+// where the event runs it), and the subsets in VITEST_SUBSETS.
 export const SELECTABLE_JOBS = [
-  "vitest", "behavior-evals", "packaged-server", "windows-cua", "electron-smokes", "cloudflared-linux-arm64",
-  "foss", "control-plane", "ui-smoke", "browser-identity", "package-linux", "browser-driver",
+  "build", "vitest", "behavior-evals", "packaged-server", "windows-cua", "electron-smokes", "cloudflared-linux-arm64",
+  "foss", "control-plane", "ui-smoke", "browser-identity", "package-linux", "browser-driver", "relay",
 ];
 
 // The server imports Electron and renderer modules, and the macOS smokes run
@@ -20,7 +19,7 @@ const SERVER_CHECKS = [
   "build", "linux-tests", "host-tests", "behavior-evals", "packaged-server", "foss", "electron-smokes",
   "ui-smoke", "browser-identity", "browser-driver", "package-linux",
 ];
-const EVERY_CHECK = [...SERVER_CHECKS, "windows-cua", "cloudflared-linux-arm64", "control-plane"];
+const EVERY_CHECK = [...SERVER_CHECKS, "windows-cua", "cloudflared-linux-arm64", "control-plane", "relay"];
 
 /** What a pull request's change in each area can affect. */
 export const AREA_CHECKS = {
@@ -33,6 +32,10 @@ export const AREA_CHECKS = {
   // The Windows CUA job starts these the way the installed app does, then lends the PC's screen through them.
   "windows-computer-control": [...SERVER_CHECKS, "windows-cua"],
   "control-plane": ["control-plane"],
+  // The relay is its own package with its own lockfile; nothing outside relay/ reaches it except the shared vectors,
+  // which it keeps a pinned copy of.
+  relay: ["relay"],
+  "e2e-vectors": [...SERVER_CHECKS, "relay"],
   everything: EVERY_CHECK,
 };
 
@@ -46,12 +49,109 @@ export const AREA_CHECKS = {
 export const VITEST_SUBSETS = {
   "locale-tests": {
     part: "locale tests",
-    files: ["src/", "scripts/generate-locale.test.mjs", "scripts/testing/key-readback.e2e.test.ts", "scripts/server-locale-plugin.test.ts",
-      "server/server-lines.test.ts", "server/host/devs-reports.test.ts", "server/automation-reports.test.ts", "server/incidents.test.ts",
-      "server/routine-run-card.test.ts", "server/host/chief-notices-retry.test.ts", "server/connector-card-text.test.ts", "server/host/secret-cards.test.ts",
-      "server/notify.test.ts", "server/room-lines.test.ts", "server/post-to-room.test.ts",
-      "server/teammate-lines.test.ts", "server/cloud-send-arrived.test.ts", "scripts/ci-workflow.test.ts", "scripts/pre-push-check.test.ts",
-      "server/host/wait-words.test.ts"],
+    files: [
+      "src/",
+      "electron/menu.test.mjs",
+      "electron/updater.test.mjs",
+      "scripts/generate-locale.test.mjs",
+      "scripts/testing/bot-tools-ui.e2e.test.ts",
+      "scripts/testing/key-readback.e2e.test.ts",
+      "scripts/testing/one-workspace-ui.e2e.test.ts",
+      "scripts/testing/secret-card-descriptions.test.ts",
+      "scripts/testing/team-own-chat.e2e.test.ts",
+      "server/body-thread-guards.e2e.test.ts",
+      "server/client-notifications.e2e.test.ts",
+      "server/cloud-connections.e2e.test.ts",
+      "server/cloud-lending-browser.e2e.test.ts",
+      "server/cloud-lending-chrome.e2e.test.ts",
+      "server/cloud-lending-memory.e2e.test.ts",
+      "server/cloud-lending.e2e.test.ts",
+      "server/cloud-send-kinds.e2e.test.ts",
+      "server/cloud-send-move.e2e.test.ts",
+      "server/cloud-send-rooms.e2e.test.ts",
+      "server/cloud-send-routine-merge.e2e.test.ts",
+      "server/cloud-send-store.e2e.test.ts",
+      "server/cloud-send.e2e.test.ts",
+      "server/cloud-sync.e2e.test.ts",
+      "server/cloud-team-browser.e2e.test.ts",
+      "server/cloud-team-connections.e2e.test.ts",
+      "server/cloud-team-engine-homes.e2e.test.ts",
+      "server/cloud-team-gateway-mcp.e2e.test.ts",
+      "server/cloud-team-inbox.e2e.test.ts",
+      "server/cloud-team-open-reach.e2e.test.ts",
+      "server/cloud-team-owners.e2e.test.ts",
+      "server/cloud-team-people.e2e.test.ts",
+      "server/cloud-team-phones.e2e.test.ts",
+      "server/cloud-team-pictures.e2e.test.ts",
+      "server/cloud-team-private.e2e.test.ts",
+      "server/cloud-team-profile.e2e.test.ts",
+      "server/cloud-team-requests.e2e.test.ts",
+      "server/cloud-team-setup-request.e2e.test.ts",
+      "server/cloud-team.e2e.test.ts",
+      "server/host/brief-words.test.ts",
+      "server/host/lending-lifts.test.ts",
+      "server/lent-folders.e2e.test.ts",
+      "server/one-home-keep.e2e.test.ts",
+      "server/one-home-outdated.e2e.test.ts",
+      "server/one-home-retry.e2e.test.ts",
+      "server/one-home-session.e2e.test.ts",
+      "server/one-home-trial-key.e2e.test.ts",
+      "server/one-home-two-desks.e2e.test.ts",
+      "server/one-home.e2e.test.ts",
+      "server/parked-cards.e2e.test.ts",
+      "server/question-cards.e2e.test.ts",
+      "server/shared-computers.e2e.test.ts",
+      "server/team-move.e2e.test.ts",
+      "server/use-my-mac.e2e.test.ts",
+      "server/workspace-banner.e2e.test.ts",
+      "scripts/server-locale-plugin.test.ts",
+      "server/server-lines.test.ts",
+      "server/host/devs-reports.test.ts",
+      "server/automation-reports.test.ts",
+      "server/incidents.test.ts",
+      "server/routine-run-card.test.ts",
+      "server/host/chief-notices-retry.test.ts",
+      "server/connector-card-text.test.ts",
+      "server/host/secret-cards.test.ts",
+      "server/notify.test.ts",
+      "server/room-lines.test.ts",
+      "server/post-to-room.test.ts",
+      "server/teammate-lines.test.ts",
+      "server/chat-notices.test.ts",
+      "server/recall-disclosure.test.ts",
+      "server/routine-cron-text.test.ts",
+      "server/routine-requests.test.ts",
+      "server/cloud-send-arrived.test.ts",
+      "server/cloud-team-bot-access.e2e.test.ts",
+      "server/cloud-team-one-answer.e2e.test.ts",
+      "server/cloud-team-preference.e2e.test.ts",
+      "server/cloud-team-rules.e2e.test.ts",
+      "server/cloud-team-rules-running-turn.e2e.test.ts",
+      "server/outside-work-threads.e2e.test.ts",
+      "server/own-home.e2e.test.ts",
+      "server/places-elsewhere.e2e.test.ts",
+      "server/question-routing.e2e.test.ts",
+      "server/team-protocol.e2e.test.ts",
+      "server/team-small-fixes.e2e.test.ts",
+      "server/team-mausbot-followup.e2e.test.ts",
+      "server/team-no-ai.e2e.test.ts",
+      "server/team-refused-handoff.e2e.test.ts",
+      "server/two-places.e2e.test.ts",
+      "scripts/ci-workflow.test.ts",
+      "scripts/pre-push-check.test.ts",
+      "server/host/wait-words.test.ts",
+      "server/place-inbox.e2e.test.ts",
+      "server/bot-api-team.e2e.test.ts",
+      "server/cloud-team-first-look.e2e.test.ts",
+      "server/cloud-team-mausbot-own-chat.e2e.test.ts",
+      "server/connector-stayed.e2e.test.ts",
+      "server/email/host.test.ts",
+      "server/host/outside-lineage.test.ts",
+      "server/memory-move.test.ts",
+      "server/outside-lineage.e2e.test.ts",
+      "server/same-name-mentions.e2e.test.ts",
+      "server/skill-switch.test.ts",
+    ],
     shards: 2,
     nodeTests: true,
   },
@@ -85,10 +185,12 @@ const AREAS = [
   [/^scripts\/.+\.test\.[cm]?[jt]sx?$/, "script-tests"],
   [/^src\/locales\/(?:(?!en\.json$)[^/]+\.json|[^/]+\.test\.ts)$/, "locales"],
   [/^(?:src|public)\/|^[^/]+-preview\.html$/, "web"],
+  [/^companion\/src\/e2e\/vectors\//, "e2e-vectors"],
   [/^(?:server|shared|enterprise|companion|evals|skills|deploy|cloudflare\/composio-broker)\/|^(?:Dockerfile|\.dockerignore|compose\.yaml)$/, "server"],
   [/^electron\/(?:cua|cua-failure|cua-connection|capabilities|screen-status|shared-cua-connection|shared-computer-access|lent-screen-tools|lent-screen-failures|paced-typing)\.[cm]js$/, "windows-computer-control"],
   [/^(?:electron|build)\/|^(?:electron-builder\.yml|index\.html|rail\.html)$/, "desktop"],
   [/^cloudflare\/control-plane\//, "control-plane"],
+  [/^relay\//, "relay"],
 ];
 
 export function areaOf(file) {
@@ -229,7 +331,7 @@ export function vitestMatrix(oses) {
 }
 
 /** What ci.yml runs for a scope on an event whose suite covers `oses`: the
- * selected job ids, whether `static` builds, and the vitest matrix. */
+ * selected job ids and the vitest matrix. */
 export function ciOutputs({ checks }, oses) {
   const platforms = oses.filter((os) => checks.includes(os === "ubuntu-latest" ? "linux-tests" : "host-tests"));
   const { include } = vitestMatrix(platforms);
@@ -245,7 +347,6 @@ export function ciOutputs({ checks }, oses) {
   const jobs = SELECTABLE_JOBS.filter((job) => (job === "vitest" ? include.length > 0
     : job === "windows-cua" ? checks.includes(job) && oses.includes("windows-latest") : checks.includes(job)));
   return {
-    build: checks.includes("build"),
     jobs,
     vitest_os: oses,
     // macOS's packaged server smoke runs in the macOS smokes job.

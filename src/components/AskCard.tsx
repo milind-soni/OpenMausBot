@@ -4,6 +4,7 @@ import { botButton, type BotButton } from "@/lib/bot-button";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { MausColor } from "@/lib/mascot";
+import { imeComposing } from "@/lib/send-key";
 import type { Bot } from "@/state/store";
 import { BotAvatar } from "./Avatar";
 import { ELEVATED_CARD, ELEVATED_FLOAT } from "./elevated";
@@ -198,7 +199,7 @@ export function AskReply({ label, placeholder, color, onSend, sending = false, v
         disabled={sending}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+          if (event.key !== "Enter" || event.shiftKey || imeComposing(event.nativeEvent)) return;
           event.preventDefault();
           send();
         }}

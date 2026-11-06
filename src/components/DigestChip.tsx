@@ -2,11 +2,19 @@ import { useState } from "react";
 import { ClipboardList } from "lucide-react";
 
 import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 import { formatDuration } from "@/lib/usage-trace";
 import type { Message } from "@/state/store";
 import { traceRootId } from "../../shared/usage-trace";
 import { EXCERPT_SUMMARY_HEADER } from "../../shared/wire";
 import { TraceDialog } from "./usage/TraceView";
+
+const WORK_KEY: Record<"noFiles" | "oneFile" | "files", Record<"oneTool" | "tools", LocaleKey>> = {
+  noFiles: { oneTool: "chat.digestChipNoFilesOne", tools: "chat.digestChipNoFiles" },
+  oneFile: { oneTool: "chat.digestChipOneEach", tools: "chat.digestChipOneFile" },
+  files: { oneTool: "chat.digestChipOneTool", tools: "chat.digestChip" },
+};
+const one = (count: number | string) => String(count) === "1";
 
 export function DigestChip({ message }: { message: Message }) {
   const [tracing, setTracing] = useState(false);
@@ -17,7 +25,7 @@ export function DigestChip({ message }: { message: Message }) {
   const tools = digest.toolCalls ?? `${digest.tools.reduce((n, tool) => n + tool.count, 0)}${digest.toolsDropped ? "+" : ""}`;
   const label = [
     digest.durationMs > 0 ? t("trace.workedFor", { duration: formatDuration(digest.durationMs) }) : null,
-    worked ? files === null ? t("chat.digestChipNoFiles", { tools }) : t("chat.digestChip", { tools, files }) : null,
+    worked ? t(WORK_KEY[files === null ? "noFiles" : one(files) ? "oneFile" : "files"][one(tools) ? "oneTool" : "tools"], { tools, files: files ?? 0 }) : null,
   ].filter(Boolean).join(" · ");
   if (!label) return null;
   return (

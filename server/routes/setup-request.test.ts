@@ -80,7 +80,7 @@ describe("the Set me up route", () => {
     const s = setup(null, { hold: new Promise<void>((resolve) => { release = resolve; }) });
     const first = s.call("POST", { threadId: s.bot.threadId, text: "Research and digging into topics" });
     await Promise.resolve();
-    expect(await s.call("POST", { threadId: s.bot.threadId, text: "Research and digging into topics" })).toEqual({ status: 409, body: { error: "That answer is already on its way." } });
+    expect(await s.call("POST", { threadId: s.bot.threadId, text: "Research and digging into topics" })).toEqual({ status: 409, body: { error: "That answer is already on its way.", errorKey: "serverError.chat.answerSent" } });
     expect(await s.call("POST", { threadId: s.bot.threadId })).toMatchObject({ status: 409 });
     release();
     expect(await first).toMatchObject({ status: 200 });
@@ -121,7 +121,7 @@ describe("the Set me up route", () => {
     expect(s.waiting()).toMatchObject({ by: "member-a" });
     s.as("member-b");
     expect(await s.call("DELETE", { threadId: s.bot.threadId })).toEqual({
-      status: 403, body: { error: "Only the person who pressed Set me up, or an owner or admin, can stop it." },
+      status: 403, body: { error: "Only the person who pressed Set me up, or an owner or admin, can stop it.", errorKey: "serverError.setup.stopOwner" },
     });
     expect(s.waiting()).toBeDefined();
     s.as("member-a");
@@ -134,7 +134,7 @@ describe("the Set me up route", () => {
     s.as("member-a");
     expect(await s.call("POST", { threadId: s.bot.threadId })).toMatchObject({ status: 200 });
     s.as("owner", admin);
-    expect(await s.call("POST", { threadId: s.bot.threadId })).toEqual({ status: 409, body: { error: "Someone else is setting this bot up." } });
+    expect(await s.call("POST", { threadId: s.bot.threadId })).toEqual({ status: 409, body: { error: "Someone else is setting this bot up.", errorKey: "serverError.setup.someoneElse" } });
     expect(await s.call("DELETE", { threadId: s.bot.threadId })).toEqual({ status: 200, body: { ok: true } });
     expect(s.waiting()).toBeUndefined();
   });
@@ -142,7 +142,7 @@ describe("the Set me up route", () => {
   it("refuses the press, in plain words, when the bot's AI cannot set it up", async () => {
     const s = setup(null, { canSetUp: false });
     expect(await s.call("POST", { threadId: s.bot.threadId })).toEqual({
-      status: 409, body: { error: "This bot's AI can't set it up by itself. Tell the bot what you'd like it to do instead." },
+      status: 409, body: { error: "This bot's AI can't set it up by itself. Tell the bot what you'd like it to do instead.", errorKey: "serverError.setup.noTools" },
     });
     expect(s.store.messagesFor(s.bot.threadId)).toHaveLength(1);
     expect(s.waiting()).toBeUndefined();

@@ -428,3 +428,93 @@ it("leaves no file and no later-turn attachment when the turn dies mid-synthesis
   expect(messages.some((m: any) => (m.attachments ?? []).some((a: any) => a.kind === "audio"))).toBe(false);
   expect(f.mp3Files()).toEqual([]);
 }), 90_000);
+
+const spokenNote = async (f: any, threadId: string, text: string) => {
+  let found: any;
+  await expect.poll(async () => {
+    found = (await f.messages(threadId)).find((m: any) => m.text === text && (m.attachments ?? []).some((a: any) => a.kind === "audio"));
+    return Boolean(found);
+  }, { timeout: 20_000 }).toBe(true);
+  return found.attachments.filter((a: any) => a.kind === "audio");
+};
+
+const settle = async (f: any, bot: any, text = "Go ahead.") => {
+  await f.cli("send", "--bot", bot.id, "--task", bot.activeTaskId, "--text", text);
+  await f.cli("wait", "--bot", bot.id, "--task", bot.activeTaskId, "--timeout", "30");
+};
+
+it("speaks every reply when the Voice setting is on: failed turns too, never a stopped one, a bot's own note, or a bot switched off", async () => withVoiceFixture(async (f) => {
+  const baseUrl = await f.serveTts();
+  await f.api("/api/config", { tts: { provider: "chatterbox", baseUrl, voice: "voice-a", everyReply: true } }, "PUT");
+  expect((await f.api("/api/config", undefined, "GET")).tts.everyReply).toBe(true);
+  const muted = (await f.cli("new-bot", "--name", "Switched off bot")).bot;
+  expect((await f.api("/api/bots/" + muted.id, { voiceNoteEveryReply: false }, "PATCH")).bot.voiceNoteEveryReply).toBe(false);
+  const plain = (await f.cli("new-bot", "--name", "Following bot")).bot;
+  const own = (await f.cli("new-bot", "--name", "Own note bot")).bot;
+  const failing = (await f.cli("new-bot", "--name", "Failing bot")).bot;
+  const stopped = (await f.cli("new-bot", "--name", "Stopped bot")).bot;
+  const gate = join(f.dataDir, "every-reply-gate");
+  f.savePlan({
+    [muted.id]: { steps: [], reply: "Muted reply." },
+    [plain.id]: { steps: [], reply: "The **report** is ready." },
+    [own.id]: { steps: [{ tool: "send_voice_note", arguments: { text: "My own note." } }], reply: "Reply next to my own note." },
+    [failing.id]: { turns: [{ steps: [], progress: "Half the export is done.", failWith: "the export step crashed" }, { steps: [], reply: "Retried." }] },
+    [stopped.id]: { steps: [], progress: "Starting the long job.", gateFile: gate, reply: "Never reached." },
+  });
+
+  await settle(f, muted);
+  await settle(f, plain);
+  const [note] = await spokenNote(f, plain.activeTaskId, "The **report** is ready.");
+  expect(note.text).toBe("The report is ready.");
+  expect(f.seen.map((call: any) => call.input)).not.toContain("Muted reply.");
+  expect((await f.messages(muted.activeTaskId)).some((m: any) => (m.attachments ?? []).length)).toBe(false);
+
+  await settle(f, own);
+  expect(await spokenNote(f, own.activeTaskId, "Reply next to my own note.")).toEqual([expect.objectContaining({ text: "My own note." })]);
+
+  await f.cli("send", "--bot", failing.id, "--task", failing.activeTaskId, "--text", "Export it.");
+  expect(await spokenNote(f, failing.activeTaskId, "Half the export is done.")).toEqual([expect.objectContaining({ text: "Half the export is done." })]);
+  expect((await f.messages(failing.activeTaskId)).some((m: any) => String(m.tool?.name ?? "").startsWith("error:"))).toBe(true);
+
+  await f.cli("send", "--bot", stopped.id, "--task", stopped.activeTaskId, "--text", "Start the long job.");
+  await expect.poll(async () => (await f.messages(stopped.activeTaskId)).some((m: any) => m.text === "Starting the long job."), { timeout: 20_000 }).toBe(true);
+  await f.api("/api/bots/" + stopped.id + "/interrupt", { threadId: stopped.activeTaskId });
+  await f.cli("wait", "--bot", stopped.id, "--task", stopped.activeTaskId, "--timeout", "30");
+  await settle(f, plain, "Once more.");
+  await expect.poll(() => f.seen.filter((call: any) => call.input === "The report is ready.").length, { timeout: 20_000 }).toBe(2);
+  const spoken = f.seen.map((call: any) => call.input);
+  for (const never of ["Muted reply.", "Reply next to my own note.", "Starting the long job."]) expect(spoken).not.toContain(never);
+  for (const once of ["Half the export is done.", "My own note."]) expect(spoken.filter((input: string) => input === once)).toHaveLength(1);
+}), 180_000);
+
+it("with the Voice setting off, speaks only for a bot switched on, and says once, quietly, why a bot without a voice cannot", async () => withVoiceFixture(async (f) => {
+  const baseUrl = await f.serveTts();
+  await f.api("/api/config", { tts: { provider: "chatterbox", baseUrl, voice: "" } }, "PUT");
+  const following = (await f.cli("new-bot", "--name", "Following quiet bot")).bot;
+  const voiced = (await f.cli("new-bot", "--name", "Switched on bot")).bot;
+  await f.api("/api/bots/" + voiced.id, { voiceNoteEveryReply: true, voice: "voice-b" }, "PATCH");
+  const voiceless = (await f.cli("new-bot", "--name", "Voiceless bot")).bot;
+  await f.api("/api/bots/" + voiceless.id, { voiceNoteEveryReply: true }, "PATCH");
+  f.savePlan({
+    [following.id]: { steps: [], reply: "Not spoken." },
+    [voiced.id]: { steps: [], reply: "Spoken in my own voice." },
+    [voiceless.id]: { steps: [], reply: "No voice to speak with." },
+  });
+
+  await settle(f, following);
+  await settle(f, voiced);
+  await spokenNote(f, voiced.activeTaskId, "Spoken in my own voice.");
+  expect(f.seen).toEqual([{ input: "Spoken in my own voice.", voice: "voice-b" }]);
+
+  await settle(f, voiceless);
+  await settle(f, voiceless, "Again.");
+  const notices = (await f.messages(voiceless.activeTaskId)).filter((m: any) => String(m.tool?.name ?? "").startsWith("notice: No voice note"));
+  expect(notices).toHaveLength(1);
+  expect(f.seen).toHaveLength(1);
+
+  // null: the bot follows the Voice setting again, which is off.
+  expect((await f.api("/api/bots/" + voiced.id, { voiceNoteEveryReply: null }, "PATCH")).bot.voiceNoteEveryReply).toBeUndefined();
+  await settle(f, voiced, "And now?");
+  await settle(f, following, "Barrier.");
+  expect(f.seen).toHaveLength(1);
+}), 120_000);

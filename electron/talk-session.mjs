@@ -32,6 +32,9 @@ const SERVER_NOTICES = new Map([
   ["moved", TALK_TEXT.moved],
 ]);
 
+const SERVER_NOTICE_KEYS = new Map([["server-down", "native.talk.openMausBot"], ["starting", "native.talk.starting"], ["no-mausbot", "native.talk.setUpFirst"], ["moved", "native.talk.movedToCloud"]]);
+const SPEECH_KEYS = new Map([["speech-not-authorized", "native.talk.permissions"], ["mic-failed", "native.talk.unavailable"], ["recognizer-unavailable", "native.talk.unavailable"], ["dictation-disabled", "native.talk.dictationOff"], ["helper-build-failed", "native.talk.unavailable"], ["helper-start-failed", "native.talk.unavailable"], ["unsupported-platform", "native.talk.unavailable"]]);
+
 const UNDER_WAY = new Set(["listening", "sending", "thinking"]);
 
 export function createTalkSession({ speech, server, panel, voiceInUse, release, openChat, newSendId = randomUUID }) {
@@ -45,10 +48,10 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
     return ask;
   }
 
-  function show(ask, state, text) {
+  function show(ask, state, text, textCode) {
     ask.state = state;
     try {
-      panel.render({ state, text });
+      panel.render({ state, text, ...(textCode ? { textCode } : {}) });
     } catch {}
   }
 
@@ -87,9 +90,9 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
     ask.hideTimer = setTimeout(check, ms);
   }
 
-  function settle(ask, state, text, hideMs) {
+  function settle(ask, state, text, hideMs, textCode) {
     clearTimeout(ask.answerTimer);
-    show(ask, state, text);
+    show(ask, state, text, textCode);
     hideIn(ask, hideMs);
   }
 
@@ -101,8 +104,8 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
   function failed(ask, error) {
     const code = error instanceof TalkServerError ? error.code : null;
     if (code === "lost") stillWorking(ask);
-    else if (SERVER_NOTICES.has(code)) settle(ask, "error", SERVER_NOTICES.get(code), TALK_TIMING.noticeHideMs);
-    else settle(ask, "error", TALK_TEXT.failed, TALK_TIMING.replyHideMs);
+    else if (SERVER_NOTICES.has(code)) settle(ask, "error", SERVER_NOTICES.get(code), TALK_TIMING.noticeHideMs, SERVER_NOTICE_KEYS.get(code));
+    else settle(ask, "error", TALK_TEXT.failed, TALK_TIMING.replyHideMs, "native.talk.failed");
   }
 
   function follow(ask, update) {
@@ -118,7 +121,7 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
     if (!live(ask)) return;
     if (outcome === "done") settle(ask, "reply", ask.reply, TALK_TIMING.replyHideMs);
     else if (outcome === "needs-you") settle(ask, "needs-you", ask.reply, TALK_TIMING.replyHideMs);
-    else settle(ask, "error", TALK_TEXT.failed, TALK_TIMING.replyHideMs);
+    else settle(ask, "error", TALK_TEXT.failed, TALK_TIMING.replyHideMs, "native.talk.failed");
   }
 
   function send(ask, prepared) {
@@ -153,7 +156,7 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
       end(info) {
         if (!listening()) return;
         const problem = SPEECH_PROBLEMS.get(info?.reason);
-        if (problem) settle(ask, "error", problem, TALK_TIMING.noticeHideMs);
+        if (problem) settle(ask, "error", problem, TALK_TIMING.noticeHideMs, SPEECH_KEYS.get(info?.reason));
         else if (!ask.words.trim()) closeBox(ask);
         else send(ask, prepared);
       },
@@ -168,7 +171,7 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
     } catch {
       if (!listening()) return;
       speech.stop(ask.sink);
-      settle(ask, "error", TALK_TEXT.unavailable, TALK_TIMING.noticeHideMs);
+      settle(ask, "error", TALK_TEXT.unavailable, TALK_TIMING.noticeHideMs, "native.talk.unavailable");
       return;
     }
     ask.listenTimer = setTimeout(() => { if (listening()) speech.finish(ask.sink); }, TALK_TIMING.maxListenMs);
@@ -180,7 +183,7 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
     press() {
       if (current && UNDER_WAY.has(current.state)) return;
       dismiss();
-      if (voiceInUse()) settle(begin("error"), "error", TALK_TEXT.busy, TALK_TIMING.noticeHideMs);
+      if (voiceInUse()) settle(begin("error"), "error", TALK_TEXT.busy, TALK_TIMING.noticeHideMs, "native.talk.voiceBusy");
       else listen();
     },
     open() {

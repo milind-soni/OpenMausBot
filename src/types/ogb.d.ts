@@ -419,7 +419,7 @@ const __APP_VERSION__: string;
       openAtLogin?: { state(): Promise<{ available: boolean; on: boolean }>; set(on: boolean): Promise<{ available: boolean; on: boolean }> };
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(
-        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey",
+        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey" | "geminiImageApiKey",
         value: string,
       ): Promise<ConfigStatus>;
       /** In-app auto-update (packaged app only; dormant in dev). Updates
@@ -469,6 +469,11 @@ export interface UpdaterState {
   releaseNotes?: string;
   percent?: number;
   message?: string;
+  /** `message` as a code the window words in its own language; absent when main has only the updater's own words */
+  messageCode?: "tls" | "integrity" | "disk" | "permission" | "busy" | "feed" | "network" | "prepareTimeout" | "slowRestart" | "unavailable";
+  /** Fixed native.update.* wording beside its English fallback, including elevated-install details. */
+  messageKey?: string;
+  messageParams?: Record<string, string>;
   /** native work may still be running; recovery requires an app restart */
   retryable?: boolean;
   /**
@@ -495,6 +500,9 @@ export interface CompanionAccountState {
   email?: string;
   endpoint?: string;
   message?: string;
+  /** The HTTPS address was given back after 30 days with no paired phone
+   * seen. Opening the phone page calls prepare(), which brings it back. */
+  paused?: boolean;
 }
 
 export type AndroidUsbDevice = {

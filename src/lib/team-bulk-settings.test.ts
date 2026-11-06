@@ -6,6 +6,7 @@ import { persistBotUpdate, type Bot, type InstanceInfo } from "@/state/store";
 import { EFFORT_LEVELS } from "../../shared/wire";
 import {
   applyTeamPlan,
+  planAccess,
   planNeedsLocalAutoConsent,
   planTeamChange,
   TEAM_APPROVAL_MODES,
@@ -176,3 +177,57 @@ describe("team-wide settings", () => {
     expect(renderToStaticMarkup(createElement(TeamMenuItems, { ...base, onSetForAll: vi.fn() }))).toContain("Set for all bots in this department…");
   });
 });
+
+describe("who can use a department's bots", () => {
+  const ADA = "ada@acme.test", BOB = "bob@acme.test", CARA = "cara@acme.test";
+  const shared = (id: string, access: Bot["access"], fields: Partial<Bot> = {}) => bot(id, { access, yourAccess: "edit", reportsTo: ADA, ...fields });
+
+  it("sets everyone's level and one person's on each bot, keeping who else was added", () => {
+    const payroll = shared("payroll", { everyone: "none", people: { [CARA]: "edit" } });
+    const ledger = shared("ledger", { everyone: "chat", people: { [BOB]: "chat" } });
+    const plan = planTeamChange([payroll, ledger], instances, { kind: "access", everyone: "chat", person: { email: BOB, level: "chat" } });
+    expect(plan).toEqual([
+      { bot: payroll, status: "apply", access: { everyone: "chat", people: { [CARA]: "edit", [BOB]: "chat" } } },
+      { bot: ledger, status: "unchanged" },
+    ]);
+    expect(planTeamChange([ledger], instances, { kind: "access", person: { email: BOB, level: null } })).toEqual([
+      { bot: ledger, status: "apply", access: { everyone: "chat", people: {} } },
+    ]);
+  });
+
+  it("never lowers someone who can already do more when adding them, and keeps the sharing's other fields", () => {
+    const payroll = shared("payroll", { everyone: "none", people: { [CARA]: "edit", [BOB]: "view" }, groups: { finance: "chat" } } as Bot["access"]);
+    const plan = planAccess(payroll, { kind: "access", everyone: "chat", person: { email: CARA, level: "chat" } });
+    expect(plan).toEqual({ bot: payroll, status: "apply", access: { everyone: "chat", people: { [CARA]: "edit", [BOB]: "view" }, groups: { finance: "chat" } } });
+    expect(planAccess(payroll, { kind: "access", person: { email: BOB, level: "chat" } })).toMatchObject({ access: { everyone: "none", people: { [CARA]: "edit", [BOB]: "chat" }, groups: { finance: "chat" } } });
+  });
+
+  it("skips someone's own MausBot and a bot this person can't share, and never lists a bot's owner", () => {
+    const own = shared("mine", { everyone: "none", people: {} }, { defaultBot: { person: BOB } } as Partial<Bot>);
+    const viewOnly = shared("atlas", { everyone: "none", people: {} }, { yourAccess: "chat" });
+    const owned = shared("owned", { everyone: "none", people: {} });
+    const plan = planTeamChange([own, viewOnly, owned], instances, { kind: "access", person: { email: ADA, level: "chat" } });
+    expect(plan.map((row) => row.status === "skip" ? row.reason : row.status)).toEqual(["it's someone's own MausBot", "you can't change who can use it", "unchanged"]);
+  });
+
+  it("plans again from the bot's latest sharing, so a grant another admin removed after the preview stays removed", () => {
+    const previewed = shared("payroll", { everyone: "chat", people: { [CARA]: "chat" } });
+    const latest = shared("payroll", { everyone: "chat", people: {} });
+    const change = { kind: "access" as const, everyone: "none" as const };
+    expect(planTeamChange([previewed], instances, change)[0]).toMatchObject({ access: { everyone: "none", people: { [CARA]: "chat" } } });
+    expect(planAccess(latest, change)).toEqual({ bot: latest, status: "apply", access: { everyone: "none", people: {} } });
+  });
+
+  it("saves each bot's sharing through its own request, one at a time, and never as a settings patch", async () => {
+    const payroll = shared("payroll", { everyone: "none", people: {} });
+    const plan = planTeamChange([payroll], instances, { kind: "access", everyone: "chat" });
+    const persist = vi.fn(async () => undefined);
+    const share = vi.fn(async () => undefined);
+    expect(planNeedsLocalAutoConsent(plan)).toBe(false);
+    expect(await applyTeamPlan(plan, persist, { share })).toEqual([{ bot: payroll, status: "applied" }]);
+    expect(share).toHaveBeenCalledWith(payroll, { everyone: "chat", people: {} });
+    expect(persist).not.toHaveBeenCalled();
+    expect(await applyTeamPlan(plan, persist, { share: async () => "unchanged" }), "already set by the time it was sent").toEqual([{ bot: payroll, status: "unchanged" }]);
+  });
+});
+

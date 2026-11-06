@@ -1,0 +1,69 @@
+import { afterEach, expect, it, vi } from "vitest";
+import { cliVersionProbe } from "./cli-version-probe.ts";
+import { cliVersionReader, type execCli } from "./procs.ts";
+
+afterEach(() => vi.useRealTimers());
+
+it("shares overlapping slow probes and accepts a version after the old eight-second limit", async () => {
+  vi.useFakeTimers();
+  const run = vi.fn<typeof execCli>((_cli, _args, options, callback) => {
+    expect(options.timeout).toBe(30_000);
+    setTimeout(() => callback(null, "2.1.311 (Claude Code)\n"), 16_000);
+  });
+  const probe = cliVersionProbe("claude", run);
+  const first = probe({ PATH: "fixture" });
+  expect(probe({ PATH: "fixture" })).toBe(first);
+  await vi.advanceTimersByTimeAsync(16_000);
+  expect(await first).toEqual({ version: "2.1.311 (Claude Code)" });
+  expect(run).toHaveBeenCalledTimes(1);
+});
+
+it("retries an empty success once within the original thirty-second budget", async () => {
+  vi.useFakeTimers();
+  const run = vi.fn<typeof execCli>()
+    .mockImplementationOnce((_cli, _args, options, callback) => {
+      expect(options.timeout).toBe(30_000);
+      setTimeout(() => callback(null, ""), 20_000);
+    })
+    .mockImplementationOnce((_cli, _args, options, callback) => {
+      expect(options.timeout).toBe(10_000);
+      callback(null, "codex-cli 0.165.0");
+    });
+  const result = cliVersionProbe("codex", run)({});
+  await vi.advanceTimersByTimeAsync(20_000);
+  expect(await result).toEqual({ version: "codex-cli 0.165.0" });
+  expect(run).toHaveBeenCalledTimes(2);
+});
+
+it("does not retry forever or label an empty success as a missing installation", async () => {
+  const run = vi.fn<typeof execCli>((_cli, _args, _options, callback) => callback(null, " \n"));
+  expect(await cliVersionProbe("codex", run)({})).toEqual({ reason: "`codex` returned no version. Check again." });
+  expect(run).toHaveBeenCalledTimes(2);
+});
+
+it("rechecks after settlement and preserves the last version through temporary failures", async () => {
+  const failed = Object.assign(new Error("fixture process failure"), { code: 1 });
+  const run = vi.fn<typeof execCli>()
+    .mockImplementationOnce((_cli, _args, _options, callback) => callback(null, "2.1.311"))
+    .mockImplementationOnce((_cli, _args, _options, callback) => callback(failed, ""))
+    .mockImplementation((_cli, _args, _options, callback) => callback(null, ""));
+  const probe = cliVersionProbe("claude", run);
+  expect(await probe({})).toEqual({ version: "2.1.311" });
+  expect(await probe({})).toEqual({ version: "2.1.311" });
+  expect(await probe({})).toEqual({ version: "2.1.311" });
+  expect(run).toHaveBeenCalledTimes(4);
+});
+
+it.each(["ENOENT", "EACCES", "EPERM"])("forgets a known version after %s instead of resurrecting it on a later timeout", (code) => {
+  const read = cliVersionReader("claude");
+  expect(read(null, "2.1.311")).toEqual({ version: "2.1.311" });
+  const unavailable = read(Object.assign(new Error("fixture launch failure"), { code }), "");
+  expect(unavailable).toEqual({ reason: expect.stringContaining(code === "ENOENT" ? "CLI not found" : "file permissions") });
+  expect(read(Object.assign(new Error("fixture timeout"), { killed: true }), "")).toEqual({ reason: expect.stringContaining("took longer than 30 seconds") });
+});
+
+it("reports an unrecognized failure without claiming the CLI is missing or exposing its output", () => {
+  expect(cliVersionReader("codex")(new Error("private diagnostic"), "private output")).toEqual({
+    reason: "`codex` could not report its version. Check that it starts in a terminal, then check again.",
+  });
+});

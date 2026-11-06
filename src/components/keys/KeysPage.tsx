@@ -6,6 +6,7 @@ import { scrollParent, scrollWithin } from "@/lib/scroll-within";
 import { t } from "@/lib/i18n";
 import { BoatOfferPanel } from "../BoatOffer";
 import { LiveProviderSettings } from "../LiveProviderSettings";
+import { VoiceEveryReplySetting } from "../VoiceEveryReplySetting";
 import { BuiltInReplyWait, LmStudioServer, OtherOpenAiCompatServers } from "../OpenAiCompatServers";
 import { KEY_CATALOG, KEY_SECTIONS, keyMatches, savedState, type KeyEntry, type KeyId, type KeySectionId } from "./key-catalog";
 import { finishKeyFocus, useKeyFocus, type KeyFocusRequest } from "./key-focus";
@@ -102,6 +103,7 @@ function KeySection({ id, rows, open, onToggle }: { id: KeySectionId; rows: KeyE
       </button>
       <div id={bodyId} hidden={!open} className="flex flex-col gap-0.5 border-t border-hairline/40 px-1 py-1.5 in-data-[settings-look=simple]:border-t-[0.5px] in-data-[settings-look=simple]:border-(--settings-edge)">
         {rows.map((entry) => <KeyCatalogRow key={entry.id} entry={entry} />)}
+        {id === "voice" && <VoiceEveryReplySetting />}
       </div>
     </section>
   );

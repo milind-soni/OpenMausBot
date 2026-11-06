@@ -16,6 +16,7 @@ import {
   placeholders,
   sourceHash,
   staleTranslationKeys,
+  translationPrompt,
   validateSourceCatalog,
   validateTranslationCatalog,
   validateTranslationHashes,
@@ -150,6 +151,43 @@ describe("locale draft validation", () => {
   it("never generates or accepts the English source catalog", () => {
     expect(() => main(["en", "English", "--force"])).toThrow(/English is the source catalog/i);
     expect(() => main(["en", "--accept"])).toThrow(/English is the source catalog/i);
+  });
+
+  it("asks for pt-BR terms in pt-br drafts and leaves other prompts as they were", () => {
+    const portuguese = translationPrompt({ first: "One" }, "Brazilian Portuguese", "pt-br");
+    expect(portuguese).toContain("Write AI as “IA”");
+    expect(portuguese).toContain("skill as “habilidade”");
+    expect(portuguese).not.toContain("and AI unchanged");
+
+    expect(translationPrompt({ first: "One" }, "German", "de")).toContain(
+      "Keep placeholders such as {name} exactly, including duplicates. Keep OpenMausBot, MausBot Cloud, CLI, and AI unchanged.",
+    );
+  });
+});
+
+describe("every locale pack", () => {
+  const source = { save: "Save", claude: "Claude", count: "{count} bots" };
+
+  function check(catalogs) {
+    const locales = temporaryDirectory();
+    writeFileSync(join(locales, "en.json"), JSON.stringify(source));
+    for (const [code, catalog] of Object.entries(catalogs)) writeFileSync(join(locales, `${code}.json`), JSON.stringify(catalog));
+    writeFileSync(join(locales, "source-hashes.json"), JSON.stringify({ version: 1, locales: {} }));
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      checkCatalogs(locales);
+    } finally {
+      log.mockRestore();
+    }
+  }
+
+  it("may skip keys and repeat English, whichever language it is", () => {
+    expect(() => check({ "pt-br": { save: "Salvar" }, fr: { save: "Save", claude: "Claude" } })).not.toThrow();
+  });
+
+  it("still fails --check for a broken placeholder in any pack", () => {
+    expect(() => check({ "pt-br": { count: "{n} bots" } })).toThrow(/pt-br\.json: count: placeholders must stay/);
+    expect(() => check({ fr: { count: "{n} bots" } })).toThrow(/fr\.json: count: placeholders must stay/);
   });
 });
 

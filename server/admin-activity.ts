@@ -363,6 +363,8 @@ export type ActivityEntry =
       bot?: string;
       tool?: string;
       summary?: string;
+      summaryCode?: string;
+      summaryParams?: DecisionRow["summaryParams"];
       threadId: string;
       requestId?: string;
     }
@@ -398,7 +400,7 @@ export function activityEntries(
       source: clean.source,
       ...(clean.botName || clean.botId ? { bot: clean.botName || clean.botId } : {}),
       ...(clean.tool ? { tool: clean.tool } : {}),
-      ...(clean.summary ? { summary: clean.summary } : {}),
+      ...(clean.summary ? { summary: clean.summary, summaryCode: clean.summaryCode, summaryParams: clean.summaryParams } : {}),
       threadId: clean.threadId,
       ...(clean.requestId ? { requestId: clean.requestId } : {}),
     });

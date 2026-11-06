@@ -32,7 +32,7 @@ export function credentialProvider(target: unknown): KeyProvider | "other" {
 
 export const ENGINE = [
   "claude", "codex", "gemini", "cursor", "opencode", "qwen", "hermes", "cline", "custom_acp", "pi", "openai_compat", "grok",
-  "grok_api", "kimi", "droid", "antigravity", "minimax", "mistral", "cerebras", "groq", "greenference", "meta", "muse_code", "deepseek", "copilot",
+  "grok_api", "kimi", "droid", "antigravity", "minimax", "mistral", "cerebras", "groq", "greenference", "meta", "muse_code", "deepseek", "copilot", "command_code",
 ] as const;
 export type Engine = (typeof ENGINE)[number];
 
@@ -41,7 +41,7 @@ const ENGINE_BY_DRIVER = new Map<string, Engine>(Object.entries({
   qwenAgent: "qwen", hermesAgent: "hermes", clineAgent: "cline", customAcp: "custom_acp", piAgent: "pi",
   "openai-compat": "openai_compat", grokAgent: "grok", grok: "grok_api", kimiAgent: "kimi", droidAgent: "droid",
   antigravityAgent: "antigravity", minimax: "minimax", mistral: "mistral", cerebras: "cerebras", groq: "groq", greenference: "greenference",
-  meta: "meta", museCode: "muse_code", deepseekAgent: "deepseek", copilotAgent: "copilot",
+  meta: "meta", museCode: "muse_code", deepseekAgent: "deepseek", copilotAgent: "copilot", commandCodeAgent: "command_code",
 } satisfies Record<string, Engine>));
 
 export function engineForDriver(driverKind: unknown): Engine | "other" {
@@ -68,7 +68,7 @@ export const KEY_VIA = ["settings", "computer_panel", "chat_request", "apps", "m
 export type KeyVia = (typeof KEY_VIA)[number];
 export const KEY_RESULT = ["ok", "rejected", "unverified", "error"] as const;
 export type KeyResult = (typeof KEY_RESULT)[number];
-export const SIGN_IN_ENGINE = ["claude", "codex", "grok", "kimi"] as const;
+export const SIGN_IN_ENGINE = ["claude", "codex", "grok", "kimi", "cursor"] as const;
 export const SIGN_IN_METHOD = ["code", "device_code", "browser"] as const;
 export type SignInMethod = (typeof SIGN_IN_METHOD)[number];
 export const BOT_SOURCE = ["blank", "template", "preset"] as const;
@@ -78,7 +78,7 @@ export type ConnectorResult = (typeof CONNECTOR_RESULT)[number];
 export const CALL_MODE = ["turns", "live"] as const;
 export const ROOM_MODE = ["chat", "goal"] as const;
 export const CLOUD_COMPUTER_SOURCE = ["own_key", "included", "none"] as const;
-export const VOICE = ["elevenlabs", "fish", "system", "chatterbox", "xai", "gemini", "none"] as const;
+export const VOICE = ["elevenlabs", "fish", "system", "chatterbox", "xai", "gemini", "openai", "none"] as const;
 export const DECIDER = ["jev", "openrouter", "off"] as const;
 export const CONNECTORS_MODE = ["managed", "self_hosted", "unavailable"] as const;
 export const LOCAL_VM_MODE = ["shared", "per_bot", "pool"] as const;

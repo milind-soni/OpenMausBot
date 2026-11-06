@@ -14,6 +14,7 @@ import { personKey } from "../person-key.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "../routes/table.ts";
 import type { BotRecord, Store } from "../store.ts";
+import { userError } from "../user-errors.ts";
 import type { Delivery } from "./person-inbox.ts";
 
 const ONE_BOT = /^\/api\/bots\/([\w-]{1,128})\/access-request$/;
@@ -70,7 +71,7 @@ export function createAccessRequests(deps: AccessRequestDeps) {
     if (!one) return PASS;
     const bot = deps.store().bot(one[1]!);
     const email = sessionEmail(auth);
-    if (!deps.team || !bot || !email) return json(res, 404, { error: "no such bot" });
+    if (!deps.team || !bot || !email) return json(res, 404, userError("serverError.bot.missing"));
     if (deps.levelOf(auth, bot.id) !== "view") return json(res, 409, { error: `You can already chat with ${bot.name}.` });
     const asked = openAsks(bot, email);
     if (asked.length) return json(res, 200, { asked: asked.map(({ person }) => ({ email: person.email, name: nameOf(person.email) })) });

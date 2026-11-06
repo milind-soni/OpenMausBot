@@ -86,6 +86,18 @@ it("says when a server is added, imported or removed on purpose, so a Cloud home
   expect(changes).toEqual(["added", "added", "removed"]);
 });
 
+it("adds a command server sent with type stdio, as other MCP clients write it, and keeps the old shape working", async () => {
+  const { cfg, post } = await serve();
+  const typed = await post("/api/mcp/servers", { name: "notes", type: "stdio", command: "npx", args: ["-y", "notes-mcp"] });
+  expect(typed.status, await typed.clone().text()).toBe(201);
+  const plain = await post("/api/mcp/servers", { name: "files", command: "npx", args: ["-y", "files-mcp"] });
+  expect(plain.status, await plain.clone().text()).toBe(201);
+  expect(cfg.mcpServers).toEqual({
+    notes: { command: "npx", args: ["-y", "notes-mcp"], env: {}, enabled: false },
+    files: { command: "npx", args: ["-y", "files-mcp"], env: {}, enabled: false },
+  });
+});
+
 it.each([["private", "person"], ["public", "team"]])("lists the scope of %s in reads and mutation responses", async (name, scope) => {
   const { post, get } = await serve();
   const response = await post("/api/mcp/servers", { name, url: "https://mail.example.com/mcp", headers: { Authorization: "" } });
@@ -102,10 +114,22 @@ it.each(["create", "import"])("rejects personal header values on %s without savi
     : await post("/api/mcp/servers/import", { json: JSON.stringify({ mcpServers: { public: { url: "https://public.example.com/mcp" }, private: entry } }) });
 
   expect(response.status).toBe(400);
-  const body = await response.json() as { error: string };
+  const body = await response.json() as { error: string; errorKey: string };
   expect(body.error).toMatch(/personal.*header|header.*personal/i);
+  expect(body.errorKey).toBe("serverError.mcp.personalHeadersShared");
   expect(JSON.stringify(body)).not.toContain("private-secret");
   expect(cfg.mcpServers).toEqual({});
+});
+
+it("keeps the sign-in refusal's localization code in the HTTP response", async () => {
+  const { post } = await serve();
+  expect((await post("/api/mcp/servers", { name: "private", url: "https://mail.example.com/mcp", headers: { Authorization: "" } })).status).toBe(201);
+  const response = await post("/api/mcp/servers/private/test", {});
+  expect(response.status).toBe(403);
+  expect(await response.json()).toEqual({
+    error: "Sign in to the team to test your own connection.",
+    errorKey: "serverError.mcp.testSignInFirst",
+  });
 });
 
 it.each(["create", "import"])("accepts blank personal headers on %s and retains team header values", async (action) => {
@@ -187,7 +211,7 @@ describe("a bot's MCP servers, as a phone reads them", () => {
     const { base } = await serve({ bots: [{ id: "ada" }] });
     const response = await fetch(`${base}/api/bots/nobody/mcp-servers`);
     expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ error: "no such bot" });
+    expect(await response.json()).toEqual({ error: "no such bot", errorKey: "serverError.bot.missing" });
   });
 });
 

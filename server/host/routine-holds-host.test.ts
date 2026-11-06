@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { RoutineManager } from "../routines.ts";
-import { createRoutineHoldsHost, ROUTINE_HOLD_LINES } from "./routine-holds-host.ts";
+import { createRoutineHoldsHost } from "./routine-holds-host.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -48,7 +48,7 @@ describe("a Cloud home's routines wait while the owner has left", () => {
     w.make();
     w.host.engines(true);
     expect(w.state()).toMatchObject({ enabled: false, heldFor: "no_engine" });
-    expect(w.lines).toEqual([{ threadId: "chief-main", name: `notice: ${ROUTINE_HOLD_LINES.no_engine}` }]);
+    expect(w.lines).toEqual([{ threadId: "chief-main", name: "notice: Your routines are paused: none of your AI accounts is signed in here any more. They turn back on by themselves when you sign in again." }]);
     // Read again and again while signed out: nothing more is said.
     w.host.engines(true);
     w.host.engines(true);
@@ -65,7 +65,7 @@ describe("a Cloud home's routines wait while the owner has left", () => {
     w.host.engines(false);
     w.host.plan(true);
     expect(w.state()).toMatchObject({ enabled: false, heldFor: "plan_cancelled" });
-    expect(w.lines.map((line) => line.name)).toEqual([`notice: ${ROUTINE_HOLD_LINES.plan_cancelled}`]);
+    expect(w.lines.map((line) => line.name)).toEqual(["notice: Your routines are paused because the plan was cancelled. To keep one running until the plan ends, turn it back on in Routines."]);
     expect(JSON.parse(readFileSync(join(w.dir, "routine-holds.json"), "utf8"))).toEqual({ planCancelled: true });
 
     const again = world(w.dir);
@@ -100,7 +100,7 @@ describe("a Cloud home's routines wait while the owner has left", () => {
     w.setApps(false);
     await w.host.connections("removed");
     expect(w.state()).toMatchObject({ enabled: false, heldFor: "no_connections" });
-    expect(w.lines.map((line) => line.name)).toEqual([`notice: ${ROUTINE_HOLD_LINES.no_connections}`]);
+    expect(w.lines.map((line) => line.name)).toEqual(["notice: Your routines are paused: every connected app and MCP server was removed. They turn back on when you connect one, or turn one back on in Routines."]);
     await w.host.connections("added");
     expect(w.state().enabled).toBe(true);
   });

@@ -86,7 +86,7 @@ it("stops waiting soon after a local server stops answering, long before the rep
     const done = await fixture.recorder.until((event) => event.type === "turn.completed", 10_000);
     expect(done).toMatchObject({ ok: false });
     expect(Date.now() - started).toBeLessThan(10_000);
-    expect(fixture.recorder.events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining("stopped answering") });
+    expect(fixture.recorder.events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining("stopped answering"), text: { key: "chat.notice.modelServerStoppedAnswering", params: { host: expect.stringMatching(/^127\.0\.0\.1:\d+$/) } } });
   } finally {
     await fixture.close();
   }

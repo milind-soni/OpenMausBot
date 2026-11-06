@@ -19,6 +19,8 @@ import { boxUploadsDir, bwrapArgs, planBox, taskWorkspaceIds, type BoxBridge, ty
 
 /** The loopback port inside a box that reaches the egress gate. The harness gate sits at the server's own port. */
 export const BOX_EGRESS_PORT = 3128;
+/** What the box sets on an isolated network: the egress proxy, and the local hosts that skip it. */
+export const BOX_PROXY_ENV = ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"] as const, BOX_NO_PROXY_ENV = ["NO_PROXY", "no_proxy"] as const;
 /** The loopback port inside a box that reaches the credential broker. */
 export const BOX_BROKER_PORT = 18080;
 /** The descriptor the box reads its seccomp filter from: the first after stdio. */
@@ -100,9 +102,9 @@ export class BoxRunner {
       : boxEnvironment(request.env, this.options.denyEnv, new Set(request.allowEnv ?? []));
     if (plan.net === "isolated") {
       const proxy = `http://127.0.0.1:${this.options.egressPort ?? BOX_EGRESS_PORT}`;
-      for (const name of ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"]) env[name] = proxy;
+      for (const name of BOX_PROXY_ENV) env[name] = proxy;
       // Node's env proxy matches an IPv6 host only bracketed; curl and the engines take the plain forms.
-      for (const name of ["NO_PROXY", "no_proxy"]) env[name] = "127.0.0.1,localhost,::1,[::1]";
+      for (const name of BOX_NO_PROXY_ENV) env[name] = "127.0.0.1,localhost,::1,[::1]";
     }
     const bridges = plan.net === "isolated" ? this.options.setup.bridges : [];
     const inner = bridgedCommand(this.options.bridge, bridges, request.command, request.args);

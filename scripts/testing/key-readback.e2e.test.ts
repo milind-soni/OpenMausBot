@@ -36,6 +36,7 @@ let stub: Server;
 let fixture: VerificationServer;
 let server: ChildProcess;
 const stubCalls: string[] = [];
+const geminiModelKeys: string[] = [];
 
 async function call(method: string, path: string, body?: unknown) {
   const response = await fetch(`${fixture.info.url}${path}`, {
@@ -73,6 +74,10 @@ beforeAll(async () => {
       wav.writeUInt32LE(24000, 24); wav.writeUInt32LE(48000, 28); wav.writeUInt16LE(2, 32);
       wav.writeUInt16LE(16, 34); wav.write("data", 36); wav.writeUInt32LE(2, 40);
       return reply(200, { steps: [{ type: "model_output", content: [{ type: "audio", mime_type: "audio/wav", data: wav.toString("base64") }] }] });
+    }
+    if (url.startsWith("/gemini/models")) {
+      geminiModelKeys.push(String(req.headers["x-goog-api-key"]));
+      return reply(200, { models: [] });
     }
     if (url.startsWith("/eleven/voices")) return reply(200, { voices: [] });
     if (url.startsWith("/fish/model")) return reply(200, { items: [], total: 0 });
@@ -123,8 +128,10 @@ it("saves every kind of credential, reads it back and shows it masked to its las
       const key = `${PREFIX[entry.id] ?? "fx-"}${entry.id}-${randomBytes(6).toString("hex")}`;
       const last4 = key.slice(-4);
       const patch = (value: string) => entry.target ? entry.target.patch(value, true) : EXTRA_PATCH[entry.id]!(value);
+      geminiModelKeys.length = 0;
       const saved = await call("PUT", `/api/config${storage}`, patch(key));
       expect(saved.status, `${entry.id}${storage}: ${JSON.stringify(saved.body)}`).toBe(200);
+      for (const sent of geminiModelKeys) expect(sent, `${entry.id}${storage} verification key`).toBe(key);
 
       const config = (await call("GET", "/api/config")).body;
       expect(savedState(entry, config as never), `${entry.id}${storage}`).toEqual({ configured: true, last4 });
@@ -145,7 +152,9 @@ it("saves every kind of credential, reads it back and shows it masked to its las
 }, hostTimeout(180_000));
 
 it("configures Gemini speech and synthesizes WAV through the isolated server", async () => {
+  geminiModelKeys.length = 0;
   expect((await call("PUT", "/api/config", { tts: { provider: "gemini", geminiKey: "fixture-gemini-secret", voice: "Kore" } })).status).toBe(200);
+  expect(geminiModelKeys).toEqual(["fixture-gemini-secret"]);
   const status = (await call("GET", "/api/config")).body;
   expect(status.tts).toMatchObject({ provider: "gemini", configured: true, ready: true, model: "gemini-3.8-flash-lite-tts" });
   expect(JSON.stringify(status)).not.toContain("fixture-gemini-secret");

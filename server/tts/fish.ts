@@ -1,5 +1,6 @@
 // The API key stays on the harness: the renderer gets only voice metadata and audio bytes.
 import type { FishTtsModel } from "../config.ts";
+import { userErrorThrown } from "../user-errors.ts";
 
 const API = (process.env.OMB_FISH_AUDIO_API || "https://api.fish.audio").replace(/\/+$/, "");
 export const DEFAULT_FISH_MODEL: FishTtsModel = "s2.1-pro";
@@ -220,7 +221,7 @@ export async function transcribe(audio: Uint8Array, mime: string, key: string): 
       signal: AbortSignal.timeout(60_000),
     });
   } catch {
-    throw new Error("Couldn't reach Fish Audio to hear you — check your connection.");
+    throw userErrorThrown("serverError.voice.fishTranscribeConnection");
   }
   const body = await safeBody(res);
   if (!res.ok) throw new Error(errorMessage(res.status, "hearing you", body));

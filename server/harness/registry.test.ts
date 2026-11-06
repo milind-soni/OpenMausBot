@@ -668,6 +668,65 @@ process.exit(0);
     expect(await registry.installRuntime("a")).toBe(true);
   });
 
+  // An install command pasted as the CLI path runs curl, which answers --version as curl: not the engine, not the person's
+  // choice of copy. On a Cloud nobody could find Reset; the engine's own CLI takes over once it is installed.
+  it("points a saved CLI path that runs another program at the app's own copy once it's installed", async () => {
+    withFakeNpm(false);
+    const base = join(scratch, "data");
+    const bin = join(base, "tools", "standalone", "fake-engine", "bin");
+    const fake = makeFakeDriver();
+    fake.driver.defaultConfig = () => ({ cli: "fakebin" });
+    Object.assign(fake.driver, { install: { standalone: standaloneRelease(standalonePlatformKey()) } });
+    const registry = new ProviderRegistry([fake.driver], {
+      enginesBaseDir: base,
+      npmAvailable: () => false,
+      installStandalone: async () => {
+        mkdirSync(bin, { recursive: true });
+        writeFileSync(join(bin, "fakebin"), "#!/bin/sh\necho 2.0.0\n", { mode: 0o755 });
+        registerFallbackPathDir(bin);
+        return { version: "2.0.0", executablePath: join(bin, "fakebin"), binDir: bin };
+      },
+    });
+    await registry.load({ pasted: { driver: "fake", config: { cli: "curl https://example.test/install -fsS | bash" } } });
+    Object.assign(registry.get("pasted")!, { snapshot: async () => ({ state: "unavailable", reason: "not fakebin's CLI", notEngineCli: true }) });
+    expect(await registry.installRuntime("pasted")).toEqual({ useCli: join(bin, "fakebin") });
+  });
+
+  it("gives a saved CLI path that runs another program up for the engine's own installed CLI by itself, once", async () => {
+    const own = withFakeNpm(false);
+    const fake = makeFakeDriver();
+    fake.driver.defaultConfig = () => ({ cli: "fakebin" });
+    const healed: Array<[string, string]> = [];
+    let release: () => void = () => {};
+    const registry = new ProviderRegistry([fake.driver], { enginesBaseDir: join(scratch, "data"), npmAvailable: () => false });
+    registry.onWrongCli((instanceId, cli) => { healed.push([instanceId, cli]); return new Promise<void>((resolve) => { release = resolve; }); });
+    const notEngine = { state: "unavailable" as const, reason: "not fakebin's CLI", notEngineCli: true as const };
+    await registry.load({ pasted: { driver: "fake", config: { cli: "curl https://example.test/install -fsS | bash" } }, missing: { driver: "fake" } });
+    for (const id of ["pasted", "missing"]) Object.assign(registry.get(id)!, { snapshot: async () => notEngine });
+
+    // Nothing of the engine's own is installed: the card offers the install instead.
+    await registry.describe();
+    expect(healed).toEqual([]);
+
+    writeFileSync(join(own, "fakebin"), "#!/bin/sh\necho 2.0.0\n", { mode: 0o755 });
+    resetPathCache();
+    await registry.describe();
+    await registry.describe({ reuse: { ms: 0, changed: () => {} } });
+    // Only the saved path gives way, once while it runs; the default name has nothing to give way to.
+    expect(healed).toEqual([["pasted", join(own, "fakebin")]]);
+    release();
+    // The healer reloads it with that CLI, as Set CLI would.
+    await registry.dispose("pasted");
+
+    // A path that answered for another reason (it did not start) stays the person's, and so does the very path the
+    // engine's own name finds: giving it up for itself would only go round again.
+    await registry.load({ broken: { driver: "fake", config: { cli: "/opt/elsewhere/fakebin" } }, found: { driver: "fake", config: { cli: join(own, "fakebin") } } });
+    Object.assign(registry.get("broken")!, { snapshot: async () => ({ state: "unavailable", reason: "fakebin does not start" }) });
+    Object.assign(registry.get("found")!, { snapshot: async () => notEngine });
+    await registry.describe();
+    expect(healed.map(([id]) => id)).toEqual(["pasted"]);
+  });
+
   it("lets a driver's own installer go first", async () => {
     withFakeNpm(false);
     const fake = makeFakeDriver();

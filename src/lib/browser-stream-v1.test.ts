@@ -240,6 +240,20 @@ describe("the v1 live client", () => {
     expect(post.mock.calls.some(([body]) => body.type === "input_keyboard")).toBe(false);
   });
 
+  it("preserves coded error fields and English while reconnecting an unresponsive browser", () => {
+    vi.useFakeTimers();
+    const { client, handlers, source } = open();
+    const message = "The browser stopped responding, so it is being restarted. The live view reconnects by itself.";
+    source.fail({ retryable: true, message, errorKey: "serverError.browser.restartingUnresponsive", errorParams: {} });
+    expect(handlers.onMessage).toHaveBeenCalledExactlyOnceWith({ type: "notice", message, errorKey: "serverError.browser.restartingUnresponsive", errorParams: {} });
+    expect(handlers.onGone).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(999);
+    expect(FixtureEventSource.instances).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(FixtureEventSource.instances).toHaveLength(2);
+    client.stop();
+  });
+
   it("does not retry the server's terminal refusal, and shows its reason", () => {
     const { handlers, source } = open();
     source.fail({ retryable: false, message: "Too many browser views are open." });

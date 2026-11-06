@@ -11,6 +11,9 @@ import {
   withManagedCompanionTunnelAccess,
   withoutManagedCompanionTunnelAccess,
 } from "./managed-companion-tunnel.mjs";
+import { MANAGED_ENDPOINT_PHONES_UNUSED } from "./companion-endpoint-need.mjs";
+
+export { managedEndpointNeed, PHONE_UNUSED_RELEASE_MS } from "./companion-endpoint-need.mjs";
 
 export const DEFAULT_COMPANION_CONTROL_PLANE_URL = "https://accounts.openmausbot.com";
 
@@ -23,6 +26,8 @@ export const COMPANION_INSTALLATION_CREDENTIAL_FIELD = "companionInstallationCre
 export const COMPANION_INSTALLATION_EXPIRY_FIELD = "companionInstallationCredentialExpiresAt";
 export const COMPANION_ACCOUNT_CLEANUP_PENDING_FIELD = "companionAccountCleanupPending";
 export const COMPANION_ENDPOINT_RELEASE_PENDING_FIELD = "companionEndpointReleasePending";
+/** The address was given back while phones were paired but unused; the control plane keeps its hostname. */
+export const COMPANION_ENDPOINT_PAUSED_FIELD = "companionEndpointPaused";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const INSTALLATION_ID = UUID;
@@ -80,13 +85,6 @@ export function companionAccountCleanupPending(credentials) {
   return credentials?.[COMPANION_ACCOUNT_CLEANUP_PENDING_FIELD] === true;
 }
 
-/** true, false, or null when that cannot be told; only false ever gives an address back. */
-export function managedEndpointNeed(state) {
-  if (!state || typeof state !== "object" || state.enabled !== true || state.error) return null;
-  if (state.devicesUnreadable === true || !Array.isArray(state.devices)) return null;
-  return state.devices.length > 0 || Boolean(state.pairing);
-}
-
 function storedAccount(credentials) {
   const email = normalizeAccountEmail(ownString(credentials, COMPANION_ACCOUNT_EMAIL_FIELD));
   const userId = ownString(credentials, COMPANION_ACCOUNT_USER_ID_FIELD);
@@ -117,6 +115,7 @@ function withoutCompanionAccount(credentials) {
     COMPANION_INSTALLATION_EXPIRY_FIELD,
     COMPANION_ACCOUNT_CLEANUP_PENDING_FIELD,
     COMPANION_ENDPOINT_RELEASE_PENDING_FIELD,
+    COMPANION_ENDPOINT_PAUSED_FIELD,
   ]) {
     delete next[field];
   }
@@ -147,6 +146,7 @@ function withProvisionedAccount(credentials, { accountToken, user, installation,
   };
   delete next[COMPANION_ACCOUNT_CLEANUP_PENDING_FIELD];
   delete next[COMPANION_ENDPOINT_RELEASE_PENDING_FIELD];
+  delete next[COMPANION_ENDPOINT_PAUSED_FIELD];
   return next;
 }
 
@@ -212,8 +212,9 @@ export function friendlyCompanionAccountError(error) {
   return `${message}${reference}`;
 }
 
-function publicState({ available, status, email, endpoint, message }) {
+function publicState({ available, status, email, endpoint, message, paused }) {
   const state = { available: Boolean(available), status };
+  if (paused === true) state.paused = true;
   const normalizedEmail = normalizeAccountEmail(email);
   if (normalizedEmail) state.email = normalizedEmail;
   const accessEndpoint = (() => {
@@ -258,6 +259,8 @@ export function createCompanionAccountService({
   firstEndpointCheckMs = DEFAULT_FIRST_ENDPOINT_CHECK_MS,
   onDemand = false,
   managedEndpointNeeded = async () => null,
+  /** MausBot Relay: `capable` makes a "no" need hold even right after sign-in; `legacyDevices` counts old phones. */
+  relay = { capable: () => false, legacyDevices: async () => null },
   releaseGraceMs = DEFAULT_RELEASE_GRACE_MS,
   releaseJitterMs = DEFAULT_RELEASE_JITTER_MS,
   // Only the code, HTTP status, request id and retry delay: never an email, token, credential or address.
@@ -363,6 +366,7 @@ export function createCompanionAccountService({
     const account = storedAccount(document);
     const persistedAccess = managedCompanionTunnelAccess(document);
     const available = healthy || Boolean(account);
+    const paused = Boolean(account) && !persistedAccess && document[COMPANION_ENDPOINT_PAUSED_FIELD] === true;
     if (!healthy) {
       return publicState({
         available,
@@ -370,6 +374,7 @@ export function createCompanionAccountService({
         email: account?.email,
         endpoint: persistedAccess?.endpoint,
         message: FRIENDLY_MESSAGES.control_plane_unavailable,
+        paused,
       });
     }
     if (
@@ -382,11 +387,11 @@ export function createCompanionAccountService({
     ) {
       phase = null;
     }
-    if (phase) return publicState({ available, ...phase });
+    if (phase) return publicState({ available, ...phase, paused });
     if (!account) return publicState({ available, status: "signed-out" });
     const access = persistedAccess;
     if (!access) {
-      if (onDemand) return publicState({ available, status: "ready", email: account.email });
+      if (onDemand) return publicState({ available, status: "ready", email: account.email, paused });
       return publicState({
         available,
         status: "error",
@@ -545,9 +550,15 @@ export function createCompanionAccountService({
       }
       throw error;
     }
-    const endpoint = await client.ensureEndpoint(installation.credential, {
-      appVersion: identity.appVersion,
-    });
+    const withoutTunnel = async () => {
+      await updateCredentials((document) => withAuthenticatedAccount(document, { accountToken, user, clientInstanceId }));
+      resetAutoRetry();
+      return (phase = null), settledState();
+    };
+    if (onDemand && (await currentNeed()) === false) return withoutTunnel();
+    const endpoint = await client.ensureEndpoint(installation.credential, { appVersion: identity.appVersion, ...(await relay.legacyDevices().then((count) => (count === null ? {} : { legacyDevices: count }))) })
+      .catch((error) => (error?.code === "relay_capable" ? null : Promise.reject(error)));
+    if (!endpoint) return withoutTunnel();
     try {
       await updateCredentials((document) =>
         withProvisionedAccount(document, {
@@ -765,14 +776,15 @@ export function createCompanionAccountService({
 
   const savedAddress = (document) => normalizeManagedCompanionEndpoint(document[MANAGED_COMPANION_ENDPOINT_FIELD]);
 
+  let phonesUnused = false;
+  /** "unused" (paired phones, none seen for 30 days) reads as false and is remembered for the release. */
   const currentNeed = async () => {
-    if (requestedRecently()) return true;
-    try {
-      const need = await managedEndpointNeeded();
-      return typeof need === "boolean" ? need : null;
-    } catch {
-      return null;
-    }
+    const answer = await Promise.resolve().then(() => managedEndpointNeeded()).catch(() => null);
+    phonesUnused = answer === MANAGED_ENDPOINT_PHONES_UNUSED;
+    const need = phonesUnused ? false : typeof answer === "boolean" ? answer : null;
+    if (need === false && relay.capable()) return false;
+    if (requestedRecently()) return (phonesUnused = false), true;
+    return need;
   };
 
   const releaseScheduledAt = () => {
@@ -792,6 +804,7 @@ export function createCompanionAccountService({
   /** The connector stops and the address is withdrawn before the DELETE, so nothing can pair to an address being removed. */
   const releaseAddress = async () => {
     const need = await currentNeed();
+    const pause = phonesUnused;
     if (need !== false) {
       if (need) await cancelRelease();
       return settledState();
@@ -822,12 +835,16 @@ export function createCompanionAccountService({
         return settledState();
       }
     }
-    await updateCredentials((current) => removalPending
-      ? { ...withoutManagedCompanionTunnelAccess(current), [COMPANION_ENDPOINT_RELEASE_PENDING_FIELD]: true }
-      : withoutManagedCompanionTunnelAccess(current));
+    await updateCredentials((current) => ({
+      ...withoutManagedCompanionTunnelAccess(current),
+      ...(removalPending ? { [COMPANION_ENDPOINT_RELEASE_PENDING_FIELD]: true } : {}),
+      ...(pause ? { [COMPANION_ENDPOINT_PAUSED_FIELD]: true } : {}),
+    }));
     resetAutoRetry();
     phase = null;
-    writeLog("companion account: gave the secure address back; no device needs it");
+    writeLog(pause
+      ? "companion account: gave the secure address back; no paired phone was used in 30 days"
+      : "companion account: gave the secure address back; no device needs it");
     return settledState();
   };
 

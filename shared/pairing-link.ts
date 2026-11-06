@@ -10,6 +10,29 @@ export interface CompanionEndpoint {
   priority: number;
 }
 
+export interface PairingE2EDescriptor {
+  v: 1;
+  k: string;
+  h?: string;
+  r?: string[];
+}
+
+const B64U_FIELD = /^[A-Za-z0-9_-]+$/;
+const RELAY_HOST = /^relay[1-9][0-9]?\.openmausbot\.com$/;
+
+/** The QR's `e2e` value, or null for anything a phone would refuse: then the link goes out without it, as from a
+ * computer without the encrypted connection. A QR never says "local": a restriction is set per phone, later. */
+export function encodePairingE2E(descriptor: PairingE2EDescriptor | null | undefined): string | null {
+  if (!descriptor || descriptor.v !== 1 || typeof descriptor.k !== "string" || descriptor.k.length !== 87 || !B64U_FIELD.test(descriptor.k)) return null;
+  const relay = typeof descriptor.h === "string" && Array.isArray(descriptor.r) && descriptor.r.length >= 1 && descriptor.r.length <= 4
+    && descriptor.h.length === 22 && B64U_FIELD.test(descriptor.h) && descriptor.r.every((node) => RELAY_HOST.test(node))
+    ? { h: descriptor.h, r: descriptor.r }
+    : {};
+  const json = JSON.stringify({ v: 1, k: descriptor.k, ...relay });
+  const encoded = btoa(json).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+  return encoded.length <= 1024 ? encoded : null;
+}
+
 export interface PhonePairingLinkOptions {
   /** Where the phone dials first: a host or IP literal together with `port`
    * (the desktop companion), or a complete http(s) origin (a server). */
@@ -25,6 +48,9 @@ export interface PhonePairingLinkOptions {
   /** Complete base URLs, encoded apart from `address`/`hosts` so HTTPS and
    * port 443 stay unambiguous. */
   endpoints?: CompanionEndpoint[];
+  /** The end-to-end descriptor `{v, k, h?, r?}`: the computer's transport key, pinned by the scan, and its relay
+   * identity. Sent as `e2e=<base64url JSON>`; a phone that can't parse it refuses the whole link. */
+  e2e?: PairingE2EDescriptor | null;
   /** P-256 HPKE recipient key pinned by the camera scan. Its private half
    * remains in the desktop's OS-encrypted credential store. */
   secretPublicKey?: string;
@@ -145,6 +171,7 @@ export function phonePairingLink({
   hosts,
   endpoints,
   secretPublicKey,
+  e2e,
 }: PhonePairingLinkOptions): string | null {
   const dial = linkAddress(address, port);
   if (!dial || !/^omb_pair_[A-Za-z0-9_-]{43}$/.test(token)) return null;
@@ -164,6 +191,8 @@ export function phonePairingLink({
   if (routes.length) fields.push(["endpoints", encodeEndpoints(routes)]);
   const secretKey = validSecretPublicKey(secretPublicKey);
   if (secretKey) fields.push(["secretKey", secretKey]);
+  const descriptor = encodePairingE2E(e2e);
+  if (descriptor) fields.push(["e2e", descriptor]);
 
   return `openmausbot://pair?${fields.map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join("&")}`;
 }

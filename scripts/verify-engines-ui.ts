@@ -33,6 +33,7 @@ const instances: InstanceInfo[] = [
   ["pi", "piAgent", "Pi", false, ""],
   ["deepseek", "deepseekAgent", "DeepSeek Harness", false, ""],
   ["githubCopilot", "copilotAgent", "GitHub Copilot", true, "1.0.103"],
+  ["commandCode", "commandCodeAgent", "Command Code", true, "1.88.4"],
 ].map(([id, driver, name, ready, version]) => ({
   instanceId: String(id), driverKind: String(driver), displayName: String(name),
   cliDefault: String(id),

@@ -5,7 +5,8 @@ import { DeviceAuthController, type DeviceAuthOptions, type DeviceSignIn } from 
 import { codexReportsLogin } from "./codex-login.ts";
 
 export function codexDevicePrompt(output: string): { authorizationUrl: string; userCode: string } | null {
-  return deviceSignInPrompt("codex", stripVTControlCharacters(output));
+  const prompt = deviceSignInPrompt("codex", stripVTControlCharacters(output));
+  return prompt?.userCode ? { authorizationUrl: prompt.authorizationUrl, userCode: prompt.userCode } : null;
 }
 
 function loginFailure(output: string): string {

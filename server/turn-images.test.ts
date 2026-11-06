@@ -29,6 +29,12 @@ describe("turn image admission", () => {
     return path;
   };
 
+  const video = (root: string, index: number, extension = ".mp4", bytes = 4) => {
+    const path = join(root, `${IDS[index]}${extension}`);
+    writeFileSync(path, Buffer.alloc(bytes, index + 1));
+    return path;
+  };
+
   afterEach(() => {
     for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
   });
@@ -73,7 +79,7 @@ describe("turn image admission", () => {
       `<attached-image path="${ordinary}" />`,
     ].join("\n");
 
-    expect(extractTurnImages(source, { attachmentsDir: root })).toEqual({ text: source, images: [] });
+    expect(extractTurnImages(source, { attachmentsDir: root })).toEqual({ text: source, images: [], videos: [] });
   });
 
   it("decodes composer entities once before validating the exact store path", () => {
@@ -86,6 +92,56 @@ describe("turn image admission", () => {
     expect(extractTurnImages(`<attached-image path="${encoded}" />`, { attachmentsDir: root })).toEqual({
       text: "",
       images: [{ path, mime: "image/webp", bytes: 5 }],
+      videos: [],
+    });
+  });
+
+  it("resolves a video delivered through the generic <attached-file> tag and keeps the tag for engines that read files", () => {
+    const root = store();
+    const clip = video(root, 0, ".mp4", 9);
+    const source = `watch this\n\n<attached-file path="${clip}" name="clip.mp4" />`;
+
+    expect(extractTurnImages(source, { attachmentsDir: root })).toEqual({
+      text: source,
+      images: [],
+      videos: [{ path: clip, mime: "video/mp4", bytes: 9 }],
+    });
+  });
+
+  it("leaves a non-video <attached-file> tag untouched, since other file kinds still need it intact", () => {
+    const root = store();
+    const doc = join(root, `${IDS[0]}.pdf`);
+    writeFileSync(doc, "not a video");
+    const source = `see the brief\n\n<attached-file path="${doc}" name="brief.pdf" />`;
+
+    expect(extractTurnImages(source, { attachmentsDir: root })).toEqual({ text: source, images: [], videos: [] });
+  });
+
+  it("admits both an image and a video from the same message", () => {
+    const root = store();
+    const png = image(root, 0, ".png", 4);
+    const clip = video(root, 1, ".webm", 6);
+    const source = [
+      `<attached-image path="${png}" name="a.png" />`,
+      `<attached-file path="${clip}" name="clip.webm" />`,
+    ].join("\n\n");
+
+    const result = extractTurnImages(source, { attachmentsDir: root });
+    expect(result.text).toBe(`\n\n<attached-file path="${clip}" name="clip.webm" />`);
+    expect(result.images).toEqual([{ path: png, mime: "image/png", bytes: 4 }]);
+    expect(result.videos).toEqual([{ path: clip, mime: "video/webm", bytes: 6 }]);
+  });
+
+  it("samples only the first video and leaves every video's tag in place", () => {
+    const root = store();
+    const first = video(root, 0, ".mp4", 4);
+    const second = video(root, 1, ".mov", 4);
+    const source = `<attached-file path="${first}" />\n\n<attached-file path="${second}" />`;
+
+    expect(extractTurnImages(source, { attachmentsDir: root })).toEqual({
+      text: source,
+      images: [],
+      videos: [{ path: first, mime: "video/mp4", bytes: 4 }],
     });
   });
 
@@ -123,7 +179,7 @@ describe("turn image admission", () => {
     symlinkSync(target, link);
     const source = `<attached-image path="${link}" />`;
 
-    expect(extractTurnImages(source, { attachmentsDir: root })).toEqual({ text: source, images: [] });
+    expect(extractTurnImages(source, { attachmentsDir: root })).toEqual({ text: source, images: [], videos: [] });
   });
 
   it("resolves a steer's texts one by one and keeps its images in order", () => {

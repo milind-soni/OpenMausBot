@@ -2007,8 +2007,8 @@ describe("agents-proxy MCP surface", () => {
     const list = await rpc("tools/list");
     const manage = list.result.tools.find((t: { name: string }) => t.name === "skill_manage");
     expect(JSON.stringify(manage.inputSchema)).not.toMatch(/"(oneOf|anyOf|allOf|const|format)":/);
-    expect(manage.inputSchema.required).toEqual(["action", "skill_md", "source"]);
-    expect(manage.inputSchema.properties.action.enum).toEqual(["create", "update"]);
+    expect(manage.inputSchema.required).toEqual(["action"]);
+    expect(manage.inputSchema.properties.action.enum).toEqual(["create", "update", "enable", "disable", "delete"]);
 
     const listed = await callTool("skills_list", {});
     expect(listed.result.content[0].text).toContain("file-expense");
@@ -2075,6 +2075,28 @@ describe("agents-proxy MCP surface", () => {
     });
     expect(missingTarget.result.isError).toBe(true);
     expect(missingTarget.result.content[0].text).toContain("needs skill_name");
+    expect(lastSkillStageBody).toBeNull();
+
+    const missingSkillMd = await callTool("skill_manage", { action: "create", source: "conversation" });
+    expect(missingSkillMd.result.isError).toBe(true);
+    expect(missingSkillMd.result.content[0].text).toContain("needs skill_md");
+    expect(lastSkillStageBody).toBeNull();
+  });
+
+  it("sends turning a skill on, off or deleting it to the skill stage route", async () => {
+    for (const [action, verb] of [["enable", "turn on"], ["disable", "turn off"], ["delete", "delete"]] as const) {
+      lastSkillStageBody = null;
+      const switched = await callTool("skill_manage", { action, skill_name: " learned-expense " });
+      expect(lastSkillStageBody).toEqual({ fromBotId: "bot-asker", fromThreadId: "thread-asker-routine", action, skill_name: "learned-expense" });
+      expect(switched.result.isError).toBeFalsy();
+      expect(switched.result.content[0].text).toContain(`to ${verb} skill “learned-expense”`);
+      expect(switched.result.content[0].text).toContain("wait for the decision");
+    }
+
+    lastSkillStageBody = null;
+    const unnamed = await callTool("skill_manage", { action: "delete" });
+    expect(unnamed.result.isError).toBe(true);
+    expect(unnamed.result.content[0].text).toContain("needs skill_name to delete a skill");
     expect(lastSkillStageBody).toBeNull();
   });
 });
