@@ -9,7 +9,8 @@ after editing (instance entries are read at boot).
 Each instance shows its driver's mark. An OpenAI-compatible server shows the
 mark of whoever runs it, read from the host in its address: `api.deepseek.com`
 shows DeepSeek, `<resource>.openai.azure.com` Microsoft Azure,
-`dashscope-intl.aliyuncs.com` Qwen, `openrouter.ai` OpenRouter, and so on
+`dashscope-intl.aliyuncs.com` or `<workspace>.<region>.maas.aliyuncs.com` Qwen,
+`openrouter.ai` OpenRouter, and so on
 (the list is `SERVER_HOSTS` in `server/provider-icon.ts`). A server without a
 mark of its own, such as Groq, Together, Ollama or LM Studio, keeps the default.
 
@@ -172,6 +173,29 @@ entry:
 - Set `config.tools` to `false` for a model without tool support. Image support
   also depends on the chosen model; the driver cannot add vision to a text-only
   model. See [tool verification](verification/openai-tools.md) for scope and tests.
+
+### Example: Alibaba Cloud Model Studio (Qwen)
+
+Use the `openai-compat` instance above with your Model Studio API key and a
+model ID enabled for your account. Set `config.url` to the base URL from
+your Model Studio workspace, including `/compatible-mode/v1`:
+
+| Region | Base URL |
+|---|---|
+| Beijing | `https://<workspace-id>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` |
+| Virginia | `https://<workspace-id>.us-east-1.maas.aliyuncs.com/compatible-mode/v1` |
+| Singapore | `https://<workspace-id>.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1` |
+| Tokyo | `https://<workspace-id>.ap-northeast-1.maas.aliyuncs.com/compatible-mode/v1` |
+
+Replace `<workspace-id>` with your workspace ID. The API key must come from
+the same region as the endpoint; a mismatch can return HTTP 401 even when
+the key is valid. The older `dashscope.aliyuncs.com` and
+`dashscope-intl.aliyuncs.com` addresses still work. Both address formats show
+the Qwen mark; the mark identifies the service, not the selected model's
+capabilities or account access.
+
+See [Alibaba Cloud's OpenAI-compatible API guide](https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope)
+for current addresses, model availability and region requirements.
 
 ## Notes
 
