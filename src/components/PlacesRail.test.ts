@@ -535,3 +535,19 @@ it("＋ stands for Add another account alone, when nothing else can be added", a
   await act(async () => { await refreshPlaces(); });
   expect(host.querySelector("[data-rail-add]")).toBeNull();
 });
+
+it("once My Cloud is home, This Mac (This PC elsewhere) is a laptop circle that says what it is, and a click opens it through main by its profile id", async () => {
+  const mac = place("profile:default", "This computer", { kind: "computer", profile: "default" });
+  rail = { places: [mac, ...PLACES], add: { cloud: true, link: true, address: false } };
+  Object.assign(window, { ogb: { workspaces, cloudAdd, platform: "darwin" } });
+  await mount(createElement(PlacesRail));
+  const tile = host.querySelector('[data-rail-place="profile:default"]');
+  expect(tile?.getAttribute("aria-label")).toBe("This Mac: a separate place on this computer, with its own bots. The bots on My Cloud stay there.");
+  expect(tile?.getAttribute("data-rail-kind")).toBe("computer");
+  await click(tile);
+  expect(workspaces.open.mock.calls).toEqual([["profile:default"]]);
+  Object.assign(window, { ogb: { workspaces, cloudAdd, platform: "win32" } });
+  expect(placeLabel(mac)).toBe("This PC: a separate place on this computer, with its own bots. The bots on My Cloud stay there.");
+  expect(matchingPlaces([mac, ...PLACES], "pc").map((entry) => entry.id)).toEqual(["profile:default"]);
+  expect(placeLabel(place("local", "This computer", { kind: "computer" })), "before the move it is This computer, as ever").toBe("This computer");
+});

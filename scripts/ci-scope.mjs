@@ -57,6 +57,7 @@ export const VITEST_SUBSETS = {
       "scripts/testing/bot-tools-ui.e2e.test.ts",
       "scripts/testing/key-readback.e2e.test.ts",
       "scripts/testing/one-workspace-ui.e2e.test.ts",
+      "scripts/testing/rail-profile-ui.e2e.test.ts",
       "scripts/testing/secret-card-descriptions.test.ts",
       "scripts/testing/team-own-chat.e2e.test.ts",
       "server/body-thread-guards.e2e.test.ts",
