@@ -1016,13 +1016,17 @@ describe("structured tool execution boundaries", () => {
     expect(JSON.stringify(f.recorder.events)).not.toContain("zqxzqxzqx");
   });
 
-  it("leaves the reply alone when the configured key is a short placeholder like \"1\"", async () => {
+  it.each([
+    { scenario: "the provider key", apiKey: "1", token: undefined },
+    { scenario: "an integration token", apiKey: undefined, token: "1" },
+  ])("leaves the reply alone when $scenario is a short placeholder like \"1\"", async ({ apiKey, token }) => {
     const text = "1 12:00–13:00 123 8901 10 11 ID: 1A2B3C";
     const f = await fixture((_request, response) => sse(response, [
       ...text.match(/.{1,5}/gs)!.map((piece) => chunk({ content: piece })),
       chunk({}, "stop"),
-    ]), "openai-compat", "1");
-    await f.start({ integrations: undefined });
+    ]), "openai-compat", apiKey);
+    const audit = f.integrations!.custom!.audit as { command: string; args: string[]; env: Record<string, string> };
+    await f.start({ integrations: token ? { custom: { audit: { ...audit, env: { ...audit.env, AUDIT_TOKEN: token } } } } : undefined });
     expect(await f.completed()).toMatchObject({ ok: true });
     const combined = f.recorder.events.filter((event) => event.type === "content.delta").map((event) => event.delta).join("");
     expect(combined).toBe(text);
