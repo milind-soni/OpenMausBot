@@ -185,6 +185,8 @@ export interface AcpSupport {
   clientFileSystem?: boolean;
   /** Sent as `clientCapabilities._meta` on initialize, where agents read vendor capabilities. */
   clientCapabilitiesMeta?: Record<string, unknown>;
+  /** Sent as `_meta` on session/new and session/load (Kiro policyPreset). */
+  sessionMeta?: (config: AcpConfig, turn: SendTurnInput) => Record<string, unknown> | null;
   /** The agent reaches MCP servers by URL: OpenMausBot's own servers are this server's endpoints, no process each. */
   ownMcpOverHttp?: boolean;
   /** How many tools the agent lists of its own beside the MCP servers', counted against a provider's tool limit. */
@@ -765,7 +767,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           }
           const kind = String(toolCall.kind ?? "");
           const operationKey = isQuestion || current.controlsHost ? null : acpSessionOperationKey(toolCall);
-          if (operationKey && answersAlone(toolCall.rawInput?.command) && sessionAllows.get(threadId)?.has(operationKey)) {
+          if (operationKey && sessionAllows.get(threadId)?.has(operationKey)) {
             const allow = optionFor("allow");
             if (allow) {
               return send({ jsonrpc: "2.0", id: msg.id, result: { outcome: { outcome: "selected", optionId: allow } } });
@@ -806,7 +808,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 : forSession
                   ? optionAlways ?? optionFor("allow")
                   : optionFor(want);
-            if (forSession && !optionAlways && optionId && operationKey) {
+            const shouldRemember = support.driverKind === "kiroAgent"
+              ? (forSession && optionId && operationKey)
+              : (forSession && !optionAlways && optionId && operationKey);
+            if (shouldRemember) {
               const remembered = sessionAllows.get(threadId) ?? new Set<string>();
               remembered.add(operationKey);
               sessionAllows.set(threadId, remembered);
@@ -879,6 +884,27 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             current.state.producedItem = true;
             for (const event of acpToolEndEvents(u, itemId, current.endedToolIds)) emit({ ...base(threadId, current.turnId), ...event });
           };
+          // Kiro V3 emits fetch_cloud_config as a spurious tool around session start (T3 filter)
+          if (support.driverKind === "kiroAgent") {
+            const kiroMeta = (u as Record<string, unknown>)?._meta as Record<string, unknown> | undefined;
+            const kiro = kiroMeta?.kiro as Record<string, unknown> | undefined;
+            const toolId = typeof kiro?.toolId === "string" ? kiro.toolId : undefined;
+            if (toolId === "fetch_cloud_config") {
+              // Track to also drop subsequent updates for same toolCallId
+              const key = `${String(p.sessionId ?? "")}\n${String((u as { toolCallId?: unknown }).toolCallId ?? "")}`;
+              (handleNotification as unknown as { _kiroCloud?: Set<string> })._kiroCloud ??= new Set<string>();
+              (handleNotification as unknown as { _kiroCloud: Set<string> })._kiroCloud.add(key);
+              return;
+            }
+            if ((u.sessionUpdate === "tool_call_update" || u.sessionUpdate === "tool_call_content_chunk")) {
+              const key = `${String(p.sessionId ?? "")}\n${String((u as { toolCallId?: unknown }).toolCallId ?? "")}`;
+              const set = (handleNotification as unknown as { _kiroCloud?: Set<string> })._kiroCloud;
+              if (set?.has(key)) {
+                if (finished) set.delete(key);
+                return;
+              }
+            }
+          }
           switch (u.sessionUpdate) {
             case "agent_message_chunk": {
               const content = u.content;
@@ -894,16 +920,21 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   alt: "Generated image",
                 });
               } else if (typeof delta === "string" && delta) {
+                let filteredDelta = delta;
+                if (support.driverKind === "kiroAgent" && filteredDelta.includes("[STEERING")) {
+                  filteredDelta = filteredDelta.split("[STEERING")[0].trimEnd();
+                  if (!filteredDelta) break;
+                }
                 const messageId = typeof u.messageId === "string" ? u.messageId : null;
                 if (support.resendsReasoningReply && messageId && messageId === current.state.textMessageId
-                    && isHermesReasoningReplay(delta, current.state.text)) break;
+                    && isHermesReasoningReplay(filteredDelta, current.state.text)) break;
                 current.state.textMessageId = messageId;
-                current.state.text += delta;
+                current.state.text += filteredDelta;
                 const trimmed = current.state.text.trimStart();
                 if (!trimmed.startsWith("<SYSTEM_MESSAGE") &&
                     !trimmed.startsWith("The following is a <SYSTEM_MESSAGE") &&
                     !trimmed.startsWith("<SYSTEM_NOTIFICATION")) {
-                  emit({ ...base(threadId, current.turnId), type: "content.delta", streamKind: "assistant_text", delta });
+                  emit({ ...base(threadId, current.turnId), type: "content.delta", streamKind: "assistant_text", delta: filteredDelta });
                 }
               }
               break;
@@ -1083,9 +1114,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const envFingerprint = createHash("sha256").update(JSON.stringify(spawnEnv)).digest("hex").slice(0, 16);
         const inheritedScopeFingerprint = narrowsNativeTools(turn.toolScope) && support.toolScopeCacheKey
           ? createHash("sha256").update(support.toolScopeCacheKey({ config: turnConfig, env, cwd })).digest("hex") : null;
+        const sessionMetaForContract = support.sessionMeta?.(turnConfig, cliTurn) ?? null;
         const processContract = [launch.command, launch.args ?? [], spawnArgs,
           support.sessionScopedApproval ? null : turnConfig.fullAuto === true, envFingerprint,
-          support.spawnFingerprint?.(spawnEnv, turnConfig) ?? null];
+          support.spawnFingerprint?.(spawnEnv, turnConfig) ?? null,
+          sessionMetaForContract ? JSON.stringify(sessionMetaForContract) : null];
         const contractKey = JSON.stringify([...processContract, cwd, turn.toolScope ?? null, inheritedScopeFingerprint]);
         const launchModel = support.sessionModelEnv && cliTurn.model && /^[\w.:/-]{1,200}$/u.test(cliTurn.model)
           && catalog.accountModels?.has(cliTurn.model) ? cliTurn.model : undefined;
@@ -1276,9 +1309,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               let loaded = false;
               if (cursor) {
                 try {
+                  const loadSessionMeta = support.sessionMeta?.(turnConfig, cliTurn) ?? null;
                   await request(
                     support.resumeMethod === "resume" ? "session/resume" : "session/load",
-                    { sessionId: cursor, cwd, mcpServers: support.mcpServersFromLaunch ? [] : mcpServers, ...selectionParams },
+                    { sessionId: cursor, cwd, mcpServers: support.mcpServersFromLaunch ? [] : mcpServers, ...selectionParams, ...(loadSessionMeta ? { _meta: loadSessionMeta } : {}) },
                     LOAD_SESSION_TIMEOUT,
                     (result) => {
                       if (result) {
@@ -1311,7 +1345,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 init = session.initResult;
                 continue;
               }
-              sessionAllows.delete(threadId);
+              if (support.driverKind !== "kiroAgent") sessionAllows.delete(threadId);
+              // For Kiro, persistent consent outlives a single session for the same thread.
               if (cursor) {
                 const recovery = recoveryPromptFor({
                   recoveryText: turn.recoveryText,
@@ -1321,7 +1356,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 promptTurn = { ...turn, text: recovery.text };
                 rebuiltFromReplay = recovery.replayed;
               }
-              await request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : mcpServers, ...selectionParams }, NEW_SESSION_TIMEOUT, (result) => {
+              const newSessionMeta = support.sessionMeta?.(turnConfig, cliTurn) ?? null;
+              await request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : mcpServers, ...selectionParams, ...(newSessionMeta ? { _meta: newSessionMeta } : {}) }, NEW_SESSION_TIMEOUT, (result) => {
                 session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
                 session.sessionKey = sessionKey;
                 receiveModelVariants(result, true);

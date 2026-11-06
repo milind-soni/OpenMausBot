@@ -61,12 +61,12 @@ export function acpShellRequest(isShellCommand: boolean, rawInput: unknown, laun
   return { command: isShellCommand ? acpPermissionCommand(rawInput, launchCwd) : undefined, commandLine: shellRequest(command, undefined).commandLine };
 }
 
-/** An ACP permission request's exact operation, for the driver's own session allow; null for a generic title with no input. */
+/** An ACP permission request's exact operation, for the driver's own session allow. */
 export function acpSessionOperationKey(toolCall: any): string | null {
   const rawInput = toolCall?.rawInput;
   const command = typeof rawInput?.command === "string" ? rawInput.command : undefined;
   const hasInput = rawInput && typeof rawInput === "object" && Object.keys(rawInput).length > 0;
-  if (!command && !hasInput) return null;
+  if (!command && !hasInput && !toolCall?.title && !toolCall?.kind && !toolCall?.locations) return null;
   const stable = (value: unknown): unknown =>
     Array.isArray(value)
       ? value.map(stable)
