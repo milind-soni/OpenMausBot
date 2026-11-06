@@ -180,7 +180,7 @@ test("New organization on ＋: only while this account runs a Team plan's organi
   const r = rail(), plan = { planCloudId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", canAdd: true, count: 2, max: 10 };
   assert.equal((await r.call("workspaces:places")).add.organization, false, "no Team plan's organizations: no such choice");
   r.w.state = session({ organizations: plan });
-  assert.deepEqual((await r.call("workspaces:places")).add, { cloud: true, link: true, address: false, organization: true });
+  assert.deepEqual((await r.call("workspaces:places")).add, { cloud: true, link: true, address: false, organization: true, local: false });
   r.w.state = session({ organizations: { ...plan, canAdd: false, blocked: "limit" } });
   assert.equal((await r.call("workspaces:places")).add.organization, true, "at the plan's limit it is still there, to say so");
   r.w.state = session({ organizations: { ...plan, canAdd: false, blocked: "off" } });
@@ -322,7 +322,7 @@ function preload(origin, { activation = false } = {}) {
 
 test("a Cloud's page gets the rail and the add sheet's narrow bridges; a circle, ＋ and checkout open only from the person's click", async () => {
   const page = preload(HOME);
-  assert.deepEqual(Object.keys(page.bridge.workspaces), ["state", "menu", "line", "places", "open", "add", "look", "color", "recolor", "remove", "makeHome", "onChanged"]);
+  assert.deepEqual(Object.keys(page.bridge.workspaces), ["state", "menu", "line", "places", "open", "add", "look", "color", "recolor", "remove", "makeHome", "onChanged", "local", "onNewLocal"]);
   assert.deepEqual(Object.keys(page.bridge.cloudAdd), ["state", "start", "reopen", "copyLink", "open", "interest", "sheet", "organization"]);
   await page.bridge.workspaces.places();
   await page.bridge.cloudAdd.state();
@@ -337,6 +337,9 @@ test("a Cloud's page gets the rail and the add sheet's narrow bridges; a circle,
   await assert.rejects(page.bridge.workspaces.recolor("vps", "rose"), /Choose a color/);
   await assert.rejects(page.bridge.workspaces.remove("old"), /Choose Remove from list/, "Remove from list only from the person's click");
   await assert.rejects(page.bridge.workspaces.makeHome("vps"), /Choose Make my home/, "a move starts only from the person's click");
+  await assert.rejects(page.bridge.workspaces.local.create("Work", "rose"), /Choose a name/, "a workspace of this computer's own only from the person's click");
+  await assert.rejects(page.bridge.workspaces.local.edit("profile:work", { name: "Office" }), /Choose a change/);
+  await assert.rejects(page.bridge.workspaces.local.remove("profile:work"), /Choose Remove/);
   await page.bridge.workspaces.look();
   assert.deepEqual(page.invoked.at(-1), ["workspaces:look"]);
   const clicked = preload(HOME, { activation: true });
@@ -353,7 +356,12 @@ test("a Cloud's page gets the rail and the add sheet's narrow bridges; a circle,
   assert.equal(page.bridge.cloudAccount, undefined, "never the account bridge");
   const local = preload(LOCAL);
   await local.bridge.workspaces.open("a");
-  assert.deepEqual(local.invoked, [["workspaces:open", "a"]], "this app's own page needs no click check");
+  await local.bridge.workspaces.local.create({ toString: () => "Work" }, "rose");
+  await local.bridge.workspaces.local.edit("profile:work", { name: "Office", color: "blue" });
+  await local.bridge.workspaces.local.edit("profile:work", { color: null });
+  await local.bridge.workspaces.local.remove("profile:work");
+  assert.deepEqual(JSON.parse(JSON.stringify(local.invoked)), [["workspaces:open", "a"], ["workspaces:local-new", "Work", "rose"], ["workspaces:local-edit", "profile:work", { name: "Office" }],
+    ["workspaces:local-edit", "profile:work", { color: null }], ["workspaces:local-remove", "profile:work"]], "this app's own page needs no click check, and only a name or a colour goes");
 });
 
 test("Remove from list on a server saved by hand: main forgets it here, by its own word for which one", async () => {
@@ -380,7 +388,7 @@ test("a place with inbox lines waiting says so on its circle, this computer's to
 test("once My Cloud is home, This Mac is a circle of its own, first, by its profile id: the frozen copy is never a place again", () => {
   const places = railPlaces({ saved: saved("home"), home: HOME, mine: HOME, state: session(), profiles: [{ id: "default" }] });
   assert.deepEqual(places.map(place => place.id), ["profile:default", "home", "a", "acme", "vps"]);
-  assert.deepEqual(places[0], { id: "profile:default", name: "This computer", color: null, kind: "computer", profile: "default", opens: true });
+  assert.deepEqual(places[0], { id: "profile:default", name: "This computer", color: null, kind: "computer", profile: "default", opens: true, paint: { swatch: null } });
   assert.equal(places.some(place => place.id === "local"), false, "nothing opens the frozen copy");
   assert.equal(places.find(place => place.id === "home").active, true, "My Cloud is the place on screen");
   const shown = railPlaces({ saved: saved("local"), home: HOME, mine: HOME, state: session(), profiles: [{ id: "default", active: true }] });
@@ -403,4 +411,57 @@ test("a profile's circle opens it by main's own word for it: only one main liste
   const older = rail({ places: () => railPlaces({ saved: saved(), home: HOME, mine: HOME, state: session(), profiles: [{ id: "default" }] }) });
   assert.throws(() => older.call("workspaces:open", "profile:default"), /isn't here/, "a main with no profiles opens none");
   assert.deepEqual(older.opened, []);
+});
+
+test("workspaces of this computer's own with names: first after My Cloud is home, else right after This computer; each with its name and colour; the one on screen marked", () => {
+  const rows = [{ id: "default", name: null, color: null, swatch: null }, { id: "work", name: "Work", color: "teal", swatch: "green", active: true }, { id: "lab", name: "Lab", color: null, swatch: null, settling: "Scout" }];
+  const home = railPlaces({ saved: saved("local"), home: HOME, mine: HOME, state: session(), profiles: rows });
+  assert.deepEqual(home.slice(0, 3), [
+    { id: "profile:default", name: "This computer", color: null, kind: "computer", profile: "default", opens: true, paint: { swatch: null } },
+    { id: "profile:work", name: "Work", color: "teal", kind: "computer", profile: "work", named: true, opens: true, paint: { swatch: "green" }, active: true },
+    { id: "profile:lab", name: "Lab", color: null, kind: "computer", profile: "lab", named: true, opens: true, paint: { swatch: null }, settling: "Scout" },
+  ]);
+  const local = { activeId: "local", environments: [] };
+  assert.deepEqual(railPlaces({ saved: local, home: null, state: null, profiles: [] }), [], "This computer alone: no rail, as ever");
+  const two = railPlaces({ saved: local, home: null, state: null, profiles: [{ id: "work", name: "Work", color: null, swatch: null }] });
+  assert.deepEqual(two.map(place => [place.id, place.active ?? false]), [["local", true], ["profile:work", false]], "This computer and Work: a rail of two, This computer on screen");
+  const inWork = railPlaces({ saved: local, home: null, state: null, profiles: [{ id: "work", name: "Work", color: null, swatch: null, active: true }], computerSettling: "Juno" });
+  assert.deepEqual(inWork.map(place => [place.id, place.active ?? false]), [["local", false], ["profile:work", true]], "Work on screen: This computer isn't marked too");
+  assert.equal(inWork[0].settling, "Juno", "This computer opens once Juno, in Work, finishes");
+});
+
+test("＋'s new workspace and a workspace's menu: only while main offers it, only for a workspace main listed, never a Cloud or another account's", async () => {
+  const made = [], opened = [], cancels = [], edits = [], removed = [];
+  let creatable = true;
+  const rows = () => [{ id: "default", name: null, color: null, swatch: null }, { id: "work", name: "Work", color: null, swatch: null }];
+  const local = { creatable: () => creatable, cancel: () => cancels.push(true),
+    create: (input) => { made.push(input); return input.name === "Work" ? { outcome: "taken" } : { outcome: "made", id: "lab" }; },
+    rename: (id, name) => { edits.push(["rename", id, name]); return { outcome: "saved" }; }, recolor: (id, color) => { edits.push(["recolor", id, color]); return { outcome: "saved" }; },
+    remove: async (id) => { removed.push(id); return { outcome: "removed" }; } };
+  const r = rail({ local, openProfile: async (id) => { opened.push(id); }, places: () => railPlaces({ saved: saved(), home: HOME, mine: HOME, state: session(), profiles: rows() }) });
+  assert.equal((await r.call("workspaces:places")).add.local, true);
+  assert.deepEqual(await r.call("workspaces:local-new", "Work", "rose"), { outcome: "taken" });
+  assert.deepEqual(await r.call("workspaces:local-new", { toString: () => "Lab" }, 7), { outcome: "made", id: "lab" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(made, [{ name: "Work", color: "rose" }, { name: "", color: null }], "only plain text reaches main");
+  assert.deepEqual(opened, ["lab"], "a new workspace opens next, by main's own switch");
+  assert.deepEqual(await r.call("workspaces:local-edit", "profile:work", { name: "Office" }), { outcome: "saved" });
+  assert.deepEqual(await r.call("workspaces:local-edit", "profile:default", { color: "violet" }), { outcome: "saved" });
+  assert.deepEqual(await r.call("workspaces:local-edit", "profile:default", { color: null }), { outcome: "saved" });
+  assert.deepEqual(edits, [["rename", "work", "Office"], ["recolor", "default", "violet"], ["recolor", "default", null]]);
+  assert.deepEqual(await r.call("workspaces:local-remove", "profile:work"), { outcome: "removed" });
+  assert.deepEqual(removed, ["work"]);
+  for (const id of ["home", "a", "local", "profile:../x", "profile:gone"]) {
+    assert.throws(() => r.call("workspaces:local-edit", id, { name: "X" }), /isn't here/, id);
+    assert.throws(() => r.call("workspaces:local-remove", id), /isn't here/, id);
+  }
+  await r.call("workspaces:open", "a");
+  assert.equal(cancels.length, 1, "another place clicked: a switch still waiting ends");
+  r.w.lists = false;
+  assert.throws(() => r.call("workspaces:local-edit", "profile:work", { name: "X" }), /only available/, "a place's page never renames one");
+  assert.deepEqual(await r.call("workspaces:local-new", "Notes", null), { outcome: "made", id: "lab" }, "this computer's own page names one from the Server menu");
+  r.w.trusted = false;
+  assert.throws(() => r.call("workspaces:local-new", "Notes", null), /only available/, "a Cloud's page never makes one");
+  creatable = false; r.w.trusted = true;
+  assert.throws(() => r.call("workspaces:local-new", "Notes", null), /isn't something to add/);
 });

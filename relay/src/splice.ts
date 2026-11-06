@@ -102,6 +102,7 @@ export class Session {
     this.ctx.heartbeat.track(this.phone);
     this.ctx.heartbeat.track(data);
     this.ctx.metrics.inc("relay_sessions_total");
+    this.ctx.metrics.peak("sessions_spliced", (this.ctx.hosts.spliced += 1));
     sendJson(this.phone, { t: "ready" });
   }
 
@@ -209,6 +210,7 @@ export class Session {
   }
 
   private finish(code: number): void {
+    if (this.state === "spliced") this.ctx.hosts.spliced -= 1;
     this.state = "closed";
     clearTimeout(this.openTimer);
     for (const dir of [this.toHost, this.toPhone]) clearTimeout(dir?.wedge);

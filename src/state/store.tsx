@@ -506,7 +506,7 @@ export interface InstanceInfo extends InstanceEndpointInfo {
   cliDefault?: string;
   cliCandidates?: string[];
   claudeAccount?: { configDir: string; signInCommand: string; signInShell: "powershell" | "sh"; isDefault: boolean };
-  freeUpSpace?: boolean; replyWaitMinutes?: number; modelsUnconfirmed?: true;
+  freeUpSpace?: boolean; replyWaitMinutes?: number; modelsUnconfirmed?: true; /** The app updated its own copy of this engine to this version lately. */ autoUpdated?: { version: string; at: number };
 }
 
 export type AppSettingsSection =

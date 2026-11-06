@@ -534,8 +534,10 @@ export function createHomeWindow(deps) {
       clearRenewal();
       if (await clean.open(profileShown)) {
         if (!wanted(token)) return;
+        // `away`: a Cloud's page may still be on its way (a click just before this one); this page's load replaces it.
+        const leaving = away || onScreen() || !shows(localOrigin());
         ensureWindow(); clearRetry(); screen = null; status = null; shown = null; away = false;
-        return showLocal(onScreen() || !shows(localOrigin()));
+        return showLocal(leaving);
       }
       profileShown = null;
       if (!wanted(token)) return;

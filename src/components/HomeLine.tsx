@@ -8,11 +8,11 @@ import { computerName } from "@/lib/places";
 import { setNotificationPlace } from "@/lib/notify";
 import { useStore } from "@/state/store";
 
-type Line = { kind: "left"; name: string } | { kind: "clean"; saved?: boolean } | { kind: "profile" };
+type Line = { kind: "left"; name: string } | { kind: "clean"; saved?: boolean } | { kind: "profile"; name?: string };
 
-/** The words for main's one line: a team this person is no longer in, that the clean workspace isn't where their bots went (`saved`: the account they moved with is signed in here too, one click away on the rail), or that a workspace of this computer's own opened from the rail is separate from My Cloud. */
+/** The words for main's one line: a team this person is no longer in, that the clean workspace isn't where their bots went (`saved`: the account they moved with is signed in here too, one click away on the rail), or that a workspace of this computer's own opened from the rail is separate from My Cloud (`name`: one added from ＋, separate from the rest). */
 export function homeLineText(line: Line, platform?: string): string {
-  if (line.kind === "profile") return t("homeLine.profile", { name: computerName({ profile: "default" }, platform) });
+  if (line.kind === "profile") return line.name ? t("homeLine.local", { name: line.name }) : t("homeLine.profile", { name: computerName({ profile: "default" }, platform) });
   if (line.kind === "clean") return t(line.saved ? "homeLine.cleanSaved" : "homeLine.clean");
   return t("homeLine.left", { name: line.name });
 }

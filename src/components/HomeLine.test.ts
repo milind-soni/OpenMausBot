@@ -96,3 +96,7 @@ it("in This Mac's own place, the line says it is separate from My Cloud, where t
   setLocale("pt-br");
   expect(homeLineText({ kind: "profile" }, "darwin")).toMatch(/^Este Mac começa do zero/);
 });
+
+it("in a workspace added from ＋, the line names it and says it is separate, with its own bots, chats and files", () => {
+  expect(homeLineText({ kind: "profile", name: "Work" }, "darwin")).toBe("Work starts fresh: a separate place on this computer, with its own bots, chats and files.");
+});

@@ -2,6 +2,7 @@
 import { findCliCandidates } from "../env-path.ts";
 import { installNpmEngine, npmAvailable, serverInstallFor, standaloneLookupPath } from "../engine-install.ts";
 import { installStandaloneEngine, isAppStandaloneCopy, type StandaloneInstalled } from "../engine-standalone.ts";
+import { pinnedNpmVersion } from "../engine-versions.ts";
 import { withEngineMemory } from "../engine-memory.ts";
 import { withEngineHomes } from "../engine-homes/engine-homes.ts";
 import { withLocalContext } from "../drivers/local-inject.ts";
@@ -345,7 +346,7 @@ export class ProviderRegistry {
         return (await this.appCopyAdvice(instanceId, driver, installed)) ?? true;
       }
       if (!server?.package) return false;
-      await installNpmEngine(server.package, { baseDir: this.enginesBaseDir, cli: cliDefaultOf(driver) });
+      await installNpmEngine(server.package, { baseDir: this.enginesBaseDir, cli: cliDefaultOf(driver), version: driver ? pinnedNpmVersion(driver.driverKind) : undefined });
       return true;
     } finally {
       this.forgetSnapshots();

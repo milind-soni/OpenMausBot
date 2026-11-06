@@ -603,10 +603,13 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       return { text: `send_voice_note is limited to 1000 characters; this one is ${text.length}. Shorten the note.`, isError: true };
     }
     try {
-      await api("/api/internal/voice-note", {
+      const r = await api("/api/internal/voice-note", {
         method: "POST",
         body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, text }),
       });
+      if (r.attached !== true || typeof r.file !== "string" || !r.file) {
+        return { text: "Voice note not sent: OpenMausBot did not confirm the audio was saved. Tell the person the note did not go through; do not say it is attached.", isError: true };
+      }
       return { text: "Voice note recorded. It will be attached to this turn's reply when the turn ends; the note text is also the visible caption." };
     } catch (error) {
       return { text: `Voice note not sent: ${error instanceof Error ? error.message : String(error)}`, isError: true };

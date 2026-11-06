@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { rm as removeDirectory } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { ToolResults, TOOL_RESULT_MAX_CHARS } from "./tool-results.ts";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { authorizeExternalRuntime, externalRuntimeIsActive, type ExternalRuntimeGrant } from "./external-runtime.ts";
 import { z } from "zod";
 import { selectReplay, replayToolCalls, DEFAULT_REBUILD_BYTES, MAX_SUMMARY_BYTES } from "./context-rebuild.ts";
@@ -87,7 +87,7 @@ import { emailSignInRoute } from "./routes/email-sign-in.ts";
 import { createPersonStop } from "./host/person-stop.ts";
 import { createTurnOrder } from "./host/turn-order.ts";
 import { createQueuedNotes, createWaitWords } from "./host/wait-words.ts";
-import { landTurnFiles, settleParkedFiles, type ParkedTurnAttachment } from "./host/turn-attachments.ts";
+import { landTurnFiles, parkedFilesKey, settleParkedFiles, takeParkedFiles, type ParkedTurnAttachment } from "./host/turn-attachments.ts";
 import { createReplyVoiceNotes } from "./host/reply-voice-notes.ts";
 import { runtimeRequestCardFields } from "./request-card.ts";
 import type { DirectSendInput, DirectSendReceipt } from "./direct-send.ts";
@@ -186,7 +186,7 @@ import { serveStatic } from "./static-files.ts";
 import { startUpkeep } from "./host/start-upkeep.ts";
 import { ComputerControl } from "./computer-control.ts";
 import { resetPathCache } from "./env-path.ts";
-import { registerEnginesBinDir } from "./engine-install.ts";
+import { registerEnginesBinDir } from "./engine-install.ts"; import { engineUpdatesFor } from "./engine-updates-host.ts";
 import { appendUsage, flushUsageLedger, queuedTurnTrigger, usageTriggerFor, type UsageRow, type UsageTrigger } from "./usage-ledger.ts"; import { createUsageAttribution } from "./usage-attribution.ts";
 import { createTraceRecorder } from "./usage-trace/recorder.ts";
 import { GroupUsageReader } from "./group-thread-usage.ts";
@@ -810,7 +810,7 @@ function customDomainStatus() {
 }
 const registry = new ProviderRegistry(BUILT_IN_DRIVERS, { statusFile: join(DATA_DIR, "providers", "engine-status.json") });
 const supportsApprovalMode = createApprovalModeSupport(registry);
-registerEnginesBinDir();
+registerEnginesBinDir(); const engineUpdates = engineUpdatesFor({ drivers: BUILT_IN_DRIVERS, turnRunning: () => store.bots.some((bot) => botHasActiveTurn(bot.id)) || store.groups.some(groupIsWorking) || Boolean(routines?.hasActiveRuns()), configuredClis: () => Object.values(providerConfigs()).flatMap((entry) => { const cli = (entry.config as { cli?: unknown } | undefined)?.cli; return typeof cli === "string" && cli ? [cli] : []; }), updated: () => { registry.forgetSnapshots(); broadcast({ kind: "config", ...configStatus() }); } });
 
 // Set only when a turn is admitted, never on queue or steer, so a second person's words cannot re-book the first person's turn.
 const turnTriggers = new Map<string, UsageTrigger>();
@@ -2307,9 +2307,7 @@ const pendingCancelledProviderHandshakes = new PendingTurnCancellations();
 
 const turnAttachmentsByTurn = new Map<string, Array<ParkedTurnAttachment>>();
 
-function turnAttachmentKey(threadId: string, turnId?: string): string {
-  return `${threadId}:${turnId ?? "active"}`;
-}
+const turnAttachmentKey = parkedFilesKey;
 
 function purgeTurnAttachmentsForThread(threadId: string): void {
   for (const [key, attachments] of turnAttachmentsByTurn) {
@@ -6415,9 +6413,9 @@ bus.subscribe((event: RuntimeEvent) => {
     lastReply.set(event.threadId, spoken.text);
   };
   const landParkedFiles = () => {
-    const key = turnAttachmentKey(event.threadId, event.turnId);
-    const { land, discard } = settleParkedFiles(turnAttachmentsByTurn.get(key) ?? [], redactSecretsInText, Boolean(goalCoordinatorTurn || ambiguousCoordinatorText));
-    turnAttachmentsByTurn.delete(key);
+    const { files, strays } = takeParkedFiles(turnAttachmentsByTurn, event.threadId, event.turnId);
+    if (strays.length) console.warn(`[turn-files] thread=${event.threadId} turn=${event.turnId ?? "none"} took files parked under ${strays.join(", ")}`);
+    const { land, discard } = settleParkedFiles(files, redactSecretsInText, Boolean(goalCoordinatorTurn || ambiguousCoordinatorText));
     for (const file of discard) deleteAttachment(file.path);
     landTurnFiles(store, { threadId: event.threadId, turnId: completedTurnId, ...(speaker ? { from: speaker } : {}) }, land, pushMessage);
   };
@@ -11882,7 +11880,7 @@ async function describeInstances() {
   return engines.map((instance) => {
     const entry = configs[instance.instanceId];
     const described = {
-      ...instance, ...testedAi.info(instance),
+      ...instance, ...testedAi.info(instance), ...engineUpdates.shown(instance.driverKind),
       ...instanceIcon(entry),
       ...(entry?.access ? { access: entry.access } : {}), ...(entry?.driver === "openai-compat" && typeof (entry.config as { replyWaitMinutes?: unknown } | undefined)?.replyWaitMinutes === "number" ? { replyWaitMinutes: (entry.config as { replyWaitMinutes: number }).replyWaitMinutes } : {}), ...(heldKeys?.refusal(instance.instanceId) ? { snapshot: { state: "unavailable" as const, reason: TRIAL_KEY_HELD } } : {}),
     };
@@ -14421,11 +14419,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             return json(res, 409, { error: "this turn has not started yet or already ended" });
           }
           const saved = saveAudio(Buffer.from(audio.bytes), audio.mime);
+          if (!existsSync(saved.path)) throw new Error("the voice note's audio file was not saved");
           const key = turnAttachmentKey(internalCapability.threadId, turnId);
           const current = turnAttachmentsByTurn.get(key) ?? [];
           current.push({ kind: "audio", path: saved.path, mime: saved.mime, text });
-          turnAttachmentsByTurn.set(key, current);
-          return json(res, 201, { attached: true });
+          turnAttachmentsByTurn.set(key, current); console.info(`[voice-note] parked thread=${internalCapability.threadId} turn=${turnId} file=${basename(saved.path)}`);
+          return json(res, 201, { attached: true, file: basename(saved.path) });
         } catch (error) {
           const failure = voiceNoteFailure(error);
           if (failure) return json(res, failure.status, failure.body);
@@ -15509,7 +15508,7 @@ server.listen(PORT, "127.0.0.1", async () => {
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
   personWaits.boot(); browserSweep.start(); startCloudTeamPolicy({ cloudHome: CLOUD_HOME, dataDir: DATA_DIR, managed: managedPolicy, sessions }); moveFreeze.hold(() => appTriggers.start(), () => void appTriggers.stop()); startCloudHomeConnectedApps({ cloudHome: CLOUD_HOME !== null, dataDir: DATA_DIR, cloudGrant: CLOUD_ENV.OMB_CLOUD_CONNECTED_APPS_GRANT, apply: (access) => { composio.setManagedBrokerAccess(access); broadcast({ kind: "config", ...configStatus() }); } });
   void afterFirstEngineRead().then(() => { if (builtInBrowserEnabled(cfg)) chromeLauncher.start(); });
-  followupsReady = true;
+  followupsReady = true; engineUpdates.start();
   drainQueuedSends();
   drainQueuedChannelSends();
   void cloudComputerPower.armRunning();

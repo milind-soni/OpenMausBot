@@ -90,3 +90,18 @@ test("signing out from the profile ends it as the place on screen: the next sign
   assert.deepEqual(w.went.at(-1), [CLOUD, CLOUD]);
   assert.equal(new URL(w.url).origin === LOCAL, false);
 });
+
+test("My Cloud clicked, then a workspace before My Cloud's page arrived: the workspace's page loads over it, so the last click wins", async () => {
+  const clean = profiles(), w = world({ clean });
+  await w.home.show();
+  await w.home.openProfile("default");
+  w.url = `${LOCAL}/`;
+  w.stall = () => true;
+  void w.home.show({ place: "cloud" });
+  await new Promise((resolve) => setImmediate(resolve));
+  w.url = `${LOCAL}/`;
+  w.local.length = 0;
+  assert.equal(await w.home.openProfile("default"), true);
+  assert.deepEqual(w.local, [true], "a load of its own, never left to the Cloud's page on its way");
+  assert.equal(w.home.profile(), "default");
+});
