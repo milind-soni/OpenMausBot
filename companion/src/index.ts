@@ -131,6 +131,9 @@ const watcher = createAddressWatcher({
   advertise: () => mdns.advertise(service()),
   withdraw: () => mdns.stop(),
   log: (line) => console.log(`bonjour: ${line}`),
+  // On a Mac a failed join is not papered over by the default-route
+  // membership, so a join that fails while an interface settles is retried.
+  failureRetries: process.platform === "darwin" ? 3 : 0,
 });
 
 const service = (): ServiceInfo => ({

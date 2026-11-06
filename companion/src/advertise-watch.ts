@@ -12,6 +12,10 @@ export interface AddressWatchOptions {
    * than pointing phones at addresses we no longer hold. */
   withdraw: () => Promise<void>;
   log?: (line: string) => void;
+  /** Extra ticks to retry an advertise that resolved false on the same
+   * network state before giving up until it changes. 0 (the default) gives up
+   * at once. */
+  failureRetries?: number;
 }
 
 export interface AddressWatcher {
@@ -31,6 +35,8 @@ export function createAddressWatcher(options: AddressWatchOptions): AddressWatch
   let known: string | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
   let inflight = false;
+  let failedKey: string | null = null;
+  let failures = 0;
 
   const check = async (): Promise<void> => {
     // `advertise` withdraws and rebinds a socket; a tick that lands meanwhile
@@ -38,6 +44,10 @@ export function createAddressWatcher(options: AddressWatchOptions): AddressWatch
     if (inflight) return;
     const current = [...options.addresses()].sort();
     const key = `${options.name?.() ?? ""}\n${current.join(",")}`;
+    if (key !== failedKey) {
+      failedKey = key;
+      failures = 0;
+    }
     if (key === known) return;
     inflight = true;
     try {
@@ -51,9 +61,11 @@ export function createAddressWatcher(options: AddressWatchOptions): AddressWatch
             ? `advertising on ${current.join(", ")}`
             : "could not advertise — pairing by typed address still works",
         );
+        if (!ok && failures < (options.failureRetries ?? 0)) {
+          failures += 1;
+          return;
+        }
       }
-      // Recorded even when advertising failed: the failure is tied to this
-      // network state, so only the next change retries.
       known = key;
     } catch (error) {
       // A throw is logged and not recorded, and the watcher survives it.
