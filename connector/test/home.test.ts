@@ -130,7 +130,8 @@ describe("the home on an own server", () => {
     const f = fixture();
     await started(f, D);
     const spec = f.docker.container("mausbot-home")!.spec;
-    const secretsDir = join(f.state.dir, "home-secrets");
+    // The host's path as Docker reports the state volume's mount point, with a / like any Linux path.
+    const secretsDir = `${f.state.dir}/home-secrets`;
     expect(spec).toEqual(homeSpec(D, env, SECCOMP, { secretsDir, dropsCapabilities: true }));
     expect(JSON.stringify(spec)).not.toContain(SECRET);
     expect(JSON.stringify(spec)).not.toContain(RELAY);
