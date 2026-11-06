@@ -360,7 +360,7 @@ export function defaultHostName(machine = hostname()): string {
 /** macOS point-to-point tunnels: utun (every VPN, Tailscale, tun2socks),
  * ipsec, ppp. Multicast cannot cross them, and on macOS 27 closing a socket
  * that held memberships on a utun that came or went hung the kernel and
- * panicked the Mac (#2513). Typed-address and tailnet pairing do not use mDNS. */
+ * panicked the Mac. Typed-address and tailnet pairing do not use mDNS. */
 const MAC_TUNNEL_INTERFACE = /^(utun|ipsec|ppp)\d*$/i;
 
 export function advertisableAddresses(interfaces = networkInterfaces(), platform = process.platform): string[] {

@@ -522,7 +522,7 @@ const ipv4 = (address: string, internal = false): NetworkInterfaceInfoIPv4 => ({
 });
 
 describe("advertisableAddresses", () => {
-  // The Mac from #2513: Wi-Fi plus a mesh VPN, Tailscale and a tun2socks device.
+  // A reported Mac: Wi-Fi plus a mesh VPN, Tailscale and a tun2socks device.
   const mac = {
     en0: [ipv4("192.168.1.42")],
     utun3: [ipv4("10.20.30.40")],
