@@ -1,14 +1,18 @@
 // Runs fleet.ts plans as root with fixed argument lists, or prints them for a root shell; never a shell command from user input.
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { appendFileSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync } from "node:fs";
 import { posix } from "node:path";
 import { writeFileAtomic } from "./atomic.ts";
 import { unstableInstallWarning } from "./service-unit.ts";
+import { assertWorkspaceHost, workspaceHostFor } from "./fleet-tenancy.ts";
+import { brandCreateNotes, planCreateBrand, planFleetBrand, resolveCreateBrandJson } from "./fleet-brand.ts";
+import { planFleetRates, runFleetBilling, snapshotBeforeDelete } from "./fleet-billing.ts";
+import { meterTenantPeople, tenantIo, type PeopleResult } from "./fleet-tenant-io.ts";
+import { TWO_DECIMAL_CURRENCIES, type FleetReseller, type RateSet } from "./fleet-reseller.ts";
 import {
   applySignIn,
   assertManagedWorkspace,
   assertSlug,
-  assertUnixUser,
   createPlan,
   deletePlan,
   describeSteps,
@@ -29,10 +33,46 @@ import {
   type FleetStep,
 } from "./fleet.ts";
 
+export interface BrandPatch {
+  name?: string;
+  tagline?: string;
+  accent?: string;
+  supportUrl?: string;
+}
+
+export const BRAND_FIELDS = ["name", "tagline", "accent", "logo", "favicon", "supportUrl"] as const;
+export type BrandField = (typeof BRAND_FIELDS)[number];
+
+/** Rates in minor units, as `fleet rates` flags name them. */
+export interface RatesPatch {
+  wholesale?: Partial<RateSet>;
+  retail?: Partial<RateSet>;
+  overrides?: Record<string, Partial<RateSet>>;
+  clearOverrides?: string[];
+}
+
 export interface FleetInput {
-  action: "init" | "create" | "list" | "users" | "providers" | "suspend" | "resume" | "delete" | "upgrade";
+  action: "init" | "create" | "list" | "users" | "providers" | "suspend" | "resume" | "delete" | "upgrade" | "brand" | "billing" | "rates";
   slug?: string;
   domain?: string;
+  /** `create --host`: a custom web address instead of `<slug>.<domain>`. */
+  host?: string;
+  resellerName?: string;
+  /** `init` and `rates`: ISO 4217 code. */
+  currency?: string;
+  /** `brand --default` targets the reseller's default brand; otherwise `slug` names the workspace. */
+  brandDefault?: boolean;
+  brandPatch?: BrandPatch;
+  brandClear?: BrandField[];
+  /** A file path or an https URL; an agent request carries a data URI instead. */
+  logoSource?: string;
+  faviconSource?: string;
+  /** `billing`: `YYYY-MM`, UTC. */
+  month?: string;
+  csv?: boolean;
+  detail?: boolean;
+  ratesPatch?: RatesPatch;
+  licenseKeyFile?: string;
   /** The operator's Unix user: the one workspace allowed to talk to the fleet agent. */
   operator?: string;
   admins: string[];
@@ -68,6 +108,8 @@ export interface FleetIo {
 
 export interface FleetUsageTotals { turns: number; costUsd: number | null; billableUsd: null }
 
+export type Entitlements = (feature: string) => boolean;
+
 export interface FleetDeps {
   isRoot(): boolean;
   run(argv: string[]): Promise<{ code: number | null; output: string }>;
@@ -79,118 +121,9 @@ export interface FleetDeps {
   appendOnce(path: string, line: string): void;
   remove(path: string): void;
   health(url: string, timeoutMs: number): Promise<boolean>;
-}
-
-// Tenant-controlled ancestors can be renamed between any two filesystem calls: the boundary is dropping ALL root authority
-// before I/O, not a preceding lstat. The checks also reject visible symlinks, shared inodes and special files.
-const TENANT_IO = String.raw`
-const fs = require("node:fs");
-const path = require("node:path");
-const { randomUUID } = require("node:crypto");
-const request = JSON.parse(fs.readFileSync(0, "utf8"));
-const { uid, gid, home, file, action, content, mode } = request;
-if (process.getuid() === 0) {
-  process.setgroups([]);
-  process.setgid(gid);
-  process.setuid(uid);
-}
-if (process.getuid() !== uid || process.getgid() !== gid || uid === 0 || gid === 0) throw Error("could not drop fleet file privileges");
-const limit = 4 * 1024 * 1024;
-const check = (stat, directory) => {
-  if (stat.uid !== uid || (directory ? !stat.isDirectory() : !stat.isFile() || stat.nlink !== 1)) throw Error("unsafe workspace file or directory");
-};
-const totals = { turns: 0, costUsd: null, billableUsd: null };
-let cursor = home;
-try {
-  check(fs.lstatSync(cursor), true);
-  for (const part of path.relative(home, path.dirname(file)).split(path.sep).filter(Boolean)) {
-    cursor = path.join(cursor, part);
-    check(fs.lstatSync(cursor), true);
-  }
-} catch (error) {
-  if (action !== "usage" || error.code !== "ENOENT") throw error;
-  process.stdout.write(JSON.stringify(totals));
-  process.exit(0);
-}
-let result = null;
-if (action === "mkdir") {
-  try { fs.mkdirSync(file, { mode }); } catch (error) { if (error.code !== "EEXIST") throw error; }
-  check(fs.lstatSync(file), true);
-} else if (action === "read" || action === "usage") {
-  let fd;
-  try { fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK); }
-  catch (error) { if (error.code !== "ENOENT") throw error; }
-  if (fd !== undefined) {
-    try {
-      const stat = fs.fstatSync(fd);
-      check(stat, false);
-      if (stat.size > limit) throw Error("workspace file exceeds 4 MiB");
-      const data = Buffer.alloc(limit + 1);
-      let size = 0;
-      while (size < data.length) { const read = fs.readSync(fd, data, size, data.length - size, null); if (!read) break; size += read; }
-      if (size > limit) throw Error("workspace file exceeds 4 MiB");
-      result = data.subarray(0, size).toString("utf8");
-    } finally { fs.closeSync(fd); }
-  }
-  if (action === "usage") {
-    const to = Date.parse(content);
-    const date = new Date(to);
-    const from = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
-    // Scan one bounded month's text without retaining rows or allocating groups.
-    const text = result || "";
-    for (let offset = 0; offset < text.length;) {
-      const end = text.indexOf("\n", offset);
-      const line = text.slice(offset, end < 0 ? text.length : end);
-      offset = end < 0 ? text.length : end + 1;
-      let row;
-      try { row = JSON.parse(line); } catch { continue; }
-      if (!row || typeof row !== "object" || typeof row.at !== "string" || typeof row.botId !== "string" || typeof row.model !== "string" || typeof row.input !== "number" || typeof row.output !== "number" || !row.trigger || typeof row.trigger !== "object" || typeof row.trigger.kind !== "string") continue;
-      const at = Date.parse(row.at);
-      if (!(at >= from && at <= to)) continue;
-      totals.turns++;
-      if (typeof row.costUsd === "number" && Number.isFinite(row.costUsd) && row.costUsd >= 0) {
-        const sum = (totals.costUsd || 0) + row.costUsd;
-        if (!Number.isFinite(sum)) throw Error("workspace usage total exceeds numeric range");
-        totals.costUsd = sum;
-      }
-    }
-    result = totals;
-  }
-} else if (action === "write") {
-  if (Buffer.byteLength(content) > limit) throw Error("workspace file exceeds 4 MiB");
-  try { check(fs.lstatSync(file), false); } catch (error) { if (error.code !== "ENOENT") throw error; }
-  const temp = file + ".fleet-" + randomUUID();
-  let fd;
-  try {
-    fd = fs.openSync(temp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, mode);
-    fs.writeFileSync(fd, content);
-    fs.fsyncSync(fd);
-    fs.closeSync(fd); fd = undefined;
-    fs.renameSync(temp, file);
-  } finally {
-    if (fd !== undefined) fs.closeSync(fd);
-    try { fs.unlinkSync(temp); } catch (error) { if (error.code !== "ENOENT") throw error; }
-  }
-} else throw Error("unknown fleet file operation");
-process.stdout.write(JSON.stringify(result));
-`;
-
-function tenantIo(owner: string, file: string, action: "read" | "write" | "mkdir" | "usage", content?: string, mode?: number): string | null | FleetUsageTotals {
-  assertUnixUser(owner);
-  const options = { encoding: "utf8" as const, timeout: 5_000, killSignal: "SIGKILL" as const, cwd: "/", env: { PATH: "/usr/bin:/bin" }, stdio: ["pipe", "pipe", "pipe"] as ["pipe", "pipe", "pipe"] };
-  const account = execFileSync("/usr/bin/getent", ["passwd", owner], { ...options, maxBuffer: 8192 }).trim().split(":");
-  const uid = Number(account[2]);
-  const gid = Number(account[3]);
-  const home = account[5];
-  if (account.length !== 7 || account[0] !== owner || !Number.isSafeInteger(uid) || uid <= 0 || !Number.isSafeInteger(gid) || gid <= 0 || !home?.startsWith("/") || posix.normalize(home) !== home || !file.startsWith(`${home}/`) || posix.normalize(file) !== file) {
-    throw new Error(`unsafe filesystem identity or path for ${owner}`);
-  }
-  try {
-    return JSON.parse(execFileSync(process.execPath, ["--eval", TENANT_IO], { ...options, maxBuffer: action === "usage" ? 8192 : 32 * 1024 * 1024, input: JSON.stringify({ uid, gid, home, file, action, content, mode }) })) as string | null | FleetUsageTotals;
-  } catch {
-    // Do not repeat helper stderr: tenant-controlled file contents may be secret.
-    throw new Error(`could not ${action} workspace file as ${owner}: check ownership, links, file size and permissions`);
-  }
+  people?(dataDir: string, owner: string, month: string, maxUsers?: number): Promise<PeopleResult>;
+  entitlements?(licenseKey: string | undefined): Promise<Entitlements>;
+  readBytes?(path: string): Uint8Array | null;
 }
 
 export function defaultFleetDeps(): FleetDeps {
@@ -213,6 +146,8 @@ export function defaultFleetDeps(): FleetDeps {
       }),
     pathExists: (path) => { try { lstatSync(path); return true; } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; } },
     readText: (path, owner) => owner ? tenantIo(owner, path, "read") as string | null : (existsSync(path) ? readFileSync(path, "utf8") : null),
+    readBytes: (path) => (existsSync(path) ? readFileSync(path) : null),
+    people: (dataDir, owner, month, maxUsers) => meterTenantPeople(dataDir, owner, month, maxUsers),
     usage: (dataDir, owner, now) => {
       const at = now.toISOString();
       return tenantIo(owner, posix.join(dataDir, "usage", `${at.slice(0, 7)}.jsonl`), "usage", at) as FleetUsageTotals;
@@ -303,7 +238,8 @@ export function planFleetAction(input: FleetInput, deps: FleetDeps): FleetStep[]
       const existing = deps.readText(layout.registryFile);
       if (existing !== null && !input.yes) throw new Error(`${layout.registryFile} exists; pass --yes to rewrite the template unit and fence (workspaces are kept)`);
       const kept = existing !== null ? parseRegistry(existing) : undefined;
-      const plan = initPlan({ domain: input.domain, node: input.node, script: input.script, operator: input.operator ?? kept?.operator, layout });
+      const reseller = resellerFor(input, kept?.reseller);
+      const plan = initPlan({ domain: input.domain, node: input.node, script: input.script, operator: input.operator ?? kept?.operator, ...(reseller ? { reseller } : {}), layout });
       if (kept) {
         // Reinitializing templates must not erase reservations or open sibling ports.
         const registry = { ...kept, ...plan.registry, workspaces: kept.workspaces, nextPort: kept.nextPort };
@@ -321,23 +257,31 @@ export function planFleetAction(input: FleetInput, deps: FleetDeps): FleetStep[]
       assertSlug(input.slug);
       const registry = loadRegistry(layout, deps);
       if (registry.workspaces[input.slug]) throw new Error(`workspace "${input.slug}" already exists`);
+      assertWorkspaceHost({ registry, slug: input.slug, host: input.host, portalUrl: input.portalUrl });
       for (const path of [workspaceHome(layout, input.slug), posix.join(layout.instancesDir, `${input.slug}.env`), posix.join(layout.caddyDir, `${input.slug}.caddy`), posix.join(posix.dirname(layout.unitFile), `openmausbot@${input.slug}.service.d`)]) {
         if (deps.pathExists(path)) throw new Error(`workspace path already exists: ${path}; recover or remove it explicitly before provisioning a fresh workspace`);
       }
-      const brandJson = input.brandJson ?? (input.brandFile ? deps.readText(input.brandFile) : undefined);
-      if (input.brandFile && brandJson === null) throw new Error(`${input.brandFile} not found`);
-      if (brandJson) JSON.parse(brandJson);
+      const brandInput = { registry, brandFile: input.brandFile, brandJson: input.brandJson };
+      const brandJson = resolveCreateBrandJson(brandInput, deps);
+      const brand = planCreateBrand({ ...brandInput, layout, slug: input.slug }, deps);
       const anthropicKey = input.anthropicKey?.trim() || (input.anthropicKeyFile ? deps.readText(input.anthropicKeyFile)?.trim() : undefined);
       if (input.anthropicKeyFile && !anthropicKey) throw new Error(`${input.anthropicKeyFile} is missing or empty`);
-      return createPlan({
+      const plan = createPlan({
         registry,
         slug: input.slug,
+        host: workspaceHostFor(registry, input.slug, input.host),
+        brand,
         seed: { admins: input.admins, members: input.members, ...(anthropicKey ? { anthropicKey } : {}), ...(input.anthropicUrl ? { anthropicUrl: input.anthropicUrl } : {}), ...(input.portalUrl ? { portalUrl: input.portalUrl } : {}), ...(input.cap !== undefined ? { monthlyCapUsd: input.cap } : {}), ...(brandJson ? { brandJson } : {}), openrouterKey: input.openrouterKey, openrouterUrl: input.openrouterUrl, openrouterModels: input.openrouterModels, openrouterDefault: input.openrouterDefault },
         ...(input.licenseKey ? { licenseKey: input.licenseKey } : {}),
         ...(input.memory ? { memoryMax: input.memory } : {}),
         layout,
-      }).steps;
+      });
+      return [...plan.steps, ...brandCreateNotes({ registry, licenseKey: input.licenseKey }).map((text): FleetStep => ({ kind: "note", text }))];
     }
+    case "brand":
+      return planFleetBrand(input, deps);
+    case "rates":
+      return planFleetRates(input, deps);
     case "providers": {
       if (!input.slug) throw new Error("fleet providers needs a workspace name");
       assertSlug(input.slug);
@@ -396,8 +340,19 @@ export function planFleetAction(input: FleetInput, deps: FleetDeps): FleetStep[]
     case "upgrade":
       return upgradePlan({ registry: loadRegistry(layout, deps) });
     case "list":
+    case "billing":
       return [];
   }
+}
+
+function resellerFor(input: Pick<FleetInput, "resellerName" | "currency">, kept: FleetReseller | undefined): FleetReseller | undefined {
+  if (input.resellerName === undefined && input.currency === undefined) return kept;
+  const name = input.resellerName ?? kept?.name;
+  if (!name) throw new Error("--currency needs --reseller-name the first time");
+  const currency = input.currency ?? kept?.currency ?? "USD";
+  if (!TWO_DECIMAL_CURRENCIES.has(currency)) throw new Error(`--currency ${currency} is not supported; use a currency with two decimals, such as USD, EUR or GBP`);
+  const zero: RateSet = { workspaceMonthMinor: 0, userMonthMinor: 0 };
+  return { ...kept, name, currency, wholesale: kept?.wholesale ?? zero, retail: kept?.retail ?? zero };
 }
 
 /** Preserve the reservation and any account checkpoint after a failed create. */
@@ -435,6 +390,8 @@ export async function runFleetCommand(input: FleetInput, io: FleetIo, deps: Flee
       }
       return 0;
     }
+    if (input.action === "billing") return await runFleetBilling(input, io, deps);
+    if (input.action === "delete" && input.yes && asRoot) await snapshotBeforeDelete(input, deps, new Date());
     const steps = planFleetAction(input, deps);
     if (!asRoot) return printPlan(steps, io, input.dryRun ? "dry run" : "not running as root");
     try {

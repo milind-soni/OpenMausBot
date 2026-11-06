@@ -1,6 +1,8 @@
 // Many client workspaces on one Linux server, each its own OS user and `openmausbot@<slug>` service. This module only plans:
 // it renders files and fixed argument lists as steps, and never builds a shell command string.
 import { posix } from "node:path";
+import { parseEvents, parseReseller, parseRetailOverride, type FleetReseller, type FleetWorkspaceEvent, type FleetWorkspaceStatus, type RateSet } from "./fleet-reseller.ts";
+import { recordWorkspaceEvent } from "./fleet-metering.ts";
 
 const { join } = posix;
 
@@ -19,6 +21,10 @@ export interface FleetLayout {
   fenceUnitFile: string;
   caddyDir: string;
   caddyfile: string;
+  /** Root-owned reseller brand files, one merged file per workspace. */
+  brandsDir: string;
+  /** Root-owned billing records that must outlive a workspace. */
+  billingDir: string;
   homesDir: string;
   agentUnitFile: string;
   socketPath: string;
@@ -36,6 +42,8 @@ export function fleetLayout(root = "/"): FleetLayout {
     fenceUnitFile: at("etc", "systemd", "system", "openmausbot-fence.service"),
     caddyDir: at("etc", "caddy", "omb.d"),
     caddyfile: at("etc", "caddy", "Caddyfile"),
+    brandsDir: at("etc", "openmausbot", "brands"),
+    billingDir: at("var", "lib", "openmausbot-billing"),
     homesDir: at("var", "lib", "openmausbot"),
     agentUnitFile: at("etc", "systemd", "system", "openmausbot-fleet.service"),
     socketPath: at("run", "openmausbot", "fleet.sock"),
@@ -73,10 +81,14 @@ export interface FleetWorkspace {
   host: string;
   port: number;
   webhookPort: number;
-  status: "running" | "suspended" | "provisioning" | "error" | "retained";
+  status: FleetWorkspaceStatus;
   createdAt: string;
   /** Incomplete provisioning keeps its fence once the Unix account exists. */
   accountCreated?: boolean;
+  /** Status changes, oldest first, at most 100; billing reads them to know when the workspace ran. */
+  events?: FleetWorkspaceEvent[];
+  /** Retail rates for this workspace that replace the reseller's, field by field. */
+  retailOverride?: Partial<RateSet>;
 }
 
 export interface FleetRegistry {
@@ -85,6 +97,8 @@ export interface FleetRegistry {
   nextPort: number;
   /** The Unix user whose workspace may drive the fleet agent. */
   operator?: string;
+  /** Present when this server's workspaces are resold under one name. */
+  reseller?: FleetReseller;
   workspaces: Record<string, FleetWorkspace>;
 }
 
@@ -103,8 +117,22 @@ export function parseRegistry(text: string): FleetRegistry {
     domain: record.domain,
     nextPort: record.nextPort,
     ...(typeof record.operator === "string" ? { operator: record.operator } : {}),
-    workspaces: { ...record.workspaces },
+    ...(record.reseller !== undefined ? { reseller: parseReseller(record.reseller) } : {}),
+    workspaces: Object.fromEntries(Object.entries(record.workspaces).map(([slug, workspace]) => [slug, parseWorkspaceFields(slug, workspace)])),
   };
+}
+
+function parseWorkspaceFields(slug: string, workspace: FleetWorkspace): FleetWorkspace {
+  if (!workspace || typeof workspace !== "object") return workspace;
+  const record = workspace as unknown as Record<string, unknown>;
+  const checked: Partial<FleetWorkspace> = {};
+  try {
+    if (Object.hasOwn(record, "events")) checked.events = parseEvents(record.events);
+    if (Object.hasOwn(record, "retailOverride")) checked.retailOverride = parseRetailOverride(record.retailOverride);
+  } catch (error) {
+    throw new Error(`workspace "${slug}": ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return { ...workspace, ...checked };
 }
 
 export function fleetUser(slug: string): string {
@@ -232,7 +260,10 @@ export function caddyImportLine(layout = fleetLayout()): string {
   return `import ${layout.caddyDir}/*.caddy`;
 }
 
-export function instanceEnv(input: { workspace: FleetWorkspace; dataDir: string; licenseKey?: string; portalUrl?: string }): string {
+/** `KEY=value` lines a brand adds to the instance environment; one line each, so a value can never smuggle in another. */
+const ENV_LINE = /^[A-Z][A-Z0-9_]*=[^\r\n]*$/;
+
+export function instanceEnv(input: { workspace: FleetWorkspace; dataDir: string; licenseKey?: string; portalUrl?: string; extra?: string[] }): string {
   const lines = [
     `OMB_DATA_DIR=${input.dataDir}`,
     `OMB_PORT=${input.workspace.port}`,
@@ -241,6 +272,10 @@ export function instanceEnv(input: { workspace: FleetWorkspace; dataDir: string;
   ];
   if (input.licenseKey) lines.push(`OMB_LICENSE_KEY=${input.licenseKey}`);
   if (input.portalUrl) lines.push(`OMB_ADMIN_URL=${input.portalUrl}`, `OMB_ADMIN_WORKSPACE=${input.workspace.slug}`);
+  for (const extra of input.extra ?? []) {
+    if (!ENV_LINE.test(extra)) throw new Error("an instance environment line must be KEY=value on one line");
+    lines.push(extra);
+  }
   return lines.join("\n") + "\n";
 }
 
@@ -294,11 +329,11 @@ export function assertUnixUser(name: string): void {
   if (!/^[a-z_][a-z0-9_-]{0,31}$/.test(name)) throw new Error(`"${name}" is not a Unix user name`);
 }
 
-export function initPlan(input: { domain: string; node: string; script: string; operator?: string; layout?: FleetLayout }): { steps: FleetStep[]; registry: FleetRegistry } {
+export function initPlan(input: { domain: string; node: string; script: string; operator?: string; reseller?: FleetReseller; layout?: FleetLayout }): { steps: FleetStep[]; registry: FleetRegistry } {
   assertDomain(input.domain);
   if (input.operator) assertUnixUser(input.operator);
   const layout = input.layout ?? fleetLayout();
-  const registry: FleetRegistry = { ...emptyRegistry(input.domain.toLowerCase()), ...(input.operator ? { operator: input.operator } : {}) };
+  const registry: FleetRegistry = { ...emptyRegistry(input.domain.toLowerCase()), ...(input.operator ? { operator: input.operator } : {}), ...(input.reseller ? { reseller: parseReseller(input.reseller) } : {}) };
   const steps: FleetStep[] = [
     { kind: "mkdir", path: layout.etcDir, mode: 0o755 },
     { kind: "mkdir", path: layout.instancesDir, mode: 0o700 },
@@ -321,10 +356,19 @@ export function initPlan(input: { domain: string; node: string; script: string; 
   return { steps, registry };
 }
 
+/** What a brand adds to a new workspace: root-owned files, and environment lines the workspace cannot edit. */
+export interface CreateBrand {
+  steps: FleetStep[];
+  env: string[];
+}
+
 export function createPlan(input: {
   registry: FleetRegistry;
   slug: string;
   seed: WorkspaceSeed;
+  /** The web address, already checked by `assertWorkspaceHost`. */
+  host?: string;
+  brand?: CreateBrand;
   licenseKey?: string;
   memoryMax?: string;
   now?: Date;
@@ -349,18 +393,20 @@ export function createPlan(input: {
   if (input.memoryMax !== undefined && !/^\d+[MG]$/.test(input.memoryMax)) throw new Error("--memory takes a size like 1G or 512M");
   const layout = input.layout ?? fleetLayout();
   const { port, next } = allocatePort(input.registry);
-  const workspace: FleetWorkspace = {
+  const createdAt = (input.now ?? new Date()).toISOString();
+  const draft: FleetWorkspace = {
     slug: input.slug,
-    host: `${input.slug}.${input.registry.domain}`,
+    host: input.host ?? `${input.slug}.${input.registry.domain}`,
     port,
     webhookPort: port + 1,
     status: "running",
-    createdAt: (input.now ?? new Date()).toISOString(),
+    createdAt,
   };
+  const workspace = recordWorkspaceEvent(draft, "running", createdAt);
   const registry: FleetRegistry = { ...input.registry, nextPort: next, workspaces: { ...input.registry.workspaces, [workspace.slug]: workspace } };
   const reserved = (accountCreated: boolean): FleetRegistry => ({
     ...registry,
-    workspaces: { ...registry.workspaces, [workspace.slug]: { ...workspace, status: "provisioning", accountCreated } },
+    workspaces: { ...registry.workspaces, [workspace.slug]: { ...draft, status: "provisioning", accountCreated } },
   });
   const user = fleetUser(workspace.slug);
   const home = workspaceHome(layout, workspace.slug);
@@ -382,7 +428,8 @@ export function createPlan(input: {
       } } }, null, 2)}\n` },
     ] : []),
     ...(input.seed.brandJson ? [{ kind: "write" as const, path: join(dataDir, "brand.json"), content: input.seed.brandJson, mode: 0o600, owner: user }] : []),
-    { kind: "write", path: join(layout.instancesDir, `${workspace.slug}.env`), content: instanceEnv({ workspace, dataDir, licenseKey: input.licenseKey, portalUrl: input.seed.portalUrl }), mode: 0o600 },
+    ...(input.brand?.steps ?? []),
+    { kind: "write", path: join(layout.instancesDir, `${workspace.slug}.env`), content: instanceEnv({ workspace, dataDir, licenseKey: input.licenseKey, portalUrl: input.seed.portalUrl, extra: input.brand?.env }), mode: 0o600 },
     ...(input.memoryMax
       ? [
           { kind: "mkdir" as const, path: join(layout.unitFile.replace(/openmausbot@\.service$/, ""), `openmausbot@${workspace.slug}.service.d`), mode: 0o755 },
@@ -398,6 +445,7 @@ export function createPlan(input: {
     { kind: "run", argv: ["systemctl", "reload", "caddy"], why: `serve https://${workspace.host} and fetch its certificate` },
     { kind: "write", path: layout.registryFile, content: `${JSON.stringify(registry, null, 2)}\n`, mode: 0o600 },
     { kind: "note", text: `https://${workspace.host} is ready; ${input.seed.admins[0]} signs in with an emailed code` },
+    ...(workspace.host !== `${workspace.slug}.${input.registry.domain}` ? [{ kind: "note" as const, text: `point ${workspace.host} at this server (an A/AAAA record); its certificate is fetched once the name resolves here` }] : []),
   ];
   return { steps, registry, workspace };
 }
@@ -407,18 +455,18 @@ export function assertManagedWorkspace(workspace: FleetWorkspace): void {
   if (workspace.status !== "running" && workspace.status !== "suspended") throw new Error(`workspace "${workspace.slug}" is ${workspace.status} and requires operator recovery`);
 }
 
-function withStatus(registry: FleetRegistry, slug: string, status: "running" | "suspended"): { registry: FleetRegistry; workspace: FleetWorkspace } {
+function withStatus(registry: FleetRegistry, slug: string, status: "running" | "suspended", now: Date): { registry: FleetRegistry; workspace: FleetWorkspace } {
   assertSlug(slug);
   const current = registry.workspaces[slug];
   if (!current) throw new Error(`no workspace "${slug}"`);
   assertManagedWorkspace(current);
-  const workspace = { ...current, status };
+  const workspace = recordWorkspaceEvent({ ...current, status }, status, now.toISOString());
   return { registry: { ...registry, workspaces: { ...registry.workspaces, [slug]: workspace } }, workspace };
 }
 
-export function suspendPlan(input: { registry: FleetRegistry; slug: string; layout?: FleetLayout }): { steps: FleetStep[]; registry: FleetRegistry } {
+export function suspendPlan(input: { registry: FleetRegistry; slug: string; now?: Date; layout?: FleetLayout }): { steps: FleetStep[]; registry: FleetRegistry } {
   const layout = input.layout ?? fleetLayout();
-  const { registry, workspace } = withStatus(input.registry, input.slug, "suspended");
+  const { registry, workspace } = withStatus(input.registry, input.slug, "suspended", input.now ?? new Date());
   return {
     registry,
     steps: [
@@ -430,9 +478,9 @@ export function suspendPlan(input: { registry: FleetRegistry; slug: string; layo
   };
 }
 
-export function resumePlan(input: { registry: FleetRegistry; slug: string; layout?: FleetLayout }): { steps: FleetStep[]; registry: FleetRegistry } {
+export function resumePlan(input: { registry: FleetRegistry; slug: string; now?: Date; layout?: FleetLayout }): { steps: FleetStep[]; registry: FleetRegistry } {
   const layout = input.layout ?? fleetLayout();
-  const { registry, workspace } = withStatus(input.registry, input.slug, "running");
+  const { registry, workspace } = withStatus(input.registry, input.slug, "running", input.now ?? new Date());
   return {
     registry,
     steps: [
@@ -445,14 +493,14 @@ export function resumePlan(input: { registry: FleetRegistry; slug: string; layou
   };
 }
 
-export function deletePlan(input: { registry: FleetRegistry; slug: string; keepData: boolean; layout?: FleetLayout }): { steps: FleetStep[]; registry: FleetRegistry } {
+export function deletePlan(input: { registry: FleetRegistry; slug: string; keepData: boolean; now?: Date; layout?: FleetLayout }): { steps: FleetStep[]; registry: FleetRegistry } {
   assertSlug(input.slug);
   const layout = input.layout ?? fleetLayout();
   const workspace = input.registry.workspaces[input.slug];
   if (!workspace) throw new Error(`no workspace "${input.slug}"`);
   assertManagedWorkspace(workspace);
   const { [input.slug]: _gone, ...rest } = input.registry.workspaces;
-  const registry: FleetRegistry = { ...input.registry, workspaces: input.keepData ? { ...rest, [input.slug]: { ...workspace, status: "retained" } } : rest };
+  const registry: FleetRegistry = { ...input.registry, workspaces: input.keepData ? { ...rest, [input.slug]: recordWorkspaceEvent({ ...workspace, status: "retained" }, "retained", (input.now ?? new Date()).toISOString()) } : rest };
   const unitsDir = layout.unitFile.replace(/openmausbot@\.service$/, "");
   return {
     registry,

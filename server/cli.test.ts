@@ -73,6 +73,53 @@ describe("openmausbot command line", () => {
     expect(parseArgs(["serve", "--domain", "maus.example.com", "--tunnel"], {})).toEqual({ error: expect.stringContaining("--domain already gives") });
   });
 
+  it("parses the reseller flags of fleet init, create, brand, rates and billing, and refuses the wrong shape", () => {
+    expect(parseArgs(["fleet", "init", "--domain", "agentada.cc", "--reseller-name", "Acme Cloud", "--currency", "eur", "--license-key-file", "/tmp/key"], {})).toMatchObject({
+      fleetAction: "init", domain: "agentada.cc", resellerName: "Acme Cloud", currency: "EUR", licenseKeyFile: resolve("/tmp/key"),
+    });
+    expect(parseArgs(["fleet", "create", "acme", "--admin", "ada@example.test", "--host", "chat.acme.example"], {})).toMatchObject({ fleetAction: "create", slug: "acme", host: "chat.acme.example" });
+    expect(parseArgs(["fleet", "brand", "acme", "--brand-name", "Acme", "--tagline", "Ask", "--accent", "#C2510A", "--support-url", "https://acme.example/help", "--logo", "logo.png", "--favicon", "icon.ico", "--clear", "tagline", "--clear", "accent"], {})).toMatchObject({
+      fleetAction: "brand", slug: "acme", brandPatch: { name: "Acme", tagline: "Ask", accent: "#C2510A", supportUrl: "https://acme.example/help" },
+      logoSource: resolve("logo.png"), faviconSource: resolve("icon.ico"), brandClear: ["tagline", "accent"],
+    });
+    expect(parseArgs(["fleet", "brand", "--default", "--logo", "https://acme.example/logo.svg"], {})).toMatchObject({ fleetAction: "brand", brandDefault: true, logoSource: "https://acme.example/logo.svg" });
+    expect(parseArgs(["fleet", "rates", "--currency", "USD", "--wholesale-workspace", "25", "--wholesale-user", "3.5", "--retail-workspace", "49.00", "--retail-user", "5.00", "--retail-override", "acme=39.00/4.50", "--retail-override", "beta=/6", "--clear-override", "old"], {})).toMatchObject({
+      fleetAction: "rates", currency: "USD",
+      ratesPatch: {
+        wholesale: { workspaceMonthMinor: 2500, userMonthMinor: 350 }, retail: { workspaceMonthMinor: 4900, userMonthMinor: 500 },
+        overrides: { acme: { workspaceMonthMinor: 3900, userMonthMinor: 450 }, beta: { userMonthMinor: 600 } }, clearOverrides: ["old"],
+      },
+    });
+    expect(parseArgs(["fleet", "billing", "--month", "2026-09", "--csv", "--detail", "--license-key-file", "/tmp/key"], {})).toMatchObject({ fleetAction: "billing", month: "2026-09", csv: true, detail: true, licenseKeyFile: resolve("/tmp/key") });
+    expect(parseArgs(["fleet", "billing"], {})).not.toHaveProperty("slug");
+    expect(parseArgs(["fleet"], {})).toMatchObject({ error: expect.stringContaining("brand NAME|--default, rates, billing") });
+
+    const refused = (args: string[]) => (parseArgs(["fleet", ...args], {}) as { error?: string }).error;
+    expect(refused(["billing", "2026-09"])).toBe('unknown argument "2026-09"');
+    expect(refused(["rates", "acme"])).toBe('unknown argument "acme"');
+    expect(refused(["brand"])).toBe("fleet brand needs a workspace name or --default");
+    expect(refused(["brand", "acme", "--default"])).toBe("fleet brand takes a workspace name or --default, not both");
+    expect(refused(["brand", "acme", "--clear", "colour"])).toContain("--clear takes one of");
+    expect(refused(["brand", "acme", "--logo", "http://acme.example/logo.png"])).toContain("--logo takes");
+    expect(refused(["brand", "acme", "--favicon", "https://acme.example/icon.png"])).toContain("not fetched");
+    expect(refused(["billing", "--month", "2026-13"])).toContain("--month takes");
+    expect(refused(["billing", "--month", "September"])).toContain("--month takes");
+    expect(refused(["rates", "--currency", "JPY"])).toContain("not supported");
+    expect(refused(["rates", "--retail-user", "5.001"])).toContain("at most two decimals");
+    expect(refused(["rates", "--retail-user", "-5"])).toContain("at most two decimals");
+    expect(refused(["rates", "--retail-override", "acme"])).toContain("NAME=WORKSPACE/USER");
+    expect(refused(["rates", "--retail-override", "acme=/"])).toContain("NAME=WORKSPACE/USER");
+    expect(refused(["rates", "--retail-override", "Acme=1/1"])).toContain("NAME=WORKSPACE/USER");
+    expect(refused(["rates", "--retail-override", "acme=1/1", "--retail-override", "acme=2/2"])).toContain("twice");
+    expect(refused(["rates", "--clear-override", "Not A Name"])).toContain("--clear-override takes");
+    expect(refused(["list", "--host", "x.example"])).toBe("only fleet create takes --host");
+    expect(refused(["billing", "--wholesale-user", "1"])).toBe("only fleet rates takes the rate flags");
+    expect(refused(["create", "acme", "--month", "2026-09"])).toBe("only fleet billing takes --month, --csv and --detail");
+    expect(refused(["create", "acme", "--currency", "USD"])).toBe("only fleet init and fleet rates take --currency");
+    expect(refused(["create", "acme", "--reseller-name", "Acme"])).toBe("only fleet init takes --reseller-name");
+    expect(refused(["billing", "--month"])).toBe("--month needs a value");
+  });
+
   it("takes the phone kind non-interactively, because a scripted pair never sees the chooser", () => {
     expect(parseArgs(["pair", "--phone", "android"], {})).toMatchObject({ command: "pair", phone: "android" });
     expect(parseArgs(["pair", "--phone", "iOS"], {})).toMatchObject({ phone: "ios" });

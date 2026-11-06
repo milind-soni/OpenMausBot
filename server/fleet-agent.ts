@@ -3,6 +3,8 @@
 import { appendFileSync, chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { dirname } from "node:path";
+import { billingReply, snapshotBeforeDelete } from "./fleet-billing.ts";
+import { brandInputFromBody, omitBrandAssets } from "./fleet-brand.ts";
 import { defaultFleetDeps, executePlan, loadRegistry, markProvisioningFailed, planFleetAction, type FleetDeps, type FleetInput } from "./fleet-cli.ts";
 import { assertSlug, fleetLayout, fleetUser, openRouterModelIds, workspaceDataDir, type FleetLayout, type FleetWorkspace } from "./fleet.ts";
 
@@ -25,8 +27,10 @@ export interface FleetWorkspaceView extends FleetWorkspace {
 }
 
 const MAX_BODY = 256 * 1024;
+/** A logo and a favicon at their schema limits, as data URIs, plus the rest of a brand. */
+export const MAX_BRAND_BODY = 512 * 1024;
 
-export function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+export function readBody(req: IncomingMessage, limit = MAX_BODY): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let bytes = 0;
@@ -34,7 +38,7 @@ export function readBody(req: IncomingMessage): Promise<Record<string, unknown>>
     req.on("data", (chunk: Buffer) => {
       if (tooLarge) return;
       bytes += chunk.length;
-      if (bytes > MAX_BODY) {
+      if (bytes > limit) {
         // Keep draining so the 413 can still be sent, but stop holding bytes.
         tooLarge = true;
         chunks.length = 0;
@@ -97,6 +101,7 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
     const io = { log: (line: string) => log.push(line), error: (line: string) => errors.push(line) };
     let steps;
     try {
+      if (input.action === "delete" && input.yes) await snapshotBeforeDelete(input, deps, now());
       steps = planFleetAction(input, deps);
     } catch (error) {
       audit({ action: input.action, slug: input.slug, ok: false, error: error instanceof Error ? error.message : String(error) });
@@ -144,7 +149,7 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
           const live = workspace.status === "running" || workspace.status === "suspended"
             ? (await deps.run(["systemctl", "is-active", `openmausbot@${workspace.slug}.service`])).output.trim() || "unknown"
             : workspace.status;
-          workspaces.push(statusOnly ? { slug: workspace.slug, live } : { ...workspace, live, usage: workspaceUsage(layout, workspace.slug, now(), deps) });
+          workspaces.push(statusOnly ? { slug: workspace.slug, live } : omitBrandAssets({ ...workspace, live, usage: workspaceUsage(layout, workspace.slug, now(), deps) }));
         }
         return send(200, { domain: registry.domain, operator: registry.operator ?? null, workspaces });
       }
@@ -159,11 +164,19 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
         });
         return send(result.status, result.body);
       }
+      if (method === "GET" && url.pathname === "/billing") {
+        const reply = await billingReply(url.searchParams, { layout, deps, now: now() });
+        return send(reply.status, reply.body);
+      }
+      if (method === "PUT" && url.pathname === "/brand") {
+        const result = await act(brandInputFromBody(base(), await readBody(req, MAX_BRAND_BODY), undefined));
+        return send(result.status, result.body);
+      }
       if (method === "POST" && url.pathname === "/upgrade") {
         const result = await act({ ...base(), action: "upgrade" });
         return send(result.status, result.body);
       }
-      const match = /^\/workspaces\/([a-z0-9-]+)(?:\/(users|providers|suspend|resume))?$/.exec(url.pathname);
+      const match = /^\/workspaces\/([a-z0-9-]+)(?:\/(users|providers|suspend|resume|brand))?$/.exec(url.pathname);
       if (match) {
         const slug = match[1]!;
         assertSlug(slug);
@@ -171,6 +184,10 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
         if (method === "POST" && sub === "providers") {
           const body = await readBody(req);
           const result = await act({ ...base(), action: "providers", slug, openrouterModels: models(body.models) });
+          return send(result.status, result.body);
+        }
+        if (method === "POST" && sub === "brand") {
+          const result = await act(brandInputFromBody(base(), await readBody(req, MAX_BRAND_BODY), slug));
           return send(result.status, result.body);
         }
         if (method === "POST" && sub === "users") {
