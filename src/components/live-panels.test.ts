@@ -70,6 +70,34 @@ afterEach(() => {
 });
 
 describe("Inspector on the app's live stream", () => {
+  it("keeps only the newest 400 runtime entries during a long turn, with its total and raw snapshot", async () => {
+    vi.stubGlobal("fetch", () => Promise.resolve(new Response(JSON.stringify({
+      entries: [{ kind: "native", at: "2026-10-04T09:00:00.000Z", data: { at: "2026-10-04T09:00:00.000Z", dir: "out", source: "fixture", msg: { type: "raw retained" } } }],
+      total: { runtime: 700, native: 12 },
+    }))));
+    await mount(InspectorPanel);
+    const events = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((tab) => tab.textContent === "events")!;
+    flushSync(() => events.click());
+    flushSync(() => {
+      for (let i = 0; i < 1_000; i++) frame(runtime(`bounded-${i}`, { type: "item.started", itemType: "tool", title: `long step ${i}` }));
+    });
+    await vi.waitFor(() => expect(document.body.textContent).toContain("long step 999"));
+    expect(document.body.textContent).not.toContain("long step 599");
+    expect(document.body.textContent).toContain("long step 600");
+    expect(document.body.textContent).toContain("1700");
+    expect(document.querySelectorAll('button .tabular-nums')).toHaveLength(400);
+    flushSync(() => {
+      frame(runtime("bounded-999", { type: "item.started", itemType: "tool", title: "duplicated tail" }));
+      frame(runtime("bounded-1000", { type: "item.started", itemType: "tool", title: "next batch" }));
+    });
+    await vi.waitFor(() => expect(document.body.textContent).toContain("next batch"));
+    expect(document.body.textContent).not.toContain("duplicated tail");
+    expect(document.body.textContent).toContain("1701");
+    const raw = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((tab) => tab.textContent === "raw")!;
+    flushSync(() => raw.click());
+    expect(document.body.textContent).toContain("raw retained");
+  });
+
   it("shows this thread's runtime events and opens no stream of its own", async () => {
     await mount(InspectorPanel);
     const events = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((tab) => tab.textContent === "events")!;
@@ -78,10 +106,38 @@ describe("Inspector on the app's live stream", () => {
       frame(runtime("e1", { type: "item.started", itemType: "tool", title: "List the files" }));
       frame(runtime("e2", { type: "item.started", itemType: "tool", title: "Somebody else's step" }, "other-thread"));
     });
-    await settle();
-    expect(document.body.textContent).toContain("tool: List the files");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("tool: List the files"));
     expect(document.body.textContent).not.toContain("Somebody else's step");
     expect(opened).not.toHaveBeenCalled();
+  });
+
+  it("merges events received during a reload once and keeps the new live tail", async () => {
+    await mount(InspectorPanel);
+    const events = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((tab) => tab.textContent === "events")!;
+    flushSync(() => events.click());
+    let finish!: (response: Response) => void;
+    vi.stubGlobal("fetch", () => new Promise<Response>((resolve) => { finish = resolve; }));
+    missed();
+    frame(runtime("overlap", { type: "item.started", itemType: "tool", title: "in both sources" }));
+    frame(runtime("tail", { type: "item.started", itemType: "tool", title: "after snapshot" }));
+    finish(new Response(JSON.stringify({
+      entries: [{ kind: "runtime", at: "2026-10-04T09:00:00.000Z", data: runtime("overlap", { type: "item.started", itemType: "tool", title: "in both sources" }) }],
+      total: { runtime: 70, native: 0 },
+    })));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("after snapshot"));
+    expect(document.querySelectorAll('button .tabular-nums')).toHaveLength(2);
+    expect(document.body.textContent).toContain("71");
+  });
+
+  it("cancels the old thread's queued batch when switching conversations", async () => {
+    const render = await mount(InspectorPanel);
+    frame(runtime("old", { type: "item.started", itemType: "tool", title: "old queued work" }));
+    render({ ...bot, threadId: "next-thread" });
+    const events = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((tab) => tab.textContent === "events")!;
+    flushSync(() => events.click());
+    frame(runtime("next", { type: "item.started", itemType: "tool", title: "next thread work" }, "next-thread"));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("next thread work"));
+    expect(document.body.textContent).not.toContain("old queued work");
   });
 
   it("reloads from disk when the stream missed frames it could not replay", async () => {
