@@ -3,6 +3,7 @@ import { api, type Bot, type ModelSelection } from "@/state/store";
 import type { BotUpdatePatch } from "@/state/bot-patch-queue";
 import type { Routine, RoutineInput } from "./routines";
 import type { ChosenPreset } from "./bot-presets";
+import { t } from "@/lib/i18n";
 import { randomUuid } from "./random-uuid";
 
 export const EMPTY_BOT_DEFAULTS: NewBotDefaults = { profile: {}, memory: {}, skills: [], routines: [] };
@@ -81,8 +82,8 @@ export class BotCreationDraft {
   export(): NewBotDefaults { return structuredClone({ ...this.template, routines: this.routines.map(routineTemplate) }); }
 
   uploadAvatar = async (file: File): Promise<string> => {
-    if (!["image/png", "image/jpeg", "image/gif", "image/webp"].includes(file.type)) throw new Error("Choose a PNG, JPEG, GIF, or WebP image");
-    if (file.size > 10 * 1024 * 1024) throw new Error("Choose an image smaller than 10 MiB");
+    if (!["image/png", "image/jpeg", "image/gif", "image/webp"].includes(file.type)) throw new Error(t("newBot.avatar.invalidType"));
+    if (file.size > 10 * 1024 * 1024) throw new Error(t("newBot.avatar.tooLarge"));
     if (this.avatarObjectUrl) URL.revokeObjectURL(this.avatarObjectUrl);
     this.avatarFile = file;
     this.avatarObjectUrl = URL.createObjectURL(file);
@@ -92,7 +93,7 @@ export class BotCreationDraft {
   dispose() { if (this.avatarObjectUrl) URL.revokeObjectURL(this.avatarObjectUrl); }
 
   private routine(input: RoutineInput, previous?: Routine): Routine {
-    const { groupId: _group, resultsThreadId: _results, checks: _checks, access: _access, deliver: _deliver, steps: _steps, schedule, ...fields } = input;
+    const { groupId: _group, resultsThreadId: _results, checks: _checks, access: _access, deliver: _deliver, modelSelection: _model, steps: _steps, schedule, ...fields } = input;
     const normalizedSchedule = schedule.type === "interval" ? {
       ...schedule, weekdays: schedule.weekdays ?? undefined,
       window: schedule.window ?? undefined, endsAt: schedule.endsAt ?? undefined,
@@ -121,7 +122,7 @@ export class BotCreationDraft {
     } else if (path === `${base}/skills` && method === "POST") {
       const preview = await this.network<{ skills: NewBotDefaults["skills"] }>("/api/bot-defaults/skills/preview", { method: "POST", body: JSON.stringify(body) });
       const names = new Set(this.template.skills.map(skill => skill.name));
-      if (preview.skills.some(skill => names.has(skill.name))) throw new Error("A skill with this name is already in the draft");
+      if (preview.skills.some(skill => names.has(skill.name))) throw new Error(t("newBot.skillExists"));
       this.template.skills.push(...preview.skills); this.changed(); result = { installed: preview.skills };
     } else if (path.startsWith(`${base}/skills/`)) {
       const name = decodeURIComponent(path.slice(`${base}/skills/`.length));

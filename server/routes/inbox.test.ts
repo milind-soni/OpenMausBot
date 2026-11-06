@@ -35,7 +35,7 @@ it("answers each member with their own inbox, which a client session may read an
   const line = mine.body.rows[0].id as string;
   expect((await call("POST", `/api/inbox/${line}/read`)).body.rows[0]).toMatchObject({ unread: false, tab: "info" });
   expect((await call("POST", `/api/inbox/${line}/done`)).body.rows[0]).toMatchObject({ tab: "done" });
-  expect(await call("POST", `/api/inbox/${line}/done`, session(CLEO.email)), "someone else's line").toMatchObject({ status: 404 });
+  expect(await call("POST", `/api/inbox/${line}/done`, session(CLEO.email)), "someone else's line").toMatchObject({ status: 404, body: { error: "That line is not in your inbox.", errorKey: "serverError.inbox.lineMissing" } });
   expect((await call("GET", "/api/inbox", session(CLEO.email))).body.rows).toEqual([]);
   expect(await call("DELETE", "/api/inbox")).toMatchObject({ status: 405 });
   expect((await call("GET", "/api/needs-you")).out).toBe(PASS);
@@ -51,10 +51,10 @@ it("refuses to mark an open ask done, which only its answer settles", async () =
   f.team.route({ kind: "approval", botId: "reporter", botName: "Reporter", threadId: "rep-shared", title: "Reporter needs approval", body: "Run: rm -rf ./build" });
   const [ask] = (await call("GET", "/api/inbox")).body.rows;
   expect(ask).toMatchObject({ tab: "needs-you", card: { requestId: "req-1" } });
-  expect(await call("POST", `/api/inbox/${ask.id}/done`)).toMatchObject({ status: 409 });
+  expect(await call("POST", `/api/inbox/${ask.id}/done`)).toMatchObject({ status: 409, body: { error: "This waits on your answer: answer it, or close it, where it asks.", errorKey: "serverError.inbox.answerRequired" } });
 });
 
 it("has no inbox off a team", async () => {
   const { call } = setup({ team: false });
-  expect(await call("GET", "/api/inbox")).toMatchObject({ status: 404 });
+  expect(await call("GET", "/api/inbox")).toMatchObject({ status: 404, body: { error: "There is no inbox here.", errorKey: "serverError.inbox.missing" } });
 });

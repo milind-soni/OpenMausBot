@@ -72,7 +72,7 @@ Staff, hands Mira work. Expected:
   question). As her Chief, Clive sends the answer with that thread id: it answers the card for the person (receipt
   `injected`), her turn carries on with `@Clive answered for the person: …`, the card says Clive answered, and no work is
   handed out. When Clive is not her Chief, the same thread id is refused as above and the question stays the person's.
-  So it is when a webhook starts Clive's turn: it does not list the question either. The person can still change Clive's
+  When a webhook starts Clive's turn, the question is not listed either. The person can still change Clive's
   answer on the card, and Mira gets a new turn with it.
 
 Unit tests for the relay's rules (which thread, which sender, sign-ins, work handed out this turn, an engine that cannot

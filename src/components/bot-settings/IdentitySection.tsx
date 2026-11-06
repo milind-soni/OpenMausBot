@@ -14,7 +14,7 @@ import { useBotEditor } from "./BotEditorContext";
 import { PackageProvenance } from "./PackageProvenance";
 import { ProposalStatus } from "./ProposalStatus";
 import { randomBotName } from "@/lib/random-bot-name";
-import { t } from "@/lib/i18n";
+import { intlLocale, t } from "@/lib/i18n";
 
 export type IdentityPart = "avatar" | "provenance" | "name" | "title" | "blurb";
 
@@ -102,7 +102,7 @@ export function IdentitySection({
           <span>{t("botSettings.identity.blurbHelp")}</span>
           {bot.description.length > 3_000 && (
             <span className="shrink-0 tabular-nums">
-              {bot.description.length.toLocaleString()} / {BOT_PROFILE_LIMITS.description.toLocaleString()}
+              {bot.description.length.toLocaleString(intlLocale())} / {BOT_PROFILE_LIMITS.description.toLocaleString(intlLocale())}
             </span>
           )}
         </div>

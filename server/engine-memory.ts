@@ -3,6 +3,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { ChildProcess } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
+import { chatNotice, noticeFailure } from "./chat-notices.ts";
 import { newEventId, newId, TurnNotStartedError, type ProviderAdapter, type ProviderInstance, type RuntimeEvent, type RuntimeEventListener } from "./contracts.ts";
 
 const MB = 1024 * 1024;
@@ -78,8 +79,11 @@ export function processGroupBytes(list: () => string[] = () => readdirSync("/pro
 
 const tasks = (count: number) => `${count} ${count === 1 ? "task" : "tasks"}`;
 const running = (count: number) => `${tasks(count)} ${count === 1 ? "is" : "are"} running on this Cloud`;
+const memoryStopKey = (browser: boolean, detail = false) => detail
+  ? browser ? "chat.notice.memoryReclaimedBrowserDetail" : "chat.notice.memoryReclaimedTaskDetail"
+  : browser ? "chat.notice.memoryReclaimedBrowser" : "chat.notice.memoryReclaimedTask";
 /** The one line a turn stopped for memory ends with: what was closed to keep everything else running. */
-export const memoryStopText = (browser: boolean) => `Ran out of room, so I ${browser ? "closed the browser" : "stopped this task"} to keep everything else running.`;
+export const memoryStopText = (browser: boolean) => chatNotice(memoryStopKey(browser));
 /** Whether a failed turn's cause is `memoryStopText`'s: such a run is started again once there is room. */
 export const memoryStopped = (cause: string) => /^Ran out of room, so I (closed the browser|stopped this task) to keep everything else running\./.test(cause);
 export const memoryWaitText = (count: number) => `Waiting for memory: ${running(count)}, and one more could run it out of memory. `
@@ -314,8 +318,12 @@ export class EngineMemory {
 
   /** The sentence for a turn of this thread whose engine was stopped for memory; null when it was not. */
   stopText(threadId: string): string | null {
+    return this.stopFailure(threadId)?.message ?? null;
+  }
+
+  stopFailure(threadId: string, detail?: string): ReturnType<typeof noticeFailure> | null {
     const stop = this.stops.get(threadId);
-    return stop === undefined ? null : memoryStopText(stop.browser);
+    return stop === undefined ? null : noticeFailure(memoryStopKey(stop.browser, detail !== undefined), detail === undefined ? undefined : { detail });
   }
 
   /** A stalled turn's cause, saying so when memory ran short while it ran. */
@@ -484,15 +492,15 @@ export function withEngineMemory(instance: ProviderInstance, memory: EngineMemor
     queueMicrotask(() => { explained.delete(item.threadId); memory.turnEnded(item.threadId); });
   });
   const present = (item: RuntimeEvent): RuntimeEvent[] => {
-    const stopped = memory.stopText(item.threadId);
+    const stopped = memory.stopFailure(item.threadId, item.type === "runtime.error" ? item.message.slice(0, 200) : undefined);
     if (!stopped) return [item];
     if (item.type === "runtime.error") {
       explained.add(item.threadId);
-      return [{ ...item, message: `${stopped} (${item.message.slice(0, 200)})` }];
+      return [{ ...item, ...stopped }];
     }
     if (item.type === "turn.completed" && !item.ok && !explained.has(item.threadId)) {
       explained.add(item.threadId);
-      return [event(item.threadId, { turnId: item.turnId, type: "runtime.error", message: stopped }), item];
+      return [event(item.threadId, { turnId: item.turnId, type: "runtime.error", ...stopped }), item];
     }
     return [item];
   };

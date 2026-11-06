@@ -2,7 +2,8 @@ import { Children, createElement, isValidElement, type ReactElement, type ReactN
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConfigStatus } from "@/state/store";
-import { DecisionModelSettings, deciderFailureText } from "./DecisionModelSettings";
+import { setLocale } from "@/lib/i18n";
+import { DecisionModelSettings, deciderFailureText, helpersStatusLine } from "./DecisionModelSettings";
 import { Switch } from "./SettingsPrimitives";
 
 const fixture = vi.hoisted(() => ({
@@ -79,7 +80,7 @@ beforeEach(() => {
   vi.stubGlobal("window", {});
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { setLocale("en"); vi.unstubAllGlobals(); });
 
 describe("DecisionModelSettings", () => {
   it("explains itself, then the switch, the key, and what it decides", () => {
@@ -94,6 +95,11 @@ describe("DecisionModelSettings", () => {
     expect(view.master.props.checked).toBe(false);
     expect(view.master.props.disabled).toBe(true);
     expect(view.html).toContain("Save a key below to turn this on.");
+  });
+
+  it("uses an invariable status for missing decisions and extraction in pt-BR", () => {
+    setLocale("pt-br");
+    expect(helpersStatusLine(null)).toBe("Decisões: sem configuração · Extração: sem configuração");
   });
 
   it("offers both providers, with Jev selected for an existing install and no model picker", () => {

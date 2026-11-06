@@ -104,6 +104,9 @@ export interface CloudSendPageBridge {
   teams?(): Promise<{ teams: Array<{ id: string; name: string; ready: boolean }> }>;
   /** Moves one bot into one of those teams (a real click). */
   moveToTeam?(botId: string, teamId: string, name: string): Promise<import("./team-move.mjs").TeamMoveView | null>;
+  /** `moveToTeam` with main's refusal as a value, which the page says in its own language; `moveToTeam` keeps rejecting
+   * with the English only, for pages that predate this. Absent from an older desktop. */
+  moveToTeamCoded?(botId: string, teamId: string, name: string): Promise<{ view: import("./team-move.mjs").TeamMoveView | null } | { refused: import("./team-move.mjs").TeamMoveRefusal }>;
   /** A team's own page: the bots its person has on My Cloud, and one moved in once they agree in main's own confirm. */
   teamBring?(): Promise<{ team?: { id: string; name: string; ready: boolean }; bots: Array<{ id: string; name: string; stays?: "default" | "chief" | "last" }> }>;
   teamBringMove?(botId: string): Promise<{ started: boolean; move: import("./team-move.mjs").TeamMoveView | null }>;
@@ -132,8 +135,12 @@ export interface CloudSendSession {
 
 export class CloudSendError extends Error {
   code: string;
+  /** Set when My Cloud refused with a `serverError.*` key: `message` is then My Cloud's own English for it. */
+  errorKey?: string;
+  errorParams?: Record<string, string | number>;
   constructor(code: string, message: string, options?: { cause?: unknown });
 }
+export function namedRefusal(answer: { status: number; body: any }): { message: string; errorKey: string; errorParams: Record<string, string | number> } | null;
 export function unanswered(error: unknown): boolean;
 
 export function botPatch(bot: Record<string, unknown>, parts: string[], cloudBots: ReadonlySet<string>): Record<string, unknown>;
@@ -181,6 +188,7 @@ export function createCloudSend(deps: {
   /** Bring newer chats' copy, for a Cloud too old to take chats by row. */
   store: { read(): unknown; write(value: unknown): void };
   onChange?(snapshot: CloudSendSnapshot): void;
+  t?(key: string, params?: Record<string, string | number>): string;
   now?(): number;
   /** How long a move waits for My Cloud to run the engines whose keys it just took. */
   engineWaitMs?: number;

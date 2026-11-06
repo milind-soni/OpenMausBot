@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { describeVoice, listVoices, providerConfigured, speak, voiceConfigured, voiceReady } from "./index.ts";
+import { describeVoice, listVoices, providerConfigured, speak, verifyKey, voiceConfigured, voiceReady } from "./index.ts";
 import type { AppConfig } from "../config.ts";
 
 const cfg: AppConfig = { tts: { provider: "gemini", geminiKey: "private-gemini-key", voice: "Kore" } };
@@ -68,5 +68,38 @@ describe("Gemini speech", () => {
   it.each([{}, result(""), result("invalid"), result(Buffer.from("not audio").toString("base64")), result(wav.toString("base64"), "text/plain")])("rejects invalid audio", async (body) => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => Response.json(body)));
     await expect(speak(cfg, "hello")).rejects.toThrow(/Gemini/);
+  });
+
+  it("verifies a valid Gemini API key using the models endpoint", async () => {
+    const request = vi.fn().mockResolvedValue(new Response(JSON.stringify({ models: [] })));
+    vi.stubGlobal("fetch", request);
+    const result = await verifyKey("gemini", "valid-gemini-key");
+    expect(result).toEqual({ ok: true });
+    const [url, init] = request.mock.calls[0];
+    expect(url).toBe("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1");
+    expect(init.method).toBe("GET");
+    expect(init.headers).toEqual({ "x-goog-api-key": "valid-gemini-key" });
+    expect(init.redirect).toBe("error");
+  });
+
+  it.each([400, 401, 403])("returns refusal message when key is rejected (HTTP %i)", async (status) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("error", { status })));
+    const result = await verifyKey("gemini", "bad-key");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.message).toMatch(/rejected the API key/i);
+  });
+
+  it("handles quota exceeded during key verification", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("quota", { status: 429 })));
+    const result = await verifyKey("gemini", "rate-limited-key");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.message).toMatch(/quota exceeded/i);
+  });
+
+  it("handles network failure during key verification", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Network offline")));
+    const result = await verifyKey("gemini", "some-key");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.message).toMatch(/Couldn't reach Gemini/i);
   });
 });

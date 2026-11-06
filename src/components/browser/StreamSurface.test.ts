@@ -3,7 +3,8 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { PreviewStreamControl, PreviewStreamEvents, PreviewStreamInput } from "@/lib/browser-stream-client";
+import { PREVIEW_STREAM_LIBRARIES_COMMAND, PREVIEW_STREAM_SANDBOX_STEPS_URL, type PreviewStreamControl, type PreviewStreamEvents, type PreviewStreamInput } from "@/lib/browser-stream-client";
+import { setLocale } from "@/lib/i18n";
 import { controlPill } from "./ChromeRow";
 import { letterbox, mapToPage, mapToSurface, StreamSurface } from "./StreamSurface";
 
@@ -40,6 +41,7 @@ afterEach(() => {
   host.remove();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  setLocale("en");
 });
 
 const control = (controller: PreviewStreamControl["controller"], more: Partial<PreviewStreamControl> = {}): PreviewStreamControl => ({ canOperate: true, controller, generation: 1, dialog: null, ...more });
@@ -73,6 +75,29 @@ const pointer = (canvas: HTMLCanvasElement, type: string, x: number, y: number) 
 const button = (label: string) => [...host.querySelectorAll("button")].find((candidate) => (candidate.getAttribute("aria-label") ?? candidate.textContent) === label)!;
 
 describe("the picture and the page", () => {
+  it.each([
+    ["en", "The browser stopped responding, so it is being restarted. The live view reconnects by itself."],
+    ["pt-br", "O navegador parou de responder e está sendo reiniciado. A visualização ao vivo se reconecta sozinha."],
+  ] as const)("renders the coded browser restart in %s without changing the event", async (locale, expected) => {
+    setLocale(locale);
+    const onMessage = vi.fn();
+    const { events } = await mount({ onMessage });
+    const notice = { type: "notice", message: "The browser stopped responding, so it is being restarted. The live view reconnects by itself.", errorKey: "serverError.browser.restartingUnresponsive" };
+    await act(async () => events().onMessage?.(notice));
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe(expected);
+    expect(onMessage).toHaveBeenCalledExactlyOnceWith(notice);
+    expect(notice.message).toBe("The browser stopped responding, so it is being restarted. The live view reconnects by itself.");
+  });
+
+  it("keeps uncoded notices and unknown server keys as the original fallback", async () => {
+    setLocale("pt-br");
+    const { events } = await mount();
+    for (const errorKey of [undefined, "serverError.unknown", "approval.applied.waitFollowUp"]) {
+      await act(async () => events().onMessage?.({ type: "notice", message: "Original browser diagnostic", ...(errorKey ? { errorKey } : {}) }));
+    }
+    expect([...host.querySelectorAll('[role="alert"]')].map(alert => alert.textContent)).toEqual(Array(3).fill("Original browser diagnostic"));
+  });
+
   it("maps a point through the letterbox both ways, and refuses one outside the picture", () => {
     expect(letterbox({ width: 1600, height: 1200 }, { width: 3200, height: 2000 })).toEqual({ width: 1600, height: 1000, left: 0, top: 100 });
     const rect = { left: 10, top: 20, width: 1600, height: 1200 };
@@ -275,5 +300,20 @@ describe("who has the browser", () => {
     expect(controlPill(true, control("agent", { owned: true }), "")).toBe("held");
     expect(controlPill(true, control("agent"), "pending")).toBe("taking");
     expect(controlPill(true, control("agent"), "slow")).toBe("waiting");
+  });
+});
+
+describe("a host that cannot run the browser yet", () => {
+  it("links a blocked sandbox to its setup steps, and shows missing libraries their command, never both", async () => {
+    const { show, events } = await mount();
+    await show(control("you"));
+    await act(async () => events().onHostSetup?.({ need: "sandbox" }));
+    const link = [...host.querySelectorAll("a")].find((candidate) => candidate.textContent === "Browser sandbox setup steps");
+    expect(link?.getAttribute("href")).toBe(PREVIEW_STREAM_SANDBOX_STEPS_URL);
+    expect(host.querySelector("code")).toBeNull();
+    await act(async () => button("Try again").click());
+    await act(async () => events().onHostSetup?.({ need: "libraries", command: PREVIEW_STREAM_LIBRARIES_COMMAND }));
+    expect(host.querySelector("code")?.textContent).toBe(PREVIEW_STREAM_LIBRARIES_COMMAND);
+    expect(host.querySelector("a")).toBeNull();
   });
 });

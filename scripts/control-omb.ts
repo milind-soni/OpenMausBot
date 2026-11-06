@@ -301,8 +301,13 @@ export async function launchVerificationServer(
   const evidenceDir = join(tmpdir(), "openmausbot-verification-evidence");
   mkdirSync(evidenceDir, { recursive: true });
   const logPath = join(evidenceDir, `server-${Date.now()}-${process.pid}.log`);
+  const imageApi = parentEnv.OMB_FAKE_IMAGE_API_URL?.trim() ?? "";
+  const imageGen = /^http:\/\/127\.0\.0\.1:\d{1,5}\/v1$/.test(imageApi)
+    ? { primary: { provider: "openai" }, fallback: { provider: "custom", model: "fixture-image" }, customUrl: imageApi }
+    : undefined;
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
     ...(boatFixtureApi ? { box: { token: "box_verification_fixture" } } : {}),
+    ...(imageGen ? { imageGen } : {}),
     // A setup card's answers would be one more engine call at every new bot, taking replies a test scripts for its turns.
     features: { smartSetupChoices: false },
     instances: {

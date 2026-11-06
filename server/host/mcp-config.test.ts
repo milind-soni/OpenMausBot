@@ -10,7 +10,7 @@ import type { TeamConnectionsHost } from "./team-connections-host.ts";
 
 const remote = (url = "https://data.example.com/mcp"): StoredMcpServer => ({ type: "http", url, headers: {}, enabled: false }) as StoredMcpServer;
 
-function fixture(options: { refuse?: (name: string) => string | undefined } = {}) {
+function fixture(options: { refuse?: (name: string) => string | undefined; personal?: string[] } = {}) {
   const cfg: Pick<AppConfig, "mcpServers" | "postiz"> = { mcpServers: {} };
   const mcpOAuth = new McpOAuthManager({ file: join(DATA_DIR, "mcp-config-oauth.json") });
   const forget = vi.spyOn(mcpOAuth, "forget");
@@ -20,7 +20,7 @@ function fixture(options: { refuse?: (name: string) => string | undefined } = {}
     cfg,
     sessions: { isLive: () => true },
     mcpOAuth,
-    teamConnections: { personMcp: () => [], people: {} as TeamConnectionsHost["people"] },
+    teamConnections: { personMcp: () => options.personal ?? [], people: {} as TeamConnectionsHost["people"] },
     cloudHome: null,
     fallbackPublicUrl: null,
     mcpConfigBusy: { get: () => busy, set: (value) => { busy = value; } },
@@ -34,6 +34,19 @@ function fixture(options: { refuse?: (name: string) => string | undefined } = {}
 }
 
 describe("shared MCP config", () => {
+  it("keeps personal header and test sign-in refusals coded without changing English or status", async () => {
+    const { cfg, config } = fixture({ personal: ["personal"] });
+    const entry = { ...remote(), headers: { Authorization: "Bearer fixture-secret" } } as StoredMcpServer;
+    const refusal = { status: 400, error: "Personal MCP header values cannot be saved in shared configuration. Save your key in your personal connection.", errorKey: "serverError.mcp.personalHeadersShared" };
+    expect(config.add("personal", entry)).toEqual(refusal);
+    cfg.mcpServers = { personal: remote() as never };
+    expect(config.replace("personal", entry)).toEqual(refusal);
+    cfg.mcpServers = {};
+    expect(await config.addMany(async () => ({ servers: { personal: entry } }))).toEqual(refusal);
+    cfg.mcpServers = { personal: { ...remote(), headers: { Authorization: "" } } as never };
+    expect(await config.test("personal", { signal: new AbortController().signal })).toEqual({ status: 403, error: "Sign in to the team to test your own connection.", errorKey: "serverError.mcp.testSignInFirst" });
+  });
+
   it("enabling a server the policy refuses returns 403 managed_policy and leaves it off", () => {
     const { cfg, config } = fixture({ refuse: (name) => name === "blocked" ? "Your admin hasn't approved this server." : undefined });
     cfg.mcpServers = { blocked: remote() as never };

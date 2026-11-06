@@ -4,6 +4,7 @@ import type { Bot, InstanceInfo } from "@/state/store";
 import type { EffortLevel } from "../../shared/wire";
 import type { MenuGroup, MenuModelRow, SimpleMenu } from "@/lib/simple-model-menu";
 import { modelBlurb } from "@/lib/model-friendly";
+import { modelOptionLabel } from "@/lib/model-label";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { BotAvatar } from "./Avatar";
@@ -60,8 +61,8 @@ function MenuModel({ instance, row, onPick }: { instance: InstanceInfo; row: Men
       data-org-blocked={row.blocked || undefined}
       disabled={row.blocked}
       aria-pressed={row.current}
-      aria-label={[option.label, option.provider, reason].filter(Boolean).join(" · ")}
-      title={[option.label, option.provider, reason ?? modelBlurb(option)].filter(Boolean).join(" · ")}
+      aria-label={[modelOptionLabel(option), option.provider, reason].filter(Boolean).join(" · ")}
+      title={[modelOptionLabel(option), option.provider, reason ?? modelBlurb(option)].filter(Boolean).join(" · ")}
       tabIndex={-1}
       onClick={() => onPick(instance, row.model ?? option.id, row.variant)}
       className={SIMPLE_MENU_ROW}

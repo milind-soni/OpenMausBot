@@ -11,10 +11,10 @@ import type { Store } from "../store.ts";
 /** What a turn hears when it tries to carry outside work into a conversation that is not outside. */
 export const OUTSIDE_STAYS_HERE = "This work came in from outside, so it stays in this conversation and can't reach that one. Finish it here and say plainly what a person would need to do.";
 
-const ROUTINE_FROM_BEFORE = "This routine was made before this update. Open it and save it once to run it with full access.";
-const ROUTINE_FROM_OUTSIDE = "A webhook's run made or changed this routine, so it runs without full access. Open it and save it once to run it with full access.";
-const CONVERSATION_FROM_BEFORE = "This conversation is from before My Cloud was only yours, so this bot works in it without a shell. Start a new conversation to use it fully.";
-const CONVERSATION_FROM_OUTSIDE = "Work from outside came into this conversation, so this bot works in it without a shell. Start a new conversation to use it fully.";
+const ROUTINE_FROM_BEFORE = "server.outside.routineFromBefore";
+const ROUTINE_FROM_OUTSIDE = "server.outside.routineFromOutside";
+const CONVERSATION_FROM_BEFORE = "server.outside.conversationFromBefore";
+const CONVERSATION_FROM_OUTSIDE = "server.outside.conversationFromOutside";
 
 const MAX_HOPS = 32;
 
@@ -112,7 +112,7 @@ export function createOutsideLineage(deps: OutsideLineageDeps) {
   /** A level comes down a hand-off only from work a person or their routine started. */
   const handsNoLevel = (threadId: string): boolean => outsideDrivenThread(threadId) || cloudGuestDriven(threadId);
 
-  function confinedWhy(threadId: string): string {
+  function confinedKey(threadId: string) {
     const run = deps.activeRun(threadId);
     const writer = run ? deps.writer(run.routineId) : undefined;
     if (run && writer === CLOUD_OUTSIDE_KEY) return ROUTINE_FROM_OUTSIDE;
@@ -120,10 +120,15 @@ export function createOutsideLineage(deps: OutsideLineageDeps) {
     return run && !deps.ownerPerson(writer) ? ROUTINE_FROM_BEFORE : CONVERSATION_FROM_BEFORE;
   }
 
+  function confinedWhy(threadId: string): string {
+    return serverLine(deps.language(threadId), confinedKey(threadId));
+  }
+
   function guestEngineRefusal(threadId: string): string {
-    const why = confinedWhy(threadId);
-    return why !== CONVERSATION_FROM_BEFORE ? `This bot's AI can't run it that way. ${why}`
-      : "This conversation is from before the Cloud was only yours, and this bot's AI can't work in it. Start a new conversation.";
+    const language = deps.language(threadId);
+    return confinedKey(threadId) !== CONVERSATION_FROM_BEFORE
+      ? serverLine(language, "server.outside.engineRefusal", { why: confinedWhy(threadId) })
+      : serverLine(language, "server.outside.engineRefusalOldConversation");
   }
 
   /** A person's own line in a conversation outside work reached: once, in their words, why the bot works without its shell here. */

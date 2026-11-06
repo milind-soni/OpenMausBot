@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
+import "./server-line-packs.ts";
 import { DATA_DIR } from "./config.ts";
 import { journalFile, JOURNAL_DIR } from "./memory-journal.ts";
 import { moveMemoryLayer } from "./memory-move.ts";
@@ -44,4 +45,18 @@ describe("moving one memory layer's notes into another", () => {
     expect(await moveMemoryLayer("empty", "empty--member-p")).toBe(false);
     expect(await moveMemoryLayer("missing", "missing--member-p")).toBe(false);
   });
+});
+
+it.each([
+  ["en", "This note moved here from where the bot kept it before, so it can't be reverted here."],
+  ["pt-br", "Esta nota veio de onde o bot a guardava antes, então não é possível reverter a alteração aqui."],
+  ["de", "Diese Notiz wurde von dort hierher verschoben, wo der Bot sie zuvor aufbewahrte. Deshalb kann sie hier nicht zurückgesetzt werden."],
+])("a moved note keeps its explanation in %s", async (language, reason) => {
+  const from = `from-${language}`, into = `into-${language}`;
+  ensureWorkspace(from);
+  mkdirSync(JOURNAL_DIR, { recursive: true });
+  writeFileSync(journalFile(from), `${JSON.stringify({ id: "moved-note", botId: from, at: 1, path: "MEMORY.md", canRevert: true })}\n`);
+  await moveMemoryLayer(from, into, language);
+  const row = JSON.parse(readFileSync(journalFile(into), "utf8").trim());
+  expect(row).toMatchObject({ before: null, canRevert: false, revertUnavailableReason: reason });
 });

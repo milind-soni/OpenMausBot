@@ -17,6 +17,7 @@ export function installCloudSend(deps: {
   window(): { isDestroyed(): boolean; webContents: { send(channel: string, value: unknown): void; mainFrame: { url: string } } } | null;
   localOrigin(): string;
   fetch?: typeof fetch;
+  t?(key: string, params?: Record<string, string | number>): string;
   engineWaitMs?: number;
   space?: { disk(): unknown; grow(sizeGb: number): Promise<unknown> };
   move?: () => { view(): unknown; seen(): unknown; retry(): Promise<unknown> } | null;

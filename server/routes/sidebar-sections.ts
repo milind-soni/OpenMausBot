@@ -3,7 +3,16 @@ import { z } from "zod";
 import type { WireBot } from "../../shared/wire.ts";
 import type { BotRecord, Store } from "../store.ts";
 import type { TeamComputers } from "../team-computers.ts";
+import { USER_ERROR, userError, type UserErrorKey } from "../user-errors.ts";
 import { PASS, type RouteHandler } from "./table.ts";
+
+const STORE_REFUSALS: readonly UserErrorKey[] = ["serverError.department.notFound", "serverError.department.nameRule",
+  "serverError.department.duplicate", "serverError.department.renameBusy", "serverError.department.emptyFirst", "serverError.department.deleteBusy", "serverError.department.generalChief"];
+
+export function storeRefusal(error: string): { error: string; errorKey?: UserErrorKey } {
+  const key = STORE_REFUSALS.find((candidate) => USER_ERROR[candidate] === error);
+  return key ? userError(key) : { error };
+}
 
 export interface SidebarSectionRouteDeps {
   store: Store;
@@ -28,20 +37,20 @@ export function createSidebarSectionRoutes(deps: SidebarSectionRouteDeps): Route
     if (path === "/api/sidebar-sections" && (method === "PATCH" || method === "DELETE")) {
       const section = url.searchParams.get("section")?.trim();
       if (!section) return json(res, 400, { error: "Choose a named department" });
-      if (method === "DELETE" && teamComputers.forSection(section)) return json(res, 409, { error: "Unassign this department's computer before deleting the department" });
+      if (method === "DELETE" && teamComputers.forSection(section)) return json(res, 409, userError("serverError.department.unassignComputer"));
       let nextName: string | null = null;
       if (method === "PATCH") {
         const parsed = z.object({ name: z.string().trim().min(1).max(60) }).strict().safeParse(await readBody(req));
-        if (!parsed.success) return json(res, 400, { error: "Department name must be 1 to 60 characters" });
+        if (!parsed.success) return json(res, 400, userError("serverError.department.nameLength"));
         nextName = parsed.data.name;
       }
       const error = nextName === null ? store.deleteSection(section) : store.renameSection(section, nextName, teamComputers);
-      if (error) return json(res, error === "No such department" ? 404 : 409, { error });
+      if (error) return json(res, error === "No such department" ? 404 : 409, storeRefusal(error));
       return json(res, 200, { sections: store.sections });
     }
     if (method === "PUT" && path === "/api/sidebar-sections") {
       const section = url.searchParams.get("section")?.trim();
-      if (!section || !store.sections.includes(section)) return json(res, 404, { error: "No such department" });
+      if (!section || !store.sections.includes(section)) return json(res, 404, userError("serverError.department.notFound"));
       const ids = z.array(z.string().regex(/^[\w-]+$/)).max(MAX_WORKSPACE_BOTS);
       const parsed = z.object({ addBotIds: ids, removeBotIds: ids }).strict().safeParse(await readBody(req));
       if (!parsed.success) return json(res, 400, { error: "Provide addBotIds and removeBotIds" });
@@ -52,10 +61,9 @@ export function createSidebarSectionRoutes(deps: SidebarSectionRouteDeps): Route
         }
       }
       const result = store.updateTeamMembers(section, parsed.data.addBotIds, parsed.data.removeBotIds);
-      if (!result.ok) return json(res, result.reason === "unavailable" ? 404 : 409, { error:
-        result.reason === "chief-conflict" ? "A department can have only one Chief of Staff. Change the Chief before moving this bot."
-          : result.reason === "membership-changed" ? "Department membership changed. Reopen the dialog and try again."
-          : "One or more bots are unavailable" });
+      if (!result.ok) return json(res, result.reason === "unavailable" ? 404 : 409, result.reason === "chief-conflict" ? userError("serverError.department.moveChiefConflict")
+          : result.reason === "membership-changed" ? userError("serverError.department.membershipChanged")
+          : { error: "One or more bots are unavailable" });
       return json(res, 200, { sections: store.sections, bots: result.bots.map(wireBot) });
     }
     if (method === "POST" && path === "/api/sidebar-sections") {
@@ -77,7 +85,7 @@ export function createSidebarSectionRoutes(deps: SidebarSectionRouteDeps): Route
       if (!result.ok) {
         if (result.reason === "chief-conflict") {
           return json(res, 409, {
-            error: "A department can have only one Chief of Staff. Choose one Chief or use a department without one.",
+            ...userError("serverError.department.oneChief"),
           });
         }
         return json(res, 404, { error: "one or more bots are unavailable" });

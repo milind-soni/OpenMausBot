@@ -14,6 +14,7 @@ export function createCleanWorkspace(deps: {
   running(): string | null;
   swap(dir: string): Promise<{ ok: boolean }>;
   allowed?(): boolean;
+  t?(key: string, params?: Record<string, string | number>): string;
   changed?(): void;
   log?(line: string): void;
 }): CleanWorkspace;

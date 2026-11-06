@@ -19,13 +19,16 @@ export interface DesktopAnalyticsBridge {
   /** This computer's page only. */
   set?(enabled: boolean): Promise<void>;
 }
-/** The app's language on this computer, one pick for every page its window shows. */
+/** The app's language on this computer, one pick for every page its window shows; main draws its menus, tray, dialogs and
+ * notifications in it too. */
 export interface DesktopLanguageBridge {
   /** A locale code, "" to follow the system, or null until one is picked on this computer. */
   choice(): string | null;
   set(language: string): Promise<boolean>;
   /** A pick made on another page of this desktop. */
   onChange(listener: (language: string) => void): () => void;
+  /** The language this page shows, so menus, tray and dialogs never read in another one beside it. Older desktop apps lack it. */
+  shown?(language: string): void;
 }
 export interface DesktopPrefs {
   seen(): string[];
@@ -65,20 +68,40 @@ export interface WindowFrameState {
 type Files = Pick<typeof import("node:fs"), "readFileSync" | "writeFileSync" | "renameSync" | "rmSync">;
 export declare function jsonFile(file: string, files?: Files): { read(): unknown; write(value: unknown): void };
 export declare function createDesktopPrefs(options: { read(): unknown; write(value: unknown): void }): DesktopPrefs;
+export declare function createDesktopText(app: { getPath(name: "userData"): string; isReady(): boolean; getLocale(): string }, prefs?: DesktopPrefs): {
+  prefs: DesktopPrefs;
+  language(): string;
+  t(key: string, params?: Record<string, string | number>): string;
+  set(code: string | null): boolean;
+  intlTag(): string;
+  listFormat(names: string[]): string;
+};
+export declare function relabelDesktop(options: {
+  menu(): void;
+  trays: ({ relabel(): void } | null | undefined)[];
+  window: { isDestroyed(): boolean; setTitle(title: string): void } | null;
+  title(): string;
+  badge(): void;
+}): void;
 export declare function registerDesktopPrefs(options: {
   /** Used instead of making a store from read/write. */
   prefs?: DesktopPrefs;
   ipcMain: { handle(channel: string, handler: (event: unknown, ...args: unknown[]) => unknown): void; on(channel: string, listener: (event: { returnValue?: unknown }) => void): void };
-  read(): unknown;
-  write(value: unknown): void;
+  read?(): unknown;
+  write?(value: unknown): void;
   page(event: unknown): "local" | "cloud" | "server" | null;
   cloudOffered(): Promise<boolean>;
   localConfig?(): unknown;
   languageChanged?(language: string, sender: unknown): void;
+  /** The pick changed: main redraws its own words in it ("" for the system's). */
+  onLanguage?(language: string): void;
+  /** A page of the window shows `language`: with nothing picked, main draws its own words in that one too. */
+  onShown?(language: string, sender: unknown): void;
   /** The window's frame: `made()`, the frame the window was made with (null before it is); `restarts`, a change waits for
    * the app to start again; `changed()`, the pages hear it. */
   frame?: { made(): boolean | null; restarts: boolean; changed(): void } | null;
   /** The MausBot Cloud sign-in client: with it, the product-updates question is asked and its answer kept here. */
   cloudAccount?(): import("./updates-consent.mjs").UpdatesConsentClient | null;
   now?: () => number;
+  systemName?(): Promise<string | null>;
 }): import("./updates-consent.mjs").UpdatesConsent | null;

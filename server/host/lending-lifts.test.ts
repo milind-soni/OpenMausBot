@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { parseOptionsCardInput } from "../../shared/options-card.ts";
 import { liveDecisionRefusal } from "../../shared/live-approval.ts";
+import "../server-line-packs.ts";
 import { createLendingLifts, handedInSince, type LendingLiftDeps } from "./lending-lifts.ts";
 
 const OWNER = "p_owner";
@@ -96,6 +97,20 @@ describe("the card that lifts a lock on the lent computer (server/host/lending-l
     expect(refused.status).toBe(403);
     expect(state.accepted).toEqual([]);
     expect(cardOf(lines).answered).toBeUndefined();
+  });
+  it.each([
+    [undefined, "Choose Allow or Not now.", "Only you can allow this, from one of your own devices."],
+    ["pt-br", "Escolha Permitir ou Agora não.", "Só você pode permitir isso, em um dos seus dispositivos."],
+    ["de", "Wähle Erlauben oder Nicht jetzt.", "Nur du kannst dies erlauben, von einem deiner eigenen Geräte aus."],
+  ])("writes answer refusals in the conversation language %s", (language, choose, ownerOnly) => {
+    const { lines, deps, lifts, answer, state } = world();
+    deps.language = () => language;
+    lifts.raise(input);
+    const { requestId } = cardOf(lines);
+    expect(answer(requestId, "answer")).toEqual({ status: 400, body: { error: choose } });
+    expect(answer(requestId, "allow", "p_guest")).toEqual({ status: 403, body: { error: ownerOnly } });
+    expect(cardOf(lines).answered).toBeUndefined();
+    expect(state.accepted).toEqual([]);
   });
   it("a change after it was shown lifts nothing: the card shows what's there now", () => {
     const { lines, state, continued, lifts, answer } = world();

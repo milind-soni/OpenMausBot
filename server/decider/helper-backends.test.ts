@@ -93,7 +93,7 @@ describe("the order: own Jev, own Workers AI, Cloud's included relay, OpenRouter
   it("a Workers AI token without its account ID is no key at all, and saving one is refused", () => {
     expect(deciderAccount({ decider: { enabled: true, workersAiToken: CF_TOKEN } })).toBeNull();
     expect(deciderAccount({ decider: { enabled: true, workersAiToken: CF_TOKEN, workersAiAccountId: "not-an-account" } })).toBeNull();
-    expect(deciderSavePatch({ workersAiToken: CF_TOKEN }, {})).toEqual({ ok: false, error: "Add your Cloudflare account ID with the token." });
+    expect(deciderSavePatch({ workersAiToken: CF_TOKEN }, {})).toEqual({ ok: false, error: "Add your Cloudflare account ID with the token.", errorKey: "serverError.decider.accountRequired" });
     expect(deciderSavePatch({ workersAiToken: ` ${CF_TOKEN} `, workersAiAccountId: ` ${ACCOUNT} ` }, {}))
       .toEqual({ ok: true, patch: { workersAiToken: CF_TOKEN, workersAiAccountId: ACCOUNT, enabled: true, jobs: { roomRouting: true } } });
   });

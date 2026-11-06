@@ -182,7 +182,7 @@ describe("a routine that splits its work into steps", () => {
     expect(runOf(h, run.id).stepRuns!.map((step) => step.status)).toEqual(["done", "skipped", "skipped"]);
   });
 
-  it("refuses steps out of range, a first-step check, a bot it cannot hand work to and steps with checks", () => {
+  it("refuses steps out of range, a first-step check, a bot it cannot hand work to, and steps with checks or the routine's own model", () => {
     const h = harness();
     const one = [steps[0]!];
     const seven = Array.from({ length: 7 }, () => steps[0]!);
@@ -191,6 +191,7 @@ describe("a routine that splits its work into steps", () => {
     expect(() => h.manager.create(routineInput([steps[2]!, steps[0]!]))).toThrow("The first step can't be a check");
     expect(() => h.manager.create(routineInput([steps[0]!, { botId: "hidden", instructions: "Help." }]))).toThrow("not one you can hand work to");
     expect(() => h.manager.create({ ...routineInput(), checks: ["mail"] })).toThrow("Steps work only on a bot routine");
+    expect(() => h.manager.create({ ...routineInput(), modelSelection: { instanceId: "claude", model: "claude-haiku-5-5" } })).toThrow("Steps work only on a bot routine");
   });
 
   it("keeps steps through an update that leaves them out, and removes them with null", () => {

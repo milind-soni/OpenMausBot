@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import nativeText from "./native-text.cjs";
 
 import { gapKey, gapSummary, STAYED_MAX, stayedBehind } from "./move-gaps.mjs";
 
@@ -58,4 +59,20 @@ test("at most a handful of lines, the rest counted", () => {
   const said = stayedBehind({ ok: false, gaps: { items } });
   assert.equal(said.length, STAYED_MAX);
   assert.deepEqual(said.at(-1), { label: "13 more", error: "They didn't reach My Cloud." });
+});
+
+test("the stayed results use the current language and keep gap identity unchanged", () => {
+  const text = nativeText.createNativeText({ saved: "en" });
+  const input = report();
+  const key = gapKey(input);
+  assert.equal(stayedBehind(input, text.t)[1].error, "2 of its memory notes didn't reach My Cloud.");
+  text.set("pt-br");
+  assert.deepEqual(stayedBehind(input, text.t).slice(0, 3), [
+    { label: "Archie", error: "Não chegou ao Cloud." },
+    { label: "Scout", error: "2 notas de memória não chegaram ao Cloud." },
+    { label: "Scout", error: "Um dos arquivos não chegou ao Cloud." },
+  ]);
+  assert.deepEqual(stayedBehind({ gaps: { items: Array.from({ length: 20 }, (_, n) => ({ label: `Bot ${n}` })) } }, text.t).at(-1),
+    { label: "Mais 13", error: "Não chegaram ao Cloud." });
+  assert.equal(gapKey(input), key);
 });

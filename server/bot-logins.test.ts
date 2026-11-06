@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { cardLoginPlace, cardSignInElsewhere, observeSignInPage } from "./bot-logins.ts";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { browserMatesOf, loginHeldBackFor } from "../shared/logins.ts";
+import { BotLogins, cardLoginPlace, cardSignInElsewhere, observeSignInPage } from "./bot-logins.ts";
+import { LoginStore } from "./login-store.ts";
+import type { OnePasswordLogins } from "./onepassword.ts";
 import { FakeLoginPage, LOGIN_FORM } from "./testing/fake-login-page.ts";
 
 let page: FakeLoginPage | null = null;
@@ -41,3 +48,65 @@ describe("the bot's open page", () => {
     expect(await observeSignInPage(async () => { throw new Error("The browser did not answer."); })).toBeNull();
   });
 });
+
+describe("a login kept to some bots, and bots that share a browser", () => {
+  // Payroll and Infra share the "finance" browser profile; Notes and Audit have their own; each guest bot gets its own
+  // temporary browser.
+  const bots = [
+    { id: "payroll", browserProfile: "finance" }, { id: "infra", browserProfile: "finance" }, { id: "notes" }, { id: "audit", browserProfile: null },
+    { id: "scout", browserProfile: "guest" }, { id: "visitor", browserProfile: "guest" },
+  ];
+  const onePassword = { fresh: async () => {}, sitesFor: () => [], candidates: () => [], markUsed: () => {} } as unknown as OnePasswordLogins;
+  const world = () => {
+    const store = new LoginStore({ dataDir: mkdtempSync(join(tmpdir(), "omb-bot-logins-")) });
+    const logins = new BotLogins(store, onePassword, () => bots);
+    const place = { site: "capacity.example", hosts: ["capacity.example"], exactHost: false };
+    return { store, logins, place };
+  };
+
+  it("finds the bots on the same named profile, and none for a bot on its own or a guest browser", () => {
+    expect(browserMatesOf(bots, "payroll")).toEqual(["infra"]);
+    expect(browserMatesOf(bots, "notes")).toEqual([]);
+    expect(browserMatesOf(bots, "audit")).toEqual([]);
+    expect(browserMatesOf(bots, "scout")).toEqual([]);
+  });
+
+  it("keeps a login saved from a sign-in card to every bot that browser signs in, so it fills for the bot that asked", async () => {
+    const { store, logins, place } = world();
+    expect(logins.cardBots("payroll")).toEqual(["payroll", "infra"]);
+    expect(logins.cardBots("notes")).toEqual(["notes"]);
+    expect(logins.cardBots("scout")).toEqual(["scout"]);
+    store.create({ ...place, username: "from-card", password: "x", source: "card", bots: logins.cardBots("payroll") });
+    expect((await logins.candidates("payroll", "capacity.example")).map((login) => login.username)).toEqual(["from-card"]);
+  });
+
+  it("fills a login kept to one guest bot for that bot alone", async () => {
+    const { store, logins, place } = world();
+    store.create({ ...place, username: "guest-only", password: "x", source: "settings", bots: ["scout"] });
+    expect(logins.sitesFor("scout").map((login) => login.username)).toEqual(["guest-only"]);
+    expect(logins.sitesFor("visitor")).toEqual([]);
+    expect(loginHeldBackFor({ bots: ["scout"] }, bots)).toEqual([]);
+  });
+
+  it("is never filled into a browser a bot it isn't kept to also signs in through", async () => {
+    const { store, logins, place } = world();
+    store.create({ ...place, username: "ops", password: "hunter2", source: "settings", bots: ["payroll"] });
+    expect(logins.sitesFor("payroll")).toEqual([]);
+    expect(await logins.candidates("payroll", "capacity.example")).toEqual([]);
+    expect(logins.sitesFor("infra")).toEqual([]);
+    expect(loginHeldBackFor({ bots: ["payroll"] }, bots)).toEqual(["payroll"]);
+  });
+
+  it("fills when every bot on the browser may use it, when it is for every bot, and for a bot with its own browser", async () => {
+    const { store, logins, place } = world();
+    store.create({ ...place, username: "both", password: "a", source: "settings", bots: ["payroll", "infra"] });
+    store.create({ ...place, username: "everyone", password: "b", source: "settings", bots: "all" });
+    store.create({ ...place, username: "notes-only", password: "c", source: "settings", bots: ["notes"] });
+    expect(logins.sitesFor("payroll").map((login) => login.username)).toEqual(["both", "everyone"]);
+    expect((await logins.candidates("infra", "capacity.example")).map((login) => login.username)).toEqual(["both", "everyone"]);
+    expect(logins.sitesFor("notes").map((login) => login.username)).toEqual(["everyone", "notes-only"]);
+    expect(loginHeldBackFor({ bots: ["payroll", "infra"] }, bots)).toEqual([]);
+    expect(loginHeldBackFor({ bots: "all" }, bots)).toEqual([]);
+  });
+});
+

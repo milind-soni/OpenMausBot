@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import "../server-line-packs.ts";
 import type { BotRecord, Message } from "../store.ts";
 import { createSecretCards } from "./secret-cards.ts";
+import { CREDENTIAL_TARGETS } from "../../shared/credential-request.ts";
+import { redactBotAuthored } from "../message-redaction.ts";
+import { redactSecretsInText } from "../redact.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -39,6 +42,34 @@ function fixture(language?: string) {
 }
 
 describe("the card a bot asks for a key or secret with", () => {
+  it.each([
+    ["greenferenceApiKey", "secretCard.greenference.description"],
+    ["geminiTtsKey", "secretCard.geminiTts.description"],
+  ] as const)("keeps the fallback and structured description for %s", (credentialId, baseCode) => {
+    const { cards, lines, bot } = fixture();
+    const reason = "For the requested report.";
+    expect(cards.requestCredential(bot, "ledger-main", { credentialId, reason: `  ${reason}  ` }).status).toBe(201);
+    expect(lines[0]!.secret).toMatchObject({
+      description: `${CREDENTIAL_TARGETS[credentialId].description} ${reason} Ledger can use it but never read it back.`,
+      descriptionParts: { baseCode, reason, bot: "Ledger" },
+    });
+  });
+
+  it.each(["greenferenceApiKey", "geminiTtsKey"] as const)("scrubs the structured description data for %s", (credentialId) => {
+    const { cards, lines, bot } = fixture();
+    const key = `sk-ant-api03-${"abcdefghijklmnopqrstuvwxyz0123456789"}`;
+    const reason = `Use ${key} for this report.`;
+    bot.name = `Ledger ${key}`;
+    cards.requestCredential(bot, "ledger-main", { credentialId, reason });
+    const scrubbed = redactBotAuthored(lines[0]!);
+    expect(JSON.stringify(scrubbed)).not.toContain(key);
+    expect(scrubbed.secret?.descriptionParts).toMatchObject({
+      reason: redactSecretsInText(reason),
+      bot: redactSecretsInText(bot.name),
+    });
+    expect(lines[0]!.secret!.descriptionParts!.reason).toBe(reason);
+  });
+
   it("asks in the language of the conversation's person", () => {
     const { cards, lines, bot } = fixture("de");
     expect(cards.requestCredential(bot, "ledger-main", { credentialId: "xaiApiKey" }).status).toBe(201);

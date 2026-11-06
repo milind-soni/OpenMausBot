@@ -1,4 +1,11 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+
+import { BotLogins } from "../bot-logins.ts";
+import { LoginStore } from "../login-store.ts";
+import type { OnePasswordLogins } from "../onepassword.ts";
 
 import type { Surface } from "../../shared/wire.ts";
 import type { BotRecord } from "../store.ts";
@@ -105,3 +112,26 @@ describe("fill_login in the bot's own browser", () => {
     expect(answer.text).toContain("1Password could not be read just now, so its logins may be missing: 1Password is limiting requests right now.");
   });
 });
+
+describe("fill_login and a login kept to some bots on a shared browser", () => {
+  const onePassword = { fresh: async () => {}, sitesFor: () => [], candidates: () => [], markUsed: () => {} } as unknown as OnePasswordLogins;
+  const logins = (bots: ReadonlyArray<{ id: string; browserProfile?: string }>) => {
+    const store = new LoginStore({ dataDir: mkdtempSync(join(tmpdir(), "omb-fill-shared-")) });
+    store.create({ ...BANK, password: "never-shown", source: "settings", bots: ["b1"] });
+    return new BotLogins(store, onePassword, () => bots);
+  };
+
+  it("has nothing to fill for a bot whose named profile another bot shares, and asks for a sign-in instead", async () => {
+    const { fill, moveToBrowser } = harness({ logins: logins([{ id: "b1", browserProfile: "bank" }, { id: "b2", browserProfile: "bank" }]) });
+    const answer = await fill(bot, turn, undefined, undefined);
+    expect(moveToBrowser).not.toHaveBeenCalled();
+    expect(answer.text).toBe("You have no saved logins to fill. Call request_sign_in so the person signs in on this computer.");
+  });
+
+  it("goes on to fill when the bot is alone on the profile", async () => {
+    const { fill, moveToBrowser } = harness({ logins: logins([{ id: "b1", browserProfile: "bank" }, { id: "b2" }]) });
+    await fill(bot, turn, undefined, undefined);
+    expect(moveToBrowser).toHaveBeenCalledWith(turn);
+  });
+});
+

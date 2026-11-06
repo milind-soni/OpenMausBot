@@ -3,6 +3,7 @@
 // again carries from one it never will; `gapSummary`, kinds and counts only, for the Admin's move report
 // (move-status.mjs); and `stayedBehind`, what the person reads on the done line for what stayed on this computer.
 import { createHash } from "node:crypto";
+import nativeText from "./native-text.cjs";
 
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const list = (value) => (Array.isArray(value) ? value : []);
@@ -58,37 +59,37 @@ export const STAYED_MAX = 8;
  * and files, a room's name, an app or a key. `report.names`: bot ids and `room:<id>` to their names; `report.owners`: each
  * short chat's bot id or `room:<id>`. Never a path, a secret or anything written in a chat.
  */
-export function stayedBehind(report) {
+export function stayedBehind(report, t = nativeText.englishText.t) {
   const gaps = record(report?.gaps) ? report.gaps : {};
   const names = record(report?.names) ? report.names : {};
   const owners = record(report?.owners) ? report.owners : {};
   const nameOf = (id) => (typeof names[id] === "string" && names[id].trim() ? names[id].trim() : null);
   const out = [];
   const add = (label, error) => { if (label && !out.some((entry) => entry.label === label && entry.error === error)) out.push({ label, error }); };
-  const plural = (count, one, many) => (count === 1 ? one : many.replace("{n}", String(count)));
+  const plural = (count, one, many) => t(count === 1 ? one : many, { n: count });
   const byBot = (entries, botOf) => {
     const counts = new Map();
     for (const entry of entries) { const bot = botOf(entry); counts.set(bot, (counts.get(bot) ?? 0) + 1); }
     return counts;
   };
 
-  for (const item of list(gaps.items)) add(text(item?.label) || "Something", "It didn't reach My Cloud.");
-  for (const item of list(gaps.parts)) add(text(item?.label) || "Something", "Some of its settings didn't reach My Cloud.");
-  for (const room of list(gaps.rooms)) add(text(room?.name) || "A room", "This room didn't reach My Cloud.");
-  for (const [bot, count] of byBot(list(gaps.memory), (entry) => entry?.bot)) add(nameOf(bot) ?? "A bot", plural(count, "One of its memory notes didn't reach My Cloud.", "{n} of its memory notes didn't reach My Cloud."));
-  for (const bot of new Set(list(gaps.journal))) add(nameOf(bot) ?? "A bot", "Some of its memory history didn't reach My Cloud.");
+  for (const item of list(gaps.items)) add(text(item?.label) || t("native.cloud.stayed.something"), t("native.cloud.stayed.notArrived"));
+  for (const item of list(gaps.parts)) add(text(item?.label) || t("native.cloud.stayed.something"), t("native.cloud.stayed.settings"));
+  for (const room of list(gaps.rooms)) add(text(room?.name) || t("native.cloud.stayed.room"), t("native.cloud.stayed.roomNotArrived"));
+  for (const [bot, count] of byBot(list(gaps.memory), (entry) => entry?.bot)) add(nameOf(bot) ?? t("room.aBot"), plural(count, "native.cloud.stayed.memoryOne", "native.cloud.stayed.memoryMany"));
+  for (const bot of new Set(list(gaps.journal))) add(nameOf(bot) ?? t("room.aBot"), t("native.cloud.stayed.memoryHistory"));
   const files = byBot(list(gaps.files), (path) => /^(?:workspaces|task-workspaces)\/([\w-]{1,128})\//u.exec(text(path))?.[1]);
-  for (const [bot, count] of files) add(nameOf(bot) ?? "A bot", plural(count, "One of its files didn't reach My Cloud.", "{n} of its files didn't reach My Cloud."));
+  for (const [bot, count] of files) add(nameOf(bot) ?? t("room.aBot"), plural(count, "native.cloud.stayed.fileOne", "native.cloud.stayed.fileMany"));
   const chats = byBot([...list(gaps.conversations), ...list(gaps.settings), ...shortChats(report).map((entry) => entry.threadId)], (threadId) => owners[threadId]);
-  for (const [owner, count] of chats) add(nameOf(owner) ?? "Chats", plural(count, "Part of one chat didn't reach My Cloud.", "Parts of {n} chats didn't reach My Cloud."));
-  if (list(gaps.runs).length) add("Routine history", plural(gaps.runs.length, "One past run didn't reach My Cloud.", "{n} past runs didn't reach My Cloud."));
-  if (list(gaps.learned).length) add("What your bots learned about you", "Some of it didn't reach My Cloud.");
-  if (list(gaps.teams).length) add("Team notes", "Some of them didn't reach My Cloud.");
-  for (const id of list(gaps.connections)) add(text(id).replace(/^(?:mcp|key):/u, "") || "An app", "It didn't reach My Cloud. Add it there again if a bot needs it.");
+  for (const [owner, count] of chats) add(nameOf(owner) ?? t("native.cloud.stayed.chats"), plural(count, "native.cloud.stayed.chatOne", "native.cloud.stayed.chatMany"));
+  if (list(gaps.runs).length) add(t("native.cloud.stayed.routineHistory"), plural(gaps.runs.length, "native.cloud.stayed.runOne", "native.cloud.stayed.runMany"));
+  if (list(gaps.learned).length) add(t("native.cloud.stayed.learned"), t("native.cloud.stayed.learnedNotArrived"));
+  if (list(gaps.teams).length) add(t("native.cloud.stayed.teamNotes"), t("native.cloud.stayed.teamNotesNotArrived"));
+  for (const id of list(gaps.connections)) add(text(id).replace(/^(?:mcp|key):/u, "") || t("native.cloud.stayed.app"), t("native.cloud.stayed.addAgain"));
   const attachments = list(report?.attachments).length;
-  if (attachments) add(plural(attachments, "An attachment", "{n} attachments"), plural(attachments, "It didn't reach My Cloud.", "They didn't reach My Cloud."));
+  if (attachments) add(plural(attachments, "native.cloud.stayed.attachmentOne", "native.cloud.stayed.attachmentMany"), plural(attachments, "native.cloud.stayed.notArrived", "native.cloud.stayed.notArrivedMany"));
   const secrets = secretsOf(report).length;
-  if (secrets) add(plural(secrets, "A sign-in or key", "{n} sign-ins and keys"), plural(secrets, "It didn't reach My Cloud. Add it there again if a bot needs it.", "They didn't reach My Cloud. Add them there again if a bot needs them."));
+  if (secrets) add(plural(secrets, "native.cloud.stayed.secretOne", "native.cloud.stayed.secretMany"), plural(secrets, "native.cloud.stayed.addAgain", "native.cloud.stayed.addAgainMany"));
   if (out.length <= STAYED_MAX) return out;
-  return [...out.slice(0, STAYED_MAX - 1), { label: `${out.length - STAYED_MAX + 1} more`, error: "They didn't reach My Cloud." }];
+  return [...out.slice(0, STAYED_MAX - 1), { label: t("native.cloud.stayed.more", { n: out.length - STAYED_MAX + 1 }), error: t("native.cloud.stayed.notArrivedMany") }];
 }

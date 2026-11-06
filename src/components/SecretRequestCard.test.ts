@@ -25,6 +25,10 @@ vi.mock("@/state/store", async (original) => ({
 vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
 
 import { SecretRequestCard } from "./SecretRequestCard";
+import { setLocale } from "@/lib/i18n";
+import { CREDENTIAL_TARGETS } from "../../shared/credential-request";
+
+afterEach(() => setLocale("en"));
 
 const secretCard = (secret: Record<string, unknown>): Message => ({
   id: "secret-card",
@@ -48,6 +52,21 @@ const view = (secret: Record<string, unknown>) => renderToStaticMarkup(createEle
   threadId: "thread-1",
   message: secretCard(secret),
 }));
+
+function namedCard(target: "greenferenceApiKey" | "geminiTtsKey", reason: string): Message {
+  return secretCard({
+    target,
+    ...CREDENTIAL_TARGETS[target],
+    description: `${CREDENTIAL_TARGETS[target].description} ${reason} Scout can use it but never read it back.`,
+    descriptionParts: {
+      baseCode: target === "greenferenceApiKey" ? "secretCard.greenference.description" : "secretCard.geminiTts.description",
+      reason,
+      bot: "Scout",
+    },
+  });
+}
+
+const escapedText = (text: string) => renderToStaticMarkup(createElement("span", null, text)).slice(6, -7);
 
 beforeEach(() => {
   vi.stubGlobal("window", {});
@@ -127,6 +146,74 @@ describe("SecretRequestCard ask card", () => {
     expect(html).toContain("Try again");
     expect(html).toContain("The bot could not be resumed.");
     expect(html).not.toContain('type="password"');
+  });
+});
+
+describe("SecretRequestCard Greenference copy", () => {
+  it("localizes the Greenference title, description and password field without changing the saved card", () => {
+    const message = namedCard("greenferenceApiKey", "Para preparar o resumo solicitado.");
+    const render = () => renderToStaticMarkup(createElement(SecretRequestCard, { botId: "bot-1", threadId: "thread-1", message }));
+    const english = render();
+    expect(english).toContain('aria-label="Greenference API key"');
+    expect(english).toContain("Runs Greenference models with your own key.");
+    expect(english).toContain('placeholder="Paste your Greenference API key"');
+    expect(english).toContain(escapedText(message.secret!.description));
+    setLocale("pt-br");
+    const portuguese = render();
+    expect(portuguese).toContain('aria-label="Chave de API do Greenference"');
+    expect(portuguese).toContain("Roda modelos do Greenference com sua própria chave. Para preparar o resumo solicitado. Scout pode usar o valor, mas nunca consegue lê-lo.");
+    expect(portuguese).toContain('placeholder="Cole sua chave de API do Greenference"');
+    expect(portuguese).toContain(CREDENTIAL_TARGETS.greenferenceApiKey.helpUrl);
+    expect(message.secret).toMatchObject({ target: "greenferenceApiKey", description: `${CREDENTIAL_TARGETS.greenferenceApiKey.description} Para preparar o resumo solicitado. Scout can use it but never read it back.` });
+    setLocale("en");
+    expect(render()).toBe(english);
+  });
+
+  it.each([
+    { stopped: true },
+    { superseded: true },
+    { provided: true, resumed: true },
+  ])("localizes the Greenference label in settled states %j", (state) => {
+    setLocale("pt-br");
+    const html = view({ target: "greenferenceApiKey", ...CREDENTIAL_TARGETS.greenferenceApiKey, ...state });
+    expect(html).toContain('data-ask-card="settled"');
+    expect(html).toContain('aria-label="Chave de API do Greenference"');
+    expect(html).not.toContain('aria-label="Greenference API key"');
+    expect(html).not.toContain("<input");
+  });
+});
+
+describe("SecretRequestCard Gemini copy", () => {
+  it("localizes the Gemini title, description and password field without changing the saved card", () => {
+    const message = namedCard("geminiTtsKey", "Para preparar o resumo solicitado.");
+    const render = () => renderToStaticMarkup(createElement(SecretRequestCard, { botId: "bot-1", threadId: "thread-1", message }));
+    const english = render();
+    expect(english).toContain('aria-label="Gemini speech API key"');
+    expect(english).toContain(CREDENTIAL_TARGETS.geminiTtsKey.description);
+    expect(english).toContain('placeholder="Paste your Google AI Studio API key"');
+    expect(english).toContain(escapedText(message.secret!.description));
+    setLocale("pt-br");
+    const portuguese = render();
+    expect(portuguese).toContain('aria-label="Chave de API de voz do Gemini"');
+    expect(portuguese).toContain("Gera respostas faladas, mensagens de voz e a fala das chamadas com o Gemini. Para preparar o resumo solicitado. Scout pode usar o valor, mas nunca consegue lê-lo.");
+    expect(portuguese).toContain('placeholder="Cole sua chave de API do Google AI Studio"');
+    expect(portuguese).toContain(CREDENTIAL_TARGETS.geminiTtsKey.helpUrl);
+    expect(message.secret).toMatchObject({ target: "geminiTtsKey", description: `${CREDENTIAL_TARGETS.geminiTtsKey.description} Para preparar o resumo solicitado. Scout can use it but never read it back.` });
+    setLocale("en");
+    expect(render()).toBe(english);
+  });
+
+  it.each([
+    { stopped: true },
+    { superseded: true },
+    { provided: true, resumed: true },
+  ])("localizes the Gemini label in settled states %j", (state) => {
+    setLocale("pt-br");
+    const html = view({ target: "geminiTtsKey", ...CREDENTIAL_TARGETS.geminiTtsKey, ...state });
+    expect(html).toContain('data-ask-card="settled"');
+    expect(html).toContain('aria-label="Chave de API de voz do Gemini"');
+    expect(html).not.toContain('aria-label="Gemini speech API key"');
+    expect(html).not.toContain("<input");
   });
 });
 
@@ -256,6 +343,33 @@ describe("SecretRequestCard key analytics", () => {
 });
 
 describe("SecretRequestCard custom secrets", () => {
+  it.each(["file", "ref"] as const)("localizes the stopped %s delivery using its recorded author, not the saved description's words", (delivery) => {
+    const message: Message = { ...secretCard({ target: "customSecret", reason: "To create test charges.", description: "Original saved description.", helpUrl: "", delivery, stopped: true }), from: { botId: "bot-1", name: "Scout", color: "green" } };
+    const render = () => renderToStaticMarkup(createElement(SecretRequestCard, { botId: "bot-1", threadId: "thread-1", message }));
+    expect(render()).toContain('title="Original saved description."');
+    setLocale("pt-br");
+    const html = render();
+    expect(html).toContain("To create test charges.");
+    expect(html).toContain(delivery === "file" ? "Os comandos de Scout podem ler" : "Scout recebe uma referência de uso único");
+    expect(html).not.toContain("Original saved description.");
+    setLocale("en");
+    expect(render()).toContain('title="Original saved description."');
+  });
+
+  it.each(["file", "ref"] as const)("uses the direct chat's bot name for stopped %s delivery without a group author", (delivery) => {
+    const message = secretCard({ target: "customSecret", stopped: true, description: "Saved direct chat description.", delivery });
+    const render = () => renderToStaticMarkup(createElement(SecretRequestCard, { botId: "bot-1", botName: "Scout", threadId: "thread-1", message }));
+    expect(render()).toContain('title="Saved direct chat description."');
+    setLocale("pt-br");
+    expect(render()).toContain(delivery === "file" ? "Os comandos de Scout podem ler" : "Scout recebe uma referência de uso único");
+    expect(render()).not.toContain("Saved direct chat description.");
+  });
+
+  it("keeps an older card's description when no recorded author is available", () => {
+    setLocale("pt-br");
+    expect(view({ target: "customSecret", stopped: true, description: "Saved legacy description", delivery: "file" })).toContain('title="Saved legacy description"');
+  });
+
   it("says what the bot may do with it, in the bot's words and plainly, with no key link", () => {
     const file = view({ target: "customSecret", label: "Stripe secret key", reason: "To create test charges.", description: "To create test charges. Scout's commands can read it.", helpUrl: "", delivery: "file" });
     expect(file).toContain("To create test charges.");

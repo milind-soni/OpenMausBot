@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { ChevronRight, Download, Loader2, RefreshCw } from "lucide-react";
 
 import { api } from "@/state/store";
+import { routineLineText } from "@/lib/activity-text";
 import { cn } from "@/lib/cn";
-import { t } from "@/lib/i18n";
+import { intlLocale, t } from "@/lib/i18n";
 import { ACTIVITY_WHATS, activityQuery, describeEntry, formatValue, whoLabel, type ActivityEntry, type ActivityFilters, type ActivityWhat } from "@/lib/activity";
 import type { LocaleKey } from "@/locales";
 import { Select } from "./Select";
@@ -17,13 +18,13 @@ export function ActivityRow({ entry }: { entry: ActivityEntry }) {
   return (
     <li className="border-b border-hairline/20 py-2 text-[13px]" data-activity-entry={entry.type}>
       <div className="grid grid-cols-[auto_1fr] items-start gap-x-3">
-        <time className="whitespace-nowrap tabular-nums text-ink-secondary" dateTime={entry.at}>{new Date(entry.at).toLocaleString()}</time>
+        <time className="whitespace-nowrap tabular-nums text-ink-secondary" dateTime={entry.at}>{new Date(entry.at).toLocaleString(intlLocale())}</time>
         <div className="min-w-0">
           <div className="flex flex-wrap items-baseline gap-x-2">
             <span className="font-medium text-ink">{whoLabel(entry.who)}</span>
             <span className="min-w-0 break-words text-ink">{describeEntry(entry)}</span>
           </div>
-          {entry.type === "approval" && entry.summary && <div className="mt-0.5 truncate text-[12px] text-ink-secondary">{entry.summary}</div>}
+          {entry.type === "approval" && entry.summary && <div className="mt-0.5 truncate text-[12px] text-ink-secondary">{routineLineText(entry.summaryCode, entry.summary, entry.summaryParams)}</div>}
           {detail && (
             <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="cursor-pointer mt-0.5 flex items-center gap-1 text-[12px] text-ink-secondary hover:text-ink">
               <ChevronRight size={12} className={cn("transition-transform", open && "rotate-90")} />

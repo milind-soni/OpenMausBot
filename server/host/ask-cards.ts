@@ -80,7 +80,7 @@ export function createAskCards(deps: AskCardsDeps) {
     if (!delegator || delegator.threadId === threadId || deps.copiedInto(delegator.threadId, asker.id, threadId)) return;
     const chip = store.appendMessage(delegator.threadId, { role: "bot", kind: "activity",
       from: { botId: asker.id, name: asker.name, color: asker.color },
-      tool: { name: `Waiting on your ${kind} in @${asker.name}` },
+      tool: { name: `Waiting on your ${kind} in @${asker.name}`, nameCode: kind === "approval" ? "chat.notice.waitingApprovalElsewhere" : "chat.notice.waitingAnswerElsewhere", nameParams: { name: asker.name } },
       threadRef: { botId: asker.id, threadId, title: store.taskByThread(asker.id, threadId)?.title ?? asker.name },
     });
     waitingOnPersonChips.set(`${threadId}:${requestId}`, { threadId: delegator.threadId, messageId: chip.id, name: asker.name, kind });
@@ -155,7 +155,7 @@ export function createAskCards(deps: AskCardsDeps) {
       store.appendMessage(liveParent.threadId, {
         role: "bot", kind: "activity",
         from: { botId: bot.id, name: bot.name, color: bot.color },
-        tool: { name: chip, ok: true },
+        tool: { name: chip, ok: true, nameCode: "chat.notice.teammateNeedsInput", nameParams: { name: bot.name, question: withDefault(question).question.slice(0, 180) } },
         ...(node.groupId ? { comm: { groupId: node.groupId, threadId: node.threadId, withBotId: bot.id, withName: bot.name, withColor: bot.color } }
           : { threadRef: { botId: bot.id, threadId: node.threadId, title } }),
       });

@@ -19,11 +19,36 @@ export interface TeammatePromptDeps {
   fullAccess(botId: string, threadId: string): boolean;
   /** The work in this thread was started by an outside event. */
   startedOutside(threadId: string): boolean;
+  /** Whether the person the turn in `chiefThreadId` acts for is the one a question in `threadId` of `botId` waits on. */
+  asksActingPerson(chiefThreadId: string): (threadId: string, botId: string) => boolean;
   guestDriven(threadId: string): boolean;
   confined(threadId: string): boolean;
   readableFrom(threadId: string): (other: string) => boolean;
-  waitingForPerson(chief: BotRecord, teammates: readonly BotRecord[], readable: (threadId: string) => boolean): WaitingQuestion[];
+  waitingForPerson(chief: BotRecord, teammates: readonly BotRecord[], readable: (threadId: string, botId: string) => boolean): WaitingQuestion[];
   now?(): number;
+}
+
+/** What a coordinate_bots call tells the bot to do next. */
+export function coordinateResultMessage(reply: "none" | "poll" | "resume", answeredOnly: boolean): string {
+  if (reply === "none") return "Sent one way. Nothing comes back and nothing resumes you; continue your turn.";
+  if (answeredOnly) return "Answered for the person. Nothing from this call comes back or resumes you; continue your turn and tell the person what you answered.";
+  return reply === "poll"
+    ? "Handed to the coordinator. Read each result with assignment_status (id: a receipt's requestId, or rootId for the whole call), long-polling with wait_ms."
+    : "End your turn after sending all work. These actual teammates will reply and resume you automatically. Do not poll or wait.";
+}
+
+/** Security invariant: on a team a Chief answers a teammate's question only for the person it is for, and only in a turn that person drives.
+ * A room's turn names its person only through its generation. */
+export function createAsksActingPerson(deps: {
+  team: boolean;
+  requester(threadId: string, generation?: string): string | null;
+  askedPerson(botId: string, threadId: string): string | null;
+}) {
+  return (chiefThreadId: string, generation?: string): ((threadId: string, botId: string) => boolean) => {
+    if (!deps.team) return () => true;
+    const person = deps.requester(chiefThreadId, generation);
+    return (threadId, botId) => person !== null && deps.askedPerson(botId, threadId) === person;
+  };
 }
 
 export function createTeammatePrompts(deps: TeammatePromptDeps) {
@@ -58,7 +83,8 @@ export function createTeammatePrompts(deps: TeammatePromptDeps) {
     if (!actsForPerson(bot, threadId)) return "";
     const teammates = store.bots.filter((teammate) => teammate.id !== bot.id && !teammate.hidden && canManage(bot, teammate));
     const now = deps.now?.() ?? waitNow();
-    const waiting = deps.waitingForPerson(bot, teammates, deps.readableFrom(threadId))
+    const readable = deps.readableFrom(threadId), asked = deps.asksActingPerson(threadId);
+    const waiting = deps.waitingForPerson(bot, teammates, (other, botId) => readable(other) && asked(other, botId))
       .map(({ since, ...one }) => ({ ...one, thread: escapeNotes(one.thread).slice(0, 120), question: escapeNotes(one.question).slice(0, 400),
         ...(waitedLong(since, now) ? { waited: waitedWords(since, now) } : {}) }));
     if (!waiting.length) return "";

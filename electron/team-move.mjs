@@ -31,6 +31,16 @@ function parseMove(value) {
   return value;
 }
 
+export const TEAM_MOVE_TEXT = Object.freeze({
+  notInTeam: () => "You're not in that team.",
+  notABot: () => "Choose one of your bots to move.",
+  movingElsewhere: ({ bot, team }) => `${bot} is moving to ${team}.`,
+});
+
+export function teamMoveRefusal(code, params = {}) {
+  return Object.assign(new Error(TEAM_MOVE_TEXT[code](params)), { refusal: { code, params } });
+}
+
 export function parseTeamMoves(value) {
   return { v: 1, moves: record(value) && Array.isArray(value.moves) ? value.moves.map(parseMove).filter(Boolean).slice(0, 50) : [] };
 }
@@ -228,7 +238,7 @@ export function createTeamMove(deps) {
       const journal = read();
       const held = journal.moves.find((move) => move.bot.id === bot.id);
       if (held && held.phase !== "done" && !held.stopped) {
-        if (held.team.id !== team.id) throw new Error(`${held.bot.name} is moving to ${held.team.name}.`);
+        if (held.team.id !== team.id) throw teamMoveRefusal("movingElsewhere", { bot: held.bot.name, team: held.team.name });
         return kick();
       }
       const moves = journal.moves.filter((move) => move.bot.id !== bot.id).map((move) => (move.phase === "done" ? { ...move, told: true } : move));

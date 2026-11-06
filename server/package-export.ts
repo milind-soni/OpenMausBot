@@ -29,6 +29,8 @@ import {
   type PackageRoutine,
   type PackageRoutineSchedule,
 } from "../shared/package-format.ts";
+import type { ServerTextParams } from "../shared/server-text.ts";
+import { USER_ERROR, userError, type UserErrorKey } from "./user-errors.ts";
 
 function portableKey(value: string, fallback: string, used: Set<string>): string {
   const stem = value
@@ -278,7 +280,12 @@ export class TeamExportError extends Error {
   readonly status = 400;
 }
 
-export const TEAM_TOO_LARGE_MESSAGE = "This department is too large to share (4 MB). Leave out pictures, starter notes or some skills and try again.";
+function teamExportRefusal(key: UserErrorKey, params?: ServerTextParams): TeamExportError {
+  const { error, ...fields } = userError(key, params);
+  return Object.assign(new TeamExportError(error), fields);
+}
+
+export const TEAM_TOO_LARGE_MESSAGE = USER_ERROR["serverError.department.shareTooLarge"];
 
 export interface TeamExportInput {
   team: string;
@@ -478,7 +485,7 @@ function refuseSkillConflicts(bots: readonly BotRecord[], skillsByBot: ReadonlyM
       const first = firstByName.get(skill.name);
       if (!first) firstByName.set(skill.name, skill);
       else if (!sameSkill(first, skill)) {
-        throw new TeamExportError(`Two bots in this department have different skills named "${skill.name}". Leave that skill out and try again.`);
+        throw teamExportRefusal("serverError.department.shareSkillClash", { skill: skill.name });
       }
     }
   }
@@ -488,11 +495,11 @@ function refuseSkillConflicts(bots: readonly BotRecord[], skillsByBot: ReadonlyM
 export function createTeamPackageExport(input: TeamExportInput): TeamExportResult {
   const team = teamOf(input.team);
   const bots = input.bots.filter((bot) => !bot.hidden && teamOf(bot.section) === team);
-  if (!bots.length) throw new TeamExportError("Add a bot to this department before sharing it.");
+  if (!bots.length) throw teamExportRefusal("serverError.department.shareNoBots");
   const skipped: TeamExportSkip[] = [...(input.skipped ?? [])];
 
   const release = input.release?.trim() || nextPatchRelease(input.published?.lastRelease);
-  if (!SEMVER.test(release)) throw new TeamExportError("Use a version like 1.2.3.");
+  if (!SEMVER.test(release)) throw teamExportRefusal("serverError.share.version");
   const notes = input.notes?.trim();
   if (notes && notes.length > RELEASE_NOTES_MAX) throw new TeamExportError(`Release notes must be at most ${RELEASE_NOTES_MAX} characters.`);
   const displayName = input.name?.trim() || team || "General";
@@ -510,10 +517,10 @@ export function createTeamPackageExport(input: TeamExportInput): TeamExportResul
   else refuseSkillConflicts(bots, skillsByBot);
   const { packageSkills, agentSkills } = assignSkills(bots, skillsByBot);
   if (packageSkills.size > PACKAGE_MAX_SKILLS) {
-    throw new TeamExportError(`A department can share at most ${PACKAGE_MAX_SKILLS} skills. Choose fewer skills and try again.`);
+    throw teamExportRefusal("serverError.department.shareSkillLimit", { count: PACKAGE_MAX_SKILLS });
   }
   const crowded = bots.find((bot) => (agentSkills.get(bot.id)?.length ?? 0) > AGENT_MAX_SKILLS);
-  if (crowded) throw new TeamExportError(`${crowded.name} has more than ${AGENT_MAX_SKILLS} skills. Choose fewer skills and try again.`);
+  if (crowded) throw teamExportRefusal("serverError.department.shareBotSkillLimit", { name: crowded.name, count: String(AGENT_MAX_SKILLS) });
   const requirements = requiredApps(bots);
 
   // Addresses and header names only; values stay on this computer.
@@ -688,7 +695,7 @@ export function createTeamPackageExport(input: TeamExportInput): TeamExportResul
   try {
     document = parsePackageDocument(redactedDocument, { trust: "file" });
   } catch (error) {
-    if (error instanceof PackageFormatError && error.code === "too_large") throw new TeamExportError(TEAM_TOO_LARGE_MESSAGE);
+    if (error instanceof PackageFormatError && error.code === "too_large") throw teamExportRefusal("serverError.department.shareTooLarge");
     throw new TeamExportError(error instanceof Error ? error.message : "This department could not be shared.");
   }
   const toRecord = (keys: ReadonlyMap<string, string>, include: (id: string) => boolean) =>
@@ -739,7 +746,7 @@ function withPresetSkills(
   return { ...preset, ...(kept.length ? { skills: kept } : {}) };
 }
 
-export const PRESET_TOO_LARGE_MESSAGE = "This preset is too large to share (4 MB). Leave out starter notes or some skills and try again.";
+export const PRESET_TOO_LARGE_MESSAGE = USER_ERROR["serverError.preset.tooLarge"];
 
 export interface LibraryExportInput {
   name?: string;
@@ -762,10 +769,10 @@ export interface LibraryExportResult {
 }
 
 export function createLibraryPackageExport(input: LibraryExportInput): LibraryExportResult {
-  if (!input.preset) throw new TeamExportError("Your New bot defaults are empty. Give them a name, instructions, skills or starter notes first.");
+  if (!input.preset) throw teamExportRefusal("serverError.preset.empty");
   const skipped: TeamExportSkip[] = [...(input.skipped ?? [])];
   const release = input.release?.trim() || nextPatchRelease(input.published?.lastRelease);
-  if (!SEMVER.test(release)) throw new TeamExportError("Use a version like 1.2.3.");
+  if (!SEMVER.test(release)) throw teamExportRefusal("serverError.share.version");
   const notes = input.notes?.trim();
   if (notes && notes.length > RELEASE_NOTES_MAX) throw new TeamExportError(`Release notes must be at most ${RELEASE_NOTES_MAX} characters.`);
   const displayName = (input.name?.trim() || input.preset.preset.name).slice(0, 100).trim();
@@ -797,7 +804,7 @@ export function createLibraryPackageExport(input: LibraryExportInput): LibraryEx
   try {
     document = parsePackageDocument(redactedDocument, { trust: "file" });
   } catch (error) {
-    if (error instanceof PackageFormatError && error.code === "too_large") throw new TeamExportError(PRESET_TOO_LARGE_MESSAGE);
+    if (error instanceof PackageFormatError && error.code === "too_large") throw teamExportRefusal("serverError.preset.tooLarge");
     throw new TeamExportError(error instanceof Error ? error.message : "This preset could not be shared.");
   }
   return {

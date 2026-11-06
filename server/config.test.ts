@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { botThreadLimitText, defaultBotThreads, maxConcurrentBotThreads, maxConcurrentChildThreads } from "./bot-thread-limits.ts";
 import type { JsonValue } from "./schema.ts";
+import { imageSlots } from "./image-generation.ts";
 
 import { cacheUntilConfigChanges,
   changedInstanceIds,
@@ -120,6 +121,12 @@ describe("configuration boundaries", () => {
     expect(() => parseConfigPatch({ tts: { provider: "unknown" } })).toThrow("provider");
   });
 
+  it("stores OpenAI readout without changing live-call settings or enabling readout", () => {
+    const patch = { tts: { provider: "openai", voice: "marin" }, openai: { key: "fixture-key" } };
+    expect(parseConfigPatch(patch)).toEqual(patch);
+    expect(parseStoredConfig(patch)).toEqual(patch);
+  });
+
   it("accepts only known Fish Audio speech models", () => {
     for (const fishModel of ["s2.1-pro", "s2.1-pro-free"]) {
       expect(parseConfigPatch({ tts: { fishModel } }).tts).toEqual({ fishModel });
@@ -178,9 +185,20 @@ describe("configuration boundaries", () => {
       provider: "custom", key: "openai-kept", customApiKey: "router-only",
       customUrl: "http://127.0.0.1:4000/v1/", customModel: " local/image ",
     } });
-    expect(parsed.imageGen).toEqual({ provider: "custom", key: "openai-kept", customApiKey: "router-only", customUrl: "http://127.0.0.1:4000/v1", customModel: "local/image" });
+    expect(parsed.imageGen).toEqual({ primary: { provider: "custom" }, customModel: "local/image", key: "openai-kept", customApiKey: "router-only", customUrl: "http://127.0.0.1:4000/v1" });
     expect(parseStoredConfig({ imageGen: { key: "legacy" } }).imageGen).toEqual({ key: "legacy" });
     expect(() => parseConfigPatch({ imageGen: { provider: "unknown" } })).toThrow("provider");
+    expect(parseConfigPatch({ imageGen: { primary: { provider: "gemini", model: " gemini-2.5-flash-image " }, fallback: null, maxPerTurn: 3 } }).imageGen)
+      .toEqual({ primary: { provider: "gemini", model: "gemini-2.5-flash-image" }, fallback: null, maxPerTurn: 3 });
+    expect(() => parseConfigPatch({ imageGen: { primary: { provider: "cursor" } } })).toThrow("primary");
+    expect(() => parseConfigPatch({ imageGen: { maxPerTurn: 11 } })).toThrow("maxPerTurn");
+    expect(parseConfigPatch({ imageGen: { provider: "xai" } }).imageGen).toEqual({ primary: { provider: "xai" } });
+    for (const pasted of ["sk-or-v1-0123456789abcdef0123456789abcdef", "sk-proj-abcdefghijklmnop", "xai-abcdefghijklmnopqrstuvwx", "AIzaSyA-abcdefghijklmnopqrstuvwxyz012"]) {
+      expect(() => parseConfigPatch({ imageGen: { primary: { provider: "openrouter", model: pasted } } })).toThrow("API key");
+      expect(() => parseConfigPatch({ imageGen: { fallback: { provider: "openai", model: pasted } } })).toThrow("API key");
+      expect(() => parseConfigPatch({ imageGen: { provider: "custom", customModel: pasted } })).toThrow("API key");
+    }
+    expect(parseConfigPatch({ imageGen: { primary: { provider: "openrouter", model: "openai/gpt-image-2" } } }).imageGen).toEqual({ primary: { provider: "openrouter", model: "openai/gpt-image-2" } });
     expect(() => parseConfigPatch({ imageGen: { customUrl: "https://user:secret@router.example/v1" } })).toThrow("customUrl");
     const childEnv = { OMB_CUSTOM_IMAGE_KEY: "must-not-reach-bot" };
     stripWorkspaceCredentialEnv(childEnv);
@@ -750,6 +768,54 @@ describe("loadConfig between changes", () => {
       writeFileSync(path, JSON.stringify({ budgets: { monthlyUsd: 30, warnAtPercent: 50 } }));
       settle();
       expect(loadConfig().budgets).toEqual({ monthlyUsd: 30, warnAtPercent: 50 });
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+});
+
+describe("saving the image providers", () => {
+  it("keeps the model typed for Custom when the base moves to another provider and comes back", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({}));
+    try {
+      saveConfig(parseConfigPatch({ imageGen: { primary: { provider: "custom", model: "local/image" } } }));
+      saveConfig(parseConfigPatch({ imageGen: { primary: { provider: "openai" } } }));
+      saveConfig(parseConfigPatch({ imageGen: { primary: { provider: "custom" } } }));
+      expect(imageSlots(JSON.parse(readFileSync(path, "utf8"))).primary).toEqual({ provider: "custom", model: "local/image" });
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  it("drops a model that was a key once that key is replaced, and refuses a model equal to a saved key", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({ imageGen: { customApiKey: "gateway-old", customUrl: "http://127.0.0.1:4000/v1", customModel: "gateway-old",
+      primary: { provider: "custom", model: "gateway-old" }, fallback: { provider: "openai", model: "gateway-old" } } }));
+    try {
+      saveConfig(parseConfigPatch({ imageGen: { customApiKey: "gateway-new" } }));
+      const saved = readFileSync(path, "utf8");
+      expect(saved).not.toContain("gateway-old");
+      expect(imageSlots(JSON.parse(saved)).primary.model).not.toBe("gateway-old");
+      expect(() => saveConfig(parseConfigPatch({ imageGen: { primary: { provider: "custom", model: "gateway-new" } } }))).toThrow("API key");
+      expect(() => saveConfig(parseConfigPatch({ imageGen: { fallback: { provider: "openrouter", model: "gateway-new" } } }))).toThrow("API key");
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  it("keeps the base and the keys when the backup is cleared", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({ imageGen: { key: "openai-fixture", primary: { provider: "openai" } } }));
+    try {
+      saveConfig(parseConfigPatch({ imageGen: { fallback: { provider: "xai" } } }));
+      expect(JSON.parse(readFileSync(path, "utf8")).imageGen).toEqual({ key: "openai-fixture", primary: { provider: "openai" }, fallback: { provider: "xai" } });
+      saveConfig(parseConfigPatch({ imageGen: { fallback: null } }));
+      saveConfig(parseConfigPatch({ imageGen: { fallback: null } }));
+      expect(JSON.parse(readFileSync(path, "utf8")).imageGen).toEqual({ key: "openai-fixture", primary: { provider: "openai" } });
     } finally {
       rmSync(path, { force: true });
     }

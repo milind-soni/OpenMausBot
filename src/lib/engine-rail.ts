@@ -1,5 +1,7 @@
 import type { InstanceInfo } from "@/state/store";
 
+export { engineDisplayName } from "@/lib/engine-name";
+
 export function configuredModelInstances(instances: readonly InstanceInfo[], selectedInstanceId?: string): InstanceInfo[] {
   return instances.filter((instance) =>
     instance.instanceId === selectedInstanceId

@@ -1,5 +1,7 @@
 import type { Routine, RoutineRun } from "./routines";
 import { activeLocale, t } from "./i18n";
+import { routineLineText } from "./activity-text";
+import { clockOptions } from "./clock-time";
 
 export function routineRunTime(run: RoutineRun): number {
   return run.createdAt || run.startedAt || run.scheduledFor;
@@ -30,7 +32,7 @@ export function routineRunTone(run: RoutineRun): string {
 }
 
 export function routineDateTime(at: number): string {
-  return new Date(at).toLocaleString(activeLocale(), { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return new Date(at).toLocaleString(activeLocale(), { month: "short", day: "numeric", ...clockOptions(activeLocale()) });
 }
 
 export function routineFinished(routine: Routine): boolean {
@@ -61,4 +63,10 @@ export function routineRunsOn({ roomGoal, runOn, computer, cloudHome }: {
   if (computer === "cloud") return { label: t("routines.runsOn.botCloud"), hint };
   if (computer === "vm" && !cloudHome) return { label: t("routines.runsOn.botVm"), hint };
   return { label: t(cloudHome ? "routines.runsOn.cloudHome" : "routines.runsOn.local"), hint };
+}
+
+export function routineRunText(run: RoutineRun, field: "output" | "error" | "attention"): string {
+  const english = run[field] ?? "";
+  if (field === "output") return routineLineText(run.outputCode, english);
+  return field === "error" ? routineLineText(run.errorCode, english, run.errorParams) : routineLineText(run.attentionCode, english, run.attentionParams);
 }

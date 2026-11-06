@@ -4,6 +4,7 @@
 import { accountPlaces, clearPlaceStorage, createPlaceStash, withoutPlaces, withPlacesBack } from "./account-places.mjs";
 import { createCloudAccounts } from "./cloud-accounts.mjs";
 import { accountRows } from "./rail-accounts.mjs";
+import nativeText from "./native-text.cjs";
 
 /** The sign-in as the You menu shows it: never a token, and no account while none is signed in. */
 export function accountsView(state) {
@@ -75,11 +76,12 @@ export function createDesktopRing(deps) {
  *   holdSheet(open: boolean): void,
  *   tellSheet(): void,
  *   tell(): void,
+ *   t?(key: string, params?: Record<string, string | number>): string,
  * }} deps `ownPage`: this app's own page in the window, or the rail's. `placePage`: the page of a place of the person's own
  * or their team's, which may offer the sheet. `ring`: the accounts kept on this device. `holdSheet`: the rail's page stays up
  * for the sheet, even for someone who hid the rail. `tell`: this app's pages read the list again.
  */
-export function installAccounts({ ipcMain, ownPage, placePage, account, client, ring, holdSheet, tellSheet, tell }) {
+export function installAccounts({ ipcMain, ownPage, placePage, account, client, ring, holdSheet, tellSheet, tell, t = nativeText.englishText.t }) {
   let sheetPending = false;
   const view = () => accountsView(account()?.state());
   const own = (channel, handler) => ipcMain.handle(channel, (event, ...args) => {
@@ -118,7 +120,7 @@ export function installAccounts({ ipcMain, ownPage, placePage, account, client, 
       const id = view().active?.id;
       if (!id) return client().signOut();
       const { outcome } = await ring().signOut(id);
-      if (outcome === "moving") throw new Error("This computer's bots are moving to the Cloud. Try again once that's done.");
+      if (outcome === "moving") throw new Error(t("native.accounts.moving"));
       return client().state();
     },
   };

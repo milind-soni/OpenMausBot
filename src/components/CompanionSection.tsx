@@ -9,9 +9,11 @@ import {
   Trash2,
   Wifi,
 } from "lucide-react";
+import type { CompanionAccountState } from "../types/ogb";
 import {
   PhoneSetupFlowView,
   companionAccountActionError,
+  companionAccountBridge,
   companionBridge,
   loadCompanionBridgeState,
   shouldHydrateCompanionEmail,
@@ -113,9 +115,17 @@ export function deriveCompanionPanelStatus(
   const pairedCount = state.devices.length;
   if (!pairedCount) return null;
   return {
-    label: `${pairedCount} ${pairedCount === 1 ? "device" : "devices"} paired`,
+    label: pairedCount === 1 ? t("remote.status.pairedOne") : t("remote.status.pairedMany", { count: pairedCount }),
     good: true,
   };
+}
+
+/** Opening this page is what brings a paused address back: no button. */
+export function shouldResumePausedAddress(
+  account: CompanionAccountState | null,
+  state: Pick<CompanionState, "enabled" | "devices" | "error"> | null,
+): boolean {
+  return account?.paused === true && account.available && state?.enabled === true && !state.error && state.devices.length > 0;
 }
 
 export const relative = (at: number) => {
@@ -146,6 +156,14 @@ export function CompanionSection({ profileEmail = "", focusRequest = 0 }: { prof
     if (!focusRequest) revealed.current = 0;
     else if (revealed.current !== focusRequest && revealPhonePairing(pairingFlow.current)) revealed.current = focusRequest;
   }, [focusRequest, loaded]);
+  const resumeAsked = useRef(false);
+  const resumePaused = shouldResumePausedAddress(c.account, state);
+  const { accountAct } = c;
+  useEffect(() => {
+    if (!resumePaused || resumeAsked.current || !companionAccountBridge()?.prepare) return;
+    resumeAsked.current = true;
+    void accountAct((remote) => remote.prepare?.() ?? remote.state());
+  }, [resumePaused, accountAct]);
   const managedPolicy = useStore().state.config?.managedPolicy;
   const remoteBlocked = managedPolicy?.remoteAccess === false ? t("policy.remoteBlocked", { organization: managedPolicy.organizationName }) : null;
   const managedBy = managedPolicy?.remoteAccess === false ? t("policy.managedBy", { organization: managedPolicy.organizationName }) : null;
@@ -250,6 +268,7 @@ export function CompanionSection({ profileEmail = "", focusRequest = 0 }: { prof
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-[14px] font-medium text-ink">{device.name}</div>
                           <div className="text-[12px] text-ink-secondary">{t("remote.devices.lastSeen", { when: relative(device.lastSeenAt) })}</div>
+                          {c.account?.paused && <div className="text-[12px] text-ink-secondary">{t("remote.devices.paused")}</div>}
                         </div>
                         <button
                           disabled={c.busy}

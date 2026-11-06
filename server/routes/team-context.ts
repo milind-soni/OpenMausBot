@@ -4,6 +4,7 @@ import { z } from "zod";
 import { SECTION_CONTEXT_MAX_BYTES, readSectionContext, sectionContextKey, sectionContextLabel, writeSectionContext } from "../section-context.ts";
 import { sectionKey, type Store } from "../store.ts";
 import { TEAM_MEMORY_KINDS, TeamMemory, TeamMemoryConflict, type TeamMemoryKind } from "../team-memory.ts";
+import { userError, userErrorFields } from "../user-errors.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface TeamContextRouteDeps {
@@ -19,7 +20,7 @@ export function createTeamContextRoutes(deps: TeamContextRouteDeps): RouteHandle
     if (path === "/api/team-memory" && (method === "GET" || method === "POST")) {
       if (!url.searchParams.has("section")) return json(res, 400, { error: "section is required" });
       const section = sectionContextKey(url.searchParams.get("section") ?? "");
-      if (section && !store.sections.includes(section)) return json(res, 404, { error: "No such department" });
+      if (section && !store.sections.includes(section)) return json(res, 404, userError("serverError.department.notFound"));
       if (section.length > 60) return json(res, 400, { error: "section must be at most 60 characters" });
       if (method === "GET") {
         return json(res, 200, { section, label: sectionContextLabel(section), entries: teamMemory.list(section), loadedIds: teamMemory.promptSelection(section).loadedIds });
@@ -61,7 +62,7 @@ export function createTeamContextRoutes(deps: TeamContextRouteDeps): RouteHandle
         }
         return json(res, 200, { entries: teamMemory.list(section), loadedIds: teamMemory.promptSelection(section).loadedIds });
       } catch (error) {
-        return json(res, error instanceof TeamMemoryConflict ? 409 : 400, { error: error instanceof Error ? error.message : String(error) });
+        return json(res, error instanceof TeamMemoryConflict ? 409 : 400, { error: error instanceof Error ? error.message : String(error), ...userErrorFields(error) });
       }
     }
 
@@ -75,7 +76,7 @@ export function createTeamContextRoutes(deps: TeamContextRouteDeps): RouteHandle
         store.sections.includes(section) ||
         store.bots.some((bot) => !bot.hidden && sectionKey(bot.section) === section) ||
         store.groups.some((group) => sectionKey(group.section) === section);
-      if (!exists) return json(res, 404, { error: "no such department" });
+      if (!exists) return json(res, 404, userError("serverError.department.missing"));
 
       if (method === "GET") {
         const context = readSectionContext(section);

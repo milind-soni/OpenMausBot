@@ -10,6 +10,7 @@ import { activeRunsOf, nextDueOf, schedulerDueOf, wakeHoldOf } from "./routine-d
 import { startDueTimer, type DueTimer } from "./due-timer.ts";
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import type { RoutineRequestOperation } from "../shared/routine-request.ts";
+import type { ModelSelection } from "../shared/wire.ts";
 import { intervalAllowsOccurrence, intervalHasRestrictions, isSameLocalDay, latestIntervalOccurrence } from "./routine-intervals.ts";
 import { cloneSchedule, limitResetOccurrence, mergeScheduleUpdate, nextOccurrence, RoutineScheduleError, type RoutineSchedule, type RoutineScheduleInput } from "./routine-schedules.ts";
 import { runsOnce } from "../shared/limit-reset.ts";
@@ -23,7 +24,7 @@ import {
   routineFailure, routineHostWarning, skipNeedsNotice, stepPrompt, supersededBy,
 } from "./routine-execution.ts";
 import {
-  dispatchRefusal, engineFacts, loadOwnerNotices, recoverRun, requeueOnce, weekRuns, type RoutineAlert, type RoutineFailureFacts, type RoutineOwnerNotice,
+  dispatchRefusal, engineFacts, loadOwnerNotices, nextScheduledRun, recoverRun, requeueOnce, weekRuns, type RoutineAlert, type RoutineFailureFacts, type RoutineOwnerNotice,
 } from "./routine-recovery.ts";
 import { activeMs, askOf, settleAsk, waitingFor, type RoutineRunAsk } from "./routine-waits.ts";
 import { failsLikeLastOutcome, outcomesNewestFirst } from "./routine-outcomes.ts";
@@ -32,6 +33,7 @@ import { attachmentPathsOf, attachmentsMalformed, cloneAttachments } from "./rou
 import { loadInstalledPackage, loadRequestReceipts, loadRoutine, loadRun } from "./routine-load.ts";
 import { applyHolds, holdCauses, type AppliedHolds } from "./routine-holds.ts";
 import { sanitizeInput } from "./routine-input.ts";
+import { applyCheckResult, routineLine, runLineFields, type RoutineLineCodes, type RoutineTroubleCode } from "./routine-lines.ts";
 import { checkHold, CHECK_BOOT_HOLD_MS, type CheckHold } from "./routine-check-pacing.ts";
 import { resolveRoutineResultsThread, routineRunDefinition, type ResultsThreadAllocation } from "./routine-run-definition.ts";
 
@@ -46,7 +48,7 @@ export type RoutineTarget = "bot" | "room-goal";
 export type RoutineGoalStatus = Exclude<GroupGoalRunStatus, "working">;
 
 
-export interface Routine {
+export interface Routine extends RoutineTroubleCode {
   id: string;
   name: string;
   prompt: string;
@@ -60,6 +62,7 @@ export interface Routine {
   timeoutMinutes?: number;
   attachments?: RoutineContextAttachment[];
   continuity?: boolean;
+  modelSelection?: ModelSelection;
   overlap?: "skip" | "queue";
   runOnStartup?: boolean;
   checks?: RoutineCheck[];
@@ -89,7 +92,7 @@ export interface RoutinePackageStamp {
   parts: Record<RoutinePart, PartPair>;
 }
 
-export interface RoutineRun {
+export interface RoutineRun extends RoutineLineCodes {
   id: string;
   routineId: string;
   routineName: string;
@@ -180,6 +183,7 @@ export interface RoutineInput {
   timeoutMinutes?: number | null;
   attachments?: RoutineContextAttachment[];
   continuity?: boolean;
+  modelSelection?: ModelSelection | null;
   overlap?: "skip" | "queue";
   runOnStartup?: boolean;
   checks?: RoutineCheck[] | null;
@@ -210,7 +214,7 @@ function routineRequestOwnerKey(owner: RoutineRequestOwner): string {
 
 /** What a routine's checks found: items for one AI run, a sentence while an app cannot be read, and the next time they
  * have something to do on time. */
-export interface RoutineCheckResult { run?: { prompt: string; key: string }; trouble?: string; wakeAt?: number }
+export interface RoutineCheckResult { run?: { prompt: string; key: string }; trouble?: string; troubleCode?: string; wakeAt?: number }
 
 export interface RoutineChecks {
   /** Runs a routine's checks. With `hold` they may do only what needs no AI, and their items wait. */
@@ -611,6 +615,7 @@ export class RoutineManager {
       timeoutMinutes: Object.hasOwn(patch, "timeoutMinutes") ? patch.timeoutMinutes : routine.timeoutMinutes,
       attachments: patch.attachments ?? routine.attachments,
       continuity: patch.continuity ?? routine.continuity,
+      modelSelection: Object.hasOwn(patch, "modelSelection") ? patch.modelSelection : routine.modelSelection,
       overlap: Object.hasOwn(patch, "overlap") ? patch.overlap : routine.overlap,
       runOnStartup: patch.runOnStartup ?? routine.runOnStartup,
       checks: Object.hasOwn(patch, "checks") ? patch.checks : routine.checks,
@@ -642,13 +647,8 @@ export class RoutineManager {
         updatedAt: Math.max(now, routine.updatedAt + 1),
       });
       if (patch.enabled !== undefined) delete routine.heldFor;
-      if (!clean.continuity) delete routine.continuity;
-      if (clean.overlap !== "queue") delete routine.overlap;
-      if (!clean.runOnStartup) delete routine.runOnStartup;
-      if (!clean.access) delete routine.access;
-      if (!clean.deliver) delete routine.deliver;
-      if (!clean.steps) delete routine.steps;
-      if (!clean.checks) for (const key of ["checks", "checkedAt", "checkTrouble", "wakeAt"] as const) delete routine[key];
+      for (const key of ["continuity", "modelSelection", "overlap", "runOnStartup", "access", "deliver", "steps"] as const) if (!clean[key]) delete routine[key];
+      if (!clean.checks) for (const key of ["checks", "checkedAt", "checkTrouble", "checkTroubleCode", "wakeAt"] as const) delete routine[key];
       if (Object.hasOwn(patch, "timeoutMinutes") && patch.timeoutMinutes == null) {
         delete routine.timeoutMinutes;
       }
@@ -1243,7 +1243,7 @@ export class RoutineManager {
       result = await hook.check(cloneRoutine(routine), { manual: manual !== undefined, ...(hold ? { hold } : {}) });
     } catch (error) {
       console.error(`routines: the checks of ${routineId} failed`, error);
-      result = { trouble: "The checks could not run; they try again at the next check." };
+      result = { trouble: routineLine("routines.server.checksFailed"), troubleCode: "routines.server.checksFailed" };
     } finally {
       this.checking.delete(key);
     }
@@ -1261,9 +1261,7 @@ export class RoutineManager {
     let run: RoutineRun | undefined;
     try {
       this.commitMutation(() => {
-        for (const field of ["wakeAt", "checkTrouble"] as const) delete current[field];
-        Object.assign(current, result.wakeAt === undefined ? {} : { wakeAt: result.wakeAt }, result.trouble ? { checkTrouble: result.trouble.slice(0, 300) } : {},
-          result.trouble || result.run ? {} : { checkedAt: this.now() });
+        applyCheckResult(current, result, this.now());
         if (result.run) {
           run = queued ?? this.newRun(current, this.now(), false, allocations);
           if (queued) Object.assign(run, routineRunDefinition(current), {
@@ -1273,7 +1271,7 @@ export class RoutineManager {
           if (run.timeoutMinutes === undefined) delete run.timeoutMinutes;
           Object.assign(run, { prompt: result.run.prompt, checkKey: result.run.key });
         } else if (queued && !result.trouble) {
-          Object.assign(queued, { status: "completed", output: "Nothing new since the last check", report: { state: "quiet" }, finishedAt: this.now() } satisfies Partial<RoutineRun>);
+          Object.assign(queued, { status: "completed", output: routineLine("routines.server.nothingNew"), outputCode: "routines.server.nothingNew", report: { state: "quiet" }, finishedAt: this.now() } satisfies Partial<RoutineRun>);
         }
       }, () => this.discardResultsThreads(allocations));
     } catch (error) {
@@ -1316,7 +1314,7 @@ export class RoutineManager {
       run.output = redactSecretsInText(event.text).trim().slice(0, 2_000);
       if (run.plan) this.stepReplies.set(run.id, event.text);
     } else if (event.type === "runtime.error") {
-      run.error = redactSecretsInText(event.message).slice(0, 500);
+      Object.assign(run, runLineFields("error", event.message, event.text));
       this.failureFacts.set(run.id, engineFacts(event));
     } else if (event.type === "turn.completed") {
       if (this.closing && (!event.ok || event.stopReason === "cancelled" || event.stopReason === "interrupted")) return null;
@@ -1383,7 +1381,7 @@ export class RoutineManager {
     this.failureFacts.delete(run.id);
     if (this.closing) return;
     const held = facts.limit !== undefined || facts.limitResetsAt !== undefined ? facts.limit ?? "engine" : facts.stopReason === "auth_required" ? "signed-out" : undefined, backupReady = held !== undefined && this.options.limitBackup?.(run.botId, held) === true;
-    const recovery = recoverRun(run, failure, { ...facts, ...(backupReady ? { backupReady } : {}) }, this.now(), this.ownerNotices);
+    const recovery = recoverRun(run, failure, { ...facts, ...(backupReady ? { backupReady } : {}), nextScheduled: nextScheduledRun(run, this.routines) }, this.now(), this.ownerNotices);
     if (!recovery.queued) this.failRun(Object.assign(run, { partial: (facts.partial && Boolean(run.output)) || undefined }), recovery.error, "failed", recovery.alert);
     else {
       this.saveLater();

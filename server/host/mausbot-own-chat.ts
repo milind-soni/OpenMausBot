@@ -8,7 +8,7 @@ export interface MausBotOwnChatDeps {
   bots(): ReadonlyArray<{ id: string; threadId: string } & DefaultBotFields>;
   starters: { get(threadId: string): string | undefined; set(threadId: string, person: string): void };
   personKey(email: string): string;
-  moveNotes(from: string, to: string): Promise<unknown>;
+  moveNotes(from: string, to: string, person: string): Promise<unknown>;
 }
 
 export function createMausBotOwnChat(deps: MausBotOwnChatDeps) {
@@ -18,7 +18,7 @@ export function createMausBotOwnChat(deps: MausBotOwnChatDeps) {
     if (!email || deps.starters.get(bot.threadId) !== undefined) return null;
     const person = deps.personKey(email);
     deps.starters.set(bot.threadId, person);
-    return deps.moveNotes(bot.id, layerId(bot.id, memberAudience(person)));
+    return deps.moveNotes(bot.id, layerId(bot.id, memberAudience(person)), person);
   };
   return {
     claim,
