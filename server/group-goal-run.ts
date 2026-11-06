@@ -1,3 +1,5 @@
+import type { ServerText } from "../shared/server-text.ts";
+import { noticeFailure } from "./chat-notices.ts";
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import type { GroupDefaultResponder } from "./store.ts";
 
@@ -178,6 +180,7 @@ export interface GoalStepResult {
   replyText: string;
   outcome?: GoalStepOutcome;
   stopReason?: string | null;
+  stopReasonText?: ServerText;
 }
 
 export type GoalRunEnd = Exclude<GroupGoalRunStatus, "working">;
@@ -192,8 +195,8 @@ export interface GoalRunDeps<Bot extends GoalRunMember> {
   current(botId: string): Bot | undefined;
   /** One member turn; a step counts against the run's turns once its member is claimed. */
   step(bot: Bot, coordinator: boolean, instructions: string): Promise<GoalStepResult>;
-  finish(status: GoalRunEnd, detail: string): void;
-  progress(detail: string): void;
+  finish(status: GoalRunEnd, detail: string, text?: ServerText): void;
+  progress(detail: string, text?: ServerText): void;
   /** An activity row in the conversation, from the coordinator. */
   note(text: string): void;
 }
@@ -204,7 +207,9 @@ const TRANSIENT_STEP: ReadonlySet<GoalStepOutcome | undefined> = new Set(["provi
 async function stepOnceRetried<Bot extends GoalRunMember>(deps: GoalRunDeps<Bot>, bot: Bot, coordinator: boolean, instructions: string): Promise<GoalStepResult> {
   const first = await deps.step(bot, coordinator, instructions);
   if (!TRANSIENT_STEP.has(first.outcome) || deps.cancelled()) return first;
-  deps.progress(`${bot.name}'s turn did not settle (${first.outcome!.replace("_", " ")}) — retrying once.`);
+  const why = { provider_failed: "chat.notice.part.providerFailed", dispatch_failed: "chat.notice.part.dispatchFailed", stalled: "chat.notice.part.goalStalled", timed_out: "chat.notice.part.goalTimedOut" }[first.outcome as "provider_failed" | "dispatch_failed" | "stalled" | "timed_out"];
+  const retry = noticeFailure("chat.notice.goalRetry", { name: bot.name, why });
+  deps.progress(retry.message, retry.text);
   return deps.step(bot, coordinator, instructions);
 }
 
@@ -244,7 +249,10 @@ export async function runGoalRun<Bot extends GoalRunMember>(deps: GoalRunDeps<Bo
       return;
     }
     if (coordinatorResult.outcome === "busy") {
-      deps.finish("blocked", `${coordinatorResult.stopReason ?? `${coordinator.name} stayed busy`} — send the goal again when they are free.`);
+      const code = coordinatorResult.stopReasonText;
+      const busy = code?.key === "chat.notice.goalBusyOne" || code?.key === "chat.notice.goalBusyMany"
+        ? noticeFailure(code.key === "chat.notice.goalBusyOne" ? "chat.notice.goalBusyOneAgain" : "chat.notice.goalBusyManyAgain", code.params as Record<string, string>) : undefined;
+      deps.finish("blocked", busy?.message ?? `${coordinatorResult.stopReason ?? `${coordinator.name} stayed busy`} — send the goal again when they are free.`, busy?.text);
       return;
     }
     if (coordinatorResult.outcome === "parked") {

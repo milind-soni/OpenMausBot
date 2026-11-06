@@ -1,3 +1,4 @@
+import type { ServerTextParams } from "../shared/server-text.ts";
 // The authorization decision log: one fleet-wide, append-only NDJSON file per UTC month (<data>/decisions/YYYY-MM.ndjson)
 // recording why a tool call was allowed, denied or carded. 0600 and redacted (rows carry what the agent typed, credentials
 // included), and fire-and-forget: an audit log must never take down the decision it audits. ask_bot peer-approval cards are not covered.
@@ -56,6 +57,9 @@ export interface DecisionRow {
   botName?: string;
   tool?: string;
   summary?: string;
+  /** Fixed summary words; the English remains authoritative. */
+  summaryCode?: string;
+  summaryParams?: ServerTextParams;
   decision: DecisionKind;
   source: DecisionSource;
   /** which rule decided: a guard's regex source, or the granted key */

@@ -1,0 +1,64 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { HOME_SCREEN_PATH, OPEN_MS } from "./home-window.mjs";
+import { LOCAL, world } from "./fixtures/home-window-world.mjs";
+
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+
+test("the recovery owns the window until it settles, and a server chosen meanwhile takes it back", async () => {
+  const garage = "https://garage.example.test";
+  const marker = { frozen: true, cloud: garage, place: "Garage server" };
+  const choosing = world({ journal: null, marker, state: { status: "signed-out" }, url: `${LOCAL}${HOME_SCREEN_PATH}` });
+  choosing.reopenAnswer = false;
+  let chosen = () => {};
+  choosing.reopenGate = new Promise((resolve) => { chosen = resolve; });
+  const recoveringChoice = choosing.home.show();
+  for (let i = 0; i < 200 && choosing.reopened.length === 0; i++) await tick();
+  choosing.home.cancel();
+  chosen();
+  await recoveringChoice;
+  assert.deepEqual(choosing.local, [], "no frozen page either way");
+  assert.notEqual(choosing.home.view().screen, "offline", "a server chosen while the recovery runs keeps the screen to itself");
+  const leaving = world({ journal: null, marker, state: { status: "signed-out" }, url: `${LOCAL}${HOME_SCREEN_PATH}` });
+  leaving.reopenAnswer = false;
+  await leaving.home.show();
+  assert.deepEqual(leaving.home.view(), { screen: "offline", reason: "Your bots are on Garage server." });
+  assert.equal(leaving.timers.length, 1, "it was going to look again by itself");
+  leaving.url = "https://studio.example.test/";
+  leaving.home.cancel();
+  assert.equal(leaving.timers.length, 0, "the recovery's own retry is retired with it");
+  await leaving.later(5_000);
+  assert.equal(leaving.url, "https://studio.example.test/", "the retry left with the recovery it belonged to");
+  const overlapped = world({ journal: null, marker, state: { status: "signed-out" }, url: `${LOCAL}${HOME_SCREEN_PATH}` });
+  overlapped.reopenGate = new Promise(() => {});
+  let settled = false;
+  const firstLook = overlapped.home.show().then(() => { settled = true; });
+  for (let i = 0; i < 200 && overlapped.timers.length === 0; i++) await tick();
+  overlapped.url = `${garage}/`;
+  await overlapped.home.show();
+  await overlapped.later(OPEN_MS);
+  await tick();
+  assert.equal(settled, true, "a second show() leaves the deadline to the recovery");
+  assert.deepEqual(overlapped.home.view(), { screen: "offline", reason: "Your bots are on Garage server." }, "a page that never commits is still bounded");
+  assert.equal(overlapped.timers.length, 1, "and looks again by itself");
+  await firstLook;
+  const replaced = world({ journal: null, marker, state: { status: "signed-out" }, url: `${LOCAL}${HOME_SCREEN_PATH}` });
+  let releaseOld = () => {};
+  replaced.reopenAnswer = false;
+  replaced.reopenGate = new Promise((resolve) => { releaseOld = resolve; });
+  const old = replaced.home.show();
+  for (let i = 0; i < 200 && replaced.reopened.length === 0; i++) await tick();
+  replaced.home.cancel();
+  replaced.reopenGate = new Promise(() => {});
+  const newer = replaced.home.show();
+  for (let i = 0; i < 200 && replaced.reopened.length === 1; i++) await tick();
+  releaseOld();
+  await old;
+  void replaced.home.show();
+  await tick();
+  await tick();
+  assert.equal(replaced.reopened.length, 2, "a cancelled recovery never unlocks the one that replaced it");
+  void newer;
+});
+

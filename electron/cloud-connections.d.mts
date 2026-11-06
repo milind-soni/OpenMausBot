@@ -53,11 +53,12 @@ export class ConnectionMoveError extends Error {
 
 export function parseConnections(value: unknown): ConnectionsRead | null;
 export function collectConnections(local: ConnectionsLocal): Promise<CollectedConnections>;
-export function adoptComposioId(target: ConnectionsTarget, options: { local: ConnectionsLocal; here: Connection; there: Connection | null }):
+export function adoptComposioId(target: ConnectionsTarget, options: { local: ConnectionsLocal; here: Connection; there: Connection | null; managedApps?: boolean; t?: (key: string, params?: Record<string, string | number>) => string }):
   Promise<{ shared: true } | { kept: true; missing: string[] }>;
 export function sendConnections(collected: CollectedConnections, target: ConnectionsTarget, options: {
   local: ConnectionsLocal;
   release?: boolean;
+  t?(key: string, params?: Record<string, string | number>): string;
   signIns?: boolean;
   waitMs?: number;
   onProgress?: (progress: { done: number; total: number; label: string }) => void;

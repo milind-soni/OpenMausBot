@@ -6,6 +6,7 @@ import { helperModelAllowed, type BotVisibility } from "../shared/wire.ts";
 import type { BotRecord, GroupRecord, Message, Store, TaskRecord } from "./store.ts";
 import type { Routine, RoutineManager } from "./routines.ts";
 import { redactSecretsInText } from "./redact.ts";
+import { exportedGoalWords, restoredGoalWords } from "./team-backup-words.ts";
 import {
   listMemoryLogs, listMemoryTopics, readMemoryFile, readMemoryLog, readMemoryTopic,
   writeMemoryFile, writeMemoryLog, writeMemoryTopic,
@@ -33,7 +34,7 @@ function restoreMemory(botId: string, memory: NonNullable<TeamBackup["bots"][num
 }
 
 /** Readable history only: no executable cards, queue entries, approval requests, local paths or session handles. */
-function messageText(message: Message): string {
+function messageText(message: Message) {
   const parts = [message.text ?? ""];
   if (message.card) parts.push(message.card.title, message.card.subtitle, ...message.card.options, message.card.answered ?? "");
   if (message.tool) parts.push(`[${message.tool.name}${message.tool.ok === false ? ": failed" : ""}]`);
@@ -41,9 +42,14 @@ function messageText(message: Message): string {
   if (message.kind === "secret") parts.push("[Secret request — not restored]");
   if (message.kind === "signin") parts.push("[Sign-in request — not restored]");
   if (message.routineRun) parts.push(`[Routine: ${message.routineRun.routineName} — ${message.routineRun.status}]`, message.routineRun.summary ?? "", message.routineRun.error ?? "");
+  const goalPart = parts.length;
   if (message.goalRun) parts.push(`[Goal: ${message.goalRun.status}]`, message.goalRun.goal, message.goalRun.detail ?? "");
   if (message.kind === "screen" || message.attachments?.length) parts.push("[Image or attachment — file not included in this backup]");
-  return parts.filter(Boolean).join("\n");
+  const text = parts.filter(Boolean).join("\n");
+  if (!message.goalRun) return { text, ...restoredGoalWords({ ...message, text }) };
+  const before = parts.slice(0, goalPart).filter(Boolean).join("\n");
+  const after = parts.slice(goalPart + 1).filter(Boolean).join("\n");
+  return exportedGoalWords(message, text, before ? `${before}\n` : "", after ? `\n${after}` : "");
 }
 
 /** `shown`: on a Team Cloud someone else's private chat is never in the exporting person's backup. */
@@ -68,7 +74,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
         : undefined,
       activeLeafId: store.activeLeaf(task.threadId),
       messages: store.messagesFor(task.threadId).map((message) => ({
-        id: message.id, role: message.role, text: messageText(message), at: message.at,
+        id: message.id, role: message.role, ...messageText(message), at: message.at,
         parentId: message.parentId ?? null, replyToId: message.replyToId,
         from: message.from, peerPost: message.peerPost, ...(message.serverCard ? { serverCard: true as const } : {}),
       })),
@@ -160,6 +166,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
     const ids = new Map(task.messages.map((message) => [message.id, newId()]));
     const messages: Message[] = task.messages.map((message) => ({
       id: ids.get(message.id)!, kind: "text", role: message.role, text: message.text, at: message.at,
+      ...(message.from && !botIds.has(message.from.botId) ? {} : restoredGoalWords(message)),
       parentId: message.parentId ? ids.get(message.parentId)! : null,
       replyToId: message.replyToId ? ids.get(message.replyToId) : undefined,
       // A removed sender keeps its name in the text, never a link to an unrelated local bot with a colliding key.

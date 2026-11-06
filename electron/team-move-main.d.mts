@@ -2,7 +2,7 @@ import type { TeamMoveView } from "./team-move.mjs";
 
 export function moveTeams(state: unknown): Array<{ id: string; name: string; origin: string; ready: boolean }>;
 
-export function teamMoveConfirmWords(names: { bot: string; team: string }): { message: string; detail: string; buttons: string[] };
+export function teamMoveConfirmWords(names: { bot: string; team: string }, t?: (key: string, params?: Record<string, string | number>) => string): { message: string; detail: string; buttons: string[] };
 export function bringableBots(listed: unknown): Array<{ id: string; name: string; stays?: "default" | "chief" | "last" }>;
 
 export function installTeamMove(deps: {
@@ -19,6 +19,7 @@ export function installTeamMove(deps: {
   fetch?: typeof fetch;
   journal?: { read(): unknown; write(value: unknown): void };
   log?(line: string): void;
+  t?(key: string, params?: Record<string, string | number>): string;
 }): {
   kick(): Promise<void>;
   view(): TeamMoveView | null;

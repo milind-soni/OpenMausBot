@@ -474,6 +474,29 @@
       "use_tool"
     ]
   },
+  "skills+shared+voice+escalations+x+team+images": {
+    "bytes": 18429,
+    "sha256": "bbbe7bb7e483b7e6df32f08db33aa661946ae079db2e3fe369bf4062bf7be3c9",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "publish_page",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "send_voice_note",
+      "message_person",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
   "default+legacy-switches": {
     "bytes": 17486,
     "sha256": "d6c5f68fac5114c9a084906d9dbb41e4acf688dc399af136f646a8dbe09b3a48",
@@ -592,6 +615,28 @@
       "coordinate_bots",
       "list_bots",
       "list_rooms",
+      "attach_file",
+      "publish_page",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "message_person",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "default+images": {
+    "bytes": 17502,
+    "sha256": "ce42f064070e44731e840ec00db6977fbe880c8318f2188364f2dd8202b46867",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
       "attach_file",
       "publish_page",
       "post_to_room",

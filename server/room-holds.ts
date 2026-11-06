@@ -83,9 +83,12 @@ export function addressesEveryone(text: string): boolean {
   return false;
 }
 
+const RESUME_WORDS = new Set(["resume", "retomar", "retome"]);
+const RESUME_TAIL = new Set(["all", "everyone", "please", "todos", "por", "favor"]);
+
 function isBareResume(text: string): boolean {
   const words = maskQuotedAndCode(text).toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
-  return words.length > 0 && words[0] === "resume" && words.slice(1).every((word) => ["all", "everyone", "please"].includes(word));
+  return words.length > 0 && RESUME_WORDS.has(words[0]!) && words.slice(1).every((word) => RESUME_TAIL.has(word));
 }
 
 /** `ownName`: the bot it was sent to, which may be tagged. A tag of anyone else is a message about them, not a stop. */

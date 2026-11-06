@@ -3,6 +3,7 @@ import { AlertTriangle, AtSign, Bell, CheckCircle2, CircleHelp, HandHelping, Inf
 import { api, useStore, openThread, type Action } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { setNotificationTrayPinned } from "@/lib/notification-preferences";
 import { useShowThreads } from "@/lib/thread-preferences";
 import type { LocaleKey } from "@/locales";
 import { BotAvatar, type BotAvatarProps } from "./Avatar";
@@ -64,27 +65,37 @@ export function filterNotifications<T extends { botId: string }>(entries: T[], b
   return botId === ALL_BOTS ? entries : entries.filter((entry) => entry.botId === botId);
 }
 
-export function NotificationRail() {
+/** `bar` is the top bar's button class, which also selects the top-bar layout. */
+export function NotificationBell({ bar }: { bar?: string }) {
   const { state, dispatch } = useStore();
   const unread = state.notifications.reduce((count, n) => count + (n.read ? 0 : 1), 0);
+  return (
+    <button
+      type="button"
+      data-notification-bell
+      onClick={() => dispatch({ type: "toggleNotifications" })}
+      aria-label={unread > 0 ? t("notifications.railUnread", { count: unread }) : t("notifications.title")}
+      title={t("notifications.title")}
+      aria-pressed={state.notificationsOpen}
+      className={cn("relative", bar ?? "flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink", bar && state.notificationsOpen && "text-accent hover:text-accent")}
+    >
+      <Bell size={bar ? 15 : 17} strokeWidth={bar ? 1.75 : undefined} aria-hidden="true" />
+      {unread > 0 && (
+        <span className={cn("absolute flex items-center justify-center rounded-full bg-accent font-semibold text-accent-ink", bar ? "-right-1 -top-0.5 h-[13px] min-w-[13px] px-0.5 text-[9px]" : "-right-0.5 -top-0.5 h-[15px] min-w-[15px] px-1 text-[10px]")}>
+          {unread > 99 ? "99+" : unread}
+        </span>
+      )}
+    </button>
+  );
+}
+
+/** The bell on the window's right edge, for windows without the top bar (a browser, or the frame turned off). */
+export function NotificationRail() {
+  const { state } = useStore();
   if (state.notificationsOpen) return null;
   return (
     <aside aria-label={t("notifications.title")} className="absolute right-0 top-1/2 z-20 -translate-y-1/2 rounded-l-lg border border-r-0 border-hairline/40 bg-panel p-1 shadow-sm">
-      <button
-        type="button"
-        onClick={() => dispatch({ type: "toggleNotifications" })}
-        aria-label={unread > 0 ? t("notifications.railUnread", { count: unread }) : t("notifications.title")}
-        title={t("notifications.title")}
-        aria-pressed={false}
-        className="relative flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
-      >
-        <Bell size={17} />
-        {unread > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-accent-ink">
-            {unread > 99 ? "99+" : unread}
-          </span>
-        )}
-      </button>
+      <NotificationBell />
     </aside>
   );
 }
@@ -125,6 +136,13 @@ export function NotificationsPanel() {
       void postNotificationRead(`/api/notifications/${entry.id}/read`, dispatch);
     }
     openThread(dispatch, { botId: entry.botId, threadId: entry.threadId }, state, showThreads);
+    if (!state.notificationsPinned) dispatch({ type: "toggleNotifications", open: false });
+  };
+
+  const togglePinned = () => {
+    const pinned = !state.notificationsPinned;
+    dispatch({ type: "toggleNotificationsPinned", pinned });
+    setNotificationTrayPinned(pinned);
   };
 
   const markAllRead = () => {
@@ -147,7 +165,7 @@ export function NotificationsPanel() {
         </button>
         <button
           type="button"
-          onClick={() => dispatch({ type: "toggleNotificationsPinned" })}
+          onClick={togglePinned}
           aria-label={state.notificationsPinned ? t("notifications.unpin") : t("notifications.pin")}
           aria-pressed={state.notificationsPinned}
           title={state.notificationsPinned ? t("notifications.unpin") : t("notifications.pin")}
@@ -185,7 +203,7 @@ export function NotificationsPanel() {
           <div className="px-3.5 py-6 text-[13px] text-ink-secondary">{state.notifications.length === 0 ? t("notifications.empty") : t("notifications.emptyForBot")}</div>
         )}
         {visible.map((entry) => (
-          <NotificationRow key={entry.id} entry={entry} now={now} bot={notificationBotForAvatar(entry, state.bots)} threadName={notificationThreadName(entry, state)} onOpen={() => openRow(entry)} />
+          <NotificationRow key={entry.id} entry={entry} title={entry.title} now={now} bot={notificationBotForAvatar(entry, state.bots)} threadName={notificationThreadName(entry, state)} onOpen={() => openRow(entry)} />
         ))}
       </div>
       <div className="border-t border-hairline/40 px-3.5 py-2 text-center text-[12px] text-ink-tertiary">
@@ -195,13 +213,13 @@ export function NotificationsPanel() {
   );
 }
 
-function NotificationRow({ entry, now, bot, threadName, onOpen }: { entry: NotificationLogEntry; now: number; bot: BotAvatarProps["bot"] | null; threadName: string | null; onOpen: () => void }) {
+function NotificationRow({ entry, title, now, bot, threadName, onOpen }: { entry: NotificationLogEntry; title: string; now: number; bot: BotAvatarProps["bot"] | null; threadName: string | null; onOpen: () => void }) {
   const { Icon, className, status } = KIND_LOOK[entry.kind] ?? KIND_LOOK.done;
   return (
     <button
       type="button"
       onClick={onOpen}
-      title={entry.title}
+      title={title}
       className={cn(
         "flex w-full gap-2.5 border-b border-hairline/20 px-3.5 py-2.5 text-left hover:bg-raised/60",
         !entry.read && "bg-accent/5",
@@ -222,7 +240,7 @@ function NotificationRow({ entry, now, bot, threadName, onOpen }: { entry: Notif
               <span className="min-w-0 flex-1 truncate font-normal">{threadName}</span>
             </>
           ) : (
-            <span className="min-w-0 flex-1 truncate">{entry.title}</span>
+            <span className="min-w-0 flex-1 truncate">{title}</span>
           )}
           <span className={cn("shrink-0 text-[11px] font-medium", className)}>{t(status)}</span>
         </span>

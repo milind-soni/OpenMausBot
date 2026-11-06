@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { APP_LIMITS, appBlockedText, htmlFallbackText, htmlVisibleText, mcpAppFallbackText, parseShowHtmlInput, parseUpdateHtmlInput, utf8Bytes, wrapHtmlFragment } from "./app.ts";
+import { APP_LIMITS, appBlockedText, appDoneOf, htmlFallbackText, htmlVisibleText, mcpAppFallbackText, parseShowHtmlInput, parseUpdateHtmlInput, utf8Bytes, wrapHtmlFragment } from "./app.ts";
 
 describe("parseShowHtmlInput", () => {
   it("keeps a whole document as written, trimmed", () => {
@@ -86,5 +86,26 @@ describe("fallback text", () => {
 describe("utf8Bytes", () => {
   it("counts like the encoder does", () => {
     for (const text of ["", "abc", "é", "€", "😀", "a😀é€", "\ud800 lone"]) expect(utf8Bytes(text), text).toBe(new TextEncoder().encode(text).length);
+  });
+});
+
+describe("appDoneOf", () => {
+  const text = (value: string) => ({ type: "text", text: value });
+  it("takes the plain text as one line and its first https link", () => {
+    expect(appDoneOf("Create issue", { content: [text("Created issue #12\n  https://github.com/o/r/issues/12 (label not applied)")] }, 5))
+      .toEqual({ tool: "Create issue", text: "Created issue #12 https://github.com/o/r/issues/12 (label not applied)", url: "https://github.com/o/r/issues/12", at: 5 });
+  });
+  it("shows no raw JSON: a JSON block gives only its html_url, else its url", () => {
+    expect(appDoneOf("Create issue", { content: [text('{"url":"https://api.github.com/repos/o/r/issues/12","html_url":"https://github.com/o/r/issues/12","number":12}')] }, 1))
+      .toEqual({ tool: "Create issue", url: "https://github.com/o/r/issues/12", at: 1 });
+    expect(appDoneOf("Create issue", { content: [text('{"id":"1","url":"https://github.com/o/r/issues/13"}')] }, 1))
+      .toEqual({ tool: "Create issue", url: "https://github.com/o/r/issues/13", at: 1 });
+    expect(appDoneOf("Create issue", { content: [], structuredContent: { html_url: "https://github.com/o/r/pull/7" } }, 1).url).toBe("https://github.com/o/r/pull/7");
+  });
+  it("keeps only https links and clips long text", () => {
+    const done = appDoneOf("Run", { content: [text(`see http://x.test/a and javascript:alert(1) ${"y".repeat(400)}`)], structuredContent: { url: "javascript:alert(1)" } }, 1);
+    expect(done.url).toBeUndefined();
+    expect(done.text!.length).toBeLessThanOrEqual(APP_LIMITS.doneText);
+    expect(appDoneOf("Run", { content: [] }, 1)).toEqual({ tool: "Run", at: 1 });
   });
 });

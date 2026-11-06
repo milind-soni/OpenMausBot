@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
+import nativeText from "./native-text.cjs";
 
 import { listedColors, parseCloudList } from "./cloud-list.mjs";
 import environments from "./environments.cjs";
@@ -94,7 +95,7 @@ test("main's own wiring: This computer's page reads and changes its own colour, 
   const start = source.indexOf("installPlaceLook({ ipcMain, guard: workspaceOnly"), end = source.indexOf('ipcMain.handle("sharing:state"', start);
   assert.ok(start >= 0 && end > start, "main installs the colour's channels");
   const handlers = new Map(), persisted = [];
-  const context = vm.createContext({ installPlaceLook, savedPlace: environments.savedPlace, withPlaceColor: environments.withPlaceColor,
+  const context = vm.createContext({ installPlaceLook, nativeT: nativeText.englishText.t, savedPlace: environments.savedPlace, withPlaceColor: environments.withPlaceColor,
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, workspaceOnly: handler => handler,
     environmentsState: { environments: [typed], activeId: "local" }, desktopRemoteAccess: null, cloudAccount: null, myCloud: () => null,
     ensureCloudAccount: () => { throw new Error("This computer's colour never asks the Admin"); },

@@ -209,7 +209,7 @@ test("Pause stops every Cloud at once and lasts across restarts; Resume lends ag
   await until(() => homes[HOME].connects.length === 1 && homes[OTHER].connects.length === 1, "both Clouds to be lent");
   mac.sharing.pause();
   await until(() => homes[HOME].disconnects.length === 1 && homes[OTHER].disconnects.length === 1, "both Clouds to be told");
-  assert.deepEqual(mac.summaries.at(-1), { lending: [], clouds: ["My Cloud", "Client A"], using: [], paused: true, terminal: false, busy: null, screen: null });
+  assert.deepEqual(mac.summaries.at(-1), { lending: [], clouds: ["My Cloud", "Client A"], waiting: [], using: [], paused: true, terminal: false, busy: null, screen: null });
   assert.equal(mac.sharing.lentToCloud(myCloud).paused, true, "Files keeps My Cloud's copies, and holds bots' changes there");
   const plans = path.join(mac.dir, "Plans");
   await mkdir(plans);
@@ -554,4 +554,28 @@ test("the activity window says what every language pack says, word for word", as
     assert.ok(WORDS[locale], `${locale}: main has no words for it`);
     for (const key of keys) assert.equal(WORDS[locale][key], pack[key] ?? en[key], `${locale} ${key}: copy src/locales/${file} into electron/lending-words.mjs`);
   }
+});
+
+test("a home server that refuses this computer is shown as waiting, never as able to use it, until it accepts (#4078)", async t => {
+  const GARAGE = "https://garage.example.test", garage = { id: "garage", kind: "remote", name: "Garage server", origin: GARAGE };
+  const server = cloudHome({ link: false, chrome: false });
+  const answer = server.fetch;
+  let refuse = true;
+  const reply = (value, status) => ({ ok: status < 400, status, headers: { get: () => null }, body: (async function* () { yield Buffer.from(JSON.stringify(value)); })() });
+  server.fetch = async (url, init) => {
+    const route = new URL(url).pathname;
+    if (route === "/api/auth/session") return reply({ kind: "session", id: server.sessionId, scopes: ["admin", "client"], own: true }, 200);
+    if (route === "/api/shared-computers/connect" && refuse) return reply({ error: "Forbidden" }, 403);
+    return answer(url, init);
+  };
+  const mac = await computer(t, { homes: { [GARAGE]: server }, places: [garage], ownHome: () => ({ origin: GARAGE, environmentId: server.environmentId }) });
+  mac.sharing.start();
+  await until(() => mac.summaries.some(summary => summary.waiting?.includes("Garage server")), "the refused server to be waiting");
+  assert.equal(server.connects.length, 0);
+  assert.deepEqual(mac.summaries.at(-1).clouds, ["Garage server"], "still lent, so the menu-bar item stays");
+  assert.equal(indicatorText(mac.summaries.at(-1), "Mac").line, "Waiting for Garage server to accept this Mac");
+  refuse = false;
+  await until(() => server.connects.length === 1, "the server to accept on the next try", 8000);
+  await until(() => mac.summaries.at(-1).waiting.length === 0, "the waiting line to go");
+  assert.equal(indicatorText(mac.summaries.at(-1), "Mac").line, "Garage server can use this Mac");
 });

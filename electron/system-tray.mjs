@@ -1,5 +1,7 @@
+import nativeText from "./native-text.cjs";
+
 // Retain the Windows notification-area identity across app restarts.
-export function createSystemTray({ Tray, Menu, nativeImage, iconPath, getWindow, onQuit }) {
+export function createSystemTray({ Tray, Menu, nativeImage, iconPath, getWindow, onQuit, t = nativeText.englishText.t }) {
   const tray = new Tray(nativeImage.createFromPath(iconPath).resize({ width: 20, height: 20 }),
     "889af657-21b5-4ec9-b5d0-cb798cbdfd30");
   let hidden = false;
@@ -13,12 +15,13 @@ export function createSystemTray({ Tray, Menu, nativeImage, iconPath, getWindow,
     win.focus();
     return true;
   };
-  tray.setToolTip("OpenMaus Bot");
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Open OpenMaus Bot", click: show },
+  const label = () => tray.setContextMenu(Menu.buildFromTemplate([
+    { label: t("native.tray.open"), click: show },
     { type: "separator" },
-    { label: "Quit OpenMaus Bot", click: onQuit },
+    { label: t("native.tray.quit"), click: onQuit },
   ]));
+  tray.setToolTip("OpenMaus Bot");
+  label();
   tray.on("click", show);
   tray.on("double-click", show);
   return {
@@ -26,6 +29,7 @@ export function createSystemTray({ Tray, Menu, nativeImage, iconPath, getWindow,
     hide(win) { hidden = true; win.setSkipTaskbar(true); win.hide(); },
     isHidden() { return hidden; },
     windowShown(win) { hidden = false; win.setSkipTaskbar(false); },
+    relabel() { if (!tray.isDestroyed()) label(); },
     destroy() { if (!tray.isDestroyed()) tray.destroy(); },
   };
 }

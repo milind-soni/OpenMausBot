@@ -1,6 +1,8 @@
 import type { Message } from "@/state/store";
 import { activeLocale, t } from "@/lib/i18n";
 import { lastNonReceipt } from "@/lib/receipts";
+import { noticeText } from "@/lib/activity-text";
+import type { ServerTextParams } from "../../shared/server-text";
 
 export interface TranscriptLookups {
   editVersions(message: Message): readonly Message[] | undefined;
@@ -51,4 +53,8 @@ export function dayLabel(at: number, today = localDay(Date.now())): string {
     dates = { locale, format: (value) => formatter.format(value) };
   }
   return dates.format(at);
+}
+
+export function botLineText(message: { text?: string; textCode?: string; textParams?: ServerTextParams }): string {
+  return noticeText(message.textCode, message.text ?? "", message.textParams);
 }

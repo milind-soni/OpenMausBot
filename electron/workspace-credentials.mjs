@@ -9,6 +9,7 @@ export const WORKSPACE_CREDENTIALS = [
   { section: "decider", field: "workersAiToken", name: "workersAiToken", env: "OMB_WORKERS_AI_TOKEN" },
   { section: "imageGen", field: "key", name: "openaiImageApiKey", env: "OMB_OPENAI_IMAGE_KEY" },
   { section: "imageGen", field: "customApiKey", name: "customImageApiKey", env: "OMB_CUSTOM_IMAGE_KEY" },
+  { section: "imageGen", field: "geminiKey", name: "geminiImageApiKey", env: "OMB_GEMINI_IMAGE_KEY" },
   { section: "live", field: "key", name: "openaiLiveKey", env: "OMB_OPENAI_LIVE_KEY" },
   { section: "treg", field: "key", name: "tregApiKey", env: "OMB_TREG_KEY" },
   { section: "postiz", field: "key", name: "postizApiKey", env: "OMB_POSTIZ_API_KEY" },

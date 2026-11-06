@@ -2,6 +2,8 @@
 // of kind "widget". Node names and props follow ChatKit's widget components.
 // Model input is normalised here once; every renderer reads canonical trees only.
 import type { JsonValue } from "./json.ts";
+import { readWidgetText } from "./widget-text.ts";
+import { buttonStyle } from "./widget-button-style.ts";
 
 export const WIDGET_VERSION = 1;
 
@@ -494,13 +496,6 @@ const SPECS: Record<string, NodeSpec> = {
 /** Every node type a widget may contain, roots first. */
 export const WIDGET_NODE_TYPES: readonly string[] = Object.keys(SPECS);
 
-function buttonStyle(raw: Record<string, unknown>): string {
-  if (raw.color === "danger" || raw.style === "danger") return "danger";
-  if (raw.variant === "ghost" || raw.style === "quiet") return "quiet";
-  if (raw.style === "secondary" || raw.variant === "outline" || raw.variant === "soft" || raw.color === "secondary") return "secondary";
-  return raw.style === "primary" || raw.color === "primary" || raw.variant === "solid" || raw.submit === true ? "primary" : "secondary";
-}
-
 interface Context {
   nodes: number;
   images: number;
@@ -541,6 +536,7 @@ function normalize(input: unknown, path: string, depth: number, slot: "root" | "
     if (value !== undefined) node[key] = value;
   }
   if (type === "Button") node.style = buttonStyle(raw);
+  if (raw.i18n !== undefined) node.i18n = readWidgetText(raw.i18n);
   if (type === "Icon") node.name ??= "dot";
   if (type === "Progress") {
     const max = typeof raw.max === "number" && Number.isFinite(raw.max) && raw.max > 0 ? raw.max : undefined;

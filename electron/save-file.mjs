@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import nativeText from "./native-text.cjs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
@@ -153,9 +154,9 @@ export function htmlCopyName(name) {
 
 /** Opens HTML the page already showed in the default browser: a fresh copy in our own temp folder, never a path a page
  * names. `open` is shell.openPath, which answers "" or why it failed. Copies older than a day are cleared first. */
-export async function openHtmlCopy(source, name, { dir, open, fsp = fs.promises, now = Date.now() }) {
-  if (typeof source !== "string") throw new Error("Nothing to open");
-  if (Buffer.byteLength(source, "utf8") > OPEN_HTML_MAX_BYTES) throw new Error("This page is too large to open (2 MB)");
+export async function openHtmlCopy(source, name, { dir, open, fsp = fs.promises, now = Date.now(), t = nativeText.englishText.t }) {
+  if (typeof source !== "string") throw new Error(t("native.html.nothingToOpen"));
+  if (Buffer.byteLength(source, "utf8") > OPEN_HTML_MAX_BYTES) throw new Error(t("native.html.tooLarge"));
   await fsp.mkdir(dir, { recursive: true, mode: 0o700 });
   for (const entry of await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])) {
     if (!entry.isDirectory() || !entry.name.startsWith("p-")) continue;

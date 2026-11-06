@@ -19,6 +19,8 @@ import { Card, CommandLine } from "./SettingsPrimitives";
 import { MacLocalControl } from "./MacLocalControl";
 import { Select } from "./Select";
 import { cn } from "@/lib/cn";
+import { localizeComputerProblem } from "@/lib/computer-messages";
+import { computerInventoryRequest, jsonPostRequest, type ComputerApiRequest } from "@/lib/computer-requests";
 import { useStore } from "@/state/store";
 import { VpsComputersCard } from "./VpsComputersCard"; import { KeysLink } from "./keys/KeysLink";
 
@@ -270,34 +272,9 @@ export function vpsComputerShortId(name: string): string {
   return suffix ? suffix.slice(-8).toLowerCase() : "unknown";
 }
 
-type ComputerInventoryRequest = "status" | "local-vms" | "cloud" | "vps";
-type ComputerApiRequest = [url: string, init: RequestInit];
 export interface ComputerActionPlan {
   confirmation: string | null;
   request: ComputerApiRequest;
-}
-
-const computerInventoryPaths: Record<ComputerInventoryRequest, string> = {
-  status: "/api/local-computer",
-  "local-vms": "/api/local-computer/instances",
-  cloud: "/api/computers/boxes",
-  vps: "/api/computers/vps",
-};
-
-/** Observation only: opening Computers must never provision or wake anything. */
-export function computerInventoryRequest(
-  inventory: ComputerInventoryRequest,
-  signal?: AbortSignal,
-): ComputerApiRequest {
-  return [computerInventoryPaths[inventory], { signal }];
-}
-
-function jsonPostRequest(url: string, body: unknown): ComputerApiRequest {
-  return [url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  }];
 }
 
 export function perBotLocalVmDeletePlan(instance: LocalVmInventoryInstance): ComputerActionPlan {
@@ -605,7 +582,7 @@ export function LocalVmInventoryCard({
                   </div>
                 )}
                 {managed && instance.problem && !instance.inUse && (
-                  <div className="mt-1 text-[12px] text-warning">{instance.problem}</div>
+                  <div className="mt-1 text-[12px] text-warning">{localizeComputerProblem(instance.problem)}</div>
                 )}
                 {managed && instance.inUse && (
                   <div className="mt-1 text-[12px] text-ink-secondary">{t("vm.perBot.stopFirst")}</div>
@@ -832,7 +809,7 @@ export function LocalComputerSection() {
     const payload = body as LocalVmInventoryPayload;
     setInventory(payload.instances);
     setInventoryMax(payload.maxInstances);
-    setInventoryUnavailableReason(payload.available ? null : (payload.problem ?? t("vm.err.runtimeUnavailable")));
+    setInventoryUnavailableReason(payload.available ? null : (localizeComputerProblem(payload.problem) ?? t("vm.err.runtimeUnavailable")));
     setInventoryError(null);
   }, []);
 

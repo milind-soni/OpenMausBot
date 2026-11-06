@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, extname, join } from "node:path";
+import { resolvePortableHermes } from "./portable-hermes.ts";
 
 function nvmBinDirs(): string[] {
   try {
@@ -42,6 +43,11 @@ function knownDirs(): string[] {
     join(home, ".deno", "bin"),
     join(home, "bin"),
     ...nvmBinDirs(),
+    // Mac Local VM runtimes: Docker Desktop's per-user CLI install and Podman's official pkg.
+    ...(process.platform === "darwin" ? [
+      join(home, ".docker", "bin"),
+      ...(sealedFixture() ? [] : ["/opt/podman/bin"]),
+    ] : []),
   ];
 }
 
@@ -217,7 +223,7 @@ function isFile(p: string): boolean {
   }
 }
 
-function whichWin(cli: string, env?: NodeJS.ProcessEnv): string | null {
+export function whichWin(cli: string, env?: NodeJS.ProcessEnv): string | null {
   const exts = ((env ?? process.env).PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
   // npm installs both `claude` (a sh script) and `claude.cmd`; an extensionless name is not runnable on Windows.
   const probe = (base: string) => {
@@ -325,6 +331,8 @@ function parseCmdShim(shim: string, env?: NodeJS.ProcessEnv): ResolvedSpawn | nu
     return null;
   }
   const dir = dirname(shim);
+  const portableHermes = resolvePortableHermes(shim, text);
+  if (portableHermes) return portableHermes;
   // npm's own npm.cmd/npx.cmd name their entry as SET "NPX_CLI_JS=%~dp0\…"; a launcher switch to a global npm is not followed.
   const npmEntry = /^SET "NP[MX]_CLI_JS=%~dp0\\([^"]+)"/im.exec(text);
   const targets = [...(npmEntry ? [npmEntry] : []), ...text.matchAll(/"%~?dp0%?\\?([^"]+)"/g)]

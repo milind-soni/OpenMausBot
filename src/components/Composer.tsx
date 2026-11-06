@@ -7,6 +7,8 @@ import { cn } from "@/lib/cn";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { useMenuMotion } from "./MenuMotion";
 import { ELEVATED_CARD, ELEVATED_FLOAT } from "./elevated";
+import { uploadDraftImage } from "@/lib/composer-uploads";
+import { intakeFilesWithNotice } from "@/lib/attach-notice";
 import { activeLocale, t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { imeComposing, sendKeyLabel, sendsMessage, useSendKey } from "@/lib/send-key";
@@ -20,7 +22,6 @@ import {
   prependComposerDraft,
   recoverFailedComposerSend,
   rememberFailedComposerSend,
-  replaceDraftAttachment,
   restoredSendId,
   restoredRequestText,
   useComposerDraft,
@@ -44,7 +45,6 @@ import { useOnCall } from "@/lib/call";
 import { isLiveCallRunning, useLiveMedia } from "@/lib/live-call-media";
 import {
   appendPastedText,
-  handoffAttachmentImagePreview,
   clipboardHasImages,
   clipboardImageFiles,
   composeMessage,
@@ -52,11 +52,11 @@ import {
   discardUnsentUpload,
   composerShouldRefocus,
   composerTakesFocusOnOpen,
-  imageAttachmentFromFile, imageBytesLeft, imageSlotsLeft, imagesThatFit,
+  imageBytesLeft,
+  imageSlotsLeft,
+  imagesThatFit,
   replyTargetTakesFocus,
-  intakeFiles,
   isLongPaste,
-  optimisticImageAttachment,
   pasteAttachment,
   releaseAttachmentImagePreview,
   type Attachment,
@@ -476,33 +476,12 @@ export function Composer({
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const modeBot = group ? undefined : bot;
   const { choice: approvalChoice, dialogs: approvalDialogs } = useThreadApproval(modeBot);
-  const uploadImage = useCallback(async (file: File): Promise<Attachment | null> => {
-    const optimistic = optimisticImageAttachment(file);
-    if (!optimistic) return null;
-    appendDraftAttachments(draftId, [optimistic]);
-    try {
-      const completed = await imageAttachmentFromFile(file, optimistic);
-      if (!completed) {
-        replaceDraftAttachment(draftId, optimistic.id, null);
-        releaseAttachmentImagePreview(optimistic);
-        return null;
-      }
-      handoffAttachmentImagePreview(completed.path, completed.previewUrl);
-      if (!replaceDraftAttachment(draftId, optimistic.id, completed)) {
-        releaseAttachmentImagePreview(completed);
-      }
-      return null;
-    } catch (error) {
-      replaceDraftAttachment(draftId, optimistic.id, null);
-      releaseAttachmentImagePreview(optimistic);
-      throw error;
-    }
-  }, [draftId]);
+  const uploadImage = useCallback((file: File) => uploadDraftImage(draftId, file), [draftId]);
   const pickFiles = async (picked: FileList | null) => {
     if (!picked?.length) return;
     changeDraftAttachmentPending(draftId, true);
     try {
-      const { attachments: added, notice } = await intakeFiles(Array.from(picked), {
+      const { attachments: added, notice } = await intakeFilesWithNotice(Array.from(picked), {
         allowImages: engineSupportsImages,
         getPath: pathForFile,
         uploadImage,
@@ -551,13 +530,14 @@ export function Composer({
           replyToId: failed.replyToId,
           threadId: failed.threadId, mentions: failed.mentions,
           channelMode: failed.channelMode,
+          followUp: failed.followUp,
         });
       },
     };
     if (group) {
       dispatch({ type: "sendGroup", groupId: group.id, mode: failedMode, ...retry });
     } else if (bot) {
-      dispatch({ type: "send", botId: bot.id, mode: failedMode, ...retry });
+      dispatch({ type: "send", botId: bot.id, mode: failedMode, followUp: failed.followUp, ...retry });
     }
   };
   const send = (followUp: FollowUp | undefined = followUpFor(false)) => {
@@ -584,7 +564,7 @@ export function Composer({
       reply: replyTo ?? null,
       replyToId: replyTo?.id,
       threadId,
-      channelMode: effectiveChannelMode, mentions: picks.ids(body),
+      channelMode: effectiveChannelMode, mentions: picks.ids(body), followUp,
     };
     if (group) {
       dispatch({

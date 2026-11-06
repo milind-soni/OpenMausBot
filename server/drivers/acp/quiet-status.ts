@@ -1,3 +1,4 @@
+import { RuntimeNoticeError } from "../runtime-notice-error.ts";
 // What a quiet ACP agent is doing. ACP has no "still working" message, and agents go silent for minutes
 // (Qwen Code 0.24 while it waits out a rate limit, retries, or runs a slow call), so a quiet turn is
 // probed from the agent's debug log and its process tree's connections and CPU.
@@ -350,10 +351,10 @@ export function quietVerdict(input: {
   const limited = input.logged && waitingOutLimit(input.logged.signal) && input.now - input.logged.at >= limitQuietMs() ? input.logged.signal : null;
   if (limited) {
     const said = limited.kind === "provider-error" ? ` (“${limited.message}”)` : "";
-    return { next, noSignsSince, stop: Object.assign(new Error(`${input.name} reached a usage limit${said} and is waiting it out without replying, so this turn was stopped.`), { acpUsageLimit: true }) };
+    return { next, noSignsSince, stop: Object.assign(new RuntimeNoticeError(`${input.name} reached a usage limit${said} and is waiting it out without replying, so this turn was stopped.`, "chat.notice.acpQuietUsageLimit", { name: input.name, said }), { acpUsageLimit: true }) };
   }
   if (noSignsSince !== null && input.now - noSignsSince >= noSignsStopMs()) {
-    return { next, noSignsSince, stop: Object.assign(new Error(`${input.name} sent nothing for ${formatQuietLimit(input.quietMs)} with no tool running, no open request to its model and no CPU use, so the turn was stopped as stuck. Send the message again to retry.`), { acpPromptStall: true }) };
+    return { next, noSignsSince, stop: Object.assign(new RuntimeNoticeError(`${input.name} sent nothing for ${formatQuietLimit(input.quietMs)} with no tool running, no open request to its model and no CPU use, so the turn was stopped as stuck. Send the message again to retry.`, "chat.notice.acpQuietStuck", { name: input.name, quiet: formatQuietLimit(input.quietMs) }), { acpPromptStall: true }) };
   }
   return { next, noSignsSince, stop: null };
 }
@@ -435,4 +436,8 @@ export function lastSeenPhrase(state: QuietState): string {
     case "no-signs": return "no open request and no CPU use";
     case "unknown": return "no readable process state";
   }
+}
+
+export function quietNoticeText(name: string, state: QuietState, quietMs: number) {
+  return state.kind === "provider-error" ? { key: "chat.notice.acpModelRequestFailed", params: { name, message: state.message, quiet: minutes(quietMs) } } : undefined;
 }

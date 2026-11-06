@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { AlertTriangle } from "lucide-react";
 
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
 
 export type ConfirmTone = "danger" | "neutral";
 
@@ -93,7 +94,7 @@ export function ConfirmDialogCard({
   title,
   body,
   confirmLabel,
-  cancelLabel = "Cancel",
+  cancelLabel = t("common.cancel"),
   tone = "danger",
   icon,
   onCancel,

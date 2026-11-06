@@ -158,7 +158,8 @@ describe("OpenCode model variants", () => {
         selection: { instanceId: "opencode", model: "provider/model", ...(variant !== undefined ? { variant } : {}) } });
     }
     const markup = renderToStaticMarkup(createElement(ModelVariantRow, { bot: { ...selected("removed"), busy: true }, compact: true }));
-    expect(markup).toContain('disabled=""');
+    // A reasoning variant is read when each turn starts, so it stays changeable while the bot works.
+    expect(markup).not.toMatch(/<select[^>]* disabled=/);
     expect(markup).toContain("removed (unverified)");
     expect(markup).toContain("Use session setting");
   });

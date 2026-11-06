@@ -58,7 +58,7 @@ describe("inbox triage on the helper models", () => {
       email("c", "Bank <alerts@bank.example>", "Payment due"),
     ], ["news@shop.example"]);
     expect(picks).toEqual([
-      { id: "b", why: "Asks you to confirm the PO number, due 2026-10-30.", needsReply: true },
+      { id: "b", why: "Asks you to confirm the PO number, due 2026-10-30.", whyText: { key: "brief.inbox.askDue", params: { ask: "confirm the PO number", deadline: "2026-10-30" } }, needsReply: true },
       { id: "c", why: "", needsReply: false },
     ]);
     // Every request is one the Cloud relay accepts: the fixed fields, the fixed question, cleaned data.

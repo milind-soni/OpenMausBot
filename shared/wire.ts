@@ -16,7 +16,8 @@ import type { RoutineRequestCardData } from "./routine-request.ts"; import type 
 import type { WebhookRequestCardData } from "./webhook-request.ts"; import type { WaitCardField, WaitLineField } from "./wait-request.ts"; import type { ComputerAskField } from "./computer-ask.ts";
 import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTriggerService } from "./app-triggers.ts";
 import type { ProfileRequestCardData } from "./profile-request.ts";
-import type { PlaceRow } from "./place-view.ts";
+import type { ServerTextLine, ServerTextParams } from "./server-text.ts";
+import type { WireTool } from "./wire-tool.ts";
 import type { ModelRequestCardData } from "./model-request.ts";
 import type { ConnectorCardData } from "./connector-card.ts"; import type { McpChangeRequest } from "./mcp-request.ts";
 import type { SkillRequestCardData } from "./skill-request.ts"; import type { OutsideWriteCardField } from "./outside-write.ts";
@@ -340,7 +341,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   voice?: string;
   /** Whether this bot may send voice notes. Absent/true = allowed; false
    * hides the tool and refuses the route even with a voice configured. */
-  voiceNotes?: boolean;
+  voiceNotes?: boolean; /** The harness speaks each reply as a voice note; absent follows the installation's `tts.everyReply`. */ voiceNoteEveryReply?: boolean;
   /** Whether this bot may use the X research tools (x_search and its
    * actions), which spend the workspace's treg balance.
    * Absent/false = off: the person turns it on per bot. */
@@ -450,7 +451,7 @@ export type CardAnswerer = (
 export const EXCERPT_SUMMARY_HEADER = "Historical excerpts in chronological order; newer corrections override older requests. These excerpts may omit earlier details.";
 
 /** One transcript line, serialized as stored. */
-export interface WireMessage extends HelperIntroField, SetupCardFields, WaitLineField, BugReportField {
+export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCardFields, WaitLineField, BugReportField {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
@@ -464,11 +465,11 @@ export interface WireMessage extends HelperIntroField, SetupCardFields, WaitLine
     tokensBefore: number;
     by: "person" | "harness";
   };
-  /** Renderers receive only the allowlisted /api/attachments URL. `file`
-   * entries are opened through the message-scoped file route, never by path. */
+  /** Renderers receive only the allowlisted /api/attachments URL. `file` entries are opened through the message-scoped
+   * file route, never by path. `source`: a bot attach-file copy's original path on the server, for Show in folder. */
   attachments?: Array<
-    | { kind: "image"; path: string; mime: string; name?: string }
-    | { kind: "file"; path: string; mime: string; name: string }
+    | { kind: "image"; path: string; mime: string; name?: string; source?: string }
+    | { kind: "file"; path: string; mime: string; name: string; source?: string }
     /** `text` is the words the note speaks (secret-redacted when stored): clients show it behind a
      * collapsed transcript, never as message body, and the model's replay folds it back after `text`. */
     | { kind: "audio"; path: string; mime: string; durationMs?: number; text?: string }
@@ -503,26 +504,12 @@ export interface WireMessage extends HelperIntroField, SetupCardFields, WaitLine
   /** call rows (kind "call"): the finished Live call this row records. */
   call?: LiveCallRecord;
   /** activity messages: tool name + outcome. */
-  tool?: {
-    name: string; ok?: boolean; spoken?: string; setup?: boolean; terminal?: boolean; summary?: string; input?: string; output?: string; clipped?: boolean;
-    /** What the call works on, as its live status said it: the chip's and the "Now" card's specific words. `whose`: the person whose own app or MCP server the call used. */
-    step?: import("./turn-progress.ts").LiveStep; whose?: { person: string; app: string };
+  tool?: WireTool & {
+    clipped?: boolean;
     /** Words the harness wrote for what the call did, shown in place of `name`; `name` stays the tool's own. */
     label?: string;
-    /** error rows: the installed Claude Code is too old for the model, and
-     * the UI can offer to update it in place. notice rows: `rescue`, a turn that heard nothing from its AI for a while. */
-    claudeUpdate?: boolean; rescue?: import("./first-reply-rescue.ts").FirstReplyRescue;
-  /** error rows: the place this turn could not use. */
-    place?: PlaceRow;
-    /** error rows: epoch ms when the usage limit that stopped the turn resets. */
-    limitResetsAt?: number;
     /** error rows: the reply came back; only a step the turn ran failed or wasn't allowed. */
     partial?: boolean;
-    /** Provider item identity, scoped to the owning turn. */
-    itemId?: string;
-    /** Whether the harness captured the full redacted result. Private
-     * server-local spill paths are not exposed to clients. */
-    fullResult?: boolean;
   };
   /** A bot line a "post" webhook wrote: whoever called the webhook chose
    * its words. On a room line this also carries `from`, so the room renders
@@ -664,6 +651,9 @@ export interface OptionCardData extends WaitCardField, ComputerAskField, AccessR
   teamMemoryRequest?: { section: string; entryId: string; kind: string; revision?: string };
   title: string;
   subtitle: string;
+  /** Fixed `chat.notice.*` words for `subtitle`; the English fallback stays stored in `subtitle`. */
+  summaryCode?: string;
+  summaryParams?: ServerTextParams;
   options: string[];
   /** Distinguishes a provider question from an approval after its live run ends. */
   requestType?: "permission" | "question";
@@ -738,6 +728,12 @@ export interface SecretRequestCardData {
   target: CredentialTargetId | typeof CUSTOM_SECRET_TARGET;
   label: string;
   description: string;
+  /** Optional named-key copy for client localization; `description` remains the complete fallback for English and older cards. */
+  descriptionParts?: {
+    baseCode: "secretCard.greenference.description" | "secretCard.geminiTts.description";
+    reason: string;
+    bot: string;
+  };
   placeholder: string;
   helpUrl: string;
   /** A custom secret's use: "ref", OpenMausBot's own tools only; "file", the bot's commands; "email", the Email connector, never a bot. */ delivery?: SecretDelivery | "email";

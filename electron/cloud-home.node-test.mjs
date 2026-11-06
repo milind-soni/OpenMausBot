@@ -8,6 +8,7 @@ import { CLOUD_HOME_NAME, cloudHomeConnectUrl, cloudPlanDisk, cloudUnreachableTe
 import environments from "./environments.cjs";
 import { handSaved } from "./own-home-main.mjs";
 import { homeLook, withoutOldCloudHome } from "./cloud-list.mjs";
+import nativeText from "./native-text.cjs";
 
 const NOW = 1_800_000_000_000;
 const origin = "https://omb-u-1a2b3c4d5e6f.fly.dev";
@@ -435,12 +436,12 @@ test("the Server menu opens My Cloud through the Cloud's own connection, never a
   const entry = { id: "cloud", name: CLOUD_HOME_NAME, origin }, other = { id: "vps", kind: "remote", name: "VPS", origin: "https://vps.example.test" };
   const context = vm.createContext({
     environmentsState: { environments: [entry, other], activeId: environments.LOCAL_ID }, LOCAL_ID: environments.LOCAL_ID,
-    cloudAccount: { homeTarget: () => ({ origin }), state: () => ({}) }, isCloudHomeEntry, slog: () => {},
+    cloudAccount: { homeTarget: () => ({ origin }), state: () => ({}) }, isCloudHomeEntry, slog: () => {}, nativeT: nativeText.englishText.t,
     connectCloudHome: (...args) => connect(...args), cloudHomeSignedIn: async () => signedIn,
     openCloudSettings: async () => { calls.push("settings"); },
     persistEnvironments: next => { calls.push(`active:${next.activeId}`); context.environmentsState = next; }, withActive: environments.withActive,
     navigateMainWindow: url => calls.push(`navigate:${url}`), activeOrigin: () => context.environmentsState.environments.find(e => e.id === context.environmentsState.activeId)?.origin,
-    homeWindow: { cloudOrigin: () => null, asking: () => false }, showHome: async (options) => { calls.push(options ? `home:${JSON.stringify(options)}` : "home"); },
+    homeWindow: { cloudOrigin: () => null, asking: () => false, cancel: () => {} }, showHome: async (options) => { calls.push(options ? `home:${JSON.stringify(options)}` : "home"); },
     homePlaces: { remember: (place) => calls.push(`remember:${JSON.stringify(place)}`) },
     runningDataDir: "/data", desktopDataDir: () => "/data",
     handSaved, serverOpens: async (place) => { calls.push(`look:${place.id}`); return answers; }, session: { defaultSession: { fetch: async () => null } }, dialog: {},
@@ -460,10 +461,10 @@ test("the Server menu opens My Cloud through the Cloud's own connection, never a
   calls.length = 0; await context.switchEnvironment("acme");
   assert.deepEqual(calls, ['home:{"place":{"team":"team-acme","name":"Acme"}}'], "a team opens through the home window's team pairing, never a plain navigation");
   context.environmentsState = { environments: [entry, other, acme], activeId: "acme" };
-  context.homeWindow = { cloudOrigin: () => origin, asking: () => false };
+  context.homeWindow = { cloudOrigin: () => origin, asking: () => false, cancel: () => {} };
   calls.length = 0; await context.switchEnvironment("cloud");
   assert.deepEqual(calls, ["remember:null", 'home:{"place":"cloud"}'], "back to My Cloud from a team: My Cloud itself, remembered");
-  context.homeWindow = { cloudOrigin: () => null, asking: () => false };
+  context.homeWindow = { cloudOrigin: () => null, asking: () => false, cancel: () => {} };
   context.environmentsState = { environments: [entry, other], activeId: environments.LOCAL_ID };
   context.environmentsState = { environments: [entry, other], activeId: environments.LOCAL_ID };
   context.cloudAccount = { homeTarget: () => null, state: () => ({ status: "connected", machine: { status: "stopped" } }) }; context.remember({ accountId: "a1", origin });
@@ -475,12 +476,12 @@ test("the Server menu opens My Cloud through the Cloud's own connection, never a
   context.cloudAccount = null; context.environmentsState = { environments: [entry, other], activeId: environments.LOCAL_ID };
   calls.length = 0; await context.switchEnvironment("cloud");
   assert.deepEqual(calls, ["remember:null", "active:cloud", `navigate:${origin}`]);
-  context.homeWindow = { cloudOrigin: () => origin, asking: () => false }; context.environmentsState = { environments: [entry, other], activeId: "vps" };
+  context.homeWindow = { cloudOrigin: () => origin, asking: () => false, cancel: () => {} }; context.environmentsState = { environments: [entry, other], activeId: "vps" };
   calls.length = 0; await context.switchEnvironment("cloud");
   assert.deepEqual(calls, ["remember:null", 'home:{"place":"cloud"}'], "once My Cloud is home, choosing it shows home the one way every window does");
 
   // A My Cloud entry saved before, for the address the Admin is setting up again: never loaded by its address.
-  context.homeWindow = { cloudOrigin: () => null, asking: () => false }; context.remember(null);
+  context.homeWindow = { cloudOrigin: () => null, asking: () => false, cancel: () => {} }; context.remember(null);
   context.cloudAccount = { homeTarget: () => null, state: () => ({ status: "connected", machine: { status: "provisioning", origin } }) };
   context.environmentsState = { environments: [entry, other], activeId: environments.LOCAL_ID };
   connect = async () => { calls.push("connect"); };
@@ -489,7 +490,7 @@ test("the Server menu opens My Cloud through the Cloud's own connection, never a
   // That screen is this computer's own page: This computer is already the Server menu's choice, and still leaves it.
   calls.length = 0; await context.switchEnvironment(environments.LOCAL_ID);
   assert.deepEqual(calls, [], "nothing asked for: choosing the server shown changes nothing");
-  context.homeWindow = { cloudOrigin: () => null, asking: () => true };
+  context.homeWindow = { cloudOrigin: () => null, asking: () => true, cancel: () => {} };
   calls.length = 0; await context.switchEnvironment(environments.LOCAL_ID);
   assert.deepEqual(calls.slice(0, 2), ["remember:null", `active:${environments.LOCAL_ID}`]);
   assert.match(calls[2], /^navigate:/);
@@ -508,5 +509,5 @@ test("the session's teams are read with their role and their Cloud as the machin
   }
   for (const none of [undefined, null, {}, "x", 3]) assert.deepEqual(parseCloudTeams(none), [], String(none));
   assert.deepEqual(CLOUD_TEAM_ROLES, ["owner", "admin", "member"]);
-  assert.deepEqual(["owner", "admin", "member", "x", undefined].map(teamRoleLabel), ["Super admin", "Admin", "User", "User", "User"]);
+  assert.deepEqual(["owner", "admin", "member", "x", undefined].map((role) => teamRoleLabel(role)), ["Super admin", "Admin", "User", "User", "User"]);
 });

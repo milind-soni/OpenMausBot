@@ -1,8 +1,8 @@
 import type { CacheKeepWarmStatus } from "../../shared/wire";
-import { t } from "./i18n";
+import { intlLocale, t } from "./i18n";
 import { formatTokens, formatUsd, hasFiniteCost } from "./usage";
 
-const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+const clock = (at: number) => new Date(at).toLocaleTimeString(intlLocale(), { hour: "numeric", minute: "2-digit" });
 
 export function keepWarmLine(status: CacheKeepWarmStatus | undefined, format: (at: number) => string = clock): string | null {
   if (!status) return null;

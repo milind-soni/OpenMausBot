@@ -61,6 +61,14 @@ describe("room member holds", () => {
     expect(classifyHoldDirective("resume the deploy tomorrow", []).releaseAll).toBe(false);
   });
 
+  it("takes the Portuguese word the pt-BR held banner asks for", () => {
+    expect(classifyHoldDirective("retomar", []).releaseAll).toBe(true);
+    expect(classifyHoldDirective("Retomar todos.", []).releaseAll).toBe(true);
+    expect(classifyHoldDirective("retome, por favor", []).releaseAll).toBe(true);
+    expect(classifyHoldDirective("retomar o deploy amanhã", []).releaseAll).toBe(false);
+    expect(classifyHoldDirective("para @Scout", ["scout"]).hold).toEqual([]);
+  });
+
   it("applies directives to the room's holds and reports what changed", () => {
     const first = applyHoldDirective(undefined, classifyHoldDirective("stop @Scout", ["scout"]), members, 10);
     expect(first).toEqual({ holds: { scout: { at: 10 } }, held: ["scout"], released: [] });
