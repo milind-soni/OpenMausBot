@@ -10,11 +10,14 @@ export class OpenConnectorError extends Error {
   readonly status: number | undefined;
   /** The runtime's errorCode (unknown_action, connection_not_allowed, ...), when it reported one. */
   readonly code: string | undefined;
-  constructor(message: string, options: { status?: number; code?: string } = {}) {
+  /** Retry-After parsed to milliseconds, when a throttled response carried it. */
+  readonly retryAfterMs: number | undefined;
+  constructor(message: string, options: { status?: number; code?: string; retryAfterMs?: number } = {}) {
     super(message);
     this.name = "OpenConnectorError";
     this.status = options.status;
     this.code = options.code;
+    this.retryAfterMs = options.retryAfterMs;
   }
 }
 
@@ -110,7 +113,7 @@ export class OpenConnectorClient {
       const envelope = envelopeSchema.safeParse(body);
       throw new OpenConnectorError(
         (envelope.success && envelope.data.message) || `OpenConnector: HTTP ${response.status}`,
-        { status: response.status, code: envelope.success ? envelope.data.errorCode : undefined },
+        { status: response.status, code: envelope.success ? envelope.data.errorCode : undefined, retryAfterMs },
       );
     }
     const envelope = envelopeSchema.safeParse(body);
@@ -118,6 +121,7 @@ export class OpenConnectorClient {
       throw new OpenConnectorError(envelope.data.message || "OpenConnector request failed", {
         status: response.status,
         code: envelope.data.errorCode,
+        retryAfterMs,
       });
     }
     return { data: envelope.success ? envelope.data.data : body, retryAfterMs };
