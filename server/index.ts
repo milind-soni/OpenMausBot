@@ -508,8 +508,7 @@ import {
 } from "./presets.ts";
 import { OrgLibrary } from "./org-library.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
-import { autoLocalVmAttachable, type ContainerComputerStatus } from "./container-computer.ts";
-import { startStoppedPodmanMachine } from "./podman-machine.ts";
+import { autoLocalVmAttachable } from "./container-computer.ts";
 import { createLocalVmTurns } from "./host/local-vm-turns.ts";
 import { keepTransient, lazyClaimFailedText, lazyClaimRetryText, settledWithin, startAutoVmClaim, withinBudget, type AutoVmClaimSlot, type AutoVmClaimTable } from "./auto-vm-claims.ts";
 import { CONTROL_ACT_WITHIN_MS, CONTROL_BUSY, CONTROL_HANDED_BACK, CONTROL_WAIT_MS, CONTROL_WAITED, controlRefusal, type ControlState } from "./control-client.ts";
@@ -5706,6 +5705,7 @@ const {
   readyLocalVmForTurn,
   existingPerBotLocalVmCount,
   perBotLocalVmCountForModeChange,
+  perBotLocalVmCountForSourceChange,
 } = localVmTurns;
 const COMPUTER_CALL_WAIT_MS = Math.min(CONTROL_WAIT_MS, Math.max(500, Number(process.env.OMB_COMPUTER_CALL_WAIT_MS) || CONTROL_WAIT_MS));
 const COMPUTER_CALL_ACT_WITHIN_MS = Math.min(CONTROL_ACT_WITHIN_MS, Math.max(100, Number(process.env.OMB_COMPUTER_CALL_ACT_WITHIN_MS) || CONTROL_ACT_WITHIN_MS));
@@ -12402,7 +12402,8 @@ const postiz = createPostiz({ cfg: () => cfg, mcpOAuth, persistMcpServers: persi
   activeVpsThreads,
   existingVmActiveThreads,
   providerConfigBusy: { get: () => providerConfigBusy, set: (busy) => { providerConfigBusy = busy; } },
-  computerProviderConfigTransitions, managedBoatOwners, providerOperationConflict, perBotLocalVmCountForModeChange,
+  computerProviderConfigTransitions, managedBoatOwners, providerOperationConflict,
+  perBotLocalVmCountForModeChange, perBotLocalVmCountForSourceChange,
   checkedModelSelection, policyModelRefusal, browserSessionSpec, configStatus,
   configForAccess: (status, auth) => configForAccess(status as ReturnType<typeof configStatus>, auth.scopes.includes("admin"), auth.kind === "session" ? auth.session : null),
   ...(CLOUD_TEAM ? { ownProfile: (auth: RequestAuth, profile: { name?: string; avatarUrl?: string; aboutMe?: string }) => auth.kind === "session" ? (teamHost.saveMemberProfile(auth.session, profile), true) : false } : {}),

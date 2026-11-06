@@ -332,6 +332,20 @@ export function createLocalVmTurns(deps: LocalVmTurnsDeps) {
   }
 
   async function perBotCountForModeChange(): Promise<number | null> {
+    const bots = deps.bots();
+    const targets = [...new Map(bots.map((bot) => {
+      const target = perBotLocalVmTarget(bot.id);
+      return [target.key, target] as const;
+    })).values()];
+    if (targets.length === 0) return 0;
+    const runtime = await deps.runtimeStatus();
+    if (!runtime.runtime || !runtime.daemonUp) {
+      return targets.some((target) => existsSync(target.workspaceDir)) ? null : 0;
+    }
+    return (await discoverExistingPerBotLocalVms(bots, runtime.runtime)).length;
+  }
+
+  async function perBotCountForSourceChange(): Promise<number | null> {
     const workspaceNames = perBotWorkspaceNames();
     if (workspaceNames === null) return null;
     const runtime = await deps.runtimeStatus();
@@ -380,6 +394,7 @@ export function createLocalVmTurns(deps: LocalVmTurnsDeps) {
     existingPerBotLocalVmCount: existingPerBotCount,
     perBotLocalVmWorkspaceNames: perBotWorkspaceNames,
     perBotLocalVmCountForModeChange: perBotCountForModeChange,
+    perBotLocalVmCountForSourceChange: perBotCountForSourceChange,
     cancelIdle(targetKey: string): void {
       idles.get(targetKey)?.cancel();
       idles.delete(targetKey);

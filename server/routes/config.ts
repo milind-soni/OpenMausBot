@@ -91,6 +91,7 @@ export interface ConfigRouteDeps {
   managedBoatOwners(): boat.ManagedBoatOwner[];
   providerOperationConflict(provider: RemoteComputerProvider): string | null;
   perBotLocalVmCountForModeChange(): Promise<number | null>;
+  perBotLocalVmCountForSourceChange(): Promise<number | null>;
   checkedModelSelection(raw: unknown, current?: { selection: ModelSelection; busy: boolean }, requireAvailableModel?: boolean): ModelSelectionCheck;
   policyModelRefusal(instance: { instanceId: string; driverKind: string }): string | undefined;
   browserSessionSpec(binaryPath: string, session: string, profile: string | undefined): { command: string; env: Record<string, string> };
@@ -116,7 +117,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
     localVmIdleMs, localVmIdles, localVmActiveThreads, localVmLifecycleBusy, localVmImageBusy, localVmModeChangeBusy,
     existingVmActiveThreads, activeVpsThreads,
     providerConfigBusy, computerProviderConfigTransitions, managedBoatOwners, providerOperationConflict,
-    perBotLocalVmCountForModeChange, checkedModelSelection, policyModelRefusal, browserSessionSpec, configStatus,
+    perBotLocalVmCountForModeChange, perBotLocalVmCountForSourceChange, checkedModelSelection, policyModelRefusal, browserSessionSpec, configStatus,
     configForAccess, resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, ownProfile, postiz,
   } = deps;
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
@@ -283,7 +284,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       if (changingLocalVmPolicy) localVmModeChangeBusy.set(true);
       try {
         if (localVmSourceChanged && localVmMode(cfg) === "per-bot") {
-          const existing = await perBotLocalVmCountForModeChange();
+          const existing = await perBotLocalVmCountForSourceChange();
           if (existing === null) {
             return json(res, 409, {
               error: "start the container runtime and delete every per-bot Local VM before switching the Local VM source",

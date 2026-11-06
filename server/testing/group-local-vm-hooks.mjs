@@ -4,12 +4,14 @@ import { registerHooks } from 'node:module';
 const state = process.env.OMB_TEST_VM_STATE;
 if (!state) throw new Error('An explicit isolated VM state file is required');
 const actual = new URL('../container-computer.ts?actual', import.meta.url).href;
+const inventoryMock = new URL('./group-local-vm-inventory-mock.mjs', import.meta.url).href;
 const atomic = new URL('../atomic.ts', import.meta.url).href;
 const mock = new URL('./group-local-vm-mock.mjs', import.meta.url).href;
 const profilesMock = new URL('./group-local-vm-profiles-mock.mjs', import.meta.url).href;
 registerHooks({
   resolve(specifier, context, nextResolve) {
     if (specifier.endsWith('/container-computer.ts')) return { url: mock, shortCircuit: true };
+    if (specifier.endsWith('/container-computer-inventory.ts')) return { url: inventoryMock, shortCircuit: true };
     if (specifier.endsWith('/local-vm-profiles.ts')) return { url: profilesMock, shortCircuit: true };
     return nextResolve(specifier, context);
   },
@@ -56,10 +58,6 @@ registerHooks({
         const state = read();
         return state.containers ? state.containers.includes(target.key) : !state.noContainers;
       }
-      export async function containerComputerManagedPerBotNames() {
-        const state = read();
-        return (state.containers ?? []).filter(key => key.startsWith('bot:')).map(key => 'openmausbot-computer-' + key.slice(-16));
-      }
       export async function containerComputerStatus(_run, _platform, target = SHARED_LOCAL_VM_TARGET) {
         writeFileSync(file + '.entered', target.key);
         while (read().blocked || read().blockedTarget === target.key) await new Promise(r => setTimeout(r, 30));
@@ -104,6 +102,14 @@ registerHooks({
         state.actions = [...(state.actions ?? []), { action, target: target.key }];
         writeFileAtomic(file, JSON.stringify(state), { durable: false });
         return containerComputerStatus(_run, _platform, target);
+      }
+    ` };
+    if (url === inventoryMock) return { format: 'module', shortCircuit: true, source: `
+      import { readFileSync } from 'node:fs';
+      const file = ${JSON.stringify(state)};
+      export async function containerComputerManagedPerBotNames() {
+        const state = JSON.parse(readFileSync(file, 'utf8'));
+        return (state.containers ?? []).filter(key => key.startsWith('bot:')).map(key => 'openmausbot-computer-' + key.slice(-16));
       }
     ` };
     const result = nextLoad(url, context);
