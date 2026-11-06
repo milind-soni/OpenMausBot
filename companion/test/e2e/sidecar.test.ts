@@ -112,21 +112,46 @@ describe("the sidecar's end-to-end connection, through the real relay", () => {
     second.shutdown();
   }, 40_000);
 
-  it("drops a device restricted to Wi-Fi and Tailscale from the relay at once: the relay answers 4404, direct still works", async () => {
+  it("tells a phone it is restricted to Wi-Fi and Tailscale inside its sessions, then the relay drops it (4404); direct stays", async () => {
     const current = await state();
     const relayed = await rig.viaRelay(current, deviceToken);
+    const direct = await rig.direct(current, deviceToken);
+    const marker = rig.harness.emit({ n: "routes" });
+    const relayedEvents = events(relayed, deviceToken, marker - 1);
+    const directEvents = events(direct, deviceToken, marker - 1);
+    await waitFor(() => [relayedEvents, directEvents].every((stream) => stream.seen.some((event) => event.id === marker)));
+    let closedAt = 0;
+    const closed = relayed.closed.then((code) => ((closedAt = Date.now()), code));
     await rig.control("PUT", `/devices/${deviceId}/routes`, { routes: "local" });
-    expect(await relayed.closed).toBeGreaterThan(0);
+    expect(await closed).toBeGreaterThan(0);
+    const local = { v: 1, k: current.e2e.descriptor!.k, h: rig.hid, r: ["relay1.openmausbot.com"], routes: "local" };
+    // Heard inside the relayed session itself, well before the relay closed it.
+    expect(relayedEvents.pushed.map((event) => event.data)).toEqual([expect.objectContaining({ kind: "companion.endpoints", serverName: "Test Mac", e2e: local })]);
+    expect(closedAt - relayedEvents.pushed[0].at).toBeGreaterThanOrEqual(200);
+    await waitFor(() => directEvents.pushed.length === 1);
+    expect(directEvents.pushed[0].data).toEqual(expect.objectContaining({ kind: "companion.endpoints", e2e: local }));
     const refused = await waitFor(async () => {
       const outcome = await rig.viaRelay(current, deviceToken).then((session) => (session.shutdown(), null), (error: unknown) => error);
       return outcome instanceof SessionClosed && outcome.code === 4404 ? outcome : null;
     }, 5_000);
     expect(refused.code).toBe(4404);
-    const session = await rig.direct(current, deviceToken);
-    const endpoints = json(await http(session, "GET", "/api/companion/endpoints", { token: deviceToken }));
-    expect(endpoints.e2e).toEqual({ v: 1, k: current.e2e.descriptor!.k, routes: "local" });
-    session.shutdown();
+    expect(direct.state).toBe("open");
+    const endpoints = json(await http(direct, "GET", "/api/companion/endpoints", { token: deviceToken }));
+    expect(endpoints.e2e).toEqual(local);
+
+    // Allowed again: admitted first, then told, on the session that stayed.
     await rig.control("PUT", `/devices/${deviceId}/routes`, { routes: "any" });
+    await waitFor(() => directEvents.pushed.length === 2);
+    expect(directEvents.pushed[1].data).toEqual(expect.objectContaining({ kind: "companion.endpoints", e2e: { v: 1, k: current.e2e.descriptor!.k, h: rig.hid, r: ["relay1.openmausbot.com"] } }));
+    const back = await waitFor(() => rig.viaRelay(current, deviceToken).catch(() => null), 5_000);
+    expect((await http(back, "GET", "/api/health", { token: deviceToken })).status).toBe(200);
+    // The harness's own stream is untouched: no id was spent and its events still arrive.
+    const after = rig.harness.emit({ n: 5 });
+    await waitFor(() => directEvents.seen.some((event) => event.id === after));
+    back.shutdown();
+    directEvents.abort();
+    relayedEvents.abort();
+    direct.shutdown();
   });
 
   it("tells a removed phone so inside the encryption, then closes with 4001, through the relay and directly", async () => {
