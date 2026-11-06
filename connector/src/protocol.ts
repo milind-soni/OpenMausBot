@@ -1,23 +1,49 @@
-// MausBot connector protocol v1: what the connector on an own server and the MausBot Cloud Admin say to each other.
-// The Admin side copies this file as it is: it imports nothing.
+// MausBot connector protocol v2: what the connector on an own server (a "box") and the MausBot Cloud Admin say to each
+// other. The Admin side copies this file as it is: it imports nothing.
 //
-// The connector only ever calls out. It enrols once over HTTPS with a one-time code, then holds one WebSocket to the
-// Admin and runs the jobs the Admin sends on it; jobs that change the home or the connector run one at a time. There is
-// no shell and no other command. Disk transfers are HTTPS, authorized with the same agent token.
+// The connector only ever calls out. It enrols once over HTTPS with a one-time code, sending the public half of an
+// Ed25519 key it made and keeps; the Admin answers with its own signing keys, which the connector pins. Then it holds
+// one WebSocket to the Admin. Each connection starts with both sides proving their keys (`authText`, `HelloPayload`),
+// and the connector's count of its connections, which only goes up: a count the Admin has seen before means a copy of
+// the key, and the Admin revokes it. Text messages carry JSON: jobs signed by the Admin for this box only, their
+// replies, heartbeats and the Admin's signed schedule and policy. Binary messages carry yamux frames (yamux.ts, the
+// phone relay's profile): the Admin opens a stream per HTTP request to the home, and the connector pipes it to the
+// home's edge on this server and nowhere else. There is no shell and no other command. Disk transfers are HTTPS,
+// authorized with a short token the connector signs (`TransferPayload`).
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /** `POST {admin}{ENROLL_PATH}` with an `EnrollRequest`; answers an `EnrollResponse`. The code is single use. */
-export const ENROLL_PATH = "/api/cloud/servers/agent/enroll";
-/** `GET {admin}{CONNECT_PATH}`, upgraded to a WebSocket, with `Authorization: Bearer <agentToken>`. */
-export const CONNECT_PATH = "/api/cloud/servers/agent/connect";
+export const ENROLL_PATH = "/api/cloud/box/v1/enroll";
+/** `GET {admin}{CONNECT_PATH}`, upgraded to a WebSocket with subprotocol `CHANNEL_PROTOCOL` and header `x-omb-box`. */
+export const CONNECT_PATH = "/api/cloud/box/v1/connect";
+export const CHANNEL_PROTOCOL = "omb-box.v2";
+export const BOX_HEADER = "x-omb-box";
 /** `PUT {admin}{EXPORT_PATH}/<job id>`, `content-type: application/gzip`: an `export-disk` job's archive of `/data`. */
-export const EXPORT_PATH = "/api/cloud/servers/agent/export";
+export const EXPORT_PATH = "/api/cloud/box/v1/export";
+/** `Authorization: Box <envelope>` on a transfer to or from the Admin: a `TransferPayload` the box signed. */
+export const TRANSFER_SCHEME = "Box";
 
-/** The Admin closes the WebSocket with this code when it no longer knows the token: the server was removed. */
+/** The Admin closes the WebSocket with this code when it does not know the box's key, or the key was revoked. */
 export const CLOSE_UNAUTHORIZED = 4401;
-/** The Admin closes an older WebSocket with this code when a newer one with the same token connects. */
+/** The Admin saw a second server with this box's key (a connection count it had seen before) and revoked the key. */
+export const CLOSE_KEY_COPIED = 4403;
+/** The Admin closes an older WebSocket with this code when a newer one of the same box connects. */
 export const CLOSE_REPLACED = 4409;
+/** Either side: a message out of order or malformed, a yamux error, or a key that does not verify. */
+export const CLOSE_PROTOCOL = 4000;
+/** Either side: nothing arrived for `CHANNEL_DEAD_MS`. */
+export const CLOSE_SILENT = 4002;
+
+/** Each side sends a yamux ping this often; a connection with nothing received for `CHANNEL_DEAD_MS` is dropped. */
+export const CHANNEL_PING_MS = 20_000;
+export const CHANNEL_DEAD_MS = 90_000;
+/** How long either side waits for the other's half of the handshake. */
+export const HANDSHAKE_MS = 60_000;
+/** A signed job is refused this long after the Admin signed it (by the Admin's clock, which the hello carries). */
+export const JOB_LIFETIME_MS = 15 * 60_000;
+/** A transfer token lasts this long; an upload or download only has to start within it. */
+export const TRANSFER_TOKEN_MS = 10 * 60_000;
 
 /** How often the connector sends a heartbeat while connected. */
 export const HEARTBEAT_INTERVAL_MS = 30_000;
@@ -122,7 +148,7 @@ export interface JobArgs {
   restore: { backupId: string };
   /** Uploads a gzip tar of `/data` to `PUT {admin}{EXPORT_PATH}/<job id>`. */
   "export-disk": Record<string, never>;
-  /** Replaces `/data` with the gzip tar at `url` (https; the agent token is sent only to the Admin's own origin). */
+  /** Replaces `/data` with the gzip tar at `url` (https; a transfer token goes only to the Admin's own origin). */
   "import-disk": { url: string };
   "host-health": Record<string, never>;
   /** Swaps the connector itself for `image`, keeping the current one until the new one has connected. */
@@ -156,7 +182,8 @@ export interface JobResults {
 export type JobErrorCode =
   | "invalid_job" | "unknown_job" | "invalid_args" | "busy" | "interrupted" | "audit_unavailable" | "refused_by_policy" | "image_refused"
   | "no_home" | "docker" | "pull_failed" | "unhealthy" | "update_rolled_back" | "rollback_failed"
-  | "not_found" | "disk_full" | "port_in_use" | "box_unavailable" | "transfer_failed" | "self_update_failed";
+  | "not_found" | "disk_full" | "port_in_use" | "box_unavailable" | "transfer_failed" | "self_update_failed"
+  | "unsigned_job" | "wrong_box" | "expired_job" | "pending_box";
 
 /** `message` is plain words for the Admin's log and alerts; it never carries a secret. */
 export interface JobError {
@@ -177,17 +204,122 @@ export interface JobAck {
   ack: string;
 }
 
-/** `POST {admin}{ENROLL_PATH}` body. */
+/** `POST {admin}{ENROLL_PATH}` body. `publicKey`: the box key's raw 32 bytes, base64url. */
 export interface EnrollRequest {
   code: string;
+  publicKey: string;
   host: HostFacts;
   connector: ConnectorIdentity;
 }
 
+/**
+ * A box the team's Owner has not accepted yet is `pending`: it connects and reports its health, and the Admin sends it no
+ * job that carries the team's data or changes anything. `revoked` is never sent: a revoked key is refused (4401).
+ */
+export type BoxState = "pending" | "accepted";
+
 export interface EnrollResponse {
-  serverId: string;
-  cloudId: string;
-  agentToken: string;
+  boxId: string;
+  teamId: string;
+  /** The Admin's signing keys by id, raw Ed25519 public keys in base64url; the connector pins them. One or two (rotation). */
+  adminKeys: Record<string, string>;
+  state: BoxState;
+}
+
+/** Admin → connector, the first message on every connection. `nonce`: 32 random bytes, base64url. */
+export interface Challenge {
+  t: "challenge";
+  v: 1;
+  nonce: string;
+}
+
+/** Connector → Admin: `sig` is the box key's signature of `authText(box, challenge nonce, nonce, count)`. */
+export interface Auth {
+  t: "auth";
+  v: 1;
+  box: string;
+  count: number;
+  nonce: string;
+  sig: string;
+}
+
+export function authText(box: string, adminNonce: string, boxNonce: string, count: number): string {
+  return `omb-box auth v1\n${box}\n${adminNonce}\n${boxNonce}\n${count}`;
+}
+
+/** Admin → connector, `{t: "hello", signed}`: an envelope (signed.ts) of this payload, under a key the connector pinned. */
+export interface HelloPayload {
+  t: "hello";
+  kid: string;
+  box: string;
+  adminNonce: string;
+  boxNonce: string;
+  count: number;
+  /** The Admin's clock (ms); the connector judges a job's age by it, whatever its own clock says. */
+  now: number;
+  state: BoxState;
+  /** The Admin's signing keys from now on (rotation); absent: unchanged. */
+  keys?: Record<string, string>;
+}
+
+/** Admin → connector, `{job: envelope}`. Only for this box, only while `exp` (the Admin's clock) has not passed. */
+export interface JobPayload {
+  t: "job";
+  kid: string;
+  box: string;
+  iat: number;
+  exp: number;
+  job: Job;
+}
+
+/** The update window, in the server's time zone (`days`: 0 is Sunday; `end` before `start` runs past midnight). */
+export interface UpdateWindow {
+  days: number[];
+  start: string;
+  end: string;
+  timeZone: string;
+}
+
+/**
+ * Admin → connector, `{config: envelope}`, after each hello and on each change; a higher `version` replaces a lower one.
+ * The connector keeps the newest it verified on its disk and goes by it while the Admin can't be reached.
+ */
+export interface ConfigPayload {
+  t: "config";
+  kid: string;
+  box: string;
+  iat: number;
+  version: number;
+  state: BoxState;
+  schedule: {
+    window: UpdateWindow | null;
+    ring: "early" | "standard" | "late";
+    /** Updates wait until then (ms). */
+    holdUntil: number | null;
+    /** The home image this server should run. */
+    image: string | null;
+  };
+  policy: {
+    /** How long members' sessions last past the Admin's last check while it can't be reached. */
+    offlineHours: number;
+  };
+}
+
+/** Admin → connector before it restarts: reconnect after `reconnectInMs` plus a random part of `tryForMs`. */
+export interface Restarting {
+  t: "restarting";
+  reconnectInMs: number;
+  tryForMs: number;
+}
+
+/** What the box signs for `Authorization: Box <envelope>` on a transfer; `kid` is "box". */
+export interface TransferPayload {
+  t: "transfer";
+  kid: "box";
+  box: string;
+  job: string;
+  iat: number;
+  exp: number;
 }
 
 // Validation, shared so both sides refuse the same things.
@@ -195,7 +327,6 @@ export interface EnrollResponse {
 const JOB_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const BACKUP_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const OPAQUE_ID = /^[A-Za-z0-9_-]{1,128}$/;
-const TOKEN = /^[A-Za-z0-9_.~-]{32,512}$/;
 const ENV_NAME = /^OMB_[A-Z0-9_]{1,60}$/;
 // oxlint-disable-next-line no-control-regex
 const ENV_VALUE = /^[^\0\r\n]{0,8192}$/;
@@ -318,13 +449,77 @@ function checkArgs(type: JobType, args: Record<string, unknown>): Checked<JobArg
   }
 }
 
+const B64U_KEY = /^[A-Za-z0-9_-]{43}$/;
+const KEY_ID = /^[a-z0-9]{1,16}$/;
+const NONCE = /^[A-Za-z0-9_-]{43}$/;
+const BOX_ID = /^[A-Za-z0-9_-]{8,64}$/;
+const isBoxState = (value: unknown): value is BoxState => value === "pending" || value === "accepted";
+const isTime = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+
+export const checkBoxId = (value: unknown): value is string => typeof value === "string" && BOX_ID.test(value);
+export const checkNonce = (value: unknown): value is string => typeof value === "string" && NONCE.test(value);
+
+/** One or two signing keys by id, each a raw Ed25519 public key in base64url. */
+export function checkKeys(value: unknown): Checked<Record<string, string>> {
+  if (!plainObject(value)) return { ok: false, message: "keys must be an object" };
+  const entries = Object.entries(value);
+  if (entries.length < 1 || entries.length > 2) return { ok: false, message: "one or two keys" };
+  for (const [kid, key] of entries) if (!KEY_ID.test(kid) || typeof key !== "string" || !B64U_KEY.test(key)) return { ok: false, message: "a key is malformed" };
+  return { ok: true, value: Object.fromEntries(entries) as Record<string, string> };
+}
+
 export function checkEnrollResponse(value: unknown): Checked<EnrollResponse> {
   if (!plainObject(value)) return { ok: false, message: "the enrolment answer is not a JSON object" };
-  const { serverId, cloudId, agentToken } = value;
-  if (typeof serverId !== "string" || !OPAQUE_ID.test(serverId)) return { ok: false, message: "the enrolment answer has no valid serverId" };
-  if (typeof cloudId !== "string" || !OPAQUE_ID.test(cloudId)) return { ok: false, message: "the enrolment answer has no valid cloudId" };
-  if (typeof agentToken !== "string" || !TOKEN.test(agentToken)) return { ok: false, message: "the enrolment answer has no valid agentToken" };
-  return { ok: true, value: { serverId, cloudId, agentToken } };
+  const { boxId, teamId, adminKeys, state } = value;
+  if (!checkBoxId(boxId)) return { ok: false, message: "the enrolment answer has no valid boxId" };
+  if (typeof teamId !== "string" || !OPAQUE_ID.test(teamId)) return { ok: false, message: "the enrolment answer has no valid teamId" };
+  const keys = checkKeys(adminKeys);
+  if (!keys.ok) return { ok: false, message: `the enrolment answer's adminKeys: ${keys.message}` };
+  if (!isBoxState(state)) return { ok: false, message: "the enrolment answer has no valid state" };
+  return { ok: true, value: { boxId, teamId, adminKeys: keys.value, state } };
+}
+
+/** A verified hello's payload for this connection: this box, both nonces, this count. */
+export function checkHello(payload: Record<string, unknown>, expected: { box: string; adminNonce: string; boxNonce: string; count: number }): Checked<HelloPayload> {
+  if (payload.t !== "hello") return { ok: false, message: "not a hello" };
+  if (payload.box !== expected.box) return { ok: false, message: "the hello is for another box" };
+  if (payload.adminNonce !== expected.adminNonce || payload.boxNonce !== expected.boxNonce || payload.count !== expected.count) return { ok: false, message: "the hello is not for this connection" };
+  if (!isTime(payload.now) || !isBoxState(payload.state)) return { ok: false, message: "the hello is malformed" };
+  if (payload.keys !== undefined && !checkKeys(payload.keys).ok) return { ok: false, message: "the hello's keys are malformed" };
+  return { ok: true, value: payload as unknown as HelloPayload };
+}
+
+/** A verified job envelope's payload: for `box`, signed at most `JOB_LIFETIME_MS` ago by the Admin's clock (`adminNow`). */
+export function checkJobPayload(payload: Record<string, unknown>, box: string, adminNow: number): { ok: true; job: unknown } | { ok: false; code: "wrong_box" | "expired_job" | "unsigned_job"; message: string } {
+  if (payload.t !== "job" || !isTime(payload.iat) || !isTime(payload.exp)) return { ok: false, code: "unsigned_job", message: "not a signed job" };
+  if (payload.box !== box) return { ok: false, code: "wrong_box", message: "the job was signed for another server" };
+  if (payload.exp - payload.iat > JOB_LIFETIME_MS || adminNow > payload.exp || adminNow < payload.iat - JOB_LIFETIME_MS) {
+    return { ok: false, code: "expired_job", message: "the job's signature is too old" };
+  }
+  return { ok: true, job: payload.job };
+}
+
+const CLOCK = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
+const TIME_ZONE = /^[A-Za-z][A-Za-z0-9_+/-]{0,63}$/;
+
+/** A verified config envelope's payload for `box`. */
+export function checkConfig(payload: Record<string, unknown>, box: string): Checked<ConfigPayload> {
+  if (payload.t !== "config" || payload.box !== box) return { ok: false, message: "the config is for another box" };
+  if (!isTime(payload.iat) || typeof payload.version !== "number" || !Number.isSafeInteger(payload.version) || payload.version < 1 || !isBoxState(payload.state)) {
+    return { ok: false, message: "the config is malformed" };
+  }
+  const schedule = payload.schedule, policy = payload.policy;
+  if (!plainObject(schedule) || !plainObject(policy)) return { ok: false, message: "the config is malformed" };
+  const window = schedule.window;
+  if (window !== null && (!plainObject(window) || !Array.isArray(window.days) || window.days.length > 7
+    || window.days.some((day) => !Number.isInteger(day) || (day as number) < 0 || (day as number) > 6)
+    || typeof window.start !== "string" || !CLOCK.test(window.start) || typeof window.end !== "string" || !CLOCK.test(window.end)
+    || typeof window.timeZone !== "string" || !TIME_ZONE.test(window.timeZone))) return { ok: false, message: "the update window is malformed" };
+  if (!["early", "standard", "late"].includes(schedule.ring as string)) return { ok: false, message: "the ring is malformed" };
+  if (schedule.holdUntil !== null && !isTime(schedule.holdUntil)) return { ok: false, message: "the hold is malformed" };
+  if (schedule.image !== null && (typeof schedule.image !== "string" || !HOME_IMAGE.test(schedule.image))) return { ok: false, message: "the image is malformed" };
+  if (typeof policy.offlineHours !== "number" || !Number.isInteger(policy.offlineHours) || policy.offlineHours < 0 || policy.offlineHours > 720) return { ok: false, message: "the policy is malformed" };
+  return { ok: true, value: payload as unknown as ConfigPayload };
 }
 
 /** A one-time code as the Admin shows it: letters, digits and dashes. */

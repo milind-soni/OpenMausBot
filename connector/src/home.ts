@@ -340,7 +340,7 @@ export class Home {
   }
 
   /** A gzip tar of /data, copied while the home is stopped, then uploaded to the Admin once the home runs again. */
-  exportDisk(jobId: string, admin: { origin: string; token: string }): Promise<JobResults["export-disk"]> {
+  exportDisk(jobId: string, admin: { origin: string; authorization: (jobId: string) => string }): Promise<JobResults["export-disk"]> {
     return this.exclusive(async () => {
       const { image } = this.current();
       await this.ensureRoomForCopy(image);
@@ -361,7 +361,7 @@ export class Home {
       if (wasRunning) await this.restartAfter(image);
       this.phase({ phase: "upload" });
       try {
-        const sent = await this.options.transfer.upload(`${admin.origin}${EXPORT_PATH}/${jobId}`, { authorization: `Bearer ${admin.token}` }, this.state.path(archive));
+        const sent = await this.options.transfer.upload(`${admin.origin}${EXPORT_PATH}/${jobId}`, { authorization: admin.authorization(jobId) }, this.state.path(archive));
         return { bytes: sent.bytes, sha256: sent.sha256 };
       } catch (error) {
         throw new JobFailure("transfer_failed", `The data could not be sent to MausBot (${errorText(error)}).`);
@@ -373,7 +373,7 @@ export class Home {
   }
 
   /** Replaces /data with the gzip tar at `url`, keeping a safety copy until the home runs on it. */
-  importDisk(jobId: string, url: string, admin: { origin: string; token: string }): Promise<JobResults["import-disk"]> {
+  importDisk(jobId: string, url: string, admin: { origin: string; authorization: (jobId: string) => string }): Promise<JobResults["import-disk"]> {
     return this.exclusive(async () => {
       const { image, env } = this.current();
       const archive = `import-${jobId}.tar.gz`;
@@ -381,8 +381,8 @@ export class Home {
       this.begin({ jobId, type: "import-disk", phase: "download", previousImage: image, nextImage: null, target: archive, dataAtRisk: false, wasRunning });
       let bytes: number;
       try {
-        // The token goes only to the Admin itself, never to a storage address it hands out.
-        const headers: Record<string, string> = new URL(url).origin === admin.origin ? { authorization: `Bearer ${admin.token}` } : {};
+        // The box's token goes only to the Admin itself, never to a storage address it hands out.
+        const headers: Record<string, string> = new URL(url).origin === admin.origin ? { authorization: admin.authorization(jobId) } : {};
         bytes = (await this.options.transfer.download(url, headers, this.state.path(archive), Math.max(0, this.options.diskFree() - 2e9))).bytes;
         await this.ensureRoomForCopy(image);
       } catch (error) {

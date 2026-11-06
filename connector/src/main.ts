@@ -3,11 +3,15 @@
 import { existsSync, readFileSync, statfsSync } from "node:fs";
 import { join } from "node:path";
 
-import { Agent } from "./agent.ts";
+import { createConnection } from "node:net";
+import type { Duplex } from "node:stream";
+
+import { Agent, savedConfig, transferAuthorization } from "./agent.ts";
 import { AuditLog, verifyAudit } from "./audit.ts";
 import { SocketDocker, type DockerInfo } from "./docker.ts";
 import { adminOrigin, enroll } from "./enroll.ts";
 import { readHealth } from "./home-health.ts";
+import { serveRequest } from "./home-requests.ts";
 import { Home } from "./home.ts";
 import { hostChecks, hostFacts, hostHealth, probeBox, type BoxProbeResult, type HostReader } from "./host.ts";
 import { jobDesk, jobRunner, resultEvent } from "./jobs.ts";
@@ -16,7 +20,7 @@ import { POLICY_FILE } from "./policy.ts";
 import { errorText, log, registerSecret } from "./log.ts";
 import { PROTOCOL_VERSION, type ConnectorIdentity, type Heartbeat, type HostHealth } from "./protocol.ts";
 import { SELF_UPDATE_DEADLINE_MS, SelfUpdater, ownContainer } from "./self-update.ts";
-import { AUDIT_FILE, CONNECTOR_VERSION, PATHS, SECCOMP_FILE, envSeconds } from "./settings.ts";
+import { AUDIT_FILE, CONNECTOR_VERSION, HOME_PORT, PATHS, SECCOMP_FILE, envSeconds } from "./settings.ts";
 import { StateStore, type AgentRecord } from "./state.ts";
 import { httpTransfer } from "./transfer.ts";
 
@@ -112,9 +116,11 @@ async function run(): Promise<void> {
     await sleep(2_000);
     record = state.agent();
   }
-  registerSecret(record.agentToken);
+  registerSecret(record.privateKey);
   let current: AgentRecord = record;
-  if (enrolledNow) note({ event: "connector", what: "enrolled", version: CONNECTOR_VERSION, image: identity().image, serverId: record.serverId });
+  if (enrolledNow) note({ event: "connector", what: "enrolled", version: CONNECTOR_VERSION, image: identity().image, boxId: record.boxId });
+  const kept = savedConfig(state.adminConfig(), current);
+  if (kept) log(`going by MausBot's schedule and policy kept on this server (version ${kept.version}) until MausBot answers`);
   const host = hostReporter(docker, () => current.admin);
   const home = new Home({
     docker, state, log, readHealth, seccomp, transfer: httpTransfer,
@@ -132,12 +138,29 @@ async function run(): Promise<void> {
     home,
     hostHealth: () => host.health(true),
     identity,
-    admin: () => ({ origin: current.admin, token: current.agentToken }),
+    admin: () => ({ origin: current.admin, authorization: (jobId) => transferAuthorization(current, jobId) }),
     selfUpdate: (job) => home.exclusive(() => updater.run(job, { pause: () => agent.stop(), resume: () => agent.start() })),
   });
   const desk = jobDesk({ run: runner, audit, log, policyFile: join(PATHS.hostConfig, POLICY_FILE) });
-  const makeAgent = (from: AgentRecord) => new Agent({ admin: from.admin, token: from.agentToken, log, heartbeat, handle: (job) => desk.submit(job, "admin"), status: (patch) => state.saveStatus(patch) });
-  agent = makeAgent(current);
+  const connectHome = () => new Promise<Duplex>((resolve, reject) => {
+    const socket = createConnection({ host: "127.0.0.1", port: HOME_PORT });
+    socket.once("connect", () => resolve(socket));
+    socket.once("error", reject);
+  });
+  const makeAgent = () => new Agent({
+    identity: () => current, log, heartbeat, handle: (job) => desk.submit(job, "admin"), status: (patch) => state.saveStatus(patch),
+    nextCount: () => state.nextCount(),
+    saveAdminKeys: (keys) => {
+      current = { ...current, adminKeys: keys };
+      state.saveAgent(current);
+      log(`MausBot's signing keys are now ${Object.keys(keys).join(", ")}`);
+    },
+    config: { saved: () => state.adminConfig(), save: (config) => state.saveAdminConfig(config) },
+    onConfig: (config) => log(`MausBot's schedule and policy (version ${config.version}) are kept on this server`),
+    stream: (stream, accept) => serveRequest(stream, accept, { connectHome, record: note }),
+    refused: (refusal) => note({ event: "refused", by: "admin", code: refusal.code, why: refusal.message, ...(refusal.id ? { id: refusal.id } : {}), ...(refusal.type ? { type: refusal.type } : {}) }),
+  });
+  agent = makeAgent();
 
   const role = await updater.atStart(() => new Promise<boolean>((resolve) => {
     const timer = setTimeout(() => resolve(false), SELF_UPDATE_DEADLINE_MS);
@@ -174,13 +197,13 @@ async function run(): Promise<void> {
   setInterval(() => {
     home.supervise().catch((error) => log(`supervising the home failed: ${errorText(error)}`));
     const latest = state.agent();
-    if (latest && latest.agentToken !== current.agentToken) {
+    if (latest && latest.publicKey !== current.publicKey) {
       log("this server was connected again with a new code; reconnecting");
-      registerSecret(latest.agentToken);
+      registerSecret(latest.privateKey);
       current = latest;
-      note({ event: "connector", what: "enrolled", version: CONNECTOR_VERSION, image: identity().image, serverId: latest.serverId });
+      note({ event: "connector", what: "enrolled", version: CONNECTOR_VERSION, image: identity().image, boxId: latest.boxId });
       agent.stop();
-      agent = makeAgent(current);
+      agent = makeAgent();
       agent.start();
     }
   }, 10_000);
@@ -207,7 +230,7 @@ async function enrollCommand(): Promise<void> {
   state.saveAgent(record);
   // Connected again only once the service has connected with this token.
   state.saveStatus({ connected: false, unauthorized: false, lastError: null });
-  console.log(`This server is connected to MausBot (server ${record.serverId}).`);
+  console.log(`This server is connected to MausBot (server ${record.boxId}).`);
 }
 
 function statusCommand(): void {
@@ -216,8 +239,9 @@ function statusCommand(): void {
   const status = state.status();
   const home = state.home();
   console.log(JSON.stringify({
-    enrolled: Boolean(record), admin: record?.admin ?? null, serverId: record?.serverId ?? null, cloudId: record?.cloudId ?? null,
-    connected: status.connected, unauthorized: status.unauthorized, lastConnectedAt: status.lastConnectedAt, lastHeartbeatAt: status.lastHeartbeatAt,
+    enrolled: Boolean(record), admin: record?.admin ?? null, boxId: record?.boxId ?? null, teamId: record?.teamId ?? null,
+    connected: status.connected, accepted: status.boxState === "accepted", unauthorized: status.unauthorized,
+    lastConnectedAt: status.lastConnectedAt, lastHeartbeatAt: status.lastHeartbeatAt, config: state.adminConfig()?.version ?? null,
     lastError: status.lastError, home: { desired: home.desired, image: home.image, operation: home.operation?.type ?? null },
   }));
 }
