@@ -164,9 +164,9 @@
   /* the 0.5px line where two panes meet: the sidebar and the chat */
   --color-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
   /* the window's frame: its top bar and the rail of places, around the
-     app's pane (the sidebar and the chat). The app's own colour a step darker, so it
-     stays in the skin's family: --frame-shade of black. */
-  --color-frame: color-mix(in oklab, var(--color-app), black var(--frame-shade));
+     app's card (the sidebar and the chat). The sidebar's colour in every skin,
+     so the bar, the rail and the sidebar read as one field. */
+  --color-frame: var(--color-panel);
   --color-ink: #f5f5f5;
   --color-ink-secondary: #f5f5f5a8;
   /* quiet text: timestamps, hints, placeholders, calendar hours. It used to
@@ -232,10 +232,6 @@
 
 :root {
   --code-color-scheme: dark;
-  /* how far the frame steps from the app's colour toward black: further on
-     the dark skins, whose colours sit close to black, and a small step on the
-     light ones (2.5%), where the quiet ink must still clear 4.5:1 on it */
-  --frame-shade: 30%;
   /* ink carried by a filled accent / danger surface (see the rule at the
      bottom of this file, which is what makes them take effect) */
   --color-accent-ink: #ffffff;
@@ -333,7 +329,6 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="atelier"] {
   --code-color-scheme: light;
-  --frame-shade: 3%;
   --color-app: #f5f1eb;           /* outermost ground */
   --color-panel: #fbf8f2;         /* sidebar */
   --color-raised: #ffffff;        /* content — raised means lighter here */
@@ -484,7 +479,6 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="lagoon"] {
   --code-color-scheme: light;
-  --frame-shade: 4%;
   /* The tint is the point, so it is carried by the surfaces, not by a button:
      the ground sits 13 points of green-blue above its red channel, roughly
      three times Atelier's cream cast, which is what makes the skin read as
@@ -620,7 +614,6 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="linen"] {
   --code-color-scheme: light;
-  --frame-shade: 3.5%;
   --color-app: #eceff3;
   --color-panel: #f5f6f8;
   --color-raised: #ffffff;
@@ -756,10 +749,8 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="daylight"] {
   --code-color-scheme: light;
-  --frame-shade: 6%;
   --color-app: #fcfcfc;           /* the thread */
   --color-panel: #f5f5f5;         /* sidebar */
-  --color-frame: var(--color-panel);
   --color-raised: #e4e4e4;        /* the sidebar's selected row: 8% ink on the panel */
   --color-raised-hover: #d8d8d8;
   --color-card: #efefef;          /* what a bot says: 6% ink on the page */
@@ -827,7 +818,6 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="meadow"] {
   --code-color-scheme: light;
-  --frame-shade: 6%;
   --color-app: #ffffff;           /* the thread */
   --color-panel: #f6f8f6;         /* sidebar */
   --color-raised: #e9eeea;
@@ -892,7 +882,6 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="pop"] {
   --code-color-scheme: light;
-  --frame-shade: 6%;
   --color-app: #fdf5ea;           /* the page */
   --color-panel: #f6ebdb;         /* sidebar */
   --color-raised: #efe3d1;
@@ -2990,10 +2979,10 @@ button:disabled.bg-danger {
    scripts/check-skin-contrast.mjs measures these as "<skin> (phone)", so the
    AA pairs hold here exactly as on desktop. */
 @media (max-width: 767.98px) {
-  /* The window's frame keeps the desktop ground at any width: the rail of places is a page 36px wide beside a full
-     page, and both draw the frame's top bar or rail in one colour. */
+  /* The window's frame keeps the desktop sidebar's colour at any width: the rail of places is a page 36px wide beside
+     a full page, and both draw the frame's top bar or rail in one colour. */
   :is([data-skin="midnight"]) {
-    --color-frame: color-mix(in oklab, #121212, black var(--frame-shade));
+    --color-frame: #0e0e0e;
     --color-app: #141414;
     --color-panel: #1c1c1e;
     --color-raised: #2c2c2e;
@@ -3012,7 +3001,7 @@ button:disabled.bg-danger {
     --radius-menu: 22px;
   }
   :is([data-skin="meadow"]) {
-    --color-frame: color-mix(in oklab, #ffffff, black var(--frame-shade));
+    --color-frame: #f6f8f6;
     --color-app: #f6f8f6;
     --color-panel: #fcfdfc;
     --color-card: #ffffff;
