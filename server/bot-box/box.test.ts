@@ -61,6 +61,19 @@ describe("BoxRunner.wrap", () => {
     expect(wrapped.args.slice(wrapped.args.indexOf("--") + 1)).toEqual(["/opt/chrome", "--headless"]);
   });
 
+  // The box's paths are POSIX paths inside it, which Windows' path module would write with drive letters and backslashes.
+  it.skipIf(process.platform === "win32")("a relay is bound in and dialed by the Node bridge, even where socat bridges the gates; a shared-network box has none", () => {
+    const runner = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set() });
+    const relay = "/data/.openmausbot/box/relay-ab12.sock";
+    const wrapped = runner.wrap({ command: "/data/.openmausbot/tools/agy", args: ["--uid="], env: { PATH: "/usr/bin" }, relay });
+    expect(wrapped.args.join(" ")).toContain(`--bind ${relay} /run/omb/relay.sock`);
+    const inner = wrapped.args.slice(wrapped.args.indexOf("--") + 1);
+    expect(inner).toEqual([bridge.node, bridge.bridgeScript, "--bridge=3128=/run/omb/egress.sock", "--bridge=8799=/run/omb/harness.sock", "--relay=/run/omb/relay.sock", "--", "/data/.openmausbot/tools/agy", "--uid="]);
+    const shared = runner.wrap({ command: "/opt/chrome", args: [], env: {}, net: "shared", relay });
+    expect(shared.args).not.toContain(relay);
+    expect(shared.args.slice(shared.args.indexOf("--") + 1)).toEqual(["/opt/chrome"]);
+  });
+
   it("the env-all mutation hands over the whole environment (so the self-check can prove the allow-list)", () => {
     const runner = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup: { ...setup, mutate: new Set(["env-all" as const]) }, denyEnv: new Set() });
     expect(runner.wrap({ command: "x", args: [], env: { OMB_CLOUD_BOOTSTRAP_SECRET: "s", EMPTY: undefined } }).env).toMatchObject({ OMB_CLOUD_BOOTSTRAP_SECRET: "s" });
@@ -158,6 +171,18 @@ describe("BotBox", () => {
     expect(box.report().checks).toEqual({ passed: 20, total: 21, failed: ["egress-public-allowed"], at: 1 });
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatch(/^bot box: on \(bubblewrap, node bridges, credential broker, seccomp (on|unsupported here)\)$/);
+    const relay = (await box.openRelay())!;
+    expect(relay.socketPath.startsWith(join(dataDir, "box", "relay-"))).toBe(true);
+    expect(existsSync(relay.socketPath)).toBe(true);
+    relay.close();
+    expect(existsSync(relay.socketPath)).toBe(false);
+  });
+
+  it("off: no relay", async () => {
+    const box = new BotBox();
+    boxes.push(box);
+    await box.start({ dataDir: temp(), home: temp(), port: 8799, denyEnv: new Set(), env: {}, log: () => {} });
+    expect(await box.openRelay()).toBeNull();
   });
 });
 

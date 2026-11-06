@@ -2728,7 +2728,7 @@ describe("harness HTTP API", () => {
         await mintTestCapability(BASE, chief.id, chief.threadId);
         const expired = await held.finish();
         expect(expired.status).toBe(401);
-        expect(expired.body.error).toMatch(/expired/);
+        expect(expired.body.error).toMatch(/turn has already ended/);
         held.close();
         held = undefined;
         token = await mintTestCapability(BASE, chief.id, chief.threadId, { kind: "connectors" });
@@ -2779,7 +2779,7 @@ describe("harness HTTP API", () => {
 
       const rejected = await held.finish();
       expect(rejected.status).toBe(401);
-      expect(rejected.body.error).toMatch(/expired/i);
+      expect(rejected.body.error).toMatch(/turn has already ended/i);
       const state = (await api("GET", "/api/bots?messages=0")).body;
       expect(state.bots.some((bot: { name: string }) => bot.name === lateName)).toBe(false);
     } finally {
@@ -10069,7 +10069,7 @@ describe("harness HTTP API", () => {
     { mode: "size", sizes: [25 * 1024 * 1024 + 1], message: "Uploads are limited to 25 MiB per file.", status: 200 },
     { mode: "batch", sizes: Array(5).fill(21 * 1024 * 1024) as number[], message: "Uploads are limited to 100 MiB per batch.", status: 200 },
     { mode: "changed", sizes: [1024], message: expect.stringContaining("changed while staging"), status: 200 },
-    { mode: "stop", sizes: [1024], message: "the internal turn capability has expired", status: 401 },
+    { mode: "stop", sizes: [1024], message: expect.stringContaining("turn has already ended"), status: 401 },
     { mode: "disk", sizes: [1024], message: expect.stringMatching(/ENOTDIR|EEXIST/), status: 500 },
   ])("returns the correct browser upload result for $mode", async ({ mode, sizes, message, status }) => {
     const bot = (await api("POST", "/api/bots")).body.bot;

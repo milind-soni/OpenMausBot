@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { baseDomain, discoverMailServers, parseAutoconfig, type DiscoverDeps } from "./discover.ts";
+import { baseDomain, discoverMailServers, parseAutoconfig, smtpBeside, type DiscoverDeps } from "./discover.ts";
 
 const AUTOCONFIG = `<?xml version="1.0"?><clientConfig version="1.1"><emailProvider id="x">
   <incomingServer type="pop3"><hostname>pop.example.com</hostname><port>995</port><socketType>SSL</socketType></incomingServer>
@@ -16,6 +16,8 @@ function deps(over: Partial<DiscoverDeps> & { pages?: Record<string, string> } =
     fetchText: over.fetchText ?? (async (url) => { asked.push(url); return over.pages?.[url] ?? null; }),
     mx: over.mx ?? (async () => []),
     srv: over.srv ?? (async () => []),
+    cname: over.cname ?? (async () => []),
+    reverse: over.reverse ?? (async () => []),
   };
 }
 
@@ -46,6 +48,44 @@ describe("where a mailbox's servers are", () => {
     const found = await discoverMailServers("office@small-shop.at", deps({ mx: async () => ["mx1.world4you.com."] }));
     expect(found.imap[0]).toEqual({ host: "imap.world4you.com", port: 993, secure: true });
     expect(found.smtp[0]).toEqual({ host: "smtp.world4you.com", port: 587, secure: false });
+  });
+
+  it("a domain hosted at a provider under its own names: the provider's servers, found from the names behind them", async () => {
+    // How a World4You domain looks: its MX is mail.<the domain> on World4You's address, imap.<the domain> is a CNAME to
+    // imap.world4you.com, and World4You's certificates are for *.world4you.com only.
+    const found = await discoverMailServers("office@small-shop.at", deps({
+      mx: async () => ["mail.small-shop.at."],
+      cname: async (name) => (name === "imap.small-shop.at" ? ["imap.world4you.com"] : []),
+      reverse: async (host) => (host === "mail.small-shop.at" ? ["mail25.world4you.com"] : []),
+    }));
+    expect(found.imap[0]).toEqual({ host: "imap.world4you.com", port: 993, secure: true });
+    expect(found.smtp[0]).toEqual({ host: "smtp.world4you.com", port: 587, secure: false });
+  });
+
+  it("the same domain known only by its MX's reverse name", async () => {
+    const found = await discoverMailServers("office@small-shop.at", deps({ mx: async () => ["mail.small-shop.at."], reverse: async () => ["mail25.world4you.com."] }));
+    expect(found.smtp[0]).toEqual({ host: "smtp.world4you.com", port: 587, secure: false });
+  });
+
+  it("knows Easyname, whose outgoing server takes TLS on 465", async () => {
+    const found = await discoverMailServers("office@small-shop.at", deps({ mx: async () => ["mx01.easyname.com."] }));
+    expect(found.imap[0]).toEqual({ host: "imap.easyname.com", port: 993, secure: true });
+    expect(found.smtp.slice(0, 2)).toEqual([{ host: "smtp.easyname.com", port: 465, secure: true }, { host: "smtp.easyname.com", port: 587, secure: false }]);
+  });
+
+  it("the outgoing server beside an incoming one: smtp.x and mail.x for imap.x or pop.x, on both ports", () => {
+    expect(smtpBeside("imap.wh20.easyname.systems").map((server) => `${server.host}:${server.port}`)).toEqual([
+      "smtp.wh20.easyname.systems:587", "smtp.wh20.easyname.systems:465", "mail.wh20.easyname.systems:587", "mail.wh20.easyname.systems:465",
+      "imap.wh20.easyname.systems:587", "imap.wh20.easyname.systems:465",
+    ]);
+    expect(smtpBeside("pop.world4you.com")[0]).toEqual({ host: "smtp.world4you.com", port: 587, secure: false });
+    expect(smtpBeside("mail.example.com").map((server) => server.host)).toEqual(["smtp.example.com", "smtp.example.com", "mail.example.com", "mail.example.com"]);
+    expect(smtpBeside("imap.com").map((server) => server.host), "never a bare top-level name").not.toContain("smtp.com");
+  });
+
+  it("Gmail and Outlook come with what they need instead of a password", async () => {
+    expect((await discoverMailServers("me@gmail.com", deps())).provider).toEqual({ rule: "app-password", hint: { provider: "Google", app: "gmail", appPasswordUrl: "https://myaccount.google.com/apppasswords" } });
+    expect((await discoverMailServers("me@company.example", deps({ mx: async () => ["company-example.mail.protection.outlook.com."] }))).provider).toMatchObject({ rule: "no-password", hint: { app: "outlook" } });
   });
 
   it("asks Thunderbird's list about the provider behind an MX record it doesn't know", async () => {

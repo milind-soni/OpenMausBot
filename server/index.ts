@@ -87,7 +87,7 @@ import { emailSignInRoute } from "./routes/email-sign-in.ts";
 import { createPersonStop } from "./host/person-stop.ts";
 import { createTurnOrder } from "./host/turn-order.ts";
 import { createQueuedNotes, createWaitWords } from "./host/wait-words.ts";
-import { settleParkedFiles, type ParkedTurnAttachment } from "./host/turn-attachments.ts";
+import { landTurnFiles, settleParkedFiles, type ParkedTurnAttachment } from "./host/turn-attachments.ts";
 import { createReplyVoiceNotes } from "./host/reply-voice-notes.ts";
 import { runtimeRequestCardFields } from "./request-card.ts";
 import type { DirectSendInput, DirectSendReceipt } from "./direct-send.ts";
@@ -507,7 +507,7 @@ import { OrgLibrary } from "./org-library.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
 import { autoLocalVmAttachable, type ContainerComputerStatus } from "./container-computer.ts";
 import { startStoppedPodmanMachine } from "./podman-machine.ts";
-import { keepTransient, lazyClaimRetryText, settledWithin, startAutoVmClaim, withinBudget, type AutoVmClaimSlot, type AutoVmClaimTable } from "./auto-vm-claims.ts";
+import { keepTransient, lazyClaimFailedText, lazyClaimRetryText, settledWithin, startAutoVmClaim, withinBudget, type AutoVmClaimSlot, type AutoVmClaimTable } from "./auto-vm-claims.ts";
 import { CONTROL_ACT_WITHIN_MS, CONTROL_BUSY, CONTROL_HANDED_BACK, CONTROL_WAIT_MS, CONTROL_WAITED, controlRefusal, type ControlState } from "./control-client.ts";
 import { computerFreeAfterText, computerParkedText, computerPersonAwayText, computerStoppedWaitingText, computerWaitingText, type ComputerHolder } from "./computer-wait.ts";
 import { modelContextWindow } from "./model-context-window.ts";
@@ -518,7 +518,7 @@ import {
   ProviderTurnGenerationRegistry,
   RetiredTurnRegistry,
   guardTurnDispatch,
-  isTurnEventQuarantined,
+  isTurnEventQuarantined, TURN_ENDED_REFUSAL,
 } from "./turn-dispatch-guard.ts";
 import { createGracefulShutdown } from "./graceful-shutdown.ts";
 import { acquireDataDirLeaseForProcess } from "./data-dir-lease.ts";
@@ -1875,11 +1875,11 @@ class ComputerWaitParked extends Error {
     this.generation = generation;
   }
 }
-function clearFailedAutoPin(botId: string, threadId: string, place: Surface): void {
+function clearFailedAutoPin(botId: string, threadId: string, place: Surface): boolean {
   const pinned = store.taskByThread(botId, threadId);
-  if (pinned?.surface === place && pinned.surfaceSource === "auto") {
-    store.patchTask(botId, threadId, { surface: undefined, surfaceSource: undefined });
-  }
+  if (pinned?.surface !== place || pinned.surfaceSource !== "auto") return false;
+  store.patchTask(botId, threadId, { surface: undefined, surfaceSource: undefined });
+  return true;
 }
 
 async function asPlaceFailure(
@@ -5708,10 +5708,7 @@ async function computerCallGate(internalCapability: InternalCapability, signal?:
       held = { held: true, helpOpen, reason: "person" };
     } else if (lazyClaim?.failed) {
       // A rejected lazy claim refuses every screen call for the rest of the generation: never forward onto a desktop this turn never claimed.
-      return {
-        held: true, helpOpen: false,
-        blockedReason: `This turn could not claim ${lazyClaim.label ?? "this computer"}${lazyClaim.failure ? ` (${lazyClaim.failure})` : ""}. This call was not performed. Do not retry computer work in this turn; tell the person what you could not do.`,
-      };
+      return { held: true, helpOpen: false, blockedReason: lazyClaimFailedText(lazyClaim) };
     } else if (lazyClaim?.lazy && !lazyClaim.claimed) {
       startAutoVmClaim(autoVmClaims, threadId, generation, call);
       if (lazyClaim.begin && Date.now() < deadline && !signal?.aborted) {
@@ -5914,6 +5911,7 @@ function mountBotBoat(
         });
         if (!attached) throw new Error(opts.existingOnly ? "this bot no longer has a cloud computer of its own" : "the cloud computer could not be created or reached");
       } catch (error) {
+        slot.cause = error instanceof Error ? error.message : String(error);
         throw keepTransient(error, opts.source ? await asPlaceFailure(error, "cloud", opts.source, bot, "box") : error);
       }
       slot.boxId = attached.boxId;
@@ -5934,7 +5932,7 @@ async function attachBotBoat(bot: BotRecord, owner: TurnOwner, start: { budgetMs
   // Claim before any network await so setup itself cannot race another turn.
   await bindTurnComputer(owner, `computer:box-bot:${bot.id}`, true);
   start.onSeated();
-  const machine = await withinBudget(cloudComputerPower.start(bot, owner, { existingOnly: start.existingOnly }), start.budgetMs, CLOUD_COMPUTER_DID_NOT_START);
+  const machine = await withinBudget(cloudComputerPower.start(bot, owner, { existingOnly: start.existingOnly, budgetMs: start.budgetMs }), start.budgetMs, CLOUD_COMPUTER_DID_NOT_START);
   if (!machine) return null;
   await bindTurnComputer(owner, `computer:box:${machine.id}`);
   return {
@@ -6416,15 +6414,12 @@ bus.subscribe((event: RuntimeEvent) => {
     pushMessage({ role: "bot", kind: "text", text: spoken.text, turnId });
     lastReply.set(event.threadId, spoken.text);
   };
-  const landParkedFiles = (stopped: boolean) => {
+  const landParkedFiles = () => {
     const key = turnAttachmentKey(event.threadId, event.turnId);
-    const { land, discard } = settleParkedFiles(turnAttachmentsByTurn.get(key) ?? [], stopped, redactSecretsInText, Boolean(goalCoordinatorTurn || ambiguousCoordinatorText));
+    const { land, discard } = settleParkedFiles(turnAttachmentsByTurn.get(key) ?? [], redactSecretsInText, Boolean(goalCoordinatorTurn || ambiguousCoordinatorText));
     turnAttachmentsByTurn.delete(key);
     for (const file of discard) deleteAttachment(file.path);
-    if (!land.length) return;
-    const response = store.messagesFor(event.threadId).findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === completedTurnId);
-    if (response) store.patchMessage(event.threadId, response.id, { attachments: [...(response.attachments ?? []), ...land] });
-    else pushMessage({ role: "bot", kind: "text", text: "", attachments: land, turnId: completedTurnId });
+    landTurnFiles(store, { threadId: event.threadId, turnId: completedTurnId, ...(speaker ? { from: speaker } : {}) }, land, pushMessage);
   };
 
   if (coordinatorVisibleText) pushAssistantText(coordinatorVisibleText, completedTurnId);
@@ -6699,7 +6694,7 @@ bus.subscribe((event: RuntimeEvent) => {
         pushStoppedTurn(event.turnId);
         break;
       }
-      landParkedFiles(false); // above the failure row, which stays the last, retryable line
+      landParkedFiles(); // above the failure row, which stays the last, retryable line
       pushMessage({ role: "bot", kind: "activity", tool: failedTurnTool(event.message, event) });
       if (event.setup && bot) store.setTaskActivity(bot.id, event.threadId, "dead");
       break;
@@ -6718,7 +6713,7 @@ bus.subscribe((event: RuntimeEvent) => {
       const clientStopped = personStops.stopped(event.threadId, completedTurnId) || (stoppedTurns.has(event.threadId)
         && (stoppedTurnId === undefined || completedTurnId === undefined || stoppedTurnId === completedTurnId));
       const stopped = event.stopReason === "interrupted" || clientStopped;
-      landParkedFiles(!event.ok && stopped);
+      landParkedFiles();
       if (completedTurnId) {
         const terminal = store.markTerminalAssistantMessage(event.threadId, completedTurnId);
         if (terminal) store.patchMessage(event.threadId, terminal.id, { turnSucceeded: event.ok });
@@ -6726,7 +6721,7 @@ bus.subscribe((event: RuntimeEvent) => {
           .filter((message) => message.role === "bot" && message.kind === "text" && message.turnId === completedTurnId)
           .map((message) => message.text ?? "").join("\n"));
       }
-      if (bot) void replyVoiceNotes.turnSettled({ bot, threadId: event.threadId, turnId: completedTurnId, stopped, internal });
+      if (bot) void replyVoiceNotes.turnSettled({ bot, threadId: event.threadId, turnId: completedTurnId, stoppedByPerson: personStops.stopped(event.threadId, completedTurnId), internal, ...(event.ok ? {} : { ending: { stop: turnStops.read(event.threadId, completedTurnId), cause: turnStops.failureCause(event), interrupted: event.stopReason === "interrupted" } }) });
       const reply = lastReply.get(event.threadId) ?? "";
       if (personStops.stopped(event.threadId, completedTurnId)) pushStoppedTurn(completedTurnId);
       personStops.turnEnded(event.threadId, completedTurnId);
@@ -8074,7 +8069,8 @@ async function beginTurn(
           return;
         }
         const placeFailure = error instanceof PlaceUnavailableError ? error : undefined;
-        if (placeFailure) clearFailedAutoPin(bot.id, threadId, placeFailure.place);
+        const slot = autoVmClaims.get(threadId);
+        if (placeFailure && clearFailedAutoPin(bot.id, threadId, placeFailure.place) && slot?.owner.generation === resourceOwner.generation) slot.backOnAuto = true;
         const message = placeFailure?.message ?? `computer unavailable — ${label} could not be claimed for this turn (${failure})`;
         store.appendMessage(threadId, {
           role: "bot",
@@ -9862,7 +9858,7 @@ async function runClaimedGroupMemberTurn(
     return true;
   }
   if (instance.adapter.capabilities.customMcp === true) {
-    attachCustomMcp(integrations, { ...await mcpServersHost.prepare(bot).then(() => teamConnections.turnMcp(bot, threadId, internalGeneration)), ...lentMcp.mounts(bot, { botId: bot.id, threadId, generation: internalGeneration }) }, cfg, { botId: bot.id, threadId });
+    const custom = { ...await mcpServersHost.prepare(bot).then(() => teamConnections.turnMcp(bot, threadId, internalGeneration)), ...lentMcp.mounts(bot, { botId: bot.id, threadId, generation: internalGeneration }) }; attachCustomMcp(integrations, custom, cfg, { botId: bot.id, threadId }); Object.assign(integrations, chatAppsMcp.turnMounts(custom, bot.toolScope));
   }
   // An interrupt during connected-app setup must still stop the queued room operation before it starts a process.
   if (isCancelled?.()) return false;
@@ -11556,7 +11552,7 @@ function claimPhoneSecretBotDeletion(botId: string): (() => void) | null {
   };
 }
 
-const secretCards = createSecretCards({ store, cfg, botLogins, phoneSecrets, phoneSecretSubmissions, connectorThread, answerCardNode, followCard: (threadId, from, to) => coordinator.followCard(threadId, from, to), threadLanguage, email: { connect: (request) => emailService.connect(request), refusal: () => emailService.status().reason, connected: (address) => { const one = emailService.store.get(address); return Boolean(one && !one.problem); }, profileAddress: () => cfg.profile?.email?.trim() || undefined }, dataDir: DATA_DIR, providerKeysRefused: Boolean(hostedModels), layerFolder: (botId, threadId) => workspaceDir(teamHost.layer(botId, threadId)), turnVm: (threadId) => localVmThreadTargets.get(threadId)?.key });
+const secretCards = createSecretCards({ store, cfg, botLogins, phoneSecrets, phoneSecretSubmissions, connectorThread, answerCardNode, followCard: (threadId, from, to) => coordinator.followCard(threadId, from, to), threadLanguage, email: { connect: (request, reading) => emailService.connect(request, reading), refusal: () => emailService.status().reason, connected: (address) => { const one = emailService.store.get(address); return Boolean(one && !one.problem); }, sendingProblem: (address) => emailService.sendingProblem(address), profileAddress: () => cfg.profile?.email?.trim() || undefined }, dataDir: DATA_DIR, providerKeysRefused: Boolean(hostedModels), layerFolder: (botId, threadId) => workspaceDir(teamHost.layer(botId, threadId)), turnVm: (threadId) => localVmThreadTargets.get(threadId)?.key });
 ROUTES.push(createSecretCardRoutes({ cards: secretCards, phoneSecretSubmissions, threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), answerContext: (auth, botId, threadId) => ({ personalCloud: Boolean(CLOUD_PERSONAL), shared: sharedMembership(), owner: (CLOUD_TEAM ? teamOwners.routing.askedPerson(botId, threadId) : null) ?? threadStarters.get(threadId) ?? null, person: auth.kind === "session" ? personKey(auth.session) : null }) }));
 
 // By design OpenMausBot never receives a website password: the person signs in where the bot works, and the bot uses that session.
@@ -12144,7 +12140,7 @@ ROUTES.push(createBotMessageRoutes({
 }));
 const chatApps = createChatApps({ store, dataDir: DATA_DIR });
 const chatAppsMcp = createChatAppsMcp({ store, apps: chatApps, dataDir: DATA_DIR, storedServers: () => cfg.mcpServers ?? {}, mountedServers: engineMcpServers, personMcp: teamConnections.personMcp, oauth: mcpOAuth });
-ROUTES.push(createChatAppRoutes({ store, apps: chatApps, threadRefusal: cloudThreadRefusal, mcpRpc: chatAppsMcp.rpc }));
+ROUTES.push(createChatAppRoutes({ store, apps: chatApps, threadRefusal: cloudThreadRefusal, mcpRpc: chatAppsMcp.rpc, threadVisible: (auth, threadId) => (auth.kind !== "session" || sessions.isLive(auth.session.id)) && visibleTo(viewerFor(auth)).thread(threadId) }));
 const { react } = createReactions({
   store, reply: (input) => teamMessages.reactedIn(input.auth, input.threadId, input.target.id, input.answer, { sendId: input.sendId, sender: messageSender(input.auth) }) ?? personReplies.deliver({ ...input, about: "message" }),
   answerCard: (input) => respondToCard({ ...input, via: "reaction" }), withdraw: personReplies.withdraw,
@@ -12994,7 +12990,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const body = await readBody(req);
         // Authorization at header time is not a lease: if the owning turn settled meanwhile, die before any side effect.
         if (!internalCapabilityIsActive(internalCapability)) {
-          throw Object.assign(new Error("the internal turn capability has expired"), { status: 401 });
+          throw Object.assign(new Error(TURN_ENDED_REFUSAL), { status: 401 });
         }
         if (body && typeof body === "object" && !Array.isArray(body)) {
           for (const key of ["fromBotId", "botId"] as const) {
@@ -13012,10 +13008,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       };
       const requireActiveInternalCapability = () => {
         if (!internalCapabilityIsActive(internalCapability)) {
-          throw Object.assign(new Error("the internal turn capability has expired"), { status: 401 });
+          throw Object.assign(new Error(TURN_ENDED_REFUSAL), { status: 401 });
         }
       };
-      const botFolders = async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }); if (await lentMcp.route({ method, path, req, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS || await internalToolRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, folders: botFolders }) !== PASS || await waitRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, ...waitTurnChecks(internalCapability, internalSender) }) !== PASS || await teamMessages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || await devsReports.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || (computerAsks && await computerAsks.internal({ method, path, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS) || await imageTools.internal({ method, path, res, json, readBody: readInternalBody, threadId: internalCapability.threadId, requireActive: requireActiveInternalCapability, personTurn: turnOrigin(internalCapability).kind === "user" || (Boolean(roomRun(internalCapability.generation)?.requestMessageId) && guestDrivenTurns.get(internalCapability.threadId) !== internalCapability.generation) }) !== PASS) return; const pagesCall = new AbortController(); res.once("close", () => { if (!res.writableEnded) pagesCall.abort(); }); if (await publishedPages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, requireActive: requireActiveInternalCapability, signal: pagesCall.signal, folders: botFolders, post: (text, publishedPage, bundle) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return !source ? null : (!source.group && bundle && publishedPages.show({ threadId: internalCapability.threadId, card: publishedPage, bundle })) || store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, publishedPage, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id; } }) !== PASS) return;
+      const botFolders = async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }); if (await lentMcp.route({ method, path, req, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS || await internalToolRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, folders: botFolders }) !== PASS || await waitRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, ...waitTurnChecks(internalCapability, internalSender) }) !== PASS || await teamMessages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || await devsReports.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || (computerAsks && await computerAsks.internal({ method, path, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS) || await imageTools.internal({ method, path, res, json, readBody: readInternalBody, threadId: internalCapability.threadId, requireActive: requireActiveInternalCapability, personTurn: turnOrigin(internalCapability).kind === "user" || (Boolean(roomRun(internalCapability.generation)?.requestMessageId) && guestDrivenTurns.get(internalCapability.threadId) !== internalCapability.generation) }) !== PASS) return; const pagesCall = new AbortController(); res.once("close", () => { if (!res.writableEnded) pagesCall.abort(); }); if (await publishedPages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, requireActive: requireActiveInternalCapability, signal: pagesCall.signal, folders: botFolders, post: (text, publishedPage, bundle) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return !source ? null : (bundle && publishedPages.show({ threadId: internalCapability.threadId, card: publishedPage, bundle, bot: internalSender })) || store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, publishedPage, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id; } }) !== PASS) return;
       const delegatedThisTurn = (taskId: string) => {
         (internalCapability.delegatedThisTurn ??= new Set()).add(taskId);
       };

@@ -9,6 +9,8 @@ import { TurnNotStartedError, type ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import * as procs from "../procs.ts";
+import { botBox } from "../bot-box/box.ts";
+import { dialRelay, openBoxRelay } from "../bot-box/relay.ts";
 import * as envPath from "../env-path.ts";
 import * as managedRuntime from "./antigravity-runtime.ts";
 import {
@@ -42,6 +44,7 @@ import {
 } from "./antigravity.ts";
 
 const FAKE_ACP = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-acp-cli.ts");
+const FAKE_SIGNIN = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-antigravity-signin.ts");
 const scratch: string[] = [];
 
 function fakeRuntime(startupDelayMs = 0): { directory: string; executable: string; harness: string } {
@@ -253,6 +256,52 @@ createInterface({ input: process.stdin }).on('line', line => {
       expect(signedIn).not.toHaveBeenCalled();
     } finally {
       controller.cancel();
+    }
+  });
+
+  it("delivers a redirect pasted from another computer to the runtime's own callback listener, and the sign-in finishes", async () => {
+    const fake = fakeRuntime();
+    writeFileSync(fake.executable, readFileSync(FAKE_SIGNIN));
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    const profile = await prepareAntigravityProfile({ instanceId: "auth-pasted", runtime, baseDir: fake.directory });
+    const signedIn = vi.fn();
+    const controller = new AntigravityAuthController(signedIn);
+    try {
+      const flow = await controller.start(runtime, profile);
+      const redirect = new URL(flow.authorizationUrl!).searchParams.get("redirect_uri")!;
+      await controller.complete(flow.flowId!, `${redirect}?state=fixture&code=pasted`);
+      expect(await antigravityProfileAuthenticated(profile)).toBe(true);
+      expect(signedIn).toHaveBeenCalledOnce();
+    } finally {
+      controller.cancel();
+    }
+  });
+
+  // A Cloud home runs the runtime in a bot box with its own network, where only the box's relay reaches its listener
+  // (proved against a real box in antigravity-box.linux.test.ts); here the relay's box side runs in this process.
+  it.skipIf(process.platform === "win32")("delivers the redirect through the box's relay when sign-in runs in a bot box, and closes the relay after", async () => {
+    const fake = fakeRuntime();
+    writeFileSync(fake.executable, readFileSync(FAKE_SIGNIN));
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    const profile = await prepareAntigravityProfile({ instanceId: "auth-relayed", runtime, baseDir: fake.directory });
+    const relay = await openBoxRelay(join(fake.directory, "relay.sock"));
+    const inBox = dialRelay(relay.socketPath, 20);
+    const reach = vi.spyOn(relay, "connect");
+    vi.spyOn(botBox, "openRelay").mockResolvedValue(relay);
+    const spawned = vi.spyOn(procs, "spawnCli");
+    const controller = new AntigravityAuthController();
+    try {
+      const flow = await controller.start(runtime, profile);
+      expect(spawned.mock.calls[0]![2]).toMatchObject({ box: { relay: relay.socketPath } });
+      const redirect = new URL(new URL(flow.authorizationUrl!).searchParams.get("redirect_uri")!);
+      await controller.complete(flow.flowId!, `${redirect.href}?state=fixture&code=pasted`);
+      expect(reach).toHaveBeenCalledWith(Number(redirect.port));
+      expect(await antigravityProfileAuthenticated(profile)).toBe(true);
+      await vi.waitFor(() => expect(existsSync(relay.socketPath)).toBe(false));
+    } finally {
+      controller.cancel();
+      inBox.close();
+      relay.close();
     }
   });
 

@@ -37,7 +37,8 @@ function isEmpty(field: WidgetField, values: WidgetValues, other: WidgetOther): 
   return field.type === "Checkbox" ? value !== true : typeof value !== "string" || !value.trim();
 }
 
-export function WidgetMessage({ botId, threadId, message }: { botId: string; threadId?: string; message: Message }) {
+/** `viewOnly`: shown in a room, where a press would speak for everyone; links and thread jumps still open. */
+export function WidgetMessage({ botId, threadId, message, viewOnly }: { botId: string; threadId?: string; message: Message; viewOnly?: boolean }) {
   const simple = !useAdvancedMode();
   const serverCard = (message as { serverCard?: true }).serverCard === true;
   const locale = activeLocale();
@@ -48,10 +49,10 @@ export function WidgetMessage({ botId, threadId, message }: { botId: string; thr
       : null;
   }
   // Replacing a widget renumbers node ids, so a new revision remounts the card.
-  return <WidgetCard key={payload.rev ?? 0} botId={botId} threadId={threadId} messageId={message.id} payload={payload} />;
+  return <WidgetCard key={payload.rev ?? 0} botId={botId} threadId={threadId} messageId={message.id} payload={payload} viewOnly={viewOnly === true} />;
 }
 
-function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; threadId?: string; messageId: string; payload: WidgetPayload }) {
+function WidgetCard({ botId, threadId, messageId, payload, viewOnly }: { botId: string; threadId?: string; messageId: string; payload: WidgetPayload; viewOnly: boolean }) {
   const root = payload.root;
   const { state, dispatch, flushBotPatches } = useStore();
   const showThreads = useShowThreads();
@@ -127,7 +128,7 @@ function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; th
       if (target) openThread(dispatch, target, state, showThreads);
       return;
     }
-    if (settled) return;
+    if (settled || viewOnly) return;
     let sending: WidgetValues | undefined;
     let sendingOther: WidgetOther | undefined;
     if (entry.tone !== "cancel") {
@@ -204,7 +205,7 @@ function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; th
       setOtherEdits((current) => ({ ...current, [name]: text }));
       if (problem?.field === name) setProblem(undefined);
     },
-    locked: isSettled || pending !== undefined,
+    locked: isSettled || pending !== undefined || viewOnly,
     invalid: problem?.field,
     errorId,
     fields,
@@ -229,7 +230,7 @@ function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; th
         aria-label={name}
         aria-busy={pending !== undefined || undefined}
         data-widget={messageId}
-        data-widget-state={settled ? "settled" : pending !== undefined ? "sending" : "live"}
+        data-widget-state={settled ? "settled" : viewOnly ? "view-only" : pending !== undefined ? "sending" : "live"}
         data-widget-compact={compact || undefined}
         className={cn("w-full text-start", WIDTH[widgetString(root, "size") ?? "lg"] ?? WIDTH.lg)}
       >

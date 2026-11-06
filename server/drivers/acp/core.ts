@@ -623,14 +623,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             ? { jsonrpc: "2.0", id: msg.id, result: question.cancelled }
             : { jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
       };
-      const sharedHost = (hostKey: string | null): AcpHost | null => {
+      const sharedHost = (hostKey: string | null, threadId: string, cwd: string): AcpHost | null => {
         if (hostKey === null) return null;
-        for (const host of hosts) if (host.key === hostKey && host.accepts(SHARED_SESSIONS_MAX, SHARED_SESSIONS_LIFETIME)) return host;
+        for (const host of hosts) if (host.key === hostKey && host.accepts(SHARED_SESSIONS_MAX, SHARED_SESSIONS_LIFETIME, threadId, cwd)) return host;
         return null;
       };
-      const hostFor = (launch: { command: string }, argv: string[], env: Record<string, string | undefined>, cwd: string,
+      const hostFor = (threadId: string, launch: { command: string }, argv: string[], env: Record<string, string | undefined>, cwd: string,
         hostKey: string | null): AcpHost => {
-        const running = sharedHost(hostKey);
+        const running = sharedHost(hostKey, threadId, cwd);
         if (running) return running;
         const child = spawnCli(launch.command, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { allowEnv: instanceEnvNames(input.environment, env) } }, "bot");
         const host = new AcpHost(child, hostKey, { source: SOURCE, logMessage: nativeLogMessage, unrouted: refuse });
@@ -650,8 +650,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         hostKey: string | null,
       ): AcpSession => {
         const commandCwd = permissionLaunchCwd(cwd);
-        const host = hostFor(launch, argv, env, cwd, hostKey);
-        const acp = host.link(threadId);
+        const host = hostFor(threadId, launch, argv, env, cwd, hostKey);
+        const acp = host.link(threadId, cwd);
         const send = (obj: unknown) => acp.send(obj);
 
         const resolveClientPath = async (requestPath: unknown): Promise<string> => {
@@ -1119,7 +1119,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             if (pooled.dead) sessions.delete(threadId);
             else closeSession(threadId, "contract");
           }
-          const joining = sharedHost(hostKey);
+          const joining = sharedHost(hostKey, threadId, cwd);
           await turn.engineAdmission?.(joining ? "session" : "process", joining?.child.pid);
           requireRunning();
           if (active.has(threadId)) throw new Error("a turn is already running on this thread");

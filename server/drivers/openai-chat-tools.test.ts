@@ -1410,6 +1410,30 @@ describe("a turn with the person's Windows computer, the built-in browser and th
       .toEqual([`To fit the model's 128-tool limit, the tools of "notes" are reached through the tool search this turn.`]);
     expect(toolBudgetOf("mira")).toEqual({ limit: 128, listed: 117, servers: [{ name: "notes", tools: 14, direct: false }] });
   });
+
+  it("lists fewer tools once when the provider names a lower limit, learns it for the next turn, and runs the turn", async () => {
+    const f = await fixture((body, response) => {
+      if ((body.tools?.length ?? 0) <= 110) return answer(response);
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: `Invalid 'tools': array too long. Expected an array with maximum length 110, but got an array with length ${body.tools!.length} instead.`, type: "invalid_request_error" } }));
+    });
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      await f.start({ botId: "ines", integrations: integrations(42, { custom: { notes: catalog(syntheticToolNames("note", 14)) } }) });
+      expect(await f.completed()).toMatchObject({ ok: true });
+    } finally { console.warn = warn; }
+    expect(f.requests.map((request) => request.tools!.length)).toEqual([118, 110]);
+    expect(f.requests[1].tools!.map((tool) => tool.function.name).slice(-4)).toEqual(["mcp_search_tools", "mcp_describe_tool", "mcp_call_tool", "ask_user"]);
+    expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "runtime.notice",
+      message: `To fit the model's 110-tool limit, the tools of "notes" are reached through the tool search this turn.` }));
+    expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
+    expect(toolBudgetOf("ines")).toMatchObject({ limit: 110, servers: [{ name: "notes", tools: 14, direct: false }] });
+
+    await f.start({ botId: "ines", integrations: integrations(42, { custom: { notes: catalog(syntheticToolNames("note", 14)) } }) });
+    await f.recorder.until((event) => event.type === "turn.completed" && f.requests.length === 3);
+    expect(f.requests[2].tools).toHaveLength(110);
+  });
 });
 
 describe("a provider that streams whole tool calls without an index", () => {
