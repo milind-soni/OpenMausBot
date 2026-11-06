@@ -61,12 +61,22 @@ export function acpShellRequest(isShellCommand: boolean, rawInput: unknown, laun
   return { command: isShellCommand ? acpPermissionCommand(rawInput, launchCwd) : undefined, commandLine: shellRequest(command, undefined).commandLine };
 }
 
-/** An ACP permission request's exact operation, for the driver's own session allow. */
+/** An ACP permission request's exact operation, for the driver's own session allow.
+ * Only an exact command string or an absolute path is memorable — a generic
+ * title such as "Write File" without a path must not authorize unrelated writes. */
 export function acpSessionOperationKey(toolCall: any): string | null {
   const rawInput = toolCall?.rawInput;
   const command = typeof rawInput?.command === "string" ? rawInput.command : undefined;
   const hasInput = rawInput && typeof rawInput === "object" && Object.keys(rawInput).length > 0;
-  if (!command && !hasInput && !toolCall?.title && !toolCall?.kind && !toolCall?.locations) return null;
+  if (!command && !hasInput) return null;
+  const hasAbsolutePath = (() => {
+    const locs = Array.isArray(toolCall?.locations) ? toolCall.locations : [];
+    if (locs.some((l: unknown) => typeof (l as { path?: unknown })?.path === "string" && isAbsolute((l as { path: string }).path))) return true;
+    if (!rawInput || typeof rawInput !== "object") return false;
+    const ri = rawInput as Record<string, unknown>;
+    return ["path", "filePath", "file_path"].some((k) => typeof ri[k] === "string" && isAbsolute(ri[k] as string));
+  })();
+  if (!command && !hasAbsolutePath) return null;
   const stable = (value: unknown): unknown =>
     Array.isArray(value)
       ? value.map(stable)

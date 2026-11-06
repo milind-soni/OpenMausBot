@@ -6,7 +6,7 @@ import { acpSessionOperationKey } from "../permission-command.ts";
 // and validates sessionAllows isolation assumptions used by core.ts.
 
 describe("acpSessionOperationKey — Kiro file operation boundaries", () => {
-  it("distinguishes Write File from Review changes on same turn", () => {
+  it("Write File with path is memorable; Review changes without path is not", () => {
     const writeFile = {
       kind: "edit",
       title: "Write File",
@@ -22,8 +22,7 @@ describe("acpSessionOperationKey — Kiro file operation boundaries", () => {
     const k1 = acpSessionOperationKey(writeFile);
     const k2 = acpSessionOperationKey(reviewChanges);
     expect(k1).not.toBeNull();
-    expect(k2).not.toBeNull();
-    expect(k1).not.toBe(k2);
+    expect(k2).toBeNull(); // generic title without absolute path must not be remembered (P1 fix)
   });
 
   it("distinguishes same title with different file paths", () => {

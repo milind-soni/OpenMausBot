@@ -767,7 +767,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           }
           const kind = String(toolCall.kind ?? "");
           const operationKey = isQuestion || current.controlsHost ? null : acpSessionOperationKey(toolCall);
-          if (operationKey && sessionAllows.get(threadId)?.has(operationKey)) {
+          const canRemember = String(toolCall.kind ?? "") !== "execute" || answersAlone(toolCall.rawInput?.command);
+          if (operationKey && canRemember && sessionAllows.get(threadId)?.has(operationKey)) {
             const allow = optionFor("allow");
             if (allow) {
               return send({ jsonrpc: "2.0", id: msg.id, result: { outcome: { outcome: "selected", optionId: allow } } });
@@ -1346,7 +1347,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 continue;
               }
               if (support.driverKind !== "kiroAgent") sessionAllows.delete(threadId);
-              // For Kiro, persistent consent outlives a single session for the same thread.
+              else if (pooled && pooled.contractKey !== contractKey) sessionAllows.delete(threadId);
+              // For Kiro, persistent consent outlives a single session for the same thread and cwd.
               if (cursor) {
                 const recovery = recoveryPromptFor({
                   recoveryText: turn.recoveryText,
