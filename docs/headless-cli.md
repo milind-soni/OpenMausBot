@@ -34,7 +34,9 @@ openmausbot connect https://maus.example.com --code ABCD1234 --out ~/.openmausbo
 openmausbot doctor --url https://maus.example.com --token-file ~/.openmausbot-token
 ```
 
-Get the code in the app under **Settings → Phone → Set up a phone**. On this
+Get the code in the app under **Settings → Phone → Set up a phone**, or on
+the server with `openmausbot pair --client --ttl 24h` (a code lasts five
+minutes unless `--ttl` says otherwise, at most a day, and works once). On this
 computer's own server, `connect` makes the code itself (`--client` gives a
 token that can chat but not change settings). The token goes to a file only
 you can read, and is never printed. Pass it with `--token-file FILE` or
@@ -42,13 +44,28 @@ you can read, and is never printed. Pass it with `--token-file FILE` or
 read by other programs. A token is never sent while the command is still
 looking for a server: with a token, name the server.
 
+For CI, make an access token that ends on a date you choose:
+
+```sh
+openmausbot token create "Nightly CI" --scope client --expires 90d --out ci-token   # on the server, or with an admin token
+openmausbot token list                     # name, scope, end date, last used (never the token)
+openmausbot token revoke ID                # it stops working at once
+```
+
+A `connect` session renews itself while it is used, up to 180 days; an access
+token never renews and ends on its date. `--expires` is at most the server's
+session limit (180 days unless `OMB_SESSION_MAX_DAYS` says otherwise), and
+`--scope client`, the default, can chat and answer approvals but not change
+settings. Tokens are listed and revoked like any session (`openmausbot
+sessions`, and Settings), and the token itself is written only to `--out`.
+
 ## Output and exit codes
 
 Without `--json` you get plain lines. With `--json` you get exactly one JSON
 document on stdout, a failure included (`{ "ok": false, "error", "hint",
 "exitCode" }`). Progress goes to stderr as one JSON object per line; `--quiet`
 drops it. Everything printed, either way, has secrets removed (the same
-redaction the transcript uses). Durations are written `90`, `90s`, `5m` or `2h`.
+redaction the transcript uses). Durations are written `90`, `90s`, `5m`, `2h` or `30d`.
 
 | Exit code | Meaning |
 |---|---|
@@ -83,6 +100,7 @@ one of its conversations.
 | `team apply FILE`, `team export --out FILE` | Makes the workspace match a team file, or writes one (below). |
 | `engine set KIND`, `engine list` | Gives the workspace an engine key without a screen (below). |
 | `connect [URL]` | Gets a token for a workspace elsewhere. |
+| `token create NAME`, `token list`, `token revoke ID` | Access tokens for CI that end on their date (above). |
 | `new-bot`, `new-channel`, `set-model`, `edit` | Make a bot or a room, change a bot's model, rewrite an earlier message. |
 | `mcp` | The OpenMausBot MCP server on stdin and stdout ([docs/mcp-server.md](mcp-server.md)). |
 

@@ -10,6 +10,7 @@ import { exportVerb } from "./export.ts";
 import { Output, processIo, type HeadlessIo } from "./output.ts";
 import { runVerb, waitVerb } from "./run.ts";
 import { teamApplyVerb, teamExportVerb } from "./team-apply.ts";
+import { tokenVerb } from "./token.ts";
 
 const T = "TARGET is a bot or room by name or id, or --bot ID, --channel ID, --thread ID; --task ID picks one of its conversations.";
 
@@ -83,6 +84,14 @@ openmausbot doctor --host [--data-dir DIR] [--port 8799] [--domain HOST]
   On this computer's own server the code is made for you; elsewhere, get one from Settings → Phone.
   Then use it: --url URL --token-file FILE (or OPENMAUSBOT_URL and OPENMAUSBOT_TOKEN).`,
   mcp: "openmausbot mcp\n  Serve the OpenMausBot MCP tools on stdin and stdout, for an agent (docs/mcp-server.md).",
+  token: "openmausbot token create NAME --out FILE … | token list | token revoke ID   (see help token create)",
+  "token create": `openmausbot token create NAME --out FILE [--scope client|admin] [--expires 90d] [--force]
+  An access token for CI and scripts, saved to FILE (only you can read it) and never printed.
+  It ends on its date (--expires, at most the server's session limit: 180 days unless OMB_SESSION_MAX_DAYS)
+  and never renews. --scope client (the default) can chat and answer approvals; admin can change settings.
+  Then: --url URL --token-file FILE. It is listed with openmausbot sessions too.`,
+  "token list": "openmausbot token list\n  The access tokens, their scope, when each ends and when it was last used (never the token).",
+  "token revoke": "openmausbot token revoke ID\n  End an access token at once (openmausbot token list shows the ids).",
 };
 
 export interface HeadlessOptions {
@@ -100,6 +109,7 @@ const VERBS: Record<string, (ctx: VerbContext) => Promise<VerbOutcome>> = {
   doctor, bots: list, channels: list, models: list, messages, send, "send-channel": send, run: runVerb, wait: waitVerb,
   interrupt, "new-bot": newBot, "new-channel": newChannel, "set-model": setModel, edit, export: exportVerb, events: eventsVerb,
   "team apply": teamApplyVerb, "team export": teamExportVerb, "engine set": engineVerb, "engine list": engineVerb, connect: connectVerb,
+  "token create": tokenVerb, "token list": tokenVerb, "token revoke": tokenVerb,
 };
 
 async function execute(argv: readonly string[], options: HeadlessOptions, io: HeadlessIo): Promise<{ outcome: VerbOutcome; output: Output; client?: HeadlessClient }> {

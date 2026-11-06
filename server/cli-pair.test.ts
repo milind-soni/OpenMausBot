@@ -203,3 +203,20 @@ describe("the phone-app link `openmausbot pair` prints", () => {
     expect(printed()).not.toContain("phone app:");
   });
 });
+
+describe("pair --ttl", () => {
+  it("asks the server to keep the code open that long, skips the phone questions, and prints the day it ends", async () => {
+    const day = Date.now() + 86_400_000;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/api/health")) return Response.json({ app: "openmausbot", pid: 12345 });
+      if (url.endsWith("/api/auth/pairing") && init?.method === "POST") return Response.json({ code, expiresAt: day, url: null, hint: "set OMB_PUBLIC_URL" });
+      throw new Error(`Unexpected fixture request: ${url}`);
+    });
+    expect(await runPair({ ...options, pairTtlMs: 86_400_000 })).toBe(0);
+    const posted = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+    expect(JSON.parse(String(posted![1]!.body))).toEqual({ ttlMs: 86_400_000 });
+    expect(mocks.ui.choose).not.toHaveBeenCalled();
+    expect(vi.mocked(console.log).mock.calls.map(([line]) => String(line)).join("\n")).toContain(`expires:       ${new Date(day).toLocaleString()} (single use)`);
+  });
+});

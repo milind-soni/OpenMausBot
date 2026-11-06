@@ -199,7 +199,7 @@ open or scan:  https://c-7f3a9c.openmausbot.com/pair#code=RR8Y-BLR6-H939
 - **The desktop app:** copy the link, then in the app's **Server** menu choose **Add Server from Copied Pairing Link…**. The menu switches between your own machine and every server you added.
 - **The phone:** scan the QR code from the iOS app's pairing screen, or paste the whole link into its address field. The phone can chat, approve, and read; creating bots, changing models, and connecting apps stay with you in the server's UI.
 
-Worth knowing: a code works **once** and expires after **five minutes**; the link only works on that address (typing the code by hand: open `…/pair` and enter it); ten wrong codes in a minute from one address pause pairing for that address for a minute; `--client` mints a code for a device that may chat and approve but not change settings or pair others.
+Worth knowing: a code works **once** and expires after **five minutes** (`--ttl 24h` keeps it open up to a day, for a device you set up later; it is still single use, and a server restart ends every open code); the link only works on that address (typing the code by hand: open `…/pair` and enter it); ten wrong codes in a minute from one address pause pairing for that address for a minute; `--client` mints a code for a device that may chat and approve but not change settings or pair others.
 
 ## Manage devices
 
@@ -330,7 +330,7 @@ Read this before putting anything else in front of the server.
 
 **"forbidden: pair this device to use the server remotely" / "this request came through a proxy".** Expected before pairing, and for tools that call the API without a session. Pair the device. Scripts send `Authorization: Bearer <token>` with the token from the pairing response instead of a cookie.
 
-**Pairing code refused.** It expired (five minutes) or was used. Mint a new one. "Too many failed pairing attempts" means wait a minute.
+**Pairing code refused.** It expired (five minutes, or its `--ttl`) or was used. Mint a new one. "Too many failed pairing attempts" means wait a minute.
 
 **A bot says the engine is not signed in.** Sign that engine in again on the server.
 
