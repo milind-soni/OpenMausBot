@@ -120,9 +120,10 @@ it("Make Garage server my home: bots, chats, memory and routines arrive, this co
   expect(webhook.webhook.id).toBeTruthy();
   expect((await local("GET", "/api/move/freeze")).body).toMatchObject({ frozen: true, cloud: garage.base, place: "Garage server" });
 
-  // This computer is lent with Scout's project folder to Garage server, its phone link stops, and the window opens Garage server.
+  // This computer is lent with Scout's project folder to Garage server and the window opens Garage server; its phone link
+  // stays on, so a paired phone hears where the bots went.
   expect(fx.spies.lent).toEqual([{ projects: [project], place: garage.base }]);
-  expect(fx.spies.phoneStops).toBe(1);
+  expect(fx.spies.phoneStops).toBe(0);
   expect(fx.spies.opened).toEqual([garage.base]);
   expect(fx.main.offers(garage.place), "home is there: nothing more to offer").toBe(false);
 
