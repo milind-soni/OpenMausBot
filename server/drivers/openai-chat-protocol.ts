@@ -37,7 +37,8 @@ export class ChatReasoningDetails {
     }
     this.chars += JSON.stringify(value).length;
     if (this.chars > MAX_REASONING_DETAIL_CHARS) throw new ChatProtocolError("provider reasoning details exceeded the size limit");
-    this.blocks.push(...value);
+    // One push per block: spreading a huge array into push() can pass the engine's argument limit.
+    for (const block of value) this.blocks.push(block);
   }
 }
 

@@ -862,7 +862,7 @@ describe("structured tool execution boundaries", () => {
     });
     await f.start();
     await f.decide();
-    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(await f.recorder.until((event) => event.type === "turn.completed", 19_000)).toMatchObject({ ok: true });
     const assistant = f.requests[1].messages.find((message) => message.role === "assistant");
     expect(assistant?.reasoning_details).toHaveLength(8_000);
   }, 20_000);

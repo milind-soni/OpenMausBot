@@ -194,6 +194,12 @@ describe("streamed reasoning details", () => {
     expect(JSON.stringify(details.blocks).length).toBeGreaterThan(256_000);
   });
 
+  it("accepts reasoning details just under 4 MB of JSON", () => {
+    const details = new ChatReasoningDetails();
+    details.add(delta("x".repeat(3_900_000)));
+    expect(details.blocks).toHaveLength(1);
+  });
+
   it("still refuses reasoning details past the bound", () => {
     const details = new ChatReasoningDetails();
     expect(() => details.add(delta("x".repeat(MAX_REASONING_DETAIL_CHARS)))).toThrow(/exceeded the size limit/);
