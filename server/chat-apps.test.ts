@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { APP_LIMITS, APP_PAGE_VERSIONS, type AppPayload } from "../shared/app.ts";
 import { BOT_HTML_CSP, BOT_HTML_NETWORK } from "../shared/app-frame/csp.ts";
 import { CSP_META_PREFIX } from "../shared/app-frame/document.ts";
-import { APP_HELPER_SOURCE } from "../shared/app-frame/helper.ts";
+import { APP_HELPER_SOURCE, APP_ROOM_HELPER_SOURCE } from "../shared/app-frame/helper.ts";
 import { AppDocs } from "./app-docs.ts";
 import {
   appContextBlock, appDocument, AppMessageRate, createAppCard, createChatApps, pageVersion, prepareAppMessage, publishablePage, rowRate, setAppContext,
@@ -86,14 +86,23 @@ describe("show_html", () => {
     expect(docs.read(row("m1").app!.doc)?.html).toBe("<!DOCTYPE html><html><head><meta charset=\"utf-8\"></head><body><b>hi</b></body></html>");
   });
 
-  it("refuses rooms and input over the limits, and writes nothing", () => {
-    const { call, rows } = setup(["room-thread"]);
-    expect(call({ tool: "show_html", html: PAGE, title: "t" }, "room-thread")).toEqual({ ok: false, status: 409, error: "Pages are not available in rooms yet. Answer in text." });
+  it("refuses input over the limits, and writes nothing", () => {
+    const { call, rows } = setup();
     expect(call({ tool: "show_html", html: "x".repeat(APP_LIMITS.htmlBytes + 1), title: "t" })).toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/^html:/) });
     expect(call({ tool: "show_html", html: PAGE, title: "t".repeat(81) })).toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/^title:/) });
     expect(call({ tool: "show_html", html: PAGE })).toMatchObject({ ok: false, status: 400 });
-    expect(rows("room-thread")).toEqual([]);
     expect(rows(THREAD)).toEqual([]);
+  });
+
+  it("shows a page in a room as the bot's own row, which only that bot can replace", () => {
+    const { call, row, store, docs } = setup(["room-thread"]);
+    expect(call({ tool: "show_html", html: PAGE, title: "Sales" }, "room-thread")).toEqual({ ok: true, messageId: "m1" });
+    expect(row("m1", "room-thread")).toMatchObject({ role: "bot", kind: "app", from: { botId: SCOUT.id, name: "Scout", color: "blue" }, app: { source: "html", title: "Sales" } });
+    const other = { id: "bot-other", name: "Other", color: "red" as const };
+    expect(createAppCard({ store, docs, bot: other, threadId: "room-thread", input: { tool: "update_html", app_id: "m1", html: "<p>mine now</p>" } }))
+      .toEqual({ ok: false, status: 404, error: "No page with that id in this conversation." });
+    expect(call({ tool: "update_html", app_id: "m1", html: "<p>v2</p>" }, "room-thread")).toEqual({ ok: true, messageId: "m1" });
+    expect(row("m1", "room-thread").app).toMatchObject({ rev: 1 });
   });
 
   it("scrubs secrets from the page, the title and the fallback before anything is stored, and says so", () => {
@@ -337,7 +346,7 @@ describe("publish_page in the chat", () => {
   it("shows the published page as its own inline card, with the link", async () => {
     const { store, docs, row } = setup();
     const { bundle } = await folder();
-    const id = showPublishedPage({ store, docs, threadId: THREAD, card: LIVE, bundle: await bundle() });
+    const id = showPublishedPage({ store, docs, bot: SCOUT, threadId: THREAD, card: LIVE, bundle: await bundle() });
     expect(id).toBe("m1");
     expect(row("m1")).toMatchObject({ kind: "app", text: "[App] Dash\nDash", publishedPage: LIVE, app: { source: "html", title: "Dash", rev: 0 } });
     expect(docs.readFile(row("m1").app!.doc, "data.csv")?.toString()).toBe("a\n1");
@@ -348,12 +357,12 @@ describe("publish_page in the chat", () => {
     const { base, bundle } = await folder();
     await createAppCard({ store, docs, bot: SCOUT, threadId: THREAD, input: { tool: "show_html", path: "dash", title: "Dash" }, folders: async () => ({ roots: [base], vmWorkspace: null }) });
     writeFileSync(join(base, "dash", "data.csv"), "a\n2");
-    expect(showPublishedPage({ store, docs, threadId: THREAD, card: LIVE, bundle: await bundle() })).toBe("m1");
+    expect(showPublishedPage({ store, docs, bot: SCOUT, threadId: THREAD, card: LIVE, bundle: await bundle() })).toBe("m1");
     expect(rows(THREAD)).toHaveLength(1);
     expect(row("m1")).toMatchObject({ publishedPage: LIVE, app: { rev: 1 } });
     expect(row("m1").text).toBe("[App] Dash\nDash");
     expect(docs.readFile(row("m1").app!.doc, "data.csv")?.toString()).toBe("a\n2");
-    expect(showPublishedPage({ store, docs, threadId: THREAD, card: { ...LIVE, url: `${LIVE.url}?again` }, bundle: await bundle() })).toBe("m1");
+    expect(showPublishedPage({ store, docs, bot: SCOUT, threadId: THREAD, card: { ...LIVE, url: `${LIVE.url}?again` }, bundle: await bundle() })).toBe("m1");
     expect(row("m1")).toMatchObject({ app: { rev: 1 }, publishedPage: { url: `${LIVE.url}?again` } });
   });
 
@@ -365,18 +374,31 @@ describe("publish_page in the chat", () => {
     writeFileSync(join(base, "dash", "index.html"), "<h1>Dash, edited</h1>");
     const published = await bundle();
     expect(published.skipped).toEqual([{ path: "clip.webm", why: "video" }]);
-    expect(showPublishedPage({ store, docs, threadId: THREAD, card: LIVE, bundle: published })).toBe("m1");
+    expect(showPublishedPage({ store, docs, bot: SCOUT, threadId: THREAD, card: LIVE, bundle: published })).toBe("m1");
     expect(row("m1")).toMatchObject({ publishedPage: LIVE, app: { rev: 1 } });
     expect(docs.read(row("m1").app!.doc)!.html).toBe("<h1>Dash, edited</h1>");
     expect(docs.video(row("m1").app!.doc, "clip.webm")).toMatchObject({ bytes: 4 });
   });
 
-  it("leaves a room, a limit card and a page with no index.html to the plain link card", async () => {
-    const { store, docs, rows } = setup(["room-1"]);
+  it("shows it in a room too, as the publishing bot's card, and gives the link only to that bot's own card", async () => {
+    const { store, docs, row, rows } = setup(["room-1"]);
+    const { base, bundle } = await folder();
+    const other = { id: "bot-other", name: "Other", color: "red" as const };
+    await createAppCard({ store, docs, bot: other, threadId: "room-1", input: { tool: "show_html", path: "dash", title: "Dash" }, folders: async () => ({ roots: [base], vmWorkspace: null }) });
+    expect(showPublishedPage({ store, docs, bot: SCOUT, threadId: "room-1", card: LIVE, bundle: await bundle() })).toBe("m2");
+    expect(row("m2", "room-1")).toMatchObject({ kind: "app", publishedPage: LIVE, from: { botId: SCOUT.id, name: "Scout", color: "blue" }, app: { rev: 0 } });
+    expect(row("m1", "room-1")).not.toHaveProperty("publishedPage");
+    expect(showPublishedPage({ store, docs, bot: SCOUT, threadId: "room-1", card: { ...LIVE, url: `${LIVE.url}?again` }, bundle: await bundle() })).toBe("m2");
+    expect(rows("room-1")).toHaveLength(2);
+    const doc = appDocument({ store, docs, threadId: "room-1", messageId: "m2" });
+    expect(doc).toMatchObject({ room: true, can: { message: false, modelContext: false, serverTools: false, openLinks: true } });
+  });
+
+  it("leaves a limit card and a page with no index.html to the plain link card", async () => {
+    const { store, docs, rows } = setup();
     const { bundle } = await folder();
-    expect(showPublishedPage({ store, docs, threadId: "room-1", card: LIVE, bundle: await bundle() })).toBeNull();
-    expect(showPublishedPage({ store, docs, threadId: THREAD, card: { state: "limit", title: "Dash", message: "Used up." }, bundle: await bundle() })).toBeNull();
-    expect(showPublishedPage({ store, docs, threadId: THREAD, card: LIVE, bundle: { source: "/x", files: [{ path: "a.csv", data: Buffer.from("a") }], bytes: 1, skipped: [] } })).toBeNull();
+    expect(showPublishedPage({ store, docs, bot: SCOUT, threadId: THREAD, card: { state: "limit", title: "Dash", message: "Used up." }, bundle: await bundle() })).toBeNull();
+    expect(showPublishedPage({ store, docs, bot: SCOUT, threadId: THREAD, card: LIVE, bundle: { source: "/x", files: [{ path: "a.csv", data: Buffer.from("a") }], bytes: 1, skipped: [] } })).toBeNull();
     expect(rows(THREAD)).toEqual([]);
   });
 });
@@ -468,6 +490,26 @@ describe("appDocument", () => {
     expect(doc.srcdoc.endsWith("<html><head><style>body{margin:0}</style></head><body><h1>Sales</h1><p>Up 12%</p><script>draw()</script></body></html>")).toBe(true);
     expect(doc.can).toEqual({ serverTools: false, serverResources: false, message: true, openLinks: true, modelContext: true });
     expect(doc).not.toHaveProperty("tool");
+  });
+
+  it("serves a room's page and MCP app view-only: no message, context or server, and the room's helper", () => {
+    const { call, store, docs } = setup(["room-thread"]);
+    call({ tool: "show_html", html: PAGE, title: "Sales" }, "room-thread");
+    const page = appDocument({ store, docs, threadId: "room-thread", messageId: "m1" })!;
+    expect(page.room).toBe(true);
+    expect(page.can).toEqual({ serverTools: false, serverResources: false, message: false, openLinks: true, modelContext: false });
+    expect(page.srcdoc).toContain(APP_ROOM_HELPER_SOURCE);
+    expect(page.srcdoc).not.toContain(APP_HELPER_SOURCE);
+    expect(page.csp).toBe(BOT_HTML_CSP);
+    const stored = docs.put({ source: "mcp", html: "<p>view</p>", data: { tool: { name: "get-time" }, network: { connect: [], resources: [] } } });
+    if (!stored.ok) throw new Error("not stored");
+    store.appendMessage("room-thread", { role: "bot", kind: "app", text: "Basic · Get time", from: { botId: SCOUT.id, name: "Scout", color: "blue" },
+      app: { v: 1, source: "mcp", title: "Get time", doc: stored.doc, rev: 0, bytes: 11, border: true, network: { connect: [], resources: [] }, mcp: { server: "basic", tool: "get-time", resourceUri: "ui://basic/view" } } });
+    const open = { serverTools: true, serverResources: true, message: true, openLinks: true, modelContext: true };
+    const app = appDocument({ store, docs, threadId: "room-thread", messageId: "m2", mcpAccess: () => ({ can: open }) })!;
+    expect(app).toMatchObject({ room: true, tool: { name: "get-time" }, can: { serverTools: false, serverResources: false, message: false, openLinks: true, modelContext: false } });
+    expect(app).not.toHaveProperty("blocked");
+    expect(appDocument({ store, docs, threadId: THREAD, messageId: "m2" })).toBeNull();
   });
 
   it("is null for a row that is not an app, another thread's row, and a row whose document is not stored", () => {

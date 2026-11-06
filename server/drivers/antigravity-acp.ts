@@ -7,6 +7,8 @@ import { delimiter, join, resolve } from "node:path";
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
 import { writeFileAtomic } from "../atomic.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
+import { botBox } from "../bot-box/box.ts";
+import type { BoxRelay } from "../bot-box/relay.ts";
 import type { ModelCatalog } from "../contracts.ts";
 import type { ChildProcess } from "node:child_process";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
@@ -231,13 +233,14 @@ export class AntigravityAcpClient {
     profile: AntigravityProfile,
     cwd: string,
     onAuthorizationUrl?: (url: string) => void,
+    relay?: BoxRelay,
   ) {
     this.onAuthorizationUrl = onAuthorizationUrl;
     this.tempDirectory = profile.tempDirectory;
     this.child = spawnCli(
       runtime.executablePath,
       process.platform === "linux" ? ["--uid="] : [],
-      { cwd, env: profile.environment, stdio: ["pipe", "pipe", "pipe"] },
+      { cwd, env: profile.environment, stdio: ["pipe", "pipe", "pipe"], ...(relay ? { box: { relay: relay.socketPath } } : {}) },
       "bot",
     );
     this.child.stdout!.setEncoding("utf8");
@@ -492,7 +495,10 @@ export function validateAntigravityCallbackUrl(
   return callback;
 }
 
-export function forwardAntigravityCallback(callback: URL): Promise<void> {
+/** Delivers the callback to the runtime's listener on 127.0.0.1, which is the box's own loopback when the runtime runs in
+ * a bot box with its own network: `relay` reaches it there. */
+export async function forwardAntigravityCallback(callback: URL, relay?: Pick<BoxRelay, "connect">): Promise<void> {
+  const socket = relay ? await relay.connect(Number(callback.port)) : null;
   return new Promise((resolveForward, reject) => {
     const req = httpRequest({
       protocol: "http:",
@@ -500,7 +506,7 @@ export function forwardAntigravityCallback(callback: URL): Promise<void> {
       port: callback.port,
       path: `${callback.pathname}${callback.search}`,
       method: "GET",
-      agent: false,
+      ...(socket ? { createConnection: () => socket } : { agent: false }),
       timeout: 10_000,
     }, (response) => {
       response.resume();
@@ -678,6 +684,7 @@ export interface AntigravityAuthStart {
 interface AuthFlow {
   id: string;
   client: AntigravityAcpClient;
+  relay: BoxRelay | null;
   completed: Promise<void>;
   pending: { redirectUri: string; state: string };
   expiresAt: number;
@@ -699,10 +706,21 @@ export class AntigravityAuthController {
       foundUrl = resolveUrl;
       failUrl = reject;
     });
-    const client = new AntigravityAcpClient(runtime, profile, profile.directory, (url) => {
-      try { foundUrl(parseAntigravityAuthorizationUrl(url)); }
-      catch (error) { failUrl(error instanceof Error ? error : new Error(String(error))); }
-    });
+    const relay = await botBox.openRelay();
+    let client: AntigravityAcpClient;
+    try {
+      client = new AntigravityAcpClient(runtime, profile, profile.directory, (url) => {
+        try { foundUrl(parseAntigravityAuthorizationUrl(url)); }
+        catch (error) { failUrl(error instanceof Error ? error : new Error(String(error))); }
+      }, relay ?? undefined);
+    } catch (error) {
+      relay?.close();
+      throw error;
+    }
+    const closeAll = () => {
+      client.close();
+      relay?.close();
+    };
     try {
       await client.initialize();
       const authenticated = client.request("authenticate", { methodId: "oauth-personal" }, AUTH_TIMEOUT_MS);
@@ -719,13 +737,14 @@ export class AntigravityAuthController {
         if (startupTimer) clearTimeout(startupTimer);
       });
       if (outcome.kind === "done") {
-        client.close();
+        closeAll();
         this.onSignedIn();
         return { phase: "succeeded", flowId: null, authorizationUrl: null, expiresAt: null };
       }
       const flow: AuthFlow = {
         id: randomUUID(),
         client,
+        relay,
         completed: authenticated,
         pending: { redirectUri: outcome.request.redirectUri, state: outcome.request.state },
         expiresAt: Date.now() + AUTH_TIMEOUT_MS,
@@ -733,7 +752,7 @@ export class AntigravityAuthController {
       this.flow = flow;
       void authenticated.then(() => this.onSignedIn(), () => {}).finally(() => {
         if (this.flow === flow) this.flow = null;
-        client.close();
+        closeAll();
       });
       return {
         phase: "waiting",
@@ -742,7 +761,7 @@ export class AntigravityAuthController {
         expiresAt: new Date(flow.expiresAt).toISOString(),
       };
     } catch (error) {
-      client.close();
+      closeAll();
       throw error;
     }
   }
@@ -752,12 +771,13 @@ export class AntigravityAuthController {
     if (!flow || flow.id !== flowId || Date.now() >= flow.expiresAt) {
       throw new Error("This Google sign-in is no longer active. Start again.");
     }
-    await forwardAntigravityCallback(validateAntigravityCallbackUrl(flow.pending, callbackUrl));
+    await forwardAntigravityCallback(validateAntigravityCallbackUrl(flow.pending, callbackUrl), flow.relay ?? undefined);
     await flow.completed;
   }
 
   cancel(): void {
     this.flow?.client.close();
+    this.flow?.relay?.close();
     this.flow = null;
   }
 }

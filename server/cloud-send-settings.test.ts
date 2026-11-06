@@ -55,9 +55,9 @@ describe("a model on this computer's own network", () => {
   it("stays here: its key is neither listed for a move, handed over, nor fingerprinted", () => {
     const config = { openaiCompat: { key: "sk-home", url: "http://192.168.1.20:11434/v1" }, openrouter: { key: "sk-or" }, groq: { key: "gk", url: "http://localhost:9000" },
       xai: { key: "xk", url: "https://api.x.ai/v1" } } as unknown as AppConfig;
-    const listed = listConnections({ config, mcpAuth: () => "signed-out" as never, composio: null, highlevel: () => null }).map((item) => item.id);
+    const listed = listConnections({ config, mcpAuth: () => "signed-out" as never, composio: null }).map((item) => item.id);
     expect(listed).toEqual(["key:openrouter", "key:xai"]);
-    expect(Object.keys(connectionFingerprints("n".repeat(43), { config, highlevel: () => null }))).toEqual(["key:openrouter", "key:xai"]);
-    expect(answerConnection("key:openaiCompat", { config, mcpSignIn: () => undefined, highlevel: () => null })).toEqual({ ok: false, error: "This key's model is on this computer's own network, so it stays here." });
+    expect(Object.keys(connectionFingerprints("n".repeat(43), { config }))).toEqual(["key:openrouter", "key:xai"]);
+    expect(answerConnection("key:openaiCompat", { config, mcpSignIn: () => undefined })).toEqual({ ok: false, error: "This key's model is on this computer's own network, so it stays here." });
   });
 });

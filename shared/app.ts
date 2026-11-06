@@ -174,7 +174,13 @@ export interface AppDocument {
   can: AppCan;
   /** Why serverTools/serverResources are off: drawn as a strip under the frame. */
   blocked?: { reason: AppBlockedReason; text: string };
+  /** Shown in a room, to everyone who can see it: view-only. `can` has message, modelContext, serverTools and
+   * serverResources off, and a bot's page reads `mausbot.room === true`. */
+  room?: true;
 }
+
+/** Why a room refuses what an app or a widget would do for the person: nobody in a room speaks for the others. */
+export const ROOM_VIEW_ONLY = "In a room, pages, apps and widgets are view-only: they cannot send messages or tell a bot what anyone sees.";
 
 /** Exactly one of `html` (wrapped when it was a fragment), `jsx` and `path` (a folder with index.html, or an .html
  * file, in the bot's own folders), none yet scrubbed of secrets. */

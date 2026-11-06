@@ -1,5 +1,5 @@
 // This computer's connections, moved once with the rest of the person's things to their own Cloud: MCP servers with
-// their secrets and sign-ins, the AI keys bots run on, connected apps, HighLevel and mailboxes. Secrets reach main only over the
+// their secrets and sign-ins, the AI keys bots run on, connected apps and mailboxes. Secrets reach main only over the
 // server's private port (cloud-logins.mjs) and go only to the move's owner session on My Cloud. A sign-in that
 // refreshes itself moves: once My Cloud has it, this computer forgets its own copy, so only My Cloud uses it.
 //
@@ -14,16 +14,16 @@ import nativeText from "./native-text.cjs";
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const sentence = (value) => (typeof value === "string" && value.trim() ? value.trim().slice(0, 300) : null);
 const pick = (source, names) => Object.fromEntries(names.filter((name) => source[name] !== undefined && source[name] !== null).map((name) => [name, source[name]]));
-const ID = /^(?:mcp:[a-z][a-z0-9_-]{0,31}|key:\w{1,40}|composio|highlevel|email)$/u;
+const ID = /^(?:mcp:[a-z][a-z0-9_-]{0,31}|key:\w{1,40}|composio|email)$/u;
 const INSTALLATION = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const ENVIRONMENT = /^[\w-]{1,128}$/u;
 const SLUG = /^[a-z0-9_][a-z0-9_-]{0,80}$/u;
 const ENGINE = /^[\w.:-]{1,128}$/u;
 const LAUNCHER = /^[a-z0-9._+-]{1,40}$/u;
 const DIGEST = /^[0-9a-f]{64}$/u;
-const KINDS = new Set(["mcp", "key", "composio", "highlevel", "email"]);
+const KINDS = new Set(["mcp", "key", "composio", "email"]);
 /** Keys first, so the engines they run are ready before anything that follows them; connected apps last. */
-const ORDER = { key: 0, mcp: 1, highlevel: 2, email: 2, composio: 3 };
+const ORDER = { key: 0, mcp: 1, email: 2, composio: 3 };
 const MCP_FIELDS = ["command", "args", "env", "type", "url", "headers", "oauth", "resultBudget", "enabled", "runsOn"];
 /** How long a move waits for My Cloud to run the engines whose keys just went. */
 const ENGINE_WAIT_MS = 10_000;
@@ -90,12 +90,12 @@ async function runningEngines(target, engines, waitMs, cloud) {
   }
 }
 
-const signInRoute = (item) => (item.kind === "mcp" ? `/api/cloud-connections/mcp/${item.id.slice("mcp:".length)}/sign-in` : "/api/cloud-connections/highlevel");
+const signInRoute = (item) => `/api/cloud-connections/mcp/${item.id.slice("mcp:".length)}/sign-in`;
 
 /** This computer's newer copy of a sign-in, in place of the one My Cloud took from it (`onCloud`); its digest, or null. */
 async function sendAgain(local, target, item, onCloud) {
   const fresh = await secrets(local, item).catch(() => null);
-  const signIn = item.kind === "mcp" ? fresh?.connection.mcp?.signIn : fresh?.connection.highlevel;
+  const signIn = fresh?.connection.mcp?.signIn;
   if (!record(signIn) || !fresh.digest) return null;
   const answer = await target.call("PUT", `${signInRoute(item)}?replaces=${onCloud}`, signIn).catch(() => null);
   return answer?.ok && answer.body?.adopted === true ? fresh.digest : null;
@@ -211,15 +211,6 @@ export async function sendConnections(collected, target, { local, release = true
         if (!signIns) return void result.later.push({ id: item.id, label: item.label });
         await moveSignIn(item, signIn, digest);
       }
-    },
-    async highlevel(item) {
-      if (item.signIn && !signIns) return void result.later.push({ id: item.id, label: item.label });
-      const { connection, digest } = await secrets(local, item);
-      const highlevel = connection.highlevel;
-      if (!record(highlevel) || (highlevel.kind === "oauth" && !digest)) throw new ConnectionMoveError("local", "HighLevel could not be read on this computer.");
-      const kept = result.kept.length;
-      await moveSignIn(item, highlevel, highlevel.kind === "oauth" ? digest : undefined);
-      if (result.kept.length === kept) done(item);
     },
     async email(item) {
       const accounts = (await secrets(local, item)).connection.email;

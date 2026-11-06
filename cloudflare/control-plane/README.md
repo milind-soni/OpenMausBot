@@ -51,6 +51,10 @@ tunnel and DNS IDs would make operator cleanup impossible. `0011` drops
 1.7.1, and from 1.7.3 Better Auth never writes the column, so it would refuse
 any new account row. Apply `0011` before deploying a Worker on Better Auth
 1.7.7.
+`0013` drops `highlevel_flows` and `highlevel_ip_rate_limits`, the HighLevel
+OAuth relay's tables from `0009` and `0010`, with any sealed token payload still
+in them. Apply it after deploying a Worker without that relay: an older Worker
+still reads those tables.
 
 ## API surface
 
@@ -614,12 +618,18 @@ old one; no identifiers) answers:
   stays in as the number grows; `RELAY_ALLOW_INSTALLATIONS` admits named installations (the team) at any percentage.
 - **Adoption.** Every request records its counts in `relay_adoption`, in the rollout or not; `/healthz` reports
   `relayAdoption: {e2eDevices, legacyDevices, installs}` over the last 30 days. The tunnel path retires on these numbers.
+- **Usage per day** (`migrations/0014`). `relay_daily` counts installations once per UTC day and kind: `seen` (asked
+  for a token), `token` (got one), `e2e` (reported end-to-end phones), `new` (asked for the first time). It holds only
+  the day, the kind and a count; `relay_adoption.first_seen_at`, `token_at` and `e2e_at` tell a request whether its
+  installation was already counted today. The stats dashboard (stats.openmausbot.com) charts it. A Worker without the
+  migration keeps minting tokens and writing `relay_adoption`, and logs `relay_daily_schema` once per isolate.
 - **Tunnels.** From `RELAY_CAPABLE_MIN_VERSION`, a desktop at that version or later that reports `legacyDevices: 0` gets
   `409 relay_capable` instead of a new tunnel. An endpoint it already holds keeps working.
 
 Setup, once:
 
-1. `wrangler d1 migrations apply DB --config wrangler.jsonc` (0012).
+1. `wrangler d1 migrations apply DB --config wrangler.jsonc --remote` (0012, and 0014 for the daily counts; apply 0014
+   before deploying the Worker that writes it).
 2. Make a key pair: a 32-byte Ed25519 seed for this Worker, its public key for the relay's `RELAY_TOKEN_KEYS`
    (`{"k1":"<b64u public key>"}`). `wrangler secret put RELAY_TOKEN_SIGNING_KEY --config wrangler.jsonc` with the seed as
    base64url. Until it exists every request answers 503. Once it is set it is listed in `secrets.required`: a deploy
@@ -628,46 +638,6 @@ Setup, once:
    relay alerts. `RELAY_DISABLED: "1"` turns every token off at once; tokens already issued expire within 12 hours.
 4. To rotate, give the relay both public keys, set `RELAY_TOKEN_KID` and the new secret, deploy, then drop the old key
    from the relay after 12 hours.
-
-### HighLevel OAuth relay
-
-OpenMausBot's native HighLevel (GoHighLevel, and white-labels such as Growably)
-integration signs a person in through a Marketplace app registered to us. The
-app's client secret lives only in this Worker; the harness (desktop or a Cloud
-home) never sees it. Routes, none of which need an installation credential: the
-random `state` and the tokens themselves are the secrets, and each route is
-rate-limited per caller address.
-
-| Route | Does |
-| --- | --- |
-| `POST /v1/highlevel/start` | Mints a 32-byte `state`, stores only `HKDF(state, "lookup")`, returns the white-label authorization URL (`marketplace.leadconnectorhq.com/v2/oauth/chooselocation`) with our client id, redirect URL and scopes. |
-| `GET /v1/highlevel/callback?code&state` | HighLevel sends the person's browser here. Exchanges the code (`POST services.leadconnectorhq.com/oauth/token`, `user_type=Location`), seals the token payload with AES-GCM under `HKDF(state, "wrap")`, shows a plain "Connected" page. Never echoes query parameters. |
-| `POST /v1/highlevel/claim {state}` | The harness collects the payload once (404 before the callback, 410 after); the row is emptied. |
-| `POST /v1/highlevel/refresh {refreshToken}` | Refreshes with the client secret; HighLevel's refusal is `401 highlevel_refresh_rejected`. |
-
-Rows live at most ten minutes (`highlevel_flows`, swept by the cron). Without the
-raw state a row opens nothing, and no plaintext token is ever written to D1.
-Logs carry counts and error codes, never codes or tokens.
-
-Setup, once:
-
-1. Register the Marketplace app (private, sub-account, installable by agency and
-   sub-account). Redirect URL: `https://accounts.openmausbot.com/v1/highlevel/callback`.
-   Scopes: `contacts.readonly contacts.write opportunities.readonly opportunities.write conversations.readonly locations.readonly calendars.readonly users.readonly`.
-2. Put the client id in `vars.HIGHLEVEL_CLIENT_ID` (it is public: it appears in the
-   authorization URL). Keep `HIGHLEVEL_REDIRECT_URL` and `HIGHLEVEL_SCOPES` in step
-   with the app.
-3. `wrangler d1 migrations apply DB --config wrangler.jsonc` (0009 and 0010).
-   On a running Worker, apply 0010 before deploying a Worker built from this
-   code: its callback marks the flow in `callback_at`. An older Worker
-   ignores the column.
-4. `wrangler secret put HIGHLEVEL_CLIENT_SECRET --config wrangler.jsonc`. It is
-   deliberately not in `secrets.required`: until it exists the routes answer
-   `503 highlevel_unavailable`.
-5. `wrangler deploy --config wrangler.jsonc`.
-
-A private app stops accepting installs past five external agencies; publish it
-(HighLevel review) before that.
 
 ## Local checks
 

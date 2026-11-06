@@ -74,12 +74,12 @@ describe("trust controls in the real renderer", () => {
     expect(profile).toBeDefined();
     await ui("click", "--ref", `@${profile![0]}`);
     await click("Permissions");
-    await click("Allow a daily amount");
-    await type("Daily outbound limit", "7");
-    await ui("press", "--keys", "Tab");
-    await expect.poll(async () => (await saved()).outbound, { timeout: 10_000 }).toEqual({ policy: "allow", dailyCap: 7 });
+    await click("Send without asking");
+    await expect.poll(async () => (await saved()).outbound, { timeout: 10_000 }).toEqual({ policy: "allow" });
+    expect(await evaluate("[...document.querySelectorAll('div')].find(el => el.firstElementChild?.textContent === 'Sending on your behalf')?.querySelectorAll('input').length")).toBe(0);
+    expect(await snapshot()).not.toContain("used today");
     await click("Ask every time");
-    await expect.poll(async () => (await saved()).outbound, { timeout: 10_000 }).toEqual({ policy: "ask", dailyCap: 7 });
+    await expect.poll(async () => (await saved()).outbound, { timeout: 10_000 }).toEqual({ policy: "ask" });
 
     // Only this page's inventory reads are synthetic; policy writes still
     // pass through the real bot queue and server validation.

@@ -71,6 +71,8 @@ export interface StandaloneInstallOptions {
   timeoutMs?: number;
   /** How long the download may go without a single byte. */
   stallMs?: number;
+  /** Runs on the new program once it has started, just before it replaces anything: a reason stops the install. */
+  beforeSwitch?: (program: string) => Promise<string | null>;
 }
 
 interface InstallRecord {
@@ -321,6 +323,12 @@ export function registerStandaloneBinDirs(baseDir = DATA_DIR, releases: readonly
       warn(release, error);
     }
   }
+}
+
+/** The version the app's copy of this engine points at, checked or not; null when the app installed none. */
+export function standaloneCurrentVersion(release: StandaloneRelease, baseDir = DATA_DIR): string | null {
+  const pointer = readJsonFile(join(standaloneEngineDir(release.engine, baseDir), CURRENT)) as Partial<CurrentPointer> | null;
+  return typeof pointer?.version === "string" && usableVersionName(pointer.version) ? pointer.version : null;
 }
 
 function resolvesInside(folder: string, cli: string, path?: string): boolean {
@@ -578,7 +586,7 @@ function lockedError(error: unknown): boolean {
 }
 
 /** Moves `from` onto `to`. Windows will not replace a program that is running but lets it be renamed, so it steps aside. */
-async function replaceFile(from: string, to: string): Promise<void> {
+export async function replaceFile(from: string, to: string): Promise<void> {
   try {
     await rename(from, to);
     return;
@@ -745,7 +753,7 @@ async function installOnce(release: StandaloneRelease, options: StandaloneInstal
     if (signedHere(key, release) && !(await macSignerOk(stagedProgram, release, codesign))) {
       throw Object.assign(new StandaloneInstallError(`The downloaded ${release.name} is not signed by its maker, so nothing was installed.`), userErrorFields(userError("serverError.install.notSigned", { name: release.name })));
     }
-    const failure = await probeVersion(stagedProgram, release);
+    const failure = await probeVersion(stagedProgram, release) ?? await options.beforeSwitch?.(stagedProgram) ?? null;
     if (failure !== null) {
       throw Object.assign(new StandaloneInstallError(`${release.name} was downloaded, but it doesn't start on this computer (${failure}). Nothing was installed.`), userErrorFields(userError("serverError.install.downloadDoesNotStart", { name: release.name, failure: failure })));
     }

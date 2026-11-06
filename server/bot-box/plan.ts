@@ -16,7 +16,8 @@
 //   - of /sys, only the machine's CPU list, read-only;
 //   - a network namespace with loopback only. Two loopback ports inside are bridged to unix sockets bound in from outside:
 //     the egress gate (every connection to the internet goes through it) and the harness gate (only /api/internal/
-//     routes of this server). Nothing else on the server's loopback is reachable.
+//     routes of this server). Nothing else on the server's loopback is reachable. A box that waits for a sign-in callback
+//     also dials out to one more socket, through which the server reaches the box's own loopback, never the other way.
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export type BoxNet = "isolated" | "shared";
@@ -71,6 +72,9 @@ export interface BoxRequest {
   home?: string;
   /** Files bound read-write over their names in `home`: the team's engine sign-ins. */
   shared?: ReadonlyArray<{ source: string; target: string }>;
+  /** A host unix socket the box dials out to, so the server can reach a port the engine listens on inside the box's own
+   * network, such as a sign-in's callback. Only an isolated box has one. */
+  relay?: string;
 }
 
 export interface BoxPlan {
@@ -84,6 +88,7 @@ export interface BoxPlan {
 }
 
 export const IN_BOX_SOCKET_DIR = "/run/omb";
+export const RELAY_SOCKET_NAME = "relay";
 export const BOX_HOSTNAME = "omb-box";
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -221,6 +226,7 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     options.push("--unshare-net");
     mounts.push({ kind: "dir", target: IN_BOX_SOCKET_DIR });
     for (const bridge of setup.bridges) mounts.push({ kind: "bind", source: bridge.socket, target: join(IN_BOX_SOCKET_DIR, `${bridge.name}.sock`) });
+    if (request.relay) mounts.push({ kind: "bind", source: resolve(request.relay), target: inBoxSocket(RELAY_SOCKET_NAME) });
   }
   if (cwd) options.push("--chdir", cwd);
   return { mounts, options, net, writable, botId };

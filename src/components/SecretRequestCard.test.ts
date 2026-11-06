@@ -234,6 +234,13 @@ describe("SecretRequestCard mailbox", () => {
     expect(view({})).not.toContain('type="email"');
   });
 
+  it("connects with Connect, and while it checks shows the incoming server that took the password", () => {
+    expect(view({ ...email, address: "me@shop.example" })).toContain(">Connect<");
+    const html = view({ ...email, address: "me@shop.example", emailReading: "imap.shop.example" });
+    expect(html).toMatch(/data-email-check="done".*imap\.shop\.example/su);
+    expect(html).toContain('data-email-check="waiting"');
+  });
+
   it("says the bot goes on once connected, without the address field", () => {
     const html = view({ ...email, provided: true, resumed: true, address: "me@shop.example" });
     expect(html).toContain('data-ask-card="settled"');

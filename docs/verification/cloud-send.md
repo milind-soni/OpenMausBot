@@ -38,7 +38,7 @@ everything did, so a test can start from what such a send left on My Cloud.
 context summaries, a 610-message room and a conversation both sides added to
 pass the path check; MCP servers with their keys and header tokens, an MCP
 sign-in of its own (left here by the first pass, carried by the final one and
-let go of here), an AI key, HighLevel by its token and the connected-apps
+let go of here), an AI key and the connected-apps
 account (a fake broker) arrive, with equal credential fingerprints; the move's
 session counts as someone using My Cloud; a moved conversation may use a lent
 Mac and feeds its bot's memory on My Cloud; and a move run again changes

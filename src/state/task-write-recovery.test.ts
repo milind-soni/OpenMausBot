@@ -118,6 +118,30 @@ describe("thread setting save recovery", () => {
     expect(requests.mock.calls.map(([path]) => path)).toEqual(["/api/bots/bot/tasks/thread", SNAPSHOT]);
   });
 
+  it("asks again after a failed reconciliation, and permits a send once the server answers", async () => {
+    let reachable = false;
+    const requests = vi.fn<typeof fetch>(async (path) => {
+      if (path === SNAPSHOT) return reachable ? response({ bots: [bot] }) : response({ error: "Offline" }, 503);
+      if (path === "/api/bots/bot/tasks/thread") return response({ error: "Save failed" }, 500);
+      return response({});
+    });
+    const controls = mount(requests);
+    controls.update();
+    await flush();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flush();
+    expect(requests.mock.calls.filter(([path]) => path === SNAPSHOT)).toHaveLength(2);
+    reachable = true;
+    await vi.advanceTimersByTimeAsync(5_000);
+    await flush();
+    expect(requests.mock.calls.filter(([path]) => path === SNAPSHOT)).toHaveLength(3);
+    controls.send();
+    await flush();
+    expect(requests).toHaveBeenLastCalledWith("/api/bots/bot/messages", expect.objectContaining({ method: "POST" }));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(requests.mock.calls.filter(([path]) => path === SNAPSHOT), "no more reads once reconciled").toHaveLength(3);
+  });
+
   it("does not let an old reconciliation clear a newer write", async () => {
     const reconcile = deferred();
     const nextWrite = deferred();

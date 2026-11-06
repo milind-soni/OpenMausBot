@@ -1,7 +1,12 @@
-// Trades the one-time code for this server's own agent token, once, over HTTPS.
+// Trades the one-time code for this server's place in the team: a key made here, whose public half the Admin keeps, and
+// the Admin's own keys, which the connector pins. Once, over HTTPS.
 import { errorText } from "./log.ts";
-import { ENROLL_PATH, checkEnrollCode, checkEnrollResponse, isLoopbackHost, type ConnectorIdentity, type HostFacts } from "./protocol.ts";
+import { ENROLL_PATH, checkEnrollCode, checkEnrollResponse, isLoopbackHost, type ConnectorIdentity, type EnrollRequest, type HostFacts } from "./protocol.ts";
+import { generateKeyPair } from "./signed.ts";
 import type { AgentRecord } from "./state.ts";
+
+/** A slow link or a busy Admin is not a refusal; the person runs the install command again if this passes. */
+const ENROLL_TIMEOUT_MS = 2 * 60_000;
 
 /** The Admin's origin: https, or http on this machine's loopback for a test Admin. */
 export function adminOrigin(raw: string | undefined): string {
@@ -24,16 +29,19 @@ export async function enroll(options: {
   connector: ConnectorIdentity;
   fetch?: typeof fetch;
   now?: () => number;
+  timeoutMs?: number;
 }): Promise<AgentRecord> {
   const code = checkEnrollCode(options.code.trim());
   if (!code.ok) throw new Error(code.message);
+  const key = generateKeyPair();
+  const request: EnrollRequest = { code: code.value, publicKey: key.publicKey, host: options.host, connector: options.connector };
   let response: Response;
   try {
     response = await (options.fetch ?? fetch)(`${options.admin}${ENROLL_PATH}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code: code.value, host: options.host, connector: options.connector }),
-      signal: AbortSignal.timeout(30_000),
+      body: JSON.stringify(request),
+      signal: AbortSignal.timeout(options.timeoutMs ?? ENROLL_TIMEOUT_MS),
     });
   } catch (error) {
     throw new Error(`This server can't reach MausBot at ${options.admin} (${errorText(error)}). Check that it can make outbound HTTPS connections, then run the install command again.`);
@@ -46,5 +54,6 @@ export async function enroll(options: {
   try { body = await response.json(); } catch { body = null; }
   const checked = checkEnrollResponse(body);
   if (!checked.ok) throw new Error(`MausBot's answer could not be used (${checked.message}). Try the install command again.`);
-  return { version: 1, admin: options.admin, ...checked.value, enrolledAt: (options.now ?? Date.now)() };
+  const { boxId, teamId, adminKeys } = checked.value;
+  return { version: 2, admin: options.admin, boxId, teamId, publicKey: key.publicKey, privateKey: key.privateKey, adminKeys, enrolledAt: (options.now ?? Date.now)() };
 }

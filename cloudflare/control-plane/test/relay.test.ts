@@ -154,6 +154,53 @@ describe("relay host tokens", () => {
   });
 });
 
+describe("relay usage per UTC day", () => {
+  type Counts = Record<string, number>;
+  const today = () => new Date().toISOString().slice(0, 10);
+  async function daily(day = today()): Promise<Counts> {
+    const rows = await env.DB.prepare("SELECT kind, installs FROM relay_daily WHERE day = ?").bind(day).all<{ kind: string; installs: number }>();
+    return Object.fromEntries(rows.results.map((row) => [row.kind, row.installs]));
+  }
+  const delta = (after: Counts, before: Counts) =>
+    Object.fromEntries(["seen", "token", "e2e", "new"].map((kind) => [kind, (after[kind] ?? 0) - (before[kind] ?? 0)]));
+
+  it("counts each installation once per day and kind: asked, got a token, has end-to-end phones, first time", async () => {
+    const a = await installation("daily-a@example.test");
+    const b = await installation("daily-b@example.test");
+    let before = await daily();
+    expect((await ask(relayEnv(), a.credential, { e2e: 2, legacy: 0 })).status).toBe(200);
+    expect((await ask(relayEnv(), a.credential, { e2e: 1, legacy: 0 })).status).toBe(200);
+    expect(delta(await daily(), before)).toEqual({ seen: 1, token: 1, e2e: 1, new: 1 });
+
+    before = await daily();
+    expect((await ask(relayEnv({ RELAY_ROLLOUT_PERCENT: "0" }), b.credential, { e2e: 0, legacy: 3 })).status).toBe(503);
+    expect(delta(await daily(), before)).toEqual({ seen: 1, token: 0, e2e: 0, new: 1 });
+    before = await daily();
+    expect((await ask(relayEnv(), b.credential, { e2e: 0, legacy: 3 })).status).toBe(200);
+    expect((await ask(relayEnv(), b.credential, { e2e: 0, legacy: 3 })).status).toBe(200);
+    expect(delta(await daily(), before)).toEqual({ seen: 0, token: 1, e2e: 0, new: 0 });
+
+    const c = await installation("daily-c@example.test");
+    before = await daily();
+    for (let index = 0; index < 2; index += 1) expect((await ask(relayEnv({ RELAY_ROLLOUT_PERCENT: "0" }), c.credential, { e2e: 1, legacy: 0 })).status).toBe(503);
+    expect(delta(await daily(), before)).toEqual({ seen: 1, token: 0, e2e: 1, new: 1 });
+
+    // The next day: a's row as yesterday's requests left it.
+    const yesterday = Date.now() - 24 * 60 * 60 * 1000;
+    await env.DB.prepare("UPDATE relay_adoption SET updated_at = ?1, token_at = ?1, e2e_at = ?1 WHERE installation_id = ?2").bind(yesterday, a.id).run();
+    before = await daily();
+    expect((await ask(relayEnv(), a.credential, { e2e: 1, legacy: 0 })).status).toBe(200);
+    expect(delta(await daily(), before)).toEqual({ seen: 1, token: 1, e2e: 1, new: 0 });
+    const row = await env.DB.prepare("SELECT first_seen_at, token_at, e2e_at FROM relay_adoption WHERE installation_id = ?").bind(a.id).first<Record<string, number>>();
+    expect(row!.first_seen_at).toBeLessThan(row!.token_at);
+  });
+
+  it("keep only the day, the kind and a count", async () => {
+    const columns = await env.DB.prepare("PRAGMA table_info(relay_daily)").all<{ name: string }>();
+    expect(columns.results.map((column) => column.name)).toEqual(["day", "kind", "installs"]);
+  });
+});
+
 describe("node order", () => {
   const nodes = ["relay1.openmausbot.com", "relay2.openmausbot.com", "relay3.openmausbot.com"];
 
@@ -238,5 +285,32 @@ describe("a Worker deployed before migration 0012", () => {
     worker.scheduled(createScheduledController(), oldEnv, ctx);
     await waitOnExecutionContext(ctx);
     expect((await call(oldEnv, "/v1/installations/self", { token: credential, method: "GET" })).status).toBe(200);
+  });
+});
+
+describe("a Worker deployed before migration 0014", () => {
+  it("still mints tokens and records adoption, without the daily counts", async () => {
+    const db = env.MIGRATION_DB;
+    const daily = env.TEST_MIGRATIONS.findIndex((migration) => migration.name.startsWith("0014_"));
+    expect(daily).toBeGreaterThan(0);
+    await applyD1Migrations(db, env.TEST_MIGRATIONS.slice(0, daily));
+    const oldEnv = { ...relayEnv(), DB: db } as unknown as Env;
+    const now = Date.now();
+    const lookup = b64u(crypto.getRandomValues(new Uint8Array(16)));
+    const credential = `omb_install_${lookup}.${b64u(crypto.getRandomValues(new Uint8Array(32)))}`;
+    const secretHash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential)))]
+      .map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    const installationId = crypto.randomUUID();
+    await db.batch([
+      db.prepare('INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)').bind("pre-0014-user", "Old", "pre-0014@example.test", now, now),
+      db.prepare("INSERT INTO installations (id, owner_user_id, client_instance_id, display_name, platform, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind(installationId, "pre-0014-user", crypto.randomUUID(), "Old computer", "darwin", now, now),
+      db.prepare("INSERT INTO installation_credentials (id, installation_id, lookup_id, secret_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)")
+        .bind(crypto.randomUUID(), installationId, lookup, secretHash, now, now + 3_600_000),
+    ]);
+    const response = await ask(oldEnv, credential, { e2e: 1, legacy: 2 });
+    expect(response.status).toBe(200);
+    const row = await db.prepare("SELECT e2e_devices, legacy_devices FROM relay_adoption WHERE installation_id = ?").bind(installationId).first();
+    expect(row).toEqual({ e2e_devices: 1, legacy_devices: 2 });
   });
 });

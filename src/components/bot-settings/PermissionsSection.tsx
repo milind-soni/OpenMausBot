@@ -1,6 +1,6 @@
 // LocalComputerAutoWarning remembers its bot, so a bot switch while it is up never applies the choice to the new bot.
 import { useTeamPeople } from "@/state/team-people";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Crown } from "lucide-react";
 
 import { cn } from "@/lib/cn";
@@ -166,7 +166,7 @@ export function PermissionsSection({
         {...commandAllowlistTarget}
         onClose={() => setCommandAllowlistTarget(null)}
       />}
-      {!draft && shows("outbound") && <OutboundControl key={bot.id} bot={bot} onChange={(outbound) => patch({ outbound })} />}
+      {!draft && shows("outbound") && <OutboundControl bot={bot} onChange={(outbound) => patch({ outbound })} />}
       <LocalComputerAutoWarning
         open={localAutoWarning !== null}
         onCancel={() => setLocalAutoWarning(null)}
@@ -193,34 +193,6 @@ function PeersListNote({ peers, bots, onOpen }: { peers: readonly string[]; bots
 
 function OutboundControl({ bot, onChange }: { bot: Bot; onChange: (policy: OutboundPolicy) => void }) {
   const policy = bot.outbound ?? DEFAULT_OUTBOUND_POLICY;
-  const [today, setToday] = useState<number | null>(null);
-  const [capDraft, setCapDraft] = useState(String(policy.dailyCap));
-
-  useEffect(() => {
-    setCapDraft(String(policy.dailyCap));
-  }, [policy.dailyCap]);
-
-  useEffect(() => {
-    let alive = true;
-    void fetch(`/api/bots/${bot.id}/outbound`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((body: { today?: number } | null) => {
-        if (alive && body && typeof body.today === "number") setToday(body.today);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [bot.id, bot.outbound]);
-
-  const commitCap = () => {
-    const parsed = Number(capDraft);
-    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 1000) {
-      setCapDraft(String(policy.dailyCap));
-      return;
-    }
-    if (parsed !== policy.dailyCap) onChange({ policy: policy.policy, dailyCap: parsed });
-  };
 
   return (
     <div className="rounded-xl bg-card p-4">
@@ -241,7 +213,7 @@ function OutboundControl({ bot, onChange }: { bot: Bot; onChange: (policy: Outbo
             type="button"
             aria-pressed={policy.policy === value}
             onClick={() => {
-              if (value !== policy.policy) onChange({ policy: value, dailyCap: policy.dailyCap });
+              if (value !== policy.policy) onChange({ policy: value });
             }}
             className={cn(
               "flex-1 rounded-md px-2.5 py-1.5 text-[13px] font-medium",
@@ -252,30 +224,6 @@ function OutboundControl({ bot, onChange }: { bot: Bot; onChange: (policy: Outbo
           </button>
         ))}
       </div>
-      {policy.policy === "allow" && (
-        <div className="mt-3 flex flex-wrap items-center gap-3 text-[13px] text-ink-secondary">
-          <label className="flex items-center gap-2">
-            {t("permissions.outbound.upTo")}
-            <input
-              type="number"
-              min={1}
-              max={1000}
-              value={capDraft}
-              onChange={(event) => setCapDraft(event.target.value)}
-              onBlur={commitCap}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") (event.target as HTMLInputElement).blur();
-              }}
-              aria-label={t("permissions.outbound.dailyLimit")}
-              className="w-20 rounded-md bg-inset px-2 py-1 text-[13px] text-ink tabular-nums outline-none focus:ring-1 focus:ring-accent"
-            />
-            {t("permissions.outbound.perDay")}
-          </label>
-          <span className="tabular-nums">
-            {today === null ? "" : t("permissions.outbound.usedToday", { today, cap: policy.dailyCap })}
-          </span>
-        </div>
-      )}
     </div>
   );
 }

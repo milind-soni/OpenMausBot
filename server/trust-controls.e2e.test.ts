@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,13 +18,11 @@ let fullBot: any;
 let draftBot: any;
 let draftHelper: any;
 let outboundPolicyBot: any;
-let capBot: any;
+let noRuleBot: any;
 const gmailDrafts = new Map<string, Record<string, unknown>>();
 let brokerOrigin = "";
 const relayed: unknown[] = [];
 const evidence: unknown[] = [];
-let blockRelay: (() => void) | undefined;
-let relayEntered = false;
 let blockSession: (() => void) | undefined;
 let sessionEntered = false;
 const api = async (method: string, path: string, body?: unknown, token = admin) => {
@@ -90,10 +88,6 @@ beforeAll(async () => {
         });
         return res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: JSON.stringify({ successful: true, data: { results } }) }] } }));
       }
-      if (blockRelay) {
-        relayEntered = true;
-        await new Promise<void>(resolve => { blockRelay = resolve; });
-      }
       return res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: "relay-ok" }] } }));
     }
     return res.end(JSON.stringify({ items: [{ slug: "gmail", connected_account: { id: "fixture-account", status: "ACTIVE" } }] }));
@@ -115,19 +109,19 @@ beforeAll(async () => {
   const policyCreated = await fetch(fixture.info.url + "/api/bots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Full outbound policy fixture" }) });
   expect(policyCreated.status).toBe(201);
   outboundPolicyBot = (await policyCreated.json() as any).bot;
-  const capCreated = await fetch(fixture.info.url + "/api/bots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Full default cap fixture" }) });
-  expect(capCreated.status).toBe(201);
-  capBot = (await capCreated.json() as any).bot;
+  const noRuleCreated = await fetch(fixture.info.url + "/api/bots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Full no sending rule fixture" }) });
+  expect(noRuleCreated.status).toBe(201);
+  noRuleBot = (await noRuleCreated.json() as any).bot;
   await waitForExit(fixture.child, { signal: "SIGTERM" });
   const botsFile = join(fixture.info.dataDir, "bots.json");
   const bots = JSON.parse(readFileSync(botsFile, "utf8"));
   const saved = bots.find((row: any) => row.id === fullBot.id);
-  for (const full of [saved, ...[draftBot, draftHelper, outboundPolicyBot, capBot].map(bot => bots.find((row: any) => row.id === bot.id))]) {
+  for (const full of [saved, ...[draftBot, draftHelper, outboundPolicyBot, noRuleBot].map(bot => bots.find((row: any) => row.id === bot.id))]) {
     full.approvalMode = "full";
     full.autoApprove = false;
     for (const task of full.tasks) { task.approvalMode = "full"; task.autoApprove = false; }
   }
-  // Full access asks only for a bot someone set a sending rule on.
+  // Full access asks only for a bot someone set a sending rule on. These rules carry the daily cap older apps stored.
   for (const bot of [fullBot, draftBot, draftHelper, outboundPolicyBot]) bots.find((row: any) => row.id === bot.id).outbound = { policy: "ask", dailyCap: 100 };
   writeFileSync(botsFile, JSON.stringify(bots));
   const configFile = join(fixture.info.dataDir, "config.json");
@@ -161,7 +155,6 @@ beforeAll(async () => {
 }, 40_000);
 
 afterAll(async () => {
-  blockRelay?.();
   blockSession?.();
   const evidencePath = fixture.info.logPath + ".trust-controls.json";
   writeFileSync(evidencePath, JSON.stringify({ fixture: fixture.info, evidence, relayed }, null, 2));
@@ -179,13 +172,13 @@ it("keeps activity, shared memory and policy changes admin-only", async () => {
   expect((await api("POST", "/api/team-memory?section=", { kind: "term", name: "Denied", detail: "not admin" }, member)).status).toBe(403);
   expect((await api("PATCH", "/api/team-memory/fixture?section=", { detail: "not admin" }, member)).status).toBe(403);
   expect((await api("DELETE", "/api/team-memory/fixture?section=", undefined, member)).status).toBe(403);
-  for (const patch of [{ outbound: { policy: "allow", dailyCap: 100 } }, { connectorScopes: null }, { fallback: [] }]) {
+  for (const patch of [{ outbound: { policy: "allow" } }, { connectorScopes: null }, { fallback: [] }]) {
     expect((await api("PATCH", `/api/bots/${b.id}`, patch, member)).status).toBe(403);
   }
   expect((await api("PATCH", `/api/bots/${b.id}`, { fallback: [{ instanceId: "claude", model: " " }] })).status).toBe(400);
 });
 
-it("honors outbound approval and the daily allowance at Full access, and still refuses apps outside scope", async () => {
+it("honors outbound approval and Send without asking at Full access, and still refuses apps outside scope", async () => {
   const b = fullBot;
   const fleet = await api("GET", "/api/bots");
   expect(fleet.body.bots.find((row: any) => row.id === b.id).approvalMode).toBe("full");
@@ -202,27 +195,28 @@ it("honors outbound approval and the daily allowance at Full access, and still r
   await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: allowedCard.card.requestId, behavior: "allow" });
   expect((await allowed).body.result.isError).not.toBe(true);
   expect(relayed).toHaveLength(before + 1);
-  await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow", dailyCap: 1 } });
+  // An older app still sends the daily cap with the rule: it is accepted, dropped, and limits nothing.
+  expect((await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow", dailyCap: 1 } })).status).toBe(200);
+  expect((await api("GET", "/api/bots")).body.bots.find((row: any) => row.id === b.id).outbound).toEqual({ policy: "allow" });
   const cardCount = (await cards(b.threadId)).filter(row => row.card?.outboundRequest).length;
-  expect((await relay(token, "SLACK_SEND_MESSAGE", { channel: "fixture", text: "Allowed once" })).body.result.isError).not.toBe(true);
-  expect((await api("GET", `/api/bots/${b.id}/outbound`)).body.today).toBe(1);
-  expect((await relay(token, "GMAIL_SEND_EMAIL", { to: "over-limit@fixture.test" })).body.result.isError).toBe(true);
+  expect((await relay(token, "SLACK_SEND_MESSAGE", { channel: "fixture", text: "Sent without asking" })).body.result.isError).not.toBe(true);
+  expect((await relay(token, "GMAIL_SEND_EMAIL", { to: "second@fixture.test" })).body.result.isError).not.toBe(true);
   expect((await cards(b.threadId)).filter(row => row.card?.outboundRequest)).toHaveLength(cardCount);
   const opaque = relay(token, "COMPOSIO_REMOTE_WORKBENCH", { code_to_execute: "print(1)" });
   const opaqueCard = await pending(b.threadId);
   await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: opaqueCard.card.requestId, behavior: "deny" });
   expect((await opaque).body.result.isError).toBe(true);
-  expect(relayed).toHaveLength(before + 2);
+  expect(relayed).toHaveLength(before + 3);
   await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "read" } } });
   expect((await relay(token, "GMAIL_SEND_EMAIL")).body.result.isError).toBe(true);
-  expect(relayed).toHaveLength(before + 2);
+  expect(relayed).toHaveLength(before + 3);
 });
 
 it("honors Ask every time at Full access before the first send for any prompt language", async () => {
   const b = outboundPolicyBot;
-  expect((await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === b.id).outbound.policy).toBe("ask");
-  expect((await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "invalid", dailyCap: 100 } })).status).toBe(400);
-  expect((await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow", dailyCap: 100 } }, member)).status).toBe(403);
+  expect((await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === b.id).outbound).toEqual({ policy: "ask" });
+  expect((await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "invalid" } })).status).toBe(400);
+  expect((await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow" } }, member)).status).toBe(403);
   const before = relayed.length;
   for (const text of ["Responde a Sam, no lo envíes", "Sam को जवाब लिखो, भेजना मत", "Réponds à Sam sans envoyer", "Samに返信を書いて、送信しないで", "Send the email now"]) {
     expect((await api("POST", `/api/bots/${b.id}/messages`, { text, threadId: b.threadId })).status).toBe(202);
@@ -254,9 +248,9 @@ it("honors Ask every time at Full access before the first send for any prompt la
   expect((await repeated).body.result.isError).toBe(true);
 });
 
-it("honors the daily allowance for explicit draft-and-send requests without classifying their wording", async () => {
+it("honors Send without asking for explicit draft-and-send requests without classifying their wording", async () => {
   const b = outboundPolicyBot;
-  expect((await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow", dailyCap: 100 } })).status).toBe(200);
+  expect((await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow" } })).status).toBe(200);
   const before = relayed.length;
   const cardCount = (await cards(b.threadId)).filter(row => row.card?.outboundRequest).length;
   for (const text of ["Draft a reply to Sam and send it", "Edit the draft to fix the typo and send it", "Write a draft and then send it to the team"]) {
@@ -267,7 +261,7 @@ it("honors the daily allowance for explicit draft-and-send requests without clas
   }
   expect(relayed).toHaveLength(before + 3);
   expect((await cards(b.threadId)).filter(row => row.card?.outboundRequest)).toHaveLength(cardCount);
-  expect((await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "ask", dailyCap: 100 } })).status).toBe(200);
+  expect((await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "ask" } })).status).toBe(200);
 });
 
 it("holds sends under Ask every time at Full access and revises the same Gmail draft without another creation", async () => {
@@ -304,7 +298,7 @@ it("holds sends under Ask every time at Full access and revises the same Gmail d
   expect(gmailDrafts.get(draftId)).toMatchObject({ body: "Revised reply", thread_id: "mega-thread" });
   const reached = relayed.slice(before).flatMap((frame: any) => frame.params?.arguments?.tools ?? [{ tool_slug: frame.params?.name }]);
   expect(reached.map((tool: any) => tool.tool_slug)).toEqual(["GMAIL_CREATE_EMAIL_DRAFT", "GMAIL_UPDATE_DRAFT"]);
-  await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow", dailyCap: 100 } });
+  await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow" } });
   const cardCount = (await cards(b.threadId)).filter(row => row.card?.outboundRequest).length;
   expect((await relay(revision, "GMAIL_SEND_DRAFT", { draft_id: draftId })).body.result.isError).not.toBe(true);
   expect(relayed).toHaveLength(before + 3);
@@ -315,7 +309,7 @@ it("retains Gmail draft limits through delegated work and the requester's resume
   const b = draftBot;
   const helper = draftHelper;
   for (const bot of [b, helper]) {
-    expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "gmailFixture", model: "claude-sonnet-5" }, threadId: bot.threadId, peers: [b.id, helper.id].filter(id => id !== bot.id), acknowledgePeerScope: true, outbound: { policy: "ask", dailyCap: 100 } })).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "gmailFixture", model: "claude-sonnet-5" }, threadId: bot.threadId, peers: [b.id, helper.id].filter(id => id !== bot.id), acknowledgePeerScope: true, outbound: { policy: "ask" } })).status).toBe(200);
   }
   const draft = { thread_id: "continued-thread", recipient_email: "sam@example.test", subject: "Re: Continuation", body: "Draft response" };
   const write = { server: "composio", tool: "GMAIL_CREATE_EMAIL_DRAFT", arguments: draft };
@@ -354,7 +348,7 @@ it("honors Ask every time on Full-access delegated and resumed turns without rel
   const b = outboundPolicyBot;
   const helper = draftHelper;
   for (const bot of [b, helper]) {
-    expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "gmailFixture", model: "claude-sonnet-5" }, threadId: bot.threadId, peers: [b.id, helper.id].filter(id => id !== bot.id), acknowledgePeerScope: true, outbound: { policy: "ask", dailyCap: 100 } })).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "gmailFixture", model: "claude-sonnet-5" }, threadId: bot.threadId, peers: [b.id, helper.id].filter(id => id !== bot.id), acknowledgePeerScope: true, outbound: { policy: "ask" } })).status).toBe(200);
   }
   const send = { server: "composio", tool: "GMAIL_REPLY_TO_THREAD", arguments: { thread_id: "ask-delegation" }, expectError: true };
   writeFileSync(join(fixture.info.dataDir, "gmail-plan.json"), JSON.stringify({
@@ -379,31 +373,26 @@ it("honors Ask every time on Full-access delegated and resumed turns without rel
   evidence.push({ outboundPolicyDelegation: readFileSync(join(fixture.info.dataDir, "gmail-plan.json.evidence.jsonl"), "utf8") });
 }, 90_000);
 
-it("sends 25 a day at Full access with no sending rule, refuses the 26th, and a routine at the cap reports it with no card", async () => {
-  const b = capBot;
+it("sends 35 in a day at Full access with no sending rule, with no refusal and no card, and a routine sends too", async () => {
+  const b = noRuleBot;
   const email = (to: string) => ({ recipient_email: to, subject: "Reminder", body: "See you at nine." });
   const token = await mint(b.id, b.threadId);
   const before = relayed.length;
   const sent = () => relayed.slice(before).filter((frame: any) => frame.method === "tools/call").length;
-  for (let count = 0; count < 25; count++) expect((await relay(token, "GMAIL_SEND_EMAIL", email(`person${count}@example.test`))).body.result.isError).not.toBe(true);
-  expect(sent()).toBe(25);
-  expect((await api("GET", `/api/bots/${b.id}/outbound`)).body.today).toBe(25);
-  const refused = (await relay(token, "GMAIL_SEND_EMAIL", email("late@example.test"))).body.result;
-  expect(refused.isError).toBe(true);
-  expect(refused.content[0].text).toMatch(/did not send this\. Full default cap fixture has reached its daily limit of 25 outbound actions at Full access/);
-  expect(sent(), "nothing was sent").toBe(25);
+  for (let count = 0; count < 35; count++) expect((await relay(token, "GMAIL_SEND_EMAIL", email(`person${count}@example.test`))).body.result.isError).not.toBe(true);
+  expect(sent()).toBe(35);
 
   expect((await api("PATCH", `/api/bots/${b.id}`, { modelSelection: { instanceId: "gmailFixture", model: "claude-sonnet-5" }, threadId: b.threadId })).status).toBe(200);
   writeFileSync(join(fixture.info.dataDir, "gmail-plan.json"), JSON.stringify({ [b.id]: { timeoutMs: 60_000,
-    steps: [{ server: "composio", tool: "GMAIL_SEND_EMAIL", arguments: email("team@example.test"), expectError: true }],
-    reply: "Report: the reminder was not sent, the daily sending limit is reached." } }));
+    steps: [{ server: "composio", tool: "GMAIL_SEND_EMAIL", arguments: email("team@example.test") }],
+    reply: "Report: the reminder was sent." } }));
   const created = await api("POST", "/api/routines", { name: "Morning reminder", prompt: "Send the morning reminder email to the team.", botId: b.id, schedule: { type: "interval", everyMinutes: 1440, anchorAt: Date.now() + 86_400_000 } });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   const { run } = (await api("POST", `/api/routines/${created.body.routine.id}/run`)).body;
   let finished: any;
   await expect.poll(async () => (finished = (await api("GET", "/api/routines")).body.runs.find((item: any) => item.id === run.id))?.status, { timeout: 45_000 }).toBe("completed");
-  expect(finished.output).toContain("Report: the reminder was not sent");
-  expect(sent()).toBe(25);
+  expect(finished.output).toContain("Report: the reminder was sent.");
+  expect(sent()).toBe(36);
   const threads = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === b.id).tasks.map((task: any) => task.threadId);
   for (const thread of threads) expect((await cards(thread)).filter((row: any) => row.card?.outboundRequest), "no card waits on anyone").toEqual([]);
 }, 90_000);
@@ -475,7 +464,7 @@ it("does not consume a Gmail draft reservation when the fresh scope check refuse
 
 it("honors Ask every time enabled while a Full-access send is waiting for dispatch", async () => {
   const b = fullBot;
-  await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow", dailyCap: 100 }, connectorScopes: { apps: { gmail: "write" } } });
+  await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow" }, connectorScopes: { apps: { gmail: "write" } } });
   const token = await mint(b.id, b.threadId);
   const before = relayed.length;
   sessionEntered = false;
@@ -483,7 +472,7 @@ it("honors Ask every time enabled while a Full-access send is waiting for dispat
   const send = relay(token, "GMAIL_SEND_EMAIL", { to: "sam@example.test" });
   try {
     await expect.poll(() => sessionEntered, { timeout: 5_000 }).toBe(true);
-    expect((await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "ask", dailyCap: 100 } })).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "ask" } })).status).toBe(200);
     await expect.poll(() => JSON.parse(readFileSync(join(fixture.info.dataDir, "bots.json"), "utf8"))
       .find((bot: any) => bot.id === b.id).outbound?.policy).toBe("ask");
   } finally {
@@ -497,46 +486,28 @@ it("honors Ask every time enabled while a Full-access send is waiting for dispat
   expect(relayed).toHaveLength(before);
   await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: card.card.requestId, behavior: "deny" });
   expect((await nextSend).body.result.isError).toBe(true);
-  expect((await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow", dailyCap: 100 } })).status).toBe(200);
+  expect((await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow" } })).status).toBe(200);
   expect((await relay(token, "GMAIL_SEND_EMAIL", { to: "sam@example.test" })).body.result.isError).not.toBe(true);
   expect(relayed).toHaveLength(before + 1);
 });
 
-it("does not consume the outbound allowance when a duplicate draft refuses a mixed batch", async () => {
+it("sends nothing when a duplicate draft refuses a mixed batch", async () => {
   const b = fullBot;
   const token = await mint(b.id, b.threadId);
-  const draft = { thread_id: "reservation-cap", body: "Review this" };
+  const draft = { thread_id: "duplicate-in-batch", body: "Review this" };
   const before = relayed.length;
-  const count = (await api("GET", `/api/bots/${b.id}/outbound`)).body.today;
   expect((await relay(token, "GMAIL_CREATE_EMAIL_DRAFT", draft)).body.result.isError).not.toBe(true);
   const duplicate = await relay(token, "COMPOSIO_MULTI_EXECUTE_TOOL", { tools: [
     { tool_slug: "GMAIL_CREATE_EMAIL_DRAFT", arguments: draft },
     { tool_slug: "GMAIL_SEND_EMAIL", arguments: { to: "sam@example.test" } },
   ] });
   expect(duplicate.body.result.isError).toBe(true);
-  expect((await api("GET", `/api/bots/${b.id}/outbound`)).body.today).toBe(count);
   expect(relayed).toHaveLength(before + 1);
 });
 
-it("reserves a daily slot before provider await, so simultaneous calls cannot overspend", async () => {
-  const b = await bot("Concurrent cap");
-  await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow", dailyCap: 1 } });
-  const token = await mint(b.id, b.threadId);
-  relayEntered = false;
-  blockRelay = () => {};
-  const first = relay(token, "GMAIL_SEND_EMAIL");
-  await expect.poll(() => relayEntered, { timeout: 5_000 }).toBe(true);
-  expect((await relay(token, "GMAIL_SEND_EMAIL")).body.result.isError).toBe(true);
-  expect((await api("GET", `/api/bots/${b.id}/outbound`)).body.today).toBe(1);
-  blockRelay();
-  blockRelay = undefined;
-  expect((await first).body.result.isError).not.toBe(true);
-  expect((await api("GET", `/api/bots/${b.id}/outbound`)).body.today).toBe(1);
-});
-
-it("never treats arbitrary workbench code as a counted daily allowance", async () => {
+it("still asks before arbitrary workbench code under Send without asking", async () => {
   const b = await bot("Opaque code");
-  await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow", dailyCap: 1 } });
+  await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow" } });
   const token = await mint(b.id, b.threadId);
   const before = relayed.length;
   const held = relay(token, "COMPOSIO_REMOTE_WORKBENCH", { code_to_execute: 'for x in range(99): run_tool("GMAIL_" + "SEND_EMAIL", {})' });
@@ -661,17 +632,4 @@ it("preserves accounts referenced by a fallback chain before delete or credentia
   expect((await api("PATCH", `/api/instances/${instanceId}`, { configDir: join(fixture.info.dataDir, "synthetic-account-directory") })).status).toBe(409);
   await api("PATCH", `/api/bots/${b.id}`, { fallback: [] });
   expect((await api("DELETE", `/api/instances/${instanceId}`)).status).toBe(200);
-});
-
-it("does not relay if the allowance cannot be durably written", async () => {
-  const b = await bot("Failed allowance");
-  await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow", dailyCap: 1 } });
-  const token = await mint(b.id, b.threadId);
-  const file = join(fixture.info.dataDir, "outbound-counts.json");
-  renameSync(file, file + ".saved");
-  mkdirSync(file);
-  const before = relayed.length;
-  expect((await relay(token, "GMAIL_SEND_EMAIL")).body.result.isError).toBe(true);
-  expect(relayed).toHaveLength(before);
-  expect((await api("GET", `/api/bots/${b.id}/outbound`)).body.today).toBe(0);
 });

@@ -5,6 +5,7 @@ import {
   mkdir,
   mkdtemp,
   open,
+  readdir,
   readFile,
   rename,
   rm,
@@ -338,6 +339,21 @@ export function installAntigravityRuntime(options: AntigravityInstallOptions = {
   const running = installOnce(options).finally(() => installs.delete(key));
   installs.set(key, running);
   return running;
+}
+
+/** The newest runtime the app installed here, when it is not the pinned one; null when the pinned one is installed or none is. */
+export async function antigravityOlderRuntime(baseDir = DATA_DIR, asset = resolveAntigravityReleaseAsset()): Promise<string | null> {
+  if (!asset) return null;
+  const versions = join(runtimeRoot(baseDir), "versions");
+  if (await completedRelease(join(versions, asset.sha256), asset)) return null;
+  const found: string[] = [];
+  for (const name of await readdir(versions).catch(() => [] as string[])) {
+    try {
+      const record = JSON.parse(await readFile(join(versions, name, INSTALL_RECORD), "utf8")) as Partial<InstallRecord>;
+      if (record.sha256 === name && typeof record.version === "string") found.push(record.version);
+    } catch {}
+  }
+  return found.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))[0] ?? null;
 }
 
 export function antigravityManagedInstallAvailable(): boolean {

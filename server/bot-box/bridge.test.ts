@@ -33,6 +33,14 @@ linuxBox("the in-box bridge command", () => {
     expect(parseBridgeArgs(args.slice(1))).toEqual({ bridges: [{ port: 3128, socket: "/run/omb/egress.sock" }, { port: 8799, socket: "/run/omb/harness.sock" }], command: ["claude", "-p"] });
   });
 
+  it("with a relay: the Node bridge even where socat is, so each connection the host sends names its own port", () => {
+    const { command, args } = bridgedCommand({ socat: "/usr/bin/socat", bridgeScript: "/app/box-bridge.js", node: "/usr/bin/node" }, bridges, "agy", ["--uid="], "/run/omb/relay.sock");
+    expect(command).toBe("/usr/bin/node");
+    expect(args).toEqual(["/app/box-bridge.js", "--bridge=3128=/run/omb/egress.sock", "--bridge=8799=/run/omb/harness.sock", "--relay=/run/omb/relay.sock", "--", "agy", "--uid="]);
+    expect(parseBridgeArgs(args.slice(1))).toEqual({ bridges: [{ port: 3128, socket: "/run/omb/egress.sock" }, { port: 8799, socket: "/run/omb/harness.sock" }], relay: "/run/omb/relay.sock", command: ["agy", "--uid="] });
+    expect(bridgedCommand({ socat: null, bridgeScript: "/b.js", node: "/n" }, [], "agy", [], "/run/omb/relay.sock")).toEqual({ command: "/n", args: ["/b.js", "--relay=/run/omb/relay.sock", "--", "agy"] });
+  });
+
   it("no bridges (a shared-network box): the engine as is", () => {
     expect(bridgedCommand({ socat: "/usr/bin/socat", bridgeScript: "/b.js", node: "/n" }, [], "chrome", ["--headless"])).toEqual({ command: "chrome", args: ["--headless"] });
   });

@@ -370,7 +370,7 @@ describe("encrypted full workspace backups", () => {
       "vm-home/.browser-profiles/chrome/Cookies", "vm-homes/abc/.browser-profiles/chromium/Cookies",
       "tmp/omb-mcp-123/mcp.json", ".tmp/secret",
       "logins.json.enc", "logins-key", "logins.json.enc.123.05a7b3e0-1234.tmp",
-      "highlevel.json.enc", "highlevel-key", "connected-apps-installation.json", "webhook-key",
+      "connected-apps-installation.json", "webhook-key",
     ];
     for (const root of [source, target]) {
       for (const path of authPaths) {

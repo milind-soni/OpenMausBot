@@ -119,6 +119,10 @@ export class AcpHost {
   opened = 0;
   retired = 0;
   recycle: ReturnType<typeof setTimeout> | null = null;
+  /** Security: the thread each folder belongs to, for the process's life. An agent may keep MCP servers per folder and
+   * name, not per session (OpenCode 1.18.27: session/new and session/load call mcp.add({ directory, name })), so a
+   * second thread in a folder would call through the first one's servers and act on that thread's turn capability. */
+  readonly #folders = new Map<string, string>();
   #nextId = 1;
   readonly #pending = new Map<number, Pending>();
   readonly #privateResponses = new Set<number>();
@@ -164,12 +168,16 @@ export class AcpHost {
     });
   }
 
-  /** Room for one more thread: alive, not draining, under `limit` sessions open and `lifetime` ever opened. */
-  accepts(limit: number, lifetime: number): boolean {
-    return !this.dead && !this.draining && this.child.exitCode === null && this.links.size < limit && this.opened < lifetime;
+  /** Room for `threadId` in `folder`: alive, not draining, under `limit` sessions open and `lifetime` ever opened, and
+   * no other thread has had a session in that folder here. */
+  accepts(limit: number, lifetime: number, threadId: string, folder: string): boolean {
+    const owner = this.#folders.get(folder);
+    return !this.dead && !this.draining && this.child.exitCode === null && this.links.size < limit && this.opened < lifetime &&
+      (owner === undefined || owner === threadId);
   }
 
-  link(threadId: string): AcpLink {
+  link(threadId: string, folder: string): AcpLink {
+    this.#folders.set(folder, threadId);
     const link = new AcpLink(this, threadId);
     this.links.add(link);
     this.opened += 1;

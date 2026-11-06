@@ -381,7 +381,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
    * none. Grants never travel in shareable exports. */
   connectorTools?: Record<string, ConnectorToolGrant>;
   connectorScopes?: { apps: Record<string, "read" | "write"> };
-  outbound?: { policy: "ask" | "allow"; dailyCap: number };
+  outbound?: { policy: "ask" | "allow" };
   /** Which of a paired phone's apps this bot may use; absent: every bot may use what the phone allows (shared/phone-apps.ts). */
   phoneApps?: import("./phone-apps.ts").PhoneApps;
   /** Ordered backups used only by opt-in, pre-prompt startup recovery. */
@@ -738,6 +738,8 @@ export interface SecretRequestCardData {
   helpUrl: string;
   /** A custom secret's use: "ref", OpenMausBot's own tools only; "file", the bot's commands; "email", the Email connector, never a bot. */ delivery?: SecretDelivery | "email";
   /** An email card: the mailbox it is for, when known; off a phone the person can change it on the card. */ address?: string;
+  /** An email card: the incoming server that took the password, once it did, while sending is still being checked. */
+  emailReading?: string;
   /** A custom secret: the bot's own words on why; `description` adds what the bot may do with it, and helpUrl is empty. */
   reason?: string;
   /** A file secret's Local VM target key, when the asking turn ran in one. */

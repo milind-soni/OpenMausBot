@@ -151,6 +151,17 @@ describe("navigation while a reconnect snapshot is in flight", () => {
     expect(shown().messages.map(message => message.id)).toEqual(["fresh-b"]);
   });
 
+  it("ends a pending switch whose response carries no bot", async () => {
+    await resync();
+    switchResponse = deferred();
+    flushSync(() => dispatch({ type: "switchTask", botId: "bot", threadId: "b" }));
+    await applySnapshot();
+    expect(shown().switchingTo).toBe("b");
+    switchResponse.resolve(json({}));
+    await vi.waitFor(() => expect(shown().switchingTo).toBeUndefined());
+    expect(shown().threadId).toBe("a");
+  });
+
   it("keeps the room thread opened after the request started", async () => {
     await resync();
     flushSync(() => dispatch({ type: "switchGroupTask", groupId: "room", threadId: "room-b" }));

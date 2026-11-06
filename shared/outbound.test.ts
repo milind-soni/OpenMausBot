@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { OUTBOUND_DEFAULT_CAP, connectorCallsIn, isOutboundTool, isReadOnlyTool, normalizeOutboundPolicy, outboundCallsIn } from "./outbound.ts";
+import { connectorCallsIn, isOutboundTool, isReadOnlyTool, normalizeOutboundPolicy, outboundCallsIn, trimOutboundPolicy } from "./outbound.ts";
 
 describe("isOutboundTool", () => {
   it("flags tools that send, reply, post, publish, invite, share, or move money", () => {
@@ -81,18 +81,40 @@ describe("isReadOnlyTool", () => {
 });
 
 describe("normalizeOutboundPolicy", () => {
-  it("accepts ask and allow with a whole-number daily cap", () => {
-    expect(normalizeOutboundPolicy({ policy: "ask" })).toEqual({ policy: "ask", dailyCap: OUTBOUND_DEFAULT_CAP });
-    expect(normalizeOutboundPolicy({ policy: "allow", dailyCap: 10 })).toEqual({ policy: "allow", dailyCap: 10 });
+  it("accepts ask and allow, with no limit of any kind", () => {
+    expect(normalizeOutboundPolicy({ policy: "ask" })).toEqual({ policy: "ask" });
+    expect(normalizeOutboundPolicy({ policy: "allow" })).toEqual({ policy: "allow" });
+  });
+
+  it("accepts a rule an older app saved or sends with a daily cap, whatever the cap, and drops it", () => {
+    for (const dailyCap of [10, 0, 2.5, 100_000, "25", null]) {
+      expect(normalizeOutboundPolicy({ policy: "allow", dailyCap })).toEqual({ policy: "allow" });
+    }
+    expect(normalizeOutboundPolicy({ policy: "ask", dailyCap: 25 })).toEqual({ policy: "ask" });
   });
 
   it("refuses anything else", () => {
     expect(normalizeOutboundPolicy({ policy: "yes" })).toBeNull();
-    expect(normalizeOutboundPolicy({ policy: "allow", dailyCap: 0 })).toBeNull();
-    expect(normalizeOutboundPolicy({ policy: "allow", dailyCap: 2.5 })).toBeNull();
-    expect(normalizeOutboundPolicy({ policy: "allow", dailyCap: 100_000 })).toBeNull();
+    expect(normalizeOutboundPolicy({ dailyCap: 10 })).toBeNull();
     expect(normalizeOutboundPolicy("allow")).toBeNull();
     expect(normalizeOutboundPolicy(null)).toBeNull();
+  });
+});
+
+describe("trimOutboundPolicy", () => {
+  it("drops a stored daily cap and says so, once", () => {
+    const bot = { outbound: { policy: "allow", dailyCap: 25 } as never };
+    expect(trimOutboundPolicy(bot)).toBe(true);
+    expect(bot.outbound).toEqual({ policy: "allow" });
+    expect(trimOutboundPolicy(bot)).toBe(false);
+  });
+
+  it("leaves no rule, a current rule and a malformed rule as they are", () => {
+    for (const outbound of [undefined, { policy: "ask" }, { policy: "yes", dailyCap: 25 }] as never[]) {
+      const bot = { outbound };
+      expect(trimOutboundPolicy(bot)).toBe(false);
+      expect(bot.outbound).toBe(outbound);
+    }
   });
 });
 

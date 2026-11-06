@@ -1,7 +1,8 @@
 const TYPED_PREFIX = "typed::";
 const OPENCODE_MODEL = /^[A-Za-z0-9][\w.-]{0,63}\/[A-Za-z0-9][\w.:@+/-]{0,199}$/u;
 
-function openCodeModelId(value: string): string | null {
+/** `value` trimmed when it is a `provider/model` id OpenCode can be given, else null. */
+export function openCodeModelId(value: string): string | null {
   const id = value.trim();
   return OPENCODE_MODEL.test(id) && !id.endsWith("/") ? id : null;
 }

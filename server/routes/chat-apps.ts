@@ -1,4 +1,4 @@
-import { APP_LIMITS, type AppPayload } from "../../shared/app.ts";
+import { APP_LIMITS, ROOM_VIEW_ONLY, type AppPayload } from "../../shared/app.ts";
 import { APP_RPC_METHODS, type AppRpcMethod } from "../../shared/app-frame/bridge.ts";
 import { webOrigin } from "../../shared/app-frame/csp.ts";
 import { appRow, createChatApps, rowRate, type ChatApps } from "../chat-apps.ts";
@@ -30,6 +30,9 @@ export interface ChatAppRouteDeps {
   apps: ChatApps;
   /** On a Cloud home, a guest changes only conversations it started. */
   threadRefusal?(auth: RequestAuth, threadId: string): string | null;
+  /** Whether this person may see the conversation now: asked when its app is fetched and again for every file of a folder
+   * page they load, so leaving a room, or losing sight of its bot, closes its pages to them. */
+  threadVisible?(auth: RequestAuth, threadId: string): boolean;
   mcpRpc?(request: McpRpcRequest): Promise<McpRpcAnswer>;
 }
 
@@ -50,12 +53,15 @@ export function createChatAppRoutes(deps: ChatAppRouteDeps): RouteHandler {
       const threadId = m[1]!;
       // An unknown thread answers before the store materialises it.
       if (!store.botByThread(threadId) && !store.groupByThread(threadId)) return json(res, 404, { error: "no such conversation" });
+      const visible = deps.threadVisible;
+      if (visible && !visible(auth, threadId)) return json(res, 404, { error: "no such conversation" });
       if (!appRow(store, threadId, m[2]!)) return json(res, 404, { error: "no app on that message" });
       const asked = url.searchParams.get("rev");
       if (asked !== null && !/^\d{1,6}$/.test(asked)) return json(res, 400, { error: "rev must be a version number" });
       // A folder page's files load from wherever this client reaches the app; it names that origin itself.
       const origin = webOrigin(url.searchParams.get("origin")) ?? webOrigin(url.origin) ?? undefined;
-      const doc = apps.appDocument(threadId, m[2]!, asked === null ? undefined : Number(asked), origin);
+      const viewer = { key: auth.kind === "session" ? `session:${auth.session.id}` : auth.kind, allowed: () => !visible || visible(auth, threadId) };
+      const doc = apps.appDocument(threadId, m[2]!, asked === null ? undefined : Number(asked), origin, viewer);
       if (!doc) return json(res, 404, userError(asked === null ? "serverError.page.notStored" : "serverError.page.versionGone"));
       // `can` and `blocked` change with sign-in and settings: never cached.
       res.setHeader("cache-control", "private, no-store");
@@ -72,6 +78,7 @@ export function createChatAppRoutes(deps: ChatAppRouteDeps): RouteHandler {
     const threadId = body.threadId;
     const bot = store.bot(botId);
     if (!bot) return json(res, 404, { error: "no such bot" });
+    if (store.groupByThread(threadId)) return json(res, 409, { error: ROOM_VIEW_ONLY });
     if (!store.taskByThread(bot.id, threadId)) return json(res, 404, { error: "no such conversation" });
     const refused = deps.threadRefusal?.(auth, threadId);
     if (refused) return json(res, 403, { error: refused });

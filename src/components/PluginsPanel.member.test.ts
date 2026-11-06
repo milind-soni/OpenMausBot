@@ -9,7 +9,6 @@ vi.mock("@/state/store", () => ({
   useStore: () => ({ state: { pluginsSurface: "apps", bots: [], instances: [] }, dispatch: vi.fn() }),
 }));
 vi.mock("./McpServersPanel", () => ({ McpServersPanel: () => null }));
-vi.mock("./HighLevelCard", () => ({ HighLevelCard: () => null }));
 vi.mock("./XCard", () => ({ X_CARD_SEARCH: "x", XCard: () => null }));
 
 const { PluginsPanel } = await import("./PluginsPanel");

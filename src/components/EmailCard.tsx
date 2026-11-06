@@ -1,13 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
-import { Check, Loader2, Mail, MoreHorizontal } from "lucide-react";
+import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { Check, Loader2, Mail, MoreHorizontal, Plus } from "lucide-react";
 
 import { api } from "@/state/store";
 import { t } from "@/lib/i18n";
-import type { EmailConnectAnswer, EmailServerFields, EmailStatus } from "../../shared/email";
+import type { EmailConnectAnswer, EmailConnectRequest, EmailServerFields, EmailSignInHint, EmailStatus } from "../../shared/email";
+import { EMAIL_FIELD, EMAIL_LINK, EMAIL_PILL, EmailCheckLines, EmailMailbox, EmailSignInNote, OutgoingServerInputs } from "./EmailMailbox";
 import { SidebarPopoverMenu } from "./SidebarPopoverMenu";
-
-const pill = "inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink transition-colors hover:bg-raised-hover disabled:opacity-40";
-const field = "h-8 w-full min-w-0 rounded-lg bg-inset px-2.5 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none focus:ring-1 focus:ring-accent/50";
 
 export function EmailIcon() {
   return (
@@ -15,20 +13,76 @@ export function EmailIcon() {
   );
 }
 
-/** Where a mail server is, for when it can't be found from the address. */
-export function EmailServerInputs({ value, onChange, className = field }: { value: EmailServerFields; onChange: (next: EmailServerFields) => void; className?: string }) {
-  const text = (name: "imapHost" | "smtpHost" | "username", label: string) => (
+/** Where a mail server is, for when it can't be found from the address; the outgoing one only behind its own button. */
+export function EmailServerInputs({ value, onChange, className = EMAIL_FIELD }: { value: EmailServerFields; onChange: (next: EmailServerFields) => void; className?: string }) {
+  const [outgoing, setOutgoing] = useState(Boolean(value.smtpHost));
+  const text = (name: "imapHost" | "username", label: string) => (
     <input type="text" autoComplete="off" spellCheck={false} dir="ltr" aria-label={label} placeholder={label} value={value[name] ?? ""} onChange={(event) => onChange({ ...value, [name]: event.target.value })} className={className} />
   );
-  const port = (name: "imapPort" | "smtpPort", label: string) => (
-    <input type="number" min={1} max={65535} autoComplete="off" dir="ltr" aria-label={label} placeholder={label} value={value[name] ?? ""} onChange={(event) => { const { [name]: _gone, ...rest } = value; onChange(event.target.value ? { ...rest, [name]: Number(event.target.value) } : rest); }} className={className} />
-  );
   return (
-    <div data-email-server-fields className="grid grid-cols-[minmax(0,1fr)_6rem] gap-2">
-      {text("imapHost", t("email.incomingServer"))}{port("imapPort", t("email.port"))}
-      {text("smtpHost", t("email.outgoingServer"))}{port("smtpPort", t("email.port"))}
-      <div className="col-span-2">{text("username", t("email.username"))}</div>
+    <div data-email-server-fields className="flex flex-col gap-2">
+      <div className="grid grid-cols-[minmax(0,1fr)_6rem] gap-2">
+        {text("imapHost", t("email.incomingServer"))}
+        <input type="number" min={1} max={65535} autoComplete="off" dir="ltr" aria-label={t("email.port")} placeholder={t("email.port")} value={value.imapPort ?? ""} onChange={(event) => { const { imapPort: _gone, ...rest } = value; onChange(event.target.value ? { ...rest, imapPort: Number(event.target.value) } : rest); }} className={className} />
+        <div className="col-span-2">{text("username", t("email.username"))}</div>
+      </div>
+      {outgoing ? <OutgoingServerInputs value={value} onChange={onChange} className={className} /> : <button type="button" onClick={() => setOutgoing(true)} className={EMAIL_LINK}>{t("email.outgoing")}</button>}
     </div>
+  );
+}
+
+/** Why a connect didn't take: in one sentence, with the servers to type when none was found, or a provider's own way in. */
+export type EmailConnectRefusal = { error: string; needsServer?: boolean; signIn?: EmailSignInHint };
+
+/** Email and password, and Connect: the servers are found from the address. While it checks, "Reading" and "Sending"
+ * tick as they pass; `reading` is the incoming server once it took the password. */
+export function EmailConnectForm({ initialAddress = "", submit, reading, fieldClassName = EMAIL_FIELD, submitClassName = EMAIL_PILL, submitStyle, footer }: {
+  initialAddress?: string;
+  /** Connects, or says why not. */
+  submit: (request: EmailConnectRequest) => Promise<EmailConnectRefusal | null>;
+  reading?: string;
+  fieldClassName?: string;
+  submitClassName?: string;
+  submitStyle?: CSSProperties;
+  footer?: ReactNode;
+}) {
+  const [address, setAddress] = useState(initialAddress);
+  const [password, setPassword] = useState("");
+  const [server, setServer] = useState<EmailServerFields>({});
+  const [needsServer, setNeedsServer] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [refusal, setRefusal] = useState<EmailConnectRefusal | null>(null);
+
+  const connect = async () => {
+    if (busy || !address.trim() || !password) return;
+    setBusy(true);
+    setRefusal(null);
+    try {
+      // A password goes as typed: a mailbox's can begin or end with a space.
+      const refused = await submit({ address: address.trim(), password, ...server });
+      if (refused) {
+        setRefusal(refused);
+        if (refused.needsServer) setNeedsServer(true);
+      } else setPassword("");
+    } finally { setBusy(false); }
+  };
+
+  const anyScreenConnecting = busy || Boolean(reading);
+  return (
+    <form data-email-form className="flex flex-col gap-2" onSubmit={(event) => { event.preventDefault(); void connect(); }}>
+      <input type="email" autoComplete="off" spellCheck={false} dir="ltr" disabled={busy} aria-label={t("email.address")} placeholder={t("email.address")} value={address} onChange={(event) => setAddress(event.target.value)} className={fieldClassName} />
+      <input type="password" autoComplete="new-password" spellCheck={false} dir="ltr" disabled={busy} aria-label={t("email.password")} placeholder={t("email.password")} value={password} onChange={(event) => setPassword(event.target.value)} className={fieldClassName} />
+      {needsServer && <EmailServerInputs value={server} onChange={setServer} className={fieldClassName} />}
+      {anyScreenConnecting && <EmailCheckLines reading={reading ? { state: "done", host: reading } : { state: "waiting" }} sending={{ state: "waiting" }} />}
+      {refusal && (refusal.signIn ? <EmailSignInNote hint={refusal.signIn} /> : <p role="alert" className="text-[12px] text-danger">{refusal.error}</p>)}
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="submit" disabled={busy || !address.trim() || !password} className={submitClassName} style={submitStyle}>
+          {busy ? <Loader2 size={14} className="animate-spin" /> : t("connectors.action.connect")}
+        </button>
+        {!needsServer && !busy && <button type="button" onClick={() => setNeedsServer(true)} className={EMAIL_LINK}>{t("email.typeServer")}</button>}
+      </div>
+      {footer}
+    </form>
   );
 }
 
@@ -41,11 +95,6 @@ export function EmailCard({ refreshKey = 0, onConnection }: {
   const [status, setStatus] = useState<EmailStatus | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [address, setAddress] = useState("");
-  const [password, setPassword] = useState("");
-  const [server, setServer] = useState<EmailServerFields>({});
-  const [needsServer, setNeedsServer] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
 
@@ -59,28 +108,18 @@ export function EmailCard({ refreshKey = 0, onConnection }: {
   useEffect(() => { void load(); }, [load, refreshKey]);
   useEffect(() => { onConnection?.(status ? status.state === "connected" : null); }, [status, onConnection]);
 
-  const connect = async () => {
-    if (busy) return;
-    setBusy(true);
-    setError(null);
+  const connect = async (request: EmailConnectRequest): Promise<EmailConnectRefusal | null> => {
     setDone(null);
     try {
-      const answer = await api("/api/email/accounts", { method: "POST", body: JSON.stringify({ address: address.trim(), password, ...server }) }) as EmailConnectAnswer;
-      if (!answer.ok) {
-        setError(answer.error);
-        if (answer.needsServer) setNeedsServer(true);
-        return;
-      }
-      setPassword("");
+      const answer = await api("/api/email/accounts", { method: "POST", body: JSON.stringify(request) }) as EmailConnectAnswer;
+      if (!answer.ok) return { error: answer.error, ...(answer.needsServer ? { needsServer: true } : {}), ...(answer.signIn ? { signIn: answer.signIn } : {}) };
       setOpen(false);
-      setNeedsServer(false);
-      setServer({});
-      setAddress("");
       setDone(answer.sending.ok ? t("email.connected", { count: answer.inbox.messages }) : t("email.connectedNoSending", { count: answer.inbox.messages }));
       await load();
+      return null;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally { setBusy(false); }
+      return { error: cause instanceof Error ? cause.message : String(cause) };
+    }
   };
 
   const disconnect = async (mailbox: string) => {
@@ -93,7 +132,6 @@ export function EmailCard({ refreshKey = 0, onConnection }: {
   const accounts = status?.accounts ?? [];
   const connected = accounts.length > 0;
   const description = connected ? accounts.map((account) => account.address).join(", ") : t("email.description");
-  const problem = accounts.find((account) => account.problem)?.problem;
 
   return (
     <div data-app-tile="email" data-email-state={status?.state ?? "loading"} className="flex min-w-0 flex-col rounded-xl px-2 py-2 transition-colors hover:bg-raised/40">
@@ -108,11 +146,11 @@ export function EmailCard({ refreshKey = 0, onConnection }: {
         </div>
         {status === null ? (
           loadFailed
-            ? <button type="button" onClick={() => void load()} className={pill}>{t("connectors.action.retry")}</button>
-            : <button type="button" disabled className={pill} aria-label={t("common.checking")}><Loader2 size={14} className="animate-spin" /></button>
+            ? <button type="button" onClick={() => void load()} className={EMAIL_PILL}>{t("connectors.action.retry")}</button>
+            : <button type="button" disabled className={EMAIL_PILL} aria-label={t("common.checking")}><Loader2 size={14} className="animate-spin" /></button>
         ) : (
           <div className="flex shrink-0 items-center gap-1.5">
-            {(!connected || open) && <button type="button" disabled={busy} onClick={() => { setOpen(!open); setError(null); }} className={pill} aria-expanded={open}>{open ? t("common.cancel") : t("connectors.action.connect")}</button>}
+            {(!connected || open) && <button type="button" onClick={() => { setOpen(!open); setError(null); }} className={EMAIL_PILL} aria-expanded={open}>{open ? t("common.cancel") : t("connectors.action.connect")}</button>}
             {connected && (
               <SidebarPopoverMenu
                 placement="below"
@@ -128,24 +166,15 @@ export function EmailCard({ refreshKey = 0, onConnection }: {
           </div>
         )}
       </div>
-      <div className="ps-[52px]">
+      <div className="flex flex-col gap-3 ps-[52px]">
         {done && <p role="status" className="mt-1.5 text-[12px] text-ink-secondary">{done}</p>}
-        {problem && !open && <p role="alert" className="mt-1.5 text-[12px] text-warning">{problem}</p>}
-        {error && <p role="alert" className="mt-1.5 text-[12px] text-danger">{error}</p>}
-        {open && (
-          <form data-email-form className="mt-2 flex flex-col gap-2" onSubmit={(event) => { event.preventDefault(); void connect(); }}>
-            <input type="email" autoComplete="off" spellCheck={false} dir="ltr" aria-label={t("email.address")} placeholder={t("email.address")} value={address} onChange={(event) => setAddress(event.target.value)} className={field} />
-            <input type="password" autoComplete="new-password" spellCheck={false} dir="ltr" aria-label={t("email.password")} placeholder={t("email.password")} value={password} onChange={(event) => setPassword(event.target.value)} className={field} />
-            {needsServer && <EmailServerInputs value={server} onChange={setServer} />}
-            <p className="text-[12px] leading-relaxed text-ink-secondary">{t("email.help")}</p>
-            <div className="flex items-center gap-2">
-              <button type="submit" disabled={busy || !address.trim() || !password} className={pill}>
-                {busy ? <Loader2 size={14} className="animate-spin" /> : t("connectors.action.connect")}
-              </button>
-              {busy && <span role="status" className="text-[12px] text-ink-secondary">{t("email.checking")}</span>}
-              {!needsServer && !busy && <button type="button" onClick={() => setNeedsServer(true)} className="text-[12px] text-ink-secondary underline underline-offset-2 hover:text-ink">{t("email.typeServer")}</button>}
-            </div>
-          </form>
+        {accounts.map((account) => <EmailMailbox key={`${account.address}:${account.connectedAt}`} compact account={account} onChanged={load} />)}
+        {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
+        {open && <EmailConnectForm submit={connect} footer={<p className="text-[12px] leading-relaxed text-ink-secondary">{t("email.help")}</p>} />}
+        {connected && !open && (
+          <button type="button" onClick={() => { setOpen(true); setError(null); }} className="inline-flex items-center gap-1 self-start text-[12px] text-ink-secondary hover:text-ink">
+            <Plus size={12} aria-hidden="true" />{t("email.addAnotherAddress")}
+          </button>
         )}
       </div>
     </div>

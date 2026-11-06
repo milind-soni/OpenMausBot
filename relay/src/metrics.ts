@@ -23,6 +23,50 @@ export interface Gauge {
   value: number;
 }
 
+/** Gauges whose highest value of each UTC day this node keeps, today's and the day before's. */
+export type PeakName = "hosts_connected" | "sessions_spliced" | "sockets_open";
+const PEAKS: Record<PeakName, string> = {
+  hosts_connected: "Most hosts with a control socket at once on this node, by UTC day (today and the day before)",
+  sessions_spliced: "Most phone sessions spliced at once on this node, by UTC day (today and the day before)",
+  sockets_open: "Most WebSockets held at once on this node, by UTC day (today and the day before)",
+};
+/** The gauge each peak follows; a scrape counts toward the peak too, so a day with no rise still starts from what is held. */
+const PEAK_OF: Record<string, PeakName> = {
+  relay_hosts_connected: "hosts_connected",
+  relay_sessions_spliced: "sessions_spliced",
+  relay_sockets_open: "sockets_open",
+};
+const DAY_S = 86_400;
+
+/**
+ * A gauge's highest value per UTC day. A scraper that misses minutes (or scrapes rarely) still reads the day's true peak
+ * since this process started; the day before is kept so the last minutes of a day are not lost at midnight.
+ */
+class DailyPeak {
+  private day = -1;
+  private today = 0;
+  private yesterday: { day: number; value: number } | undefined;
+
+  see(value: number, day: number): void {
+    this.roll(day);
+    if (value > this.today) this.today = value;
+  }
+
+  values(day: number): { day: number; value: number }[] {
+    this.roll(day);
+    return [...(this.yesterday && this.yesterday.day === day - 1 ? [this.yesterday] : []), { day, value: this.today }];
+  }
+
+  private roll(day: number): void {
+    if (day === this.day) return;
+    this.yesterday = this.day === day - 1 ? { day: this.day, value: this.today } : undefined;
+    this.day = day;
+    this.today = 0;
+  }
+}
+
+const isoDay = (day: number) => new Date(day * DAY_S * 1000).toISOString().slice(0, 10);
+
 const LAG_TICK_MS = 100;
 const LAG_SAMPLES_MAX = 4_096;
 
@@ -56,6 +100,13 @@ class LoopLag {
 export class Metrics {
   private readonly counts = new Map<string, number>();
   private readonly lag = new LoopLag();
+  private readonly peaks = new Map<PeakName, DailyPeak>();
+  private readonly utcDay: () => number;
+
+  /** `wallSeconds` is the clock the daily peaks are bucketed by. */
+  constructor(wallSeconds: () => number = () => Date.now() / 1000) {
+    this.utcDay = () => Math.floor(wallSeconds() / DAY_S);
+  }
 
   inc(name: CounterName, label?: string | number, by = 1): void {
     const key = label === undefined ? name : `${name}\u0000${label}`;
@@ -64,6 +115,13 @@ export class Metrics {
 
   count(name: CounterName, label?: string | number): number {
     return this.counts.get(label === undefined ? name : `${name}\u0000${label}`) ?? 0;
+  }
+
+  /** Records a gauge's current value toward today's peak. Call it where the gauge goes up. */
+  peak(name: PeakName, value: number): void {
+    let peak = this.peaks.get(name);
+    if (!peak) this.peaks.set(name, (peak = new DailyPeak()));
+    peak.see(value, this.utcDay());
   }
 
   /** Prometheus text format. The event-loop lag window restarts at each render, so it covers one scrape interval. */
@@ -77,6 +135,13 @@ export class Metrics {
         const at = key.indexOf("\u0000");
         lines.push(at < 0 ? `${name} ${value}` : `${name}{${label}="${key.slice(at + 1)}"} ${value}`);
       }
+    }
+    for (const { name, value } of gauges) if (PEAK_OF[name]) this.peak(PEAK_OF[name], value);
+    const day = this.utcDay();
+    for (const [name, help] of Object.entries(PEAKS) as [PeakName, string][]) {
+      lines.push(`# HELP relay_${name}_peak ${help}`, `# TYPE relay_${name}_peak gauge`);
+      const values = this.peaks.get(name)?.values(day) ?? [{ day, value: 0 }];
+      for (const { day: at, value } of values) lines.push(`relay_${name}_peak{day="${isoDay(at)}"} ${value}`);
     }
     const usage = process.cpuUsage();
     const memory = process.memoryUsage();

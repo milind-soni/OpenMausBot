@@ -36,16 +36,14 @@ describe("credential fingerprints a move checks by", () => {
     expect(JSON.stringify(loginFingerprints(NONCE, here))).not.toContain(PASSWORD);
   });
 
-  it("cover keys, MCP servers' own secrets, the person's own connected-apps project and a HighLevel token, never a sign-in that moves once", () => {
+  it("cover keys, MCP servers' own secrets and the person's own connected-apps project, never a sign-in that moves once", () => {
     const config = { openrouter: { key: KEY }, composio: { apiKey: "fake-composio-key", userId: "u1" },
       mcpServers: { docs: { type: "http", url: "https://mcp.docs.example.test/mcp", headers: { Authorization: "Bearer fake-docs" }, enabled: true },
         dodo: { command: "node", args: ["server.js"], env: { DODO_KEY: "fake-dodo" }, enabled: true } } } as unknown as AppConfig;
-    const token = { kind: "token", accessToken: "fake-pit", locationId: "loc1", scopes: "", connectedAt: 1, state: "signed-in" } as const;
-    const seen = connectionFingerprints(NONCE, { config, highlevel: () => token });
-    expect(Object.keys(seen).sort()).toEqual(["composio", "highlevel", "key:openrouter", "mcp:docs", "mcp:dodo"]);
+    const seen = connectionFingerprints(NONCE, { config });
+    expect(Object.keys(seen).sort()).toEqual(["composio", "key:openrouter", "mcp:docs", "mcp:dodo"]);
     expect(seen["key:openrouter"]).toBe(fingerprint(NONCE, { openrouter: { key: KEY } }));
-    expect(connectionFingerprints(NONCE, { config, highlevel: () => ({ ...token, kind: "oauth" as const, refreshToken: "fake-refresh" }) })).not.toHaveProperty("highlevel");
-    const changed = connectionFingerprints(NONCE, { config: { ...config, mcpServers: { ...config.mcpServers, docs: { ...(config.mcpServers!.docs as object), headers: { Authorization: "Bearer other" } } } } as AppConfig, highlevel: () => token });
+    const changed = connectionFingerprints(NONCE, { config: { ...config, mcpServers: { ...config.mcpServers, docs: { ...(config.mcpServers!.docs as object), headers: { Authorization: "Bearer other" } } } } as AppConfig });
     expect(changed["mcp:docs"]).not.toBe(seen["mcp:docs"]);
     expect(JSON.stringify(seen)).not.toMatch(/fake-|sk-or/u);
   });

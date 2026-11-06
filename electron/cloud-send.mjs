@@ -458,7 +458,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     return [...ctx.cloudBots].filter((id) => bots.has(id) && ctx.localItems.has(itemKey.bot(id))).map((id) => ({ id, name: bots.get(id).name }));
   }
 
-  /** This computer's apps and keys, MCP servers, HighLevel and connected apps, over the move's session. A sign-in that
+  /** This computer's apps and keys, MCP servers, mailboxes and connected apps, over the move's session. A sign-in that
    * refreshes itself goes only in the final pass; this computer then lets go of its copy once My Cloud has it, and one it
    * could not let go of yet is kept and let go of on the next final pass. */
   async function moveConnections(origin, session, result, final) {

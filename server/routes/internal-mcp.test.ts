@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "../config.ts";
-import { createMcpConfig } from "../host/mcp-config.ts";
+import { createMcpConfig, type McpConfigDeps } from "../host/mcp-config.ts";
 import type { TeamConnectionsHost } from "../host/team-connections-host.ts";
 import { addBotMcpServer, keepForBot } from "../mcp-bot-servers.ts";
 import { botListing, mcpOwner } from "../mcp-bot-rules.ts";
@@ -45,6 +45,11 @@ interface Options {
   boxed?: boolean;
   usedBy?: Record<string, string[]>;
   signInRefusal?: { status: number; error: string };
+  /** Lending: how a server on another computer is tested there, whose computers this turn may use, and where an added
+   * server that needs the person's computer runs. */
+  testElsewhere?: McpConfigDeps["testElsewhere"];
+  lender?: string | null;
+  place?: InternalMcpDeps["place"];
 }
 
 function fixture(options: Options = {}) {
@@ -62,6 +67,7 @@ function fixture(options: Options = {}) {
     persistMcpServers: (next) => { cfg.mcpServers = next; },
     savedCustomDomain: () => null,
     changed: () => {},
+    ...(options.testElsewhere ? { testElsewhere: options.testElsewhere } : {}),
   });
   let clock = Date.now();
   const vault = new SecretVault(() => clock);
@@ -116,6 +122,8 @@ function fixture(options: Options = {}) {
       signIns.push({ name, url: server.url });
       return { posted: true };
     },
+    ...(options.lender !== undefined ? { lender: () => options.lender ?? null } : {}),
+    ...(options.place ? { place: options.place } : {}),
   };
   const route = createInternalMcpRoutes(deps);
   const ref = (value: string) => vault.saveRef(owner, `card-${value}`, "Key", value);
@@ -358,15 +366,61 @@ describe("internal mcp_server route, Full access", () => {
     expect(stored("linear")).toMatchObject({ url: linear.url, enabled: true });
   });
 
-  it("refuses a server that runs on another computer, test included", async () => {
+  it("never changes, turns on or removes a server that runs on another computer, and never starts it here", async () => {
     const probe = probeWith({ ok: true, tools: [] });
-    const { post, stored, lines } = fixture({ servers: { notes: { ...notes, enabled: false, runsOn: MAC } } });
-    const out = await post({ action: "enable", name: "notes" });
-    expect(out).toEqual({ status: 403, body: { error: "This server runs on Ada's Mac, so it can't be changed here." } });
+    const { post, stored, cfg } = fixture({ servers: { notes: { ...notes, enabled: false, runsOn: MAC } } });
+    const before = structuredClone(cfg.mcpServers);
+    for (const change of [{ action: "enable" }, { action: "disable" }, { action: "update", command: "evil", args: [] }, { action: "remove" }]) {
+      expect(await post({ ...change, name: "notes" })).toEqual({ status: 403, body: { error: "This server runs on Ada's Mac, so it can't be changed here." } });
+    }
+    expect(cfg.mcpServers).toEqual(before);
     expect(stored("notes")?.enabled).toBe(false);
-    expect(await post({ action: "test", name: "notes" })).toEqual({ status: 409, body: { error: "This server runs on Ada's Mac, so it isn't started here." } });
+    expect((await post({ action: "test", name: "notes" })).body.text).toBe("MCP server notes: Not tested: This server runs on Ada's Mac, so it isn't started here.");
     expect(probe).not.toHaveBeenCalled();
-    expect(lines).toEqual([]);
+  });
+
+  it("tests a server that runs on another computer there, for the person this turn acts for", async () => {
+    const probe = probeWith({ ok: true, tools: [] });
+    const testElsewhere = vi.fn<NonNullable<McpConfigDeps["testElsewhere"]>>(async () => ({ status: 200, body: { ok: true, tools: [{ name: "search_notes" }] } }));
+    const { post } = fixture({ servers: { notes: { ...notes, runsOn: MAC } }, testElsewhere, lender: "cloud-home" });
+    expect((await post({ action: "test", name: "notes" })).body.text).toBe("MCP server notes: Test: it started and listed its tools: search_notes. That does not show what they return: call one to check.");
+    expect(testElsewhere).toHaveBeenCalledWith("notes", expect.objectContaining({ command: "npx", runsOn: MAC }), "cloud-home", expect.any(AbortSignal));
+    expect(probe).not.toHaveBeenCalled();
+
+    testElsewhere.mockResolvedValueOnce({ status: 409, error: "notes runs on your Mac (Ada's Mac), which is offline right now: OpenMausBot on it is closed, or the Mac is asleep or off." });
+    const offline = await post({ action: "test", name: "notes" });
+    expect(offline.body.text).toBe("MCP server notes: Not tested: notes runs on your Mac (Ada's Mac), which is offline right now: OpenMausBot on it is closed, or the Mac is asleep or off.");
+    expect(offline.body.text).not.toContain("Could not reach");
+  });
+
+  it("a server the bot adds that needs the person's computer is marked as running there, and the person's card turns it on", async () => {
+    probeWith({ ok: true, tools: [] });
+    const testElsewhere = vi.fn<NonNullable<McpConfigDeps["testElsewhere"]>>(async () => ({ status: 200, body: { ok: true, tools: [{ name: "search_notes" }] } }));
+    const place = vi.fn<NonNullable<InternalMcpDeps["place"]>>(async (server) => ({ ok: true, server: { ...server, runsOn: MAC } }));
+    const { post, stored, card, respond, chat } = fixture({ full: false, testElsewhere, lender: "cloud-home", place });
+    const added = await post({ action: "add", name: "local", type: "http", url: "http://127.0.0.1:19501/mcp" });
+    expect(added.status).toBe(201);
+    expect(added.body.text).toContain("It runs on Ada's Mac, the person's own computer, and its tools reach you through it while it is online.");
+    expect(place).toHaveBeenCalledWith(expect.objectContaining({ url: "http://127.0.0.1:19501/mcp" }), undefined);
+    expect(stored("local")).toMatchObject({ url: "http://127.0.0.1:19501/mcp", enabled: false, runsOn: MAC });
+    expect(card()?.subtitle).toBe("http://127.0.0.1:19501/mcp\nRuns on Ada's Mac.");
+    expect(chat).toHaveLength(1);
+    expect((await respond("allow"))?.status).toBe(200);
+    expect(stored("local")?.enabled).toBe(true);
+    expect(testElsewhere).toHaveBeenCalledWith("local", expect.objectContaining({ runsOn: MAC }), "cloud-home", expect.any(AbortSignal));
+  });
+
+  it("an add that can't tell which lent computer runs it saves nothing and says what to ask; a named one is passed on", async () => {
+    const place = vi.fn<NonNullable<InternalMcpDeps["place"]>>(async () => ({ ok: false, error: "This server runs on the person's own computer, and several are lent to My Cloud: Ada's Mac, Studio. Ask the person which one in one short question, then add it again with computer set to its name." }));
+    const { post, cfg } = fixture({ place });
+    const refused = await post({ action: "add", name: "local", command: "/Users/ada/bin/notes-mcp" });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toContain("Ask the person which one");
+    expect(cfg.mcpServers).toEqual({});
+    place.mockImplementationOnce(async (server) => ({ ok: true, server: { ...server, runsOn: { environmentId: "env-studio", label: "Studio" } } }));
+    expect((await post({ action: "add", name: "local", command: "/Users/ada/bin/notes-mcp", computer: "Studio" })).status).toBe(201);
+    expect(place).toHaveBeenLastCalledWith(expect.objectContaining({ command: "/Users/ada/bin/notes-mcp" }), "Studio");
+    expect(cfg.mcpServers?.local).toMatchObject({ runsOn: { environmentId: "env-studio", label: "Studio" } });
   });
 
   it("refuses removing a server the organisation's policy refuses, with the policy's words", async () => {
@@ -539,14 +593,14 @@ describe("internal mcp_server route, Full access", () => {
     expect(body.dropped).toBeUndefined();
   });
 
-  it("list marks a server on another computer as not this bot's and a policy-refused one as managed", async () => {
+  it("list names the computer a server runs on and marks a policy-refused one as managed", async () => {
     const refuse = (name: string) => (name === "linear" ? "Not approved." : undefined);
     const { call } = fixture({ servers: { linear, notes: { ...notes, runsOn: MAC } }, refuse });
     const { body } = await call("GET");
     const rows = JSON.parse(body.text!.slice(body.text!.indexOf("\n") + 1)) as Array<Record<string, unknown>>;
     expect(rows).toEqual([
       expect.objectContaining({ name: "linear", owner: "managed", managedBy: "Acme IT", forThisBot: true }),
-      expect.objectContaining({ name: "notes", owner: "elsewhere", forThisBot: false }),
+      expect.objectContaining({ name: "notes", owner: "elsewhere", runsOn: "Ada's Mac", forThisBot: true }),
     ]);
   });
 

@@ -26,7 +26,7 @@ import {
   type BoatCreateRequest,
 } from "./boat-create-idempotency.ts";
 import {
-  boatDeletionSnapshot,
+  BOAT_DELETING, BOAT_DELETION_FINISHED, boatDeletionSnapshot,
   getBoatDeletion,
   hasPendingBoatDeletionForBot,
   markBoatDeletionAccepted,
@@ -718,7 +718,7 @@ function inventoryFailure(inventory: ManagedBoatInventory): Error & { status: nu
 function deletionFenceError(): Error & { status: number } {
   return Object.assign(
     new Error("this cloud computer is being deleted — wait for it to finish, or retry Delete if it needs attention"),
-    { status: 409 },
+    { status: 409, code: BOAT_DELETING },
   );
 }
 
@@ -1055,7 +1055,7 @@ async function finishPriorDeletionBeforeProvision(cfg: AppConfig, botId: string)
   }
   throw Object.assign(
     new Error("the previous cloud computer deletion finished — retry to create a new computer"),
-    { status: 409 },
+    { status: 409, code: BOAT_DELETION_FINISHED },
   );
 }
 

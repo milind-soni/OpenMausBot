@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { BOT_HTML_CSP, mcpAppCsp } from "./csp.ts";
 import { botHtmlDocument, buildSrcdoc, CSP_META_PREFIX, mcpAppDocument, stripDocumentPreamble } from "./document.ts";
-import { APP_HELPER_SOURCE, APP_THEME_STYLE } from "./helper.ts";
+import { APP_HELPER_SOURCE, APP_ROOM_HELPER_SOURCE, APP_THEME_STYLE } from "./helper.ts";
 import { APP_POINT_SOURCE } from "./point.ts";
 
 const CSP = "default-src 'none'";
@@ -45,6 +45,7 @@ describe("buildSrcdoc", () => {
 
   it("keeps the helper free of anything that would end its script element", () => {
     expect(APP_HELPER_SOURCE).not.toMatch(/<\/script/i);
+    expect(APP_ROOM_HELPER_SOURCE).not.toMatch(/<\/script/i);
     expect(APP_POINT_SOURCE).not.toMatch(/<\/script|<!--/i);
     expect(APP_THEME_STYLE).not.toMatch(/<\/style/i);
   });
@@ -62,6 +63,21 @@ describe("documents", () => {
     expect(doc.srcdoc.startsWith(`${CSP_META_PREFIX}${BOT_HTML_CSP}">`)).toBe(true);
     expect(doc.can).toEqual({ serverTools: false, serverResources: false, message: true, openLinks: true, modelContext: true });
     expect(doc.tool).toBeUndefined();
+  });
+
+  it("in a room, the same policy and sandbox, with nothing that acts for anyone", () => {
+    const html = "<!DOCTYPE html><html><body>hi</body></html>";
+    const own = botHtmlDocument({ messageId: "m1", rev: 0, html });
+    const room = botHtmlDocument({ messageId: "m1", rev: 0, html, room: true });
+    expect(room).toMatchObject({ csp: own.csp, network: own.network, room: true });
+    expect(room.can).toEqual({ serverTools: false, serverResources: false, message: false, openLinks: true, modelContext: false });
+    expect(room.srcdoc).toBe(own.srcdoc.replace(APP_HELPER_SOURCE, APP_ROOM_HELPER_SOURCE));
+    expect(own).not.toHaveProperty("room");
+    const network = { connect: ["https://esm.sh"], resources: [] };
+    const app = mcpAppDocument({ messageId: "m2", rev: 0, html: "<p>app</p>", network, tool: { name: "t" }, room: true,
+      can: { serverTools: true, serverResources: true, message: true, openLinks: true, modelContext: true }, blocked: { reason: "apps-off", text: "off" } });
+    expect(app).toMatchObject({ csp: mcpAppCsp(network), room: true, can: { serverTools: false, serverResources: false, message: false, openLinks: true, modelContext: false } });
+    expect(app).not.toHaveProperty("blocked");
   });
 
   it("an MCP app carries the construction from its filtered network set", () => {

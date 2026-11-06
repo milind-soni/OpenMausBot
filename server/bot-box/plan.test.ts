@@ -112,6 +112,17 @@ linuxBox("the box plan", () => {
     expect(visibleInBox(plan, "/data/.openmausbot/messages.db")).toBe("none");
   });
 
+  it("a relay socket goes in at /run/omb/relay.sock only for a box with its own network", () => {
+    const relay = `${dataDir}/box/relay-ab12.sock`;
+    const plan = planBox(setup(), { command: "/usr/bin/agy", args: [], cwd, env: { HOME: home }, relay });
+    expect(bwrapArgs(plan).join(" ")).toContain(`--bind ${relay} /run/omb/relay.sock`);
+    expect(visibleInBox(plan, "/run/omb/relay.sock")).toBe("rw");
+    expect(visibleInBox(plan, relay)).toBe("none");
+    expect(visibleInBox(plan, `${dataDir}/box/egress.sock`)).toBe("none");
+    const shared = planBox(setup(), { command: "/opt/chrome", args: [], env: {}, net: "shared", relay });
+    expect(bwrapArgs(shared).join(" ")).not.toContain(relay);
+  });
+
   it("has the machine's CPU list read-only and nothing else of /sys, so a TCMalloc runtime (Antigravity) can start", () => {
     // Measured on a Fly Cloud home (2, 4 and 8 shared CPUs): without `possible` Google's runtime stops at start with
     // "tcmalloc/internal/sysinfo.h:76] CHECK in NumCPUs" and exit 134; with it, initialize answers.

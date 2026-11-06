@@ -1,7 +1,7 @@
-export type ConnectionKind = "mcp" | "key" | "composio" | "highlevel" | "email";
+export type ConnectionKind = "mcp" | "key" | "composio" | "email";
 
 export interface Connection {
-  /** "mcp:<name>", "key:<provider>", "composio", "highlevel" or "email". */
+  /** "mcp:<name>", "key:<provider>", "composio" or "email". */
   id: string;
   kind: ConnectionKind;
   label: string;

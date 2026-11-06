@@ -113,13 +113,17 @@ function workspaceSenderAllowed(event, contents, state, localOrigin) {
 
 /** Native menu choices, never renderer-supplied destinations or callbacks. `iconFor`: a saved colour's small dot, when main can draw one.
  * `places`: the one line saying which side has which bots, shown first; `copyToCloud`: the send line under the list. `foldSublabels`: where menus show no sublabels (Windows, Linux), My Cloud's status line
- * joins its name instead of vanishing. */
-function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget, onAddCloud, sublabels = {}, iconFor = null, places = null, copyToCloud = null, foldSublabels = false, homeOrigin = null, text = englishText }) {
+ * joins its name instead of vanishing. `locals`: the workspaces of this computer's own (local-profiles.mjs), each opened by
+ * `onLocal(id)` (`shown`: the one on screen); `onNewLocal`: a new one, named on this computer's own page. */
+function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget, onAddCloud, sublabels = {}, iconFor = null, places = null, copyToCloud = null, foldSublabels = false, homeOrigin = null, locals = [], onLocal = null, onNewLocal = null, text = englishText }) {
   const active = activeEnvironment(state), { t } = text;
-  if (homeOrigin) return homeMenuTemplate(state, { onSwitch, onForget, sublabels, iconFor, foldSublabels, homeOrigin, t });
+  const own = onLocal ? locals.map((local) => ({ id: `workspace-local-${local.id}`, label: local.label, type: "radio", checked: local.shown === true, click: () => onLocal(local.id) })) : [];
+  const fresh = onNewLocal ? [{ id: "workspace-new-local", label: t("native.menu.newLocal"), click: onNewLocal }] : [];
+  if (homeOrigin) return homeMenuTemplate(state, { onSwitch, onForget, sublabels, iconFor, foldSublabels, homeOrigin, own, fresh, t });
   return [
     ...(places ? [{ id: "workspace-places", label: places, enabled: false }, { type: "separator" }] : []),
-    { id: "workspace-local", label: t("place.local"), type: "radio", checked: !active, ...(iconFor && cleanColor(state.localColor) ? { icon: iconFor(state.localColor) } : {}), click: () => onSwitch(LOCAL_ID) },
+    { id: "workspace-local", label: t("place.local"), type: "radio", checked: !active && !own.some((item) => item.checked), ...(iconFor && cleanColor(state.localColor) ? { icon: iconFor(state.localColor) } : {}), click: () => onSwitch(LOCAL_ID) },
+    ...own,
     ...[...state.environments].sort((a, b) => listedPlace(b) - listedPlace(a)).map((entry) => {
       const icon = iconFor && cleanColor(entry.color) ? iconFor(entry.color) : null;
       const status = Object.hasOwn(sublabels, entry.id) ? sublabels[entry.id] : entry.team ? teamRoleLabel(entry.team.role, t) : null;
@@ -132,6 +136,7 @@ function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget, onAddClou
     ...(copyToCloud ? [{ id: "workspace-copy-to-cloud", label: copyToCloud.label, click: copyToCloud.click }] : []),
     ...(onAddCloud ? [{ id: "workspace-add-cloud", label: t("native.menu.addCloud"), sublabel: t("native.switcher.addCloudSub"), click: onAddCloud }] : []),
     { type: "separator" },
+    ...fresh,
     { id: "workspace-connect", label: t("native.menu.connect"), click: onConnect },
     ...(active && !listedPlace(active) ? [{ id: "workspace-forget", label: t("native.switcher.forgetNamed", { name: active.name }), click: () => onForget(active.id) }] : []),
   ];
@@ -140,18 +145,21 @@ function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget, onAddClou
 /** Once My Cloud is the person's home: My Cloud, each Cloud of theirs and each team's Cloud (with this person's role),
  * then the other saved servers, each a whole place of its own; this computer is not one of them, and nothing here sends
  * or copies. A Cloud or a team is the Admin's to list and remove, so it has no Forget. */
-function homeMenuTemplate(state, { onSwitch, onForget, sublabels, iconFor, foldSublabels, homeOrigin, t }) {
+function homeMenuTemplate(state, { onSwitch, onForget, sublabels, iconFor, foldSublabels, homeOrigin, own = [], fresh = [], t }) {
   const active = activeEnvironment(state);
   const places = state.environments.filter((entry) => entry.kind !== "local").sort((a, b) => placeRank(a, homeOrigin) - placeRank(b, homeOrigin));
+  const shown = own.some((item) => item.checked);
   return [
+    ...own,
     ...places.map((entry) => {
       const icon = iconFor && cleanColor(entry.color) ? iconFor(entry.color) : null;
       const status = Object.hasOwn(sublabels, entry.id) ? sublabels[entry.id] : entry.team ? teamRoleLabel(entry.team.role, t) : null;
       return {
         id: `workspace-${entry.id}`, label: foldSublabels && status ? `${entry.name} · ${status}` : entry.name, sublabel: status ?? new URL(entry.origin).host,
-        ...(icon ? { icon } : {}), type: "radio", checked: entry.id === state.activeId, click: () => onSwitch(entry.id),
+        ...(icon ? { icon } : {}), type: "radio", checked: entry.id === state.activeId && !shown, click: () => onSwitch(entry.id),
       };
     }),
+    ...(fresh.length ? [{ type: "separator" }, ...fresh] : []),
     ...(active && active.origin !== homeOrigin && !listedPlace(active) ? [{ type: "separator" }, { id: "workspace-forget", label: t("native.switcher.forgetNamed", { name: active.name }), click: () => onForget(active.id) }] : []),
   ];
 }

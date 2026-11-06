@@ -13,9 +13,9 @@ import { conversationLanguage, serverLine } from "../server-lines.ts";
 import { boxUploadsDir } from "../bot-box/plan.ts";
 import { harnessMcpTokenEnv } from "../harness-mcp-token.ts";
 import { AGENTS_NODE_FLAG, SPAWNED_PROXIES } from "../proxy-paths.ts";
-import { EmailError, LIST_MAX, listMailboxes, listMessages, readMessage, searchMessages, sendMessage } from "./client.ts";
-import { EMAIL_INSTRUCTIONS, EMAIL_NOT_CONNECTED_TEXT, EMAIL_PROMPT, EMAIL_TO_CONNECT_PROMPT } from "./instructions.ts";
-import type { EmailService } from "./service.ts";
+import { EmailError, LASTING_SENDING_FAULTS, LIST_MAX, listMailboxes, listMessages, readMessage, searchMessages, sendMessage, SendingError } from "./client.ts";
+import { EMAIL_CANT_SEND_PROMPT, EMAIL_CANT_SEND_TEXT, EMAIL_INSTRUCTIONS, EMAIL_NOT_CONNECTED_TEXT, EMAIL_NOT_SENT_TEXT, EMAIL_PROMPT, EMAIL_TO_CONNECT_PROMPT } from "./instructions.ts";
+import { sendingProblem, type EmailService } from "./service.ts";
 import type { EmailAccount } from "./store.ts";
 import { EMAIL_TOOLS, emailError, emailText, emailToolCallProblem, isEmailRead, isEmailToolName, type EmailTool, type EmailToolResult } from "./tools.ts";
 
@@ -126,7 +126,8 @@ export function createEmailHost(deps: EmailHostDeps) {
       const scopes = bot.connectorScopes ? { apps: { [EMAIL_SLUG]: bot.connectorScopes.apps[EMAIL_SLUG]! } } : undefined;
       const grant = bot.connectorTools?.[EMAIL_SLUG];
       const granted = grant && grant.tools !== "*" ? ` Of the email tools, this bot was granted only: ${grant.tools.join(", ")}.` : "";
-      return EMAIL_PROMPT(service.store.list().map((one) => one.address)) + granted + describeConnectorScopes(scopes);
+      const cantSend = service.store.list().flatMap((one) => { const problem = sendingProblem(one); return problem ? [EMAIL_CANT_SEND_PROMPT(one.address, problem)] : []; }).join("");
+      return EMAIL_PROMPT(service.store.list().map((one) => one.address)) + cantSend + granted + describeConnectorScopes(scopes);
     },
     toolListing: () => (service.status().state === "unavailable" ? null : { email: EMAIL_TOOLS.map(({ name, description }) => ({ name, description })) }),
 
@@ -152,12 +153,19 @@ export function createEmailHost(deps: EmailHostDeps) {
       if (!allowed.ok) return emailError(allowed.text);
       const mailbox = account(args.account);
       if ("content" in mailbox) return mailbox;
+      const cantSend = name === "EMAIL_SEND_MESSAGE" ? sendingProblem(mailbox) : undefined;
+      if (cantSend) return emailError(EMAIL_CANT_SEND_TEXT(mailbox.address, cantSend));
       // Before anything comes back: a failure halfway must not leave mail in a conversation not marked as outside work.
       if (isEmailRead(name)) deps.markOutside(capability.threadId);
       let result: EmailToolResult;
       try {
         result = await call(name, args, mailbox, capability);
       } catch (error) {
+        if (error instanceof SendingError) {
+          if (!LASTING_SENDING_FAULTS.has(error.fault)) return emailError(EMAIL_NOT_SENT_TEXT(error.message));
+          service.store.markSendingProblem(mailbox, error.message);
+          return emailError(EMAIL_CANT_SEND_TEXT(mailbox.address, error.message));
+        }
         const failed = error instanceof EmailError ? error : new EmailError("server", "The mail server did not finish this call.");
         if (failed.code === "password") service.store.markProblem(mailbox.address, mailbox.password, "The mail server stopped accepting this password. Connect it again.");
         return emailError(failed.code === "password"
@@ -165,7 +173,7 @@ export function createEmailHost(deps: EmailHostDeps) {
           : failed.message);
       }
       assertActive();
-      if (mailbox.problem && !result.isError) service.store.markProblem(mailbox.address, mailbox.password, mailbox.smtp ? undefined : mailbox.problem);
+      if (mailbox.problem && !result.isError) service.store.markProblem(mailbox.address, mailbox.password, undefined);
       if (name === "EMAIL_SEND_MESSAGE" && !result.isError) {
         deps.appendMessage(capability.threadId, {
           role: "bot", kind: "activity", tool: { name: `mcp__${EMAIL_MCP_SERVER}__${name}`, ok: true, summary: serverLine(conversationLanguage(capability.threadId), "server.email.sent", { address: mailbox.address, count: (args.to as string[]).length }) },

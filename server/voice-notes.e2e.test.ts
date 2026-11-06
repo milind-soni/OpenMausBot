@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { request } from "../scripts/mcp-server.ts";
+import { lastNonReceipt } from "../src/lib/receipts.ts";
 import { listSystemVoices } from "./tts/system-voices.ts";
 
 const execFileAsync = promisify(execFile);
@@ -340,7 +341,7 @@ it("keeps the parked note when the room-post append fails, so a retry can attach
   expect(audio.path.endsWith(f.mp3Files()[0])).toBe(true);
 }, { failFirstAudioAppend: true }), 60_000);
 
-it("keeps a failed turn's voice note above its failure row, and still deletes a stopped turn's", async () => withVoiceFixture(async (f) => {
+it("keeps a failed turn's voice note above its failure row, and a stopped turn's above its stop line", async () => withVoiceFixture(async (f) => {
   const baseUrl = await f.serveTts();
   await f.api("/api/config", { tts: { provider: "chatterbox", baseUrl, voice: "voice-a" } }, "PUT");
   const replying = (await f.cli("new-bot", "--name", "Failing reply bot")).bot;
@@ -381,28 +382,15 @@ it("keeps a failed turn's voice note above its failure row, and still deletes a 
   await f.cli("send", "--bot", stopped.id, "--task", stopped.activeTaskId, "--text", "Send a note, then hold.");
   await expect.poll(() => f.mp3Files().length, { timeout: 20_000 }).toBe(3);
   await f.api("/api/bots/" + stopped.id + "/interrupt", { threadId: stopped.activeTaskId });
-  await expect.poll(() => f.mp3Files().length, { timeout: 20_000 }).toBe(2);
   await f.cli("wait", "--bot", stopped.id, "--task", stopped.activeTaskId, "--timeout", "30");
-  expect((await f.messages(stopped.activeTaskId)).some((m: any) => (m.attachments ?? []).some((a: any) => a.kind === "audio"))).toBe(false);
+  const afterStop: any[] = await f.messages(stopped.activeTaskId);
+  const kept = afterStop.findIndex((m: any) => (m.attachments ?? []).some((a: any) => a.kind === "audio"));
+  expect(afterStop[kept].attachments[0].text).toBe("This note is stopped.");
+  const last = lastNonReceipt<any>(afterStop);
+  expect(last.tool.name).toMatch(/^stopped:/);
+  expect(afterStop.indexOf(last)).toBeGreaterThan(kept);
+  expect(f.mp3Files()).toHaveLength(3);
 }), 120_000);
-
-it("deletes a parked voice note when the turn is cancelled mid-flight", async () => withVoiceFixture(async (f) => {
-  const baseUrl = await f.serveTts();
-  await f.api("/api/config", { tts: { provider: "chatterbox", baseUrl, voice: "voice-a" } }, "PUT");
-  const bot = (await f.cli("new-bot", "--name", "Cancelled note bot")).bot;
-  const gate = join(f.dataDir, "voice-note-gate");
-  f.savePlan({
-    [bot.id]: {
-      steps: [{ tool: "send_voice_note", arguments: { text: "This note will be cancelled." } }],
-      gateFile: gate,
-      reply: "Never reached.",
-    },
-  });
-  await f.cli("send", "--bot", bot.id, "--task", bot.activeTaskId, "--text", "Send a note, then hold.");
-  await expect.poll(() => f.mp3Files().length, { timeout: 20_000 }).toBe(1);
-  await f.api("/api/bots/" + bot.id + "/interrupt", { threadId: bot.activeTaskId });
-  await expect.poll(() => f.mp3Files(), { timeout: 20_000 }).toEqual([]);
-}), 90_000);
 
 it("leaves no file and no later-turn attachment when the turn dies mid-synthesis", async () => withVoiceFixture(async (f) => {
   const hold = join(f.dataDir, "tts-hold");
@@ -443,7 +431,7 @@ const settle = async (f: any, bot: any, text = "Go ahead.") => {
   await f.cli("wait", "--bot", bot.id, "--task", bot.activeTaskId, "--timeout", "30");
 };
 
-it("speaks every reply when the Voice setting is on: failed turns too, never a stopped one, a bot's own note, or a bot switched off", async () => withVoiceFixture(async (f) => {
+it("speaks every reply when the Voice setting is on: failed turns too with how they ended, never one the person stopped, a bot's own note, or a bot switched off", async () => withVoiceFixture(async (f) => {
   const baseUrl = await f.serveTts();
   await f.api("/api/config", { tts: { provider: "chatterbox", baseUrl, voice: "voice-a", everyReply: true } }, "PUT");
   expect((await f.api("/api/config", undefined, "GET")).tts.everyReply).toBe(true);
@@ -473,7 +461,8 @@ it("speaks every reply when the Voice setting is on: failed turns too, never a s
   expect(await spokenNote(f, own.activeTaskId, "Reply next to my own note.")).toEqual([expect.objectContaining({ text: "My own note." })]);
 
   await f.cli("send", "--bot", failing.id, "--task", failing.activeTaskId, "--text", "Export it.");
-  expect(await spokenNote(f, failing.activeTaskId, "Half the export is done.")).toEqual([expect.objectContaining({ text: "Half the export is done." })]);
+  const failedNote = "Half the export is done. I stopped before finishing: the export step crashed";
+  expect(await spokenNote(f, failing.activeTaskId, "Half the export is done.")).toEqual([expect.objectContaining({ text: failedNote })]);
   expect((await f.messages(failing.activeTaskId)).some((m: any) => String(m.tool?.name ?? "").startsWith("error:"))).toBe(true);
 
   await f.cli("send", "--bot", stopped.id, "--task", stopped.activeTaskId, "--text", "Start the long job.");
@@ -484,7 +473,7 @@ it("speaks every reply when the Voice setting is on: failed turns too, never a s
   await expect.poll(() => f.seen.filter((call: any) => call.input === "The report is ready.").length, { timeout: 20_000 }).toBe(2);
   const spoken = f.seen.map((call: any) => call.input);
   for (const never of ["Muted reply.", "Reply next to my own note.", "Starting the long job."]) expect(spoken).not.toContain(never);
-  for (const once of ["Half the export is done.", "My own note."]) expect(spoken.filter((input: string) => input === once)).toHaveLength(1);
+  for (const once of [failedNote, "My own note."]) expect(spoken.filter((input: string) => input === once)).toHaveLength(1);
 }), 180_000);
 
 it("with the Voice setting off, speaks only for a bot switched on, and says once, quietly, why a bot without a voice cannot", async () => withVoiceFixture(async (f) => {

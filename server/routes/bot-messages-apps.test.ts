@@ -6,6 +6,9 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { ROOM_VIEW_ONLY } from "../../shared/app.ts";
+import { WIDGET_SAMPLES } from "../../shared/widget-samples.ts";
+import { createAgentCard } from "../chat-widgets.ts";
 import { createChatApps, type ChatApps } from "../chat-apps.ts";
 import { DATA_DIR } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
@@ -165,6 +168,22 @@ describe("POST /api/bots/:id/messages with appMessage", () => {
     expect(await post({ threadId, sendId: sendId(), expectedActiveLeafId: null, appMessage: { messageId: appId, text: "x" } }, "/guarded")).toEqual({ status: 400, body: { error: "guarded sends cannot speak for an app" } });
     expect(await post({ threadId, sendId: sendId(), widgetAction: { messageId: appId, ref: "confirm" }, appMessage: { messageId: appId, text: "x" } })).toEqual({ status: 400, body: { error: "send widgetAction or appMessage, not both" } });
     expect(sent()).toEqual([]);
+  });
+
+  it("refuses an app's words and a widget press in a room, so nothing speaks for anyone there", async () => {
+    const { store, bot, state, post, page } = await fixture();
+    const other = store.createBot({ name: "Basil" });
+    const room = store.createGroup("Launch", [bot.id, other.id]);
+    const appId = page("Booking", room.threadId);
+    const widget = createAgentCard({ store, bot, threadId: room.threadId, input: { tool: "show_widget", widget: WIDGET_SAMPLES.pullRequests } });
+    if (!widget.ok) throw new Error(widget.error);
+    const before = store.messagesFor(room.threadId).length;
+    expect(await post({ threadId: room.threadId, sendId: sendId(), appMessage: { messageId: appId, text: "Book the 3pm slot" } }))
+      .toEqual({ status: 409, body: { error: ROOM_VIEW_ONLY } });
+    expect(await post({ threadId: room.threadId, sendId: sendId(), widgetAction: { messageId: widget.messageId, ref: "n2" } }))
+      .toEqual({ status: 409, body: { error: ROOM_VIEW_ONLY } });
+    expect(state.accepted).toEqual([]);
+    expect(store.messagesFor(room.threadId)).toHaveLength(before);
   });
 
   it("holds an app row to 20 messages an hour, gives a refused send's slot back, and lets a retry through", async () => {

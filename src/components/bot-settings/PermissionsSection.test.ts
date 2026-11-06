@@ -122,6 +122,30 @@ describe("PermissionsSection parts", () => {
   });
 });
 
+describe("Sending on your behalf", () => {
+  const option = (label: string) => [...host.querySelectorAll("button")].find((candidate) => candidate.textContent === label);
+
+  it("asks every time by default, and one click sends without asking", () => {
+    render(base);
+    expect(option("Ask every time")?.getAttribute("aria-pressed")).toBe("true");
+    flushSync(() => option("Send without asking")!.click());
+    expect(dispatch).toHaveBeenCalledExactlyOnceWith({ type: "updateBot", botId: "pepper", patch: { outbound: { policy: "allow" } } });
+  });
+
+  it("has no limit to set or count, even for a rule saved with a daily cap", () => {
+    const fetched = vi.fn(() => new Promise(() => {}));
+    vi.stubGlobal("fetch", fetched);
+    render({ ...base, outbound: { policy: "allow", dailyCap: 25 } as Bot["outbound"] });
+    expect(option("Send without asking")?.getAttribute("aria-pressed")).toBe("true");
+    expect(host.querySelector("input")).toBeNull();
+    expect(host.textContent).not.toContain("used today");
+    expect(host.textContent).not.toContain("25");
+    expect(fetched).not.toHaveBeenCalled();
+    flushSync(() => option("Ask every time")!.click());
+    expect(dispatch).toHaveBeenCalledExactlyOnceWith({ type: "updateBot", botId: "pepper", patch: { outbound: { policy: "ask" } } });
+  });
+});
+
 describe("who a bot talks to", () => {
   const quill: Bot = { ...base, id: "quill", name: "Quill", threadId: "quill-main", tasks: [] };
   const button = () => [...host.querySelectorAll("button")].find((candidate) => candidate.textContent === "Let it talk to every bot");

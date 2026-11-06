@@ -2,6 +2,9 @@ import { Ajv, type ErrorObject, type ValidateFunction } from "ajv";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import formats from "ajv-formats";
 
+const DRAFT_07 = "http://json-schema.org/draft-07/schema#";
+const DRAFT_2020_12 = "https://json-schema.org/draft/2020-12/schema";
+
 // A schema is a contract: no coercion, defaults, removed fields or fetched external references.
 const validatorOptions = {
   strict: true, allErrors: false, coerceTypes: false, useDefaults: false,
@@ -12,12 +15,12 @@ const validatorOptions = {
 
 export function compileToolSchema(schema: Record<string, unknown>, options: { allErrors?: boolean; strict?: boolean } = {}): ValidateFunction {
   const dialect = schema.$schema;
-  if (dialect !== undefined && dialect !== "http://json-schema.org/draft-07/schema#" && dialect !== "https://json-schema.org/draft/2020-12/schema") {
+  if (dialect !== undefined && dialect !== DRAFT_07 && dialect !== DRAFT_2020_12) {
     throw new Error("MCP tool schema uses an unsupported dialect; use JSON Schema draft-07 or 2020-12");
   }
   // One compiler per schema keeps external IDs from resolving against unrelated tools.
   const settings = { ...validatorOptions, allErrors: options.allErrors === true, strict: options.strict !== false };
-  const compiler = dialect === "https://json-schema.org/draft/2020-12/schema" ? new Ajv2020(settings) : new Ajv(settings);
+  const compiler = dialect === DRAFT_2020_12 ? new Ajv2020(settings) : new Ajv(settings);
   // ajv-formats is CommonJS and exports the plugin as both module.exports and .default.
   formats.default(compiler);
   // GitHub's MCP server tags header-routed arguments with this annotation; it adds no constraint to check.
@@ -30,18 +33,34 @@ export function compileToolSchema(schema: Record<string, unknown>, options: { al
   catch { throw new Error("MCP tool schema could not be validated; check its constraints, formats, and references"); }
 }
 
-/** A configured server's tool schema. Where strict compilation refuses it, its copy without what asserts nothing is
- * compiled instead, so a refusal still means a constraint this checker cannot hold. */
+/** A configured server's tool schema, strictly. MCP (2025-11-25) reads a schema without `$schema` as JSON Schema 2020-12,
+ * while older servers write draft-07 without naming it, so such a schema is tried as each. Where strict compilation refuses
+ * it, its copy without what asserts nothing is compiled instead, so a refusal still means a constraint this checker cannot hold. */
 export function compileServerToolSchema(schema: Record<string, unknown>): ValidateFunction {
-  try { return compileToolSchema(schema); }
-  catch (error) {
-    const plain = withoutNonAssertions(schema);
-    if (!plain) throw error;
-    return compileToolSchema(plain);
+  const plain = withoutNonAssertions(schema);
+  const candidates = [schema, ...(plain ? [plain] : [])]
+    .flatMap((candidate) => candidate.$schema === undefined ? [candidate, { ...candidate, $schema: DRAFT_2020_12 }] : [candidate]);
+  let refusal: unknown;
+  for (const candidate of candidates) {
+    try { return compileToolSchema(candidate); }
+    catch (error) { refusal ??= error; }
   }
+  throw refusal;
 }
 
-const DRAFT_07 = "http://json-schema.org/draft-07/schema#";
+/** How much of a server tool's schema OpenMausBot checks a call against before the server checks it: all of it, the
+ * lenient copy, or only that the arguments are an object. */
+export type ServerToolCheck = "full" | "lenient" | "object";
+
+/** A check for every tool a server lists, so one schema this checker cannot compile never costs the server its other tools.
+ * Security: no compiler here loads a schema, so an external `$ref` is never fetched; it leaves the check to the server. */
+export function serverToolValidator(schema: Record<string, unknown>): { validate: ValidateFunction; check: ServerToolCheck } {
+  try { return { validate: compileServerToolSchema(schema), check: "full" }; }
+  catch {}
+  const lenient = lenientToolValidator(schema);
+  return lenient ? { validate: lenient, check: "lenient" } : { validate: compileToolSchema({ type: "object" }), check: "object" };
+}
+
 /** What tool generators emit that never asserts: OpenAPI's `example`, `discriminator`, `externalDocs` and `xml`, and VS
  * Code's editor hints. Vendor `x-` extensions too, except the two compileToolSchema checks. */
 const NON_ASSERTIONS = new Set(["example", "discriminator", "externalDocs", "xml", "markdownDescription", "markdownEnumDescriptions", "enumDescriptions"]);

@@ -4,11 +4,14 @@
  * a brief disconnect of the same account, and `places()` the saved servers that are the person's own Clouds, My Cloud
  * first. `ownHome()`: a server of the person's own their bots moved to (own-home-main.mjs), lent as their Clouds are, bound
  * to that server's identity (`own:<environment id>` as its account), last. Security: never a Team Cloud, nor a server that
- * only signed in with their account (`isOwnCloud`), nor one connected by hand that the person did not make their home. */
-export function createLendingTarget({ account, environments, ownHome = () => null }) {
+ * only signed in with their account (`isOwnCloud`), nor one connected by hand that the person did not make their home; and
+ * nothing while the clean workspace for nobody who can reach the bots runs (`clean`, clean-workspace.mjs). A profile the
+ * person opened keeps this computer lent as before: the sign-in alone decides. */
+export function createLendingTarget({ account, environments, ownHome = () => null, clean = null }) {
   let lastHome = null;
+  const signedIn = () => (clean?.stranded() ? null : account());
   const mine = () => {
-    const current = account();
+    const current = signedIn();
     if (!current) return null;
     const state = current.state();
     const accountId = state.account?.id ?? null;
@@ -22,7 +25,7 @@ export function createLendingTarget({ account, environments, ownHome = () => nul
     if (own && env?.origin === own.origin) return { status: "connected", accountId: `own:${own.environmentId}`, origin: own.origin };
     const base = mine();
     if (!base || !env?.cloud || base.origin === env.origin) return base;
-    return account()?.isOwnCloud?.(env.origin) ? { ...base, origin: env.origin } : base;
+    return signedIn()?.isOwnCloud?.(env.origin) ? { ...base, origin: env.origin } : base;
   };
   const environment = () => {
     const snapshot = mine();
@@ -34,7 +37,7 @@ export function createLendingTarget({ account, environments, ownHome = () => nul
     environment,
     places() {
       const home = environment(), own = ownHome();
-      const others = environments().filter((entry) => entry.cloud && entry !== home && account()?.isOwnCloud?.(entry.origin));
+      const others = environments().filter((entry) => entry.cloud && entry !== home && signedIn()?.isOwnCloud?.(entry.origin));
       const theirs = own ? environments().filter((entry) => entry.origin === own.origin && !entry.cloud && !entry.team && !entry.home) : [];
       return [...(home ? [home] : []), ...others, ...theirs];
     },

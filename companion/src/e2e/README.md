@@ -57,13 +57,15 @@ reveals nothing about `psk`: the two are separate HMAC outputs under different l
 - **Field rules:**
   - `v` MUST be 1.
   - `k` is required.
-  - `h` and `r` are present only when the computer has a relay token (signed in, relay enabled, and the device isn't restricted to "Wi-Fi and
-    Tailscale only").
+  - `h` and `r` are present only when the computer has a relay token (signed in, relay enabled). A device restricted to "Wi-Fi and
+    Tailscale only" still gets them: they admit nothing by themselves, and they let a restricted phone away from home probe the relay
+    now and then (4404 until it is allowed again).
   - `r` lists 1 to 4 hostnames in the order to try. Each MUST match `^relay[1-9][0-9]?\.openmausbot\.com$`.
   - `routes` is optional, `"any"` or `"local"`. `"local"` means the computer restricted this device to Wi-Fi and
-    Tailscale; it never comes with `h` or `r`. Absent means `"any"`, so a descriptor without `h` and `r` and without
-    `"local"` only says the computer has no relay right now (signed out, or outside the rollout). The QR never carries
-    `"local"`: a restriction is set per phone after pairing, and reaches it through the endpoint list.
+    Tailscale; it may come with `h` and `r` (an older computer sends it without them). Absent means `"any"`, so a
+    descriptor without `h` and `r` and without `"local"` only says the computer has no relay right now (signed out, or
+    outside the rollout). The QR never carries `"local"`: a restriction is set per phone after pairing, and reaches it
+    through the endpoint list and the `companion.endpoints` event.
   - The encoded value is at most 1,024 bytes.
 - **Phone parsing rules:**
   - A malformed `e2e` rejects the whole invite. That includes bad base64, bad JSON, a bad point, `h` without `r` or `r` without `h`, and a host
@@ -74,7 +76,12 @@ reveals nothing about `psk`: the two are separate HMAC outputs under different l
   `http://H:P` into `ws://H:P/v1/e2e`. A `hosted` URL is never used for E2E.
 - **Pair response.** `POST /api/pair` returns 200 with `{token, device, serverName, hosts?, endpoints?}` plus `"e2e": {…same object…}`.
 - **Endpoint list.** `GET /api/companion/endpoints` returns `{serverName, hosts?, endpoints[]}` plus `"e2e": {…}`. The response is built for
-  the device that asks: `h` and `r` are left out if that device is restricted.
+  the device that asks: a restricted device's `e2e` says `"routes":"local"`.
+- **Endpoint event.** When a device's routes change, the sidecar writes the same body plus `"kind":"companion.endpoints"` as one event
+  (`data:` only, no `id:` and no `seq`, never replayed) on every `/api/events` stream that device holds, so the phone hears it inside its
+  session. Narrowing to `"local"`: the event first, then the relay keeps the device admitted 300 ms more so the event lands, then the
+  set shrinks (the relay closes its relay sessions with 4404) and the computer closes its own; direct sessions stay. Widening to
+  `"any"`: admitted first, then the event.
 - **Pinning:**
   - A phone that holds a QR-pinned `k` MUST NEVER replace it from a network response.
   - A phone paired before this feature (no `k`) accepts `k` once from `/api/companion/endpoints`, over the route it already trusts (trust on
@@ -353,7 +360,9 @@ These make the sections above exact where an implementation could otherwise choo
 - `v` must be an integer. `v > 1` means "update the app" whatever the other fields hold; `v < 1`, a string, or a missing
   `v` rejects.
 - Unknown fields are ignored. Field order is free.
-- `routes`, when present, must be the string `"any"` or `"local"`, and `"local"` with `h` or `r` rejects.
+- `routes`, when present, must be the string `"any"` or `"local"`. `"local"` may carry `h` and `r` (vector
+  `routes_local_with_relay`); a restricted phone dials only its direct routes, and probes the relay on a slow backoff only
+  when they fail.
 
 **Removal**
 - A close code travels outside the encryption, and over the relay the relay writes it. When a device is removed, the

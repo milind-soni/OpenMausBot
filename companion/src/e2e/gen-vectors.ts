@@ -524,6 +524,7 @@ function v7() {
     { name: "routes_local", value: encodeDescriptor({ v: 1, k, routes: "local" }) },
     { name: "routes_any_with_relay", value: encodeDescriptor({ v: 1, k, h, r, routes: "any" }) },
     { name: "routes_any_without_relay", value: raw({ v: 1, k, routes: "any" }) },
+    { name: "routes_local_with_relay", value: encodeDescriptor({ v: 1, k, h, r, routes: "local" }) },
   ];
   const offCurve = b64u(flip(T.publicKey, 64));
   const invalid = [
@@ -551,7 +552,6 @@ function v7() {
     { name: "json_array", value: raw([1]) },
     { name: "routes_unknown", value: raw({ v: 1, k, routes: "wifi" }) },
     { name: "routes_not_a_string", value: raw({ v: 1, k, routes: 1 }) },
-    { name: "routes_local_with_relay", value: raw({ v: 1, k, h, r, routes: "local" }) },
     { name: "v2", value: raw({ v: 2, k }) },
     { name: "v2_unknown_shape", value: raw({ v: 2, keys: [1, 2, 3] }) },
   ];

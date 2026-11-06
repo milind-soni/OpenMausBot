@@ -6,17 +6,23 @@ import type { EmailService } from "../email/service.ts";
 import { userError } from "../user-errors.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
-const body = z.object({
+const outgoing = z.object({
+  smtpHost: z.string().trim().max(253).optional(),
+  smtpPort: z.number().int().min(1).max(65_535).optional(),
+  smtpSecurity: z.enum(["tls", "starttls"]).optional(),
+  smtpUsername: z.string().trim().max(320).optional(),
+  smtpPassword: z.string().max(4_096).optional(),
+}).strict();
+
+const body = outgoing.extend({
   address: z.string().trim().min(3).max(320),
   password: z.string().min(1).max(4_096),
   imapHost: z.string().trim().max(253).optional(),
   imapPort: z.number().int().min(1).max(65_535).optional(),
-  smtpHost: z.string().trim().max(253).optional(),
-  smtpPort: z.number().int().min(1).max(65_535).optional(),
   username: z.string().trim().max(320).optional(),
 }).strict();
 
-const ACCOUNT = /^\/api\/email\/accounts\/([^/]{3,960})$/u;
+const ACCOUNT = /^\/api\/email\/accounts\/([^/]{3,960})(?:\/(outgoing|test))?$/u;
 
 export function createEmailRoutes(deps: { service: EmailService }): RouteHandler {
   const { service } = deps;
@@ -34,7 +40,16 @@ export function createEmailRoutes(deps: { service: EmailService }): RouteHandler
       return json(res, 200, answer);
     }
     const one = ACCOUNT.exec(path);
-    if (one && method === "DELETE") return json(res, 200, service.disconnect(decodeURIComponent(one[1]!)));
-    return json(res, 404, { error: "not found" });
+    let address: string | null = null;
+    try { address = one ? decodeURIComponent(one[1]!) : null; } catch {}
+    if (!one || !address) return json(res, 404, { error: "not found" });
+    if (!one[2]) return method === "DELETE" ? json(res, 200, service.disconnect(address)) : json(res, 405, { error: "method not allowed" });
+    if (method !== "POST") return json(res, 405, { error: "method not allowed" });
+    // JSON only, so a form posted from another page can't send a message or change where mail goes.
+    if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) return json(res, 415, { error: "content-type must be application/json" });
+    if (one[2] === "test") return json(res, 200, await service.sendTest(address));
+    const fields = outgoing.safeParse(await readBody(req, 20_480));
+    if (!fields.success) return json(res, 400, userError("serverError.mailbox.outgoingFields"));
+    return json(res, 200, await service.checkOutgoing(address, fields.data));
   };
 }

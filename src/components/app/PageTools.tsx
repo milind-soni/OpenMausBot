@@ -123,10 +123,12 @@ export interface PageToolsProps {
   share: ReturnType<typeof usePageShare>;
   ready: boolean;
   fullScreen: { open: boolean; toggle(): void };
+  /** Shown in a room: view-only, so no Point and no Share. */
+  room?: boolean;
 }
 
 /** The card's toolbar: ‹ v2 › and Updated on the left; Point, Share, Open in new tab and Full screen on the right. */
-export function PageToolbar({ version, point, share, ready, fullScreen, className }: PageToolsProps & { className?: string }) {
+export function PageToolbar({ version, point, share, ready, fullScreen, room, className }: PageToolsProps & { className?: string }) {
   const label = version.latest ? t("chat.preview.version", { n: version.rev + 1 }) : t("chat.preview.versionOf", { n: version.rev + 1, count: version.last + 1 });
   const busy = share.share.kind === "busy";
   return (
@@ -141,13 +143,15 @@ export function PageToolbar({ version, point, share, ready, fullScreen, classNam
         {version.flash && <span role="status" data-page-updated className="ms-1 rounded-full bg-accent/15 px-2 py-px font-medium text-accent-text">{t("chat.preview.updated")}</span>}
       </div>
       <div className="ms-auto flex items-center gap-1">
-        <button type="button" aria-pressed={point.pointing} onClick={point.toggle} disabled={!ready} title={t("chat.preview.pointHint")}
-          className={cn(ASK_CHIP, point.pointing ? ASK_CHIP_PICKED : ASK_CHIP_IDLE)}>
-          <Crosshair size={14} />{t("chat.preview.point")}
-        </button>
-        <button type="button" onClick={() => void share.run(version.rev)} disabled={busy} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
-          {busy ? <Loader2 size={14} className="animate-spin" /> : <Share2 size={14} />}{t("chat.preview.share")}
-        </button>
+        {!room && <>
+          <button type="button" aria-pressed={point.pointing} onClick={point.toggle} disabled={!ready} title={t("chat.preview.pointHint")}
+            className={cn(ASK_CHIP, point.pointing ? ASK_CHIP_PICKED : ASK_CHIP_IDLE)}>
+            <Crosshair size={14} />{t("chat.preview.point")}
+          </button>
+          <button type="button" onClick={() => void share.run(version.rev)} disabled={busy} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <Share2 size={14} />}{t("chat.preview.share")}
+          </button>
+        </>}
         <button type="button" className={TOOL} disabled={!share.url} onClick={() => share.url && void openExternalLink(share.url)}
           aria-label={t("chat.preview.openTab")} title={share.url ? t("chat.preview.openTab") : t("chat.preview.openTabNeedsLink")}>
           <ArrowUpRight size={15} />
@@ -164,7 +168,7 @@ export function PageToolbar({ version, point, share, ready, fullScreen, classNam
 
 /** Under the toolbar: the public link with Copy, Update link and Unpublish once shared, or why sharing failed; the Point
  * hint. */
-export function PageNotes({ version, point, share, className }: Pick<PageToolsProps, "version" | "point" | "share"> & { className?: string }) {
+export function PageNotes({ version, point, share, room, className }: Pick<PageToolsProps, "version" | "point" | "share" | "room"> & { className?: string }) {
   const { dispatch } = useStore();
   const { state: copied, copy } = useCopyFeedback(share.url ?? "");
   const state = share.share;
@@ -179,9 +183,11 @@ export function PageNotes({ version, point, share, className }: Pick<PageToolsPr
         <button type="button" onClick={copy} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
           {copied === "copied" ? <Check size={14} /> : <Copy size={14} />}{t(copied === "copied" ? "chat.page.copied" : "chat.page.copyLink")}
         </button>
-        <button type="button" onClick={() => void share.run(version.rev)} disabled={state.kind === "busy"} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
-          {t("chat.preview.republish")}
-        </button>
+        {!room && (
+          <button type="button" onClick={() => void share.run(version.rev)} disabled={state.kind === "busy"} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
+            {t("chat.preview.republish")}
+          </button>
+        )}
         <button type="button" onClick={() => void share.unpublish()} disabled={state.kind === "unpublishing"} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
           {state.kind === "unpublishing" ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}{t("chat.page.unpublish")}
         </button>
@@ -232,7 +238,7 @@ export function PageFullScreen(props: PageToolsProps & {
       <div ref={closer} className="flex flex-col gap-2 border-b border-hairline/40 px-4 pb-3 pt-3">
         <div className="truncate text-[15px] font-semibold text-ink" title={props.title}><bdi dir="auto">{props.title}</bdi></div>
         <PageToolbar {...props} />
-        <PageNotes version={props.version} point={point} share={props.share} />
+        <PageNotes version={props.version} point={point} share={props.share} room={props.room} />
       </div>
       <div className={cn("relative min-h-0 flex-1 bg-app", point.pointing && "ring-2 ring-inset ring-accent/60")}>
         <AppFrame doc={props.doc} botId={props.botId} threadId={props.threadId} title={props.title} height={600} handle={props.handle}

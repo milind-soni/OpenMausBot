@@ -34,6 +34,8 @@ export class Hosts {
   private readonly entries = new Map<string, HostEntry>();
   private readonly slots: number;
   connected = 0;
+  /** Sessions spliced right now, across every host. */
+  spliced = 0;
 
   constructor(admissionMax: number) {
     this.slots = admissionMax;
@@ -145,7 +147,7 @@ export function handleControl(ctx: Context, ws: WebSocket): void {
     entry.control = ws;
     entry.admission = [];
     if (previous) closeWith(ctx, previous, Close.Replaced);
-    else ctx.hosts.connected += 1;
+    else ctx.metrics.peak("hosts_connected", (ctx.hosts.connected += 1));
 
     const since = ctx.now();
     const rate = new TokenBucket(ctx.limits.controlBurst, ctx.limits.controlPerSecond / 1000, ctx.now);

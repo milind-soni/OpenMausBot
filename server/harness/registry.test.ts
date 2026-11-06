@@ -207,6 +207,30 @@ describe("ProviderRegistry", () => {
     }
   });
 
+  it("tells its listeners when a status read finds a signed-out engine signed in, however that sign-in happened, and only then", async () => {
+    let authenticated: boolean | undefined = false;
+    const fake = makeFakeDriver({ get answer() { return { state: "available" as const, version: "1.0.0", ...(authenticated === undefined ? {} : { authenticated }) }; } });
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.load({ a: { driver: "fake" } });
+    const heard: string[] = [];
+    registry.onSignedIn((instanceId) => heard.push(instanceId));
+    const read = async () => {
+      registry.forgetSnapshots();
+      await registry.describe();
+    };
+    await read();
+    expect(heard).toEqual([]);
+    authenticated = true;
+    await read();
+    expect(heard).toEqual(["a"]);
+    await read();
+    authenticated = undefined;
+    await read();
+    authenticated = true;
+    await read();
+    expect(heard, "signed in all along: nothing new to tell").toEqual(["a"]);
+  });
+
   it("describe() reports a snapshot() failure as unavailable rather than throwing", async () => {
     const fake = makeFakeDriver({ failSnapshot: "provider probe exploded" });
     const registry = new ProviderRegistry([fake.driver]);

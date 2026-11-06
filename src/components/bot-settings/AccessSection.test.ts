@@ -16,7 +16,7 @@ vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({ state: { ...original.initialState, config: fixture.config ?? original.initialState.config }, dispatch: fixture.dispatch }) };
 });
-// The connected-apps list (Composio accounts plus the native HighLevel connection) is seeded per test.
+// The connected-apps list (Composio accounts plus the native Email connection) is seeded per test.
 vi.mock("./useBotApps", async (importOriginal) => ({
   ...await importOriginal<typeof import("./useBotApps")>(),
   useBotApps: () => fixture.apps,
@@ -334,21 +334,12 @@ describe("AccessSection Record browser steps", () => {
 describe("AccessSection per-app scopes", () => {
   const app = (slug: string, label: string) => ({ slug, label, blurb: "", card: { logo: null, domain: null, label }, scope: "write" as const });
 
-  it("lists HighLevel by name next to the Composio apps once the server reports it connected", () => {
-    fixture.apps = { phase: "ready", connectedSlugs: ["gmail", "highlevel"], apps: [app("gmail", "Gmail"), app("highlevel", "HighLevel")] };
+  it("lists Email by name next to the Composio apps once the server reports a mailbox connected", () => {
+    fixture.apps = { phase: "ready", connectedSlugs: ["email", "gmail"], apps: [app("email", "Email"), app("gmail", "Gmail")] };
     const html = render(makeBot({ connectorScopes: { apps: { gmail: "write" } } }));
-    expect(html).toContain('aria-label="highlevel access"');
-    expect(html).toMatch(/<span class="min-w-0 text-\[13px\] text-ink">HighLevel</);
+    expect(html).toContain('aria-label="email access"');
+    expect(html).toMatch(/<span class="min-w-0 text-\[13px\] text-ink">Email</);
     expect(html).not.toContain("not connected");
-    // Tool-by-tool grants are Composio's list; HighLevel is scoped by read/write only.
-    expect([...html.matchAll(/truncate font-mono text-\[13px\] text-ink">([^<]*)</g)].map((match) => match[1])).toEqual(["gmail"]);
-  });
-
-  it("leaves HighLevel out while it is not connected", () => {
-    fixture.apps = { phase: "ready", connectedSlugs: ["gmail"], apps: [app("gmail", "Gmail")] };
-    const html = render(makeBot({ connectorScopes: { apps: { gmail: "write" } } }));
-    expect(html).not.toContain("HighLevel");
-    expect(html).not.toContain("highlevel");
   });
 
   it("shows no scope rows until the account list is known", () => {

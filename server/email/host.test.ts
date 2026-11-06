@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import "../server-line-packs.ts";
 import { setConversationLanguage } from "../server-lines.ts";
 import { boxUploadsDir } from "../bot-box/plan.ts";
-import { EmailError, openGuard } from "./client.ts";
+import { EmailError, openGuard, SendingError } from "./client.ts";
 import { outsideRouteRefused } from "../host/outside-fence.ts";
 import { createEmailHost, EMAIL_INTERNAL_MCP_PATH, emailAccess, emailAllowedFor, type EmailBot, type EmailHostDeps } from "./host.ts";
 import { createEmailService } from "./service.ts";
@@ -20,7 +20,7 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 
 async function fixture(run: EmailHostDeps["run"] = {}, bot: EmailBot | null = { id: "b1", name: "Ada", color: "blue" }, connected = true) {
   const dataDir = mkdtempSync(join(tmpdir(), "omb-mail-host-")); dirs.push(dataDir);
-  const service = createEmailService({ dataDir, publicOnly: false, guard: openGuard, discover: { fetchText: async () => null, mx: async () => [], srv: async () => [] }, test: { mailbox: (async () => ({ messages: 1 })) as never, sending: (async () => {}) as never } });
+  const service = createEmailService({ dataDir, publicOnly: false, guard: openGuard, discover: { fetchText: async () => null, mx: async () => [], srv: async () => [], cname: async () => [], reverse: async () => [] }, test: { mailbox: (async () => ({ messages: 1 })) as never, sending: (async () => {}) as never } });
   if (connected) await service.connect({ address: "me@shop.example", password: PASSWORD });
   const marked: string[] = [];
   const rows: Array<Record<string, unknown>> = [];
@@ -79,6 +79,27 @@ describe("a turn's Email tools", () => {
     expect(rows).toHaveLength(1);
     expect(JSON.stringify(rows)).not.toContain("a@b.example");
     expect(JSON.stringify(rows)).not.toContain("Body");
+  });
+
+  it("a send the outgoing server refuses for good stops sends until the person fixes it; one that may pass doesn't", async () => {
+    const server = { host: "smtp.shop.example", port: 587, secure: false };
+    let fault: "password" | "no-answer" = "no-answer";
+    let calls = 0;
+    const { call, service, host } = await fixture({ sendMessage: (async () => { calls++; throw new SendingError(fault, server); }) as never });
+    const send = () => call("EMAIL_SEND_MESSAGE", { to: ["a@b.example"], subject: "Hi", text: "Body" });
+    const passing = await send();
+    expect(passing).toMatchObject({ isError: true });
+    expect(passing.content[0]!.text).toContain("smtp.shop.example didn't answer on port 587.");
+    expect(service.sendingProblem("me@shop.example")).toBeUndefined();
+    fault = "password";
+    const lasting = await send();
+    expect(lasting.content[0]!.text).toContain("The outgoing server smtp.shop.example:587 refused the password.");
+    expect(lasting.content[0]!.text).toContain("Connected apps");
+    expect(lasting.content[0]!.text).not.toMatch(/try again/iu);
+    expect(service.sendingProblem("me@shop.example")).toContain("refused the password");
+    expect((await send()).isError).toBe(true);
+    expect(calls, "the third send never reached the server").toBe(2);
+    expect(host.prompt({ id: "b1", name: "Ada" })).toContain("Sending from me@shop.example doesn't work until the person fixes its outgoing server");
   });
 
   it("a header can't be smuggled into a send", async () => {

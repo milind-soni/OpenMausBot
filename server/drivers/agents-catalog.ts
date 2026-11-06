@@ -885,8 +885,8 @@ const CHIEF_TARGET_TOOL_NAMES = new Set(["propose_profile", "propose_model"]);
 const WATCHER_TOOL_NAMES = new Set(["create_options_card"]);
 
 const LOCAL_VM_TOOL_NAMES = new Set(["vm_exec"]);
-/** Refused in a room's thread (chat-widgets.ts, chat-apps.ts, routes/waits.ts), and list_waits, since a room holds no wait. */
-const ROOM_REFUSED_TOOL_NAMES = new Set(["show_widget", "show_html", ...WAIT_TOOL_NAMES]);
+/** Refused in a room's thread (routes/waits.ts), and list_waits, since a room holds no wait. */
+const ROOM_REFUSED_TOOL_NAMES = WAIT_TOOL_NAMES;
 const CLOUD_HOME_SURFACE = {
   type: "string", enum: ["auto", "cloud", "browser"],
   description: "auto = suitable configured computer, cloud = the bot's cloud computer, browser = built-in browser. Omit to list. This server runs in the cloud: the user's own computer and a Local VM are not places here.",

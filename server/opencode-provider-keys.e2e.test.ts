@@ -15,6 +15,7 @@ const HOST = "omb-t-0123456789ab.fly.dev";
 const secret = randomBytes(32).toString("base64url");
 const VENICE = `venice-owner-${randomBytes(8).toString("hex")}`;
 const OWNER_ANTHROPIC = `anthropic-owner-${randomBytes(8).toString("hex")}`;
+const VENICE_LISTED = "listed-only-by-venice";
 let home = "";
 let dataDir = "";
 let dump = "";
@@ -75,7 +76,8 @@ beforeAll(async () => {
   }));
   const port = await freePortBlock([0, 1]);
   base = `http://127.0.0.1:${port}`;
-  const offlinePrelude = `data:text/javascript,${encodeURIComponent('const real = globalThis.fetch; globalThis.fetch = async (url, init) => String(url).startsWith("http://127.0.0.1:") ? real(url, init) : new Response("offline fixture", { status: 503 });')}`;
+  const veniceListing = JSON.stringify({ data: [{ id: VENICE_LISTED }] });
+  const offlinePrelude = `data:text/javascript,${encodeURIComponent(`const real = globalThis.fetch; globalThis.fetch = async (url, init) => String(url).startsWith("http://127.0.0.1:") ? real(url, init) : String(url) === "https://api.venice.ai/api/v1/models?type=text" && new Headers(init?.headers).get("authorization") === "Bearer ${VENICE}" ? new Response(${JSON.stringify(veniceListing)}) : new Response("offline fixture", { status: 503 });`)}`;
   child = spawnWithSecrets(process.execPath, ["--import", offlinePrelude, join(SERVER_DIR, "index.ts")], {
     PATH: process.env.PATH, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
     HOME: home, USERPROFILE: home, OMB_DATA_DIR: dataDir, OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1),
@@ -117,6 +119,9 @@ it("saves keys for any OpenCode provider on a Cloud, shows only their names, and
     expect(response).not.toContain(OWNER_ANTHROPIC);
   }
   expect(reread.body.opencodeGo.providerKeys).toEqual(["ANTHROPIC_API_KEY", "VENICE_API_KEY"]);
+  await expect.poll(async () => (await api("GET", "/api/instances?fresh=1")).body.instances
+    .find((instance: any) => instance.instanceId === "opencodeGo")?.models.options.map((option: any) => option.id), { timeout: 15_000 })
+    .toContain(`venice/${VENICE_LISTED}`);
   await expect.poll(() => written(dump), { timeout: 15_000 }).toBe(true);
   expect(started().env.VENICE_API_KEY).toBe(VENICE);
   expect(started().env.ANTHROPIC_API_KEY).toBe(OWNER_ANTHROPIC);

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  capToolListResult, forgetToolCountLimits, learnedToolCountLimit, learnToolCountLimit, mcpToolBudget, shareToolBudget, toolCountLimitFromError,
+  capToolListResult, chatToolLimitFor, chatToolLimitKey, forgetToolCountLimits, learnedToolCountLimit, learnToolCountLimit, mcpToolBudget, shareToolBudget, toolCountLimitFromError,
 } from "./tool-count-limit.ts";
 
 afterEach(() => forgetToolCountLimits());
@@ -68,5 +68,21 @@ describe("a learned limit", () => {
     learnToolCountLimit("a", 128);
     expect(learnedToolCountLimit("a")).toBe(128);
     expect(learnedToolCountLimit("b")).toBeUndefined();
+  });
+});
+
+describe("a chat provider's tool limit", () => {
+  it("is none for Venice, whose API takes any number of tools, and the common 128 elsewhere", () => {
+    expect(chatToolLimitFor("https://api.venice.ai/api/v1", "venice-uncensored")).toBeNull();
+    expect(chatToolLimitFor("https://openrouter.ai/api/v1", "openai/gpt-5")).toBe(128);
+    expect(chatToolLimitFor("https://api.openai.com/v1", "gpt-5")).toBe(128);
+    expect(chatToolLimitFor("https://notvenice.ai.example.com/v1", "m")).toBe(128);
+    expect(chatToolLimitFor("not a url", "m")).toBe(128);
+  });
+
+  it("is what a refusal taught for that address and model", () => {
+    learnToolCountLimit(chatToolLimitKey("https://api.venice.ai/api/v1", "small-model"), 64);
+    expect(chatToolLimitFor("https://api.venice.ai/api/v1", "small-model")).toBe(64);
+    expect(chatToolLimitFor("https://api.venice.ai/api/v1", "other-model")).toBeNull();
   });
 });

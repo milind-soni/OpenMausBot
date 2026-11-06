@@ -1,3 +1,6 @@
+export const TURN_ENDED_REFUSAL = "This bot turn has already ended (it finished or was stopped), so this call was refused. " +
+  "Anything the call started before the turn ended may still have run.";
+
 /** Admission failures that can resume once a slot frees; never matched on error wording. */
 export function isTurnAdmissionBlocked(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error &&

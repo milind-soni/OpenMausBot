@@ -12,7 +12,7 @@ export interface CloudSendResult {
   onePassword: boolean;
   /** "profile" and/or "language". */
   settings: string[];
-  /** Apps and keys a move carried (MCP servers, AI keys, HighLevel, connected apps); 0 or absent for any other send. */
+  /** Apps and keys a move carried (MCP servers, AI keys, mailboxes, connected apps); 0 or absent for any other send. */
   connections?: number;
   /** The chats My Cloud lacked, added by row or by Bring newer chats; null when this send did not bring chats. `left`:
    * conversations that did not all go this time (a bot answering in one, or My Cloud not taking a page yet). */
