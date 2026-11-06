@@ -50,6 +50,25 @@ export async function startFakeHarness(): Promise<FakeHarness> {
       req.on("end", () => res.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify({ bytes, sha256: hash.digest("hex") })));
       return;
     }
+    const soak = /^\/api\/attachments\/soak-(\d+)\.mp3$/.exec(path);
+    if (soak) {
+      // A long screen stream in small frames: `total` bytes in 12 KiB writes, byte i = i % 251.
+      const total = Number(soak[1]);
+      const frame = Buffer.from(Array.from({ length: 12 * 1024 * 251 }, (_, index) => index % 251));
+      res.writeHead(200, { "content-type": "audio/mpeg", "content-length": total });
+      let sent = 0;
+      const pump = () => {
+        while (sent < total) {
+          const size = Math.min(12 * 1024, total - sent);
+          const offset = sent % 251;
+          const more = res.write(frame.subarray(offset, offset + size));
+          sent += size;
+          if (!more) return void res.once("drain", pump);
+        }
+        res.end();
+      };
+      return pump();
+    }
     if (path.startsWith("/api/attachments/")) {
       const body = Buffer.from(Array.from({ length: ATTACHMENT_BYTES }, (_, index) => attachmentByte(index)));
       const range = /^bytes=(\d+)-(\d+)$/.exec(String(req.headers.range ?? ""));

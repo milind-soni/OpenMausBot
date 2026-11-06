@@ -197,7 +197,10 @@ function configureE2E(message: Record<string, unknown>): void {
   applyRelay(config.relay);
 }
 
-devices.onChange(() => relay?.refreshAdmission());
+/** A removal closes the device's sessions with an authenticated GoAway(3) first; the relay drops a session whose
+ * admission leaves the set at once (4404), so the smaller set follows a moment later. */
+const ADMISSION_SETTLE_MS = 300;
+devices.onChange(() => setTimeout(() => relay?.refreshAdmission(), ADMISSION_SETTLE_MS).unref());
 e2e.onAdmissionChange(() => relay?.refreshAdmission());
 
 const control = createControlServer({

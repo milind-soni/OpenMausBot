@@ -169,7 +169,8 @@ export class E2ERegistry {
     for (const live of this.#live) {
       if (live.context.peer.kind !== "device" || live.context.peer.id !== deviceId) continue;
       if (onlyRoute && live.context.route !== onlyRoute) continue;
-      live.session.close(code);
+      if (code === CLOSE.rejected) live.session.remove();
+      else live.session.close(code);
     }
   }
 
