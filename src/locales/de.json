@@ -2993,6 +2993,7 @@
   "voice.usesOwn": "Dieser Bot spricht mit seiner eigenen Stimme.",
   "server.voice.noNoteNoVoice": "Keine Sprachnachricht zu dieser Antwort: Für diesen Bot ist noch keine Stimme eingerichtet.",
   "server.voice.noNoteFailed": "Keine Sprachnachricht zu dieser Antwort: Die Stimme konnte nicht erzeugt werden ({reason}).",
+  "server.voice.turnEnded": "Ich habe aufgehört, bevor ich fertig war: {reason}",
   "botApi.title": "Bot API",
   "botApi.switch": "Apps mit diesem Bot sprechen lassen",
   "botApi.hint": "Apps und Skripte schicken {name} mit einem Schlüssel eine Nachricht und bekommen eine Antwort. {name} antwortet aus seinen Anweisungen und seinem Gedächtnis und nutzt dafür keine Tools.",

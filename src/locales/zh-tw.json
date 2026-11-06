@@ -4696,6 +4696,7 @@
   "voice.usesOwn": "這個機器人用自己的聲音說話。",
   "server.voice.noNoteNoVoice": "這則回覆沒有語音留言：這個機器人還沒有設定聲音。",
   "server.voice.noNoteFailed": "這則回覆沒有語音留言：無法產生聲音（{reason}）。",
+  "server.voice.turnEnded": "我在完成前停下了：{reason}",
   "botApi.title": "Bot API",
   "botApi.switch": "允許應用程式與此機器人對話",
   "botApi.hint": "應用程式和指令碼憑金鑰向{name}傳送訊息並取得回覆。{name}根據自己的指示和記憶回答,不使用任何工具。",

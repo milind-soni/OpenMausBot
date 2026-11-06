@@ -7460,6 +7460,7 @@
   "settings.threads.starter": "Starter はボットごとに一度に 1 つのスレッドを実行し、より大きなプランではもっと実行できます。ボットが自分で始めた作業はそのまま実行され、ボットごとに 1 つずつ使えます。",
   "server.voice.noNoteNoVoice": "この返信にはボイスノートがありません：このボットにはまだ音声が設定されていません。",
   "server.voice.noNoteFailed": "この返信にはボイスノートがありません：音声を作成できませんでした（{reason}）。",
+  "server.voice.turnEnded": "終わる前に止まりました：{reason}",
   "grokMove.intro": "Grok Bot にはエクスポートのボタンがないため、ボットごとに自分の設定を書き出してもらいます。Grok Bot 側は何も変わりません。",
   "grokMove.step1": "1. ボットにこのメッセージを送る",
   "grokMove.step1Hint": "コピーして、ボットのチャットで送ってください。ボットごとに 1 回ずつ行います。",

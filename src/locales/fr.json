@@ -2873,6 +2873,7 @@
   "voice.usesOwn": "Ce bot parle avec sa propre voix.",
   "server.voice.noNoteNoVoice": "Pas de note vocale pour cette réponse : ce bot n’a pas encore de voix configurée.",
   "server.voice.noNoteFailed": "Pas de note vocale pour cette réponse : la voix n’a pas pu être générée ({reason}).",
+  "server.voice.turnEnded": "Je me suis arrêté avant d’avoir fini : {reason}",
   "botApi.title": "Bot API",
   "botApi.switch": "Laisser des apps parler à ce bot",
   "botApi.hint": "Des apps et des scripts envoient un message à {name} avec une clé et reçoivent une réponse. {name} répond à partir de ses instructions et de sa mémoire, sans utiliser d’outils.",

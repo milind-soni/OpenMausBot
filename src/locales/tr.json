@@ -5304,6 +5304,7 @@
   "voice.usesOwn": "Bu bot kendi sesiyle konuşur.",
   "server.voice.noNoteNoVoice": "Bu yanıt için sesli not yok: bu botun henüz ayarlanmış bir sesi yok.",
   "server.voice.noNoteFailed": "Bu yanıt için sesli not yok: ses oluşturulamadı ({reason}).",
+  "server.voice.turnEnded": "Bitirmeden durdum: {reason}",
   "botApi.title": "Bot API",
   "botApi.switch": "Uygulamaların bu botla konuşmasına izin ver",
   "botApi.hint": "Uygulamalar ve betikler bir anahtarla {name} adlı bota mesaj gönderir ve yanıt alır. {name} talimatlarına ve belleğine göre yanıtlar, bunun için araç kullanmaz.",

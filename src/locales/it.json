@@ -6443,6 +6443,7 @@
   "settings.threads.starter": "Starter esegue un thread alla volta per bot, un piano più grande ne esegue di più. Il lavoro che un bot avvia da solo viene comunque eseguito, e ogni bot ha il suo.",
   "server.voice.noNoteNoVoice": "Nessuna nota vocale con questa risposta: questo bot non ha ancora una voce impostata.",
   "server.voice.noNoteFailed": "Nessuna nota vocale con questa risposta: non è stato possibile creare la voce ({reason}).",
+  "server.voice.turnEnded": "Mi sono fermato prima di finire: {reason}",
   "botApi.title": "Bot API",
   "botApi.switch": "Lascia che le app parlino con questo bot",
   "botApi.hint": "App e script inviano a {name} un messaggio con una chiave e ricevono una risposta. {name} risponde in base alle sue istruzioni e alla sua memoria, senza usare strumenti.",
