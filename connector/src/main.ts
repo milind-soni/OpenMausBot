@@ -199,15 +199,21 @@ function statusCommand(): void {
   }));
 }
 
-/** One line per check for install.sh: `ok <id>`, `warn <id> <fix>` or `fail <id> <fix>`; exits 1 when any fails. */
+/**
+ * One line per check for install.sh: `ok <id>`, `warn <id> <fix>` or `fail <id> <fix>`. With --json, one object
+ * `{ok, checks}` for `openmausbot doctor --host`, which asks the connector on a server that runs one. Exits 1 when any
+ * check fails.
+ */
 async function probeCommand(): Promise<void> {
   const docker = new SocketDocker(PATHS.docker);
   const image = process.env.MAUSBOT_CONNECTOR_IMAGE;
   let box: BoxProbeResult | null = null;
   try { box = image ? await probeBox(docker, image, seccomp()) : null; } catch (error) { box = { ok: false, fix: errorText(error) }; }
   const checks = hostChecks(await docker.info(), reader, { clockSkewS: null, box });
-  for (const check of checks) console.log(check.ok && !check.warning ? `ok ${check.id}` : `${check.ok ? "warn" : "fail"} ${check.id} ${check.fix ?? ""}`);
-  if (checks.some((check) => !check.ok)) process.exitCode = 1;
+  const ok = checks.every((check) => check.ok);
+  if (process.argv.includes("--json")) console.log(JSON.stringify({ ok, checks }));
+  else for (const check of checks) console.log(check.ok && !check.warning ? `ok ${check.id}` : `${check.ok ? "warn" : "fail"} ${check.id} ${check.fix ?? ""}`);
+  if (!ok) process.exitCode = 1;
 }
 
 const commands: Record<string, () => Promise<void> | void> = {
