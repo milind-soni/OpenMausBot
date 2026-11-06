@@ -8,6 +8,7 @@ import { TRIAL_CREDIT_REFUSED } from "../shared/trial-credit.ts";
 import {
   classifyRoutineFailure, dispatchRefusal, nextScheduledRun, retryNote, ROUTINE_BUSY_RECHECK_MS, ROUTINE_BUSY_WAIT_MS, weekRuns, type RoutineAlert,
 } from "./routine-recovery.ts";
+import { runJournalFile } from "./routine-run-journal.ts";
 import { RoutineManager, type Routine, type RoutineManagerOptions, type RoutineRun } from "./routines.ts";
 import { claudeLimitError } from "./drivers/claude-limits.ts";
 
@@ -493,7 +494,8 @@ describe("a run that OpenMausBot's shutdown cuts off", () => {
     h.fail("thread-1", "The engine stopped without saying why (stop reason: interrupted).", { stopReason: "interrupted" });
     h.manager.failThread("thread-1", STALL, { cause: "stalled" });
     expect(h.run(run.id).status).toBe("running");
-    expect(JSON.parse(readFileSync(h.options.file!, "utf8")).runs[0].status).toBe("running");
+    const log = readFileSync(runJournalFile(h.options.file!), "utf8").trim().split("\n");
+    expect((JSON.parse(log.at(-1)!) as { run: RoutineRun }).run.status).toBe("running");
     expect(h.failed).toEqual([]);
 
     h.restart();

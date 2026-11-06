@@ -127,6 +127,11 @@ export class OwnedFile {
     this.last = text;
   }
 
+  /** The text this file holds, as last read or written; undefined before either. */
+  current(): string | undefined {
+    return this.last;
+  }
+
   write(text: string): boolean {
     if (text === this.last) return false;
     writeFileAtomic(this.path, text, this.options);

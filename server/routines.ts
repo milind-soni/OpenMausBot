@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { DATA_DIR } from "./config.ts";
 import type { RuntimeEvent } from "./contracts.ts";
 import { OwnedFile } from "./atomic.ts"; import { saveSoon } from "./save-batch.ts";
+import { openRunJournal, runJournalFile, type RunJournal } from "./routine-run-journal.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { activeRunsOf, nextDueOf, schedulerDueOf, wakeHoldOf } from "./routine-due.ts";
 import { startDueTimer, type DueTimer } from "./due-timer.ts";
@@ -191,7 +192,8 @@ interface RoutineFile {
   version: 1;
   frozenResultsCleared?: true;
   routines: Routine[];
-  runs: RoutineRun[];
+  /** Older files kept run history here; it is read once and then lives in `<name>.runs.jsonl`. */
+  runs?: RoutineRun[];
   routineRequestReceipts?: RoutineRequestReceipt[];
   webhookRunReceipts?: EventRunReceipt[];
   startupLaunchId?: string;
@@ -299,6 +301,8 @@ function cloneRun(run: RoutineRun): RoutineRun {
 
 export class RoutineManager {
   private readonly file: string; private readonly disk: OwnedFile;
+  private readonly runJournal: RunJournal;
+  private runsMigrated = false;
   private readonly now: () => number;
   private readonly options: RoutineManagerOptions;
   private routines: Routine[] = [];
@@ -325,6 +329,7 @@ export class RoutineManager {
   constructor(options: RoutineManagerOptions) {
     this.options = options;
     this.file = options.file ?? join(DATA_DIR, "routines.json"); this.disk = new OwnedFile(this.file, { mode: 0o600 });
+    this.runJournal = openRunJournal(runJournalFile(this.file));
     this.now = options.now ?? Date.now;
     this.bootedAt = this.now();
     try {
@@ -341,7 +346,19 @@ export class RoutineManager {
         }
         return loaded ? [loaded] : [];
       }) : [];
-      this.runs = Array.isArray(disk.runs) ? disk.runs.map(loadRun) : []; this.malformedAttachments = attachmentsMalformed([...(disk.routines ?? []), ...(disk.runs ?? [])]);
+      const rawLegacy = Array.isArray(disk.runs) ? disk.runs : [];
+      const legacyRuns = rawLegacy.map(loadRun);
+      let merged = { runs: rawLegacy, migrated: false };
+      try {
+        merged = this.runJournal.load(legacyRuns);
+        this.runs = merged.runs.map(loadRun);
+        this.runsMigrated = merged.migrated;
+      } catch (error) {
+        console.error(`routines: could not read its run log: ${error instanceof Error ? error.message : String(error)}`);
+        this.runs = legacyRuns;
+      }
+      // Check the loaded rows before `loadRun` can drop a malformed attachment; a clear must not trust them.
+      this.malformedAttachments = attachmentsMalformed([...(disk.routines ?? []), ...rawLegacy, ...merged.runs]);
       this.routineRequestReceipts = loadRequestReceipts(disk.routineRequestReceipts);
       this.webhookRunReceipts = loadEventReceipts(disk.webhookRunReceipts, this.runs, this.now());
       this.frozenPending = disk.frozenResultsCleared !== true;
@@ -372,6 +389,10 @@ export class RoutineManager {
       cut.push(cloneRun(run));
     }
     if (cut.length > 0) this.saveLater();
+    if (this.runsMigrated) {
+      // The first save moves the old history out of routines.json; a failure here keeps it there for the next save.
+      try { this.save(); } catch (error) { console.error(`routines: could not move run history into its log: ${error instanceof Error ? error.message : String(error)}`); }
+    }
     for (const run of cut) {
       if (run.threadId) this.options.onRunCut?.(run);
       this.notifyRunChanged(run);
@@ -1551,17 +1572,30 @@ export class RoutineManager {
       this.runs.splice(index, 1);
       excess -= 1;
     }
+    // The small JSON keeps definitions, receipts and holds; an older file's `runs` stay there only until the migration
+    // save drops them. Writing it first means a failed rename leaves no run appended for a mutation that never landed.
     mkdirSync(dirname(this.file), { recursive: true });
-    this.disk.write(JSON.stringify({
+    const text = JSON.stringify({
       version: 1,
       ...(this.frozenPending ? {} : { frozenResultsCleared: true }),
       routines: [...this.routines, ...this.unloadedRoutines],
-      runs: this.runs,
       routineRequestReceipts: this.routineRequestReceipts,
       webhookRunReceipts: this.webhookRunReceipts,
       ...(this.startupLaunchId === undefined ? {} : { startupLaunchId: this.startupLaunchId }),
       ...(this.ownerNotices.length ? { ownerNotices: this.ownerNotices } : {}),
       ...(this.holds.length ? { holds: this.holds } : {}),
-    } satisfies RoutineFile));
+    } satisfies RoutineFile);
+    const previous = this.disk.current();
+    const wrote = this.disk.write(text);
+    try {
+      // One line per changed run, not every routine and every run ever recorded.
+      this.runJournal.write(this.runs);
+    } catch (error) {
+      // Put the definitions back if the run log is what failed, so the two never disagree about a mutation.
+      if (wrote && previous !== undefined) {
+        try { this.disk.write(previous); } catch { /* the caller's rollback still holds in memory */ }
+      }
+      throw error;
+    }
   }
 }
