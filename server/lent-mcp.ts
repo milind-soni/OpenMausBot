@@ -218,11 +218,12 @@ export function createLentMcp(deps: LentMcpDeps) {
     /** A turn's servers that run on a lent computer it may use now, as servers at this server's address. One it can't
      * reach is left out, and lines() says why. */
     mounts(bot: Bot, turn: Turn): Record<string, McpServerSpec> {
-      const principal = deps.principal(turn);
+      const elsewhere = Object.entries(servers(bot));
+      const principal = elsewhere.length ? deps.principal(turn) : null;
       if (!principal) return {};
       const mounted: Record<string, McpServerSpec> = {};
       let token: string | null = null;
-      for (const [name, server] of Object.entries(servers(bot))) {
+      for (const [name, server] of elsewhere) {
         const state = lentState(deps.computers, principal, server);
         if (state.kind !== "ready") continue;
         token ??= deps.mint(turn);
@@ -234,9 +235,10 @@ export function createLentMcp(deps: LentMcpDeps) {
 
     /** What the bot is told about each of its servers that runs elsewhere and that its turn can't reach now, by name. */
     lines(bot: Bot, turn: Turn): Map<string, string> {
-      const principal = deps.principal(turn);
+      const elsewhere = Object.entries(servers(bot));
+      const principal = elsewhere.length ? deps.principal(turn) : null;
       const said = new Map<string, string>();
-      for (const [name, server] of Object.entries(servers(bot))) {
+      for (const [name, server] of elsewhere) {
         const state = lentState(deps.computers, principal, server);
         if (state.kind === "ready") continue;
         const refusal = principal ? null : deps.notice(turn);

@@ -104,6 +104,15 @@ describe("a server that runs on the person's computer, in a turn", () => {
     expect(say({})).toEqual([["local"], { notes: "notes starts a program on your Mac (Ada's Mac), which doesn't let My Cloud run programs right now: turn on \"Let Clouds run commands on this Mac\" from the OpenMausBot icon on that Mac." }]);
   });
 
+  it("a bot with no server on another computer costs its turn nothing: the lending gate isn't asked", () => {
+    const asked = vi.fn(() => "cloud-home");
+    const lent = createLentMcp({ cfg: () => ({ mcpServers: { web: { type: "http", url: "https://mcp.example.com/mcp", headers: {}, enabled: true } } }), computers: { runsOn: vi.fn(), mcpLenders: vi.fn(), request: vi.fn() } as unknown as LentMcpDeps["computers"],
+      policy: (servers) => servers, bot: () => ({ id: "kiwi" }), principal: asked, notice: vi.fn(), refusal: vi.fn(), mint: vi.fn(), active: () => true, origin: "http://127.0.0.1:1", personal: true, place: "My Cloud" });
+    expect(lent.mounts({ id: "kiwi" }, TURN)).toEqual({});
+    expect(lent.lines({ id: "kiwi" }, TURN)).toEqual(new Map());
+    expect(asked).not.toHaveBeenCalled();
+  });
+
   it("mounts nothing for a turn that can't use the lent computer, and says why", () => {
     const { lent, minted } = fixture({ principal: null });
     expect(lent.mounts({ id: "kiwi" }, TURN)).toEqual({});
