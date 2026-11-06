@@ -7,7 +7,7 @@ import { BotEditorStore, initialState, reducer, type Action, type AppState, type
 import { BotContextMenu } from "./Sidebar";
 import { setLocale } from "@/lib/i18n";
 
-const workingFolder = vi.hoisted(() => ({ path: null as string | null, local: false, requests: vi.fn() }));
+const workingFolder = vi.hoisted(() => ({ path: null as string | null, local: false, requests: vi.fn(), prepare: vi.fn() }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return {
@@ -15,6 +15,7 @@ vi.mock("@/state/store", async (importOriginal) => {
     api: (path: string, opts?: RequestInit) => {
       if (path.split("?")[0].endsWith("/working-folder")) {
         workingFolder.requests(path);
+        if (opts?.method === "POST") return workingFolder.prepare();
         return Promise.resolve({ path: workingFolder.path, local: workingFolder.local });
       }
       return original.api(path, opts);
@@ -53,6 +54,7 @@ const response = (threadId: string) => {
 
 beforeEach(() => {
   workingFolder.requests.mockReset();
+  workingFolder.prepare.mockReset().mockImplementation(async () => ({ path: workingFolder.path, local: workingFolder.local }));
   workingFolder.path = null;
   workingFolder.local = false;
   mode.advanced = true;
@@ -86,6 +88,39 @@ it.each([true, false])("closes after copying and keeps the toast visible with ad
   await vi.waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   await vi.waitFor(() => expect(document.querySelector("[data-bot-menu]")).toBeNull());
   expect(document.querySelector("[data-notice-toast]")?.textContent).toBe("Path copied");
+});
+
+it.each([
+  { advanced: true, action: "copy" }, { advanced: false, action: "copy" },
+  { advanced: true, action: "open" }, { advanced: false, action: "open" },
+])("does not close a reopened bot menu when a folder action finishes: %j", async ({ advanced, action }) => {
+  mode.advanced = advanced;
+  workingFolder.path = "C:\\fixture\\Reviewer";
+  workingFolder.local = action === "open";
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const copy = vi.fn(async () => { await gate; });
+  const reveal = vi.fn(async () => { await gate; return "shown" as const; });
+  vi.stubGlobal("navigator", { language: "en", clipboard: { writeText: copy } });
+  window.ogb = { revealInFolder: reveal } as typeof window.ogb;
+  onClose.mockImplementation(() => { menu = null; draw(); });
+  const label = action === "open" ? "Open working folder" : "Copy path";
+  draw();
+  await vi.waitFor(() => expect(button(label)).toBeDefined());
+  flushSync(() => button(label).click());
+  await vi.waitFor(() => expect(action === "open" ? reveal : copy).toHaveBeenCalledOnce());
+  const reopenedMenu = { botId: bot.id, x: 80, y: 80 };
+  menu = reopenedMenu;
+  draw();
+  release();
+  if (action === "copy") {
+    await vi.waitFor(() => expect(document.querySelector("[data-notice-toast]")?.textContent).toBe("Path copied"));
+  } else {
+    await vi.waitFor(() => expect(button(label)?.disabled).toBe(false));
+  }
+  expect(onClose).not.toHaveBeenCalled();
+  expect(menu).toBe(reopenedMenu);
+  expect(document.querySelector("[data-bot-menu]")).not.toBeNull();
 });
 
 describe("bot menu bulk reads", () => {
