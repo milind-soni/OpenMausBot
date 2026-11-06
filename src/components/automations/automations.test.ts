@@ -244,6 +244,73 @@ describe("the Automations list switch", () => {
     expect(container.querySelector('[data-automation="orphan"]')).toBeNull();
     expect(container.querySelector('[data-automation="orphan-hook"]')).toBeNull();
   });
+
+  describe("by department", () => {
+    const sectioned = [{ ...botA, section: "Social" }, { ...botB, section: "Dev" }, { ...botB, id: "bot-c", name: "Atlas", threadId: "thread-c" }] as unknown as Bot[];
+    const department = () => container.querySelector<HTMLSelectElement>('select[aria-label="All departments"]');
+    const pick = (value: string) => { department()!.value = value; department()!.dispatchEvent(new Event("change", { bubbles: true })); };
+
+    it("offers no department question when no bot sits in a department", () => {
+      fixture.state.routines = [routine];
+      mountPage();
+      expect(department()).toBeNull();
+    });
+
+    it("lists only the chosen department's automations, and the General ones for bots outside any", () => {
+      fixture.state.bots = sectioned;
+      fixture.state.sections = ["Dev", "Social"];
+      fixture.state.routines = [routine, { ...routine, id: "dev-routine", name: "Dev check", botId: "bot-b" }, { ...routine, id: "general-routine", name: "General check", botId: "bot-c" }];
+      fixture.state.webhooks = [];
+      mountPage();
+      expect([...department()!.options].map((option) => option.textContent)).toEqual(["All departments", "Dev", "Social", "General"]);
+      expect(["routine-1", "dev-routine", "general-routine"].every((id) => row(id))).toBe(true);
+      flushSync(() => pick("Dev"));
+      expect(row("dev-routine")).not.toBeNull();
+      expect(container.querySelector('[data-automation="routine-1"]')).toBeNull();
+      expect(container.querySelector('[data-automation="general-routine"]')).toBeNull();
+      flushSync(() => pick([...department()!.options].find((option) => option.textContent === "General")!.value));
+      expect(row("general-routine")).not.toBeNull();
+      expect(container.querySelector('[data-automation="dev-routine"]')).toBeNull();
+    });
+
+    it("falls back to everyone when the chosen department no longer holds a bot", () => {
+      fixture.state.bots = sectioned;
+      fixture.state.sections = ["Dev", "Social"];
+      fixture.state.routines = [routine, { ...routine, id: "dev-routine", name: "Dev check", botId: "bot-b" }, { ...routine, id: "general-routine", name: "General check", botId: "bot-c" }];
+      fixture.state.webhooks = [];
+      mountPage();
+      const rerender = () => flushSync(() => root!.render(createElement(TriggersPage, { onBack: vi.fn(), onOpenRoom: vi.fn() })));
+      flushSync(() => pick("Dev"));
+      expect(container.querySelector('[data-automation="routine-1"]')).toBeNull();
+      fixture.state.bots = sectioned.map((bot) => bot.id === "bot-b" ? { ...bot, section: "Social" } : bot);
+      rerender();
+      expect(department()!.value).toBe("all");
+      expect([...department()!.options].map((option) => option.textContent)).toEqual(["All departments", "Social", "General"]);
+      expect(["routine-1", "dev-routine", "general-routine"].every((id) => row(id))).toBe(true);
+      flushSync(() => pick([...department()!.options].find((option) => option.textContent === "General")!.value));
+      fixture.state.bots = sectioned.map((bot) => ({ ...bot, section: "Social" }));
+      rerender();
+      expect(department()!.value).toBe("all");
+      expect(row("general-routine")).not.toBeNull();
+    });
+
+    it("narrows the bot question to that department's bots and clears a bot picked before", () => {
+      fixture.state.bots = sectioned;
+      fixture.state.sections = ["Dev", "Social"];
+      fixture.state.webhooks = [];
+      fixture.state.routines = Array.from({ length: 9 }, (_, index) => ({ ...routine, id: `r-${index}`, name: `Check ${index}`, botId: index < 5 ? "bot-a" : "bot-b" }));
+      mountPage();
+      const bots = () => container.querySelector<HTMLSelectElement>('select[aria-label="All bots"]')!;
+      const change = (select: HTMLSelectElement, value: string) => { select.value = value; select.dispatchEvent(new Event("change", { bubbles: true })); };
+      expect([...bots().options].map((option) => option.textContent)).toEqual(["All bots", "Scout", "Ledger", "Atlas"]);
+      flushSync(() => change(bots(), "bot-a"));
+      expect(container.querySelectorAll("[data-automation]")).toHaveLength(5);
+      flushSync(() => pick("Dev"));
+      expect(bots().value).toBe("all");
+      expect([...bots().options].map((option) => option.textContent)).toEqual(["All bots", "Ledger"]);
+      expect(container.querySelectorAll("[data-automation]")).toHaveLength(4);
+    });
+  });
 });
 
 describe("More, for another app's automation", () => {
@@ -298,6 +365,46 @@ describe("the calendar", () => {
     expect(dots("Morning summary").length).toBeGreaterThan(0);
     expect(dots("Morning summary").every((status) => status === "working")).toBe(true);
     expect(container.querySelector('[data-event-card][aria-label^="Orphan check"]')).toBeNull();
+  });
+
+  it("shows only the chosen department's events", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 9, 14, 8, 0));
+    const at = new Date(2026, 9, 14, 17, 0).getTime();
+    const daily = (id: string, name: string, botId: string) => ({ id, name, prompt: `${name}.`, target: "bot", botId, runOn: "maus", enabled: true,
+      schedule: { type: "daily", time: "17:00", weekdays: [0, 1, 2, 3, 4, 5, 6] }, durationMinutes: 30, nextRunAt: at, createdAt: 0, updatedAt: 0 });
+    fixture.state.bots = [{ ...botA, section: "Social" }, { ...botB, section: "Dev" }] as unknown as Bot[];
+    fixture.state.routines = [daily("social", "Social post", "bot-a"), daily("dev", "Dev check", "bot-b")];
+    fixture.state.groups = [];
+    const cards = (department: string) => {
+      const container = mount(createElement(AutomationsCalendar, { botFilter: "all", department, onOpenAutomation: vi.fn(), onOpenRoom: vi.fn() }));
+      const count = (name: string) => container.querySelectorAll(`[data-event-card][aria-label^="${name}"]`).length;
+      const counts = { social: count("Social post"), dev: count("Dev check") };
+      root!.unmount();
+      container.remove();
+      return counts;
+    };
+    const everyone = cards("all");
+    expect(everyone.social).toBeGreaterThan(0);
+    expect(everyone.dev).toBeGreaterThan(0);
+    expect(cards("Dev")).toEqual({ social: 0, dev: everyone.dev });
+    expect(cards("Social")).toEqual({ social: everyone.social, dev: 0 });
+  });
+
+  it("keeps a call when any of its bots is in the chosen department", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 9, 14, 8, 0));
+    const at = new Date(2026, 9, 14, 17, 0).getTime();
+    const call = (id: string, name: string, botIds: string[]) => ({ id, name, description: "", botIds, schedule: { type: "once", at }, durationMinutes: 30, attachments: [], nextRunAt: at, createdAt: 0, updatedAt: 0 });
+    fixture.state.bots = [{ ...botA, section: "Social" }, { ...botB, section: "Dev" }] as unknown as Bot[];
+    fixture.state.routines = [];
+    fixture.state.groups = [];
+    fixture.api.mockImplementation(async (path: unknown) => path === "/api/calendar-calls" ? { calls: [call("social", "Social sync", ["bot-a"]), call("dev", "Dev sync", ["bot-b"]), call("both", "All hands", ["bot-a", "bot-b"])] } : {});
+    const container = mount(createElement(AutomationsCalendar, { botFilter: "all", department: "Dev", onOpenAutomation: vi.fn(), onOpenRoom: vi.fn() }));
+    const shown = (name: string) => container.querySelectorAll(`[data-event-card][aria-label^="${name}"]`).length;
+    await vi.waitFor(() => expect(shown("Dev sync")).toBeGreaterThan(0));
+    expect(shown("All hands")).toBeGreaterThan(0);
+    expect(shown("Social sync")).toBe(0);
   });
 });
 
