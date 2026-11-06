@@ -1,4 +1,13 @@
 {
+  "botFolder.open": "Відкрити робочу папку",
+  "botFolder.openLocal": "Відкрити робочу папку на цьому комп’ютері",
+  "botFolder.copy": "Копіювати шлях",
+  "botFolder.copyLabel": "Копіювати шлях до робочої папки",
+  "botFolder.unavailable": "На цьому комп’ютері немає доступної робочої папки",
+  "botFolder.loadFailed": "Не вдалося завантажити робочу папку.",
+  "botFolder.openFailed": "Не вдалося відкрити робочу папку. Перевірте її розташування та дозволи або скопіюйте шлях до неї.",
+  "botFolder.copied": "Шлях скопійовано",
+  "botFolder.copyFailed": "Не вдалося скопіювати шлях.",
   "voice.gemini.keyPlaceholder": "Вставте свій API-ключ Google AI Studio",
   "voice.gemini.model": "Модель синтезу мовлення Gemini",
   "keys.label.geminiTts": "API-ключ синтезу мовлення Gemini",

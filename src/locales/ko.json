@@ -1,4 +1,13 @@
 {
+  "botFolder.open": "작업 폴더 열기",
+  "botFolder.openLocal": "이 컴퓨터에서 작업 폴더 열기",
+  "botFolder.copy": "경로 복사",
+  "botFolder.copyLabel": "작업 폴더 경로 복사",
+  "botFolder.unavailable": "이 컴퓨터에서 사용할 수 있는 작업 폴더가 없습니다",
+  "botFolder.loadFailed": "작업 폴더를 불러오지 못했습니다.",
+  "botFolder.openFailed": "작업 폴더를 열지 못했습니다. 위치와 권한을 확인하거나 경로를 복사하세요.",
+  "botFolder.copied": "경로가 복사되었습니다",
+  "botFolder.copyFailed": "경로를 복사하지 못했습니다.",
   "voice.gemini.keyPlaceholder": "Google AI Studio API 키를 붙여넣으세요",
   "voice.gemini.model": "Gemini 음성 합성 모델",
   "keys.label.geminiTts": "Gemini 음성 합성 API 키",

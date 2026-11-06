@@ -1,4 +1,13 @@
 {
+  "botFolder.open": "Apri cartella di lavoro",
+  "botFolder.openLocal": "Apri cartella di lavoro su questo computer",
+  "botFolder.copy": "Copia percorso",
+  "botFolder.copyLabel": "Copia il percorso della cartella di lavoro",
+  "botFolder.unavailable": "Nessuna cartella di lavoro disponibile su questo computer",
+  "botFolder.loadFailed": "Impossibile caricare la cartella di lavoro.",
+  "botFolder.openFailed": "Impossibile aprire la cartella di lavoro. Controlla il percorso e le autorizzazioni oppure copia il percorso.",
+  "botFolder.copied": "Percorso copiato",
+  "botFolder.copyFailed": "Impossibile copiare il percorso.",
   "voice.gemini.keyPlaceholder": "Incolla la tua chiave API di Google AI Studio",
   "voice.gemini.model": "Modello vocale Gemini",
   "keys.label.geminiTts": "Chiave API vocale Gemini",

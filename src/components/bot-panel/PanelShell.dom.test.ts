@@ -12,6 +12,7 @@ vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return {
     ...original,
+    api: (path: string, opts?: RequestInit) => path.endsWith("/working-folder") ? Promise.resolve({ path: null, local: false }) : original.api(path, opts),
     useStore: () => ({ state: { ...original.initialState, settingsOpen: fixture.settingsOpen }, dispatch: fixture.dispatch, flushBotPatches: () => Promise.resolve(null) }),
   };
 });
@@ -187,7 +188,7 @@ describe("the panel's top", () => {
     await settle();
     const top = [...host.querySelectorAll("button")].slice(0, 3);
     expect(top.map((button) => button.getAttribute("aria-label") ?? button.getAttribute("title"))).toEqual(["Share", "Bot settings", "Close settings"]);
-    for (const button of [moreButton()!, top[1]!, top[2]!]) expect(button.querySelector("span, svg")).not.toBeNull();
+    for (const button of top) expect(button.querySelector("span, svg")).not.toBeNull();
     click(moreButton());
     expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key"))).toEqual(["copy", "download"]);
     press(moreButton(), "Escape");

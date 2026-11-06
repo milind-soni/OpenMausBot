@@ -1,3 +1,5 @@
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -44,6 +46,45 @@ async function serve(deps: Partial<BotMemoryRouteDeps> = {}, beforeDispatch?: (r
 }
 
 describe("the bot-memory module through the route table", () => {
+  it("resolves default and custom folders and creates on demand without launching a file manager", async () => {
+    const root = await mkdtemp(join(tmpdir(), "omb-folder-"));
+    const folder = join(root, "new folder");
+    const base = await serve({
+      bot: (id) => id === "custom" ? { id, cwd: folder } : BOTS[id],
+    });
+    try {
+      expect(await (await fetch(`${base}/api/bots/bot-123/working-folder`)).json()).toMatchObject({ path: expect.stringContaining(join("workspaces", "bot-123")), local: true });
+      expect(await (await fetch(`${base}/api/bots/custom/working-folder`)).json()).toEqual({ path: folder, local: true });
+      await expect(stat(folder)).rejects.toThrow();
+      const prepared = await fetch(`${base}/api/bots/custom/working-folder`, { method: "POST" });
+      expect(prepared.status).toBe(200);
+      expect(await prepared.json()).toEqual({ path: folder, local: true });
+      expect((await stat(folder)).isDirectory()).toBe(true);
+      expect((await fetch(`${base}/api/bots/custom/working-folder`, { method: "POST" })).status).toBe(200);
+      expect((await fetch(`${base}/api/bots/missing/working-folder`)).status).toBe(404);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("refuses VM, cloud, relative and network folders before opening", async () => {
+    for (const extra of [{ computer: "vm" }, { computer: "cloud" }, { cwd: "relative" }, { cwd: "//server/share" }, { cwd: "\\\\server\\share" }, { cwd: "C:\\bad\0folder" }]) {
+      const base = await serve({ bot: (id) => ({ id, ...extra }) });
+      expect(await (await fetch(`${base}/api/bots/b1/working-folder`)).json()).toEqual({ path: null, local: false });
+      expect((await fetch(`${base}/api/bots/b1/working-folder`, { method: "POST" })).status).toBe(403);
+    }
+  });
+
+  it("reports a folder creation failure without replacing an existing file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "omb-folder-file-"));
+    const file = join(root, "file.txt");
+    try {
+      await writeFile(file, "keep");
+      const base = await serve({ bot: (id) => ({ id, cwd: file }) });
+      const response = await fetch(`${base}/api/bots/b1/working-folder`, { method: "POST" });
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({ error: "Could not create the working folder. Check its location and permissions." });
+      expect((await stat(file)).isFile()).toBe(true);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
   it("serves the overview and reads a file from the bot's workspace", async () => {
     const base = await serve();
     const overview = await fetch(`${base}/api/bots/bot-123/memory`);
@@ -185,6 +226,8 @@ describe("the bot-memory module through the route table", () => {
 
   it("is admin-scoped by path in request-auth.ts, every arm of it", () => {
     for (const [method, path] of [
+      ["GET", "/api/bots/b1/working-folder"],
+      ["POST", "/api/bots/b1/working-folder"],
       ["GET", "/api/bots/b1/memory"],
       ["PUT", "/api/bots/b1/memory"],
       ["GET", "/api/bots/b1/memory/file"],
@@ -206,6 +249,8 @@ describe("the bot-memory module through the route table", () => {
 describe("the bot-memory family behind the gate on a real server", () => {
   let fixture: VerificationServer;
   const arms: Array<[string, string, unknown?]> = [
+    ["GET", "/api/bots/b1/working-folder"],
+    ["POST", "/api/bots/b1/working-folder", {}],
     ["GET", "/api/bots/b1/memory"],
     ["PUT", "/api/bots/b1/memory", { text: "x" }],
     ["GET", "/api/bots/b1/memory/file"],
@@ -236,6 +281,34 @@ describe("the bot-memory family behind the gate on a real server", () => {
   });
   afterAll(async () => {
     await fixture?.close();
+  });
+
+  it("resolves a created bot through the real isolated server", async () => {
+    const created = await fetch(`${fixture.info.url}/api/bots`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Folder fixture" }) });
+    expect(created.status).toBe(201);
+    const { bot } = await created.json() as { bot: { id: string } };
+    const response = await fetch(`${fixture.info.url}/api/bots/${bot.id}/working-folder`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ path: join(fixture.info.dataDir, "workspaces", bot.id), local: true });
+    const prepared = await fetch(`${fixture.info.url}/api/bots/${bot.id}/working-folder`, { method: "POST" });
+    expect(prepared.status).toBe(200);
+    const folder = (await prepared.json()) as { path: string; local: boolean };
+    expect(folder).toEqual({ path: join(fixture.info.dataDir, "workspaces", bot.id), local: true });
+    expect((await stat(folder.path)).isDirectory()).toBe(true);
+    console.log(JSON.stringify({ fixture: fixture.info, action: "create bot, resolve and prepare working folder", botId: bot.id, folder }));
+  });
+
+  it("lets an authenticated remote admin copy a server path but refuses preparing it", async () => {
+    const created = await fetch(`${fixture.info.url}/api/bots`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Remote folder fixture" }) });
+    const { bot } = await created.json() as { bot: { id: string } };
+    const opened = await fetch(`${fixture.info.url}/api/auth/pairing`, { method: "POST", headers: { "content-type": "application/json", origin: fixture.info.url }, body: JSON.stringify({ scopes: ["admin"] }) });
+    const { code } = await opened.json() as { code: string };
+    const paired = await fetch(`${fixture.info.url}/api/auth/pair`, { method: "POST", headers: { "content-type": "application/json", origin: fixture.info.url }, body: JSON.stringify({ code }) });
+    const { token } = await paired.json() as { token: string };
+    const headers = { authorization: `Bearer ${token}`, origin: fixture.info.url };
+    const response = await fetch(`${fixture.info.url}/api/bots/${bot.id}/working-folder`, { headers });
+    expect(await response.json()).toEqual({ path: join(fixture.info.dataDir, "workspaces", bot.id), local: false });
+    expect(await call("POST", `/api/bots/${bot.id}/working-folder`, {}, headers)).toBe(403);
   });
 
   it("refuses every arm for a request with no session, before any handler runs", async () => {

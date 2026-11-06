@@ -3313,7 +3313,16 @@
       "pair.noCode": "1b206510b50ba46a5ada2bb240bc4a8e0b24dfca793b7a3cc93d890c6332cc46",
       "pair.invitedByEmail": "9ca8c859198fcd02607a4bada9956c81ce6fe8e7aff293889902aeed0739710b",
       "pair.notEncrypted": "1b0489066c525fad4839564422cb75bb8040352ee56feee3fc6cfd51c0913d9c",
-      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1"
+      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -9277,7 +9286,16 @@
       "pair.noCode": "1b206510b50ba46a5ada2bb240bc4a8e0b24dfca793b7a3cc93d890c6332cc46",
       "pair.invitedByEmail": "9ca8c859198fcd02607a4bada9956c81ce6fe8e7aff293889902aeed0739710b",
       "pair.notEncrypted": "1b0489066c525fad4839564422cb75bb8040352ee56feee3fc6cfd51c0913d9c",
-      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1"
+      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -12457,7 +12475,16 @@
       "pair.noCode": "1b206510b50ba46a5ada2bb240bc4a8e0b24dfca793b7a3cc93d890c6332cc46",
       "pair.invitedByEmail": "9ca8c859198fcd02607a4bada9956c81ce6fe8e7aff293889902aeed0739710b",
       "pair.notEncrypted": "1b0489066c525fad4839564422cb75bb8040352ee56feee3fc6cfd51c0913d9c",
-      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1"
+      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -15489,7 +15516,16 @@
       "pair.noCode": "1b206510b50ba46a5ada2bb240bc4a8e0b24dfca793b7a3cc93d890c6332cc46",
       "pair.invitedByEmail": "9ca8c859198fcd02607a4bada9956c81ce6fe8e7aff293889902aeed0739710b",
       "pair.notEncrypted": "1b0489066c525fad4839564422cb75bb8040352ee56feee3fc6cfd51c0913d9c",
-      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1"
+      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -23134,7 +23170,16 @@
       "pair.noCode": "1b206510b50ba46a5ada2bb240bc4a8e0b24dfca793b7a3cc93d890c6332cc46",
       "pair.invitedByEmail": "9ca8c859198fcd02607a4bada9956c81ce6fe8e7aff293889902aeed0739710b",
       "pair.notEncrypted": "1b0489066c525fad4839564422cb75bb8040352ee56feee3fc6cfd51c0913d9c",
-      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1"
+      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -32841,7 +32886,16 @@
       "pair.noCode": "1b206510b50ba46a5ada2bb240bc4a8e0b24dfca793b7a3cc93d890c6332cc46",
       "pair.invitedByEmail": "9ca8c859198fcd02607a4bada9956c81ce6fe8e7aff293889902aeed0739710b",
       "pair.notEncrypted": "1b0489066c525fad4839564422cb75bb8040352ee56feee3fc6cfd51c0913d9c",
-      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1"
+      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -40372,7 +40426,16 @@
       "pair.noCode": "1b206510b50ba46a5ada2bb240bc4a8e0b24dfca793b7a3cc93d890c6332cc46",
       "pair.invitedByEmail": "9ca8c859198fcd02607a4bada9956c81ce6fe8e7aff293889902aeed0739710b",
       "pair.notEncrypted": "1b0489066c525fad4839564422cb75bb8040352ee56feee3fc6cfd51c0913d9c",
-      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1"
+      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -45227,7 +45290,16 @@
       "pair.noCode": "1b206510b50ba46a5ada2bb240bc4a8e0b24dfca793b7a3cc93d890c6332cc46",
       "pair.invitedByEmail": "9ca8c859198fcd02607a4bada9956c81ce6fe8e7aff293889902aeed0739710b",
       "pair.notEncrypted": "1b0489066c525fad4839564422cb75bb8040352ee56feee3fc6cfd51c0913d9c",
-      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1"
+      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -48700,7 +48772,16 @@
       "pair.noCode": "1b206510b50ba46a5ada2bb240bc4a8e0b24dfca793b7a3cc93d890c6332cc46",
       "pair.invitedByEmail": "9ca8c859198fcd02607a4bada9956c81ce6fe8e7aff293889902aeed0739710b",
       "pair.notEncrypted": "1b0489066c525fad4839564422cb75bb8040352ee56feee3fc6cfd51c0913d9c",
-      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1"
+      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -54163,7 +54244,16 @@
       "pair.noCode": "1b206510b50ba46a5ada2bb240bc4a8e0b24dfca793b7a3cc93d890c6332cc46",
       "pair.invitedByEmail": "9ca8c859198fcd02607a4bada9956c81ce6fe8e7aff293889902aeed0739710b",
       "pair.notEncrypted": "1b0489066c525fad4839564422cb75bb8040352ee56feee3fc6cfd51c0913d9c",
-      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1"
+      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -59626,7 +59716,16 @@
       "pair.noCode": "1b206510b50ba46a5ada2bb240bc4a8e0b24dfca793b7a3cc93d890c6332cc46",
       "pair.invitedByEmail": "9ca8c859198fcd02607a4bada9956c81ce6fe8e7aff293889902aeed0739710b",
       "pair.notEncrypted": "1b0489066c525fad4839564422cb75bb8040352ee56feee3fc6cfd51c0913d9c",
-      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1"
+      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -66352,7 +66451,16 @@
       "pair.noCode": "1b206510b50ba46a5ada2bb240bc4a8e0b24dfca793b7a3cc93d890c6332cc46",
       "pair.invitedByEmail": "9ca8c859198fcd02607a4bada9956c81ce6fe8e7aff293889902aeed0739710b",
       "pair.notEncrypted": "1b0489066c525fad4839564422cb75bb8040352ee56feee3fc6cfd51c0913d9c",
-      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1"
+      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -73140,7 +73248,16 @@
       "pair.noCode": "1b206510b50ba46a5ada2bb240bc4a8e0b24dfca793b7a3cc93d890c6332cc46",
       "pair.invitedByEmail": "9ca8c859198fcd02607a4bada9956c81ce6fe8e7aff293889902aeed0739710b",
       "pair.notEncrypted": "1b0489066c525fad4839564422cb75bb8040352ee56feee3fc6cfd51c0913d9c",
-      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1"
+      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -79727,7 +79844,16 @@
       "pair.noCode": "1b206510b50ba46a5ada2bb240bc4a8e0b24dfca793b7a3cc93d890c6332cc46",
       "pair.invitedByEmail": "9ca8c859198fcd02607a4bada9956c81ce6fe8e7aff293889902aeed0739710b",
       "pair.notEncrypted": "1b0489066c525fad4839564422cb75bb8040352ee56feee3fc6cfd51c0913d9c",
-      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1"
+      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -87038,7 +87164,16 @@
       "pair.noCode": "1b206510b50ba46a5ada2bb240bc4a8e0b24dfca793b7a3cc93d890c6332cc46",
       "pair.invitedByEmail": "9ca8c859198fcd02607a4bada9956c81ce6fe8e7aff293889902aeed0739710b",
       "pair.notEncrypted": "1b0489066c525fad4839564422cb75bb8040352ee56feee3fc6cfd51c0913d9c",
-      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1"
+      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     }
   }
 }

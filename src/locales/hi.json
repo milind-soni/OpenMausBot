@@ -1,4 +1,13 @@
 {
+  "botFolder.open": "कार्य फ़ोल्डर खोलें",
+  "botFolder.openLocal": "इस कंप्यूटर पर कार्य फ़ोल्डर खोलें",
+  "botFolder.copy": "पथ कॉपी करें",
+  "botFolder.copyLabel": "कार्य फ़ोल्डर का पथ कॉपी करें",
+  "botFolder.unavailable": "इस कंप्यूटर पर कोई कार्य फ़ोल्डर उपलब्ध नहीं है",
+  "botFolder.loadFailed": "कार्य फ़ोल्डर लोड नहीं हो सका।",
+  "botFolder.openFailed": "कार्य फ़ोल्डर नहीं खुल सका। उसका स्थान और अनुमतियाँ जाँचें या उसका पथ कॉपी करें।",
+  "botFolder.copied": "पथ कॉपी हो गया",
+  "botFolder.copyFailed": "पथ कॉपी नहीं हो सका।",
   "voice.gemini.keyPlaceholder": "अपनी Google AI Studio API कुंजी पेस्ट करें",
   "voice.gemini.model": "Gemini वाक् मॉडल",
   "keys.label.geminiTts": "Gemini वाक् API कुंजी",

@@ -1,4 +1,13 @@
 {
+  "botFolder.open": "Open working folder",
+  "botFolder.openLocal": "Open working folder on this computer",
+  "botFolder.copy": "Copy path",
+  "botFolder.copyLabel": "Copy working folder path",
+  "botFolder.unavailable": "No working folder available on this computer",
+  "botFolder.loadFailed": "Could not load the working folder.",
+  "botFolder.openFailed": "Could not open the working folder. Check its location and permissions, or copy its path.",
+  "botFolder.copied": "Path copied",
+  "botFolder.copyFailed": "Could not copy path.",
   "connectedWorkspaces.localTitle": "Environments on this computer",
   "connectedWorkspaces.missing": "missing",
   "connectedWorkspaces.current": "Current",
