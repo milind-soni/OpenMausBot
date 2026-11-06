@@ -125,6 +125,17 @@ describe("calendar event details drawer", () => {
 });
 
 describe("calendar event editor", () => {
+  // A backdrop blur re-blurs the whole page behind the editor on every repaint, which is costly without GPU compositing.
+  it("dims the page behind the editor without blurring it", () => {
+    const tree = render(() => EventEditor({
+      seed: { kind: "routine", at: 1, durationMinutes: 30, botIds: [bot.id], routine },
+      bots: [bot], plain: true, onClose: vi.fn(), onSavedCall: vi.fn(),
+    }));
+    const overlay = tree.find((node) => String(node.props.className ?? "").includes("fixed inset-0"))!;
+    expect(overlay.props.className).toContain("bg-black/65");
+    expect(overlay.props.className).not.toMatch(/backdrop-blur|backdrop-filter/);
+  });
+
   it.each([
     ["en", "Room no longer exists. Choose another.", "Save"],
     ["pt-br", "O grupo não existe mais. Escolha outro.", "Salvar"],
