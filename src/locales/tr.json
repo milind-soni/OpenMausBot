@@ -1,4 +1,13 @@
 {
+  "botFolder.open": "Çalışma klasörünü aç",
+  "botFolder.openLocal": "Bu bilgisayardaki çalışma klasörünü aç",
+  "botFolder.copy": "Yolu kopyala",
+  "botFolder.copyLabel": "Çalışma klasörünün yolunu kopyala",
+  "botFolder.unavailable": "Bu bilgisayarda kullanılabilir bir çalışma klasörü yok",
+  "botFolder.loadFailed": "Çalışma klasörü yüklenemedi.",
+  "botFolder.openFailed": "Çalışma klasörü açılamadı. Konumunu ve izinlerini kontrol edin veya yolunu kopyalayın.",
+  "botFolder.copied": "Yol kopyalandı",
+  "botFolder.copyFailed": "Yol kopyalanamadı.",
   "voice.gemini.keyPlaceholder": "Google AI Studio API anahtarınızı yapıştırın",
   "voice.gemini.model": "Gemini konuşma modeli",
   "keys.label.geminiTts": "Gemini konuşma API anahtarı",

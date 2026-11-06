@@ -1,4 +1,13 @@
 {
+  "botFolder.open": "Arbeitsordner öffnen",
+  "botFolder.openLocal": "Arbeitsordner auf diesem Computer öffnen",
+  "botFolder.copy": "Pfad kopieren",
+  "botFolder.copyLabel": "Pfad des Arbeitsordners kopieren",
+  "botFolder.unavailable": "Auf diesem Computer ist kein Arbeitsordner verfügbar",
+  "botFolder.loadFailed": "Der Arbeitsordner konnte nicht geladen werden.",
+  "botFolder.openFailed": "Der Arbeitsordner konnte nicht geöffnet werden. Prüfe seinen Speicherort und die Zugriffsrechte oder kopiere seinen Pfad.",
+  "botFolder.copied": "Pfad kopiert",
+  "botFolder.copyFailed": "Der Pfad konnte nicht kopiert werden.",
   "voice.gemini.keyPlaceholder": "Google AI Studio API-Schlüssel einfügen",
   "voice.gemini.model": "Gemini-Sprachmodell",
   "keys.label.geminiTts": "Gemini-Sprach-API-Schlüssel",

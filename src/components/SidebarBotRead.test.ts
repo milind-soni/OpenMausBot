@@ -7,6 +7,13 @@ import { BotEditorStore, initialState, reducer, type Action, type AppState, type
 import { BotContextMenu } from "./Sidebar";
 import { setLocale } from "@/lib/i18n";
 
+vi.mock("@/state/store", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/state/store")>();
+  return {
+    ...original,
+    api: (path: string, opts?: RequestInit) => path.endsWith("/working-folder") ? Promise.resolve({ path: null, local: false }) : original.api(path, opts),
+  };
+});
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 const mode = vi.hoisted(() => ({ advanced: true }));
@@ -130,7 +137,7 @@ describe("Simple mode's bot menu", () => {
   const point = (target: Element, y: number) => target.dispatchEvent(new MouseEvent("pointerover", { bubbles: true, clientX: 60, clientY: y }));
   beforeEach(() => { mode.advanced = false; });
 
-  it("leads with Pin, Move and Mark as read, then the thread items, then Rename, then Copy conversation ID and More, and ends with Archive and Delete", () => {
+  it("hides unavailable folder actions and ends with Archive and Delete", () => {
     draw();
     expect([...sheet().querySelectorAll("button")].map((node) => node.textContent)).toEqual([
       "Pin", "Move to department", "Mark as read", "New thread", "View threads", "Rename", "Copy conversation ID", "More", "Archive", "Delete",

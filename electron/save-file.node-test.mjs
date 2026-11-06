@@ -245,6 +245,20 @@ describe("Show in folder for a file outside the workspace", () => {
     assert.deepEqual(shown, []);
   });
 
+  it("opens a directory's contents through the desktop shell and reports shell failures", async () => {
+    const { shown, reveal } = shell();
+    const opened = [];
+    const openDirectory = async (folder) => { opened.push(folder); return ""; };
+    assert.equal(await revealInFolder(botHome, { reveal, openDirectory }), "shown");
+    assert.deepEqual(opened, [botHome]);
+    assert.deepEqual(shown, []);
+    assert.equal(await revealInFolder(botHome, { reveal, openDirectory: async () => "Permission denied" }), "invalid");
+    assert.equal(await revealInFolder(botHome, { reveal, openDirectory: async () => { throw new Error("denied"); } }), "invalid");
+    assert.equal(await revealInFolder(path.join(home, "secret.txt"), { reveal, openDirectory }), "shown");
+    assert.deepEqual(shown, [path.join(home, "secret.txt")]);
+    assert.deepEqual(opened, [botHome]);
+  });
+
   it("refuses relative paths, URLs and network shares without touching the disk", async () => {
     const { shown, reveal } = shell();
     const fsp = { stat: () => assert.fail("an invalid path must not be looked up") };

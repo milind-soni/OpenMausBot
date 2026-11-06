@@ -1,4 +1,13 @@
 {
+  "botFolder.open": "打开工作文件夹",
+  "botFolder.openLocal": "打开此计算机上的工作文件夹",
+  "botFolder.copy": "复制路径",
+  "botFolder.copyLabel": "复制工作文件夹路径",
+  "botFolder.unavailable": "此计算机上没有可用的工作文件夹",
+  "botFolder.loadFailed": "无法加载工作文件夹。",
+  "botFolder.openFailed": "无法打开工作文件夹。请检查其位置和访问权限，或复制其路径。",
+  "botFolder.copied": "已复制路径",
+  "botFolder.copyFailed": "无法复制路径。",
   "voice.gemini.keyPlaceholder": "粘贴你的 Google AI Studio API 密钥",
   "voice.gemini.model": "Gemini 语音合成模型",
   "keys.label.geminiTts": "Gemini 语音合成 API 密钥",

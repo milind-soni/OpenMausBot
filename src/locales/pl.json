@@ -1,4 +1,13 @@
 {
+  "botFolder.open": "Otwórz folder roboczy",
+  "botFolder.openLocal": "Otwórz folder roboczy na tym komputerze",
+  "botFolder.copy": "Kopiuj ścieżkę",
+  "botFolder.copyLabel": "Kopiuj ścieżkę folderu roboczego",
+  "botFolder.unavailable": "Na tym komputerze nie ma dostępnego folderu roboczego",
+  "botFolder.loadFailed": "Nie udało się wczytać folderu roboczego.",
+  "botFolder.openFailed": "Nie udało się otworzyć folderu roboczego. Sprawdź jego lokalizację i uprawnienia lub skopiuj jego ścieżkę.",
+  "botFolder.copied": "Ścieżka skopiowana",
+  "botFolder.copyFailed": "Nie udało się skopiować ścieżki.",
   "voice.gemini.keyPlaceholder": "Wklej swój klucz API Google AI Studio",
   "voice.gemini.model": "Model syntezy mowy Gemini",
   "keys.label.geminiTts": "Klucz API syntezy mowy Gemini",

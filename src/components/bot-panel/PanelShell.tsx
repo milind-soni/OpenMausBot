@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { BotWorkingFolderActions } from "../BotWorkingFolderActions";
 import { Settings, X } from "lucide-react";
 
 import { cn } from "@/lib/cn";
@@ -97,6 +98,7 @@ export function BotPanel({ bot, derived, linkedSection, onClose }: {
   return (
     <div className="flex min-h-0 flex-1 flex-col" onKeyDown={onKeyDown}>
       <div {...dragProps} className="flex h-[50px] shrink-0 items-start justify-end gap-2.5 px-[13px] pt-[13px]">
+        <BotWorkingFolderActions bot={bot} className={roundButtonCls} />
         <ChatShareMenu bot={bot} className={roundButtonCls} />
         <button
           type="button"

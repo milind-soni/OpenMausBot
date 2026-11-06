@@ -1,4 +1,13 @@
 {
+  "botFolder.open": "Ouvrir le dossier de travail",
+  "botFolder.openLocal": "Ouvrir le dossier de travail sur cet ordinateur",
+  "botFolder.copy": "Copier le chemin",
+  "botFolder.copyLabel": "Copier le chemin du dossier de travail",
+  "botFolder.unavailable": "Aucun dossier de travail disponible sur cet ordinateur",
+  "botFolder.loadFailed": "Impossible de charger le dossier de travail.",
+  "botFolder.openFailed": "Impossible d’ouvrir le dossier de travail. Vérifiez son emplacement et les autorisations, ou copiez son chemin.",
+  "botFolder.copied": "Chemin copié",
+  "botFolder.copyFailed": "Impossible de copier le chemin.",
   "voice.gemini.keyPlaceholder": "Collez votre clé API Google AI Studio",
   "voice.gemini.model": "Modèle de synthèse vocale Gemini",
   "keys.label.geminiTts": "Clé API de synthèse vocale Gemini",

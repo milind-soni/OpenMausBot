@@ -1,4 +1,13 @@
 {
+  "botFolder.open": "開啟工作資料夾",
+  "botFolder.openLocal": "開啟這台電腦上的工作資料夾",
+  "botFolder.copy": "複製路徑",
+  "botFolder.copyLabel": "複製工作資料夾路徑",
+  "botFolder.unavailable": "這台電腦上沒有可用的工作資料夾",
+  "botFolder.loadFailed": "無法載入工作資料夾。",
+  "botFolder.openFailed": "無法開啟工作資料夾。請檢查其位置與存取權限，或複製其路徑。",
+  "botFolder.copied": "已複製路徑",
+  "botFolder.copyFailed": "無法複製路徑。",
   "voice.gemini.keyPlaceholder": "貼上你的 Google AI Studio API 金鑰",
   "voice.gemini.model": "Gemini 語音合成模型",
   "keys.label.geminiTts": "Gemini 語音合成 API 金鑰",

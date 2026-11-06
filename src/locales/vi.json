@@ -1,4 +1,13 @@
 {
+  "botFolder.open": "Mở thư mục làm việc",
+  "botFolder.openLocal": "Mở thư mục làm việc trên máy tính này",
+  "botFolder.copy": "Sao chép đường dẫn",
+  "botFolder.copyLabel": "Sao chép đường dẫn thư mục làm việc",
+  "botFolder.unavailable": "Không có thư mục làm việc khả dụng trên máy tính này",
+  "botFolder.loadFailed": "Không thể tải thư mục làm việc.",
+  "botFolder.openFailed": "Không thể mở thư mục làm việc. Hãy kiểm tra vị trí và quyền truy cập hoặc sao chép đường dẫn.",
+  "botFolder.copied": "Đã sao chép đường dẫn",
+  "botFolder.copyFailed": "Không thể sao chép đường dẫn.",
   "voice.gemini.keyPlaceholder": "Dán khóa API Google AI Studio của bạn",
   "voice.gemini.model": "Mô hình giọng nói Gemini",
   "keys.label.geminiTts": "Khóa API giọng nói Gemini",

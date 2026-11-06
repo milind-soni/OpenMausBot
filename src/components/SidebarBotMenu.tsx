@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { BotWorkingFolderActions } from "./BotWorkingFolderActions";
 import { createPortal } from "react-dom";
 import { Archive, BellDot, Check, CheckCheck, ChevronRight, ClipboardCopy, Copy, Crown, FolderMinus, FolderOpen, FolderPlus, Loader2, MessagesSquare, MoreHorizontal, Pencil, Pin, PinOff, SquarePen, Star, Trash2, Users } from "lucide-react";
 import { api, useStore, openBot, type Bot } from "@/state/store";
@@ -308,6 +309,7 @@ export function BotContextMenu({
         style={{ top: shown.y, left: shown.x }}
         className={cn("fixed z-40 max-h-[calc(100dvh-16px)] w-max min-w-[198px] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain", MENU_SHEET, motion.className)} {...motion.exitProps}
       >
+        <BotWorkingFolderActions bot={bot} menu onOpened={onClose} />
         {remoteClient ? [moveToSection, ...threads, ...(rename ? [divider("rename"), rename] : []), divider("copy"), copyId, moreRow] : [
           item(
             bot.pinned ? <PinOff size={16} className="text-ink-secondary" /> : <Pin size={16} className="text-ink-secondary" />,
@@ -369,6 +371,7 @@ export function BotContextMenu({
       style={{ top: shown.y, left: shown.x }}
       className={cn("fixed z-40 max-h-[calc(100dvh-16px)] w-max min-w-[198px] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain", MENU_SHEET, motion.className)} {...motion.exitProps}
     >
+      <BotWorkingFolderActions bot={bot} menu onOpened={onClose} />
       {showThreads && <>
         {item(<SquarePen size={16} className="text-ink-secondary" />, t("task.newShort"), () => dispatch({ type: "newTask", botId: bot.id }))}
         {admin && item(<FolderOpen size={16} className="shrink-0 text-ink-secondary" />, t("task.folder.new"), () => onNewTaskFolder(bot.id))}
