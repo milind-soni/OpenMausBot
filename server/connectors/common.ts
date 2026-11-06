@@ -49,3 +49,7 @@ export function requestedServiceRecord<T>(services: Record<string, T>, requested
     }),
   );
 }
+
+export function decodeConnectedAccountId(value: string): string | undefined {
+  try { return decodeURIComponent(value); } catch { return undefined; }
+}
