@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { APPARMOR_PROFILE, LABELS, NAMES, SECCOMP_FILE } from "../src/settings.ts";
+import { APPARMOR_PROFILE, LABELS, NAMES, PATHS, SECCOMP_FILE } from "../src/settings.ts";
 
 const SCRIPT = join(import.meta.dirname, "..", "install.sh");
 const script = readFileSync(SCRIPT, "utf8");
@@ -34,21 +34,24 @@ esac`);
   tool("apparmor_parser", `echo "apparmor_parser $*" >> "${log}"`);
   const etc = join(dir, "etc-mausbot");
   const apparmor = join(dir, "apparmor.d");
+  const audit = join(dir, "log-mausbot");
   mkdirSync(etc);
   mkdirSync(apparmor);
+  mkdirSync(audit);
+  writeFileSync(join(audit, "audit.jsonl"), "{}\n");
   writeFileSync(join(etc, SECCOMP_FILE), "{}");
   writeFileSync(join(apparmor, APPARMOR_PROFILE), "profile");
   const result = spawnSync("sh", [SCRIPT, ...args], {
     encoding: "utf8",
     env: {
-      PATH: `${bin}:/usr/bin:/bin`, MAUSBOT_ETC_DIR: etc, MAUSBOT_APPARMOR_DIR: apparmor,
+      PATH: `${bin}:/usr/bin:/bin`, MAUSBOT_ETC_DIR: etc, MAUSBOT_APPARMOR_DIR: apparmor, MAUSBOT_AUDIT_DIR: audit,
       MAUSBOT_ADMIN_URL: "https://cloud.example.test", MAUSBOT_CONNECTOR_IMAGE: `ghcr.io/milind-soni/mausbot-connector@sha256:${"1".repeat(64)}`,
       ...options.env,
     },
     timeout: 30_000,
   });
   const calls = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [];
-  return { ...result, calls, etc, apparmor };
+  return { ...result, calls, etc, apparmor, audit };
 }
 
 describe("install.sh", () => {
@@ -76,7 +79,9 @@ describe("install.sh", () => {
     expect(script).toContain('say "Connected. Your server shows up in MausBot in a minute."');
     expect(script).toContain(`com.mausbot.instance=$instance`);
     expect(script).toContain("--restart unless-stopped --network host");
-    expect(script).toContain("-v /var/run/docker.sock:/var/run/docker.sock -v \"$STATE_VOLUME:/state\" -v \"$ETC_DIR:/etc/mausbot:ro\"");
+    expect(script).toContain("-v /var/run/docker.sock:/var/run/docker.sock -v \"$STATE_VOLUME:/state\" -v \"$ETC_DIR:/etc/mausbot:ro\" -v \"$AUDIT_DIR:/var/log/mausbot\"");
+    expect(script).toContain('AUDIT_DIR="${MAUSBOT_AUDIT_DIR:-/var/log/mausbot}"');
+    expect(PATHS.audit).toBe("/var/log/mausbot");
     expect(script).toContain('apparmor_parser -r -W "$APPARMOR_DIR/$PROFILE"');
   });
 
@@ -91,7 +96,8 @@ describe("install.sh", () => {
     expect(result.calls.some((call) => call.startsWith("apparmor_parser -R "))).toBe(true);
     expect(existsSync(join(result.apparmor, APPARMOR_PROFILE))).toBe(false);
     expect(existsSync(result.etc)).toBe(false);
-    expect(result.stdout).toContain(`Your data is kept in the Docker volume ${NAMES.dataVolume}, with its backups.`);
+    expect(result.stdout).toContain(`Your data is kept in the Docker volume ${NAMES.dataVolume}, with its backups, and the audit log in ${result.audit}.`);
+    expect(existsSync(join(result.audit, "audit.jsonl"))).toBe(true);
     expect(result.stdout).toContain("curl -fsSL https://cloud.example.test/install.sh | sudo sh -s -- uninstall --delete-data");
   });
 
@@ -103,6 +109,7 @@ describe("install.sh", () => {
       "docker volume rm mausbot-backup-20261028-000000-ab12", "docker volume rm mausbot-backup-20261029-000000-cd34",
     ]));
     expect(deleted.stdout).toContain("MausBot is removed from this server, and so is its data.");
+    expect(existsSync(deleted.audit)).toBe(false);
     for (const typo of [["uninstall", "--delete-dat"], ["uninstall", "--delete-data=yes"], ["uninstall", "-f"]]) {
       const refused = run(typo);
       expect(refused.status, typo.join(" ")).toBe(1);
