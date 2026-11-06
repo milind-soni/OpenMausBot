@@ -150,6 +150,7 @@
   "server.mcp.card.remove": "{name} entfernen?",
   "server.mcp.card.internet": "Über das Internet erreichbar. Eingeschaltet können deine Bots seine Tools nutzen.",
   "server.mcp.card.local": "Läuft auf diesem Computer.",
+  "server.mcp.card.elsewhere": "Läuft auf {computer}.",
   "server.mcp.card.newKey": "neuer Schlüssel für {key}",
   "server.mcp.card.cleared": "Gespeicherte Werte werden gelöscht: {items}.",
   "server.mcp.card.usedBy": "Wird von {names} genutzt.",

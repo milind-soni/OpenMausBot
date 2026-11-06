@@ -126,6 +126,7 @@
   "server.mcp.card.remove": "Supprimer {name} ?",
   "server.mcp.card.internet": "Accessible par Internet. Une fois activé, vos bots peuvent utiliser ses outils.",
   "server.mcp.card.local": "S'exécute sur cet ordinateur.",
+  "server.mcp.card.elsewhere": "S'exécute sur {computer}.",
   "server.mcp.card.newKey": "nouvelle clé pour {key}",
   "server.mcp.card.cleared": "Efface les valeurs enregistrées : {items}.",
   "server.mcp.card.usedBy": "Utilisé par {names}.",

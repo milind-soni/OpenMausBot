@@ -177,6 +177,7 @@
   "server.mcp.card.remove": "Rimuovere {name}?",
   "server.mcp.card.internet": "Raggiunto via internet. Una volta attivo, i tuoi bot possono usarne gli strumenti.",
   "server.mcp.card.local": "Viene eseguito su questo computer.",
+  "server.mcp.card.elsewhere": "Viene eseguito su {computer}.",
   "server.mcp.card.newKey": "nuova chiave per {key}",
   "server.mcp.card.cleared": "Cancella i valori salvati: {items}.",
   "server.mcp.card.usedBy": "Usato da {names}.",

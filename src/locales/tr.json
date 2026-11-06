@@ -157,6 +157,7 @@
   "server.mcp.card.remove": "{name} kaldırılsın mı?",
   "server.mcp.card.internet": "İnternet üzerinden erişilir. Açıldığında botların araçlarını kullanabilir.",
   "server.mcp.card.local": "Bu bilgisayarda çalışır.",
+  "server.mcp.card.elsewhere": "{computer} üzerinde çalışır.",
   "server.mcp.card.newKey": "{key} için yeni anahtar",
   "server.mcp.card.cleared": "Kayıtlı değerleri siler: {items}.",
   "server.mcp.card.usedBy": "Kullananlar: {names}.",

@@ -179,6 +179,7 @@
   "server.mcp.card.remove": "Удалить {name}?",
   "server.mcp.card.internet": "Доступен через интернет. После включения ваши боты смогут пользоваться его инструментами.",
   "server.mcp.card.local": "Работает на этом компьютере.",
+  "server.mcp.card.elsewhere": "Работает на {computer}.",
   "server.mcp.card.newKey": "новый ключ для {key}",
   "server.mcp.card.cleared": "Удаляет сохранённые значения: {items}.",
   "server.mcp.card.usedBy": "Используют: {names}.",
