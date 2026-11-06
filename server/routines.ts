@@ -10,15 +10,13 @@ import { activeRunsOf, nextDueOf, schedulerDueOf, wakeHoldOf } from "./routine-d
 import { startDueTimer, type DueTimer } from "./due-timer.ts";
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import type { RoutineRequestOperation } from "../shared/routine-request.ts";
-import type { ModelSelection } from "../shared/wire.ts";
 import { intervalAllowsOccurrence, intervalHasRestrictions, isSameLocalDay, latestIntervalOccurrence } from "./routine-intervals.ts";
-import { cloneSchedule, limitResetOccurrence, mergeScheduleUpdate, nextOccurrence, RoutineScheduleError, type RoutineSchedule, type RoutineScheduleInput } from "./routine-schedules.ts";
+import { cloneSchedule, limitResetOccurrence, mergeScheduleUpdate, nextOccurrence, RoutineScheduleError, type RoutineSchedule } from "./routine-schedules.ts";
 import { runsOnce } from "../shared/limit-reset.ts";
 import {
-  isRoutineProblemRun, type RoutineAccess, type RoutineCheck, type RoutineContextAttachment, type RoutineDelivery, type RoutineIntervalWindow, type RoutineRetryCause,
-  type RoutineHoldCause, type RoutineRunReport, type RoutineRunStatus, type RoutineRunTrigger, type RoutineStep, type RoutineStepRun,
+  isRoutineProblemRun, type RoutineContextAttachment, type RoutineIntervalWindow, type RoutineHoldCause, type RoutineRunReport, type RoutineRunStatus,
+  type RoutineRunTrigger, type RoutineStep,
 } from "../shared/routines.ts";
-import type { PartPair, RoutinePart } from "./package-parts.ts";
 import {
   advanceStep, composeExecutionPrompt, continuityCarry, endSteps, ROUTINE_DEFERRAL_NOTICE_MS, ROUTINE_SKIPPED_WHILE_WAITING, ROUTINE_SUPERSEDED,
   routineFailure, routineHostWarning, skipNeedsNotice, stepPrompt, supersededBy,
@@ -26,14 +24,14 @@ import {
 import {
   dispatchRefusal, engineFacts, loadOwnerNotices, nextScheduledRun, recoverRun, requeueOnce, weekRuns, type RoutineAlert, type RoutineFailureFacts, type RoutineOwnerNotice,
 } from "./routine-recovery.ts";
-import { activeMs, askOf, settleAsk, waitingFor, type RoutineRunAsk } from "./routine-waits.ts";
+import { activeMs, askOf, settleAsk, waitingFor } from "./routine-waits.ts";
 import { failsLikeLastOutcome, outcomesNewestFirst } from "./routine-outcomes.ts";
 import { EVENT_RETRY_WINDOW_MS, loadEventReceipts, MAX_EVENT_RECEIPTS, type EventRunReceipt } from "./routine-event-receipts.ts";
 import { attachmentPathsOf, attachmentsMalformed, cloneAttachments } from "./routine-attachments.ts";
 import { loadInstalledPackage, loadRequestReceipts, loadRoutine, loadRun } from "./routine-load.ts";
 import { applyHolds, holdCauses, type AppliedHolds } from "./routine-holds.ts";
 import { sanitizeInput } from "./routine-input.ts";
-import { applyCheckResult, routineLine, runLineFields, type RoutineLineCodes, type RoutineTroubleCode } from "./routine-lines.ts";
+import { applyCheckResult, routineLine, runLineFields } from "./routine-lines.ts";
 import { checkHold, CHECK_BOOT_HOLD_MS, type CheckHold } from "./routine-check-pacing.ts";
 import { resolveRoutineResultsThread, routineRunDefinition, type ResultsThreadAllocation } from "./routine-run-definition.ts";
 
@@ -42,156 +40,11 @@ export { intervalHasRestrictions } from "./routine-intervals.ts";
 export { nextOccurrence, RoutineScheduleError } from "./routine-schedules.ts";
 export type { RoutineIntervalSchedule, RoutineIntervalScheduleInput, RoutineSchedule, RoutineScheduleInput } from "./routine-schedules.ts";
 
-/** `cloud` runs the agent inside the bot's Boat VM; `maus` runs the bot's own provider and borrows only its computer tools. */
-export type RoutineRunOn = "maus" | "cloud";
-export type RoutineTarget = "bot" | "room-goal";
-export type RoutineGoalStatus = Exclude<GroupGoalRunStatus, "working">;
-
-
-export interface Routine extends RoutineTroubleCode {
-  id: string;
-  name: string;
-  prompt: string;
-  target: RoutineTarget;
-  botId: string;
-  groupId?: string;
-  runOn: RoutineRunOn;
-  enabled: boolean;
-  schedule: RoutineSchedule;
-  durationMinutes: number;
-  timeoutMinutes?: number;
-  attachments?: RoutineContextAttachment[];
-  continuity?: boolean;
-  modelSelection?: ModelSelection;
-  overlap?: "skip" | "queue";
-  runOnStartup?: boolean;
-  checks?: RoutineCheck[];
-  access?: RoutineAccess;
-  deliver?: RoutineDelivery;
-  checkedAt?: number;
-  checkTrouble?: string;
-  wakeAt?: number;
-  skippedRuns?: number;
-  lastSkippedAt?: number;
-  failureStreak?: number;
-  weekRuns?: { ok: number; total: number };
-  warning?: string;
-  heldFor?: RoutineHoldCause;
-  steps?: RoutineStep[];
-  sourceThreadId?: string;
-  resultsThreadId?: string;
-  installedPackage?: RoutinePackageStamp;
-  nextRunAt: number | null;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface RoutinePackageStamp {
-  installId: string;
-  key: string;
-  parts: Record<RoutinePart, PartPair>;
-}
-
-export interface RoutineRun extends RoutineLineCodes {
-  id: string;
-  routineId: string;
-  routineName: string;
-  prompt?: string;
-  durationMinutes?: number;
-  timeoutMinutes?: number;
-  attachments?: RoutineContextAttachment[];
-  target: RoutineTarget;
-  goalStatus?: RoutineGoalStatus;
-  groupId?: string;
-  botId: string;
-  runOn: RoutineRunOn;
-  scheduledFor: number;
-  status: RoutineRunStatus;
-  manual: boolean;
-  deferredAt?: number;
-  deferredNoticeAt?: number;
-  /** A queued run starts no earlier than this. */
-  retryAt?: number;
-  retried?: RoutineRetryCause;
-  /** When its current wait began; read only while the run is waiting. */
-  waitingSince?: number;
-  asked?: RoutineRunAsk;
-  /** Time spent waiting on the person's answers, which the run limit does not count. */
-  waitedMs?: number;
-  triggerSource?: RoutineRunTrigger;
-  /** "app": a connected-app event started it; "wait": a wait's follow-up did (its triggerSource stays "webhook", an outside event). */
-  eventSource?: "app" | "wait";
-  webhookId?: string;
-  deliveryId?: string;
-  sourceThreadId?: string;
-  resultsThreadId?: string;
-  threadId?: string;
-  startedAt?: number;
-  finishedAt?: number;
-  output?: string;
-  attention?: string;
-  error?: string; partial?: boolean;
-  cost?: number | null;
-  denials?: string[];
-  report?: RoutineRunReport;
-  access?: RoutineAccess;
-  deliver?: RoutineDelivery;
-  checkKey?: string;
-  plan?: RoutineStep[];
-  stepAt?: number;
-  stepRuns?: RoutineStepRun[];
-  handoff?: string;
-  createdAt: number;
-  seenAt?: number;
-}
-
-export interface RoutineRequestReceipt {
-  requestId: string;
-  messageId: string;
-  botId: string;
-  threadId: string;
-  action: RoutineRequestOperation["action"];
-  fingerprintVersion: 1;
-  fingerprint: string;
-  resultId: string;
-  appliedAt: number;
-}
-
-export interface RoutineRequestCommit {
-  requestId: string;
-  messageId: string;
-  botId: string;
-  threadId: string;
-  action: RoutineRequestOperation["action"];
-  fingerprintVersion: 1;
-  fingerprint: string;
-}
+export type { Routine, RoutineGoalStatus, RoutineInput, RoutinePackageStamp, RoutineRequestCommit, RoutineRequestReceipt, RoutineRun, RoutineRunOn, RoutineTarget } from "./routine-records.ts";
+import type { Routine, RoutineInput, RoutinePackageStamp, RoutineRequestCommit, RoutineRequestReceipt, RoutineRun, RoutineRunOn, RoutineTarget } from "./routine-records.ts";
 
 type RoutineRequestCommitFor<Action extends RoutineRequestOperation["action"]> =
   Omit<RoutineRequestCommit, "action"> & { action: Action };
-
-export interface RoutineInput {
-  name: string;
-  prompt: string;
-  target?: RoutineTarget;
-  botId: string;
-  groupId?: string | null;
-  runOn?: RoutineRunOn;
-  enabled?: boolean;
-  schedule: RoutineScheduleInput;
-  durationMinutes?: number;
-  timeoutMinutes?: number | null;
-  attachments?: RoutineContextAttachment[];
-  continuity?: boolean;
-  modelSelection?: ModelSelection | null;
-  overlap?: "skip" | "queue";
-  runOnStartup?: boolean;
-  checks?: RoutineCheck[] | null;
-  access?: RoutineAccess | null;
-  deliver?: RoutineDelivery | null;
-  steps?: RoutineStep[] | null;
-  resultsThreadId?: string | null;
-}
 
 interface RoutineFile {
   version: 1;
