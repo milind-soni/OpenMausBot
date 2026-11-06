@@ -238,6 +238,9 @@ export function createHomeWindow(deps) {
     now = Date.now, timers = DEFAULT_TIMERS, hosts = () => null, readyStore = null, ownMove = () => null, log = () => {}, t = nativeText.englishText.t } = deps;
   let home = { kind: "computer" }, screen = null, status = null, opens = 0, retry = null, tries = 0, loaded = null, newer = false, repairing = null;
   let recovering = null;
+  /** The profile (clean-workspace.mjs) the person opened from the rail while My Cloud is home, until they pick a place. Never
+   * remembered: each launch opens My Cloud. */
+  let profileShown = null;
   /** My Cloud asked for before the move made it home (`{ open }`), until its page loads or the person goes elsewhere;
    * `naming`: since when, and how often, a brand-new My Cloud's name was not found. */
   let asked = null, naming = null;
@@ -519,10 +522,24 @@ export function createHomeWindow(deps) {
   async function show({ open = null, place = null } = {}) {
     if (recovering) { if (!open && !place) return; recovering = null; }
     const token = ++opens;
+    if (open || place) profileShown = null;
     const current = await refresh();
     if (!wanted(token)) return;
-    // This computer's own copy is the server again before anything of the person's Cloud opens.
-    if (!current.clean && clean?.active()) { await clean.leave(); if (!wanted(token)) return; }
+    if (current.kind !== "cloud") profileShown = null;
+    // This computer's own copy is the server again before anything of the person's Cloud opens; a profile they opened keeps
+    // running, so going back to it is one click.
+    if (!current.clean && clean?.active() && !clean.profile?.()) { await clean.leave(); if (!wanted(token)) return; }
+    if (profileShown) {
+      opening = null; asked = null; naming = null;
+      clearRenewal();
+      if (await clean.open(profileShown)) {
+        if (!wanted(token)) return;
+        ensureWindow(); clearRetry(); screen = null; status = null; shown = null; away = false;
+        return showLocal(onScreen() || !shows(localOrigin()));
+      }
+      profileShown = null;
+      if (!wanted(token)) return;
+    }
     // Nobody signed in has nothing to open but the clean workspace; the place stays remembered for when they're back.
     const target = current.clean && signedOut() ? { kind: "cloud" } : placeOf({ ask: place, remembered: remembered(), state: state() });
     if (target.kind === "cloud" && target.left) { left(target.left); remember(null); }
@@ -634,6 +651,16 @@ export function createHomeWindow(deps) {
 
   return {
     show,
+    /** Profile `id` from the rail while My Cloud is home: the window shows it, and My Cloud is one click away. False when it
+     * can't open, and the window shows My Cloud as before. */
+    async openProfile(id) {
+      if (!clean?.open || (await refresh()).kind !== "cloud") return false;
+      profileShown = id;
+      await show();
+      return profileShown === id;
+    },
+    /** The profile on screen, opened from the rail, else null. */
+    profile: () => profileShown,
     /** The person asked for My Cloud (the Server menu, the welcome, Settings, the ready notice). Before the move made it
      * home it opens as a saved server, and while the Admin sets it up the setup screen shows until it opens by itself. */
     async openCloud(open = null) {
@@ -703,6 +730,7 @@ export function createHomeWindow(deps) {
      * the window off whatever it shows of that account. */
     accountLeaving() {
       opens++;
+      profileShown = null;
       clearRetry(); clearRenewal();
       asked = null; naming = null; shown = null; opening = null; screen = null; status = null;
       away = away || !shows(localOrigin());

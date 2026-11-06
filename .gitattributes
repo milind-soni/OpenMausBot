@@ -45,3 +45,8 @@ scripts/tighten-ratchets.mjs text eol=lf
 # on Windows fails every one of those checks for a reason that has nothing to do with the wire.
 companion/src/e2e/vectors/** text eol=lf
 relay/test/vectors/** text eol=lf
+
+# server/cloud-home.test.ts matches the edge's Caddy configs line by line with "\n", and Caddy reads them as written;
+# a CRLF checkout on Windows fails every match for a reason that has nothing to do with the edge.
+deploy/fly/Caddyfile* text eol=lf
+deploy/fly/*.caddy text eol=lf

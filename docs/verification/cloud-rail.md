@@ -86,6 +86,39 @@ Nothing here needs a real MausBot Cloud account, a payment or the Electron app.
   pairing steps, and one only reachable on its own network with nothing to
   open.
 
+## This Mac, once My Cloud is home
+
+Once a person's bots moved to My Cloud, this computer's own copy is frozen and
+is never a place again. The rail then shows This Mac (This PC on Windows and
+Linux) first, beside My Cloud: a separate place on this computer, with its own
+bots. A click starts it fresh in a folder of its own beside the data folder
+(`~/.openmausbot-profiles/default`, a profile by its stable id; more profiles
+would be more folders there), on the same address, one server at a time, as a
+local environment switch does. Nothing moves either way, the frozen copy keeps
+its marker and its bots, and the move's code never reaches the profile. A line
+on its page says the bots from before are on My Cloud and that an older copy
+comes in from Settings → Backups. My Cloud on the rail goes back; the profile
+keeps running, so This Mac is one click again. Every launch opens My Cloud.
+This computer stays lent to My Cloud throughout: lending follows the sign-in,
+and only the clean workspace for nobody who can reach the bots stops it. People
+with no Cloud see no change.
+
+```sh
+node --test electron/clean-workspace.node-test.mjs electron/home-window-profile.node-test.mjs electron/home-window-clean.node-test.mjs electron/cloud-rail.node-test.mjs electron/lending-target.node-test.mjs
+pnpm exec vitest run src/components/PlacesRail.test.ts src/components/HomeLine.test.ts
+OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/rail-profile-ui.e2e.test.ts
+```
+
+`scripts/testing/rail-profile-ui.e2e.test.ts` runs main's own handlers in a
+headless Chrome (`launchHomeWorld` with `profiles`): My Cloud a real Cloud-mode
+server with the bots, this computer its real frozen server until This Mac
+restarts it on the profile's folder, the rail's own page in a tab of its own,
+and this computer really lent to My Cloud on the window's session. It clicks
+This Mac on the rail (an empty place, the line, the marker untouched), then My
+Cloud (the Cloud's bots), then This Mac again (what was made there is still
+there, with no restart), watching the lent link every 50 ms all the while: it
+never drops. Each picture is the rail beside the page, as the window shows them.
+
 ## Automated fixtures
 
 ```sh

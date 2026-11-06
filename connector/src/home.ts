@@ -6,6 +6,7 @@ import { rmSync } from "node:fs";
 import { DockerError, type ContainerSpec, type Docker, type Mount } from "./docker.ts";
 import { JobFailure } from "./failure.ts";
 import { publicHost, summarizeHealth, type HealthRead } from "./home-health.ts";
+import { digestPinnedOnly, type ImageCheck } from "./images.ts";
 import { errorText, registerSecret, type Log } from "./log.ts";
 import { EXPORT_PATH, UPDATE_HEALTH_WINDOW_MS, type CopyInfo, type HomeHealth, type HomeReport, type HomeState, type JobError, type JobReply, type JobResults } from "./protocol.ts";
 import {
@@ -83,6 +84,17 @@ function versionBelow(a: readonly number[], b: readonly number[]): boolean {
   return false;
 }
 
+/** How long an updated home's bot box has to finish its self-check once the home answers (it starts 5 s after boot). */
+const BOX_WINDOW_MS = 3 * 60_000;
+
+/** "passed" when the box ran its self-check and every check passed; "pending" until it has; otherwise what went wrong. */
+export function boxVerdict(box: HomeHealth["box"]): "passed" | "pending" | string {
+  if (!box) return "pending";
+  if (box.box !== "bwrap") return `its bot box is ${box.box ?? "unknown"}`;
+  if (box.checks === null) return "pending";
+  return box.failed.length ? `its bot box failed ${box.failed.join(", ")} (${box.checks})` : "passed";
+}
+
 const lastLine = (text: string) => text.trim().split("\n").pop()?.slice(0, 300) ?? "";
 const spoken = (ms: number) => (ms % 60_000 === 0 ? `${ms / 60_000} minutes` : `${Math.round(ms / 1000)} seconds`);
 const gb = (bytes: number) => Math.round((bytes / 1e9) * 10) / 10;
@@ -97,6 +109,10 @@ export interface HomeOptions {
   /** Free bytes where Docker keeps its volumes. */
   diskFree: () => number;
   transfer: Transfer;
+  /** Every image the home is to run, after it is pulled and before it runs. */
+  checkImage?: ImageCheck;
+  /** Each step of a job that changes the home or its data, as it begins: the audit log's `step` lines. */
+  onStep?: (step: { id: string; type: Operation["type"]; step: string; detail?: Record<string, unknown> }) => void;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
   updateWindowMs?: number;
@@ -185,11 +201,13 @@ export class Home {
   start(jobId: string, image: string, env: Record<string, string>): Promise<JobResults["start"]> {
     return this.exclusive(async () => {
       registerHomeSecrets(env);
-      this.state.saveHomeEnv(env);
       const record = this.state.home();
+      // Refused before anything is kept: the connector would otherwise start this image again on its own.
+      await this.ensureImage(image);
+      await this.checkImage(image, record.image);
+      this.state.saveHomeEnv(env);
       this.state.saveHome({ ...record, desired: "running", image, operation: { jobId, type: "start", phase: "start", previousImage: record.image, nextImage: image, target: null, dataAtRisk: false, wasRunning: false, startedAt: this.now() } });
       try {
-        await this.ensureImage(image);
         await this.ensureDataVolume();
         await this.ensureContainer(image, env);
         await this.startHome(image);
@@ -231,9 +249,13 @@ export class Home {
       const { image: previous, env } = this.current();
       const record = this.state.home();
       const wasRunning = (await this.docker.containerInspect(NAMES.home))?.State.Running === true;
+      // The new version must keep a bot box that passed every check passing them: never a silent step down.
+      const boxBefore = wasRunning ? (await this.refreshHealth().catch(() => this.lastHealth))?.box ?? null : null;
+      const keepBox = boxVerdict(boxBefore) === "passed";
       this.begin({ jobId, type: "update", phase: "pull", previousImage: previous, nextImage: image, target: null, dataAtRisk: false, wasRunning });
       try {
         await this.ensureImage(image);
+        await this.checkImage(image, previous);
         await this.ensureRoomForCopy(previous);
       } catch (error) {
         this.finish({});
@@ -248,8 +270,9 @@ export class Home {
         await this.createContainer(image, env);
         await this.startHome(image);
         this.phase({ phase: "wait" });
-        const waited = await this.waitHealthy(image, this.updateWindowMs);
+        const waited = await this.waitHealthy(image, this.updateWindowMs, keepBox);
         if (!waited.ok) failure = waited.reason;
+        else this.step("healthy", { box: this.lastHealth?.box?.checks ?? null });
       } catch (error) {
         failure = errorText(error);
       }
@@ -317,7 +340,7 @@ export class Home {
   }
 
   /** A gzip tar of /data, copied while the home is stopped, then uploaded to the Admin once the home runs again. */
-  exportDisk(jobId: string, admin: { origin: string; token: string }): Promise<JobResults["export-disk"]> {
+  exportDisk(jobId: string, admin: { origin: string; authorization: (jobId: string) => string }): Promise<JobResults["export-disk"]> {
     return this.exclusive(async () => {
       const { image } = this.current();
       await this.ensureRoomForCopy(image);
@@ -338,7 +361,7 @@ export class Home {
       if (wasRunning) await this.restartAfter(image);
       this.phase({ phase: "upload" });
       try {
-        const sent = await this.options.transfer.upload(`${admin.origin}${EXPORT_PATH}/${jobId}`, { authorization: `Bearer ${admin.token}` }, this.state.path(archive));
+        const sent = await this.options.transfer.upload(`${admin.origin}${EXPORT_PATH}/${jobId}`, { authorization: admin.authorization(jobId) }, this.state.path(archive));
         return { bytes: sent.bytes, sha256: sent.sha256 };
       } catch (error) {
         throw new JobFailure("transfer_failed", `The data could not be sent to MausBot (${errorText(error)}).`);
@@ -350,7 +373,7 @@ export class Home {
   }
 
   /** Replaces /data with the gzip tar at `url`, keeping a safety copy until the home runs on it. */
-  importDisk(jobId: string, url: string, admin: { origin: string; token: string }): Promise<JobResults["import-disk"]> {
+  importDisk(jobId: string, url: string, admin: { origin: string; authorization: (jobId: string) => string }): Promise<JobResults["import-disk"]> {
     return this.exclusive(async () => {
       const { image, env } = this.current();
       const archive = `import-${jobId}.tar.gz`;
@@ -358,8 +381,8 @@ export class Home {
       this.begin({ jobId, type: "import-disk", phase: "download", previousImage: image, nextImage: null, target: archive, dataAtRisk: false, wasRunning });
       let bytes: number;
       try {
-        // The token goes only to the Admin itself, never to a storage address it hands out.
-        const headers: Record<string, string> = new URL(url).origin === admin.origin ? { authorization: `Bearer ${admin.token}` } : {};
+        // The box's token goes only to the Admin itself, never to a storage address it hands out.
+        const headers: Record<string, string> = new URL(url).origin === admin.origin ? { authorization: admin.authorization(jobId) } : {};
         bytes = (await this.options.transfer.download(url, headers, this.state.path(archive), Math.max(0, this.options.diskFree() - 2e9))).bytes;
         await this.ensureRoomForCopy(image);
       } catch (error) {
@@ -466,11 +489,28 @@ export class Home {
 
   private begin(op: Omit<Operation, "startedAt">): void {
     this.state.saveHome({ ...this.state.home(), operation: { ...op, startedAt: this.now() } });
+    this.step(op.phase, op.nextImage ? { image: op.nextImage, from: op.previousImage } : undefined);
   }
 
   private phase(patch: Partial<Operation>): void {
     const record = this.state.home();
-    if (record.operation) this.state.saveHome({ ...record, operation: { ...record.operation, ...patch } });
+    if (!record.operation) return;
+    this.state.saveHome({ ...record, operation: { ...record.operation, ...patch } });
+    if (patch.phase && patch.phase !== record.operation.phase) this.step(patch.phase);
+  }
+
+  private step(step: string, detail?: Record<string, unknown>): void {
+    const op = this.state.home().operation;
+    if (op) this.options.onStep?.({ id: op.jobId, type: op.type, step, ...(detail ? { detail } : {}) });
+  }
+
+  private async checkImage(image: string, current: string | null): Promise<void> {
+    try {
+      await (this.options.checkImage ?? digestPinnedOnly)(image, { kind: "home", current });
+    } catch (error) {
+      throw new JobFailure("image_refused", `${image} was refused (${errorText(error)}). Nothing was changed.`);
+    }
+    this.step("checked", { image });
   }
 
   private finish(patch: Partial<HomeRecord>): void {
@@ -539,8 +579,10 @@ export class Home {
     if (paths.length) this.log(`cleared the data-directory lease records a stopped home left: ${paths.join(", ")}`);
   }
 
-  private async waitHealthy(image: string, windowMs: number): Promise<Waited> {
-    const deadline = this.now() + windowMs;
+  /** The home reports `image`, and with `box` its bot box has passed every check, within `windowMs` plus BOX_WINDOW_MS. */
+  private async waitHealthy(image: string, windowMs: number, box = false): Promise<Waited> {
+    let deadline = this.now() + windowMs;
+    let reported = false;
     const env = this.state.homeEnv();
     if (!env) return { ok: false, reason: "the home has no environment" };
     for (;;) {
@@ -551,8 +593,19 @@ export class Home {
       }
       const { status, report } = await this.options.readHealth({ port: HOME_PORT, publicHost: publicHost(env), secret: env.OMB_CLOUD_BOOTSTRAP_SECRET });
       this.lastHealth = summarizeHealth(status, report, image, this.now());
-      if (this.lastHealth.ok) return { ok: true };
-      if (this.now() >= deadline) return { ok: false, reason: `it did not report ${image} within ${spoken(windowMs)}` };
+      if (this.lastHealth.ok) {
+        if (!box) return { ok: true };
+        if (!reported) {
+          reported = true;
+          deadline = this.now() + BOX_WINDOW_MS;
+        }
+        const verdict = boxVerdict(this.lastHealth.box);
+        if (verdict === "passed") return { ok: true };
+        if (verdict !== "pending") return { ok: false, reason: verdict };
+      }
+      if (this.now() >= deadline) {
+        return { ok: false, reason: reported ? `its bot box did not finish its self-check within ${spoken(BOX_WINDOW_MS)}` : `it did not report ${image} within ${spoken(windowMs)}` };
+      }
       await this.sleep(this.pollMs);
     }
   }

@@ -1,18 +1,26 @@
-// mausbot-connector: `run` (the service), `enroll` (the code on stdin), `status`, `probe`, `version`.
-import { readFileSync, statfsSync } from "node:fs";
+// mausbot-connector: `run` (the service), `enroll` (the code on stdin), `status`, `probe`, `job` (one job from root on this
+// server), `audit` (the audit log, checked), `version`.
+import { existsSync, readFileSync, statfsSync } from "node:fs";
 import { join } from "node:path";
 
-import { Agent } from "./agent.ts";
+import { createConnection } from "node:net";
+import type { Duplex } from "node:stream";
+
+import { Agent, savedConfig, transferAuthorization } from "./agent.ts";
+import { AuditLog, verifyAudit } from "./audit.ts";
 import { SocketDocker, type DockerInfo } from "./docker.ts";
 import { adminOrigin, enroll } from "./enroll.ts";
 import { readHealth } from "./home-health.ts";
+import { serveRequest } from "./home-requests.ts";
 import { Home } from "./home.ts";
 import { hostChecks, hostFacts, hostHealth, probeBox, type BoxProbeResult, type HostReader } from "./host.ts";
-import { jobRunner } from "./jobs.ts";
+import { jobDesk, jobRunner, resultEvent } from "./jobs.ts";
+import { sendLocalJob, serveLocalJobs } from "./local.ts";
+import { POLICY_FILE } from "./policy.ts";
 import { errorText, log, registerSecret } from "./log.ts";
 import { PROTOCOL_VERSION, type ConnectorIdentity, type Heartbeat, type HostHealth } from "./protocol.ts";
 import { SELF_UPDATE_DEADLINE_MS, SelfUpdater, ownContainer } from "./self-update.ts";
-import { CONNECTOR_VERSION, PATHS, SECCOMP_FILE, envSeconds } from "./settings.ts";
+import { AUDIT_FILE, CONNECTOR_VERSION, HOME_PORT, PATHS, SECCOMP_FILE, envSeconds } from "./settings.ts";
 import { StateStore, type AgentRecord } from "./state.ts";
 import { httpTransfer } from "./transfer.ts";
 
@@ -34,6 +42,7 @@ const reader: HostReader = {
   },
 };
 
+const auditLog = () => new AuditLog(join(PATHS.audit, AUDIT_FILE));
 const identity = (): ConnectorIdentity => ({ version: CONNECTOR_VERSION, protocol: PROTOCOL_VERSION, image: process.env.MAUSBOT_CONNECTOR_IMAGE || null });
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -93,21 +102,31 @@ async function run(): Promise<void> {
   const docker = new SocketDocker(PATHS.docker);
   const instance = process.env.MAUSBOT_INSTANCE || "unknown";
   log(`MausBot connector ${CONNECTOR_VERSION} starting`);
+  const audit = auditLog();
+  const note = (event: Parameters<AuditLog["append"]>[0]) => {
+    try { audit.append(event); } catch (error) { log(`could not write the audit log ${audit.file}: ${errorText(error)}`); }
+  };
+  note({ event: "connector", what: "started", version: CONNECTOR_VERSION, image: identity().image });
   // A connector removed with SIGKILL never said it went offline.
   state.saveStatus({ connected: false });
   let record: AgentRecord | null = state.agent();
   if (!record) log("waiting for this server to be connected: run the install command with the code MausBot shows");
+  const enrolledNow = !record;
   while (!record) {
     await sleep(2_000);
     record = state.agent();
   }
-  registerSecret(record.agentToken);
+  registerSecret(record.privateKey);
   let current: AgentRecord = record;
+  if (enrolledNow) note({ event: "connector", what: "enrolled", version: CONNECTOR_VERSION, image: identity().image, boxId: record.boxId });
+  const kept = savedConfig(state.adminConfig(), current);
+  if (kept) log(`going by MausBot's schedule and policy kept on this server (version ${kept.version}) until MausBot answers`);
   const host = hostReporter(docker, () => current.admin);
   const home = new Home({
     docker, state, log, readHealth, seccomp, transfer: httpTransfer,
     diskFree: () => reader.disk().free,
     updateWindowMs: envSeconds("MAUSBOT_UPDATE_WAIT_S", 600, 60, 3600) * 1000,
+    onStep: ({ id, type, step, detail }) => note({ event: "step", id, type, step, ...(detail ? { detail } : {}) }),
   });
   const updater = new SelfUpdater({ docker, state, log, instance, identity });
   const heartbeat = async (): Promise<Heartbeat> => {
@@ -115,15 +134,33 @@ async function run(): Promise<void> {
     return { heartbeat: { host: await host.health(false), home: await home.report(), connector: identity() } };
   };
   let agent: Agent;
-  const handle = jobRunner({
+  const runner = jobRunner({
     home,
     hostHealth: () => host.health(true),
     identity,
-    admin: () => ({ origin: current.admin, token: current.agentToken }),
+    admin: () => ({ origin: current.admin, authorization: (jobId) => transferAuthorization(current, jobId) }),
     selfUpdate: (job) => home.exclusive(() => updater.run(job, { pause: () => agent.stop(), resume: () => agent.start() })),
   });
-  const makeAgent = (from: AgentRecord) => new Agent({ admin: from.admin, token: from.agentToken, log, heartbeat, handle, status: (patch) => state.saveStatus(patch) });
-  agent = makeAgent(current);
+  const desk = jobDesk({ run: runner, audit, log, policyFile: join(PATHS.hostConfig, POLICY_FILE) });
+  const connectHome = () => new Promise<Duplex>((resolve, reject) => {
+    const socket = createConnection({ host: "127.0.0.1", port: HOME_PORT });
+    socket.once("connect", () => resolve(socket));
+    socket.once("error", reject);
+  });
+  const makeAgent = () => new Agent({
+    identity: () => current, log, heartbeat, handle: (job) => desk.submit(job, "admin"), status: (patch) => state.saveStatus(patch),
+    nextCount: () => state.nextCount(),
+    saveAdminKeys: (keys) => {
+      current = { ...current, adminKeys: keys };
+      state.saveAgent(current);
+      log(`MausBot's signing keys are now ${Object.keys(keys).join(", ")}`);
+    },
+    config: { saved: () => state.adminConfig(), save: (config) => state.saveAdminConfig(config) },
+    onConfig: (config) => log(`MausBot's schedule and policy (version ${config.version}) are kept on this server`),
+    stream: (stream, accept) => serveRequest(stream, accept, { connectHome, record: note }),
+    refused: (refusal) => note({ event: "refused", by: "admin", code: refusal.code, why: refusal.message, ...(refusal.id ? { id: refusal.id } : {}), ...(refusal.type ? { type: refusal.type } : {}) }),
+  });
+  agent = makeAgent();
 
   const role = await updater.atStart(() => new Promise<boolean>((resolve) => {
     const timer = setTimeout(() => resolve(false), SELF_UPDATE_DEADLINE_MS);
@@ -141,23 +178,32 @@ async function run(): Promise<void> {
     if (self) await docker.stopContainer(self.Id, 10).catch(() => {});
     return;
   }
+  const interrupted = state.home().operation?.type ?? "update";
   const recovered = await home.recover().catch((error) => {
     log(`could not finish the interrupted job: ${errorText(error)}`);
     return null;
   });
-  if (recovered) agent.reply(recovered);
-  if (role.role === "candidate") agent.reply(role.reply);
+  if (recovered) {
+    note(resultEvent("admin", interrupted, recovered));
+    agent.reply(recovered);
+  }
+  if (role.role === "candidate") {
+    note(resultEvent("admin", "self-update", role.reply));
+    agent.reply(role.reply);
+  }
   agent.start();
+  await serveLocalJobs(PATHS.jobs, desk, log).catch((error) => log(`jobs from this server are off: ${errorText(error)}`));
 
   setInterval(() => {
     home.supervise().catch((error) => log(`supervising the home failed: ${errorText(error)}`));
     const latest = state.agent();
-    if (latest && latest.agentToken !== current.agentToken) {
+    if (latest && latest.publicKey !== current.publicKey) {
       log("this server was connected again with a new code; reconnecting");
-      registerSecret(latest.agentToken);
+      registerSecret(latest.privateKey);
       current = latest;
+      note({ event: "connector", what: "enrolled", version: CONNECTOR_VERSION, image: identity().image, boxId: latest.boxId });
       agent.stop();
-      agent = makeAgent(current);
+      agent = makeAgent();
       agent.start();
     }
   }, 10_000);
@@ -184,7 +230,7 @@ async function enrollCommand(): Promise<void> {
   state.saveAgent(record);
   // Connected again only once the service has connected with this token.
   state.saveStatus({ connected: false, unauthorized: false, lastError: null });
-  console.log(`This server is connected to MausBot (server ${record.serverId}).`);
+  console.log(`This server is connected to MausBot (server ${record.boxId}).`);
 }
 
 function statusCommand(): void {
@@ -193,8 +239,9 @@ function statusCommand(): void {
   const status = state.status();
   const home = state.home();
   console.log(JSON.stringify({
-    enrolled: Boolean(record), admin: record?.admin ?? null, serverId: record?.serverId ?? null, cloudId: record?.cloudId ?? null,
-    connected: status.connected, unauthorized: status.unauthorized, lastConnectedAt: status.lastConnectedAt, lastHeartbeatAt: status.lastHeartbeatAt,
+    enrolled: Boolean(record), admin: record?.admin ?? null, boxId: record?.boxId ?? null, teamId: record?.teamId ?? null,
+    connected: status.connected, accepted: status.boxState === "accepted", unauthorized: status.unauthorized,
+    lastConnectedAt: status.lastConnectedAt, lastHeartbeatAt: status.lastHeartbeatAt, config: state.adminConfig()?.version ?? null,
     lastError: status.lastError, home: { desired: home.desired, image: home.image, operation: home.operation?.type ?? null },
   }));
 }
@@ -210,17 +257,47 @@ async function probeCommand(): Promise<void> {
   if (checks.some((check) => !check.ok)) process.exitCode = 1;
 }
 
+/** `job <type> [args as JSON]`: one job, run by the running connector; prints its reply, exits 1 when it failed. */
+async function jobCommand(): Promise<void> {
+  const [type, args] = process.argv.slice(3);
+  if (!type) throw new Error("usage: mausbot-connector job <type> [args as JSON], e.g. job update '{\"image\":\"ghcr.io/…@sha256:…\"}'");
+  let parsed: unknown = {};
+  if (args) {
+    try { parsed = JSON.parse(args); } catch { throw new Error("the job's arguments are not JSON"); }
+  }
+  const reply = await sendLocalJob(PATHS.jobs, type, parsed);
+  console.log(JSON.stringify(reply));
+  if (reply.ok !== true) process.exitCode = 1;
+}
+
+/** `audit [--tail N]` prints the newest lines; `audit --verify` checks every line's link to the one before it. */
+function auditCommand(): void {
+  const audit = auditLog();
+  const args = process.argv.slice(3);
+  if (args.includes("--verify")) {
+    const verdict = verifyAudit(existsSync(audit.file) ? readFileSync(audit.file, "utf8") : "");
+    console.log(verdict.ok ? `${audit.file}: ${verdict.lines} lines, each linked to the one before it` : `${audit.file}: line ${verdict.line}: ${verdict.why}`);
+    if (!verdict.ok) process.exitCode = 1;
+    return;
+  }
+  const at = args.indexOf("--tail");
+  const count = at >= 0 ? Number(args[at + 1]) : 50;
+  for (const line of audit.tail(Number.isInteger(count) && count > 0 ? count : 50)) console.log(line);
+}
+
 const commands: Record<string, () => Promise<void> | void> = {
   run,
   enroll: enrollCommand,
   status: statusCommand,
   probe: probeCommand,
+  job: jobCommand,
+  audit: auditCommand,
   version: () => console.log(CONNECTOR_VERSION),
 };
 
 const command = commands[process.argv[2] ?? "run"];
 if (!command) {
-  console.error("usage: mausbot-connector run | enroll | status | probe | version");
+  console.error("usage: mausbot-connector run | enroll | status | probe | job <type> [args] | audit [--tail N | --verify] | version");
   process.exitCode = 2;
 } else {
   Promise.resolve().then(command).catch((error) => {
