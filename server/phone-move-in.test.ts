@@ -198,6 +198,24 @@ describe("a phone's move into this computer", () => {
     expect(existsSync(join(dir, "phone-move-ins.json"))).toBe(false);
   });
 
+  it("refuses a path an engine or git reads as its configuration, in any capitals and at any depth, and lets notes and instructions through", async () => {
+    const moveIn = setup();
+    await create(moveIn);
+    const file = (path: string) => `/api/cloud-send/files?path=${encodeURIComponent(path)}&size=1&sha256=x&offset=0&mode=new`;
+    for (const rel of [".mcp.json", ".claude/settings.json", ".claude/hooks/x.sh", ".agents/skills/x/SKILL.md", "opencode.json", "opencode.jsonc", ".opencode/plugin/x.ts",
+      ".gemini/settings.json", ".qwen/settings.json", ".codex/config.toml", ".grok/config.toml", ".cursor/mcp.json", ".github/hooks/hooks.json",
+      ".copilot/mcp-config.json", ".factory/mcp.json", ".kimi/config.toml", ".kimi-code/config.toml", ".cline/settings.json", ".clinerules/hooks/PreToolUse",
+      ".pi/extensions/x.ts", ".dsh/config.yaml", ".git/config", ".git/hooks/pre-commit",
+      ".MCP.JSON", ".Claude/settings.json", "OpenCode.JSON", ".mcp.j\u017fon", "trip/.Git/config", "trip/site/.gemini/settings.json"]) {
+      const answer = await run(moveIn, phone, "POST", file(`workspaces/${SCOUT}/${rel}`));
+      expect([answer.status, answer.body, answer.reads, answer.resumed], rel).toEqual([403, { error: PHONE_MOVE_REFUSAL }, 0, 1]);
+    }
+    expect(await run(moveIn, phone, "POST", file(`task-workspaces/${SCOUT}/t1/.mcp.json`))).toMatchObject(refused);
+    for (const rel of ["notes.md", "AGENTS.md", "CLAUDE.md", "GEMINI.md", ".gitignore", "my.mcp.json", "opencode.json.md", "github/readme.md", "trip/.mcp.json.bak"]) {
+      expect((await run(moveIn, phone, "POST", file(`workspaces/${SCOUT}/${rel}`))).out, rel).toBe(PASS);
+    }
+  });
+
   it("refuses every move write for a bot the phone did not bring", async () => {
     const moveIn = setup();
     await create(moveIn);
