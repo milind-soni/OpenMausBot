@@ -6,13 +6,14 @@ import { createHash } from "node:crypto";
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 
-import type { Job, JobError, JobType } from "./protocol.ts";
+import type { Job, JobError, JobErrorCode, JobType } from "./protocol.ts";
 
 /** Who asked: the Admin over the connector's connection, or root on this server through `mausbot-connector job`. */
 export type AuditSource = "admin" | "local";
 
 export type AuditEvent =
-  | { event: "connector"; what: "started" | "enrolled"; version: string; image: string | null; serverId?: string }
+  | { event: "connector"; what: "started" | "enrolled"; version: string; image: string | null; boxId?: string }
+  | { event: "refused"; by: "admin"; code: JobErrorCode; why: string; id?: string; type?: string }
   | { event: "job"; by: AuditSource; id: string; type: JobType; args: Record<string, unknown> }
   | { event: "result"; by: AuditSource; id: string; type: JobType; ok: true; detail?: Record<string, unknown> }
   | { event: "result"; by: AuditSource; id: string; type: JobType; ok: false; error: JobError }

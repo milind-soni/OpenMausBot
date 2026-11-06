@@ -318,7 +318,7 @@ describe("the home on an own server", () => {
     f.write("a.txt", "1");
     const { backup } = await f.home.backup("backup-1");
     f.docker.failCopy = true;
-    const admin = { origin: "https://cloud.example.test", token: "t".repeat(40) };
+    const admin = { origin: "https://cloud.example.test", authorization: (jobId: string) => `Box token-for-${jobId}` };
     for (const job of [() => f.home.update("update-1", B), () => f.home.restore("restore-1", backup.id), () => f.home.importDisk("import-1", "https://storage.example.test/d.tgz", admin)]) {
       expect(await failure(job())).toMatchObject({ code: "docker", message: "Copying the data failed (cp: error writing '/to/big.bin': No space left on device); nothing was changed." });
       expect(f.docker.container("mausbot-home")).toMatchObject({ status: "running", spec: { Image: A } });
@@ -425,13 +425,13 @@ describe("the home on an own server", () => {
     expect((await failure(f.home.restore("restore-2", "20260101-000000-0000"))).code).toBe("not_found");
   });
 
-  it("sends a gzip tar of /data to the Admin with the agent token, with the home running again meanwhile, and leaves no archive behind", async () => {
+  it("sends a gzip tar of /data to the Admin with the box's token for that job, with the home running again meanwhile, and leaves no archive behind", async () => {
     const f = fixture();
     await started(f);
     f.write("a.txt", "1");
-    const result = await f.home.exportDisk("export-1", { origin: "https://cloud.example.test", token: "agent-token-0123456789abcdefghijklmnopqrst" });
+    const result = await f.home.exportDisk("export-1", { origin: "https://cloud.example.test", authorization: (jobId) => `Box token-for-${jobId}` });
     expect(result).toEqual({ bytes: f.uploads[0].body.length, sha256: "0".repeat(64) });
-    expect(f.uploads).toEqual([{ url: "https://cloud.example.test/api/cloud/servers/agent/export/export-1", headers: { authorization: "Bearer agent-token-0123456789abcdefghijklmnopqrst" }, body: JSON.stringify([["a.txt", "1"]]) }]);
+    expect(f.uploads).toEqual([{ url: "https://cloud.example.test/api/cloud/box/v1/export/export-1", headers: { authorization: "Box token-for-export-1" }, body: JSON.stringify([["a.txt", "1"]]) }]);
     expect(readdirSync(f.state.dir).filter((name) => name.startsWith("export-"))).toEqual([]);
     expect(f.docker.container("mausbot-home")?.status).toBe("running");
   });
@@ -440,14 +440,14 @@ describe("the home on an own server", () => {
     const f = fixture();
     await started(f);
     f.write("old.txt", "1");
-    const admin = { origin: "https://cloud.example.test", token: "agent-token-0123456789abcdefghijklmnopqrst" };
+    const admin = { origin: "https://cloud.example.test", authorization: (jobId: string) => `Box token-for-${jobId}` };
     const imported = await f.home.importDisk("import-1", "https://storage.example.test/disk.tgz?sig=x", admin);
     expect(imported).toMatchObject({ bytes: expect.any(Number), home: { state: "running" } });
     expect(f.data()).toEqual({ "imported.txt": "from the old home" });
     expect(f.docker.files("mausbot-snapshot")).toEqual({ "old.txt": "1" });
     expect(f.downloads[0]).toEqual({ url: "https://storage.example.test/disk.tgz?sig=x", headers: {} });
-    await f.home.importDisk("import-2", "https://cloud.example.test/api/cloud/servers/agent/import/import-2", admin);
-    expect(f.downloads[1].headers).toEqual({ authorization: `Bearer ${admin.token}` });
+    await f.home.importDisk("import-2", "https://cloud.example.test/api/cloud/box/v1/import/import-2", admin);
+    expect(f.downloads[1].headers).toEqual({ authorization: "Box token-for-import-2" });
     f.setArchive("not an archive");
     const bad = await failure(f.home.importDisk("import-3", "https://storage.example.test/bad.tgz", admin));
     expect(bad.toJobError()).toMatchObject({ code: "transfer_failed" });
