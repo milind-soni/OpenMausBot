@@ -8,7 +8,8 @@ export const IMAGE_GENERATION_TIMEOUT_MS = 120_000;
 const MAX_UPSTREAM_RESPONSE_BYTES = 15 * 1024 * 1024;
 
 const imagesApiResponseSchema = z.object({
-  data: z.array(z.object({ b64_json: z.string().min(1).optional(), url: z.string().optional() })).min(1),
+  // OpenAI-compatible gateways (DeepInfra and others) send unused fields such as url as null.
+  data: z.array(z.object({ b64_json: z.string().min(1).nullish() })).min(1),
 });
 
 export interface ImageCredentials {
