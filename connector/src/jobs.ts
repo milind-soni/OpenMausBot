@@ -4,6 +4,7 @@ import { auditArgs, type AuditEvent, type AuditLog, type AuditSource } from "./a
 import { asJobError } from "./failure.ts";
 import type { Home } from "./home.ts";
 import { errorText, type Log } from "./log.ts";
+import { policyRefusal, readPolicy } from "./policy.ts";
 import type { ConnectorIdentity, HostHealth, Job, JobArgs, JobReply, JobResults, JobType } from "./protocol.ts";
 
 /** Jobs that change the home, its data or the connector; they wait for each other. */
@@ -80,7 +81,7 @@ export interface Desk {
   submit(job: Job, by: AuditSource): Promise<JobReply | null>;
 }
 
-export function jobDesk(deps: { run: (job: Job) => Promise<JobReply | null>; audit: AuditLog; log: Log }): Desk {
+export function jobDesk(deps: { run: (job: Job) => Promise<JobReply | null>; audit: AuditLog; log: Log; policyFile?: string }): Desk {
   const record = (event: AuditEvent): boolean => {
     try {
       deps.audit.append(event);
@@ -94,6 +95,12 @@ export function jobDesk(deps: { run: (job: Job) => Promise<JobReply | null>; aud
     async submit(job, by) {
       if (!record({ event: "job", by, id: job.id, type: job.type, args: auditArgs(job) }) && !READS.has(job.type)) {
         return { id: job.id, ok: false, error: { code: "audit_unavailable", message: `The audit log at ${deps.audit.file} cannot be written, so nothing was done. Run the install command again to repair it.` } };
+      }
+      const refusal = by === "admin" && deps.policyFile ? policyRefusal(job, readPolicy(deps.policyFile), deps.policyFile) : null;
+      if (refusal) {
+        const refused: JobReply = { id: job.id, ok: false, error: { code: "refused_by_policy", message: refusal } };
+        record(resultEvent(by, job.type, refused));
+        return refused;
       }
       const reply = await deps.run(job);
       if (reply) record(resultEvent(by, job.type, reply));

@@ -12,6 +12,7 @@ import { Home } from "./home.ts";
 import { hostChecks, hostFacts, hostHealth, probeBox, type BoxProbeResult, type HostReader } from "./host.ts";
 import { jobDesk, jobRunner, resultEvent } from "./jobs.ts";
 import { sendLocalJob, serveLocalJobs } from "./local.ts";
+import { POLICY_FILE } from "./policy.ts";
 import { errorText, log, registerSecret } from "./log.ts";
 import { PROTOCOL_VERSION, type ConnectorIdentity, type Heartbeat, type HostHealth } from "./protocol.ts";
 import { SELF_UPDATE_DEADLINE_MS, SelfUpdater, ownContainer } from "./self-update.ts";
@@ -133,7 +134,7 @@ async function run(): Promise<void> {
     admin: () => ({ origin: current.admin, token: current.agentToken }),
     selfUpdate: (job) => home.exclusive(() => updater.run(job, { pause: () => agent.stop(), resume: () => agent.start() })),
   });
-  const desk = jobDesk({ run: runner, audit, log });
+  const desk = jobDesk({ run: runner, audit, log, policyFile: join(PATHS.hostConfig, POLICY_FILE) });
   const makeAgent = (from: AgentRecord) => new Agent({ admin: from.admin, token: from.agentToken, log, heartbeat, handle: (job) => desk.submit(job, "admin"), status: (patch) => state.saveStatus(patch) });
   agent = makeAgent(current);
 
