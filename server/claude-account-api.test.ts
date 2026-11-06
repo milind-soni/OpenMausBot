@@ -149,6 +149,14 @@ describe("Claude account HTTP API", () => {
     const second = await addBotOn(id, "model-b");
     expect((await bot(first.id)).modelSelection.model).toBe("model-a");
     expect((await bot(second.id)).modelSelection.model).toBe("model-b");
+    if (engine === "claude") {
+      for (const [launched, model] of [[first, "model-a"], [second, "model-b"]] as const) {
+        expect((await api("POST", `/api/bots/${launched.id}/messages`, { text: "which model" })).status).toBe(202);
+        await idle(launched.id);
+        const spawn = JSON.parse(readFileSync(join(saved().instances[id].config.configDir, "spawn.json"), "utf8"));
+        expect(spawn.argv[spawn.argv.indexOf("--model") + 1]).toBe(model);
+      }
+    }
     expect((await api("PATCH", `/api/instances/${id}/${engine}-endpoint`, { displayName: "Renamed", baseUrl: "https://catalog-fixture.example/v1" })).status).toBe(200);
     const configs = saved().instances[id].config;
     expect(engine === "codex" ? configs.endpoint.models : configs.endpointModels).toEqual(["model-a", "model-b"]);
