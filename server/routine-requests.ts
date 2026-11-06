@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
-import { formatInstant, routineCronText } from "./routine-cron-text.ts";
+import { formatInstant } from "./routine-cron-text.ts";
 import { conversationLanguage } from "./server-lines.ts";
-import { plainClock, plainTimeZone, plainWeekdays } from "../shared/plain-time-zone.ts";
+import { plainTimeZone } from "../shared/plain-time-zone.ts";
 import { normalizeCronSchedule, nextCronRuns } from "../shared/routine-schedule.ts";
 import { newId } from "./contracts.ts";
 import { UNDO_STALE, type DirectApply, type DirectApplyCheck } from "./direct-apply.ts";
@@ -28,6 +28,7 @@ import {
   type RoutineScheduleInput,
 } from "./routines.ts";
 import { ROUTINE_STEP_LIMITS, type RoutineStep } from "../shared/routines.ts";
+import { consequenceLine, scheduleText, type LimitResetEngines } from "./routine-schedule-text.ts";
 import type {
   RoutineRequestCardData,
   RoutineRequestChanges,
@@ -62,6 +63,7 @@ const ACTION_COPY = {
 } as const satisfies Record<RoutineRequestOperation["action"], { title: string; detail: string }>;
 const ROUTINE_REQUEST_FINGERPRINT_VERSION = 1 as const;
 
+export { consequenceLine, scheduleText } from "./routine-schedule-text.ts"; export type { LimitResetEngines } from "./routine-schedule-text.ts";
 export type { RoutineProposalInput, RoutineToolChangesInput, RoutineToolDefinitionInput, RoutineToolScheduleInput } from "./routine-request-schemas.ts";
 
 export interface RoutineRequestOptionCard {
@@ -528,14 +530,6 @@ function effectiveSchedule(
   return merged;
 }
 
-/** Names an engine and says when its usage limit resets, for a limit-reset routine's card. */
-export interface LimitResetEngines {
-  name(engine: string): string;
-  resetAt(engine: string): number | null;
-  /** The engine a bot works on now, for a limit-reset routine that names none. */
-  botEngine(botId: string): string | undefined;
-}
-
 /** A stored routine's schedule as a request names it: a limit-reset time is the engine's, never part of the request. */
 function requestSchedule(schedule: RoutineSchedule): RoutineRequestSchedule {
   if (schedule.type === "limit_reset") return { type: "limit_reset", engine: schedule.engine, repeat: schedule.repeat };
@@ -564,55 +558,6 @@ function nextForOperation(operation: RoutineRequestOperation, manager: RoutineMa
   if (definition.schedule.type === "interval" && definition.schedule.anchorAt === undefined) return null;
   const schedule = asSchedule(definition.schedule, now);
   return nextOccurrence(schedule, now);
-}
-
-export function scheduleText(schedule: RoutineRequestSchedule, timeZone: string, engines?: LimitResetEngines, language?: string): string {
-  if (schedule.type === "cron") return `${routineCronText(schedule, language)} · Cron: ${schedule.expression}`;
-  if (schedule.type === "limit_reset") {
-    const name = engines?.name(schedule.engine) ?? schedule.engine;
-    return schedule.repeat === "every_reset" ? `Each time ${name}'s usage limit resets` : `When ${name}'s usage limit resets`;
-  }
-  const zone = plainTimeZone(timeZone);
-  if (schedule.type === "once") return `${formatInstant(schedule.at, timeZone)} ${zone}`;
-  if (schedule.type === "interval") {
-    const restricted = intervalHasRestrictions(schedule);
-    const cadence = schedule.anchorAt === undefined
-      ? restricted
-        ? `Every ${schedule.everyMinutes} minutes, cadence starting at confirmation; first run is the next allowed time`
-        : `Every ${schedule.everyMinutes} minutes, starting one interval after confirmation`
-      : `Every ${schedule.everyMinutes} minutes, anchored at ${formatInstant(schedule.anchorAt, timeZone)} ${zone}`;
-    const restrictions = [
-      schedule.weekdays?.length
-        ? `on ${plainWeekdays(schedule.weekdays)} (${zone})`
-        : null,
-      schedule.window ? `during ${plainClock(schedule.window.start)}–${plainClock(schedule.window.end)} ${zone}` : null,
-      schedule.endsAt !== undefined ? `until ${formatInstant(schedule.endsAt, timeZone)} ${zone}` : null,
-    ].filter((part): part is string => part !== null);
-    return restrictions.length ? `${cadence} · ${restrictions.join(" · ")}` : cadence;
-  }
-  return `${plainWeekdays(schedule.weekdays)} at ${plainClock(schedule.time)} ${zone}`;
-}
-
-export function consequenceLine(schedule: RoutineRequestSchedule, continuity = false): string {
-  const session = continuity ? "each run starts a fresh session with the previous run's report" : "each run starts a fresh session";
-  if (schedule.type === "cron") return `Will run at matching calendar times, ${plainTimeZone(schedule.timeZone)}; ${session}.`;
-  if (schedule.type === "once") return "Will run once; that run starts a fresh session.";
-  if (schedule.type === "limit_reset") {
-    return schedule.repeat === "every_reset"
-      ? "Will run a minute after each time that usage limit resets, in this conversation."
-      : "Will run once, a minute after that usage limit resets, and continue in this conversation.";
-  }
-  if (schedule.type === "interval") {
-    if (intervalHasRestrictions(schedule)) {
-      return `Will run every ${schedule.everyMinutes} minutes when its day, time, and end restrictions allow; ${session}.`;
-    }
-    const runsPerDay = Math.round(1440 / schedule.everyMinutes);
-    const cadence = runsPerDay <= 1 ? "about once a day" : `about ${runsPerDay} times a day`;
-    return `Will run ${cadence}; ${session}.`;
-  }
-  const days = schedule.weekdays.length;
-  const cadence = days === 7 ? "every day" : days === 1 ? "one day a week" : `${days} days a week`;
-  return `Will run ${cadence}; ${session}.`;
 }
 
 function effectiveDefinition(operation: RoutineRequestOperation, manager: RoutineManager): RoutineRequestDefinition | null {
