@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyTurn, fastModelFor, routeDirectTurn, routeTurn, type RouteInput } from "./turn-route.ts";
+import { classifyTurn, fastModelFor, quickStepModel, routeDirectTurn, routeTurn, type RouteInput } from "./turn-route.ts";
 import type { ModelCatalog } from "./contracts.ts";
 
 const plain = { attachments: 0, priorTurnUsedTools: false };
@@ -149,5 +149,15 @@ describe("routeDirectTurn", () => {
   it("leaves a thread with its own model and an automated turn alone", () => {
     expect(routeDirectTurn(bot, { modelSelection: bot.modelSelection }, [], message, instance, false).tier).toBeNull();
     expect(routeDirectTurn(bot, {}, [], message, instance, true).tier).toBeNull();
+  });
+});
+
+describe("quickStepModel", () => {
+  it("names the quick model of the bot's own provider, and none when the engine refuses small models or has none", () => {
+    expect(quickStepModel({ models: mixed }, "gpt-5.4")).toBe("gpt-5.4-mini");
+    expect(quickStepModel({ models: mixed, quickModelsUsable: () => false }, "gpt-5.4")).toBeUndefined();
+    expect(quickStepModel({ models: mixed }, "gpt-5.4", new Set(["gpt-5.4-mini"]))).toBeUndefined();
+    expect(quickStepModel({ models: mixed }, "gpt-5.4-mini")).toBeUndefined();
+    expect(quickStepModel({}, "gpt-5.4")).toBeUndefined();
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { listTriggers, parseTriggerRequest, triggerTarget } from "./trigger-tools.ts";
+import { listTriggers, parseTriggerRequest, resolveStepBots, triggerTarget } from "./trigger-tools.ts";
 import type { Routine, RoutineRun } from "./routines.ts";
 import type { WebhookTrigger } from "./webhooks.ts";
 
@@ -88,5 +88,22 @@ describe("triggerTarget", () => {
     expect(triggerTarget(bots.a, "bot-c", lookup)).toMatchObject({ status: 403 });
     expect(triggerTarget(bots.a, "bot-zzz", lookup)).toMatchObject({ status: 404 });
     expect(triggerTarget(bots.a, "  ", lookup)).toMatchObject({ status: 400 });
+  });
+});
+
+describe("a routine's steps in the trigger tools", () => {
+  const team = [{ id: "bot-a", name: "Chief" }, { id: "bot-b", name: "Writer" }];
+
+  it("reads each step's bot name or id as its id, the owner when it names none, and refuses a bot it cannot find", () => {
+    const proposal = { routine: { steps: [{ instructions: "Find." }, { bot: "writer", instructions: "Write." }, { bot: "Chief", instructions: "Check?" }, { bot: "bot-b", instructions: "Again." }] } };
+    expect(resolveStepBots(proposal, team[0]!, team)).toBeNull();
+    expect(proposal.routine.steps.map((step) => (step as { botId?: string }).botId)).toEqual(["bot-a", "bot-b", "bot-a", "bot-b"]);
+    expect(resolveStepBots({ changes: { steps: [{ bot: "Nobody", instructions: "Help." }] } }, team[0]!, team)).toContain('No bot with id or name "Nobody"');
+  });
+
+  it("lists a routine's steps by bot name in the tool's own words", () => {
+    const stepped = { ...routine("r1", "bot-a"), steps: [{ botId: "bot-a", instructions: "Find." }, { botId: "bot-b", instructions: "Is it news?", model: "quick" as const, check: true as const }] };
+    const listed = listTriggers({ botId: "bot-a", routines: [stepped], webhooks: [], runs: [], timeZone: "UTC", now, botName: (id) => team.find((bot) => bot.id === id)?.name });
+    expect(listed.triggers?.[0]).toMatchObject({ steps: [{ bot: "Chief", botId: "bot-a", do: "Find." }, { bot: "Writer", botId: "bot-b", do: "Is it news?", quick: true, check: true }] });
   });
 });

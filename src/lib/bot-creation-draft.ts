@@ -93,7 +93,7 @@ export class BotCreationDraft {
   dispose() { if (this.avatarObjectUrl) URL.revokeObjectURL(this.avatarObjectUrl); }
 
   private routine(input: RoutineInput, previous?: Routine): Routine {
-    const { groupId: _group, resultsThreadId: _results, checks: _checks, access: _access, deliver: _deliver, modelSelection: _model, schedule, ...fields } = input;
+    const { groupId: _group, resultsThreadId: _results, checks: _checks, access: _access, deliver: _deliver, modelSelection: _model, steps: _steps, schedule, ...fields } = input;
     const normalizedSchedule = schedule.type === "interval" ? {
       ...schedule, weekdays: schedule.weekdays ?? undefined,
       window: schedule.window ?? undefined, endsAt: schedule.endsAt ?? undefined,

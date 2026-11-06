@@ -1481,6 +1481,31 @@
               "type"
             ]
           },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "bot": {
+                  "type": "string"
+                },
+                "do": {
+                  "type": "string"
+                },
+                "quick": {
+                  "type": "boolean"
+                },
+                "check": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "do"
+              ]
+            },
+            "description": "Schedules: 2-6 steps run in order instead of instructions (then the purpose), each seeing only the previous reply. bot: teammate name or id (default you). quick: its quick model. check: yes/no on the previous reply; no ends the run. update replaces; [] removes."
+          },
           "webhook_event_types": {
             "type": "array",
             "maxItems": 20,

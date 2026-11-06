@@ -1,4 +1,4 @@
-import type { RoutineRetryCause } from "../shared/routines.ts";
+import { ROUTINE_STEP_LIMITS, type RoutineRetryCause, type RoutineStep, type RoutineStepRun } from "../shared/routines.ts";
 import { stopCause } from "./drivers/engine-errors.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { retryNote } from "./routine-recovery.ts";
@@ -96,6 +96,51 @@ export function composeExecutionPrompt(
     );
   }
   return parts.filter(Boolean).join("\n\n");
+}
+
+/** A stepped run's prompt for its running step: only the previous step's reply crosses, fenced like a carried report. */
+export function stepPrompt(run: { routineName: string; prompt?: string; plan: readonly RoutineStep[]; stepAt: number; handoff?: string }, previousBot?: string): string {
+  const step = run.plan[run.stepAt]!, total = run.plan.length;
+  return [
+    `Step ${run.stepAt + 1} of ${total} of the routine ${JSON.stringify(run.routineName)}. The routine's purpose: ${(run.prompt ?? "").slice(0, 500)}`,
+    `Your part: ${step.instructions}`,
+    ...(run.stepAt > 0 ? [`<previous-step from="${escapeAttachmentPath(previousBot ?? "the previous step")}">`, fenceCarriedReport(run.handoff ?? ""), "</previous-step>"] : []),
+    run.stepAt === total - 1 ? "Your reply is the routine's result." : "Reply with your result only. Your reply goes to the next step, which sees nothing else from this chat.",
+    ...(step.check ? ["Answer the question with YES or NO alone on the last line."] : []),
+  ].join("\n");
+}
+
+/** The steps a run leaves undone: the one at `at` takes `current`, every later one is skipped. */
+export function endSteps(stepRuns: readonly RoutineStepRun[], at: number, current: "failed" | "skipped", now: number): RoutineStepRun[] {
+  return stepRuns.map((step, index) => index < at || step.status === "done" || step.status === "skipped" ? step
+    : index === at ? { ...step, status: current, finishedAt: now } : { ...step, status: "skipped" });
+}
+
+const CHECK_ANSWER = /^(yes|no)[.!]*$/i;
+
+export type StepAdvance =
+  | { next: "step"; stepAt: number; stepRuns: RoutineStepRun[]; handoff: string }
+  | { next: "complete"; stepRuns: RoutineStepRun[]; quiet?: true; result: Pick<RoutineRun, "threadId" | "output"> }
+  | { next: "fail"; stepRuns: RoutineStepRun[]; error: string };
+
+/** What a stepped run does once its running step's turn ended well with `reply` (redacted). A check gates: yes goes
+ * on with the reply it checked, no ends the run with nothing to report, anything else fails it. A finished run never
+ * points at a check's thread, so its result quotes the last real reply and never "YES". */
+export function advanceStep(run: Required<Pick<RoutineRun, "plan" | "stepAt" | "stepRuns">> & Pick<RoutineRun, "handoff">, reply: string, now: number): StepAdvance {
+  const at = run.stepAt, step = run.plan[at]!;
+  const stepRuns = run.stepRuns.map((entry, index) => index === at ? { ...entry, status: "done" as const, finishedAt: now } : entry);
+  const answer = step.check ? CHECK_ANSWER.exec(reply.split("\n").map((line) => line.trim()).filter(Boolean).at(-1) ?? "")?.[1]?.toLowerCase() : undefined;
+  if (step.check && !answer) return { next: "fail", stepRuns: endSteps(run.stepRuns, at, "failed", now), error: `Step ${at + 1} didn't answer yes or no` };
+  if (answer) stepRuns[at]!.answer = answer as "yes" | "no";
+  const handoff = step.check ? run.handoff ?? "" : reply.slice(0, ROUTINE_STEP_LIMITS.handoff);
+  if (answer !== "no" && at + 1 < run.plan.length) return { next: "step", stepAt: at + 1, stepRuns, handoff };
+  const answered = run.plan.findLastIndex((candidate, index) => index <= at && !candidate.check);
+  return {
+    next: "complete",
+    stepRuns: answer === "no" ? endSteps(stepRuns, at + 1, "skipped", now) : stepRuns,
+    ...(answer === "no" ? { quiet: true as const } : {}),
+    result: step.check ? { threadId: stepRuns[answered]?.threadId, output: handoff.slice(0, 2_000) || undefined } : {},
+  };
 }
 
 /** A Box (the legacy cloud destination) is Linux; anything else runs on this host. */

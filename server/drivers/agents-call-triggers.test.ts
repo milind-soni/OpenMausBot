@@ -124,3 +124,23 @@ describe("delete_trigger", () => {
     expect(calls).toEqual([{ path: "/api/internal/trigger-requests", body: { fromBotId: "scout", fromThreadId: "thread-1", action: "delete", triggerId: "t-1", forBotId: "helper" } }]);
   });
 });
+
+describe("a schedule's steps in the trigger tool", () => {
+  it("sends steps in stored words, removes them with [], and refuses them on another kind or in another shape", async () => {
+    const { calls, context: ctx } = context();
+    await callTool("trigger", {
+      action: "create", when: "schedule", name: "News", instructions: "Tell me about AI releases.", schedule: { type: "daily", time: "08:00" },
+      steps: [{ do: " Find three items. " }, { bot: "Writer", do: "Summarize.", quick: true }, { do: "Is a release in it?", check: true }],
+    }, ctx);
+    expect((calls[0]!.body as { routine: { steps: unknown } }).routine.steps).toEqual([
+      { instructions: "Find three items." }, { instructions: "Summarize.", bot: "Writer", model: "quick" }, { instructions: "Is a release in it?", check: true },
+    ]);
+    await callTool("trigger", { action: "update", trigger_id: "t-1", steps: [] }, ctx);
+    expect(calls[1]!.body).toMatchObject({ action: "update", changes: { steps: [] } });
+    const refused = context();
+    const text = async (args: Record<string, unknown>) => (await callTool("trigger", args, refused.context)).text;
+    expect(await text({ action: "create", when: "webhook", name: "A", instructions: "B", steps: [{ do: "C" }, { do: "D" }] })).toBe("A webhook trigger fires when its link is called, so it takes no steps.");
+    expect(await text({ action: "update", trigger_id: "t-1", steps: [{ bot: "Writer" }] })).toContain("steps must be a list like");
+    expect(refused.calls).toEqual([]);
+  });
+});

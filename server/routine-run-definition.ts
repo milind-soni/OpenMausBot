@@ -23,7 +23,7 @@ export function resolveRoutineResultsThread(
 }
 
 export function routineRunDefinition(routine: Routine): Pick<RoutineRun,
-  "routineName" | "prompt" | "durationMinutes" | "timeoutMinutes" | "attachments" | "target" | "groupId" | "botId" | "runOn" | "access" | "deliver"> {
+  "routineName" | "prompt" | "durationMinutes" | "timeoutMinutes" | "attachments" | "target" | "groupId" | "botId" | "runOn" | "access" | "deliver" | "plan" | "stepAt" | "stepRuns"> {
   return {
     routineName: routine.name,
     prompt: routine.prompt,
@@ -36,5 +36,6 @@ export function routineRunDefinition(routine: Routine): Pick<RoutineRun,
     runOn: routine.runOn ?? "maus",
     access: routine.access,
     deliver: routine.deliver,
+    ...(routine.steps ? { plan: routine.steps.map((step) => ({ ...step })), stepAt: 0, stepRuns: routine.steps.map(() => ({ status: "pending" as const })) } : {}),
   };
 }

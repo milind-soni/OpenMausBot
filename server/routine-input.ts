@@ -2,7 +2,7 @@
 import { approvalModeFor, type ApprovalMode } from "../shared/approval-mode.ts";
 import { runsOnce } from "../shared/limit-reset.ts";
 import { cleanAttachments, cleanTimeoutMinutes } from "./routine-attachments.ts";
-import { loadChecks, loadModelSelection } from "./routine-load.ts";
+import { cleanSteps, loadChecks, loadModelSelection } from "./routine-load.ts";
 import { cleanSchedule } from "./routine-schedules.ts";
 import type { ModelSelection } from "../shared/wire.ts";
 import type { Routine, RoutineInput } from "./routines.ts";
@@ -88,6 +88,10 @@ export function sanitizeInput(input: RoutineInput, after: number): Omit<Routine,
   if (checks && (target !== "bot" || runsOnce(schedule))) throw userErrorThrown("serverError.routine.checksRepeat");
   if (input.access != null && input.access !== "read-and-draft") throw userErrorThrown("serverError.routine.access");
   if (input.deliver != null && (input.deliver !== "brief" || target !== "bot")) throw userErrorThrown("serverError.routine.deliver");
+  const steps = input.steps == null || (Array.isArray(input.steps) && input.steps.length === 0) ? undefined : cleanSteps(input.steps);
+  if (steps && (target !== "bot" || modelSelection || checks || input.access != null || input.deliver != null)) {
+    throw new Error("Steps work only on a bot routine without its own model, checks, access limits or brief delivery");
+  }
   return {
     name,
     prompt,
@@ -107,5 +111,6 @@ export function sanitizeInput(input: RoutineInput, after: number): Omit<Routine,
     ...(checks ? { checks } : {}),
     ...(input.access === "read-and-draft" ? { access: "read-and-draft" as const } : {}),
     ...(input.deliver === "brief" ? { deliver: "brief" as const } : {}),
+    ...(steps ? { steps } : {}),
   };
 }

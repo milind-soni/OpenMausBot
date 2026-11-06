@@ -444,3 +444,19 @@ describe("additive portable team backups", () => {
     expect(store.group(group.id)?.memberIds).toEqual([chief.id, scout.id]);
   });
 });
+
+describe("a stepped routine in a portable team backup", () => {
+  beforeEach(() => rmSync(DATA_DIR, { recursive: true, force: true }));
+
+  it("keeps its steps, each on the restored copy of its bot", () => {
+    const { store, routines, chief, scout } = fixture();
+    routines.create({ name: "News", prompt: "Morning news.", botId: chief.id, enabled: true, schedule: { type: "daily", time: "08:00", weekdays: [1] },
+      steps: [{ botId: scout.id, instructions: "Find items." }, { botId: chief.id, instructions: "Is one a release?", check: true }] });
+    const backup = createTeamBackup(store, routines.listRoutines(), "Stepped");
+    const restored = importTeamBackup(store, routines, parseTeamBackup(JSON.parse(JSON.stringify(backup))), selection());
+    const [mira, scoutCopy] = ["Mira 2", "Scout 2"].map((name) => restored.bots.find((bot) => bot.name === name)!);
+    expect(restored.routines.find((routine) => routine.name === "News")?.steps).toEqual([
+      { botId: scoutCopy!.id, instructions: "Find items." }, { botId: mira!.id, instructions: "Is one a release?", check: true },
+    ]);
+  });
+});

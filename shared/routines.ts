@@ -117,6 +117,32 @@ export function isRoutineProblemRun(run: { status: RoutineRunStatus }): boolean 
  * indicators count, or one exact status. */
 export type RoutineRunStatusFilter = "all" | "problems" | RoutineRunStatus;
 
+/** One step of a routine that splits its work. A bot does it, on its own model or its quick one, in a thread of
+ * its own, and only its reply carries on to the next step. A check step answers yes or no about the previous
+ * step's reply: yes goes on, no ends the run with nothing to report. */
+export interface RoutineStep {
+  botId: string;
+  instructions: string;
+  /** The bot's quick model (server/turn-route.ts fastModelFor); absent, the bot's own model. */
+  model?: "quick";
+  check?: true;
+}
+
+export const ROUTINE_STEP_LIMITS = { min: 2, max: 6, instructions: 4_000, handoff: 4_000 } as const;
+
+export type RoutineStepStatus = "pending" | "running" | "done" | "skipped" | "failed";
+
+export interface RoutineStepRun {
+  status: RoutineStepStatus;
+  threadId?: string;
+  /** The model the step ran on, as the picker labels it. */
+  model?: string;
+  answer?: "yes" | "no";
+  startedAt?: number;
+  finishedAt?: number;
+  cost?: number | null;
+}
+
 export interface Routine {
   id: string;
   name: string;
@@ -160,6 +186,8 @@ export interface Routine {
   /** Set while OpenMausBot keeps it paused because its owner left; turning it on or off clears it. */
   heldFor?: RoutineHoldCause;
   attachments?: RoutineContextAttachment[];
+  /** Absent: one bot runs the prompt. */
+  steps?: RoutineStep[];
   sourceThreadId?: string;
   resultsThreadId?: string;
   nextRunAt: number | null;
@@ -219,6 +247,12 @@ export interface RoutineRun {
   deliver?: RoutineDelivery;
   /** The items its routine's checks handed this run, so they are kept or released once it ends. */
   checkKey?: string;
+  /** The routine's steps when this run was queued; `threadId` is then the running step's thread. */
+  plan?: RoutineStep[];
+  stepAt?: number;
+  stepRuns?: RoutineStepRun[];
+  /** The last finished step's reply, redacted and cut to ROUTINE_STEP_LIMITS.handoff, for the next step only. */
+  handoff?: string;
   createdAt: number;
   seenAt?: number;
 }
@@ -246,6 +280,8 @@ export interface RoutineInput {
   access?: RoutineAccess | null;
   deliver?: RoutineDelivery | null;
   attachments?: RoutineContextAttachment[];
+  /** `null` explicitly removes them on updates; omission preserves them. */
+  steps?: RoutineStep[] | null;
   /** Omission preserves routing; null resets it to the bot's main thread. */
   resultsThreadId?: string | null;
 }

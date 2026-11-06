@@ -653,6 +653,7 @@ export function createTeamPackageExport(input: TeamExportInput): TeamExportResul
       ...(routine.overlap === "queue" ? { overlap: "queue" as const } : {}),
       ...(!goal && routine.continuity ? { continuity: true } : {}),
       ...(routine.runOnStartup ? { runOnStartup: true } : {}),
+      // shortcut: a package carries a stepped routine as its purpose alone, run by its bot; add steps to the package format when packages need them.
       enabledAfterInstall: routine.enabled,
     }];
   });

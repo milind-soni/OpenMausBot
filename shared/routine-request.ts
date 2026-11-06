@@ -6,6 +6,7 @@
 
 import type { LimitResetRepeat } from "./limit-reset.ts";
 import type { RoutineCronSchedule } from "./routine-schedule.ts";
+import type { RoutineStep } from "./routines.ts";
 
 export type RoutineRequestRunOn = "maus" | "cloud";
 
@@ -61,14 +62,18 @@ export interface RoutineRequestDefinition {
   overlap?: "skip" | "queue";
   /** Also run once each time OpenMausBot starts. Repeating routines only. */
   runOnStartup?: boolean;
+  /** Absent: one bot runs the instructions. */
+  steps?: RoutineStep[];
 }
 
 export type RoutineRequestChanges =
-  & Omit<Partial<RoutineRequestDefinition>, "schedule" | "timeoutMinutes">
+  & Omit<Partial<RoutineRequestDefinition>, "schedule" | "timeoutMinutes" | "steps">
   & {
     schedule?: RoutineRequestScheduleChanges;
     /** `null` removes an existing safety cap. */
     timeoutMinutes?: number | null;
+    /** The whole new list; `null` removes the steps. */
+    steps?: RoutineStep[] | null;
   };
 
 /** Another bot in the proposer's section that this proposal targets: a

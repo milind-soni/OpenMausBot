@@ -2073,3 +2073,70 @@ describe("a bot's own routine changes", () => {
     expect(undo(service, "missing")).toEqual({ claimed: false });
   });
 });
+
+describe("a routine's steps through the request path", () => {
+  const steps = [
+    { botId: "bot-a", instructions: "Find three AI news items." },
+    { botId: "bot-b", instructions: "Write a five-line summary.", model: "quick" as const },
+  ];
+  const stepped = () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-routine-steps-"));
+    tempDirs.push(dir);
+    const routines = new RoutineManager({
+      file: join(dir, "routines.json"), now: () => Date.parse("2026-08-28T10:00:00Z"), botState: () => "busy", createTask: () => null, startTurn: async () => {},
+      stepBotProblem: (_owner, botId) => botId === "bot-b" || botId === "bot-c" ? null : `No bot with id "${botId}"`,
+    });
+    const store = new MemoryStore();
+    const service = new RoutineRequestService({ store, routines, now: () => Date.parse("2026-08-28T10:00:00Z"), timeZone: () => "UTC",
+      autoApply: (botId, _threadId, targetBotId) => directApply({ fullAccess: false, botId, targetBotId, blocked: false }), botName: (botId) => ({ "bot-a": "Research", "bot-b": "Writer" })[botId] });
+    const submit = (proposal: RoutineProposalInput) => service.submit({ botId: "bot-a", threadId: "ask-thread", proposal });
+    const undo = (requestId: string) => service.undo({ botId: "bot-a", threadId: "ask-thread", requestId });
+    const card = (requestId: string) => store.messagesFor("ask-thread").find((message) => message.card?.requestId === requestId)!.card!;
+    return { routines, submit, undo, card };
+  };
+
+  it("creates and updates steps, lists them on the card, and undo puts the previous steps back", async () => {
+    const { routines, submit, undo, card } = stepped();
+    const created = await submit(createProposal({ steps }));
+    const routineId = created.result!.resultId;
+    expect(routines.listRoutines()[0]!.steps).toEqual(steps);
+    expect(card(created.requestId).subtitle).toContain("Steps:\n1. @Research: Find three AI news items.\n2. @Writer (quick): Write a five-line summary.");
+    const next = [...steps, { botId: "bot-a", instructions: "Does it mention a release?", check: true as const }];
+    const updated = await submit({ action: "update", routineId, changes: { steps: next } });
+    expect(routines.listRoutines()[0]!.steps).toEqual(next);
+    expect(card(updated.requestId).subtitle).toContain("3. @Research, check: Does it mention a release?");
+    expect(undo(updated.requestId)).toMatchObject({ state: "undone", action: "update" });
+    expect(routines.listRoutines()[0]!.steps).toEqual(steps);
+    const removed = await submit({ action: "update", routineId, changes: { steps: null } });
+    expect(routines.listRoutines()[0]!.steps).toBeUndefined();
+    expect(undo(removed.requestId)).toMatchObject({ state: "undone" });
+    expect(routines.listRoutines()[0]!.steps).toEqual(steps);
+  });
+
+  it("keeps the steps when a deleted routine is undone", async () => {
+    const { routines, submit, undo } = stepped();
+    const routineId = (await submit(createProposal({ steps }))).result!.resultId;
+    const deleted = await submit({ action: "delete", routineId });
+    expect(routines.listRoutines()).toHaveLength(0);
+    expect(undo(deleted.requestId)).toMatchObject({ state: "undone", action: "delete" });
+    expect(routines.listRoutines()[0]!.steps).toEqual(steps);
+  });
+
+  it.each([
+    ["one step", [steps[0]!], "2 to 6"],
+    ["seven steps", Array.from({ length: 7 }, () => steps[0]!), "2 to 6"],
+    ["a first-step check", [{ ...steps[0]!, check: true as const }, steps[1]!], "The first step can't be a check"],
+    ["a bot it cannot hand work to", [steps[0]!, { botId: "bot-z", instructions: "Help." }], 'No bot with id "bot-z"'],
+  ])("refuses %s before any card is written", async (_label, plan, error) => {
+    const { routines, submit } = stepped();
+    await expect(submit(createProposal({ steps: plan }))).rejects.toThrow(error);
+    expect(routines.listRoutines()).toHaveLength(0);
+  });
+
+  it("refuses steps on a routine that has checks", async () => {
+    const { routines, submit } = stepped();
+    const watched = routines.create({ botId: "bot-a", name: "Watch", prompt: "Watch mail.", checks: ["mail"], schedule: { type: "daily", time: "09:00", weekdays: [1] } });
+    await expect(submit({ action: "update", routineId: watched.id, changes: { steps } })).rejects.toThrow("Steps work only on a bot routine");
+    expect(routines.listRoutines()[0]!.steps).toBeUndefined();
+  });
+});

@@ -104,7 +104,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
   });
   const validRoutines = routines.filter((routine) => {
     const room = groups.find((group) => group.key === routine.groupId);
-    const valid = botIds.has(routine.botId) && (routine.target !== "room-goal" || !routine.groupId || (room && !room.dm && room.memberIds.includes(routine.botId)));
+    const valid = botIds.has(routine.botId) && (routine.steps ?? []).every((step) => botIds.has(step.botId)) && (routine.target !== "room-goal" || !routine.groupId || (room && !room.dm && room.memberIds.includes(routine.botId)));
     if (!valid) warnings.push(`Routine “${routine.name}” is not included because its bot, room or coordinator was deleted.`);
     return valid;
   });
@@ -132,6 +132,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
       groupId: routine.groupId, runOn: routine.runOn, schedule: routine.schedule,
       durationMinutes: routine.durationMinutes, timeoutMinutes: routine.timeoutMinutes,
       ...(routine.checks ? { checks: routine.checks } : {}), ...(routine.access ? { access: routine.access } : {}), ...(routine.deliver ? { deliver: routine.deliver } : {}),
+      ...(routine.steps ? { steps: routine.steps } : {}),
     })),
   });
   if (Buffer.byteLength(JSON.stringify(document)) > MAX_TEAM_BACKUP_BYTES) {
@@ -253,7 +254,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
       }
     }
     for (const source of backup.routines) {
-      createdRoutines.push(routines.create({ ...source, botId: botIds.get(source.botId)!,
+      createdRoutines.push(routines.create({ ...source, botId: botIds.get(source.botId)!, steps: source.steps?.map((step) => ({ ...step, botId: botIds.get(step.botId)! })),
         groupId: source.target === "room-goal" && source.groupId ? groupIds.get(source.groupId) : undefined, enabled: false }));
     }
     return { name: backup.name, bots, groups, routines: createdRoutines };

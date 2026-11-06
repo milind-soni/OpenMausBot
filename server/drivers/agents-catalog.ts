@@ -109,6 +109,16 @@ const TRIGGER_FIELDS_SCHEMA = {
     description: "Complete steps for each run, which does NOT see this conversation, in the person's plain words (\"draft a reply\"), never \"event data\", \"payload\", \"webhook\" or \"trigger\". Put judgement here, e.g. \"if it is not about an order, stop\".",
   },
   schedule: { ...ROUTINE_SCHEDULE_SCHEMA, description: `Only for when=schedule. ${ROUTINE_SCHEDULE_SCHEMA.description}` },
+  steps: {
+    type: "array",
+    items: {
+      type: "object",
+      additionalProperties: false,
+      properties: { bot: { type: "string" }, do: { type: "string" }, quick: { type: "boolean" }, check: { type: "boolean" } },
+      required: ["do"],
+    },
+    description: "Schedules: 2-6 steps run in order instead of instructions (then the purpose), each seeing only the previous reply. bot: teammate name or id (default you). quick: its quick model. check: yes/no on the previous reply; no ends the run. update replaces; [] removes.",
+  },
   webhook_event_types: {
     type: "array",
     maxItems: 20,

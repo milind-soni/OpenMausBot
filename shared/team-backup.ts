@@ -153,6 +153,9 @@ const backupSchema = z.object({
     checks: z.array(z.enum(["calendar", "mail", "runs"])).max(3).optional(),
     access: z.literal("read-and-draft").optional(),
     deliver: z.literal("brief").optional(),
+    steps: z.array(z.object({
+      botId: key, instructions: z.string().trim().min(1).max(4_000), model: z.literal("quick").optional(), check: z.literal(true).optional(),
+    })).max(6).optional(),
   })).max(2_000),
 });
 
@@ -194,7 +197,7 @@ export function parseTeamBackup(input: unknown): TeamBackup {
     if (group.dm && (group.memberIds.length !== 2 || group.tasks.length !== 1)) throw new Error("Invalid backup: invalid direct-message room");
   }
   for (const routine of backup.routines) {
-    if (!bots.has(routine.botId)) throw new Error("Invalid backup: unknown routine bot");
+    if (!bots.has(routine.botId) || routine.steps?.some((step) => !bots.has(step.botId))) throw new Error("Invalid backup: unknown routine bot");
     if (routine.target === "room-goal") {
       if (routine.runOn !== "maus") throw new Error("Invalid backup: room goals must run on this computer");
       const group = backup.groups.find((candidate) => candidate.key === routine.groupId);

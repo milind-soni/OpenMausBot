@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import type { AppTrigger } from "../shared/app-triggers.ts";
 import { appWhenText } from "./app-trigger-requests.ts";
-import { canManage, type RosterMember } from "./peer-roster.ts";
+import { canManage, namesTeammate, resolveTeammate, type RosterMember } from "./peer-roster.ts";
 import { redactSecretsInText } from "./redact.ts";
 import type { Routine, RoutineRun } from "./routines.ts";
 import type { WebhookTrigger } from "./webhooks.ts";
@@ -56,7 +56,7 @@ function agentSchedule(schedule: Routine["schedule"]) {
   return { type: "weekly" as const, time: schedule.time, weekdays: schedule.weekdays.map((day) => WEEKDAY_NAMES[day]) };
 }
 
-export function agentRoutine(routine: Routine, latestRun?: RoutineRun) {
+export function agentRoutine(routine: Routine, latestRun?: RoutineRun, botName: (botId: string) => string | undefined = () => undefined) {
   return {
     id: routine.id,
     kind: "schedule" as const,
@@ -73,6 +73,8 @@ export function agentRoutine(routine: Routine, latestRun?: RoutineRun) {
     durationMinutes: routine.durationMinutes,
     ...(routine.timeoutMinutes === undefined ? {} : { timeoutMinutes: routine.timeoutMinutes }),
     schedule: agentSchedule(routine.schedule),
+    ...(routine.steps ? { steps: routine.steps.map((step) => ({ bot: botName(step.botId) ?? step.botId, botId: step.botId, do: redactSecretsInText(step.instructions),
+      ...(step.model === "quick" ? { quick: true } : {}), ...(step.check ? { check: true } : {}) })) } : {}),
     nextRunAt: timestamp(routine.nextRunAt),
     latestRun: latestRun ? agentRun(latestRun) : null,
   };
@@ -140,6 +142,7 @@ export function listTriggers(input: {
   runs: readonly RoutineRun[];
   timeZone: string;
   now: number;
+  botName?: (botId: string) => string | undefined;
 }): TriggerListing {
   const latest = new Map<string, RoutineRun>();
   for (const run of input.runs) {
@@ -155,13 +158,13 @@ export function listTriggers(input: {
     const app = apps.find((candidate) => candidate.id === input.triggerId);
     if (!routine && !webhook && !app) return { ...header, error: "No trigger with that id belongs to this bot. Call trigger_info without trigger_id to see its ids." };
     const fires = input.runs.filter((run) => run.routineId === input.triggerId).slice(0, FIRES_SHOWN).map(agentRun);
-    const shown = routine ? agentRoutine(routine, latest.get(routine.id)) : webhook ? agentWebhook(webhook, latest.get(webhook.id)) : agentAppTrigger(app!, latest.get(app!.id));
+    const shown = routine ? agentRoutine(routine, latest.get(routine.id), input.botName) : webhook ? agentWebhook(webhook, latest.get(webhook.id)) : agentAppTrigger(app!, latest.get(app!.id));
     return { ...header, trigger: { ...shown, recentFires: fires } };
   }
   return {
     ...header,
     triggers: [
-      ...routines.map((routine) => agentRoutine(routine, latest.get(routine.id))),
+      ...routines.map((routine) => agentRoutine(routine, latest.get(routine.id), input.botName)),
       ...webhooks.map((webhook) => agentWebhook(webhook, latest.get(webhook.id))),
       ...apps.map((trigger) => agentAppTrigger(trigger, latest.get(trigger.id))),
     ].slice(0, 100),
@@ -212,6 +215,22 @@ export function parseTriggerRequest(body: unknown, kindOf: (id: string) => "sche
   const misplaced = changes && Object.keys(changes).find((key) => !WEBHOOK_FIELDS.has(key));
   if (misplaced) return { ok: false, error: `A webhook trigger has no ${misplaced}; it fires when its link is called. Change name, instructions, run_on or webhook_event_types.` };
   return { ok: true, kind: "webhook", forBotId: request.forBotId, operation: { action: request.action, webhookId: request.triggerId, ...(changes ? { changes } : {}) } };
+}
+
+/** A schedule request's steps with each step's bot, as the bot named it, read as its id; the owner when it names none. */
+export function resolveStepBots<T extends RosterMember>(proposal: { routine?: unknown; changes?: unknown }, owner: T, bots: readonly T[]): string | null {
+  const holder = proposal.routine ?? proposal.changes;
+  const steps = holder && typeof holder === "object" ? (holder as { steps?: unknown }).steps : undefined;
+  if (!Array.isArray(steps)) return null;
+  for (const step of steps) {
+    if (!step || typeof step !== "object") continue;
+    const named = (step as { bot?: unknown }).bot, raw = typeof named === "string" ? named : "";
+    delete (step as { bot?: unknown }).bot;
+    const resolved = !raw || namesTeammate(owner, raw) ? { id: owner.id } : resolveTeammate(bots, owner, raw);
+    if ("error" in resolved) return resolved.error;
+    (step as { botId?: string }).botId = resolved.id;
+  }
+  return null;
 }
 
 /** An automation is part of a bot's setup: another bot named by for_bot_id needs the sender's authority, not just reach. */
