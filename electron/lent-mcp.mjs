@@ -230,8 +230,8 @@ export function createLentMcp({ environment = async () => ({ ...inheritedEnviron
     for (let attempt = 0; ; attempt++) {
       const live = await ready(server, signal);
       clearTimeout(live.idle);
+      try { await live.started; } catch (error) { live.failed = true; stop(server.name); throw error; }
       try {
-        await live.started;
         const result = await work(live.client);
         live.idle = setTimeout(() => stop(server.name), IDLE_MS);
         live.idle.unref?.();

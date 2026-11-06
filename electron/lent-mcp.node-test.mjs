@@ -93,6 +93,20 @@ test("a command server starts once, from the home folder, with its saved key, an
   assert.equal(fresh.key, "new-key");
 });
 
+test("a server that refuses to start is started again on the next call, not kept refusing", async t => {
+  let refusals = 1;
+  const { url, seen } = await httpFixture(t, (req, res, message) => {
+    if (!("id" in message)) { res.writeHead(202).end(); return; }
+    if (message.method === "initialize" && refusals-- > 0) { res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id: message.id, error: { code: -32000, message: "warming up" } })); return; }
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: message.method === "initialize" ? { protocolVersion: "2025-03-26" } : { tools: [{ name: "search" }] } }));
+  });
+  const lent = createLentMcp();
+  t.after(() => lent.close());
+  await assert.rejects(lent.call({ action: "mcp_tools", server: http(url) }, signal()), /warming up/);
+  assert.deepEqual(await lent.call({ action: "mcp_tools", server: http(url) }, signal()), { tools: [{ name: "search" }] });
+  assert.equal(seen.filter(request => request.message.method === "initialize").length, 2);
+});
+
 test("a command server that can't start says so by its program's name, never with its keys", async t => {
   const { lent } = await stdioFixture(t);
   const missing = { name: "notes", command: path.join(tmpdir(), "omb-no-such-program"), args: [], env: { NOTES_TOKEN: "never-echoed" } };
