@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { keepTransient, lazyClaimRetryText, MAX_CLAIM_ATTEMPTS, startAutoVmClaim, transientClaimFailure, type AutoVmClaimSlot, type AutoVmClaimTable } from "./auto-vm-claims.ts";
+import { keepTransient, lazyClaimFailedText, lazyClaimRetryText, MAX_CLAIM_ATTEMPTS, startAutoVmClaim, transientClaimFailure, type AutoVmClaimSlot, type AutoVmClaimTable } from "./auto-vm-claims.ts";
 
 const slot = (claim: () => Promise<void>, generation = "gen-1"): AutoVmClaimSlot => ({
   owner: { threadId: "t1", generation },
@@ -192,5 +192,23 @@ describe("startAutoVmClaim", () => {
     await table.get("t1")!.begin;
     expect(table.get("t1")!.claimed).toBe(true);
     expect(onRejected).not.toHaveBeenCalled();
+  });
+});
+
+describe("lazyClaimFailedText", () => {
+  const boat = { label: "the cloud computer", startsComputer: true as const, failure: "Miso's cloud desktop didn't start. This conversation is back on Auto. Send your message again." };
+
+  it("gives the bot the computer's own reason, and says the conversation is back on Auto only when it is", () => {
+    expect(lazyClaimFailedText({ ...boat, cause: "the cloud computer could not be created or reached", backOnAuto: true })).toBe(
+      "The cloud computer could not be started: the cloud computer could not be created or reached. This call was not performed. " +
+      "This conversation is back on Auto. Do not retry computer work in this turn; tell the person what you could not do.");
+    expect(lazyClaimFailedText({ ...boat, cause: "the cloud computer didn't start in time." })).toBe(
+      "The cloud computer could not be started: the cloud computer didn't start in time. This call was not performed. " +
+      "Do not retry computer work in this turn; tell the person what you could not do.");
+  });
+
+  it("keeps the claim wording for a computer the turn does not start", () => {
+    expect(lazyClaimFailedText({ label: "the Local VM", failure: "the Local VM is not ready" })).toBe(
+      "This turn could not claim the Local VM (the Local VM is not ready). This call was not performed. Do not retry computer work in this turn; tell the person what you could not do.");
   });
 });
