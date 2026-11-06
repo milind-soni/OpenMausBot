@@ -1288,9 +1288,11 @@ network has IPv6 of its own (not verified).
 header in `OMB_CLOUD_CLIENT_IP_HEADER`, or every member shares one lockout:
 ten wrong codes from anyone would also refuse the Admin's own pairings for a
 minute. A proxy on the same host reaches a published port from the Docker
-bridge's gateway (usually `172.17.0.1`), which the agent shares. Only the
-named peers are believed, and only the last address they add, so a client's
-own `X-Forwarded-For` or `Cf-Connecting-IP` changes nothing.
+bridge's gateway (usually `172.17.0.1`), which the agent shares; naming the
+gateway lets anything that arrives from it name a client, so do it only when
+no port is published on `[::]` (Docker's proxy sends IPv6 clients from there
+too). Only the named peers are believed, and only the last address they add,
+so a client's own `X-Forwarded-For` or `Cf-Connecting-IP` changes nothing.
 
 **Private, on a tailnet.** `tailscale serve --bg --https=443
 http://127.0.0.1:8080` on the server serves `https://<machine>.<tailnet>.ts.net`
