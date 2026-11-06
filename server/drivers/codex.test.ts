@@ -1211,6 +1211,39 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(argv).toContain("mcp_servers.notes.command");
   });
 
+  it("runs a restarted custom server without its restart marker, since every turn starts its servers anew", async () => {
+    const dump = join(scratch, "restarted-mcp.json"); process.env.FAKE_CODEX_DUMP = dump;
+    await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex") } });
+    await instance.adapter.sendTurn({ threadId: "restarted-mcp", text: "go", integrations: { custom: {
+      notes: { command: "notes-mcp", args: [], env: { NOTES_KEY: "kept", OMB_MCP_RESTART: "1" } },
+      tasks: { command: "tasks-mcp", args: [], env: { OMB_MCP_RESTART: "2" } },
+    } } });
+    expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).toContain('mcp_servers.notes.env_vars=["NOTES_KEY"]');
+    expect(seen.argv).toContain("mcp_servers.tasks.env_vars=[]");
+    expect(seen.env.OMB_MCP_RESTART).toBeUndefined();
+  });
+
+  it("still refuses any other OpenMausBot variable on a custom server", async () => {
+    await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex") } });
+    await expect(instance.adapter.sendTurn({ threadId: "reserved-mcp", text: "go", integrations: { custom: {
+      notes: { command: "notes-mcp", args: [], env: { OMB_COMMS_TOKEN: "stolen", OMB_MCP_RESTART: "1" } },
+    } } })).rejects.toThrow("cannot set reserved environment variable “OMB_COMMS_TOKEN”");
+  });
+
+  it("recognises a restarted server the user's config.toml already runs, and mounts no second copy", async () => {
+    const dump = join(scratch, "restarted-toml.json"); process.env.FAKE_CODEX_DUMP = dump;
+    const codexHome = join(scratch, ".codex"); mkdirSync(codexHome, { recursive: true });
+    writeFileSync(join(codexHome, "config.toml"), '[mcp_servers.sentry]\ncommand = "npx"\nargs = ["-y", "@sentry/mcp-server"]\n');
+    await create({ environment: { HOME: scratch, CODEX_HOME: codexHome } });
+    await instance.adapter.sendTurn({ threadId: "restarted-toml", text: "go", integrations: { custom: {
+      sentry: { command: "npx", args: ["-y", "@sentry/mcp-server"], env: { OMB_MCP_RESTART: "1" } },
+    } } });
+    expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+    expect(JSON.parse(readFileSync(dump, "utf8")).argv.filter((arg: string) => arg.includes("sentry"))).toEqual([]);
+  });
+
   it("does not mount a second copy of a server the user's config.toml already runs, as one brought in from there", async () => {
     const codexHome = join(scratch, "same-server-codex-home");
     mkdirSync(codexHome, { recursive: true });
