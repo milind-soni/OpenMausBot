@@ -767,6 +767,38 @@ describe("OpenCode turns without a sign-in gate", () => {
     expect(events.some((event) => event.type === "runtime.error")).toBe(false);
   });
 
+  it("sends an attached image to the model as a native ACP image block", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-image-"));
+    const dump = join(scratch, "dump.json");
+    const imagePath = join(scratch, "tiny.png");
+    const bytes = Buffer.from("opencode-image-bytes");
+    writeFileSync(imagePath, bytes);
+    const driver = createOpenCodeDriver(async () => ({ default: "", options: [] }));
+    const instance = await driver.create({
+      instanceId: "opencode-image", displayName: "OpenCode", enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false, workspace: scratch },
+      environment: {
+        HOME: scratch, USERPROFILE: scratch, XDG_CONFIG_HOME: scratch, XDG_DATA_HOME: join(scratch, "data"),
+        FAKE_ACP_MODELS: "opencode/big-pickle", FAKE_ACP_IMAGE_CAPABILITY: "1",
+        FAKE_ACP_DUMP: dump, FAKE_ACP_DUMP_PROMPT: "1",
+      },
+    });
+    const recorder = recordEvents(instance.adapter);
+    fixtures.push({ scratch, instance, recorder });
+
+    expect(instance.adapter.capabilities).toMatchObject({ images: true, nativeImageInput: true });
+    const { turnId } = await instance.adapter.sendTurn({
+      threadId: "t-image", text: "What is this?", model: "opencode/big-pickle",
+      images: [{ path: imagePath, mime: "image/png", bytes: bytes.length }],
+    });
+    await expect(recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId))
+      .resolves.toMatchObject({ ok: true });
+    expect(JSON.parse(readFileSync(`${dump}.prompt.json`, "utf8"))).toEqual([
+      expect.objectContaining({ type: "text" }),
+      { type: "image", data: bytes.toString("base64"), mimeType: "image/png" },
+    ]);
+  });
+
   it("shows a fix-your-key card for a rejected key and keeps the process for the retry", async () => {
     const f = await open("opencode-bad-key", (scratch) => ({
       OPENCODE_API_KEY: "sk-bogus", FAKE_ACP_MODELS: "opencode/big-pickle", FAKE_ACP_RPC_FAILURE_FILE: join(scratch, "failure.json"),
