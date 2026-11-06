@@ -21,7 +21,7 @@ export const codexEndpointUpdateSchema = codexEndpointSchema.partial().refine(va
 type Fields = Partial<z.infer<typeof codexEndpointSchema>>;
 
 function configOf(entry: InstanceConfig) {
-  return (entry.config ?? {}) as { cli?: string; endpoint?: { url: string; models: string[] } };
+  return (entry.config ?? {}) as { cli?: string; endpoint?: { url: string; models: string[]; model?: string } };
 }
 
 export function isCodexEndpoint(entry: InstanceConfig | undefined): boolean {
@@ -51,7 +51,7 @@ export function newCodexEndpoint(cfg: AppConfig, body: z.infer<typeof codexEndpo
   const cli = source ? configOf(source).cli : undefined;
   instances[instanceId] = {
     driver: "codex", access: "custom", displayName: body.displayName,
-    config: { ...(cli ? { cli } : {}), endpoint: { url: endpointBaseUrl(body.baseUrl)!, models: body.model ? [body.model] : officialModels(true) } },
+    config: { ...(cli ? { cli } : {}), endpoint: { url: endpointBaseUrl(body.baseUrl)!, ...(body.model ? { model: body.model, models: [body.model] } : { models: officialModels(true) }) } },
     environment: { CODEX_HOME: join(DATA_DIR, "providers", instanceId), OPENMAUSBOT_CODEX_API_KEY: body.token },
   };
   return { instanceId, instances };
@@ -70,7 +70,7 @@ export function updateCodexEndpoint(cfg: AppConfig, instanceId: string, body: Fi
   if (!token) throw Object.assign(new Error("Enter the endpoint's token."), { status: 400 });
   instances[instanceId] = {
     ...entry, ...(body.displayName ? { displayName: body.displayName } : {}),
-    config: { ...configOf(entry), endpoint: { url: address, models: body.model ? [body.model] : saved.models } },
+    config: { ...configOf(entry), endpoint: { ...configOf(entry).endpoint!, url: address, ...(body.model ? { model: body.model, models: [body.model] } : {}) } },
     environment: { ...entry.environment, OPENMAUSBOT_CODEX_API_KEY: token },
   };
   return { instances };

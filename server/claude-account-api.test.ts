@@ -195,6 +195,15 @@ describe("Claude account HTTP API", () => {
     expect((await api("DELETE", `/api/instances/${id}`)).status).toBe(200);
   });
 
+  it("keeps a Codex endpoint's fixed model when its key changes on the official URL", async () => {
+    const created = await api("POST", "/api/instances/codex-endpoint", { displayName: "Fixed fixture", baseUrl: "https://api.openai.com/v1", token: "fixed-fixture-key", model: "fixed-model" });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const id = created.body.instanceId;
+    expect((await api("PATCH", `/api/instances/${id}/codex-endpoint`, { token: "fixed-rotated-key" })).status).toBe(200);
+    expect(saved().instances[id].config.endpoint.models).toEqual(["fixed-model"]);
+    expect((await api("DELETE", `/api/instances/${id}`)).status).toBe(200);
+  });
+
   it("rotates a legacy Claude endpoint's key without a model catalog", async () => {
     const created = await api("POST", "/api/instances/claude-endpoint", { displayName: "Legacy fixture", baseUrl: "https://offline.example", token: "legacy-fixture-key", model: "legacy-model" });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
@@ -219,6 +228,8 @@ describe("Claude account HTTP API", () => {
     expect((await api("POST", `/api/instances/${id}/auth/start`)).status).not.toBe(200);
     expect((await api("PATCH", `/api/instances/${id}/codex-endpoint`, { baseUrl: "https://other.example/v1" })).status).toBe(400);
     expect((await api("PATCH", `/api/instances/${id}/codex-endpoint`, { model: "another-model" })).status).toBe(200);
+    expect(saved().instances[id].config.endpoint.models).toEqual(["another-model"]);
+    expect((await api("PATCH", `/api/instances/${id}/codex-endpoint`, { token: "codex-api-rotated-secret" })).status).toBe(200);
     expect(saved().instances[id].config.endpoint.models).toEqual(["another-model"]);
     const bot = await addBotOn(id, "another-model");
     expect((await api("DELETE", `/api/instances/${id}`)).status).toBe(409);

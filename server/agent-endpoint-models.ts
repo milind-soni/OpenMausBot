@@ -17,6 +17,13 @@ export function isGatewayEndpoint(entry: InstanceConfig): boolean {
   return agentEndpointAddress(entry) !== OFFICIAL_URL[entry.driver === "codex" ? "codex" : "claude"];
 }
 
+/** An endpoint saved with a fixed model keeps it; discovery never replaces it. */
+export function hasExplicitModel(entry: InstanceConfig): boolean {
+  return entry.driver === "codex"
+    ? Boolean((entry.config as { endpoint?: { model?: string } }).endpoint?.model)
+    : Boolean(entry.environment?.ANTHROPIC_MODEL);
+}
+
 export function officialModels(codex: boolean): string[] {
   const catalog = codex ? STATIC_CODEX_MODELS : STATIC_CLAUDE_MODELS;
   return [...new Set([catalog.default, ...catalog.options.map(option => option.id)])];
@@ -69,7 +76,8 @@ export async function discoverAgentEndpointModels(entry: InstanceConfig, fetchIm
   if (response.status === 404) throw failure("The model catalog was not found (HTTP 404). Check the base URL; Codex usually needs /v1 and requests /v1/models.");
   if (response.status >= 300 && response.status < 400) throw failure("The gateway redirected the model request. Enter the final API base URL; credentials are never forwarded through redirects.");
   if (!response.ok) throw failure(`The model request failed (HTTP ${response.status}). Check the gateway's status and model catalog support.`);
-  const text = await readCatalog(response, MAX_CATALOG_BYTES);
+  const text = await readCatalog(response, MAX_CATALOG_BYTES)
+    .catch(() => { throw failure("The gateway closed the connection while sending its model catalog. Try again, or check the gateway's logs."); });
   if (text === null) throw failure("The model catalog is larger than 2 MB. Check that the base URL points to the gateway's API.");
   let body: unknown;
   try { body = JSON.parse(text); } catch { throw failure("The gateway did not return a JSON model catalog. Check that the base URL points to its API, not its dashboard."); }

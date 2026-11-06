@@ -73,3 +73,11 @@ it("never offers Claude Code's reserved `default` as a gateway model", async () 
   await discoverAgentEndpointModels(entry, vi.fn<typeof fetch>().mockResolvedValue(Response.json({ data: [{ id: "default" }, { id: "model-a" }] })));
   expect((entry.config as any).endpointModels).toEqual(["model-a"]);
 });
+it("explains a gateway that drops the connection mid-catalog without exposing the error", async () => {
+  const entry = endpoint(true);
+  const body = new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('{"data":[')); controller.error(new Error("fixture-secret")); } });
+  const failure = await discoverAgentEndpointModels(entry, vi.fn<typeof fetch>().mockResolvedValue(new Response(body))).catch(error => error);
+  expect(failure.message).toContain("closed the connection while sending its model catalog");
+  expect(failure.message).not.toContain("fixture-secret");
+  expect(failure.status).toBe(400);
+});

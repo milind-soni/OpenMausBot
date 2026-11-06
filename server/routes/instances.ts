@@ -1,4 +1,4 @@
-import { agentEndpointAddress, discoverAgentEndpointModels, isGatewayEndpoint } from "../agent-endpoint-models.ts";
+import { agentEndpointAddress, discoverAgentEndpointModels, hasExplicitModel, isGatewayEndpoint } from "../agent-endpoint-models.ts";
 import { codexEndpointSchema, codexEndpointUpdateSchema, newCodexEndpoint, updateCodexEndpoint, withCodexEndpointInfo, isCodexEndpoint } from "../codex-endpoints.ts";
 import { userError, userErrorFields } from "../user-errors.ts";
 import { randomUUID } from "node:crypto";
@@ -212,7 +212,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         const { instances } = (codex ? updateCodexEndpoint : updateClaudeEndpoint)(cfg, instanceId, parsed.data);
         const previous = persistableInstanceConfigs(cfg)[instanceId];
         const addressChanged = agentEndpointAddress(previous) !== agentEndpointAddress(instances[instanceId]);
-        if (!parsed.data.model && !previous.environment?.ANTHROPIC_MODEL && (parsed.data.token !== undefined || addressChanged)) await discoverAgentEndpointModels(instances[instanceId]);
+        if (!parsed.data.model && !hasExplicitModel(previous) && (parsed.data.token !== undefined || addressChanged)) await discoverAgentEndpointModels(instances[instanceId]);
         await persistProviderInstance(instanceId, instances);
         return json(res, 200, { instances: await describeInstances() });
       } catch (error) {
@@ -265,7 +265,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         }
         if (action === "refresh-models") {
           const endpoint = persistableInstanceConfigs(cfg)[instanceId];
-          if (endpoint && (isClaudeEndpoint(endpoint) || isCodexEndpoint(endpoint)) && isGatewayEndpoint(endpoint) && !endpoint.environment?.ANTHROPIC_MODEL) {
+          if (endpoint && (isClaudeEndpoint(endpoint) || isCodexEndpoint(endpoint)) && isGatewayEndpoint(endpoint) && !hasExplicitModel(endpoint)) {
             if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
             providerConfigBusy.set(true);
             try {
