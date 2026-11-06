@@ -175,6 +175,7 @@ export const SRC_OUTSIDE_RENDERER = [
   "src/lib/citations.ts",
   "src/lib/composer-attachments.ts",
   "src/lib/random-uuid.ts",
+  "src/lib/receipts.ts",
 ];
 
 export const DOCS = /^(?:[^/]+\.md|docs\/.+\.md|\.github\/FUNDING\.yml)$/;
