@@ -622,7 +622,8 @@ Setup, once:
 1. `wrangler d1 migrations apply DB --config wrangler.jsonc` (0012).
 2. Make a key pair: a 32-byte Ed25519 seed for this Worker, its public key for the relay's `RELAY_TOKEN_KEYS`
    (`{"k1":"<b64u public key>"}`). `wrangler secret put RELAY_TOKEN_SIGNING_KEY --config wrangler.jsonc` with the seed as
-   base64url. It is deliberately not in `secrets.required`: until it exists every request answers 503.
+   base64url. Until it exists every request answers 503. Once it is set it is listed in `secrets.required`: a deploy
+   keeps only the secrets listed there, so an unlisted one is dropped. Set it before deploying a config that lists it.
 3. Admit the team with `RELAY_ALLOW_INSTALLATIONS`, then raise `RELAY_ROLLOUT_PERCENT` 10, 50, 100 while watching the
    relay alerts. `RELAY_DISABLED: "1"` turns every token off at once; tokens already issued expire within 12 hours.
 4. To rotate, give the relay both public keys, set `RELAY_TOKEN_KID` and the new secret, deploy, then drop the old key
@@ -660,9 +661,10 @@ Setup, once:
    On a running Worker, apply 0010 before deploying a Worker built from this
    code: its callback marks the flow in `callback_at`. An older Worker
    ignores the column.
-4. `wrangler secret put HIGHLEVEL_CLIENT_SECRET --config wrangler.jsonc`. It is
-   deliberately not in `secrets.required`: until it exists the routes answer
-   `503 highlevel_unavailable`.
+4. `wrangler secret put HIGHLEVEL_CLIENT_SECRET --config wrangler.jsonc`. Until
+   it exists the routes answer `503 highlevel_unavailable`. It is live, so it is
+   listed in `secrets.required`: a deploy keeps only the secrets listed there and
+   would otherwise drop it.
 5. `wrangler deploy --config wrangler.jsonc`.
 
 A private app stops accepting installs past five external agencies; publish it
