@@ -252,8 +252,7 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
   const [folder, setFolder] = useState<MessageFolderListing | null>(null);
   const [reason, setReason] = useState("");
   const [savedTo, setSavedTo] = useState("");
-  const [outsideWorkspace, setOutsideWorkspace] = useState(false);
-  const [tooLarge, setTooLarge] = useState(false);
+  const [failureCode, setFailureCode] = useState<unknown>(undefined);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const request = useRef<AbortController | null>(null);
   const saving = useRef(false);
@@ -274,8 +273,7 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
     saving.current = false;
     setReason("");
     setSavedTo("");
-    setOutsideWorkspace(false);
-    setTooLarge(false);
+    setFailureCode(undefined);
     setFolder(null);
     setState("idle");
   }, [filePath, entry, message?.messageId, message?.threadId]);
@@ -293,8 +291,7 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
       resetTimer.current = null;
     }
     setReason("");
-    setOutsideWorkspace(false);
-    setTooLarge(false);
+    setFailureCode(undefined);
     setState("saving");
     request.current?.abort();
     const controller = new AbortController();
@@ -342,9 +339,7 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
     } catch (error) {
       if (!mounted.current || controller.signal.aborted) return;
       setReason(error instanceof Error ? error.message : t("attach.saveFailed"));
-      const code = (error as { code?: unknown } | null)?.code;
-      setOutsideWorkspace(code === "outside_workspace");
-      setTooLarge(code === "file_too_large");
+      setFailureCode((error as { code?: unknown } | null)?.code);
       setState("failed");
     } finally {
       if (request.current === controller) {
@@ -354,9 +349,8 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
     }
   }, [filePath, entry, message?.messageId, message?.threadId, name]);
 
-  // Retrying can't move a file into the folder or make it smaller.
-  const retryable = state === "failed" && !outsideWorkspace && !tooLarge;
-  return { state, reason, savedTo, outsideWorkspace, retryable, folder, save };
+  const outsideWorkspace = failureCode === "outside_workspace"; // Retrying can't move a file into the folder or make it smaller.
+  return { state, reason, savedTo, outsideWorkspace, retryable: state === "failed" && !outsideWorkspace && failureCode !== "file_too_large", folder, save };
 }
 
 export function saveFailureText(save: { reason: string; outsideWorkspace: boolean }): string {
@@ -908,7 +902,6 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
   const save = useLocalFileSave(file.path, file.name, message);
   const preview = useHtmlPreview(file.path, file.name, message);
   const failed = save.state === "failed";
-  const retryable = save.retryable;
   if (compact) return <CompactFileChip file={file} message={message} linked={linked} save={save} preview={preview} className={className} />;
   if (!message || (!file.private && !linked)) {
     return (
@@ -927,7 +920,7 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
       <div className="flex items-center pe-1">
         <button
           type="button"
-          {...chipNameAction(preview, save, file.name, retryable)}
+          {...chipNameAction(preview, save, file.name, save.retryable)}
           className="flex min-h-10 min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-left transition-colors hover:bg-raised/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 disabled:cursor-wait disabled:hover:bg-transparent"
         >
           <FileText size={14} className="shrink-0" aria-hidden="true" />
@@ -937,12 +930,12 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
           ) : save.state === "saved" ? (
             <Check size={13} className="shrink-0 text-success" />
           ) : failed ? (
-            retryable && <RotateCcw size={13} className="shrink-0 text-danger" />
+            save.retryable && <RotateCcw size={13} className="shrink-0 text-danger" />
           ) : (
             <Download size={13} className="shrink-0" />
           )}
         </button>
-        {preview.html ? <SaveIconButton name={file.name} save={save} retryable={retryable} /> : <FilePreviewButton path={file.path} name={file.name} message={message} />}
+        {preview.html ? <SaveIconButton name={file.name} save={save} retryable={save.retryable} /> : <FilePreviewButton path={file.path} name={file.name} message={message} />}
         {preview.dialog}
       </div>
       {save.state !== "idle" && (
@@ -980,7 +973,6 @@ function CompactFileChip({ file, message, linked, save, preview, className }: {
   className?: string;
 }) {
   const failed = save.state === "failed";
-  const retryable = save.retryable;
   const name = <span dir="auto" className="min-w-0 truncate text-ink [unicode-bidi:isolate]">{file.name}</span>;
   if (!message || (!file.private && !linked)) {
     return (
@@ -999,7 +991,7 @@ function CompactFileChip({ file, message, linked, save, preview, className }: {
       >
         <button
           type="button"
-          {...chipNameAction(preview, save, file.name, retryable)}
+          {...chipNameAction(preview, save, file.name, save.retryable)}
           className="inline-flex h-7 min-w-0 items-center gap-1.5 rounded-full ps-2.5 pe-2 transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-wait"
         >
           <FileText size={14} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
@@ -1009,12 +1001,12 @@ function CompactFileChip({ file, message, linked, save, preview, className }: {
           ) : save.state === "saved" ? (
             <Check size={13} className="shrink-0 text-success" aria-hidden="true" />
           ) : failed ? (
-            retryable && <RotateCcw size={13} className="shrink-0 text-danger" aria-hidden="true" />
+            save.retryable && <RotateCcw size={13} className="shrink-0 text-danger" aria-hidden="true" />
           ) : (
             <Download size={13} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
           )}
         </button>
-        {preview.html ? <SaveIconButton name={file.name} save={save} retryable={retryable} /> : <FilePreviewButton path={file.path} name={file.name} message={message} />}
+        {preview.html ? <SaveIconButton name={file.name} save={save} retryable={save.retryable} /> : <FilePreviewButton path={file.path} name={file.name} message={message} />}
         {preview.dialog}
       </span>
       {save.state !== "idle" && save.state !== "saved" && (
