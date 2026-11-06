@@ -69,7 +69,7 @@ describe("provider requests", () => {
     const body = { created: 1, data: [{ b64_json: PNG.toString("base64"), url: null, revised_prompt: null }] };
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(body), { status: 200 }));
     const cfg = { imageGen: { customUrl: "http://127.0.0.1:4711/v1/openai", customApiKey: "custom-secret", customModel: "vendor/image-model", primary: { provider: "custom" as const } } };
-    await expect(generateImage(cfg, { prompt: "owl" }, { fetchImpl: fetchMock })).resolves.toMatchObject({ provider: "custom", model: "vendor/image-model" });
+    await expect(generateImage(cfg, { prompt: "owl" }, { fetchImpl: fetchMock })).resolves.toMatchObject({ provider: "custom", model: "vendor/image-model", bytes: PNG, mime: "image/png" });
   });
 
   it("still asks for inline image data when a provider sends only a url", async () => {
