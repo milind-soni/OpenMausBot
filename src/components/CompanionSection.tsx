@@ -5,8 +5,6 @@ import {
   Loader2,
   LogOut,
   ShieldCheck,
-  Smartphone,
-  Trash2,
   Wifi,
 } from "lucide-react";
 import type { CompanionAccountState } from "../types/ogb";
@@ -24,6 +22,7 @@ import {
 import { companionPairingMode } from "../lib/phone-setup";
 import { revealPhonePairing } from "../lib/phone-pairing";
 import { PhonesList } from "./PhonesList";
+import { PairedPhones, RelayLine } from "./PairedPhones";
 import { ConnectionDetail } from "./ConnectionDetail";
 import { Card, Switch } from "./SettingsPrimitives";
 import { productName } from "../lib/brand";
@@ -242,7 +241,7 @@ export function CompanionSection({ profileEmail = "", focusRequest = 0 }: { prof
             <div className="min-w-0">
               <div className="text-[13px] text-ink">{t("remote.title")}</div>
               <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-                {t("remote.toggleDetail")}
+                <RelayLine state={state} fallback={t("remote.toggleDetail")} />
               </div>
             </div>
             <Switch
@@ -257,60 +256,7 @@ export function CompanionSection({ profileEmail = "", focusRequest = 0 }: { prof
             <div className="text-[13px] text-ink">{t("remote.devices.title")}</div>
             <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{pairedCount ? t("remote.devices.subtitle", { app: productName() }) : t("remote.devices.empty")}</div>
             <div className="mt-3">
-              {pairedCount > 0 && (
-                <ul className="flex flex-col gap-2">
-                  {state.devices.map((device) => (
-                    <li key={device.id} className="rounded-xl bg-inset px-3 py-3">
-                      <div className="flex items-center gap-3">
-                        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-control text-ink-secondary">
-                          <Smartphone size={15} />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-[14px] font-medium text-ink">{device.name}</div>
-                          <div className="text-[12px] text-ink-secondary">{t("remote.devices.lastSeen", { when: relative(device.lastSeenAt) })}</div>
-                          {c.account?.paused && <div className="text-[12px] text-ink-secondary">{t("remote.devices.paused")}</div>}
-                        </div>
-                        <button
-                          disabled={c.busy}
-                          onClick={() => void c.act((companion) => companion.revoke(device.id))}
-                          aria-label={t("remote.devices.remove", { name: device.name })}
-                          className="shrink-0 rounded p-1.5 text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-40"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                      <div className="mt-3 flex items-center justify-between gap-3 border-t border-hairline/30 pt-3">
-                        <div>
-                          <div className="text-[12px] text-ink">{t("remote.devices.allowView")}</div>
-                          <div className="mt-0.5 text-[11px] text-ink-secondary">{t("remote.devices.allowViewDetail")}</div>
-                        </div>
-                        <Switch
-                          checked={device.cloudDesktopAccess}
-                          aria-label={t("remote.devices.viewAria", { name: device.name })}
-                          disabled={c.busy}
-                          onClick={() =>
-                            void c.act((companion) =>
-                              companion.cloudDesktop(device.id, !device.cloudDesktopAccess),
-                            )
-                          }
-                        />
-                      </div>
-                      <div className="mt-3 flex items-center justify-between gap-3 border-t border-hairline/30 pt-3">
-                        <div>
-                          <div className="text-[12px] text-ink">{t("remote.devices.allowBrowser")}</div>
-                          <div className="mt-0.5 text-[11px] text-ink-secondary">{t("remote.devices.allowBrowserDetail")}</div>
-                        </div>
-                        <Switch
-                          checked={device.browserControlAccess === true}
-                          aria-label={t("remote.devices.browserAria", { name: device.name })}
-                          disabled={c.busy}
-                          onClick={() => void c.act((companion) => companion.browserControl(device.id, !device.browserControlAccess))}
-                        />
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <PairedPhones c={c} state={state} />
             </div>
           </div>
 
