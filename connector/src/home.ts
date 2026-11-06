@@ -9,12 +9,14 @@ import { publicHost, summarizeHealth, type HealthRead } from "./home-health.ts";
 import { errorText, registerSecret, type Log } from "./log.ts";
 import { EXPORT_PATH, UPDATE_HEALTH_WINDOW_MS, type CopyInfo, type HomeHealth, type HomeReport, type HomeState, type JobError, type JobReply, type JobResults } from "./protocol.ts";
 import {
-  APPARMOR_PROFILE, BACKUPS_KEPT, HOME_CAPABILITIES, HOME_OOM_SCORE_ADJ, HOME_PORT, HOME_SHM_BYTES, HOME_STOP_TIMEOUT_S, LABELS, LEASE_FIXED_VERSION, NAMES,
+  APPARMOR_PROFILE, BACKUPS_KEPT, HARDENED_LAUNCHER_VERSION, HIDEPID_CAPABILITIES, HOME_CAPABILITIES, HOME_OOM_SCORE_ADJ, HOME_PORT, HOME_SECRET_ENV, HOME_SECRETS_DIR,
+  HOME_SECRETS_TARGET, HOME_SHM_BYTES, HOME_STOP_TIMEOUT_S, LABELS, LEASE_FIXED_VERSION, NAMES,
 } from "./settings.ts";
 import type { HomeRecord, Operation, StateStore } from "./state.ts";
 import type { Transfer } from "./transfer.ts";
 
 const DATA: Mount = { Type: "volume", Source: NAMES.dataVolume, Target: "/data" };
+const VERSION_LABEL = "org.opencontainers.image.version";
 /** What a copy of /data needs as root: read every file, and write it back with its owner, mode and times. */
 const COPY_CAPS = ["CHOWN", "DAC_OVERRIDE", "DAC_READ_SEARCH", "FOWNER", "FSETID"];
 const READ_CAPS = ["DAC_READ_SEARCH"];
@@ -25,12 +27,30 @@ export function envDigest(env: Record<string, string>): string {
   return createHash("sha256").update(JSON.stringify(Object.entries(env).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))).digest("hex");
 }
 
-/** The home container, with exactly the settings its bot box needs on a stock Docker host, and nothing more. */
-export function homeSpec(image: string, env: Record<string, string>, seccomp: string): ContainerSpec {
+/** What a home image's launcher does, by its version: an older image gets exactly the settings it always had. */
+export interface Launcher {
+  /** Reads its secrets from HOME_SECRETS_TARGET, so they stay out of the container's environment. */
+  secretsFile: boolean;
+  /** Drops CAP_SYS_ADMIN and CAP_SETPCAP once it has remounted /proc with hidepid, so it may be given them for that. */
+  dropsCapabilities: boolean;
+}
+
+export function launcherOf(version: readonly number[] | null): Launcher {
+  const hardened = version !== null && !versionBelow(version, HARDENED_LAUNCHER_VERSION);
+  return { secretsFile: hardened, dropsCapabilities: hardened };
+}
+
+/**
+ * The home container, with exactly the settings its bot box needs on a stock Docker host, and nothing more. With
+ * `secretsDir` (the host folder holding the secrets file) the secrets are mounted read-only instead of set in the
+ * environment.
+ */
+export function homeSpec(image: string, env: Record<string, string>, seccomp: string, options: { secretsDir?: string | null; dropsCapabilities?: boolean } = {}): ContainerSpec {
   const environment = { ...env, OMB_CLOUD_IMAGE: image };
+  const secret = new Set<string>(options.secretsDir ? HOME_SECRET_ENV : []);
   return {
     Image: image,
-    Env: Object.entries(environment).map(([name, value]) => `${name}=${value}`),
+    Env: Object.entries(environment).filter(([name]) => !secret.has(name)).map(([name, value]) => `${name}=${value}`),
     Labels: { [LABELS.role]: "home", [LABELS.image]: image, [LABELS.env]: envDigest(environment) },
     ExposedPorts: { [`${HOME_PORT}/tcp`]: {} },
     StopTimeout: HOME_STOP_TIMEOUT_S,
@@ -38,13 +58,13 @@ export function homeSpec(image: string, env: Record<string, string>, seccomp: st
       Init: true,
       ShmSize: HOME_SHM_BYTES,
       PortBindings: { [`${HOME_PORT}/tcp`]: [{ HostIp: "127.0.0.1", HostPort: String(HOME_PORT) }] },
-      Mounts: [DATA],
+      Mounts: options.secretsDir ? [DATA, { Type: "bind", Source: options.secretsDir, Target: HOME_SECRETS_TARGET, ReadOnly: true }] : [DATA],
       SecurityOpt: [`apparmor=${APPARMOR_PROFILE}`, `seccomp=${seccomp}`, "no-new-privileges=true"],
       // Docker's `--security-opt systempaths=unconfined`: no masked or read-only /proc paths (the AppArmor profile denies them).
       MaskedPaths: [],
       ReadonlyPaths: [],
       CapDrop: ["ALL"],
-      CapAdd: [...HOME_CAPABILITIES],
+      CapAdd: [...HOME_CAPABILITIES, ...(options.dropsCapabilities ? HIDEPID_CAPABILITIES : [])],
       OomScoreAdj: HOME_OOM_SCORE_ADJ,
       RestartPolicy: { Name: "no" },
       LogConfig: { Type: "json-file", Config: { "max-size": "20m", "max-file": "5" } },
@@ -133,7 +153,10 @@ export class Home {
     this.startWindowMs = options.startWindowMs ?? UPDATE_HEALTH_WINDOW_MS;
     this.pollMs = options.pollMs ?? 2_000;
     const env = this.state.homeEnv();
-    if (env) registerHomeSecrets(env);
+    if (env) {
+      registerHomeSecrets(env);
+      this.state.saveHomeSecrets(env);
+    }
   }
 
   /** True while a job or a restart holds the home. */
@@ -500,8 +523,18 @@ export class Home {
   }
 
   private async createContainer(image: string, env: Record<string, string>): Promise<void> {
+    const launcher = launcherOf(imageVersion((await this.docker.imageInspect(image))?.Config?.Labels?.[VERSION_LABEL]));
+    const secretsDir = launcher.secretsFile ? await this.hostSecretsDir(env) : null;
     await this.docker.removeContainer(NAMES.home);
-    await this.docker.createContainer(NAMES.home, homeSpec(image, env, this.options.seccomp()));
+    await this.docker.createContainer(NAMES.home, homeSpec(image, env, this.options.seccomp(), { secretsDir, dropsCapabilities: launcher.dropsCapabilities }));
+  }
+
+  /** The secrets folder in the state volume, as the host sees it: Docker mounts it into the home by that path. */
+  private async hostSecretsDir(env: Record<string, string>): Promise<string> {
+    this.state.saveHomeSecrets(env);
+    const volume = await this.docker.volumeInspect(NAMES.stateVolume);
+    if (!volume?.Mountpoint) throw new JobFailure("docker", `The connector's state volume ${NAMES.stateVolume} is missing. Run the install command again to repair it.`);
+    return `${volume.Mountpoint}/${HOME_SECRETS_DIR}`;
   }
 
   private async startHome(image: string): Promise<void> {
@@ -527,7 +560,7 @@ export class Home {
    * while no container at all runs on the volume, so a live server's lease is never touched.
    */
   private async clearStaleLease(image: string): Promise<void> {
-    const version = imageVersion((await this.docker.imageInspect(image))?.Config?.Labels?.["org.opencontainers.image.version"]);
+    const version = imageVersion((await this.docker.imageInspect(image))?.Config?.Labels?.[VERSION_LABEL]);
     if (version && !versionBelow(version, LEASE_FIXED_VERSION)) return;
     if ((await this.docker.containersUsing(NAMES.dataVolume)).some((container) => container.State === "running" || container.State === "paused")) return;
     const cleared = await this.helper(image, [DATA], [

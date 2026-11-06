@@ -55,6 +55,25 @@ export const HOME_OOM_SCORE_ADJ = -800;
 /** The first home image whose launcher clears another container's data-directory lease itself. */
 export const LEASE_FIXED_VERSION = [0, 1, 131] as const;
 
+/**
+ * The first home image whose launcher reads its secrets from HOME_SECRETS_FILE and drops CAP_SYS_ADMIN and CAP_SETPCAP
+ * as soon as it has remounted /proc with hidepid. An older image gets its secrets in its environment and never these
+ * two capabilities: it would keep CAP_SYS_ADMIN for life.
+ */
+export const HARDENED_LAUNCHER_VERSION = [0, 1, 143] as const;
+export const HIDEPID_CAPABILITIES = ["SYS_ADMIN", "SETPCAP"] as const;
+
+/** The home's secrets: kept out of its container's environment (docker inspect shows that) once its launcher reads the file. */
+export const HOME_SECRET_ENV = [
+  "OMB_CLOUD_BOOTSTRAP_SECRET", "OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_VOICE_TOKEN", "OMB_CLOUD_DECIDER_TOKEN", "OMB_CLOUD_AI_TOKEN",
+  "OMB_CLOUD_CONNECTED_APPS_GRANT", "OMB_CLOUD_X_TOKEN",
+] as const;
+/** In the home: a read-only folder holding only `secrets.json`, root's alone. The launcher reads it at start. */
+export const HOME_SECRETS_TARGET = "/run/mausbot";
+/** In the connector's state volume: the folder mounted at HOME_SECRETS_TARGET. */
+export const HOME_SECRETS_DIR = "home-secrets";
+export const HOME_SECRETS_FILE = "secrets.json";
+
 export function envSeconds(name: string, fallback: number, min: number, max: number): number {
   const raw = process.env[name];
   const value = raw === undefined ? NaN : Number(raw);
