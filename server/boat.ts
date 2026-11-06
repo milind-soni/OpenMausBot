@@ -361,7 +361,7 @@ export async function runCommand(cfg: AppConfig, boxId: string, command: string,
     ok: res.ok && body?.exitCode === 0,
     exitCode: body?.exitCode ?? null,
     stdout: body?.stdout ?? "",
-    stderr: body?.stderr ?? "",
+    stderr: body?.stderr ?? "", ...(body?.timedOut === true ? { timedOut: true as const } : {}),
   };
 }
 

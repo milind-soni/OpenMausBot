@@ -301,7 +301,7 @@ install_connector() {
   check_box
   connect "$code"
   say ""
-  say "Connected. Your server shows up in MausBot in a minute."
+  say "Connected. Your server shows up in MausBot in a minute, for your team's Owner to accept."
 }
 
 # Removal never deletes the data, its safety copy or its backups unless --delete-data is typed.
@@ -324,7 +324,7 @@ uninstall() {
   if command -v apparmor_parser >/dev/null 2>&1 && [ -f "$APPARMOR_DIR/$PROFILE" ]; then apparmor_parser -R "$APPARMOR_DIR/$PROFILE" >/dev/null 2>&1 || true; fi
   rm -f "$APPARMOR_DIR/$PROFILE" "$ETC_DIR/$SECCOMP"
   rmdir "$ETC_DIR" 2>/dev/null || true
-  # The connector's own state (its token, the home's settings) is not your data: MausBot hands both out again.
+  # The connector's own state (its key, the home's settings) is not your data: a new code makes a new key.
   docker volume rm "$STATE_VOLUME" >/dev/null 2>&1 || true
   if [ "$delete" = yes ]; then
     for volume in "$DATA_VOLUME" "$SNAPSHOT_VOLUME" $(docker volume ls -q --filter "label=$ROLE_LABEL=backup" 2>/dev/null); do
