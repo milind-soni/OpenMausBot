@@ -1470,6 +1470,7 @@
   "engines.resetting": "Réinitialisation…",
   "engines.setCli": "Définir la CLI…",
   "engines.claudeUpdated": "Claude mis à jour — {version}",
+  "engines.updatedTo": "Mis à jour vers {version}",
   "engines.account.signInHint": "Exécutez exactement cette commande dans un terminal sur l’ordinateur qui exécute {app}, terminez la connexion Claude CLI, puis cliquez sur « Vérifier le compte ». Si vous consultez {app} à distance, exécutez-la là-bas, pas sur cet appareil.",
   "engines.none": "Aucune application de fournisseur de modèles détectée pour l’instant.",
   "remote.pairing.tailscale.title": "Appairage via Tailscale",

@@ -4035,6 +4035,7 @@
   "engines.resetting": "초기화 중…",
   "engines.setCli": "CLI 지정…",
   "engines.claudeUpdated": "Claude 업데이트됨 — {version}",
+  "engines.updatedTo": "{version}(으)로 업데이트됨",
   "engines.account.signInHint": "{app}이 실행 중인 컴퓨터의 터미널에서 이 명령을 그대로 실행하고 Claude CLI 로그인을 마친 뒤 계정 확인을 누르세요. {app}을 원격으로 보고 있다면 이 기기가 아니라 그 컴퓨터에서 실행하세요.",
   "engines.account.powershell": "이 명령은 PowerShell에서 실행하세요.",
   "accounts.claude": "Claude",

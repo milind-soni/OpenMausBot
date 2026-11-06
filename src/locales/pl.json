@@ -3730,6 +3730,7 @@
   "engines.resetting": "Resetowanie…",
   "engines.setCli": "Ustaw CLI…",
   "engines.claudeUpdated": "Claude zaktualizowano — {version}",
+  "engines.updatedTo": "Zaktualizowano do {version}",
   "engines.account.signInHint": "Uruchom dokładnie tę komendę w terminalu na komputerze, na którym działa {app}, dokończ logowanie do Claude CLI, a następnie kliknij Sprawdź konto. Jeśli łączysz się z {app} zdalnie, uruchom ją tam, a nie na tym urządzeniu.",
   "engines.account.powershell": "Użyj PowerShell dla tej komendy.",
   "accounts.claude": "Claude",

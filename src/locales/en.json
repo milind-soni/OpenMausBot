@@ -4369,6 +4369,7 @@
   "engines.unhide": "Unhide",
   "engines.unhiding": "Unhiding…",
   "engines.claudeUpdated": "Claude updated to {version}",
+  "engines.updatedTo": "Updated to {version}",
   "engines.account.signInHint": "Run this exact command in a terminal on the computer running {app}, finish Claude CLI sign-in, then click Check account. If you are viewing {app} remotely, run it there, not on this device.",
   "engines.account.powershell": "Use PowerShell for this command.",
   "accounts.claude": "Claude",

@@ -1470,6 +1470,7 @@
   "engines.resetting": "रीसेट हो रहा है…",
   "engines.setCli": "CLI सेट करें…",
   "engines.claudeUpdated": "Claude अपडेट हुआ — {version}",
+  "engines.updatedTo": "{version} पर अपडेट हुआ",
   "engines.account.signInHint": "{app} चला रहे कंप्यूटर के टर्मिनल में यही कमांड चलाएँ, Claude CLI साइन-इन पूरा करें, फिर खाता जाँचें पर क्लिक करें। अगर आप {app} को रिमोट से देख रहे हैं, तो इसे वहीं चलाएँ, इस डिवाइस पर नहीं।",
   "engines.none": "अभी कोई मॉडल प्रदाता ऐप नहीं मिला।",
   "remote.pairing.tailscale.title": "Tailscale से जोड़ना",

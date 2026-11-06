@@ -1526,6 +1526,7 @@
   "engines.resetting": "Wird zurückgesetzt…",
   "engines.setCli": "CLI festlegen…",
   "engines.claudeUpdated": "Claude aktualisiert — {version}",
+  "engines.updatedTo": "Aktualisiert auf {version}",
   "engines.account.signInHint": "Führe genau diesen Befehl in einem Terminal auf dem Computer aus, auf dem {app} läuft, schließe die Claude-CLI-Anmeldung ab und klicke dann auf „Konto prüfen“. Wenn du {app} aus der Ferne nutzt, führe ihn dort aus, nicht auf diesem Gerät.",
   "engines.none": "Bisher keine Apps von Modellanbietern erkannt.",
   "remote.pairing.tailscale.title": "Tailscale-Kopplung",

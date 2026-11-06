@@ -4186,6 +4186,7 @@
   "engines.resetting": "正在重置…",
   "engines.setCli": "设置命令行…",
   "engines.claudeUpdated": "Claude 已更新——{version}",
+  "engines.updatedTo": "已更新到 {version}",
   "engines.account.signInHint": "请在运行 {app} 的电脑终端中运行这条完整指令，完成 Claude CLI 登录后，再点击「检查账户」。若你是以远程方式查看 {app}，请在那里运行，而不是这台设备。",
   "engines.account.powershell": "这道指令请使用 PowerShell 运行。",
   "accounts.claude": "Claude",

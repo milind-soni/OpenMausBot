@@ -4212,6 +4212,7 @@
   "engines.unhide": "再表示",
   "engines.unhiding": "再表示しています…",
   "engines.claudeUpdated": "Claude を更新しました — {version}",
+  "engines.updatedTo": "{version} に更新しました",
   "engines.account.signInHint": "{app} が動いているコンピューターのターミナルで、このコマンドをそのまま実行し、Claude CLI のサインインを完了してから「アカウントを確認」をクリックしてください。{app} をリモートで開いている場合は、このデバイスではなくそちらで実行してください。",
   "engines.account.powershell": "このコマンドには PowerShell を使ってください。",
   "accounts.claude": "Claude",

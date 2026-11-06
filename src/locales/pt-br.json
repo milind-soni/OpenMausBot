@@ -4112,6 +4112,7 @@
   "engines.unhide": "Mostrar novamente",
   "engines.unhiding": "Mostrando novamente…",
   "engines.claudeUpdated": "Claude atualizado para {version}",
+  "engines.updatedTo": "Atualizado para {version}",
   "engines.account.signInHint": "Execute exatamente este comando no terminal do computador onde o app {app} roda, conclua o login na CLI do Claude e clique em Verificar conta. Se você acessa o app {app} remotamente, execute lá, não neste dispositivo.",
   "engines.account.powershell": "Use o PowerShell para este comando.",
   "accounts.claude": "Claude",

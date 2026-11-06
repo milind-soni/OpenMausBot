@@ -3079,6 +3079,7 @@
   "engines.resetting": "Đang đặt lại…",
   "engines.setCli": "Thiết lập CLI…",
   "engines.claudeUpdated": "Đã cập nhật Claude — {version}",
+  "engines.updatedTo": "Đã cập nhật lên {version}",
   "engines.account.signInHint": "Chạy chính xác lệnh này trong terminal trên máy tính đang chạy {app}, hoàn tất đăng nhập Claude CLI, sau đó nhấp vào Kiểm tra tài khoản. Nếu bạn đang xem {app} từ xa, hãy chạy lệnh ở đó, không phải trên thiết bị này.",
   "engines.account.powershell": "Sử dụng PowerShell cho lệnh này.",
   "accounts.claude": "Claude",
