@@ -53,7 +53,7 @@ describe("engineLimitFromUsage", () => {
     expect(engineLimitFromUsage(opencode)).toMatchObject({
       engine: "opencodeGo", name: "OpenCode", driver: "opencode", window: "weekly", usedPercent: 55, resetsAt: NOW + 4 * 24 * HOUR, blocked: false,
     });
-    expect(engineLimitFromUsage(opencode)?.windows.map((window) => window.window)).toEqual(["5-hour", "weekly"]);
+    expect(engineLimitFromUsage(opencode)?.windows?.map((window) => window.window)).toEqual(["5-hour", "weekly"]);
   });
 
   it("waits for the latest reset of every window at its limit, and knows no time when one has none", () => {
