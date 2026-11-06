@@ -93,6 +93,38 @@ describe("address watcher", () => {
     expect(calls).toEqual(["advertise", "advertise"]);
   });
 
+  it("retries a failed advertise a bounded number of ticks when asked to", async () => {
+    let attempts = 0;
+    const { watcher, calls, set } = rig(["192.168.1.42"], {
+      failureRetries: 2,
+      advertise: async () => {
+        attempts += 1;
+        calls.push("advertise");
+        return false;
+      },
+    });
+    for (let i = 0; i < 5; i += 1) await watcher.check();
+    // the first try plus two retries, then quiet until the network changes
+    expect(attempts).toBe(3);
+    set(["10.0.0.7"]);
+    for (let i = 0; i < 5; i += 1) await watcher.check();
+    expect(attempts).toBe(6);
+    expect(calls).toHaveLength(6);
+  });
+
+  it("stops retrying once a retried advertise succeeds", async () => {
+    let attempts = 0;
+    const { watcher } = rig(["192.168.1.42"], {
+      failureRetries: 3,
+      advertise: async () => {
+        attempts += 1;
+        return attempts >= 2;
+      },
+    });
+    for (let i = 0; i < 5; i += 1) await watcher.check();
+    expect(attempts).toBe(2);
+  });
+
   it("survives an advertise that throws, and tries again next tick", async () => {
     let attempts = 0;
     const { watcher, calls, logs } = rig(["192.168.1.42"], {
