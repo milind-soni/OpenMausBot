@@ -16,16 +16,12 @@ function fixture(configured?: string, dataDir = mkdtempSync(join(tmpdir(), "omb-
 }
 
 describe("the language a line for a person is written in", () => {
-  it("is the one their app shows, else the place's: the one set here, else the one most people's apps show", () => {
+  it("is the one their app shows, else the place's: the one set here, else the one every app here shows", () => {
     const { languages, tick } = fixture();
     expect(languages.forLine()).toBeUndefined();
     languages.heard("ada", "de");
     tick();
-    languages.heard("ben", "en");
-    tick();
     languages.heard("cy", "de");
-    expect(languages.forLine("ben")).toBe("en");
-    expect(languages.forLine("ada")).toBe("de");
     expect(languages.forLine("someone-new")).toBe("de");
     expect(languages.forLine()).toBe("de");
     const set = fixture("fr");
@@ -34,17 +30,34 @@ describe("the language a line for a person is written in", () => {
     expect(set.languages.forLine()).toBe("fr");
   });
 
-  it("breaks a tie with the language heard last, and follows a person who changes theirs", () => {
+  it("is English for nobody in particular once two people's apps differ: no one's pick decides for the others", () => {
     const { languages, tick } = fixture();
-    languages.heard("ada", "de");
+    languages.heard("ada", "pt-br");
     tick();
-    languages.heard("ben", "es");
-    expect(languages.forLine()).toBe("es");
+    languages.heard("ben", "en");
     tick();
-    languages.heard("ada", "de");
-    expect(languages.forLine()).toBe("de");
-    languages.heard("ada", "pt-BR");
+    languages.heard("cy", "pt-br");
+    expect(languages.forLine("ben")).toBe("en");
     expect(languages.forLine("ada")).toBe("pt-br");
+    expect([languages.forLine(), languages.forLine("someone-new")]).toEqual([undefined, undefined]);
+    tick();
+    languages.heard("ada", "pt-br");
+    expect(languages.forLine(), "hearing one again does not tip it").toBeUndefined();
+    languages.heard("ben", "pt-BR");
+    expect(languages.forLine("ben")).toBe("pt-br");
+    expect(languages.forLine(), "everyone's now").toBe("pt-br");
+  });
+
+  it("writes a conversation's lines in its one person's language, and a shared one's in the place's, whoever spoke last", () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-person-languages-"));
+    dirs.push(dataDir);
+    const languages = createPersonLanguages({ dataDir, configured: () => undefined, privateTo: (threadId) => (threadId === "ada-own" ? "ada" : null) });
+    languages.heard("ada", "pt-br");
+    languages.heard("ben", "en");
+    expect(languages.forThread("ada-own")).toBe("pt-br");
+    expect(languages.forThread("team-room")).toBeUndefined();
+    const configured = createPersonLanguages({ dataDir, configured: () => "de", privateTo: () => null });
+    expect(configured.forThread("team-room")).toBe("de");
   });
 
   it("keeps what it heard across a restart, and ignores what is not a language tag", () => {

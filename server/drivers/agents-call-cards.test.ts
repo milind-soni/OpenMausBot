@@ -184,6 +184,13 @@ describe("the chat-app tools", () => {
     expect(JSON.parse(apiResponse.mock.lastCall![1]!.body as string)).toMatchObject({ app_id: "m9", frameless: false });
   });
 
+  it("passes on the sentence naming the files a folder page left out", async () => {
+    const leftOut = "Left out land.foo (pages can't carry .foo files) and .env (hidden).";
+    const { context } = harness({ ok: true, status: 201, body: { messageId: "m9", leftOut } });
+    expect(await callTool("show_html", { path: "trails", title: "Trails" }, context)).toEqual({ text: `Shown as app m9. To change it, call show_html again with app_id "m9". ${leftOut}` });
+    expect(await callTool("show_html", { app_id: "m9", path: "trails" }, context)).toEqual({ text: `Updated app m9. ${leftOut}` });
+  });
+
   it("says when something in the page was masked as a secret", async () => {
     const { context } = harness({ ok: true, status: 201, body: { messageId: "m9", masked: true } });
     expect((await callTool("show_html", { html: "<p>hi</p>", title: "Hi" }, context)).text).toContain("masked before it was stored");

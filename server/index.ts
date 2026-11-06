@@ -548,7 +548,7 @@ import {
   serializeSessionCookie,
   sessionCookieName, ownerOrAdmin,
 } from "./request-auth.ts";
-import { cookieMaxAgeSeconds, formatPairingCode, SessionRegistry, type Scope, type SessionRecord } from "./sessions.ts";
+import { cookieMaxAgeSeconds, formatPairingCode, pairingRequest, SessionRegistry, type SessionRecord } from "./sessions.ts";
 import { ThreadStarters } from "./thread-starters.ts";
 import {
   appendAdminAction,
@@ -698,8 +698,8 @@ const CLOUD_SECRETS = BOOT_CLOUD_SECRETS;
 const CLOUD_ENV: NodeJS.ProcessEnv = { ...process.env, ...CLOUD_SECRETS };
 const CLOUD_HOME = cloudHomeConfiguration(CLOUD_ENV);
 const CLOUD_TEAM = CLOUD_HOME?.team ?? null, CLOUD_PERSONAL = CLOUD_HOME !== null && CLOUD_TEAM === null, TEAM_LABEL = CLOUD_TEAM ? { label: CLOUD_TEAM.name } : {};
-/** The language set on this server, else (on a Team Cloud) the team's default from the Admin. threadLanguage: the one a line in a conversation is written in, its person's, else the place's (server/server-lines.ts). */
-const appLanguage = (): string | undefined => cfg.language ?? CLOUD_TEAM?.language; const personLanguages = createPersonLanguages({ dataDir: DATA_DIR, configured: appLanguage }); const threadLanguage = (threadId: string): string | undefined => personLanguages.forLine(teamConversationPerson(threadId) ?? threadPersonKey(threadId)); setConversationLanguage(threadLanguage);
+/** The language set on this server, else (on a Team Cloud) the team's default from the Admin. threadLanguage: the one a line in a conversation is written in, its one person's, else the place's (server/server-lines.ts). */
+const appLanguage = (): string | undefined => cfg.language ?? CLOUD_TEAM?.language; const personLanguages = createPersonLanguages({ dataDir: DATA_DIR, configured: appLanguage, privateTo: (threadId) => teamHost.privateTo(threadId) }); const threadLanguage = personLanguages.forThread; setConversationLanguage(threadLanguage);
 if (CLOUD_HOME) repairMovedWorkspacePaths(DATA_DIR);
 if (CLOUD_PERSONAL) sessions.requireAdmin(userError("serverError.cloud.personal"));
 const lendingEnabled = () => sharedComputersEnabled(cfg) || CLOUD_HOME !== null || ownHome.here();
@@ -4118,7 +4118,7 @@ const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoor
       return outwardActions(turnRows(node));
     },
     shareAnswer: createShareAnswer({ askedFrom: (node) => (node.parentId ? coordinator.node(node.parentId)?.threadId : undefined), audienceOf: teamHost.audienceOf, pinned: (botId, threadId) => store.taskByThread(botId, threadId)?.cwd, botFolder: (botId) => store.bot(botId)?.cwd, privateFolders: TASK_WORKSPACES_DIR }),
-    joined: (node) => { store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${serverLine(personLanguages.forLine(teamConversationPerson(node.threadId) ?? threadPersonKey(node.threadId)), "server.teammates.sameRequest")}`, ok: true } }); },
+    joined: (node) => { store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${serverLine(threadLanguage(node.threadId), "server.teammates.sameRequest")}`, ok: true } }); },
   },
 });
 threadsAwaitingTeammates = () => coordinator.awaitingTeammateThreads();
@@ -5258,7 +5258,7 @@ cacheKeepWarmStatus = (threadId) => cacheKeepWarm.status(threadId);
 const warmSummaries = createWarmSummaryHost({ store, instance: (id) => registry.get(id), queued: hasQueuedSteeredMessages, coordinator, waits: () => botWaits, routines: () => routines,
   enabled: () => cfg.context?.autoCompact !== false && process.env.OMB_WARM_SUMMARY !== "0" && spendState(cfg, DATA_DIR)?.exceeded !== true, memoryShort: () => engineMemory.headroom() < 0.3,
   nativeCompactAt: (id) => { const instance = registry.get(id), at = instance ? nativeCompactTokens(instance) : undefined; return at && Number.isFinite(at) ? at : undefined; },
-  busy: (botId, threadId) => threadBusy(botId, threadId) || botHasActiveTurn(botId), keepWarmUntil: (threadId) => cacheKeepWarm.status(threadId)?.until, book: bookForkUsage, log: (line) => console.info(line), language: (threadId) => personLanguages.forLine(threadStarters.get(threadId)),
+  busy: (botId, threadId) => threadBusy(botId, threadId) || botHasActiveTurn(botId), keepWarmUntil: (threadId) => cacheKeepWarm.status(threadId)?.until, book: bookForkUsage, log: (line) => console.info(line), language: threadLanguage,
   fold: async ({ botId, threadId, instanceId }, idle) => { const bot = store.projectBotForTask(botId, threadId), model = store.taskByThread(botId, threadId)?.lastContextModel, instance = registry.get(instanceId), before = latestCompaction(store.activePath(threadId))?.id;
     if (bot && instance && model?.startsWith(`${instanceId}:`)) await compactConversation({ bot, threadId, generation: `idle:${randomUUID()}`, instance, model: model.slice(instanceId.length + 1), excludedIds: new Set(), manual: false, idle });
     return latestCompaction(store.activePath(threadId))?.id !== before; } });
@@ -6525,7 +6525,7 @@ bus.subscribe((event: RuntimeEvent) => {
         : group && speaker?.botId === asker.id ? roomTurnLevels.forRequest(event.threadId, asker.id, () => ownApprovalMode(asker))
           : ownApprovalMode(asker);
       const notAsked = !permission && asker && event.requestId ? questionRouting.notAsked({ botId: asker.id, threadId: event.threadId, level: effectiveApprovalMode, question: event.summary }) : undefined;
-      if (notAsked !== undefined && asker && event.requestId) { void answerRequest(event.threadId, event.providerInstanceId ?? asker.modelSelection.instanceId, event.requestId, "answer", notAsked); pushMessage({ role: "bot", kind: "activity", tool: { name: serverLine(personLanguages.forLine(teamHost.privateTo(event.threadId) ?? undefined), "server.questions.notAsked", { question: event.summary.slice(0, 160) }), ok: true } }); break; }
+      if (notAsked !== undefined && asker && event.requestId) { void answerRequest(event.threadId, event.providerInstanceId ?? asker.modelSelection.instanceId, event.requestId, "answer", notAsked); pushMessage({ role: "bot", kind: "activity", tool: { name: serverLine(threadLanguage(event.threadId), "server.questions.notAsked", { question: event.summary.slice(0, 160) }), ok: true } }); break; }
       // Shell descriptors are distinct from computer/MCP permissions: a local desktop must not disable an exact shell grant.
       const command = permission && asker && event.requestId && !event.requiresExplicitApproval && event.command && !guestDriven
         ? commandAllowlistCandidate({ ...event.command, providerInstanceId: event.providerInstanceId ?? asker.modelSelection.instanceId })
@@ -12805,11 +12805,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
         return json(res, 401, { error: "Your session ended. Sign in again before creating a pairing code." });
       }
-      const requested: unknown = body?.scopes;
-      const scopes = Array.isArray(requested) ? requested.filter((v): v is Scope => v === "admin" || v === "client") : undefined;
+      const requested = pairingRequest(body);
+      if ("error" in requested) return json(res, 400, requested);
       let opened: ReturnType<typeof sessions.openPairing>;
       try {
-        opened = sessions.openPairing({ label: typeof body?.label === "string" ? body.label : undefined, scopes });
+        opened = sessions.openPairing(requested);
       } catch (error) {
         if ((error as { code?: unknown }).code === "cloud_personal") return json(res, 403, { error: (error as Error).message, code: "cloud_personal", ...userErrorFields(error) });
         throw error;
@@ -13101,7 +13101,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           input: (body?.tool === "show_html" || body?.tool === "update_html") && cloudGuestDriven(internalCapability.threadId) ? { ...body, frameless: false } : body, authored: (id) => handoffs.authored(internalCapability.threadId, internalCapability.generation, id),
         });
         return result.ok
-          ? json(res, 201, { messageId: result.messageId, ...("masked" in result && result.masked ? { masked: true } : {}) })
+          ? json(res, 201, { messageId: result.messageId, ...("masked" in result && result.masked ? { masked: true } : {}), ...("leftOut" in result && result.leftOut ? { leftOut: result.leftOut } : {}) })
           : json(res, result.status, { error: result.error });
       }
       // Notes from a room fewer people can see than this bot would carry its words to everyone who can see the bot.
@@ -13182,7 +13182,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const abort = new AbortController();
         res.once("close", () => { if (!res.writableEnded) abort.abort(); });
         return json(res, 200, { result: await cloudComputerRpc(body, {
-          cfg, signal: abort.signal,
+          cfg, signal: abort.signal, folder: () => messageFileRootsForThread(internalCapability.botId, internalCapability.threadId)[0],
           boxId: () => internalCapability.boxId ?? claimedBoatId(internalCapability),
           gate: () => computerCallGate(internalCapability, abort.signal),
           assertActive: requireActiveInternalCapability,

@@ -59,8 +59,9 @@ function createNativeText({ dir = LOCALES_DIR, saved = null, system = () => "", 
   const systemTag = () => {
     try { return String(system() ?? ""); } catch { return ""; }
   };
-  let chosen = resolveLanguage(saved, available());
-  const language = () => chosen ?? resolveLanguage(systemTag(), available()) ?? ENGLISH;
+  let chosen = resolveLanguage(saved, available()), shown = null;
+  // With nothing picked, the language the window's page shows (follow), so menus never read in another one beside it.
+  const language = () => chosen ?? shown ?? resolveLanguage(systemTag(), available()) ?? ENGLISH;
   const intlTag = () => {
     const code = language(), tag = systemTag();
     if (tag && resolveLanguage(tag, available()) === code) {
@@ -77,6 +78,12 @@ function createNativeText({ dir = LOCALES_DIR, saved = null, system = () => "", 
     set(code) {
       const before = language();
       chosen = resolveLanguage(code, available());
+      return language() !== before;
+    },
+    /** The window's page shows `code`: main's words follow it while nothing is picked. True when they change. */
+    follow(code) {
+      const before = language();
+      shown = resolveLanguage(code, available());
       return language() !== before;
     },
     intlTag,

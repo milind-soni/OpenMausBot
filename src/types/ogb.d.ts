@@ -500,6 +500,9 @@ export interface CompanionAccountState {
   email?: string;
   endpoint?: string;
   message?: string;
+  /** The HTTPS address was given back after 30 days with no paired phone
+   * seen. Opening the phone page calls prepare(), which brings it back. */
+  paused?: boolean;
 }
 
 export type AndroidUsbDevice = {

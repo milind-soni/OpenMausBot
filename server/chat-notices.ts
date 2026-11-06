@@ -92,6 +92,7 @@ export const CHAT_NOTICE = {
   "chat.notice.codexUnsupportedMore": "Codex could not run the tools {tools} and {count} more (\"unsupported call\"): the AI provider sent the call back without the tool's app name, so it never reached the tool. Pick a model for this bot whose provider handles tool calls fully.",
 
   "chat.notice.copilotAccountRefused": "GitHub Copilot refused this request for the signed-in account. Check its Copilot plan and premium request allowance, then try again.",
+  "chat.notice.commandCodeAccountRefused": "Command Code refused this request for the signed-in account. Check its plan and credits on commandcode.ai, then try again.",
   "chat.notice.acpQuietUsageLimit": "{name} reached a usage limit{said} and is waiting it out without replying, so this turn was stopped.",
   "chat.notice.acpQuietStuck": "{name} sent nothing for {quiet} with no tool running, no open request to its model and no CPU use, so the turn was stopped as stuck. Send the message again to retry.",
   "chat.notice.acpModelRequestFailed": "{name}'s model request failed: \"{message}\" {name} may retry or stop; no reply for {quiet} so far.",

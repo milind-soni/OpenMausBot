@@ -71,10 +71,25 @@
     // HighLevel Marketplace app exactly.
     "HIGHLEVEL_CLIENT_ID": "6ad0c3b87999ff4de949c785-mv9n5v73",
     "HIGHLEVEL_REDIRECT_URL": "https://accounts.openmausbot.com/v1/highlevel/callback",
-    "HIGHLEVEL_SCOPES": "contacts.readonly contacts.write opportunities.readonly opportunities.write conversations.readonly locations.readonly calendars.readonly calendars/events.readonly users.readonly"
+    "HIGHLEVEL_SCOPES": "contacts.readonly contacts.write opportunities.readonly opportunities.write conversations.readonly locations.readonly calendars.readonly calendars/events.readonly users.readonly",
+    // MausBot Relay (README "MausBot Relay"). Host tokens are signed with RELAY_TOKEN_SIGNING_KEY (b64u of a 32-byte
+    // Ed25519 seed, `wrangler secret put`). It is in secrets.required so a deploy can't drop it: set it before the
+    // first deploy that lists it. The relay holds only the matching public key. RELAY_NODES lists only nodes that
+    // exist; add relay2 when its box and DNS are up.
+    // RELAY_ROLLOUT_PERCENT (0-100) admits computers by a stable hash of their host id; RELAY_ALLOW_INSTALLATIONS
+    // (comma-separated installation ids) admits a few by name; RELAY_DISABLED "1" turns every token off.
+    "RELAY_NODES": "relay1.openmausbot.com",
+    "RELAY_NODES_AMERICAS": "",
+    "RELAY_TOKEN_KID": "k1",
+    "RELAY_ROLLOUT_PERCENT": "0",
+    "RELAY_ALLOW_INSTALLATIONS": "",
+    "RELAY_DISABLED": "0",
+    // The first desktop release that reaches phones through the relay. From it, a desktop with no old phones paired
+    // gets 409 relay_capable instead of a new tunnel. Empty: never refused.
+    "RELAY_CAPABLE_MIN_VERSION": ""
   },
   "secrets": {
-    "required": ["BETTER_AUTH_SECRET", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_TOKEN_MAUSBOT_SI"]
+    "required": ["BETTER_AUTH_SECRET", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_TOKEN_MAUSBOT_SI", "RELAY_TOKEN_SIGNING_KEY"]
   },
   "d1_databases": [
     {
