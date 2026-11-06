@@ -172,10 +172,10 @@ The log stays on this machine: workspace backups leave it out.
   (`OMB_CLOUD_DECIDER_TOKEN`), sent only to the Admin's relay, never to Jev
   or `baseUrl`, and only for room routing and the key check (other jobs need
   a key of the person's own). Settings says **Included with your Cloud plan**, and
-  the master switch is on until someone switches it off. A key saved here
-  always wins; clearing it falls back to the included decisions. The relay
-  speaks Jev's API only, so the included decisions are Jev's: with OpenRouter
-  selected nothing is included and you need an OpenRouter key. See
+  the master switch is on until someone switches it off. A Jev or Workers AI
+  key saved here wins; clearing it falls back to the included decisions. The
+  relay speaks Jev's API only, so the included decisions are Jev's, and they
+  come before an OpenRouter key whichever provider is selected. See
   [cloud-pro.md](cloud-pro.md), "Included Boat computers, voice and
   decisions".
 
@@ -191,11 +191,17 @@ usually a similar fraction of a cent.
 
 Each decision sends the state described above (the room's name, its people,
 recent room lines and the new message) and the bots' descriptions to the
-selected provider. With Workers AI that is Cloudflare, which also receives the
-emails Clairic reads for the inbox. With OpenRouter that is OpenRouter and the
-host it routes the model to, under OpenRouter's privacy settings and your account's data
-policy; OpenMausBot does not set a data-collection preference. Use Jev, or
-leave the job off, for rooms that must not leave the machine.
+provider whose key decides (see the key order above). With Workers AI that is
+Cloudflare, or the server `workersAiBaseUrl` points to, which also receives the
+token. With OpenRouter that is OpenRouter and the host it routes the model to,
+under OpenRouter's privacy settings and your account's data policy;
+OpenMausBot does not set a data-collection preference.
+
+Inbox triage sends each new email's sender, subject and preview twice: to the
+provider whose key decides, and first to the one that reads it, the first of
+your own Workers AI key, Cloud's included relay, then OpenRouter (a Jev key is
+not used for reading). Leave a job off when its data must not leave the
+machine.
 
 ## Turning it off
 
@@ -250,8 +256,9 @@ API is alpha at OpenRouter and may change. The model list comes from
 `GET /api/decider/models`, which needs no key and spends nothing.
 
 `workersAiAccountId` is 32 hexadecimal characters. `workersAiBaseUrl` has no
-Settings UI, follows the same https-or-loopback rule, and must include
-`/client/v4`. Requests go to
+Settings UI and follows the same https-or-loopback rule. It is the REST root
+the account path is added to; Cloudflare's own includes `/client/v4`.
+Requests go to
 `{workersAiBaseUrl}/accounts/{workersAiAccountId}/ai/run/@cf/cloudflare/clef-flash`
 (or `clef`, or `clairic` for extraction).
 
