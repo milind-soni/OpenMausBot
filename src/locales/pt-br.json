@@ -7604,6 +7604,7 @@
   "settings.threads.starter": "O Starter permite uma conversa por vez em cada bot; planos maiores permitem mais. Cada bot tem sua própria vaga. O trabalho que o bot inicia por conta própria continua rodando.",
   "server.voice.noNoteNoVoice": "Sem nota de voz nesta resposta: este bot ainda não tem uma voz configurada.",
   "server.voice.noNoteFailed": "Sem nota de voz nesta resposta: não foi possível gerar a voz ({reason}).",
+  "server.voice.turnEnded": "Parei antes de terminar: {reason}",
   "botApi.title": "API do bot",
   "botApi.switch": "Permitir que apps conversem com este bot",
   "botApi.hint": "Apps e scripts usam uma chave para enviar uma mensagem a {name} e receber uma resposta. {name} responde com base nas próprias instruções e na memória, sem usar ferramentas para esses pedidos.",

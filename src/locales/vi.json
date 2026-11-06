@@ -5304,6 +5304,7 @@
   "voice.usesOwn": "Bot này nói bằng giọng riêng.",
   "server.voice.noNoteNoVoice": "Không có ghi chú thoại cho câu trả lời này: bot này chưa được thiết lập giọng nói.",
   "server.voice.noNoteFailed": "Không có ghi chú thoại cho câu trả lời này: không tạo được giọng nói ({reason}).",
+  "server.voice.turnEnded": "Tôi đã dừng trước khi xong: {reason}",
   "botApi.title": "Bot API",
   "botApi.switch": "Cho ứng dụng trò chuyện với bot này",
   "botApi.hint": "Ứng dụng và script gửi tin nhắn cho {name} kèm một khóa và nhận câu trả lời. {name} trả lời dựa trên hướng dẫn và bộ nhớ của mình, không dùng công cụ.",

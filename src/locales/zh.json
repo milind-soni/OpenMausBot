@@ -7388,6 +7388,7 @@
   "settings.threads.starter": "Starter 每个机器人一次运行一个对话，更大的方案可以运行更多。机器人自己发起的工作仍会运行，每个机器人各有一个。",
   "server.voice.noNoteNoVoice": "这条回复没有语音留言：这个机器人还没有设置声音。",
   "server.voice.noNoteFailed": "这条回复没有语音留言：无法生成声音（{reason}）。",
+  "server.voice.turnEnded": "我在完成前停下了：{reason}",
   "botApi.title": "Bot API",
   "botApi.switch": "允许应用与此机器人对话",
   "botApi.hint": "应用和脚本凭密钥向{name}发送消息并获得回复。{name}根据自己的指示和记忆回答,不使用任何工具。",

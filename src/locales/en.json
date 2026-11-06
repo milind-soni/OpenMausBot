@@ -9603,6 +9603,7 @@
   "imageGen.key.openrouter": "OpenRouter API key",
   "server.voice.noNoteNoVoice": "No voice note with this reply: this bot has no voice set up yet.",
   "server.voice.noNoteFailed": "No voice note with this reply: the voice couldn't be made ({reason}).",
+  "server.voice.turnEnded": "I stopped before finishing: {reason}",
   "phone.code.e2e.scan": "Open the {app} app on your phone and scan.",
   "phone.code.e2e.wifi": "This Wi-Fi",
   "phone.code.e2e.tailscale": "Tailscale",

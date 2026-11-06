@@ -6583,6 +6583,7 @@
   "settings.threads.starter": "Starter uruchamia jeden wątek naraz na bota, a większy plan więcej. Praca, którą bot zaczyna sam, i tak się wykonuje, a każdy bot ma swój wątek.",
   "server.voice.noNoteNoVoice": "Brak notatki głosowej do tej odpowiedzi: ten bot nie ma jeszcze ustawionego głosu.",
   "server.voice.noNoteFailed": "Brak notatki głosowej do tej odpowiedzi: nie udało się wygenerować głosu ({reason}).",
+  "server.voice.turnEnded": "Zatrzymałem się przed końcem: {reason}",
   "botApi.title": "Bot API",
   "botApi.switch": "Pozwól aplikacjom rozmawiać z tym botem",
   "botApi.hint": "Aplikacje i skrypty wysyłają do {name} wiadomość z kluczem i otrzymują odpowiedź. {name} odpowiada na podstawie swoich instrukcji i pamięci, bez użycia narzędzi.",
