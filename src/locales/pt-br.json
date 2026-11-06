@@ -2742,6 +2742,7 @@
   "composer.queued.steerNextInterruptHint": "Parar a sessão em andamento e enviar agora a próxima mensagem da fila",
   "composer.queued.steeringAria": "Enviando agora as mensagens da fila",
   "composer.queued.steerImagesHeld": "Imagens não podem ser enviadas para a sessão em andamento deste bot. Sua mensagem será enviada na próxima sessão.",
+  "composer.queued.steerHeld": "A sessão em andamento não conseguiu receber esta mensagem. Ela continua na fila e será enviada em seguida.",
   "composer.queued.regionOne": "1 mensagem na fila",
   "composer.queued.regionMany": "{count} mensagens na fila",
   "composer.queued.list": "Mensagens na fila",

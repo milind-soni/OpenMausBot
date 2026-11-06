@@ -739,7 +739,7 @@ posixOnly("mid-turn steering e2e", () => {
       threadId: created.threadId,
     });
     expect(still.status).toBe(200);
-    expect(still.body).toMatchObject({ ok: true, queued: true });
+    expect(still.body).toMatchObject({ ok: true, queued: true, blockedBy: "running-turn" });
     expect((await getBot(created.id)).busy).toBe(true);
     expect((await getBot(created.id)).messages.some((m: any) => m.text === "second")).toBe(false);
 
@@ -818,7 +818,7 @@ posixOnly("mid-turn steering e2e", () => {
       threadId: room.threadId,
     });
     expect(still.status).toBe(200);
-    expect(still.body).toMatchObject({ ok: true, queued: true });
+    expect(still.body).toMatchObject({ ok: true, queued: true, blockedBy: "running-turn" });
     expect((await getGroup())?.working).toBe(true);
     expect((await getGroup())?.messages.some((m: any) => m.text === "second")).toBe(false);
 
