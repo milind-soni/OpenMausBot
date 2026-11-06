@@ -12674,6 +12674,12 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("rejects malformed percent-encoded OpenConnector account IDs with 400", async () => {
+    const response = await api("DELETE", "/api/connectors/github/accounts/oc%ZZ");
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: "invalid connected-account ID" });
+  });
+
   it.skipIf(process.platform === "win32")("stores the credentials file with owner-only permissions", () => {
     expect(statSync(join(home, ".openmausbot", "config.json")).mode & 0o777).toBe(0o600);
   });

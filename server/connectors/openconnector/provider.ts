@@ -306,7 +306,8 @@ async function relayOpenConnectorMcp(
   if (method?.startsWith("notifications/")) return encode({}, 202);
   if (method === "tools/list") {
     const actions = await client().actions();
-    const tools = actions
+    const detailedActions = await client().actionDetails(actions);
+    const tools = detailedActions
       .map((action) => connectorToolListingForAction(action))
       .filter((listing): listing is NonNullable<typeof listing> => listing !== null)
       .map((listing) => ({

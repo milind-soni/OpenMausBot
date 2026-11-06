@@ -105,18 +105,31 @@ let selected: { key: string; provider: ConnectorProvider } | null = null;
 /** The provider for this process, memoized until the env or config.json changes. */
 export function connectorProvider(env: NodeJS.ProcessEnv = process.env): ConnectorProvider {
   const settings = loadConnectorSettings(env);
+  let resolvedToken: string | undefined;
+  let tokenResolvable = false;
+  if (settings.provider === "openconnector") {
+    try {
+      resolvedToken = resolveToken(settings.openconnector, env);
+      tokenResolvable = true;
+    } catch {
+      tokenResolvable = false;
+    }
+  }
   const key = JSON.stringify([
     settings.provider,
     settings.openconnector.url,
     settings.openconnector.adminTokenRef,
-    resolveTokenRef(settings.openconnector.adminTokenRef, env) !== undefined,
-    createHash("sha256").update(resolveToken(settings.openconnector, env) ?? "").digest("hex"),
+    tokenResolvable,
+    createHash("sha256").update(resolvedToken ?? "").digest("hex"),
     settledFileStamp(join(DATA_DIR, "config.json")),
   ]);
   if (selected?.key === key) return selected.provider;
   let provider: ConnectorProvider;
   try {
     assertOpenConnectorSettings(settings, env);
+    if (settings.provider === "openconnector" && !tokenResolvable) {
+      throw new Error("OpenConnector admin token reference cannot be resolved");
+    }
     provider = selectProvider(settings, env);
   } catch {
     provider = unavailableOpenConnectorProvider();

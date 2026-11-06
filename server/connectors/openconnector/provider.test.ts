@@ -19,6 +19,7 @@ let actionsBody: unknown = [
   { id: "github.create_issue", description: "Open an issue", inputSchema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } },
   { id: "gmail.list_emails" },
 ];
+let actionDetailsBody: unknown | null = null;
 let authenticatedBody: unknown = ["github"];
 let failConnect = false;
 let connectionRequestBody: unknown = { status: "connected" };
@@ -45,7 +46,8 @@ beforeAll(async () => {
     }
     if (url.pathname.startsWith("/v1/actions/") && req.method === "GET") {
       const id = decodeURIComponent(url.pathname.slice("/v1/actions/".length));
-      const action = (Array.isArray(actionsBody) ? actionsBody : []).find((item) => (item as { id?: string }).id === id);
+      const details = actionDetailsBody ?? actionsBody;
+      const action = (Array.isArray(details) ? details : []).find((item) => (item as { id?: string }).id === id);
       return ok(action ?? { id });
     }
     if (url.pathname.startsWith("/v1/actions/") && req.method === "POST") return ok({ ran: url.pathname.slice("/v1/actions/".length), input: (calls.at(-1)!.body as { input?: unknown }).input });
@@ -87,6 +89,7 @@ afterAll(async () => {
 beforeEach(() => {
   calls.length = 0;
   providersBody = [{ id: "github", name: "GitHub" }, { id: "gmail", name: "Gmail" }];
+  actionDetailsBody = null;
   actionsBody = [
     { id: "github.get_current_user", description: "Who am I", inputSchema: { type: "object", properties: { verbose: { type: "boolean" } } } },
     { id: "github.create_issue", description: "Open an issue", inputSchema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } },
@@ -173,6 +176,25 @@ describe("tools / catalog", () => {
       { name: "GITHUB_GET_CURRENT_USER", description: "Who am I", inputSchema: { type: "object", properties: { verbose: { type: "boolean" } } } },
     ]);
     expect(tools.gmail).toEqual([{ name: "GMAIL_LIST_EMAILS", inputSchema: emptySchema }]);
+  });
+
+  it("fetches action details for tools/list so required input schemas are preserved", async () => {
+    actionsBody = [
+      { id: "github.create_issue", description: "Open an issue" },
+      { id: "gmail.list_emails" },
+    ];
+    actionDetailsBody = [
+      { id: "github.create_issue", description: "Open an issue", inputSchema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } },
+      { id: "gmail.list_emails" },
+    ];
+    const relayed = await provider().relayMcp(cfg, { jsonrpc: "2.0", id: 20, method: "tools/list" });
+    const frame = JSON.parse(new TextDecoder().decode(relayed.bytes));
+    expect(frame.result.tools).toEqual([
+      { name: "GITHUB_CREATE_ISSUE", description: "Open an issue", inputSchema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } },
+      { name: "GMAIL_LIST_EMAILS", inputSchema: { type: "object", properties: {}, additionalProperties: false, required: [] } },
+    ]);
+    expect(calls.filter((call) => call.path === "/v1/actions")).toHaveLength(1);
+    expect(calls.filter((call) => call.path.startsWith("/v1/actions/"))).toHaveLength(2);
   });
 
   it("serves the provider list as the app catalog", async () => {

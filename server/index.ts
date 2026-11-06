@@ -15172,7 +15172,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     m = path.match(/^\/api\/connectors\/([\w-]+)\/accounts\/([A-Za-z0-9][A-Za-z0-9_: %-]{0,127})$/);
     if (m && method === "DELETE") {
-      const accountId = decodeURIComponent(m[2]);
+      let accountId: string;
+      try {
+        accountId = decodeURIComponent(m[2]);
+      } catch {
+        return json(res, 400, { error: "invalid connected-account ID" });
+      }
       const removed = await composio.removeAccount(cfg, m[1], accountId); void routineHolds?.connections("removed"); return json(res, 200, removed);
     }
     m = path.match(/^\/api\/connectors\/([\w-]+)$/);

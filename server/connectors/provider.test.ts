@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
+import type { AppConfig } from "../config.ts";
 import {
   CONNECTOR_PROVIDER_ENV,
   OPENCONNECTOR_ADMIN_TOKEN_ENV,
@@ -156,6 +157,24 @@ describe("resolveTokenRef", () => {
       chmodSync(path, 0o600);
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("falls back to unavailable setup when an OpenConnector token file cannot be read", () => {
+    const tokenPath = join(tmpdir(), `omb-openconnector-token-${process.pid}-${Date.now()}`);
+    const cfg: AppConfig = { composio: { apiKey: "ak_test", userId: "user", sessionId: "session" } };
+    const provider = connectorProvider({
+      OMB_CONNECTOR_PROVIDER: "openconnector",
+      OMB_OPENCONNECTOR_URL: "https://connector.example.test",
+      OMB_OPENCONNECTOR_ADMIN_TOKEN_REF: `file:${tokenPath}`,
+    });
+    expect(provider.mode(cfg)).toBe("unavailable");
+    expect(provider.isConfigured(cfg)).toBe(false);
+    const stillUnavailable = connectorProvider({
+      OMB_CONNECTOR_PROVIDER: "openconnector",
+      OMB_OPENCONNECTOR_URL: "https://connector.example.test",
+      OMB_OPENCONNECTOR_ADMIN_TOKEN_REF: `file:${tokenPath}`,
+    });
+    expect(stillUnavailable.mode(cfg)).toBe("unavailable");
   });
 
   it("treats a bare name as an env variable and blank as absent", () => {
