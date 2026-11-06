@@ -33,6 +33,7 @@ import { runServiceCommand } from "./service-cli.ts";
 import { runSentinelCli } from "./sentinel/cli.ts";
 import { BRAND_FIELDS, runFleetCommand, type BrandField, type BrandPatch, type FleetInput, type RatesPatch } from "./fleet-cli.ts";
 import { startFleetAgent } from "./fleet-agent.ts";
+import { MAX_USERS_LIMIT } from "./fleet-metering.ts";
 import { parseMinorAmount, TWO_DECIMAL_CURRENCIES, type RateSet } from "./fleet-reseller.ts";
 import { FLEET_SLUG, fleetLayout } from "./fleet.ts";
 import { explainTailscaleFailure, tailscaleServe, tailscaleServeOff, tailscaleStatus, type TailscaleStatus } from "./tailscale.ts";
@@ -111,6 +112,7 @@ export interface CliOptions {
   month?: string;
   csv?: boolean;
   detail?: boolean;
+  maxUsers?: number;
   ratesPatch?: RatesPatch;
   dryRun?: boolean;
   yes?: boolean;
@@ -238,6 +240,12 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       }
       else if (options.command === "fleet" && arg === "--csv") options.csv = true;
       else if (options.command === "fleet" && arg === "--detail") options.detail = true;
+      else if (options.command === "fleet" && arg === "--max-users") {
+        const raw = value();
+        const count = Number(raw);
+        if (!/^\d+$/.test(raw) || count < 1 || count > MAX_USERS_LIMIT) return { error: `--max-users takes a whole number from 1 to ${MAX_USERS_LIMIT}` };
+        options.maxUsers = count;
+      }
       else if (options.command === "fleet" && arg === "--memory") options.memory = value();
       else if (options.command === "fleet" && arg === "--dry-run") options.dryRun = true;
       else if (options.command === "fleet" && arg === "--yes") options.yes = true;
@@ -301,6 +309,7 @@ function fleetFlagMisplaced(options: CliOptions): string | undefined {
     ["--default, --brand-name, --tagline, --accent, --support-url, --logo, --favicon and --clear", options.brandDefault !== undefined || options.brandPatch !== undefined || options.logoSource !== undefined || options.faviconSource !== undefined || options.brandClear !== undefined, "brand"],
     ["the rate flags", options.ratesPatch !== undefined, "rates"],
     ["--month, --csv and --detail", options.month !== undefined || options.csv !== undefined || options.detail !== undefined, "billing"],
+    ["--max-users", options.maxUsers !== undefined, "billing"],
   ];
   const wrong = only.find(([, present, owner]) => present && owner !== action);
   if (wrong) return `only fleet ${wrong[2]} takes ${wrong[0]}`;
@@ -1166,6 +1175,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         month: options.month,
         csv: options.csv,
         detail: options.detail,
+        maxUsers: options.maxUsers,
         ratesPatch: options.ratesPatch,
         memory: options.memory,
         dryRun: options.dryRun ?? false,

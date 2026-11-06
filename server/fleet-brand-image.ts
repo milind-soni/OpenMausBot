@@ -45,21 +45,69 @@ export function maxRawBytes(kind: ImageKind, format: ImageFormat): number {
   return Math.floor((MAX_CHARS[kind] - `data:${MIME[format]};base64,`.length) / 4) * 3;
 }
 
-const decodeCharacterReferences = (text: string) =>
-  text.replace(/&#x([0-9a-f]+);?/gi, (_, hex: string) => String.fromCodePoint(Math.min(parseInt(hex, 16), 0x10ffff))).replace(/&#(\d+);?/g, (_, digits: string) => String.fromCodePoint(Math.min(Number(digits), 0x10ffff)));
+const XML_ENTITIES: Record<string, string> = { lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" };
+const codePoint = (value: number) => String.fromCodePoint(Math.min(value, 0x10ffff));
 
-const HOSTILE_SVG: [RegExp, string][] = [
-  [/<\s*script/i, "<script"],
-  [/<\s*foreignObject/i, "<foreignObject"],
-  [/<\s*(?:iframe|embed|object)\b/i, "an embedded document"],
-  [/[\s"'/]on[a-z]+\s*=/i, "an on...= event attribute"],
-  [/<!ENTITY/i, "an entity declaration"],
-];
+const decodeCharacterReferences = (text: string) =>
+  text
+    .replace(/&#x([0-9a-f]+);?/gi, (_, hex: string) => codePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);?/g, (_, digits: string) => codePoint(Number(digits)))
+    .replace(/&(lt|gt|amp|quot|apos);/g, (_, name: string) => XML_ENTITIES[name]!);
+
+const decodeCssEscapes = (text: string) => text.replace(/\\([0-9a-f]{1,6})[ \t\r\n\f]?/gi, (_, hex: string) => codePoint(parseInt(hex, 16))).replace(/\\([\s\S])/g, "$1");
+
+const compact = (text: string) => [...text].filter((char) => char.trim() && char.charCodeAt(0) > 31).join("").toLowerCase();
+
+const EMBEDDED = "an embedded document";
+const OUTSIDE = "an outside reference (only #id links inside the image are allowed)";
+const CSS_URL = "a CSS url() outside the image";
+const REFUSED_ELEMENTS: Record<string, string> = { script: "<script", handler: "<script", foreignobject: "<foreignObject", iframe: EMBEDDED, embed: EMBEDDED, object: EMBEDDED };
+const ELEMENT = /<\s*(?:\/\s*)?(?:[^\s<>/"'=:]{1,80}\s*:\s*)?([^\s<>/"'=:]{1,80})/g;
+const FRAGMENT = /^#[\p{L}\p{N}_.-]+$/u;
+
+function valueAt(text: string, at: number, unquoted: RegExp): string {
+  const quote = text[at];
+  if (quote === '"' || quote === "'") {
+    const end = text.indexOf(quote, at + 1);
+    return text.slice(at + 1, end === -1 ? undefined : end);
+  }
+  unquoted.lastIndex = at;
+  return unquoted.exec(text)?.[0] ?? "";
+}
+
+const ATTRIBUTE_VALUE = /[^\s>"'=]*/y;
+const CSS_URL_VALUE = /[^\s)"']*/y;
+
+/** Every check runs on every position, so text that misleads one reading of the quotes can only cause a refusal. */
+function svgRefusal(source: string): string | undefined {
+  const text = decodeCharacterReferences(source);
+  for (const [, name] of text.matchAll(ELEMENT)) {
+    const refused = REFUSED_ELEMENTS[name!.toLowerCase()];
+    if (refused) return refused;
+  }
+  if (/<!\s*ENTITY/i.test(text)) return "an entity declaration";
+  if (/<!\s*DOCTYPE/i.test(text)) return "a DOCTYPE";
+  if (/[\s"'/:]on[a-z]+\s*=/i.test(text)) return "an on...= event attribute";
+  if (compact(text).includes("javascript:")) return "a javascript: link";
+  for (const match of text.matchAll(/(?<![\w.-])href\s*=\s*/gi)) {
+    if (!FRAGMENT.test(valueAt(text, match.index + match[0].length, ATTRIBUTE_VALUE).trim())) return OUTSIDE;
+  }
+  if (/(?<![\w.-])xml\s*:\s*base\s*=/i.test(text) || /attributeName\s*=\s*(?:["']\s*)?(?:[\w.-]+\s*:\s*)?href(?![\w.-])/i.test(text)) return OUTSIDE;
+  for (const match of text.matchAll(/=\s*/g)) {
+    if (compact(valueAt(text, match.index + match[0].length, ATTRIBUTE_VALUE)).includes("data:")) return "a data: address";
+  }
+  const css = decodeCssEscapes(text);
+  if (/@import/i.test(css)) return "a CSS @import";
+  if (/image-set\s*\(/i.test(css)) return CSS_URL;
+  for (const match of css.matchAll(/url\s*\(\s*/gi)) {
+    if (!FRAGMENT.test(valueAt(css, match.index + match[0].length, CSS_URL_VALUE).trim())) return CSS_URL;
+  }
+  return undefined;
+}
 
 function assertSafeSvg(bytes: Uint8Array, label: string): void {
-  const text = decodeCharacterReferences(new TextDecoder("utf-8").decode(bytes));
-  const refused = HOSTILE_SVG.find(([pattern]) => pattern.test(text))?.[1] ?? (/javascript:/i.test([...text].filter((char) => char.trim() && char.charCodeAt(0) > 31).join("")) ? "a javascript: link" : undefined);
-  if (refused) throw new Error(`${label} is an SVG that contains ${refused}; export a plain SVG without scripts, events or embedded documents`);
+  const refused = svgRefusal(new TextDecoder("utf-8").decode(bytes));
+  if (refused) throw new Error(`${label} is an SVG that contains ${refused}; export a plain SVG without scripts, events, embedded documents or outside references`);
 }
 
 const kilobytes = (bytes: number, round: (value: number) => number) => `${round(bytes / 1024)} KB`;

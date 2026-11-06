@@ -29,6 +29,8 @@ export interface FleetWorkspaceView extends FleetWorkspace {
 }
 
 const MAX_BODY = 256 * 1024;
+const BILLING_CACHE_MS = 60_000;
+const BILLING_CACHE_ENTRIES = 32;
 /** A logo and a favicon at their schema limits, as data URIs, plus the rest of a brand. */
 export const MAX_BRAND_BODY = 512 * 1024;
 
@@ -140,9 +142,38 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
   // Planning reads the registry too: serialize the whole read/modify/execute sequence so ports and updates cannot collide.
   let mutationTail: Promise<unknown> = Promise.resolve();
   const act = (input: FleetInput) => {
-    const result = mutationTail.then(() => runAction(input));
+    forgetBilling();
+    const result = mutationTail.then(() => runAction(input)).finally(forgetBilling);
     mutationTail = result.catch(() => {});
     return result;
+  };
+
+  type Reply = { status: number; body: unknown };
+  const billingCache = new Map<string, { at: number; reply: Reply }>();
+  const billingBuilds = new Map<string, Promise<Reply>>();
+  let billingEpoch = 0;
+  function forgetBilling() {
+    billingEpoch++;
+    billingCache.clear();
+    billingBuilds.clear();
+  }
+  const billingAnswer = (query: URLSearchParams): Promise<Reply> => {
+    const key = JSON.stringify([query.get("month"), query.get("detail") === "true", query.get("maxUsers")]);
+    const cached = billingCache.get(key);
+    if (cached && now().getTime() - cached.at < BILLING_CACHE_MS) return Promise.resolve(cached.reply);
+    const building = billingBuilds.get(key);
+    if (building) return building;
+    const epoch = billingEpoch;
+    const build: Promise<Reply> = billingReply(query, { layout, deps, now: now() }).then((reply) => {
+      if (reply.status === 200 && epoch === billingEpoch) {
+        for (const [name, entry] of billingCache) if (now().getTime() - entry.at >= BILLING_CACHE_MS) billingCache.delete(name);
+        if (billingCache.size >= BILLING_CACHE_ENTRIES) billingCache.delete(billingCache.keys().next().value!);
+        billingCache.set(key, { at: now().getTime(), reply });
+      }
+      return reply;
+    }).finally(() => { if (billingBuilds.get(key) === build) billingBuilds.delete(key); });
+    billingBuilds.set(key, build);
+    return build;
   };
 
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
@@ -178,7 +209,7 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
         return send(result.status, result.body);
       }
       if (method === "GET" && url.pathname === "/billing") {
-        const reply = await billingReply(url.searchParams, { layout, deps, now: now() });
+        const reply = await billingAnswer(url.searchParams);
         audit({ action: "billing", month: url.searchParams.get("month") ?? undefined, ok: reply.status === 200 });
         return send(reply.status, reply.body);
       }

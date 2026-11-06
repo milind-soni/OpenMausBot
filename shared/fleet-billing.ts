@@ -1,7 +1,7 @@
 /** Money is whole minor units (cents) in `currency`; a figure is `null` when it cannot be known. */
 export interface FleetBillingMoney {
-  /** The per-workspace charge; 0 when the workspace is not billable this month. */
-  workspaceMinor: number;
+  /** The per-workspace charge; 0 when the workspace is not billable this month, `null` when whether it is billable is unknown. */
+  workspaceMinor: number | null;
   /** Users times the per-user rate; `null` when the workspace's ledger was unavailable. */
   usersMinor: number | null;
   totalMinor: number | null;
@@ -25,10 +25,13 @@ export interface FleetBillingWorkspace {
   slug: string;
   host: string;
   status: string;
-  /** Whether the workspace is charged for the month. */
-  billable: boolean;
-  /** Why: it ran at some point in the month, it had usage, or neither. */
-  billableReason: "running" | "usage" | "none";
+  /**
+   * Whether the workspace is charged for the month. `null` when the ledger could not be read and the workspace was not
+   * running that month: usage might still make it billable, so the answer is unknown, not no.
+   */
+  billable: boolean | null;
+  /** Why: it ran at some point in the month, it had usage, neither, or that cannot be known (`unknown`, with `billable` null). */
+  billableReason: "running" | "usage" | "none" | "unknown";
   ledger: "ok" | "unavailable";
   unavailableReason?: string;
   turns: number | null;
@@ -68,8 +71,10 @@ export interface FleetBillingReport {
   /** False while the month is still running: the report is "as of" `generatedAt`. */
   final: boolean;
   basis: "tenant-reported-ledger";
-  /** False when any workspace's ledger was unavailable. */
+  /** False when any workspace's ledger was unavailable or a closing snapshot for the month had to be skipped. */
   complete: boolean;
+  /** Closing snapshots of this month that were damaged or in another currency, each with the reason; absent when none. */
+  skippedSnapshots?: string[];
   workspaces: FleetBillingWorkspace[];
   totals: FleetBillingTotals;
 }

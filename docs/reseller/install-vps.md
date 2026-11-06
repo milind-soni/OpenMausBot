@@ -30,7 +30,8 @@ Copy the script to the server, read it, and look at what it would do:
 scp deploy/vps/install.sh root@SERVER_IP:
 ssh root@SERVER_IP
 sh install.sh --dry-run --domain example.com --admin owner@acme.test \
-  --reseller-name "Acme Cloud" --license-key-file /root/omb-license.key
+  --reseller-name "Acme Cloud" --license-key-file /root/omb-license.key \
+  --version 0.1.145
 ```
 
 Then run it for real:
@@ -38,9 +39,14 @@ Then run it for real:
 ```sh
 sh install.sh --domain example.com --admin owner@acme.test \
   --reseller-name "Acme Cloud" --license-key-file /root/omb-license.key \
-  --logo /root/acme-logo.png --accent '#C2510A' --tagline "Teams that ship" \
+  --version 0.1.145 --logo /root/acme-logo.png --accent '#C2510A' --tagline "Teams that ship" \
   --support-url https://help.acme.test --engine claude
 ```
+
+Pin the version with `--version` and keep it in your own notes. Without it the
+script installs `latest`, so rebuilding the server later can bring a different
+release than the one you tested, and every workspace on it. Change the pinned
+version on purpose, then run `openmausbot fleet upgrade`.
 
 A bad option is refused with exit status 2 before anything changes.
 
@@ -60,7 +66,7 @@ A bad option is refused with exit status 2 before anything changes.
 | `--license-key-file FILE` | Licence key. `OMB_LICENSE_KEY` in the environment works too. |
 | `--operator USER` | Existing Unix user whose workspace manages the fleet from Settings, Installations. |
 | `--currency CODE` | Billing currency with two decimals, default `USD`. See [billing](billing.md). |
-| `--version VERSION` | The `openmausbot` version or tag to install, default `latest`. |
+| `--version VERSION` | The `openmausbot` version to install, for example `0.1.145`. Always pass one: the default, `latest`, is whatever the vendor published most recently, so two installs a week apart can differ. |
 | `--engine claude` | Also install the Claude Code CLI. |
 | `--dry-run` | Print every step and change nothing. |
 
@@ -88,15 +94,45 @@ The phases run in this order, and each prints a `== name ==` heading.
 11. `summary`: the address, the DNS records, how to sign in, the engine,
     `fleet billing` and any warnings.
 
-The script downloads the NodeSource setup script and the Caddy apt key over
-TLS, the same trust the vendors' own instructions ask for; it pins no digests.
 A secret never appears on a command line or in the output: key files are passed
 by path, and the licence key may come from `OMB_LICENSE_KEY`.
 
-An existing `/etc/caddy/Caddyfile` is replaced only when it is the stock file
-from the Caddy package (the original is kept as `Caddyfile.pre-openmausbot`) or
-holds nothing but this script's own global block. Any other Caddyfile stops the
-install with the line to add by hand.
+An existing `/etc/caddy/Caddyfile` is replaced only when, comments and blank
+lines aside, it is exactly the stock file from the Caddy package (`:80` serving
+`/usr/share/caddy`), or holds nothing but this script's own global block. The
+stock file is first copied to `Caddyfile.pre-openmausbot.<UTC time>`, a new copy
+on every run that replaces it, so an older backup is never overwritten. A
+Caddyfile that already holds the line `import /etc/caddy/omb.d/*.caddy` is left
+alone. Any other Caddyfile stops the install with the two lines to add by hand.
+
+## Supply chain and trust
+
+The script runs as root and fetches the following without a pinned checksum.
+Each is trusted on first use over TLS, as the vendors' own instructions ask.
+This is a known residual risk:
+
+- The NodeSource setup script, `https://deb.nodesource.com/setup_24.x`, which
+  the script then runs with `bash` as root. It adds NodeSource's apt repository
+  and signing key, and apt checks the `nodejs` package against that key.
+  Skipped when Node 24 or newer is already installed.
+- The Caddy apt signing key, `https://dl.cloudsmith.io/public/caddy/stable/gpg.key`,
+  and the repository list next to it. apt checks the `caddy` package against
+  that key. Skipped when `caddy` is already installed.
+- npm packages: `openmausbot@VERSION` and every dependency it pulls in, and,
+  with `--engine claude`, `@anthropic-ai/claude-code` at its latest release.
+  `npm install -g` runs as root, and so do the install scripts of those
+  packages. npm checks each download against the integrity hash the registry
+  publishes, which catches a damaged download, not a bad release. Without
+  `--version` the script prints an `UNPINNED` warning before this step and in
+  the summary.
+
+To narrow this, verify them yourself before the run: install Node 24 and Caddy
+your own way first (the script then skips both), compare the Caddy key's
+fingerprint with the one Caddy publishes, read the NodeSource script, and pin
+`--version` to a release you have checked (`npm view openmausbot version` names
+the current one, `npm view openmausbot@X.Y.Z dist.integrity` its hash). The
+packages the script installs from your distribution (`nftables`, `curl`,
+`ca-certificates`, `gnupg`) come from its signed archive.
 
 ## Running it again
 
@@ -108,8 +144,8 @@ The script resumes where an earlier run stopped:
 - When `fleet list` already shows the workspace, it is not created again. A
   workspace in state `error`, `provisioning` or `retained` stops the run:
   recover it as the [fleet record](../verification/fleet.md) describes.
-- Installed Node and Caddy are left alone, and `npm install -g` upgrades
-  `openmausbot` to `VERSION`. Running workspaces keep their old release until
+- Installed Node and Caddy are left alone, and `npm install -g` moves
+  `openmausbot` to the `--version` you pass again (to `latest` when you pass none). Running workspaces keep their old release until
   you run `openmausbot fleet upgrade`.
 
 ## After the install
@@ -124,6 +160,23 @@ The script resumes where an earlier run stopped:
   refuses that; the mail relay is the way around it.
 - Usage by workspace and user: `openmausbot fleet billing --license-key-file FILE`.
 - More customers: `openmausbot fleet create NAME --admin EMAIL [--host HOST]`.
+
+## What each workspace can read
+
+Each workspace runs as its own Unix user with its environment file,
+`/etc/openmausbot/instances/<name>.env`, loaded into its service. The file is
+root-only on disk, but that workspace's own processes, a bot with a shell
+included, can read the environment back from `/proc`. Two values in it are
+yours, not the customer's:
+
+- `OMB_LICENSE_KEY`, your reseller licence key, when you pass one. Every
+  workspace created with it holds the same key: assume each customer can read
+  it.
+- `OMB_SIGNIN_SMTP_URL`, the mail relay address from `reseller.smtp`. When it
+  carries a user name and password, any workspace can send mail as you with
+  them, and `fleet create` and `fleet brand` print a warning. Use a relay on
+  the server's loopback that needs no login instead, as
+  [the branding guide](branding.md#sign-in-mail) describes.
 
 ## Limits
 

@@ -23,12 +23,14 @@ const row = (trigger: UsageTrigger): UsageRow => ({
 
 describe.skipIf(process.platform === "win32")("fleet agent billing over its socket", () => {
   let root: string;
+  let clock: Date;
   let socketPath: string;
   let stop: (() => Promise<void>) | null = null;
   const layout = () => fleetLayout(root);
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "omb-fleet-agent-billing-"));
+    clock = NOW;
     socketPath = join(root, "fleet.sock");
   });
   afterEach(async () => {
@@ -45,7 +47,7 @@ describe.skipIf(process.platform === "win32")("fleet agent billing over its sock
   async function boot(options: Parameters<typeof fleetMachine>[1] = {}, registry: Partial<FleetRegistry> = {}, wrap: (deps: FleetDeps) => FleetDeps = (deps) => deps) {
     const machine = fleetMachine(root, options);
     machine.files.set(layout().registryFile, JSON.stringify({ ...emptyRegistry("example.test"), reseller, workspaces: { acme: workspace("acme"), beta: workspace("beta") }, ...registry }));
-    const server = await startFleetAgent({ socketPath, node: "/usr/bin/node", script: "/cli.js", root, deps: wrap(machine.deps), auditFile: join(root, "audit.jsonl"), now: () => NOW }, { log: () => {} });
+    const server = await startFleetAgent({ socketPath, node: "/usr/bin/node", script: "/cli.js", root, deps: wrap(machine.deps), auditFile: join(root, "audit.jsonl"), now: () => clock }, { log: () => {} });
     stop = () => new Promise((resolve) => server.close(() => resolve()));
     return machine;
   }
@@ -128,8 +130,84 @@ describe.skipIf(process.platform === "win32")("fleet agent billing over its sock
     expect(readFileSync(join(root, "audit.jsonl"), "utf8")).not.toContain("private.test");
   });
 
+  describe("many readers at once", () => {
+    const peopleCalls = (machine: Awaited<ReturnType<typeof boot>>) => machine.calls.filter((call) => call.startsWith("people")).length;
+
+    it("shares one build between parallel requests, so each workspace is metered once", async () => {
+      ledger("acme", [row({ kind: "user", email: "ada@x.test" })]);
+      const machine = await boot();
+      const replies = await Promise.all(Array.from({ length: 12 }, () => billing()));
+      expect(replies.every((reply) => reply.status === 200 && reply.body.totals.activeUsers === 1)).toBe(true);
+      expect(peopleCalls(machine)).toBe(2);
+    });
+
+    it("answers a repeat within a minute from memory and rebuilds after it", async () => {
+      const machine = await boot();
+      await billing();
+      clock = new Date(NOW.getTime() + 59_000);
+      await billing();
+      expect(peopleCalls(machine)).toBe(2);
+      clock = new Date(NOW.getTime() + 61_000);
+      await billing();
+      expect(peopleCalls(machine)).toBe(4);
+    });
+
+    it("keeps a separate answer for each month, detail and user limit", async () => {
+      const machine = await boot();
+      await billing();
+      await billing("?detail=true");
+      await billing("?month=2026-08");
+      await billing("?maxUsers=50");
+      expect(peopleCalls(machine)).toBe(8);
+      await billing("?detail=true");
+      expect(peopleCalls(machine)).toBe(8);
+    });
+
+    it("forgets what it knew as soon as a change goes through the agent", async () => {
+      const machine = await boot();
+      expect((await billing()).body.workspaces.find((line) => line.slug === "acme")!.status).toBe("running");
+      expect((await fleetRequest(socketPath, "POST", "/workspaces/acme/suspend")).status).toBe(200);
+      const after = await billing();
+      expect(after.body.workspaces.find((line) => line.slug === "acme")!.status).toBe("suspended");
+      expect(peopleCalls(machine)).toBe(4);
+    });
+
+    it("does not keep a failed answer", async () => {
+      let broken = true;
+      const machine = await boot({}, {}, (deps) => ({ ...deps, readText: (path) => { if (broken && path.endsWith("fleet.json")) throw new Error("registry unreadable"); return deps.readText(path); } }));
+      expect((await billing()).status).toBe(500);
+      broken = false;
+      expect((await billing()).status).toBe(200);
+      expect(peopleCalls(machine)).toBe(2);
+    });
+
+    it("audits every request, whether or not it was answered from memory", async () => {
+      await boot();
+      await Promise.all([billing(), billing(), billing("?month=2026-09")]);
+      await billing();
+      const lines = readFileSync(join(root, "audit.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+      expect(lines.filter((line) => line.action === "billing")).toHaveLength(4);
+      expect(lines.every((line) => Object.keys(line).every((key) => ["action", "at", "month", "ok"].includes(key)))).toBe(true);
+    });
+  });
+
+  describe("the user limit", () => {
+    it("passes ?maxUsers to the helper and refuses a value out of range", async () => {
+      const limits: (number | undefined)[] = [];
+      await boot({}, {}, (deps) => ({ ...deps, people: async (dataDir, owner, month, maxUsers) => { limits.push(maxUsers); return deps.people!(dataDir, owner, month, maxUsers); } }));
+      expect((await billing("?maxUsers=25")).status).toBe(200);
+      expect(limits).toEqual([25, 25]);
+      for (const bad of ["0", "10001", "-3", "1.5", "lots", ""]) {
+        const reply = await billing(`?maxUsers=${bad}`);
+        expect(reply.status).toBe(400);
+        expect(reply.body.error).toContain("maxUsers takes a whole number from 1 to 10000");
+      }
+      expect(limits).toEqual([25, 25]);
+    });
+  });
+
   describe("deleting a workspace", () => {
-    const closing = (slug: string) => join(layout().billingDir, "closing", `${slug}@2026-08-01T00:00:00.000Z.json`);
+    const closing = (slug: string) => join(layout().billingDir, "closing", `${slug}@2026-08-01T00:00:00.000Z@2026-09.json`);
 
     it("writes the closing snapshot first, and the report keeps the workspace afterwards", async () => {
       ledger("acme", [row({ kind: "user", email: "ada@private.test" })]);

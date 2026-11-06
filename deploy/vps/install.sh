@@ -19,6 +19,7 @@ LICENSE_KEY_FILE=
 ANTHROPIC_KEY_FILE=
 OPERATOR=
 VERSION=latest
+VERSION_GIVEN=0
 ENGINE=
 CAP=
 DRY_RUN=0
@@ -67,7 +68,7 @@ Brand (applies to every workspace; needs the whitelabel licence entitlement):
 Server:
   --operator USER            Unix user whose workspace manages the fleet
   --currency CODE            billing currency, two decimals only (default USD)
-  --version VERSION          openmausbot version or tag to install (default: latest)
+  --version X.Y.Z            openmausbot release to install; pin one (default: latest, unpinned)
   --engine claude            also install the Claude Code CLI for the workspaces
   --dry-run                  print every step and change nothing
   -h, --help                 show this text
@@ -229,7 +230,10 @@ parse_args() {
       --license-key-file) LICENSE_KEY_FILE=$given ;;
       --anthropic-key-file) ANTHROPIC_KEY_FILE=$given ;;
       --operator) OPERATOR=$given ;;
-      --version) VERSION=$given ;;
+      --version)
+        VERSION=$given
+        VERSION_GIVEN=1
+        ;;
       --engine) ENGINE=$given ;;
       --cap) CAP=$given ;;
     esac
@@ -406,19 +410,44 @@ only_email_block() {
   grep -Ev '^[[:space:]]*$' "$1" | tr -d '\n' | grep -Eq '^\{[[:space:]]*email [^[:space:]{}]+[[:space:]]*\}$'
 }
 
+FLEET_IMPORT='import /etc/caddy/omb.d/*.caddy'
+STOCK_CADDYFILE=':80 {
+root * /usr/share/caddy
+file_server
+}'
+
+imports_fleet() {
+  grep -Eqx '[[:space:]]*import /etc/caddy/omb\.d/\*\.caddy[[:space:]]*' "$1"
+}
+
+stock_caddyfile() {
+  [ "$(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^#/d' -e '/^$/d' "$1")" = "$STOCK_CADDYFILE" ]
+}
+
+backup_name() {
+  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+  candidate="$1.pre-openmausbot.$stamp"
+  n=1
+  while [ -e "$candidate" ]; do
+    candidate="$1.pre-openmausbot.$stamp.$n"
+    n=$((n + 1))
+  done
+  printf '%s' "$candidate"
+}
+
 write_caddyfile() {
   acme_email=${ADMINS%%
 *}
-  if [ -f "$CADDYFILE" ] && grep -q 'omb\.d' "$CADDYFILE"; then
+  if [ -f "$CADDYFILE" ] && imports_fleet "$CADDYFILE"; then
     note "$CADDYFILE already imports the workspaces folder; leaving it alone"
     return 0
   fi
-  if [ -s "$CADDYFILE" ] && ! grep -q '/usr/share/caddy' "$CADDYFILE" && ! only_email_block "$CADDYFILE"; then
-    stop_or_warn "$CADDYFILE is not the stock file from the Caddy package. Put '{ email $acme_email }' at its very top, then run this installer again"
-    return 0
-  fi
-  if [ -s "$CADDYFILE" ] && [ ! -e "$CADDYFILE.pre-openmausbot" ] && ! only_email_block "$CADDYFILE"; then
-    run cp -p "$CADDYFILE" "$CADDYFILE.pre-openmausbot"
+  if [ -s "$CADDYFILE" ] && ! only_email_block "$CADDYFILE"; then
+    if ! stock_caddyfile "$CADDYFILE"; then
+      stop_or_warn "$CADDYFILE is not the stock file from the Caddy package. Put '{ email $acme_email }' at its very top and the line '$FLEET_IMPORT' at its end, then run this installer again"
+      return 0
+    fi
+    run cp -p "$CADDYFILE" "$(backup_name "$CADDYFILE")"
   fi
   run mkdir -p "$(dirname "$CADDYFILE")"
   write_file "$CADDYFILE" 0644 "{
@@ -427,8 +456,27 @@ write_caddyfile() {
   run caddy validate --config "$CADDYFILE" --adapter caddyfile
 }
 
+pinned_version() {
+  printf '%s\n' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+}
+
+warn_unpinned() {
+  if [ "$VERSION_GIVEN" = 1 ]; then
+    warn "UNPINNED: --version $VERSION is a tag or a range, so this installs whatever openmausbot@$VERSION points to right now."
+  else
+    warn "UNPINNED: no --version was given, so this installs openmausbot@latest, whatever the registry serves right now."
+  fi
+  warn "npm installs it as root and runs the install scripts of it and of every package it pulls in, as root."
+  warn "Pin a release you have checked: run 'npm view openmausbot version', then rerun with --version X.Y.Z"
+}
+
 install_openmausbot() {
   phase install_openmausbot
+  if ! pinned_version; then
+    printf '\n'
+    warn_unpinned
+    printf '\n'
+  fi
   run npm install -g "openmausbot@$VERSION"
 }
 
@@ -572,6 +620,9 @@ summary() {
   note "More workspaces: openmausbot fleet create NAME --admin EMAIL [--host HOST]"
   if [ "$FLEET_EXISTED" = 1 ]; then
     note "Existing workspaces keep their old release until you run: openmausbot fleet upgrade"
+  fi
+  if ! pinned_version; then
+    warn "UNPINNED: openmausbot@$VERSION is not a pinned release; rerun with --version X.Y.Z (see: npm view openmausbot version)"
   fi
   if [ -z "$LICENSE_KEY_FILE" ] && [ -z "${OMB_LICENSE_KEY:-}" ]; then
     warn "no licence key: the brand will not apply and fleet billing will refuse. Rerun with --license-key-file FILE."

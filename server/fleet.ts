@@ -261,7 +261,7 @@ export function caddyImportLine(layout = fleetLayout()): string {
   return `import ${layout.caddyDir}/*.caddy`;
 }
 
-/** `KEY=value` lines a brand adds to the instance environment; one line each, so a value can never smuggle in another. */
+/** `KEY=value` lines read from files or a brand; one line each, so a value can never smuggle in another. */
 const ENV_LINE = /^[A-Z][A-Z0-9_]*=[^\r\n]*$/;
 
 export function instanceEnv(input: { workspace: FleetWorkspace; dataDir: string; licenseKey?: string; portalUrl?: string; extra?: string[] }): string {
@@ -271,7 +271,11 @@ export function instanceEnv(input: { workspace: FleetWorkspace; dataDir: string;
     `OMB_WEBHOOK_PORT=${input.workspace.webhookPort}`,
     `OMB_PUBLIC_URL=https://${input.workspace.host}`,
   ];
-  if (input.licenseKey) lines.push(`OMB_LICENSE_KEY=${input.licenseKey}`);
+  if (input.licenseKey) {
+    const line = `OMB_LICENSE_KEY=${input.licenseKey}`;
+    if (!ENV_LINE.test(line)) throw new Error("the licence key must be a single line; check the key file");
+    lines.push(line);
+  }
   if (input.portalUrl) lines.push(`OMB_ADMIN_URL=${input.portalUrl}`, `OMB_ADMIN_WORKSPACE=${input.workspace.slug}`);
   for (const extra of input.extra ?? []) {
     if (!ENV_LINE.test(extra)) throw new Error("an instance environment line must be KEY=value on one line");
@@ -463,7 +467,7 @@ function withStatus(registry: FleetRegistry, slug: string, status: "running" | "
   const current = registry.workspaces[slug];
   if (!current) throw new Error(`no workspace "${slug}"`);
   assertManagedWorkspace(current);
-  const workspace = recordWorkspaceEvent({ ...current, status }, status, now.toISOString());
+  const workspace = { ...recordWorkspaceEvent(current, status, now.toISOString()), status };
   return { registry: { ...registry, workspaces: { ...registry.workspaces, [slug]: workspace } }, workspace };
 }
 
@@ -503,7 +507,7 @@ export function deletePlan(input: { registry: FleetRegistry; slug: string; keepD
   if (!workspace) throw new Error(`no workspace "${input.slug}"`);
   assertManagedWorkspace(workspace);
   const { [input.slug]: _gone, ...rest } = input.registry.workspaces;
-  const registry: FleetRegistry = { ...input.registry, workspaces: input.keepData ? { ...rest, [input.slug]: recordWorkspaceEvent({ ...workspace, status: "retained" }, "retained", (input.now ?? new Date()).toISOString()) } : rest };
+  const registry: FleetRegistry = { ...input.registry, workspaces: input.keepData ? { ...rest, [input.slug]: { ...recordWorkspaceEvent(workspace, "retained", (input.now ?? new Date()).toISOString()), status: "retained" } } : rest };
   const unitsDir = layout.unitFile.replace(/openmausbot@\.service$/, "");
   return {
     registry,

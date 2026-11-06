@@ -113,12 +113,15 @@ describe.skipIf(process.platform === "win32")("the operator app's fleet billing 
     expect((await get("/api/fleet/billing?detail=true")).body.workspaces[0].users).toEqual([{ id: "ada@x.test", kind: "email", asked: 1, attributed: 1, costUsd: 0.1 }]);
   });
 
-  it("passes on only the two parameters it knows", async () => {
+  it("passes on only the parameters it knows", async () => {
     await layer(["admin", "billing"]);
     await boot({ agent: true });
     const reply = await get("/api/fleet/billing?month=2026-09&maxUsers=1&root=/etc&detail=false");
     expect(reply.status).toBe(200);
     expect(reply.body.workspaces[0].users).toBeUndefined();
+    const refused = await get("/api/fleet/billing?maxUsers=0");
+    expect(refused.status).toBe(400);
+    expect(refused.body.error).toContain("maxUsers takes a whole number from 1 to 10000");
   });
 
   it("returns the agent's refusal of a bad month", async () => {

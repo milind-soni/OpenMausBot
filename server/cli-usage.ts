@@ -48,7 +48,7 @@ export const USAGE = `openmausbot — your team of AI bots, ready in a few steps
                     [--favicon FILE] [--support-url URL] [--clear FIELD]
                   | rates [--currency USD] [--wholesale-workspace A] [--wholesale-user A]
                     [--retail-workspace A] [--retail-user A] [--retail-override NAME=WS/USER] [--clear-override NAME]
-                  | billing [--month YYYY-MM] [--csv] [--detail]
+                  | billing [--month YYYY-MM] [--csv] [--detail] [--max-users N]
                   (all take --license-key-file FILE, which keeps the key out of the process list)
                   | agent [--socket PATH] [--group USER]   (root; installed by init --operator)
 

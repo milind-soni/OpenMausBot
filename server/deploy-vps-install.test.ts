@@ -21,6 +21,27 @@ const UBUNTU = 'NAME="Ubuntu"\nID=ubuntu\nVERSION_ID="24.04"\n';
 const DEBIAN = 'PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"\nID=debian\nVERSION_ID="12"\n';
 const FEDORA = "NAME=Fedora\nID=fedora\nVERSION_ID=41\n";
 const STOCK_CADDYFILE = ":80 {\n\troot * /usr/share/caddy\n\tfile_server\n}\n";
+const PACKAGED_CADDYFILE = [
+  "# The Caddyfile is an easy way to configure your Caddy web server.",
+  "#",
+  "# Unless the file starts with a global options block, the first",
+  "# uncommented line is always the address of your site.",
+  "",
+  ":80 {",
+  "\t# Set this path to your site's directory.",
+  "\troot * /usr/share/caddy",
+  "",
+  "\t# Enable the static file server.",
+  "\tfile_server",
+  "",
+  "\t# Another common task is to set up a reverse proxy:",
+  "\t# reverse_proxy localhost:8080",
+  "}",
+  "",
+  "# Refer to the Caddy docs for more information:",
+  "# https://caddyserver.com/docs/caddyfile",
+  "",
+].join("\n");
 
 const STUB = `#!/bin/sh
 p=$OMB_VPS_PREFIX
@@ -296,6 +317,28 @@ describe.skipIf(process.platform === "win32")("deploy/vps/install.sh", () => {
       expect(dryRun(baseArgs(), { OMB_LICENSE_KEY: "from-env" }).stdout).not.toContain("warning: no licence key");
     });
 
+    it("warns loudly, before the npm install, that a run without a pinned --version installs whatever latest is", () => {
+      const ran = dryRun(baseArgs());
+      expect(ran.status).toBe(0);
+      const warning = ran.stdout.indexOf("warning: UNPINNED");
+      expect(warning).toBeGreaterThan(ran.stdout.indexOf("== install_openmausbot =="));
+      expect(warning).toBeLessThan(ran.stdout.indexOf("+ npm install -g openmausbot@latest"));
+      const block = ran.stdout.slice(warning, ran.stdout.indexOf("+ npm install -g openmausbot@latest"));
+      expect(block).toContain("no --version was given, so this installs openmausbot@latest");
+      expect(block).toContain("as root");
+      expect(block).toContain("install scripts");
+      expect(block).toContain("npm view openmausbot version");
+      expect(ran.stdout.slice(ran.stdout.indexOf("== summary =="))).toContain("warning: UNPINNED");
+      const tag = dryRun([...baseArgs(), "--version", "next"]).stdout;
+      expect(tag).toContain("warning: UNPINNED: --version next is a tag or a range");
+      expect(tag).toContain("npm view openmausbot version");
+      for (const version of ["0.1.145", "1.2.3-beta.1"]) {
+        const pinned = dryRun([...baseArgs(), "--version", version]).stdout;
+        expect(pinned, version).not.toContain("UNPINNED");
+        expect(pinned).not.toContain("npm view openmausbot version");
+      }
+    });
+
     it("prints usage for --help and exits 0", () => {
       const ran = install(["--help"]);
       expect(ran.status).toBe(0);
@@ -508,11 +551,15 @@ describe.skipIf(process.platform === "win32")("deploy/vps/install.sh", () => {
       expect(statSync(join(prefix, "etc", "caddy", "Caddyfile")).mode & 0o777).toBe(0o644);
     });
 
+    const caddyDir = () => join(prefix, "etc", "caddy");
+    const backups = () => readdirSync(caddyDir()).filter((name) => /^Caddyfile\.pre-openmausbot\.\d{8}T\d{6}Z(?:\.\d+)?$/.test(name)).sort();
+
     it("keeps the stock Caddyfile as a backup and refuses to overwrite a hand-written one", () => {
       mkdirSync(join(prefix, "etc", "caddy"), { recursive: true });
       writeFileSync(join(prefix, "etc", "caddy", "Caddyfile"), STOCK_CADDYFILE);
       expect(runStubbed(baseArgs()).status).toBe(0);
-      expect(readFileSync(join(prefix, "etc", "caddy", "Caddyfile.pre-openmausbot"), "utf8")).toBe(STOCK_CADDYFILE);
+      expect(backups()).toHaveLength(1);
+      expect(readFileSync(join(caddyDir(), backups()[0]!), "utf8")).toBe(STOCK_CADDYFILE);
 
       const other = mkdtempSync(join(root, "other-"));
       prefix = other;
@@ -524,6 +571,55 @@ describe.skipIf(process.platform === "win32")("deploy/vps/install.sh", () => {
       expect(ran.stderr).toContain("is not the stock file from the Caddy package");
       expect(calls().some((line) => line.startsWith("openmausbot"))).toBe(false);
       expect(readFileSync(join(prefix, "etc", "caddy", "Caddyfile"), "utf8")).toBe("mine.example.org {\n\trespond hi\n}\n");
+    });
+
+    it("recognises the packaged Caddyfile with its comments as stock", () => {
+      mkdirSync(caddyDir(), { recursive: true });
+      writeFileSync(join(caddyDir(), "Caddyfile"), PACKAGED_CADDYFILE);
+      const ran = runStubbed(baseArgs());
+      expect(ran.status, ran.output).toBe(0);
+      expect(backups().map((name) => readFileSync(join(caddyDir(), name), "utf8"))).toEqual([PACKAGED_CADDYFILE]);
+      expect(readFileSync(join(caddyDir(), "Caddyfile"), "utf8").startsWith("{\n\temail owner@acme.test\n}\n")).toBe(true);
+    });
+
+    it.each([
+      ["serves its own site from /usr/share/caddy", "mine.example.org {\n\troot * /usr/share/caddy\n\tfile_server\n}\n"],
+      ["mentions /usr/share/caddy only in a comment", "# copied from /usr/share/caddy\nmine.example.org {\n\trespond hi\n}\n"],
+      ["mentions omb.d only in a comment", "# TODO: import /etc/caddy/omb.d/*.caddy\nmine.example.org {\n\trespond hi\n}\n"],
+      ["has the import line commented out", "mine.example.org {\n\trespond hi\n}\n#import /etc/caddy/omb.d/*.caddy\n"],
+      ["imports another omb.d folder", "mine.example.org {\n\trespond hi\n}\nimport /srv/omb.d/*.caddy\n"],
+    ])("refuses a hand-written Caddyfile that %s, and leaves it untouched", (_label, content) => {
+      mkdirSync(caddyDir(), { recursive: true });
+      writeFileSync(join(caddyDir(), "Caddyfile"), content);
+      const ran = runStubbed(baseArgs());
+      expect(ran.status, ran.output).toBe(1);
+      expect(ran.stderr).toContain("is not the stock file from the Caddy package");
+      expect(ran.stderr).toContain("import /etc/caddy/omb.d/*.caddy");
+      expect(readFileSync(join(caddyDir(), "Caddyfile"), "utf8")).toBe(content);
+      expect(backups()).toEqual([]);
+      expect(calls().some((line) => line.startsWith("openmausbot"))).toBe(false);
+    });
+
+    it("leaves alone a hand-written Caddyfile that already has the fleet's import line", () => {
+      mkdirSync(caddyDir(), { recursive: true });
+      const content = "{\n\temail ops@acme.test\n}\nmine.example.org {\n\trespond hi\n}\n  import /etc/caddy/omb.d/*.caddy  \n";
+      writeFileSync(join(caddyDir(), "Caddyfile"), content);
+      const ran = runStubbed(baseArgs());
+      expect(ran.status, ran.output).toBe(0);
+      expect(ran.stdout).toContain("already imports the workspaces folder; leaving it alone");
+      expect(readFileSync(join(caddyDir(), "Caddyfile"), "utf8")).toBe(content);
+    });
+
+    it("backs the stock file up under a new name every time, even when an older backup exists", () => {
+      mkdirSync(caddyDir(), { recursive: true });
+      writeFileSync(join(caddyDir(), "Caddyfile.pre-openmausbot"), "an older backup\n");
+      writeFileSync(join(caddyDir(), "Caddyfile"), STOCK_CADDYFILE);
+      expect(runStubbed(baseArgs()).status).toBe(0);
+      writeFileSync(join(caddyDir(), "Caddyfile"), PACKAGED_CADDYFILE);
+      expect(runStubbed(baseArgs()).status).toBe(0);
+      expect(readFileSync(join(caddyDir(), "Caddyfile.pre-openmausbot"), "utf8")).toBe("an older backup\n");
+      expect(backups()).toHaveLength(2);
+      expect(backups().map((name) => readFileSync(join(caddyDir(), name), "utf8")).sort()).toEqual([PACKAGED_CADDYFILE, STOCK_CADDYFILE].sort());
     });
 
     it("never gives a secret to any command or prints it", () => {

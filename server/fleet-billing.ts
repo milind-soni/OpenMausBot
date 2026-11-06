@@ -2,7 +2,7 @@ import { posix } from "node:path";
 import type { FleetBillingMoney, FleetBillingReport, FleetBillingUser, FleetBillingWorkspace } from "../shared/fleet-billing.ts";
 import type { FleetDeps, FleetInput, FleetIo } from "./fleet-cli.ts";
 import { assertManagedWorkspace, fleetLayout, fleetUser, parseRegistry, workspaceDataDir, type FleetLayout, type FleetRegistry, type FleetStep, type FleetWorkspace } from "./fleet.ts";
-import { monthWindow, printable } from "./fleet-metering.ts";
+import { MAX_USERS_LIMIT, monthWindow, printable } from "./fleet-metering.ts";
 import { TWO_DECIMAL_CURRENCIES, type FleetReseller, type RateSet } from "./fleet-reseller.ts";
 import { csvCell, csvNumber } from "./usage-ledger.ts";
 
@@ -20,9 +20,13 @@ export function billingMonth(raw: string | undefined, now: Date): string {
 }
 
 function ranDuring(workspace: FleetWorkspace, start: number, end: number): boolean {
+  const created = Date.parse(workspace.createdAt);
+  if (!Number.isNaN(created) && created >= end) return false;
   if (workspace.events?.length) {
     const events = [...workspace.events].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
-    let atStart: string | undefined;
+    const [first] = events;
+    const trimmed = first!.at !== workspace.createdAt && Date.parse(first!.at) > start;
+    let atStart: string | undefined = trimmed ? (first!.status === "running" ? "suspended" : "running") : undefined;
     for (const event of events) {
       const at = Date.parse(event.at);
       if (at <= start) atStart = event.status;
@@ -30,14 +34,14 @@ function ranDuring(workspace: FleetWorkspace, start: number, end: number): boole
     }
     return atStart === "running";
   }
-  if (workspace.status !== "running") return false;
-  const created = Date.parse(workspace.createdAt);
-  return Number.isNaN(created) || created < end;
+  return workspace.status === "running";
 }
 
-export function isBillableWorkspace(workspace: FleetWorkspace, month: string, hasUsage: boolean): { billable: boolean; reason: FleetBillingWorkspace["billableReason"] } {
+/** `hasUsage` is `null` when the ledger could not be read. */
+export function isBillableWorkspace(workspace: FleetWorkspace, month: string, hasUsage: boolean | null): { billable: boolean | null; reason: FleetBillingWorkspace["billableReason"] } {
   const { start, end } = monthWindow(month);
   if (ranDuring(workspace, start, end)) return { billable: true, reason: "running" };
+  if (hasUsage === null) return { billable: null, reason: "unknown" };
   return hasUsage ? { billable: true, reason: "usage" } : { billable: false, reason: "none" };
 }
 
@@ -46,13 +50,14 @@ function whole(value: number): number {
   return value;
 }
 
-function charge(billable: boolean, users: number | null, rates: RateSet): FleetBillingMoney {
+function charge(billable: boolean | null, users: number | null, rates: RateSet): FleetBillingMoney {
+  if (billable === null) return { workspaceMinor: null, usersMinor: null, totalMinor: null };
   const workspaceMinor = billable ? rates.workspaceMonthMinor : 0;
   const usersMinor = users === null ? null : whole(users * rates.userMonthMinor);
   return { workspaceMinor, usersMinor, totalMinor: usersMinor === null ? null : whole(workspaceMinor + usersMinor) };
 }
 
-export function priceWorkspace(input: { reseller: FleetReseller; workspace: FleetWorkspace; billable: boolean; users: number | null }): { wholesale: FleetBillingMoney; retail: FleetBillingMoney; marginMinor: number | null } {
+export function priceWorkspace(input: { reseller: FleetReseller; workspace: FleetWorkspace; billable: boolean | null; users: number | null }): { wholesale: FleetBillingMoney; retail: FleetBillingMoney; marginMinor: number | null } {
   const { reseller, workspace, billable, users } = input;
   const wholesale = charge(billable, users, reseller.wholesale);
   const retail = charge(billable, users, { ...reseller.retail, ...workspace.retailOverride });
@@ -79,7 +84,7 @@ async function lineFor(input: { reseller: FleetReseller; layout: FleetLayout; de
     }
   }
   const ledgerOk = neverServed || metered !== null;
-  const billing = isBillableWorkspace(workspace, month, (metered?.turns ?? 0) > 0);
+  const billing = isBillableWorkspace(workspace, month, ledgerOk ? (metered?.turns ?? 0) > 0 : null);
   const users = ledgerOk ? (metered?.people.length ?? 0) : null;
   const priced = priceWorkspace({ reseller, workspace, billable: billing.billable, users });
   const people: FleetBillingUser[] | undefined = detail && ledgerOk
@@ -118,19 +123,28 @@ function parseClosing(text: string, name: string): ClosingSnapshot {
   return value as unknown as ClosingSnapshot;
 }
 
-function closingLines(input: { layout: FleetLayout; deps: FleetDeps; month: string; currency: string; taken: Set<string> }): FleetBillingWorkspace[] {
+const closingName = (workspaceId: string, month: string) => `${workspaceId}@${month}.json`;
+
+function closingLines(input: { layout: FleetLayout; deps: FleetDeps; month: string; currency: string; taken: Set<string> }): { lines: FleetBillingWorkspace[]; skipped: string[] } {
   const directory = posix.join(input.layout.billingDir, "closing");
+  const suffix = `@${input.month}.json`;
   const lines: FleetBillingWorkspace[] = [];
+  const skipped: string[] = [];
   for (const name of [...(input.deps.listDir?.(directory) ?? [])].sort()) {
-    if (!name.endsWith(".json")) continue;
-    const text = input.deps.readText(posix.join(directory, name));
-    if (text === null) continue;
-    const snapshot = parseClosing(text, name);
-    if (snapshot.month !== input.month || input.taken.has(snapshot.workspace.workspaceId)) continue;
-    if (snapshot.currency !== input.currency) throw new Error(`closing snapshot ${name} is in ${snapshot.currency} but this fleet bills in ${input.currency}`);
-    lines.push(snapshot.workspace);
+    if (!name.endsWith(suffix)) continue;
+    try {
+      const text = input.deps.readText(posix.join(directory, name));
+      if (text === null) continue;
+      const snapshot = parseClosing(text, name);
+      if (snapshot.month !== input.month) throw new Error(`closing snapshot ${name} says it is for ${snapshot.month}`);
+      if (input.taken.has(snapshot.workspace.workspaceId)) continue;
+      if (snapshot.currency !== input.currency) throw new Error(`closing snapshot ${name} is in ${snapshot.currency} but this fleet bills in ${input.currency}`);
+      lines.push(snapshot.workspace);
+    } catch (error) {
+      skipped.push(`${reasonOf(error)}; skipped, so a deleted workspace may be missing from this month`);
+    }
   }
-  return lines;
+  return { lines, skipped };
 }
 
 function sum(values: (number | null)[]): number | null {
@@ -151,8 +165,8 @@ export async function buildBillingReport(input: { registry: FleetRegistry; layou
   for (let index = 0; index < workspaces.length; index += METER_CONCURRENCY) {
     lines.push(...await Promise.all(workspaces.slice(index, index + METER_CONCURRENCY).map((workspace) => lineFor({ ...input, reseller }, workspace))));
   }
-  const closed = closingLines({ layout: input.layout, deps: input.deps, month, currency: reseller.currency, taken: new Set(lines.map((line) => line.workspaceId)) })
-    .map(({ users, ...line }) => (input.detail && users ? { ...line, users } : line));
+  const snapshots = closingLines({ layout: input.layout, deps: input.deps, month, currency: reseller.currency, taken: new Set(lines.map((line) => line.workspaceId)) });
+  const closed = snapshots.lines.map(({ users, ...line }) => (input.detail && users ? { ...line, users } : line));
   const all = [...lines, ...closed].sort((a, b) => a.slug.localeCompare(b.slug) || (a.workspaceId < b.workspaceId ? -1 : 1));
   return {
     version: 1,
@@ -162,7 +176,8 @@ export async function buildBillingReport(input: { registry: FleetRegistry; layou
     generatedAt: now.toISOString(),
     final: month < now.toISOString().slice(0, 7),
     basis: "tenant-reported-ledger",
-    complete: all.every((line) => line.ledger === "ok"),
+    complete: all.every((line) => line.ledger === "ok" && line.billable !== null) && snapshots.skipped.length === 0,
+    ...(snapshots.skipped.length ? { skippedSnapshots: snapshots.skipped } : {}),
     workspaces: all,
     totals: {
       workspaces: all.length,
@@ -188,7 +203,7 @@ export function billingCsv(report: FleetBillingReport): string {
   const text = (value: string) => csvCell(value);
   const row = (cells: string[]) => rows.push(cells.join(","));
   for (const line of report.workspaces) {
-    row([text(report.month), "workspace", text(line.slug), text(line.host), "", "", "", csvNumber(line.turns), csvNumber(line.costUsd), String(line.billable), line.ledger, csvNumber(line.wholesale.totalMinor), csvNumber(line.retail.totalMinor), csvNumber(line.marginMinor), text(report.currency)]);
+    row([text(report.month), "workspace", text(line.slug), text(line.host), "", "", "", csvNumber(line.turns), csvNumber(line.costUsd), line.billable === null ? "" : String(line.billable), line.ledger, csvNumber(line.wholesale.totalMinor), csvNumber(line.retail.totalMinor), csvNumber(line.marginMinor), text(report.currency)]);
     for (const user of line.users ?? []) {
       row([text(report.month), "user", text(line.slug), text(line.host), text(user.id), user.kind, csvNumber(user.asked), csvNumber(user.attributed), csvNumber(user.costUsd), "", "", "", "", "", text(report.currency)]);
     }
@@ -212,7 +227,7 @@ export function billingText(report: FleetBillingReport): string {
   for (const line of report.workspaces) {
     const known = line.ledger === "ok";
     out.push(cells([
-      plain(line.slug), plain(line.host), plain(line.status), line.billable ? `yes (${line.billableReason})` : "no",
+      plain(line.slug), plain(line.host), plain(line.status), line.billable === null ? "?" : line.billable ? `yes (${line.billableReason})` : "no",
       known ? String(line.activeUsers) : "?", known ? String(line.turns) : "?", known ? (line.costUsd === null ? "-" : line.costUsd.toFixed(4)) : "?",
       formatMinor(line.wholesale.totalMinor), formatMinor(line.retail.totalMinor), formatMinor(line.marginMinor),
     ]));
@@ -221,10 +236,16 @@ export function billingText(report: FleetBillingReport): string {
   out.push("");
   const totals = report.totals;
   out.push(cells(["TOTAL", `${totals.workspaces} workspace${totals.workspaces === 1 ? "" : "s"}`, "", "", totals.activeUsers === null ? "?" : String(totals.activeUsers), "", "", formatMinor(totals.wholesaleMinor), formatMinor(totals.retailMinor), formatMinor(totals.marginMinor)]));
-  if (!report.complete) {
+  const unreadable = report.workspaces.filter((line) => line.ledger === "unavailable");
+  if (unreadable.length) {
     out.push("");
     out.push("INCOMPLETE: these ledgers could not be read, so their lines and the totals that depend on them are unavailable:");
-    for (const line of report.workspaces) if (line.ledger === "unavailable") out.push(`  ${plain(line.slug)}: ${plain(line.unavailableReason ?? "unavailable")}`);
+    for (const line of unreadable) out.push(`  ${plain(line.slug)}: ${plain(line.unavailableReason ?? "unavailable")}${line.billable === null ? " (billable unknown)" : ""}`);
+  }
+  if (report.skippedSnapshots?.length) {
+    out.push("");
+    out.push("INCOMPLETE: these closing snapshots of deleted workspaces were skipped:");
+    for (const note of report.skippedSnapshots) out.push(`  ${plain(note)}`);
   }
   out.push("");
   out.push(FOOTER);
@@ -266,10 +287,15 @@ export async function billingReply(query: URLSearchParams, context: { layout: Fl
   let month: string;
   try { month = billingMonth(query.get("month") ?? undefined, context.now); }
   catch (error) { return { status: 400, body: { error: error instanceof Error ? error.message : String(error) } }; }
+  const rawMaxUsers = query.get("maxUsers");
+  const maxUsers = rawMaxUsers === null ? undefined : Number(rawMaxUsers);
+  if (rawMaxUsers !== null && !(/^\d+$/.test(rawMaxUsers) && maxUsers! >= 1 && maxUsers! <= MAX_USERS_LIMIT)) {
+    return { status: 400, body: { error: `maxUsers takes a whole number from 1 to ${MAX_USERS_LIMIT}` } };
+  }
   try {
     const registry = readRegistry(context.layout, context.deps);
     if (!registry.reseller) return { status: 409, body: { error: "this fleet has no reseller yet: run `openmausbot fleet init --yes --reseller-name NAME` first" } };
-    return { status: 200, body: await buildBillingReport({ registry, layout: context.layout, deps: context.deps, month, detail: query.get("detail") === "true", now: context.now }) };
+    return { status: 200, body: await buildBillingReport({ registry, layout: context.layout, deps: context.deps, month, detail: query.get("detail") === "true", now: context.now, maxUsers }) };
   } catch (error) {
     return { status: 500, body: { error: error instanceof Error ? error.message : String(error) } };
   }
@@ -287,6 +313,19 @@ const rateLine = (label: string, rates: Partial<RateSet>, currency: string) => {
   return `${label}: ${parts.join(", ") || "no rates"} per month in ${currency}`;
 };
 
+function refuseCurrencyChangeWithSnapshots(layout: FleetLayout, deps: FleetDeps, currency: string): void {
+  const month = new Date().toISOString().slice(0, 7);
+  const directory = posix.join(layout.billingDir, "closing");
+  for (const name of [...(deps.listDir?.(directory) ?? [])].sort()) {
+    if (!name.endsWith(`@${month}.json`)) continue;
+    let held: unknown;
+    try { held = (JSON.parse(deps.readText(posix.join(directory, name)) ?? "null") as { currency?: unknown } | null)?.currency; } catch { continue; }
+    if (typeof held === "string" && held !== currency) {
+      throw new Error(`closing snapshots for ${month} are in ${held}, so --currency ${currency} would mix two currencies in one report; change the currency in the first days of next month, after billing ${month}`);
+    }
+  }
+}
+
 export function planFleetRates(input: FleetInput, deps: FleetDeps): FleetStep[] {
   const layout = fleetLayout(input.root ?? "/");
   const registry = readRegistry(layout, deps);
@@ -294,6 +333,7 @@ export function planFleetRates(input: FleetInput, deps: FleetDeps): FleetStep[] 
   if (!reseller) throw new Error("this fleet has no reseller yet: run `openmausbot fleet init --yes --reseller-name NAME` first");
   const patch = input.ratesPatch;
   if (input.currency !== undefined && !TWO_DECIMAL_CURRENCIES.has(input.currency)) throw new Error(`--currency ${input.currency} is not supported; use a currency with two decimals, such as USD, EUR or GBP`);
+  if (input.currency !== undefined) refuseCurrencyChangeWithSnapshots(layout, deps, input.currency);
   const overrides = patch?.overrides ?? {};
   const cleared = patch?.clearOverrides ?? [];
   for (const slug of [...Object.keys(overrides), ...cleared]) if (!registry.workspaces[slug]) throw new Error(`no workspace "${slug}"`);
@@ -342,18 +382,24 @@ export async function snapshotBeforeDelete(input: FleetInput, deps: FleetDeps, n
   if (text === null) return;
   const registry = parseRegistry(text);
   const workspace = registry.workspaces[input.slug];
-  if (!registry.reseller || !workspace) return;
+  const reseller = registry.reseller;
+  if (!reseller || !workspace) return;
   assertManagedWorkspace(workspace);
-  const month = now.toISOString().slice(0, 7);
-  const report = await buildBillingReport({ registry: { ...registry, workspaces: { [workspace.slug]: workspace } }, layout, deps, month, detail: true, now });
-  const line = report.workspaces[0];
-  if (!line) throw new Error(`could not take the closing billing snapshot for ${input.slug}; the workspace was not deleted`);
-  const snapshot: ClosingSnapshot = { version: 1, month, closedAt: now.toISOString(), currency: report.currency, workspace: { ...line, status: "deleted" } };
+  const current = now.toISOString().slice(0, 7);
+  const created = Date.parse(workspace.createdAt);
+  const previous = new Date(monthWindow(current).start - 1).toISOString().slice(0, 7);
+  const months = Number.isNaN(created) || created < monthWindow(current).start ? [previous, current] : [current];
   const directory = posix.join(layout.billingDir, "closing");
-  try {
-    deps.mkdir(directory, 0o700);
-    deps.writeText(posix.join(directory, `${line.workspaceId}.json`), `${JSON.stringify(snapshot, null, 2)}\n`, 0o600);
-  } catch (error) {
-    throw new Error(`could not write the closing billing snapshot for ${input.slug} (${error instanceof Error ? error.message : String(error)}); the workspace was not deleted`);
+  for (const month of months) {
+    const line = await lineFor({ reseller, layout, deps, month, detail: true }, workspace);
+    const path = posix.join(directory, closingName(line.workspaceId, month));
+    if (month !== current && deps.readText(path) !== null) continue;
+    const snapshot: ClosingSnapshot = { version: 1, month, closedAt: now.toISOString(), currency: reseller.currency, workspace: { ...line, status: "deleted" } };
+    try {
+      deps.mkdir(directory, 0o700);
+      deps.writeText(path, `${JSON.stringify(snapshot, null, 2)}\n`, 0o600);
+    } catch (error) {
+      throw new Error(`could not write the closing billing snapshot for ${input.slug} (${error instanceof Error ? error.message : String(error)}); the workspace was not deleted`);
+    }
   }
 }

@@ -117,6 +117,22 @@ describe("rendered files", () => {
     expect(() => applySignIn(demoted.config, "add", "bob@acme.test", true)).toThrow("at least one admin");
     expect(() => applySignIn(demoted.config, "remove", "bob@acme.test", false)).toThrow("at least one admin");
   });
+
+  it("refuses a licence key that would add a line to the environment, without repeating it", () => {
+    const workspace: FleetWorkspace = { slug: "acme", host: "acme.agentada.cc", port: 8810, webhookPort: 8811, status: "running", createdAt: "" };
+    for (const licenseKey of ["omb1.k\nOMB_PUBLIC_URL=https://evil.test", "omb1.k\rOMB_PORT=1", "omb1.k\r\nX=1"]) {
+      let thrown = "";
+      try {
+        instanceEnv({ workspace, dataDir: "/var/lib/openmausbot/acme/.openmausbot", licenseKey });
+      } catch (error) {
+        thrown = (error as Error).message;
+      }
+      expect(thrown, JSON.stringify(licenseKey)).toBe("the licence key must be a single line; check the key file");
+      expect(thrown).not.toContain("omb1.k");
+    }
+    const registry = emptyRegistry("agentada.cc");
+    expect(() => createPlan({ registry, slug: "acme", seed: { admins: ["ada@example.test"], members: [] }, licenseKey: "omb1.k\nOMB_PUBLIC_URL=https://evil.test", layout })).toThrow("licence key must be a single line");
+  });
 });
 
 describe("plans", () => {

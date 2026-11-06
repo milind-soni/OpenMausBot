@@ -97,7 +97,7 @@ function signInMailEnv(smtp: NonNullable<FleetReseller["smtp"]>, deps: Pick<Flee
   try {
     parsed = new URL(url);
   } catch {
-    throw new Error(`${smtp.urlFile} does not hold an SMTP address such as smtps://user:password@smtp.example.com:465`);
+    throw new Error(`${smtp.urlFile} does not hold an SMTP address such as smtp://127.0.0.1:25 or smtps://user:password@smtp.example.com:465`);
   }
   if (parsed.protocol !== "smtp:" && parsed.protocol !== "smtps:") throw new Error(`${smtp.urlFile} must hold an smtp:// or smtps:// address`);
   if (/[\s"'\\]/.test(url)) throw new Error(`${smtp.urlFile} must not contain spaces, quotes or backslashes: percent-encode the user name and password`);
@@ -131,6 +131,20 @@ export function brandCreateNotes(input: { registry: FleetRegistry; licenseKey?: 
     ...(input.licenseKey ? [] : [`no licence key was given: ${reseller.name}'s brand applies only on a workspace whose key grants whitelabel (pass --license-key-file)`]),
     ...(reseller.smtp ? [] : [`warning: sign-in codes go through the OpenMausBot account service, not ${reseller.name}'s own mail; set reseller.smtp in fleet.json, or give each admin access with \`openmausbot pair\` on the server`]),
   ];
+}
+
+/** A known open risk: the relay address sits in every workspace's environment, which that workspace's own processes can read. */
+export function smtpLoginNotes(reseller: FleetReseller | undefined, deps: Pick<FleetDeps, "readText">): string[] {
+  const smtp = reseller?.smtp;
+  if (!smtp) return [];
+  let parsed: URL;
+  try {
+    parsed = new URL(deps.readText(smtp.urlFile)?.trim() ?? "");
+  } catch {
+    return [];
+  }
+  if (!parsed.username && !parsed.password) return [];
+  return [`warning: the mail relay address in ${smtp.urlFile} carries a login, and every workspace gets it in its environment, where that workspace's own processes (a bot with a shell included) can read it and send mail as you; use a relay on this server's loopback that needs no login, such as smtp://127.0.0.1:25, which keeps the password itself and pins the sender`];
 }
 
 interface BrandChange {
@@ -192,6 +206,7 @@ export function planFleetBrand(input: FleetInput, deps: FleetDeps): FleetStep[] 
   if (!reseller) throw new Error("fleet brand needs a reseller: run `openmausbot fleet init --domain your.domain --reseller-name NAME --yes` first");
   if (input.brandDefault && input.slug) throw new Error("fleet brand takes a workspace name or --default, not both");
   const change = brandChange(input, deps);
+  const loginNotes = smtpLoginNotes(reseller, deps).map((text): FleetStep => ({ kind: "note", text }));
 
   if (input.brandDefault) {
     const brandDefault = applyChange(readBrandFields(deps, defaultBrandPath(layout)), change, "default brand");
@@ -205,6 +220,7 @@ export function planFleetBrand(input: FleetInput, deps: FleetDeps): FleetStep[] 
       ...merged.flatMap(({ workspace }) => staleEnvNote(layout, workspace.slug, deps)),
       ...workspaces.filter((workspace) => !managed.includes(workspace)).map((workspace): FleetStep => ({ kind: "note", text: `skipped ${workspace.slug}: it is ${workspace.status}; run \`openmausbot fleet brand ${workspace.slug}\` once it is running again` })),
       { kind: "note", text: `default brand saved and applied to ${merged.length} workspace${merged.length === 1 ? "" : "s"}; open pages show it on their next reload, no restart needed` },
+      ...loginNotes,
     ];
   }
 
@@ -221,6 +237,7 @@ export function planFleetBrand(input: FleetInput, deps: FleetDeps): FleetStep[] 
     writeBrand(workspaceBrandPath(layout, input.slug), brand),
     ...staleEnvNote(layout, input.slug, deps),
     { kind: "note", text: `${input.slug} now shows "${brand.name}"; an open page shows it on its next reload, no restart needed` },
+    ...loginNotes,
   ];
 }
 
@@ -238,13 +255,19 @@ export function omitBrandAssets<T extends object>(view: T): T {
   return copy as T;
 }
 
-const SMTP_LINE = /^(OMB_SIGNIN_SMTP_URL=).*$/m;
+const SECRET_ENV_LINES: [RegExp, string][] = [
+  [/^(OMB_SIGNIN_SMTP_URL=).*$/gm, "$1(read from the reseller's SMTP file when this runs)"],
+  [/^(OMB_LICENSE_KEY=).*$/gm, "$1(the licence key, left out of this listing)"],
+];
 
-/** A plan that is printed must not carry brand images (hundreds of kilobytes each) or the mail relay's password. */
+const withoutSecretEnv = (content: string) => SECRET_ENV_LINES.reduce((text, [line, shown]) => text.replace(line, shown), content);
+
+/** A plan that is printed must not carry brand images (hundreds of kilobytes each), the mail relay's address or the licence key. */
 export function redactPrintedSteps(steps: FleetStep[]): FleetStep[] {
   return steps.map((step) => {
     if (step.kind !== "write") return step;
-    if (SMTP_LINE.test(step.content)) return { ...step, content: step.content.replace(SMTP_LINE, "$1(read from the reseller's SMTP file when this runs)") };
+    const content = withoutSecretEnv(step.content);
+    if (content !== step.content) return { ...step, content };
     if (posix.basename(posix.dirname(step.path)) !== "brands") return step;
     let value: unknown;
     try {

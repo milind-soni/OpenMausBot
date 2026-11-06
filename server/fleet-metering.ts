@@ -14,12 +14,17 @@ const EMAIL = /^[a-z0-9_%+'-]+(?:\.[a-z0-9_%+'-]+)*@(?:[a-z0-9](?:[a-z0-9-]{0,61
 
 const isControl = (char: string) => { const code = char.charCodeAt(0); return code < 32 || (code >= 127 && code <= 159); };
 export const hasControl = (text: string): boolean => [...text].some(isControl);
-/** Replaces each control character with a space, so a tenant-chosen label cannot move a terminal's cursor. */
-export const printable = (text: string): string => [...text].map((char) => (isControl(char) ? " " : char)).join("");
+export { printable } from "./fleet-printable.ts";
 
+/**
+ * Appends a status change to the workspace as it stood before the change. A workspace from a registry that kept no events
+ * starts its history with the status it has now, at its creation time, so the months before the change still bill as they did.
+ */
 export function recordWorkspaceEvent(workspace: FleetWorkspace, status: FleetWorkspaceStatus, at: string): FleetWorkspace {
   if (Number.isNaN(Date.parse(at)) || new Date(at).toISOString() !== at) throw new Error("a workspace event needs an ISO time");
-  const events = [...(workspace.events ?? []), { at, status }].slice(-FLEET_MAX_EVENTS);
+  const created = Date.parse(workspace.createdAt);
+  const seed = !Number.isNaN(created) && created < Date.parse(at) ? [{ at: workspace.createdAt, status: workspace.status }] : [];
+  const events = [...(workspace.events ?? seed), { at, status }].slice(-FLEET_MAX_EVENTS);
   return { ...workspace, events };
 }
 

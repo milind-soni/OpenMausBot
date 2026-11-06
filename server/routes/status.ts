@@ -92,7 +92,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
       else if (method === "POST" && resource === "upgrade") forward = { method: "POST", path: "/upgrade" };
       else if (method === "GET" && resource === "billing") {
         const query = new URLSearchParams();
-        for (const key of ["month", "detail"]) { const value = url.searchParams.get(key); if (value !== null) query.set(key, value); }
+        for (const key of ["month", "detail", "maxUsers"]) { const value = url.searchParams.get(key); if (value !== null) query.set(key, value); }
         forward = { method: "GET", path: `/billing${query.size ? `?${query}` : ""}` };
       }
       else if (slug && method === "POST" && sub === "brand") forward = { method: "POST", path: `/workspaces/${slug}/brand`, body: await readBody(req, 512 * 1024) };

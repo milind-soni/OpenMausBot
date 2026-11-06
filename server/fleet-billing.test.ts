@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { billingCsv, billingMonth, billingText, buildBillingReport, isBillableWorkspace, planFleetRates, priceWorkspace, runFleetBilling, snapshotBeforeDelete } from "./fleet-billing.ts";
 import { runFleetCommand, type FleetDeps, type FleetInput } from "./fleet-cli.ts";
-import { emptyRegistry, fleetLayout, parseRegistry, workspaceDataDir, type FleetRegistry, type FleetWorkspace } from "./fleet.ts";
+import { emptyRegistry, fleetLayout, parseRegistry, resumePlan, suspendPlan, workspaceDataDir, type FleetRegistry, type FleetWorkspace } from "./fleet.ts";
 import type { FleetReseller } from "./fleet-reseller.ts";
+import { recordWorkspaceEvent } from "./fleet-metering.ts";
 import { fleetMachine } from "./testing/fleet-machine.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import type { UsageRow, UsageTrigger } from "./usage-ledger.ts";
@@ -72,6 +73,63 @@ describe("which workspaces are billable", () => {
     const shuffled = workspace("a", { status: "suspended", ...events(["2026-09-10T00:00:00.000Z", "suspended"], ["2026-08-01T00:00:00.000Z", "running"]) });
     expect(billable(shuffled)).toEqual({ billable: true, reason: "running" });
     expect(billable(shuffled, false, "2026-10")).toEqual({ billable: false, reason: "none" });
+  });
+
+  describe("a workspace from a registry written before events were kept", () => {
+    const legacy = workspace("old", { events: undefined, createdAt: "2026-08-01T00:00:00.000Z" });
+    const NOV_5 = new Date("2026-11-05T09:00:00.000Z");
+
+    it("stays billable for the months before its first suspend, and for the month it was suspended in", () => {
+      const suspended = recordWorkspaceEvent(legacy, "suspended", NOV_5.toISOString());
+      expect(suspended.events).toEqual([{ at: "2026-08-01T00:00:00.000Z", status: "running" }, { at: NOV_5.toISOString(), status: "suspended" }]);
+      for (const month of ["2026-08", "2026-09", "2026-10", "2026-11"]) expect(isBillableWorkspace({ ...suspended, status: "suspended" }, month, false)).toEqual({ billable: true, reason: "running" });
+      expect(isBillableWorkspace({ ...suspended, status: "suspended" }, "2026-12", false)).toEqual({ billable: false, reason: "none" });
+    });
+
+    it("keeps that history when suspended through the planner", () => {
+      const registry = { ...emptyRegistry("example.test"), workspaces: { old: legacy } };
+      const { registry: next } = suspendPlan({ registry, slug: "old", now: NOV_5 });
+      const suspended = next.workspaces.old!;
+      expect(suspended.status).toBe("suspended");
+      expect(isBillableWorkspace(suspended, "2026-10", false)).toEqual({ billable: true, reason: "running" });
+      const resumed = resumePlan({ registry: next, slug: "old", now: new Date("2026-12-02T00:00:00.000Z") }).registry.workspaces.old!;
+      expect(isBillableWorkspace(resumed, "2026-11", false)).toEqual({ billable: true, reason: "running" });
+      expect(isBillableWorkspace(resumed, "2026-12", false)).toEqual({ billable: true, reason: "running" });
+    });
+
+    it("does not call a legacy workspace that was already suspended running before its resume", () => {
+      const parked = workspace("old", { events: undefined, status: "suspended", createdAt: "2026-08-01T00:00:00.000Z" });
+      const { registry } = resumePlan({ registry: { ...emptyRegistry("example.test"), workspaces: { old: parked } }, slug: "old", now: NOV_5 });
+      expect(isBillableWorkspace(registry.workspaces.old!, "2026-10", false)).toEqual({ billable: false, reason: "none" });
+      expect(isBillableWorkspace(registry.workspaces.old!, "2026-11", false)).toEqual({ billable: true, reason: "running" });
+    });
+  });
+
+  describe("a workspace whose oldest events were dropped by the cap", () => {
+    it("still knows it was running at the start of a month that began before the first kept event", () => {
+      const trimmed = workspace("old", { status: "running", createdAt: "2026-01-01T00:00:00.000Z", events: [{ at: "2026-03-10T00:00:00.000Z", status: "suspended" }, { at: "2026-05-01T00:00:00.000Z", status: "running" }] });
+      expect(isBillableWorkspace(trimmed, "2026-03", false)).toEqual({ billable: true, reason: "running" });
+      expect(isBillableWorkspace(trimmed, "2026-04", false)).toEqual({ billable: false, reason: "none" });
+      expect(isBillableWorkspace(trimmed, "2026-05", false)).toEqual({ billable: true, reason: "running" });
+    });
+
+    it("never bills a month that ended before the workspace was created", () => {
+      const trimmed = workspace("old", { createdAt: "2026-06-01T00:00:00.000Z", events: [{ at: "2026-07-10T00:00:00.000Z", status: "suspended" }] });
+      expect(isBillableWorkspace(trimmed, "2026-05", false)).toEqual({ billable: false, reason: "none" });
+    });
+
+    it("keeps the newest hundred and still bills from them", () => {
+      let current: FleetWorkspace = workspace("old", { events: undefined, createdAt: "2026-01-01T00:00:00.000Z" });
+      for (let index = 0; index < 130; index++) current = recordWorkspaceEvent(current, index % 2 ? "suspended" : "running", new Date(Date.UTC(2026, 0, 2 + index)).toISOString());
+      expect(current.events).toHaveLength(100);
+      expect(isBillableWorkspace(current, "2026-02", false).billable).toBe(true);
+    });
+  });
+
+  it("says the answer is unknown, not no, when the ledger could not be read and the workspace was not running", () => {
+    const idle = workspace("a", { status: "suspended", ...events(["2026-08-01T00:00:00.000Z", "running"], ["2026-08-15T00:00:00.000Z", "suspended"]) });
+    expect(isBillableWorkspace(idle, "2026-09", null)).toEqual({ billable: null, reason: "unknown" });
+    expect(isBillableWorkspace(workspace("a"), "2026-09", null)).toEqual({ billable: true, reason: "running" });
   });
 
   it("falls back to the current status and creation time when a registry has no events", () => {
@@ -230,6 +288,21 @@ describe("the report", () => {
     expect(report.complete).toBe(false);
     expect(report.totals).toEqual({ workspaces: 5, activeUsers: null, wholesaleMinor: null, retailMinor: null, marginMinor: null });
     expect(report.workspaces.filter((line) => line.slug !== "acme").every((line) => line.ledger === "ok" && line.marginMinor !== null)).toBe(true);
+  });
+
+  it("leaves billable and the money unknown when an idle workspace's ledger cannot be read", async () => {
+    seedLedgers();
+    const machine = fleet(world, { unmeterable: ["omb-gamma"] });
+    const report = await build(machine);
+    const gamma = report.workspaces.find((line) => line.slug === "gamma")!;
+    expect(gamma).toMatchObject({
+      billable: null, billableReason: "unknown", ledger: "unavailable",
+      wholesale: { workspaceMinor: null, usersMinor: null, totalMinor: null }, retail: { workspaceMinor: null, usersMinor: null, totalMinor: null }, marginMinor: null,
+    });
+    expect(report.complete).toBe(false);
+    expect(report.totals).toMatchObject({ wholesaleMinor: null, retailMinor: null, marginMinor: null });
+    expect(billingCsv(report).split("\n")).toContain("2026-09,workspace,gamma,gamma.example.test,,,,,,,unavailable,,,,USD");
+    expect(billingText(report)).toMatch(/gamma\s+gamma\.example\.test\s+suspended\s+\?\s+\?\s+\?\s+\?\s+unavailable/);
   });
 
   it("treats a missing people capability as every ledger unavailable", async () => {
@@ -491,7 +564,7 @@ describe("the report", () => {
       action: "delete", slug, admins: [], members: [], dryRun: false, yes: true, keepData: false, node: "/usr/bin/node", script: "/cli.js", root, ...overrides,
     });
     const quiet = { log: (_line: string) => {}, error: (_line: string) => {} };
-    const closing = (slug: string) => join(layout().billingDir, "closing", `${slug}@2026-08-01T00:00:00.000Z.json`);
+    const closing = (slug: string, month = "2026-09") => join(layout().billingDir, "closing", `${slug}@2026-08-01T00:00:00.000Z@${month}.json`);
 
     it("writes a root-only snapshot of the month before the account is removed", async () => {
       seedLedgers();
@@ -505,7 +578,7 @@ describe("the report", () => {
       expect(parseRegistry(machine.files.get(layout().registryFile)!).workspaces).not.toHaveProperty("acme");
     });
 
-    it("is part of that month's report afterwards, once, and only for that month", async () => {
+    it("is part of that month's report afterwards, once, and not of a month it was not snapshotted for", async () => {
       seedLedgers();
       const machine = fleet(world, { features: ["admin", "billing"] });
       await runFleetCommand(del("acme"), quiet, machine.deps);
@@ -517,7 +590,7 @@ describe("the report", () => {
       expect(after.totals.workspaces).toBe(5);
       expect(after.totals).toMatchObject({ wholesaleMinor: 7500, retailMinor: 18500 });
       expect((await build(machine, true)).workspaces.find((item) => item.slug === "acme")!.users).toHaveLength(2);
-      expect((await build(machine, false, "2026-08")).workspaces.some((item) => item.slug === "acme")).toBe(false);
+      expect((await build(machine, false, "2026-07")).workspaces.some((item) => item.slug === "acme")).toBe(false);
     });
 
     it("aborts the delete, running no step, when the snapshot cannot be written", async () => {
@@ -567,14 +640,117 @@ describe("the report", () => {
       expect(report.workspaces.filter((item) => item.slug === "acme").map((item) => item.workspaceId)).toEqual(["acme@2026-08-01T00:00:00.000Z", "acme@2026-09-15T00:00:00.000Z"]);
     });
 
-    it("refuses to bill past a damaged snapshot or one in another currency", async () => {
+    const closingFile = (workspaceId: string, month: string) => join(layout().billingDir, "closing", `${workspaceId}@${month}.json`);
+    const ACME_ID = "acme@2026-08-01T00:00:00.000Z";
+
+    it("keeps one snapshot per workspace when two are deleted in the same month", async () => {
+      seedLedgers();
+      const machine = fleet(world, { features: ["admin", "billing"] });
+      expect(await runFleetCommand(del("acme"), quiet, machine.deps)).toBe(0);
+      expect(await runFleetCommand(del("beta"), quiet, machine.deps)).toBe(0);
+      const acme = JSON.parse(machine.files.get(closingFile(ACME_ID, "2026-09"))!);
+      const beta = JSON.parse(machine.files.get(closingFile("beta@2026-09-05T00:00:00.000Z", "2026-09"))!);
+      expect(acme.workspace).toMatchObject({ slug: "acme", workspaceId: ACME_ID, activeUsers: 2, retail: { totalMinor: 7000 } });
+      expect(beta.workspace).toMatchObject({ slug: "beta", status: "deleted", activeUsers: 0, retail: { totalMinor: 5000 } });
+      const report = await build(machine);
+      expect(report.workspaces.filter((item) => ["acme", "beta"].includes(item.slug)).map((item) => [item.slug, item.status])).toEqual([["acme", "deleted"], ["beta", "deleted"]]);
+    });
+
+    it("keeps both lives of a name that was deleted, recreated and deleted again in a month", async () => {
+      seedLedgers();
+      const machine = fleet(world, { features: ["admin", "billing"] });
+      await runFleetCommand(del("acme"), quiet, machine.deps);
+      const registry = parseRegistry(machine.files.get(layout().registryFile)!);
+      registry.workspaces.acme = workspace("acme", { createdAt: "2026-09-15T00:00:00.000Z", events: [{ at: "2026-09-15T00:00:00.000Z", status: "running" }] });
+      machine.files.set(layout().registryFile, JSON.stringify(registry));
+      await runFleetCommand(del("acme"), quiet, machine.deps);
+      const first = JSON.parse(machine.files.get(closingFile(ACME_ID, "2026-09"))!);
+      const second = JSON.parse(machine.files.get(closingFile("acme@2026-09-15T00:00:00.000Z", "2026-09"))!);
+      expect(first.workspace).toMatchObject({ workspaceId: ACME_ID, activeUsers: 2 });
+      expect(second.workspace).toMatchObject({ workspaceId: "acme@2026-09-15T00:00:00.000Z" });
+      const report = await build(machine);
+      expect(report.workspaces.filter((item) => item.slug === "acme").map((item) => item.workspaceId)).toEqual([ACME_ID, "acme@2026-09-15T00:00:00.000Z"]);
+    });
+
+    it("also snapshots the previous month, so billing it after the delete still lists the workspace", async () => {
+      seedLedgers();
+      const machine = fleet(world, { features: ["admin", "billing"] });
+      await runFleetCommand(del("acme"), quiet, machine.deps);
+      const august = await build(machine, false, "2026-08");
+      expect(august.workspaces.find((item) => item.slug === "acme")).toMatchObject({ status: "deleted", billable: true, billableReason: "running", wholesale: { workspaceMinor: 2000 } });
+      expect(JSON.parse(machine.files.get(closingFile(ACME_ID, "2026-08"))!)).toMatchObject({ month: "2026-08" });
+    });
+
+    it("takes no previous-month snapshot for a workspace that did not exist yet, and never rewrites one that exists", async () => {
+      seedLedgers();
       const machine = fleet(world);
-      machine.files.set(join(layout().billingDir, "closing", "x@1.json"), "{broken");
-      await expect(build(machine)).rejects.toThrow("not JSON");
-      machine.files.set(join(layout().billingDir, "closing", "x@1.json"), JSON.stringify({ version: 1, month: "2026-09" }));
-      await expect(build(machine)).rejects.toThrow("malformed");
-      machine.files.set(join(layout().billingDir, "closing", "x@1.json"), JSON.stringify({ version: 1, month: "2026-09", closedAt: NOW.toISOString(), currency: "EUR", workspace: { workspaceId: "x@1", slug: "x", host: "x.example.test", billable: true, wholesale: { workspaceMinor: 1, usersMinor: 0, totalMinor: 1 }, retail: { workspaceMinor: 1, usersMinor: 0, totalMinor: 1 } } }));
-      await expect(build(machine)).rejects.toThrow("EUR");
+      await snapshotBeforeDelete(del("beta"), machine.deps, NOW);
+      expect(machine.files.has(closingFile("beta@2026-09-05T00:00:00.000Z", "2026-08"))).toBe(false);
+      machine.files.set(closingFile(ACME_ID, "2026-08"), "kept");
+      await snapshotBeforeDelete(del("acme"), machine.deps, NOW);
+      expect(machine.files.get(closingFile(ACME_ID, "2026-08"))).toBe("kept");
+    });
+
+    it("writes a later month's retry to its own file and leaves the earlier month's alone", async () => {
+      seedLedgers();
+      const machine = fleet(world);
+      await snapshotBeforeDelete(del("acme"), machine.deps, NOW);
+      const earlier = machine.files.get(closingFile(ACME_ID, "2026-09"))!;
+      await snapshotBeforeDelete(del("acme"), machine.deps, new Date("2026-10-03T00:00:00.000Z"));
+      expect(machine.files.get(closingFile(ACME_ID, "2026-09"))).toBe(earlier);
+      expect(JSON.parse(machine.files.get(closingFile(ACME_ID, "2026-10"))!)).toMatchObject({ month: "2026-10" });
+    });
+
+    const foreign = { version: 1, month: "2026-09", closedAt: NOW.toISOString(), currency: "EUR", workspace: { workspaceId: "x@1", slug: "x", host: "x.example.test", billable: true, wholesale: { workspaceMinor: 1, usersMinor: 0, totalMinor: 1 }, retail: { workspaceMinor: 1, usersMinor: 0, totalMinor: 1 } } };
+    const snapshotPath = (name: string) => join(layout().billingDir, "closing", name);
+
+    it.each([
+      ["a damaged file", "{broken", "not JSON"],
+      ["a malformed file", JSON.stringify({ version: 1, month: "2026-09" }), "malformed"],
+      ["a snapshot in another currency", JSON.stringify(foreign), "EUR"],
+    ])("skips %s, says so, and marks the report incomplete instead of failing", async (_name, content, expected) => {
+      seedLedgers();
+      const machine = fleet(world, { features: ["admin", "billing"] });
+      machine.files.set(snapshotPath("x@1@2026-09.json"), content);
+      const report = await build(machine);
+      expect(report.complete).toBe(false);
+      expect(report.workspaces.some((item) => item.slug === "x")).toBe(false);
+      expect(report.skippedSnapshots).toHaveLength(1);
+      expect(report.skippedSnapshots![0]).toContain("x@1@2026-09.json");
+      expect(report.skippedSnapshots![0]).toContain(expected);
+      expect(billingText(report)).toContain("x@1@2026-09.json");
+      const out: string[] = [];
+      expect(await runFleetBilling({ action: "billing", admins: [], members: [], dryRun: false, yes: false, keepData: false, node: "n", script: "s", root }, { log: (line) => out.push(line), error: () => {} }, machine.deps)).toBe(1);
+      expect(out.join("\n")).toContain("INCOMPLETE");
+    });
+
+    it("ignores a damaged file that belongs to another month", async () => {
+      seedLedgers();
+      const machine = fleet(world);
+      machine.files.set(snapshotPath("x@1@2026-07.json"), "{broken");
+      machine.files.set(snapshotPath("y@1@2026-07.json"), JSON.stringify({ ...foreign, month: "2026-07" }));
+      const report = await build(machine);
+      expect(report.complete).toBe(true);
+      expect(report.skippedSnapshots).toBeUndefined();
+    });
+
+    it("never lets a damaged snapshot block a delete", async () => {
+      seedLedgers();
+      const machine = fleet(world, { features: ["admin", "billing"] });
+      machine.files.set(snapshotPath("x@1@2026-09.json"), "{broken");
+      expect(await runFleetCommand(del("acme"), quiet, machine.deps)).toBe(0);
+      expect(machine.files.has(closingFile(ACME_ID, "2026-09"))).toBe(true);
+    });
+
+    it("refuses to change the currency while this month has snapshots in another one", () => {
+      const machine = fleet(world);
+      machine.files.set(snapshotPath("x@1@2026-09.json"), JSON.stringify({ ...foreign, currency: "USD" }));
+      const set = (currency: string): FleetInput => ({ action: "rates", admins: [], members: [], dryRun: false, yes: false, keepData: false, node: "n", script: "s", root, currency });
+      expect(() => planFleetRates(set("EUR"), machine.deps)).toThrow(/closing snapshots.*USD/);
+      expect(() => planFleetRates(set("USD"), machine.deps)).not.toThrow();
+      machine.files.delete(snapshotPath("x@1@2026-09.json"));
+      machine.files.set(snapshotPath("x@1@2026-08.json"), JSON.stringify({ ...foreign, month: "2026-08", currency: "USD" }));
+      expect(() => planFleetRates(set("EUR"), machine.deps)).not.toThrow();
     });
   });
 });

@@ -92,6 +92,8 @@ describe("openmausbot command line", () => {
     });
     expect(parseArgs(["fleet", "billing", "--month", "2026-09", "--csv", "--detail", "--license-key-file", "/tmp/key"], {})).toMatchObject({ fleetAction: "billing", month: "2026-09", csv: true, detail: true, licenseKeyFile: resolve("/tmp/key") });
     expect(parseArgs(["fleet", "billing"], {})).not.toHaveProperty("slug");
+    expect(parseArgs(["fleet", "billing", "--max-users", "2500"], {})).toMatchObject({ fleetAction: "billing", maxUsers: 2500 });
+    expect(parseArgs(["fleet", "billing"], {})).not.toHaveProperty("maxUsers");
     expect(parseArgs(["fleet"], {})).toMatchObject({ error: expect.stringContaining("brand NAME|--default, rates, billing") });
 
     const refused = (args: string[]) => (parseArgs(["fleet", ...args], {}) as { error?: string }).error;
@@ -118,6 +120,10 @@ describe("openmausbot command line", () => {
     expect(refused(["create", "acme", "--currency", "USD"])).toBe("only fleet init and fleet rates take --currency");
     expect(refused(["create", "acme", "--reseller-name", "Acme"])).toBe("only fleet init takes --reseller-name");
     expect(refused(["billing", "--month"])).toBe("--month needs a value");
+    for (const bad of ["0", "10001", "-1", "1.5", "many", "1e3"]) expect(refused(["billing", "--max-users", bad])).toBe("--max-users takes a whole number from 1 to 10000");
+    expect(parseArgs(["fleet", "billing", "--max-users", "10000"], {})).toMatchObject({ maxUsers: 10000 });
+    expect(refused(["list", "--max-users", "5"])).toBe("only fleet billing takes --max-users");
+    expect(refused(["billing", "--max-users"])).toBe("--max-users needs a value");
   });
 
   it("takes the phone kind non-interactively, because a scripted pair never sees the chooser", () => {

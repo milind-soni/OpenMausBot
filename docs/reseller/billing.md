@@ -47,6 +47,7 @@ openmausbot fleet billing                       # this month so far, as text
 openmausbot fleet billing --month 2026-08       # a past month
 openmausbot fleet billing --csv > 2026-08.csv   # for a spreadsheet
 openmausbot fleet billing --detail              # one line per person as well
+openmausbot fleet billing --max-users 5000      # raise the 1000-person limit (up to 10000)
 ```
 
 Months are UTC calendar months. The current month is "as of" now: run it again
@@ -57,7 +58,9 @@ The command needs a licence key that grants both `admin` and `billing`
 that is missing. This is a product gate, not a security boundary: the report
 reads files root already owns. In the operator workspace the same report is at
 `GET /api/fleet/billing?month=YYYY-MM&detail=true`, for an admin with the same
-two features.
+two features. The root agent builds each month's report once at a time and
+answers a repeat of the same request from memory for up to a minute, until a
+change (create, suspend, delete and so on) goes through it.
 
 ### What is charged
 
@@ -68,7 +71,15 @@ workspace created on the 28th pays the full workspace price. A retained
 workspace follows the same rule. The registry records each status change with
 its time (the last 100 are kept), which is how "running at any moment" is
 known; a registry written before this feature falls back to the current status
-and the creation time.
+and the creation time, and its first suspend, resume or retain starts its
+history at the creation time with the status it had, so earlier months bill as
+they did.
+
+Only the newest 100 changes are kept. For a month that began before the oldest
+kept change, the state at its start is inferred from that change (a suspend
+means it was running before, a resume means it was not). A month older than the
+kept history, or one asked about for a workspace that flipped state more than
+about 50 times since, can therefore be wrong; the report cannot tell you.
 
 A workspace is also charged the user price for each **active user**: a distinct
 person who asked it something and got an answer during the month.
@@ -104,6 +115,17 @@ takes over 20 seconds) is shown as `unavailable`. Its user count and every
 amount are blank, not zero. Totals that depend on it are blank. The report says
 `INCOMPLETE`, the other workspaces are still shown, and the command exits 1.
 
+If the workspace was not running that month, whether it is charged at all
+depends on the usage that cannot be read, so its `billable` is unknown: the text
+report shows `?`, the CSV cell is empty, and its workspace price is blank too.
+It is not reported as "no".
+
+A closing snapshot (below) that is damaged, or was written in another currency,
+is skipped instead of stopping the report. The report says `INCOMPLETE`, names
+the file, and exits 1, because a deleted workspace may be missing from it. A
+damaged file for another month is ignored. `fleet rates --currency` refuses to
+change the currency while this month has snapshots in another one.
+
 ### CSV columns
 
 `month,row_type,workspace,host,user,user_kind,asked_turns,attributed_turns,cost_usd,billable,ledger,wholesale_minor,retail_minor,margin_minor,currency`
@@ -116,11 +138,29 @@ prefixed with an apostrophe; numbers, including a negative margin, are not.
 
 ## Deleting a workspace
 
-`fleet delete` first writes a root-only closing snapshot of the current month
-to `/var/lib/openmausbot-billing/closing/NAME@CREATED.json`, because deleting
-removes the ledger. If the snapshot cannot be written the workspace is not
-deleted. A report for that month includes the snapshot. `--keep-data` keeps the
-workspace and its ledger, so no snapshot is needed.
+`fleet delete` first writes root-only closing snapshots to
+`/var/lib/openmausbot-billing/closing/NAME@CREATED@YYYY-MM.json`, because
+deleting removes the ledger. There is one file per month and per workspace life
+(`CREATED` tells a reused name apart), for the current UTC month and for the
+month before it, so billing last month after a delete early this month still
+lists the workspace. A workspace created this month has no file for last month,
+and a last-month file that already exists is not rewritten. A retry in a later
+month writes that month's files and leaves earlier ones alone. If a snapshot
+cannot be written the workspace is not deleted; a damaged snapshot already in
+the directory never blocks a delete. A report for a month includes that month's
+snapshots. `--keep-data` keeps the workspace and its ledger, so no snapshot is
+needed.
+
+## How far to trust it
+
+The ledger is the workspace's own file, so a determined customer can make the
+report smaller than the truth: truncate or edit the ledger, leave out the email
+and label so its turns are unattributed (they count as turns, not as users), or
+push more than 1000 distinct labels in a month so the workspace becomes
+`unavailable` and is shown as incomplete. The report is for spotting this, not
+preventing it. The provisioned seats (the sign-in lists, which the customer
+cannot change without you) are printed beside the active users, so a large gap
+between the two is worth asking about.
 
 ## What it does not do
 

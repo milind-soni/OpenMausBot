@@ -166,6 +166,31 @@ describe("a create with a reseller", () => {
     expect(thrown).not.toContain("hunter2");
   });
 
+  it("warns on create and brand that a relay login is readable by every workspace, and stays quiet for a relay without one", () => {
+    const smtp = { urlFile: "/etc/openmausbot/smtp.url", from: "Acme <login@acme.test>" };
+    const registry = resellerRegistry([workspace("acme")], { ...RESELLER, smtp });
+    const notesOf = (steps: FleetStep[]) => steps.flatMap((step) => (step.kind === "note" ? [step.text] : []));
+    const commands = (machine: ReturnType<typeof machineWith>) => [
+      notesOf(planFleetAction({ ...base, action: "create", slug: "beta", admins: ["ada@example.test"], licenseKey: "omb1.k" }, machine.deps)),
+      notesOf(planFleetAction({ ...base, action: "brand", slug: "acme", brandPatch: { tagline: "Hi" } }, machine.deps)),
+      notesOf(planFleetAction({ ...base, action: "brand", brandDefault: true, brandPatch: { tagline: "Hi" } }, machine.deps)),
+    ];
+    for (const url of ["smtps://login%40acme.test:hunter2@smtp.acme.test:465", "smtp://relay-hunter2@smtp.acme.test:587"]) {
+      for (const notes of commands(machineWith(registry, { [smtp.urlFile]: `${url}\n` }))) {
+        const warning = notes.find((text) => text.startsWith("warning: ") && text.includes(smtp.urlFile));
+        expect(warning, url).toBeDefined();
+        expect(warning).toContain("that workspace's own processes");
+        expect(warning).toContain("can read it");
+        expect(warning).toContain("smtp://127.0.0.1:25");
+        expect(warning).toContain("pins the sender");
+        expect(notes.join("\n")).not.toContain("hunter2");
+      }
+    }
+    for (const url of ["smtp://127.0.0.1:25", "smtp://localhost:2525", "smtps://smtp.acme.test:465"]) {
+      for (const notes of commands(machineWith(registry, { [smtp.urlFile]: `${url}\n` }))) expect(notes.filter((text) => text.includes(smtp.urlFile) || text.includes("password")), url).toEqual([]);
+    }
+  });
+
   it("refuses a sender address that would break the environment file", () => {
     const withSmtp = { ...RESELLER, smtp: { urlFile: "/etc/openmausbot/smtp.url", from: 'Acme "Chat" <login@acme.test>' } };
     const machine = machineWith(resellerRegistry([], withSmtp), { "/etc/openmausbot/smtp.url": "smtp://localhost:25" });

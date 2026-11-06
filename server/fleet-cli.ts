@@ -1,12 +1,12 @@
 // Runs fleet.ts plans as root with fixed argument lists, or prints them for a root shell; never a shell command from user input.
 import { spawn } from "node:child_process";
-import { appendFileSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, closeSync, constants, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync } from "node:fs";
 import { posix } from "node:path";
 import { writeFileAtomic } from "./atomic.ts";
 import type { BrandField } from "./brand-schema.ts";
 import { unstableInstallWarning } from "./service-unit.ts";
 import { assertWorkspaceHost, workspaceHostFor } from "./fleet-tenancy.ts";
-import { brandCreateNotes, redactPrintedSteps, planCreateBrand, planFleetBrand, resolveCreateBrandJson } from "./fleet-brand.ts";
+import { brandCreateNotes, redactPrintedSteps, planCreateBrand, planFleetBrand, resolveCreateBrandJson, smtpLoginNotes } from "./fleet-brand.ts";
 import { planFleetRates, runFleetBilling, snapshotBeforeDelete } from "./fleet-billing.ts";
 import { meterTenantPeople, tenantIo, type PeopleResult } from "./fleet-tenant-io.ts";
 import { TWO_DECIMAL_CURRENCIES, type FleetReseller, type RateSet } from "./fleet-reseller.ts";
@@ -130,6 +130,37 @@ export interface FleetDeps {
   listDir?(path: string): string[];
 }
 
+const MAX_IMAGE_FILE_BYTES = 1024 * 1024;
+
+/** Root opens a path the operator typed: never through a final symbolic link, only a regular file, at most 1 MiB. */
+function readImageFile(path: string): Uint8Array | null {
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return null;
+    if (code === "ELOOP" || code === "EMLINK") throw new Error(`${path} is a symbolic link; pass the image file itself`);
+    throw error;
+  }
+  try {
+    const info = fstatSync(fd);
+    if (!info.isFile()) throw new Error(`${path} is not a regular file`);
+    if (info.size > MAX_IMAGE_FILE_BYTES) throw new Error(`${path} is larger than 1 MiB`);
+    const buffer = Buffer.alloc(MAX_IMAGE_FILE_BYTES + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const read = readSync(fd, buffer, length, buffer.length - length, null);
+      if (read === 0) break;
+      length += read;
+    }
+    if (length > MAX_IMAGE_FILE_BYTES) throw new Error(`${path} is larger than 1 MiB`);
+    return buffer.subarray(0, length);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export function defaultFleetDeps(): FleetDeps {
   return {
     isRoot: () => typeof process.getuid === "function" && process.getuid() === 0,
@@ -150,7 +181,7 @@ export function defaultFleetDeps(): FleetDeps {
       }),
     pathExists: (path) => { try { lstatSync(path); return true; } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; } },
     readText: (path, owner) => owner ? tenantIo(owner, path, "read") as string | null : (existsSync(path) ? readFileSync(path, "utf8") : null),
-    readBytes: (path) => (existsSync(path) ? readFileSync(path) : null),
+    readBytes: readImageFile,
     listDir: (path) => { try { return readdirSync(path); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; } },
     entitlements: async (licenseKey) => {
       const { entitled, loadEnterpriseLayer } = await import("./enterprise.ts");
@@ -286,7 +317,7 @@ export function planFleetAction(input: FleetInput, deps: FleetDeps): FleetStep[]
         ...(input.memory ? { memoryMax: input.memory } : {}),
         layout,
       });
-      return [...plan.steps, ...brandCreateNotes({ registry, licenseKey: input.licenseKey }).map((text): FleetStep => ({ kind: "note", text }))];
+      return [...plan.steps, ...[...brandCreateNotes({ registry, licenseKey: input.licenseKey }), ...smtpLoginNotes(registry.reseller, deps)].map((text): FleetStep => ({ kind: "note", text }))];
     }
     case "brand":
       return planFleetBrand(input, deps);
