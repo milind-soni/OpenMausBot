@@ -14,6 +14,15 @@ import { OPENCODE_STANDALONE } from "./opencode-release.ts";
 import { createAcpDriver, type AccountErrorCode, type AcpConfig, type AcpSupport } from "./core.ts";
 import { offeredModels, surveyModelVariants } from "./config-options.ts";
 import { declareTypedOpenCodeModel } from "./opencode-typed-model.ts";
+import {
+  declareLiveOpenCodeModels,
+  keepOpenCodeModelsFresh,
+  markOpenCodeCatalogRefreshed,
+  refreshLiveModelLists,
+  resetLiveModelLists,
+  type OpenCodeModelSources,
+  type OpenCodeRefreshSchedule,
+} from "./opencode-model-refresh.ts";
 import { parseOpenCodeLogLine } from "./quiet-status.ts";
 import type { ModelCatalog, ModelVariantOption, ProviderDriver, ProviderErrorCode } from "../../contracts.ts";
 import { titleCaseModelId } from "../../contracts.ts";
@@ -30,12 +39,14 @@ const paidModels = new Set<string>();
 const DISCOVERY_TIMEOUT_MS = 20_000;
 const EFFORT_SURVEY_MS = 8_000;
 const DISCOVERY_PROBE_TTL_MS = 30_000;
+/** How long a listing OpenCode 2 runs stays open for its own catalog refresh to land (2.2.5 fetched 11 MB in 4 s). */
+const SELF_REFRESH_SETTLE_MS = 10_000;
 const discoveryProbeCache = new Map<string, { expiresAt: number; result: Promise<boolean> }>();
 
 export type OpenCodeCatalogLoader = (
   environment: Record<string, string | undefined>,
   cli: string,
-  options?: { refresh?: boolean },
+  options?: { refresh?: boolean; settleMs?: number },
 ) => Promise<ModelCatalog>;
 
 function labelForModel(id: string): string {
@@ -231,10 +242,11 @@ function runOpenCodeModelsVerbose(
 }
 
 /** OpenCode (1.19.4) lists models from its models.dev cache, or without one the snapshot built into it, and neither
- * `opencode models` nor `opencode acp` refetches it; `models --refresh` does, and the next process reads it. */
-function refreshOpenCodeModelCache(cli: string, environment: Record<string, string | undefined>): Promise<void> {
+ * `opencode models` nor `opencode acp` refetches it; `models --refresh` does, and the next process reads it. OpenCode
+ * 2.2.5 rejects the flag (exit 1): each of its processes refetches the catalog itself, in the background, at start. */
+function refreshOpenCodeModelCache(cli: string, environment: Record<string, string | undefined>): Promise<boolean> {
   return new Promise((resolve) => {
-    execCli(cli, ["models", "--refresh"], { timeout: DISCOVERY_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, env: environment }, () => resolve());
+    execCli(cli, ["models", "--refresh"], { timeout: DISCOVERY_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, env: environment }, (error) => resolve(!error));
   });
 }
 
@@ -294,11 +306,14 @@ export function surveyOpenCodeEfforts(
   return surveyModelVariants(request, session, budgetMs);
 }
 
+/** `settleMs` keeps the process open that long after it starts, then lists again: OpenCode 2's own catalog refresh
+ * reaches a running process's later sessions only. */
 export async function probeOpenCodeSession(
   cli: string,
   environment: Record<string, string | undefined>,
   folder?: string,
   timeoutMs = DISCOVERY_TIMEOUT_MS,
+  settleMs = 0,
 ): Promise<OpenCodeSessionProbe> {
   const cwd = folder ?? await discoveryDirectory();
   const deadline = Date.now() + timeoutMs;
@@ -388,7 +403,12 @@ export async function probeOpenCodeSession(
       const session = await request("session/new", { cwd, mcpServers: [] });
       listed = { session, efforts: new Map() };
       const budget = Math.min(EFFORT_SURVEY_MS, deadline - Date.now() - 1_000);
-      return { session, efforts: await surveyOpenCodeEfforts(request, session, budget) };
+      const efforts = await surveyOpenCodeEfforts(request, session, budget);
+      if (!settleMs) return { session, efforts };
+      const wait = Math.min(settleMs, timeoutMs - 2_000) - (Date.now() - (deadline - timeoutMs));
+      if (wait > 0) await new Promise((resolveWait) => setTimeout(resolveWait, wait));
+      const later = await request("session/new", { cwd, mcpServers: [] });
+      return { session: catalogFromOpenCodeSession(later) ? later : session, efforts };
     })().then((result) => finish(null, result), (error: Error) => finish(error));
   });
 }
@@ -408,10 +428,12 @@ function withEfforts(
 export async function discoverOpenCodeModels(
   environment: Record<string, string | undefined>,
   cli = "opencode",
-  options: { refresh?: boolean } = {},
+  options: { refresh?: boolean; settleMs?: number } = {},
 ): Promise<ModelCatalog> {
-  if (options.refresh) await refreshOpenCodeModelCache(cli, environment);
-  const probeSession = () => probeOpenCodeSession(cli, environment);
+  const settleMs = options.refresh && !await refreshOpenCodeModelCache(cli, environment)
+    ? options.settleMs ?? SELF_REFRESH_SETTLE_MS
+    : 0;
+  const probeSession = () => probeOpenCodeSession(cli, environment, undefined, DISCOVERY_TIMEOUT_MS, settleMs);
   const readMetadata = () => runOpenCodeModelsVerbose(cli, environment).then(parseOpenCodeModels);
   let [session, verbose] = await Promise.allSettled([probeSession(), readMetadata()]);
   // Two OpenCode processes starting together in a fresh home race to create its database and one fails
@@ -469,6 +491,7 @@ export async function canRunOpenCode(
 
 export function resetOpenCodeModelCache() {
   discoveryFolder = null;
+  resetLiveModelLists();
   lastSuccessfulCatalog.clear();
   catalogRevisions.clear();
   discoveryProbeCache.clear();
@@ -816,7 +839,11 @@ function openCodeLoginsFingerprint(env: Record<string, string | undefined>): str
 }
 
 /** `ownAccess` hears, per instance, whether its last sign-in read found access of the person's own. */
-const support = (loadCatalog: OpenCodeCatalogLoader, ownAccess = new Map<string, boolean>()): AcpSupport => ({
+const support = (
+  loadCatalog: OpenCodeCatalogLoader,
+  ownAccess = new Map<string, boolean>(),
+  sources: OpenCodeModelSources = {},
+): AcpSupport => ({
   driverKind: "opencodeGo",
   displayName: "OpenCode",
   models: NO_MODELS,
@@ -854,6 +881,7 @@ const support = (loadCatalog: OpenCodeCatalogLoader, ownAccess = new Map<string,
   resolveTurnModel: (model, env) => model ? declareTypedOpenCodeModel(env, model) ?? ensureOpenCodeInjectModel(model, env) : model,
   transformEnv: (env, config, instanceId, instanceEnvironment) => {
     withholdProviderKeysWhenManaged(env, config, instanceId, instanceEnvironment);
+    declareLiveOpenCodeModels(env, sources.liveLists);
     applyStandaloneSpawnEnv(OPENCODE_STANDALONE, env, config.cli);
   },
   spawnFingerprint: (env, config) => openCodeSpawnFingerprint(env, config.cli),
@@ -880,10 +908,12 @@ const support = (loadCatalog: OpenCodeCatalogLoader, ownAccess = new Map<string,
   },
   classifyError: classifyOpenCodeError,
   describeAccountError: describeOpenCodeAccountError,
-  resolveModels: async (environment, config, _instanceId, fresh) => mergeLocalInject(
-    await loadCatalog(environment, config.cli, { refresh: fresh === true }),
-    environment,
-  ),
+  resolveModels: async (environment, config, instanceId, fresh) => {
+    if (fresh) markOpenCodeCatalogRefreshed(instanceId, (sources.now ?? Date.now)());
+    await refreshLiveModelLists(environment, { lists: sources.liveLists, fetch: sources.fetch, now: sources.now });
+    declareLiveOpenCodeModels(environment, sources.liveLists);
+    return mergeLocalInject(await loadCatalog(environment, config.cli, { refresh: fresh === true }), environment);
+  },
   buildPromptText: (turn) => turn.system ? `${turn.system}\n\n${turn.text}` : turn.text,
 });
 
@@ -919,14 +949,20 @@ export function classifyOpenCodeError(error: unknown): ProviderErrorCode | undef
 
 export const classifyOpenCodeGoError = classifyOpenCodeError;
 
+export type { OpenCodeRefreshSchedule };
+
 /** Its status says `freeFallback` while only Zen's free no-login models make it ready (contracts.ts). */
-export function createOpenCodeDriver(loadCatalog: OpenCodeCatalogLoader = discoverOpenCodeModels): ProviderDriver<AcpConfig> {
+export function createOpenCodeDriver(
+  loadCatalog: OpenCodeCatalogLoader = discoverOpenCodeModels,
+  schedule: OpenCodeRefreshSchedule = {},
+): ProviderDriver<AcpConfig> {
   const ownAccess = new Map<string, boolean>();
-  const driver = createAcpDriver(support(loadCatalog, ownAccess));
+  const driver = createAcpDriver(support(loadCatalog, ownAccess, schedule));
   return {
     ...driver,
     async create(input) {
       const instance = await driver.create(input);
+      keepOpenCodeModelsFresh(instance, input.instanceId, schedule);
       const read = instance.snapshot.bind(instance);
       instance.snapshot = async () => {
         const snapshot = await read();
