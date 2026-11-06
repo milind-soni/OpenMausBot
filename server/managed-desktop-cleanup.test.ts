@@ -286,7 +286,7 @@ function reloadFixture() {
   };
   // Two rooms, each with a member speaking on one engine and holding a bearer in each.
   const rooms = new Map([["room-compat", { botId: "eli", engine: "compat" }], ["room-claude", { botId: "mira", engine: "claude" }]]);
-  const log: string[] = [], settled: Array<{ generation: string; text: string }> = [], revoked: string[] = [];
+  const log: string[] = [], settled: Array<{ generation: string; text: string }> = [], revoked: string[] = [], existingVmReleased: string[] = [];
   const slot = (botId: string) => [`${botId} agents`, { grants: "", token: `t-${botId}` }] as const;
   const bearers = new Map([...threads.map(thread => [thread.threadId, new Map([slot(thread.botId)])] as const),
     ...[...rooms.keys()].map(threadId => [threadId, new Map([slot("eli"), slot("mira")])] as const)]);
@@ -329,7 +329,8 @@ function reloadFixture() {
     liveTurnByThread: new Map(),
     stoppedTurnText: (threadId: string, _turnId: string | undefined, cause: string) => `${cause} (${threadId})`,
     stoppedTurnOutcome: ({ reason }: { reason: string }) => reason,
-    stopScreenPoller() {}, releaseLocalVmThread() {}, releaseTurnResources() {}, endForeignTurns() {}, vpsThreadEnded() {},
+    stopScreenPoller() {}, releaseLocalVmThread() {}, releaseExistingVmThread: (threadId: string) => existingVmReleased.push(threadId),
+    releaseTurnResources() {}, endForeignTurns() {}, vpsThreadEnded() {},
     watchdog: { settle() {} }, closeOpenApprovals() {}, directTurnBots: new Map(),
     finalizeDelegationWatch: (_threadId: string, _ok: boolean, _reply: string, why: string) => log.push(`delegation:${why}`),
     routines: { failThread() {} }, failedTurnTool: (name: string) => ({ name, ok: false }),
@@ -344,7 +345,7 @@ function reloadFixture() {
     return context.reloadProviders(engineLaunches(before, {})) as Promise<void>;
   };
   const held = () => Object.fromEntries([...bearers].map(([threadId, slots]) => [threadId, [...slots.keys()]]));
-  return { threads, log, settled, revoked, held, save, configs: () => configs, context };
+  return { threads, log, settled, revoked, existingVmReleased, held, save, configs: () => configs, context };
 }
 
 it("saving the same provider settings again interrupts no turn and replaces no engine", async () => {
@@ -354,6 +355,7 @@ it("saving the same provider settings again interrupts no turn and replaces no e
   expect(f.log).toEqual([]);
   expect(f.settled).toEqual([]);
   expect(f.revoked).toEqual([]);
+  expect(f.existingVmReleased).toEqual([]);
   expect(f.held()).toEqual(before);
   expect(f.threads.filter(thread => thread.busy).map(thread => thread.threadId)).toEqual(["eli-work", "mira-work"]);
 });
@@ -363,6 +365,7 @@ it("a changed key replaces only its engine and tells only that engine's requeste
   await f.save({ ...f.configs(), compat: { driver: "openai-compat", environment: { OPENAI_COMPAT_API_KEY: "k2" } } });
   expect(f.log.filter(line => line.includes("claude") || line.includes("mira"))).toEqual([]);
   expect(f.revoked).toEqual(["eli-work", "room-compat"]);
+  expect(f.existingVmReleased).toEqual(["eli-work", "room-compat"]);
   expect(f.held()).toEqual({
     "eli-work": [], "eli-idle": [], "mira-work": ["mira agents"], "mira-idle": ["mira agents"],
     "room-compat": ["mira agents"], "room-claude": ["mira agents"],

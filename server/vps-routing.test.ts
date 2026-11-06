@@ -18,6 +18,7 @@ import {
 import { VPS_CONTAINER_LABEL, VPS_IMAGE, VPS_MANAGED_LABEL, VPS_VIEWER_LABEL, vpsContainerName } from "./vps-computer.ts";
 import { CONTROL_BUSY, CONTROL_REFUSAL_PLAIN, controlRefusal, createControlClient } from "./control-client.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { validPngFixture } from "./testing/png-fixture.ts";
 import type { RoutineSchedule } from "../shared/routines.ts";
 import { workerPort } from "./testing/worker-port.ts";
 
@@ -210,11 +211,9 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
 `, { mode: 0o755 });
     writeFileSync(join(fakeBin, "image.json"), imageInspectJson());
     writeFileSync(join(fakeBin, "container.json.tpl"), containerInspectTemplate());
-    const png = Buffer.concat([
-      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-      Buffer.alloc(600),
-      Buffer.from("IEND", "ascii"),
-    ]);
+    // The preview path validates PNG chunk structure and CRCs, so the
+    // zero-filled placeholder this fixture used to emit is now refused.
+    const png = validPngFixture();
     writeFileSync(join(fakeBin, "screenshot.b64"), png.toString("base64"));
     writeFileSync(dockerLog, "");
 

@@ -12,6 +12,8 @@ import { workspacePreparationDockerfile } from "./container-workspace.ts";
 import { DATA_DIR } from "./config.ts";
 import { PIDS_LIMIT, raisePidsLimit } from "./container-limits.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
+import { wholeScreenshot } from "./screenshot-validation.ts";
+export { wholeScreenshot, type ScreenshotCheck } from "./screenshot-validation.ts";
 
 const run = promisify(execFile);
 const SCREENSHOT_STATUS_TTL_MS = 10_000;
@@ -44,6 +46,7 @@ export const VM_WORKSPACE_GUEST = "/home/cua/workspace";
 export const DISPLAY = ":1";
 export const CUA_SOCKET = "/run/user/1000/openmausbot-cua.sock";
 export const CUA_EXECUTABLE = "/usr/local/libexec/openmausbot/cua-driver";
+export const PER_BOT_VM_HOMES_DIR = join(DATA_DIR, "vm-homes");
 
 const RUNTIMES = ["docker", "podman", "container"] as const;
 export type Runtime = (typeof RUNTIMES)[number];
@@ -76,7 +79,7 @@ export function perBotLocalVmTarget(botId: string): LocalVmTarget {
   return {
     key: `bot:${digest}`,
     containerName: `${CONTAINER}-${short}`,
-    workspaceDir: join(DATA_DIR, "vm-homes", short),
+    workspaceDir: join(PER_BOT_VM_HOMES_DIR, short),
     viewerPort: null,
     label: digest,
   };
@@ -994,25 +997,8 @@ export async function containerComputerExists(
   }
 }
 
-export type ScreenshotCheck = { ok: boolean; mime: "image/png" | "image/jpeg" };
-
-/** A truncated base64 transfer must never become a "successful" preview frame. */
-export function wholeScreenshot(bytes: Buffer): ScreenshotCheck {
-  if (bytes.length < 512) return { ok: false, mime: "image/png" };
-  const png = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
-  if (png) {
-    return {
-      ok: bytes.subarray(Math.max(0, bytes.length - 12)).includes(Buffer.from("IEND", "ascii")),
-      mime: "image/png",
-    };
-  }
-  const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
-  return {
-    ok: jpeg && bytes.subarray(Math.max(0, bytes.length - 32)).includes(Buffer.from([0xff, 0xd9])),
-    mime: "image/jpeg",
-  };
-}
-
+/** Enumerate managed per-bot names so source changes cannot hide a container
+ * whose bot record no longer exists. Unknown managed names fail closed. */
 export async function containerComputerFrame(
   runner: CommandRunner = sh,
   platform: NodeJS.Platform = process.platform,
