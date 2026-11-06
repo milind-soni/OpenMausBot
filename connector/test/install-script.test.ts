@@ -76,7 +76,7 @@ describe("install.sh", () => {
     expect(value("SECCOMP")).toBe(SECCOMP_FILE);
     expect(script).toContain('ADMIN_URL="${MAUSBOT_ADMIN_URL:-@MAUSBOT_ADMIN_URL@}"');
     expect(script).toContain('CONNECTOR_IMAGE="${MAUSBOT_CONNECTOR_IMAGE:-@MAUSBOT_CONNECTOR_IMAGE@}"');
-    expect(script).toContain('say "Connected. Your server shows up in MausBot in a minute."');
+    expect(script).toContain(`say "Connected. Your server shows up in MausBot in a minute, for your team's Owner to accept."`);
     expect(script).toContain(`com.mausbot.instance=$instance`);
     expect(script).toContain("--restart unless-stopped --network host");
     expect(script).toContain("-v /var/run/docker.sock:/var/run/docker.sock -v \"$STATE_VOLUME:/state\" -v \"$ETC_DIR:/etc/mausbot:ro\" -v \"$AUDIT_DIR:/var/log/mausbot\"");

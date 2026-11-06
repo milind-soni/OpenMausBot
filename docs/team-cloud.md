@@ -83,8 +83,12 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   *Paired devices* lists the phones those codes opened as *device · member* (`GET /api/team/phones`): a member sees their
   own, the Super admin and Admins every member's. **Remove** (`DELETE /api/team/phones/<id>`, the same rule) signs that
   phone out at once and closes its open streams; the app windows the Admin signs in are not listed there.
-- **Never asleep, kept across restarts.** A Team Cloud refuses the Admin's sleep request (`busy: ["team"]`) and keeps
-  every member's session across a restart; a My Cloud revokes every session that is not its owner's at each boot.
+- **Asleep only when nobody needs it, kept across restarts.** On a plan that sleeps, a Team Cloud answers the Admin's
+  sleep request as any home does ([Sleeping homes](cloud-pro.md#sleeping-homes-the-power-read-and-the-sleep-handshake)):
+  not while any member used it in the last minutes, a turn or routine runs, or work one bot handed another is still
+  moving (`handoff`). A member's app, phone or a webhook wakes it, and the Admin wakes it before a routine is due. Inbox
+  lines and open cards live on its volume, so a person's answer after a sleep finds them. It keeps every member's
+  session across a restart; a My Cloud revokes every session that is not its owner's at each boot.
 
 
 ### Off a team

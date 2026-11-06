@@ -39,6 +39,16 @@ Reddit at all. Reddit blocks bots that browse from cloud computers and can ban
 the account, so the bot is told to use the Reddit connected app or ask you to do
 it on your own computer.
 
+A bot's `exec` call waits for its command to finish, so a long one (a big
+download, a build, a data job) can run out of time while it keeps going on the
+Boat. For those, the bot starts the command with `background: true`, which
+answers at once with a process id, and follows it with `exec_status`, which shows
+whether it is still running, its exit code and the end of its output. The Boat
+doesn't go to sleep while a background command runs, for up to two hours after it
+started. When a plain `exec` runs out of time, the bot is told the command may
+still be running, so it checks instead of starting a second copy. This works with
+your own Boat key and with the cloud computers included in a Cloud plan.
+
 ## Bring your own VPS
 
 OpenMausBot can control Docker on an x86_64 Linux server through an SSH config alias. The agent process stays on your local machine; only Docker commands and the managed desktop container run on the VPS.

@@ -4,6 +4,7 @@
 import * as boat from "../boat.ts";
 import { boatCreateRecoverySnapshot } from "../boat-create-idempotency.ts";
 import { hasPendingBoatDeletionForBot } from "../boat-delete-journal.ts";
+import { backgroundCommandRunning } from "../cloud-computer-background.ts";
 import { ComputerIdleTimer } from "../computer-idle.ts";
 import type { AppConfig } from "../config.ts";
 import { redactSecretsInText } from "../redact.ts";
@@ -66,6 +67,8 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
     const state = typeof machine?.state === "string" ? machine.state : null;
     if (!state || boat.SLEEPING_BOAT_STATES.has(state)) return forget(owner);
     if (boat.boatTurnLifecycleAction(state) !== "attach" || busy(owner)) return "busy";
+    if (typeof machine?.id === "string" && await backgroundCommandRunning(cfg, machine.id)) return "busy";
+    if (closed) return;
     let release: () => void;
     try {
       release = deps.claim(owner);

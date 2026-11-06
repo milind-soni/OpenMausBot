@@ -16,7 +16,7 @@ import { activeLocale, t } from "@/lib/i18n";
 import { localizedRelativeTime } from "@/lib/relative-time";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useBesideFramed } from "@/lib/chrome-rail";
-import { makeHome, placeInitials, recolorPlace, removePlace, usePlaces, type RailPlace } from "@/lib/places";
+import { computerName, makeHome, placeInitials, recolorPlace, removePlace, usePlaces, type RailPlace } from "@/lib/places";
 import { AccountsSheet, switchNote } from "./AccountMenu";
 import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 import { MENU_ROW, MENU_SHEET } from "./menu-recipe";
@@ -34,12 +34,13 @@ const tileRadius = (size: number) => Math.round(size * 0.3);
  * own that signed in with their account says so, whether it is online, and why there is nothing to open when it is only
  * reachable on its own network. */
 export function placeLabel(place: RailPlace, now = Date.now()): string {
+  if (place.profile) return t("rail.profile", { name: computerName(place) });
   const own = place.kind === "account" ? null : place.email ?? null;
   return [placeStatus(place, now), own, place.signIn && t("accounts.needsSignIn")].filter(Boolean).join(" · ");
 }
 
 function placeStatus(place: RailPlace, now: number): string {
-  const name = place.kind === "computer" ? t("rail.thisComputer") : place.server ? t("rail.ownServer", { name: place.name }) : place.name;
+  const name = place.kind === "computer" ? computerName(place) : place.server ? t("rail.ownServer", { name: place.name }) : place.name;
   if (place.waiting) return t("rail.waiting", { name });
   if (place.progress !== undefined) return t("rail.settingUp", { name });
   if (place.attention) return t("rail.attention", { name });
@@ -65,7 +66,7 @@ export function shownPlaces(places: RailPlace[], limit = RAIL_SHOWN): RailPlace[
 export function matchingPlaces(places: RailPlace[], query: string): RailPlace[] {
   const words = query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
   return places.filter((place) => {
-    const name = `${place.kind === "computer" ? t("rail.thisComputer") : place.name} ${place.email ?? ""}`.toLocaleLowerCase();
+    const name = `${place.kind === "computer" ? computerName(place) : place.name} ${place.email ?? ""}`.toLocaleLowerCase();
     return words.every((word) => name.includes(word));
   });
 }
@@ -203,7 +204,7 @@ function PlaceMenu({ place, top, onClose }: { place: RailPlace; top: number; onC
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => { (ref.current?.querySelector<HTMLElement>("[role='radio'][tabindex='0']") ?? ref.current?.querySelector<HTMLElement>("[data-rail-remove-ask], [data-rail-make-home-start]"))?.focus(); }, []);
   if (!paint && !place.removable && !place.makeHome) return null;
-  const name = place.kind === "computer" ? t("rail.thisComputer") : place.name;
+  const name = place.kind === "computer" ? computerName(place) : place.name;
   const choose = (swatch: CloudSwatch) => {
     if (!paint || paint.locked || pending || swatch === paint.swatch) return;
     setPending(swatch); setOutcome(null);
