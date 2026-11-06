@@ -48,8 +48,8 @@ export interface ComputerRouteDeps {
   boatLifecycleBusyBots: Pick<Set<string>, "has">;
   computerProviderConfigTransitions: Pick<Set<RemoteComputerProvider>, "has">;
   localVmActiveThreads: Pick<Map<string, string>, "has">;
-  localVmLifecycleBusy: Pick<Set<string>, "has" | "add" | "delete">;
-  localVmSeen: Pick<Set<string>, "add">;
+  localVmLifecycleBusy: { has(value: string): boolean; add(value: string): unknown; delete(value: string): boolean };
+  localVmSeen: { add(value: string): unknown };
   localVmImageBusy: BusyFlag;
   localVmProvisionBusy: BusyFlag;
   localVmModeChangeBusy: Pick<BusyFlag, "get">;

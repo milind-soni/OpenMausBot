@@ -3,7 +3,6 @@ import { canWorkOnCloud } from "../../shared/cloud-computer";
 import { viewerTargetId } from "../../shared/desktop-viewer";
 import { Switch } from "./SettingsPrimitives";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { z } from "zod";
 import { waitForLocalVmReady } from "@/lib/local-vm-readiness";
 import { CalendarClock, ChevronRight, Columns2, Box, Check, Cloud, Sparkles, Globe, Hand, Loader2, Maximize2, Monitor, Moon, Power, Settings, X } from "lucide-react";
 import { api, ApiError, currentTaskBot, useStore, type Bot, type ConfigStatus } from "@/state/store";
@@ -29,7 +28,7 @@ const DataPanel = lazy(() => import("./data/DataPanel").then((module) => ({ defa
 const loadLiveDesktop = () => import("./LiveDesktop").then((module) => ({ default: module.LiveDesktop }));
 const LiveDesktop = lazy(loadLiveDesktop);
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled } from "@/lib/feature-flags";
-import { parseComputerHelp, transitionComputerControlLease, type ComputerControlAction } from "@/lib/computer-control";
+import { transitionComputerControlLease, type ComputerControlAction } from "@/lib/computer-control";
 import { openProviderDesktop, useComputerTakeover } from "./computer-takeover";
 import { SignInBanner } from "./SignInRequestCard";
 import { LocalScreenPreview } from "./LocalScreenPreview";
@@ -52,89 +51,7 @@ import { openPlaceAction, placeBlocked, placeFacts, placeHasIssue, placeViewFor,
 import { cloudRefusal, type PlaceActionId, type PlaceFacts, type PlaceView } from "../../shared/place-view";
 import { t } from "@/lib/i18n";
 import { LocalizedPanelError, panelErrorText } from "@/lib/computer-messages";
-
-interface VpsComputerStatus {
-  configured: boolean;
-  imageMatches: boolean;
-  managed: boolean;
-  container: "running" | "stopped" | "missing";
-  ready: boolean;
-  problem: string | null;
-}
-
-type Phase =
-  | "checking"
-  | "unconfigured"
-  | "starting"
-  | "busy-boat"
-  | "ready"
-  | "vm"
-  | "vm-unavailable"
-  | "vps-unconfigured"
-  | "vps-incompatible"
-  | "vps-stopped"
-  | "local"
-  | "local-unavailable"
-  | "auto-unavailable"
-  | "team-boat"
-  | "show-ready-boat"
-  | "show-sleeping-boat"
-  | "show-pending-boat"
-  | "cloud-new"
-  | "cloud-asleep"
-  | "browser"
-  | "off"
-  | "error";
-
-interface ManagedLocalVmStatus extends LocalVmStatus {
-  source: "managed";
-}
-interface LocalVmStatus {
-  resumable?: boolean;
-  stop_reason?: "idle" | null;
-  mode: "shared" | "per-bot" | "pool";
-  max_instances: number;
-  image: boolean;
-  create_supported: boolean;
-  container: "running" | "stopped" | "missing";
-  imageMatches: boolean;
-  managed: boolean;
-  network: "loopback" | "unsafe" | "unknown";
-  security: "hardened" | "unsafe" | "unknown";
-  persistence: "durable" | "unsafe" | "unknown";
-  desktopReady: boolean;
-  ready: boolean;
-  problem: string | null;
-  viewer_url: string;
-  target_key: string;
-}
-
-interface ExistingLocalVmStatus {
-  source: "existing";
-  configured: boolean;
-  sshAlias: string | null;
-  ssh: "not-configured" | "connected" | "unreachable";
-  os: "unknown" | "linux" | "unsupported";
-  driver: "unknown" | "compatible" | "missing" | "incompatible";
-  mcp: "unknown" | "ready" | "failed";
-  tools: string[];
-  desktopReady: boolean;
-  ready: boolean;
-  problem: string | null;
-  errorCode: string | null;
-  driver_version: string;
-  viewer_url: "";
-  watch_only: true;
-}
-
-type LocalVmUiStatus = ManagedLocalVmStatus | ExistingLocalVmStatus;
-
-const computerControlSnapshotSchema = z.object({
-  held: z.boolean().optional().default(false),
-  helpReason: z.string().nullable().optional().default(null),
-  help: z.unknown().optional().transform(parseComputerHelp),
-  owned: z.boolean().optional(),
-}).passthrough();
+import { computerControlSnapshotSchema, type ExistingLocalVmStatus, type LocalVmUiStatus, type ManagedLocalVmStatus, type Phase, type VpsComputerStatus } from "./computer-panel-state";
 
 export function ComputerPanel({
   bot: profileBot,

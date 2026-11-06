@@ -10848,12 +10848,16 @@ describe("harness HTTP API", () => {
         modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
       });
       expect(engine.status).toBe(200);
+      writeFileSync(fakeDockerFixture, "existing-vm-must-not-probe-managed-runtime");
+      rmSync(fakeDockerLog, { force: true });
+      writeFileSync(fakeDockerLog, "");
       const started = await api("POST", `/api/bots/${botId}/messages`, { text: "hold the Existing VM turn" });
       expect(started.status).toBe(202);
       await expect.poll(async () => {
         const state = (await api("GET", "/api/bots")).body;
         return state.bots.find((bot: { id: string }) => bot.id === botId)?.busy;
       }, { timeout: 5_000 }).toBe(true);
+      expect(readFileSync(fakeDockerLog, "utf8")).toBe("");
       const sourceChange = await api("PATCH", "/api/config", { localVm: { source: "managed" } });
       expect(sourceChange.status).toBe(409);
       expect(sourceChange.body.error).toContain("active Existing VM turn");
@@ -10880,6 +10884,8 @@ describe("harness HTTP API", () => {
       expect(status.body).not.toHaveProperty("mode");
       expect(status.body).not.toHaveProperty("max_instances");
     } finally {
+      rmSync(fakeDockerFixture, { force: true });
+      rmSync(fakeDockerLog, { force: true });
       await api("PATCH", "/api/config", { localVm: { source: "managed", sshAlias: "" } });
       await api("DELETE", `/api/bots/${botId}`);
     }

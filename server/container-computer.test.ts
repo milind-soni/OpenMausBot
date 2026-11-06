@@ -22,7 +22,6 @@ import {
   WORKSPACE_LABEL,
   containerComputerAction,
   containerComputerFrame,
-  containerComputerManagedPerBotNames,
   containerComputerMcp,
   containerComputerScreenshot,
   containerComputerStatus,
@@ -37,12 +36,13 @@ import {
   podmanSecurityIsHardened,
   SHARED_LOCAL_VM_TARGET,
   setupCommands,
-  wholeScreenshot,
   type CommandRunner,
   type LocalVmTarget,
   autoLocalVmAttachable,
 } from "./container-computer.ts";
 import { PIDS_LIMIT } from "./container-limits.ts";
+import { containerComputerManagedPerBotNames } from "./container-computer-inventory.ts";
+import { wholeScreenshot } from "./screenshot-validation.ts";
 import { validPngFixture } from "./testing/png-fixture.ts";
 
 function runner(responses: Record<string, string | Error>) {

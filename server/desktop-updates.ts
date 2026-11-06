@@ -231,7 +231,7 @@ export async function recoverLocalVms(input: {
   mode: "shared" | "per-bot" | "pool";
   seats: number;
   bots: LocalVmInventoryBot[];
-  seen: Set<string>;
+  seen: { add(value: string): unknown };
   status(target: LocalVmTarget): Promise<ContainerComputerStatus | null>;
   note(target: LocalVmTarget, status: ContainerComputerStatus | null): void;
   armIdle(target: LocalVmTarget): void;

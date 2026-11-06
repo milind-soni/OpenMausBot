@@ -29,11 +29,13 @@ import { deciderConfigSchema, type DeciderConfig } from "./decider/config.ts";
 import { liveConfigSchema, liveConfigWithEnv, liveSettingEnv, type LiveConfig } from "./live-config.ts";
 import { browserEngineConfigSchema, isValidCdpTarget, type BrowserEngineConfig } from "./browser/config.ts";
 import { roomContextSettings } from "./room-context-settings.ts";
-import { MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES, MAX_LOCAL_VM_MAX_INSTANCES, MIN_LOCAL_VM_IDLE_TIMEOUT_MINUTES, MIN_LOCAL_VM_MAX_INSTANCES } from "./local-vm-settings.ts";
+import { localVmConfigSchema, type LocalVmConfig } from "./local-vm-config.ts";
+import { isValidSshAlias } from "./ssh-alias.ts";
 export * from "./local-vm-settings.ts";
+export { isValidSshAlias } from "./ssh-alias.ts";
+export { localVmSource, localVmSshAlias } from "./local-vm-config.ts";
 
 const optionalText = z.string().optional();
-const SSH_ALIAS = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 const LEGACY_BROWSER_PROFILE_ID = /^[A-Za-z0-9_-]{1,40}$/;
 const BROWSER_PROFILE_ID = /^[a-z0-9_-]{1,40}$/;
 
@@ -50,10 +52,6 @@ export const MAX_MCP_CALL_TIMEOUT_MINUTES = 60;
 /** The floor keeps a log tail large enough for the event inspector's recent-line window. */
 export const MIN_THREAD_EVENT_LOG_BYTES = 256 * 1024;
 export const MAX_THREAD_EVENT_LOG_BYTES = 4 * 1024 * 1024 * 1024;
-
-export function isValidSshAlias(value: unknown): value is string {
-  return typeof value === "string" && SSH_ALIAS.test(value);
-}
 
 export function normalizeVpsConfig(raw: unknown): { sshAlias?: string } {
   if (raw === undefined || raw === null) return {};
@@ -87,27 +85,6 @@ const mcpConfigSchema = z.object({
     .max(MAX_MCP_CALL_TIMEOUT_MINUTES)
     .optional(),
 }).strict();
-/** Bot desktop isolation, default "shared"; `maxInstances` caps per-bot desktops or pool seats. Switching modes cold-starts every desktop. */
-const localVmConfigSchema = z.object({
-  source: z.enum(["managed", "existing"]).optional(),
-  mode: z.enum(["shared", "per-bot", "pool"]).optional(),
-  maxInstances: z
-    .number()
-    .int()
-    .min(MIN_LOCAL_VM_MAX_INSTANCES)
-    .max(MAX_LOCAL_VM_MAX_INSTANCES)
-    .optional(),
-  sshAlias: z.string().refine((value) => value === "" || isValidSshAlias(value), {
-    message: "must be a simple SSH config alias",
-  }).optional(),
-  idleTimeoutMinutes: z
-    .number()
-    .int()
-    .min(MIN_LOCAL_VM_IDLE_TIMEOUT_MINUTES)
-    .max(MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES)
-    .optional(),
-  preserveInstalledApps: z.boolean().optional(),
-});
 /** A named browser session; its id names a durable Electron partition. */
 const browserProfileSchema = z.object({
   // Lowercase only: Chromium partition directories collide on case-insensitive filesystems.
@@ -503,16 +480,7 @@ export interface AppConfig extends HelperConfig {
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean; roomCompactAt?: number; roomSessions?: boolean; replayToolHistory?: boolean };
   memory?: { captureQuietMs?: number; tidyHour?: number };
-  /** Managed preserves the historical container-backed Local VM. Existing is
-   * one user-owned Linux VM reached through a validated SSH alias. */
-  localVm?: {
-    source?: "managed" | "existing";
-    mode?: "shared" | "per-bot" | "pool";
-    maxInstances?: number;
-    idleTimeoutMinutes?: number;
-    sshAlias?: string;
-    preserveInstalledApps?: boolean;
-  };
+  localVm?: LocalVmConfig;
   features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; smartSetupChoices?: boolean; autoRecall?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; parallelRoomJobs?: boolean; chiefEscalations?: boolean; acpPlanLines?: boolean; agentsToolBridge?: boolean; savedSteps?: boolean }
   onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[]; firstTurnAt?: string };
   browserProfiles?: BrowserProfile[];
@@ -642,13 +610,6 @@ export function threadEventLogRetentionDays(cfg: AppConfig): number | null {
   return cfg.threads?.eventLogRetentionDays ?? null;
 }
 
-export function localVmSource(cfg: AppConfig): "managed" | "existing" {
-  return cfg.localVm?.source === "existing" ? "existing" : "managed";
-}
-
-export function localVmSshAlias(cfg: AppConfig): string | null {
-  return isValidSshAlias(cfg.localVm?.sshAlias) ? cfg.localVm.sshAlias : null;
-}
 export function skillAuthoringEnabled(cfg: AppConfig): boolean {
   return cfg.features?.skillAuthoring !== false;
 }
