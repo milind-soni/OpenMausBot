@@ -33,7 +33,13 @@ export const PATHS = {
   hostConfig: process.env.MAUSBOT_HOST_CONFIG_DIR || "/etc/mausbot",
   /** The connector's own copies, which install.sh installs from this image. */
   profiles: process.env.MAUSBOT_PROFILES_DIR || "/app/profiles",
+  /** /var/log/mausbot on the host, mounted read-write: the audit log the server's owner reads. */
+  audit: process.env.MAUSBOT_AUDIT_DIR || "/var/log/mausbot",
+  /** In the container's own /tmp: `mausbot-connector job` reaches the running connector here. */
+  jobs: process.env.MAUSBOT_JOBS_SOCKET || "/tmp/mausbot-jobs.sock",
 } as const;
+
+export const AUDIT_FILE = "audit.jsonl";
 
 export const SECCOMP_FILE = "seccomp-omb-home.json";
 export const APPARMOR_PROFILE = "omb-home-narrow";
