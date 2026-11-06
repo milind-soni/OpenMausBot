@@ -147,6 +147,11 @@ function ownWords(message: string): string[] {
   return [display, ...citations.map((citation) => citation.comment ?? "")];
 }
 
+/** A block the composer wraps around text the person pasted in (composeMessage): like a quote, a @devs inside it is
+ * theirs to read, not a tag they typed. */
+const PASTED_TEXT = /^ {0,3}<pasted-text(?:[\t ]+index="\d+")?[\t ]*>[\t ]*\r?\n[\s\S]*?^[\t ]*<\/pasted-text>[\t ]*$/gim;
+const tagsDevsOutsidePastes = (part: string, names?: readonly string[]) => tagsDevs(part.replace(PASTED_TEXT, ""), names);
+
 /** Rides on the turn that answers a @devs message. */
 const TURN_NOTE = "\n\n[From OpenMausBot, not the person: this message tags @devs, so it is a bug report for the MausBot team, OpenMausBot's developers. Call report_bug once, first: what the person says went wrong; what you saw yourself in this conversation (errors, failed tools, stuck steps), or that you saw nothing unusual; and steps to reproduce. Leave out passwords, keys, tokens and file contents; OpenMausBot adds the app's own diagnostics. Then tell the person, word for word, the line report_bug returns, and help with the problem if you can.]";
 
@@ -446,9 +451,9 @@ export function createDevsReports(deps: DevsReportsDeps) {
     if (seen.has(line.id) || !line.text || now() - line.at > FRESH_MS) return;
     if (!line.sendId && deps.automated(threadId)) return;
     const own = ownWords(line.text);
-    if (!own.some((part) => tagsDevs(part))) return;
+    if (!own.some((part) => tagsDevsOutsidePastes(part))) return;
     const names = namesBeforeDevs();
-    if (!own.some((part) => tagsDevs(part, names))) return;
+    if (!own.some((part) => tagsDevsOutsidePastes(part, names))) return;
     seen.add(line.id);
     if (seen.size > 1_000) seen.delete(seen.values().next().value!);
     if (waiting.length >= MAX_WAITING) return notice(threadId, { ok: false, line: fullLine(MAX_OUTBOX, languageFor(line.sender?.id)), marker: "" });

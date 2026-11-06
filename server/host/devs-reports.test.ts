@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { citationAttachment, createCitationTextSelector } from "../../src/lib/citations.ts";
-import { composeMessage } from "../../src/lib/composer-attachments.ts";
+import { composeMessage, pasteAttachment } from "../../src/lib/composer-attachments.ts";
 import "../server-line-packs.ts";
 import type { DevsReportPayload } from "../devs-report.ts";
 import type { ReportStatusAnswer, ReportStatusQuestion, SendOutcome } from "../devs-report-send.ts";
@@ -238,6 +238,20 @@ describe("a message that tags @devs", () => {
     await fx.settle();
     expect(fx.sent).toHaveLength(1);
     expect(fx.sent[0]!.description.split("\n")[0]).toBe("this is wrong");
+    fx.stop();
+  });
+
+  it("does not send for a @devs that is only inside pasted text; the person's own @devs beside the paste sends one", async () => {
+    const fx = fixture();
+    const notes = pasteAttachment("What's new\n- Quoted @devs reports send correctly.\n* fix(devs-reports): a quoted @devs alone sends nothing");
+    fx.person("scout-main", composeMessage("does this update change how we work?", [notes]));
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toHaveLength(0);
+    fx.person("scout-main", composeMessage("@devs it crashes with this log", [notes]));
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toHaveLength(1);
     fx.stop();
   });
 
