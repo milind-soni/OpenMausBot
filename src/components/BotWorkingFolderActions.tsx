@@ -8,14 +8,14 @@ import { t } from "@/lib/i18n";
 import { MENU_ITEM } from "./menu-recipe";
 import { NoticeToast } from "./NoticeCard";
 
-type Props = { bot: Pick<Bot, "id" | "cwd" | "computer">; menu?: boolean; onOpened?: () => void; className?: string };
+type Props = { bot: Pick<Bot, "id" | "cwd" | "computer">; menu?: boolean; onCompleted?: (action: "open" | "copy") => void; className?: string };
 
 export function BotWorkingFolderActions(props: Props) {
   const { bot } = props;
   return <WorkingFolderActions key={JSON.stringify([bot.id, bot.cwd, bot.computer])} {...props} />;
 }
 
-function WorkingFolderActions({ bot, menu = false, onOpened, className }: Props) {
+function WorkingFolderActions({ bot, menu = false, onCompleted, className }: Props) {
   const [folder, setFolder] = useState<BotWorkingFolder | null>(null);
   const [feedback, setFeedback] = useState("");
   const [busy, setBusy] = useState(false);
@@ -42,7 +42,7 @@ function WorkingFolderActions({ bot, menu = false, onOpened, className }: Props)
       if (!prepared.local || !prepared.path || await reveal(prepared.path) !== "shown") {
         if (active.current) setFeedback(t("botFolder.openFailed"));
       } else if (active.current) {
-        onOpened?.();
+        onCompleted?.("open");
       }
     } catch {
       if (active.current) setFeedback(t("botFolder.openFailed"));
@@ -54,7 +54,9 @@ function WorkingFolderActions({ bot, menu = false, onOpened, className }: Props)
   const copy = async () => {
     if (!folder?.path) return;
     const result = await copyText(folder.path);
-    if (active.current) setFeedback(t(result === "copied" ? "botFolder.copied" : "botFolder.copyFailed"));
+    if (!active.current) return;
+    if (result === "copied" && onCompleted) onCompleted("copy");
+    else setFeedback(t(result === "copied" ? "botFolder.copied" : "botFolder.copyFailed"));
   };
   const title = folder?.path ?? t("botFolder.unavailable");
   const cls = `${menu ? MENU_ITEM : className ?? "rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"} disabled:opacity-40`;
