@@ -25,4 +25,10 @@ describe("acpRuntimeFailure: an MCP server that failed to connect at session sta
     const message = "Internal error: model request failed; earlier: mcp-client(composio): initial connection or tool synchronization failed (session/prompt)";
     expect(acpRuntimeFailure(new Error(message), "DeepSeek Harness")).toEqual({ message });
   });
+
+  it("keeps account wording that comes without a message", () => {
+    const error = new Error("mcp-client(composio): initial connection or tool synchronization failed");
+    const text = { key: "chat.notice.acpNoReason", params: { provider: "DeepSeek Harness" } } as const;
+    expect(acpRuntimeFailure(error, "DeepSeek Harness", { text })).toEqual({ message: error.message, text });
+  });
 });
