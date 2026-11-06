@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { BotBox, BoxRunner, BOX_EGRESS_PORT, flyApiPrivate, procHidepid, writeSeccompFile } from "./box.ts";
+import { BotBox, BoxRunner, BOX_EGRESS_PORT, flyApiPrivate, writeSeccompFile } from "./box.ts";
+import { processStart, seesProcess } from "./box-probe.ts";
+import { procHidepid } from "./hidepid.ts";
 import { visibleInBox } from "./plan.ts";
 import { DENIED_SYSCALLS, seccompBytes } from "./seccomp.ts";
 import { engineInstallRoots, npmEnginesPrefix } from "../engine-roots.ts";
@@ -253,5 +255,22 @@ describe("BoxRunner.lend", () => {
     runner.lend("bot-a", "thread-1", []);
     expect(runner.wrap(request).plan.writable).not.toContain(layer);
     expect(runner.lentTo("bot-a", "thread-1")).toEqual([]);
+  });
+});
+
+describe("the probe tells the server and the canary from a box process with the same pid", () => {
+  // /proc/<pid>/stat as Linux 6.8 writes it; the command may hold spaces and parentheses.
+  const stat = (start: string) => `331 (node (MainThread)) S 1 331 331 0 -1 4194560 26085 0 0 0 63 12 0 0 20 0 11 0 ${start} 1270784000 23468 18446744073709551615`;
+
+  it("reads a process's start after its command, however that is spelled", () => {
+    expect(processStart(331, () => stat("4321789"))).toBe("4321789");
+    expect(processStart(331, () => { throw new Error("ENOENT"); })).toBeNull();
+    if (process.platform === "linux") expect(processStart("self")).toMatch(/^\d+$/);
+  });
+
+  it("counts a pid as the same process only when it started at the same moment", () => {
+    expect(seesProcess(7, "4321789", () => "4321789")).toBe(true);
+    expect(seesProcess(7, "4321789", () => "88")).toBe(false);
+    expect(seesProcess(7, "4321789", () => null)).toBe(false);
   });
 });

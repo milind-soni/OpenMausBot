@@ -34,6 +34,14 @@ describe("what a bot on My Cloud is told about connections that need the person"
     expect(prompt({ mcpServers: ["dodo", "off"] })).toBe("");
   });
 
+  it("in a turn, a server on the person's computer is named only when it can't be reached now, with the reason lending gives", () => {
+    const prompt = createConnectionPrompt(sources(), ORIGIN);
+    expect(prompt({ mcpServers: ["notes"] }, new Map()), "reached through the lent computer: nothing to say").toBe("");
+    const offline = "notes runs on your Mac (Milind's MacBook), which is offline right now: OpenMausBot on it is closed, or the Mac is asleep or off.";
+    expect(prompt({ mcpServers: ["notes"] }, new Map([["notes", offline]]))).toBe(
+      ` Runs on the person's own computer and can't be reached now: ${offline} If a task needs one, tell the person that in plain words, and do not write your own replacement.`);
+  });
+
   it("says nothing of a server signed in here, or one that needs no sign-in", () => {
     const prompt = createConnectionPrompt(sources({ linear: "signed-in", jira: "signed-in" }), ORIGIN);
     expect(prompt({ mcpServers: ["dodo", "linear", "jira"] })).toBe("");

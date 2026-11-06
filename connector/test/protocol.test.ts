@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { cloudRequestSignature as homeSignature } from "../../server/cloud-home.ts";
+import { CLOUD_HOME_SECRET_KEYS, cloudRequestSignature as homeSignature } from "../../server/cloud-home.ts";
+import { CAPS_DROPPED_ENV, CLOUD_SECRETS_FILE, CLOUD_SECRETS_FILE_KEYS } from "../../server/cloud-home-start.ts";
+import { HOME_SECRET_ENV, HOME_SECRETS_FILE, HOME_SECRETS_TARGET } from "../src/settings.ts";
 import { cloudRequestSignature, summarizeHealth } from "../src/home-health.ts";
 import {
   checkConfig, checkEnrollCode, checkEnrollResponse, checkHello, checkHomeEnv, checkJob, checkJobPayload, checkTransferUrl, JOB_LIFETIME_MS, JOB_TYPES, REQUIRED_HOME_ENV,
@@ -54,7 +56,7 @@ describe("the connector protocol", () => {
     }
     const refused = (extra: Record<string, unknown>) => checkHomeEnv({ ...env, ...extra });
     for (const name of ["FLY_APP_NAME", "PATH", "NODE_OPTIONS", "HOME", "LD_PRELOAD", "omb_lower", "OMB_"]) expect(refused({ [name]: "x" }).ok, name).toBe(false);
-    for (const name of ["OMB_CLOUD_EDGE_HOLD", "OMB_CLOUD_EDGE_BIN", "OMB_CLOUD_HARDEN", "OMB_DATA_DIR", "OMB_PORT", "OMB_CLOUD_SECRETS_FD"]) {
+    for (const name of ["OMB_CLOUD_EDGE_HOLD", "OMB_CLOUD_EDGE_BIN", "OMB_CLOUD_HARDEN", "OMB_DATA_DIR", "OMB_PORT", "OMB_CLOUD_SECRETS_FD", "OMB_CLOUD_CAPS_DROPPED"]) {
       expect(refused({ [name]: "x" }), name).toMatchObject({ ok: false, message: `env name ${name} is the image's own setting` });
     }
     const secret = "T0P-SECRET-VALUE";
@@ -68,6 +70,13 @@ describe("the connector protocol", () => {
     expect(refused({ OMB_PUBLIC_URL: "https://acme.example.test/path" }).ok).toBe(false);
     expect(checkHomeEnv(Object.fromEntries(Array.from({ length: 65 }, (_, i) => [`OMB_X${i}`, "v"]))).ok).toBe(false);
     expect(checkHomeEnv([]).ok).toBe(false);
+  });
+
+  it("keeps out of the home's environment exactly the secrets its launcher reads from the file, where it reads it", () => {
+    expect([...HOME_SECRET_ENV].sort()).toEqual([...CLOUD_SECRETS_FILE_KEYS].sort());
+    expect(CLOUD_SECRETS_FILE_KEYS).toEqual(expect.arrayContaining([...CLOUD_HOME_SECRET_KEYS]));
+    expect(`${HOME_SECRETS_TARGET}/${HOME_SECRETS_FILE}`).toBe(CLOUD_SECRETS_FILE);
+    expect(checkHomeEnv({ ...env, [CAPS_DROPPED_ENV]: "1" }).ok).toBe(false);
   });
 
   it("transfers only over https, or http to a test Admin on this machine, never with credentials in the address", () => {

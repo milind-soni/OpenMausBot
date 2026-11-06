@@ -260,6 +260,7 @@
   "server.mcp.card.remove": "Remove {name}?",
   "server.mcp.card.internet": "Reached over the internet. Once on, your bots can use its tools.",
   "server.mcp.card.local": "Runs on this computer.",
+  "server.mcp.card.elsewhere": "Runs on {computer}.",
   "server.mcp.card.newKey": "new key for {key}",
   "server.mcp.card.cleared": "Clears the saved {items}.",
   "server.mcp.card.usedBy": "Used by {names}.",
