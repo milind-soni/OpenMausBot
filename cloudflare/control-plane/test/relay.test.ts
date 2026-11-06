@@ -98,8 +98,10 @@ describe("relay host tokens", () => {
   it("mint a 12 h token for a stable host id, with the node order and the refresh time", async () => {
     const { credential, id } = await installation("mint@example.test");
     const before = Math.floor(Date.now() / 1000);
-    const first = await (await ask(relayEnv(), credential)).json<Issued>();
-    const second = await (await ask(relayEnv(), credential)).json<Issued>();
+    // Two nodes, whatever wrangler.jsonc lists today, so the order is still tested.
+    const twoNodes = relayEnv({ RELAY_NODES: "relay1.openmausbot.com,relay2.openmausbot.com" });
+    const first = await (await ask(twoNodes, credential)).json<Issued>();
+    const second = await (await ask(twoNodes, credential)).json<Issued>();
     expect(second.hostId).toBe(first.hostId);
     expect(fromB64u(first.hostId)).toHaveLength(16);
     const { ok, claims } = await verify(first.token, await publicKeyOf(seed));

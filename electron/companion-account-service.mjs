@@ -259,6 +259,8 @@ export function createCompanionAccountService({
   firstEndpointCheckMs = DEFAULT_FIRST_ENDPOINT_CHECK_MS,
   onDemand = false,
   managedEndpointNeeded = async () => null,
+  /** MausBot Relay: `capable` makes a "no" need hold even right after sign-in; `legacyDevices` counts old phones. */
+  relay = { capable: () => false, legacyDevices: async () => null },
   releaseGraceMs = DEFAULT_RELEASE_GRACE_MS,
   releaseJitterMs = DEFAULT_RELEASE_JITTER_MS,
   // Only the code, HTTP status, request id and retry delay: never an email, token, credential or address.
@@ -548,9 +550,15 @@ export function createCompanionAccountService({
       }
       throw error;
     }
-    const endpoint = await client.ensureEndpoint(installation.credential, {
-      appVersion: identity.appVersion,
-    });
+    const withoutTunnel = async () => {
+      await updateCredentials((document) => withAuthenticatedAccount(document, { accountToken, user, clientInstanceId }));
+      resetAutoRetry();
+      return (phase = null), settledState();
+    };
+    if (onDemand && (await currentNeed()) === false) return withoutTunnel();
+    const endpoint = await client.ensureEndpoint(installation.credential, { appVersion: identity.appVersion, ...(await relay.legacyDevices().then((count) => (count === null ? {} : { legacyDevices: count }))) })
+      .catch((error) => (error?.code === "relay_capable" ? null : Promise.reject(error)));
+    if (!endpoint) return withoutTunnel();
     try {
       await updateCredentials((document) =>
         withProvisionedAccount(document, {
@@ -771,15 +779,12 @@ export function createCompanionAccountService({
   let phonesUnused = false;
   /** "unused" (paired phones, none seen for 30 days) reads as false and is remembered for the release. */
   const currentNeed = async () => {
-    phonesUnused = false;
-    if (requestedRecently()) return true;
-    try {
-      const need = await managedEndpointNeeded();
-      phonesUnused = need === MANAGED_ENDPOINT_PHONES_UNUSED;
-      return phonesUnused ? false : typeof need === "boolean" ? need : null;
-    } catch {
-      return null;
-    }
+    const answer = await Promise.resolve().then(() => managedEndpointNeeded()).catch(() => null);
+    phonesUnused = answer === MANAGED_ENDPOINT_PHONES_UNUSED;
+    const need = phonesUnused ? false : typeof answer === "boolean" ? answer : null;
+    if (need === false && relay.capable()) return false;
+    if (requestedRecently()) return (phonesUnused = false), true;
+    return need;
   };
 
   const releaseScheduledAt = () => {

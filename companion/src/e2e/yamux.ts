@@ -5,7 +5,9 @@ export const VERSION = 0;
 export const TYPE = { data: 0, windowUpdate: 1, ping: 2, goAway: 3 } as const;
 export const FLAG = { syn: 0x1, ack: 0x2, fin: 0x4, rst: 0x8 } as const;
 const KNOWN_FLAGS = 0xf;
-export const GO_AWAY = { normal: 0, protocol: 1, internal: 2 } as const;
+/** `removed` goes only from the computer to the phone: this device was removed, and the close that follows is 4001. It
+ * is inside the encryption, so unlike a bare 4001 close code a relay can't forge it. */
+export const GO_AWAY = { normal: 0, protocol: 1, internal: 2, removed: 3 } as const;
 
 export const HEADER_BYTES = 12;
 export const MAX_DATA_PAYLOAD = 65_507;

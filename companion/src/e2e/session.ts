@@ -164,6 +164,7 @@ export class E2ESession<Id> {
   #settleReady!: (error?: Error) => void;
   #settleClosed!: (code: number) => void;
   #connectOrigin: (() => Promise<Duplex>) | null = null;
+  #removed = false;
   /** The computer side: which device (or pairing window) this is. */
   peer: Id | null = null;
   readonly ready: Promise<void>;
@@ -230,8 +231,19 @@ export class E2ESession<Id> {
     return this.#mux;
   }
 
+  /** The phone side: the computer said, inside the encryption, that this device was removed. Only this, or a 4001 on
+   * a direct route, means "pair again"; a bare 4001 through the relay may be the relay's own and means "keep trying". */
+  get removed(): boolean {
+    return this.#removed;
+  }
+
   get state(): State {
     return this.#state;
+  }
+
+  /** Records each way so far, for diagnostics. */
+  get records(): { sent: number; received: number } {
+    return { sent: this.#keys?.send.nonce ?? 0, received: this.#keys?.receive.nonce ?? 0 };
   }
 
   get congested(): boolean {
@@ -290,6 +302,12 @@ export class E2ESession<Id> {
     return stream;
   }
 
+  /** The computer side: the device was removed. The phone hears it authenticated, then the 4001 close. */
+  remove(): void {
+    if (this.#state === "open") this.#mux?.goAway(GO_AWAY.removed);
+    this.close(CLOSE.rejected);
+  }
+
   /** A planned close (quit, sleep, restart): GoAway first, so the peer knows it isn't an error. */
   shutdown(): void {
     if (this.#state === "open") this.#mux?.goAway(GO_AWAY.normal);
@@ -339,7 +357,8 @@ export class E2ESession<Id> {
       },
       writable: (streamId) => this.#streams.get(streamId)?.flush(),
       goAway: (code) => {
-        if (code !== GO_AWAY.normal) this.close(CLOSE.protocol);
+        if (code === GO_AWAY.removed && this.role === "phone") this.#removed = true;
+        else if (code !== GO_AWAY.normal) this.close(CLOSE.protocol);
       },
       pong: (value) => {
         if (value !== this.#awaitingPong) return;

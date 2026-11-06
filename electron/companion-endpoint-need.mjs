@@ -11,13 +11,17 @@ export function phoneUnused(device, now = Date.now()) {
   return typeof seen === "number" && Number.isFinite(seen) && seen > 0 && now - seen > PHONE_UNUSED_RELEASE_MS;
 }
 
-/** true, false, "unused", or null when that cannot be told; only false or "unused" ever gives an address back. */
+/** true, false, "unused", or null when that cannot be told; only false or "unused" ever gives an address back. Once
+ * this computer serves the end-to-end encrypted connection, only an old phone (no `e2eAt`) needs a tunnel: a new
+ * pairing never makes one. */
 export function managedEndpointNeed(state, now = Date.now()) {
   if (!state || typeof state !== "object" || state.enabled !== true || state.error) return null;
   if (state.devicesUnreadable === true || !Array.isArray(state.devices)) return null;
-  if (state.pairing) return true;
-  if (state.devices.length === 0) return false;
+  const encrypted = state.e2e?.enabled === true;
+  if (state.pairing && !encrypted) return true;
+  const devices = encrypted ? state.devices.filter((device) => !Number.isSafeInteger(device?.e2eAt)) : state.devices;
+  if (devices.length === 0) return false;
   const connected = new Set(Array.isArray(state.connectedDeviceIds) ? state.connectedDeviceIds : []);
-  return state.devices.some((device) => connected.has(device?.id) || !phoneUnused(device, now))
+  return devices.some((device) => connected.has(device?.id) || !phoneUnused(device, now))
     || MANAGED_ENDPOINT_PHONES_UNUSED;
 }
