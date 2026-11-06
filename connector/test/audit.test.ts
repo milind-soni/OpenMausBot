@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AuditLog, auditArgs, auditRequest, verifyAudit, type AuditLine } from "../src/audit.ts";
 import { jobDesk } from "../src/jobs.ts";
 import { localJobId, sendLocalJob, serveLocalJobs } from "../src/local.ts";
+import { parsePolicy } from "../src/policy.ts";
 import type { Job, JobReply } from "../src/protocol.ts";
 
 const HOME = `ghcr.io/milind-soni/openmausbot-cloud-home@sha256:${"a".repeat(64)}`;
@@ -95,6 +96,45 @@ describe("the job desk", () => {
     expect((await desk.submit({ id: "s1", type: "status", args: {} }, "admin"))?.ok).toBe(true);
     expect(ran).toEqual(["status"]);
     expect(logged.some((line) => line.startsWith("could not write the audit log"))).toBe(true);
+  });
+});
+
+describe("the server owner's policy", () => {
+  const ran: string[] = [];
+  const desk = (dir: string) => jobDesk({
+    run: async (job) => { ran.push(`${job.type}`); return { id: job.id, ok: true, result: { home: { state: "running", image: HOME, health: null } } } as JobReply; },
+    audit: new AuditLog(join(dir, "audit.jsonl")), log: () => {}, policyFile: join(dir, "policy.json"),
+  });
+  const SELF = { id: "self-1", type: "self-update", args: { image: `ghcr.io/milind-soni/mausbot-connector@sha256:${"b".repeat(64)}` } } as Job;
+  const UPDATE = { id: "u1", type: "update", args: { image: HOME } } as Job;
+
+  it("limits what MausBot may run here, records each refusal, and never limits root on the server or a self-update", async () => {
+    const dir = folder();
+    ran.splice(0);
+    writeFileSync(join(dir, "policy.json"), JSON.stringify({ jobs: ["status", "backup"], updates: "hold" }));
+    const refused = await desk(dir).submit(UPDATE, "admin");
+    expect(refused).toEqual({ id: "u1", ok: false, error: { code: "refused_by_policy", message: `This server's policy ${join(dir, "policy.json")} does not let MausBot run update jobs.` } });
+    expect((await desk(dir).submit(SELF, "admin"))?.ok).toBe(true);
+    expect((await desk(dir).submit({ ...UPDATE, id: "local-1" }, "local"))?.ok).toBe(true);
+    expect(ran).toEqual(["self-update", "update"]);
+    expect(lines(join(dir, "audit.jsonl")).filter((line) => line.event === "result").map((line) => (line as { error?: { code: string } }).error?.code ?? "ok")).toEqual(["refused_by_policy", "ok", "ok"]);
+    writeFileSync(join(dir, "policy.json"), JSON.stringify({ updates: "hold" }));
+    expect(await desk(dir).submit(UPDATE, "admin")).toMatchObject({ error: { code: "refused_by_policy", message: expect.stringContaining("holds updates") } });
+    expect((await desk(dir).submit({ id: "b1", type: "backup", args: {} }, "admin"))?.ok).toBe(true);
+  });
+
+  it("changes nothing for MausBot while the policy cannot be used, but still answers a status and takes a self-update", async () => {
+    const dir = folder();
+    ran.splice(0);
+    writeFileSync(join(dir, "policy.json"), '{"updates": "sometimes"}');
+    expect(await desk(dir).submit(UPDATE, "admin")).toMatchObject({ error: { code: "refused_by_policy", message: expect.stringContaining('"updates" must be "automatic" or "hold"') } });
+    expect((await desk(dir).submit({ id: "s1", type: "status", args: {} }, "admin"))?.ok).toBe(true);
+    expect((await desk(dir).submit(SELF, "admin"))?.ok).toBe(true);
+    expect(ran).toEqual(["status", "self-update"]);
+    expect(parsePolicy(null)).toEqual({ ok: true, policy: { jobs: null, updates: "automatic" } });
+    expect(parsePolicy('{"jobs": ["shell"]}')).toMatchObject({ ok: false });
+    expect(parsePolicy('{"support": "always"}')).toEqual({ ok: false, problem: "it has a setting this connector does not know: support" });
+    expect(parsePolicy("[]")).toMatchObject({ ok: false });
   });
 });
 
