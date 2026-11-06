@@ -2,6 +2,7 @@
 // boxes reach through unix sockets (egress-gate.ts, harness-gate.ts), and wraps each bot spawn (server/procs.ts spawnCli
 // with owner "bot") in bubblewrap by the plan (plan.ts). Nothing here changes a spawn when the box is off: the command,
 // its arguments and its environment go through untouched, so every host that is not a Cloud home behaves as before.
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, openSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
@@ -16,7 +17,8 @@ import { boxEnvironment } from "./env.ts";
 import { openHarnessGate, type HarnessGate } from "./harness-gate.ts";
 import { procHidepid } from "./hidepid.ts";
 import { DENIED_SYSCALLS, seccompBytes, seccompSupported } from "./seccomp.ts";
-import { boxUploadsDir, bwrapArgs, planBox, taskWorkspaceIds, type BoxBridge, type BoxPlan, type BoxRequest, type BoxSetup } from "./plan.ts";
+import { RELAY_SOCKET_NAME, boxUploadsDir, bwrapArgs, inBoxSocket, planBox, taskWorkspaceIds, type BoxBridge, type BoxPlan, type BoxRequest, type BoxSetup } from "./plan.ts";
+import { openBoxRelay, type BoxRelay } from "./relay.ts";
 
 /** The loopback port inside a box that reaches the egress gate. The harness gate sits at the server's own port. */
 export const BOX_EGRESS_PORT = 3128;
@@ -108,7 +110,8 @@ export class BoxRunner {
       for (const name of BOX_NO_PROXY_ENV) env[name] = "127.0.0.1,localhost,::1,[::1]";
     }
     const bridges = plan.net === "isolated" ? this.options.setup.bridges : [];
-    const inner = bridgedCommand(this.options.bridge, bridges, request.command, request.args);
+    const relay = plan.net === "isolated" && request.relay ? inBoxSocket(RELAY_SOCKET_NAME) : undefined;
+    const inner = bridgedCommand(this.options.bridge, bridges, request.command, request.args, relay);
     const brokered = this.broker(env, plan, request);
     const vouched = (request.allowEnv ?? []).filter((name) => /(?:KEY|TOKEN|SECRET)$/.test(name) && brokered.env[name] !== undefined && brokered.env[name] === request.env[name]);
     const unbrokered = [...new Set([...brokered.unbrokered, ...vouched])];
@@ -250,6 +253,12 @@ export class BotBox {
   }
 
   enabled(): boolean { return this.runner !== null; }
+
+  /** A relay for one boxed spawn (BoxRequest.relay), or null when bot spawns are not boxed here. */
+  async openRelay(): Promise<BoxRelay | null> {
+    if (!this.runner) return null;
+    return openBoxRelay(join(this.runner.setup.dataDir, "box", `relay-${randomBytes(6).toString("hex")}.sock`));
+  }
 
   /** The box a bot's Chrome runs in: the system read-only, private /tmp and /run, the host's network (the browser's own
    * gate filters it), `ro` paths, and nothing of HOME or the data folder; the launcher binds the one profile it starts

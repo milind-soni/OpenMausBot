@@ -36,6 +36,15 @@ tokens and a few names a shell expects. Every `OMB_CLOUD_*` setting, the server'
 A box with the host's network (`net: "shared"`, for a browser whose Chrome already goes through its own gate) has
 neither bridge.
 
+## The sign-in relay
+
+An engine that signs in through a callback on `127.0.0.1` (Antigravity's Google sign-in) listens on the box's own
+loopback, which the server cannot reach. That box alone gets one more unix socket (`server/bot-box/relay.ts`), bound in
+at `/run/omb/relay.sock`: the in-box Node bridge dials out to it and keeps one connection waiting, and when someone
+pastes the redirect from another computer the server writes the callback's port on that connection and sends the
+request through it. Only the server ever chooses the port, the box reaches nothing new on the host, and the server never
+connects to a path inside the box.
+
 ## When it is on
 
 `server/bot-box/detect.ts`: on by default on a Cloud home (`OMB_CLOUD_ROLE=home` or `team`), off everywhere else
