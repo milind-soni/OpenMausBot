@@ -169,7 +169,7 @@ ARG ENGINES_CACHE_TAG=""
 RUN echo "engines: ${CLOUD_HOME_ENGINES:-none} ${ENGINES_CACHE_TAG}" \
   && if [ -n "$CLOUD_HOME_ENGINES" ]; then HOME=/tmp/omb-build-home npm install -g $CLOUD_HOME_ENGINES; fi \
   && rm -rf /tmp/omb-build-home /tmp/node-compile-cache
-COPY deploy/fly/Caddyfile /app/cloud/Caddyfile
+COPY deploy/fly/Caddyfile deploy/fly/Caddyfile.tls deploy/fly/edge-routes.caddy /app/cloud/
 # The root supervisor runs /app's code and hands the server its secrets, so
 # no file there may be one `maus` can change: unlike the server image's, these
 # copies stay root's. Only the /data volume is maus's; the launcher refuses to
@@ -181,9 +181,10 @@ COPY --from=build /src/dist ./dist
 # The bundled skills (server/skill-library.ts reads ./skills from /app).
 COPY --from=build /src/skills ./skills
 RUN export HOME=/tmp/omb-build-home \
- && chmod go-w /app/cloud /app/cloud/Caddyfile \
+ && chmod go-w /app/cloud /app/cloud/Caddyfile /app/cloud/Caddyfile.tls /app/cloud/edge-routes.caddy \
  && caddy version \
  && OMB_CLOUD_PUBLIC_HOST=validate.fly.dev caddy validate --config /app/cloud/Caddyfile --adapter caddyfile \
+ && OMB_CLOUD_PUBLIC_HOST=validate.example.com OMB_CLOUD_EDGE_STORAGE=/tmp/omb-build-home/edge caddy validate --config /app/cloud/Caddyfile.tls --adapter caddyfile \
  && test -f /app/dist-server/cloud-home-start.js \
  && untrusted="$(find /app /usr/local/bin/caddy \( ! -user root -o ! -type l -perm /022 \) -print)" \
  && if [ -n "$untrusted" ]; then echo "not root's, or writable by others:" >&2; echo "$untrusted" >&2; exit 1; fi \
