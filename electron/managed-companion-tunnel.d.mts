@@ -30,6 +30,11 @@ export interface ManagedTunnel {
 
 export declare function normalizeManagedCompanionEndpoint(value: unknown): string;
 export declare function managedCompanionTunnelAccess(credentials: Record<string, unknown>): ManagedTunnelAccess | null;
+export declare function stagedCloudflaredPath(options?: {
+  appPath?: string;
+  platform?: NodeJS.Platform;
+  arch?: string;
+}): string;
 export declare function resolveCloudflaredBinary(options?: {
   isPackaged?: boolean;
   resourcesPath?: string;
