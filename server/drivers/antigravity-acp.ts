@@ -237,7 +237,12 @@ export class AntigravityAcpClient {
     this.child = spawnCli(
       runtime.executablePath,
       process.platform === "linux" ? ["--uid="] : [],
-      { cwd, env: profile.environment, stdio: ["pipe", "pipe", "pipe"] },
+      {
+        cwd, env: profile.environment, stdio: ["pipe", "pipe", "pipe"],
+        // A sign-in runtime waits for Google's redirect on 127.0.0.1 and "Send redirect" delivers it from the server:
+        // in the bot box's own network it would refuse that (ECONNREFUSED), so it shares the host's.
+        ...(onAuthorizationUrl ? { box: { net: "shared" as const } } : {}),
+      },
       "bot",
     );
     this.child.stdout!.setEncoding("utf8");
