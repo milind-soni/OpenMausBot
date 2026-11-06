@@ -318,27 +318,58 @@ function harness(get: () => { world: HomeWorld; shots: string }) {
     await picture("09-removed-open-one");
   }, hostTimeout(240_000));
 
-  it("an app restart while a workspace is open: My Cloud opens, the frozen copy's server is back without a workspace stranded, and the workspace opens again as it was", async () => {
+  it("an app restart reopens the place open when it closed: Work, then This Mac, each as it was; a workspace removed meanwhile opens My Cloud", async () => {
     await click("[data-rail-add]");
     await until(() => rail("Boolean(document.querySelector('[data-place-add-choice=\"local\"]'))"), Boolean, 15_000, "＋'s choices");
     await click('[data-place-add-choice="local"]');
     await until(() => rail("Boolean(document.querySelector('[data-local-name]'))"), Boolean, 15_000);
-    await fill("[data-local-name]", "Personal");
+    await fill("[data-local-name]", "Work");
     await click("[data-local-create]");
-    const personal = world.registry!.list().find((entry) => entry.name === "Personal")!.id;
-    await shown(`profile:${personal}`);
+    const work = workId();
+    await shown(`profile:${work}`);
     await page("fetch('/api/bots', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Diary' }) })");
     await world.restartApp();
-    await onCloud();
-    expect(world.running(), "a launch starts the data folder's server, as ever").toBe(fx.desktopDataDir);
-    expect(world.clean!.active()).toBe(false);
+    await shown(`profile:${work}`, "Diary");
+    expect(world.running(), "Work's server, not the frozen copy's").toBe(profileDir(fx.desktopDataDir, work));
+    expect(JSON.parse(readFileSync(join(fx.desktopDataDir, "moved.json"), "utf8")).cloud, "the frozen copy stays frozen").toBe(world.cloudOrigin);
     const after = await until(() => tiles(), (seen) => seen.length === 3, 30_000, "the rail after the restart");
-    expect(after.map((tile) => [tile.id, tile.current])).toEqual([["profile:default", false], [`profile:${personal}`, false], [cloudEntry, true]]);
-    await picture("10-after-restart");
-    await click(`[data-rail-place="profile:${personal}"]`);
-    await shown(`profile:${personal}`, "Diary");
+    expect(after.map((tile) => [tile.id, tile.current])).toEqual([["profile:default", false], [`profile:${work}`, true], [cloudEntry, false]]);
+    await picture("10-after-restart-work");
     await until(async () => lent(), Boolean, 30_000, "this computer lent again after the restart");
-  }, hostTimeout(240_000));
+    await click(MAC);
+    await shown("profile:default", "Scout");
+    await world.restartApp();
+    await shown("profile:default", "Scout");
+    expect(world.running()).toBe(profileDir(fx.desktopDataDir, "default"));
+    expect((await tiles()).map((tile) => [tile.id, tile.current])).toEqual([["profile:default", true], [`profile:${work}`, false], [cloudEntry, false]]);
+    await picture("10-after-restart-this-mac");
+    // Its line's ✕ closes it for good in This Mac's own config: a reload doesn't bring it back, and Work's still shows.
+    await until(() => page<boolean>("(() => { const close = document.querySelector('[data-home-line-close]'); close?.click(); return Boolean(close); })()"), Boolean, 15_000, "the line's ✕");
+    await until(lineOf, (text) => text === null, 10_000, "the line closed");
+    await world.window.loadURL(`${world.localOrigin}/`);
+    await until(() => page<string>("document.body.innerText"), (text) => text.includes("Scout"), 60_000, "This Mac reloaded");
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    expect(await lineOf(), "closed for good").toBeNull();
+    await click(`[data-rail-place="profile:${work}"]`);
+    await until(lineOf, (text) => Boolean(text?.startsWith("Work starts fresh")), 60_000, "Work's own line, still there");
+    await click(MAC);
+    await shown("profile:default", "Scout");
+    // A workspace removed while the app was closed: My Cloud opens instead, with no dialog, and the next launch doesn't try it again.
+    expect(world.profiles!.create({ name: "Spare" }).outcome).toBe("made");
+    const spare = world.registry!.list().find((entry) => entry.name === "Spare")!.id;
+    await click(`[data-rail-place="profile:${spare}"]`);
+    await shown(`profile:${spare}`);
+    await world.restartApp(() => { world.registry!.remove(spare); rmSync(profileDir(fx.desktopDataDir, spare), { recursive: true, force: true }); });
+    await onCloud();
+    expect(world.running(), "the data folder's server, as a launch starts it").toBe(fx.desktopDataDir);
+    expect(world.clean!.active()).toBe(false);
+    expect(world.places.remembered(), "forgotten").toBeNull();
+    expect((await until(() => tiles(), (seen) => seen.length === 3, 30_000, "the rail without Spare")).map((tile) => [tile.id, tile.current]))
+      .toEqual([["profile:default", false], [`profile:${work}`, false], [cloudEntry, true]]);
+    await picture("10-after-restart-removed");
+    await click(`[data-rail-place="profile:${work}"]`);
+    await shown(`profile:${work}`, "Diary");
+  }, hostTimeout(360_000));
 
   it("past eight tiles: ⋯ lists every place, a row opens its place and its right-click opens its menu", async () => {
     for (const name of ["Lab", "Studio", "Garden", "Kitchen", "Travel", "Music"]) expect(world.profiles!.create({ name }).outcome).toBe("made");

@@ -125,6 +125,7 @@ export function createProfileRegistry({ dataDir, fs = nodeFs, now = Date.now, ra
  *   trash(dir: string): Promise<void>,
  *   reserved?(): string | null,
  *   allowed?(): boolean,
+ *   remember?(place: { profile: string } | null): void,
  *   changed?(): void,
  *   log?(line: string): void,
  *   fs?: typeof nodeFs,
@@ -135,10 +136,11 @@ export function createProfileRegistry({ dataDir, fs = nodeFs, now = Date.now, ra
  * home window's profile on screen (home-window.mjs), and My Cloud shown again. `showLocal()`: the window onto this
  * computer's page, LOCAL_ID active. `onLocal()`: this computer's page is on screen. `busy()`: what the server that runs now
  * still does (GET /api/move/freeze), null when nothing. `trash(dir)`: moves a folder to the computer's Trash. `reserved()`:
- * what This Mac is called here (This Mac or This PC).
+ * what This Mac is called here (This Mac or This PC). `remember(place)`: the place the next launch opens:
+ * the workspace that opened, or null once This computer's own copy is back.
  */
 export function createLocalProfiles({ registry, clean, dataDir, home, window: shown, showLocal, onLocal, busy, trash, reserved = () => null, allowed = () => true,
-  changed = () => {}, log = () => {}, fs = nodeFs, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), now = Date.now, settleMs = SETTLE_MS }) {
+  remember = () => {}, changed = () => {}, log = () => {}, fs = nodeFs, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), now = Date.now, settleMs = SETTLE_MS }) {
   /** Each switch asked for; a newer one (another tile, My Cloud) ends the wait of the one before. */
   let turn = 0;
   /** The workspace a switch waits to open (null: This computer's own copy), and for whom. */
@@ -174,6 +176,7 @@ export function createLocalProfiles({ registry, clean, dataDir, home, window: sh
     const stops = running() !== id && (home() === "local" || running() !== null);
     if (!(await settle(mine, id, stops))) return null;
     const opened = home() === "cloud" ? await shown.openProfile(id) : running() === id ? (await showLocal(), true) : await clean.open(id);
+    if (opened) remember({ profile: id });
     return opened || mine === turn ? opened : null;
   }
 
@@ -194,9 +197,11 @@ export function createLocalProfiles({ registry, clean, dataDir, home, window: sh
     /** Back to This computer's own copy from a workspace (no home but this computer). */
     async computer() {
       const mine = ++turn;
-      if (running() === null) { await showLocal(); return true; }
+      if (running() === null) { await showLocal(); remember(null); return true; }
       if (!(await settle(mine, null, true))) return null;
-      return clean.leave();
+      const left = await clean.leave();
+      if (left && mine === turn) remember(null);
+      return left;
     },
     /** Another place was chosen: a switch still waiting ends. */
     cancel() { turn++; if (settling) { settling = null; tell(); } },
