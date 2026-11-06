@@ -4454,6 +4454,7 @@
   "remote.devices.subtitle": "Manage the devices that can use this {app}.",
   "remote.devices.empty": "No devices are paired yet.",
   "remote.devices.lastSeen": "Last seen {when}",
+  "remote.devices.paused": "Paused after 30 days unused. It reconnects when you open this page.",
   "remote.devices.remove": "Remove {name}",
   "remote.devices.allowView": "Allow computer view",
   "remote.devices.allowViewDetail": "Full interactive access from this device.",
