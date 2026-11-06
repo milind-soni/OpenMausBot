@@ -26,7 +26,7 @@
 - Spec: "idempotent by bot id and message id, so a resend after a dropped connection adds nothing twice." Keep ids; build on `/api/cloud-send/*` and kept-id `POST /api/bots`, never `/api/teams/import`.
 - Spec: "a phone paired with a computer: allowed only after the owner says yes on that computer ('Your iPhone wants to move 4 bots here. Allow?')".
 - Spec: "Secrets leave the phone only to the person's own home, over that home's authenticated channel." A key value is never echoed, logged, written to chat, SQLite, SSE or a file other than where Settings keeps it.
-- A paired phone without a live grant behaves exactly as today: same routes, same statuses, same messages.
+- A paired phone without a live grant behaves exactly as today: same routes, same statuses, same messages. The one exception: a `POST /api/bots` with its own `id` answers `403 { error: "Allow this move on the computer first." }`, so a create made while the grant is gone never leaves a bot the move cannot finish.
 - `server/index.ts` (15711 lines now; ratchet `scripts/testing/file-size-ratchet.test.ts`) and `electron/main.mjs` (3245, at its ratchet) gain **no lines**: wiring goes onto existing statements, logic into new modules. `index.ts` gains no request-path guard (`scripts/testing/index-route-ratchet.test.ts`). New routes follow `server/routes/README.md` (factory with explicit deps, `import type` for types).
 - Comments follow `AGENTS.md`: only what code cannot say (security invariants, outside facts, public wire contracts). No narration, no PR or plan names.
 - New desktop copy: keys under `moveIn.` in `src/locales/en.json`, translated in `pt-br.json`, `zh.json`, `zh-tw.json` (the spec's three languages; other packs fall back to English); `pnpm i18n:check` and `pnpm vitest run src/locales` pass. No internal words (engine, server, workspace, lent).
@@ -35,7 +35,7 @@
 
 ## Review Focus
 
-1. **The grant ends while a large request is in flight** (expiry, owner revoke, the phone's own end): the in-flight request finishes, the next move call gets today's 404, `GET /api/companion/move` says `expired` or `refused`, and a resend after a new yes adds nothing twice. Tests: Task 2 "a request that began under the grant finishes; the next one gets today's 404", Task 8 resend.
+1. **The grant ends while a large request is in flight** (expiry, owner revoke, the phone's own end): the in-flight request finishes, the next move-only call gets today's 404 (the two shared calls answer as "Refusals during a move" says), `GET /api/companion/move` says `expired` or `refused`, and a resend after a new yes adds nothing twice. Tests: Task 2 "a request that began under the grant finishes; the next one gets today's 404", Task 8 resend.
 2. **The same phone asks twice, or two phones ask at once:** one dialog per pending ask, shown one at a time; a repeat ask while one waits raises no second dialog. Tests: Task 1 "asking again … raises no second ask", Task 7 "asks one at a time".
 3. **The phone sends a bot id the computer already has** (a collision, or an id read from `GET /api/bots`): create answers 409, the bot never becomes the phone's, and every move write for it is refused; the computer's bot is unchanged. Tests: Task 3 "a bot already on this computer never becomes the phone's", Task 8 no-grant test.
 4. **The computer's MausBot already has history:** the phone's MausBot arrives as a separate bot, the computer's MausBot stays main and Chief, and the answer says `mainBot: false` so the phone renames it "MausBot from iPhone". Test: Task 5.
@@ -60,49 +60,57 @@
 
 ## Interface for the phone
 
-Every call goes to the paired computer's companion with the device token (`Authorization: Bearer …`), as today. The companion adds the grant itself; the phone never sends a move header (one it sends is dropped).
+Every call goes to the paired computer's companion with the device token (`Authorization: Bearer …`), as today. The companion adds the grant itself; the phone never sends a move header (one it sends is dropped). Every status and string below is the code's own.
 
 **Ask and wait**
 
 | Call | Request | Answers |
 |---|---|---|
-| `POST /api/companion/move` | `{ "v": 1, "bots": 4 }` (integer 1–200) | `202 { v: 1, state: "pending", expiresAt }` (asked, or already asked); `200 { v: 1, state: "granted", expiresAt }` (already live); `400 { error: "send { v: 1, bots }" }`; `409 { error: "Open OpenMausBot on this computer to move bots here." }` (no desktop app to ask); `401` unpaired |
-| `GET /api/companion/move` | none | `200 { v: 1, state: "none" \| "pending" \| "granted" \| "refused" \| "expired", expiresAt? }` |
-| `DELETE /api/companion/move` | none | `200 { v: 1, state: "none" }` (ends this phone's ask or grant) |
+| `POST /api/companion/move` | `{ "v": 1, "bots": 4 }` (integer 1–200) | `202 { v: 1, state: "pending", expiresAt }` (asked, or already asked); `200 { v: 1, state: "granted", expiresAt }` (already live); `200 { v: 1, state: "refused" }` (the owner said no or ended the grant within the last 5 minutes: not a grant, say so and stop); `429 { error: "This computer was asked a moment ago. Ask again in a few minutes." }` (this phone ended its own ask or grant within 5 minutes of asking: show the message, never retry on a timer); `400 { error: "send { v: 1, bots }" }`; `409 { error: "Open OpenMausBot on this computer to move bots here." }` (no desktop app to ask); `500 { error: "could not ask this computer" }`; `401 { error: "pair this device from Remote access settings on the host computer" }` (unpaired) |
+| `GET /api/companion/move` | none | `200 { v: 1, state: "none" \| "pending" \| "granted" \| "refused" \| "expired", expiresAt? }` (`expiresAt` with `pending` and `granted`) |
+| `DELETE /api/companion/move` | none | `200 { v: 1, state: "none" }` (ends this phone's ask or grant; the next ask within 5 minutes of the last one answers `429`) |
 
-An older computer answers `404 { error: "no route: GET /api/companion/move" }`: say to update OpenMausBot on the computer. Poll `GET` every 2 s while `pending` (the ask expires after 5 minutes). A grant lasts 30 minutes from the yes.
+An older computer answers all three with `403 { error: "Remote access settings are managed on the host computer" }`: say to update OpenMausBot on the computer. Poll `GET` every 2 s while `pending` (the ask expires after 5 minutes). A grant lasts 30 minutes from the yes.
 
 **Under the grant** (`dataDir` is any fixed fake folder, e.g. `"/phone"`; attachment paths in rows start with `"/phone/attachments/"` and names match `^[A-Za-z0-9-]{1,80}\.[A-Za-z0-9]{1,10}$`)
 
 | Call | Request | Answers |
 |---|---|---|
 | `GET /api/bots?messages=0` | — | today's list; find the ids already here |
-| `POST /api/bots` | `{ id, threadId, name, useDefaults: false, modelSelection?, requireAvailableModel? }` (ids `^[\w-]{8,128}$`) | `201 { bot }`; `409 { error: "a bot with this id already exists here" }` (already moved: continue); `403` for any field beyond profile, look and model. A model the computer lacks: retry without `modelSelection` |
+| `POST /api/bots` | `{ id, threadId, name, useDefaults: false, modelSelection?, requireAvailableModel? }` (ids `^[\w-]{8,128}$`) | `201 { bot }`; `409 { error: "a bot with this id already exists here" }` (already moved: continue; only this exact error means that); `409 { error: "this conversation id is already used here" }` and `409 { error: "this workspace is limited to <N> bots" }` (the bot did not move: stop with it and tell the person, never continue); `400 { error: "id and threadId must be ids of letters, digits, - and _ (8 to 128)" }`; `403 { error: "forbidden: a paired device may say who a new bot is and how it looks, not \"<field>\"; set that on the host computer" }` for any field beyond profile, look and model. A model the computer lacks: retry without `modelSelection` |
 | `POST /api/attachments` | image bytes (avatar) | today's answer; then `PATCH avatarUrl` |
-| `PATCH /api/bots/:id` | profile, look, model, voice, memory and phone-app fields: `name, title, description, soul, notifications, color, mascot*, avatar*, voice, speakReplies, replyStyle, voiceNotes, memoryEnabled, memoryUpkeep, phoneApps, modelSelection, fallback, projects, playbooks, assignedSkills, hidden, pinned, sidebarHidden, welcomed, unread` | `200 { bot }`; `403 { error: "forbidden: a phone's move may bring a bot's profile, look, model, voice, memory and phone-app settings, not \"<field>\"; set that on the host computer" }`. Approval level and tools are the computer's defaults |
+| `PATCH /api/bots/:id` | profile, look, model, voice, memory and phone-app fields: `name, title, description, soul, notifications, color, mascot*, avatar*, voice, speakReplies, replyStyle, voiceNotes, memoryEnabled, memoryUpkeep, phoneApps, modelSelection, fallback, projects, playbooks, assignedSkills, hidden, pinned, unread` | `200 { bot }`; `403 { error: "forbidden: a phone's move may bring a bot's profile, look, model, voice, memory and phone-app settings, not \"<field>\"; set that on the host computer" }`. Approval level and tools are the computer's defaults. `sidebarHidden` and `welcomed` go only in the bot kind record below: PATCH answers them with `400 { error: "Only MausBot is hidden this way; archive or delete other bots." }` on a bot that is not MausBot yet |
 | `PUT /api/cloud-send/kind` (bot) | `{ v: 1, key: "bot:<id>", dataDir, record: { defaultBot?: {}, chiefOfStaff?, welcomed?, pinned?, hidden?, sidebarHidden?, projects?, playbooks?, assignedSkills?, fallback?, managedSections? } }` | `200 { v: 1, ok: true, mainBot? }`. With `defaultBot`, `mainBot: true` means it is now the main MausBot; `false` means the computer's MausBot has history: `PATCH { name: "MausBot from iPhone" }` (phone-localized). Send `chiefOfStaff: true` with `defaultBot` so the computer's unused starter is archived |
 | `GET /api/bots/:id/skills` | — | `{ skills: [{ name, … }] }`; install only names not listed |
-| `POST /api/bots/:id/skill-template` | `{ name, description, warnings: [], source: "iPhone", text, enabled }` (`text` is SKILL.md, its `name` equal to `name`) | `201 { installed }`; `422` invalid |
+| `POST /api/bots/:id/skill-template` | `{ name, description, warnings: [], source: "iPhone", text, enabled }` (`text` is SKILL.md, its `name` equal to `name`) | `201 { installed }`; `400 { error: "<the schema's message>" }` (a field missing or malformed); `400 { error: "Skill name does not match its contents" }`; `422 { error }` (the skill could not be installed). A `400` or `422` is final for that skill: skip it |
 | `POST /api/cloud-send/chats` | `{ v: 1, dataDir, conversations: [{ bot, threadId, task, rows, leaf, sent }] }`: ≤200 conversations, ≤1200 rows each, rows carry `id`, `at`, `parentId`; keep each request ≤8 MB | `200 { conversations, messages, accepted: [], waiting: [], removed: [] }`; resend `waiting` later; a second send of the same rows answers `messages: 0` |
 | `POST /api/cloud-send/chats/verify` | `{ v: 1, conversations: [{ threadId, ids }] }` | `200 { v: 1, conversations: [{ threadId, missing, … }] }` |
 | `POST /api/cloud-send/chats/attachments` | `{ names: [...] }` | `200 { missing: [...] }` |
 | `POST /api/cloud-send/chats/attachment/<name>` | raw bytes | `201 { stored: true }` new; `200` already here; `413`; `507 { full: true }` |
 | `PUT /api/cloud-send/kind` (routine) | `{ v: 1, key: "routine:<id>", dataDir, record: <routine with botId of a moved bot, target: "bot">, runs? }` | `200 { v: 1, ok: true }` (arrives switched off); `409` its bot is not here yet |
 | `POST /api/cloud-send/memory` | `{ v: 1, bot, files: [{ path, text }], journal? }` (no `about`, no `teams`) | `200 { v: 1, files, journal, about, teams, failed }` |
-| `POST /api/cloud-send/files?path=workspaces/<bot>/<rel>&size&sha256&offset&mode=new` | raw part ≤8 MB | today's answers: `{ received }` to resume, `201 { stored: true }` when whole, `409 { conflict: true }` a different file is there |
-| `POST /api/phone-move/key` | `{ version: 1, keyId, deviceId, target, requestKey, encapsulatedKey, ciphertext }` sealed as below | `200 { v: 1, saved: true }`; `200 { v: 1, saved: false, kept: true }` (the computer has its own key; nothing changed); `400` bad envelope or a key the computer cannot keep; `403` no grant or another phone's envelope; `409` "This phone was paired with an older security key. Pair it again by QR code."; `429`, `503`, `504` retryable |
+| `POST /api/cloud-send/files?path=workspaces/<bot>/<rel>&size&sha256&offset&mode=new` | raw part ≤8 MB | today's answers: `{ received }` to resume, `201 { stored: true }` when whole, `409 { conflict: true }` a different file is there, `400 { error: "not a bot file a move carries" }` (memory and skills, which move by their own calls, and other left-out paths: skip it). Never send a path with a segment, in any capitals, named `.mcp.json`, `opencode.json`, `opencode.jsonc`, `.opencode`, `.claude`, `.agents`, `.codex`, `.gemini`, `.qwen`, `.grok`, `.cursor`, `.github`, `.copilot`, `.factory`, `.kimi`, `.kimi-code`, `.cline`, `.clinerules`, `.pi`, `.dsh` or `.git`: an engine's settings, hooks and MCP servers stay the computer's, and such a path answers `403 { error: "This move only brings in the bots your phone asked to move." }`. `AGENTS.md`, `CLAUDE.md` and other notes move |
+| `POST /api/phone-move/key` | `{ version: 1, keyId, deviceId, target, requestKey, encapsulatedKey, ciphertext }` sealed as below, no other field | `200 { v: 1, saved: true }`; `200 { v: 1, saved: false, kept: true }` (the computer has its own key; nothing changed); `400 { error: "The encrypted key is invalid" }` (the envelope's shape); `400 { error: "Add this key on the computer." }` (a key this computer cannot keep); another `400` (the envelope did not open: never resend it); `403 { error: "This encrypted key belongs to another phone." }`; `409 { error: "This phone was paired with an older security key. Pair it again by QR code." }`; `429`, `503`, `504` retryable (cap the retries). Without a grant the companion answers `404 { error: "no route: POST /api/phone-move/key" }` |
 | `PATCH /api/routines/:id` | `{ enabled: true }` | today's answer (for routines that were on) |
 | `POST /api/cloud-send/arrived` | `{ v: 1, computer: "<this phone's name>", webhooks: [], bots: [ids] }`: `bots` MUST name the bots the phone brought, or they stay open to the move for 24 h | `200 { v: 1, told: 0 }` |
 
-**Refusals during a move:** `404 { error: "no route: <METHOD> <path>" }` = no live grant (check `GET /api/companion/move`, ask again, then resume from the start: every step is idempotent). `403 { error: "This move only brings in the bots your phone asked to move." }` = a bot this phone did not create here, a room, a kind other than bot or routine, or place-wide memory. `401` = unpaired.
+**Refusals during a move:**
+- `404 { error: "no route: <METHOD> <path>" }` on a move-only call = no live grant: check `GET /api/companion/move`, ask again, then resume from the start (every step is idempotent).
+- The two calls a paired phone also makes every day answer differently without a grant. `POST /api/bots` with an `id` answers `403 { error: "Allow this move on the computer first." }`, and nothing is made. `PATCH /api/bots/:id` answers `403 { error: "forbidden: a paired device may change how a bot looks, not \"<field>\"; change it on the host computer" }`, the same answer as for a bot the move no longer holds (after `arrived`, or 24 h after its create). Read either as the grant gone, and do as for the 404.
+- `403 { error: "This move only brings in the bots your phone asked to move." }` = a bot the move did not create here or no longer holds (after `arrived`, or 24 h after its create), a room, a kind other than bot or routine, place-wide memory, or a file the move never carries.
+- `401 { error: "pair this device from Remote access settings on the host computer" }` = unpaired.
 
 A 403 on a routine is final, never retried: it covers a run of another bot, a run that is not an object, and a run whose `threadId` is null or names a conversation that was not moved.
 
 **Sealing a key** (iOS 17+, the pairing QR's `secretPublicKey`): HPKE base mode, DHKEM(P-256, HKDF-SHA256), HKDF-SHA256, AES-256-GCM, info `"OpenMausBot phone credential v1"`, plaintext the key (1–4096 bytes UTF-8), AAD the UTF-8 of these five lines joined by `\n`: `openmausbot-phone-move-key-v1`, `keyId`, `deviceId`, `target`, `requestKey`. `requestKey` is a fresh `^[\w-]{1,128}$` id per key; resending the same envelope is safe. `target` is a desktop credential id: `anthropicApiKey`, `openaiApiKey`, `openrouterApiKey`, `mistralApiKey`, `cerebrasApiKey`, `groqApiKey`, `greenferenceApiKey`, `metaApiKey`, `deepseekApiKey`, `xaiApiKey`, `ttsKey` (ElevenLabs), and the other `CREDENTIAL_TARGETS` except `onePasswordToken`. A key with no target (a Gemini chat key) does not move: the sheet says to add it on the computer.
 
+The envelope's fields: `version` is `1`. `keyId` is 22 characters: the first 16 bytes of SHA-256 over the 65 raw bytes of the QR's `secretPublicKey`, as unpadded base64url. `deviceId` is this phone's paired device id. `encapsulatedKey` is the 65-byte uncompressed P-256 encapsulated key and `ciphertext` the sealed key with its tag, both unpadded base64url: `encapsulatedKey` exactly 87 characters, `ciphertext` 23 to 5483.
+
 After a resend of a key the phone itself saved, `{ v: 1, saved: false, kept: true }` means success: the first send saved it.
 
 **Call order:** ask → poll until `granted` → `GET /api/bots?messages=0` → per bot, MausBot first: create, avatar, PATCH, bot kind (rename on `mainBot: false`), skills → per bot: chats in pages, verify, attachments → routine kinds → memory → files → ticked keys → `PATCH /api/routines/:id { enabled: true }` → `arrived` → `DELETE /api/companion/move` → switch to the computer.
+
+After `arrived` the brought bots are closed to the move: the phone never replays profile steps after `arrived`. A resend of the whole move happens before `arrived`.
 
 ---
 
@@ -131,8 +139,9 @@ export class MoveGrants {
   constructor(now?: () => number);
   /** created: false while an ask already waits or a grant is live, so no second dialog is raised. */
   ask(deviceId: string, bots: number): { state: MoveState; created: boolean };
-  /** The owner's yes: only an unexpired pending ask becomes a grant. */
-  allow(deviceId: string): boolean;
+  /** The owner's yes to the ask expiring at `expiresAt`: only that unexpired pending ask becomes a grant, so a yes to an
+   * earlier ask, before a restart too, never grants a newer one. */
+  allow(deviceId: string, expiresAt: number): boolean;
   /** The owner's no, a revoke, or unpairing: the ask or grant ends and reads "refused". */
   refuse(deviceId: string): void;
   /** The phone's own end: reads "none". */
@@ -141,7 +150,8 @@ export class MoveGrants {
   live(deviceId: string): boolean;
 }
 ```
-- `ControlOptions.moves?: MoveGrants`. Control routes: `POST /devices/:id/move` → `200 companionState` | `404 { error: "no such device" }` | `409 { error: "no move to allow" }`; `DELETE /devices/:id/move` → `200 companionState` | `404`. `DELETE /devices/:id` also calls `moves.refuse(id)`.
+- `ControlOptions.moves?: MoveGrants`. Control routes: `POST /devices/:id/move?expiresAt=<the ask's expiresAt>` → `200 companionState` | `404 { error: "no such device" }` | `409 { error: "no move to allow" }`; `DELETE /devices/:id/move` → `200 companionState` | `404`. `DELETE /devices/:id` also calls `moves.refuse(id)`.
+- The step sketches below call `allow(deviceId)` as first planned; the tests as built (`companion/test/move-grants.test.ts`, `companion/test/control.test.ts`) pass the ask's `expiresAt`, and also cover the 5-minute quiet window after an ask or a No.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -379,19 +389,19 @@ export function createPhoneMoveIn(deps: PhoneMoveInDeps): {
 };
 export const PHONE_MOVE_REFUSAL = "This move only brings in the bots your phone asked to move.";
 ```
-- Brought bots persist at `<dataDir>/phone-move-ins.json` as `{ "v": 1, "devices": { "<deviceId>": ["<botId>", …] } }`, mode `0o600`, `writeFileAtomic`, written before the create runs.
+- Brought bots persist at `<dataDir>/phone-move-ins.json` as `{ "v": 1, "bots": { "<botId>": <ms when recorded> } }`, mode `0o600`, `writeFileAtomic`, written before the create runs. The ids are not bound to a device (Ruling Q5): a bot stays open to any phone's move under a live grant until `arrived` names it or 24 h after it was recorded, whichever comes first; after that it is the computer's own.
 
 **The guard** (runs only when `moving(auth)`; reads the body once with the handler's limit and hands it on through `ctx.readBody`, as `server/team-move-in.ts` does; a refusal is `403 { error: PHONE_MOVE_REFUSAL }`, after `req.resume()` for a body it did not read):
 
 | Route | Passes when |
 |---|---|
-| `POST /api/bots` | always; when `body.id` matches `^[\w-]{8,128}$` and is no bot, bot thread or room thread here, the id is recorded as this phone's first |
-| `GET /api/bots/:id/skills`, `POST /api/bots/:id/skill-template` | `:id` is this phone's |
-| `PUT /api/cloud-send/kind` | `bot:<id>` with `<id>` this phone's (the record handed on without `installedPackage`); or `routine:<id>` with `record.botId` this phone's, `record.target === "bot"`, `record.resultsThreadId` absent or a thread of that bot, and no routine with that id here on another bot. Any other kind is refused. Every body handed on carries `mainIfUnused: true` |
-| `POST /api/cloud-send/chats` | every conversation has `bot` this phone's, no `room`, and a `threadId` that is new here or that bot's |
-| `POST /api/cloud-send/chats/verify` | every `threadId` is new here or a thread of a bot this phone brought |
-| `POST /api/cloud-send/memory` | `bot` is this phone's, and no `about` or `teams` |
-| `POST /api/cloud-send/files` | the `path` query starts with `workspaces/<b>/` or `task-workspaces/<b>/` for a bot `<b>` of this phone's |
+| `POST /api/bots` | always; when `body.id` matches `^[\w-]{8,128}$` and is no bot, bot thread or room thread here, the id is recorded first. Without a grant, a paired phone's create with an `id` answers `403 { error: "Allow this move on the computer first." }` in the create route |
+| `GET /api/bots/:id/skills`, `POST /api/bots/:id/skill-template` | `:id` is open to the move |
+| `PUT /api/cloud-send/kind` | `bot:<id>` with `<id>` open to the move (the record handed on without `installedPackage`); or `routine:<id>` with `record.botId` open to the move, `record.target === "bot"`, `record.resultsThreadId` absent or a thread of that bot, and no routine with that id here on another bot. Any other kind is refused. Every body handed on carries `mainIfUnused: true` |
+| `POST /api/cloud-send/chats` | every conversation has `bot` open to the move, no `room`, and a `threadId` that is new here or that bot's |
+| `POST /api/cloud-send/chats/verify` | every `threadId` is new here or a thread of a bot open to the move |
+| `POST /api/cloud-send/memory` | `bot` is open to the move, and no `about` or `teams` |
+| `POST /api/cloud-send/files` | the `path` query starts with `workspaces/<b>/` or `task-workspaces/<b>/` for a bot `<b>` open to the move, and no segment of it, in any capitals (NFKC, lowercased), is `.mcp.json`, `opencode.json`, `opencode.jsonc`, `.opencode`, `.claude`, `.agents`, `.codex`, `.gemini`, `.qwen`, `.grok`, `.cursor`, `.github`, `.copilot`, `.factory`, `.kimi`, `.kimi-code`, `.cline`, `.clinerules`, `.pi`, `.dsh` or `.git` (engine settings, hooks, plugins and MCP servers, and git's config and hooks) |
 | attachments, `arrived`, `/api/phone-move/key`, `PATCH /api/bots/:id` | always (the patch is bounded in Task 4) |
 
 - [ ] **Step 1: Write the failing tests**
@@ -423,7 +433,7 @@ it("does nothing for a request that is not a phone's move", async () => {
 });
 it("a bot becomes the phone's when it creates it under the grant, and stays so after a restart", async () => {
   // POST /api/bots { id: "pocket-scout-0001", threadId: "pocket-scout-main" } → PASS, handedOn deep-equals the body
-  // brings(phone, "pocket-scout-0001") === true; brings({ ...phone, companionDevice: "phone-2" }, "pocket-scout-0001") === false
+  // brings(phone, "pocket-scout-0001") === true; brings({ ...phone, companionDevice: "phone-2" }, "pocket-scout-0001") === true (Ruling Q5)
   // a second createPhoneMoveIn on the same dataDir → brings(phone, "pocket-scout-0001") === true
   // statSync(join(dataDir, "phone-move-ins.json")).mode & 0o777 === 0o600
 });
@@ -874,14 +884,12 @@ git add server/testing/desktop-parent.mjs server/phone-move-in.e2e.test.ts
 git commit -m "test: a phone's move into its paired computer, end to end and resent"
 ```
 
-After `arrived` the brought bots are closed to the move: the phone never replays profile steps after `arrived`. A resend of the whole move happens before `arrived`.
-
 ## Open questions
 
 1. With no desktop app (a headless companion), the ask answers 409 and no move happens. Fine, or should the control page offer Allow?
 2. Times: the ask waits 5 minutes, the grant lasts 30. Right?
 3. Approval level, tools and per-conversation settings stay the computer's defaults; only profile, look, model, voice and memory settings come with a bot. Right?
 4. A moved key never replaces a key the computer already has (`kept: true`). Right?
-5. The bots a phone brought are tied to its pairing. A phone re-paired halfway through a move cannot change the bots it moved before; the phone should say "finish on the computer". Or should they be tied to the bot ids alone?
+5. Decided (Ruling Q5): the bots a phone brought are tied to their ids alone, not to the pairing. Each stays open to any phone's move under a live grant until `arrived` names it or for 24 h, so a phone re-paired halfway through can finish. Cost: during an unfinished move a second approved phone could also write to those half-moved bots.
 6. `arrived` adds no chat line for a phone (its only lines are about webhooks). Is a per-bot "I moved here from your iPhone" line wanted? It would be new copy.
-7. The dialog stays open when its ask expires; a late Allow does nothing and the phone shows "expired". Close it on expiry?
+7. Decided (Ruling Q7, as built): the dialog closes itself when its ask expires (on macOS it is a sheet on the app's window, brought forward), and a click at or after expiry sends nothing. When the phone ends its ask first, the dialog stays up until that ask's expiry: Allow then grants nothing, and Don't Allow makes the phone's next ask read `refused` for 5 minutes.
