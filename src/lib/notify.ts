@@ -1,4 +1,5 @@
 import type { Notification } from "../../shared/notification";
+import { plainPreviewText } from "../../shared/plain-preview";
 import { finishedNotificationsEnabled, notificationSoundsEnabled } from "./notification-preferences";
 
 export type NotifyFrame = Notification;
@@ -43,8 +44,10 @@ export function showNotification(
   if (Notification.permission !== "granted") return;
 
   const title = placeName ? `${placeName} · ${frame.title}` : frame.title;
+  // Entries saved before the harness spoke plain text still carry Markdown.
+  const body = plainPreviewText(frame.body);
   const options: NotificationOptions = {
-    body: frame.body,
+    body,
     ...buildNotificationOptions({ id: frame.botId, avatarUrl }),
     ...(spend ? { tag: "openmausbot:spend", icon: undefined } : {}),
     ...(notificationSoundsEnabled() ? {} : { silent: true }),
@@ -58,6 +61,6 @@ export function showNotification(
   const desktop = window.ogb?.desktopNotifications;
   if (!desktop) return shownByPage();
   void desktop.show({
-    title, body: frame.body, tag: options.tag, silent: options.silent === true, picture: options.icon, botId: frame.botId, threadId: frame.threadId,
+    title, body, tag: options.tag, silent: options.silent === true, picture: options.icon, botId: frame.botId, threadId: frame.threadId,
   }).then((shown) => { if (!shown) shownByPage(); }, shownByPage);
 }

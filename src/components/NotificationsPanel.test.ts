@@ -39,6 +39,16 @@ describe("a row in the bell", () => {
   });
 });
 
+describe("a row stored before notifications spoke plain text", () => {
+  const scout: Bot = { id: "scout", threadId: "main", name: "Scout", title: "", description: "", notifications: true, color: "green", unread: false, modelSelection: { instanceId: "fake", model: "m" }, messages: [], tasks: [] };
+  it("shows its Markdown as the readable line", () => {
+    const state = { ...initialState, bots: [scout], notifications: [{ id: "n1", at: 1, read: true, kind: "done" as const, botId: "scout", botName: "Scout", threadId: "main", title: "Scout finished", body: "**Facture reçue** — [voir](https://example.com)" }] };
+    const html = renderToStaticMarkup(createElement(StoreContext.Provider, { value: { state, dispatch: vi.fn() } as never }, createElement(NotificationsPanel)));
+    expect(html).toContain("Facture reçue — voir");
+    expect(html).not.toContain("**");
+  });
+});
+
 describe("notificationThreadName", () => {
   it("finds a bot task title", () => {
     expect(notificationThreadName({ botId: "b1", threadId: "t-2" }, state)).toBe("Hotpatches");

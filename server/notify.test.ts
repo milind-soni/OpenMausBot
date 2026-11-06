@@ -121,6 +121,13 @@ describe("summarize", () => {
     expect(long.endsWith("…")).toBe(true);
     expect(summarize("short")).toBe("short");
   });
+
+  it("reads a bot's Markdown as the plain line a lock screen shows", () => {
+    expect(summarize("**Facture reçue** — consulter le [document](https://example.com/facture)"))
+      .toBe("Facture reçue — consulter le document");
+    expect(summarize("I added the **cover card** to the deck.")).toBe("I added the cover card to the deck.");
+    expect(summarize("Run `pnpm test` and *ship* it.")).toBe("Run pnpm test and ship it.");
+  });
 });
 
 describe("buildSpendNotification", () => {
