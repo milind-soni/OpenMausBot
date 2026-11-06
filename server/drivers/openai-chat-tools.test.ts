@@ -1000,20 +1000,33 @@ describe("structured tool execution boundaries", () => {
 
   it.each([
     // Letters outside hex and the usual id alphabets, so a random id in the events can never contain the credential.
-    { scenario: "one chunk", pieces: ["zqxzqx"] },
-    { scenario: "split chunks", pieces: ["zqx", "zqx"] },
+    { scenario: "one chunk", pieces: ["zqxzqxzqx"] },
+    { scenario: "split chunks", pieces: ["zqxzqx", "zqx"] },
   ])("redacts an overlapping-prefix credential received in $scenario", async ({ pieces }) => {
     const f = await fixture((_request, response) => sse(response, [
       chunk({ content: "Before " }),
       ...pieces.map((piece) => chunk({ content: piece })),
       chunk({ content: " after." }, "stop"),
-    ]), "openai-compat", "zqxzqx");
+    ]), "openai-compat", "zqxzqxzqx");
     await f.start({ integrations: undefined });
     expect(await f.completed()).toMatchObject({ ok: true });
     const combined = f.recorder.events.filter((event) => event.type === "content.delta").map((event) => event.delta).join("");
     expect(combined).toBe("Before [redacted] after.");
     expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "item.completed", itemType: "assistant_text", text: combined }));
-    expect(JSON.stringify(f.recorder.events)).not.toContain("zqxzqx");
+    expect(JSON.stringify(f.recorder.events)).not.toContain("zqxzqxzqx");
+  });
+
+  it("leaves the reply alone when the configured key is a short placeholder like \"1\"", async () => {
+    const text = "1 12:00–13:00 123 8901 10 11 ID: 1A2B3C";
+    const f = await fixture((_request, response) => sse(response, [
+      ...text.match(/.{1,5}/gs)!.map((piece) => chunk({ content: piece })),
+      chunk({}, "stop"),
+    ]), "openai-compat", "1");
+    await f.start({ integrations: undefined });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    const combined = f.recorder.events.filter((event) => event.type === "content.delta").map((event) => event.delta).join("");
+    expect(combined).toBe(text);
+    expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "item.completed", itemType: "assistant_text", text }));
   });
 
   it("redacts a configured credential echoed by a tool from events, diagnostics, and the returned tool result", async () => {
