@@ -3497,6 +3497,7 @@
   "remote.devices.subtitle": "Gestiona los dispositivos que pueden usar este {app}.",
   "remote.devices.empty": "Todavía no hay dispositivos emparejados.",
   "remote.devices.lastSeen": "Visto por última vez {when}",
+  "remote.devices.paused": "En pausa tras 30 días sin uso. Se vuelve a conectar cuando abres esta página.",
   "remote.devices.remove": "Quitar {name}",
   "remote.devices.allowView": "Permitir ver el equipo",
   "remote.devices.allowViewDetail": "Acceso interactivo completo desde este dispositivo.",

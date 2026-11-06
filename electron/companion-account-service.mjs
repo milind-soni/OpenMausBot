@@ -11,6 +11,9 @@ import {
   withManagedCompanionTunnelAccess,
   withoutManagedCompanionTunnelAccess,
 } from "./managed-companion-tunnel.mjs";
+import { MANAGED_ENDPOINT_PHONES_UNUSED } from "./companion-endpoint-need.mjs";
+
+export { managedEndpointNeed, PHONE_UNUSED_RELEASE_MS } from "./companion-endpoint-need.mjs";
 
 export const DEFAULT_COMPANION_CONTROL_PLANE_URL = "https://accounts.openmausbot.com";
 
@@ -23,6 +26,8 @@ export const COMPANION_INSTALLATION_CREDENTIAL_FIELD = "companionInstallationCre
 export const COMPANION_INSTALLATION_EXPIRY_FIELD = "companionInstallationCredentialExpiresAt";
 export const COMPANION_ACCOUNT_CLEANUP_PENDING_FIELD = "companionAccountCleanupPending";
 export const COMPANION_ENDPOINT_RELEASE_PENDING_FIELD = "companionEndpointReleasePending";
+/** The address was given back while phones were paired but unused; the control plane keeps its hostname. */
+export const COMPANION_ENDPOINT_PAUSED_FIELD = "companionEndpointPaused";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const INSTALLATION_ID = UUID;
@@ -80,19 +85,6 @@ export function companionAccountCleanupPending(credentials) {
   return credentials?.[COMPANION_ACCOUNT_CLEANUP_PENDING_FIELD] === true;
 }
 
-/** A phone paired before the encrypted connection still needs the tunnel while it was seen this recently. */
-const LEGACY_DEVICE_WINDOW_MS = 30 * 24 * 60 * 60_000;
-
-/** true, false, or null when that cannot be told; only false ever gives an address back. Once this computer serves
- * the encrypted connection, only an old phone seen in the last 30 days needs a tunnel: new pairings never make one. */
-export function managedEndpointNeed(state, now = Date.now()) {
-  if (!state || typeof state !== "object" || state.enabled !== true || state.error) return null;
-  if (state.devicesUnreadable === true || !Array.isArray(state.devices)) return null;
-  if (state.e2e?.enabled !== true) return state.devices.length > 0 || Boolean(state.pairing);
-  return state.devices.some((device) =>
-    !Number.isSafeInteger(device?.e2eAt) && now - (Number(device?.lastSeenAt) || 0) < LEGACY_DEVICE_WINDOW_MS);
-}
-
 function storedAccount(credentials) {
   const email = normalizeAccountEmail(ownString(credentials, COMPANION_ACCOUNT_EMAIL_FIELD));
   const userId = ownString(credentials, COMPANION_ACCOUNT_USER_ID_FIELD);
@@ -123,6 +115,7 @@ function withoutCompanionAccount(credentials) {
     COMPANION_INSTALLATION_EXPIRY_FIELD,
     COMPANION_ACCOUNT_CLEANUP_PENDING_FIELD,
     COMPANION_ENDPOINT_RELEASE_PENDING_FIELD,
+    COMPANION_ENDPOINT_PAUSED_FIELD,
   ]) {
     delete next[field];
   }
@@ -153,6 +146,7 @@ function withProvisionedAccount(credentials, { accountToken, user, installation,
   };
   delete next[COMPANION_ACCOUNT_CLEANUP_PENDING_FIELD];
   delete next[COMPANION_ENDPOINT_RELEASE_PENDING_FIELD];
+  delete next[COMPANION_ENDPOINT_PAUSED_FIELD];
   return next;
 }
 
@@ -218,8 +212,9 @@ export function friendlyCompanionAccountError(error) {
   return `${message}${reference}`;
 }
 
-function publicState({ available, status, email, endpoint, message }) {
+function publicState({ available, status, email, endpoint, message, paused }) {
   const state = { available: Boolean(available), status };
+  if (paused === true) state.paused = true;
   const normalizedEmail = normalizeAccountEmail(email);
   if (normalizedEmail) state.email = normalizedEmail;
   const accessEndpoint = (() => {
@@ -372,6 +367,7 @@ export function createCompanionAccountService({
     const account = storedAccount(document);
     const persistedAccess = managedCompanionTunnelAccess(document);
     const available = healthy || Boolean(account);
+    const paused = Boolean(account) && !persistedAccess && document[COMPANION_ENDPOINT_PAUSED_FIELD] === true;
     if (!healthy) {
       return publicState({
         available,
@@ -379,6 +375,7 @@ export function createCompanionAccountService({
         email: account?.email,
         endpoint: persistedAccess?.endpoint,
         message: FRIENDLY_MESSAGES.control_plane_unavailable,
+        paused,
       });
     }
     if (
@@ -391,11 +388,11 @@ export function createCompanionAccountService({
     ) {
       phase = null;
     }
-    if (phase) return publicState({ available, ...phase });
+    if (phase) return publicState({ available, ...phase, paused });
     if (!account) return publicState({ available, status: "signed-out" });
     const access = persistedAccess;
     if (!access) {
-      if (onDemand) return publicState({ available, status: "ready", email: account.email });
+      if (onDemand) return publicState({ available, status: "ready", email: account.email, paused });
       return publicState({
         available,
         status: "error",
@@ -780,16 +777,24 @@ export function createCompanionAccountService({
 
   const savedAddress = (document) => normalizeManagedCompanionEndpoint(document[MANAGED_COMPANION_ENDPOINT_FIELD]);
 
+  let phonesUnused = false;
+  /** "unused" (paired phones, none seen for 30 days) reads as false and is remembered for the release. */
   const currentNeed = async () => {
+    phonesUnused = false;
     let need = null;
     try {
       const answer = await managedEndpointNeeded();
-      need = typeof answer === "boolean" ? answer : null;
+      phonesUnused = answer === MANAGED_ENDPOINT_PHONES_UNUSED;
+      need = phonesUnused ? false : typeof answer === "boolean" ? answer : null;
     } catch {
       need = null;
     }
     if (need === false && relayCapable()) return false;
-    return requestedRecently() ? true : need;
+    if (requestedRecently()) {
+      phonesUnused = false;
+      return true;
+    }
+    return need;
   };
 
   const releaseScheduledAt = () => {
@@ -809,6 +814,7 @@ export function createCompanionAccountService({
   /** The connector stops and the address is withdrawn before the DELETE, so nothing can pair to an address being removed. */
   const releaseAddress = async () => {
     const need = await currentNeed();
+    const pause = phonesUnused;
     if (need !== false) {
       if (need) await cancelRelease();
       return settledState();
@@ -839,12 +845,16 @@ export function createCompanionAccountService({
         return settledState();
       }
     }
-    await updateCredentials((current) => removalPending
-      ? { ...withoutManagedCompanionTunnelAccess(current), [COMPANION_ENDPOINT_RELEASE_PENDING_FIELD]: true }
-      : withoutManagedCompanionTunnelAccess(current));
+    await updateCredentials((current) => ({
+      ...withoutManagedCompanionTunnelAccess(current),
+      ...(removalPending ? { [COMPANION_ENDPOINT_RELEASE_PENDING_FIELD]: true } : {}),
+      ...(pause ? { [COMPANION_ENDPOINT_PAUSED_FIELD]: true } : {}),
+    }));
     resetAutoRetry();
     phase = null;
-    writeLog("companion account: gave the secure address back; no device needs it");
+    writeLog(pause
+      ? "companion account: gave the secure address back; no paired phone was used in 30 days"
+      : "companion account: gave the secure address back; no device needs it");
     return settledState();
   };
 

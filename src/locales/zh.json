@@ -4270,6 +4270,7 @@
   "remote.devices.subtitle": "管理可以使用这个 {app} 的设备。",
   "remote.devices.empty": "还没有配对任何设备。",
   "remote.devices.lastSeen": "最后在线 {when}",
+  "remote.devices.paused": "30 天未使用，已暂停。打开此页面时会重新连接。",
   "remote.devices.remove": "移除 {name}",
   "remote.devices.allowView": "允许查看电脑",
   "remote.devices.allowViewDetail": "来自这台设备的完全交互访问。",

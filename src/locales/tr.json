@@ -3163,6 +3163,7 @@
   "remote.devices.subtitle": "Bu {app} uygulamasını kullanabilen cihazları yönetin.",
   "remote.devices.empty": "Henüz eşleştirilmiş cihaz yok.",
   "remote.devices.lastSeen": "Son görülme: {when}",
+  "remote.devices.paused": "30 gün kullanılmadığı için duraklatıldı. Bu sayfayı açtığınızda yeniden bağlanır.",
   "remote.devices.remove": "{name} cihazını kaldır",
   "remote.devices.allowView": "Bilgisayar görünümüne izin ver",
   "remote.devices.allowViewDetail": "Bu cihazdan tam etkileşimli erişim.",

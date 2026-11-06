@@ -675,6 +675,7 @@ const bridge = {
       languageListeners.add(listener);
       return () => { languageListeners.delete(listener); };
     },
+    shown: language => { ipcRenderer.send("desktop-language:shown", String(language)); },
   },
 };
 

@@ -4301,6 +4301,7 @@
   "remote.devices.subtitle": "この {app} を使えるデバイスを管理します。",
   "remote.devices.empty": "まだペアリング済みのデバイスはありません。",
   "remote.devices.lastSeen": "最後に確認：{when}",
+  "remote.devices.paused": "30 日間使われなかったため一時停止中です。このページを開くと再接続されます。",
   "remote.devices.remove": "{name} を削除",
   "remote.devices.allowView": "コンピューター表示を許可",
   "remote.devices.allowViewDetail": "このデバイスからの完全な操作アクセスです。",
