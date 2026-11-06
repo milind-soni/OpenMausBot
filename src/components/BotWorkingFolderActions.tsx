@@ -5,14 +5,19 @@ import type { BotWorkingFolder } from "../../shared/bot-working-folder";
 import { api, type Bot } from "@/state/store";
 import { copyText } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { MENU_ITEM } from "./menu-recipe";
 import { NoticeToast } from "./NoticeCard";
 
-type Props = { bot: Pick<Bot, "id" | "cwd" | "computer">; menu?: boolean; onCompleted?: (action: "open" | "copy") => void; className?: string };
+type Props = { bot: Pick<Bot, "id" | "threadId" | "tasks" | "cwd" | "computer">; menu?: boolean; onCompleted?: (action: "open" | "copy") => void; className?: string };
 
 export function BotWorkingFolderActions(props: Props) {
+  const allowed = useOwnerOrAdmin();
+  if (allowed !== true) return null;
   const { bot } = props;
-  return <WorkingFolderActions key={JSON.stringify([bot.id, bot.cwd, bot.computer])} {...props} />;
+  const task = bot.tasks?.find((candidate) => candidate.threadId === bot.threadId);
+  const key = JSON.stringify({ id: bot.id, threadId: bot.threadId, cwd: bot.cwd, computer: bot.computer, taskCwd: task?.cwd, surface: task?.surface });
+  return <WorkingFolderActions key={key} {...props} />;
 }
 
 function WorkingFolderActions({ bot, menu = false, onCompleted, className }: Props) {
@@ -21,13 +26,14 @@ function WorkingFolderActions({ bot, menu = false, onCompleted, className }: Pro
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
   const active = useRef(false);
+  const endpoint = `/api/bots/${bot.id}/working-folder?threadId=${encodeURIComponent(bot.threadId)}`;
   useEffect(() => {
     active.current = true;
-    void api<BotWorkingFolder>(`/api/bots/${bot.id}/working-folder`)
+    void api<BotWorkingFolder>(endpoint)
       .then((value) => { if (active.current) setFolder(value); })
       .catch(() => { if (active.current) setFeedback(t("botFolder.loadFailed")); });
     return () => { active.current = false; };
-  }, [bot.id]);
+  }, [endpoint]);
 
   const reveal = window.ogb?.remoteClient?.active ? undefined : window.ogb?.revealInFolder;
   const local = Boolean(folder?.path && folder.local && reveal);
@@ -37,7 +43,7 @@ function WorkingFolderActions({ bot, menu = false, onCompleted, className }: Pro
     setBusy(true);
     setFeedback("");
     try {
-      const prepared = await api<BotWorkingFolder>(`/api/bots/${bot.id}/working-folder`, { method: "POST", body: "{}" });
+      const prepared = await api<BotWorkingFolder>(endpoint, { method: "POST", body: "{}" });
       if (!active.current) return;
       if (!prepared.local || !prepared.path || await reveal(prepared.path) !== "shown") {
         if (active.current) setFeedback(t("botFolder.openFailed"));

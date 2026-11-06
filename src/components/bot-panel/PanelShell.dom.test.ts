@@ -7,12 +7,19 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, BotSettingsSection } from "@/state/store";
 
-const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), settingsOpen: false }));
+const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), settingsOpen: false, admin: true, folderRequests: vi.fn() }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return {
     ...original,
-    api: (path: string, opts?: RequestInit) => path.endsWith("/working-folder") ? Promise.resolve({ path: null, local: false }) : original.api(path, opts),
+    api: (path: string, opts?: RequestInit) => {
+      if (path.split("?")[0].endsWith("/working-folder")) {
+        fixture.folderRequests(path);
+        return Promise.resolve({ path: null, local: false });
+      }
+      return original.api(path, opts);
+    },
     useStore: () => ({ state: { ...original.initialState, settingsOpen: fixture.settingsOpen }, dispatch: fixture.dispatch, flushBotPatches: () => Promise.resolve(null) }),
   };
 });
@@ -78,6 +85,8 @@ const onWindowKey = (event: KeyboardEvent) => {
 };
 
 beforeEach(() => {
+  fixture.admin = true;
+  fixture.folderRequests.mockReset();
   fixture.dispatch.mockReset();
   onClose.mockReset();
   dialogCloses.mockReset();
@@ -183,6 +192,16 @@ describe("the panel's tabs", () => {
 });
 
 describe("the panel's top", () => {
+  it("does not request a folder or show a failure for a client-only session", async () => {
+    fixture.admin = false;
+    render(null);
+    await settle();
+    expect(fixture.folderRequests).not.toHaveBeenCalled();
+    expect(host.querySelector('[aria-label="Open working folder on this computer"]')).toBeNull();
+    expect(host.querySelector('[aria-label="Copy working folder path"]')).toBeNull();
+    expect(document.querySelector('[data-notice-toast]')).toBeNull();
+  });
+
   it("has a round Share button that copies or downloads the conversation, a gear for Bot settings, and Close", async () => {
     render(null);
     await settle();
