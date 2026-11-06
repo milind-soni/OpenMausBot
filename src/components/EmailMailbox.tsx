@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { reserveConnectionPage } from "@/lib/connector-oauth";
 import { mcpSignInLink } from "@/lib/mcp-sign-in";
+import { Select } from "./Select";
 import type { EmailAccountView, EmailOutgoingAnswer, EmailOutgoingFields, EmailSignInHint, EmailTestAnswer } from "../../shared/email";
 
 export const EMAIL_PILL = "inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink transition-colors hover:bg-raised-hover disabled:opacity-40";
@@ -50,11 +51,13 @@ export function OutgoingServerInputs<T extends EmailOutgoingFields>({ value, onC
     <div data-email-outgoing-fields className="grid grid-cols-[minmax(0,1fr)_6rem] gap-2">
       <input type="text" autoComplete="off" spellCheck={false} dir="ltr" disabled={disabled} aria-label={t("email.outgoingServer")} placeholder={t("email.outgoingServer")} value={value.smtpHost ?? ""} onChange={(event) => set("smtpHost", event.target.value)} className={className} />
       <input type="number" min={1} max={65535} autoComplete="off" dir="ltr" disabled={disabled} aria-label={t("email.port")} placeholder={t("email.port")} value={value.smtpPort ?? ""} onChange={(event) => set("smtpPort", event.target.value ? Number(event.target.value) : undefined)} className={className} />
-      <select aria-label={t("email.security")} disabled={disabled} value={value.smtpSecurity ?? ""} onChange={(event) => set("smtpSecurity", event.target.value)} className={cn(className, "col-span-2")}>
-        <option value="">{t("email.securityAuto")}</option>
-        <option value="tls">{t("email.securityTls")}</option>
-        <option value="starttls">{t("email.securityStarttls")}</option>
-      </select>
+      <div className="col-span-2 flex">
+        <Select size="sm" className="w-full" aria-label={t("email.security")} disabled={disabled} value={value.smtpSecurity ?? ""} onChange={(event) => set("smtpSecurity", event.target.value)}>
+          <option value="">{t("email.securityAuto")}</option>
+          <option value="tls">{t("email.securityTls")}</option>
+          <option value="starttls">{t("email.securityStarttls")}</option>
+        </Select>
+      </div>
       <input type="text" autoComplete="off" spellCheck={false} dir="ltr" disabled={disabled} aria-label={t("email.smtpUsername")} placeholder={t("email.smtpUsername")} value={value.smtpUsername ?? ""} onChange={(event) => set("smtpUsername", event.target.value)} className={cn(className, "col-span-2")} />
       <input type="password" autoComplete="new-password" spellCheck={false} dir="ltr" disabled={disabled} aria-label={t("email.smtpPassword")} placeholder={t("email.smtpPassword")} value={value.smtpPassword ?? ""} onChange={(event) => set("smtpPassword", event.target.value)} className={cn(className, "col-span-2")} />
     </div>
