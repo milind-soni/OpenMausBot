@@ -168,6 +168,36 @@ describe("Simple's sidebar before anyone drags", () => {
       expect(props.botDrag!.row(props.bot.id).draggable).toBe(true);
     }
   });
+
+  it("reorders inside the rail's own list, and nothing else: no department is created or left unseen", () => {
+    // The rail hides department names and its naming field, so a drop there must only move a tile within its list.
+    fixture.storage.set(SIDEBAR_DENSITY_KEY, "avatars");
+    drag("cleo");
+    row("atlas").botDrag!.row("atlas").onDrop(at(5) as never);
+    expect(actions()).toEqual([{ type: "botsOrdered", botIds: ["cleo", "atlas", "bea"] }]);
+    expect(sections()).not.toContain(userSectionId(NEW_DEPARTMENT));
+    fixture.dispatch.mockClear();
+
+    // Onto the middle of a bot: a place above or below, never a new department whose name field the rail hides.
+    drag("cleo");
+    row("atlas").botDrag!.row("atlas").onDragOver(at() as never);
+    expect(row("atlas").botDrop).toBe("after");
+    row("atlas").botDrag!.row("atlas").onDrop(at() as never);
+    expect(actions()).toEqual([{ type: "botsOrdered", botIds: ["atlas", "cleo", "bea"] }]);
+    expect(sections()).not.toContain(userSectionId(NEW_DEPARTMENT));
+  });
+
+  it("refuses in the rail a drop that would change department, which the person cannot see there", () => {
+    fixture.storage.set(SIDEBAR_DENSITY_KEY, "avatars");
+    drag("dodo");
+    expect(section(userSectionId("Work")).onDragOver).toBeInstanceOf(Function);
+    const over = at();
+    section(BOTS_SECTION_ID).onDragOver(over as never);
+    expect(over.preventDefault).not.toHaveBeenCalled();
+    section(BOTS_SECTION_ID).onDrop(over as never);
+    expect(actions()).toEqual([]);
+    expect(rows().every((props) => !props.botDragging)).toBe(true);
+  });
 });
 
 describe("dragging a bot", () => {
