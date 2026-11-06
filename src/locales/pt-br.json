@@ -4201,6 +4201,7 @@
   "remote.devices.subtitle": "Gerencie os dispositivos que podem usar esta instalação de {app}.",
   "remote.devices.empty": "Nenhum dispositivo pareado ainda.",
   "remote.devices.lastSeen": "Visto por último {when}",
+  "remote.devices.paused": "Pausado após 30 dias sem uso. Ele se reconecta quando você abre esta página.",
   "remote.devices.remove": "Remover {name}",
   "remote.devices.allowView": "Permitir ver o computador",
   "remote.devices.allowViewDetail": "Acesso interativo completo a partir deste dispositivo.",
