@@ -63,6 +63,7 @@ function nextRunLabel(at: number | null) {
 }
 
 export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
+  const privateDesktop = bot.computer === "vm";
   const { state, dispatch } = useStore();
   const { dragProps } = useCaptionChrome();
   const panelRef = useComputerPanelEntry(bot.id);
@@ -102,7 +103,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
     setFrame(null);
     setPreviewPending(true);
     setPreviewUnavailable(false);
-  }, [bot.id]);
+  }, [bot.id, privateDesktop]);
 
   useEffect(() => {
     const viewer = window.ogb?.desktopViewer;
@@ -121,7 +122,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   }, [bot.id]);
 
   useEffect(() => {
-    if (view !== "desktop" || !pageVisible || viewerOpen || pending) return;
+    if (privateDesktop || view !== "desktop" || !pageVisible || viewerOpen || pending) return;
     const controller = new AbortController();
     let requestRunning = false;
     let lastAttemptAt = -Infinity;
@@ -170,7 +171,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [bot.id, pageVisible, viewerOpen, pending, view]);
+  }, [bot.id, pageVisible, viewerOpen, pending, view, privateDesktop]);
 
   const open = async () => {
     setPending(true);
@@ -216,7 +217,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
         <div>
           <div className="text-[14px] font-medium text-ink">{t("remoteDesktop.title", { name: bot.name })}</div>
           <div className="mt-0.5 text-[11px] text-ink-secondary">
-            {t(bot.cloudBackend === "vps" ? "botAccess.cloud.selfHostedVps" : "remoteDesktop.cloudDesktop")}
+            {t(privateDesktop ? "remoteDesktop.privateDesktop" : bot.cloudBackend === "vps" ? "botAccess.cloud.selfHostedVps" : "remoteDesktop.cloudDesktop")}
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -261,6 +262,9 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
       ) : (
       <div className="flex flex-1 flex-col items-center gap-4 overflow-y-auto px-6 py-5 text-center">
         {help && help.place !== "browser" && <div className="-mt-3 w-full"><SignInBanner help={help} askerName={asker} onError={setError} /></div>}
+        {privateDesktop ? <p className="w-full rounded-xl bg-card p-4 text-left text-[13px] leading-relaxed text-ink-secondary">
+          {t("remoteDesktop.privateHostOnly")}
+        </p> : <>
         <button
           type="button"
           onClick={() => void open()}
@@ -307,6 +311,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
         <p className="text-[11px] leading-relaxed text-ink-secondary">
           {t("remoteDesktop.accessHint")}
         </p>
+        </>}
 
         <div className="w-full rounded-xl bg-card p-4 text-left">
           <div className="flex items-center justify-between gap-2">

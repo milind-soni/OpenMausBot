@@ -8455,6 +8455,8 @@
   "remoteDesktop.viewerUnavailable": "The desktop viewer is unavailable in this build",
   "remoteDesktop.title": "{name}'s computer",
   "remoteDesktop.cloudDesktop": "Cloud desktop",
+  "remoteDesktop.privateDesktop": "Private desktop",
+  "remoteDesktop.privateHostOnly": "This private desktop can only be opened on the host computer. Remote viewing is not available yet.",
   "remoteDesktop.desktop": "Desktop",
   "remoteDesktop.close": "Close computer panel",
   "remoteDesktop.browserHint": "Watching and driving this browser needs browser control for this paired device, in Settings → Remote access on the host computer.",
