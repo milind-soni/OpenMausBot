@@ -30,6 +30,16 @@ describe("new-bot templates", () => {
     }
   });
 
+  it("saves the voice-note switches as defaults and gives them to new bots", () => {
+    const profile = { voiceNotes: false, voiceNoteEveryReply: true };
+    expect(parseConfigPatch({ newBotDefaults: { profile } }).newBotDefaults?.profile).toEqual(profile);
+    expect(resolveBotCreationDefaults(newBotDefaultsSchema.parse({ profile }), { name: "Ada" }).profile).toEqual({ name: "Ada", ...profile });
+    expect(newBotDefaultsSchema.parse({ profile: { voiceNoteEveryReply: null } }).profile).toEqual({ voiceNoteEveryReply: null });
+    for (const wrong of [{ voiceNotes: "false" }, { voiceNotes: null }, { voiceNoteEveryReply: 1 }]) {
+      expect(newBotDefaultsSchema.safeParse({ profile: wrong }).success, JSON.stringify(wrong)).toBe(false);
+    }
+  });
+
   it("accepts bounded settings and rejects coercion and invalid model combinations", () => {
     expect(parseConfigPatch({ newBotDefaults: { profile: { notifications: false, computer: "off", mcpServers: [] } } })
       .newBotDefaults?.profile).toEqual({ notifications: false, computer: "off", mcpServers: [] });
