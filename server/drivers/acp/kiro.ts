@@ -8,7 +8,7 @@
 //   - autopilot session option controls Supervised vs Autopilot; sessions start "on", T3 sets it from runtime mode
 //   - clientCapabilities._meta {kiro:{hooks:{enabled:true,v2:true}}} keeps V3 hooks server-side
 //   - V2 flags (--agent-engine v2, --v2) are invalid on V3; model/effort must be set per session, not argv
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -36,22 +36,22 @@ function kiroHome(env: Record<string, string | undefined>): string {
   return env.KIRO_HOME?.trim() ? String(env.KIRO_HOME) : join(env.HOME || homedir(), ".kiro");
 }
 
-/** Whether the Kiro CLI appears signed in for this env (token or persisted store). */
+/** Whether the Kiro CLI appears signed in for this env (heuristic probe, not cryptographic validation). */
 export function kiroSignedIn(env: Record<string, string | undefined>): boolean {
   if (env.KIRO_API_KEY?.trim()) return true;
-  // Prefer token env that Kiro CLI itself would accept if present
   if (env.AWS_BEARER_TOKEN_KIRO?.trim()) return true;
   try {
-    const dataDir = kiroDataDir(env);
-    const db = join(dataDir, "data.sqlite3");
+    const db = join(kiroDataDir(env), "data.sqlite3");
     if (existsSync(db)) {
-      const size = readFileSync(db).length;
-      if (size > 100) return true;
+      try {
+        if (statSync(db).size > 100) return true;
+      } catch {
+        // stat failed — fall through to legacy check
+      }
     }
-    // Fallback: check legacy config file or agent dir indicates prior setup
     if (existsSync(join(kiroHome(env), "config.json"))) return true;
   } catch {
-    // existsSync failed — treat as not signed in
+    // probe failed — treat as not signed in
   }
   return false;
 }

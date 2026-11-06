@@ -10,6 +10,8 @@ import { lstat, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promi
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { createHash } from "node:crypto";
 
+import { kiroConsentMeta, kiroFilterDelta, kiroShouldDropUpdate } from "./kiro-content-filter.ts";
+
 import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
 import { openStartupModelCatalog } from "../../startup-model-catalog.ts";
 import { acpModelCatalog } from "./model-catalog.ts";
@@ -105,6 +107,8 @@ export interface AcpSupport {
   effortLevels?: readonly EffortLevel[];
   /** Discover and select opaque model variants through ACP config options. */
   modelVariants?: boolean;
+  /** Config option ids owned by the model (e.g. model, effort) — filtered from generic option handling. */
+  ownedModelOptionIds?: ReadonlySet<string> | readonly string[];
   /** Default CLI binary name if the instance config doesn't override it. */
   defaultCli: string;
   /** Optional live model catalog; a failed lookup keeps the last usable one. `config` lets a support ask the binary
@@ -767,7 +771,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           }
           const kind = String(toolCall.kind ?? "");
           const operationKey = isQuestion || current.controlsHost ? null : acpSessionOperationKey(toolCall);
-          const canRemember = String(toolCall.kind ?? "") !== "execute" || answersAlone(toolCall.rawInput?.command);
+          const canRemember = answersAlone(toolCall.rawInput?.command);
           if (operationKey && canRemember && sessionAllows.get(threadId)?.has(operationKey)) {
             const allow = optionFor("allow");
             if (allow) {
@@ -809,14 +813,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 : forSession
                   ? optionAlways ?? optionFor("allow")
                   : optionFor(want);
-            const shouldRemember = support.driverKind === "kiroAgent"
-              ? (forSession && optionId && operationKey)
-              : (forSession && !optionAlways && optionId && operationKey);
+            const shouldRemember = forSession && !optionAlways && optionId && operationKey;
             if (shouldRemember) {
               const remembered = sessionAllows.get(threadId) ?? new Set<string>();
               remembered.add(operationKey);
               sessionAllows.set(threadId, remembered);
             }
+            const consentMeta = kiroConsentMeta(params as any, cwd, forSession, optionAlways, optionId);
             if (behavior !== "cancel" && !optionId) {
               if (!isQuestion) missing(want);
               else if (behavior === "answer") {
@@ -826,7 +829,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             send({
               jsonrpc: "2.0",
               id: msg.id,
-              result: optionId ? { outcome: { outcome: "selected", optionId } } : cancelled,
+              result: optionId
+                ? { outcome: { outcome: "selected", optionId }, ...(consentMeta ? { _meta: consentMeta } : {}) }
+                : cancelled,
             });
             // ACP means "cancelled" only while cancelling the prompt turn, so an agent may then wait for
             // session/cancel (Antigravity does): end the turn.
@@ -885,27 +890,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             current.state.producedItem = true;
             for (const event of acpToolEndEvents(u, itemId, current.endedToolIds)) emit({ ...base(threadId, current.turnId), ...event });
           };
-          // Kiro V3 emits fetch_cloud_config as a spurious tool around session start (T3 filter)
-          if (support.driverKind === "kiroAgent") {
-            const kiroMeta = (u as Record<string, unknown>)?._meta as Record<string, unknown> | undefined;
-            const kiro = kiroMeta?.kiro as Record<string, unknown> | undefined;
-            const toolId = typeof kiro?.toolId === "string" ? kiro.toolId : undefined;
-            if (toolId === "fetch_cloud_config") {
-              // Track to also drop subsequent updates for same toolCallId
-              const key = `${String(p.sessionId ?? "")}\n${String((u as { toolCallId?: unknown }).toolCallId ?? "")}`;
-              (handleNotification as unknown as { _kiroCloud?: Set<string> })._kiroCloud ??= new Set<string>();
-              (handleNotification as unknown as { _kiroCloud: Set<string> })._kiroCloud.add(key);
-              return;
-            }
-            if ((u.sessionUpdate === "tool_call_update" || u.sessionUpdate === "tool_call_content_chunk")) {
-              const key = `${String(p.sessionId ?? "")}\n${String((u as { toolCallId?: unknown }).toolCallId ?? "")}`;
-              const set = (handleNotification as unknown as { _kiroCloud?: Set<string> })._kiroCloud;
-              if (set?.has(key)) {
-                if (finished) set.delete(key);
-                return;
-              }
-            }
-          }
+          if (support.driverKind === "kiroAgent" && kiroShouldDropUpdate(u as Record<string, unknown>, p as { sessionId?: unknown }, handleNotification)) return;
           switch (u.sessionUpdate) {
             case "agent_message_chunk": {
               const content = u.content;
@@ -921,11 +906,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   alt: "Generated image",
                 });
               } else if (typeof delta === "string" && delta) {
-                let filteredDelta = delta;
-                if (support.driverKind === "kiroAgent" && filteredDelta.includes("[STEERING")) {
-                  filteredDelta = filteredDelta.split("[STEERING")[0].trimEnd();
-                  if (!filteredDelta) break;
-                }
+                const filteredDelta = support.driverKind === "kiroAgent" ? kiroFilterDelta(delta) : delta;
+                if (!filteredDelta) break;
                 const messageId = typeof u.messageId === "string" ? u.messageId : null;
                 if (support.resendsReasoningReply && messageId && messageId === current.state.textMessageId
                     && isHermesReasoningReplay(filteredDelta, current.state.text)) break;
