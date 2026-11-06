@@ -138,6 +138,7 @@ describe("SidebarSectionHeader as a Simple-mode line", () => {
     expect(reserved[1].props).toMatchObject({ "aria-hidden": "true", className: "w-[22px] shrink-0" });
     expect(withMenu.map((node) => node.type)).toEqual(["button", "button"]);
     expect(withMenu[1].props["aria-label"]).toBe("Actions for Work department");
+    expect(String(withMenu[1].props.className).split(" ")).toEqual(expect.arrayContaining(["w-[22px]", "shrink-0"]));
   });
 
   it("is dragged by the line itself, and only when it can be reordered", () => {
