@@ -26,7 +26,7 @@ function mcpStartFailure(message: string, provider: string) {
 export function acpRuntimeFailure(error: unknown, provider: string, account?: { message?: string; text?: ServerText }) {
   if (account?.message !== undefined) return { message: account.message, text: account.text };
   const message = error instanceof Error ? error.message : String(error);
-  // Account wording, when given, wins over the MCP rewrite, as it did before.
+  // Account wording, when given, wins over the MCP rewrite.
   const mcp = account?.text ? null : mcpStartFailure(message, provider);
   if (mcp) return mcp;
   const failure = engineFailure(provider, message) ?? { message };
