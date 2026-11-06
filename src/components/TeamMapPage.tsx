@@ -182,8 +182,8 @@ export function SectionContextDialog({ section, label, onClose }: { section: str
   };
 
   return createPortal(
-    // No backdrop blur: every repaint here (each keystroke) re-blurred the whole team map behind it, and without GPU
-    // compositing (common on Linux) that made typing lag and the fan spin up.
+    // No backdrop blur: blurring the whole team map behind the dialog on every repaint is costly without GPU
+    // compositing (common on Linux).
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 sm:p-6"
       onMouseDown={(event) => event.target === event.currentTarget && requestClose()}

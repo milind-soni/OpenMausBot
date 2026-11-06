@@ -135,7 +135,6 @@ export function TeamMemoryDialog({ section, label, onClose }: { section: string;
   const proposed = (entries ?? []).filter((entry) => entry.status === "proposed");
 
   return createPortal(
-    // No backdrop blur over the team map: see the note in SectionContextDialog (TeamMapPage).
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 sm:p-6"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}

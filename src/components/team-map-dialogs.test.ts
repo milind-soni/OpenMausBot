@@ -22,8 +22,7 @@ beforeEach(() => {
 });
 afterEach(() => { flushSync(() => root.unmount()); host.remove(); });
 
-// A backdrop blur re-blurs the whole team map on every repaint of these dialogs; without GPU compositing that made
-// typing in them lag.
+// A backdrop blur re-blurs the whole team map on every repaint of these dialogs, which is costly without GPU compositing.
 it.each([
   ["shared instructions", SectionContextDialog],
   ["department memory", TeamMemoryDialog],
@@ -33,6 +32,7 @@ it.each([
   expect(dialog).not.toBeNull();
   const overlay = dialog!.parentElement!;
   expect(overlay.className).toContain("fixed inset-0");
+  expect(overlay.classList.contains("bg-black/55")).toBe(true);
   expect(overlay.className).not.toMatch(/backdrop-blur|backdrop-filter/);
   await vi.waitFor(() => expect(request).toHaveBeenCalled());
 });
