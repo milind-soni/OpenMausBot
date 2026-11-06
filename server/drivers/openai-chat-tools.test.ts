@@ -853,6 +853,20 @@ describe("structured tool execution boundaries", () => {
     expect(f.effects()).toEqual([{ name: "receipt", value: "done" }]);
   });
 
+  it("finishes a turn whose streamed reasoning details pass 256 KB of JSON", async () => {
+    // OpenRouter streams reasoning a few characters per delta, each wrapped in a full block.
+    const deltas = Array.from({ length: 8_000 }, () => chunk({ reasoning_details: [{ type: "reasoning.text", text: "think", format: "unknown", index: 0 }] }));
+    const f = await fixture((_request, response, round) => {
+      if (round > 1) return answer(response);
+      sse(response, [...deltas, chunk({ content: null, tool_calls: [toolCall()] }, "tool_calls")]);
+    });
+    await f.start();
+    await f.decide();
+    expect(await f.completed()).toMatchObject({ ok: true });
+    const assistant = f.requests[1].messages.find((message) => message.role === "assistant");
+    expect(assistant?.reasoning_details).toHaveLength(8_000);
+  }, 20_000);
+
   // Groq's wording, truncated in the runtime error but not in the body.
   const reasoningRejection = { error: {
     message: "'messages.2' : for 'role:assistant' the following must be satisfied[('messages.2' : property 'reasoning_content' is unsupported)]",
