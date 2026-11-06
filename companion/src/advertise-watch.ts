@@ -35,7 +35,6 @@ export function createAddressWatcher(options: AddressWatchOptions): AddressWatch
   let known: string | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
   let inflight = false;
-  // Retries spent on a failed advertise, for the state in `failedKey`.
   let failedKey: string | null = null;
   let failures = 0;
 
@@ -45,6 +44,10 @@ export function createAddressWatcher(options: AddressWatchOptions): AddressWatch
     if (inflight) return;
     const current = [...options.addresses()].sort();
     const key = `${options.name?.() ?? ""}\n${current.join(",")}`;
+    if (key !== failedKey) {
+      failedKey = key;
+      failures = 0;
+    }
     if (key === known) return;
     inflight = true;
     try {
@@ -58,22 +61,11 @@ export function createAddressWatcher(options: AddressWatchOptions): AddressWatch
             ? `advertising on ${current.join(", ")}`
             : "could not advertise — pairing by typed address still works",
         );
-        if (ok) {
-          failedKey = null;
-        } else {
-          if (failedKey !== key) {
-            failedKey = key;
-            failures = 0;
-          }
-          // Not recorded while retries are left: the next tick tries again.
-          if (failures < (options.failureRetries ?? 0)) {
-            failures += 1;
-            return;
-          }
+        if (!ok && failures < (options.failureRetries ?? 0)) {
+          failures += 1;
+          return;
         }
       }
-      // Recorded once advertising succeeded or retries ran out: the failure is
-      // tied to this network state, so only the next change retries.
       known = key;
     } catch (error) {
       // A throw is logged and not recorded, and the watcher survives it.

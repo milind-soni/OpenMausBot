@@ -104,12 +104,49 @@ describe("address watcher", () => {
       },
     });
     for (let i = 0; i < 5; i += 1) await watcher.check();
-    // the first try plus two retries, then quiet until the network changes
     expect(attempts).toBe(3);
     set(["10.0.0.7"]);
     for (let i = 0; i < 5; i += 1) await watcher.check();
     expect(attempts).toBe(6);
     expect(calls).toHaveLength(6);
+  });
+
+  it("gives a network fresh retries when it returns after going away", async () => {
+    let attempts = 0;
+    const { watcher, set } = rig(["192.168.1.42"], {
+      failureRetries: 2,
+      advertise: async () => {
+        attempts += 1;
+        return false;
+      },
+    });
+    for (let i = 0; i < 5; i += 1) await watcher.check();
+    expect(attempts).toBe(3);
+    set([]);
+    await watcher.check();
+    set(["192.168.1.42"]);
+    for (let i = 0; i < 5; i += 1) await watcher.check();
+    expect(attempts).toBe(6);
+  });
+
+  it("gives fresh retries when the network returns to a state with no addresses already seen", async () => {
+    let attempts = 0;
+    const { watcher, set } = rig([], {
+      failureRetries: 2,
+      advertise: async () => {
+        attempts += 1;
+        return false;
+      },
+    });
+    await watcher.check();
+    set(["192.168.1.42"]);
+    for (let i = 0; i < 5; i += 1) await watcher.check();
+    expect(attempts).toBe(3);
+    set([]);
+    await watcher.check();
+    set(["192.168.1.42"]);
+    for (let i = 0; i < 5; i += 1) await watcher.check();
+    expect(attempts).toBe(6);
   });
 
   it("stops retrying once a retried advertise succeeds", async () => {
