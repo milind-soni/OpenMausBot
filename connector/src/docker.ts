@@ -46,10 +46,13 @@ export interface VolumeInfo {
   Name: string;
   Labels: Record<string, string> | null;
   CreatedAt?: string;
+  /** Where the volume's files are on the host (the local driver's `_data` folder). */
+  Mountpoint?: string;
 }
 
+/** A named volume, or (`bind`) a folder on the host by its absolute path. */
 export interface Mount {
-  Type: "volume";
+  Type: "volume" | "bind";
   Source: string;
   Target: string;
   ReadOnly?: boolean;

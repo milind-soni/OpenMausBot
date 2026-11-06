@@ -10,7 +10,10 @@ import {
   cloudHomeHost, cloudHomeOffersPlace, cloudHomePlaceRefusal, cloudPairingSignature, cloudRequestSignature, createCloudPairing, firstCloudTurnPatch, prepareCloudHomeVolume,
   withoutIgnoredCloudKeys,
 } from "./cloud-home.ts";
-import { cloudHomeChildEnvironments, cloudHomeDataDir, codeTrustProblem, edgeClientAddress, edgeHold, hardenHost, holdVolume, passwdIds, prepareCloudHomeData, spawnWithSecrets } from "./cloud-home-start.ts";
+import {
+  cloudHomeChildEnvironments, cloudHomeDataDir, codeTrustProblem, edgeClientAddress, edgeHold, hardenHost, hasCapability, holdVolume, passwdIds, prepareCloudHomeData,
+  readCloudSecretsFile, setprivArgs, spawnWithSecrets,
+} from "./cloud-home-start.ts";
 import { RESTART_EXIT_CODE, restartPolicy } from "./restart.ts";
 import { hostedModelPolicy } from "./hosted-models.ts";
 import { resolveRequestAuth } from "./request-auth.ts";
@@ -571,19 +574,85 @@ it("captures a child's stdout and stderr when asked, and shares this process's o
   expect(shared.child.stderr).toBeNull();
 });
 
+// /proc/mounts and /proc/self/status as a Docker container on Linux 6.8 shows them.
+const mounts = (procOptions: string) => `overlay / overlay rw,relatime,lowerdir=/var/lib/docker/overlay2/l/A 0 0\nproc /proc proc ${procOptions} 0 0\ntmpfs /dev tmpfs rw,nosuid,size=65536k,mode=755 0 0\n`;
+const capStatus = (bounding: string, effective = bounding) => `Name:\tnode\nCapInh:\t0000000000000000\nCapPrm:\t${effective}\nCapEff:\t${effective}\nCapBnd:\t${bounding}\nCapAmb:\t0000000000000000\n`;
+// CHOWN, KILL, SETGID, SETUID; with SETPCAP and SYS_ADMIN, as the connector grants an image that drops them.
+const FOUR = "00000000000000e1", WITH_SYS_ADMIN = "00000000002001e1";
+
 it("the Cloud supervisor hardens the host before anything runs as maus: hidepid on /proc and Fly's socket folder root-only, each a note, never fatal", () => {
   const calls: string[] = [];
-  const run = (status: number, exists = true) => ({
+  const run = (status: number, exists = true, files: Record<string, string> = {}) => ({
     exec: (command: string, args: string[]) => { calls.push(`${command} ${args.join(" ")}`); return { status, stderr: status ? "mount: permission denied\n" : "" }; },
     chmod: (path: string, mode: number) => { calls.push(`chmod ${mode.toString(8)} ${path}`); },
     exists: () => exists,
+    read: (path: string) => files[path] ?? "",
   });
-  expect(hardenHost({}, run(0))).toEqual(["/proc: hidepid=invisible", "/.fly: root only"]);
+  expect(hardenHost({}, run(0))).toEqual({ notes: ["/proc: hidepid=invisible", "/.fly: root only"], dropCapabilities: false });
   expect(calls).toEqual(["mount -o remount,hidepid=invisible /proc", "chmod 700 /.fly"]);
-  expect(hardenHost({}, run(32, false))).toEqual(["/proc: hidepid not applied (mount: permission denied)"]);
-  expect(hardenHost({ OMB_CLOUD_HARDEN: "0" }, run(0))).toEqual(["hardening skipped (OMB_CLOUD_HARDEN=0)"]);
+  expect(hardenHost({}, run(32, false)).notes).toEqual(["/proc: hidepid not applied (mount: permission denied)"]);
+  expect(hardenHost({ OMB_CLOUD_HARDEN: "0" }, run(0))).toEqual({ notes: ["hardening skipped (OMB_CLOUD_HARDEN=0)"], dropCapabilities: false });
   const failing = { ...run(0), chmod: () => { throw new Error("read-only"); } };
-  expect(hardenHost({}, failing)).toEqual(["/proc: hidepid=invisible", "/.fly: left as is (read-only)"]);
+  expect(hardenHost({}, failing).notes).toEqual(["/proc: hidepid=invisible", "/.fly: left as is (read-only)"]);
+  // Already hidden (the supervisor started again, or the platform mounted /proc so): no second remount, no false failure.
+  calls.splice(0);
+  expect(hardenHost({}, run(32, false, { "/proc/mounts": mounts("rw,hidepid=invisible") })).notes).toEqual(["/proc: hidepid=invisible"]);
+  expect(calls).toEqual([]);
+});
+
+it("CAP_SYS_ADMIN serves only the hidepid remount: the supervisor starts again through setpriv without it, and says when it could not", () => {
+  const run = (files: Record<string, string>, setpriv = true) => ({
+    exec: () => ({ status: 0 }), chmod: () => {}, exists: (path: string) => path === "/usr/bin/setpriv" && setpriv,
+    read: (path: string) => files[path] ?? "",
+  });
+  const granted = { "/proc/mounts": mounts("rw"), "/proc/self/status": capStatus(WITH_SYS_ADMIN) };
+  expect(hardenHost({}, run(granted))).toEqual({ notes: ["/proc: hidepid=invisible"], dropCapabilities: true });
+  // Started again: hidepid stays, and the capability is gone from every set it could come back from.
+  const dropped = { "/proc/mounts": mounts("rw,hidepid=invisible"), "/proc/self/status": capStatus(FOUR) };
+  expect(hardenHost({ OMB_CLOUD_CAPS_DROPPED: "1" }, run(dropped))).toEqual({ notes: ["/proc: hidepid=invisible", "CAP_SYS_ADMIN dropped"], dropCapabilities: false });
+  // setpriv without CAP_SETPCAP exits 0 and drops nothing: the next start sees it and never loops.
+  const kept = { "/proc/mounts": mounts("rw,hidepid=invisible"), "/proc/self/status": capStatus(WITH_SYS_ADMIN) };
+  expect(hardenHost({ OMB_CLOUD_CAPS_DROPPED: "1" }, run(kept))).toEqual({ notes: ["/proc: hidepid=invisible", "CAP_SYS_ADMIN kept: it could not be dropped (CAP_SETPCAP is missing)"], dropCapabilities: false });
+  expect(hardenHost({}, run(granted, false)).notes).toEqual(["/proc: hidepid=invisible", "CAP_SYS_ADMIN kept: /usr/bin/setpriv is missing"]);
+  // A remount that failed still drops a capability nothing needs.
+  expect(hardenHost({}, { ...run(granted), exec: () => ({ status: 32, stderr: "mount: denied" }) }).dropCapabilities).toBe(true);
+  // The connector's four capabilities: nothing to drop, nothing to start again.
+  expect(hardenHost({}, run({ "/proc/self/status": capStatus(FOUR) })).dropCapabilities).toBe(false);
+  expect(setprivArgs("/usr/local/bin/node", "/app/dist-server/cloud-home-start.js")).toEqual([
+    "setpriv", "--inh-caps=-sys_admin,-setpcap", "--bounding-set=-sys_admin,-setpcap", "--", "/usr/local/bin/node", "/app/dist-server/cloud-home-start.js",
+  ]);
+});
+
+it("reads a capability bit the way the kernel writes it", () => {
+  expect(hasCapability(capStatus(WITH_SYS_ADMIN), "CapBnd", 21)).toBe(true);
+  expect(hasCapability(capStatus(FOUR), "CapBnd", 21)).toBe(false);
+  expect(hasCapability(capStatus(FOUR, WITH_SYS_ADMIN), "CapEff", 21)).toBe(true);
+  expect(hasCapability(capStatus("000001ffffffffff"), "CapBnd", 21)).toBe(true);
+  expect(hasCapability("", "CapBnd", 21)).toBe(false);
+});
+
+it("takes an own server's secrets from the root-only file the connector mounts, and only the secrets it knows", () => {
+  const file = "/run/mausbot/secrets.json";
+  const fs = (overrides: { file?: { uid: number; mode: number; symlink?: boolean }; dir?: { uid: number; mode: number }; text?: string; exists?: boolean } = {}) => ({
+    exists: () => overrides.exists ?? true,
+    lstat: () => {
+      const entry = overrides.file ?? { uid: 0, mode: 0o100400 };
+      return { ...entry, isFile: () => !entry.symlink, isSymbolicLink: () => Boolean(entry.symlink) };
+    },
+    stat: (path: string) => (path === file ? overrides.file ?? { uid: 0, mode: 0o100400 } : path === "/run/mausbot" ? overrides.dir ?? { uid: 0, mode: 0o40700 } : { uid: 0, mode: 0o40755 }),
+    read: () => overrides.text ?? JSON.stringify({
+      OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_CLOUD_BOAT_TOKEN: `box_omb_${"b".repeat(43)}`, OMB_CLOUD_TUNNEL_TOKEN: "t".repeat(40),
+      OMB_PUBLIC_URL: "https://elsewhere.example", PATH: "/tmp",
+    }),
+  });
+  expect(readCloudSecretsFile("/data", file, fs())).toEqual({ OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_CLOUD_BOAT_TOKEN: `box_omb_${"b".repeat(43)}`, OMB_CLOUD_TUNNEL_TOKEN: "t".repeat(40) });
+  expect(readCloudSecretsFile("/data", file, fs({ exists: false }))).toEqual({});
+  expect(() => readCloudSecretsFile("/data", file, fs({ file: { uid: 0, mode: 0o100644 } }))).toThrow("readable by others than root");
+  expect(() => readCloudSecretsFile("/data", file, fs({ file: { uid: 1001, mode: 0o100400 } }))).toThrow(`${file} is not root's`);
+  expect(() => readCloudSecretsFile("/data", file, fs({ dir: { uid: 0, mode: 0o40777 } }))).toThrow("/run/mausbot is writable by others than root");
+  expect(() => readCloudSecretsFile("/data", file, fs({ file: { uid: 0, mode: 0o120777, symlink: true } }))).toThrow("is not a plain file");
+  expect(() => readCloudSecretsFile("/data", file, fs({ text: "[1]" }))).toThrow("is not a JSON object");
+  expect(() => readCloudSecretsFile("/data", "/data/secrets.json", fs())).toThrow("is on the volume");
 });
 
 it("boots as a Team Cloud with the Admin's team id and name, and refuses a team without them", () => {
