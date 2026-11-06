@@ -1062,8 +1062,10 @@ the `list_shared_computers` and `shared_computer` tools.
 The `Dockerfile`'s `cloud-home` target shares the server image's runtime
 layers (Node, Chrome's libraries, agent-browser and its Chrome) and adds:
 
-- Caddy (`deploy/fly/Caddyfile`), as the only listener the network can reach
-  (`0.0.0.0:8080`);
+- Caddy, as the only listener the network can reach: `0.0.0.0:8080` with
+  `deploy/fly/Caddyfile`, and also 443 for the home's own domain with
+  `deploy/fly/Caddyfile.tls` (both import the same routes,
+  `deploy/fly/edge-routes.caddy`);
 - Grok Build (`/usr/local/bin/grok`) from xAI's own installer, pinned by
   `GROK_VERSION` to the version the Grok driver is verified against. The
   build fails if the installer cannot be reached, rather than shipping an
@@ -1238,12 +1240,64 @@ a public interface. Caddy
 https` and `X-Forwarded-For`, so the server sees each one as remote: it needs
 a paired session, whatever `Host` it claims. On Fly (`FLY_APP_NAME` is set),
 Caddy trusts `Fly-Client-IP` only from Fly's private ranges. On your own
-server, where any local process can reach the published port, it trusts
-`Cf-Connecting-IP` only from the home's own loopback, where the Cloudflare
-tunnel connects from, and ignores a client-address header from any other peer
-(the launcher sets both: `edgeClientAddress`). That address feeds the pairing
-lockout, never authorization. Apart from `/api/health`, Caddy answers only for
-the machine's own name (`OMB_PUBLIC_URL`) and refuses any other `Host`.
+server, where any local process can reach the published port and a bot can
+reach the edge's loopback, it trusts no client-address header by default: the
+client is the connection's peer. Only proxies the owner names may name one
+(below). The launcher sets these values (`edgeClientAddress`). That address
+feeds the pairing lockout, never authorization. Apart from `/api/health`,
+Caddy answers only for the machine's own name (`OMB_PUBLIC_URL`) and refuses
+any other `Host`.
+
+### On your own server: how people reach it
+
+A home on a server of its owner's (Team on your own server) runs the same
+image. Its agent on the server sets these, with the boot contract below, on the
+home's container. None of them may be set on Fly: the launcher refuses to
+start.
+
+| Variable | Value |
+| --- | --- |
+| `OMB_PUBLIC_URL` | `https://` and the name people use, e.g. `https://mausbot.acme.eu`. Its DNS points at the server. |
+| `OMB_CLOUD_EDGE_TLS` | `1`: the edge gets and renews a Let's Encrypt certificate for that name and serves it on 443. Unset or `0`: the edge serves only `:8080`, for the agent, and something else ends TLS. |
+| `OMB_CLOUD_TRUSTED_PROXIES` | Only when the owner's own proxy stands in front: its addresses or ranges (`10.0.0.5`, `10.0.0.0/24`, `private_ranges`), separated by spaces or commas, at most 32. Unset: none. A `/0` range, a host name or anything else stops the home with a message naming the variable. |
+| `OMB_CLOUD_CLIENT_IP_HEADER` | The header those proxies put the client's address in. Default `X-Forwarded-For`; it needs `OMB_CLOUD_TRUSTED_PROXIES`. |
+
+**Its own domain (`OMB_CLOUD_EDGE_TLS=1`).** The agent publishes the
+container's 443 (and 80 if the owner opens it). Let's Encrypt checks the name
+over TLS on 443 (TLS-ALPN), so port 80 is optional; a certificate took 6 to 8 s
+in tests. Clients reach 443 directly, so the edge counts each by its own
+address with no header at all, and the agent's requests, which arrive through
+`127.0.0.1:8080` from the Docker bridge, are counted apart from any stranger
+on 443. The certificate and the ACME account live on the volume, in
+`/data/.omb-edge/caddy`, outside the server's data folder (no workspace backup
+or export carries the key) and never in `/tmp`: an update or a rollback is a
+new container, and Let's Encrypt issues the same name at most 5 times a week.
+The edge speaks HTTP/1.1 and HTTP/2 only, so UDP 443 stays closed.
+
+Docker gives a container on its default bridge no IPv6 address, and then
+forwards IPv6 clients of a port published on `[::]` through its own proxy,
+from the bridge's gateway, `172.17.0.1`: the address the agent's requests come
+from. Measured on Docker 29: ten wrong codes from one IPv6 client made the
+Admin's next signed pairing answer 429. So the agent publishes 443 on IPv4
+only (`0.0.0.0`) and the name has no AAAA record, unless the home's Docker
+network has IPv6 of its own (not verified).
+
+**The owner's own proxy in front.** It ends TLS and forwards to the home's
+`:8080` (published where the proxy can reach it). Name it in
+`OMB_CLOUD_TRUSTED_PROXIES` and, if it does not use `X-Forwarded-For`, its
+header in `OMB_CLOUD_CLIENT_IP_HEADER`, or every member shares one lockout:
+ten wrong codes from anyone would also refuse the Admin's own pairings for a
+minute. A proxy on the same host reaches a published port from the Docker
+bridge's gateway (usually `172.17.0.1`), which the agent shares. Only the
+named peers are believed, and only the last address they add, so a client's
+own `X-Forwarded-For` or `Cf-Connecting-IP` changes nothing.
+
+**Private, on a tailnet.** `tailscale serve --bg --https=443
+http://127.0.0.1:8080` on the server serves `https://<machine>.<tailnet>.ts.net`
+to the tailnet; set `OMB_PUBLIC_URL` to that name, and name the bridge's
+gateway in `OMB_CLOUD_TRUSTED_PROXIES` so each member's tailnet address is
+counted apart. The Admin never needs that address: its requests come through
+the agent. Not verified on a tailnet.
 
 ### Fly
 
