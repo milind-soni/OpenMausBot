@@ -7,7 +7,7 @@ import { ArrowRightLeft, Loader2, Users } from "lucide-react";
 import type { TeamMoveView } from "../../electron/team-move.mjs";
 import type { Bot } from "@/state/store";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { ipcErrorText, teamMoveLine } from "@/lib/cloud-send";
+import { ipcErrorText, teamMoveLine, teamMoveRefusalText } from "@/lib/cloud-send";
 import { t } from "@/lib/i18n";
 
 type Team = { id: string; name: string; ready: boolean };
@@ -41,9 +41,13 @@ export function useMoveToTeam({ blocked }: { blocked: (bot: Bot) => string | und
     if (!asked || !page?.moveToTeam) return;
     setSending(true);
     setError(null);
-    void page.moveToTeam(asked.bot.id, asked.team.id, asked.bot.name)
-      .then(() => setAsked(null))
-      .catch((cause: unknown) => setError(ipcErrorText(cause) ?? t("teamMove.failed", { bot: asked.bot.name, team: asked.team.name })))
+    const { bot, team } = asked;
+    const refused = page.moveToTeamCoded
+      ? page.moveToTeamCoded(bot.id, team.id, bot.name).then((answer) => ("refused" in answer ? teamMoveRefusalText(answer.refused) : null))
+      : page.moveToTeam(bot.id, team.id, bot.name).then(() => null);
+    void refused
+      .then((text) => (text ? setError(text) : setAsked(null)))
+      .catch((cause: unknown) => setError(ipcErrorText(cause) ?? t("teamMove.failed", { bot: bot.name, team: team.name })))
       .finally(() => setSending(false));
   };
   const names = asked ? { bot: asked.bot.name, team: asked.team.name } : { bot: "", team: "" };
@@ -63,7 +67,8 @@ export function useMoveToTeam({ blocked }: { blocked: (bot: Bot) => string | und
         <span>{t("teamMove.everyone", names)}</span>
         <span>{t("teamMove.goes", names)}</span>
         <span>{t("teamMove.private", names)}</span>
-        <span>{t("teamMove.stays", names)}</span>
+        <span>{t("teamMove.staysOnMyCloud", names)}</span>
+        <span data-team-move-final className="font-medium text-ink">{t("teamMove.noWayBack", names)}</span>
         {error && <span role="alert" className="text-danger">{error}</span>}
       </span>}
       confirmLabel={t("teamMove.confirm", names)}

@@ -72,7 +72,7 @@ export function isRemoteMcpServer(server: McpServerSpec): server is RemoteMcpSpe
 }
 
 /** Whether `botId` may start this server: every bot may start one that is no bot's own. */
-export function mcpServerServes(server: McpServerSpec & { bot?: string }, botId: string | undefined): boolean {
+export function mcpServerServes(server: object & { bot?: string }, botId: string | undefined): boolean {
   return !server.bot || server.bot === botId;
 }
 
@@ -140,6 +140,8 @@ const runsOnSchema = z.object({
 }).strict();
 
 const stdioEntrySchema = z.object({
+  /** Optional, as other MCP clients write it; a command always runs over stdio, so it is not stored. */
+  type: z.literal("stdio").optional(),
   command: z.string().trim().min(1).max(1_024),
   args: z.array(z.string().max(4_096)).max(MAX_ARGS).optional(),
   env: z.record(z.string(), z.string().max(16_384)).optional(),

@@ -1,9 +1,11 @@
+import { userError } from "../user-errors.ts";
 // Who a Team Cloud bot reports to. GET /api/team/people lists the members a bot can report to, with each one's
 // picture; GET /api/team/people/<person>/picture serves it. PUT /api/bots/<id>/reports-to {email} changes one bot's
 // owner: an Admin may, and so may the member who owns it now, to hand it over. PUT /api/team/reports-to {botIds, email}
 // sets a whole department's at once, for an Admin.
 // Security: all but the last are client-scoped, so the checks here are the gate. A member's name and picture are shown
 // to the team's signed-in members and nobody else; nothing else of their profile (About you) is ever served here.
+import type { AdminActionRow } from "../admin-activity.ts";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
@@ -36,6 +38,8 @@ export interface TeamOwnerRouteDeps {
   /** Whether the session may see this bot at all. */
   sees(auth: RequestAuth, botId: string): boolean;
   publicBot(bot: BotRecord): unknown;
+  /** Settings → Activity: who a bot reports to decides who edits it. */
+  record?(auth: RequestAuth, row: Omit<AdminActionRow, "at" | "actor">): void;
 }
 
 /** The address a session speaks for: a team member's, or none (a loopback service, a session the Admin never signed). */
@@ -57,6 +61,11 @@ function teamPictureUrl(email: string, avatarUrl: string): string {
 }
 
 export function createTeamOwnerRoutes(deps: TeamOwnerRouteDeps): RouteHandler {
+  const recordOwner = (auth: RequestAuth, bot: BotRecord, previous: string | null | undefined) => {
+    const now = botOwner(bot);
+    if ((previous ?? null) === (now ?? null)) return;
+    deps.record?.(auth, { category: "bot", action: "owner.update", target: { kind: "bot", id: bot.id, name: bot.name }, before: { owner: previous ?? null }, after: { owner: now ?? null } });
+  };
   const profileOf = (email: string) => deps.profileOf?.(email) ?? {};
   const nameOf = (email: string) => profileOf(email).name?.trim() || nameFromEmail(email);
   return async ({ req, res, path, method, auth, json, readBody }) => {
@@ -66,7 +75,7 @@ export function createTeamOwnerRoutes(deps: TeamOwnerRouteDeps): RouteHandler {
     const bulk = method === "PUT" && path === TEAM_REPORTS_TO_PATH;
     if (!one && !listing && !picture && !bulk) return PASS;
     const { team, people } = deps;
-    if (!team || !people) return picture ? json(res, 404, { error: "not found" }) : json(res, 400, { error: "Only a team's bots report to someone." });
+    if (!team || !people) return picture ? json(res, 404, { error: "not found" }) : json(res, 400, userError("serverError.owner.teamOnly"));
     const admin = auth.scopes.includes("admin");
     const me = sessionEmail(auth);
     const members = () => {
@@ -101,19 +110,21 @@ export function createTeamOwnerRoutes(deps: TeamOwnerRouteDeps): RouteHandler {
     }
 
     const unknownPerson = (email: string | null) => email !== null && email !== me && !people.has(email);
-    const conflict = (email: string | null) => json(res, 409, {
-      error: `${email ? nameOf(ownerEmail(email)) : "That person"} already has a Chief of Staff. Take the crown off one of them first.`,
-    });
+    const conflict = (email: string | null) => json(res, 409, email
+      ? userError("serverError.owner.chiefConflict", { name: nameOf(ownerEmail(email)) })
+      : userError("serverError.owner.unassignedChiefConflict"));
 
     if (bulk) {
-      if (!admin) return json(res, 403, { error: `Only ${team.name}'s admins can set who a department's bots report to.` });
+      if (!admin) return json(res, 403, userError("serverError.owner.departmentAdmin", { team: team.name }));
       const parsed = bulkBody.safeParse(await readBody(req));
       if (!parsed.success) return json(res, 400, { error: "Send botIds and an email." });
       const { email } = parsed.data;
-      if (unknownPerson(email)) return json(res, 400, { error: `Choose someone in ${team.name}.` });
+      if (unknownPerson(email)) return json(res, 400, userError("serverError.owner.choose", { team: team.name }));
       const botIds = parsed.data.botIds.filter((id) => !deps.store.bot(id)?.defaultBot?.person);
+      const owners = new Map(botIds.map((id) => { const one = deps.store.bot(id); return [id, one && botOwner(one)]; }));
       const changed = setReportsTo(deps.store, botIds, email);
-      if (!changed.ok) return changed.reason === "chief-conflict" ? conflict(email) : json(res, 404, { error: "One or more bots are unavailable." });
+      if (!changed.ok) return changed.reason === "chief-conflict" ? conflict(email) : json(res, 404, userError("serverError.owner.unavailable"));
+      for (const updated of changed.bots) recordOwner(auth, updated, owners.get(updated.id));
       return json(res, 200, { bots: changed.bots.map((bot) => deps.publicBot(bot)) });
     }
 
@@ -122,15 +133,17 @@ export function createTeamOwnerRoutes(deps: TeamOwnerRouteDeps): RouteHandler {
     const parsed = ownerBody.safeParse(await readBody(req));
     if (!parsed.success) return json(res, 400, { error: "Send the email of the person it reports to." });
     const bot = deps.store.bot(one![1]!);
-    if (!bot || !deps.sees(auth, bot.id)) return json(res, 404, { error: "no such bot" });
-    if (bot.defaultBot?.person) return json(res, 409, { error: `${bot.name} is ${nameOf(ownerEmail(bot.defaultBot.person))}'s own MausBot: it always reports to them.` });
+    if (!bot || !deps.sees(auth, bot.id)) return json(res, 404, userError("serverError.bot.missing"));
+    if (bot.defaultBot?.person) return json(res, 409, userError("serverError.owner.personal", { bot: bot.name, name: nameOf(ownerEmail(bot.defaultBot.person)) }));
     if (!admin && (me === null || botOwner(bot) !== me)) {
-      return json(res, 403, { error: `Only ${team.name}'s admins, or the person ${bot.name} reports to, can change who it reports to.` });
+      return json(res, 403, userError("serverError.owner.change", { team: team.name, bot: bot.name }));
     }
     const { email } = parsed.data;
-    if (unknownPerson(email)) return json(res, 400, { error: `Choose someone in ${team.name}.` });
+    if (unknownPerson(email)) return json(res, 400, userError("serverError.owner.choose", { team: team.name }));
+    const previous = botOwner(bot);
     const changed = setReportsTo(deps.store, [bot.id], email);
-    if (!changed.ok) return changed.reason === "chief-conflict" ? conflict(email) : json(res, 404, { error: "no such bot" });
+    if (!changed.ok) return changed.reason === "chief-conflict" ? conflict(email) : json(res, 404, userError("serverError.bot.missing"));
+    recordOwner(auth, changed.bots[0]!, previous);
     return json(res, 200, { bot: deps.publicBot(changed.bots[0]!) });
   };
 }

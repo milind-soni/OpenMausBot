@@ -201,9 +201,9 @@ describe("managed image preparation", () => {
       if (args.join(" ") === (runtime === "container" ? `image pull ${BASE_IMAGE}` : `pull ${BASE_IMAGE}`)) {
         return { stdout: "pulled" };
       }
-      if (args.slice(0, 3).join(" ") === `build -t ${IMAGE}`) {
-        context = args[3];
-        expect(readFileSync(join(context, "Dockerfile"), "utf8")).toBe(managedImageDockerfile());
+      if (args[0] === "build") {
+        context = args.at(-1);
+        expect(readFileSync(join(context!, "Dockerfile"), "utf8")).toBe(managedImageDockerfile());
         prepared = true;
         return { stdout: "built" };
       }
@@ -217,6 +217,31 @@ describe("managed image preparation", () => {
     expect(pullIndex).toBeGreaterThanOrEqual(0);
     expect(buildIndex).toBeGreaterThan(pullIndex);
     expect(context).toBeDefined();
+    const buildFlags = runtime === "container" ? [] : ["--force-rm"];
+    expect(calls[buildIndex]).toEqual([runtime, "build", ...buildFlags, "-t", IMAGE, context]);
+    expect(existsSync(context!)).toBe(false);
+  });
+
+  it.each(["docker", "podman"] as const)("has %s remove a failed build's step containers", async runtime => {
+    let build: string[] | undefined;
+    const run: CommandRunner = async (command, args) => {
+      if (command === "/usr/bin/which") {
+        if (args[0] === runtime) return { stdout: runtime };
+        throw new Error("missing executable");
+      }
+      if (args[0] === "info") return { stdout: "running" };
+      if (args.slice(0, 2).join(" ") === "image inspect") throw new Error("missing image");
+      if (args[0] === "inspect") throw new Error("missing container");
+      if (args[0] === "pull") return { stdout: "pulled" };
+      if (args[0] === "build") {
+        build = [command, ...args];
+        throw new Error("The command '/bin/sh -c pip install' returned a non-zero code: 1");
+      }
+      throw new Error(`unsupported command: ${command} ${args.join(" ")}`);
+    };
+    await expect(containerComputerAction("pull", run, "darwin")).rejects.toThrow("non-zero code");
+    const context = build?.at(-1);
+    expect(build).toEqual([runtime, "build", "--force-rm", "-t", IMAGE, context]);
     expect(existsSync(context!)).toBe(false);
   });
 });
@@ -847,7 +872,14 @@ describe("Cua integration", () => {
     expect(dockerfile).toContain("6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2");
     expect(dockerfile).toContain("/usr/local/share/licenses/noto-cjk/OFL.txt");
     expect(dockerfile).toContain("fc-cache -f");
-    expect(IMAGE_LAYER_VERSION).toBe("7");
+    expect(IMAGE_LAYER_VERSION).toBe("8");
+  });
+
+  it("starts the driver's Chrome without its own sandbox inside the hardened container", () => {
+    // Without it Chrome exits with code 21 ("Failed to move to new namespace"): see the start-script comment.
+    const dockerfile = managedImageDockerfile();
+    const exec = dockerfile.split("\n").find((line) => line.includes(`${CUA_EXECUTABLE} serve`));
+    expect(exec).toContain("exec env CUA_DRIVER_BROWSER_NO_SANDBOX=1 ");
   });
 
   it("rejects a zero-byte OpenSSL base image before the wheel download needs curl", () => {

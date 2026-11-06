@@ -1,4 +1,4 @@
-import { t } from "./i18n";
+import { t } from "@/lib/i18n";
 import type { Bot, InstanceInfo } from "@/state/store";
 
 export function instanceSupportsLocalComputer(
@@ -11,6 +11,10 @@ export function instanceSupportsLocalComputer(
   return capabilities?.localComputerMcp === true || capabilities?.computerMcp === true;
 }
 
+export function pageOnRemoteServer(capabilities: DesktopCapabilities): boolean {
+  return capabilities.localComputer?.reasonCode === "remote-server";
+}
+
 export function localComputerSelectable({
   capabilities,
   providerSupportsLocal,
@@ -20,6 +24,7 @@ export function localComputerSelectable({
 }): boolean {
   if (!providerSupportsLocal) return false;
   if (capabilities.localComputer.available) return true;
+  if (pageOnRemoteServer(capabilities)) return false;
   return capabilities.host.platform === "darwin" || capabilities.host.platform === "win32";
 }
 
@@ -33,6 +38,7 @@ export function localComputerDisabledReason({
 }): string | null {
   if (!providerSupportsLocal) return t("computer.problem.localAiCannot");
   if (capabilities.localComputer.available) return null;
+  if (pageOnRemoteServer(capabilities)) return t("computer.problem.localRemoteServer");
   if (capabilities.host.platform === "linux") {
     if (capabilities.localComputer.reasonCode === "linux-wayland-seat-safety-blocked") return t("computer.problem.localWaylandBlocked");
     if (capabilities.localComputer.reasonCode === "wayland-compositor-unsupported") return t("computer.problem.localWaylandDesktop");

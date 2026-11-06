@@ -30,7 +30,7 @@ test("the rail: My Cloud, the person's Clouds and teams' Clouds in the session's
     { id: "home", name: "Studio", color: "purple", kind: "cloud", opens: true, paint: { swatch: "violet" }, active: true },
     { id: "a", name: "Client A", color: "teal", kind: "cloud", opens: true, paint: { swatch: "green" } },
     { id: "acme", name: "Acme", color: "yellow", kind: "team", opens: true, paint: { swatch: "amber", locked: "member" } },
-    { id: "vps", name: "Office", color: null, kind: "server", opens: true, paint: { swatch: null } },
+    { id: "vps", name: "Office", color: null, kind: "server", opens: true, paint: { swatch: null }, removable: true, forget: true },
   ], "each colour changed from the rail, but a team's by its admins alone");
   for (const origin of [HOME, CLIENT_A, TEAM, VPS, "/Users/person/lab"]) assert.equal(JSON.stringify(places).includes(origin), false, origin);
   const before = railPlaces({ saved: saved("local"), home: null, mine: HOME, state: session() });
@@ -84,7 +84,7 @@ test("a server of the person's own that signed in with their account: one saved 
     entry({ id: "s-render", name: "Render VPS", color: "rose", tier: null, runsOn: "server", managed: false, status: "offline", origin: RENDER, lastSeenAt: 1_761_000_100_000 })]);
   const state = session({ clouds });
   const places = railPlaces({ saved: saved(), home: HOME, mine: HOME, state });
-  assert.deepEqual(places.find(place => place.id === "vps"), { id: "vps", name: "Office", color: null, kind: "server", opens: true, paint: { swatch: null }, server: true },
+  assert.deepEqual(places.find(place => place.id === "vps"), { id: "vps", name: "Office", color: null, kind: "server", opens: true, paint: { swatch: null }, removable: true, forget: true, server: true },
     "saved by hand at its address: the same circle, marked as theirs, online, opening as it always did");
   assert.deepEqual(places.slice(-2), [
     { id: "signed-in:s-mini", name: "Mac mini", color: null, kind: "server", opens: false, paint: { swatch: null }, ownNetwork: true, server: true, offline: true, lastSeenAt: 1_761_000_000_000 },
@@ -158,6 +158,10 @@ test("buying another Cloud from a page: the plan must be on sale, the name is ch
   await assert.rejects(r.call("cloud-add:start", "pro", " ", "rose"), /Choose a plan/);
   assert.deepEqual(await r.call("cloud-add:start", "pro", "Client B", "url(x)"), { outcome: "opened" });
   assert.deepEqual(r.w.added, [{ tier: "pro", interval: "month", name: "Client B", color: null }], "an unknown swatch is none");
+  await r.call("cloud-add:start", "pro", "Client C", "rose", "app_whats_new_team");
+  await r.call("cloud-add:start", "pro", "Client D", "rose", "https://evil.example.test");
+  assert.deepEqual(r.w.added.slice(1), [{ tier: "pro", interval: "month", name: "Client C", color: "rose", source: "app_whats_new_team" },
+    { tier: "pro", interval: "month", name: "Client D", color: "rose" }], "the app's own source goes with it; anything else is left out");
   assert.equal(await r.call("cloud-add:copy-link"), true);
   assert.deepEqual(r.sent, ["https://test.checkout.dodopayments.com/x"]);
   r.w.state = session({ adding: { cloudId: "c-a", name: "Client A", color: "green", tier: "pro", startedAt: 1, link: true } });
@@ -286,6 +290,24 @@ test("Remove from list from a circle's menu: only the rail's own page, only a ci
   assert.deepEqual(making.opened, ["cloud:c-b"], "its own screen, never a saved place or an address");
 });
 
+test("Make … my home: only on a server connected by hand that main offers it for, from the rail's own page, by main's own word for it", async () => {
+  const offered = new Set(["vps"]), made = [];
+  const r = rail({ places: () => railPlaces({ saved: saved("home", [{ id: "box", kind: "remote", name: "Box", origin: "https://box.example.test" }]), home: HOME, mine: HOME, state: session(),
+    offers: entry => offered.has(entry.id) || entry.id === "home" || entry.id === "a" || entry.id === "acme" }), makeHome: id => { made.push(id); return { started: true }; } });
+  const places = (await r.call("workspaces:places")).places;
+  assert.deepEqual(places.filter(place => place.makeHome).map(place => place.id), ["vps"], "never My Cloud, another Cloud or a team's, whatever main says");
+  assert.deepEqual(await r.call("workspaces:make-home", "vps"), { started: true });
+  for (const id of ["box", "home", "a", "acme", "https://box.example.test", { toString: () => "vps" }]) {
+    assert.throws(() => r.call("workspaces:make-home", id), /can't be your bots' home/, String(id));
+  }
+  assert.deepEqual(made, ["vps"]);
+  offered.clear();
+  assert.throws(() => r.call("workspaces:make-home", "vps"), /can't be your bots' home/, "no longer offered: refused");
+  r.w.lists = false;
+  assert.throws(() => r.call("workspaces:make-home", "vps"), /only available/, "any other page: refused");
+  assert.throws(() => rail().call("workspaces:make-home", "vps"), /can't be your bots' home/, "a main that offers it nowhere");
+});
+
 const PRELOAD = readFileSync(new URL("./preload.cjs", import.meta.url), "utf8");
 function preload(origin, { activation = false } = {}) {
   let bridge; const invoked = [];
@@ -300,7 +322,7 @@ function preload(origin, { activation = false } = {}) {
 
 test("a Cloud's page gets the rail and the add sheet's narrow bridges; a circle, ＋ and checkout open only from the person's click", async () => {
   const page = preload(HOME);
-  assert.deepEqual(Object.keys(page.bridge.workspaces), ["state", "menu", "line", "places", "open", "add", "look", "color", "recolor", "remove", "onChanged"]);
+  assert.deepEqual(Object.keys(page.bridge.workspaces), ["state", "menu", "line", "places", "open", "add", "look", "color", "recolor", "remove", "makeHome", "onChanged"]);
   assert.deepEqual(Object.keys(page.bridge.cloudAdd), ["state", "start", "reopen", "copyLink", "open", "interest", "sheet", "organization"]);
   await page.bridge.workspaces.places();
   await page.bridge.cloudAdd.state();
@@ -314,6 +336,7 @@ test("a Cloud's page gets the rail and the add sheet's narrow bridges; a circle,
   await assert.rejects(page.bridge.workspaces.color("rose"), /Choose a color/, "a page changes its place's colour only from the person's click");
   await assert.rejects(page.bridge.workspaces.recolor("vps", "rose"), /Choose a color/);
   await assert.rejects(page.bridge.workspaces.remove("old"), /Choose Remove from list/, "Remove from list only from the person's click");
+  await assert.rejects(page.bridge.workspaces.makeHome("vps"), /Choose Make my home/, "a move starts only from the person's click");
   await page.bridge.workspaces.look();
   assert.deepEqual(page.invoked.at(-1), ["workspaces:look"]);
   const clicked = preload(HOME, { activation: true });
@@ -325,8 +348,31 @@ test("a Cloud's page gets the rail and the add sheet's narrow bridges; a circle,
   await clicked.bridge.cloudAdd.organization({ toString: () => "Client C" }, null);
   assert.deepEqual(clicked.invoked, [["workspaces:open", "a"], ["workspaces:add", "link"], ["cloud-add:start", "pro", "Client B", null], ["workspaces:color", "rose"], ["workspaces:color", null],
     ["cloud-add:organization", "Client C", null]]);
+  await clicked.bridge.cloudAdd.start("team", "Studio", "blue", { toString: () => "app_whats_new_team" });
+  assert.deepEqual(clicked.invoked.at(-1), ["cloud-add:start", "team", "Studio", "blue", "app_whats_new_team"], "a source travels as plain text");
   assert.equal(page.bridge.cloudAccount, undefined, "never the account bridge");
   const local = preload(LOCAL);
   await local.bridge.workspaces.open("a");
   assert.deepEqual(local.invoked, [["workspaces:open", "a"]], "this app's own page needs no click check");
+});
+
+test("Remove from list on a server saved by hand: main forgets it here, by its own word for which one", async () => {
+  const forgotten = [];
+  const installed = rail({ forget: async (id) => { forgotten.push(id); } });
+  const vps = (await installed.call("workspaces:places")).places.find(place => place.id === "vps");
+  assert.deepEqual([vps.removable, vps.forget], [true, true]);
+  assert.deepEqual(await installed.call("workspaces:remove", "vps"), { outcome: "removed" });
+  assert.deepEqual(forgotten, ["vps"]);
+  for (const id of ["home", "a", "acme", "lab"]) await assert.rejects(installed.call("workspaces:remove", id), /isn't here/, id);
+  assert.deepEqual(forgotten, ["vps"], "never a Cloud, a team's Cloud or this computer's own");
+  assert.deepEqual(await rail({ forget: async () => false }).call("workspaces:remove", "vps"), { outcome: "failed" });
+  assert.deepEqual(await rail().call("workspaces:remove", "vps"), { outcome: "unsupported" }, "a main without forget says so");
+});
+
+test("a place with inbox lines waiting says so on its circle, this computer's too; the Admin's payment problem still does", () => {
+  const places = railPlaces({ saved: saved("home"), mine: HOME, state: session(), waiting: id => id === "a" || id === "local" });
+  assert.equal(places.find(place => place.id === "a").attention, true);
+  assert.equal(places.find(place => place.id === "local").attention, true);
+  assert.equal(places.find(place => place.id === "vps").attention, undefined);
+  assert.equal(railPlaces({ saved: saved("home"), mine: HOME, state: session() }).find(place => place.id === "a").attention, undefined, "with nothing to say, nothing fires");
 });

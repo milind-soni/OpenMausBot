@@ -23,6 +23,12 @@ describe("who can see a team's private chat", () => {
     expect(renderToStaticMarkup(createElement(TeamSharedHeader, { team: { name: "Acme" } }))).toContain("Shared · everyone in Acme can see");
   });
 
+  it("says only the people added can see them when the bot is shared that way, never everyone", () => {
+    const html = renderToStaticMarkup(createElement(TeamSharedHeader, { team: { name: "Acme" }, onlyPeopleAdded: true }));
+    expect(html).toContain("Shared · only people added and admins can see");
+    expect(html).not.toContain("everyone");
+  });
+
   it("keeps the bot's name in view on a narrow header: the label gives way to its icon, never the name", () => {
     for (const html of [renderToStaticMarkup(createElement(TeamSharedHeader, { team: { name: "Acme" } })), renderToStaticMarkup(createElement(TeamPrivateHeader))]) {
       expect(html).not.toMatch(/^<span[^>]*\bshrink-0\b/);

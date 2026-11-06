@@ -408,6 +408,8 @@ const COMPACTIONS = [
 
 export interface DirectoryContext {
   server: string;
+  /** A directory over several servers' tools, named in place of `server`. */
+  servers?: readonly string[];
   title?: string;
   instructions?: string;
 }
@@ -438,7 +440,8 @@ export class ToolDirectory {
   }
 
   listed(context: DirectoryContext): Json[] {
-    const who = `the "${context.server}" MCP server${context.title && context.title !== context.server ? ` (${oneLine(context.title, 80)})` : ""}`;
+    const who = context.servers?.length ? `the MCP servers ${context.servers.map((server) => `"${server}"`).join(", ")}`
+      : `the "${context.server}" MCP server${context.title && context.title !== context.server ? ` (${oneLine(context.title, 80)})` : ""}`;
     const about = oneLine(context.instructions, ABOUT_CHARS);
     const nameField = { type: "string", description: `The tool's exact name, as ${SEARCH_TOOL} gave it.` };
     return [

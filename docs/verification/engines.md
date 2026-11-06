@@ -49,6 +49,26 @@ prove real OAuth login or native Windows execution.
   provider.
 - Model-picker rendering is Electron UI and remains outside this first map.
 
+## Slow or empty CLI version responses
+
+```sh
+pnpm exec vitest run server/cli-version-probe.test.ts server/procs.test.ts server/engine-status-reads.e2e.test.ts src/App.engine-status.test.ts
+```
+
+The disposable server fixture runs a synthetic Claude CLI that takes nine
+seconds to report its version, and another that returns empty output once.
+Concurrent engine-list reads must report it available and signed in, using
+one version process for the slow case and two for the empty-response retry.
+Both cases send two chat turns through the control surface and retain the
+bot's saved model selection.
+
+The probe tests cover the thirty-second total budget, overlapping checks,
+temporary failures, and clearing a remembered version when the executable is
+missing or cannot be executed. The renderer test keeps an existing chat
+visible while engine status is unavailable and retains setup when there is
+no conversation. These checks do not prove a real provider's login or a
+packaged Windows window.
+
 ## Groq API setup
 
 ```sh
@@ -66,6 +86,23 @@ the row reports catalog reachability without claiming chat authentication. Selec
 Groq model in the bot's picker, send a fixture turn, then clear the key and
 confirm the engine is unavailable. Never use the live app or a real key for
 this recipe.
+
+## Greenference API setup
+
+```sh
+pnpm exec vitest run server/drivers/greenference.test.ts server/provider-key-check.test.ts server/credential-request.test.ts src/components/keys/key-catalog.test.ts
+```
+
+These use a local stand-in for `https://llm.eu.greenference.com/v1`. They check
+the preset endpoint, that the server's key never goes to another host, the
+model list (ready models that call tools, short names, image input from
+`input_modalities`), streaming with reasoning and usage, and that a refused key
+never shows in events. Greenference's model list is public, but a wrong key
+gets 401 there, so Settings' Test proves the key. They never call Greenference.
+
+Checked against the live public list on 2026-10-30: 10 models, of which 5 call
+tools (GLM 5.3 Flash, Qwen3.6 27B, Gemma 4 31B, GLM 4.7 Flash, Qwen3 14B), and
+chat without a key answers 401. A real chat turn needs a real key.
 
 ## Meta Muse: Model API and Muse Code
 

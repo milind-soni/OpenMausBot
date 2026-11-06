@@ -128,7 +128,7 @@ describe("the local send key choice", () => {
     expect(preference.defaultSendKey("ja-jp")).toBe("mod-enter");
     for (const locale of ["en", "zh", "ko", "jam"]) expect(preference.defaultSendKey(locale)).toBe("enter");
     try {
-      i18n.setLocale("ja-JP");
+      await i18n.loadLocale("ja-JP");
       expect(preference.useSendKey()).toBe("mod-enter");
       expect(hook.serverSnapshot!()).toBe("mod-enter");
       expect(preference.parseSendKey("bogus")).toBe("mod-enter");

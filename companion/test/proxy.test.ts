@@ -13,6 +13,7 @@ import { MAX_SSE_EVENT_BYTES } from "../src/wire.ts";
 import { createConnectedDeviceTracker } from "../src/connected-devices.ts";
 import type { CompanionEndpoint } from "../src/endpoints.ts";
 import { removeTempDir, waitForExit } from "../../server/testing/cleanup.ts";
+import { workerPort } from "../../server/testing/worker-port.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..");
@@ -29,7 +30,7 @@ const freePorts = async (span = 1): Promise<number> => {
     });
 
   for (let attempt = 0; attempt < 40; attempt++) {
-    const candidate = 20_000 + Math.floor(Math.random() * 9_000);
+    const candidate = workerPort(20_000, 9_000);
     const held: Server[] = [];
     let free = true;
     for (let i = 0; i < span; i++) {

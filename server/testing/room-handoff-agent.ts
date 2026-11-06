@@ -98,10 +98,11 @@ async function screenCalls(server: AgentsIntegration, count: number): Promise<Ar
 
 /** Plan fields: `launch` replaces Claude's argv files; `progress`/`progressAfterGate` stream around the
  * gate; `approve` asks through Claude's permission-prompt tool (`replyIfDenied` otherwise);
- * `screenCalls` calls the mounted computer that many times. */
+ * `screenCalls` calls the mounted computer that many times; `echoSteered` ends a scripted reply with what
+ * `steered` says was sent into the turn while it ran. */
 export async function runRoomHandoffAgent(argv: string[], planPath: string, prompt?: unknown,
   launch?: { integration: AgentsIntegration; system: string; evidence?: Record<string, unknown> },
-  progress?: (text: string) => void): Promise<string> {
+  progress?: (text: string) => void, steered: () => readonly string[] = () => []): Promise<string> {
   const arg = (flag: string) => argv[argv.indexOf(flag) + 1];
   const mounted = launch ? [] : Object.values(JSON.parse(readAtLaunch(arg("--mcp-config"))).mcpServers as Record<string, AgentsIntegration>);
   // With a tool selection every server sits behind the gate, which names its upstream in OMB_GATE_UPSTREAM.
@@ -200,9 +201,10 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
       evidence.push(await call("tools/list"));
       evidence.push(await call("tools/call", { name: "list_room_targets", arguments: {} }));
       // `server` names another server the turn mounted ("browser", or a person's own MCP server); `capture` { name: regex }
-      // keeps the first group of the result for later steps' `{{name}}`.
+      // keeps the first group of the result for later steps' `{{name}}`; `delayMs` waits that long before the step.
       const captured: Record<string, string> = {};
       for (const step of steps) {
+        if (typeof step.delayMs === "number") await new Promise((resolve) => setTimeout(resolve, step.delayMs));
         const server = step.server ? (launch ? undefined : JSON.parse(readAtLaunch(arg("--mcp-config"))).mcpServers?.[step.server] as AgentsIntegration | undefined) : undefined;
         if (step.server && !server) throw new Error(`A scripted ${step.server} step needs that server mounted for the turn`);
         const args = withCaptured(step.arguments, captured);
@@ -245,7 +247,8 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
       if (typeof plan.failWith === "string") throw new Error(plan.failWith);
       if (plan.failResumed && resumed) throw new Error("Scripted failure of a resumed turn");
       if (approval && approval.behavior !== "allow") return plan.replyIfDenied ?? `${plan.reply} (approval ${approval.behavior})`;
-      if (entry) return String(withCaptured(plan.reply ?? `Result from ${botId}`, captured));
+      const echoed = plan.echoSteered && steered().length ? ` + steered: ${steered().join(" | ")}` : "";
+      if (entry) return `${String(withCaptured(plan.reply ?? `Result from ${botId}`, captured))}${echoed}`;
       return basePlan.turns ? plan.reply : resumed ? plan.resumeReply ?? `Summary from ${botId}` : plan.reply ?? `Result from ${botId}`;
     })()]);
   } finally {

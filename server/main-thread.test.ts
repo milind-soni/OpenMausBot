@@ -13,6 +13,14 @@ describe("a bot's main thread", () => {
     expect(mainThread(tasks)).toBe("later");
   });
 
+  it("is the thread the person chose while it is open, else the usual pick", () => {
+    const tasks = [{ ...latest, askedAt: 10 }, { ...later, askedAt: 30 }, { ...first, askedAt: 20 }];
+    expect(mainThread(tasks, "later", "first")).toBe("first");
+    expect(mainThread([{ ...latest, archivedAt: 5 }, { ...later, askedAt: 30 }], "later", "latest")).toBe("later");
+    expect(mainThread([{ ...latest, routineRunId: "run" }, later], "later", "latest")).toBe("later");
+    expect(mainThread(tasks, "later", "deleted")).toBe("later");
+  });
+
   it("is never a routine run or an archived thread, however recently written in", () => {
     const tasks = [
       { ...latest, askedAt: 50, routineRunId: "run" },

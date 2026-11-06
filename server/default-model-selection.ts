@@ -28,8 +28,9 @@ const best = (instances: readonly SelectableInstance[], context: DefaultSelectio
 };
 
 /** The saved config's enabled switch and picker group win over what the driver reports. */
+/** Every list a person or the server chooses a model from passes here, so a hidden provider drops out of all of them. */
 export function withInstanceConfig<T extends SelectableInstance>(instances: readonly T[], configs: InstanceConfigMap): T[] {
-  return instances.map((instance) => ({
+  return instances.filter((instance) => configs[instance.instanceId]?.hidden !== true).map((instance) => ({
     ...instance,
     enabled: configs[instance.instanceId]?.enabled ?? instance.enabled,
     ...(configs[instance.instanceId]?.access ? { access: configs[instance.instanceId].access } : {}),

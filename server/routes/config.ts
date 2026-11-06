@@ -1,3 +1,4 @@
+import { liveSavePatch } from "../live-config.ts";
 import * as boat from "../boat.ts";
 import { boatCreateRecoverySnapshot, retireDeletedBoatCreate } from "../boat-create-idempotency.ts";
 import { boatDeletionSnapshot } from "../boat-delete-journal.ts";
@@ -8,7 +9,6 @@ import { finalizeBrowserCleanupMutation, requireBrowserCleanupAcknowledged } fro
 import type { BrowserLive } from "../browser-live.ts";
 import type { BrowserRuntime } from "../browser-runtime.ts";
 import { boatAccountResourceChangeError, vpsAliasResourceChangeError } from "../cloud-backend.ts";
-import { CLOUD_PERSONAL_REFUSAL } from "../cloud-owner.ts";
 import * as composio from "../composio.ts";
 import {
   browserProfilePartitionTarget,
@@ -19,7 +19,6 @@ import {
   loadConfig,
   localVmMode,
   mergeOpenCodeProviderKeys,
-  parseConfigPatch,
   saveConfig,
   syncCredentialEnv,
   vpsSshAlias,
@@ -27,7 +26,8 @@ import {
 } from "../config.ts";
 import type { InstanceConfigMap, ModelSelection } from "../contracts.ts";
 import type { RequestAuth } from "../request-auth.ts";
-import { DECIDER_KEY_REJECTED, deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderSharedKeyUsable, type Decider } from "../decider/index.ts";
+import { parseConfigPatchForPerson } from "../decider/config-errors.ts";
+import { DECIDER_KEY_ERROR, deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderSharedKeyUsable, type Decider } from "../decider/index.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import { forgetKey } from "../key-rejections.ts";
@@ -40,6 +40,8 @@ import { parseSkillMd } from "../skills.ts";
 import type { Store } from "../store.ts";
 import * as tts from "../tts/index.ts";
 import * as vps from "../vps-computer.ts";
+import { refusalBody, userError, userErrorFields } from "../user-errors.ts";
+import type { ServerErrorBody } from "../../shared/server-text.ts";
 import type { Postiz } from "../postiz/service.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
@@ -50,7 +52,7 @@ export interface BusyFlag {
 
 export type RemoteComputerProvider = "box" | "vps";
 
-export type ModelSelectionCheck = { ok: true; selection: ModelSelection } | { ok: false; status: number; error: string };
+export type ModelSelectionCheck = { ok: true; selection: ModelSelection } | ({ ok: false; status: number } & ServerErrorBody);
 
 export type ConfigStatus = Record<string, unknown>;
 
@@ -118,8 +120,8 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
     }
     if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
       const body = await readBody(req);
-      if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
-      const patch = parseConfigPatch(body);
+      if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
+      const patch = parseConfigPatchForPerson(body);
       if (patch.profile && ownProfile) {
         // The address is the verified claim's; a profile names no other.
         const { email: _email, ...own } = patch.profile;
@@ -131,12 +133,12 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         }
       }
       if (CLOUD_HOME && (patch.signIn?.admins?.length || patch.signIn?.members?.length)) {
-        return json(res, 403, { error: CLOUD_PERSONAL_REFUSAL, code: "cloud_personal" });
+        return json(res, 403, { ...userError("serverError.cloud.personal"), code: "cloud_personal" });
       }
       if (patch.newBotDefaults) {
         if (patch.newBotDefaults.profile.modelSelection) {
           const checked = checkedModelSelection(patch.newBotDefaults.profile.modelSelection);
-          if (!checked.ok) return json(res, checked.status, { error: checked.error });
+          if (!checked.ok) return json(res, checked.status, refusalBody(checked));
           patch.newBotDefaults.profile.modelSelection = checked.selection;
         }
         for (const skill of patch.newBotDefaults.skills) {
@@ -146,11 +148,11 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       }
       if (hostedModels && patch.defaultModelSelection) {
         const checked = checkedModelSelection(patch.defaultModelSelection);
-        if (!checked.ok) return json(res, checked.status, { error: checked.error });
+        if (!checked.ok) return json(res, checked.status, refusalBody(checked));
       }
       if (patch.automaticRecovery?.enabled) {
         const checked = checkedModelSelection(patch.automaticRecovery.backup, undefined, true);
-        if (!checked.ok) return json(res, checked.status, { error: checked.error });
+        if (!checked.ok) return json(res, checked.status, refusalBody(checked));
         const target = registry.get(checked.selection.instanceId)!;
         if (!target.enabled) return json(res, 400, { error: "Enable the backup engine before selecting it for recovery." });
         const refusal = policyModelRefusal(target);
@@ -160,7 +162,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
       if (patch.decider) {
         const planned = deciderSavePatch(patch.decider, cfg.decider, { included: deciderIncludedHere(), shared: deciderSharedKeyUsable(cfg) });
-        if (!planned.ok) return json(res, 400, { error: planned.error });
+        if (!planned.ok) return json(res, 400, refusalBody(planned));
         patch.decider = planned.patch;
       }
       const changingVoiceProvider = patch.tts?.provider !== undefined
@@ -169,6 +171,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         // Voice ids are provider-owned: never carry one from one catalog into another.
         patch.tts = { ...patch.tts, voice: "" };
       }
+      if (changingVoiceProvider && patch.tts?.model === undefined) patch.tts = { ...patch.tts, model: "" };
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
       if (patch.browserProfiles !== undefined && body.expectedBrowserProfiles !== undefined) {
         const current = (cfg.browserProfiles ?? []).map(({ id, name, browser }) => ({ id, name, ...(browser ? { browser } : {}) }));
@@ -365,7 +368,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         }
       }
       const postizRefusal = await postiz?.configCheck(patch);
-      if (postizRefusal) return json(res, postizRefusal.status, { error: postizRefusal.error, code: postizRefusal.code });
+      if (postizRefusal) return json(res, postizRefusal.status, { error: postizRefusal.error, code: postizRefusal.code, ...userErrorFields(postizRefusal) });
       const newBoatToken = patch.box?.token;
       if (newBoatToken?.trim()) {
         const check = await boat.verifyToken(newBoatToken);
@@ -448,12 +451,16 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         const check = await tts.verifyKey("fish", newTts.fishKey.trim());
         if (!check.ok) return json(res, 400, { error: check.message });
       }
+      if (newTts?.geminiKey !== undefined) newTts.geminiKey = newTts.geminiKey.trim();
+      if (newTts?.geminiKey) {
+        const check = await tts.verifyKey("gemini", newTts.geminiKey);
+        if (!check.ok) return json(res, 400, { error: check.message });
+      }
       const deciderKey = patch.decider ? deciderPatchKey(patch.decider, cfg.decider) : null;
       if (deciderKey) {
         const check = await decider.testKey(deciderKey.check);
         if (!check.ok && check.reason === "rejected") {
-          const error = DECIDER_KEY_REJECTED[deciderKey.provider];
-          return json(res, 400, { error, code: "decider_rejected" });
+          return json(res, 400, { ...userError(DECIDER_KEY_ERROR[deciderKey.provider]), code: "decider_rejected" });
         }
       }
       if (patch.browserProfiles !== undefined) {
@@ -513,6 +520,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       const enginesBefore = engineLaunches(providerConfigs());
       const externalSecretStorage = url.searchParams.get("secretStorage") === "external";
       try {
+        if (patch.live) patch.live = liveSavePatch(cfg.live, patch.live);
         // Before the provider commit, so a failed write never leaves a foreign voice id to speak.
         if (changingVoiceProvider) store.clearVoiceSelections();
         if (externalSecretStorage) {
@@ -524,11 +532,13 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           if (persisted.opencodeGo?.apiKey !== undefined) persisted.opencodeGo.apiKey = "";
           if (persisted.tts?.key !== undefined) persisted.tts.key = "";
           if (persisted.tts?.fishKey !== undefined) persisted.tts.fishKey = "";
+          if (persisted.tts?.geminiKey !== undefined) persisted.tts.geminiKey = "";
           if (persisted.decider?.key !== undefined) persisted.decider.key = "";
           if (persisted.decider?.openrouterKey !== undefined) persisted.decider.openrouterKey = "";
           if (persisted.decider?.workersAiToken !== undefined) persisted.decider.workersAiToken = "";
           if (persisted.imageGen?.key !== undefined) persisted.imageGen.key = "";
           if (persisted.imageGen?.customApiKey !== undefined) persisted.imageGen.customApiKey = "";
+          if (persisted.imageGen?.geminiKey !== undefined) persisted.imageGen.geminiKey = "";
           if (persisted.live?.key !== undefined) persisted.live.key = "";
           if (persisted.treg?.key !== undefined) persisted.treg.key = "";
           if (persisted.postiz?.key !== undefined) persisted.postiz.key = "";

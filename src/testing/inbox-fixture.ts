@@ -15,7 +15,7 @@ export const questionRow: InboxRow = {
 };
 export const messageRow: InboxRow = {
   id: "line-message", kind: "message", tab: "info", unread: true, at: INBOX_NOW - 65 * 60_000, replies: true,
-  from: { name: "Philipp", email: "philipp@acme.test" }, via: { botId: "scout", name: "Scout" }, text: "The launch moved to Friday. Can you check the numbers before then?",
+  from: { name: "Cleo", email: "cleo@acme.test" }, via: { botId: "scout", name: "Scout" }, text: "The launch moved to Friday. Can you check the numbers before then?",
 };
 export const reportRow: InboxRow = {
   id: "line-report", kind: "result", tab: "info", unread: false, at: INBOX_NOW - 3 * 60 * 60_000,
@@ -28,6 +28,6 @@ export const settledRow: InboxRow = {
 };
 
 export const inboxView = (rows: InboxRow[] = [approvalRow, questionRow, messageRow, reportRow, settledRow]): InboxView => ({
-  botId: "marcos-chief", threadId: "inbox", rows,
+  botId: "bens-chief", threadId: "inbox", rows,
   anchor: rows.find((row) => row.kind === "ask")?.id ?? rows[0]?.id ?? null,
 });

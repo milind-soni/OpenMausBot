@@ -7,6 +7,7 @@ import type { ConnectorToolGrant } from "../shared/wire.ts";
 import { toolkitName } from "./activity.ts";
 import type { McpAuthState } from "./mcp-oauth.ts";
 import { isRemoteMcpServer, parseStoredMcpServer } from "./mcp-registry.ts";
+import { stayedConnectors, stayedWhyText } from "./cloud-connections-stayed.ts";
 
 const COMPOSIO_TTL_MS = 20_000;
 const SLUG = /^[a-z0-9_][a-z0-9_-]{0,80}$/u;
@@ -19,6 +20,8 @@ export interface ConnectionPromptSources {
   composioConnected(slugs: string[]): Promise<Record<string, boolean>>;
   /** The computer the bots moved here from, once a move is done. */
   movedFrom?(): string | null;
+  /** The programs this Cloud has. */
+  programs?(): readonly string[];
 }
 
 export type ConnectionPromptBot = { mcpServers?: string[]; composio?: boolean; connectorTools?: Record<string, ConnectorToolGrant> };
@@ -47,13 +50,16 @@ export function createConnectionPrompt(sources: ConnectionPromptSources, origin:
   return (bot) => {
     const toConnect: string[] = [];
     const elsewhere = new Map<string, string[]>();
+    for (const stayed of stayedConnectors(sources.mcpServers(), sources.programs?.() ?? [])) {
+      if (bot.mcpServers !== undefined && !bot.mcpServers.includes(stayed.name)) continue;
+      elsewhere.set(stayed.computer, [...elsewhere.get(stayed.computer) ?? [], `${stayed.name} (${stayedWhyText(stayed)})`]);
+    }
     for (const [name, raw] of Object.entries(sources.mcpServers() ?? {})) {
       if (bot.mcpServers !== undefined && !bot.mcpServers.includes(name)) continue;
       const parsed = parseStoredMcpServer(name, raw);
       if (!parsed.ok || !parsed.server.enabled) continue;
       const server = parsed.server;
-      if (server.runsOn) elsewhere.set(server.runsOn.label, [...elsewhere.get(server.runsOn.label) ?? [], name]);
-      else if (isRemoteMcpServer(server)) {
+      if (!server.runsOn && isRemoteMcpServer(server)) {
         const auth = sources.mcpAuth(name, server.url);
         if (auth === "needs-sign-in" || (auth === "none" && server.oauth)) toConnect.push(`${name} (sign in here: ${link(`mcp:${name}`)})`);
       }
@@ -66,7 +72,7 @@ export function createConnectionPrompt(sources: ConnectionPromptSources, origin:
       from ? ` You moved to My Cloud from the person's computer ${from}, with everything in OpenMausBot. What lives outside OpenMausBot stayed on ${from}: its other folders and files, passkeys, the person's own browser sessions and apps, Local VM disks and model servers on its home network. When a task needs one, use ${from} if it is lent to My Cloud and online; otherwise say in plain words that it stayed there.` : "",
       toConnect.length ? ` Not connected on My Cloud yet: ${toConnect.join("; ")}. When a task needs one, say in plain words that it needs the person once on My Cloud and give its link; do not try another way.` : "",
       apps.length ? ` Assigned to this bot but not connected on My Cloud yet: ${apps.join(", ")}. When a task needs one, call COMPOSIO_MANAGE_CONNECTIONS for it, which shows the person a card to connect it, and end the turn.` : "",
-      ...[...elsewhere].map(([computer, names]) => ` Runs only on the person's computer ${computer}, not on My Cloud: ${names.join(", ")}. If a task needs one, say so in plain words.`),
+      ...[...elsewhere].map(([computer, names]) => ` Runs only on the person's computer ${computer}, not on My Cloud: ${names.join("; ")}. It worked there before the bots moved here. If a task needs one, tell the person in plain words that it stayed on ${computer} and why, not that it was never set up, and do not write your own replacement.`),
     ].join("");
   };
 }

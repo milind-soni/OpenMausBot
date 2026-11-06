@@ -13,7 +13,9 @@ import {
   LOCKOUT,
   normalizePairingCode,
   PAIRING_CODE_ALPHABET,
+  PAIRING_CODE_MAX_TTL_MS,
   PAIRING_CODE_TTL_MS,
+  pairingRequest,
   SESSION_TTL_MS,
   SessionRegistry,
   STREAM_TICKET_TTL_MS,
@@ -21,6 +23,7 @@ import {
   cookieMaxAgeSeconds,
   daysMs,
 } from "./sessions.ts";
+import { userError } from "./user-errors.ts";
 
 let dir: string;
 let clock: number;
@@ -172,10 +175,30 @@ describe("pairing codes", () => {
     const again = registry.exchange({ code, label: "x", source: "a" });
     expect(again.ok).toBe(false);
     if (!again.ok) expect(again.error).toMatch(/wrong or has expired/);
+    expect(again).toMatchObject({ status: 401, errorKey: "serverError.pair.codeWrong" });
     const { code: stale } = registry.openPairing();
     clock += PAIRING_CODE_TTL_MS + 1;
     expect(registry.exchange({ code: stale, label: "x", source: "b" }).ok).toBe(false);
     expect(registry.openPairings()).toEqual([]);
+  });
+
+  it("stay open as long as asked, up to a day, and still work once", () => {
+    const { code, expiresAt } = registry.openPairing({ label: "server", ttlMs: PAIRING_CODE_MAX_TTL_MS });
+    expect(expiresAt).toBe(clock + 24 * 3_600_000);
+    clock += 23 * 3_600_000;
+    expect(registry.exchange({ code, label: "", source: "a" }).ok).toBe(true);
+    expect(registry.exchange({ code, label: "", source: "a" }).ok).toBe(false);
+    const { code: late } = registry.openPairing({ ttlMs: PAIRING_CODE_MAX_TTL_MS });
+    clock += PAIRING_CODE_MAX_TTL_MS + 1;
+    expect(registry.exchange({ code: late, label: "", source: "b" }).ok).toBe(false);
+  });
+
+  it("takes a code's term and a token's from the request, and refuses either out of bounds", () => {
+    expect(pairingRequest({ label: "CI", scopes: ["client", "root"], ttlMs: 86_400_000 })).toEqual({ label: "CI", scopes: ["client"], ttlMs: 86_400_000 });
+    expect(pairingRequest({ tokenTtlMs: SESSION_MAX_AGE_MS })).toEqual({ tokenTtlMs: SESSION_MAX_AGE_MS });
+    expect(pairingRequest(null)).toEqual({});
+    for (const ttlMs of [86_400_001, 59_999, 1.5e6 + 0.5, "24h"]) expect(pairingRequest({ ttlMs }), String(ttlMs)).toMatchObject({ error: expect.stringContaining("24 hours") });
+    expect(pairingRequest({ tokenTtlMs: SESSION_MAX_AGE_MS + 1 })).toMatchObject({ error: expect.stringContaining("OMB_SESSION_MAX_DAYS") });
   });
 
   it("locks a source out after repeated failures, and forgets on success", () => {
@@ -188,6 +211,7 @@ describe("pairing codes", () => {
     if (!locked.ok) {
       expect(locked.status).toBe(429);
       expect(locked.error).toMatch(/from your address; try again in 60s/);
+      expect(locked).toMatchObject({ errorKey: "serverError.pair.tooMany", errorParams: { seconds: 60 } });
     }
     expect(registry.exchange({ code, label: "", source: "friend" }).ok).toBe(true);
     clock += LOCKOUT.lockMs + 1;
@@ -332,6 +356,32 @@ describe("sessions", () => {
     expect(registry.isLive(email.session.id)).toBe(false);
   });
 
+  it("with recheckMs, reads membership at most that often, at once after membershipChanged(): a removal still ends access promptly", () => {
+    let allowed = true;
+    const resolve = vi.fn((_email: string) => allowed ? ["client" as const] : null);
+    registry = new SessionRegistry({ file: file(), now: () => clock, emailScopes: resolve, recheckMs: 2_000 });
+    const email = registry.issue({ label: "browser", email: "person@example.test", scopes: ["client"] });
+    resolve.mockClear();
+    for (let i = 0; i < 1_000; i++) expect(registry.isLive(email.session.id)).toBe(true);
+    expect(resolve.mock.calls.length).toBeLessThanOrEqual(1);
+    allowed = false;
+    registry.membershipChanged();
+    expect(registry.isLive(email.session.id)).toBe(false);
+    expect(registry.authenticate(email.token)).toBeNull();
+  });
+
+  it("with recheckMs, a sign-in list edited outside the app ends access within that time", () => {
+    let allowed = true;
+    registry = new SessionRegistry({ file: file(), now: () => clock, emailScopes: () => allowed ? ["client"] : null, recheckMs: 2_000 });
+    const email = registry.issue({ label: "browser", email: "person@example.test", scopes: ["client"] });
+    registry.recheckMembership();
+    allowed = false;
+    clock += 1_999;
+    expect(registry.isLive(email.session.id)).toBe(true);
+    clock += 1;
+    expect(registry.isLive(email.session.id)).toBe(false);
+  });
+
   it("builds one membership resolver per pass and skips snapshots with no eligible account sessions", () => {
     const resolve = vi.fn((_email: string) => ["client" as const]);
     const snapshot = vi.fn(() => resolve);
@@ -447,6 +497,17 @@ describe("sessions", () => {
     expect(readFileSync(blocked, "utf8")).toContain(paired.session.id);
   });
 
+  it("still reduces the in-memory set when persisting a prune fails", () => {
+    pair();
+    clock += SESSION_TTL_MS + 1;
+    const logger = vi.spyOn(console, "error").mockImplementation(() => {});
+    const writes = vi.spyOn(atomic, "writeFileAtomic").mockImplementation(() => { throw new Error("EIO: the session file is unwritable"); });
+    expect(() => registry.list(), "the heartbeat prunes through isLive(), where a throw would exit the process").not.toThrow();
+    expect(registry.list()).toEqual([]);
+    expect(logger.mock.calls.flat().join(" ")).toContain("Could not persist session pruning.");
+    writes.mockRestore();
+  });
+
   it("stores only a hash, owner-only, and reloads from disk", () => {
     const { token, session } = pair();
     const onDisk = readFileSync(file(), "utf8");
@@ -481,6 +542,29 @@ describe("sessions", () => {
     registry.authenticate(token);
     expect(registry.list()[0]?.lastSeenAt).toBe(clock);
     expect(statSync(file()).mtimeMs).toBeGreaterThanOrEqual(before);
+  });
+
+  it("opens an access token that lasts exactly its term, never renews, and stays one after a restart", () => {
+    const term = 90 * 24 * 3_600_000;
+    const { code } = registry.openPairing({ label: "Nightly CI", scopes: ["client"], tokenTtlMs: term });
+    const paired = registry.exchange({ code, label: "", source: "ci" });
+    if (!paired.ok) throw new Error(paired.error);
+    expect(paired.session).toMatchObject({ label: "Nightly CI", scopes: ["client"], token: true, expiresAt: clock + term });
+    clock += term - 60_000;
+    expect(registry.authenticate(paired.token)?.id).toBe(paired.session.id);
+    expect(registry.renew(paired.session.id)).toBe(false);
+    expect(new SessionRegistry({ file: file(), now: () => clock }).list()).toMatchObject([{ id: paired.session.id, token: true, expiresAt: paired.session.expiresAt }]);
+    clock += 60_001;
+    expect(registry.authenticate(paired.token)).toBeNull();
+  });
+
+  it("never makes a token of a browser sign-in, and caps a token at the longest session", () => {
+    const browser = registry.openPairing({ browser: true, tokenTtlMs: 3_600_000 });
+    const signedIn = registry.exchange({ code: browser.credential, label: "", source: "b", browser: true });
+    expect(signedIn.ok && signedIn.session.token).toBeFalsy();
+    const { code } = registry.openPairing({ tokenTtlMs: SESSION_MAX_AGE_MS * 2 });
+    const long = registry.exchange({ code, label: "", source: "c" });
+    expect(long.ok && long.session.expiresAt).toBe(clock + SESSION_MAX_AGE_MS);
   });
 
   it("renews a session with half its term or less left, and never revives an expired one", () => {
@@ -578,9 +662,9 @@ describe("admin scope only (an OMB Cloud home is personal: server/cloud-owner.ts
     const ticket = stored.ok ? registry.issueStreamTicket(stored.session.id).ticket : "";
     const openWindow = registry.openPairing({ scopes: ["client"] });
     const owner = registry.exchange({ code: registry.openPairing().credential, label: "Mac", source: "a" });
-    registry.requireAdmin(PERSONAL);
+    registry.requireAdmin(userError("serverError.cloud.personal"));
     expect(() => registry.openPairing({ scopes: ["client"] })).toThrow(PERSONAL);
-    expect(registry.exchange({ code: openWindow.credential, label: "Guest", source: "b" })).toEqual({ ok: false, status: 403, error: PERSONAL });
+    expect(registry.exchange({ code: openWindow.credential, label: "Guest", source: "b" })).toEqual({ ok: false, status: 403, error: PERSONAL, errorKey: "serverError.cloud.personal" });
     expect(() => registry.issue({ label: "Friend", scopes: ["client"], email: "friend@example.test" })).toThrow(PERSONAL);
     expect(() => registry.issuePortal({ email: "friend@example.test", grant: "g".repeat(43), scopes: ["client"] })).toThrow(PERSONAL);
     if (!stored.ok || !owner.ok) throw new Error("unreachable");

@@ -862,6 +862,28 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(servers.composio).toMatchObject({ command: "node", args: ["connector-proxy.js"], env: { COMPOSIO_KEY: "ck" } });
   });
 
+  it("reports pi's priced cost and cached tokens summed over the whole run", async () => {
+    await create("priced");
+    await instance.adapter.sendTurn({ threadId: "t-priced", text: "run it", model: "synthetic/hf:moonshotai/Kimi-K3" });
+    const done = await recorder.until((e) => e.type === "turn.completed");
+
+    expect(done).toMatchObject({ ok: true });
+    // input counts every prompt token, cached ones included, as the other drivers do.
+    expect((done as { usage: unknown }).usage).toEqual({ input: 257, output: 3, cachedInput: 220 });
+    expect((done as { cost: number }).cost).toBeCloseTo(0.0025, 10);
+  });
+
+  it("books a model call's cost when the turn is stopped while its tool runs", async () => {
+    await create("priced-stop");
+    await instance.adapter.sendTurn({ threadId: "t-priced-stop", text: "run it", model: "synthetic/hf:moonshotai/Kimi-K3" });
+    await recorder.until((e) => e.type === "item.started");
+    await instance.adapter.interruptTurn("t-priced-stop");
+    const done = await recorder.until((e) => e.type === "turn.completed");
+
+    expect(done).toMatchObject({ ok: true, stopReason: "cancelled", usage: { input: 125, output: 1, cachedInput: 100 } });
+    expect((done as { cost: number }).cost).toBeCloseTo(0.0021, 10);
+  });
+
   it("rides the toolUse auto-continue and only settles on the final end_turn", async () => {
     await create("tooluse");
     await instance.adapter.sendTurn({ threadId: "t-tool", text: "run it" });

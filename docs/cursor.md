@@ -21,8 +21,13 @@ key.
 
    On Windows, OpenMausBot does not spawn cursor-agent.cmd (Node rejects a .cmd). It starts the powershell.exe -File launch from that shim’s sibling cursor-agent.ps1. After installing from the terminal, use Refresh engines so the version check runs again.
 
-2. Sign in with `cursor-agent login`, or set `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`
-   in the environment of the Cursor instance.
+2. Sign in from Cursor's card in the app (**Sign in to Cursor**), or with `cursor-agent login`
+   in a terminal, or set `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN` in the environment of the
+   Cursor instance. The card runs `cursor-agent login` where OpenMausBot runs, with
+   `NO_OPEN_BROWSER` set, and shows the one link Cursor prints
+   (`https://cursor.com/loginDeepControl?…`): open it on any device and sign in, and the
+   CLI where the bots run finishes the sign-in. Only a cursor.com sign-in link carrying
+   Cursor's request (`challenge`, `uuid` and its own flags) is ever shown.
 
 3. Confirm `cursor-agent --version` works. Cursor's docs call the command `agent`;
    the installer adds `cursor-agent` beside it, and OpenMausBot runs that name,
@@ -31,16 +36,47 @@ key.
    OpenMausBot already looks in both, so a CLI installed while the app is open
    is found without restarting.
 
-The engine stays unavailable until the `cursor-agent` executable is found. A
-missing login shows as unauthenticated rather than crashing the fleet.
+The engine stays unavailable until the `cursor-agent` executable is found, and
+until it answers `--version` with Cursor's own build number (`2026.10.22-27dcf5f`).
+A CLI path that runs another program is reported as not Cursor's CLI: an install
+command pasted as the path (`curl https://cursor.com/install -fsS | bash`) runs curl,
+which answers `--version` with its own banner. Settings' CLI test refuses such a path
+the same way. A missing login shows as
+unauthenticated rather than crashing the fleet.
+
+## MausBot Cloud
+
+A Cloud has no terminal, so on Linux Cursor's card installs Cursor's own build itself
+(**Install Cursor here**): the build `https://cursor.com/install` downloads, pinned to the
+version above and checked against its SHA-256 (`server/drivers/acp/cursor-release.ts`). It goes
+into the app's own folder on the data volume (`tools/standalone/cursor-agent/<version>`, about
+560 MB; every bot's box sees it read-only), and `bin/cursor-agent` there is a link to its
+launcher, which runs the node and scripts beside it. That `bin/` goes last on PATH, at start-up
+too, only while the link and the launcher are the pinned ones, so a Cursor the person installs
+themselves comes first. Nothing is added to the Cloud image.
+
+A saved CLI path that answers `--version` as another program gives way by itself to Cursor's own
+CLI once one is installed (the app's copy or one on PATH), as Set CLI would; until then the card
+offers the install. Cursor is then signed in from its card, as above; the login lands in the
+Cloud's home on its volume. Cursor runs on the Cloud itself, so signing in on the person's own
+computer, or on their cloud computer, never signs in the Cursor their bots use; the Cloud's bots
+are told so.
+
+On a Cloud, a card never offers a command to copy or a CLI path to set: an engine the Cloud can't
+install says so in one line.
 
 ## Models
 
-The picker starts from a small static catalog and refreshes from plain
-`cursor-agent models` output (`slug - Label`, with `(default)` / `(current)` markers).
-Live ids are merged into the main cloud rail (not the local-models pane). A
-failed listing keeps the last usable catalog (then the static fallback) rather
-than emptying the rail.
+The picker starts from a small static catalog and refreshes from the models an
+ACP session advertises: OpenMausBot opens `cursor-agent acp`, sends
+`initialize` and `session/new` in an empty folder, and stops, so the refresh
+sends no prompt. Each advertised model shows once under its plain slug
+(`grok-4.7[...]` as `grok-4.7`, `default[]` as `auto`). A static entry stays
+only when the session offers its model. `cursor-agent models` lists only `auto`
+on CLI 2026.10.22, so it answers only when no session opens (`slug - Label`,
+with `(default)` / `(current)` markers). Live ids are merged into the main cloud
+rail (not the local-models pane). A failed listing keeps the last usable
+catalog (then the static fallback) rather than emptying the rail.
 
 `--model <id>` is passed as a global CLI flag before `acp`. Current CLIs
 (checked with 2026.09.28) ignore that flag in ACP sessions: every session

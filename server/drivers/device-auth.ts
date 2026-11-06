@@ -1,5 +1,6 @@
-// Device-code CLI sign-in from the app (`codex login --device-auth`, `grok login --device-auth`),
-// confirmed the way turns will see it; a DeviceSignIn holds the per-CLI parts.
+// Device-code CLI sign-in from the app (`codex login --device-auth`, `grok login --device-auth`), or a CLI's own login
+// that prints one link to finish it (`cursor-agent login`), confirmed the way turns will see it; a DeviceSignIn holds the
+// per-CLI parts.
 import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
@@ -34,6 +35,8 @@ export interface DeviceSignIn {
   homeEnv: string;
   homeDir: string;
   loginArgs: readonly string[];
+  /** Set for every command of this sign-in, such as a CLI's switch that keeps it from opening a browser on the server. */
+  env?: Readonly<Record<string, string>>;
   install: string;
   /** One safe sentence for a failed login command; never the CLI's own words, which may carry tokens. */
   failure(output: string): string;
@@ -239,7 +242,7 @@ export class DeviceAuthController {
       }
       let child: ReturnType<typeof spawnCli>;
       try {
-        child = spawnCli(this.options.cli, args, { env: { ...env, NO_COLOR: "1" }, cwd, stdio: ["pipe", "pipe", "pipe"] });
+        child = spawnCli(this.options.cli, args, { env: { ...env, NO_COLOR: "1", ...this.spec.env }, cwd, stdio: ["pipe", "pipe", "pipe"] });
       } catch {
         rejectExec(new Error(`${product} could not start on this server. Install or update the configured ${product} CLI, then try again.`));
         return;
@@ -277,7 +280,7 @@ export class DeviceAuthController {
     if (flow.status.phase !== "waiting") return;
     let child: ReturnType<typeof spawnCli>;
     try {
-      child = spawnCli(this.options.cli, args, { env: { ...env, NO_COLOR: "1" }, cwd, stdio: ["pipe", "pipe", "pipe"] });
+      child = spawnCli(this.options.cli, args, { env: { ...env, NO_COLOR: "1", ...this.spec.env }, cwd, stdio: ["pipe", "pipe", "pipe"] });
     } catch {
       this.finish(flow, "failed", `${product} could not start on this server. Install or update the configured ${product} CLI, then try again.`);
       return;
@@ -292,9 +295,10 @@ export class DeviceAuthController {
         return;
       }
       output += chunk.toString("utf8");
-      const prompt = parsePrompt && !flow.ready ? deviceSignInPrompt(provider, stripVTControlCharacters(output)) : null;
-      if (prompt) {
-        flow.status = { ...flow.status, ...prompt };
+      const prompt = parsePrompt ? deviceSignInPrompt(provider, stripVTControlCharacters(output)) : null;
+      if (!prompt || (prompt.userCode === flow.status.userCode && prompt.authorizationUrl === flow.status.authorizationUrl)) return;
+      flow.status = { ...flow.status, ...prompt };
+      if (!flow.ready) {
         flow.ready = true;
         clearTimeout(flow.startupTimer);
         flow.resolve({ ...flow.status, phase: "waiting" });

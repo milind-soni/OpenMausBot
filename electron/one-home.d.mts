@@ -1,29 +1,44 @@
-/** The line either page shows for the one-time move to My Cloud (one-home.mjs). */
-export type OneHomeView =
-  /** `chats`: conversations gone of those to go; `failing`: it has failed for a day, with why; `updating`: My Cloud is too old
+/** The line either page shows for the one-time move to My Cloud (one-home.mjs), or to a server of the person's own, named
+ * `place`. */
+export type OneHomeView = OneHomePhase & { place?: string };
+/** Something a move could not carry, by its name, and why. */
+export type OneHomeNotCarried = { label: string; error: string };
+/** Why the move fails, including the server's error code and parameters when provided. */
+export type OneHomeFailing = { error: string | null; errorKey?: string; errorParams?: Record<string, string | number>; items?: OneHomeNotCarried[] };
+/** A connector that stayed on this computer. */
+export type OneHomeStayed = { name: string; needs?: string };
+type OneHomePhase =
+  /** `chats`: conversations gone of those to go; `failing`: it has failed for a day, or its check found things missing pass
+   * after pass, with why and what did not go; `updating`: My Cloud is too old
    * to take a move and updates first. */
-  | { phase: "copy"; chats?: { done: number; total: number }; failing?: { error: string | null }; updating?: true }
+  | { phase: "copy"; chats?: { done: number; total: number }; failing?: OneHomeFailing; updating?: true }
   /** `waitingFor`: the bot or room whose work holds the move ("" when it has no name), and `waitingWhat` what it is;
    * neither while it waits for a quiet moment or has not asked yet. */
-  | { phase: "wait"; waitingFor?: string; waitingWhat?: "bot" | "room" | "sign-in"; failing?: { error: string | null } }
-  | { phase: "finishing"; failing?: { error: string | null } }
-  /** What arrived, checked on both sides; `at`: when the move was done; `phone`: a phone was paired with this computer; `held`: keys a trial's Cloud keeps unused while its Claude credit lasts. */
-  | { phase: "done"; at?: number; counts?: OneHomeCounts; phone: boolean; held: string[] }
+  | { phase: "wait"; waitingFor?: string; waitingWhat?: "bot" | "room" | "sign-in"; failing?: OneHomeFailing }
+  | { phase: "finishing"; failing?: OneHomeFailing }
+  /** What arrived, checked on both sides; `at`: when the move was done; `phone`: a phone was paired with this computer; `held`: keys a trial's Cloud keeps unused while its Claude credit lasts; `left`: what My Cloud refused for good, which stayed where it was; `stayed`: connectors that work only on this computer (`needs`: a program My Cloud lacks). */
+  | { phase: "done"; at?: number; counts?: OneHomeCounts; phone: boolean; held: string[]; left?: OneHomeNotCarried[]; stayed?: OneHomeStayed[] }
   /** This computer's bots are on their way home from a My Cloud that goes on, because the person keeps them here;
    * `updating`: My Cloud is too old to stop their automations and updates first. */
   | { phase: "keeping"; updating?: true }
   /** My Cloud ended: this computer is home again; `back`: My Cloud's own changes came back too, unless `lost`; or, with
    * `elsewhere`, they came back to that other computer and this one keeps its own copy from `since`, with automations off.
-   * `kept`: My Cloud goes on, and this computer's bots came home because the person keeps them here. */
-  | { phase: "home-again" | "back"; lost?: true; elsewhere?: { name: string; since?: number }; kept?: true };
+   * `kept`: My Cloud goes on, and this computer's bots came home because the person keeps them here. `gone`: the Cloud this
+   * computer moved to was deleted, or ended while another Cloud is My Cloud; its own copy is open as it was at the move, with
+   * every automation off. */
+  | { phase: "home-again" | "back"; lost?: true; elsewhere?: { name: string; since?: number }; kept?: true; gone?: true };
 export interface OneHomeCounts { bots: number; skills: number; logins: number; onePassword: boolean; chats: number; routines: number }
 
 export interface OneHomeCloud {
   origin: string | null; account: string; machine: string | null; ready: boolean; moves: boolean; ended: boolean; paid: boolean;
+  /** A server of the person's own, by the name they know it by: the move's line and the frozen copy say it. */
+  name?: string;
   /** The computer an ended Cloud's things come home to, by installation (one-home-main.mjs `installationOf`). */
   homecoming?: { installationId: string; name: string };
   /** This app's sign-in (the Admin's device id), while connected. */
   signIn?: string;
+  /** The Admin answered this sign-in just now (connected), so its word on the person's Clouds counts. */
+  verified?: boolean;
 }
 type Answer = { ok: boolean; status: number; body: any };
 
@@ -44,6 +59,7 @@ export function automationsOn(manifest: unknown): Record<string, boolean>;
 export function keptSwitches(brought: Record<string, boolean>, there: Record<string, boolean> | null | undefined): Record<string, boolean>;
 export function switchOn(key: string): { method: string; route: string; body: unknown } | null;
 export function arrivedCounts(here: unknown, there: unknown): OneHomeCounts;
+export function missingOf(report: unknown): string;
 
 export function createOneHome(deps: {
   journal: { read(): unknown; write(value: unknown): void };
@@ -56,7 +72,12 @@ export function createOneHome(deps: {
     json(route: string): Promise<any>;
     call(method: string, route: string, body?: unknown): Promise<Answer>;
     forget?(): Promise<void>;
+    /** This computer's freeze marker: the Cloud it names (`cloud`), or the server of the person's own (`place`). */
+    marker?(): Promise<{ frozen: boolean; cloud?: string; place?: string }>;
   };
+  /** The Admin's word that this account's Cloud at `origin` is gone: deleted, or ended (stopped and kept only until it is
+   * deleted); null for anything else, and while it can't be asked. */
+  gone?(origin: string): Promise<"deleted" | "ended" | null>;
   session(): Promise<{ call(method: string, route: string, body?: unknown): Promise<Answer>; close(): Promise<void> }>;
   /** My Cloud's session is no longer needed: the move is done, paused, or not this account's. */
   release?(): Promise<void>;
@@ -65,6 +86,8 @@ export function createOneHome(deps: {
   openHome?(): void;
   openLocal?(): void;
   lastInput?(): number;
+  /** Whether this computer's own copy is the server answering now. */
+  ownCopy?(): boolean;
   again?: { bring(): Promise<{ restored: string; switches: Record<string, boolean> } | { deleted: true } | { later: number }> };
   /** The person's choice to keep this computer's bots here. */
   keep?: { read(): unknown; write(value: unknown): void };
@@ -85,12 +108,15 @@ export function createOneHome(deps: {
   now?(): number;
   timers?: { set(work: () => void, ms: number): unknown; clear(timer: unknown): void };
   log?(line: string): void;
+  t?(key: string, params?: Record<string, string | number>): string;
 }): {
   kick(): Promise<void>;
   view(): OneHomeView | null;
   away(): boolean;
   /** A move or a send under way that restarting this app would cut into. */
   busy(): boolean;
+  /** The move of the account signed in is past where it can stop by itself: that account can't be left for a moment. */
+  moving(): boolean;
   keeps(): boolean;
   /** Throws once this computer's bots are on their way home past turning back and `on` is false. */
   keep(on: boolean): Promise<void>;

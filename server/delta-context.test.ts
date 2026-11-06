@@ -11,6 +11,7 @@ import {
   renderUnseen,
   sessionStart,
   unseenMessages,
+  UNSEEN_END,
   withUnseenMessages,
   type ContextMessage,
   type Handoff,
@@ -146,8 +147,13 @@ describe("renderUnseen", () => {
     expect(block).toContain("User (sent while an earlier turn was running; you may already have it): also cover costs");
   });
 
-  it("separates the block from the turn text with one blank line", () => {
-    expect(withUnseenMessages("[block]", "question")).toBe("[block]\n\nquestion");
+  it("ends the block with a marker, so the person's new message never reads as one more line of it", () => {
+    expect(withUnseenMessages("[block]", "question")).toBe(`[block]\n\n${UNSEEN_END}\n\nquestion`);
+    // A teammate's relayed reply is the block's last line; the person's next request comes after it.
+    const relayed = msg("r", "[Relayed from Sam]: I'll take the Berlin trip, you book the hotel.", { keep: true });
+    const text = withUnseenMessages(renderUnseen([relayed]).block, "Book the flight for Tuesday.");
+    expect(text.indexOf("you book the hotel.")).toBeLessThan(text.indexOf(UNSEEN_END));
+    expect(text.slice(text.lastIndexOf(UNSEEN_END) + UNSEEN_END.length).trim()).toBe("Book the flight for Tuesday.");
   });
 });
 

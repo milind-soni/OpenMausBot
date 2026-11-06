@@ -12,6 +12,7 @@ import { VM_WORKSPACE_GUEST } from "../container-computer.ts";
 import type { json as sendJson } from "../harness/http.ts";
 import type { PageBundle } from "../pages/bundle.ts";
 import type { PagePublisher } from "../pages/publisher.ts";
+import { refusalBody, userError } from "../user-errors.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface PagesInternalContext {
@@ -95,11 +96,11 @@ export function createPublishedPageRoutes(publisher: PagePublisher, apps?: AppPa
     if (!apps || !page || method !== "POST") return PASS;
     const [, threadId, messageId] = page as unknown as [string, string, string];
     const bot = apps.botOf(threadId);
-    if (!bot) return void json(res, 404, { error: "Pages from a room or a closed conversation can't be published here." });
+    if (!bot) return void json(res, 404, userError("serverError.page.roomOrClosed"));
     const body = appPublishBody.safeParse(await readBody(req, 4_096) ?? {});
     if (!body.success) return void json(res, 400, { error: "Publish takes an optional rev, the version to publish." });
     const built = apps.page(threadId, messageId, body.data.rev);
-    if (!built.ok) return void json(res, built.status, { error: built.error });
+    if (!built.ok) return void json(res, built.status, refusalBody(built));
     const pageId = apps.published(threadId, messageId);
     const outcome = await publisher.publishFiles({
       botId: bot.id, threadId, source: built.folder ?? appPageSource(threadId, messageId), title: built.title, files: built.files,

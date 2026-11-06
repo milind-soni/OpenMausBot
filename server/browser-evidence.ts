@@ -7,7 +7,6 @@ import { open, readFile, stat, statfs as statfsAsync } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import type { Writable } from "node:stream";
 
-import { Header } from "tar";
 
 import { writeFileAtomic } from "./atomic.ts";
 
@@ -286,6 +285,7 @@ export class BrowserEvidence {
       out.once("drain", settle);
       out.once("close", closed);
     });
+    const { Header } = await import("tar");
     const entry = async (path: string, body: Buffer | { file: string; size: number }, mtime: Date) => {
       const bytes = Buffer.isBuffer(body) ? body.length : body.size;
       const block = Buffer.alloc(512);

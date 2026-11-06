@@ -7,6 +7,7 @@ import type { AppConfig } from "../config.ts";
 import { customMcpServers } from "../config.ts";
 import { noteKeyAccepted } from "../key-rejections.ts";
 import { McpOAuthManager } from "../mcp-oauth.ts";
+import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import { FAKE_POSTIZ_KEY, startFakePostiz, type FakePostiz } from "../testing/fake-postiz.ts";
 import { createPostiz } from "./service.ts";
 
@@ -99,6 +100,23 @@ describe("the API key", () => {
     expect(await save(service, { key: "" })).toBeNull();
     expect(cfg.mcpServers).toEqual({});
     expect(service.status()).toMatchObject({ state: "not-connected", how: null, keySaved: false });
+  });
+
+  it("checks and rechecks a key against a Postiz that lists tools to anyone and refuses calls, running no tool", async () => {
+    const key = "key-for-an-anonymous-lister";
+    const lister = await startFakeHttpMcp({ guard: "tools/call", acceptBearer: (authorization) => authorization === `Bearer ${key}`, tools: [{ name: "integrationList" }, { name: "postsListTool" }] });
+    try {
+      const address = new URL(lister.url).origin;
+      const service = postiz();
+      expect(await service.checkKey(address, key)).toEqual({ ok: true, tools: 2 });
+      expect(await save(service, { url: address, key })).toBeNull();
+      expect((await service.recheck()).tools).toBe(2);
+      expect(service.status()).toMatchObject({ state: "connected", how: "key" });
+      expect(lister.calls).toEqual([]);
+      expect(lister.refusedCalls).toEqual([]);
+    } finally {
+      await lister.close();
+    }
   });
 
   it("shows a revoked key as refused after the next check", async () => {

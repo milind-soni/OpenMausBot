@@ -47,10 +47,11 @@ const rpc = (request: unknown, gate: { held: boolean; reason?: "person"; blocked
 };
 
 describe("cloud computer tools", () => {
-  it("lists the same ten tools for every engine", async () => {
+  it("lists the same thirteen tools for every engine", async () => {
     const listed = await rpc({ method: "tools/list", params: {} }).done as { tools: Array<{ name: string }> };
     expect(listed.tools.map(tool => tool.name)).toEqual([
-      "screenshot", "get_screen_size", "click", "move", "drag", "type_text", "key_press", "scroll", "open_url", "exec",
+      "screenshot", "get_screen_size", "click", "move", "drag", "type_text", "key_press", "scroll", "open_url", "exec", "exec_status",
+      "copy_from_computer", "copy_to_computer",
     ]);
     expect(calls).toEqual([]);
   });
@@ -185,7 +186,7 @@ describe("cloud computer tools", () => {
       cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, budgetMs: 600, assertActive: () => {},
       gate: async () => { await new Promise(resolve => setTimeout(resolve, 300)); return { held: false }; },
     });
-    expect(result).toEqual({ isError: true, content: [{ type: "text", text: tools.CLOUD_COMPUTER_LATE }] });
+    expect(result).toEqual({ isError: true, content: [{ type: "text", text: (await import("./cloud-computer-background.ts")).EXEC_LATE }] });
     expect(Date.now() - started).toBeGreaterThanOrEqual(550);
     expect(Date.now() - started).toBeLessThan(1_500);
     expect(calls.filter(entry => entry.path.endsWith("/commands"))).toHaveLength(1);

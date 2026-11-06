@@ -2,13 +2,13 @@
 // forward it), and OPENAI_API_KEY makes provider:auto resolve to OpenRouter without its key ("HTTP 401:
 // Missing Authentication header"), so injects write providers.<host> and set_model `custom:<host>:<model>`.
 import { spawn } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
-import { harnessHome } from "../../env-path.ts";
+import { findCliCandidates, harnessHome, resolveCliSpawn, splitCliString, whichWin } from "../../env-path.ts";
 import { resolveCli } from "../../procs.ts";
 import { decodeInjectId, hostApiKey, INJECT_SEP, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
@@ -98,6 +98,15 @@ export function hermesAcpModelId(modelId: string | null | undefined): string | n
 
 /** Not an inject id: no session/set_model and no -m, so Hermes runs the model in its own config.yaml. */
 export const HERMES_CONFIG_MODEL_ID = "hermes-default";
+
+// `custom: true` is load-bearing: a custom-only agent's picker pane lists only options carrying it.
+function hermesConfigOption(model: string) {
+  return {
+    id: HERMES_CONFIG_MODEL_ID,
+    label: model ? `${model} (Hermes config)` : "Hermes default (config)",
+    custom: true as const,
+  };
+}
 
 function nonEmptyDotenvValue(text: string, name: string): string | null {
   const match = new RegExp(`^[ \\t]*(?:export[ \\t]+)?${name}[ \\t]*=[ \\t]*([^\\r\\n]*)$`, "m").exec(text);
@@ -191,13 +200,60 @@ export function hermesConfiguredModel(
   const configIsHosted = configuredDefault !== null;
   if (!hasHostedProviderKey && !configIsHosted) return null;
 
-  const model = configuredDefault?.model ?? "";
-  // `custom: true` is load-bearing: a custom-only agent's picker pane lists only options carrying it.
-  return {
-    id: HERMES_CONFIG_MODEL_ID,
-    label: model ? `${model} (Hermes config)` : "Hermes default (config)",
-    custom: true as const,
-  };
+  return hermesConfigOption(configuredDefault?.model ?? "");
+}
+
+/** A runnable file, so the default entry never points at a directory or a file that can't start. A wrapper such as
+ * `wsl hermes` is looked up by its first word, as resolveCliSpawn launches it, and any runnable PATH match counts. */
+function hermesInstalled(cli: string): boolean {
+  const trimmed = cli.trim();
+  const head = trimmed.includes(" ") && existsSync(trimmed) ? trimmed : (splitCliString(trimmed)[0] ?? "");
+  // An unrecognized .cmd/.bat shim stays a shim after resolution, and Node can't spawn it without a shell.
+  if (process.platform === "win32") {
+    return whichWin(head) !== null && !/\.(cmd|bat)$/i.test(resolveCliSpawn(trimmed, []).command);
+  }
+  return findCliCandidates(head).some((found) => {
+    try {
+      if (!statSync(found).isFile()) return false;
+      accessSync(found, constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
+const HERMES_PROBED_PROVIDERS = new Set(["ollama", "lmstudio"]);
+/** Hosts the IPv4 probe reaches; IPv6 loopback ([::1]) is not one of them. */
+const PROBED_LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost"]);
+
+function yamlMap(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function hermesUsesProbedProvider(env: Record<string, string | undefined>): boolean {
+  const dir = env.HERMES_HOME || harnessHome("hermes", env);
+  try {
+    const text = readFileSync(join(dir, "config.yaml"), "utf8");
+    const provider = hermesConfigDefault(text)?.provider.toLowerCase() ?? "";
+    const probe = HERMES_PROBED_PROVIDERS.has(provider) ? localHost(provider) : undefined;
+    if (!probe) return false;
+    const config = yamlMap(parseYaml(text));
+    const baseUrl =
+      yamlString(yamlMap(config.model).base_url) ||
+      yamlString(yamlMap(yamlMap(config.providers)[provider]).base_url) ||
+      yamlString(config.base_url);
+    if (!baseUrl) return true;
+    const configured = new URL(baseUrl);
+    const probed = new URL(probe.baseUrl);
+    return (
+      PROBED_LOOPBACK_HOSTS.has(configured.hostname) &&
+      configured.protocol === probed.protocol &&
+      configured.port === probed.port
+    );
+  } catch {
+    return false;
+  }
 }
 
 export const HERMES_ACP_MODELS_TIMEOUT_ENV = "HERMES_ACP_MODELS_TIMEOUT_MS";
@@ -313,19 +369,25 @@ export async function fetchHermesAcpModels(
   });
 }
 
-async function resolveModels(
+export async function resolveHermesModels(
   env: Record<string, string | undefined>,
   config?: { cli?: string },
 ): Promise<ModelCatalog> {
+  const cli = config?.cli || "hermes";
   const catalog = await mergeLocalInject(EMPTY, env);
   const configured = hermesConfiguredModel(env);
-  const remote = configured ? await fetchHermesAcpModels(config?.cli || "hermes", env) : [];
+  const remote = configured ? await fetchHermesAcpModels(cli, env) : [];
   const seen = new Set<string>();
   const options = [...(configured ? [configured] : []), ...remote, ...catalog.options].filter((o) => {
     if (seen.has(o.id)) return false;
     seen.add(o.id);
     return true;
   });
+  // A custom endpoint or a config we can't read (another HERMES_HOME, WSL) would leave no choice and no way to
+  // create a Hermes bot: offer Hermes' own config.yaml model, which starts `hermes acp` without picking one.
+  if (!options.length && !hermesUsesProbedProvider(env) && hermesInstalled(cli)) {
+    options.push(hermesConfigOption(""));
+  }
   return { default: options[0]?.id ?? "", options };
 }
 
@@ -347,7 +409,7 @@ const support: AcpSupport = {
   displayName: "Hermes",
   access: "custom",
   models: EMPTY,
-  resolveModels: (env: Record<string, string | undefined>, config: any) => resolveModels(env, config),
+  resolveModels: (env: Record<string, string | undefined>, config: any) => resolveHermesModels(env, config),
   resolveTurnModel: (model, env) => {
     // Never inherit a broad or stale compatibility grant from the parent; bind one concrete model.
     bindHermesScreenshotCompat(env, model);

@@ -26,6 +26,16 @@ export function deviceWord(platform: LentPlatform | null | undefined): "PC" | "M
   return platform === "win32" ? "PC" : platform === "darwin" ? "Mac" : "computer";
 }
 
+/** Their computer as they know it: "their PC (MILIND-PC)" on Windows, "their Mac (…)" only on a Mac, else "their own computer". */
+export function theirComputer(lent: ReadonlyArray<{ name: string; platform: LentPlatform | null }>): { theirs: string; device: "PC" | "Mac" | "computer" } {
+  const latest = lent[0];
+  if (!latest) return { theirs: "their own computer", device: "computer" };
+  const device = deviceWord(latest.platform);
+  // eslint-disable-next-line no-control-regex
+  const name = latest.name.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, " ").slice(0, 80);
+  return { theirs: `their ${device} (${name})`, device };
+}
+
 export class LentComputers {
   private readonly file: string;
   private readonly now: () => number;
@@ -113,14 +123,15 @@ const dateText = (at: number) => new Date(at).toISOString().slice(0, 16).replace
  * What list_shared_computers adds for a bot when a computer it knows is not online: the computer by name and kind, since
  * when, and the one sentence to say. Nothing when every known computer is online.
  */
-export function awayNotice(known: LentComputer[], online: ReadonlySet<string>): { offline?: Array<{ name: string; device: string; lastOnline: string; lent: boolean }>; say?: string } {
+export function awayNotice(known: LentComputer[], online: ReadonlySet<string>, askTool: string | null = null): { offline?: Array<{ name: string; device: string; lastOnline: string; lent: boolean }>; say?: string } {
   const away = known.filter((computer) => !online.has(computer.id));
   if (!away.length || known.some((computer) => online.has(computer.id))) return {};
   const offline = away.slice(0, 3).map((computer) => ({ name: computer.name, device: deviceWord(computer.platform), lastOnline: dateText(computer.lastSeenAt), lent: computer.stoppedAt === null }));
   const latest = away[0]!;
   const device = deviceWord(latest.platform);
+  const ask = askTool ? ` If the request needs it, call ${askTool}: it asks them with a one-tap Turn on, and you carry on once it's on. Don't explain the fix in chat.` : null;
   const say = latest.stoppedAt === null
-    ? `Their ${device} ${latest.name} is shared with the Cloud but offline (last online ${dateText(latest.lastSeenAt)}): OpenMausBot on it is closed, or the ${device} is asleep or off. Ask them to open OpenMausBot on that ${device}; it reconnects by itself.`
-    : `Their ${device} ${latest.name} no longer shares itself with the Cloud: OpenMausBot on it is paused, or signed out of MausBot Cloud. Ask them to choose Resume from OpenMausBot's icon in the ${device === "Mac" ? "menu bar" : "taskbar"} on that ${device}, or sign in there again.`;
+    ? `Their ${device} ${latest.name} is shared with the Cloud but offline (last online ${dateText(latest.lastSeenAt)}): OpenMausBot on it is closed, or the ${device} is asleep or off.${ask ?? ` Ask them to open OpenMausBot on that ${device}; it reconnects by itself.`}`
+    : `Their ${device} ${latest.name} no longer shares itself with the Cloud: OpenMausBot on it is paused, or signed out of MausBot Cloud.${ask ?? ` Ask them to choose Resume from OpenMausBot's icon in the ${device === "Mac" ? "menu bar" : "taskbar"} on that ${device}, or sign in there again.`}`;
   return { offline, say };
 }

@@ -2,6 +2,7 @@
 // prompt, where events that arrive together share one run.
 import type { AppTrigger, AppTriggerFilter } from "../shared/app-triggers.ts";
 import { filtersAtSource } from "../shared/app-triggers.ts";
+import { AUTHORITY, appEventWho, fromNote } from "./provenance-label.ts";
 import { defuse as defused } from "./records-block.ts";
 
 /** Event data in one run, as for a webhook delivery; and how many events one run takes before another starts. */
@@ -61,7 +62,7 @@ export function eventBlock(trigger: Pick<AppTrigger, "appName" | "eventName" | "
     `Event ID: ${event.id.slice(0, 200)}`,
   ].join("   ");
   const test = event.test ? "\nTEST EVENT, started from OpenMausBot: nothing really happened. Do not reply to, send or change anything; say what you would do." : "";
-  return [BLOCK_OPEN, `${defused(header)}${test}`, "", defused(text), BLOCK_CLOSE].join("\n");
+  return [fromNote(appEventWho(trigger.appName, trigger.eventName), "event", AUTHORITY.info), BLOCK_OPEN, `${defused(header)}${test}`, "", defused(text), BLOCK_CLOSE].join("\n");
 }
 
 export function eventPrompt(instructions: string, block: string): string {

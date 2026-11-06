@@ -16,6 +16,58 @@ const INPUT = cn(KEY_FIELD, "font-sans");
 /** A slow computer can take minutes before a local model's first words, so the wait is the person's call. */
 export const REPLY_WAIT_CHOICES = [5, 10, 20, 30, 60] as const;
 const ICON_BUTTON = "ui-icon-button shrink-0 hover:text-ink";
+/** Google's Gemini API speaks the OpenAI protocol here; the key comes from Google AI Studio. */
+export const GEMINI_PRESET = { name: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai" } as const;
+
+const saveReplyWait = (instanceId: string, minutes: number | null): Promise<{ instances?: unknown }> =>
+  api(`/api/instances/${encodeURIComponent(instanceId)}`, { method: "PATCH", body: JSON.stringify({ replyWaitMinutes: minutes }) });
+
+function ReplyWaitSelect({ server, disabled, onPick }: { server: InstanceInfo; disabled: boolean; onPick: (minutes: number | null) => void }) {
+  return (
+    <Select
+      size="sm"
+      className="shrink-0"
+      value={server.replyWaitMinutes ?? ""}
+      onChange={(event) => onPick(event.target.value ? Number(event.target.value) : null)}
+      disabled={disabled}
+      aria-label={t("apiInstances.replyWaitFor", { name: server.displayName })}
+      title={t("apiInstances.replyWaitHint")}
+    >
+      <option value="">{t("apiInstances.replyWaitDefault")}</option>
+      {[...new Set([...REPLY_WAIT_CHOICES, ...(server.replyWaitMinutes ? [server.replyWaitMinutes] : [])])].sort((a, b) => a - b).map((minutes) => (
+        <option key={minutes} value={minutes}>{t("apiInstances.replyWaitMinutes", { minutes: String(minutes) })}</option>
+      ))}
+    </Select>
+  );
+}
+
+/** The built-in server whose base URL is set above, often a local Ollama: the same wait as an added server. */
+export function BuiltInReplyWait() {
+  const { state, dispatch, refreshInstances } = useStore();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const server = state.instances.find((instance) => instance.instanceId === "openaiCompat" && instance.driverKind === "openai-compat");
+  if (!server || !state.config?.openaiCompat?.url) return null;
+  const pick = (minutes: number | null) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    void saveReplyWait(server.instanceId, minutes)
+      .then(async ({ instances }) => {
+        if (Array.isArray(instances)) dispatch({ type: "instances", instances: instances as InstanceInfo[] });
+        else await refreshInstances({ reportErrors: true });
+      })
+      .catch((e: Error) => setError(e.message || t("apiInstances.failed")))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className="flex flex-col gap-1">
+      <ReplyWaitSelect server={server} disabled={busy} onPick={pick} />
+      <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.replyWaitHint")}</p>
+      {error && <div role="alert" className="text-[12px] leading-4 text-danger">{error}</div>}
+    </div>
+  );
+}
 
 export function OtherOpenAiCompatServers() {
   const { state } = useStore();
@@ -69,23 +121,11 @@ function AddedServers({ servers }: { servers: Array<InstanceInfo & { url?: strin
             <div className="truncate text-[12px] text-ink">{server.displayName}</div>
             {server.url && <div className="truncate font-mono text-[11px] text-ink-secondary">{server.url}</div>}
           </div>
-          <Select
-            size="sm"
-            className="shrink-0"
-            value={server.replyWaitMinutes ?? ""}
-            onChange={(event) => {
-              const minutes = event.target.value ? Number(event.target.value) : null;
-              run("other", () => api(`/api/instances/${encodeURIComponent(server.instanceId)}`, { method: "PATCH", body: JSON.stringify({ replyWaitMinutes: minutes }) }));
-            }}
+          <ReplyWaitSelect
+            server={server}
             disabled={busy !== null}
-            aria-label={t("apiInstances.replyWaitFor", { name: server.displayName })}
-            title={t("apiInstances.replyWaitHint")}
-          >
-            <option value="">{t("apiInstances.replyWaitDefault")}</option>
-            {[...new Set([...REPLY_WAIT_CHOICES, ...(server.replyWaitMinutes ? [server.replyWaitMinutes] : [])])].sort((a, b) => a - b).map((minutes) => (
-              <option key={minutes} value={minutes}>{t("apiInstances.replyWaitMinutes", { minutes: String(minutes) })}</option>
-            ))}
-          </Select>
+            onPick={(minutes) => run("other", () => saveReplyWait(server.instanceId, minutes))}
+          />
           <button
             type="button"
             onClick={() => run("other", () => api(`/api/instances/${encodeURIComponent(server.instanceId)}/refresh-models`, { method: "POST" }))}
@@ -109,6 +149,15 @@ function AddedServers({ servers }: { servers: Array<InstanceInfo & { url?: strin
         </div>
       ))}
       <div className="mt-2 flex flex-col gap-1.5">
+        <button
+          type="button"
+          onClick={() => { setName(GEMINI_PRESET.name); setUrl(GEMINI_PRESET.url); }}
+          disabled={busy !== null}
+          className="ui-button self-start"
+        >
+          {t("apiInstances.geminiPreset")}
+        </button>
+        {url.trim() === GEMINI_PRESET.url && <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.geminiKeyHint")}</p>}
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("apiInstances.name")} aria-label={t("apiInstances.name")}
           spellCheck={false} disabled={busy !== null} className={INPUT} />
         <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://api.example.com/v1" aria-label={t("apiInstances.url")}

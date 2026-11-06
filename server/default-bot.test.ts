@@ -1,3 +1,4 @@
+import { canManage, canReach } from "./peer-roster.ts";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -43,6 +44,16 @@ describe("MausBot, every person's helper", () => {
     const maus = placeMausBots(again)[0]!;
     expect(maus).toMatchObject({ name: "MausBot", color: "chrome", chiefOfStaff: true, defaultBot: {} });
     expect(intros(again, maus)).toHaveLength(1);
+  });
+
+  it("leaves a Team Cloud member's MausBot uncrowned: it reaches no bot everyone sees, so a crown would promise work it can't hand on", () => {
+    const store = new Store(selection);
+    store.seedIfEmpty({ defaultBot: false });
+    const own = ensureDefaultBot(store, { dataDir: DATA_DIR, person: "ada@acme.test", team: "Acme" })!;
+    expect(own.chiefOfStaff).toBeFalsy();
+    const fox = store.createBot({ name: "Fox", reportsTo: "ada@acme.test" } as never);
+    expect(canReach(own, fox)).toBe(false);
+    expect(canManage(own, fox)).toBe(false);
   });
 
   it("gives an existing install without one a MausBot once on update, beside its Chief, which stays exactly as it was", () => {

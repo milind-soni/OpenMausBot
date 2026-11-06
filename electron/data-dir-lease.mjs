@@ -145,7 +145,8 @@ function sameMachine(record) {
   return boot !== null && typeof record.boot === "string" && record.boot === boot;
 }
 
-function otherMachineAdvice(path) {
+function otherMachineAdvice(path, t) {
+  if (t) return t("native.boot.sharedFolderAdvice", { path: JSON.stringify(path) });
   return ` If OpenMausBot is not running on another computer or container that shares this folder, quit OpenMausBot, delete ${JSON.stringify(path)} and start again.`;
 }
 
@@ -238,14 +239,20 @@ function parseWmiDateTime(value) {
   return ms - offsetMinutes * 60 * 1000;
 }
 
+/** Windows: when a process started, in ms since the epoch; null when it has exited or neither probe can read it. */
 function processCreationTimeMs(pid) {
   if (process.platform !== "win32") return null;
+  return wmicCreationTimeMs(pid) ?? cimCreationTimeMs(pid);
+}
+
+/** A Windows probe's stdout, its window hidden; throws when it fails or runs past `timeout`. */
+function windowsOutput(file, args, timeout) {
+  return execFileSync(file, args, { encoding: "utf8", timeout, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+}
+
+function wmicCreationTimeMs(pid) {
   try {
-    const output = execFileSync(
-      "wmic",
-      ["process", "where", `ProcessId=${pid}`, "get", "CreationDate", "/format:csv"],
-      { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] },
-    );
+    const output = windowsOutput("wmic", ["process", "where", `ProcessId=${pid}`, "get", "CreationDate", "/format:csv"], 5_000);
     for (const line of output.split(/\r?\n/)) {
       const trimmed = line.trim();
       if (!trimmed) continue;
@@ -259,6 +266,24 @@ function processCreationTimeMs(pid) {
   } catch {
   }
   return null;
+}
+
+/**
+ * Windows 11 no longer installs wmic, and without a creation time every reused pid reads as the lease's owner, so
+ * the lease can never be recovered. Windows PowerShell ships with every Windows; named by full path, never via PATH.
+ */
+function cimCreationTimeMs(pid) {
+  const powershell = join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  try {
+    const output = windowsOutput(powershell, [
+      "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+      `$p = Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}'; if ($p) { ([DateTimeOffset]$p.CreationDate).ToUnixTimeMilliseconds() }`,
+    ], 15_000);
+    const ms = Number(output.trim());
+    return output.trim() && Number.isSafeInteger(ms) && ms > 0 ? ms : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Pids are reused within a boot: a process that started at another moment, or after the lease, is not its owner. */
@@ -383,13 +408,13 @@ function prepareDataDir(dataDir, legacyDataDir) {
   return join(dataDir, LEASE_NAME);
 }
 
-function assertNoLiveDelegatedChild(dataDir) {
+function assertNoLiveDelegatedChild(dataDir, t) {
   const childLeasePath = join(dataDir, DELEGATED_CHILD_DIR, LEASE_NAME);
   const child = readOwner(childLeasePath);
   if (!child) return;
   if (!sameMachine(child)) {
     throw leaseError(
-      `This OpenMausBot data directory still has a delegated server on another machine. Delegated server lease: ${JSON.stringify(childLeasePath)}.${otherMachineAdvice(childLeasePath)}`,
+      `This OpenMausBot data directory still has a delegated server on another machine. Delegated server lease: ${JSON.stringify(childLeasePath)}.${otherMachineAdvice(childLeasePath, t)}`,
     );
   }
   if (ownerIsAlive(child)) {
@@ -458,7 +483,7 @@ function validateChildDelegation(dataDir, encoded) {
 
 function acquireDataDirLeaseInternal(dataDir, options = {}) {
   const leasePath = prepareDataDir(dataDir, options.legacyDataDir);
-  if (options.guardDelegatedChild !== false) assertNoLiveDelegatedChild(dataDir);
+  if (options.guardDelegatedChild !== false) assertNoLiveDelegatedChild(dataDir, options.t);
   const owner = {
     version: 1,
     pid: process.pid,
@@ -493,7 +518,7 @@ function acquireDataDirLeaseInternal(dataDir, options = {}) {
       if (!current) continue;
       if (!sameMachine(current)) {
         throw leaseError(
-          `This OpenMausBot data directory is already owned by a process on another machine. Lease record: ${JSON.stringify(leasePath)}.${otherMachineAdvice(leasePath)}`,
+          `This OpenMausBot data directory is already owned by a process on another machine. Lease record: ${JSON.stringify(leasePath)}.${otherMachineAdvice(leasePath, options.t)}`,
         );
       }
       if (ownerIsAlive(current)) {

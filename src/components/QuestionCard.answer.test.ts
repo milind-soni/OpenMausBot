@@ -145,9 +145,9 @@ describe("QuestionCard answered in one step", () => {
   });
 
   it("sends ask_user's plain pick as the label itself", () => {
-    mount(card([plan], { questionRequest: undefined, subtitle: "Soll ich?", options: ["Ja, nur den Abschlusstext", "Nein"] }));
-    act(() => choice("Ja, nur den Abschlusstext").click());
-    expect(dispatch.mock.calls[0]![0]).toMatchObject({ type: "decideRequest", behavior: "answer", message: "Ja, nur den Abschlusstext" });
+    mount(card([plan], { questionRequest: undefined, subtitle: "Should I?", options: ["Yes, only the footer text", "No"] }));
+    act(() => choice("Yes, only the footer text").click());
+    expect(dispatch.mock.calls[0]![0]).toMatchObject({ type: "decideRequest", behavior: "answer", message: "Yes, only the footer text" });
   });
 
   it("does not send Enter while an IME composition is active", () => {

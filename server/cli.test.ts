@@ -5,13 +5,14 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { applyStartupPreferences, formatSessions, parseArgs, runAccess, runLogin, runOnboardingCommand, serverEntry, type CliOptions, verifyPhoneEndpoint } from "./cli.ts";
-import { browserSignInLines, pairingBlock, qrToString } from "./cli-pairing.ts";
+import { applyStartupPreferences, parseArgs, runAccess, runLogin, runOnboardingCommand, serverEntry, type CliOptions, verifyPhoneEndpoint } from "./cli.ts";
+import { browserSignInLines, formatSessions, pairingBlock, qrToString } from "./cli-pairing.ts";
 import { readAdminActivityRange } from "./admin-activity.ts";
 import { SetupCancelled } from "./cli-prompts.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { startControlPlaneStub } from "./testing/control-plane-stub.ts";
 import { freePortBlock } from "./testing/ports.ts";
+import { workerPort } from "./testing/worker-port.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const setup = vi.hoisted(() => ({ runSetup: vi.fn(), isSetupComplete: vi.fn(), readCliStartup: vi.fn(), saveCliStartup: vi.fn() }));
@@ -24,6 +25,10 @@ describe("openmausbot command line", () => {
     expect(serve).toMatchObject({ command: "serve", port: 9001, dataDir: resolve("/tmp/x"), label: "cab mini", tailscale: true, pair: false });
     expect(parseArgs(["pair", "--client", "--public-url", "https://h/"], {})).toMatchObject({ command: "pair", client: true, publicUrl: "https://h" });
     expect(parseArgs(["sessions", "revoke", "abc"], {})).toMatchObject({ command: "sessions", revoke: "abc" });
+    expect(parseArgs(["pair", "--client", "--ttl", "24h"], {})).toMatchObject({ command: "pair", client: true, pairTtlMs: 86_400_000 });
+    expect(parseArgs(["pair", "--ttl", "2d"], {})).toEqual({ error: "--ttl must be a duration from 1m to 24h, such as 90, 90s, 5m or 2h" });
+    expect(parseArgs(["pair", "--ttl", "30s"], {})).toMatchObject({ error: expect.stringContaining("from 1m to 24h") });
+    expect(parseArgs(["serve", "--ttl", "1h"], {})).toEqual({ error: 'unknown argument "--ttl"' });
     expect(parseArgs(["fleet", "create", "acme", "--admin", "ada@example.test", "--member", "@acme.test", "--member", "bob@acme.test", "--cap", "40", "--memory", "1G", "--dry-run"], {})).toMatchObject({
       command: "fleet", fleetAction: "create", slug: "acme", admins: ["ada@example.test"], members: ["@acme.test", "bob@acme.test"], cap: 40, memory: "1G", dryRun: true,
     });
@@ -140,6 +145,7 @@ describe("openmausbot command line", () => {
     expect(table).toMatch(/a1\s+My MacBook\s+admin\s+just now/);
     expect(table).toMatch(/b2\s+\(unnamed\)\s+client\s+3 h ago/);
     expect(table).toContain("sessions revoke <id>");
+    expect(formatSessions([{ id: "c3", label: "Nightly CI", scopes: ["client"], lastSeenAt: now, expiresAt: now, token: true }], now)).toContain("Nightly CI (token)");
   });
 
   it("finds the server next to itself: bundled index.js in a package, the TypeScript source in a checkout", () => {
@@ -151,7 +157,7 @@ describe("openmausbot command line", () => {
 
   it("serve: starts the server, prints the pairing link, and stops on SIGTERM", async () => {
     const home = mkdtempSync(join(tmpdir(), "omb-cli-serve-"));
-    const port = 21000 + Math.floor(Math.random() * 9000);
+    const port = workerPort(21000, 9000);
     const child = spawn(process.execPath, ["--experimental-strip-types", join(SERVER_DIR, "openmausbot.ts"), "serve", "--port", String(port), "--data-dir", join(home, "data"), "--label", "cli test", "--public-url", "https://mini.example"], {
       cwd: join(SERVER_DIR, ".."),
       env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, OMB_WEBHOOK_PORT: String(port + 1), OMB_BROWSER_CONNECTION: join(home, "browser-connection.json") },
@@ -402,7 +408,7 @@ describe.skipIf(process.platform === "win32")("serve --tunnel", () => {
 
   it("refuses without an account and says what to do; no local-only fallback", async () => {
     const home = mkdtempSync(join(tmpdir(), "omb-cli-tunnel-none-"));
-    const port = 21000 + Math.floor(Math.random() * 9000);
+    const port = workerPort(21000, 9000);
     const child = cli(["serve", "--tunnel", "--port", String(port), "--data-dir", join(home, "data")], { HOME: home, USERPROFILE: home });
     let err = "";
     child.stderr?.on("data", (chunk) => (err += String(chunk)));
@@ -606,7 +612,7 @@ describe.skipIf(process.platform === "win32")("serve --domain", () => {
     mkdirSync(dataDir, { recursive: true });
     const fake = join(home, "fake-caddy");
     writeFileSync(fake, `#!/bin/sh\necho "$@" > "${join(home, "caddy-args.txt")}"\necho $$ > "${join(home, "caddy.pid")}"\nexec sleep 300\n`, { mode: 0o755 });
-    const port = 21000 + Math.floor(Math.random() * 9000);
+    const port = workerPort(21000, 9000);
     const child = spawn(process.execPath, ["--experimental-strip-types", join(SERVER_DIR, "openmausbot.ts"), "serve", "--domain", "omb.example.test", "--port", String(port), "--data-dir", dataDir], {
       cwd: join(SERVER_DIR, ".."),
       env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, OMB_WEBHOOK_PORT: String(port + 1), OMB_BROWSER_CONNECTION: join(home, "browser-connection.json"), OMB_CADDY_PATH: fake },

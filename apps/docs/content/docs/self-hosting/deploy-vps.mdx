@@ -128,6 +128,19 @@ In this path, every `npx openmausbot …` command below is run inside the contai
 docker compose exec omb node dist-server/openmausbot.js pair --label "My MacBook"
 ```
 
+### On ARM64: Raspberry Pi 4/5 and ARM servers
+
+The image is published for both `linux/amd64` and `linux/arm64`, and Docker
+pulls the one that matches the machine, so the steps above are the same on an
+ARM64 server or a Raspberry Pi 4 or 5. Use a 64-bit system (Raspberry Pi OS
+64-bit or Ubuntu Server for ARM; `uname -m` prints `aarch64`) and at least 4 GB
+of RAM. When you change `ENGINES`, `docker compose build` builds the image on
+the machine itself.
+
+On ARM64 the bots' browser is Debian's Chromium, because Chrome for Testing has
+no Linux ARM64 build. Once it runs, open `https://maus.example.com` from any
+browser and pair it as below.
+
 ## Path C: only your Tailscale network
 
 From the administrator shell, install Tailscale on the server and sign in (`curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up`). Enable HTTPS certificates for your tailnet once in the admin console (DNS → HTTPS Certificates), then run this from the `maus` shell:

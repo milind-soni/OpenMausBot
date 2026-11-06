@@ -12,6 +12,13 @@ describe("admission golden tables", () => {
     expect(admit("direct-busy", { ...plain, pendingComputerSelection: true })).toEqual({ action: "queue" });
     expect(admit("direct-busy", { ...plain, engineCanSteer: false })).toEqual({ action: "queue" });
     expect(admit("direct-busy", {})).toEqual({ action: "queue" });
+    expect(admit("direct-busy", { ...plain, followUp: "steer" })).toEqual({ action: "steer" });
+    expect(admit("direct-busy", { ...plain, followUp: "queue" })).toEqual({ action: "queue", chose: "queue" });
+    expect(admit("direct-busy", { ...plain, followUp: "restart" })).toEqual({ action: "queue", chose: "restart" });
+    // A turn that cannot be steered queues whatever was asked; only restart still ends it.
+    expect(admit("direct-busy", { ...plain, engineCanSteer: false, followUp: "steer" })).toEqual({ action: "queue" });
+    expect(admit("direct-busy", { ...plain, engineCanSteer: false, followUp: "queue" })).toEqual({ action: "queue" });
+    expect(admit("direct-busy", { ...plain, engineCanSteer: false, followUp: "restart" })).toEqual({ action: "queue", chose: "restart" });
   });
 
   it("direct-busy: attachments steer into an engine that takes images mid-turn", () => {

@@ -7,6 +7,7 @@ import { setLocale } from "@/lib/i18n";
 
 const fx = vi.hoisted(() => ({
   config: {} as Record<string, unknown>,
+  instances: [] as unknown[],
   listeners: new Set<() => void>(),
   api: vi.fn(),
   dispatch: vi.fn(),
@@ -20,7 +21,7 @@ vi.mock("@/state/store", async (original) => {
     api: (...args: unknown[]) => fx.api(...args),
     useStore: () => {
       const config = useSyncExternalStore(subscribe, () => fx.config);
-      return { state: { ...actual.initialState, config, instances: [] }, dispatch: fx.dispatch };
+      return { state: { ...actual.initialState, config, instances: fx.instances as never }, dispatch: fx.dispatch };
     },
   };
 });
@@ -28,6 +29,10 @@ vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/lib/live-call-media", () => ({ dismissLiveNotice: vi.fn() }));
 
 const { KeysPage } = await import("./KeysPage");
+const { track } = await import("@/lib/analytics");
+const { BOAT_OFFER, boatClaimMailto } = await import("@/lib/boat-offer");
+const { BOAT_OFFER_NOTICE } = await import("@/lib/notices");
+const { applyBrand, DEFAULT_BRAND } = await import("@/lib/brand");
 const { LiveKeyNeeded } = await import("../LiveKeyNeeded");
 const { openKeySettings } = await import("./key-focus");
 
@@ -68,6 +73,7 @@ beforeEach(() => {
     if (action.type === "configStatus") setConfig(action.config!);
   });
   fx.config = { composio: { configured: false }, box: { configured: false }, vps: { configured: false, sshAlias: "" } };
+  fx.instances = [];
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -87,6 +93,37 @@ describe("the keys page", () => {
     expect(expanded("voice")).toBe("false");
     expect(rowsShown()).toContain("openai");
     expect(rowsShown()).not.toContain("elevenlabs");
+  });
+
+  it("offers the Live calls service, OpenAI or Azure OpenAI, on the separate live key row", () => {
+    setConfig({ ...fx.config, live: { configured: false, provider: "azure", voice: "", readTypedReplies: true, idleMinutes: 5 } });
+    page();
+    const select = row("liveKey")!.querySelector<HTMLSelectElement>("select")!;
+    expect([...select.options].map((option) => option.value)).toEqual(["openai", "azure"]);
+    expect(select.value).toBe("azure");
+    expect(row("liveKey")!.querySelector('input[type="url"]')).not.toBeNull();
+  });
+
+  it("with Azure chosen, the Live key row asks for an Azure key: required, no OpenAI wording, and no row saying Live uses the OpenAI key", () => {
+    const live = { configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live: { ...live, provider: "azure", azureEndpoint: "https://my-res.openai.azure.com" } });
+    page();
+    const azure = row("liveKey")!;
+    expect(azure.textContent).toContain("Azure OpenAI key for Live calls");
+    expect(azure.textContent).toContain("Required");
+    expect(azure.textContent).not.toContain("Optional");
+    expect(azure.textContent).not.toContain("Separate key");
+    expect(azure.textContent).not.toContain("instead of your OpenAI key");
+    expect([...azure.querySelectorAll("input")].map((input) => input.placeholder)).not.toContain("sk-…");
+    expect(azure.querySelector<HTMLAnchorElement>('a[href*="platform.openai.com"]')).toBeNull();
+    expect(row("liveCalls")).toBeNull();
+
+    setConfig({ ...fx.config, live });
+    page();
+    const openAi = row("liveKey")!;
+    expect(openAi.textContent).toContain("Optional");
+    expect([...openAi.querySelectorAll("input")].map((input) => input.placeholder)).toContain("sk-…");
+    expect(row("liveCalls")).not.toBeNull();
   });
 
   it("opens a section that holds a saved key, and counts what is connected", () => {
@@ -167,5 +204,74 @@ describe("the keys page", () => {
     await vi.waitFor(() => expect(row("box")!.querySelector("[data-key-masked]")?.textContent).toContain("••••••••c3d4"));
     expect(row("box")!.textContent).toContain("Connected");
     expect(fx.api).toHaveBeenCalledOnce();
+  });
+});
+
+describe("the OpenAI-compatible server row", () => {
+  it("offers the reply wait for the built-in server once its base URL is set, such as a local Ollama", () => {
+    const waitFor = () => host.querySelector('select[aria-label="How long to wait for Other (OpenAI-compatible) to reply"]');
+    fx.instances = [{ instanceId: "openaiCompat", driverKind: "openai-compat", displayName: "Other (OpenAI-compatible)", snapshot: { state: "available" } }];
+    page();
+    expect(waitFor()).toBeNull();
+    flushSync(() => setConfig({ ...fx.config, openaiCompat: { url: "http://localhost:11434/v1" } }));
+    expect(row("openaiCompat")).not.toBeNull();
+    expect(waitFor()).not.toBeNull();
+    flushSync(() => setConfig({ ...fx.config, openaiCompat: { url: "" } }));
+    expect(waitFor()).toBeNull();
+  });
+});
+
+describe("Boat's credit offer on the Boat card", () => {
+  const offer = () => row("box")!.querySelector<HTMLElement>("[data-boat-offer]");
+  const buttons = () => [...offer()!.querySelectorAll<HTMLButtonElement>("button")];
+  const openComputers = () => flushSync(() => section("computers").querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+  afterEach(() => {
+    BOAT_OFFER.until = null;
+    applyBrand({ brand: DEFAULT_BRAND, source: "default", file: "" });
+    delete (window as unknown as { ogb?: unknown }).ogb;
+    vi.unstubAllGlobals();
+  });
+
+  it("is always on the Boat card while the offer runs: with no key, a saved key, one a Cloud plan includes, and after its popup closed", () => {
+    page(); openComputers();
+    for (const box of [{ configured: false }, { configured: true, last4: "c3d4" }, { configured: false, included: true }]) {
+      setConfig({ ...fx.config, box });
+      expect(offer(), JSON.stringify(box)).not.toBeNull();
+      expect(offer()!.closest("[hidden]")).toBeNull();
+      const words = offer()!.textContent!;
+      for (const text of ["$50 of Boat credit for you", "Boat runs the cloud computers behind MausBot.", "You claim it yourself: it isn't automatic."]) {
+        expect(words).toContain(text);
+      }
+      expect(buttons().map((button) => button.textContent)).toEqual(["Get Boat", "I bought it: claim my $50"]);
+    }
+    vi.stubGlobal("localStorage", { getItem: (key: string) => (key === BOAT_OFFER_NOTICE ? "1" : null), setItem: () => {}, removeItem: () => {} });
+    page();
+    expect(offer(), "closing the popup never takes it from Settings").not.toBeNull();
+    type(host.querySelector<HTMLInputElement>("[data-keys-search]")!, "boat");
+    expect(rowsShown()).toContain("box"); expect(offer()!.closest("[hidden]")).toBeNull();
+  });
+
+  it("Get Boat opens boat.dev and the claim drafts the email to Boat; both stay for a later visit and save nothing", async () => {
+    const openExternal = vi.fn(async () => true);
+    (window as unknown as { ogb?: unknown }).ogb = { openExternal };
+    page(); openComputers();
+    flushSync(() => buttons()[0]!.click());
+    await vi.waitFor(() => expect(openExternal).toHaveBeenCalledWith("https://boat.dev"));
+    flushSync(() => buttons()[1]!.click());
+    await vi.waitFor(() => expect(openExternal).toHaveBeenCalledWith(boatClaimMailto()));
+    await vi.waitFor(() => expect(track).toHaveBeenCalledWith("boat_offer", { action: "claim", place: "settings" }));
+    expect(track).toHaveBeenCalledWith("boat_offer", { action: "get_boat", place: "settings" });
+    expect(offer()).not.toBeNull();
+    expect(fx.api).not.toHaveBeenCalled();
+  });
+
+  it("goes from its end date on, and on a branded build, while the Boat card stays", () => {
+    BOAT_OFFER.until = Date.now() - 1;
+    page();
+    expect(row("box")).not.toBeNull(); expect(offer()).toBeNull();
+    BOAT_OFFER.until = null;
+    applyBrand({ brand: { name: "Acme Bots" }, source: "file", file: "brand.json" });
+    page();
+    expect(row("box")).not.toBeNull(); expect(offer()).toBeNull();
   });
 });

@@ -122,7 +122,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   ownerToken = await ownerPairing();
-  // Chief first makes the seeded bot its team's Chief, which answers a teammate's failed run with a Team incidents turn
+  // Chief first makes the seeded bot its team's Chief, which answers a teammate's failed run with a Problems to look at turn
   // of its own on the same Claude: a second failed turn in the health read. Stepped down, each test's turns are its own.
   const seeded = ((await api("GET", "/api/bots?messages=0")).body.bots as any[]).find((bot) => bot.chiefOfStaff);
   expect((await api("PATCH", `/api/bots/${seeded.id}`, { body: { chiefOfStaff: false } })).status).toBe(200);
@@ -367,13 +367,15 @@ it("offers its bots the browser and cloud computers only, and tells them they ca
     const dump = join(home, "spawn-hang.json");
     await expect.poll(() => existsSync(dump), { timeout: 15_000 }).toBe(true);
     const { systemPrompt, mcpConfig } = JSON.parse(readFileSync(dump, "utf8"));
-    expect(systemPrompt).toContain(cloudHomePrompt(true));
+    expect(systemPrompt).toContain(cloudHomePrompt(true, [], [], true));
     expect(systemPrompt).toContain("check list_shared_computers");
+    expect(systemPrompt).toContain("call ask_for_computer");
+    expect(systemPrompt).toContain("never do it on their cloud computer or in the built-in browser instead unless they ask you to");
     expect(systemPrompt).not.toMatch(/Local VM is an isolated desktop|user's host|host desktop|select an available Local VM/);
     const agents = mcpConfig.mcpServers.agents;
     expect(agents.env.OMB_CLOUD_HOME).toBe("1");
     const preview = (await api("GET", `/api/bots/${botId}/system-prompt`)).body.sections as Array<{ id: string; text: string }>;
-    expect(preview.find((section) => section.id === "cloud-home")?.text).toBe(cloudHomePrompt(true));
+    expect(preview.find((section) => section.id === "cloud-home")?.text).toBe(cloudHomePrompt(true, [], [], true));
     const select = (surface?: string) => fetch(`${base}/api/internal/computer/select`, {
       method: surface === undefined ? "GET" : "POST",
       headers: { authorization: `Bearer ${agents.env.OMB_COMMS_TOKEN}`, ...(surface === undefined ? {} : { "content-type": "application/json" }) },

@@ -248,6 +248,10 @@ export class RuntimeRouter {
     return this.#chrome.service.heldBy(session) ?? this.#old.heldBy(session);
   }
 
+  working(session: string): boolean {
+    return this.#chrome.service.working(session) || this.#old.working(session);
+  }
+
   interrupted(session: string): boolean {
     return this.#chrome.service.interrupted(session) || this.#old.interrupted(session);
   }

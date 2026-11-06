@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  activeBotsFirst,
   BOT_CHATS_SECTION_ID,
   BOTS_SECTION_ID,
   CHANNELS_SECTION_ID,
@@ -138,7 +139,7 @@ describe("sidebar virtual sections", () => {
 
   it("shows pinned-circle thread rows only while the circle grid is showing", () => {
     expect(pinnedCircleThreadListVisible(true, "comfortable", 1)).toBe(true);
-    expect(pinnedCircleThreadListVisible(true, "compact", 2)).toBe(true);
+    expect(pinnedCircleThreadListVisible(true, "comfortable", 2)).toBe(true);
     expect(pinnedCircleThreadListVisible(false, "comfortable", 1)).toBe(false);
     expect(pinnedCircleThreadListVisible(true, "icons", 1)).toBe(false);
     expect(pinnedCircleThreadListVisible(true, "comfortable", 0)).toBe(false);
@@ -148,8 +149,8 @@ describe("sidebar virtual sections", () => {
     expect(sidebarLayoutInteractive("comfortable", "")).toBe(true);
     expect(sidebarLayoutInteractive("comfortable", "writer")).toBe(false);
     expect(sidebarLayoutInteractive("icons", "")).toBe(false);
-    expect(sidebarSectionCollapsed(PINNED_SECTION_ID, [PINNED_SECTION_ID], "compact", "")).toBe(true);
-    expect(sidebarSectionCollapsed(PINNED_SECTION_ID, [PINNED_SECTION_ID], "compact", "writer")).toBe(false);
+    expect(sidebarSectionCollapsed(PINNED_SECTION_ID, [PINNED_SECTION_ID], "comfortable", "")).toBe(true);
+    expect(sidebarSectionCollapsed(PINNED_SECTION_ID, [PINNED_SECTION_ID], "comfortable", "writer")).toBe(false);
     expect(sidebarSectionCollapsed(PINNED_SECTION_ID, [PINNED_SECTION_ID], "icons", "")).toBe(false);
   });
 
@@ -302,5 +303,20 @@ describe("the primary tile", () => {
     expect(tiled.unsectionedBots.map((candidate) => candidate.id)).toEqual(["bea"]);
     expect(tiled.sectionChiefs.map((candidate) => candidate.id)).toEqual(["lead"]);
     expect(withPrimaryTile(parts, undefined).primary).toBeNull();
+  });
+});
+
+describe("active bots first", () => {
+  it("moves active bots up inside each list, keeps everyone's order, and touches nothing else", () => {
+    const parts = { pinnedBots: ["p1", "p2", "p3"], sectionedBots: ["w1", "h1", "w2"], unsectionedBots: ["a", "b", "c"], other: "kept" };
+    const active = new Set(["p3", "w2", "h1", "c", "b"]);
+    expect(activeBotsFirst(parts, (id) => active.has(id))).toEqual({
+      pinnedBots: ["p3", "p1", "p2"],
+      sectionedBots: ["h1", "w2", "w1"],
+      unsectionedBots: ["b", "c", "a"],
+    });
+    expect(parts.unsectionedBots).toEqual(["a", "b", "c"]);
+    expect(parts.pinnedBots).toEqual(["p1", "p2", "p3"]);
+    expect(parts.sectionedBots).toEqual(["w1", "h1", "w2"]);
   });
 });

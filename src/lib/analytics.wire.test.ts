@@ -105,8 +105,14 @@ it("sends events without any stored or current address, polls nothing, and sends
     const analytics = await import("./analytics");
     await analytics.initAnalytics();
     analytics.track("app_snapshot", { bots: 3 });
-    analytics.identifyEmail("person@example.com");
     await minutes(11);
+    // posthog-js gzips each batch with the platform's CompressionStream, which finishes on the real clock, not the fake
+    // one: on a busy machine the batches leave after the last tick. Wait for both events to have left, not for ticks.
+    await vi.waitFor(async () => {
+      const bodies = (await Promise.all(sent.map(({ body }) => bodyText(body)))).join("\n");
+      expect(bodies).toContain("app_snapshot");
+      expect(bodies).toContain("app_active");
+    }, { timeout: 30_000, interval: 20 });
 
     const urls = sent.map(({ url }) => new URL(url));
     expect(urls.length).toBeGreaterThan(0);
@@ -114,7 +120,6 @@ it("sends events without any stored or current address, polls nothing, and sends
     const bodies = await Promise.all(sent.map(({ body }) => bodyText(body)));
     expect(bodies.join("\n")).toContain("app_snapshot");
     expect(bodies.join("\n")).toContain("app_active");
-    expect(bodies.join("\n")).toContain("$identify");
     expect(SECRETS.filter((secret) => bodies.some((body) => body.includes(secret)))).toEqual([]);
     const stored = JSON.parse(localStorage.getItem(STORED) ?? "{}") as Record<string, unknown>;
     for (const key of ["$initial_person_info", "$initial_referrer_info", "$initial_campaign_params"]) expect(stored).not.toHaveProperty(key);

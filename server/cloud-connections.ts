@@ -11,16 +11,17 @@ import { canonicalJson } from "../shared/package-format.ts";
 import { fingerprint } from "./cloud-send-verify.ts";
 import type { ComposioIdentity } from "./composio-share.ts";
 import type { AppConfig } from "./config.ts";
+import type { EmailAccount } from "./email/store.ts";
 import type { HighLevelConnection } from "./highlevel/store.ts";
 import type { McpOAuthRecord } from "./mcp-oauth-store.ts";
 import type { McpAuthState } from "./mcp-oauth.ts";
 import { isRemoteMcpServer, parseStoredMcpServer, type StoredMcpServer } from "./mcp-registry.ts";
 
-export type ConnectionKind = "mcp" | "key" | "composio" | "highlevel";
+export type ConnectionKind = "mcp" | "key" | "composio" | "highlevel" | "email";
 
 /** One connection, by name only. */
 export interface ConnectionListing {
-  /** "mcp:<name>", "key:<provider>", "composio" or "highlevel". */
+  /** "mcp:<name>", "key:<provider>", "composio", "highlevel" or "email". */
   id: string;
   kind: ConnectionKind;
   label: string;
@@ -47,7 +48,7 @@ export interface ConnectionListing {
  * goes for "Claude (API key)" alone: there it never takes over Claude bots that sign in with a Claude account. */
 interface Provider { id: string; label: string; for: string[]; config(cfg: AppConfig): Partial<AppConfig> | null }
 
-const keyed = (name: "openai" | "openrouter" | "mistral" | "cerebras") => (cfg: AppConfig): Partial<AppConfig> | null => {
+const keyed = (name: "openai" | "openrouter" | "mistral" | "cerebras" | "greenference") => (cfg: AppConfig): Partial<AppConfig> | null => {
   const key = cfg[name]?.key;
   return key ? { [name]: { key } } : null;
 };
@@ -65,6 +66,7 @@ export const KEY_PROVIDERS: readonly Provider[] = [
   { id: "mistral", label: "Mistral", for: ["mistral"], config: keyed("mistral") },
   { id: "cerebras", label: "Cerebras", for: ["cerebras"], config: keyed("cerebras") },
   { id: "groq", label: "Groq", for: ["groq"], config: keyedUrl("groq") },
+  { id: "greenference", label: "Greenference", for: ["greenference"], config: keyed("greenference") },
   { id: "meta", label: "Meta", for: ["meta"], config: keyedUrl("meta") },
   { id: "openaiCompat", label: "OpenAI-compatible", for: ["openaiCompat"], config: (cfg) => cfg.openaiCompat?.key
     ? { openaiCompat: Object.fromEntries(Object.entries(cfg.openaiCompat).filter(([, value]) => typeof value === "string" && value)) } : null },
@@ -102,10 +104,20 @@ export function launcherOf(command: string): string {
   return basename(command.replaceAll("\\", "/")).toLowerCase().replace(/\.(?:exe|cmd|bat|ps1)$/u, "");
 }
 
-/** A server that needs this computer: it starts a program by path, reads a file or folder here, or calls an address
- * only this computer reaches. */
+const MAIL_PROGRAM = /(?:^|[^a-z])(?:imap|smtp|e-?mail|himalaya)(?:[^a-z]|$)/iu;
+
+/** A command-line connector that talks to a mail server itself. It keeps its accounts on the computer it was set up on,
+ * outside anything its command line names, and in a bot's box a mail server is out of reach: the box's only way out is
+ * its HTTP proxy, which such a program does not use. So it starts on My Cloud, lists its tools, and reads no mail. */
+export function isMailConnector(server: StoredMcpServer): boolean {
+  return !isRemoteMcpServer(server) && [server.command, ...server.args].some((value) => MAIL_PROGRAM.test(value));
+}
+
+/** A server that needs this computer: it starts a program by path, reads a file or folder here, calls an address only
+ * this computer reaches, or is a mail connector. */
 export function runsHere(server: StoredMcpServer): boolean {
   if (isRemoteMcpServer(server)) return addressHere(server.url);
+  if (isMailConnector(server)) return true;
   const command = server.command.trim();
   if (/[\\/]/u.test(command) || command.startsWith("~") || command.startsWith(".")) return true;
   return [...server.args, ...Object.values(server.env)].some(pathHere);
@@ -131,6 +143,8 @@ export interface ConnectionSources {
   mcpAuth(name: string, url: string): McpAuthState;
   composio: ComposioIdentity | null;
   highlevel(): HighLevelConnection | null;
+  /** The person's mailboxes, by address only here. */
+  email?(): ReadonlyArray<{ address: string }>;
 }
 
 export function listConnections(sources: ConnectionSources): ConnectionListing[] {
@@ -156,6 +170,7 @@ export function listConnections(sources: ConnectionSources): ConnectionListing[]
   }
   const highlevel = sources.highlevel();
   if (highlevel) items.push({ id: "highlevel", kind: "highlevel", label: "HighLevel", ...(highlevel.kind === "oauth" ? { signIn: true as const } : {}) });
+  if (sources.email?.().length) items.push({ id: "email", kind: "email", label: "Email" });
   return items;
 }
 
@@ -164,13 +179,16 @@ export type ConnectionHandoff =
   | { mcp: { name: string; server: StoredMcpServer; signIn?: McpOAuthRecord } }
   | { config: Partial<AppConfig> }
   | { composio: { apiKey: string; userId: string } }
-  | { highlevel: HighLevelConnection };
+  | { highlevel: HighLevelConnection }
+  | { email: readonly EmailAccount[] };
 
 export interface HandoffSources {
   config: AppConfig;
   /** The sign-in kept for a server reached by URL, with its tokens. */
   mcpSignIn(name: string, url: string): McpOAuthRecord | undefined;
   highlevel(): HighLevelConnection | null;
+  /** The person's mailboxes with their passwords, which go only to the owner's session on their own Cloud. */
+  email?(): readonly EmailAccount[];
 }
 
 /** A sign-in's tokens in a digest: the same tokens give the same digest, so a sign-in that refreshed meanwhile is seen. */
@@ -215,6 +233,10 @@ export function answerConnection(id: string, sources: HandoffSources):
     const connection = sources.highlevel();
     if (!connection) return { ok: false, error: "HighLevel is not connected on this computer." };
     return { ok: true, connection: { highlevel: connection }, ...(connection.kind === "oauth" ? { digest: highlevelDigest(connection) } : {}) };
+  }
+  if (id === "email") {
+    const accounts = sources.email?.() ?? [];
+    return accounts.length ? { ok: true, connection: { email: accounts } } : { ok: false, error: "No mailbox is connected on this computer." };
   }
   return { ok: false, error: "This connection is not on this computer." };
 }

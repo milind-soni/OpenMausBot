@@ -17,6 +17,7 @@ export function installCloudSend(deps: {
   window(): { isDestroyed(): boolean; webContents: { send(channel: string, value: unknown): void; mainFrame: { url: string } } } | null;
   localOrigin(): string;
   fetch?: typeof fetch;
+  t?(key: string, params?: Record<string, string | number>): string;
   engineWaitMs?: number;
   space?: { disk(): unknown; grow(sizeGb: number): Promise<unknown> };
   move?: () => { view(): unknown; seen(): unknown; retry(): Promise<unknown> } | null;
@@ -24,6 +25,8 @@ export function installCloudSend(deps: {
   moveSession?: { open(target: CloudTarget): Promise<CloudSendSession> };
 }): {
   receive(proc: unknown, message: unknown): boolean;
+  /** This computer's server's private port, asked as a send asks it: another move's sends share it. */
+  handoff(what: { kind: string; [key: string]: unknown }): Promise<any>;
   move(options?: { final?: boolean }): Promise<CloudSendOutcome>;
   check(): Promise<CloudMoveCheck>;
   switches(): Record<string, boolean>;

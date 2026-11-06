@@ -5,6 +5,8 @@ vi.mock("electron", () => ({
   Menu: { buildFromTemplate: (template) => template },
 }));
 
+import { readFileSync } from "node:fs";
+import nativeText from "./native-text.cjs";
 import { buildApplicationMenu } from "./menu.mjs";
 
 describe("buildApplicationMenu", () => {
@@ -111,5 +113,62 @@ describe("buildApplicationMenu", () => {
     expect(items.some((entry) => /This computer|organization|Add a Cloud|Connect to a server/.test(entry.label))).toBe(false);
     const onCloud = build("darwin", { environments: [cloud, office], activeId: "c", home }).find((entry) => entry.label === "Server").submenu;
     expect(onCloud.find((entry) => entry.id === "back-to-my-cloud").enabled).toBe(false);
+  });
+
+  it("speaks Brazilian Portuguese: Servidor, Configurações… and This computer as the app names it", () => {
+    const { t } = nativeText.createNativeText({ saved: "pt-br" });
+    const pt = JSON.parse(readFileSync(new URL("../src/locales/pt-br.json", import.meta.url), "utf8"));
+    const template = build("darwin", { t, activeId: "local", onAddCloud: vi.fn() });
+    const server = template.find((entry) => entry.label === "Servidor");
+    expect(server.submenu[0].label).toBe(pt["place.local"]);
+    expect(server.submenu.find((entry) => entry.id === "add-cloud").label).toBe("Adicionar um Cloud…");
+    expect(template[0].submenu.find((entry) => entry.accelerator === "CmdOrCtrl+,").label).toBe("Configurações…");
+    expect(template[0].submenu.at(-1)).toEqual({ role: "quit", label: "Sair do app OpenMausBot" });
+    expect(template.map((entry) => entry.label)).toEqual(["OpenMausBot", "Arquivo", "Editar", "Servidor", "Visualizar", "Janela"]);
+    for (const platform of ["win32", "linux"]) expect(build(platform, { t })[0].submenu[0].label).toBe("Sair do OpenMausBot");
+  });
+
+  // Electron 43.7.9 lib/browser/api/menu-item-roles.ts: each role menu's default items, in order.
+  const ELECTRON_DEFAULTS = {
+    darwin: {
+      fileMenu: ["close"],
+      editMenu: ["undo", "redo", "-", "cut", "copy", "paste", "pasteAndMatchStyle", "delete", "selectAll", "-",
+        ["showSubstitutions", "-", "toggleSmartQuotes", "toggleSmartDashes", "toggleTextReplacement"], ["startSpeaking", "stopSpeaking"]],
+      viewMenu: ["reload", "forceReload", "toggleDevTools", "-", "resetZoom", "zoomIn", "zoomOut", "-", "togglefullscreen"],
+      windowMenu: ["minimize", "zoom", "-", "front"],
+    },
+    win32: {
+      fileMenu: ["quit"],
+      editMenu: ["undo", "redo", "-", "cut", "copy", "paste", "delete", "-", "selectAll"],
+      viewMenu: ["reload", "forceReload", "toggleDevTools", "-", "resetZoom", "zoomIn", "zoomOut", "-", "togglefullscreen"],
+      windowMenu: ["minimize", "zoom", "close"],
+    },
+  };
+  ELECTRON_DEFAULTS.linux = ELECTRON_DEFAULTS.win32;
+  const roles = (items) => items.map((item) => (item.type === "separator" ? "-" : item.submenu ? roles(item.submenu) : item.role));
+  const labelled = (items) => items.flatMap((item) => (item.type === "separator" ? [] : [item, ...(item.submenu ? labelled(item.submenu) : [])]));
+
+  it.each(["darwin", "win32", "linux"])("writes out Electron's own role menus on %s, each item with a label", (platform) => {
+    const template = build(platform);
+    for (const [role, expected] of Object.entries(ELECTRON_DEFAULTS[platform])) {
+      const menu = template.find((entry) => entry.role === role);
+      expect(roles(menu.submenu), role).toEqual(expected);
+    }
+    const items = labelled(template);
+    expect(items.filter((item) => typeof item.label !== "string" || !item.label)).toEqual([]);
+    expect(items.filter((item) => item.role).length).toBeGreaterThan(15);
+  });
+
+  it("keeps Electron's English labels for every role item in English", () => {
+    const english = { close: "Close Window", undo: "Undo", redo: "Redo", cut: "Cut", copy: "Copy", paste: "Paste", pasteAndMatchStyle: "Paste and Match Style",
+      delete: "Delete", selectAll: "Select All", showSubstitutions: "Show Substitutions", toggleSmartQuotes: "Smart Quotes", toggleSmartDashes: "Smart Dashes",
+      toggleTextReplacement: "Text Replacement", startSpeaking: "Start Speaking", stopSpeaking: "Stop Speaking", reload: "Reload", forceReload: "Force Reload",
+      toggleDevTools: "Toggle Developer Tools", resetZoom: "Actual Size", zoomIn: "Zoom In", zoomOut: "Zoom Out", togglefullscreen: "Toggle Full Screen",
+      minimize: "Minimize", zoom: "Zoom", front: "Bring All to Front", about: "About OpenMausBot", hide: "Hide OpenMausBot", hideOthers: "Hide Others",
+      unhide: "Show All", quit: "Quit OpenMausBot" };
+    for (const item of labelled(build("darwin")).filter((entry) => entry.role && !entry.role.endsWith("Menu"))) expect(item.label, item.role).toBe(english[item.role]);
+    expect(build("win32")[0].submenu[0].label).toBe("Exit");
+    expect(build("linux")[0].submenu[0].label).toBe("Quit");
+    expect(build("linux").find((entry) => entry.role === "windowMenu").submenu.at(-1).label).toBe("Close");
   });
 });

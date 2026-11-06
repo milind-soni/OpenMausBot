@@ -3,6 +3,7 @@ import { canWorkOnCloud, type CloudEngine } from "../shared/cloud-computer.ts";
 import { canUseMcpServer } from "../shared/tool-scope.ts";
 import { placeRowText, type PlaceRow, type PlaceSource } from "../shared/place-view.ts";
 import { PLAIN_WORDS } from "./local-computer-guidance.ts";
+import { theirComputer, type LentPlatform } from "./lent-computers.ts";
 export type { Surface, PlaceSource };
 
 /** The bot's "Works on" setting; undefined = Auto. */
@@ -83,6 +84,27 @@ function placeOf(input: { destination: Destination; pinnedSurface?: Surface | nu
   return { computer: undefined, browser: browserOn, pinned: null, note: "" };
 }
 
+/** On Auto, work handed over by another bot runs on the receiving bot's own cloud computer when it has one (asleep or awake): the handoff cannot pick a place itself. Auto still never creates one; Works on, a pin, a person's turn and a consult keep their usual place. */
+/** Work another bot handed over: a child node (a person's own root also runs as "work" when it resumes), never a consult. */
+export function isHandedWork(node: { parentId?: string; mode: string } | undefined): boolean {
+  return Boolean(node?.parentId && node.mode !== "consult");
+}
+
+export function handoffUsesOwnCloud(input: { plan: Pick<SurfacePlan, "computer">; handoffWork: boolean; ownCloudState: string | null | undefined }): boolean {
+  return input.handoffWork && input.plan.computer === undefined && Boolean(input.ownCloudState);
+}
+
+/** Best effort: an unreachable Boat service counts as no cloud computer after `ms`, so a handoff still starts promptly.
+ * `unavailable` marks a failed or slow lookup, which is not a confirmed "no cloud computer". */
+export function ownCloudStateWithin(status: Promise<{ box?: { state?: string | null } | null }>, ms = 3_000): Promise<{ state: string | null | undefined; unavailable: boolean }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const unavailable = { state: undefined, unavailable: true };
+  return Promise.race([
+    status.then((result) => ({ state: result.box?.state, unavailable: false }), () => unavailable),
+    new Promise<typeof unavailable>((resolve) => { timer = setTimeout(() => resolve(unavailable), ms); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 export function browserIsThePlace(plan: SurfacePlan): boolean {
   return plan.computer === "off" && plan.browser;
 }
@@ -90,6 +112,13 @@ export function browserIsThePlace(plan: SurfacePlan): boolean {
 /** The conversation's pin as a person chose it: a pin a turn made on its own (auto) is none. */
 export function chosenPin(task: { surface?: Surface; surfaceSource?: "user" | "auto" } | undefined): Surface | null | undefined {
   return task?.surfaceSource === "auto" ? null : task?.surface;
+}
+
+/** Where a turn's pinned place came from. A pin a turn made on its own to the place Works on already names is Works on:
+ * the person chose that place, so it is never asked for again (only a turn on Auto asks before using this computer). */
+export function pinSource(pinned: Surface, task: { surfaceSource?: "user" | "auto" } | undefined, destination: Destination): PlaceSource {
+  if (task?.surfaceSource !== "auto") return "pin";
+  return pinned === destination ? "works-on" : "auto-pin";
 }
 
 export function cloudPlaceRefusal(engine: CloudEngine & { name: string }, source: PlaceSource, bot: string): PlaceUnavailableError | null {
@@ -133,11 +162,16 @@ export function surfaceLabel(surface: Surface): string {
 /** This computer is the person's own: web work goes elsewhere first, and their first-use question is the harness's to ask. */
 const WEB_WORK_ORDER = "For web work such as finding, booking or looking something up, use, in this order:";
 const YOUR_COMPUTER_LAST =
-  " Use their own browser or screen only when the task needs their own signed-in session and nothing else works. Before your first action on it in a request, OpenMausBot asks them once whether you may, at every approval level: do not ask in chat yourself, and if they say no, finish another way. " + PLAIN_WORDS;
+  " Use their own browser or screen only when the task needs their own signed-in session and nothing else works. Before your first action on it in a request, OpenMausBot asks them once whether you may, at every approval level except Full access: do not ask in chat yourself, and if they say no, finish another way. " + PLAIN_WORDS;
 const YOUR_COMPUTER_BESIDE_BROWSER =
-  ` This computer is the person's own: their screen, their apps and the browsers they are signed in to. ${WEB_WORK_ORDER} your built-in browser, a cloud computer if select_computer offers one, a connected app.${YOUR_COMPUTER_LAST}`;
+  ` This computer is the person's own: their screen, their apps and the browsers they are signed in to. ${WEB_WORK_ORDER} a connected app that does it, your built-in browser, a cloud computer if select_computer offers one.${YOUR_COMPUTER_LAST}`;
 const YOUR_COMPUTER_ALONE =
-  ` Everything you do on screen happens on this computer, which is the person's own: their screen, their apps and the browsers they are signed in to; there is no built-in browser of yours this turn. ${WEB_WORK_ORDER} web search and fetching pages, a cloud computer if select_computer offers one, a connected app.${YOUR_COMPUTER_LAST} If you need the user to sign in, tell them it is on this computer.`;
+  ` Everything you do on screen happens on this computer, which is the person's own: their screen, their apps and the browsers they are signed in to; there is no built-in browser of yours this turn. ${WEB_WORK_ORDER} a connected app that does it, web search and fetching pages, a cloud computer if select_computer offers one.${YOUR_COMPUTER_LAST} If you need the user to sign in, tell them it is on this computer.`;
+
+/** A connected app does a task more cheaply and surely than any screen, and one that is refused or broken is the person's
+ * to fix: worked around on a screen, it stays broken and they never hear why. */
+const CONNECTED_APP_FIRST =
+  " When a connected app can do the task, use it before any browser or screen. If that app is refused or fails, say so in one plain line with what fixes it (connecting it, or who can), and ask before doing the task on a screen instead.";
 
 const RESTATE_SENTENCE =
   " Before your first action on a screen or page in a task, say in one short sentence where you are working, using that same name.";
@@ -150,19 +184,38 @@ const REPORT_BACK = "tell the bot that gave you this job which place you need an
 const SURFACE_AUTHORITY =
   ` For browser and computer tasks, use OpenMausBot's mounted browser/computer tools first: inspect the target, perform the action, and verify its result before claiming success. Discover deferred tools by their server/name when needed. Do not substitute the provider's own desktop, a shell-launched browser, or another automation path for the selected OpenMausBot surface. Ordinary code and file tasks may still use their normal tools. Announcing an action is not performing it. A request naming another place does not move these tools: this computer is the user's host, Local VM is an isolated desktop, the cloud computer is remote, and the built-in browser is a separate browser. If the requested place differs from the mounted one, ${ASK_TO_SWITCH}; never act on a different computer or describe a host window as a VM.`;
 
+/** A Cloud home without the shared-computer tools cannot reach the person's own computer at all. */
+const UNREACHABLE_OWN = "the user's own computer cannot be reached from here";
+
+/** With the shared-computer tools, what the wording above says of every screen holds only for this turn's places. */
+const OWN_COMPUTER_WORDING: ReadonlyArray<readonly [RegExp | string, string]> = [
+  [/ Everything you do on screen happens (on|in) /, " The screen tools mounted this turn work $1 "],
+  ["there is no desktop computer this turn", "no desktop computer is mounted this turn"],
+  ["You cannot open apps, click, or inspect a screen through OpenMausBot.", "No place's tools can open apps, click, or inspect a screen this turn."],
+];
+
 /** A Cloud home has neither this computer nor a Local VM; each pair rewrites one phrase of the wording above. */
 const CLOUD_HOME_WORDING: ReadonlyArray<readonly [string, string]> = [
   ["this computer is the user's host, Local VM is an isolated desktop, the cloud computer is remote, and the built-in browser is a separate browser",
-    "the cloud computer is remote, the built-in browser is a separate browser, and the user's own computer cannot be reached from here"],
+    `the cloud computer is remote, the built-in browser is a separate browser, and ${UNREACHABLE_OWN}`],
   [" or describe a host window as a VM", ""],
   ["select an available Local VM without asking", "select an available cloud computer without asking"],
   [" Never silently replace an explicitly requested VM with the host desktop.", ""],
 ];
 
-/** Built from what was actually mounted, never from the setting, so the model is only told about tools it can call. */
+/** On a Cloud home the person's own computer is never one of the places above: shared_computer reaches it, whatever
+ * place the conversation has. Saying it can't be reached there turned a bot away from a PC lent with its screen. */
+function ownComputerSentence(lent: ReadonlyArray<{ name: string; platform: LentPlatform | null }>, place: string | null): string {
+  const { theirs } = theirComputer(lent);
+  return ` ${theirs[0]!.toUpperCase()}${theirs.slice(1)} is reached only through shared_computer, never select_computer: when they ask for something on it, check list_shared_computers, then use shared_computer on it (computer_tools, then computer_call, for its apps and screen), whatever this conversation is pinned to. If list_shared_computers says this conversation can't use it, or that it doesn't lend what you need, say so in one sentence${place ? ` and don't do it on ${place} instead unless they ask` : ""}.`;
+}
+
+/** Built from what was actually mounted, never from the setting, so the model is only told about tools it can call.
+ * `ownComputer`: on a Cloud home, the person's lent computers (newest first) when this turn has the shared-computer tools. */
 export function surfacePrompt(
   mounted: MountedSurfaces,
-  opts: { pinned?: Surface | null; note?: string; canSelect?: boolean; cloudHome?: boolean; botOpened?: boolean } = {},
+  opts: { pinned?: Surface | null; note?: string; canSelect?: boolean; cloudHome?: boolean; botOpened?: boolean;
+    ownComputer?: ReadonlyArray<{ name: string; platform: LentPlatform | null }> } = {},
 ): string {
   const reportBack = opts.botOpened && !opts.canSelect;
   const computer = mounted.computer ? surfaceLabel(mounted.computer) : null;
@@ -179,7 +232,7 @@ export function surfacePrompt(
       ` Everything you do on screen happens on ${computer}, web pages included, through its own browser; there is no separate built-in browser this turn. If you need the user to sign in, tell them it is on ${computer}.`;
   } else if (mounted.browser) {
     text =
-      " Everything you do on screen happens in the built-in browser tab; there is no desktop, file or shell computer this turn. If you need the user to sign in, tell them it is in the Browser tab of the Screen panel.";
+      " Everything you do on screen happens in the built-in browser tab; there is no desktop computer this turn, but your own shell and file tools still work for ordinary code and file tasks, if you have them. If you need the user to sign in, tell them it is in the Browser tab of the Screen panel.";
   }
   if (text) text += RESTATE_SENTENCE + (opts.canSelect
     ? SURFACE_AUTHORITY.replace(ASK_TO_SWITCH, "inspect connected choices with select_computer and select the requested available place; on a pending result end this turn so OpenMausBot can reconnect the correct tools and continue the original request")
@@ -193,7 +246,13 @@ export function surfacePrompt(
   if (opts.canSelect) text += " For a screen task, use select_computer with no arguments when you need to inspect the actual available targets. Choose the requested place from its result; if the user left the place open, use a suitable available target or surface auto instead of asking them to operate the menu. Browser-only work can stay in Browser; when it needs desktop apps or capabilities the current Browser lacks, select an available Local VM without asking the user to switch it manually. Choose before taking actions, and do not repeat actions already completed if the task must continue elsewhere. OpenMausBot can start an existing configured computer and highlight the selected target. If the right tools are already mounted, use them directly. On a pending switch, end this turn: the original request resumes automatically with the new tools, and then you must carry out the task. Only ask for input for a genuine blocker, such as missing setup, required sign-in or an approval. Never silently replace an explicitly requested VM with the host desktop.";
   if (opts.canSelect) text += " If no suitable computer is running but its provider is configured, select_computer can provision one for this computer task; reuse existing resources first. Do not provision merely for ordinary chat or inspection.";
   if (opts.canSelect && !computer && !mounted.browser) text += " No computer or browser tools are mounted yet; select_computer is the way to connect them before screen work, not a reason to claim you already performed it.";
+  if (computer || mounted.browser) text += CONNECTED_APP_FIRST;
   if (computer || mounted.browser) text += " For online research, use the selected OpenMausBot browser when a search service is unavailable. A failed tool proves only that this attempt failed, not that every browser is unavailable. Inspect the current page after navigation; report a sign-in page, redirect or error as such. A completed model turn is not proof that the user's task succeeded.";
   if (opts.cloudHome) for (const [desktop, cloudHome] of CLOUD_HOME_WORDING) text = text.replace(desktop, cloudHome);
+  if (opts.cloudHome && opts.ownComputer) {
+    // What this turn's places reach, never every screen: their own computer is reachable too, through shared_computer.
+    for (const [nowhere, places] of OWN_COMPUTER_WORDING) text = text.replace(nowhere, places);
+    text = text.replace(UNREACHABLE_OWN, `${theirComputer(opts.ownComputer).theirs} is not one of these places`) + ownComputerSentence(opts.ownComputer, computer);
+  }
   return text + (opts.note ?? "");
 }

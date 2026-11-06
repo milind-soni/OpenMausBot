@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Routine, RoutineRun } from "@/lib/routines";
 import { RoutineList } from "./RoutineList";
 import { latestRoutineRun, routineNextLabel } from "@/lib/routine-display";
+import { setLocale } from "@/lib/i18n";
 
 const routine: Routine = {
   id: "brief", name: "Morning brief", prompt: "Report progress", target: "bot", botId: "scout", runOn: "maus", enabled: true,
@@ -31,6 +32,19 @@ describe("routine list", () => {
     expect(markup).toContain("6 of 7 runs OK this week");
     expect(markup).toContain("Latest: Retried after the AI stalled · Completed");
     expect(list()).not.toContain("runs OK this week");
+    expect(list({ routines: [{ ...routine, weekRuns: { ok: 1, total: 1 } }] })).toContain("1 of 1 runs OK this week");
+    setLocale("pt-br");
+    expect(list({ routines: [{ ...routine, weekRuns: { ok: 1, total: 1 } }] })).toContain("1 de 1 execução bem-sucedida nesta semana");
+    expect(list({ routines: [{ ...routine, weekRuns: { ok: 2, total: 3 } }] })).toContain("2 de 3 execuções bem-sucedidas nesta semana");
+    setLocale("en");
+  });
+  it("says a coded run result in the app language, and the run's own words otherwise", () => {
+    const waiting = { ...run, output: undefined, attention: "Starting again shortly after OpenMausBot restarted while it ran", attentionCode: "routines.server.retryAfterRestart" } as RoutineRun;
+    expect(list({ runs: [waiting] })).toContain("Starting again shortly after OpenMausBot restarted while it ran");
+    setLocale("pt-br");
+    expect(list({ runs: [waiting] })).toContain("Vai começar novamente em instantes: o OpenMausBot reiniciou durante a execução");
+    expect(list()).toContain("Brief prepared.");
+    setLocale("en");
   });
   it("retains visible records and latest results during a failed refresh", () => {
     const markup = list({ error: true });
@@ -88,9 +102,9 @@ describe("routine list", () => {
   });
 
   it("chooses a new pending run ahead of an older run that finished later", () => {
-    const pending = { ...run, id: "new", createdAt: 200, scheduledFor: 200, status: "waiting" as const, attention: "Waiting for delegated work to finish" };
+    const pending = { ...run, id: "new", createdAt: 200, scheduledFor: 200, status: "waiting" as const, attention: "Waiting for work it handed on to finish" };
     expect(latestRoutineRun(routine.id, [{ ...run, finishedAt: 300 }, pending])).toBe(pending);
     expect(list({ runs: [run, pending] })).toContain("Latest: Waiting");
-    expect(list({ runs: [run, pending] })).toContain("Waiting for delegated work to finish");
+    expect(list({ runs: [run, pending] })).toContain("Waiting for work it handed on to finish");
   });
 });

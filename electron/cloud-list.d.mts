@@ -69,3 +69,5 @@ export declare function cloudSetupProgress(cloud: CloudListEntry | null | undefi
 export declare function swatchColor(swatch: unknown): import("./cloud-buy.mjs").CloudColor | null;
 export declare function listedColors(clouds: CloudListEntry[] | null | undefined): Array<{ home?: true; teamId?: string; color: import("./cloud-buy.mjs").CloudColor | null }>;
 export declare function ownCloudPlaces(clouds: CloudListEntry[] | null | undefined): Array<{ id: string; role: string; name: string; color: import("./cloud-buy.mjs").CloudColor | null; origin: string }>;
+export declare function withoutOldCloudHome<T extends { environments: any[]; activeId: string }>(saved: T, state: unknown): T;
+export declare function homeLook(state: unknown): { name: string; color: string | null } | null;

@@ -100,6 +100,8 @@ afterEach(() => {
 
 describe("choosing a model with the keyboard", () => {
   it("opens from the chip, starts on the current model, moves with the arrows and picks with Enter", async () => {
+    fixture.instances = [{ ...claude(three), capabilities: {} }];
+    render();
     await openWith("ArrowDown");
     expect(menu()).not.toBeNull();
     expect(host.contains(menu())).toBe(false);
@@ -172,7 +174,7 @@ describe("choosing a model with the keyboard", () => {
   });
 
   it("clears a search with Escape before closing, keeps every Escape from the panel around it, and returns focus to the chip", async () => {
-    fixture.instances = [claude(numbered(14))];
+    fixture.instances = [{ ...claude(numbered(14)), capabilities: {} }];
     render(scout("model-0"));
     await openWith("click");
     const search = document.querySelector<HTMLInputElement>("[data-menu-search]")!;
@@ -254,6 +256,88 @@ describe("the full picker's search and the rows around it", () => {
   });
 });
 
+describe("an OpenCode model typed by hand", () => {
+  const typed = "venice/deepseek-v4-1-flash-uncensored";
+  const opencode: InstanceInfo = {
+    instanceId: "opencode", driverKind: "opencodeGo", displayName: "OpenCode", access: "subscription",
+    snapshot: { state: "available", version: "1.19.4", authenticated: true },
+    models: { default: "opencode/big-pickle", options: [{ id: "opencode/big-pickle", label: "Zen · Big Pickle" }] },
+  };
+  const onOpenCode = (model: string): Bot => ({ ...scout(), modelSelection: { instanceId: "opencode", model } });
+
+  it.each([false, true])("is picked from the search box (advanced: %s) and then named as typed by hand", async (advanced) => {
+    fixture.advanced = advanced;
+    fixture.instances = [opencode];
+    render(onOpenCode("opencode/big-pickle"));
+    await openWith("click");
+    type(document.querySelector<HTMLInputElement>("[data-menu-search]")!, typed);
+    const row = [...document.querySelectorAll<HTMLElement>("[data-menu-row]")].find((candidate) => candidate.textContent?.includes("typed by hand"))!;
+    flushSync(() => row.click());
+    await settle();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ type: "setModel", selection: { instanceId: "opencode", model: `typed::${typed}` } }));
+    render(onOpenCode(`typed::${typed}`));
+    expect(chip().textContent).toContain(`${typed} · typed by hand`);
+  });
+});
+
+describe("picking a model that has reasoning levels", () => {
+  for (const advanced of [false, true]) {
+    it(`keeps the ${advanced ? "full" : "Simple"} menu open on the new model so its level can be set next, and Escape still closes it`, async () => {
+      fixture.advanced = advanced;
+      render();
+      await openWith("ArrowDown");
+      press("ArrowDown");
+      expect(focused()?.textContent).toContain("Sonnet 5.5");
+      press("Enter");
+      await settle();
+
+      expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+        type: "setModel", selection: expect.objectContaining({ model: "claude-sonnet-5-5" }),
+      }));
+      expect(menu()).not.toBeNull();
+      expect(chip().getAttribute("aria-expanded")).toBe("true");
+      expect(menu()!.querySelector(advanced ? 'select[aria-label="Reasoning effort"]' : "[data-effort-pill]")).not.toBeNull();
+
+      // The store applies the pick; the picked row may be redrawn elsewhere, but focus stays in the menu.
+      render(scout("claude-sonnet-5-5"));
+      await settle();
+      expect(menu()).not.toBeNull();
+      expect(menu()!.contains(focused())).toBe(true);
+
+      press("Escape");
+      await settle();
+      expect(menu()).toBeNull();
+    });
+  }
+});
+
+describe("clearing a search after a pick that keeps the menu open", () => {
+  it("keeps focus in the Simple menu when Escape removes the picked row, so the next Escape still closes it", async () => {
+    fixture.instances = [claude(numbered(14))];
+    render(scout("model-0"));
+    await openWith("click");
+    const search = document.querySelector<HTMLInputElement>("[data-menu-search]")!;
+    type(search, "model 13");
+    press("ArrowDown", search);
+    expect(focused()?.textContent).toContain("Model 13");
+    press("Enter");
+    await settle();
+    render(scout("model-13"));
+    await settle();
+    expect(menu()!.contains(focused())).toBe(true);
+
+    press("Escape");
+    await settle();
+    expect(document.querySelector<HTMLInputElement>("[data-menu-search]")!.value).toBe("");
+    expect(menu()).not.toBeNull();
+    expect(menu()!.contains(focused())).toBe(true);
+
+    press("Escape");
+    await settle();
+    expect(menu()).toBeNull();
+  });
+});
+
 describe("the floating menu and the pointer", () => {
   it("stays open for a click inside its portal and closes for one outside, without taking focus", async () => {
     await openWith("click");
@@ -289,5 +373,112 @@ describe("the floating menu and the pointer", () => {
     const rows = [...document.querySelectorAll<HTMLElement>("[data-simple-provider] [data-menu-row]")];
     flushSync(() => rows[1]!.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerType: "mouse" })));
     expect(focused()).toBe(rows[1]);
+  });
+});
+
+describe("a model the organization turned off", () => {
+  const blockedThree: Option[] = three.map((option) => option.id === "claude-sonnet-5-5" ? { ...option, orgBlocked: true } : option);
+  const row = () => document.querySelector<HTMLButtonElement>("[data-org-blocked]")!;
+
+  for (const advanced of [false, true]) {
+    const name = advanced ? "the full picker" : "the Simple menu";
+    it(`${name} keeps it visible, disabled, with the reason, and it cannot be picked`, async () => {
+      fixture.advanced = advanced;
+      fixture.instances = [claude(blockedThree)];
+      render();
+      await openWith("click");
+      expect(row().disabled).toBe(true);
+      expect(row().textContent).toContain("Sonnet 5.5");
+      expect(row().textContent).toContain("Turned off by your organization");
+      flushSync(() => row().click());
+      await settle();
+      expect(fixture.dispatch).not.toHaveBeenCalled();
+      expect(menu()).not.toBeNull();
+    });
+
+    it(`${name}: the arrows go past it`, async () => {
+      fixture.advanced = advanced;
+      fixture.instances = [claude(blockedThree)];
+      render();
+      await openWith("ArrowDown");
+      press("ArrowDown");
+      expect(focused()?.hasAttribute("data-org-blocked")).toBe(false);
+      expect(focused()?.textContent).toContain("Haiku 5.5");
+    });
+  }
+
+  it("a selection the organization turned off shows on the chip and the current row", async () => {
+    fixture.instances = [claude(blockedThree)];
+    render(scout("claude-sonnet-5-5"));
+    expect(chip().querySelector("[data-model-attention]")).not.toBeNull();
+    expect(chip().title).toContain("Turned off by your organization");
+    await openWith("click");
+    expect(document.querySelector("[data-current-model]")?.textContent).toContain("Turned off by your organization");
+  });
+
+  it("the current row of a blocked model has nothing to set up: tapping it just closes the menu", async () => {
+    fixture.instances = [claude(blockedThree)];
+    render(scout("claude-sonnet-5-5"));
+    await openWith("click");
+    flushSync(() => document.querySelector<HTMLButtonElement>("[data-current-model]")!.click());
+    await settle();
+    expect(menu()).toBeNull();
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("the full picker opens on a row it can focus when the selection is the blocked one", async () => {
+    fixture.advanced = true;
+    fixture.instances = [claude(blockedThree)];
+    render(scout("claude-sonnet-5-5"));
+    await openWith("ArrowDown");
+    expect(focused()?.hasAttribute("data-menu-row")).toBe(true);
+    expect((focused() as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+describe("while the bot is working", () => {
+  it("opens to the reasoning level only, saves a pick for the next message, and keeps the model locked", async () => {
+    const busy = { ...scout(), busy: true };
+    fixture.bots = [busy];
+    render(busy);
+    expect(chip().disabled).toBe(false);
+    await openWith("click");
+    const panel = menu()!.querySelector<HTMLElement>("[data-model-busy]")!;
+    expect(panel.textContent).toContain("Reasoning level applies from the next message");
+    expect(panel.textContent).toContain("Stop this thread's turn before changing its model");
+    expect(panel.textContent).toContain("The bot's model: this thread, groups, and every thread that uses the bot's model.");
+    expect(menu()!.querySelector("[data-simple-models]")).toBeNull();
+    for (const option of three) expect(menu()!.textContent).not.toContain(option.label);
+    const effort = panel.querySelector<HTMLSelectElement>("select")!;
+    effort.value = "high";
+    flushSync(() => effort.dispatchEvent(new Event("change", { bubbles: true })));
+    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true,
+      selection: { instanceId: "claude", model: "claude-opus-5-5", effort: "high" },
+    }));
+  });
+
+  it("keeps a reasoning pick on a thread with its own model to that thread, so the bot's model is not overwritten", async () => {
+    const busy = { ...ownModelThread("claude-sonnet-5-5", "claude-opus-5-5"), busy: true };
+    fixture.bots = fixture.bots.map((bot) => ({ ...bot, busy: true }));
+    render(busy);
+    await openWith("click");
+    const panel = menu()!.querySelector<HTMLElement>("[data-model-busy]")!;
+    expect(panel.textContent).toContain("This thread only. It keeps this model when the bot's model changes.");
+    const effort = panel.querySelector<HTMLSelectElement>("select")!;
+    effort.value = "high";
+    flushSync(() => effort.dispatchEvent(new Event("change", { bubbles: true })));
+    const sent = fixture.dispatch.mock.lastCall![0];
+    expect(sent).toMatchObject({ type: "setModel", botId: "scout", threadId: "thread-scout",
+      selection: { instanceId: "claude", model: "claude-sonnet-5-5", effort: "high" } });
+    expect(sent.updateBotDefault).toBeUndefined();
+  });
+
+  it("stays locked when the engine has no reasoning level to change", () => {
+    fixture.instances = [{ ...claude(three), capabilities: {} }];
+    const busy = { ...scout(), busy: true };
+    fixture.bots = [busy];
+    render(busy);
+    expect(chip().disabled).toBe(true);
   });
 });

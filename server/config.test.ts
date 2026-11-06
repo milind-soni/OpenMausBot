@@ -2,7 +2,9 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, utime
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { botThreadLimitText, defaultBotThreads, maxConcurrentBotThreads, maxConcurrentChildThreads } from "./bot-thread-limits.ts";
 import type { JsonValue } from "./schema.ts";
+import { imageSlots } from "./image-generation.ts";
 
 import { cacheUntilConfigChanges,
   changedInstanceIds,
@@ -22,7 +24,6 @@ import { cacheUntilConfigChanges,
   persistableInstanceConfigs,
   roomTurnTimeoutMinutes,
   mcpCallTimeoutMinutes,
-  maxConcurrentBotThreads,
   threadEventLogMaxBytes,
   threadEventLogRetentionDays,
   showToolCallsEnabled,
@@ -120,6 +121,12 @@ describe("configuration boundaries", () => {
     expect(() => parseConfigPatch({ tts: { provider: "unknown" } })).toThrow("provider");
   });
 
+  it("stores OpenAI readout without changing live-call settings or enabling readout", () => {
+    const patch = { tts: { provider: "openai", voice: "marin" }, openai: { key: "fixture-key" } };
+    expect(parseConfigPatch(patch)).toEqual(patch);
+    expect(parseStoredConfig(patch)).toEqual(patch);
+  });
+
   it("accepts only known Fish Audio speech models", () => {
     for (const fishModel of ["s2.1-pro", "s2.1-pro-free"]) {
       expect(parseConfigPatch({ tts: { fishModel } }).tts).toEqual({ fishModel });
@@ -127,8 +134,21 @@ describe("configuration boundaries", () => {
     expect(() => parseConfigPatch({ tts: { fishModel: "s1" } })).toThrow("fishModel");
   });
 
-  it("defaults to three parallel threads and validates a configurable maximum of sixteen", () => {
-    expect(maxConcurrentBotThreads({})).toBe(3);
+  it("defaults to what each host holds, and a saved number wins except over a plan's limit", () => {
+    const GB = 1024 ** 3;
+    const desktop = (gb: number) => ({ memoryGate: false, totalBytes: gb * GB, oneThreadPerBot: false });
+    for (const [gb, threads] of [[2, 3], [4, 3], [8, 4], [16, 8], [26, 13], [32, 16], [128, 16]] as const) expect(maxConcurrentBotThreads({}, desktop(gb))).toBe(threads);
+    expect(maxConcurrentBotThreads({}, desktop(15.8)), "a 16 GB machine reports a little less").toBe(8);
+    for (const gb of [2, 8]) expect(maxConcurrentBotThreads({}, { memoryGate: true, totalBytes: gb * GB, oneThreadPerBot: false }), "the memory gate decides").toBe(16);
+    expect(maxConcurrentBotThreads({ threads: { maxConcurrentPerBot: 2 } }, desktop(64))).toBe(2);
+    expect(maxConcurrentBotThreads({ threads: { maxConcurrentPerBot: 2 } }, { memoryGate: true, totalBytes: 8 * GB, oneThreadPerBot: false })).toBe(2);
+    const starter = { memoryGate: true, totalBytes: 2 * GB, oneThreadPerBot: true };
+    expect(maxConcurrentBotThreads({}, starter)).toBe(1);
+    expect(maxConcurrentBotThreads({ threads: { maxConcurrentPerBot: 8 } }, starter), "a plan's limit is not a preference").toBe(1);
+    expect(maxConcurrentChildThreads({}, starter), "a bot's own turn is never held behind itself").toBe(16);
+    expect(maxConcurrentChildThreads({ threads: { maxConcurrentPerBot: 2 } }, desktop(64)), "only a plan's limit lets children through").toBe(2);
+    expect(botThreadLimitText({}, starter)).toContain("Starter runs one thread at a time per bot");
+    expect(botThreadLimitText({ threads: { maxConcurrentPerBot: 5 } }, desktop(16))).toBe("this bot has reached its limit of 5 parallel threads — wait for one to finish");
     expect(parseStoredConfig({ threads: { maxConcurrentPerBot: 16 } })).toEqual({ threads: { maxConcurrentPerBot: 16 } });
     expect(maxConcurrentBotThreads(parseConfigPatch({ threads: { maxConcurrentPerBot: 1 } }))).toBe(1);
     for (const value of [0, -1, 17, 1.5, "10", null]) {
@@ -165,9 +185,20 @@ describe("configuration boundaries", () => {
       provider: "custom", key: "openai-kept", customApiKey: "router-only",
       customUrl: "http://127.0.0.1:4000/v1/", customModel: " local/image ",
     } });
-    expect(parsed.imageGen).toEqual({ provider: "custom", key: "openai-kept", customApiKey: "router-only", customUrl: "http://127.0.0.1:4000/v1", customModel: "local/image" });
+    expect(parsed.imageGen).toEqual({ primary: { provider: "custom" }, customModel: "local/image", key: "openai-kept", customApiKey: "router-only", customUrl: "http://127.0.0.1:4000/v1" });
     expect(parseStoredConfig({ imageGen: { key: "legacy" } }).imageGen).toEqual({ key: "legacy" });
     expect(() => parseConfigPatch({ imageGen: { provider: "unknown" } })).toThrow("provider");
+    expect(parseConfigPatch({ imageGen: { primary: { provider: "gemini", model: " gemini-2.5-flash-image " }, fallback: null, maxPerTurn: 3 } }).imageGen)
+      .toEqual({ primary: { provider: "gemini", model: "gemini-2.5-flash-image" }, fallback: null, maxPerTurn: 3 });
+    expect(() => parseConfigPatch({ imageGen: { primary: { provider: "cursor" } } })).toThrow("primary");
+    expect(() => parseConfigPatch({ imageGen: { maxPerTurn: 11 } })).toThrow("maxPerTurn");
+    expect(parseConfigPatch({ imageGen: { provider: "xai" } }).imageGen).toEqual({ primary: { provider: "xai" } });
+    for (const pasted of ["sk-or-v1-0123456789abcdef0123456789abcdef", "sk-proj-abcdefghijklmnop", "xai-abcdefghijklmnopqrstuvwx", "AIzaSyA-abcdefghijklmnopqrstuvwxyz012"]) {
+      expect(() => parseConfigPatch({ imageGen: { primary: { provider: "openrouter", model: pasted } } })).toThrow("API key");
+      expect(() => parseConfigPatch({ imageGen: { fallback: { provider: "openai", model: pasted } } })).toThrow("API key");
+      expect(() => parseConfigPatch({ imageGen: { provider: "custom", customModel: pasted } })).toThrow("API key");
+    }
+    expect(parseConfigPatch({ imageGen: { primary: { provider: "openrouter", model: "openai/gpt-image-2" } } }).imageGen).toEqual({ primary: { provider: "openrouter", model: "openai/gpt-image-2" } });
     expect(() => parseConfigPatch({ imageGen: { customUrl: "https://user:secret@router.example/v1" } })).toThrow("customUrl");
     const childEnv = { OMB_CUSTOM_IMAGE_KEY: "must-not-reach-bot" };
     stripWorkspaceCredentialEnv(childEnv);
@@ -704,6 +735,91 @@ describe("a config.json saved with a byte order mark", () => {
       rmSync(path, { force: true });
     }
   });
+
+  it("keeps the browser's allow-list when the owner flips its local-sites switch", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({ browserEngine: { engine: "chrome", egress: { allow: ["10.0.0.5"] } } }));
+    try {
+      saveConfig({ browserEngine: { egress: { localNetwork: true } } });
+      expect(JSON.parse(readFileSync(path, "utf8")).browserEngine).toEqual({ engine: "chrome", egress: { allow: ["10.0.0.5"], localNetwork: true } });
+      saveConfig({ browserEngine: { egress: { localNetwork: false } } });
+      expect(JSON.parse(readFileSync(path, "utf8")).browserEngine).toEqual({ engine: "chrome", egress: { allow: ["10.0.0.5"], localNetwork: false } });
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+});
+
+describe("loadConfig between changes", () => {
+  it("hands every caller its own copy, and sees a save or an edit made outside the app", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    const settle = () => { const past = new Date(Date.now() - 60_000); utimesSync(path, past, past); };
+    writeFileSync(path, JSON.stringify({ budgets: { monthlyUsd: 10, warnAtPercent: 50 } }));
+    settle();
+    try {
+      const first = loadConfig();
+      first.budgets!.monthlyUsd = 999;
+      expect(loadConfig().budgets).toEqual({ monthlyUsd: 10, warnAtPercent: 50 });
+      saveConfig({ budgets: { monthlyUsd: 20, warnAtPercent: 50 } });
+      settle();
+      expect(loadConfig().budgets).toEqual({ monthlyUsd: 20, warnAtPercent: 50 });
+      writeFileSync(path, JSON.stringify({ budgets: { monthlyUsd: 30, warnAtPercent: 50 } }));
+      settle();
+      expect(loadConfig().budgets).toEqual({ monthlyUsd: 30, warnAtPercent: 50 });
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+});
+
+describe("saving the image providers", () => {
+  it("keeps the model typed for Custom when the base moves to another provider and comes back", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({}));
+    try {
+      saveConfig(parseConfigPatch({ imageGen: { primary: { provider: "custom", model: "local/image" } } }));
+      saveConfig(parseConfigPatch({ imageGen: { primary: { provider: "openai" } } }));
+      saveConfig(parseConfigPatch({ imageGen: { primary: { provider: "custom" } } }));
+      expect(imageSlots(JSON.parse(readFileSync(path, "utf8"))).primary).toEqual({ provider: "custom", model: "local/image" });
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  it("drops a model that was a key once that key is replaced, and refuses a model equal to a saved key", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({ imageGen: { customApiKey: "gateway-old", customUrl: "http://127.0.0.1:4000/v1", customModel: "gateway-old",
+      primary: { provider: "custom", model: "gateway-old" }, fallback: { provider: "openai", model: "gateway-old" } } }));
+    try {
+      saveConfig(parseConfigPatch({ imageGen: { customApiKey: "gateway-new" } }));
+      const saved = readFileSync(path, "utf8");
+      expect(saved).not.toContain("gateway-old");
+      expect(imageSlots(JSON.parse(saved)).primary.model).not.toBe("gateway-old");
+      expect(() => saveConfig(parseConfigPatch({ imageGen: { primary: { provider: "custom", model: "gateway-new" } } }))).toThrow("API key");
+      expect(() => saveConfig(parseConfigPatch({ imageGen: { fallback: { provider: "openrouter", model: "gateway-new" } } }))).toThrow("API key");
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  it("keeps the base and the keys when the backup is cleared", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({ imageGen: { key: "openai-fixture", primary: { provider: "openai" } } }));
+    try {
+      saveConfig(parseConfigPatch({ imageGen: { fallback: { provider: "xai" } } }));
+      expect(JSON.parse(readFileSync(path, "utf8")).imageGen).toEqual({ key: "openai-fixture", primary: { provider: "openai" }, fallback: { provider: "xai" } });
+      saveConfig(parseConfigPatch({ imageGen: { fallback: null } }));
+      saveConfig(parseConfigPatch({ imageGen: { fallback: null } }));
+      expect(JSON.parse(readFileSync(path, "utf8")).imageGen).toEqual({ key: "openai-fixture", primary: { provider: "openai" } });
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
 });
 
 describe("saving the newer sections", () => {
@@ -749,15 +865,15 @@ describe("saving the newer sections", () => {
     }
   });
 
-  it("seeds the concurrency default when the first threads save is an event-log knob", () => {
+  it("seeds what this machine holds when the first threads save is an event-log knob, so an older version can still read the file", () => {
     const path = join(DATA_DIR, "config.json");
     mkdirSync(DATA_DIR, { recursive: true });
     writeFileSync(path, JSON.stringify({}));
     try {
       saveConfig({ threads: { eventLogRetentionDays: 30 } });
       const disk = JSON.parse(readFileSync(path, "utf8"));
-      expect(disk.threads).toEqual({ maxConcurrentPerBot: 3, eventLogRetentionDays: 30 });
-      expect(parseStoredConfig(disk).threads).toEqual({ maxConcurrentPerBot: 3, eventLogRetentionDays: 30 });
+      expect(disk.threads).toEqual({ maxConcurrentPerBot: defaultBotThreads(), eventLogRetentionDays: 30 });
+      expect(parseStoredConfig(disk).threads).toEqual({ maxConcurrentPerBot: defaultBotThreads(), eventLogRetentionDays: 30 });
     } finally {
       rmSync(path, { force: true });
     }
@@ -1518,6 +1634,15 @@ describe("credential env preference", () => {
     expect(loadConfig()).toMatchObject({ customDomain: "", language: "en", profile: { name: "Workspace owner" } });
   });
 
+  it("saves, trims and clears the computer name a paired phone shows", () => {
+    expect(parseConfigPatch({ computerName: "  AdamPC  " })).toEqual({ computerName: "AdamPC" });
+    expect(() => parseConfigPatch({ computerName: "x".repeat(64) })).toThrow();
+    saveConfig({ profile: { name: "Workspace owner" }, computerName: "AdamPC" });
+    expect(loadConfig()).toMatchObject({ computerName: "AdamPC", profile: { name: "Workspace owner" } });
+    saveConfig({ computerName: "" });
+    expect(loadConfig()).toMatchObject({ computerName: "", profile: { name: "Workspace owner" } });
+  });
+
   it("merges onboarding progress like any other section", () => {
     saveConfig({ onboarding: { completedAt: "2026-09-09T10:00:00.000Z", version: 1 } });
     saveConfig({ onboarding: { hintsSeen: ["computer"] } });
@@ -2202,6 +2327,8 @@ describe("a value derived from config.json", () => {
     const derive = vi.fn(members);
     const read = cacheUntilConfigChanges(derive);
     read();
+    // Linux stamps ctime from a clock that ticks every 1 to 10 ms, so a chmod in the write's own tick keeps its ctime.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
     // chmod and chown leave the size, the time and the file the same.
     chmodSync(path, 0o600);
     read();

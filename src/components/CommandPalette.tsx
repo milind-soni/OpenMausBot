@@ -1,12 +1,13 @@
+import { t } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
 import { Bot as BotIcon, MessageSquare, Search, Users } from "lucide-react";
 import { api, openBot, useStore, type Bot, type Group } from "@/state/store";
-import { t } from "@/lib/i18n";
 import { rankByName } from "@/lib/palette-rank";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { cn } from "@/lib/cn";
 import type { SearchHit } from "@/lib/search-hit";
 import { landOnSearchHit } from "@/lib/focus-message";
+import { imeComposing } from "@/lib/send-key";
 
 type PaletteEntry =
   | { kind: "bot"; bot: Bot }
@@ -109,6 +110,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
+    if (imeComposing(e.nativeEvent)) { e.stopPropagation(); return; }
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
@@ -155,7 +157,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Command palette"
+        aria-label={t("palette.label")}
         className="popover-surface flex max-h-[min(480px,70vh)] w-full max-w-[560px] flex-col overflow-hidden rounded-xl border border-hairline/50 bg-card shadow-2xl shadow-black/60"
       >
         <div className="flex items-center gap-3 border-b border-hairline/40 px-4 py-3">
@@ -175,12 +177,12 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
           {entries.length === 0 && (
             <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">
-              {q ? `Nothing matches “${query}”` : "Nothing to switch to yet"}
+              {q ? t("sidebar.noMatch", { query }) : t("palette.empty")}
             </div>
           )}
           {bots.length > 0 && (
             <div className="px-3 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-              Bots
+              {t("palette.bots")}
             </div>
           )}
           {bots.map((bot, i) =>
@@ -199,7 +201,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
           )}
           {rooms.length > 0 && (
             <div className="px-3 pb-1 pt-2 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-              Groups
+              {t("palette.groups")}
             </div>
           )}
           {rooms.map((group, i) =>
@@ -215,7 +217,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
           )}
           {q && messageHits.length > 0 && (
             <div className="px-3 pb-1 pt-2 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-              Messages
+              {t("palette.messages")}
             </div>
           )}
           {q &&

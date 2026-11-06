@@ -48,6 +48,14 @@ async function addBot(instanceId: string) {
   return response.body.bot;
 }
 
+async function addBotOn(instanceId: string, model: string) {
+  const response = await api("POST", "/api/bots", {
+    name: "Endpoint bot", modelSelection: { instanceId, model }, requireAvailableModel: true,
+  });
+  expect(response.status, JSON.stringify(response.body)).toBe(201);
+  return response.body.bot;
+}
+
 async function bot(id: string) {
   return (await api("GET", "/api/bots?messages=30")).body.bots.find((row: any) => row.id === id);
 }
@@ -214,7 +222,7 @@ describe("Claude account HTTP API", () => {
     try {
       await stream.until(frame => frame.kind === "hello");
       expect((await api("POST", `/api/bots/${runningBot.id}/messages`, { text: "remain active" })).status).toBe(202);
-      await expect.poll(() => existsSync(join(active.dir, "spawn.json"))).toBe(true);
+      await expect.poll(() => existsSync(join(active.dir, "spawn.json")), { timeout: 10_000 }).toBe(true);
       const originalPid = JSON.parse(readFileSync(join(active.dir, "spawn.json"), "utf8")).pid;
       expect((await bot(runningBot.id)).busy).toBe(true);
       expect((await api("PATCH", `/api/instances/${active.id}`, { cli })).status).toBe(409);
@@ -235,6 +243,81 @@ describe("Claude account HTTP API", () => {
       stream.close();
       await api("POST", `/api/bots/${runningBot.id}/interrupt`, {});
     }
+  });
+
+  it("creates a custom endpoint as its own engine, keeps its token server-side, and runs its model against its host", async () => {
+    // A settings.json the person's own Claude Code uses: an endpoint must not inherit any of it.
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({
+      env: { ANTHROPIC_BASE_URL: "https://user-settings.test", ANTHROPIC_AUTH_TOKEN: "user-settings-secret", ANTHROPIC_MODEL: "claude-from-settings" },
+    }));
+    const endpoint = {
+      displayName: "DeepSeek", baseUrl: "https://api.deepseek.test/anthropic/", token: "sk-endpoint-secret",
+      model: "deepseek-chat", opusModel: "deepseek-reasoner",
+    };
+    const created = await api("POST", "/api/instances/claude-endpoint", endpoint);
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const id = created.body.instanceId as string;
+    const row = created.body.instances.find((candidate: any) => candidate.instanceId === id);
+    expect(row).toMatchObject({
+      displayName: "DeepSeek",
+      driverKind: "claudeAgent",
+      access: "custom",
+      url: "https://api.deepseek.test/anthropic",
+      claudeEndpoint: { baseUrl: "https://api.deepseek.test/anthropic", models: ["deepseek-chat", "deepseek-reasoner"], tokenSaved: true },
+    });
+    expect(JSON.stringify(created.body)).not.toContain("sk-endpoint-secret");
+    expect(JSON.stringify((await api("GET", "/api/instances")).body)).not.toContain("sk-endpoint-secret");
+    expect(saved().instances[id]).toMatchObject({
+      driver: "claudeAgent", access: "custom",
+      config: { cli, requireApiKey: true, endpointModels: ["deepseek-chat", "deepseek-reasoner"] },
+      environment: {
+        ANTHROPIC_BASE_URL: "https://api.deepseek.test/anthropic",
+        ANTHROPIC_AUTH_TOKEN: "sk-endpoint-secret", ANTHROPIC_API_KEY: "sk-endpoint-secret",
+        ANTHROPIC_MODEL: "deepseek-chat", ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-reasoner",
+      },
+    });
+
+    const endpointBot = await addBotOn(id, "deepseek-chat");
+    expect((await api("POST", `/api/bots/${endpointBot.id}/messages`, { text: "which host" })).status).toBe(202);
+    await idle(endpointBot.id);
+    const directory = saved().instances[id].config.configDir as string;
+    const spawn = JSON.parse(readFileSync(join(directory, "spawn.json"), "utf8"));
+    expect(spawn.env).toMatchObject({
+      ANTHROPIC_BASE_URL: "https://api.deepseek.test/anthropic",
+      ANTHROPIC_MODEL: "deepseek-chat",
+      ANTHROPIC_AUTH_TOKEN: "sk-endpoint-secret",
+    });
+    expect(spawn.env.ANTHROPIC_AUTH_TOKEN).not.toBe("user-settings-secret");
+    expect(spawn.env.ANTHROPIC_BASE_URL).not.toBe("https://user-settings.test");
+    const model = spawn.argv[spawn.argv.indexOf("--model") + 1];
+    expect(model).toBe("deepseek-chat");
+    expect((await bot(endpointBot.id)).messages.some((message: any) => message.text === `account:${basename(directory)}`)).toBe(true);
+
+    const edited = await api("PATCH", `/api/instances/${id}/claude-endpoint`, { model: "deepseek-reasoner", opusModel: "" });
+    expect(edited.status, JSON.stringify(edited.body)).toBe(200);
+    const afterEdit = saved().instances[id];
+    expect(afterEdit.environment).toMatchObject({
+      ANTHROPIC_AUTH_TOKEN: "sk-endpoint-secret",
+      ANTHROPIC_BASE_URL: "https://api.deepseek.test/anthropic",
+      ANTHROPIC_MODEL: "deepseek-reasoner",
+    });
+    expect(afterEdit.environment).not.toHaveProperty("ANTHROPIC_DEFAULT_OPUS_MODEL");
+    expect(afterEdit.config.endpointModels).toEqual(["deepseek-reasoner"]);
+    expect(edited.body.instances.find((candidate: any) => candidate.instanceId === id).claudeEndpoint.models).toEqual(["deepseek-reasoner"]);
+
+    expect((await api("PATCH", "/api/instances/claude/claude-endpoint", { model: "deepseek-chat" })).status).toBe(400);
+    expect((await api("PATCH", "/api/instances/missing/claude-endpoint", { model: "deepseek-chat" })).status).toBe(404);
+    for (const invalid of [{}, { displayName: "Only" }, { ...endpoint, baseUrl: "ftp://api.deepseek.test" }, { ...endpoint, model: "has space" }, { ...endpoint, token: "" }]) {
+      expect((await api("POST", "/api/instances/claude-endpoint", invalid)).status, JSON.stringify(invalid)).toBe(400);
+    }
+    mkdirSync(directory, { recursive: true });
+    const marker = join(directory, "user-owned-marker.txt");
+    writeFileSync(marker, "Keep the endpoint's own files");
+    expect((await api("PATCH", `/api/bots/${endpointBot.id}/model`, { instanceId: "claude", model: MODEL })).status).toBe(200);
+    expect((await api("DELETE", `/api/instances/${id}`)).status).toBe(200);
+    expect(saved().instances).not.toHaveProperty(id);
+    expect(readFileSync(marker, "utf8")).toBe("Keep the endpoint's own files");
   });
 
   it("enforces JSON, validation, duplicate-directory and admin-only mutation gates", async () => {

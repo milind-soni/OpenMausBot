@@ -16,6 +16,7 @@ describe("liveCardKind", () => {
     // propose_model cards carry update_model; a spoken yes must never reach
     // them as an approval
     expect(liveCardKind(card({ requestId: "r1", tool: "update_model", modelRequest: {} as OptionCardData["modelRequest"] }))).toBe("review");
+    expect(liveCardKind(card({ requestId: "r1", tool: "lending_lift", lendingLift: { requestMessageId: "m1" } }))).toBe("review");
     expect(liveDecisionRefusal(card({ requestId: "r1", tool: "update_model", modelRequest: {} as OptionCardData["modelRequest"] })))
       .toBe("This request is reviewed on screen.");
   });

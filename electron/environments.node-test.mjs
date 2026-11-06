@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const env = require("./environments.cjs");
+const { createNativeText } = require("./native-text.cjs");
 
 test("origins are bare http(s) origins, nothing else", () => {
   assert.equal(env.normalizeOrigin("https://mini.tail1234.ts.net/pair#code=x"), "https://mini.tail1234.ts.net");
@@ -424,6 +425,11 @@ test("the switcher lists My Cloud first, then each team from the session with th
   assert.deepEqual(items.map((item) => [item.label, item.sublabel, item.checked]), [["My Cloud", "omb-t-1.fly.dev", false], ["Acme", "Super admin", true], ["Office", "office.example.test", false]]);
   assert.deepEqual(env.workspaceMenuTemplate(state, { onSwitch() {}, onConnect() {}, onForget() {}, homeOrigin: home, foldSublabels: true }).map((item) => item.label), ["My Cloud", "Acme · Super admin", "Office"]);
   for (const [role, label] of [["owner", "Super admin"], ["admin", "Admin"], ["member", "User"], ["other", "User"]]) assert.equal(env.teamRoleLabel(role), label, role);
+  const pt = createNativeText({ saved: "pt-br" });
+  assert.deepEqual(["owner", "admin", "member"].map((role) => env.teamRoleLabel(role, pt.t)), ["Superadmin", "Admin", "Usuário"]);
+  assert.deepEqual(env.workspaceMenuTemplate(state, { onSwitch() {}, onConnect() {}, onForget() {}, homeOrigin: home, foldSublabels: true, text: pt }).map((item) => item.label), ["My Cloud", "Acme · Superadmin", "Office"]);
+  assert.deepEqual(env.workspaceMenuTemplate({ ...state, environments: state.environments.map((entry) => (entry.team ? { ...entry, team: { ...entry.team, role: "member" } } : entry)) }, { onSwitch() {}, onConnect() {}, onForget() {}, text: pt })
+    .filter((item) => item.type === "radio").map((item) => item.sublabel)[1], "Usuário");
   assert.equal(env.workspaceWindowTitle(state, null, home), "OpenMausBot — Acme");
   assert.deepEqual(env.workspaceSummary(state), { local: false, name: "Acme", origin: TEAM, role: "Super admin" });
   // Before the move (or a Team Owner, whose home is this computer): This computer, then each team with its role (no Forget), then servers as saved.
@@ -467,4 +473,17 @@ test("with My Cloud as home, the menu still folds its status line into the name 
     const [item] = env.workspaceMenuTemplate(state, { onSwitch() {}, sublabels: { c: "Always on" }, ...options });
     assert.equal(item.label, folded ? "My Cloud · Always on" : "My Cloud", platform);
   }
+});
+
+test("a Cloud or team joining the list leaves this computer's page the active place, as the window still shows it", () => {
+  const HOME = "https://home.example.test";
+  const saved = { environments: [{ id: "h", kind: "remote", name: "My Cloud", origin: HOME, home: true }], activeId: "local" };
+  const teams = env.reconcileTeams(saved, [{ id: "team-a", role: "member", name: "Acme", machine: { origin: "https://acme.example.test" } }], () => "t", HOME);
+  assert.equal(teams.state.environments.length, 2);
+  assert.equal(teams.state.activeId, "local");
+  const clouds = env.reconcileOwnClouds(saved, [{ id: "c2", role: "owner", name: "Second", origin: "https://second.example.test" }], () => "c", HOME);
+  assert.equal(clouds.environments.length, 2);
+  assert.equal(clouds.activeId, "local");
+  const gone = env.reconcileTeams({ environments: [{ id: "t", kind: "remote", name: "Acme", origin: "https://acme.example.test", team: { id: "team-a", role: "member" } }, saved.environments[0]], activeId: "t" }, [], () => "x", HOME);
+  assert.equal(gone.state.activeId, "h", "a place on screen that's gone still falls back to My Cloud");
 });

@@ -80,7 +80,7 @@ function memberMauses(group: Group, members: Bot[]) {
             ? t("room.holds.avatarHeld", { name: b.name })
             : queueTitle ?? (busyElsewhere
               ? t("room.memberWorkingElsewhere", { name: b.name })
-              : `${b.name}${busy ? " — working…" : ""}${contextWarning ? ` — ${t("contextWarning.short", { percent: contextWarning.percent })}` : ""}`)
+              : `${b.name}${busy ? ` — ${t("room.member.working")}` : ""}${contextWarning ? ` — ${t("contextWarning.short", { percent: contextWarning.percent })}` : ""}`)
         }
         className={cn(
           "relative inline-flex rounded-full",
@@ -145,7 +145,7 @@ export function RoomHeader({
   onOpenMembers: () => void;
   membersTriggerRef: RefObject<HTMLButtonElement | null>;
 }) {
-  const { dragProps: headerDragProps, noDragStyle: headerNoDragStyle, controlsShiftStyle } = useCaptionChrome();
+  const { dragProps: headerDragProps, noDragStyle: headerNoDragStyle } = useCaptionChrome();
   const faces = memberMauses(group, members);
   const membersLabel = members.length === 1
     ? t("room.members.ariaOne")
@@ -171,7 +171,7 @@ export function RoomHeader({
             </button>
             {group.description && <p className="max-w-full truncate text-[12px] leading-4 text-ink-secondary">{group.description}</p>}
           </div>
-          <div data-roomhead-controls className="flex shrink-0 items-center" style={controlsShiftStyle}>
+          <div data-roomhead-controls className="flex shrink-0 items-center">
             <button
               ref={membersTriggerRef}
               type="button"
@@ -218,7 +218,6 @@ export function RoomHeader({
         <div
           data-roomhead-controls
           className="flex items-center gap-1.5 @max-3xl/roomhead:ml-auto @max-3xl/roomhead:flex-wrap @max-3xl/roomhead:justify-end"
-          style={controlsShiftStyle}
         >
           <button
             type="button"

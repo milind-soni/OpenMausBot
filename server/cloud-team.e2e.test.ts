@@ -2,7 +2,7 @@
 // signed member claims, the audience rule on chats, memory, recall and files, the team's connected apps, and a My Cloud
 // that refuses a team claim. The engine is the synthetic Claude CLI, so this proves the plumbing, not a model's judgement.
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
@@ -115,12 +115,12 @@ it("a member's private chat with a team bot reads her notes and the team's, neve
   mkdirSync(ws(bot.id, "memory"), { recursive: true });
   writeFileSync(ws(bot.id, "MEMORY.md"), "# Memory\n\n- The office plant is called Fernando (team)\n");
   mkdirSync(ws(layerOf(`member-${benKey}`), "memory"), { recursive: true });
-  writeFileSync(ws(layerOf(`member-${benKey}`), "MEMORY.md"), "# Memory\n\n- Ben's badge code is 4471\n");
+  writeFileSync(ws(layerOf(`member-${benKey}`), "MEMORY.md"), "# Memory\n\n- Ben's badge code is BADGE-4471\n");
   adaThread = await newThread(ada, "Ada and Scout");
   scriptToolCalls([{ name: "memory_update", server: "agents", input: { action: "append", text: "Ada prefers oolong tea" } }]);
   const seen = await turn(ada, adaThread, "My cat is called Kumquat.");
   expect(seen.systemPrompt).toContain("Fernando");
-  expect(seen.systemPrompt).not.toContain("4471");
+  expect(seen.systemPrompt).not.toContain("BADGE-4471");
   // Named as the prompt quotes a path (workspace.ts, JSON.stringify): Windows' backslashes come doubled.
   expect(seen.systemPrompt).toContain(JSON.stringify(ws(layerOf(`member-${adaKey}`), "MEMORY.md")));
   // Her note landed in her own layer, not the team's.
@@ -154,7 +154,7 @@ it("a room's turn reads the room's layer and the team's, never a member's notes,
   const seen = await turn(ada, roomThread, "@Scout when do we launch?", roomId);
   expect(seen.systemPrompt).toContain("Fernando");
   expect(seen.systemPrompt).not.toContain("oolong");
-  expect(seen.systemPrompt).not.toContain("4471");
+  expect(seen.systemPrompt).not.toContain("BADGE-4471");
   expect(readFileSync(ws(layerOf(`room-${roomId}`), "MEMORY.md"), "utf8")).toContain("Tuesday");
   expect(readFileSync(ws(layerOf(`member-${adaKey}`), "MEMORY.md"), "utf8")).not.toContain("Tuesday");
   expect(readFileSync(ws(bot.id, "MEMORY.md"), "utf8")).not.toContain("Tuesday");
@@ -284,7 +284,10 @@ it("a person's own connected apps cannot be brought into the team, and the team'
   for (const [method, route] of [["GET", "/api/cloud-send/manifest"], ["POST", "/api/cloud-send/chats"], ["GET", "/api/cloud-send?move=1"]] as const) {
     const moved = await team.as(owner, method, route, method === "POST" ? { conversations: [] } : undefined);
     expect(moved.status, route).toBe(403);
-    expect(moved.body.error).toBe("Moving a computer's bots, chats and logins goes to My Cloud only. Nothing personal comes into Acme.");
+    expect(moved.body).toEqual({
+      error: "Moving a computer's bots, chats and logins goes to My Cloud only. Nothing personal comes into Acme.",
+      errorKey: "serverError.team.personalMove", errorParams: { team: "Acme" },
+    });
   }
   expect((await fx.onCloud("GET", "/api/cloud-send/manifest")).status).toBe(200);
   // My Cloud still takes its owner's share (the one-time move), as before.
@@ -297,4 +300,39 @@ it("a person's own connected apps cannot be brought into the team, and the team'
   expect((await team.as(cleo, "GET", "/api/config")).body.composio).toEqual({ configured: true, mode: "managed" });
   const seen = await turn(cleo, await newThread(cleo, "Cleo and Scout"), "Check my mail.");
   expect(Object.keys(seen.mcpConfig.mcpServers)).toContain("composio");
+}, hostTimeout(120_000));
+
+it("a member cannot save a login from a sign-in card: the team's refusal arrives with its key, and nothing is saved", async () => {
+  const before = await team.as(admin, "GET", "/api/logins");
+  expect(before.status, JSON.stringify(before.body)).toBe(200);
+  const threadId = await newThread(ada, "Ada signs in");
+  const refused = await team.as(ada, "POST", `/api/bots/${bot.id}/sign-in-cards/card-1/save-login`, {
+    threadId, username: "ada@acme.test", password: "correct horse battery staple",
+  });
+  expect(refused.status).toBe(403);
+  expect(refused.body).toEqual({
+    error: "On Acme only an admin can save a login, and it is then used by every bot in Acme.",
+    errorKey: "serverError.team.memberLogin",
+    errorParams: { team: "Acme" },
+  });
+  expect((await team.as(admin, "GET", "/api/logins")).body.logins).toEqual(before.body.logins);
+}, hostTimeout(120_000));
+
+it("a member's private chat keeps its own folder when the team's bot is given a working folder; the Owner's own thread moves there", async () => {
+  const ownFolder = (threadId: string) => realpathSync(join(team.home, ".openmausbot", "task-workspaces", bot.id, threadId));
+  const cwdOf = async (token: string, threadId: string, text: string) => realpathSync((await turn(token, threadId, text) as unknown as { cwd: string }).cwd);
+  const hers = await newThread(ada, "Ada's own folder");
+  const olives = await newThread(owner, "Olive's own folder");
+  expect(await cwdOf(ada, hers, "Hello.")).toBe(ownFolder(hers));
+  expect(await cwdOf(owner, olives, "Hello.")).toBe(ownFolder(olives));
+  const project = join(team.home, "team-project");
+  mkdirSync(project, { recursive: true });
+  const given = await team.as(owner, "PATCH", `/api/bots/${bot.id}`, { cwd: project });
+  expect(given.status, JSON.stringify(given.body)).toBe(200);
+  try {
+    expect(await cwdOf(ada, hers, "Hello again.")).toBe(ownFolder(hers));
+    expect(await cwdOf(owner, olives, "Hello again.")).toBe(realpathSync(project));
+  } finally {
+    expect((await team.as(owner, "PATCH", `/api/bots/${bot.id}`, { cwd: null })).status).toBe(200);
+  }
 }, hostTimeout(120_000));

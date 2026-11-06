@@ -66,6 +66,35 @@ describe("Windows owned CUA host", () => {
     expect(fixture.hosts[0].uniffiDestroy).toHaveBeenCalledOnce();
   });
 
+  it("tries a start that failed for a passing reason again by itself, twice, and never a blocked helper", async () => {
+    vi.useFakeTimers();
+    try {
+      const exited = Object.assign(new Error("EmbeddedDriverError.ExitedBeforeReady"), { tag: "ExitedBeforeReady", inner: { code: 1 } });
+      fixture.start.mockRejectedValueOnce(exited).mockRejectedValueOnce(exited);
+      await expect(cua.startCua()).resolves.toMatchObject({ mode: "unavailable", reason: "embedded host failed: ExitedBeforeReady: code 1" });
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(fixture.start).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(fixture.start).toHaveBeenCalledTimes(3);
+      expect(JSON.parse(readFileSync(join(fixture.home, "cua-connection.json"), "utf8"))).toMatchObject({ mode: "embedded" });
+
+      fixture.start.mockReset();
+      fixture.start.mockRejectedValue(Object.assign(new Error("EmbeddedDriverError.Spawn"), { tag: "Spawn", inner: { reason: "Access is denied. (os error 5)" } }));
+      await expect(cua.startCua()).resolves.toMatchObject({ mode: "unavailable", reason: expect.stringContaining("Access is denied") });
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(fixture.start, "a blocked helper waits for the person").toHaveBeenCalledTimes(1);
+
+      fixture.start.mockReset();
+      fixture.start.mockRejectedValue(exited);
+      await cua.startCua();
+      await cua.stopCua();
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(fixture.start, "Stop cancels a retry").toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("cancels a stalled start when the desktop stops", async () => {
     fixture.start.mockImplementation(({ signal }) => new Promise((_, reject) => {
       signal.addEventListener("abort", () => reject(signal.reason), { once: true });

@@ -4,7 +4,10 @@ import { useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { scrollParent, scrollWithin } from "@/lib/scroll-within";
 import { t } from "@/lib/i18n";
-import { LmStudioServer, OtherOpenAiCompatServers } from "../OpenAiCompatServers";
+import { BoatOfferPanel } from "../BoatOffer";
+import { LiveProviderSettings } from "../LiveProviderSettings";
+import { VoiceEveryReplySetting } from "../VoiceEveryReplySetting";
+import { BuiltInReplyWait, LmStudioServer, OtherOpenAiCompatServers } from "../OpenAiCompatServers";
 import { KEY_CATALOG, KEY_SECTIONS, keyMatches, savedState, type KeyEntry, type KeyId, type KeySectionId } from "./key-catalog";
 import { finishKeyFocus, useKeyFocus, type KeyFocusRequest } from "./key-focus";
 import { AnthropicEveryClaudeBot, OpenAiCompatUrl, OpenCodeProviderKeys, VpsConnection } from "./KeyPanels";
@@ -21,7 +24,9 @@ const PANELS: Partial<Record<KeyId, () => ReactNode>> = {
 
 const EXTRAS: Partial<Record<KeyId, () => ReactNode>> = {
   anthropic: () => <AnthropicEveryClaudeBot />,
-  openaiCompat: () => <><OpenAiCompatUrl /><OtherOpenAiCompatServers /></>,
+  openaiCompat: () => <><OpenAiCompatUrl /><BuiltInReplyWait /><OtherOpenAiCompatServers /></>,
+  box: () => <BoatOfferPanel />,
+  liveKey: () => <LiveProviderSettings />,
 };
 
 function connected(entry: KeyEntry, config: ConfigStatus | null | undefined): boolean {
@@ -98,6 +103,7 @@ function KeySection({ id, rows, open, onToggle }: { id: KeySectionId; rows: KeyE
       </button>
       <div id={bodyId} hidden={!open} className="flex flex-col gap-0.5 border-t border-hairline/40 px-1 py-1.5 in-data-[settings-look=simple]:border-t-[0.5px] in-data-[settings-look=simple]:border-(--settings-edge)">
         {rows.map((entry) => <KeyCatalogRow key={entry.id} entry={entry} />)}
+        {id === "voice" && <VoiceEveryReplySetting />}
       </div>
     </section>
   );
@@ -141,7 +147,9 @@ export function KeysPage() {
     return () => window.cancelAnimationFrame(frame);
   }, [focus]);
 
-  const rows = KEY_CATALOG.filter((entry) => keyMatches(entry, q));
+  // With Azure chosen, Live calls do not use the OpenAI key that row points at.
+  const azureLive = state.config?.live?.provider === "azure";
+  const rows = KEY_CATALOG.filter((entry) => keyMatches(entry, q) && !(azureLive && entry.id === "liveCalls"));
   const sections = KEY_SECTIONS.flatMap((section) => {
     const own = rows.filter((entry) => entry.section === section.id);
     return own.length > 0 ? [{ id: section.id, rows: own }] : [];

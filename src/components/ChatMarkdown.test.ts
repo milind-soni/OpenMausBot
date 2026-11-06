@@ -58,6 +58,9 @@ vi.mock("shiki/core", () => ({
 vi.mock("shiki/engine/javascript", () => ({
   createJavaScriptRegexEngine: () => ({}),
 }));
+// These tests pin how a block is coloured, not when: without an observer a block counts as near the screen at once.
+// Tests below undo every stubbed global, so the observer is deleted instead.
+delete (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver;
 
 describe("soft line breaks", () => {
   it("keeps a reply's single line breaks as line breaks, outside code", () => {
@@ -65,6 +68,16 @@ describe("soft line breaks", () => {
     expect(html).toContain('<p dir="ltr">1<br/>\n2<br/>\n3</p>');
     expect(html).toMatch(/>a<\/code><br\/>\nb<\/p>/);
     expect(html).toContain(">x\ny</pre>");
+  });
+});
+
+describe("spoilers", () => {
+  it("hides only double-tilde spans, not text between ranges written with a single tilde", () => {
+    const ranges = renderToStaticMarkup(createElement(ChatMarkdown, { text: "Episodes 77~82 first, then 77~80." }));
+    expect(ranges).not.toContain("Reveal spoiler");
+    expect(ranges).toContain("Episodes 77~82 first, then 77~80.");
+    const spoiler = renderToStaticMarkup(createElement(ChatMarkdown, { text: "The answer is ~~42~~." }));
+    expect(spoiler).toContain("Reveal spoiler");
   });
 });
 
@@ -1385,5 +1398,33 @@ describe("Simple mode's code block", () => {
     expect(html).toContain("data-code-plate");
     expect(html).toContain('aria-label="Copy diagram source"');
     expect(html).not.toContain('title="Mermaid diagram"');
+  });
+});
+
+describe("a code block far from the screen", () => {
+  it("stays plain until it comes near the screen, then is coloured", async () => {
+    let report: IntersectionObserverCallback | undefined;
+    (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver = class {
+      constructor(callback: IntersectionObserverCallback) { report = callback; }
+      observe() {}
+      unobserve() {}
+    };
+    shiki.codeToHtml.mockReset();
+    shiki.codeToHtml.mockImplementation(async (code: string) => `<pre class="near-probe">${code}</pre>`);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(createElement(ChatMarkdown, { text: "```ts\nconst farAway = 1;\n```" })));
+      expect(shiki.codeToHtml).not.toHaveBeenCalled();
+      expect(host.textContent).toContain("const farAway = 1;");
+      await act(async () => report!([{ target: host.querySelector(".chat-code-block")!, isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver));
+      await vi.waitFor(() => expect(host.querySelector(".near-probe")?.textContent).toBe("const farAway = 1;"));
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+      delete (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver;
+      shiki.codeToHtml.mockReset();
+    }
   });
 });

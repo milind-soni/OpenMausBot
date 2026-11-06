@@ -18,15 +18,18 @@ export const json = (body, status = 200, headers = {}) => new Response(JSON.stri
  * sign-in (its power word, wake, pairing code), My Cloud's answers (`cloud`), the window (where it went), the startup
  * screen and a manual clock.
  */
-export function world({ journal = done(), marker = null, state = connected(), power = null, cloud = {}, team = {}, client = {}, splash = true, url = "", remembered = null } = {}) {
+export function world({ clean = null, journal = done(), marker = null, state = connected(), power = null, cloud = {}, team = {}, client = {}, splash = true, url = "", remembered = null, ownMove = null, deps = {} } = {}) {
   const w = {
-    journal, marker, state, power, clock: 1_000_000, typed: 0, now: () => w.clock,
+    journal, marker, state, power, ownMove, clock: 1_000_000, typed: 0, now: () => w.clock,
     cloud: { down: false, signedIn: true, version: "0.1.130", health: 200, wakes: true, ...cloud },
     /** The team's Cloud, answering at TEAM; `gone`: the Admin's team pairing says this person is no longer in it. */
     team: { down: false, signedIn: true, version: "0.1.130", health: 200, gone: false, ...team },
     /** Another Cloud of the person's own, answering at CLIENT; `gone`: the Admin's pairing says it is no longer theirs. */
     client: { down: false, signedIn: true, version: "0.1.130", health: 200, gone: false, ...client },
     went: [], calls: [], fetched: [], pairs: 0, teamPairs: [], ownPairs: [], wakes: 0, waking: [], splash: [], published: [], local: [], reloads: 0, signIns: [],
+    /** The servers this computer's bots moved to, asked for again (`reopen`), and what main answers. `reopenGate`: a
+     * recovery whose navigation is still loading. */
+    reopened: [], reopenAnswer: true, reopenGate: null,
     remembered, remembers: [], left: [], dropped: [], redeemed: [], rehomes: [], rehomeThrows: false,
     url, timers: [], intervals: [],
     /** Remove from list on the Admin: each Cloud asked about, and what the Admin answers (`removed` takes it off the session's list). */
@@ -67,6 +70,8 @@ export function world({ journal = done(), marker = null, state = connected(), po
     },
     signInAgain: async () => { w.signIns.push("again"); },
     begin: async () => { w.signIns.push("begin"); },
+    signOut: async () => { w.signIns.push("out"); w.state = { status: "signed-out" }; },
+    reopen: async () => { w.signIns.push("reopen"); },
     async hideCloud(cloudId) {
       w.hides.push(cloudId);
       if (w.removeAnswer === "removed") w.state = { ...w.state, clouds: (w.state?.clouds ?? []).filter((cloud) => cloud.id !== cloudId) };
@@ -74,8 +79,11 @@ export function world({ journal = done(), marker = null, state = connected(), po
     },
   };
   w.home = createHomeWindow({
+    clean,
     journal: () => w.journal,
     frozen: async () => w.marker,
+    ownMove: () => w.ownMove,
+    ...deps,
     account: () => account,
     window: () => w.window,
     ensureWindow: () => { w.calls.push("ensure"); },
@@ -98,6 +106,7 @@ export function world({ journal = done(), marker = null, state = connected(), po
     power: { asleep: () => w.power?.state === "asleep", hold: () => { w.power = { state: "asleep", since: 1 }; }, woke: () => w.calls.push("woke") },
     go: async (url, origin, place) => { w.went.push(place?.kind === "team" || place?.kind === "own" ? [url, origin, place.id] : [url, origin]); w.url = url; if (w.stall(url)) await new Promise(() => {}); },
     showLocal: (leaving) => { w.local.push(leaving); if (leaving) w.url = `${LOCAL}/`; },
+    reopen: async (place) => { w.reopened.push(place); if (w.reopenGate) await w.reopenGate; if (!w.reopenAnswer) return false; w.url = `${place.origin}/`; return true; },
     remembered: () => w.remembered,
     remember: (place) => { w.remembers.push(place); w.remembered = place ? { ...place, name: ACME.name, origin: TEAM } : null; },
     left: (name) => w.left.push(name),

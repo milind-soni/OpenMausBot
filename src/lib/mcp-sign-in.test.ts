@@ -26,6 +26,15 @@ describe("mcpSignInLink", () => {
     expect(mcpSignInLink("https://user:pw@example.com/")).toBeNull();
     expect(mcpSignInLink(null)).toBeNull();
   });
+
+  it("accepts a plain http sign-in page only on this machine (#3994)", () => {
+    expect(mcpSignInLink("http://127.0.0.1:3773/oauth/mcp/authorize?x=1")).toBe("http://127.0.0.1:3773/oauth/mcp/authorize?x=1");
+    expect(mcpSignInLink("http://localhost:3773/authorize")).toBe("http://localhost:3773/authorize");
+    expect(mcpSignInLink("http://[::1]:3773/authorize")).toBe("http://[::1]:3773/authorize");
+    expect(mcpSignInLink("http://127.0.0.1.evil.example/authorize")).toBeNull();
+    expect(mcpSignInLink("http://192.168.1.5/authorize")).toBeNull();
+    expect(mcpSignInLink("http://user:pw@127.0.0.1/authorize")).toBeNull();
+  });
 });
 
 describe("runMcpSignIn", () => {
@@ -53,6 +62,21 @@ describe("runMcpSignIn", () => {
     expect(open).not.toHaveBeenCalled();
     expect(result.phase).toBe("failed");
     expect(calls).toContainEqual(["DELETE", `/api/mcp/servers/hf/sign-in/${waiting.flowId}`]);
+  });
+
+  it("opens a local http sign-in page instead of cancelling the flow (#3994)", async () => {
+    const local = { ...waiting, authorizationUrl: "http://127.0.0.1:3773/oauth/mcp/authorize?client_id=x" };
+    const calls: Array<[string, string]> = [];
+    const statuses = [{ ...local }, { ...local, phase: "succeeded", authorizationUrl: null }];
+    const api = vi.fn(async (path: string, init?: { method?: string }) => {
+      calls.push([init?.method ?? "GET", path]);
+      return init?.method === "POST" ? { auth: local } : { auth: statuses.shift() };
+    });
+    const open = vi.fn(async () => {});
+    const result = await runMcpSignIn("t3", { api, open, sleep: async () => {} });
+    expect(open).toHaveBeenCalledWith(local.authorizationUrl);
+    expect(result.phase).toBe("succeeded");
+    expect(calls.some(([method]) => method === "DELETE")).toBe(false);
   });
 
   it("cancels on the server when the person cancels", async () => {

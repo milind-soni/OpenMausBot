@@ -39,3 +39,14 @@ shared/app-frame/app-host.html text eol=lf
 
 # Imported by a vitest test: a CRLF checkout of its first lines broke the import on Windows.
 scripts/tighten-ratchets.mjs text eol=lf
+
+# The E2E wire vectors are pinned by SHA-256 and compared byte for byte with what companion/src/e2e/gen-vectors.ts
+# writes (LF), in companion/test/e2e/vectors.test.ts; the relay and the phone apps keep pinned copies. A CRLF checkout
+# on Windows fails every one of those checks for a reason that has nothing to do with the wire.
+companion/src/e2e/vectors/** text eol=lf
+relay/test/vectors/** text eol=lf
+
+# server/cloud-home.test.ts matches the edge's Caddy configs line by line with "\n", and Caddy reads them as written;
+# a CRLF checkout on Windows fails every match for a reason that has nothing to do with the edge.
+deploy/fly/Caddyfile* text eol=lf
+deploy/fly/*.caddy text eol=lf

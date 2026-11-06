@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy, ExternalLink, Loader2, LogIn, X } from "lucide-react";
 import { api, ApiError, useStore } from "@/state/store";
-import { t } from "@/lib/i18n";
+import { intlLocale, t } from "@/lib/i18n";
 import { openExternalLink } from "@/lib/app-links";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { engineSignedIn } from "@/lib/product-events";
 import type { LocaleKey } from "@/locales";
-import { deviceSignInLink, isDeviceSignInCode, type DeviceSignInProvider } from "../../shared/device-sign-in";
+import { deviceSignInHasCode, deviceSignInLink, isDeviceSignInCode, type DeviceSignInProvider } from "../../shared/device-sign-in";
 import { CodexMark } from "./ProviderIcons";
 
 export interface DeviceSignInStatus {
@@ -19,7 +19,12 @@ export interface DeviceSignInStatus {
 }
 
 export function deviceSignInProvider(driverKind: string): DeviceSignInProvider {
-  return driverKind === "grokAgent" ? "grok" : "codex";
+  switch (driverKind) {
+    case "grokAgent": return "grok";
+    case "kimiAgent": return "kimi";
+    case "cursorAgent": return "cursor";
+    default: return "codex";
+  }
 }
 
 export const DEVICE_SIGN_IN_COPY: Record<DeviceSignInProvider, Record<"description" | "start" | "enterCode" | "open" | "security" | "connected" | "connectedAccount" | "failed" | "invalidChallenge", LocaleKey>> = {
@@ -44,6 +49,29 @@ export const DEVICE_SIGN_IN_COPY: Record<DeviceSignInProvider, Record<"descripti
     connectedAccount: "engineSetup.grok.connectedAccount",
     failed: "engineSetup.grok.failed",
     invalidChallenge: "engineSetup.grok.invalidChallenge",
+  },
+  kimi: {
+    description: "engineSetup.kimi.description",
+    start: "engineSetup.kimi.start",
+    enterCode: "engineSetup.kimi.enterCode",
+    open: "engineSetup.kimi.open",
+    security: "engineSetup.kimi.security",
+    connected: "engineSetup.kimi.connected",
+    connectedAccount: "engineSetup.kimi.connectedAccount",
+    failed: "engineSetup.kimi.failed",
+    invalidChallenge: "engineSetup.kimi.invalidChallenge",
+  },
+  cursor: {
+    description: "engineSetup.cursor.description",
+    start: "engineSetup.cursor.start",
+    // Cursor prints no code: its link alone finishes the sign-in.
+    enterCode: "engineSetup.cursor.open",
+    open: "engineSetup.cursor.open",
+    security: "engineSetup.cursor.security",
+    connected: "engineSetup.cursor.connected",
+    connectedAccount: "engineSetup.cursor.connectedAccount",
+    failed: "engineSetup.cursor.failed",
+    invalidChallenge: "engineSetup.cursor.invalidChallenge",
   },
 };
 
@@ -85,13 +113,14 @@ export function DeviceSignInProgress({ auth, browserPkce = false, provider = "co
     return <p role="status" className={auth.phase === "succeeded" ? "text-[12px] text-success" : "text-[12px] text-ink-secondary"}>{label}</p>;
   }
 
-  if (!link || (!browserPkce && !isDeviceSignInCode(provider, auth.userCode))) {
+  const codeShown = !browserPkce && deviceSignInHasCode(provider);
+  if (!link || (codeShown && !isDeviceSignInCode(provider, auth.userCode))) {
     return <p role="alert" className="text-[12px] text-danger">{t(browserPkce ? "engineSetup.chatgpt.invalidChallenge" : copy.invalidChallenge)}</p>;
   }
 
   return (
     <div className="space-y-2 rounded-lg border border-hairline/50 bg-app p-3">
-      {!browserPkce && <><p className="text-[12px] text-ink-secondary">{t(copy.enterCode)}</p>
+      {codeShown && <><p className="text-[12px] text-ink-secondary">{t(copy.enterCode)}</p>
       <div className="flex items-center justify-between gap-2 rounded-lg bg-inset px-3 py-2">
         <code className="select-all font-mono text-lg font-semibold tracking-widest text-ink">{auth.userCode}</code>
         <button
@@ -114,7 +143,7 @@ export function DeviceSignInProgress({ auth, browserPkce = false, provider = "co
         <Loader2 size={12} className="animate-spin" /> {t("engineSetup.device.waiting")}
       </p>
       {auth.expiresAt && Number.isFinite(Date.parse(auth.expiresAt)) && (
-        <p className="text-[11px] text-ink-secondary">{t(browserPkce ? "engineSetup.chatgpt.expires" : "engineSetup.device.expires", { time: new Date(auth.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) })}</p>
+        <p className="text-[11px] text-ink-secondary">{t(!codeShown ? "engineSetup.chatgpt.expires" : "engineSetup.device.expires", { time: new Date(auth.expiresAt).toLocaleTimeString(intlLocale(), { hour: "2-digit", minute: "2-digit" }) })}</p>
       )}
       <p className="text-[11px] leading-relaxed text-ink-secondary">{t(browserPkce ? "engineSetup.chatgpt.security" : copy.security)}</p>
     </div>

@@ -6,8 +6,11 @@ import { composeEnvelope, composeQuestion, composeReport, composeResume, compose
 import { Runtime } from "./runtime/runtime.ts";
 import { importLegacyDelegations, importLegacyHandoffs, type LegacyThreadResolver } from "./runtime/import-legacy.ts";
 import { openRuntimeStore, type RuntimeStore } from "./runtime/store.ts";
-import { childrenSince, clip, isTerminal, path } from "./runtime/tree.ts";
-import type { Assignment, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
+import { personOnly, requesterDecides, withDefault } from "./runtime/questions.ts";
+import { isStatusOnly, mayBeStatusOnly, statusReplyPrompt } from "./runtime/status-reply.ts";
+import { answersSender, childrenSince, clip, isTerminal, path } from "./runtime/tree.ts";
+import type { Answerer, Assignment, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
+import { sameRequest } from "./same-request.ts";
 
 const NOT_RUNNING = "The originating room task is no longer running";
 const WRONG_SPEAKER = "The handoff belongs to a different room speaker";
@@ -17,6 +20,13 @@ const ROOM_ANCESTOR = "A room request cannot return to an ancestor room; results
 const DEPTH = "Room handoff depth limit reached";
 const BUDGET = "Room handoff budget exhausted";
 const NO_TURN = "The requesting turn has no root (no turn)";
+/** A stop with no other cause is the person's own. */
+const STOPPED_BY_USER = "Stopped by user";
+/** How long a person's stop holds against the same request coming back. */
+const STOP_MEMORY_MS = 24 * 60 * 60_000;
+const STOPPED_AGAIN = "The person stopped this teammate's work on this request. It isn't handed out again until the person asks again: tell them what you still wanted done, and don't send it another way.";
+/** The person's request a tree traces to, as one key: their own words, harness-quoted. Empty when no person's line started it. */
+const requestKey = (root: Assignment): string => root.origin.kind === "person" ? (root.origin.quote ?? "").replace(/\s+/g, " ").trim().toLowerCase() : "";
 
 const BRIEF_MAX = 12_000;
 const RUNTIME_DEPTH = /^Assignment depth limit reached/;
@@ -58,14 +68,17 @@ function runtimeOrigin(origin: WorkOrigin | undefined, source: RoomAddress): Ori
     : { kind: "outside", source: "chat", ref: source.threadId };
 }
 
+
+/** The question a reply ends on: its last line starts with NEEDS INPUT:, or the line before a closing `Default:` line. */
 export function needsInputQuestion(text: string): string | undefined {
   const lines = text.split(/\r?\n/);
-  let last = lines.length - 1;
-  while (last >= 0 && lines[last]!.trim() === "") last -= 1;
+  const filled = (from: number) => { let at = from; while (at >= 0 && lines[at]!.trim() === "") at -= 1; return at; };
+  const last = filled(lines.length - 1);
   if (last < 0) return undefined;
-  const line = lines[last]!.trim();
+  const at = /^default:/i.test(lines[last]!.trim()) ? filled(last - 1) : last;
+  const line = at < 0 ? "" : lines[at]!.trim();
   if (!NEEDS_INPUT.test(line)) return undefined;
-  const question = [line.slice("NEEDS INPUT:".length), ...lines.slice(last + 1)].join("\n").trim();
+  const question = [line.slice("NEEDS INPUT:".length), ...lines.slice(at + 1)].join("\n").trim();
   return question || undefined;
 }
 
@@ -81,6 +94,10 @@ export function view(a: Assignment, parent?: Assignment): HandoffView {
   if (a.outcome !== undefined) node.outcome = a.outcome;
   if (a.outcomeDetail !== undefined) node.outcomeDetail = a.outcomeDetail;
   if (a.question !== undefined) node.question = a.question;
+  if (a.decide !== undefined) node.decide = a.decide;
+  if (a.answer !== undefined) node.answer = a.answer;
+  if (a.answeredBy !== undefined) node.answeredBy = a.answeredBy;
+  if (a.carrying !== undefined) node.carrying = a.carrying;
   if (a.cards !== undefined) node.cards = a.cards;
   if (a.continuation !== undefined) node.continuation = { ...a.continuation };
   if (a.goalRunId !== undefined) node.goalRunId = a.goalRunId;
@@ -94,6 +111,28 @@ export function view(a: Assignment, parent?: Assignment): HandoffView {
   return node;
 }
 
+function announcingWrites(store: RuntimeStore, wrote: () => void): RuntimeStore {
+  const announced = <A extends unknown[], R>(write: (...args: A) => R) => (...args: A): R => {
+    const result = write(...args);
+    wrote();
+    return result;
+  };
+  return { ...store, insert: announced(store.insert), update: announced(store.update), addInbox: announced(store.addInbox),
+    markDelivered: announced(store.markDelivered), prune: announced(store.prune) };
+}
+
+/** A request back to a bot that waits on the asker's answer would leave each waiting on the other, as two bots did on a real
+ * day, each then working the same problem with its own plan. The ancestor rule covers this within one request; this covers
+ * two requests. The waiting request's words are not repeated: it may come from another person's private chat. */
+const crossed = (asker: string, request: Assignment): string => `@${asker} is already waiting on you: it handed you a request (assignment ${
+  request.id}), and ${request.status === "queued" ? "that has not reached you yet" : request.status === "running" ? "you are answering it in another conversation now"
+  : "you have not finished it yet"}. Asking @${asker} for something now would leave each of you waiting on the other, so this was not sent. Answer the person here from what you know; @${
+  asker}'s request reaches you in its own thread, and your answer there goes back to it. Once @${asker} has that answer, you can ask it again.`;
+
+/** How often a request that joined another looks at it. */
+const JOIN_POLL_MS = 1_000;
+const JOINED_NOTE = "Another teammate asked this a moment ago, so it was answered once, for both of you:";
+
 export class RuntimeCoordinator implements Coordinator {
   private readonly host: CoordinatorHost;
   private readonly store: RuntimeStore;
@@ -103,6 +142,8 @@ export class RuntimeCoordinator implements Coordinator {
   private readonly legacyThreads: LegacyThreadResolver | undefined;
   private readonly now: () => number;
   private readonly log: (line: string) => void;
+  /** The person's stops, remembered: which bots' work on which request they stopped, and when. */
+  private readonly stops: Array<{ at: number; request: string; bots: Set<string> }> = [];
   private opened = false;
   private prunedAt: number | undefined;
 
@@ -113,7 +154,8 @@ export class RuntimeCoordinator implements Coordinator {
     this.legacyThreads = options.legacyThreads;
     this.now = options.now ?? Date.now;
     this.log = options.log ?? ((line) => console.error("coordinator:", line));
-    this.store = openRuntimeStore(options.dataDir === ":memory:" ? ":memory:" : join(options.dataDir, "runtime.db"));
+    const store = openRuntimeStore(options.dataDir === ":memory:" ? ":memory:" : join(options.dataDir, "runtime.db"));
+    this.store = options.wrote ? announcingWrites(store, options.wrote) : store;
     this.runtime = new Runtime(this.store, this.runner(), {
       clock: { now: () => this.now(), monotonic: () => performance.now() },
       limits: { depth: 4, requests: REQUESTS_PER_ROOT, executions: EXECUTIONS_PER_ROOT, turnStallMs: TURN_STALL_MS, ...options.runtimeLimits },
@@ -149,6 +191,13 @@ export class RuntimeCoordinator implements Coordinator {
     this.ready();
     const a = this.store.get(id);
     return a && this.project(a);
+  }
+
+  answersTo(id: string): { botId: string; threadId: string } | undefined {
+    this.ready();
+    const a = this.store.get(id);
+    const { botId, threadId } = a?.requester ?? {};
+    return a && botId && threadId && answersSender(a, "notify", { botId, threadId }) ? { botId, threadId } : undefined;
   }
 
   has(id: string): boolean {
@@ -187,13 +236,16 @@ export class RuntimeCoordinator implements Coordinator {
     const kind: HandoffView["kind"] = target.groupId !== undefined && target.groupId === source.groupId ? "assignment" : "work";
     const lineage = path(this.store, parent);
     const root = lineage[0]!;
-    if (lineage.some(n => ancestorOf(address(n), target))) throw new Error(ANCESTOR);
+    if (!answersSender(parent, mode, target) && lineage.some(n => ancestorOf(address(n), target))) throw new Error(ANCESTOR);
+    if (this.stoppedFor(root, target.botId)) throw new Error(STOPPED_AGAIN);
     const siblings = this.store.children(parent.id);
     const existing = siblings.findLast(c => c.assignee.botId === target.botId && c.assignee.destination.groupId === target.groupId && c.brief === brief && c.mode === mode);
     if (existing && !(rework && isTerminal(existing))) return { node: view(existing, parent), duplicate: true };
     if (mode === "work" && !rework && siblings.some(c => c.mode === "work" && kindOf(c.assignee.destination.groupId, parent) === kind &&
       c.assignee.destination.groupId === target.groupId && c.assignee.botId === target.botId && c.status === "completed")) throw new Error(ALREADY_COMPLETED);
     if (kind === "work" && target.groupId && lineage.some(n => n.assignee.destination.groupId === target.groupId)) throw new Error(ROOM_ANCESTOR);
+    const waiting = mode === "notify" || target.groupId !== undefined ? undefined : this.waitingOn(source.botId, target.botId);
+    if (waiting) throw new Error(crossed(this.host.names(this.project(waiting.request), this.project(waiting.parent)).requester, waiting.request));
     const wanted: Reply = mode === "notify" ? "none" : options.reply ?? "resume";
     const reply: Reply = wanted === "none" ? "none" : root.reply === "poll" ? "poll" : wanted;
     const requester: Requester = { kind: "bot_turn", botId: parent.assignee.botId, threadId: parent.assignee.destination.threadId,
@@ -295,11 +347,27 @@ export class RuntimeCoordinator implements Coordinator {
     this.runtime.end(id, end);
   }
 
-  answerNode(id: string, text: string): boolean {
+  answerNode(id: string, text: string, by?: Answerer): boolean {
     this.ready();
     const a = this.store.get(id);
     if (!a || a.status !== "needs_input") return false;
-    return this.runtime.answer(id, text);
+    return this.runtime.answer(id, text, by);
+  }
+
+  followCard(threadId: string, from: string, to: string): void {
+    this.ready();
+    for (const n of this.live()) if (n.assignee.destination.threadId === threadId && n.cards?.includes(from)) this.runtime.followCard(n.id, from, to);
+  }
+
+  /** Nothing can answer what this parked turn waits on any more. */
+  releaseParked(id: string, reason: string): void {
+    this.ready();
+    if (this.store.get(id)?.status === "needs_input") this.runtime.cancel(id, reason, "stopped");
+  }
+
+  parkedFor(botId: string): HandoffView[] {
+    this.ready();
+    return this.live().filter(n => n.status === "needs_input" && n.assignee.botId === botId).map(n => this.project(n));
   }
 
   answerRoot(id: string, text: string): boolean {
@@ -340,9 +408,28 @@ export class RuntimeCoordinator implements Coordinator {
     for (const n of this.live()) if (this.direct(n, threadId)) this.runtime.cancel(n.id, reason, "stopped");
   }
 
-  stopAwaitingDirect(threadId: string, reason = "Stopped by user"): HandoffView[] {
+  stopAwaitingDirect(threadId: string, reason = STOPPED_BY_USER): void {
     this.ready();
-    return this.runtime.stopRequester({ threadId }, reason).map(a => this.project(a));
+    const stopping = reason === STOPPED_BY_USER ? this.live().filter(n => n.assignee.destination.threadId === threadId) : [];
+    const trees = stopping.map(n => ({ root: this.store.get(n.rootId), work: this.subtree(n).filter(a => !isTerminal(a)) }));
+    this.runtime.stopRequester({ threadId }, reason);
+    for (const { root, work } of trees) if (root) this.rememberStop(root, work);
+  }
+
+  /** The person's stop, remembered (scoped to that request): the bots whose work on it the stop ended don't take the same
+   * request from another bot again, unless the person asked again after the stop. In memory only, for a day. */
+  private rememberStop(root: Assignment, work: readonly Assignment[]): void {
+    const request = requestKey(root);
+    const bots = new Set(work.filter(a => this.store.get(a.id)?.status === "cancelled").map(a => a.assignee.botId));
+    const at = this.now();
+    while (this.stops.length && at - this.stops[0]!.at > STOP_MEMORY_MS) this.stops.shift();
+    if (request && bots.size) this.stops.push({ at, request, bots });
+  }
+
+  /** Work for `root`'s request was stopped for `botId`, and this request is not one the person made after that stop. */
+  private stoppedFor(root: Assignment, botId: string): boolean {
+    const request = requestKey(root);
+    return request !== "" && this.stops.some(stop => stop.request === request && stop.bots.has(botId) && root.createdAt <= stop.at && this.now() - stop.at <= STOP_MEMORY_MS);
   }
 
   activeDirect(threadId: string): boolean {
@@ -414,6 +501,11 @@ export class RuntimeCoordinator implements Coordinator {
     this.runtime.tick();
   }
 
+  pace(): "busy" | "parked" | "idle" {
+    this.ready();
+    return this.runtime.pace();
+  }
+
   private pruneDaily(): void {
     const now = this.now();
     if (this.prunedAt !== undefined && now - this.prunedAt < PRUNE_EVERY_MS) return;
@@ -435,6 +527,11 @@ export class RuntimeCoordinator implements Coordinator {
     for (const n of this.live()) if (n.status === "running" && n.assignee.destination.threadId === threadId) this.runtime.progress(n.id);
   }
 
+  held(threadId: string, why: string): void {
+    this.ready();
+    for (const n of this.live()) if (n.status === "running" && n.assignee.destination.threadId === threadId) this.runtime.held(n.id, why);
+  }
+
   answer(threadId: string, text: string): boolean {
     this.ready();
     const parked = this.live().find(n => n.parentId !== undefined && n.status === "needs_input" && !(n.cards && n.cards.length > 0) &&
@@ -451,7 +548,10 @@ export class RuntimeCoordinator implements Coordinator {
     const host = this.host;
     return {
       validate: (a, parent) => host.validate(view(a, parent), parent && this.project(parent)),
-      canStart: a => !host.busy(this.project(a)),
+      canStart: a => {
+        const node = this.project(a);
+        return host.busy(node) ? host.holdReason?.(node) ?? false : true;
+      },
       run: (a, input, signal) => this.run(a, input, signal),
       park: (a, question, restored) => host.park(this.project(a), question, restored),
       report: (a, parent) => host.report(view(a, parent), parent && this.project(parent)),
@@ -469,7 +569,21 @@ export class RuntimeCoordinator implements Coordinator {
     };
   }
 
+  private async statusOnly(a: Assignment, parent: Assignment | undefined, turn: RunInput["turn"], result: HostTurnResult, signal: AbortSignal): Promise<boolean> {
+    if (turn !== "first" || !this.host.statusReply || !mayBeStatusOnly(a, parent, result.text, result.evidence)) return false;
+    try {
+      return a.requester.botId !== undefined && isStatusOnly(await this.host.statusReply(a.requester.botId, statusReplyPrompt(a.brief, result.text), signal));
+    } catch (error) {
+      this.log(`status reply check failed: ${String(error)}`);
+      return false;
+    }
+  }
+
   private async run(a: Assignment, input: RunInput, signal: AbortSignal): Promise<RunResult> {
+    const first = input.turn === "first" || input.turn === "rerun" ? this.answeredElsewhere(a) : undefined;
+    if (first && input.turn === "first") this.host.joined?.(this.project(a), this.project(first));
+    const answer = first ? await this.joinAnswer(a, first.id, signal) : undefined;
+    if (answer) return answer;
     const parent = a.parentId ? this.store.get(a.parentId) : undefined;
     const node = view(a, parent);
     const resumed = input.turn === "resume";
@@ -493,12 +607,61 @@ export class RuntimeCoordinator implements Coordinator {
     if (result.cards) return { kind: "needs_input", question: result.cards.question, cards: result.cards.ids, ...evidence(result) };
     if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...evidence(result) };
     const question = root ? undefined : needsInputQuestion(result.text);
-    if (question !== undefined) return { kind: "needs_input", question, ...evidence(result) };
-    return { kind: "completed", text: result.text, ...evidence(result) };
+    if (question === undefined) return { kind: "completed", text: result.text, ...(await this.statusOnly(a, parent, input.turn, result, signal) ? { statusOnly: true } : {}), ...evidence(result) };
+    const named = withDefault(question);
+    const decide = requesterDecides(a) && !result.privateQuestion && !personOnly(named.question) ? { decide: named.default ? { default: named.default } : {} } : {};
+    return { kind: "needs_input", question, ...decide, ...evidence(result) };
   }
 
   private live(): Assignment[] {
     return this.store.all({ nonTerminal: true });
+  }
+
+  /** The same request to the same bot from another requester (same words, mode, approval level and finish line), asked
+   * earlier and still being answered when this one was asked, whose answer this one's requester may read
+   * (host.shareAnswer): two teammates asking the same thing at the same time get one answer. An answer from before this
+   * request was asked is never reused, as things may have changed since. Rooms keep their own turn order, and a request
+   * still to be answered in this one's conversation could only go on after it: neither is joined. */
+  private answeredElsewhere(a: Assignment): Assignment | undefined {
+    const share = this.host.shareAnswer;
+    if (!share || !a.parentId || a.mode === "notify" || a.rework || a.assignee.destination.groupId !== undefined) return undefined;
+    const mine = this.project(a);
+    // In the order they were asked, each still open when this one was asked.
+    const rows = this.store.all({ openSince: a.createdAt });
+    const at = rows.findIndex(o => o.id === a.id);
+    return rows.slice(0, Math.max(at, 0))
+      .filter(o => o.parentId !== undefined && o.parentId !== a.parentId && !o.rework && o.mode === a.mode
+        && o.level === a.level && o.doneWhen === a.doneWhen
+        && o.assignee.botId === a.assignee.botId && o.assignee.destination.groupId === undefined
+        && (o.status === "completed" || (!isTerminal(o) && o.assignee.destination.threadId !== a.assignee.destination.threadId))
+        && sameRequest(o.brief, a.brief))
+      .find(o => share(this.project(o), mine));
+  }
+
+  /** Waits for the request `firstId` to be answered, keeping this one's turn out of the stall window, and ends with that
+   * answer. Undefined when it ends without one: this request is then worked on as usual. */
+  private async joinAnswer(a: Assignment, firstId: string, signal: AbortSignal): Promise<RunResult | undefined> {
+    this.log(`${a.id} joins ${firstId}: the same request to ${a.assignee.botId}`);
+    // One listener for the whole wait, however long the first takes.
+    const stopped = new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+    for (;;) {
+      if (signal.aborted) return { kind: "failed", outcome: "stopped", text: "" };
+      const first = this.store.get(firstId);
+      if (first?.status === "completed") return { kind: "completed", text: `${JOINED_NOTE}\n${first.result.replace(`${JOINED_NOTE}\n`, "")}` };
+      if (!first || isTerminal(first)) return undefined;
+      this.runtime.progress(a.id);
+      await Promise.race([stopped, new Promise<void>(resolve => setTimeout(resolve, JOIN_POLL_MS))]);
+    }
+  }
+
+  /** Direct work `asker` handed to `botId` and still waits on: an open request whose requesting turn is still open. */
+  private waitingOn(botId: string, asker: string): { request: Assignment; parent: Assignment } | undefined {
+    for (const request of this.live()) {
+      if (request.assignee.botId !== botId || request.requester.botId !== asker || request.reply === "none" || request.assignee.destination.groupId !== undefined) continue;
+      const parent = request.parentId ? this.store.get(request.parentId) : undefined;
+      if (parent && !isTerminal(parent)) return { request, parent };
+    }
+    return undefined;
   }
 
   private parkedIn(threadId: string): Assignment | undefined {

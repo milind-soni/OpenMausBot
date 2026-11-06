@@ -109,11 +109,20 @@ export function canReach(from: RosterMember, target: RosterMember): boolean {
   return from.id !== target.id && !target.hidden && peerAllowed(from, target);
 }
 
+/** The name of the person who looks after a bot, or null when nobody does. */
+export type LookedAfterBy = (bot: RosterMember) => string | null;
+
 /** Why `from` cannot reach `target`, in words for the bot: null when it can. */
-export function reachRefusal(from: RosterMember, target: RosterMember): string | null {
+export function reachRefusal(from: RosterMember, target: RosterMember, lookedAfterBy?: LookedAfterBy): string | null {
   if (canReach(from, target)) return null;
   if (Array.isArray(from.peers) && !from.peers.includes(target.id)) {
     return `${peerName(target.name)} is not one of the bots ${peerName(from.name)} is set to talk to, so nothing was sent. ${peerAccessHelp(from)}`;
+  }
+  if (!target.hidden && !sameAudience(from.visibility, target.visibility)) {
+    const name = peerName(target.name);
+    const who = lookedAfterBy?.(target);
+    const ask = who ? `ask ${peerName(who)}, who looks after it` : "ask an admin";
+    return `${name} is shared with different people from ${peerName(from.name)}, so nothing was sent. Tell the person in one plain sentence: "${name} isn't shared here; ${ask}." Never use computer control to get around this.`;
   }
   return `${peerName(target.name)} cannot be reached from ${peerName(from.name)}. ${PEER_ACCESS_HELP}`;
 }
@@ -129,17 +138,37 @@ export function reachablePeers<T extends RosterMember>(bots: readonly T[], from:
   });
 }
 
-/** A name resolves only inside reachablePeers, so it can never reach a bot its id could not. */
+const foldedName = (value: string) => value.replace(/^@/, "").replace(/\s+/g, " ").trim().toLowerCase();
+// Models slug names they saw ("Reviewer 2" → "reviewer-2").
+const looseName = (value: string) => foldedName(value.replace(/[-_]+/g, " "));
+
+/** Whether `raw`, as a bot wrote it, means this teammate: its id, or its name however it was typed. */
+export function namesTeammate(target: Pick<RosterMember, "id" | "name">, raw: string): boolean {
+  const wanted = raw.trim();
+  return target.id === wanted || foldedName(target.name) === foldedName(wanted) || looseName(target.name) === looseName(wanted);
+}
+
+/** Their audiences alone would let `from` reach `target`, whatever its own list of peers says. */
+export const reachesInAudience = (from: RosterMember, target: RosterMember): boolean => sameAudience(from.visibility, target.visibility);
+
+/** The teammate `raw` names when `from` may not reach it. A person's own MausBot is never named to anyone else. */
+export function unreachableTeammate<T extends RosterMember>(bots: readonly T[], from: RosterMember, raw: string): T | null {
+  const target = bots.find((bot) => bot.id === raw.trim()) ?? bots.find((bot) => namesTeammate(bot, raw));
+  return target && target.id !== from.id && !target.hidden && !target.defaultBot && !canReach(from, target) ? target : null;
+}
+
+/** A name resolves only inside reachablePeers, so it can never reach a bot its id could not. `elsewhere(name)`: why no bot
+ * here has that name past "no such bot", when one of the person's other places has it, or when they work as one place. */
 export function resolveTeammate<T extends RosterMember>(
   bots: readonly T[],
   from: RosterMember,
   raw: string,
+  elsewhere: (name: string) => { where: string } | { hint: string } | null = () => null,
+  lookedAfterBy?: LookedAfterBy,
 ): { id: string; byName: boolean } | { error: string } {
   const wanted = raw.trim();
   if (bots.some(bot => bot.id === wanted)) return { id: wanted, byName: false };
-  const fold = (value: string) => value.replace(/^@/, "").replace(/\s+/g, " ").trim().toLowerCase();
-  // Models slug names they saw ("Reviewer 2" → "reviewer-2").
-  const loose = (value: string) => fold(value.replace(/[-_]+/g, " "));
+  const fold = foldedName, loose = looseName;
   const name = fold(wanted);
   const shown = peerName(wanted) || wanted;
   if (!name) return { error: `No bot with id "${shown}" — call list_bots and copy the exact id from the result` };
@@ -147,17 +176,29 @@ export function resolveTeammate<T extends RosterMember>(
   const matches = reachable.filter(bot => fold(bot.name) === name);
   if (matches.length === 1) return { id: matches[0]!.id, byName: true };
   if (matches.length > 1) {
-    return { error: `${matches.length} reachable teammates are named "${shown}" — call list_bots and use the id of the one you mean` };
+    return { error: `${matches.length} teammates you can reach are named "${shown}", so nothing was sent: ${sharedNameChoices(matches)}. Send it again with the id of the one you mean.` };
   }
   const near = reachable.filter(bot => loose(bot.name) === loose(wanted));
   if (near.length === 1) return { id: near[0]!.id, byName: true };
   const offList = Array.isArray(from.peers) ? bots.find(bot => bot.id !== from.id && !bot.hidden && !from.peers!.includes(bot.id) &&
     sameAudience(from.visibility, bot.visibility) && (fold(bot.name) === name || loose(bot.name) === loose(wanted))) : undefined;
   if (offList) return { error: reachRefusal(from, offList)! };
-  return { error: `No bot with id or name "${shown}" — call list_bots and copy the exact id from the result.${teammateChoices(reachable)} ${peerAccessHelp(from)}` };
+  const apart = bots.find(bot => bot.id !== from.id && !bot.hidden && !bot.defaultBot && !sameAudience(from.visibility, bot.visibility) && (fold(bot.name) === name || loose(bot.name) === loose(wanted)));
+  if (apart) return { error: reachRefusal(from, apart, lookedAfterBy)! };
+  const away = bots.some(bot => fold(bot.name) === name || loose(bot.name) === loose(wanted)) ? null : elsewhere(wanted);
+  if (away && "where" in away) return { error: away.where };
+  return { error: `No bot with id or name "${shown}" — call list_bots and copy the exact id from the result.${teammateChoices(reachable)}${away ? ` ${away.hint}` : ""} ${peerAccessHelp(from)}` };
 }
 
 const CHOICES_MAX = 12;
+
+export function sharedNameChoices(matches: readonly RosterMember[]): string {
+  const listed = matches.slice(0, CHOICES_MAX).map((bot) => {
+    const role = bot.chiefOfStaff ? "Chief of Staff" : peerName(bot.title ?? "");
+    return `${peerName(bot.name)}${role ? `, ${role}` : ""} (id ${bot.id})`;
+  });
+  return listed.join("; ") + (matches.length > CHOICES_MAX ? `; and ${matches.length - CHOICES_MAX} more` : "");
+}
 
 function teammateChoices(reachable: readonly RosterMember[]): string {
   if (!reachable.length) return "";

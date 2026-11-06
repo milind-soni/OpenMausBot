@@ -134,6 +134,15 @@ describe("the waits route", () => {
     expect(await call("POST", "/api/internal/waits", { label: "l", kind: "bot_idle", bot: "nobody" }, { peer: () => null })).toMatchObject({ status: 400, payload: { error: WAIT_MESSAGES.noPeer } });
     expect(await call("POST", "/api/internal/waits", { label: "l", kind: "bot_idle", bot: "me" }, { peer: () => "self" })).toMatchObject({ status: 400, payload: { error: WAIT_MESSAGES.self } });
   });
+  it("for a bot that lives in another of the person's places, says where instead; with no word on that, that bots work as one place", async () => {
+    const lives = "Ledger lives on Garage server, not here.";
+    expect(await call("POST", "/api/internal/waits", { label: "l", kind: "bot_idle", bot: "Ledger" }, { peer: () => null, elsewhere: () => ({ where: lives }) }))
+      .toMatchObject({ status: 400, payload: { error: lives } });
+    expect(await call("POST", "/api/internal/waits", { label: "l", kind: "bot_idle", bot: "Ledger" }, { peer: () => null, elsewhere: () => ({ hint: "Bots work together only within one place." }) }))
+      .toMatchObject({ status: 400, payload: { error: `${WAIT_MESSAGES.noPeer} Bots work together only within one place.` } });
+    expect(await call("POST", "/api/internal/waits", { label: "l", kind: "bot_idle", bot: "Ledger" }, { peer: () => null, elsewhere: () => null }))
+      .toMatchObject({ status: 400, payload: { error: WAIT_MESSAGES.noPeer } });
+  });
   it("waits for the found bot by id and name", async () => {
     waits.create.mockClear();
     await call("POST", "/api/internal/waits", { label: "l", kind: "bot_idle", bot: "coder" }, { peer: () => ({ id: "b2", name: "Coder" }) });

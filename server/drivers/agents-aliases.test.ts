@@ -12,7 +12,7 @@ import { agentsMcp } from "./agents-mcp.ts";
 
 const EVERYTHING = {
   OMB_BOT_ID: "bot-alias", OMB_CHIEF_OF_STAFF: "1", OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1",
-  OMB_VOICE_NOTES: "1", OMB_X_RESEARCH: "1", OMB_ESCALATIONS: "1", OMB_TEAM_PEOPLE: "1", OMB_MAUSBOT: "1",
+  OMB_VOICE_NOTES: "1", OMB_X_RESEARCH: "1", OMB_RESEARCH: "1", OMB_ESCALATIONS: "1", OMB_TEAM_PEOPLE: "1", OMB_MAUSBOT: "1",
 };
 const LISTED = new Set(availableTools(catalogProfileFromEnv(EVERYTHING)).map((tool) => tool.name));
 
@@ -110,7 +110,7 @@ describe("the agents action tools", () => {
     trigger_info: { list: READ, events: READ },
     trigger: { create: CHANGE, update: CHANGE, pause: CHANGE, resume: CHANGE, run_now: CHANGE },
     delete_trigger: { delete: DELETE },
-    manage_room: { create: CHANGE, add_members: CHANGE, remove_members: CHANGE, set_members: CHANGE, rename: CHANGE, set_bulletin: CHANGE },
+    manage_room: { create: CHANGE, add_members: CHANGE, remove_members: CHANGE, set_members: CHANGE, rename: CHANGE, set_bulletin: CHANGE, new_thread: CHANGE },
     session_search: { search: READ, read: READ },
     show_widget: { show: CHANGE, update: CHANGE },
     show_html: { show: CHANGE, update: CHANGE },

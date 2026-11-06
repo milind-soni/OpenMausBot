@@ -10,6 +10,7 @@ export const ZOOM_LIMITS = { min: 0.25, max: 5 } as const;
 
 /** The viewport sizes a person can pick: fill follows the panel; a preset letterboxes in it. */
 export const VIEWPORT_PRESETS = {
+  fullHd: { width: 1920, height: 1080 },
   desktop: { width: 1280, height: 800 },
   tablet: { width: 820, height: 1180 },
   phone: { width: 390, height: 844 },

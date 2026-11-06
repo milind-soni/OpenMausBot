@@ -209,6 +209,18 @@ describe("control-plane migrations and health", () => {
     expect(accountIndex?.name).toBe("installation_endpoints_account_status_idx");
   });
 
+  it("lets Better Auth write an account row on the migrated schema", async () => {
+    const { userId } = await signIn("account-row@example.com");
+    const ctx = createExecutionContext();
+    const context = await createAuth(env, ctx, readConfig(env), crypto.randomUUID()).$context;
+    // Better Auth 1.7.3 and later never write account.issuer, which 0001 created NOT NULL.
+    await context.internalAdapter.createAccount({ userId, providerId: "credential", accountId: userId });
+    await waitOnExecutionContext(ctx);
+    const rows = await env.DB.prepare('SELECT "providerId", "accountId" FROM "account" WHERE "userId" = ?')
+      .bind(userId).all();
+    expect(rows.results).toEqual([{ providerId: "credential", accountId: userId }]);
+  });
+
   it("ties every existing endpoint to the original account and carries its capacity state over", async () => {
     const db = env.MIGRATION_DB;
     const accounts = env.TEST_MIGRATIONS.findIndex((migration) => migration.name.startsWith("0007_"));
@@ -282,6 +294,7 @@ describe("control-plane migrations and health", () => {
         providerRejectedAt: null,
         reclaim: { mode: "on", pending: 0 },
       },
+      relayAdoption: { e2eDevices: 0, legacyDevices: 0, installs: 0 },
     });
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
@@ -292,7 +305,8 @@ describe("control-plane migrations and health", () => {
     const first = await call("/healthz");
     const second = await call("/healthz");
     await expect(second.json()).resolves.toEqual(await first.json());
-    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(prepare.mock.calls.filter(([sql]) => !sql.includes("relay_adoption"))).toHaveLength(1);
+    expect(prepare.mock.calls.filter(([sql]) => sql.includes("relay_adoption")).length).toBeLessThanOrEqual(1);
     // The public response stays uncached; only the internal copy expires on
     // its own, which bounds how far the report can trail D1.
     expect(second.headers.get("cache-control")).toBe("no-store");
@@ -383,6 +397,14 @@ describe("control-plane migrations and health", () => {
       OMB_TUNNEL_RECLAIM: env.OMB_TUNNEL_RECLAIM,
       OMB_TUNNEL_OFFLINE_RECLAIM_DAYS: env.OMB_TUNNEL_OFFLINE_RECLAIM_DAYS,
       OMB_CLEANUP_SWEEP_LIMIT: env.OMB_CLEANUP_SWEEP_LIMIT,
+      RELAY_NODES: env.RELAY_NODES,
+      RELAY_NODES_AMERICAS: env.RELAY_NODES_AMERICAS,
+      RELAY_TOKEN_KID: env.RELAY_TOKEN_KID,
+      RELAY_ROLLOUT_PERCENT: env.RELAY_ROLLOUT_PERCENT,
+      RELAY_ALLOW_INSTALLATIONS: env.RELAY_ALLOW_INSTALLATIONS,
+      RELAY_DISABLED: env.RELAY_DISABLED,
+      RELAY_CAPABLE_MIN_VERSION: env.RELAY_CAPABLE_MIN_VERSION,
+      RELAY_TOKEN_SIGNING_KEY: "",
       BETTER_AUTH_SECRET: "too-short",
     };
     const request = new Request(`${BASE_URL}/healthz`);

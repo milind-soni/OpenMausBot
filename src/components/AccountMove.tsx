@@ -17,21 +17,23 @@ export type AccountMoveKind = AccountMoveLine["kind"];
 const pageBridge = () => (!window.ogb?.remoteClient?.active ? window.ogb?.cloudSendPage : undefined);
 
 /** The account's words for the move: it needs the person once it has failed for a day, goes quietly meanwhile, and
- * says nothing once done (its menu row says what arrived). */
-export function accountMoveWords(kind: AccountMoveKind | null): string | null {
-  if (kind === "failed") return t("sidebar.account.moveNeedsYou");
-  if (kind === "sending") return t("sidebar.account.moving");
+ * says nothing once done (its menu row says what arrived). `place`: the server of their own it goes to, else My Cloud. */
+export function accountMoveWords(kind: AccountMoveKind | null, place?: string): string | null {
+  if (kind === "failed") return place ? t("sidebar.account.moveNeedsYouNamed", { place }) : t("sidebar.account.moveNeedsYou");
+  if (kind === "sending") return place ? t("sidebar.account.movingNamed", { place }) : t("sidebar.account.moving");
   return null;
 }
 
+const failingPlain = (place?: string) => (place ? t("cloudSend.move.failingPlainNamed", { place }) : t("cloudSend.move.failingPlain"));
+
 /** Why a failing move failed: main's words when Try again went unanswered, else the move's own reason. */
 function failingWhy(line: AccountMoveLine, unanswered: string | null): string {
-  const plain = t("cloudSend.move.failingPlain");
+  const plain = failingPlain(line.place);
   return [unanswered && unanswered !== plain ? unanswered : line.reason, ...line.extra].filter(Boolean).join(" ") || plain;
 }
 
-/** The move's rows at the top of the account menu, each the size of every other row there. Failed: Try again, with why
- * in its tooltip and a spinner while it runs. On its way: one row, the progress in its tooltip. Done: what arrived, the
+/** The move's rows at the top of the account menu. Failed: Try again, with why written under it (and in its tooltip),
+ * and a spinner while it runs. On its way: one row, the progress in its tooltip. Done: what arrived, the
  * phone to pair, and Got it, which closes it for good. A row that does not retry opens My Cloud in Settings. */
 export function moveMenuItems(line: AccountMoveLine | null, { retrying = false, unanswered = null, onOpen, onRetry, onPairPhone, onClose }: {
   retrying?: boolean;
@@ -44,18 +46,20 @@ export function moveMenuItems(line: AccountMoveLine | null, { retrying = false, 
   if (!line) return [];
   if (line.kind === "failed") {
     const title = failingWhy(line, unanswered);
-    if (!line.retry) return [{ key: "cloud-move", label: t("sidebar.account.moveNeedsYou"), title, icon: <CloudAlert size={16} className="text-warning" />, onSelect: onOpen }];
+    if (!line.retry) return [{ key: "cloud-move", label: accountMoveWords("failed", line.place)!, title, note: title, wrap: true, icon: <CloudAlert size={16} className="text-warning" />, onSelect: onOpen }];
     return [{
       key: "cloud-move",
-      label: t("sidebar.account.moveRetry"),
+      label: line.place ? t("sidebar.account.moveRetryNamed", { place: line.place }) : t("sidebar.account.moveRetry"),
       title,
+      note: title,
+      wrap: true,
       icon: retrying ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} className="text-warning" />,
       disabled: retrying,
       keepOpen: true,
       onSelect: onRetry,
     }];
   }
-  if (line.kind === "sending") return [{ key: "cloud-move", label: t("sidebar.account.moving"), title: line.text, icon: <Loader2 size={16} className="animate-spin" />, onSelect: onOpen }];
+  if (line.kind === "sending") return [{ key: "cloud-move", label: accountMoveWords("sending", line.place)!, title: line.text, icon: <Loader2 size={16} className="animate-spin" />, onSelect: onOpen }];
   return [
     { key: "cloud-move", label: line.text, ...(line.extra.length ? { note: line.extra.join(" ") } : {}), wrap: true, icon: <CloudCheck size={16} />, onSelect: onOpen },
     ...(line.phone && onPairPhone ? [{ key: "cloud-move-phone", label: t("cloudSend.move.phone"), icon: <Smartphone size={16} />, onSelect: onPairPhone }] : []),
@@ -99,7 +103,7 @@ function useMove(cloudHome: boolean) {
     if (store.get().retrying) return;
     store.set({ retrying: true, unanswered: null });
     void (bridge.moveRetry?.() ?? Promise.resolve(notice)).then((next) => { setNotice(next); store.set(IDLE); })
-      .catch((cause: unknown) => { store.set({ retrying: false, unanswered: ipcErrorText(cause) ?? t("cloudSend.move.failingPlain") }); });
+      .catch((cause: unknown) => { store.set({ retrying: false, unanswered: ipcErrorText(cause) ?? failingPlain(line.place) }); });
   };
   const close = () => { void bridge.dismiss(MOVE_LINE).then(setNotice).catch(() => {}); };
   return { line, retrying, unanswered, retry, close };
@@ -109,11 +113,12 @@ function useMove(cloudHome: boolean) {
 export function useAccountMove(cloudHome: boolean, { onOpen, onPairPhone }: { onOpen: () => void; onPairPhone?: () => void }): {
   kind: AccountMoveKind | null;
   items: SidebarMenuItem[];
+  place?: string;
 } {
   const move = useMove(cloudHome);
   if (!move) return { kind: null, items: [] };
   const { line, retrying, unanswered, retry, close } = move;
-  return { kind: line.kind, items: moveMenuItems(line, { retrying, unanswered, onOpen, onRetry: retry, onPairPhone, onClose: close }) };
+  return { kind: line.kind, items: moveMenuItems(line, { retrying, unanswered, onOpen, onRetry: retry, onPairPhone, onClose: close }), ...(line.place ? { place: line.place } : {}) };
 }
 
 /** The line's Try again: what it runs, whether it is running, and why the move failed. */
@@ -124,18 +129,18 @@ export interface AccountMoveRetry {
 }
 
 /** The move as Simple's line above the account shows it: its kind, and Try again while the failing move allows one. */
-export function useAccountMoveLine(cloudHome: boolean): { kind: AccountMoveKind | null; retry: AccountMoveRetry | null } {
+export function useAccountMoveLine(cloudHome: boolean): { kind: AccountMoveKind | null; retry: AccountMoveRetry | null; place?: string } {
   const move = useMove(cloudHome);
   if (!move) return { kind: null, retry: null };
   const { line, retrying, unanswered, retry } = move;
-  return { kind: line.kind, retry: line.kind === "failed" && line.retry ? { onRetry: retry, retrying, why: failingWhy(line, unanswered) } : null };
+  return { kind: line.kind, retry: line.kind === "failed" && line.retry ? { onRetry: retry, retrying, why: failingWhy(line, unanswered) } : null, ...(line.place ? { place: line.place } : {}) };
 }
 
 /** The account's line for the move: amber while it needs the person, quiet while it goes, nothing otherwise. With
- * `onOpen` its words are a button that opens the account menu, followed by Try again when `retry` allows one; without,
- * words inside a trigger. The words shorten before Try again does. */
-export function AccountMoveStatus({ kind, retry = null, onOpen, className }: { kind: AccountMoveKind | null; retry?: AccountMoveRetry | null; onOpen?: () => void; className?: string }) {
-  const words = accountMoveWords(kind);
+ * `onOpen` its words are a button that opens the account menu, followed by Try again when `retry` allows one, and why it
+ * failed written out under them; without, words inside a trigger. The words shorten before Try again does. */
+export function AccountMoveStatus({ kind, place, retry = null, onOpen, className }: { kind: AccountMoveKind | null; place?: string; retry?: AccountMoveRetry | null; onOpen?: () => void; className?: string }) {
+  const words = accountMoveWords(kind, place);
   if (!words) return null;
   const Icon = kind === "failed" ? CloudAlert : CloudUpload;
   const look = cn("flex min-w-0 items-center gap-1.5 text-start text-[12px] leading-4", kind === "failed" ? "font-medium text-warning" : "text-ink-secondary");
@@ -145,23 +150,26 @@ export function AccountMoveStatus({ kind, retry = null, onOpen, className }: { k
   </>;
   if (!onOpen) return <span data-account-move={kind} className={cn(look, className)}>{body}</span>;
   return (
-    <div role="status" data-account-move={kind} className={cn("flex min-w-0 items-center gap-1.5", className)}>
-      <button type="button" onClick={onOpen} className={cn(look, kind === "failed" ? "hover:underline" : "hover:text-ink")}>{body}</button>
-      {kind === "failed" && retry && (
-        <button
-          type="button"
-          data-move-retry
-          aria-label={t("sidebar.account.moveRetryName")}
-          aria-busy={retry.retrying || undefined}
-          aria-disabled={retry.retrying || undefined}
-          title={retry.why}
-          onClick={retry.retrying ? undefined : retry.onRetry}
-          className={cn("ui-button ui-button-sm shrink-0", retry.retrying && "cursor-progress")}
-        >
-          {retry.retrying && <Loader2 aria-hidden="true" className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" />}
-          {t("cloudSend.strip.retry")}
-        </button>
-      )}
+    <div role="status" data-account-move={kind} className={cn("flex min-w-0 flex-col gap-0.5", className)}>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <button type="button" onClick={onOpen} className={cn(look, kind === "failed" ? "hover:underline" : "hover:text-ink")}>{body}</button>
+        {kind === "failed" && retry && (
+          <button
+            type="button"
+            data-move-retry
+            aria-label={place ? t("sidebar.account.moveRetryNameNamed", { place }) : t("sidebar.account.moveRetryName")}
+            aria-busy={retry.retrying || undefined}
+            aria-disabled={retry.retrying || undefined}
+            title={retry.why}
+            onClick={retry.retrying ? undefined : retry.onRetry}
+            className={cn("ui-button ui-button-sm shrink-0", retry.retrying && "cursor-progress")}
+          >
+            {retry.retrying && <Loader2 aria-hidden="true" className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" />}
+            {t("cloudSend.strip.retry")}
+          </button>
+        )}
+      </div>
+      {kind === "failed" && retry?.why && <p data-move-why className="line-clamp-4 text-[12px] leading-4 text-ink-secondary">{retry.why}</p>}
     </div>
   );
 }

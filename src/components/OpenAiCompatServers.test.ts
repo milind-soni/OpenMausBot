@@ -2,7 +2,7 @@ import { Children, createElement, isValidElement, type ReactElement, type ReactN
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as store from "@/state/store";
-import { modelIds, OtherOpenAiCompatServers, LmStudioServer, lmStudioBaseUrl } from "./OpenAiCompatServers";
+import { BuiltInReplyWait, modelIds, OtherOpenAiCompatServers, LmStudioServer, lmStudioBaseUrl } from "./OpenAiCompatServers";
 
 const fixture = vi.hoisted(() => ({ counting: false, values: [] as unknown[], index: 0, api: vi.fn(), track: vi.fn() }));
 vi.mock("react", async (original) => {
@@ -105,12 +105,31 @@ describe("adding another OpenAI-compatible server", () => {
     expect(fixture.track.mock.calls).toEqual([["api_key_saved", { provider: "custom_endpoint", via: "settings", result }]]);
     expect(JSON.stringify(fixture.track.mock.calls)).not.toMatch(/ada|example|ZZtest|SECRET/);
   });
+
+  it("fills in Google Gemini, so only the AI Studio key is left to paste", async () => {
+    fixture.values = [];
+    fixture.api.mockReset();
+    fixture.api.mockResolvedValueOnce({ instances: [] });
+    const button = (text: string) => form().find((node) => node.type === "button" && JSON.stringify(node.props.children ?? "").includes(text))!;
+    expect(JSON.stringify(form().map((node) => node.props.children ?? ""))).not.toContain("aistudio.google.com");
+    button("Fill in Google Gemini").props.onClick!();
+    expect(JSON.stringify(form().map((node) => node.props.children ?? ""))).toContain("aistudio.google.com/apikey");
+    form().find((node) => node.props["aria-label"] === "API key")!.props.onChange!({ target: { value: "gemini-fixture" } });
+    button("Add server").props.onClick!();
+    await flush();
+    expect(fixture.api).toHaveBeenCalledExactlyOnceWith("/api/instances/openai-compat", expect.objectContaining({ method: "POST" }));
+    expect(JSON.parse(fixture.api.mock.calls[0][1].body)).toEqual({ displayName: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai", key: "gemini-fixture" });
+  });
 });
 
 describe("how long a server may take to reply", () => {
-  type Props = { children?: ReactNode; servers?: unknown; value?: unknown; onChange?: (event: { target: { value: string } }) => void; "aria-label"?: string };
+  type Props = { children?: ReactNode; servers?: unknown; value?: unknown; onChange?: (event: { target: { value: string } }) => void; onPick?: unknown; "aria-label"?: string };
   const nodes = (tree: ReactNode): Array<ReactElement<Props>> =>
     Children.toArray(tree).flatMap((child) => isValidElement<Props>(child) ? [child, ...nodes(child.props.children)] : []);
+  const waitPicker = (tree: ReactNode) => {
+    const picker = nodes(tree).find((node) => node.props.onPick !== undefined)!;
+    return (picker.type as (props: Props) => ReactElement<Props>)(picker.props);
+  };
   function waitSelect(replyWaitMinutes?: number) {
     vi.stubGlobal("window", {});
     const servers = [instance("openai-compat-1", "Ollama", { url: "http://127.0.0.1:11434/v1", ...(replyWaitMinutes ? { replyWaitMinutes } : {}) })];
@@ -121,7 +140,23 @@ describe("how long a server may take to reply", () => {
     fixture.counting = true;
     fixture.index = 0;
     try {
-      return nodes((added.type as (props: Props) => ReactNode)(added.props)).find((node) => node.props["aria-label"] === "How long to wait for Ollama to reply")!;
+      return waitPicker((added.type as (props: Props) => ReactNode)(added.props));
+    } finally {
+      fixture.counting = false;
+    }
+  }
+
+  function builtInSelect(url: string) {
+    vi.stubGlobal("window", {});
+    vi.spyOn(store, "useStore").mockReturnValue({
+      state: { ...store.initialState, config: { openaiCompat: { url } } as unknown as store.ConfigStatus, instances: [instance("openaiCompat", "Other (OpenAI-compatible)")] },
+      dispatch: vi.fn(), flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
+    });
+    fixture.counting = true;
+    fixture.index = 0;
+    try {
+      const tree = BuiltInReplyWait();
+      return tree && waitPicker(tree);
     } finally {
       fixture.counting = false;
     }
@@ -140,6 +175,20 @@ describe("how long a server may take to reply", () => {
     waitSelect(20).props.onChange!({ target: { value: "" } });
     await Promise.resolve();
     expect(fixture.api).toHaveBeenLastCalledWith("/api/instances/openai-compat-1", { method: "PATCH", body: JSON.stringify({ replyWaitMinutes: null }) });
+  });
+
+  it("offers the same wait for the built-in server once its base URL is set, such as a local Ollama", async () => {
+    fixture.values = [];
+    fixture.api.mockReset();
+    fixture.api.mockResolvedValue({ instances: [] });
+    const select = builtInSelect("http://localhost:11434/v1")!;
+    expect(select.props["aria-label"]).toBe("How long to wait for Other (OpenAI-compatible) to reply");
+    expect(JSON.stringify(select.props.children)).toContain("Wait 30 min");
+    select.props.onChange!({ target: { value: "30" } });
+    await Promise.resolve();
+    expect(fixture.api).toHaveBeenLastCalledWith("/api/instances/openaiCompat", { method: "PATCH", body: JSON.stringify({ replyWaitMinutes: 30 }) });
+    fixture.values = [];
+    expect(builtInSelect("")).toBeNull();
   });
 
   it("shows a saved wait that is not one of the usual choices", () => {

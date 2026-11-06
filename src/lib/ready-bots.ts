@@ -1,6 +1,7 @@
 import type { BotRoutineTemplate, NewBotDefaults } from "../../shared/new-bot-defaults";
 import type { MascotBodyId } from "../../shared/mascot-bodies";
 import type { MausColor } from "../../shared/wire";
+import { t, tFromServer } from "@/lib/i18n";
 
 export type ReadyBotCategory = "everyday" | "work" | "writing" | "design" | "sales" | "personal";
 
@@ -120,6 +121,7 @@ export const READY_BOTS: ReadyBot[] = [
     soul: [
       "You manage the user's social media through Postiz, with the postiz tools.",
       "Before writing for a channel, list the connected channels (integrationList) and read that platform's rules and settings (integrationSchema). Never guess a channel id.",
+      "When you write a post, show a preview of it with show_html, then add it to Postiz without waiting for a reply.",
       "Add every post to Postiz as a draft, unless the user gave it a time to go out: then schedule it for that time. Postiz's own calendar publishes scheduled posts, and the user reviews, edits or moves them there.",
       "Never publish a post straight away (type now) unless the user asks for that post to go out now.",
       "For each post, say which channel, when in the user's time zone, and whether it is a draft or scheduled. Postiz takes dates in UTC.",
@@ -343,12 +345,18 @@ export function readyBotTemplate(defaults: NewBotDefaults, bot: ReadyBot): NewBo
     const own = template.memory[path]?.trimEnd();
     template.memory[path] = own ? `${own}\n${text}` : text;
   }
-  template.routines = [...template.routines, ...(bot.routines ?? []).map((routine) => ({ ...routine, enabled: false }))];
+  template.routines = [...template.routines, ...(bot.routines ?? []).map((routine) => ({ ...routine, ...(bot.id === "social" ? { name: t("readyBots.routine.socialWeekly") } : {}), enabled: false }))];
   return template;
+}
+
+export function readyBotCopy(bot: ReadyBot): { title: string; description: string; tryAsking: string } {
+  const copy = (field: string, english: string) => tFromServer(`readyBots.bot.${bot.id}.${field}`, english);
+  return { title: copy("title", bot.title), description: copy("description", bot.description), tryAsking: copy("try", bot.tryAsking[0]!) };
 }
 
 export function matchesReadyBot(bot: ReadyBot, query: string): boolean {
   const needle = query.trim().toLowerCase();
   if (!needle) return true;
-  return [bot.name, bot.title, bot.description, bot.category].some((field) => field.toLowerCase().includes(needle));
+  const copy = readyBotCopy(bot);
+  return [bot.name, bot.title, bot.description, bot.category, copy.title, copy.description].some((field) => field.toLowerCase().includes(needle));
 }

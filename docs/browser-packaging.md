@@ -110,8 +110,8 @@ connects nowhere.
 |---|---|---|---|
 | Public internet | yes | yes | yes |
 | OpenMausBot's own ports (loopback and this machine's addresses) | no | no | no |
-| Other ports on this computer | yes, by `localhost` or an address, not by a public name | only servers a bot's own processes opened (Linux), or allowed below | only servers a bot's own processes opened |
-| Local network: 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7 | yes, unless `browserEngine.egress.localNetwork` is `false` | only what `browserEngine.egress.allow` lists | no |
+| Other ports on this computer | yes, by `localhost` or an address, not by a public name | only servers a bot's own processes opened (Linux), or allowed below; with "Open sites on this server" on, yes, by `localhost`, an address or a name that points at this server's own addresses, not a public name that points at loopback | only servers a bot's own processes opened |
+| Local network: 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7 | yes, unless `browserEngine.egress.localNetwork` is `false` | only what `browserEngine.egress.allow` lists, or all of it with "Open sites on this server" on | no |
 | Link-local and cloud metadata (169.254/16, fe80::/10, `fd00:ec2::254`, 100.100.100.200) | no | no | no |
 | 0/8, 198.18/15, multicast | no | no | no |
 
@@ -135,8 +135,15 @@ A self-hosted server opens more with `config.json`:
 
 Each entry is an address or CIDR range with an optional `:port` (IPv6 in
 brackets for a port: `[fd12::1]:443`). OpenMausBot's own ports, metadata and
-link-local addresses stay closed whatever it lists, and MausBot Cloud ignores
-it. Every refused connection shows up in the bot's next browser result:
+link-local addresses stay closed whatever it lists, and MausBot Cloud and shared
+company workspaces ignore it.
+
+Settings > Computer > "Open sites on this server" (`browserEngine.egress.localNetwork: true`, off by default and
+shown only to the server's owner or an admin; not on a shared company workspace, whose network is the operator's) opens this server's own sites and its local network without listing
+them. OpenMausBot's own ports, metadata and link-local addresses stay closed, also through a private address such as
+a Docker host's gateway, and a public name that resolves to loopback is still refused. It applies to new connections;
+a page already open keeps the ones it has until it closes them. Refused connections show up in the bot's next browser result:
+the first three by name and the rest as a count (up to 20 per result, each destination and reason once):
 `The page tried to reach "127.0.0.1:8799" (blocked: OpenMausBot's own service)`.
 
 `agent_browser_read` reads the page open in the browser. Given an address,

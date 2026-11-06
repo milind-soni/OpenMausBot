@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { freezeAnswer, installOneHome } from "./one-home-main.mjs";
+import nativeText from "./native-text.cjs";
 
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status });
 
@@ -69,7 +70,7 @@ test("the switch that keeps this computer's bots here: only on this app's pages,
     assert.deepEqual(ask("one-home:keep", "local"), hidden, "no Cloud");
     state = { status: "connected", account, entitlement: { plan: "pro", tier: "team", status: "active" }, teams: [{ id: "team-1", name: "Acme", role: "owner", machine }] };
     assert.deepEqual(ask("one-home:keep", "cloud"), hidden, "only a team's Cloud");
-    assert.throws(() => ask("one-home:keep-set", "local", true), /no My Cloud/u);
+    assert.throws(() => ask("one-home:keep-set", "local", true), { message: "This computer has no My Cloud to keep its bots from." });
     assert.equal(choice, null);
     state = { status: "connected", account, entitlement: { plan: "pro", tier: "personal", status: "active" }, machine: { ...machine, moves: false } };
     assert.deepEqual(ask("one-home:keep", "local"), hidden, "a Cloud the move doesn't apply to yet");
@@ -84,9 +85,70 @@ test("the switch that keeps this computer's bots here: only on this app's pages,
   } finally { main.close(); }
 });
 
+test("the switch's refusal follows the app's language", () => {
+  const handlers = new Map();
+  const { t } = nativeText.createNativeText({ saved: "pt-br" });
+  const main = installOneHome({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, cloudPage: (event) => event.page ?? null, server: () => null, home: () => null,
+    cookieFetch: async () => json({}, 401), reconnect: async () => false, power: { asleep: () => false }, file: () => "/nonexistent/cloud-send.json", window: () => null,
+    localOrigin: () => "http://127.0.0.1:4100", fetch: async () => json({}, 404), localRequest: async () => json({ frozen: false }), account: () => null,
+    journalFile: () => "/nonexistent/one-home.json", tempRoot: () => "/nonexistent", journal: { read: () => null, write: () => {} },
+    keep: { read: () => null, write: () => {} }, t,
+  });
+  try {
+    assert.throws(() => handlers.get("one-home:keep-set")({ page: "local" }, true), { message: "Este computador não tem um Cloud para receber seus bots." });
+  } finally { main.close(); }
+});
+
 test("the freeze's answer carries what holds the move, by name or, with none, what it is", () => {
   assert.deepEqual(freezeAnswer({ ok: false, status: 409, body: { error: "A bot is still working.", busy: "Scout", what: "bot" } }), { busy: "Scout", what: "bot" });
   assert.deepEqual(freezeAnswer({ ok: false, status: 409, body: { busy: "", what: "sign-in" } }), { busy: "", what: "sign-in" });
   assert.deepEqual(freezeAnswer({ ok: true, status: 200, body: { frozen: true } }), { frozen: true });
   assert.throws(() => freezeAnswer({ ok: false, status: 500, body: {} }), /could not pause/u);
+});
+
+test("while a server of the person's own is chosen as home, no move to My Cloud starts, and this computer's page shows that move's line", async () => {
+  const handlers = new Map();
+  const install = (other) => {
+    let kept = null;
+    const main = installOneHome({
+      ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, cloudPage: () => "local", server: () => null, home: () => null, cookieFetch: async () => json({}, 401),
+      reconnect: async () => false, power: { asleep: () => false }, file: () => "/nonexistent/cloud-send.json", window: () => null, localOrigin: () => "http://127.0.0.1:4100",
+      fetch: async () => json({}, 404), localRequest: async (route) => (route === "/api/move/freeze" ? json({ frozen: false }) : json({}, 404)),
+      account: () => ({ state: () => ({ status: "connected", account: { id: "acct-1" }, machine: { status: "ready", origin: "https://omb-u-1.fly.dev", moves: true } }),
+        pairHome: async () => { throw new Error("no code in this test"); } }),
+      journalFile: () => "/nonexistent/one-home.json", tempRoot: () => "/nonexistent", journal: { read: () => kept, write: (value) => { kept = value; } }, other,
+    });
+    return { main, journal: () => kept };
+  };
+  const own = { active: () => true, view: () => ({ phase: "copy", place: "Garage server" }), seen: () => null, retry: async () => {} };
+  const chosen = install(() => own);
+  try {
+    await chosen.main.kick();
+    assert.equal(chosen.journal(), null, "My Cloud's move never starts");
+    assert.deepEqual((await handlers.get("cloud-send:notice")({})).move, { phase: "copy", place: "Garage server" });
+  } finally { chosen.main.close(); }
+  const none = install(() => null);
+  try {
+    await none.main.kick();
+    assert.equal(none.journal()?.cloud.origin, "https://omb-u-1.fly.dev", "without one, My Cloud's move starts as before");
+  } finally { none.main.close(); }
+});
+
+test("the team bring handlers receive the same dynamic translator as one home", async () => {
+  const handlers = new Map();
+  let language = "en";
+  const main = installOneHome({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, cloudPage: () => "local", server: () => null, home: () => null,
+    cookieFetch: async () => json({}, 401), reconnect: async () => false, power: { asleep: () => false }, file: () => "/nonexistent/cloud-send.json", window: () => null,
+    localOrigin: () => "http://127.0.0.1:4100", fetch: async () => json({}, 404), localRequest: async () => json({}, 404), account: () => null,
+    journalFile: () => "/nonexistent/one-home.json", tempRoot: () => "/nonexistent", journal: { read: () => null, write: () => {} },
+    t: (key) => `${language}:${key}`,
+  });
+  try {
+    const move = handlers.get("cloud-send:team-bring-move");
+    await assert.rejects(move({}, "atlas-bot-1"), { message: "en:native.teamMove.openTeam" });
+    language = "pt-br";
+    await assert.rejects(move({}, "atlas-bot-1"), { message: "pt-br:native.teamMove.openTeam" });
+  } finally { main.close(); }
 });

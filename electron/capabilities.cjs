@@ -52,6 +52,12 @@ function linuxLocalControlSupport(platform, env) {
   });
 }
 
+/** Computer control's helper is gone, or the system refused to run it: access denied (os error 5), or Windows Security
+ * found it unsafe (os error 225, ERROR_VIRUS_INFECTED). */
+function driverBlocked(reason) {
+  return /binary not found|is missing|ENOENT|EPERM|EACCES|os error (?:2|5|225)\b|access is denied|virus/i.test(String(reason ?? ""));
+}
+
 function localComputerReady(platform, connection) {
   const validLegacyConnection = connection &&
     (!Object.hasOwn(connection, "status") || connection.status === "ready") &&
@@ -88,6 +94,8 @@ function desktopCapabilities({
   packaged = false,
   localConnection = null,
   homeDir = require("node:os").homedir(),
+  // Whether the page draws the window's frame now.
+  frame = true,
   // A remote server's page: this computer's screen, voice and local control are never on offer.
   remote = false,
 } = {}) {
@@ -111,12 +119,14 @@ function desktopCapabilities({
     screenPreview.reasonCode =
       hostPlatform === "linux" ? "headless-session" : "unsupported-platform";
   }
+  // Off the Mac the page listens itself and Fish Audio turns each clip into text (src/lib/fish-speech.ts).
+  const fishListening = hostPlatform === "win32" || hostPlatform === "linux";
   const dictation = {
-    available: isMac,
-    engine: isMac ? "apple-speech" : "none",
+    available: isMac || fishListening,
+    engine: isMac ? "apple-speech" : fishListening ? "fish-audio" : "none",
     onDevice: isMac,
   };
-  if (!isMac) dictation.reasonCode = "unsupported-platform";
+  if (!dictation.available) dictation.reasonCode = "unsupported-platform";
   const localComputer = {
     available: localAvailable,
     support:
@@ -156,7 +166,9 @@ function desktopCapabilities({
   if (!localAvailable) {
     localComputer.reasonCode =
       localConnection?.reasonCode ??
-      (hostPlatform === "darwin" ? "cua-driver-unavailable" : "unsupported-platform");
+      (hostPlatform === "darwin" || hostPlatform === "win32"
+        ? driverBlocked(localConnection?.reason) ? "cua-driver-blocked" : "cua-driver-unavailable"
+        : "unsupported-platform");
   }
 
   if (remote) {
@@ -195,7 +207,8 @@ function desktopCapabilities({
       homeDir: remote ? "" : homeDir,
     },
     windowChrome:
-      isMac ? "mac-inset" : hostPlatform === "win32" ? "win-caption" : "native",
+      isMac ? "mac-inset" : hostPlatform === "win32" && frame ? "win-caption" : "native",
+    windowFrame: frame !== false,
     screenPreview,
     dictation,
     localComputer,
@@ -212,6 +225,7 @@ function connectionEnabled(platform, connection) {
 module.exports = {
   connectionEnabled,
   desktopCapabilities,
+  driverBlocked,
   linuxLocalControlSupport,
   linuxSession,
   localComputerReady,

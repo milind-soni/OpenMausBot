@@ -5,6 +5,7 @@ import {
   FULL_FRAME_MS,
   GLYPH_EASE_MS,
   MOTION,
+  SMALL_MASCOT_PX,
   SMOOTH_STEP_PX,
   frameIntervalFor,
   morphUnitsPerMs,
@@ -47,11 +48,22 @@ describe("mascot cadence", () => {
   });
 
   it("runs real motion at full rate", () => {
-    expect(delay("working", 36)).toBeCloseTo(FULL_FRAME_MS);
-    expect(delay("celebrate", 24)).toBeCloseTo(FULL_FRAME_MS);
-    expect(delay("idle", 24, { blinkingOrSpinning: true })).toBeCloseTo(FULL_FRAME_MS);
-    expect(delay("spawning", 64, { stateElapsedMs: 100 })).toBeCloseTo(FULL_FRAME_MS);
-    expect(delay("spawning", 64, { stateElapsedMs: 5_000 })).toBeGreaterThan(30);
+    expect(delay("working", 96)).toBeCloseTo(FULL_FRAME_MS);
+    expect(delay("celebrate", 96)).toBeCloseTo(FULL_FRAME_MS);
+    expect(delay("idle", 96, { blinkingOrSpinning: true })).toBeCloseTo(FULL_FRAME_MS);
+    expect(delay("spawning", 96, { stateElapsedMs: 100 })).toBeCloseTo(FULL_FRAME_MS);
+    expect(delay("spawning", 96, { stateElapsedMs: 5_000 })).toBeGreaterThan(30);
+  });
+
+  it("draws row, chip and header mascots at most 20 times a second", () => {
+    for (const size of [24, 36, 42, SMALL_MASCOT_PX]) {
+      expect(delay("working", size)).toBeGreaterThan(40);
+      expect(delay("working", size)).toBeLessThanOrEqual(50);
+      expect(delay("celebrate", size)).toBeLessThanOrEqual(50);
+      expect(delay("idle", size, { blinkingOrSpinning: true })).toBeLessThanOrEqual(50);
+      expect(delay("idle", size, { blinkingOrSpinning: true })).toBeGreaterThan(40);
+    }
+    expect(delay("working", SMALL_MASCOT_PX + 1)).toBeCloseTo(FULL_FRAME_MS);
   });
 
   it("holds still with no motion strength", () => {
@@ -72,13 +84,13 @@ describe("mascot cadence", () => {
   it("draws an alert glyph's fades at full rate and rests between them", () => {
     const glyph = EFFECTS.confused!.glyph!;
     const shown = glyph.period - glyph.hold;
-    const at = (position: number) => delay("confused", 28, { stateElapsedMs: glyph.period * 3 + position });
+    const at = (position: number) => delay("confused", 112, { stateElapsedMs: glyph.period * 3 + position });
     expect(at(shown - 400)).toBeGreaterThan(2 * FULL_FRAME_MS);
     expect(at(shown - 400)).toBeLessThanOrEqual(400);
     expect(at(shown + 10)).toBeCloseTo(FULL_FRAME_MS);
     expect(at(shown + GLYPH_EASE_MS + 100)).toBeGreaterThan(2 * FULL_FRAME_MS);
     expect(at(glyph.period - 10)).toBeCloseTo(FULL_FRAME_MS);
-    expect(delay("confused", 28, { stateElapsedMs: glyph.period * 3 + shown + 10, showGlyphs: false })).toBeGreaterThan(2 * FULL_FRAME_MS);
+    expect(delay("confused", 112, { stateElapsedMs: glyph.period * 3 + shown + 10, showGlyphs: false })).toBeGreaterThan(2 * FULL_FRAME_MS);
   });
 
   it("follows an expression change until it settles", () => {

@@ -6,6 +6,7 @@ import { launchVerificationServer, runControlOmb, type VerificationServer } from
 import { waitForExit } from "../../server/testing/cleanup.ts";
 import { ensureUiBrowser } from "./control-omb-ui.ts";
 import { fixtureApi, mountPreview, type MountedPreview } from "./preview-fixture.ts";
+import { NOTICES } from "../../src/lib/notices.ts";
 
 const enabled = process.env.OMB_UI_E2E === "1";
 if (!enabled) console.log("skipping mobile code-block UI: set OMB_UI_E2E=1 for isolated browser qualification");
@@ -115,6 +116,8 @@ async function connect(url: string) {
     await request("Runtime.enable");
     await request("Emulation.setDeviceMetricsOverride", { width: 1100, height: 900, deviceScaleFactor: 1, mobile: false });
     await cdp.request("Browser.grantPermissions", { origin: new URL(preview.previewUrl).origin, permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"] });
+    // The notices (the Boat card and the like) are not this test's subject, and on a phone one covers the last block.
+    await request("Page.addScriptToEvaluateOnNewDocument", { source: `try { for (const notice of ${JSON.stringify(NOTICES)}) localStorage.setItem(notice, "1"); } catch {}` });
     await request("Page.navigate", { url: preview.previewUrl });
     await expect.poll(() => evaluate(`Boolean(document.querySelector('textarea[aria-label="Message Pepper"]'))`), { timeout: 120_000 }).toBe(true);
     await evaluate(`document.querySelector('textarea[aria-label="Message Pepper"]').focus()`);

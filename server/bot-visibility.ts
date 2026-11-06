@@ -5,8 +5,11 @@
 // transcript or a delegation would otherwise carry a restricted bot's words to people who cannot see it.
 import { z } from "zod";
 
+import { accessFromVisibility, entryMatches, higherLevel, sharedLevel, type BotAccess, type BotAccessLevel } from "../shared/bot-access.ts";
+import { botOwner, type OwnedBot } from "../shared/bot-owner.ts";
 import type { BotVisibility } from "../shared/wire.ts";
 import { audienceIncludes, type Audience } from "./audience.ts";
+import { SHARED_CHAT_TITLE } from "../shared/wire.ts";
 
 export type { BotVisibility };
 
@@ -59,10 +62,6 @@ export function isRestricted(value: unknown): boolean {
   return storedVisibility(value) !== "everyone";
 }
 
-function entryMatches(entry: string, email: string): boolean {
-  return entry.startsWith("@") ? email.endsWith(entry) && email.length > entry.length : entry === email;
-}
-
 export function viewerSees(viewer: Viewer, visibility: unknown): boolean {
   if (viewer.kind === "all") return true;
   const stored = storedVisibility(visibility);
@@ -70,6 +69,44 @@ export function viewerSees(viewer: Viewer, visibility: unknown): boolean {
   if (stored === "admins") return false;
   const email = viewer.email?.trim().toLowerCase();
   return Boolean(email && email.includes("@") && stored.people.some((entry) => entryMatches(entry, email)));
+}
+
+const accessSchema = z.object({
+  everyone: z.enum(["none", "view", "chat", "edit"]),
+  people: z.record(z.string().max(320), z.enum(["view", "chat", "edit"])),
+}).strict();
+
+/** A bot's sharing as a request sends it: every entry an address or @domain, at most MAX_VISIBILITY_PEOPLE of them. */
+export function parseBotAccess(value: unknown): { ok: true; access: BotAccess } | { ok: false; error: string } {
+  const parsed = accessSchema.safeParse(value);
+  if (!parsed.success) return { ok: false, error: 'access must be { "everyone": "none" | "view" | "chat" | "edit", "people": { email: "view" | "chat" | "edit" } }' };
+  const people: Record<string, "view" | "chat" | "edit"> = {};
+  for (const [raw, level] of Object.entries(parsed.data.people)) {
+    const entry = raw.trim().toLowerCase();
+    if (!ENTRY.test(entry)) return { ok: false, error: `"${raw.slice(0, 80)}" is not an email address` };
+    people[entry] = level;
+  }
+  if (Object.keys(people).length > MAX_VISIBILITY_PEOPLE) return { ok: false, error: `at most ${MAX_VISIBILITY_PEOPLE} people` };
+  return { ok: true, access: { everyone: parsed.data.everyone, people } };
+}
+
+export type AccessBot = OwnedBot & { visibility?: unknown; access?: unknown };
+
+/** The bot's sharing; one set before levels existed means what its visibility meant. A damaged stored value gives every
+ * member who sees the bot no more than viewing it. */
+export function accessOf(bot: AccessBot): BotAccess {
+  if (bot.access === undefined) return accessFromVisibility(storedVisibility(bot.visibility));
+  const parsed = parseBotAccess(bot.access);
+  return parsed.ok ? parsed.access : { everyone: "none", people: {} };
+}
+
+/** What a Team Cloud member may do with the bot. Seeing it is still its visibility's to decide, which an access change
+ * keeps in step; the owner can always edit; anyone who sees it can at least view it. */
+export function memberLevel(bot: AccessBot, email: string | undefined): BotAccessLevel {
+  const address = email?.trim().toLowerCase() ?? "";
+  if (!viewerSees({ kind: "member", email: address }, bot.visibility)) return "none";
+  if (address && botOwner(bot) === address) return "edit";
+  return higherLevel(sharedLevel(accessOf(bot), address), "view");
 }
 
 export function sameAudience(a: unknown, b: unknown): boolean {
@@ -118,10 +155,9 @@ export function roomFeeds(memberVisibilities: readonly unknown[], botVisibility:
   return memberVisibilities.every((visibility) => audienceWithin(botVisibility, visibility));
 }
 
-export interface VisibilityBot {
+export interface VisibilityBot extends AccessBot {
   id: string;
   threadId: string;
-  visibility?: unknown;
   section?: string;
   avatarUrl?: string | null;
   tasks?: ReadonlyArray<{ threadId: string }>;
@@ -170,6 +206,15 @@ export class VisibleSet {
   /** A non-admin session, even one that can see every bot: what only an admin reads still stays off its copy. */
   get member(): boolean {
     return this.viewer.kind === "member";
+  }
+
+  /** What this viewer may do with the bot: an admin edits every bot it sees; off a Team Cloud a member chats with every
+   * bot they see, as before levels; on one, the bot's sharing decides (memberLevel). */
+  level(id: string): BotAccessLevel {
+    if (!this.bot(id)) return "none";
+    if (this.viewer.kind === "all") return "edit";
+    const bot = this.audiences ? this.bots.get(id) : undefined;
+    return bot ? memberLevel(bot, this.viewer.email) : "chat";
   }
 
   bot(id: string): boolean {
@@ -341,11 +386,22 @@ export interface FrameContext {
  * On a Team Cloud an admin gets the bot whole but, like a member, only the conversations they may read. */
 export function memberBot<T extends object>(bot: T, visible: VisibleSet): T {
   if (visible.everything) return visible.member ? withoutServerAlias(bot) : bot;
-  const shown = visible.filtersThreads ? shownConversations(bot, visible) : bot;
+  const shown = visible.filtersThreads ? withLevel(shownConversations(bot, visible), visible) : bot;
   if (!visible.member) return shown;
   const { visibility: _visibility, vpsAlias: _vpsAlias, ...rest } = shown as T & { visibility?: unknown; peers?: unknown; vpsAlias?: unknown };
   const peers = Array.isArray(rest.peers) ? (rest.peers as unknown[]).filter((id): id is string => typeof id === "string" && visible.bot(id)) : undefined;
   return { ...rest, ...(peers ? { peers } : {}) } as T;
+}
+
+/** On a Team Cloud each person's copy says what they may do with the bot; whoever can edit it also gets its sharing
+ * (an older bot's as its visibility meant it), and nobody else does. */
+function withLevel<T extends object>(bot: T, visible: VisibleSet): T {
+  const record = bot as T & AccessBot & { id?: unknown };
+  if (typeof record.id !== "string") return bot;
+  const yourAccess = visible.level(record.id);
+  const { access: _access, ...rest } = record;
+  const audience = isRestricted(record.visibility) ? { onlyPeopleAdded: true as const } : {};
+  return (yourAccess === "edit" ? { ...rest, access: accessOf(record), yourAccess, ...audience } : { ...rest, yourAccess, ...audience }) as T;
 }
 
 /** What only the bot's selected conversation carries, dropped when that conversation is someone else's. */
@@ -375,7 +431,14 @@ function shownConversations<T extends object>(bot: T, visible: VisibleSet): T {
     if (main) next.threadId = main; else delete next.threadId;
     out = next;
   }
-  return out as T;
+  return namedSharedChat(out) as T;
+}
+
+/** A team bot's main chat goes by what it is, so nobody takes it for one of their own. A member's own MausBot has none. */
+function namedSharedChat(bot: Record<string, unknown>): Record<string, unknown> {
+  const main = bot.mainThreadId, tasks = bot.tasks;
+  if (typeof main !== "string" || !Array.isArray(tasks) || (bot.defaultBot as { person?: unknown } | undefined)?.person) return bot;
+  return { ...bot, tasks: tasks.map((task: { threadId?: unknown; private?: unknown } | null) => (task?.threadId === main && task.private !== true ? { ...task, title: SHARED_CHAT_TITLE, sharedChat: true } : task)) };
 }
 
 function teamConversation(tasks: readonly unknown[]): string | undefined {

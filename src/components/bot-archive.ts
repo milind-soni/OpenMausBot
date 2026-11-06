@@ -24,8 +24,15 @@ export function announceArchiveNotice(notice: ArchiveNotice | null): boolean {
   return listeners.size > 0;
 }
 
+/** A Chief of Staff its delete dialog offers to archive instead, keeping its chats: never the place's own MausBot, and
+ * never the last active bot. */
+export function archivableChief(bots: readonly Bot[], id: string): Bot | undefined {
+  const active = bots.filter((candidate) => !candidate.hidden);
+  return active.length > 1 ? active.find((candidate) => candidate.id === id && candidate.chiefOfStaff && !candidate.defaultBot) : undefined;
+}
+
 /**
- * Archives a bot already checked with currentArchivableBot, moves to another bot when it was the open one, and reports
+ * Archives a bot already checked with currentArchivableBot (or archivableChief), moves to another bot when it was the open one, and reports
  * through `notify`: nothing first, then the Undo notice or the error.
  */
 export async function archiveBotWithNotice(bot: Bot, context: {
@@ -39,9 +46,10 @@ export async function archiveBotWithNotice(bot: Bot, context: {
   const activeBots = context.bots.filter((candidate) => !candidate.hidden);
   notify(null);
   try {
+    // A Chief stops being one as it is archived; it comes back as an ordinary bot.
     const response = await api(`/api/bots/${bot.id}`, {
       method: "PATCH",
-      body: JSON.stringify({ hidden: true }),
+      body: JSON.stringify({ hidden: true, ...(bot.chiefOfStaff ? { chiefOfStaff: false } : {}) }),
     });
     dispatch({ type: "botPatched", bot: response.bot });
     if (context.selectedId === bot.id) {

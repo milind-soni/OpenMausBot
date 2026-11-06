@@ -1,6 +1,6 @@
 import { Children, isValidElement, type EffectCallback, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Action, AppState, Bot, Group } from "@/state/store";
+import type { Action, AppState, Bot, Group, Task } from "@/state/store";
 
 const fixture = vi.hoisted(() => ({
   values: [] as unknown[], index: 0, advanced: false, phone: false, admin: null as boolean | null,
@@ -33,7 +33,7 @@ vi.mock("./MenuMotion", () => ({
 }));
 vi.mock("./DesktopCapabilities", async () => {
   const { initialDesktopCapabilities } = await import("@/lib/desktop");
-  return { useDesktopCapabilities: () => ({ capabilities: initialDesktopCapabilities() }) };
+  return { useDesktopCapabilities: () => ({ capabilities: initialDesktopCapabilities() }), windowFramed: () => false };
 });
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.advanced }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
@@ -293,6 +293,41 @@ describe("dragging a bot", () => {
   });
 });
 
+describe("bots that are working or waiting on the person", () => {
+  const busy = (id: string, extra: Partial<Bot>) => {
+    fixture.state = { ...fixture.state, bots: fixture.state.bots.map((item) => (item.id === id ? { ...item, ...extra } : item)) };
+  };
+
+  it("move to the top of their own list, in the person's order, and go back when done", () => {
+    busy("cleo", { busy: true });
+    busy("bea", { activity: "waiting-on-you" });
+    busy("echo", { busy: true });
+    expect(listed()).toEqual(["bea", "cleo", "atlas", "echo", "dodo"]);
+    busy("cleo", { busy: false });
+    busy("bea", { activity: "idle" });
+    busy("echo", { busy: false });
+    expect(listed()).toEqual(["atlas", "bea", "cleo", "dodo", "echo"]);
+  });
+
+  it("count a working thread, but not a wait on a teammate", () => {
+    busy("cleo", { tasks: [{ threadId: "c1", title: "Run", createdAt: 1, busy: true } as Task] });
+    busy("bea", { waitingForTeammates: true });
+    expect(listed()).toEqual(["cleo", "atlas", "bea", "dodo", "echo"]);
+  });
+
+  it("never store the shown order: Alt+Up/Down and drops use the person's own order", () => {
+    busy("cleo", { busy: true });
+    row("atlas").botDrag!.step("atlas", 1);
+    expect(actions()).toEqual([{ type: "botsOrdered", botIds: ["bea", "atlas", "cleo"] }]);
+    fixture.dispatch.mockClear();
+    // A drop on the list itself finds its row in the shown order (cleo first) and places it by the person's own order.
+    drag("atlas");
+    laidOut("cleo", "atlas", "bea");
+    section(BOTS_SECTION_ID).onDrop(at(190) as never);
+    expect(actions()).toEqual([{ type: "botsOrdered", botIds: ["bea", "atlas", "cleo"] }]);
+  });
+});
+
 describe("who may drag a bot: whoever the bot menu offers Move to department", () => {
   it("gives a Team Cloud member without the admin scope no row to drag and no Alt+Up/Down, and starts no drag", () => {
     const drawnEarlier = row("atlas").botDrag!;
@@ -395,5 +430,34 @@ describe("a bot's menu in Simple", () => {
   it("offers only New department… to a bot in none, when there are no departments yet", () => {
     fixture.state = { ...fixture.state, sections: [], bots: [bot("atlas"), bot("bea")] };
     expect(open(menuProps("atlas")).map(label)).toEqual(["New department…"]);
+  });
+});
+
+describe("deleting a Chief of Staff", () => {
+  type MenuProps = Parameters<typeof BotContextMenu>[0];
+  const askToDelete = (target: Bot) => (render().find((node) => node.type === BotContextMenu)!.props as unknown as MenuProps).onDelete(target);
+  const openDialog = () => render().find((node) => node.type === ConfirmDialog && node.props.open === true);
+
+  it("offers Archive first, which keeps its chats, and archives it as an ordinary bot", async () => {
+    const chief = bot("atlas", { chiefOfStaff: true });
+    fixture.state = { ...fixture.state, bots: [chief, bot("bea")] };
+    askToDelete(chief);
+    const dialog = openDialog()!;
+    expect(dialog.props.body).toContain("Archive it instead to keep every conversation");
+    const alternative = dialog.props.alternative as { label: string; onClick: () => void };
+    expect(alternative.label).toBe("Archive instead");
+    alternative.onClick();
+    await vi.waitFor(() => expect(fixture.requests).toContainEqual({ path: "/api/bots/atlas", method: "PATCH", body: { hidden: true, chiefOfStaff: false } }));
+    expect(openDialog()).toBeUndefined();
+  });
+
+  it("offers nothing else for any other bot, or for the last bot there is", () => {
+    askToDelete(bot("bea"));
+    expect(openDialog()!.props.alternative).toBeUndefined();
+    const chief = bot("atlas", { chiefOfStaff: true });
+    fixture.values = [];
+    fixture.state = { ...fixture.state, bots: [chief] };
+    askToDelete(chief);
+    expect(openDialog()!.props.alternative).toBeUndefined();
   });
 });

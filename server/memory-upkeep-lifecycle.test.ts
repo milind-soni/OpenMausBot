@@ -144,9 +144,18 @@ describe("scheduled memory upkeep", () => {
       expect(generateText).toHaveBeenCalledTimes(1);
       expect(generateText.mock.calls[0]![0]).toContain(marker);
       const stateFile = join(DATA_DIR, "memory-upkeep.json");
+      // State writes are coalesced per tick, so a tidy that finished before the held dream is saved
+      // when the loop stops; the held step's own report is what must never appear.
+      const savedState = () => {
+        if (!existsSync(stateFile)) return {};
+        const saved = JSON.parse(readFileSync(stateFile, "utf8")) as { bots?: Record<string, Record<string, unknown>> };
+        const bot = { ...saved.bots?.[BOT.id] };
+        if (step === "dream") delete bot.lastTidy;
+        return bot;
+      };
       const snapshot = () => ({
         notebook: memory(), topic: readMemoryTopic(BOT.id, "project.md"), archive: readMemoryTopic(BOT.id, "archive.md"),
-        state: existsSync(stateFile) ? readFileSync(stateFile, "utf8") : null,
+        state: savedState(),
       });
       const before = snapshot();
       if (action === "freeze") freeze.freeze("https://fixture.example");

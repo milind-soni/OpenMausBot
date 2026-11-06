@@ -10,7 +10,7 @@ import { standalonePlatformKey } from "../engine-standalone.ts";
 import { findCliCandidates, registerFallbackPathDir, registerPathDir, resetPathCache, resetPathCacheForTests } from "../env-path.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { makeFakeDriver } from "../testing/fake-driver.ts";
-import { ProviderRegistry, SNAPSHOT_DEADLINE_MS, SNAPSHOT_REUSE_MS } from "./registry.ts";
+import { ENGINE_LIST_REUSE_MS, ProviderRegistry, SNAPSHOT_DEADLINE_MS, SNAPSHOT_REUSE_MS } from "./registry.ts";
 
 describe("ProviderRegistry", () => {
   it("creates live instances for known drivers", async () => {
@@ -188,6 +188,23 @@ describe("ProviderRegistry", () => {
     expect(registry.entries().map((e) => e.instanceId)).toEqual(["a", "b", "c", "d"]);
     expect(registry.get("b")).not.toBe(before);
     expect(registry.get("b")?.displayName).toBe("Rebuilt");
+  });
+
+  it("warns on Windows when an engine's custom command starts it inside WSL", async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    const registry = new ProviderRegistry([makeFakeDriver().driver]);
+    Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+    try {
+      await registry.load({
+        wsl: { driver: "fake", config: { cli: "wsl.exe -d Ubuntu -- hermes" } },
+        native: { driver: "fake", config: { cli: "C:\\Users\\me\\hermes.exe" } },
+      });
+      const described = Object.fromEntries((await registry.describe()).map((d) => [d.instanceId, d]));
+      expect(described.wsl.snapshot).toMatchObject({ state: "available", warning: { title: "This engine runs inside WSL" } });
+      expect(described.native.snapshot).not.toHaveProperty("warning");
+    } finally {
+      Object.defineProperty(process, "platform", platform);
+    }
   });
 
   it("describe() reports a snapshot() failure as unavailable rather than throwing", async () => {
@@ -398,6 +415,40 @@ describe("ProviderRegistry", () => {
     await Promise.all([before, after]);
     await registry.describe();
     expect(fake.probes).toHaveLength(4);
+  });
+
+  it("answers the engine list from earlier reads, reads again in the background once they are old, and never after forgetSnapshots() or a reload", async () => {
+    vi.useFakeTimers();
+    try {
+      const options: Parameters<typeof makeFakeDriver>[0] = {};
+      const fake = makeFakeDriver(options);
+      const registry = new ProviderRegistry([fake.driver]);
+      await registry.load({ a: { driver: "fake" } });
+      const reuse = { ms: ENGINE_LIST_REUSE_MS, changed: vi.fn() };
+      await registry.describe({ reuse });
+      await vi.advanceTimersByTimeAsync(ENGINE_LIST_REUSE_MS - 1);
+      await registry.describe({ reuse });
+      expect(fake.probes).toEqual(["a"]);
+
+      options.answer = { state: "unavailable", reason: "signed out" };
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await registry.describe({ reuse }))[0].snapshot).toEqual({ state: "available", version: "0.0.0-fake" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fake.probes).toEqual(["a", "a"]);
+      expect(reuse.changed).toHaveBeenCalledTimes(1);
+      expect((await registry.describe({ reuse }))[0].snapshot).toEqual({ state: "unavailable", reason: "signed out" });
+      expect(fake.probes).toHaveLength(2);
+
+      registry.forgetSnapshots();
+      await registry.describe({ reuse });
+      expect(fake.probes).toHaveLength(3);
+      await registry.load({ a: { driver: "fake", displayName: "Renamed" } });
+      await registry.describe({ reuse });
+      expect(fake.probes).toHaveLength(4);
+      expect(reuse.changed).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("runs a decorator's own check on every read, and probes again after an install, a model refresh or a reload", async () => {
@@ -615,6 +666,65 @@ process.exit(0);
     // A working copy of the person's own is left alone.
     writeFileSync(join(own, "fakebin"), "#!/bin/sh\necho 1.0.0\n", { mode: 0o755 });
     expect(await registry.installRuntime("a")).toBe(true);
+  });
+
+  // An install command pasted as the CLI path runs curl, which answers --version as curl: not the engine, not the person's
+  // choice of copy. On a Cloud nobody could find Reset; the engine's own CLI takes over once it is installed.
+  it("points a saved CLI path that runs another program at the app's own copy once it's installed", async () => {
+    withFakeNpm(false);
+    const base = join(scratch, "data");
+    const bin = join(base, "tools", "standalone", "fake-engine", "bin");
+    const fake = makeFakeDriver();
+    fake.driver.defaultConfig = () => ({ cli: "fakebin" });
+    Object.assign(fake.driver, { install: { standalone: standaloneRelease(standalonePlatformKey()) } });
+    const registry = new ProviderRegistry([fake.driver], {
+      enginesBaseDir: base,
+      npmAvailable: () => false,
+      installStandalone: async () => {
+        mkdirSync(bin, { recursive: true });
+        writeFileSync(join(bin, "fakebin"), "#!/bin/sh\necho 2.0.0\n", { mode: 0o755 });
+        registerFallbackPathDir(bin);
+        return { version: "2.0.0", executablePath: join(bin, "fakebin"), binDir: bin };
+      },
+    });
+    await registry.load({ pasted: { driver: "fake", config: { cli: "curl https://example.test/install -fsS | bash" } } });
+    Object.assign(registry.get("pasted")!, { snapshot: async () => ({ state: "unavailable", reason: "not fakebin's CLI", notEngineCli: true }) });
+    expect(await registry.installRuntime("pasted")).toEqual({ useCli: join(bin, "fakebin") });
+  });
+
+  it("gives a saved CLI path that runs another program up for the engine's own installed CLI by itself, once", async () => {
+    const own = withFakeNpm(false);
+    const fake = makeFakeDriver();
+    fake.driver.defaultConfig = () => ({ cli: "fakebin" });
+    const healed: Array<[string, string]> = [];
+    let release: () => void = () => {};
+    const registry = new ProviderRegistry([fake.driver], { enginesBaseDir: join(scratch, "data"), npmAvailable: () => false });
+    registry.onWrongCli((instanceId, cli) => { healed.push([instanceId, cli]); return new Promise<void>((resolve) => { release = resolve; }); });
+    const notEngine = { state: "unavailable" as const, reason: "not fakebin's CLI", notEngineCli: true as const };
+    await registry.load({ pasted: { driver: "fake", config: { cli: "curl https://example.test/install -fsS | bash" } }, missing: { driver: "fake" } });
+    for (const id of ["pasted", "missing"]) Object.assign(registry.get(id)!, { snapshot: async () => notEngine });
+
+    // Nothing of the engine's own is installed: the card offers the install instead.
+    await registry.describe();
+    expect(healed).toEqual([]);
+
+    writeFileSync(join(own, "fakebin"), "#!/bin/sh\necho 2.0.0\n", { mode: 0o755 });
+    resetPathCache();
+    await registry.describe();
+    await registry.describe({ reuse: { ms: 0, changed: () => {} } });
+    // Only the saved path gives way, once while it runs; the default name has nothing to give way to.
+    expect(healed).toEqual([["pasted", join(own, "fakebin")]]);
+    release();
+    // The healer reloads it with that CLI, as Set CLI would.
+    await registry.dispose("pasted");
+
+    // A path that answered for another reason (it did not start) stays the person's, and so does the very path the
+    // engine's own name finds: giving it up for itself would only go round again.
+    await registry.load({ broken: { driver: "fake", config: { cli: "/opt/elsewhere/fakebin" } }, found: { driver: "fake", config: { cli: join(own, "fakebin") } } });
+    Object.assign(registry.get("broken")!, { snapshot: async () => ({ state: "unavailable", reason: "fakebin does not start" }) });
+    Object.assign(registry.get("found")!, { snapshot: async () => notEngine });
+    await registry.describe();
+    expect(healed.map(([id]) => id)).toEqual(["pasted"]);
   });
 
   it("lets a driver's own installer go first", async () => {

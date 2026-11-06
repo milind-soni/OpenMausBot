@@ -9,6 +9,7 @@ import type { WorkspaceBackupSummary } from "../shared/workspace-backup.ts";
 import { resolveRequestAuth } from "./request-auth.ts";
 import { SessionRegistry } from "./sessions.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
+import { userError, userErrorThrown } from "./user-errors.ts";
 
 const archive = vi.hoisted(() => ({ create: vi.fn(), stage: vi.fn(), commit: vi.fn(), remove: vi.fn() }));
 vi.mock("./workspace-backup.ts", async (original) => ({
@@ -102,6 +103,14 @@ afterEach(async () => {
 function post(path: string, body: unknown, token = admin.token) {
   return fetch(`${url}${path}`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
 }
+
+it("carries a fixed backup refusal and its redacted string path to the client", async () => {
+  const params = { path: "workspaces/ws/project/loop" };
+  archive.create.mockRejectedValueOnce(userErrorThrown("serverError.backup.recursiveLink", params));
+  const response = await post("/api/workspace-backup/export", { password: PASSWORD });
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual(userError("serverError.backup.recursiveLink", params));
+});
 
 it.each(["revoke", "logout"])("keeps session controls authenticated and usable during a held export (%s)", async (action) => {
   let started!: () => void;

@@ -116,7 +116,7 @@ export async function runCodexOneShot(input: CodexOneShotInput): Promise<string>
   try {
     return await new Promise<string>((resolve, reject) => {
       const argv = codexBackgroundArgs({ model: input.model, modelProvider: input.modelProvider, providerArgs: input.providerArgs, cwd });
-      const child = input.spawn(input.cli, argv, { cwd, env: input.env, stdio: ["pipe", "pipe", "pipe"] });
+      const child = input.spawn(input.cli, argv, { cwd, env: input.env, stdio: ["pipe", "pipe", "pipe"], botWork: true });
       const describe = input.describeError ?? ((message: string) => message.slice(0, 400));
       let settled = false;
       let closed = false;

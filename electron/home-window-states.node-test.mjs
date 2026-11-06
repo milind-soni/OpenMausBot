@@ -119,3 +119,44 @@ test("Remove from list on this computer's screen: the Admin first, then the wind
   w.url = `${CLOUD}/`;
   assert.throws(() => handlers.get("home:remove")({ sender: w.contents, senderFrame: w.contents.mainFrame }), /only available/);
 });
+
+// A computer whose bots moved to one Cloud of the person's while My Cloud is now another (several Clouds per account).
+const MOVED_TO = "https://omb-trial-1.fly.dev";
+test("a freeze that names another Cloud on the person's own list is theirs, never another account's; one not on it is said to be another account's", async () => {
+  const listed = world({ journal: null, marker: { frozen: true, cloud: CLIENT }, state: { ...connected(), clouds: [CLIENT_A] } });
+  await listed.home.show();
+  assert.deepEqual(listed.home.current(), { kind: "cloud", origin: CLIENT });
+  const unlisted = world({ journal: null, marker: { frozen: true, cloud: MOVED_TO }, state: { ...connected(), clouds: [CLIENT_A] } });
+  await unlisted.home.show();
+  assert.deepEqual(unlisted.home.view(), { screen: "signin", other: true });
+});
+
+test("My Cloud ending sends home only a computer that moved to that Cloud", async () => {
+  const held = connected({ status: "stopped", hold: { until: 1_900_000_000_000 } });
+  const elsewhere = world({ journal: { v: 1, phase: "done", cloud: { origin: CLIENT, account: "acct-1", machine: CLIENT }, doneAt: 1 }, state: held });
+  await elsewhere.home.show();
+  assert.deepEqual(elsewhere.home.current(), { kind: "cloud", origin: CLIENT }, "its Cloud goes on: still home");
+  const here = world({ state: held });
+  await here.home.show();
+  assert.deepEqual(here.home.current(), { kind: "computer" });
+  const unnamed = world({ state: { ...connected(), machine: { status: "stopped", hold: { until: 1_900_000_000_000 } } } });
+  await unnamed.home.show();
+  assert.deepEqual(unnamed.home.current(), { kind: "computer" }, "a hold that names no address is taken for the Cloud moved to");
+});
+
+test("Sign in never dead-ends: another account's sign-in ends first, then the browser signs in; one still good only looks again; one open in the browser opens again", async () => {
+  const other = world({ state: { ...connected(), account: { id: "acct-2", email: "else@example.test" } } });
+  await other.home.show();
+  assert.deepEqual(other.home.view(), { screen: "signin", other: true });
+  await other.home.signIn();
+  assert.deepEqual(other.signIns, ["out", "begin"]);
+  const good = world({ journal: null, marker: { frozen: true, cloud: MOVED_TO }, state: { ...connected(), clouds: [] } });
+  await good.home.show();
+  good.state = { ...good.state, clouds: [{ ...CLIENT_A, origin: MOVED_TO }] };
+  await good.home.signIn();
+  assert.deepEqual(good.signIns, [], "the same account never signs out");
+  assert.deepEqual(good.home.current(), { kind: "cloud", origin: MOVED_TO }, "it looked again");
+  const opening = world({ state: { status: "connecting", account: null } });
+  await opening.home.signIn();
+  assert.deepEqual(opening.signIns, ["reopen"]);
+});

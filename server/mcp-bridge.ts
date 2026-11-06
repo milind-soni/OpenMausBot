@@ -176,7 +176,7 @@ export function createGateInterceptor(options: {
         JSON.stringify({
           jsonrpc: "2.0",
           id: frame.id ?? null,
-          result: { content: [{ type: "text", text: state.held ? controlRefusal(state) : CONTROL_WAITED }], isError: true },
+          result: completeFor(frame.params?._meta, { content: [{ type: "text", text: state.held ? controlRefusal(state) : CONTROL_WAITED }], isError: true }),
         }),
       );
     });
@@ -206,7 +206,7 @@ export function createMcpBridgeInterceptor(
     if (frame && frame.method === "ping") {
       // Notifications have no `id` and require no response.
       if (frame.id !== undefined) {
-        options.answer(JSON.stringify({ jsonrpc: "2.0", id: frame.id, result: {} }));
+        options.answer(JSON.stringify({ jsonrpc: "2.0", id: frame.id, result: completeFor(frame.params?._meta, {}) }));
       }
       return;
     }
@@ -241,6 +241,16 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function failed(text: string): Record<string, unknown> {
   return { content: [{ type: "text", text }], isError: true };
+}
+
+const PROTOCOL_VERSION_META = "io.modelcontextprotocol/protocolVersion";
+
+/** A client on protocol revision 2026-07-28 or later rejects a result without resultType (the driver sends one), so an
+ * answer the bridge writes itself says it is complete. Older clients get the result as it was. */
+export function completeFor(meta: unknown, result: unknown): unknown {
+  const version = isObject(meta) ? meta[PROTOCOL_VERSION_META] : undefined;
+  if (typeof version !== "string" || version < "2026-07-28" || !isObject(result) || "resultType" in result) return result;
+  return { ...result, resultType: "complete" };
 }
 
 /** A tools/call request the agent waits on, as a relay sees it; anything else is not the relay's to answer. */
@@ -344,7 +354,7 @@ export function runMcpBridge(options: BridgeOptions): void {
     // Fail-closed: a relayed answer is the bridge's, never the driver's, so it is not journalled. The gate check the call
     // passed is then left without an entry, which keeps its request's journal incomplete, and an incomplete one never saves.
     tap?.leaveOut(frame.id);
-    const result = await relayed.catch((error: unknown) => failed(error instanceof Error ? error.message : String(error)));
+    const result = completeFor(frame.meta, await relayed.catch((error: unknown) => failed(error instanceof Error ? error.message : String(error))));
     respond(JSON.stringify({ jsonrpc: "2.0", id: frame.id, result }));
   };
   let sending: Promise<void> = Promise.resolve();

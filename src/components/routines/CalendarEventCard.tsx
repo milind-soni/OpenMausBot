@@ -6,7 +6,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { MAUS_COLORS, type MausState } from "@/lib/mascot";
 import { CALENDAR_SLOT_MINUTES } from "@/lib/routine-calendar";
-import { routineRunLabel } from "@/lib/routine-display";
+import { partlyDone, routineHeldNote, routineRunLabel } from "@/lib/routine-display";
 import type { RoutineRunStatus } from "@/lib/routines";
 import { intervalLabel, niceTime } from "@/lib/schedule-label";
 import type { Bot, Group } from "@/state/store";
@@ -59,7 +59,7 @@ export function CalendarEventCard({
   const ownerIds = isCall ? item.call.botIds : [run?.botId ?? routine?.botId ?? ""];
   const ownerBots = ownerIds.flatMap((id) => bots.find((bot) => bot.id === id) ?? []);
   const primary = ownerBots[0];
-  const name = isCall ? item.call.name : run?.routineName ?? routine?.name ?? "Automation";
+  const name = isCall ? item.call.name : run?.routineName ?? routine?.name ?? t("routines.event.automation");
   const color = isCall ? "var(--color-accent)" : primary ? MAUS_COLORS[primary.color] : "var(--color-ink-tertiary)";
   const paused = Boolean(routine && !run && !routine.enabled);
   const [previewDuration, setPreviewDuration] = useState(item.durationMinutes);
@@ -73,8 +73,8 @@ export function CalendarEventCard({
   const height = Math.max(16, (previewDuration / 60) * HOUR_HEIGHT);
   const fit = cardLayout(height);
   const who = isCall ? t(ownerBots.length === 1 ? "routines.botCountOne" : "routines.botCountMany", { count: ownerBots.length }) : room ? room.name : primary?.name;
-  const details = [name, niceTime(item.at), who, intervalCadence, paused ? t("routines.pausedSchedule") : statusLabel].filter(Boolean).join(" · ");
-  const cronHint = routine?.schedule.type === "cron" ? "Open this automation to change its repeating schedule and time zone." : "";
+  const details = [name, niceTime(item.at), who, intervalCadence, paused ? (routine && routineHeldNote(routine)) ?? t("routines.pausedSchedule") : statusLabel].filter(Boolean).join(" · ");
+  const cronHint = routine?.schedule.type === "cron" ? t("routines.event.cronMoveHint") : "";
 
   const beginResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -90,7 +90,7 @@ export function CalendarEventCard({
       document.removeEventListener("pointermove", move);
       document.removeEventListener("pointerup", up);
       if (next === item.durationMinutes) return;
-      if (recurring && !window.confirm("Resize this entire recurring series?")) {
+      if (recurring && !window.confirm(t("routines.event.resizeSeries"))) {
         setPreviewDuration(item.durationMinutes);
         return;
       }
@@ -125,7 +125,7 @@ export function CalendarEventCard({
         fit === "roomy" ? "px-1.5 py-1" : "px-1.5 py-0",
         paused && "border-dashed opacity-70",
         status === "cancelled" && "opacity-55",
-        (status === "failed" || status === "missed") && "border-danger/60",
+        (status === "failed" || status === "missed") && (run && partlyDone(run) ? "border-warning/60" : "border-danger/60"),
         selected && "z-20 ring-2 ring-accent ring-offset-1 ring-offset-app",
       )}
       style={{
@@ -158,7 +158,7 @@ export function CalendarEventCard({
       ) : (
         <div className="flex h-full min-w-0 items-center truncate text-[10px] font-semibold leading-none">{name}</div>
       )}
-      {isCall && <div onPointerDown={beginResize} className="absolute inset-x-1 bottom-0 h-1.5 cursor-ns-resize rounded-full opacity-0 transition group-hover:opacity-100" aria-label="Resize event"><div className="mx-auto mt-0.5 h-0.5 w-5 rounded-full bg-current opacity-50" /></div>}
+      {isCall && <div onPointerDown={beginResize} className="absolute inset-x-1 bottom-0 h-1.5 cursor-ns-resize rounded-full opacity-0 transition group-hover:opacity-100" aria-label={t("routines.event.resize")}><div className="mx-auto mt-0.5 h-0.5 w-5 rounded-full bg-current opacity-50" /></div>}
     </button>
   );
 }

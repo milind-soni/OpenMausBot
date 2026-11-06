@@ -16,17 +16,18 @@ export function RailStripIcon({ size }: { size: number }) {
   </svg>;
 }
 
-/** The sidebar's button that hides and shows the window's rail of places, while this window has one. It takes the look
- * of the top row's other buttons: Simple's, Advanced's, or Advanced's column when the sidebar shows only avatars. */
-export function ChromeRailToggle({ advanced, icons, style }: { advanced: boolean; icons: boolean; style?: CSSProperties }) {
+/** The button that hides and shows the window's rail of places, while this window has one: in the window frame's top
+ * bar (`bar`: that bar's button look), or else in the sidebar's top row, in the look of its other buttons: Simple's,
+ * Advanced's, or Advanced's column when the sidebar shows only avatars. */
+export function ChromeRailToggle({ advanced = false, icons = false, bar, style }: { advanced?: boolean; icons?: boolean; bar?: string; style?: CSSProperties }) {
   const rail = useChromeRail();
   if (!rail?.available) return null;
   const label = t(rail.hidden ? "rail.show" : "rail.hide");
   return <button type="button" data-rail-toggle aria-label={label} title={label} aria-expanded={!rail.hidden} style={style}
     onClick={() => setChromeRailHidden(!rail.hidden)}
-    className={advanced ? cn("flex shrink-0 items-center justify-center text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
-      icons ? "size-[46px] rounded-xl" : "size-8 rounded-full") : SIMPLE_TOP_TOGGLE}>
-    <RailStripIcon size={advanced && icons ? 20 : 18} />
+    className={bar ?? (advanced ? cn("flex shrink-0 items-center justify-center text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
+      icons ? "size-[46px] rounded-xl" : "size-8 rounded-full") : SIMPLE_TOP_TOGGLE)}>
+    <RailStripIcon size={bar ? 15 : advanced && icons ? 20 : 18} />
   </button>;
 }
 

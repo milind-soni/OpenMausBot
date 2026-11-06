@@ -5,13 +5,15 @@ import { cn } from "@/lib/cn";
 import { t, tFromServer } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { SkillRequestPreview } from "@/components/SkillRequestPreview";
-import { toolLabel } from "./ApprovalCard";
+import { titledCard, titledCardAction, toolLabel } from "./ApprovalCard";
 import { ASK_QUIET_ANSWER, ASK_QUIET_BUTTON, ASK_SECONDARY_BUTTON, AskDetail, AskHeader, askPrimary, type Asker } from "./AskCard";
-import { outboundSummary } from "@/lib/approval-summary";
+import { approvalDetailText, outboundSummary } from "@/lib/approval-summary";
 import { reviewedSkillSha256 } from "../../shared/skill-request";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useInboxOrigin } from "./InboxLine";
 import { yourComputerAsk } from "@/lib/your-computer";
+import { computerAskWords } from "@/lib/computer-ask";
+import { DESKTOP_DOWNLOAD_URL } from "../../shared/computer-ask";
 
 interface ApprovalLabels {
   [tool: string]: LocaleKey;
@@ -53,16 +55,24 @@ export function pendingApprovals(messages: Message[]): Pending[] {
       allowKey: m.card!.allowKey,
       allowSession: m.card!.allowSession,
       commandAllowlist: m.card!.commandAllowlist,
-      detail: m.card!.subtitle,
+      detail: approvalDetailText(m.card!),
       held: m.card!.held,
       heldCode: m.card!.heldCode,
     }));
 }
 
 export function spokenApprovalPrompt(pending: Pending, requester: string): string {
+  const turnOn = computerAskWords(pending.message.card, requester);
+  if (turnOn) return `${turnOn.line}. ${turnOn.reason}`;
   const ask = yourComputerAsk(pending.message.card, requester);
   if (ask) return `${requester}: ${ask.line}`;
-  if (pending.message.card?.teamSetupRequest) return `${requester}: ${pending.message.card.title} Review the details and choose ${pending.message.card.options[0]} or ${pending.message.card.options[1] ?? "Cancel"}.`;
+  const card = pending.message.card;
+  if (card && titledCard(card)) return t("approval.voice.titled", {
+    requester,
+    title: card.title,
+    allow: titledCardAction(card),
+    cancel: t("approval.action.cancel"),
+  });
   const isSkillRequest = isSkillApproval(pending);
   const isProfileRequest = isProfileApproval(pending);
   if (isSkillRequest) {
@@ -80,11 +90,12 @@ export function spokenApprovalPrompt(pending: Pending, requester: string): strin
     const title = pending.message.card?.title.trim() || t("approval.voice.defaultUpdateProfile");
     return t("approval.voice.profile", { requester, title });
   }
-  return t("approval.voice.command", { requester, tool: toolLabel(pending.tool), detail: pending.detail });
+  return t("approval.voice.command", { requester, tool: toolLabel(pending.tool), detail: card ? approvalDetailText(card) : pending.detail });
 }
 
 function label(pending: Pending): string {
-  if (pending.message.card?.teamSetupRequest) return pending.message.card.title;
+  const card = pending.message.card;
+  if (card && titledCard(card)) return card.title;
   if (isSkillApproval(pending)) {
     return pending.message.card?.skillRequest?.action === "update"
       ? t("approval.label.updateSkill")
@@ -110,18 +121,21 @@ const COMMAND_TOOLS = new Set(["Bash", "shell"]);
 function isDurable(pending: Pending): boolean {
   const card = pending.message.card;
   return isSkillApproval(pending) || isProfileApproval(pending) ||
-    Boolean(card?.teamSetupRequest) || Boolean(card?.modelRequest);
+    titledCard(card) || Boolean(card?.modelRequest);
 }
 
 /** What will happen, in plain words; the command shown whole when it is what will run, and everything the card holds
  * behind Details. */
-function approvalWords(pending: Pending, botName?: string): { line: string; summary?: string; inline?: string; detail: string } {
+function approvalWords(pending: Pending, botName?: string): { line: string; summary?: string; inline?: string; note?: string; detail: string } {
   const card = pending.message.card;
   const outbound = card ? outboundSummary(card) : undefined;
+  const turnOn = computerAskWords(card, botName ?? t("approval.someone"));
+  if (turnOn) return { line: turnOn.line, summary: turnOn.why ?? turnOn.reason, ...(turnOn.why ? { note: turnOn.reason } : {}), detail: "" };
   const ask = yourComputerAsk(card, botName ?? t("approval.someone"));
-  const detail = (pending.commandAllowlist?.command ?? ask?.detail ?? pending.detail).trim();
+  const detail = (pending.commandAllowlist?.command ?? ask?.detail ?? (card ? approvalDetailText(card) : pending.detail)).trim();
   if (outbound) return { line: outbound.headline, ...(outbound.summary ? { summary: outbound.summary } : {}), detail };
   if (ask) return { line: ask.line, detail };
+  if (card?.mcpRequest || card?.lendingLift) return { line: card.title, inline: detail, detail };
   if (isDurable(pending)) return { line: label(pending), detail };
   const action = COMMAND_TOOLS.has(pending.tool) ? t("approval.tool.runCommand") : toolLabel(pending.tool);
   return { line: botName ? t("approval.card.namedWantsTo", { name: botName, action }) : label(pending), inline: detail, detail };
@@ -156,7 +170,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
   const heldNote = outbound?.opaque && pending.heldCode === "approval.held.outbound"
     ? t("approval.opaqueCode")
     : tFromServer(pending.heldCode, pending.held);
-  const { line, summary, inline, detail } = approvalWords(pending, botName ?? asker?.name);
+  const { line, summary, inline, note, detail } = approvalWords(pending, botName ?? asker?.name);
   const detailsId = `approval-details-${pending.requestId}`;
   const hidden = detail && detail !== inline ? detail : "";
   const skill = pending.message.card?.skillRequest;
@@ -204,6 +218,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
       </div>
       {summary && <p dir="auto" className="mt-1.5 break-words text-[15px] font-medium leading-[22px] text-ink">{summary}</p>}
       {inline && <AskDetail text={inline} mono label={t("approval.aria.reviewDetails")} />}
+      {note && <p dir="auto" data-computer-ask-reason className="mt-1 break-words text-[13px] leading-[18px] text-ink-secondary">{note}</p>}
       {heldNote && (outbound ? (
         <p className="mt-2 flex items-center gap-1.5 text-[13px] leading-[18px] text-warning">
           <Send size={13} aria-hidden="true" className="shrink-0" />
@@ -251,8 +266,8 @@ export function PendingApprovalActions({
   const isRoutineRequest = isRoutineApproval(pending);
   const isSkillRequest = isSkillApproval(pending);
   const isProfileRequest = isProfileApproval(pending);
-  const isTeamSetup = Boolean(pending.message.card?.teamSetupRequest);
-  const durableRequest = isRoutineRequest || isSkillRequest || isProfileRequest || isTeamSetup;
+  const titled = titledCard(pending.message.card);
+  const durableRequest = isRoutineRequest || isSkillRequest || isProfileRequest || titled;
   const canRememberCommand = ownerOrAdmin === true && !durableRequest && !pending.allowKey && Boolean(pending.commandAllowlist);
   const reviewedSha256 = pending.message.card?.skillRequest
     ? reviewedSkillSha256(pending.message.card.skillRequest)
@@ -274,6 +289,23 @@ export function PendingApprovalActions({
   const marked = (action: string) => (tag ? { [`data-${tag}-action`]: action } : {});
   const showPrimary = part !== "more";
   const showMore = part !== "primary";
+  const turnOn = computerAskWords(pending.message.card, bot?.name ?? t("approval.someone"));
+  if (turnOn) {
+    if (!showPrimary) return null;
+    return (
+      <>
+        {turnOn.getApp && (
+          <a key="get" {...marked("get-app")} href={DESKTOP_DOWNLOAD_URL} target="_blank" rel="noreferrer" className={ASK_SECONDARY_BUTTON}>{turnOn.getApp}</a>
+        )}
+        <button key="deny" {...marked("deny")} type="button" onClick={() => decide("deny")} className={turnOn.turnOn ? ASK_SECONDARY_BUTTON : ASK_QUIET_ANSWER}>
+          {t("computerAsk.action.notNow")}
+        </button>
+        {turnOn.turnOn && (
+          <button key="allow" {...marked("allow")} type="button" onClick={() => decide("allow")} className={allow.className} style={allow.style}>{turnOn.turnOn}</button>
+        )}
+      </>
+    );
+  }
   const always = durableRequest ? null
     : bot && pending.allowKey
       ? { name: t("approval.action.alwaysAllow"), hint: t("approval.action.stopAsking", { name: bot.name, key: pending.allowKey }), run: () => decide("allow", true) }
@@ -305,10 +337,10 @@ export function PendingApprovalActions({
       {...marked("deny")}
       type="button"
       onClick={() => decide("deny")}
-      autoFocus={isTeamSetup}
+      autoFocus={titled}
       className={ASK_SECONDARY_BUTTON}
     >
-      {isRoutineRequest || isProfileRequest || isTeamSetup ? t("approval.action.cancel") : t("approval.action.deny")}
+      {pending.message.card?.lendingLift ? pending.message.card.options[1] : isRoutineRequest || isProfileRequest || titled ? t("approval.action.cancel") : t("approval.action.deny")}
     </button>,
     <button
       key="allow"
@@ -319,7 +351,7 @@ export function PendingApprovalActions({
       className={allow.className}
       style={allow.style}
     >
-      {isTeamSetup ? pending.message.card?.options[0] : isSkillRequest
+      {titled && pending.message.card ? titledCardAction(pending.message.card) : isSkillRequest
         ? pending.message.card?.skillRequest?.action === "update"
           ? t("approval.action.update")
           : t("approval.action.enable")

@@ -4,6 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 
 import { createLendingDialogs, serverAccessDetail } from "./lending-dialogs.mjs";
+import nativeText from "./native-text.cjs";
 
 function fakeDialog({ response = 1, picked = { canceled: true, filePaths: [] } } = {}) {
   const calls = [];
@@ -33,6 +34,46 @@ test("a picked folder is checked and lent read only; a cancelled picker lends no
   assert.equal(checked[0][0].path, "/Users/me/Plans");
   assert.equal(checked[0][0].write, false);
   assert.deepEqual({ path: folder.path, name: folder.name, write: folder.write }, { path: "/Users/me/Plans", name: "Plans", write: false });
+});
+
+test("the terminal is lent only after its warning's own yes, one question at a time; turning it off never asks", async () => {
+  for (const [response, lent] of [[0, true], [1, false], [-1, false]]) {
+    const { dialog, calls } = fakeDialog({ response });
+    let lends = 0;
+    await createLendingDialogs({ dialog, window: liveWindow, validate: named }).lendTerminal(true, async () => { lends += 1; });
+    assert.equal(lends, lent ? 1 : 0, `response ${response}`);
+    assert.equal(calls[0][1].defaultId, 1, "Cancel is the default");
+  }
+  let answer;
+  const slow = { showMessageBox: () => new Promise(resolve => { answer = resolve; }) };
+  const dialogs = createLendingDialogs({ dialog: slow, window: liveWindow, validate: named });
+  let lends = 0;
+  const first = dialogs.lendTerminal(true, async () => { lends += 1; });
+  await dialogs.lendTerminal(true, async () => { lends += 1; });
+  answer({ response: 0 });
+  await first;
+  assert.equal(lends, 1, "a second click while the question is open lends nothing more");
+  const off = fakeDialog();
+  let stopped = 0;
+  await createLendingDialogs({ dialog: off.dialog, window: liveWindow, validate: named }).lendTerminal(false, async () => { stopped += 1; });
+  assert.deepEqual([stopped, off.calls.length], [1, 0]);
+});
+
+test("the terminal warning follows the app's language and keeps Cancel as its default", async () => {
+  const text = nativeText.createNativeText({ saved: "en" });
+  const { dialog, calls } = fakeDialog();
+  const dialogs = createLendingDialogs({ dialog, window: liveWindow, validate: named, t: text.t });
+  for (const [language, message, buttons] of [
+    ["en", "Let your Clouds run commands on this computer?", ["Let them run commands", "Cancel"]],
+    ["pt-br", "Permitir que seus Clouds executem comandos neste computador?", ["Permitir que executem comandos", "Cancelar"]],
+  ]) {
+    text.set(language);
+    assert.equal(await dialogs.lendTerminal(true, () => assert.fail("Cancel never grants access")), false);
+    const options = calls.at(-1)[1];
+    assert.equal(options.message, message);
+    assert.deepEqual(options.buttons, buttons);
+    assert.deepEqual([options.defaultId, options.cancelId], [1, 1]);
+  }
 });
 
 test("the whole home folder is lent only after its own warning, and is named in the access dialog", async () => {
@@ -90,7 +131,7 @@ function mainSharing({ response }) {
   const { dialog, calls } = fakeDialog({ response, picked: { canceled: false, filePaths: ["/Users/me/Plans"] } });
   const team = { id: "team", name: "Team server", origin: "https://team.example.test" };
   const context = vm.createContext({
-    createLendingDialogs, dialog, mainWindow: win, validateSharedFolders: named, isHomeFolder: async () => false,
+    createLendingDialogs, nativeT: nativeText.englishText.t, dialog, mainWindow: win, validateSharedFolders: named, isHomeFolder: async () => false,
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, localWorkspaceOnly: (_channel, handler) => handler,
     requireSharedComputers: async () => {}, savedWorkspace: () => team,
     sharingController: () => ({ identity: async () => ({ id: "info" }), save: async (env, grant, info) => { saved.push([env.id, grant, info]); } }),

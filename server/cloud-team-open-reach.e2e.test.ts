@@ -17,6 +17,7 @@ const ENGINE = `process.env.FAKE_CLAUDE_ROOM_PLAN = process.env.FAKE_CLAUDE_FIXT
 const ASK = "can you write @Bolt please, and ask him if we can upgrade to the latest PHP version?";
 const ANSWER = "Yes: we can upgrade to the latest PHP version. Our code already runs on it.";
 const RELAYED = "Bolt says yes: we can upgrade to the latest PHP version, our code already runs on it.";
+const NAMESAKE_REPLY = "Your tag already reached Olive's inbox.";
 
 type Bot = { id: string; name: string; threadId: string };
 type Message = { role: string; kind?: string; text?: string; tool?: { name: string; ok?: boolean }; threadRef?: { botId: string; threadId: string } };
@@ -67,6 +68,7 @@ beforeAll(async () => {
         { expectError: true, arguments: { group_id: room.id, bot_ids: ["Bolt"], message: "Bob's PHP question, for the room" } },
         { tool: "post_to_room", expectError: true, arguments: { group_id: room.id, message: "Bob's PHP question, for the room" } },
       ], reply: "That stays here: I can't post your private chat into a room." },
+      { reply: NAMESAKE_REPLY },
     ] },
     [bolt.id]: { reply: ANSWER },
   }));
@@ -141,4 +143,17 @@ it("never carries Bob's private chat into a room, by a hand-off or a post", asyn
     expect(refused.content![0]!.text).toContain("This is a private chat");
   }
   expect((await messages(olive, room.threadId)).messages).toEqual([]);
+}, hostTimeout(90_000));
+
+it("takes an @ that a teammate and a bot share as the teammate's: the bot hears its name is a person's, and is not named to Scout", async () => {
+  const namesake = await create({ name: "Olive", title: "Marketing writer", section: "Support", reportsTo: BOB.email });
+  const said = (await messages(olive, namesake.threadId)).messages.filter((message) => message.tool?.name.startsWith("notice: Olive is also a person here"));
+  expect(said).toHaveLength(1);
+  const sent = await team.as(bob, "POST", `/api/bots/${scout.id}/messages`, { text: "@Olive can you sign off the PHP upgrade?", threadId: bobsChat });
+  expect(sent.status, JSON.stringify(sent.body)).toBe(202);
+  await expect.poll(() => turns().some((turn) => turn.botId === scout.id && turn.turnIndex === 3), { timeout: 60_000 }).toBe(true);
+  await expect.poll(settled, { timeout: 20_000 }).toBe(true);
+  const asked = turns().find((turn) => turn.botId === scout.id && turn.turnIndex === 3)!;
+  expect(`${asked.system}\n${JSON.stringify(asked.prompt)}`).not.toContain("The user named these existing teammates");
+  expect(turns().some((turn) => turn.botId === namesake.id), "the bot of that name never ran").toBe(false);
 }, hostTimeout(90_000));

@@ -12,7 +12,8 @@ import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../loca
 import { applyStandaloneSpawnEnv } from "../../engine-install.ts";
 import { OPENCODE_STANDALONE } from "./opencode-release.ts";
 import { createAcpDriver, type AccountErrorCode, type AcpConfig, type AcpSupport } from "./core.ts";
-import { acpModelOption, acpVariantOption, offeredModels } from "./config-options.ts";
+import { offeredModels, surveyModelVariants } from "./config-options.ts";
+import { declareTypedOpenCodeModel } from "./opencode-typed-model.ts";
 import { parseOpenCodeLogLine } from "./quiet-status.ts";
 import type { ModelCatalog, ModelVariantOption, ProviderDriver, ProviderErrorCode } from "../../contracts.ts";
 import { titleCaseModelId } from "../../contracts.ts";
@@ -21,6 +22,7 @@ import { execCli, killCliTree, spawnCli } from "../../procs.ts";
 const NO_MODELS: ModelCatalog = { default: "", options: [] };
 
 const lastSuccessfulCatalog = new Map<string, ModelCatalog>();
+const catalogRevisions = new Map<string, number>();
 /** `models --verbose` (V1) prints Zen prices, cost 0 meaning free; V2 prints none, so a `-free` id suffix is the fallback. */
 const freeModels = new Set<string>();
 const paidModels = new Set<string>();
@@ -33,6 +35,7 @@ const discoveryProbeCache = new Map<string, { expiresAt: number; result: Promise
 export type OpenCodeCatalogLoader = (
   environment: Record<string, string | undefined>,
   cli: string,
+  options?: { refresh?: boolean },
 ) => Promise<ModelCatalog>;
 
 function labelForModel(id: string): string {
@@ -227,6 +230,19 @@ function runOpenCodeModelsVerbose(
   });
 }
 
+/** OpenCode (1.19.4) lists models from its models.dev cache, or without one the snapshot built into it, and neither
+ * `opencode models` nor `opencode acp` refetches it; `models --refresh` does, and the next process reads it. */
+function refreshOpenCodeModelCache(cli: string, environment: Record<string, string | undefined>): Promise<void> {
+  return new Promise((resolve) => {
+    execCli(cli, ["models", "--refresh"], { timeout: DISCOVERY_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, env: environment }, () => resolve());
+  });
+}
+
+function sameModelIds(left: ModelCatalog | undefined, right: ModelCatalog): boolean {
+  const ids = new Set(left?.options.map((option) => option.id));
+  return ids.size === right.options.length && right.options.every((option) => ids.has(option.id));
+}
+
 function runGit(directory: string, args: string[]): Promise<void> {
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")));
   return new Promise((resolveRun, rejectRun) => {
@@ -262,18 +278,6 @@ function discoveryDirectory(): Promise<string> {
   return discoveryFolder;
 }
 
-const UNANSWERED = Symbol("unanswered");
-
-function answerWithin(answer: Promise<unknown>, ms: number): Promise<unknown> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  return Promise.race([
-    answer.catch(() => null),
-    new Promise((resolve) => {
-      timer = setTimeout(() => resolve(UNANSWERED), ms);
-    }),
-  ]).finally(() => clearTimeout(timer));
-}
-
 export interface OpenCodeSessionProbe {
   session: unknown;
   /** Each surveyed model's ACP effort choices; an empty list means it has none. */
@@ -282,27 +286,12 @@ export interface OpenCodeSessionProbe {
 
 /** OpenCode (1.18.27, 1.19.4, 2.1.4) names a model's efforts only in the session's `effort` option once that
  * model is selected, and OpenCode 2.1.4 answers overlapping selections with another model's options. */
-export async function surveyOpenCodeEfforts(
+export function surveyOpenCodeEfforts(
   request: (method: string, params: unknown) => Promise<unknown>,
   session: unknown,
   budgetMs = EFFORT_SURVEY_MS,
 ): Promise<Map<string, ModelVariantOption[]>> {
-  const efforts = new Map<string, ModelVariantOption[]>();
-  const sessionId = (session as { sessionId?: unknown } | null)?.sessionId;
-  if (typeof sessionId !== "string") return efforts;
-  const deadline = Date.now() + budgetMs;
-  for (const id of new Set(offeredModels(session, "model"))) {
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) break;
-    const selected = await answerWithin(
-      request("session/set_config_option", { sessionId, configId: "model", value: id }),
-      remaining,
-    );
-    if (selected === UNANSWERED) break;
-    if (acpModelOption(selected, "model")?.currentValue !== id) continue;
-    efforts.set(id, acpVariantOption(selected)?.options ?? []);
-  }
-  return efforts;
+  return surveyModelVariants(request, session, budgetMs);
 }
 
 export async function probeOpenCodeSession(
@@ -419,7 +408,9 @@ function withEfforts(
 export async function discoverOpenCodeModels(
   environment: Record<string, string | undefined>,
   cli = "opencode",
+  options: { refresh?: boolean } = {},
 ): Promise<ModelCatalog> {
+  if (options.refresh) await refreshOpenCodeModelCache(cli, environment);
   const probeSession = () => probeOpenCodeSession(cli, environment);
   const readMetadata = () => runOpenCodeModelsVerbose(cli, environment).then(parseOpenCodeModels);
   let [session, verbose] = await Promise.allSettled([probeSession(), readMetadata()]);
@@ -445,8 +436,16 @@ export async function discoverOpenCodeModels(
     catalog = { default: preferredOpenCodeModel(metadata.options.map((option) => option.id)), options: metadata.options };
   }
   if (!catalog) return lastSuccessfulCatalog.get(cli) ?? NO_MODELS;
+  if (options.refresh && !sameModelIds(lastSuccessfulCatalog.get(cli), catalog)) {
+    catalogRevisions.set(cli, (catalogRevisions.get(cli) ?? 0) + 1);
+  }
   lastSuccessfulCatalog.set(cli, catalog);
   return catalog;
+}
+
+/** A running `opencode acp` keeps the catalog it started with, so a refresh that changed it needs a fresh process. */
+export function openCodeSpawnFingerprint(env: Record<string, string | undefined>, cli: string): string {
+  return `${openCodeLoginsFingerprint(env)}#${catalogRevisions.get(cli) ?? 0}`;
 }
 
 /** Whether this OpenCode offers any model; Zen's free models need no login. */
@@ -471,6 +470,7 @@ export async function canRunOpenCode(
 export function resetOpenCodeModelCache() {
   discoveryFolder = null;
   lastSuccessfulCatalog.clear();
+  catalogRevisions.clear();
   discoveryProbeCache.clear();
   freeModels.clear();
   paidModels.clear();
@@ -825,9 +825,9 @@ const support = (loadCatalog: OpenCodeCatalogLoader, ownAccess = new Map<string,
   loginNote: "OpenCode has no usable models. Add an OpenCode key in Settings → API keys.",
   install: {
     command: {
-      darwin: "npm install -g opencode-ai",
-      linux: "npm install -g opencode-ai",
-      win32: "npm install -g opencode-ai",
+      darwin: "npm install -g @opencode/cli",
+      linux: "npm install -g @opencode/cli",
+      win32: "npm install -g @opencode/cli",
     },
     docsUrl: "https://opencode.ai/docs/",
     signInCommand: "opencode auth login",
@@ -851,12 +851,12 @@ const support = (loadCatalog: OpenCodeCatalogLoader, ownAccess = new Map<string,
   ownMcpOverHttp: true,
   // OpenCode 1.18.27's build agent lists 13 tools of its own (bash, read, edit, task, skill…); room for a newer CLI's.
   engineTools: 24,
-  resolveTurnModel: (model, env) => model ? ensureOpenCodeInjectModel(model, env) : model,
+  resolveTurnModel: (model, env) => model ? declareTypedOpenCodeModel(env, model) ?? ensureOpenCodeInjectModel(model, env) : model,
   transformEnv: (env, config, instanceId, instanceEnvironment) => {
     withholdProviderKeysWhenManaged(env, config, instanceId, instanceEnvironment);
     applyStandaloneSpawnEnv(OPENCODE_STANDALONE, env, config.cli);
   },
-  spawnFingerprint: openCodeLoginsFingerprint,
+  spawnFingerprint: (env, config) => openCodeSpawnFingerprint(env, config.cli),
   applyTurnEnv: (env, { fullAuto, botId, cwd }) => {
     if (openMausOwnsWorkingFolder(cwd)) env.OPENCODE_DISABLE_PROJECT_CONFIG = "1";
     if (!fullAuto) {
@@ -880,8 +880,8 @@ const support = (loadCatalog: OpenCodeCatalogLoader, ownAccess = new Map<string,
   },
   classifyError: classifyOpenCodeError,
   describeAccountError: describeOpenCodeAccountError,
-  resolveModels: async (environment, config) => mergeLocalInject(
-    await loadCatalog(environment, config.cli),
+  resolveModels: async (environment, config, _instanceId, fresh) => mergeLocalInject(
+    await loadCatalog(environment, config.cli, { refresh: fresh === true }),
     environment,
   ),
   buildPromptText: (turn) => turn.system ? `${turn.system}\n\n${turn.text}` : turn.text,

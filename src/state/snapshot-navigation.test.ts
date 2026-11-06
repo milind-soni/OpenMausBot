@@ -87,7 +87,7 @@ beforeEach(async () => {
     if (path.startsWith("/api/groups/room/tasks/room-b")) return json({ group: room("b", "fresh-room-b") });
     if (path === "/api/bots/bot/messages" || path === "/api/groups/room/messages") sends.push(JSON.parse(String(init?.body)));
     if (path === "/api/instances") return json({ instances: [] });
-    if (path === "/api/routines") return json({ routines: [], runs: [] });
+    if (path.startsWith("/api/routines?since=")) return json({ routines: [], runs: [] });
     if (path === "/api/webhooks") return json({ webhooks: [], attempts: [] });
     return json({});
   });

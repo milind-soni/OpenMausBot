@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { intakeFiles, type Attachment } from "./composer-attachments";
+import { TURN_IMAGE_MAX_BYTES as SERVER_TURN_IMAGE_MAX_BYTES, TURN_IMAGE_MAX_COUNT as SERVER_TURN_IMAGE_MAX_COUNT } from "../../server/turn-images";
+import { fitImagesToSlots, IMAGE_MAX_BYTES, imageBytesLeft, imageSlotsLeft, imagesThatFit, intakeFiles, TURN_IMAGE_MAX_BYTES, TURN_IMAGE_MAX_COUNT, type Attachment } from "./composer-attachments";
 
 type Fake = { name: string; size: number; type: string; text: () => Promise<string> };
 const file = (name: string, type: string, size = 10): Fake => ({
@@ -30,7 +31,7 @@ describe("intakeFiles", () => {
         allowImages: true, getPath, uploadImage: async () => null,
       });
       expect(out.attachments).toEqual([expect.objectContaining({ kind: "file", path: "/private/attachments/note.ogg" })]);
-      expect(out.notice).toBeNull();
+      expect(out.problems).toEqual([]);
       expect(getPath).not.toHaveBeenCalled();
     } finally {
       fetch.mockRestore();
@@ -46,7 +47,7 @@ describe("intakeFiles", () => {
       ["image", "shot.png"],
       ["file", "notes.txt"],
     ]);
-    expect(out.notice).toBeNull();
+    expect(out.problems).toEqual([]);
   });
 
   it("uses a private uploaded path for supported documents", async () => {
@@ -68,7 +69,7 @@ describe("intakeFiles", () => {
       name: "notes.pdf",
       path: "/private/attachments/id.pdf",
     })]);
-    expect(out.notice).toBeNull();
+    expect(out.problems).toEqual([]);
   });
 
   it("does not fall back to an arbitrary disk path when a private upload fails", async () => {
@@ -80,7 +81,7 @@ describe("intakeFiles", () => {
     });
 
     expect(out.attachments).toEqual([]);
-    expect(out.notice).toContain("notes.pdf: private store is full");
+    expect(out.problems).toEqual([{ kind: "upload-failed", name: "notes.pdf", reason: "private store is full" }]);
   });
 
   it("treats an image as an ordinary file when the engine cannot read one", async () => {
@@ -102,8 +103,7 @@ describe("intakeFiles", () => {
       uploadImage: upload,
     });
     expect(out.attachments).toHaveLength(0);
-    expect(out.notice).toMatch(/ghost\.bin/);
-    expect(out.notice).not.toMatch(/Finder|Save it first/);
+    expect(out.problems).toEqual([{ kind: "unsupported", names: ["ghost.bin"] }]);
   });
 
   it("reports an upload that failed without losing the files that worked", async () => {
@@ -116,6 +116,94 @@ describe("intakeFiles", () => {
       },
     });
     expect(out.attachments).toHaveLength(1);
-    expect(out.notice).toMatch(/bad\.png: too large/);
+    expect(out.problems).toEqual([{ kind: "upload-failed", name: "bad.png", reason: "too large" }]);
+  });
+
+  it("stops at the images a message can still take and names the rest", async () => {
+    const uploadImage = vi.fn(upload);
+    const out = await intakeFiles(
+      [file("1.png", "image/png"), file("notes.txt", "text/plain"), file("2.png", "image/png"), file("3.png", "image/png")],
+      { allowImages: true, getPath: onDisk, uploadImage, imageSlots: 1 },
+    );
+    expect(out.attachments.map((a) => "name" in a ? a.name : "")).toEqual(["1.png", "notes.txt"]);
+    expect(uploadImage).toHaveBeenCalledTimes(1);
+    expect(out.notice).toBe(`A message takes up to ${TURN_IMAGE_MAX_COUNT} images, 40 MB in all. 2.png, 3.png weren't attached.`);
+  });
+
+  it("lets an oversized image fail on its own without taking the last slot", async () => {
+    const out = await intakeFiles([file("huge.png", "image/png", IMAGE_MAX_BYTES + 1), file("ok.png", "image/png")], {
+      allowImages: true,
+      getPath: onDisk,
+      uploadImage: async (f) => {
+        if (f.size > IMAGE_MAX_BYTES) throw new Error(`${f.name} exceeds 10 MB`);
+        return upload(f);
+      },
+      imageSlots: 1,
+    });
+    expect(out.attachments.map((a) => "name" in a ? a.name : "")).toEqual(["ok.png"]);
+    expect(out.notice).toBe("huge.png: huge.png exceeds 10 MB");
+  });
+
+  it("splits pasted images by the slots left, passing oversized ones through", () => {
+    const images = [{ size: 1 }, { size: IMAGE_MAX_BYTES + 1 }, { size: 2 }, { size: 3 }];
+    expect(fitImagesToSlots(images, 2)).toEqual({ kept: [images[0], images[1], images[2]], leftOut: [images[3]] });
+    expect(fitImagesToSlots(images, 0)).toEqual({ kept: [images[1]], leftOut: [images[0], images[2], images[3]] });
+  });
+
+  it("leaves images uncounted when the engine takes them as plain files", async () => {
+    const out = await intakeFiles([file("1.png", "image/png"), file("2.png", "image/png")], {
+      allowImages: false, getPath: onDisk, uploadImage: upload, uploadFile: async () => null, imageSlots: 0,
+    });
+    expect(out.attachments).toHaveLength(2);
+    expect(out.notice).toBeNull();
+  });
+
+  it("explains that an archive needs unzipping instead of calling it unsupported", async () => {
+    const out = await intakeFiles([file("아카이브.zip", "application/zip"), file("run.exe", "application/octet-stream")], {
+      allowImages: true, getPath: () => "", uploadImage: upload, uploadFile: async () => null,
+    });
+    expect(out.attachments).toEqual([]);
+    expect(out.notice).toBe(
+      "Unable to attach run.exe. Choose a supported image, document, or audio file. Archives can't be attached: unzip 아카이브.zip and attach the files inside.",
+    );
+  });
+
+  it("counts the images already in the draft, and names pasted images past the slots left", () => {
+    const draft = [{ kind: "image" }, { kind: "file" }, { kind: "image" }] as unknown as Attachment[];
+    expect(imageSlotsLeft(draft)).toBe(TURN_IMAGE_MAX_COUNT - 2);
+    expect(imageSlotsLeft(Array.from({ length: TURN_IMAGE_MAX_COUNT + 1 }, () => ({ kind: "image" })) as unknown as Attachment[])).toBe(0);
+    const notices: string[] = [];
+    const pasted = [file("a.png", "image/png"), file("b.png", "image/png"), file("c.png", "image/png")];
+    expect(imagesThatFit(pasted, 2, (notice) => notices.push(notice)).map((image) => image.name)).toEqual(["a.png", "b.png"]);
+    expect(notices).toEqual([`A message takes up to ${TURN_IMAGE_MAX_COUNT} images, 40 MB in all. c.png wasn't attached.`]);
+    expect(imagesThatFit(pasted, 3, (notice) => notices.push(notice))).toHaveLength(3);
+    expect(notices).toHaveLength(1);
+  });
+
+  it("keeps the image caps in step with the server", () => {
+    expect(TURN_IMAGE_MAX_COUNT).toBe(SERVER_TURN_IMAGE_MAX_COUNT);
+    expect(TURN_IMAGE_MAX_BYTES).toBe(SERVER_TURN_IMAGE_MAX_BYTES);
+  });
+
+  it("stops at the image bytes a message can still take, so large images are never refused at send", async () => {
+    const big = IMAGE_MAX_BYTES - 1;
+    const draft = [{ kind: "image", size: big }, { kind: "file", size: big }] as unknown as Attachment[];
+    expect(imageBytesLeft(draft)).toBe(TURN_IMAGE_MAX_BYTES - big);
+    const out = await intakeFiles(Array.from({ length: 5 }, (_, index) => file(`${index + 1}.png`, "image/png", big)), {
+      allowImages: true, getPath: onDisk, uploadImage: upload, imageSlots: imageSlotsLeft(draft), imageBytes: imageBytesLeft(draft),
+    });
+    expect(out.attachments.map((a) => "name" in a ? a.name : "")).toEqual(["1.png", "2.png", "3.png"]);
+    expect(out.notice).toBe("A message takes up to 10 images, 40 MB in all. 4.png, 5.png weren't attached.");
+    const notices: string[] = [];
+    expect(imagesThatFit([file("a.png", "image/png", big)], 9, (notice) => notices.push(notice), big - 1)).toEqual([]);
+    expect(notices).toEqual(["A message takes up to 10 images, 40 MB in all. a.png wasn't attached."]);
+  });
+
+  it("lets an empty draft take ten images and names the eleventh", () => {
+    expect(imageSlotsLeft([])).toBe(10);
+    const notices: string[] = [];
+    const pasted = Array.from({ length: 11 }, (_, index) => file(`${index + 1}.png`, "image/png"));
+    expect(imagesThatFit(pasted, imageSlotsLeft([]), (notice) => notices.push(notice))).toHaveLength(10);
+    expect(notices).toEqual(["A message takes up to 10 images, 40 MB in all. 11.png wasn't attached."]);
   });
 });

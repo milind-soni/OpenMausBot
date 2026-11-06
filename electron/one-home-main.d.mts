@@ -7,6 +7,9 @@ export function oneHomeCloud(state: unknown): OneHomeCloud | null;
 export function freezeAnswer(got: { ok: boolean; status: number; body: any }): { frozen: true } | { busy: string; what?: string };
 export type KeepHereState = import("./cloud-send.mjs").KeepHereState;
 export function installationOf(environmentId: string): string;
+export declare const GONE_ASK_MS: number;
+/** One home's `gone(origin)`, from the Admin's word (`ask`), kept per account. */
+export function createGoneCheck(deps: { ask(origin: string): Promise<string | null>; account(): string | null; now?(): number }): (origin: string) => Promise<"deleted" | "ended" | null>;
 
 type SendDeps = Parameters<typeof installCloudSend>[0];
 
@@ -16,6 +19,7 @@ export function installOneHome(deps: Omit<SendDeps, "local" | "move" | "moveSess
   /** The MausBot Cloud sign-in (cloud-account.mjs). */
   account(): { state(): any; pairHome(): Promise<{ origin: string; code: string; expiresAt?: number }>; exportHome(options?: { installation?: string }): Promise<any>;
     reportMove?(options: { installation: string }): Promise<boolean>; reportKept?(options: { installation: string }): Promise<boolean>;
+    movedTo?(origin: string): Promise<"deleted" | "ended" | "live" | "unknown" | null>;
     reportMoveStatus?(report: import("./move-status.mjs").MoveStatusReport): Promise<boolean>;
     pairTeam(teamId: string): Promise<{ origin: string; code: string; expiresAt?: number }> } | null;
   journalFile(): string;
@@ -34,10 +38,15 @@ export function installOneHome(deps: Omit<SendDeps, "local" | "move" | "moveSess
   openTeam?(team: { id: string; name: string }): void;
   /** The team moves' journal, team-moves.json beside journalFile by default. */
   teamJournal?: { read(): unknown; write(value: unknown): void };
+  t?(key: string, params?: Record<string, string | number>): string;
   /** The waits of the move's report to the Admin (move-status.mjs), setTimeout's by default. */
   reportTimers?: { set(work: () => void, ms: number): unknown; clear(timer: unknown): void };
+  /** The move to a server of the person's own: while it is chosen no move to My Cloud starts, and its line is this computer's page's. */
+  other?(): null | { view(): unknown; seen(): unknown; retry(): Promise<unknown>; active(): boolean };
 }): ReturnType<typeof installCloudSend> & {
   keep: { state(): KeepHereState; set(on: boolean): Promise<void> };
+  /** Why the account signed in can't be left now, else null. */
+  holding(): "moving" | null;
   kick(): Promise<void>;
   away(): boolean;
   view(): OneHomeView | null;

@@ -2,6 +2,8 @@ import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
 
+import { isOwnThreadFolder } from "../shared/thread-folder.ts";
+
 export type CwdValidation = { ok: true; cwd: string | null } | { ok: false; error: string };
 
 export function validateBotCwd(input: unknown): CwdValidation {
@@ -20,6 +22,14 @@ export function validateBotCwd(input: unknown): CwdValidation {
   }
   if (!stat.isDirectory()) return { ok: false, error: `that path is not a folder: ${cwd}` };
   return { ok: true, cwd };
+}
+
+/** The working folder a thread moves to on this turn: its bot's, while the thread is still in its own folder. Never for a
+ * conversation that keeps a private folder (a Cloud guest's), nor for an engine that works in no folder. */
+export function folderToFollow(bot: { id: string; cwd?: string }, threadId: string, threadCwd: string | null | undefined,
+  opts: { worksInFolders: boolean; keepsPrivateFolder: boolean }): string | undefined {
+  if (!bot.cwd || !opts.worksInFolders || opts.keepsPrivateFolder) return undefined;
+  return isOwnThreadFolder(threadCwd, bot.id, threadId) ? bot.cwd : undefined;
 }
 
 /** A conversation's folder a teammate may be sent to: one that still exists, outside OpenMausBot's own data (a bot's private workspace). */

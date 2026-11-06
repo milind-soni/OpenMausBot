@@ -52,7 +52,7 @@ it("a circle per place, with its initials on its colour; the place on screen is 
   const circles = [...host.querySelectorAll("[data-rail-place]")];
   expect(circles.map((circle) => circle.textContent)).toEqual(["MC", "CA", "A", "CB", "CC", "O"]);
   expect(host.querySelector('[data-rail-place="home"]')?.getAttribute("aria-current")).toBe("page");
-  expect(host.querySelector('[data-rail-place="home"] span')?.getAttribute("style")).toContain("var(--identity-purple)");
+  expect(host.querySelector('[data-rail-place="home"] span[style]')?.getAttribute("style")).toContain("var(--identity-purple)");
   expect(host.querySelector('[data-rail-place="acme"] [data-rail-dot]')).toBeTruthy();
   expect(host.querySelector('[data-rail-place="pending:c-b"] [data-rail-ring]')?.getAttribute("data-rail-ring")).toBe("waiting");
   expect(host.querySelector('[data-rail-place="c"] [data-rail-ring]')?.getAttribute("data-rail-ring")).toBe("40");
@@ -60,6 +60,20 @@ it("a circle per place, with its initials on its colour; the place on screen is 
   expect(host.querySelector('[data-rail-place="pending:c-b"]')?.getAttribute("aria-label")).toBe("Client B: waiting for payment");
   expect(host.querySelector("[data-rail-more-button]")).toBeNull();
   expect(host.querySelector("[data-rail-add]")?.getAttribute("aria-label")).toBe("Add a Cloud or your own server");
+});
+
+it("marks the place on screen with a pill on the rail's edge, a short one on hover for a place that opens, and no ring round a tile", async () => {
+  await mount(createElement(PlacesRail, { chrome: true }));
+  const pill = (id: string) => host.querySelector(`[data-rail-place="${id}"] [data-rail-pill]`);
+  expect(pill("home")?.getAttribute("data-rail-pill")).toBe("page");
+  expect(pill("home")?.getAttribute("class")).toEqual(expect.stringContaining("h-4"));
+  expect(pill("home")?.getAttribute("class"), "on the rail's left edge, outside the tile").toEqual(expect.stringContaining("-left-1.5"));
+  expect(pill("a")?.getAttribute("data-rail-pill")).toBe("hover");
+  expect(pill("a")?.getAttribute("class")).toEqual(expect.stringContaining("group-hover/tile:opacity-100"));
+  expect(pill("pending:c-b"), "nothing to open yet: no pill").toBeNull();
+  for (const tile of host.querySelectorAll("[data-rail-place]")) expect(tile.className, tile.getAttribute("data-rail-place")!).not.toMatch(/\bring-/);
+  expect(host.querySelector('[data-rail-place="c"] [data-rail-ring] path')?.getAttribute("stroke-width"), "a whole-pixel line").toBe("2");
+  expect(host.querySelector("[data-places-rail] ul")?.className, "as wide as the rail, so a list that scrolls cuts nothing off round a tile").toEqual(expect.stringContaining("w-full"));
 });
 
 it("a click opens the place through main by its id; the one on screen and one not ready yet open nothing", async () => {
@@ -296,17 +310,19 @@ it("a server of the person's own on an older release than the newest has a quiet
   expect(host.querySelector('[data-rail-place="s-old"] [data-rail-dot]')).toBeTruthy();
 });
 
-it("the window's own rail: drawn at every width, small circles named on hover, and its sheets cover the window while open", async () => {
+it("the window's own rail: drawn at every width, 36px wide with small rounded tiles named on hover, and its sheets cover the window while open", async () => {
   const expand = vi.fn(async () => {});
   Object.assign(window, { ogb: { workspaces, cloudAdd, rail: { expand, onSkin: () => () => {} } } });
   await mount(createElement(PlacesRail, { chrome: true }));
   const nav = host.querySelector("[data-places-rail]")!;
   expect(nav.className).toContain("flex h-full");
+  expect(nav.className.split(" "), "as thin as its tiles allow; beside a window with its own title bar, in the sidebar's colour as before the frame")
+    .toEqual(expect.arrayContaining(["w-9", "shrink-0", "flex-col", "items-center", "bg-panel"]));
   expect(nav.className, "never hidden on a narrow window").not.toContain("hidden");
-  expect(nav.textContent, "no name under the place on screen: its circle's ring marks it").toBe("MCCAACBCCO");
+  expect(nav.textContent, "no name under the place on screen: its tile's ring marks it").toBe("MCCAACBCCO");
   expect(host.querySelector('[data-rail-place="home"]')?.getAttribute("title")).toBe("My Cloud");
-  expect(host.querySelector('[data-rail-place="home"] span')?.getAttribute("style")).toContain("width: 32px; height: 32px");
-  expect(host.querySelector("[data-rail-add]")?.className).toContain("size-8");
+  expect(host.querySelector('[data-rail-place="home"] span[style]')?.getAttribute("style")).toContain("width: 24px; height: 24px; border-radius: 7px");
+  expect(host.querySelector("[data-rail-add]")?.className).toContain("size-6 place-items-center rounded-[7px]");
   expect(expand.mock.calls.at(-1)).toEqual([false]);
   await click(host.querySelector("[data-rail-add]"));
   expect(expand.mock.calls.at(-1), "＋'s sheet covers the window").toEqual([true]);
@@ -341,7 +357,7 @@ it("a right-click on a circle opens its place's menu: its colour, saved by main 
     await act(async () => { host.querySelector(`[data-rail-place="${id}"]`)!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })); });
     return host.querySelector(`[data-rail-menu="${id}"]`);
   };
-  expect(host.querySelector('[data-rail-place="local"] span')?.getAttribute("style"), "This computer's circle wears its colour").toContain("var(--identity-teal)");
+  expect(host.querySelector('[data-rail-place="local"] span[style]')?.getAttribute("style"), "This computer's circle wears its colour").toContain("var(--identity-teal)");
   const own = await menuOf("local");
   expect([own?.getAttribute("aria-label"), own?.querySelector("[aria-checked='true']")?.getAttribute("data-swatch")]).toEqual(["This computer", "green"]);
   expect(own!.querySelector("[data-swatch='slate']")?.getAttribute("aria-label"), "the plain swatch says what it does").toBe("None");
@@ -397,4 +413,125 @@ it("a Cloud of the person's own that ended says so on its circle, and its menu o
   await settle();
   expect(host.querySelector("[data-rail-menu]"), "removed: the menu closes, and the circle goes with main's next list").toBeNull();
   expect(workspaces.places).toHaveBeenCalled();
+});
+
+it("a server of the person's own that main offers as home: its menu's one tap starts the move and closes; main's own words when it can't", async () => {
+  const makeHome = vi.fn(async (_id: string): Promise<{ started: true }> => { throw new Error("Error invoking remote method 'workspaces:make-home': Error: Garage server has other people on it, so your bots stay here."); });
+  rail = { places: [
+    place("home", "This computer", { kind: "computer", active: true, paint: { swatch: null } }),
+    place("garage", "Garage server", { kind: "server", makeHome: true, paint: { swatch: null } }),
+    place("office", "Office", { kind: "server", paint: { swatch: null } }),
+  ], add: { cloud: false, link: true, address: false } };
+  Object.assign(window, { ogb: { workspaces: { ...workspaces, makeHome }, cloudAdd, rail: { expand: vi.fn(async () => {}), onSkin: () => () => {} } } });
+  await mount(createElement(PlacesRail, { chrome: true }));
+  const settle = () => act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+  const menuOf = async (id: string) => {
+    await act(async () => { host.querySelector(`[data-rail-place="${id}"]`)!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })); });
+    return host.querySelector(`[data-rail-menu="${id}"]`);
+  };
+  expect((await menuOf("office"))?.querySelector("[data-rail-make-home]"), "not offered: no such choice").toBeNull();
+  await act(async () => { host.querySelector("[data-rail-menu]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  const menu = await menuOf("garage");
+  const row = menu!.querySelector("[data-rail-make-home-start]");
+  expect(row?.textContent).toBe("Make Garage server my homeMoves this computer's bots, chats, memory and routines to Garage server, and this computer then works for it.");
+  await click(row);
+  await settle();
+  expect(makeHome).toHaveBeenCalledWith("garage");
+  expect(host.querySelector("[data-rail-menu] [data-rail-make-home] [role='alert']")?.textContent).toBe("Garage server has other people on it, so your bots stay here.");
+  makeHome.mockResolvedValueOnce({ started: true });
+  await click(host.querySelector("[data-rail-menu] [data-rail-make-home-start]"));
+  await settle();
+  expect(host.querySelector("[data-rail-menu]"), "started: the menu closes, and the account says how it goes").toBeNull();
+});
+
+const ALICE = "alice@example.test", BOB = "bob@example.test";
+const accounts = { list: vi.fn(async () => ({ active: { id: "a", email: ALICE } })), onChanged: vi.fn(() => () => {}), signOut: vi.fn(), addStart: vi.fn(), addVerify: vi.fn(), addBrowser: vi.fn(), addReopen: vi.fn(), addCancel: vi.fn(async () => {}) };
+const TWO_ACCOUNTS: RailPlace[] = [
+  place("local", "This computer", { kind: "computer", active: true }),
+  place("a1", "My Cloud", { color: "purple", group: "active", email: ALICE }),
+  place("a2", "Acme", { kind: "team", group: "active", email: ALICE }),
+  place("b1", "My Cloud", { color: "teal", group: "b", email: BOB }),
+  place("account:c", "carol@example.test", { kind: "account", group: "c", email: "carol@example.test" }),
+  place("vps", "Office", { kind: "server", group: "hand" }),
+];
+
+it("one account: no divider and no address, exactly as before", async () => {
+  await mount(createElement(PlacesRail));
+  expect(host.querySelector("[data-rail-divider]")).toBeNull();
+  expect(host.innerHTML).not.toContain("@");
+});
+
+it("several accounts: a thin divider between groups, This computer first, and each tooltip names the account, so two called My Cloud can be told apart", async () => {
+  rail = { places: TWO_ACCOUNTS, add: { cloud: true, link: true, address: false } };
+  await mount(createElement(PlacesRail));
+  expect(host.querySelectorAll("[data-rail-divider]").length).toBe(4);
+  const items = [...host.querySelectorAll("nav li")].map((row) => [row.querySelector("[data-rail-divider]") !== null, row.querySelector("[data-rail-place]")?.getAttribute("data-rail-place")]);
+  expect(items).toEqual([[false, "local"], [true, "a1"], [false, "a2"], [true, "b1"], [true, "account:c"], [true, "vps"]]);
+  expect(host.querySelector('[data-rail-place="a1"]')?.getAttribute("title")).toBe(`My Cloud · ${ALICE}`);
+  expect(host.querySelector('[data-rail-place="b1"]')?.getAttribute("title")).toBe(`My Cloud · ${BOB}`);
+  expect(host.querySelector('[data-rail-place="vps"]')?.getAttribute("title")).toBe("Office");
+  expect(host.querySelector('[data-rail-place="account:c"]')?.getAttribute("title")).toBe("carol@example.test");
+});
+
+it("a click on another account's place asks main by its id; a refusal shows the plain line, and nothing else moves", async () => {
+  rail = { places: TWO_ACCOUNTS, add: { cloud: true, link: true, address: false } };
+  Object.assign(window, { ogb: { workspaces, cloudAdd, accounts } });
+  workspaces.open.mockResolvedValueOnce({ outcome: "moving" } as never);
+  await mount(createElement(PlacesRail));
+  await click(host.querySelector('[data-rail-place="b1"]'));
+  await act(async () => { await Promise.resolve(); });
+  expect(workspaces.open.mock.calls).toEqual([["b1"]]);
+  expect(host.querySelector("[data-accounts-note]")?.textContent).toContain("moving to the Cloud");
+  expect(host.querySelector("[data-accounts-sign-out]")).toBeNull();
+});
+
+it("a saved account whose sign-in ended: its tile says so, and a click opens the emailed code for that address", async () => {
+  const ended = TWO_ACCOUNTS.map((row) => (row.id === "b1" ? { ...row, signIn: true as const } : row));
+  rail = { places: ended, add: { cloud: true, link: true, address: false } };
+  Object.assign(window, { ogb: { workspaces, cloudAdd, accounts } });
+  workspaces.open.mockResolvedValueOnce({ outcome: "sign-in", email: BOB } as never);
+  await mount(createElement(PlacesRail));
+  expect(host.querySelector('[data-rail-place="b1"]')?.getAttribute("title")).toBe(`My Cloud · ${BOB} · Sign in again`);
+  await click(host.querySelector('[data-rail-place="b1"]'));
+  await act(async () => { await Promise.resolve(); });
+  expect((host.querySelector("#cloud-add-email") as HTMLInputElement | null)?.value).toBe(BOB);
+});
+
+it("＋ offers Add another account while someone is signed in, and it opens the sign-in over the window", async () => {
+  rail = { places: TWO_ACCOUNTS, add: { cloud: true, link: true, address: false, account: true } };
+  Object.assign(window, { ogb: { workspaces, cloudAdd, accounts } });
+  await mount(createElement(PlacesRail));
+  await click(host.querySelector("[data-rail-add]"));
+  await click(host.querySelector('[data-place-add-choice="account"]'));
+  await act(async () => { await Promise.resolve(); });
+  expect(host.querySelector("[data-place-add-sheet]")).toBeNull();
+  expect((host.querySelector("#cloud-add-email") as HTMLInputElement | null)?.value).toBe("");
+});
+
+it("past eight, ⋯ keeps the groups, each under its address, and search finds a place by its account's address", async () => {
+  const many = [place("local", "This computer", { kind: "computer" }), ...Array.from({ length: 5 }, (_, at) => place(`a${at}`, `A ${at}`, { group: "active", email: ALICE })), ...Array.from({ length: 5 }, (_, at) => place(`b${at}`, `B ${at}`, { group: "b", email: BOB }))];
+  rail = { places: many, add: { cloud: false, link: false, address: false } };
+  await mount(createElement(PlacesRail));
+  await click(host.querySelector("[data-rail-more-button]"));
+  const groups = [...host.querySelectorAll("[data-rail-more] [data-rail-group]")].map((row) => row.textContent);
+  expect(groups).toEqual([ALICE, BOB]);
+  const rowsText = [...host.querySelectorAll("[data-rail-more] button")].map((row) => row.textContent);
+  expect(rowsText.join(" ")).not.toContain("@");
+  expect(matchingPlaces(many, "bob@").map((row) => row.id)).toEqual(["b0", "b1", "b2", "b3", "b4"]);
+});
+
+it("colours stay per Cloud, whichever account it belongs to", async () => {
+  rail = { places: TWO_ACCOUNTS, add: { cloud: false, link: false, address: false } };
+  await mount(createElement(PlacesRail));
+  const fill = (id: string) => (host.querySelector(`[data-rail-place="${id}"] [aria-hidden="true"][style]`) as HTMLElement | null)?.getAttribute("style");
+  expect(fill("a1")).not.toEqual(fill("b1"));
+});
+
+it("＋ stands for Add another account alone, when nothing else can be added", async () => {
+  rail = { places: TWO_ACCOUNTS, add: { cloud: false, link: false, address: false, account: true } };
+  await mount(createElement(PlacesRail));
+  expect(host.querySelector("[data-rail-add]")).not.toBeNull();
+  rail = { places: TWO_ACCOUNTS, add: { cloud: false, link: false, address: false } };
+  await act(async () => { await refreshPlaces(); });
+  expect(host.querySelector("[data-rail-add]")).toBeNull();
 });

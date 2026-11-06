@@ -1,10 +1,11 @@
-// Pairing codes (60-bit, single use, 5 min), sessions (256-bit, only the sha256 stored) and stream tickets (EventSource cannot set headers).
+// Pairing codes (60-bit, single use, 5 min unless asked for up to a day), sessions (256-bit, only the sha256 stored) and stream tickets (EventSource cannot set headers).
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
 import { teamSessionExpiresAt, type TeamMember, type TeamRole } from "./cloud-team.ts";
+import { userError, type UserError } from "./user-errors.ts";
 
 export type Scope = "admin" | "client";
 export const SCOPES: readonly Scope[] = ["admin", "client"];
@@ -12,6 +13,7 @@ export const SCOPES: readonly Scope[] = ["admin", "client"];
 export const PAIRING_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 export const PAIRING_CODE_LENGTH = 12;
 export const PAIRING_CODE_TTL_MS = 5 * 60_000;
+export const PAIRING_CODE_MAX_TTL_MS = 24 * 3_600_000;
 /** Not clamped: an invalid value falls back to the default, so a typo never becomes a policy. */
 export function daysMs(value: string | undefined, fallbackDays: number): number {
   const days = Number(value);
@@ -28,7 +30,7 @@ export function cookieMaxAgeSeconds(session: { expiresAt: number }, now = Date.n
   return Math.max(1, Math.floor((session.expiresAt - now) / 1000));
 }
 export const STREAM_TICKET_TTL_MS = 5 * 60_000;
-/** Slow-down only: a 60-bit code cannot be guessed online in five minutes, and sources are shared (NAT), so the lock stays short. */
+/** Slow-down only: a 60-bit code cannot be guessed online in a day, and sources are shared (NAT), so the lock stays short. */
 export const LOCKOUT = { failures: 10, windowMs: 60_000, lockMs: 60_000 } as const;
 /** A consumed code re-presented with the same client-made attempt id gets the same answer; sharing an address is not enough. */
 export const EXCHANGE_REPLAY_MS = 60_000;
@@ -60,6 +62,8 @@ const sessionSchema = z.object({
   owner: z.string().max(254).optional(),
   /** A Team Cloud's sign-in for moving one bot in (server/team-move-in.ts): it reaches that bot's move routes only. */
   moveIn: z.string().regex(/^[\w-]{1,128}$/).optional(),
+  /** An access token for a script (`openmausbot token create`): it ends at expiresAt and never renews. */
+  token: z.literal(true).optional(),
 });
 
 const fileSchema = z.object({ version: z.literal(1), sessions: z.array(sessionSchema) });
@@ -77,6 +81,7 @@ export interface PublicSession {
   email?: string;
   owner?: string;
   teamRole?: TeamRole;
+  token?: true;
 }
 
 export interface PairingCode {
@@ -94,6 +99,8 @@ export interface PairingCode {
   member?: TeamMember;
   /** A code a member made from their own session: when the Admin last vouched for them. Absent on the Admin's own. */
   memberCheckedAt?: number;
+  /** The session it opens is an access token that lasts exactly this long. */
+  tokenTtlMs?: number;
 }
 
 export interface PublicPairing {
@@ -106,7 +113,7 @@ export interface PublicPairing {
 
 export type ExchangeResult =
   | { ok: true; token: string; session: PublicSession }
-  | { ok: false; status: 401 | 403 | 429; error: string };
+  | ({ ok: false; status: 401 | 403 | 429 } & UserError);
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
@@ -170,7 +177,34 @@ function publicSession(record: SessionRecord): PublicSession {
   if (record.email) view.email = record.email;
   if (record.owner) view.owner = record.owner;
   if (record.teamRole) view.teamRole = record.teamRole;
+  if (record.token) view.token = true;
   return view;
+}
+
+export interface PairingRequest {
+  label?: string;
+  scopes?: Scope[];
+  ttlMs?: number;
+  tokenTtlMs?: number;
+}
+
+const DAY_MS = 24 * 3_600_000;
+const within = (value: unknown, min: number, max: number): number | null | undefined =>
+  value === undefined ? undefined : typeof value === "number" && Number.isInteger(value) && value >= min && value <= max ? value : null;
+
+/** POST /api/auth/pairing's body: `ttlMs` keeps the code open up to a day; `tokenTtlMs` makes the session it opens an
+ * access token, bounded by OMB_SESSION_MAX_DAYS like every session. */
+export function pairingRequest(body: unknown): PairingRequest | { error: string } {
+  const record: Record<string, unknown> = body && typeof body === "object" && !Array.isArray(body) ? Object(body) : {};
+  const ttlMs = within(record.ttlMs, 60_000, PAIRING_CODE_MAX_TTL_MS);
+  if (ttlMs === null) return { error: "ttlMs must be a whole number of milliseconds, from one minute to 24 hours" };
+  const tokenTtlMs = within(record.tokenTtlMs, 60_000, SESSION_MAX_AGE_MS);
+  if (tokenTtlMs === null) return { error: `a token lasts from one minute to ${Math.floor(SESSION_MAX_AGE_MS / DAY_MS)} days on this server (OMB_SESSION_MAX_DAYS)` };
+  const scopes = Array.isArray(record.scopes) ? record.scopes.filter((v): v is Scope => v === "admin" || v === "client") : undefined;
+  return {
+    ...(typeof record.label === "string" ? { label: record.label } : {}), ...(scopes ? { scopes } : {}),
+    ...(ttlMs !== undefined ? { ttlMs } : {}), ...(tokenTtlMs !== undefined ? { tokenTtlMs } : {}),
+  };
 }
 
 export type EmailScopesResolver = (email: string) => readonly Scope[] | null;
@@ -180,6 +214,9 @@ export interface SessionStoreOptions {
   emailScopes?: EmailScopesResolver;
   emailScopesSnapshot?: () => EmailScopesResolver;
   portalMembership?: boolean;
+  /** Between membershipChanged() calls, the hot paths (each request, stream frame and liveness check) recheck email
+   * membership at most this often. Default 0: every call. */
+  recheckMs?: number;
 }
 
 export class SessionRegistry {
@@ -195,7 +232,8 @@ export class SessionRegistry {
   private readonly options: SessionStoreOptions;
   private readonly openMarker: string;
   private closed = false;
-  private adminOnly: string | null = null;
+  private adminOnly: UserError | null = null;
+  private membershipCheckedAt = -Infinity;
 
   // No parameter properties: Node's strip-only TypeScript mode only erases types.
   constructor(options: SessionStoreOptions) {
@@ -257,7 +295,7 @@ export class SessionRegistry {
   }
 
   private prune(): void {
-    this.revalidateEmailSessions();
+    this.recheckMembership();
     const now = this.now();
     this.pairings = this.pairings.filter((p) => p.expiresAt > now);
     this.replays = this.replays.filter((r) => r.expiresAt > now);
@@ -269,7 +307,12 @@ export class SessionRegistry {
     if (expired.length) {
       this.sessions = this.sessions.filter((s) => s.expiresAt > now);
       for (const s of expired) this.forget(s.id);
-      this.persist();
+      try {
+        this.persist();
+      } catch {
+        // The heartbeat reaches prune() through isLive(), where an escaping write failure would exit the process.
+        console.error("Could not persist session pruning.");
+      }
     }
   }
 
@@ -291,7 +334,7 @@ export class SessionRegistry {
   }
 
   /** From now on nothing without admin scope is opened, redeemed, issued or accepted; the caller revokes stored sessions. */
-  requireAdmin(refusal: string): void {
+  requireAdmin(refusal: UserError): void {
     this.adminOnly = refusal;
   }
 
@@ -300,10 +343,13 @@ export class SessionRegistry {
   }
 
   private refusePersonal(scopes: readonly Scope[]): void {
-    if (this.personal(scopes)) throw Object.assign(new Error(this.adminOnly!), { status: 403, code: "cloud_personal" });
+    if (this.personal(scopes)) {
+      const { error, ...fields } = this.adminOnly!;
+      throw Object.assign(new Error(error), { status: 403, code: "cloud_personal", ...fields });
+    }
   }
 
-  openPairing(input: { scopes?: Scope[]; label?: string; ttlMs?: number; browser?: boolean; owner?: string; member?: TeamMember; memberCheckedAt?: number } = {}): { id: string; code: string; credential: string; expiresAt: number } {
+  openPairing(input: { scopes?: Scope[]; label?: string; ttlMs?: number; tokenTtlMs?: number; browser?: boolean; owner?: string; member?: TeamMember; memberCheckedAt?: number } = {}): { id: string; code: string; credential: string; expiresAt: number } {
     this.prune();
     const now = this.now();
     const code = generatePairingCode();
@@ -320,6 +366,7 @@ export class SessionRegistry {
       expiresAt: now + (input.ttlMs ?? PAIRING_CODE_TTL_MS),
       ...(input.browser ? { browser: true as const, ...(input.owner ? { owner: input.owner } : {}) } : {}),
       ...(input.member ? { member: input.member, ...(input.memberCheckedAt !== undefined ? { memberCheckedAt: input.memberCheckedAt } : {}) } : {}),
+      ...(input.tokenTtlMs !== undefined && !input.browser && !input.member ? { tokenTtlMs: input.tokenTtlMs } : {}),
     };
     this.pairings.push(pairing);
     return { id: pairing.id, code, credential, expiresAt: pairing.expiresAt };
@@ -388,17 +435,17 @@ export class SessionRegistry {
     const lock = this.lockState(input.source);
     if (lock.locked) {
       const seconds = Math.ceil(lock.retryAfterMs / 1000);
-      return { ok: false, status: 429, error: `too many failed pairing attempts from your address; try again in ${seconds}s` };
+      return { ok: false, status: 429, ...userError("serverError.pair.tooMany", { seconds }) };
     }
     const index = this.pairings.findIndex((p) => (p.browser === true) === browser &&
       (sameDigest(p.credentialHash, presented) || (!p.browser && sameDigest(p.codeHash, presented))));
     if (index < 0) {
       this.recordFailure(input.source);
-      return { ok: false, status: 401, error: "pairing code is wrong or has expired; create a new one on the server" };
+      return { ok: false, status: 401, ...userError("serverError.pair.codeWrong") };
     }
     const [pairing] = this.pairings.splice(index, 1);
     this.failures.delete(input.source);
-    if (this.personal(pairing.scopes)) return { ok: false, status: 403, error: this.adminOnly! };
+    if (this.personal(pairing.scopes)) return { ok: false, status: 403, ...this.adminOnly! };
     const token = `omb_sess_${randomBytes(32).toString("base64url")}`;
     const checkedAt = pairing.memberCheckedAt ?? now;
     const record: SessionRecord = {
@@ -408,7 +455,8 @@ export class SessionRegistry {
       scopes: [...pairing.scopes],
       createdAt: now,
       lastSeenAt: now,
-      expiresAt: pairing.member ? teamSessionExpiresAt(checkedAt, now + SESSION_TTL_MS) : now + Math.min(SESSION_TTL_MS, SESSION_MAX_AGE_MS),
+      expiresAt: pairing.member ? teamSessionExpiresAt(checkedAt, now + SESSION_TTL_MS) : now + Math.min(pairing.tokenTtlMs ?? SESSION_TTL_MS, SESSION_MAX_AGE_MS),
+      ...(pairing.tokenTtlMs !== undefined ? { token: true as const } : {}),
       ...(pairing.browser ? { cookieOnly: true as const, ...(pairing.owner ? { owner: pairing.owner } : {}) } : {}),
       ...(pairing.member ? { email: pairing.member.email, teamRole: pairing.member.role, membershipAuthority: "team" as const } : {}),
       ...(pairing.member && pairing.memberCheckedAt !== undefined ? { memberCheckedAt: pairing.memberCheckedAt } : {}),
@@ -508,9 +556,21 @@ export class SessionRegistry {
     this.failures.delete(source);
   }
 
+  /** The sign-in lists may have changed: the next recheckMembership() reads them. */
+  membershipChanged(): void {
+    this.membershipCheckedAt = -Infinity;
+  }
+
+  /** revalidateEmailSessions(), unless one ran within `recheckMs` and membershipChanged() has not been called since. */
+  recheckMembership(): void {
+    if (this.now() - this.membershipCheckedAt < (this.options.recheckMs ?? 0)) return;
+    this.revalidateEmailSessions();
+  }
+
   /** Email membership is live: losing any scope revokes the token and its streams; promotions never widen existing credentials. */
   revalidateEmailSessions(): void {
     if (this.closed) throw new Error("Session registry is closed.");
+    this.membershipCheckedAt = this.now();
     // A team session's membership is the Admin's signed claim, checked at each pairing (cloud-team.ts), never the sign-in list.
     const eligible = this.sessions.filter(session => session.email !== undefined && session.membershipAuthority !== "team" && !(this.options.portalMembership && session.membershipAuthority === "portal"));
     if (!eligible.length) return;
@@ -542,7 +602,7 @@ export class SessionRegistry {
 
   authenticate(token: string | undefined): SessionRecord | null {
     if (!token) return null;
-    this.revalidateEmailSessions();
+    this.recheckMembership();
     const hash = sha256(token);
     const now = this.now();
     const record = this.sessions.find((s) => sameDigest(s.tokenHash, hash));
@@ -558,10 +618,10 @@ export class SessionRegistry {
 
   /** Call only after origin and scope checks pass; never revives an expired session. */
   renew(sessionId: string): boolean {
-    this.revalidateEmailSessions();
+    this.recheckMembership();
     const record = this.sessions.find((s) => s.id === sessionId);
     const now = this.now();
-    if (!record || record.expiresAt <= now) return false;
+    if (!record || record.expiresAt <= now || record.token) return false;
     if (record.expiresAt - now > SESSION_RENEW_WHEN_LEFT_MS) return false;
     const proposed = Math.min(now + SESSION_TTL_MS, record.createdAt + SESSION_MAX_AGE_MS);
     const next = record.membershipAuthority === "team" ? teamSessionExpiresAt(record.memberCheckedAt ?? record.createdAt, proposed) : proposed;
@@ -587,6 +647,12 @@ export class SessionRegistry {
   memberPhones(): PublicSession[] {
     this.prune();
     return this.sessions.filter((s) => s.membershipAuthority === "team" && s.memberCheckedAt !== undefined).map(publicSession);
+  }
+
+  /** Every code a member made for a phone stops working, and every phone such a code opened signs out. Never an Admin-signed pairing (an app). */
+  closeMemberPhones(): number {
+    this.pairings = this.pairings.filter((pairing) => !(pairing.member && pairing.memberCheckedAt !== undefined));
+    return this.memberPhones().filter((phone) => this.revoke(phone.id)).length;
   }
 
   /** A person who left a Team Cloud: every session of theirs (app windows, phones) ends now, and no open code of theirs

@@ -2,6 +2,7 @@ import { rmSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { RoutineRunReport } from "../shared/routines.ts";
+import "./server-line-packs.ts";
 import { automationContextText, createAutomationReports, newestAutomationLines, readRunReply, recoveredText } from "./automation-reports.ts";
 import { DATA_DIR } from "./config.ts";
 import type { RoutineRun } from "./routines.ts";
@@ -34,10 +35,10 @@ describe("readRunReply", () => {
 describe("what the chat's own session reads", () => {
   it("names and dates each line as the automation's own", () => {
     const line = { routineId: "r1", runId: "run", name: "Inbox brief", trigger: "schedule" as const, executionThreadId: "x", scheduledFor: 0 };
-    expect(automationContextText(line, Date.UTC(2026, 9, 21, 9, 0), "Acme replied.")).toMatch(/^\[Your automation "Inbox brief" reported at 2026-10-21 \d\d:\d\d:\]\nAcme replied\.$/);
-    expect(automationContextText({ ...line, needsYou: true }, 0, "Send it?")).toContain('"Inbox brief" asked at');
-    expect(automationContextText({ ...line, failed: true }, 0, "Signed out.")).toContain('"Inbox brief" could not finish at');
-    expect(automationContextText({ ...line, recovered: true }, 0, "Recovered.")).toContain('"Inbox brief" recovered at');
+    expect(automationContextText(line, Date.UTC(2026, 9, 21, 9, 0), "Acme replied.")).toMatch(/^\[From routine "Inbox brief" · run, reported at 2026-10-21 \d\d:\d\d · information only\]\nAcme replied\.$/);
+    expect(automationContextText({ ...line, needsYou: true }, 0, "Send it?")).toContain('routine "Inbox brief" · run, asked at');
+    expect(automationContextText({ ...line, failed: true }, 0, "Signed out.")).toContain('routine "Inbox brief" · run, could not finish at');
+    expect(automationContextText({ ...line, recovered: true }, 0, "Recovered.")).toContain('routine "Inbox brief" · run, recovered at');
   });
 
   it("always carries the newest line of each automation", () => {
@@ -47,7 +48,7 @@ describe("what the chat's own session reads", () => {
 });
 
 /** A real Store; the routine runs live in a stand-in for the RoutineManager, which keeps their report states. */
-function fixture() {
+function fixture(options: { threadLanguage?: (threadId: string) => string | undefined } = {}) {
   const store = new Store(selection);
   const bot = store.createBot({ name: "Pepper" });
   const main = bot.threadId;
@@ -74,6 +75,7 @@ function fixture() {
     store, routines: () => manager, busy: (_botId, threadId) => busy.has(threadId),
     wrote: (_bot: BotRecord, threadId) => wrote.push(threadId),
     notify: (kind, _bot, threadId, detail) => notified.push({ kind, threadId, detail }),
+    ...(options.threadLanguage ? { threadLanguage: options.threadLanguage } : {}),
   });
   const reports = create();
   let serial = 0;
@@ -225,6 +227,20 @@ describe("automation reports", () => {
     expect(f.notified.map((entry) => entry.threadId)).toEqual([f.main, nowhere.threadId]);
   });
 
+  it("says a run whose reply came back but a step failed was partly done, not that it didn't finish", () => {
+    const f = fixture();
+    const partly = f.finished(null, "Inbox brief", { status: "failed", error: "Stopped because the tool call failed.", partial: true });
+    f.reports.runFailed(partly, "Stopped because the tool call failed.");
+    expect(f.lines()).toEqual([expect.objectContaining({
+      text: "This run was partly done: Stopped because the tool call failed.",
+      automation: expect.objectContaining({ failed: true, partial: true }),
+    })]);
+    const broken = f.finished(null, "Other", { status: "failed", error: "Signed out" });
+    f.reports.runFailed(broken, "Signed out");
+    expect(f.lines()[1]).toMatchObject({ text: "This run didn't finish: Signed out" });
+    expect(f.lines()[1]!.automation).not.toHaveProperty("partial");
+  });
+
   it("posts one recovered line when a run with nothing new follows a failed run, and stays quiet after that", () => {
     const f = fixture();
     const failed = f.finished(null, "Inbox brief", { status: "failed", error: "Timed out" });
@@ -241,9 +257,30 @@ describe("automation reports", () => {
       ["This run didn't finish: it ran past its 25-minute limit.", failed.id, true, undefined],
       [recoveredText("Inbox brief", finishedAt), ok.id, undefined, true],
     ]);
+    expect(f.lines()[1]!.textCode).toBeUndefined();
+    expect(f.lines()[1]!.textParams).toBeUndefined();
     expect(f.runs.get(ok.id)!.report).toEqual({ state: "posted", threadId: f.main, messageId: f.lines()[1]!.id });
     expect(f.wrote).toEqual([f.main, f.main]);
     expect(f.notified).toEqual([]);
+  });
+
+  it("says a failed run and its recovery in the language of the chat's person", () => {
+    const asked = new Set<string>();
+    const f = fixture({ threadLanguage: (threadId) => { asked.add(threadId); return "de"; } });
+    const failed = f.finished(null, "Posteingang", { status: "failed", error: "Timed out" });
+    f.reports.runFailed(failed, "it ran past its 25-minute limit.");
+    const finishedAt = Date.UTC(2026, 9, 26, 2, 40);
+    const ok = f.finished("NOTHING NEW", "Posteingang", { finishedAt });
+    f.reports.runSettled(ok, `turn-${ok.id}`);
+    const plain = f.finished(null, "Posteingang", { status: "failed" });
+    f.reports.runFailed(plain, "");
+    expect(f.lines().map((line) => line.text)).toEqual([
+      "Diese Ausführung wurde nicht beendet: it ran past its 25-minute limit.",
+      recoveredText("Posteingang", finishedAt, "de"),
+      "Diese Ausführung wurde nicht beendet.",
+    ]);
+    expect(recoveredText("Posteingang", finishedAt, "de")).toMatch(/^Wieder in Ordnung: Posteingang wurde um \d{1,2}:\d\d \S+ erfolgreich beendet$/);
+    expect([...asked]).toEqual([f.main]);
   });
 
   it("says when a recovered run finished, in the host's clock", () => {
@@ -358,6 +395,19 @@ describe("automation reports", () => {
     f.reports.runSettled(f.runs.get(run.id)!, "last");
     expect(f.lines().at(-1)).toMatchObject({ text: "The dashboard looks fine.", automation: { runId: run.id } });
     expect(f.lines().at(-1)?.automation).not.toHaveProperty("copyOf");
+  });
+
+  it("names a card the run waits on in the language of the chat's person", () => {
+    const f = fixture({ threadLanguage: () => "de" });
+    const run = f.finished(null, "Dashboard check", { status: "running" });
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "signin", text: "Sign in", signIn: { url: "https://example.com", site: "example.com", place: "browser", reason: "das Dashboard braucht eine Anmeldung" } });
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "connector", connector: { slug: "clarity", label: "Microsoft Clarity", description: "", status: "required", resumeKey: "resume-key-1" } });
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "secret", secret: { target: "xaiApiKey", label: "xAI API key", description: "", placeholder: "", helpUrl: "", requestKey: "secret-1" } });
+    expect(f.lines().map((line) => line.text)).toEqual([
+      "Bitte melde dich bei example.com an: das Dashboard braucht eine Anmeldung.",
+      "Bitte verbinde Microsoft Clarity.",
+      "Bitte hinterlege xAI API key.",
+    ]);
   });
 
   it("copies a card into a busy chat only after its turn, and not at all once it was answered elsewhere", () => {

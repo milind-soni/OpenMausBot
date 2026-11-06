@@ -6,6 +6,7 @@ vi.mock("./notification-preferences", () => ({
   finishedNotificationsEnabled: () => sounds.finished,
 }));
 
+import { setLocale } from "./i18n";
 import {
   buildNotificationOptions,
   requestNotificationPermission,
@@ -159,6 +160,55 @@ describe("desktop notifications", () => {
   });
 });
 
+describe("on the desktop app, where main shows the banner so its click outlives the page", () => {
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  function installBridge(answer: () => Promise<boolean>) {
+    const installed = installNotification("granted");
+    const show = vi.fn(answer);
+    vi.stubGlobal("window", { focus: vi.fn(), ogb: { desktopNotifications: { show } } });
+    return { ...installed, show };
+  }
+
+  it("asks main, with the thread to come back to, and shows no banner of its own", async () => {
+    const { notices, show } = installBridge(async () => true);
+    showNotification(frame, vi.fn(), "/api/attachments/face.png");
+    await flush();
+    expect(show).toHaveBeenCalledWith({
+      title: frame.title, body: frame.body, tag: "openmausbot:bot-1", silent: false, picture: "/api/attachments/face.png", botId: "bot-1", threadId: "thread-1",
+    });
+    expect(notices).toHaveLength(0);
+  });
+
+  it("asks main for nothing without the person's permission or over the thread on screen, as ever", async () => {
+    const denied = installBridge(async () => true);
+    vi.stubGlobal("Notification", class { static permission = "denied"; });
+    showNotification(frame, vi.fn());
+    await flush();
+    expect(denied.show).not.toHaveBeenCalled();
+    const { show } = installBridge(async () => true);
+    vi.stubGlobal("document", { hasFocus: () => true });
+    showNotification(frame, vi.fn(), undefined, frame.threadId);
+    await flush();
+    expect(show).not.toHaveBeenCalled();
+  });
+
+  it.each([["says no", async () => false], ["fails", async () => { throw new Error("no handler"); }]])("shows its own when main %s, so a banner is never lost", async (_case, answer) => {
+    const { notices } = installBridge(answer as () => Promise<boolean>);
+    const onOpen = vi.fn();
+    showNotification(frame, onOpen);
+    await flush();
+    expect(notices).toHaveLength(1);
+    notices[0]!.onclick!();
+    expect(onOpen).toHaveBeenCalledWith({ botId: "bot-1", threadId: "thread-1" });
+  });
+
+  it("keeps the page's own banner on an older app, which has no bridge for it", () => {
+    const { notices } = installNotification("granted");
+    showNotification(frame, vi.fn());
+    expect(notices).toHaveLength(1);
+  });
+});
+
 describe("notification sounds", () => {
   it("lets the platform play its sound by default", () => {
     const { notices } = installNotification("granted");
@@ -181,5 +231,18 @@ describe("buildNotificationOptions", () => {
       tag: "openmausbot:bot-9",
       icon: undefined,
     });
+  });
+});
+
+describe("notification titles", () => {
+  afterEach(() => setLocale("en"));
+
+  it.each(["en", "pt-br"] as const)("displays the server's title unchanged with client language %s", (language) => {
+    const { notices } = installNotification("granted");
+    setLocale(language);
+    for (const title of ["Maus em Launch tem uma pergunta", "Maus in Launch has a question", "Maus in Launch hat eine Frage"]) {
+      showNotification({ ...frame, kind: "question", groupId: "g1", title }, vi.fn());
+      expect(notices.at(-1)?.title).toBe(title);
+    }
   });
 });

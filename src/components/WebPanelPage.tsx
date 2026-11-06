@@ -8,6 +8,7 @@ import { openExternalLink } from "@/lib/app-links";
 import { t } from "@/lib/i18n";
 import { useWebPanels } from "@/lib/web-panel-preferences";
 import { isAppOrigin } from "@/lib/web-panels";
+import { api } from "@/state/api";
 import { useStore } from "@/state/store";
 
 const LOAD_TIMEOUT_MS = 10_000;
@@ -18,6 +19,7 @@ export function WebPanelPage() {
   const panel = panels.find((entry) => entry.id === state.webPanelId);
   const [reloads, setReloads] = useState(0);
   const [status, setStatus] = useState<"loading" | "loaded" | "failed">("loading");
+  const [refusedUrl, setRefusedUrl] = useState<string>();
 
   // A removed panel leaves nothing to show: go back to the conversation.
   useEffect(() => {
@@ -30,7 +32,18 @@ export function WebPanelPage() {
     return () => clearTimeout(timer);
   }, [panel?.url, reloads]);
 
+  // The browser fires load on a frame it refused, so only the page's headers, read by the server, tell.
+  useEffect(() => {
+    const url = panel?.url;
+    if (!url) return;
+    const check = new AbortController();
+    api<{ framing?: string }>(`/api/web-panels/framing?url=${encodeURIComponent(url)}&origin=${encodeURIComponent(window.location.origin)}`, { background: true, signal: check.signal })
+      .then(({ framing }) => setRefusedUrl(framing === "blocked" ? url : undefined), () => undefined);
+    return () => check.abort();
+  }, [panel?.url, reloads]);
+
   if (!panel) return null;
+  const refused = refusedUrl === panel.url;
   const openInBrowser = () => void openExternalLink(panel.url).catch(() => undefined);
 
   return (
@@ -52,10 +65,10 @@ export function WebPanelPage() {
           {t("webPanels.page.openInBrowser")}
         </button>
       </header>
-      {status === "failed" || isAppOrigin(panel.url, window.location.origin) ? (
+      {refused || status === "failed" || isAppOrigin(panel.url, window.location.origin) ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
           <p className="text-[14px] font-medium text-ink">{t("webPanels.page.cantEmbed")}</p>
-          <p className="max-w-sm text-[13px] text-ink-secondary">{t("webPanels.page.cantEmbedBody")}</p>
+          <p className="max-w-sm text-[13px] text-ink-secondary">{refused ? t("webPanels.page.refusedBody", { site: new URL(panel.url).host }) : t("webPanels.page.cantEmbedBody")}</p>
           <button type="button" className="ui-button ui-button-primary" onClick={openInBrowser}>
             {t("webPanels.page.openInBrowser")}
           </button>

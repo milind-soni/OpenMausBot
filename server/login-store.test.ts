@@ -178,6 +178,13 @@ describe("the held-secret scrubber", () => {
     expect(held.scrub("alice signed in")).toBe("alice signed in");
   });
 
+  it("masks a password a submitted form carried in a URL, with ! ' ( ) ~ percent-encoded", () => {
+    const store = new LoginStore({ dataDir: dir });
+    store.create({ ...at("example.com"), username: "alice", password: "Hunter2!(x)~", source: "settings", bots: "all" });
+    const url = `https://example.com/login?${new URLSearchParams({ user: "alice", password: "Hunter2!(x)~" })}`;
+    expect(new HeldSecrets(store).scrub(url)).toBe("https://example.com/login?user=alice&password=••••••");
+  });
+
   it("masks a one-time code only as a whole number, and only for a few minutes", () => {
     let now = 0;
     const held = new HeldSecrets(new LoginStore({ dataDir: dir }), () => now);

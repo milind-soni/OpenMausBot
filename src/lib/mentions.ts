@@ -55,8 +55,9 @@ export function mentionRowDescription(detail: MentionRowDetail): string {
 }
 
 export function mentionRanges(text: string, peers: readonly MentionPeer[], everyone = false, person?: MentionPerson): MentionRange[] {
+  // The longest name wins; a teammate wins a tie with a bot of the same name, as the server reads it.
   const candidates = peers.filter((p) => !p.hidden && p.name.trim())
-    .sort((a, b) => b.name.length - a.name.length);
+    .sort((a, b) => b.name.length - a.name.length || Number(Boolean(b.person)) - Number(Boolean(a.person)));
   const personNames = person ? personTagNames(person.profileName) : [];
   const botNames = candidates.filter((peer) => !peer.person).map(({ name }) => name);
   const ranges: MentionRange[] = [];

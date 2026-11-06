@@ -1,5 +1,7 @@
 import type { Routine, RoutineRun } from "./routines";
 import { activeLocale, t } from "./i18n";
+import { routineLineText } from "./activity-text";
+import { clockOptions } from "./clock-time";
 
 export function routineRunTime(run: RoutineRun): number {
   return run.createdAt || run.startedAt || run.scheduledFor;
@@ -10,14 +12,19 @@ export function latestRoutineRun(routineId: string, runs: readonly RoutineRun[])
     .reduce<RoutineRun | undefined>((latest, run) => !latest || routineRunTime(run) > routineRunTime(latest) ? run : latest, undefined);
 }
 
+/** A run that failed only because a step did, after its reply came back. */
+export function partlyDone(run: RoutineRun): boolean {
+  return run.status === "failed" && run.partial === true && !run.goalStatus;
+}
+
 export function routineRunLabel(run: RoutineRun): string {
   if (run.goalStatus) return t(`routines.goal.${run.goalStatus}`);
-  const status = t(`routines.status.${run.status}`);
+  const status = t(partlyDone(run) ? "routines.status.partial" : `routines.status.${run.status}`);
   return run.retried && run.status !== "queued" ? t(`routines.retried.${run.retried}`, { status }) : status;
 }
 
 export function routineRunTone(run: RoutineRun): string {
-  if (run.status === "waiting" || ["needs-input", "limit-reached", "paused"].includes(run.goalStatus ?? "")) return "text-warning";
+  if (run.status === "waiting" || partlyDone(run) || ["needs-input", "limit-reached", "paused"].includes(run.goalStatus ?? "")) return "text-warning";
   if (["failed", "missed"].includes(run.status) || ["failed", "blocked"].includes(run.goalStatus ?? "")) return "text-danger";
   if (run.status === "running") return "text-accent";
   if (run.status === "completed" && (!run.goalStatus || run.goalStatus === "completed")) return "text-success";
@@ -25,7 +32,7 @@ export function routineRunTone(run: RoutineRun): string {
 }
 
 export function routineDateTime(at: number): string {
-  return new Date(at).toLocaleString(activeLocale(), { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return new Date(at).toLocaleString(activeLocale(), { month: "short", day: "numeric", ...clockOptions(activeLocale()) });
 }
 
 export function routineFinished(routine: Routine): boolean {
@@ -35,6 +42,11 @@ export function routineFinished(routine: Routine): boolean {
 export function routineScheduleState(routine: Routine): string {
   if (routineFinished(routine)) return t("routines.finishedSchedule");
   return routine.enabled ? t("routines.activeSchedule") : t("routines.pausedSchedule");
+}
+
+/** Why OpenMausBot keeps this routine paused, while it does (its owner left: shared/routines.ts RoutineHoldCause). */
+export function routineHeldNote(routine: Routine): string | null {
+  return routine.heldFor ? t(`routines.heldFor.${routine.heldFor}`) : null;
 }
 
 export function routineNextLabel(routine: Routine): string {
@@ -51,4 +63,10 @@ export function routineRunsOn({ roomGoal, runOn, computer, cloudHome }: {
   if (computer === "cloud") return { label: t("routines.runsOn.botCloud"), hint };
   if (computer === "vm" && !cloudHome) return { label: t("routines.runsOn.botVm"), hint };
   return { label: t(cloudHome ? "routines.runsOn.cloudHome" : "routines.runsOn.local"), hint };
+}
+
+export function routineRunText(run: RoutineRun, field: "output" | "error" | "attention"): string {
+  const english = run[field] ?? "";
+  if (field === "output") return routineLineText(run.outputCode, english);
+  return field === "error" ? routineLineText(run.errorCode, english, run.errorParams) : routineLineText(run.attentionCode, english, run.attentionParams);
 }

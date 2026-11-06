@@ -118,7 +118,6 @@
   --animate-pop-out: pop-out 0.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
   --animate-caret: caret-blink 1s step-end infinite;
   --animate-msg-in: msg-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
-  --animate-shimmer: shimmer 2s linear infinite;
   --animate-status-pulse: status-pulse 1.6s steps(2, jump-none) infinite;
   /* onboarding: a block of copy or a row arriving in a beat; `.stagger`
      spaces siblings out. Rare, first-time motion, so it may run past the
@@ -162,6 +161,12 @@
      there `raised` is pure white and a card is too. */
   --color-control: #282828;
   --color-hairline: #383838;
+  /* the 0.5px line where two panes meet: the sidebar and the chat */
+  --color-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
+  /* the window's frame: its top bar and the rail of places, around the
+     app's pane (the sidebar and the chat). The app's own colour a step darker, so it
+     stays in the skin's family: --frame-shade of black. */
+  --color-frame: color-mix(in oklab, var(--color-app), black var(--frame-shade));
   --color-ink: #f5f5f5;
   --color-ink-secondary: #f5f5f5a8;
   /* quiet text: timestamps, hints, placeholders, calendar hours. It used to
@@ -227,6 +232,10 @@
 
 :root {
   --code-color-scheme: dark;
+  /* how far the frame steps from the app's colour toward black: further on
+     the dark skins, whose colours sit close to black, and a small step on the
+     light ones (2.5%), where the quiet ink must still clear 4.5:1 on it */
+  --frame-shade: 30%;
   /* ink carried by a filled accent / danger surface (see the rule at the
      bottom of this file, which is what makes them take effect) */
   --color-accent-ink: #ffffff;
@@ -283,10 +292,22 @@
   --color-scrollbar: #3d3d3d;
   --color-maus-line: #f5f5f5;
 
+  --color-edge: #f5f5f50f;
+
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
-  --radius-lg: 0.5rem;
-  --radius-xl: 0.75rem;
+  /* One radius scale, shared with Daylight. What takes which step: buttons
+     and pills full; menu rows 6; fields 8; sidebar rows 10; menus 12;
+     dialogs 14; a card inside a bubble 16; bubbles 18; the composer 22
+     (18 once it wraps); a card in the transcript 24; the window's panes 0. */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 14px;
+  --radius-3xl: 16px;
+  --radius-4xl: 18px;
   --identity-green: #009957;
   --identity-blue: #377FE6;
   --identity-red: #D94B52;
@@ -312,6 +333,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="atelier"] {
   --code-color-scheme: light;
+  --frame-shade: 3%;
   --color-app: #f5f1eb;           /* outermost ground */
   --color-panel: #fbf8f2;         /* sidebar */
   --color-raised: #ffffff;        /* content — raised means lighter here */
@@ -354,6 +376,9 @@
     Roboto, sans-serif;
   --radius-lg: 6px;
   --radius-xl: 10px;
+  --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
+  --radius-2xl: 16px; --radius-3xl: 24px; --radius-4xl: 32px;
+  --color-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
   --identity-green: #007f48;
   --identity-blue: #1b6adc;
   --identity-red: #d12c34;
@@ -426,6 +451,9 @@
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 4px;
   --radius-xl: 8px;
+  --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
+  --radius-2xl: 16px; --radius-3xl: 24px; --radius-4xl: 32px;
+  --color-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
   --identity-green: #009957;
   --identity-blue: #377FE6;
   --identity-red: #D94B52;
@@ -456,6 +484,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="lagoon"] {
   --code-color-scheme: light;
+  --frame-shade: 4%;
   /* The tint is the point, so it is carried by the surfaces, not by a button:
      the ground sits 13 points of green-blue above its red channel, roughly
      three times Atelier's cream cast, which is what makes the skin read as
@@ -505,6 +534,9 @@
     Roboto, sans-serif;
   --radius-lg: 8px;
   --radius-xl: 14px;
+  --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
+  --radius-2xl: 16px; --radius-3xl: 24px; --radius-4xl: 32px;
+  --color-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
   --identity-green: #007945;
   --identity-blue: #1a65d1;
   --identity-red: #c82a32;
@@ -564,6 +596,9 @@
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 6px;
   --radius-xl: 10px;
+  --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
+  --radius-2xl: 16px; --radius-3xl: 24px; --radius-4xl: 32px;
+  --color-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
   --identity-green: #009957;
   --identity-blue: #377FE6;
   --identity-red: #D94B52;
@@ -585,6 +620,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="linen"] {
   --code-color-scheme: light;
+  --frame-shade: 3.5%;
   --color-app: #eceff3;
   --color-panel: #f5f6f8;
   --color-raised: #ffffff;
@@ -623,6 +659,9 @@
     Roboto, sans-serif;
   --radius-lg: 8px;
   --radius-xl: 12px;
+  --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
+  --radius-2xl: 16px; --radius-3xl: 24px; --radius-4xl: 32px;
+  --color-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
   --identity-green: #007d47;
   --identity-blue: #1b68d7;
   --identity-red: #ce2c34;
@@ -681,6 +720,9 @@
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 8px;
   --radius-xl: 12px;
+  --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
+  --radius-2xl: 16px; --radius-3xl: 24px; --radius-4xl: 32px;
+  --color-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
   --identity-green: #009957;
   --identity-blue: #377FE6;
   --identity-red: #D94B52;
@@ -696,65 +738,72 @@
 }
 
 /* ── Daylight ─────────────────────────────────────────────────────────────
-   Midnight's twin. Midnight was pixel-sampled from the upstream app's dark
-   theme; this is the same sampling of its light one, so the two are the only
-   skins here that copy a palette rather than compose one.
+   Midnight's twin in light: near-white chrome, a neutral sidebar, white
+   floating surfaces and translucent ink for text and hairlines, so every
+   step is the same #1c1c1c ink at a different strength.
 
-   Its structural quirk is the user's own bubble: near-black on a near-white
-   page, the one place a light skin carries inverted ink. That is what
+   Its structural quirk is the user's own bubble: ink on a near-white page,
+   the one place a light skin carries inverted ink. That is what
    --color-bubble-user-ink exists for — see the rule at the bottom of the
-   file. Everything else is a short ladder of greys: page #fcfcfc, sidebar
-   #f5f5f5, selected row #e4e4e4, and white for the composer and menus.
+   file. The surfaces are a short ladder: page #fcfcfc, sidebar and the
+   window's frame #f5f5f5, selected row #e4e4e4, a bot's message #efefef,
+   and white for the composer and menus.
+
+   Where a measured value misses AA its nearest passing step is used: the
+   tertiary ink is stronger than its 56%, and the accent, danger, success
+   and warning fills are their deeper tones, so white and their text clear
+   4.5:1 (pnpm check:contrast).
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="daylight"] {
   --code-color-scheme: light;
+  --frame-shade: 6%;
   --color-app: #fcfcfc;           /* the thread */
-  --color-panel: #f5f5f5;         /* sidebar, one step down from the thread */
-  --color-raised: #e4e4e4;
+  --color-panel: #f5f5f5;         /* sidebar */
+  --color-frame: var(--color-panel);
+  --color-raised: #e4e4e4;        /* the sidebar's selected row: 8% ink on the panel */
   --color-raised-hover: #d8d8d8;
-  --color-card: #f0f0f0;          /* what a bot says */
-  --color-inset: #ebebeb;         /* the search field */
+  --color-card: #efefef;          /* what a bot says: 6% ink on the page */
+  --color-inset: #e9e9e9;         /* the search field */
   --color-control: #e3e3e3;       /* a chip on a card */
-  /* Sampled at #efefef, which is what the eye reads on the divider — but a
-     hairline that faint fails this repo's own gate (1.5:1 against the page)
-     and every border is drawn at /40 on top of that. #d0d0d0 is the lightest
-     grey that still passes; see scripts/check-skin-contrast.mjs. */
-  --color-hairline: #d0d0d0;
+  /* 24% ink: whole, the firm line; at /50, the 12% line between surfaces. */
+  --color-hairline: #1c1c1c3d;
+  --color-edge: #1c1c1c14;
 
   --color-ink: #1c1c1c;
-  --color-ink-secondary: #555555;
-  --color-ink-tertiary: #5c5c5c;
+  --color-ink-secondary: #1c1c1cad;
+  --color-ink-tertiary: #1c1c1ca6;
 
-  /* The upstream blue is #1084fe, which carries white at 3.1:1 — fine for the
-     unread dot it is mostly used for, not for a filled button's label. The
-     fill is darkened until white clears AA; the dot keeps reading as blue. */
-  --color-accent: #0b62c4;
-  --color-accent-border: #1084fe;
-  --color-accent-text: #0b5cb8;
-  --color-focus: #0b62c4;
+  --color-accent: #126fd4;
+  --color-accent-border: #1680f3;
+  --color-accent-text: #0b69cc;
+  --color-focus: #0b6dd3;
   --color-accent-ink: #ffffff;
-  /* The composer is the page with a ring around it, not a grey slab —
-     the one surface where this skin departs from `raised`. */
   --color-composer: #ffffff;
-  --color-composer-ring: #ebebeb;
-  --color-menu: #ffffff;          /* menus sit a step above the page, not on the bubble */
+  --color-composer-ring: #1c1c1c1f;
+  --color-menu: #ffffff;
   --color-menu-hover: #1c1c1c0f;
   --color-menu-active: #1c1c1c14;
-  --color-bubble-user: #070707;   /* your own messages, inverted */
+  --color-bubble-user: #1c1c1c;   /* your own messages, inverted */
   --color-bubble-user-ink: #fcfcfc;
 
-  --color-success: #1f7a4d;
-  --color-danger: #c02b3a;
+  --color-success: #007a44;
+  --color-danger: #cd2834;
   --color-danger-ink: #ffffff;
   --color-success-ink: #ffffff;
-  --color-warning: #8a5a00;
+  --color-warning: #9c5b00;
   --color-scrollbar: #c4c4c4;
   --color-maus-line: #5f5f5f;
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
   --radius-lg: 8px;
-  --radius-xl: 14px;
+  --radius-xl: 12px;
+  --radius-2xl: 14px;
+  --radius-3xl: 16px;
+  --radius-4xl: 18px;
   --identity-green: #00864c;
   --identity-blue: #2271e3;
   --identity-red: #d63a42;
@@ -778,6 +827,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="meadow"] {
   --code-color-scheme: light;
+  --frame-shade: 6%;
   --color-app: #ffffff;           /* the thread */
   --color-panel: #f6f8f6;         /* sidebar */
   --color-raised: #e9eeea;
@@ -816,6 +866,9 @@
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 10px;
   --radius-xl: 16px;
+  --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
+  --radius-2xl: 16px; --radius-3xl: 24px; --radius-4xl: 32px;
+  --color-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
   --identity-green: #00884e;
   --identity-blue: #2573e4;
   --identity-red: #d63f47;
@@ -839,6 +892,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="pop"] {
   --code-color-scheme: light;
+  --frame-shade: 6%;
   --color-app: #fdf5ea;           /* the page */
   --color-panel: #f6ebdb;         /* sidebar */
   --color-raised: #efe3d1;
@@ -877,6 +931,9 @@
     -apple-system, system-ui, "Segoe UI", sans-serif;
   --radius-lg: 12px;
   --radius-xl: 18px;
+  --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
+  --radius-2xl: 16px; --radius-3xl: 24px; --radius-4xl: 32px;
+  --color-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
   --identity-green: #00824a;
   --identity-blue: #1c6de0;
   --identity-red: #d4323a;
@@ -931,6 +988,9 @@
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 8px;
   --radius-xl: 12px;
+  --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
+  --radius-2xl: 16px; --radius-3xl: 24px; --radius-4xl: 32px;
+  --color-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
   --identity-green: #009957;
   --identity-blue: #377FE6;
   --identity-red: #D94B52;
@@ -1049,6 +1109,10 @@
 .chat-wide .chat-md > :not(.chat-table) {
   max-width: var(--chat-prose-max);
 }
+
+/* A reply's long unbroken text (a URL, a run of letters) wraps inside its bubble instead of running past the window.
+   Code blocks keep scrolling sideways; table cells keep their widths. */
+.chat-md :is(p, li, h1, h2, h3, h4, blockquote) { overflow-wrap: anywhere; }
 
 .chat-text,
 .chat-md {
@@ -1314,6 +1378,9 @@ body {
   }
   :root[data-skin="midnight"] .ui-button:enabled:is(:hover, :active) {
     background: color-mix(in srgb, var(--color-ink) 8%, transparent);
+  }
+  :root:is([data-skin="midnight"], [data-skin="daylight"]) :is(.ui-button, .ui-icon-button) {
+    border-radius: 9999px;
   }
   :root[data-skin="daylight"] .ui-button {
     border-color: color-mix(in srgb, var(--color-ink) 12%, transparent);
@@ -1902,10 +1969,17 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
 @keyframes progress-fill {
   from { clip-path: inset(0 100% 0 0 round 999px); }
 }
-/* "Thinking…" label sheen while the model reasons */
-@keyframes shimmer {
-  from { background-position: 200% 50%; }
-  to { background-position: -200% 50%; }
+/* "Thinking…" label sheen while the model reasons. The band crosses the phrase while the brighter copy inside it
+   crosses back, so the letters hold still and only the light moves. It moves by transform, in a dozen steps, and
+   rests between sweeps: a smooth sweep (or a background-position one) draws the whole page every display frame for
+   as long as a turn runs. */
+@keyframes sheen-band {
+  from { transform: translateX(-70%); animation-timing-function: steps(12, jump-none); }
+  35%, to { transform: translateX(70%); }
+}
+@keyframes sheen-letters {
+  from { transform: translateX(70%); animation-timing-function: steps(12, jump-none); }
+  35%, to { transform: translateX(-70%); }
 }
 @keyframes reduced-loader-pulse {
   0%, 100% { opacity: 0.45; }
@@ -1920,28 +1994,47 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   60% { opacity: 0.25; }
 }
 .thinking-shimmer {
-  background: linear-gradient(90deg, var(--color-ink-secondary) 40%, var(--color-ink) 50%, var(--color-ink-secondary) 60%);
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  /* background-clip:text only paints glyphs inside the background box. A
-     tight line box (leading-none) is shorter than ascenders, descenders and
-     arabic marks, so they were cut. Pad the box past the glyphs and pull the
-     margins back so the layout doesn't move. */
+  position: relative;
+  color: var(--color-ink-secondary);
+  /* A truncated phrase clips to its box, and a tight line box (leading-none)
+     is shorter than ascenders, descenders and arabic marks. Pad the box past
+     the glyphs and pull the margins back so the layout doesn't move. */
   padding: 0.35em 0.12em;
   margin: -0.35em -0.12em;
 }
-/* Simple mode's typing row is quieter: the shimmer runs from tertiary ink up to secondary. */
-.turn-phrase-quiet .thinking-shimmer {
-  background-image: linear-gradient(90deg, var(--color-ink-tertiary) 40%, var(--color-ink-secondary) 50%, var(--color-ink-tertiary) 60%);
+.thinking-sheen {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
 }
+.thinking-sheen > span {
+  position: absolute;
+  inset: 0;
+  -webkit-mask-image: linear-gradient(90deg, transparent 30%, #000 50%, transparent 70%);
+  mask-image: linear-gradient(90deg, transparent 30%, #000 50%, transparent 70%);
+  animation: sheen-band var(--sheen-period) linear var(--sheen-delay) infinite;
+}
+.thinking-sheen > span::before {
+  content: attr(data-text) / "";
+  position: absolute;
+  inset: 0;
+  padding: 0.35em 0.12em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-ink);
+  animation: sheen-letters var(--sheen-period) linear var(--sheen-delay) infinite;
+}
+/* Simple mode's typing row is quieter: the sheen runs from tertiary ink up to secondary. */
+.turn-phrase-quiet .thinking-shimmer { color: var(--color-ink-tertiary); }
+.turn-phrase-quiet .thinking-sheen > span::before { color: var(--color-ink-secondary); }
 /* rotating presence phrase: the new phrase fades in where the old one was;
    only one is ever drawn */
 @keyframes turn-phrase-in {
   from { opacity: 0; }
 }
-.turn-phrase-in { animation: shimmer 2s linear infinite, turn-phrase-in 0.32s ease-out both; }
+.turn-phrase-in { animation: turn-phrase-in 0.32s ease-out both; }
 .turn-now-toggle {
   display: flex;
   min-width: 0;
@@ -1982,10 +2075,9 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
 @media (prefers-reduced-motion: reduce) {
   .turn-now-card { animation: none; }
   .turn-now-chevron { transition: none; }
-  .animate-caret, .animate-msg-in, .animate-shimmer, .animate-pop-in, .animate-pop-out { animation: none; }
+  .animate-caret, .animate-msg-in, .animate-pop-in, .animate-pop-out { animation: none; }
   .animate-status-pulse { animation: none; opacity: 0.6; }
-  .thinking-shimmer { background: none; color: var(--color-ink-secondary); }
-  .turn-phrase-quiet .thinking-shimmer { background: none; color: var(--color-ink-tertiary); }
+  .thinking-sheen { display: none; }
   .turn-phrase-in { animation: none; }
   .turn-mascot-in, .turn-mascot-out, .turn-answer { animation: none; }
   .reply-bubble-in { animation: none; }
@@ -2877,8 +2969,11 @@ button:disabled.bg-danger {
   --radius-menu: 12px;
   --menu-shadow: 0 0 #0000;
 }
-:is([data-skin="atelier"], [data-skin="lagoon"], [data-skin="linen"], [data-skin="daylight"], [data-skin="meadow"], [data-skin="pop"]) {
+:is([data-skin="atelier"], [data-skin="lagoon"], [data-skin="linen"], [data-skin="meadow"], [data-skin="pop"]) {
   --menu-shadow: 0 8px 24px -6px rgb(0 0 0 / 0.12), 0 1px 2px rgb(0 0 0 / 0.04);
+}
+:is([data-skin="daylight"]) {
+  --menu-shadow: 0 10px 20px -3px rgb(28 28 28 / 0.1), 0 4px 6px -4px rgb(28 28 28 / 0.1);
 }
 
 /* ── Phone ─────────────────────────────────────────────────────────────────
@@ -2895,7 +2990,10 @@ button:disabled.bg-danger {
    scripts/check-skin-contrast.mjs measures these as "<skin> (phone)", so the
    AA pairs hold here exactly as on desktop. */
 @media (max-width: 767.98px) {
+  /* The window's frame keeps the desktop ground at any width: the rail of places is a page 36px wide beside a full
+     page, and both draw the frame's top bar or rail in one colour. */
   :is([data-skin="midnight"]) {
+    --color-frame: color-mix(in oklab, #121212, black var(--frame-shade));
     --color-app: #141414;
     --color-panel: #1c1c1e;
     --color-raised: #2c2c2e;
@@ -2914,6 +3012,7 @@ button:disabled.bg-danger {
     --radius-menu: 22px;
   }
   :is([data-skin="meadow"]) {
+    --color-frame: color-mix(in oklab, #ffffff, black var(--frame-shade));
     --color-app: #f6f8f6;
     --color-panel: #fcfdfc;
     --color-card: #ffffff;
@@ -2936,12 +3035,22 @@ button:disabled.bg-danger {
    property inherits, so a select's or input's wrapper is cut out too: its
    chevron or icon overlay would otherwise drag over the field. A modal's
    full-window backdrop is cut out with its dialog, so a press on it over a
-   header still closes the dialog instead of moving the window. */
+   header still closes the dialog instead of moving the window. The
+   full-screen live desktop covers the headers beneath it the same way. */
 [data-window-drag] :has(> :is(select, input)),
 [data-window-drag] :is(button, a[href], input, select, textarea, label, summary, [role="button"], [role="link"], [role="tab"], [role="switch"], [role="checkbox"], [role="radio"], [role="combobox"], [role="slider"], [role="separator"], [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])),
 :is([role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [role="tooltip"]),
-.fixed:has(> :is([role="dialog"], [role="alertdialog"], [aria-modal="true"])) {
+.fixed:has(> :is([role="dialog"], [role="alertdialog"], [aria-modal="true"])),
+[data-browser-transport],
+[data-live-desktop][data-expanded] {
   -webkit-app-region: no-drag;
+}
+
+/* Simple's sidebar in the window frame: Search and New sit in its top corner
+   (Sidebar's corner row), and the bot tiles rise beside them while their first
+   row leaves the corner free (SidebarTileGrid measures it). */
+[data-sidebar-top-row="corner"] + [data-sidebar-tiles][data-beside-corner] {
+  margin-top: -34px;
 }
 
 /* Room speaker names. Each skin sets a tone of the bot's palette that clears

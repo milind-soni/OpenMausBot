@@ -5,6 +5,7 @@ import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { Card, SIMPLE_CARD } from "./SettingsPrimitives";
 import { UsageSummaryCard } from "./CloudUsageMeter";
+import { formatPlanSpend, type PlanSpend } from "@/lib/plan-spend";
 
 interface PlanWindow {
   available: boolean;
@@ -18,6 +19,7 @@ interface PlanExtra {
   remainingPercent: number;
   usedPercent: number;
   resetsAt: string | null;
+  spend?: PlanSpend;
 }
 
 interface PlanModelUsage {
@@ -85,6 +87,7 @@ function usageTone(used: number): string {
 function windowLabel(label: string): string {
   if (label === "5-hour") return t("planUsage.fiveHour");
   if (label === "Weekly") return t("planUsage.weekly");
+  if (label === "Monthly spend") return t("planUsage.monthlySpend");
   return label;
 }
 
@@ -107,11 +110,13 @@ function WindowRow({
   window,
   now,
   usedHeadline = false,
+  detail,
 }: {
   label: string;
   window: PlanWindow;
   now: number;
   usedHeadline?: boolean;
+  detail?: string;
 }) {
   const when = window.available ? formatResetDistance(window.resetsAt, now) : null;
   const used = window.usedPercent ?? 0;
@@ -125,6 +130,7 @@ function WindowRow({
         <div className="min-w-0">
           <div className="flex flex-wrap items-baseline gap-x-2 text-[13px] text-ink">
             <span className="tabular-nums">{headline}</span>
+            {detail && <span data-plan-spend className="text-[12px] tabular-nums text-ink-secondary">{detail}</span>}
             {when && <span className="text-[12px] text-ink-secondary">{t("planUsage.resetsIn", { when })}</span>}
           </div>
           <div
@@ -186,6 +192,15 @@ function usePlanUsage() {
   return { report, loading, error, now, load };
 }
 
+/** The budget of a plan with no weekly window, to stand in for the weekly figure. */
+export function monthlySpend(report: Pick<PlanUsageReport, "providers"> | null): { provider: PlanProvider; budget: PlanExtra } | null {
+  for (const provider of report?.providers ?? []) {
+    const budget = provider.ok && !provider.weekly.available ? provider.extra.find((extra) => extra.label === "Monthly spend") : undefined;
+    if (budget) return { provider, budget };
+  }
+  return null;
+}
+
 export function busiestWeekly(report: Pick<PlanUsageReport, "providers"> | null): { provider: PlanProvider; used: number } | null {
   let busiest: { provider: PlanProvider; used: number } | null = null;
   for (const provider of report?.providers ?? []) {
@@ -199,6 +214,13 @@ export function PlanUsageSummary() {
   const { report, now } = usePlanUsage();
   if (!report) return null;
   const busiest = busiestWeekly(report);
+  const spending = busiest ? null : monthlySpend(report);
+  if (spending) {
+    const name = providerLabel(spending.provider);
+    const used = Math.round(Math.min(100, Math.max(0, spending.budget.usedPercent)));
+    return <UsageSummaryCard kind="plan" title={t("settings.simple.billing.monthlySpend", { provider: name })} percent={used} label={`${name}: ${t("planUsage.used", { used })}`}
+      note={spending.budget.spend ? formatPlanSpend(spending.budget.spend) : null} />;
+  }
   if (!busiest) {
     return <section data-usage-summary="own-ai" className={cn(SIMPLE_CARD, "px-4 py-3.5 text-[14px] leading-5 text-ink-secondary")}>{t("settings.simple.billing.ownAi")}</section>;
   }
@@ -250,6 +272,8 @@ export function PlanUsage() {
                       key={`${extra.label}-${index}`}
                       label={windowLabel(extra.label)}
                       now={now}
+                      usedHeadline={Boolean(extra.spend)}
+                      detail={extra.spend ? formatPlanSpend(extra.spend) : undefined}
                       window={{
                         available: true,
                         remainingPercent: extra.remainingPercent,

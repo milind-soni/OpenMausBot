@@ -9,12 +9,13 @@ rail, and the window looks as before.
 The rail is the window's own chrome, not a page's: this app's page `/rail` in a
 view of its own at the left edge (electron/chrome-rail.mjs), beside whichever
 place's page the window shows, at every width and on every place, whatever that
-server runs. The page beside it moves over by the rail's width (the app's
-preload, at any zoom). The rail's sheets cover the window while open. Its
-circles are small and named on hover; the place on screen wears a ring. Beside
-the rail the sidebar's switcher and the profile menu's Switch to… step aside.
-The person can hide the rail; the page then has the whole window, and those two
-come back.
+server runs. `/rail` is a small page of its own (`rail.html`, `src/rail.tsx`):
+the rail, its sheets, the skin and the person's language, not the app. The
+page beside it moves over by the rail's width (the app's preload, at any zoom).
+The rail's sheets cover the window while open. Its circles are small and named
+on hover; the place on screen wears a ring. Beside the rail the sidebar's
+switcher and the profile menu's Switch to… step aside. The person can hide the
+rail; the page then has the whole window, and those two come back.
 Nothing here needs a real MausBot Cloud account, a payment or the Electron app.
 
 ## Contract

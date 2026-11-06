@@ -60,7 +60,7 @@ export function folderPageNetwork(files: string): { connect: string[]; resources
   return { connect: [...BOT_HTML_NETWORK.connect, files, DUCKDB_EXTENSIONS], resources: [...BOT_HTML_NETWORK.resources, files] };
 }
 
-export const APP_DOMAIN_LIMIT = 16;
+export const APP_DOMAIN_LIMIT = 64;
 const REFUSED_SHOWN_CHARS = 120;
 
 const LABEL = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";

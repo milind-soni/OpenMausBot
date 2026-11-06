@@ -39,7 +39,11 @@ A thread can choose its own model in the chat header and its Ask/Auto setting in
 
 All the bot's threads share its saved memory and skills; they do not automatically receive every sibling transcript. Folders are not separate accounts or privacy boundaries. Bot profiles can carry different access preferences, but app organization is not an operating-system sandbox.
 
-Threads can converse independently, but a physical computer, browser session, or shared project folder cannot safely have two agents changing it at once. OpenMausBot reports contention instead of allowing overlapping managed actions. New local-agent threads use separate working folders by default; existing pinned folders are retained.
+Threads can converse independently, but a physical computer, browser session, or shared project folder cannot safely have two agents changing it at once. OpenMausBot reports contention instead of allowing overlapping managed actions.
+
+A bot without a working folder gives each local-agent thread a folder of its own. Give the bot a working folder and its threads move there with their next message: each starts a new engine session that rereads the conversation, and files it already made stay in its old folder. A thread started in a folder you chose keeps that folder.
+
+A Claude bot has one settings file for all its threads: `.claude/settings.json` in its working folder, or in its own folder (`~/.openmausbot/workspaces/<bot id>/`) when it has none. Its hooks, plugins, permission rules and `env` apply in every thread, whatever folder the thread runs in; Claude Code reads the rest of the file only where the thread runs in that folder. A link in place of the file is not followed.
 
 ## Groups and teams
 

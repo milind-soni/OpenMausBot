@@ -47,6 +47,8 @@ export interface CloudAccountState {
   offer?: import("./cloud-home.mjs").CloudOffer;
   /** Connected with an active plan: its allowances and this month's use of them, and the bigger plans the app can move to (display only). */
   usage?: import("./cloud-home.mjs").CloudUsage;
+  /** Connected beside `usage`: the Cloud is short on room (display only; its plan moves through the usual upgrade). */
+  room?: import("./cloud-home.mjs").CloudRoom;
   /** A checkout this app opened (or a sign-in it started on the way to
    * one: `signIn`) in the last 24 hours: the plan, and when (Reopen checkout
    * starts the 30-minute watch again). `link`: main keeps its page, so Reopen
@@ -170,6 +172,37 @@ export interface CloudAccountBridge {
   onState(callback: (state: CloudAccountState) => void): () => void;
   files?: import("./cloud-sync.mjs").CloudFilesBridge;
 }
+/** Who is signed in on this device, as the You menu shows it. `signIn`: this account's sign-in has ended here. */
+export interface AccountRow { id: string; email: string; signIn?: true }
+export interface AccountsView { active: AccountRow | null }
+export interface AccountSwitchResult { outcome: "switched" | "signed-out" | "moving" | "sign-in" | "gone" | "failed"; email?: string; view: AccountsView }
+/** What a click on a place of another account answers when it didn't switch: nothing moved. `sign-in`: that sign-in has ended. */
+export interface RailOpenResult { outcome: "switched" | "moving" | "sign-in" | "gone" | "failed"; email?: string }
+/** `added`: kept signed in, not switched to, while this computer's move finishes; `already`: that account is the one signed in. */
+export type AccountAddResult =
+  | { outcome: "switched" | "added" | "already"; email?: string; view: AccountsView }
+  | { outcome: "wrong-code"; triesLeft: number }
+  | { outcome: Exclude<import("./cloud-signin.mjs").CloudSignInVerifyFailure, "wrong-code"> };
+/** This app's own pages only: main refuses any other page. Absent on an older app. */
+export interface AccountsBridge {
+  list(): Promise<AccountsView>;
+  /** Removes that account from this device; the window goes to another signed in here, else the app is signed out. */
+  signOut(id: string): Promise<AccountSwitchResult>;
+  /** Add another account: the active account goes on until this succeeds. The attempt and the token stay in main. */
+  addStart(email: string): Promise<CloudSignInStart>;
+  addVerify(code: string): Promise<AccountAddResult>;
+  addBrowser(): Promise<{ outcome: "browser" | "failed"; code?: string }>;
+  addReopen(): Promise<void>;
+  /** How the browser's way ended, asked once the list changes: null until it has. */
+  addResult(): Promise<{ outcome: "switched" | "added" | "already" | "failed"; email?: string } | null>;
+  addCancel(): Promise<void>;
+  sheetPending(): Promise<boolean>;
+  sheetClosed(): Promise<void>;
+  onChanged(callback: () => void): () => void;
+  onOpenSheet(callback: () => void): () => void;
+}
+/** Any place's own page, from the person's click: the accounts sheet opens on the rail's page, and this page learns nothing of them. */
+export interface AccountSheetBridge { offered(): Promise<boolean>; open(): Promise<void> }
 /** On the person's own Cloud, open in this app's window: the plan, read
  * only, Manage in the browser, and Sign in again. No account, credential or address. */
 /** `signin`: this computer's sign-in ended; `tier` names the plan last verified, if any. */
@@ -187,6 +220,8 @@ export interface CloudPlanSnapshot {
   home?: true;
   /** Verified, with an active plan: its allowances and their use this month (the usage meter). */
   usage?: import("./cloud-home.mjs").CloudUsage;
+  /** Verified, beside `usage`: this Cloud is short on room, and the plan that fixes it or a tip (the room card). */
+  room?: import("./cloud-home.mjs").CloudRoom;
   /** Verified, while this account pays for a plan that runs: what Cancel and Keep act on. */
   renewal?: import("./cloud-list.mjs").CloudRenewal;
 }
@@ -203,6 +238,9 @@ export interface CloudPlanBridge {
   /** Cancel trial / Cancel plan and Keep my plan on the Cloud's own page (only from the person's click). Absent on an older app. */
   cancel?(survey: CloudCancelSurvey | null): Promise<CloudRenewalResult>;
   keep?(): Promise<CloudRenewalResult>;
+  /** The room card's Not now, and Restart now after its upgrade (only from the person's click). Absent on an older app. */
+  roomNotNow?(id: string): Promise<boolean>;
+  restartNow?(): Promise<"restarting" | "current" | "failed">;
 }
 
 export declare const CLOUD_ORIGIN: string;
@@ -210,7 +248,7 @@ export declare const STAGING_CLOUD_ORIGIN: string;
 export declare function cloudTarget(env?: Record<string, string | undefined>): {
   origin: string; staging: boolean;
   /** Under userData: the sign-in, saved servers, Files' folder, the Cloud's chosen name. */
-  file: string; environments: string; sync: string; look: string;
+  file: string; saved: string; places: string; environments: string; sync: string; look: string;
 };
 export declare const CHECKOUT_SOURCES: readonly string[];
 export declare const UPGRADE_SOURCES: readonly string[];
@@ -265,6 +303,10 @@ export interface CloudAccountClient {
   cancelPlan(survey: unknown): Promise<CloudRenewalResult>;
   /** POST /api/cloud/desktop/clouds/<the session's own Cloud>/keep. */
   keepPlan(): Promise<CloudRenewalResult>;
+  /** POST /api/cloud/desktop/room: Not now on the room card for the session's own Cloud; false when it couldn't be said. */
+  roomNotNow(id: string): Promise<boolean>;
+  /** POST /api/cloud/desktop/resize-now: the bigger size after an upgrade goes at once. */
+  restartNow(): Promise<"restarting" | "current" | "failed">;
   homeTarget(): { origin: string } | null;
   /** The Admin's last word on a Cloud whose plan sleeps; null for any other. */
   power(): import("./cloud-power.mjs").CloudPower | null;
@@ -277,7 +319,8 @@ export interface CloudAccountClient {
   /** `origin` is a Cloud the person owns (My Cloud or another of theirs), by the verified session only. */
   isOwnCloud(origin: string | null | undefined): boolean;
   /** Buys another Cloud (POST /api/cloud/desktop/clouds): its checkout opens in the browser. */
-  addCloud(input: { tier: string; interval?: "month" | "year"; name: string; color?: import("./cloud-list.mjs").CloudSwatch | null }): Promise<CloudAddResult>;
+  /** `source`: where the checkout started (CHECKOUT_SOURCES), for the Admin's funnel. */
+  addCloud(input: { tier: string; interval?: "month" | "year"; name: string; color?: import("./cloud-list.mjs").CloudSwatch | null; source?: string | null }): Promise<CloudAddResult>;
   /** A new organization on the Team plan this account pays for (POST /api/cloud/desktop/organizations): no checkout. */
   addOrganization(input: { name: string; color?: import("./cloud-list.mjs").CloudSwatch | null }): Promise<OrganizationAddResult>;
   /** A Cloud's colour on the Admin (PATCH /api/cloud/desktop/clouds/:id), for its owner or its team's Super admin and Admins. */
@@ -299,6 +342,10 @@ export interface CloudAccountClient {
   reportMove(options: { installation: string }): Promise<boolean>;
   /** This computer keeps its bots on itself again: it no longer counts as moved. False when the Admin can't take it yet. */
   reportKept(options: { installation: string }): Promise<boolean>;
+  /** The Admin's word on this account's own Cloud at `origin` (POST /api/cloud/desktop/moved-to): deleted, ended (stopped and
+   * kept only until it is deleted), live, or unknown (none of this account's). Null without a verified sign-in, or from an
+   * Admin that doesn't say. */
+  movedTo(origin: string): Promise<"deleted" | "ended" | "live" | "unknown" | null>;
   /** Tells the Admin where this computer's move to My Cloud stands (POST /api/cloud/desktop/move-status); false without a
    * sign-in or when the Admin doesn't take it yet. */
   reportMoveStatus(report: import("./move-status.mjs").MoveStatusReport): Promise<boolean>;
@@ -312,6 +359,12 @@ export interface CloudAccountClient {
   /** No sign-in needed: returns the Admin's receipt for this email-only answer. */
   updatesConsentByEmail(input: { email: string; installId: string; textVersion: string }): Promise<string>;
   withdrawUpdatesConsent(input: { status: "declined" | "withdrawn"; receipt: string }): Promise<void>;
+  /** Another account takes over: nothing more is asked or written for this sign-in. */
+  quiesce(): void;
+  /** Reads the sign-in saved in `store` afresh, keeping nothing of the one before. */
+  reload(): Promise<CloudAccountState>;
+  /** Ends a sign-in that waits on this device, at the Admin. */
+  revokeSaved(record: unknown): Promise<void>;
   close(): void;
 }
 export declare function createCloudAccountClient(options: {
@@ -330,7 +383,8 @@ export declare function createCloudAccountClient(options: {
   warn?: (message: string) => void;
   /** Files or lending waits for a sleeping Cloud to wake: the session is read every 15 s. */
   awaitingWake?: () => boolean;
+  t?: (key: string, params?: Record<string, string | number>) => string;
 }): CloudAccountClient;
 export declare function cloudPlanSnapshot(state: CloudAccountState | null | undefined, extra?: { notice?: import("./cloud-home.mjs").CloudTrialState | null }): CloudPlanSnapshot;
 /** My Cloud's line under its name in the server menus, or null for none. */
-export declare function cloudMenuSublabel(state: CloudAccountState | null | undefined, date: (value: number) => string): string | null;
+export declare function cloudMenuSublabel(state: CloudAccountState | null | undefined, date: (value: number) => string, t?: (key: string, params?: Record<string, string | number>) => string): string | null;

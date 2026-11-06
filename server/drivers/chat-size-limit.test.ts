@@ -109,6 +109,8 @@ describe("an OpenAI-compatible provider that refuses large requests", () => {
         return;
       }
       const chunks: Buffer[] = [];
+      // Only a turn's POST carries a body; the Ollama probe GETs /api/version first (ollama-context.ts).
+      if (req.method !== "POST") { res.writeHead(404); res.end(); return; }
       for await (const chunk of req) chunks.push(chunk as Buffer);
       const raw = Buffer.concat(chunks);
       requests.push({ bytes: raw.length, messages: JSON.parse(raw.toString("utf8")).messages });

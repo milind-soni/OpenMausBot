@@ -275,7 +275,7 @@ export const TOOLS: McpToolDefinition[] = [
         channel_id: { type: "string", description: "The ID of the channel." },
         task_id: { type: "string", description: "Optional expected active task/thread ID." },
         text: { type: "string", description: "The message content to post." },
-        send_id: SEND_ID_SCHEMA,
+        send_id: SEND_ID_SCHEMA, mentions: { type: "array", items: { type: "string" }, maxItems: 20, description: "When an @name in text is shared by several bots in the channel: the ids of the ones you mean." },
       },
       required: ["channel_id", "text"],
       additionalProperties: false,
@@ -938,7 +938,7 @@ export async function handleToolCall(
       }
       const receipt = await fetcher(`/api/groups/${encodeURIComponent(channelId)}/messages`, {
         method: "POST",
-        body: JSON.stringify({ text, threadId: taskId, ...sendIdArg(args) }),
+        body: JSON.stringify({ text, threadId: taskId, ...sendIdArg(args), ...(args.mentions !== undefined ? { mentions: stringArrayArg(args, "mentions") } : {}) }),
       });
       return { success: true, channelId, taskId, ...sendReceipt(receipt) };
     }

@@ -15,8 +15,8 @@ import { UsageBudgetCards, type BudgetState } from "./UsageBudget";
 import { TraceView } from "./usage/TraceView";
 import { LiveBadge, modelName, StatStrip, totalsStats } from "./usage/TraceWaterfall";
 
-export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine" | "routine";
-const OTHER_GROUPINGS: readonly UsageGroupBy[] = ["model", "user", "day", "engine", "routine"];
+export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine" | "routine" | "department";
+const OTHER_GROUPINGS: readonly UsageGroupBy[] = ["model", "user", "department", "day", "engine", "routine"];
 
 export interface UsageGroup {
   key: string;
@@ -41,6 +41,7 @@ const GROUP_LABEL_KEYS: Record<UsageGroupBy, LocaleKey> = {
   day: "usage.history.byDay",
   engine: "usage.history.byEngine",
   routine: "usage.history.byRoutine",
+  department: "usage.history.byDepartment",
 };
 
 const PERIOD_LABEL_KEYS: Record<UsagePeriod, LocaleKey> = {
@@ -55,6 +56,7 @@ const LIVE_REFRESH_MS = 2_000;
 
 export function usageGroupLabel(groupBy: UsageGroupBy, group: Pick<UsageGroup, "key" | "label">): string {
   if (groupBy === "routine") return group.key === "manual" ? t("usage.history.notRoutine") : group.label;
+  if (groupBy === "department") return group.label || t("usage.history.noDepartment");
   if (groupBy !== "user") return group.label;
   if (group.key === "owner") return t("usage.history.owner");
   if (group.key === "bot") return t("usage.history.botToBot");
@@ -76,10 +78,8 @@ function useUsageGroups(range: { from: string; to: string }, groupBy: UsageGroup
 
 export function GroupBars({ groupBy, groups }: { groupBy: UsageGroupBy; groups: readonly UsageGroup[] }) {
   const { state } = useStore();
-  const priced = groups.some((group) => hasFiniteCost(group.costUsd) && group.costUsd > 0);
-  const value = (group: UsageGroup) => priced ? group.costUsd ?? 0 : headlineTokens(group);
-  const top = [...groups].sort((a, b) => value(b) - value(a)).slice(0, 6);
-  const max = Math.max(...top.map(value), 0);
+  const top = [...groups].sort((a, b) => headlineTokens(b) - headlineTokens(a)).slice(0, 6);
+  const max = Math.max(...top.map(headlineTokens), 0);
   if (!top.length || max <= 0) return <p className="text-[13px] text-ink-secondary">{t("usage.page.whereEmpty")}</p>;
   return (
     <ul className="flex flex-col gap-2.5">
@@ -92,10 +92,11 @@ export function GroupBars({ groupBy, groups }: { groupBy: UsageGroupBy; groups: 
               <span className="truncate">{groupBy === "model" ? modelName(group.label, state.instances) : usageGroupLabel(groupBy, group)}</span>
             </span>
             <span className="h-2 overflow-hidden rounded-full bg-raised">
-              <span className="block h-full rounded-full bg-accent/70" style={{ width: `${Math.max(2, (value(group) / max) * 100)}%` }} />
+              <span className="block h-full rounded-full bg-accent/70" style={{ width: `${Math.max(2, (headlineTokens(group) / max) * 100)}%` }} />
             </span>
             <span className="min-w-[4.5rem] text-right tabular-nums text-ink-secondary">
-              {priced ? formatCost(group.costUsd) : formatTokens(headlineTokens(group))}
+              {formatTokens(headlineTokens(group))}
+              {hasFiniteCost(group.costUsd) && group.costUsd > 0 && ` · ${formatCost(group.costUsd)}`}
             </span>
           </li>
         );

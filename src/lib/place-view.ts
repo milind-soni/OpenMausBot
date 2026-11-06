@@ -6,6 +6,7 @@ import { engineSignedOut } from "@/lib/failed-turn";
 import { browserAvailable, builtInBrowserEnabled, type FeatureFlagConfig } from "@/lib/feature-flags";
 import { writeComputerPanelView } from "@/lib/computer-panel-view";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { pageOnRemoteServer } from "@/lib/local-computer";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { openBotSettings } from "@/components/bot-panel/panel-link";
 import { openKeySettings } from "@/components/keys/key-focus";
@@ -25,8 +26,10 @@ export interface PlaceSeat {
   mode: "simple" | "advanced";
 }
 
-export function serverKind(config: Pick<ConfigStatus, "cloudHome"> | null | undefined, platform: DesktopCapabilities["host"]["platform"]): ServerKind {
+export function serverKind(config: Pick<ConfigStatus, "cloudHome"> | null | undefined, capabilities: DesktopCapabilities): ServerKind {
   if (config?.cloudHome) return "my-cloud";
+  if (pageOnRemoteServer(capabilities)) return "remote";
+  const { platform } = capabilities.host;
   return platform === "darwin" ? "mac" : platform === "win32" ? "pc" : "linux";
 }
 
@@ -103,11 +106,11 @@ export function useCloudPlanPaid(): boolean {
   return Boolean(bridge) && cloudPlanView(account).kind === "paid";
 }
 
-export function usePlaceSeat(config: Pick<ConfigStatus, "cloudHome"> | null | undefined, platform: DesktopCapabilities["host"]["platform"]): PlaceSeat {
+export function usePlaceSeat(config: Pick<ConfigStatus, "cloudHome"> | null | undefined, capabilities: DesktopCapabilities): PlaceSeat {
   const plan = useCloudPlanPaid();
   const ownerOrAdmin = useOwnerOrAdmin();
   const advanced = useAdvancedMode();
-  return { server: serverKind(config, platform), plan, role: ownerOrAdmin === false ? "user" : "admin", mode: advanced ? "advanced" : "simple" };
+  return { server: serverKind(config, capabilities), plan, role: ownerOrAdmin === false ? "user" : "admin", mode: advanced ? "advanced" : "simple" };
 }
 
 export function openPlaceAction(

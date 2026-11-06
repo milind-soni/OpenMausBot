@@ -12,6 +12,7 @@ import { CLOUD_HEALTH_MAX_BYTES, HEALTH_BUCKET_CAP, createCloudHealth, createClo
 import { DATA_DIR, EVENTS_DIR } from "./config.ts";
 import { memoryStallText, memoryStopText } from "./engine-memory.ts";
 import type { RuntimeEvent } from "./contracts.ts";
+import { toolFailureMessage } from "./drivers/tool-failure.ts";
 import { createCloudSignedRoutes } from "./routes/cloud-signed.ts";
 import { SessionRegistry } from "./sessions.ts";
 import { Store } from "./store.ts";
@@ -47,6 +48,14 @@ function world(overrides: Partial<CloudHealthDeps> = {}) {
 
 const incidents = (w: ReturnType<typeof world>, after?: string) => w.health.report(after).incidents.map(({ kind, code, engine, count }) => ({ kind, code, engine, count }));
 const place = (state: PlaceRow["state"]): PlaceRow => ({ state, params: { bot: "Tallyspoon Ops", cause: "Boat said: quota exceeded for ada@example.test." }, source: "works-on" });
+
+describe("a Cloud home's memory pressure in its health report", () => {
+  it("carries the last day's counts where the home watches memory, and null where it does not", () => {
+    expect(world().health.report(undefined)).toMatchObject({ room: null });
+    const room = { waits: 3, waitMs: 360_000, stopped: 1, killed: 2, stallMinutes: 4 };
+    expect(world({ room: () => room }).health.report(undefined)).toMatchObject({ room });
+  });
+});
 
 describe("a new Cloud's first hour in its health report", () => {
   it("carries the milestones and the Chief's counts, and null where there are none", () => {
@@ -93,6 +102,14 @@ describe("the failure code a Cloud home reports", () => {
     ]);
   });
 
+  it("files a turn a failed tool call stopped under tool_error, not unknown", () => {
+    const w = world();
+    w.emit(w.bot.threadId, { type: "turn.started" }, "openai-compat");
+    w.fail(toolFailureMessage(["composio_CLARITY_GET_INSIGHTS"], []));
+    w.emit(w.bot.threadId, { type: "turn.completed", ok: false, stopReason: "tool_error" }, "openai-compat");
+    expect(incidents(w)).toEqual([{ kind: "turn", code: "tool_error", engine: "openai-compat", count: 1 }]);
+  });
+
   it("files a row whose turn never reports a stop under its own class once it has waited", () => {
     const w = world();
     w.emit(w.bot.threadId, { type: "turn.started" });
@@ -109,14 +126,15 @@ describe("the failure code a Cloud home reports", () => {
     w.fail("this thread could not start — the engine is not installed");
     w.fail("queued message could not start — the engine is not installed");
     w.fail(TRIAL_CREDIT_REFUSED.used_up);
-    w.fail(`${memoryStopText(5)} (opencodeGo exited null before the prompt result)`);
+    w.fail(`${memoryStopText(false)} (opencodeGo exited null before the prompt result)`);
     w.fail(memoryStallText("no activity for 20 minutes — the turn was stopped", 1));
+    w.fail(memoryStopText(true));
     expect(incidents(w)).toEqual([
       { kind: "turn", code: "stalled", engine: null, count: 1 },
       { kind: "turn", code: "restart", engine: null, count: 1 },
       { kind: "turn", code: "could_not_start", engine: null, count: 2 },
       { kind: "turn", code: "trial_used_up", engine: null, count: 1 },
-      { kind: "turn", code: "out_of_memory", engine: null, count: 2 },
+      { kind: "turn", code: "out_of_memory", engine: null, count: 3 },
     ]);
   });
 

@@ -133,6 +133,20 @@ describe("provider key check", () => {
       .toEqual({ ok: false, reason: "rejected", status: 401 });
   });
 
+  // Its /models answers without a key, but a wrong key gets 401 (checked 2026-10-30), so a key's own list proves it.
+  it("checks Greenference at its preset endpoint", async () => {
+    const greenference: typeof fetch = async (input, init) => {
+      expect(String(input)).toBe("https://llm.eu.greenference.com/v1/models");
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer fixture-greenference");
+      expect(init?.redirect).toBe("manual");
+      return Response.json({ object: "list", data: [{ id: "greenference/glm-5.3-flash" }] });
+    };
+    expect(await checkProviderKey({ provider: "greenference", key: "fixture-greenference" }, greenference))
+      .toEqual({ ok: true, check: "models", models: ["greenference/glm-5.3-flash"] });
+    const refused: typeof fetch = async () => Response.json({ error: { code: "authentication", message: "invalid or expired token" } }, { status: 401 });
+    expect(await checkProviderKey({ provider: "greenference", key: "bad-key" }, refused)).toEqual({ ok: false, reason: "rejected", status: 401 });
+  });
+
   it("checks Meta at its preset endpoint without claiming chat authentication", async () => {
     const meta: typeof fetch = async (input, init) => {
       expect(String(input)).toBe("https://api.meta.ai/v1/models");

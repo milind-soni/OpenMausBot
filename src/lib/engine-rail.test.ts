@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { InstanceInfo } from "@/state/store";
-import { configuredModelInstances, splitEngineRail } from "./engine-rail";
+import { configuredModelInstances, modelsAwaitEngine, splitEngineRail } from "./engine-rail";
 
 describe("splitEngineRail", () => {
   it("groups sign-in plans, pasted provider keys and Local engines", () => {
@@ -149,5 +149,19 @@ describe("Claude in the picker when Claude Code is signed out or not found", () 
     expect(configuredModelInstances([missing], "claude")).toEqual([missing]);
     expect(configuredModelInstances([missing])).toEqual([]);
     expect(configuredModelInstances([missing], "codex")).toEqual([]);
+  });
+});
+
+describe("modelsAwaitEngine", () => {
+  const snapshot = { state: "available" as const, authenticated: true };
+
+  it("asks a signed-in engine whose list it never gave", () => {
+    expect(modelsAwaitEngine({ modelsUnconfirmed: true, snapshot })).toBe(true);
+  });
+
+  it("leaves a confirmed list, a signed-out engine and an unavailable one alone", () => {
+    expect(modelsAwaitEngine({ snapshot })).toBe(false);
+    expect(modelsAwaitEngine({ modelsUnconfirmed: true, snapshot: { ...snapshot, authenticated: false } })).toBe(false);
+    expect(modelsAwaitEngine({ modelsUnconfirmed: true, snapshot: { state: "unavailable", reason: "missing" } })).toBe(false);
   });
 });

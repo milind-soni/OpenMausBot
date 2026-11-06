@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { cloudHomeLendingRefusal, cloudLendingRefusalText, createCloudRoutineAuthors, ownerOnlyConversation, routineFingerprint, type CloudLendingTurn } from "./cloud-lending.ts";
+import { cloudHomeLendingRefusal, cloudLendingRefusalText, createCloudRoutineAuthors, ownerOnlyConversation, routineFingerprint, teamLendingRefusal, type CloudLendingTurn } from "./cloud-lending.ts";
+import { CLOUD_NOBODY_KEY, CLOUD_OUTSIDE_KEY } from "./cloud-sharing.ts";
 
 const OWNER = "p_owner", GUEST = "p_guest";
 const ownerPerson = (person: string | undefined) => person === OWNER;
@@ -19,6 +20,16 @@ const mayLend = (lending: CloudLendingTurn) => cloudHomeLendingRefusal(lending) 
 describe("who may use a Mac lent to a Cloud home (review: guests, webhooks)", () => {
   it("the owner's own conversation from one of their devices may", () => {
     expect(mayLend(turn({}))).toBe(true);
+  });
+  it("a turn an outside caller started through the bot's API may not, whoever's line it reads", () => {
+    const apiLine = said("m1", undefined, { via: "api" });
+    expect(mayLend(turn({ request: request("m1", { automation: "api" }), thread: [apiLine] }))).toBe(false);
+    expect(cloudHomeLendingRefusal(turn({ request: request("m1", { automation: "api" }), thread: [said("m1", OWNER, { via: "api" })] }))).toBe("not-owner");
+    expect(cloudHomeLendingRefusal(turn({ request: request("m1", { automation: "api" }), thread: [said("m1", OWNER)], routineRun: run({ ownerStarted: true }) }))).toBe("not-owner");
+  });
+  it("a conversation a bot opened may not, even for the owner's line: another bot's words start its session", () => {
+    expect(cloudHomeLendingRefusal(turn({ botOpened: true }))).toBe("someone-else");
+    expect(mayLend(turn({ botOpened: false }))).toBe(true);
   });
   it("a guest's conversation, a sender-less line (a local process) or a bot's line may not", () => {
     expect(mayLend(turn({ thread: [said("m1", GUEST)] }))).toBe(false);
@@ -113,6 +124,17 @@ describe("the owner's routines", () => {
   afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); dir = ""; });
   const routine = { prompt: "Tidy ~/Downloads on my Mac", target: "bot", botId: "b1", attachments: [{ id: "a1", path: "/x" }],
     schedule: { type: "interval", everyMinutes: 1440, anchorAt: 1_790_000_000_000 }, runOn: "maus" };
+  it("keeps a routine outside work wrote outside when a bot's change would make it nobody's; a person's save still makes it theirs", () => {
+    dir = mkdtempSync(join(tmpdir(), "omb-cloud-lending-"));
+    const authors = createCloudRoutineAuthors(join(dir, "lending-routines.json"));
+    authors.wrote("r1", CLOUD_OUTSIDE_KEY);
+    authors.wrote("r1", CLOUD_NOBODY_KEY);
+    expect(authors.writer("r1")).toBe(CLOUD_OUTSIDE_KEY);
+    expect(createCloudRoutineAuthors(join(dir, "lending-routines.json")).writer("r1")).toBe(CLOUD_OUTSIDE_KEY);
+    authors.wrote("r1", "p_aPersonWhoSavedItxxxx");
+    expect(authors.writer("r1")).toBe("p_aPersonWhoSavedItxxxx");
+  });
+
   it("records what the owner wrote; any change to the instructions, target or attachments no longer matches", () => {
     dir = mkdtempSync(join(tmpdir(), "omb-cloud-lending-"));
     const authors = createCloudRoutineAuthors(join(dir, "lending-routines.json"));
@@ -146,10 +168,16 @@ describe("cloudLendingRefusalText", () => {
     expect(cloudLendingRefusalText("someone-else", { ...mac, fromBefore: true })).toBe("This conversation has messages from before My Cloud, so it can't use your Mac. Start a new conversation with this bot to use it.");
     expect(cloudLendingRefusalText("someone-else", mac)).toBe("Someone else wrote in this conversation, so it can't use your Mac. Start a new conversation to use it.");
     expect(cloudLendingRefusalText("not-owner", mac)).toBe("Only conversations you start with a bot, and routines you wrote, can use your Mac. Start a new conversation with this bot to use it.");
-    expect(cloudLendingRefusalText("memory-changed", room)).toBe("This bot's memory was changed in a conversation you didn't write. Review it in Memory to use your Mac again.");
+    expect(cloudLendingRefusalText("memory-changed", room)).toBe("This bot's memory was changed in a conversation you didn't write, so it can't use your Mac. In this bot's settings, open Memory, check what changed and tap Mark reviewed, then ask again here.");
     for (const why of ["unproven", "not-owner", "someone-else", "memory-changed"] as const) {
       for (const where of [mac, room, { ...room, fromBefore: true }]) expect(cloudLendingRefusalText(why, where)).not.toMatch(/Use my Mac/u);
     }
+  });
+  it("says when a bot opened the conversation, or a webhook posted in it, and names both steps when the bot's memory is locked too", () => {
+    expect(cloudLendingRefusalText("someone-else", { ...mac, botOpened: true })).toBe("A bot opened this conversation, so it can't use your Mac. Start a new conversation with this bot to use it.");
+    expect(cloudLendingRefusalText("someone-else", { ...mac, outside: true })).toBe("A webhook or a routine you didn't write posted in this conversation, so it can't use your Mac. Start a new conversation with this bot to use it.");
+    expect(cloudLendingRefusalText("someone-else", { ...mac, botOpened: true, memoryChanged: true })).toBe("This bot's memory was changed in a conversation you didn't write, so it can't use your Mac. In this bot's settings, open Memory, check what changed and tap Mark reviewed, then start a new conversation with this bot and ask there.");
+    expect(cloudLendingRefusalText("unproven", { ...room, memoryChanged: true })).toContain("tap Mark reviewed, then ask here yourself.");
   });
   it("in a group chat, points to a new thread there or to asking there", () => {
     expect(cloudLendingRefusalText("someone-else", { ...room, fromBefore: true })).toBe("This conversation has messages from before My Cloud, so it can't use your Mac. Start a new thread in this group chat to use it.");
@@ -159,5 +187,12 @@ describe("cloudLendingRefusalText", () => {
   it("calls the computer what it is", () => {
     expect(cloudLendingRefusalText("unproven", { ...room, device: "PC" })).toContain("your PC");
     expect(cloudLendingRefusalText("unproven", { ...mac, device: "computer" })).not.toMatch(/\bMac\b/u);
+  });
+});
+
+describe("a team's one line about lent computers", () => {
+  it("says plainly that nobody's own computer serves the team, in the team's name, with no personal-Cloud words", () => {
+    expect(teamLendingRefusal("Acme")).toBe("Acme's bots never use anyone's own computer; they use Acme's cloud computer.");
+    expect(teamLendingRefusal("Acme")).not.toMatch(/conversations you start|My Cloud|server/i);
   });
 });

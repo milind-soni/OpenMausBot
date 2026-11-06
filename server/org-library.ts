@@ -21,6 +21,7 @@ import {
 } from "./package-import.ts";
 import { pair, partHash, sha256Hex, type PartPair, type TeamPart } from "./package-parts.ts";
 import { storedPresetObject, type StoredPreset } from "./presets.ts";
+import { applyUpdates, handleWithdrawn, type ReleaseContext } from "./org-library-releases.ts";
 import type { RoutineManager } from "./routines.ts";
 import type { SkillListing, SkillPackageStamp } from "./skills.ts";
 import { sectionKey, type InstalledPackageMetadata, type Store, type StoreChange } from "./store.ts";
@@ -242,13 +243,18 @@ function noteRemovedParts(install: OrgInstall, next: Pick<LiveRecords, "bots" | 
 export interface OrgLibraryDeps {
   dataDir: string;
   store: Store;
-  routines: Pick<RoutineManager, "packageStamps" | "update" | "listRoutines" | "remove">;
+  routines: Pick<RoutineManager, "packageStamps" | "update" | "listRoutines" | "remove"> & Partial<Pick<RoutineManager, "stampInstalledPackage">>;
   skills: {
     list(botId: string): SkillListing[];
     stamps(botId: string): Array<{ name: string; enabled: boolean; stamp: SkillPackageStamp }>;
     setEnabled(botId: string, name: string, enabled: boolean): SkillListing | { error: string };
     installOrg(botId: string, source: string, skillMd: string, stamp: SkillPackageStamp): SkillListing | { error: string };
+    /** An update replaces a skill's text only through these; without them skills keep the text they were added with. */
+    read?(botId: string, name: string): string | null;
+    remove?(botId: string, name: string): { removed: true } | { error: string };
   };
+  /** A team's brief, by its section; without it an update leaves the brief as it is. */
+  sections?: { read(section: string): string; write(section: string, text: string): void };
   postState?: (message: OrgLibraryStateMessage) => void;
   now?: () => number;
   presets?: { list(): StoredPreset[] };
@@ -380,13 +386,24 @@ export class OrgLibrary {
 
   private reconcile(applied: AppliedLibrary): void {
     this.rebuild();
-    this.handleWithdrawn();
+    const releases = this.releases();
+    if (releases) { handleWithdrawn(releases); applyUpdates(releases); }
     this.state.source = { adminOrigin: applied.adminOrigin, organizationId: applied.organizationId };
     this.state.appliedDigest = applied.digest;
     this.save();
     this.report();
   }
 
+
+  private releases(): ReleaseContext | null {
+    const library = this.library;
+    if (!library) return null;
+    return {
+      installs: this.state.installs, entries: library.catalog.packages, currentInstallId: (packageId) => this.currentInstallId(packageId),
+      releaseDocument: (entry) => { const read = this.releaseDocument(entry); return read.ok ? read.value : null; },
+      installedDocument: (install) => this.installDocument(install), deps: this.deps, now: () => this.deps.now?.() ?? Date.now(),
+    };
+  }
 
   private currentInstallId(packageId: string): string | null {
     return this.library ? orgInstallId(this.library.adminOrigin, this.library.organizationId, packageId) : null;
@@ -579,51 +596,6 @@ export class OrgLibrary {
     for (const id of botIds) store.deleteBot(id);
     if (section && store.sections.includes(section)) store.changeEmptySection(section, null);
     console.warn(`[org-library] removed a team that was only partly added when OpenMausBot stopped; it can be added again from the shelf`);
-  }
-
-  private handleWithdrawn(): boolean {
-    if (!this.library) return false;
-    let changed = false;
-    for (const [installId, install] of Object.entries(this.state.installs)) {
-      if (this.currentInstallId(install.packageId) !== installId) continue;
-      if (install.status === "withdrawn" || (install.status === "removed" && install.withdrawnHandled === install.sha256)) continue;
-      const entry = this.library.catalog.packages.find((candidate) => candidate.packageId === install.packageId);
-      if (!entry?.withdrawnReleases.some((withdrawn) => withdrawn.sha256 === install.sha256)) continue;
-      this.switchOff(installId);
-      if (install.status === "installed") install.status = "withdrawn";
-      else install.withdrawnHandled = install.sha256;
-      install.updatedAt = this.deps.now?.() ?? Date.now();
-      changed = true;
-    }
-    return changed;
-  }
-
-  private switchOff(installId: string): void {
-    for (const bot of this.deps.store.bots) {
-      for (const skill of this.deps.skills.stamps(bot.id)) {
-        if (skill.stamp.installId !== installId || !skill.enabled) continue;
-        const result = this.deps.skills.setEnabled(bot.id, skill.name, false);
-        if ("error" in result) console.warn(`[org-library] could not switch off ${skill.name}: ${result.error}`);
-      }
-    }
-    for (const bot of this.deps.store.bots) {
-      const made = bot.installedPackage;
-      if (made?.source !== "org" || made.installId !== installId || !made.presetKey || !made.ref) continue;
-      const source = `org:${made.ref}@${made.release}`;
-      for (const skill of this.deps.skills.list(bot.id)) {
-        if (skill.source !== source || !skill.enabled) continue;
-        const result = this.deps.skills.setEnabled(bot.id, skill.name, false);
-        if ("error" in result) console.warn(`[org-library] could not switch off ${skill.name}: ${result.error}`);
-      }
-    }
-    for (const routine of this.deps.routines.packageStamps()) {
-      if (routine.stamp.installId !== installId || !routine.enabled) continue;
-      try {
-        this.deps.routines.update(routine.routineId, { enabled: false });
-      } catch (error) {
-        console.warn(`[org-library] could not pause a routine: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
   }
 
   private onStoreChange(change: StoreChange): void {
@@ -899,7 +871,7 @@ export class OrgLibrary {
       try {
         this.save();
       } catch {}
-      if (error instanceof PackageImportError) return fail(refusal(422, error.code, error.message), "invalid_package");
+      if (error instanceof PackageImportError) return error.status === 409 ? refusal(409, error.code, error.message) : fail(refusal(422, error.code, error.message), "invalid_package");
       console.error(`[org-library] could not add ${entry.ref}: ${error instanceof Error ? error.message : String(error)}`);
       return fail(refusal(500, "import_failed", ADD_FAILED), "import_failed");
     }

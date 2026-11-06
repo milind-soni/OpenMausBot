@@ -11,12 +11,12 @@ differences with OpenCode 2.x.
 
 | Provider | OpenCode | Chat engine | Claude Code | Codex |
 |---|---|---|---|---|
-| OpenRouter | Yes | Yes | Only through Claude Code's own settings | Not yet |
-| Fireworks AI | Yes | Yes | Only through Claude Code's own settings | Not yet |
-| DeepSeek | Yes | Yes | Only through Claude Code's own settings | Not yet |
+| OpenRouter | Yes | Yes | Custom endpoint, or Claude Code's own settings | Not yet |
+| Fireworks AI | Yes | Yes | Custom endpoint, or Claude Code's own settings | Not yet |
+| DeepSeek | Yes | Yes | Custom endpoint, or Claude Code's own settings | Not yet |
 | Cline | Yes | Yes | No | No |
 | Your own OpenAI-compatible address | Yes, in OpenCode's config file | Yes | No | Not yet |
-| Your own Anthropic-compatible address | Not tested | No | Only through Claude Code's own settings | No |
+| Your own Anthropic-compatible address | Not tested | No | Custom endpoint, or Claude Code's own settings | No |
 
 "Chat engine" is OpenMausBot's built-in engine for OpenAI-compatible services.
 In a bot's model picker it is called **OpenAI-compatible (OpenRouter / Groq)**
@@ -155,11 +155,25 @@ broker, including Full Access. Native Cline tool selection is not supported.
 
 ### Claude Code
 
-The app has no place yet to point Claude Code at another provider. The
-**Anthropic API key** in Connections is for Anthropic only.
+The **Anthropic API key** in Connections is for Anthropic only.
 
-You can point Claude Code itself at OpenRouter, Fireworks AI or DeepSeek,
-and your Claude bots follow it:
+To run Claude bots on DeepSeek, GLM or another host that speaks Claude
+Code's API, add a **custom endpoint** in Settings → Engines, in the Claude
+card:
+
+- **Add endpoint** takes a name, the endpoint's base URL, its token and the
+  model id the endpoint serves. Model mappings for Opus, Sonnet and Haiku
+  are optional.
+- Each endpoint is its own engine with its own directory, so a bot chooses
+  it like any other AI. It never reads or writes this computer's
+  `~/.claude`, and the Claude Code on this computer keeps its own sign-in.
+- Its bots run the model the endpoint serves. A bot that still has a Claude
+  model selected runs the endpoint's main model instead.
+- The token is saved in OpenMausBot's own `config.json` and sent only to the
+  base URL you enter. Removing an endpoint removes only that entry.
+
+You can also point Claude Code itself at OpenRouter, Fireworks AI or
+DeepSeek, and your Claude bots follow it:
 
 - Put `ANTHROPIC_BASE_URL` and your key in the `env` block of
   `~/.claude/settings.json`. Fireworks' FireConnect does this for you.
@@ -185,6 +199,24 @@ and your Claude bots follow it:
 
 Not yet. Codex bots use your ChatGPT sign-in, or your organisation's models.
 
+## Ollama's context window
+
+Below 23 GB of graphics memory, Ollama gives a model a 4,096-token context window
+unless told otherwise, and it drops whatever doesn't fit without an error. That is
+less than a bot's instructions and tools, so OpenMausBot sets a larger window the
+first time a bot uses a model.
+
+You'll see the result in `ollama list` as a second name, such as
+`qwen3.5:4b-omb-64k`. It uses the same weights, so it takes no extra disk space.
+Removing it is safe: OpenMausBot makes it again when it needs it. To free the disk
+space a model uses, remove both names.
+
+The window is 16K, 32K or 64K tokens, depending on your memory and the model's size.
+To choose your own, set `num_ctx` in a Modelfile or start Ollama with
+`OLLAMA_CONTEXT_LENGTH`. A `num_ctx` in a Modelfile is always left alone. With
+`OLLAMA_CONTEXT_LENGTH`, keep the model loaded before the first turn, because
+OpenMausBot can only see that setting on a running model.
+
 ## Current limits
 
 There is no shared provider list that configures every engine. Use each
@@ -193,14 +225,14 @@ another engine's sign-in or model list.
 
 ## OpenCode 2.x
 
-OpenMausBot installs and tests OpenCode 1.x (the `opencode-ai` npm package).
-OpenCode 2.x is a separate package, `@opencode/cli`, and it also installs a
-command called `opencode`.
+OpenMausBot installs and tests OpenCode 2.x (the `@opencode/cli` npm package).
+The older 1.x line shipped as `opencode-ai`; both packages install a command
+called `opencode`.
 
 - If you installed OpenCode from OpenMausBot's Settings, bots use that copy.
   Otherwise they use the first `opencode` on your PATH, which is 2.x if you
   installed `@opencode/cli`. **Settings → Engines** shows the version in use.
-- 2.x works on a best-effort basis. Version-specific differences:
+- Differences from 1.x:
   - Some 2.x releases have reported missing configured providers in new
     ACP sessions ([upstream report #50236](https://github.com/anomalyco/opencode/issues/50236)).
     If a provider is missing, check the installed version and upstream

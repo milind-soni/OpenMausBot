@@ -1,6 +1,7 @@
 // Outbound actions: calls that reach a person outside the app or move money.
 // Below Full access they get their own confirmation, or spend an optional daily
-// allowance per bot; at Full access they run. A read-and-draft routine run never
+// allowance per bot; at Full access they run, up to OUTBOUND_DEFAULT_CAP a day
+// unless the bot has a rule of its own. A read-and-draft routine run never
 // reaches them: the relay refuses every send there. Shared by the harness (which
 // enforces it) and the app.
 import { isConnectedAppsServer } from "./own-apps.ts";

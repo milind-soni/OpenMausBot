@@ -21,7 +21,9 @@ import type { AppConfig } from "../config.ts";
 import type { LoginStore } from "../login-store.ts";
 import type { MoveAutomations } from "../move-freeze.ts";
 import { threadHeads } from "../message-db.ts";
+import type { LineLanguage } from "../server-lines.ts";
 import type { RequestAuth } from "../request-auth.ts";
+import type { ServerErrorBody } from "../../shared/server-text.ts";
 import type { BotRecord } from "../store.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
@@ -29,19 +31,24 @@ export interface CloudSendRouteDeps extends Pick<CloudSendSources, "appVersion" 
   messagesTail(threadId: string, limit: number): { messages: ReadonlyArray<{ role: string; text?: string }>; hasMore: boolean };
   logins: Pick<LoginStore, "changes" | "get" | "onePasswordConnectedAt" | "onePasswordGrants" | "onePasswordToken">;
   config(): Pick<AppConfig, "profile" | "language">;
+  lineLanguage?: LineLanguage;
   chats?: CloudSendChatsDeps;
   /** This server is the person's own Cloud: it answers what a move asks of the Cloud it moves to. */
   cloudHome?: boolean;
+  /** A server of one person's own: it answers that person's session (`ownHome(auth)`) as a Cloud home answers its owner. */
+  ownHome?(auth: RequestAuth): boolean;
   /** This server's connections (cloud-connections.ts), by id. */
   connections?(): Promise<ReadonlyArray<{ id: string }>>;
   connectionFingerprints?(nonce: string): Record<string, string>;
+  /** The move ended: the person hears which connections stayed on the computer it came from. */
+  connectionsMoved?(language?: string): void;
   /** What only a move carries: automations, skill extras and bot fields, memory, and bot files. */
   move?: MoveKindsDeps & Omit<MoveMemoryDeps, "bot" | "owner">;
   /** This server's automations, which a Cloud home stops for a computer whose bots go home to it. */
   automations?: MoveAutomations;
   /** A team's server: nothing of one person's computer moves in, and every send or move route answers this but to a
    * sign-in that moves one bot in (`scope`). */
-  refusal?: string;
+  refusal?: ServerErrorBody;
   /** The one bot a request's sign-in moves into this team, which every read here is kept to; null for any other. */
   scope?(auth: RequestAuth): string | null;
 }
@@ -70,15 +77,16 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
   return async (ctx) => {
     const { req, res, path, method, url, json, readBody } = ctx;
     if (path !== "/api/cloud-send" && !path.startsWith("/api/cloud-send/")) return PASS;
+    const home = deps.cloudHome === true || deps.ownHome?.(ctx.auth) === true;
     const scoped = deps.scope?.(ctx.auth) ?? null;
-    if (deps.refusal && !scoped) { req.resume(); return json(res, 403, { error: deps.refusal }); }
+    if (deps.refusal && !scoped) { req.resume(); return json(res, 403, deps.refusal); }
     // A move of one bot into a team reads that bot only, on both sides.
     const bot = scoped ?? (/^[\w-]{1,128}$/u.test(url.searchParams.get("bot") ?? "") ? url.searchParams.get("bot")! : undefined);
     if (deps.chats && await cloudSendChatsRoute({ ...deps.chats, ...(bot ? { bot } : {}) }, ctx)) return;
     if (move && await moveKindsRoute(move, ctx)) return;
     if (move && await moveMemoryRoute({ ...move, bot: (id) => move.store.bot(id) ?? undefined }, ctx)) return;
     if (move && await moveFilesRoute({ dataDir: move.dataDir, bots: () => (bot ? move.store.bots.filter((entry) => entry.id === bot) : move.store.bots), owner: move.owner }, ctx)) return;
-    if (move && deps.cloudHome && await arrivedRoute({ dataDir: move.dataDir, store: move.store, webhooks: move.webhooks, owner: move.owner }, ctx)) return;
+    if (move && home && await arrivedRoute({ dataDir: move.dataDir, store: move.store, webhooks: move.webhooks, owner: move.owner, lineLanguage: deps.lineLanguage ?? (() => deps.config().language), ...(deps.connectionsMoved ? { stayed: deps.connectionsMoved } : {}) }, ctx)) return;
     if (move && deps.cloudHome && deps.automations && await automationsOffRoute({ automations: deps.automations, owner: move.owner }, ctx)) return;
     if (move && !deps.cloudHome && await homeRoute({ dataDir: move.dataDir, store: move.store, webhooks: move.webhooks }, ctx)) return;
     if (path === "/api/cloud-send/manifest") {
@@ -89,7 +97,7 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
         connections: deps.connections ?? (async () => []), heads: threadHeads, ...(move ? { kinds: move, teamMemory: move.teamMemory } : {}), ...(bot ? { bot } : {}) }));
     }
     if (path === "/api/cloud-send/verify-secrets") {
-      if (!deps.cloudHome || !deps.connectionFingerprints) return json(res, 404, { error: "not found" });
+      if (!home || !deps.connectionFingerprints) return json(res, 404, { error: "not found" });
       if (method !== "POST") return json(res, 405, { error: "method not allowed" });
       const asked = z.object({ nonce: z.string().regex(VERIFY_NONCE) }).safeParse(await readBody(req, 4096));
       if (!asked.success) return json(res, 400, { error: "send { nonce }: at least 32 random bytes, base64url" });

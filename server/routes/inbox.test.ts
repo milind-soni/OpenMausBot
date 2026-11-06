@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { afterEach, expect, it } from "vitest";
 
 import { requiredScope, type RequestAuth } from "../request-auth.ts";
-import { MARCO, PHILIPP, session, teamInbox } from "../testing/team-inbox-fixture.ts";
+import { BEN, CLEO, session, teamInbox } from "../testing/team-inbox-fixture.ts";
 import { createInboxRoutes } from "./inbox.ts";
 import { PASS, type RouteContext } from "./table.ts";
 
@@ -13,7 +13,7 @@ function setup(options: Parameters<typeof teamInbox>[0] = {}) {
   const f = teamInbox(options);
   fixtures.push(f);
   const route = createInboxRoutes(f.team);
-  const call = async (method: string, path: string, auth: RequestAuth = session(MARCO.email)) => {
+  const call = async (method: string, path: string, auth: RequestAuth = session(BEN.email)) => {
     const sent: { status?: number; body?: any } = {};
     const out = await route({
       req: {} as IncomingMessage, res: {} as ServerResponse, url: new URL(path, "http://127.0.0.1"), path, method, auth,
@@ -27,14 +27,16 @@ function setup(options: Parameters<typeof teamInbox>[0] = {}) {
 
 it("answers each member with their own inbox, which a client session may read and mark", async () => {
   const { f, call } = setup();
-  f.team.pass("scout", "philipp-private", "Marco", "The launch moved to Friday.");
+  f.team.pass("scout", "cleo-private", "Ben", "The launch moved to Friday.");
+  expect(await call("GET", "/api/inbox/count")).toMatchObject({ status: 200, body: { count: 1 } });
+  expect(requiredScope("GET", "/api/inbox/count")).toBe("client");
   const mine = await call("GET", "/api/inbox");
-  expect(mine).toMatchObject({ status: 200, body: { botId: "marcos-chief", rows: [{ text: "The launch moved to Friday.", tab: "info", unread: true }] } });
+  expect(mine).toMatchObject({ status: 200, body: { botId: "bens-chief", rows: [{ text: "The launch moved to Friday.", tab: "info", unread: true }] } });
   const line = mine.body.rows[0].id as string;
   expect((await call("POST", `/api/inbox/${line}/read`)).body.rows[0]).toMatchObject({ unread: false, tab: "info" });
   expect((await call("POST", `/api/inbox/${line}/done`)).body.rows[0]).toMatchObject({ tab: "done" });
-  expect(await call("POST", `/api/inbox/${line}/done`, session(PHILIPP.email)), "someone else's line").toMatchObject({ status: 404 });
-  expect((await call("GET", "/api/inbox", session(PHILIPP.email))).body.rows).toEqual([]);
+  expect(await call("POST", `/api/inbox/${line}/done`, session(CLEO.email)), "someone else's line").toMatchObject({ status: 404, body: { error: "That line is not in your inbox.", errorKey: "serverError.inbox.lineMissing" } });
+  expect((await call("GET", "/api/inbox", session(CLEO.email))).body.rows).toEqual([]);
   expect(await call("DELETE", "/api/inbox")).toMatchObject({ status: 405 });
   expect((await call("GET", "/api/needs-you")).out).toBe(PASS);
   for (const [method, path] of [["GET", "/api/inbox"], ["POST", `/api/inbox/${line}/read`], ["POST", `/api/inbox/${line}/done`]] as const) {
@@ -49,10 +51,10 @@ it("refuses to mark an open ask done, which only its answer settles", async () =
   f.team.route({ kind: "approval", botId: "reporter", botName: "Reporter", threadId: "rep-shared", title: "Reporter needs approval", body: "Run: rm -rf ./build" });
   const [ask] = (await call("GET", "/api/inbox")).body.rows;
   expect(ask).toMatchObject({ tab: "needs-you", card: { requestId: "req-1" } });
-  expect(await call("POST", `/api/inbox/${ask.id}/done`)).toMatchObject({ status: 409 });
+  expect(await call("POST", `/api/inbox/${ask.id}/done`)).toMatchObject({ status: 409, body: { error: "This waits on your answer: answer it, or close it, where it asks.", errorKey: "serverError.inbox.answerRequired" } });
 });
 
 it("has no inbox off a team", async () => {
   const { call } = setup({ team: false });
-  expect(await call("GET", "/api/inbox")).toMatchObject({ status: 404 });
+  expect(await call("GET", "/api/inbox")).toMatchObject({ status: 404, body: { error: "There is no inbox here.", errorKey: "serverError.inbox.missing" } });
 });

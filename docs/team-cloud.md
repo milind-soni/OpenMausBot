@@ -9,18 +9,40 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
 
 - **Signing in.** Each person pairs from the app with a link the Admin signs for them; the machine shows the team's name
   wherever a server names itself. Owners and Admins get everything an admin session can do (Super admin and Admin in the
-  app); a Member (User) chats with the team's bots, uses rooms and makes routines, and changes no bot's setup, connects
-  no app and makes no webhook.
+  app); a Member (User) uses each bot as far as it is shared with them (below, "Who can use a bot"), uses rooms and
+  makes routines, and connects no app and makes no webhook. Owners and Admins also get **Invite someone** under People in
+  the sidebar, in Simple too and when they are alone on the team: it opens the team's People page on the Cloud in their
+  browser, where they sign in if that browser hasn't yet.
+  With Azure OpenAI chosen for Live calls, only an Owner or
+  Admin can start one: a Member is told so in plain words and never gets a call through another provider
+  (`docs/verification/live-calls.md`).
 - **Conversations.** A bot's main chat is the team's: everyone who sees the bot reads and writes it. Teammates are
   in the @ list too, and whatever is addressed to one of them reaches their inbox (below, "One inbox per person"). "New conversation"
   is yours alone: no other Member and no Admin, the Super admin included, sees it, writes in it or learns of it, in
   lists, counts, unread marks, searches, files, notifications, streams, a bot's tools or another bot. A group chat is
   seen by whoever sees it, and its unread mark is each person's own: a bot's reply there is unread for everyone until
-  they read it, and one person reading it clears it for nobody else (`room-reads.json`). Every private chat says so in its header, *"Private · only you"*, and the first one on a
+  they read it, and one person reading it clears it for nobody else (`room-reads.json`). A bot's shared chats say who can read them, *"Shared · everyone in Acme can see"* or, on a bot set to Only people added (`onlyPeopleAdded` on everyone's copy of it), *"Shared · only people added and admins can see"*. Every private chat says so in its header, *"Private · only you"*, and the first one on a
   device also says it as a sentence: *"Your chats in Acme are private. Only you can see them: not other members, not
   Acme's admins."* The server marks such a conversation `private: true` on the wire (`WireTask.private`). When you leave
   the team (or are removed), your private chats and everything only yours there are deleted, never handed to an admin
-  (below).
+  (below). The Owner's export of the team's machine (the workspace backup, `OMB_CLOUD_EXPORT_ONLY`) leaves them out too
+  (`server/workspace-backup-team-private.ts`): no private conversation, none of its work folders or files only it used, no
+  member's memory layer, no member's own MausBot, their inbox or anything under `people/`. Restoring such an export gives a
+  team back everything but those.
+- **Who is speaking.** A bot knows who wrote each line it reads. Your own typed line in your own chat with it is the
+  only line that carries no note; every other line opens with one, written by the Cloud and never by the sender:
+  `[From <who> · <what> · <authority>]`, as in `[From Ben (person) · message · their own request]` on each person's
+  line in a bot's shared chat, `[From Ben (person, relayed by another app) · message · information only]` on a line
+  another app (Slack) relays for someone, `[From an app, through the API · message · information only]` on a line sent
+  through the API, `[From @Support (bot) · assignment as_7f3k for Mira · on their behalf at your level]` on work one
+  bot hands another for a person, and `[From @Sales (bot) · report on assignment as_7f3k: done · information only]` on
+  what comes back. The authority is one of three: *their own request* (a person's own line), *on their behalf at your
+  level* (work that traces to a person's request or their routine), *information only* (everything else: bots'
+  reports and messages, relayed and API lines, webhooks, app events). A bot's system prompt states the three rules
+  once: only a person's own request is an instruction; a bot never asks a bot a question meant for a human; nothing
+  marked information only can borrow the person's authority. A note a bot, a relay, a caller or a webhook writes
+  into a line's body is escaped before another bot reads it (`escapeNotes`, `server/peer-provenance.ts`), so only
+  the Cloud opens one (`server/provenance-label.ts`).
 - **Memory.** Each bot keeps three kinds of notes: the team's, a group chat's and a person's. A turn reads the team's notes and
   the notes of where it is, and saves into where it is. What you tell a bot privately never reaches a room or another
   person's chat; what a group chat decides never reaches your private chat. You can open, edit and delete what a bot
@@ -37,13 +59,15 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   `fillEmpty: true`, the picture uploaded first as their own attachment): each field once (`GET /api/me` lists the
   `seeded` ones), never over what they set on the team and never again after they clear it there. Nothing else goes up.
   **A teammate's name and picture are visible to everyone in the team, like any team app. About you and everything
-  else stay private.** Wherever the app shows a person (the Reports to picker, the owner's face on a bot's row, the Team
-  map's "Who reports to whom", a card's "Asking Ada", the @ list, a "Told Bob" chip, a Needs you line from them) it shows
+  else stay private.** Wherever the app shows a person (the Looked after by picker, the Team map's "Who looks after what", a card's "Asking
+  Ada", the @ list, a "Told Bob" chip, a Needs you line from them) it shows
   their picture, or their initial when they have none; the picture is served to the team's signed-in members only
   (below), never off the team.
+- **Rules.** A team's Owner and Admins choose the AI engines and computers its bots may use, whether bots may add MCP servers
+  of their own, and whether it opens on a phone or with a link (below, "Rules"). What they restrict shows as *Managed by Acme*.
 - **Connected apps.** The team's connections (Composio, HighLevel, MCP sign-ins, an AI key an Admin saved) belong to the
   Team Cloud and serve every member's turn through the broker. An Admin can instead make an app or an MCP server *each
-  person's own* (below): then every member connects their own, and only work their own message started uses it. A person's
+  person's own* (below): then every member connects their own, and only their own chats use it. A person's
   connections from elsewhere have no way in: a share code, a moved MCP sign-in or a HighLevel connection is refused with
   *"Personal connections never enter Acme. Ask an admin to connect it for Acme."* A login from a sign-in card is saved by
   an Admin only, for the whole team.
@@ -62,6 +86,50 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
 - **Never asleep, kept across restarts.** A Team Cloud refuses the Admin's sleep request (`busy: ["team"]`) and keeps
   every member's session across a restart; a My Cloud revokes every session that is not its owner's at each boot.
 
+
+### Off a team
+
+Everyone has an Inbox: on a personal Cloud and in the desktop app with no account, the same row at the top of the sidebar
+opens the same panel. Each place keeps its own, where its bots live, and nothing syncs; the rail's "{name}: needs you"
+says which place to open. There is one person, so nothing is routed and nobody's assistant answers. An approval or a
+question is the open card itself, listed from where it was asked, so one answer settles it however many surfaces show it
+and whatever was waiting before an upgrade is listed. `message_person` leaves out `to`: it posts one line in its
+conversation and sends one notification, and a reply is an ordinary line there. A routine's report and a failure of work
+nobody watches each get a line, in `place-inbox.json`. A guest's conversation left on a Cloud reaches its owner labelled
+with who asked, and its news stays out of the owner's list. See [Verifying the Inbox](verification/inbox.md).
+
+## Rules
+
+The team's rules live on the Admin (openmaus-cloud `docs/team-cloud.md` "Rules"): one document, `{ schema: 1, limits }`, that
+only restricts. `server/cloud-team-policy.ts` fetches it at boot, every 5 minutes and when the Admin's signed `POST
+/api/cloud/team/policy-changed` nudges it, signed with the bootstrap secret (`POST /api/cloud/machines/team-policy`), and each
+request reports the fingerprint in force here. A change applies without a restart. A turn already running keeps its engine
+process and the servers it mounted when it began, HighLevel included, and finishes with them. What it reaches for through this
+machine is refused from that moment, mid-turn too: a connected-apps tool (the turn carries on without it) and the first claim on
+a computer (the turn stops there, in the rule's words; a computer it already holds stays with it until it ends). Every turn that
+starts after the change, a hand-off's included, gets the new rules, even in a chat whose engine process is still warm: that
+process restarts without what is now blocked.
+
+- **One enforcement.** The document is projected into the one policy object (`server/managed-policy.ts`) every refusal site
+  and every "Managed by" screen already reads. Nothing restricted: no object at all, as on a team with no rules. Admins are not exempt.
+- **What passes through it.** Every turn start, direct or in a group chat, whoever or whatever asked: a person, a routine, a
+  webhook, another bot, a retry, a backup engine and every side job meet `policyModelRefusal`. Every computer claim meets
+  `bindTurnComputer`, and a lent computer's request is refused too (nobody's Mac serves a team anyway). A turn's MCP servers
+  all come through `mcpServersHost.mounted`, which drops what isn't allowed, whoever connected it; adding or signing in to one is
+  refused. `allowedMcpServers: "team"` is the plain form: admins add servers as ever, a bot can't add one, a bot's own doesn't
+  start and an engine's own user settings aren't read. Every connected-apps tool crosses `POST /api/internal/connectors/mcp`, which refuses a tool of an app that isn't
+  allowed, and code that could reach any app; connecting one is refused, and HighLevel isn't mounted.
+- **Remote access** on a Team Cloud is what a member's own code opens: "Open on your phone" is refused, codes already made stop
+  working and phones already open sign out. The Admin-signed pairing stays: it is how every member's app and the Admin reach
+  this machine, so a rule never locks the team out.
+- **Kept rules.** The last valid document stays in `team-policy.json` (0600, bound to this team, in no backup) and applies at
+  boot before anything starts. It never lapses: an Admin that can't be reached leaves it in force. With `requireFreshPolicy`,
+  new turns are refused in plain words once the Admin hasn't confirmed it for 15 minutes. A document this version can't read
+  (a newer schema, a key it can't enforce) leaves the last good one in force and is reported; the Rules page says so. Only the
+  Admin's own JSON answer, no rules or a 404 (an older Admin, or its switch off), lifts them.
+- **Constrain only.** A rule never runs anything on a member's computer and never asks anyone to approve anything. It is not a
+  security boundary against the team's own admins: the Admin holds it, and an engine's own managed settings are separate.
+
 ## The role
 
 `OMB_CLOUD_ROLE=team` with `OMB_CLOUD_TEAM_ID` (the Admin's id) and `OMB_CLOUD_TEAM_NAME` (1 to 80 characters), beside
@@ -77,6 +145,16 @@ owner" card rule (whoever started a conversation, or an Admin, answers its cards
 `OMB_CLOUD_TEAM_LANGUAGE` (optional, one of the app's locales: `de`, `pt-br`…) is the team's default language, set on
 the Admin's Team admin → Settings. It is this server's language while its own settings set none (the app's words and the
 language new bots start in); a value that isn't a locale is ignored, never refused.
+
+## Work from outside stays with that work
+
+What came in from outside (a webhook, an app's event) is confined, and the conversation it reached stays that way for good: a run or a hand-off ends, its words stay in the thread. The record is on the conversation (`outside`, `server/host/outside-lineage.ts`), and every turn is judged from it, at any level and after a restart.
+
+- **What it starts stays outside.** A thread it hands work to, a one-way notice still queued when the run ends, a retry, a wake and a routine it makes or changes all run confined. A routine it made runs without full access until someone opens it and saves it once. An event's own results chat counts too.
+- **It reaches nothing else.** A confined turn can't open a thread, hand work to, post to or retry into a conversation or room that isn't already outside, can't answer a question in a person's work or be folded into a turn running there, and can't change, start, pause, resume or delete a person's routine. A skill its words name stays plain text, and a page it shows keeps its frame. It hears why in plain words and finishes where it is. Of the server's own routes it reaches only those `server/host/outside-fence.ts` lists; anything else is refused, whether or not its engine pre-allows the tool.
+- **What it writes for later turns waits on a card.** A room's bulletin and a bot's memory load into later turns as instructions, so an admin sees a card and nothing is saved until they say yes (`server/host/outside-writes.ts`). A memory log line and a preference are refused, and nothing such a conversation says reaches memory or the daily log on its own.
+- **Its problems reach a person.** A confined run that fails or needs someone notifies a person; it starts no turn on a Chief at the Chief's own level. None of what it says lands in a person's inbox thread, by naming them or as a copy of its question or report: the person gets the notification and opens the conversation.
+- **A person's own line there runs confined too.** The engine reads the outside words as context, whoever typed last, so the bot works without its shell and says so once. A new conversation with the same bot runs at the bot's own level; it doesn't read that conversation on its own (recall and the recent-work brief leave it out), and a person can paste what they want into it.
 
 ## Team admin: the Admin's signed read
 
@@ -110,20 +188,29 @@ is, is one connection an Admin makes and every turn uses. `person` is one connec
 their team page in MausBot Cloud (the Admin's Cloud page calls the routes below as them).
 
 - **Who gets a member's own connection.** Only a turn that acts for them (server/host/acting-person.ts), read from the
-  harness's records: their own message started it, in their private chat, a group chat or the bot's main chat; or it is
-  work handed on (delegated, assigned, consulted, or a thread a bot opened for it) by a turn that acted for them, recorded
-  as it is handed on (`handed-people.json`, so a restart keeps it). A turn stops acting for anyone once another person's
-  words join it after it began (a line of theirs, queued or sent into it, or their answer to one of its cards), and never
-  acts for anyone in another member's private chat (no Admin can write in theirs). A routine, a webhook and a bot's own
-  work act for nobody. Each step that uses one says whose ("using Ada's Gmail").
+  harness's records, and only in a chat that is theirs alone, where nobody else reads what their connection brings back.
+  A turn acts for them when their own message started it, or when it is work handed on (delegated, assigned, consulted,
+  or a thread a bot opened for it) by a turn that acted for them, recorded as it is handed on (`handed-people.json`, so a
+  restart keeps it). A turn stops acting for anyone once another person's words join it after it began (a line of theirs,
+  queued or sent into it, or their answer to one of its cards); a routine, a webhook and a bot's own work act for nobody.
+  Each step that uses one says whose ("using Ada's Gmail").
+- **Work they start where others read.** Their own line in a group chat or the bot's main chat never uses their own
+  connections there; the bot is told to hand that part on. When they have connected anything of their own, the work their
+  request hands on opens in the receiving bot's chat with them (a thread private to them, as their own chats are: no
+  other member and no admin sees it), where their own connections work. What that chat hands back to the place they
+  asked in is only where the result is ("Done. The result is in Clerk's chat with Ada."), never the result: a private chat
+  never reaches a room or the team (server/host/room-access.ts).
 - **Apps.** A member's own apps are their own installation on the connected-apps service (their own Composio user),
   registered the first time they press Connect. Their turn gets a second bridge, `own_apps`, beside the team's
   `composio`; the relay checks every frame again: the team's bridge refuses a `person` app (and code that calls apps
   while the team's own installation still holds one), a member's bridge refuses a team app and anything outside their
   own turn. A connection card for a `person` app is never shown: the bot gets one plain line to say, *"Connect your
-  Gmail here: <their team page>"*; in work that acts for nobody, that the person can ask themselves, or an admin can
-  connect it for the whole team on the team's Apps page. Either way the bot doesn't try it another way (the browser or
-  another tool).
+  Gmail here: <their page>"* (a User's team home; the Owner's and an Admin's own connections are on the team's Apps
+  page); in work that acts for nobody, that the person can ask themselves, or an admin can connect it for the whole
+  team on the team's Apps page. A card for a team app asked through a member's own bridge is never shown either: for
+  the Owner or an Admin, the bot asks for it through the team's `composio` bridge, whose card connects it for everyone;
+  a User is told who can connect it, by name (the team's Owner and Admins), never to "ask an admin" with no name. Either
+  way the bot doesn't try it another way (the browser or another tool).
 - **MCP servers.** Only a server reached by its address can be `person`. A `person` server's team credential is never
   attached to any turn; a turn that acts for a member gets the server with their own key (in the header the Admin's key
   used, else `Authorization: Bearer`) or their own sign-in; one not mounted is named to the bot with why and the fix. Both are pinned to the server's address: re-pointed, they aren't sent.
@@ -237,6 +324,10 @@ work, `session_search` (memory of the layer and the team's; conversations the tu
 turn's layer folder back read-write for that conversation's boxes only (`botBox.lend`). Member layers are sibling
 folders of the bot's own, never inside it, so no other turn of that bot can read them.
 
+The same request to one bot from two requesters is answered once only where the same people see both conversations
+(`shareAnswer`, see `docs/runtime-contract.md`): two bots working for Mira get one answer, while Mira's private work
+never gets the answer Ben's got, so each of them is answered on its own.
+
 ### Engine homes
 
 The engines keep each conversation's transcript and session files in their HOME (`~/.claude/projects`,
@@ -286,22 +377,28 @@ On a My Cloud and on a desktop there is one person: every audience is the team's
 every browser keeps its old name and Chrome its old launcher, every engine keeps the server's HOME, and nothing here
 changes what those do.
 
-## Who a bot reports to
+## The shared chat's name
 
-Every team bot has an **owner**: the member it reports to. `reportsTo` (an email) names them; without it the bot
-reports to `createdBy`, the member who created it or moved it in (a bot a Chief creates gets the Chief's owner). Bots
-made before owners were recorded have none until someone picks one, and their asks go to the Admins. The sidebar shows
-the owner's face at the end of each bot's row and "→ Ada" beside a department whose bots all report to Ada. The Team map's
-"Who reports to whom" (also "See who reports to whom" in a department's menu) shows each person with their Chief and
-the bots that report to them by department; dragging a bot onto a person changes its owner. Each face is the person's
-picture from their team profile, or their initial when they have none.
+A team bot's main chat is called *"Shared chat"* on every person's copy (`WireTask.sharedChat`), whatever its stored title,
+so nobody takes it for one of their own, and it can't be renamed. A member's own MausBot has none. Clicking a bot still
+opens the person's own private chat.
+
+## Who looks after a bot
+
+Every team bot is **looked after by** one member, its owner in the data: `reportsTo` (an email) names them; without it
+the bot is looked after by `createdBy`, the member who created it or moved it in (a bot a Chief creates gets the Chief's
+owner). Bots made before owners were recorded have none until someone picks one, and their asks go to the Admins. The app
+says "Looked after by Ada" wherever it names this (the Share dialog, Bot access, a new bot's form, a bot's menu) and
+shows no face on a bot's sidebar row and no caption beside a department. The Team map's "Who looks after what" (also "See
+who looks after what" in a department's menu) shows each person with the bots they look after by department. Each face is
+the person's picture from their team profile, or their initial when they have none.
 
 | Route | Who | What |
 |---|---|---|
 | `GET /api/team/people` | any member | the members the Admin has paired here (`team-people.json`), each `{email, name, role, you?, pictureUrl?}` |
 | `GET /api/team/people/<person>/picture?v=<version>` | the team's members | that member's picture (`<person>` is their person key). `pictureUrl` names it, and its `v` changes whenever they change it; it is revalidated on every use (`private, no-cache` with an ETag). A session that isn't a member of this team gets 403, anything off a team or not a current member's picture 404 |
 | `PUT /api/bots/<id>/reports-to {email}` | an Admin, or the bot's owner handing it over | one bot's owner; `null` hands it back to its creator |
-| `PUT /api/team/reports-to {botIds, email}` | an Admin | "Set owner for all bots…" on a department |
+| `PUT /api/team/reports-to {botIds, email}` | an Admin | "Set who looks after all bots…" on a department |
 | `GET /api/needs-you` | any member | what bots ask of this person now, and the tags and passed messages waiting for them |
 
 **Routing** (`server/ask-routing.ts`). A bot's ask is a question or approval card, a sign-in, a failure, or a routine's
@@ -309,15 +406,19 @@ result. In a member's private chat it is that member's alone: never the owner's,
 bot's shared chats, a group chat, a routine nobody opened) it is the owner's, or the Admins' when nobody owns the bot.
 The asked person alone gets it in their Needs you (`/api/needs-you`, `/api/today`) and in their inbox (below), with the
 one notification about it (live and in the feed). The card itself stays in its conversation, where everyone who sees it
-may answer it, and says "Asking Ada"; the asked person may answer it too, there or from their inbox. Everyone can still
-chat with every shared bot: routing decides only whose inbox a bot's own asks reach.
+may answer it, and says "Asking Ada"; the asked person may answer it too, there or from their inbox. Routing decides only
+whose inbox a bot's own asks reach; who may chat with the bot is its sharing's (below).
 
 **One Chief of Staff per person.** A crowned bot that someone owns is that person's Chief; a team has at most one per
 person (crowning a second hands the role over, and moving a Chief to someone who has one is refused). Its authority is
 exactly the bots that person owns, in every department: they are its team in its roster, their incidents and
-escalations come to it (into a notices chat of the person's own; a notice from someone else's private chat goes to
-that person instead), and it retries their threads and changes their setup. The person's private chat with it is their
-inbox (below). A crowned bot nobody owns stays its department's Chief, as on any other server.
+escalations come to it (into a notices chat of the person's own, "Problems to look at"; a notice from someone else's
+private chat goes to that person instead), and it retries their threads and changes their setup. The person's private
+chat with it is their inbox (below). A crowned bot nobody owns stays its department's Chief, as on any other server.
+The app offers no crown on a team, so this is reached only through the API (`PATCH /api/bots/<id>` with `chiefOfStaff`).
+
+**A member's MausBot is not crowned.** It is theirs alone, and the audience rule below keeps a bot only one person sees
+from reaching a bot everyone sees (`sameAudience`), so today it cannot hand work to the team's shared bots.
 
 **Every bot reaches every bot.** Departments are folders, not walls. Any bot can ask, hand work to or @mention any
 other bot on the team, in any department, someone's Chief included, with nothing to set up (`canReach` in
@@ -332,13 +433,98 @@ or posts in one.
 On a My Cloud and on a desktop no bot has an owner: nothing is routed, and one Chief per department holds as before.
 Every bot still reaches every bot there.
 
+## Bringing a bot in from My Cloud
+
+Someone with a My Cloud moves a bot into a team from two places: **Move to Acme** in the bot's menu on My Cloud, and on the
+team's own page in the desktop app, **Bring your stuff**, which lists My Cloud's bots with one **Move** each. Both say the
+same before anything moves: who can use it there, what goes (instructions, skills, files, routines, their chats), what
+stays on My Cloud (what the bot remembers, their connections, MausBot), and that there is no way back.
+
+A team's server isn't the person's own, so its page gets less than My Cloud's does (`electron/team-move-main.mjs`). It reads
+only the names of My Cloud's bots and which can go, and only while it is the window's active page and the Admin's verified
+session says the person is in that team. It names a bot by id, and main reads the name from My Cloud. The confirm is main's
+own window, in English, because a page could soften or skip one of its own.
+
+## Who can use a bot
+
+Each team bot is shared like a document: what everyone in the team gets, and a level for each person added. A person's
+level is the higher of the two. Admins (the Super admin included) and the bot's owner can always edit it and are never
+listed.
+
+| Level | What they can do |
+|---|---|
+| No access | Nothing: the bot is not listed for them, and every route naming it, its conversations, its rooms, routines and files answers 404 as for one that does not exist |
+| Can view | See the bot, its main chat and the conversations shared with them (rooms, their own earlier chats), read only; open them and mark them read |
+| Can chat | Also write to it, start their own conversations, answer its cards, react, stop it, write in its rooms, run its routines and make routines for it (and change or delete their own) |
+| Can edit | Also change its instructions, profile and model, which of the team's connected apps and MCP servers it uses, any of its routines, its sharing, and approve a card that changes the bot itself (instructions, model, skills, team, triggers) |
+
+Can edit never reaches what only an admin sets on any bot: what it may do on its computer (approval level, always
+allow, folders), where it runs, its department, whom it answers to or directs, connecting an app or making a webhook.
+
+- **Sharing.** `bot.access` is `{ everyone: "none" | "view" | "chat" | "edit", people: { <address>: "view" | "chat" |
+  "edit" } }` (`shared/bot-access.ts`); "none" for everyone is "Only people added". It is sent only on the copy of
+  someone who can edit the bot; everyone's copy carries `yourAccess`, their own level. `PUT /api/bots/<id>/access` with
+  the whole value sets it (Undo puts the previous one back): someone who can edit it only, a new person must be a
+  current member of the team (an older list's address or `@domain` may stay), and the owner is never stored. The bot's
+  `visibility` follows in the same write (everyone when everyone may at least view it, else the owner and the people
+  added), so every rule of the audience rule above that reads who sees a bot holds unchanged. A new team bot is
+  Everyone · Can chat. A member's own MausBot stays theirs alone, as before.
+- **Before levels.** A bot whose sharing was never set is read from its visibility, exactly as it was: everyone →
+  Everyone · Can chat; admins only → Only people added (admins still edit); a list of addresses → those people · Can
+  chat. Nothing is rewritten on disk; the first change in the Share dialog stores the sharing. An older app's
+  visibility change on a team sets the matching sharing.
+- **The owner.** Handing a bot on (`PUT /api/bots/<id>/reports-to`) keeps the previous owner at Can edit, as a document
+  handed on does, and the new owner sees it.
+- **Where it is enforced** (`server/host/bot-access-gate.ts`, after the visibility gate): every member request naming
+  a bot, a conversation (by path, query or body), a room (needing the level on every bot in it), a routine or a run.
+  Reads need Can view, everything that writes Can chat, sharing Can edit; `PATCH /api/bots/<id>` takes each level's own
+  fields (`memberBotPatchViolation`), a routine needs Can edit unless its writer is changing it, a new room or routine
+  needs Can chat on what it names, and a card that changes the bot needs Can edit to answer (`cardAnswerRefusal`). A
+  message another app relays for a person (the guarded route's `onBehalfOf`) needs that person to be able to chat; one
+  that names nobody needs everyone to be able to. The live stream sends each person their own `yourAccess` with every
+  bot frame, withdraws a bot that stops being shown (`bot.deleted`, and their stream ends to start fresh) and sends one
+  that becomes shown whole.
+- **The app.** The bot's Share button (the bot panel in Simple, the settings header in Advanced) opens the Share
+  dialog on a team; the conversation's copy and download sit under the ⋯ of its header. On a team the dialog offers two
+  choices: "Everyone in Acme can use it" (`everyone: "chat"`) or "Only people added" (`everyone: "none"`), and lists
+  who looks after the bot and each person added, with Remove and the handover; it shows no Can view / Can chat / Can
+  edit menu. A person added gets `chat`; a `view` or `edit` stored earlier (or set through the API) stays as it is
+  until they are removed, so the levels keep working underneath for a finer switch later. Someone who can only view a
+  bot sees "You can view Payroll, not chat with it." where the composer would be (and in a room with that bot), opens
+  its main chat rather than a new one of their own, and is offered no New conversation. Off a team none of this shows.
+- **Bot access** (its own Settings page, for a team's admins): one row per team bot (each person's own MausBot stays
+  out) with who looks after it, what everyone gets and the faces of those added; a row opens that bot's Share dialog.
+  Everyone's access reads as one column, "Everyone can use it" or "Only people added". By person lists each User, and
+  opening one shows their bots, each with Remove where they were added. The same sharing as the Share dialog, applied at
+  once with Undo. Editing a bot stays with admins and the person who looks after it; "Ask Ada to chat" stays (below).
+- **Asking to chat.** Beside "You can view Payroll" sits "Ask Ada to chat" (Ada owns it; "Ask an admin to chat" when
+  nobody on the team does). `POST /api/bots/<id>/access-request` (anyone who can view the bot; someone who can chat
+  already gets 409) puts an Allow / Not now card in the owner's inbox, or each admin's when the owner is gone
+  (`server/host/access-requests.ts`). Asking again while a card waits sends nothing new. Allow, answered from the inbox
+  or the card in its chat, gives Can chat at once, settles the same card in every other inbox, and tells the asker in
+  their own inbox ("Ada let you chat with Payroll."); it takes effect only while the person answering can edit the bot.
+  Not now changes nothing and tells nobody; they can ask again. The card is a set-answer question card
+  (`card.accessRequest`), shown in each person's language, and its answer is always its own option.
+
+## A team with no AI
+
+Until someone connects an AI, a bot has nothing to answer with. A Send from a User comes back as `409` with `code: "no_ai"`:
+*"Olive needs to connect an AI before bots can answer. I've told them."*, and the app keeps their message in the box for
+them to send again. The owner gets one line in their inbox, naming who tried and never their words, at most once a day
+for each person (`server/host/no-ai-notice.ts`). The machine learns who the owner is only when they first open the team, so
+until then the User reads that the owner will be told, and the line goes when the owner first opens it
+(`no-ai-notices.json`). An Admin reads *"Connect an AI first, so bots can answer."* and nobody is told; a run nobody
+started by hand reads *"No AI is connected yet, so nothing can run."*
+
 ## One inbox per person
 
 Everything addressed to a person reaches one place, their **inbox** (`server/host/person-inbox.ts`): their own private
-chat with their own Chief of Staff, or with their own MausBot while they crowned none (every member gets one). It is the
-chat that bot opens to for them (`WireTask.inbox`, sent to its person alone): the one their brief was in, else their
-newest own chat with that bot, else a new one, "Inbox". Crowning another Chief moves it. Nothing is turned on: every
-member of a team has one, and off a team none exists.
+chat with their own MausBot (every member gets one; a Chief of Staff of their own, crowned through the API or before the
+app stopped offering it, holds it instead). It is the chat that bot opens to for them (`WireTask.inbox`, sent to its
+person alone): the one their brief was in, else their newest own chat with that bot, else a new one, "Inbox". Nothing is
+turned on: every member of a team has one, and off a team none exists. The app shows the inbox as one list, newest first, with a dot on
+each line that waits on the person; a line marked done leaves the list (its `tab` on the wire stays "needs-you",
+"info" or "done" as before).
 
 Each thing addressed to the person is one line there, `WireMessage.inbox` (`shared/inbox.ts`): who it is from (a
 teammate or a bot), the bot that passed it on, and the conversation it came from, linked only when the person may read
@@ -347,26 +533,36 @@ inbox is unread.
 
 | What | Line | It answers back to |
 |---|---|---|
-| `message_person` ("tell Marco that…"), from any conversation | the message, `kind: "message"` | the bot that asked, in that conversation |
-| @Marco in a teammate's line, anywhere (only their words travel) | the line or paragraph, `"message"` | the teammate's own inbox |
-| @Marco in a bot's settled reply, where Marco can see it | the same | that bot, in that conversation |
-| a question or approval routed to Marco (`ask-routing.ts`), from a shared chat, a room, a routine or work handed on | a copy of the card, `"ask"` | the card where it was asked: the copy's buttons answer it there (`answeredIn`) and the copy follows it |
-| a routine's report or a failure routed to Marco | the report, `"result"` / `"notice"` | nothing |
+| `message_person` ("tell Ben that…"), from any conversation | the message, `kind: "message"` | the bot that asked, in that conversation |
+| @Ben in a teammate's line, anywhere (only their words travel) | the line or paragraph, `"message"` | the teammate's own inbox |
+| @Ben in a bot's settled reply, where Ben can see it | the same | that bot, in that conversation |
+| a question or approval routed to Ben (`ask-routing.ts`), from a shared chat, a room, a routine or work handed on | a copy of the card, `"ask"` | the card where it was asked: the copy's buttons answer it there (`answeredIn`) and the copy follows it |
+| a routine's report or a failure routed to Ben | the report, `"result"` / `"notice"` | nothing |
+| a routine Ben wrote that tried to hand work to a bot it may not reach | what was refused, `"notice"` | nothing |
 
 An ask in the person's own private chat, where they are, stays only there. The Admins' asks (a bot nobody owns) are not
 anyone's inbox. A member without any bot of their own gets the notification where it was written, as before.
 
-**A teammate's question.** Work handed on that needs the person asks them with a card: a decision with a few set
-answers through the bot's question tool, the bot's own choices as buttons, and anything else as a card with a reply field
-in place of its `NEEDS INPUT:` line (docs/runtime-contract.md). Its copy reaches their inbox with the same buttons, and
-the conversation that handed the work on gets no chip about it when that conversation is the inbox itself. A line the
-person types while the bot waits on its own question card answers that card, as a tap would, and so does a reply to the
-card or to its copy.
+**A teammate's question.** At Full access ("Just do it", every bot's default) a question from work the person started
+and a bot handed on never reaches them unless only they can give what it asks (a sign-in or code, a payment, a secret or
+an account of theirs; work a webhook or another outside event started still asks them, and so does work in their
+private chat, whose question's words stay there): the bot that handed the work on answers it, and with no answer from it the bot goes on with the default it
+named and says so; its card in the bot's conversation shows who picked what, waits on nobody, and still takes the
+person's own answer. What only the person can do is asked for exactly, once, while the rest of the work moves on. On
+"Ask me first" work handed on that needs the person asks them with a card: a decision with a few set answers through the
+bot's question tool, the bot's own choices as buttons, and anything else as a card with a reply field in place of its
+`NEEDS INPUT:` line (docs/runtime-contract.md). It waits however long they take. Its copy reaches their inbox with the
+same buttons, and the conversation that handed the work on gets no chip about it when that conversation is the inbox
+itself. An ask left for a day is said in words the next time the person talks in their inbox (a line in the bot's reply, no new
+card), and a Chief also says so in its other chats about the questions it may answer. A line the person types while the bot waits on its own question card answers that card, as a tap would, and so
+does a reply to the card or to its copy, an answer their Chief or another bot passes on with `coordinate_bots`
+(`answers`, the question's assignment id), and anything the bot that handed the work on sends to that thread later. A question whose work ended, or that the bot replaced with a newer one, closes,
+and its copy, Needs you and the overview follow; a restart posts nothing again.
 
 **Answering is replying.** A reply to a line (the chat's Reply) goes back as the table says, and the inbox's bot takes no
-turn for it; the line records the answer and a "Told Philipp" chip follows it. A bot that asked carries on: its
-conversation gets a line from the inbox's bot, "Marco replied to your message ("…"): …" (`relay.kind: "reply"`), which
-starts its turn or waits behind the running one. Writing to the Chief in the inbox instead ("tell Philipp yes") works
+turn for it; the line records the answer and a "Told Cleo" chip follows it. A bot that asked carries on: its
+conversation gets a line from the inbox's bot, "Ben replied to your message ("…"): …" (`relay.kind: "reply"`), which
+starts its turn or waits behind the running one. Writing to the Chief in the inbox instead ("tell Cleo yes") works
 too: its turns there are told what waits on the person, and `message_person` to a line's sender answers that line. A 👍
 or 👎 on a line answers it the same way, with that emoji.
 
@@ -391,7 +587,7 @@ newest line that needed the person (`InboxView.anchor`) and updates in place. Th
 `inboxChangedAt`, which moves whenever the list changes; a client showing the list reads it again then.
 
 **The representative.** When a message asks something a fact the person already shares with the team answers, their
-inbox's bot answers it for them (`server/host/representative.ts`); the answer goes back like a reply, as "Marco's
+inbox's bot answers it for them (`server/host/representative.ts`); the answer goes back like a reply, as "Ben's
 assistant answered …" (`relay.kind: "assistant"`), and the line shows the question, the answer and that a reply corrects
 it, with the one notification saying so. What it reads is built by the server, never chosen by a model:
 
@@ -406,7 +602,7 @@ It has **no tools**: one text call on its bot's engine (`SideJob` `"representati
 process). Its answer must be JSON `{"answer"}` or `{"wait": true}`; anything else waits. Code holds back what only the
 person can say, before any model call: anything not a question, and a question that decides, approves, agrees, promises,
 commits, books, sends or shares, reaches outside the team, or asks about something private (English and German words);
-and after it, an answer that speaks for the person's will ("Marco will…", "approved"). Asks and approvals never reach it,
+and after it, an answer that speaks for the person's will ("Ben will…", "approved"). Asks and approvals never reach it,
 nor tags of the person in a teammate's words that are not a question.
 
 **Refused, in words a bot repeats:** someone who left ("Carl has left Acme…"), nobody of that name (the people are
@@ -416,7 +612,10 @@ inbox here, and more than 10 passes an hour from one conversation (answers from 
 **People.** The composer's @ list offers the teammates after the bots, with their picture and a "Person" tag; the
 sidebar lists the team's people with their pictures: your own row opens your inbox, a teammate's puts their @name in
 the composer on screen. Each person is tagged by their whole name, and by their first name when no other teammate shares
-it (`shared/person-mention.ts`). A bot's turn is told the team's people (names and admin roles; not the person it talks
+it (`shared/person-mention.ts`). A tag a bot shares is the person's: "@Ben" reaches Ben even with a bot called Ben, and
+that bot is not told it was named; only a longer bot name ("@Ben Bot") reaches a bot. A bot made or renamed with a
+person's name says so once in its own chat, and the Chief's `create_bot` result warns (`server/host/bot-name-clash.ts`).
+Deleting a Chief of Staff offers to archive it instead, which keeps its chats. A bot's turn is told the team's people (names and admin roles; not the person it talks
 with), that `message_person` reaches their inbox, and that a tag already did. Needs you lists the inbox's messages the
 person has not opened and that still wait (`kind: "message"`); the app opens the inbox on the person's first arrival of
 the day when something waits there. The state is ids, names and short excerpts, in `person-inbox.json`; a member who
@@ -444,8 +643,8 @@ person as before, and `message_person` and the inbox do not exist.
   there); an engine that does not then write in place keeps a refreshed token for that process only.
 - **What a bot keeps per bot, not per audience.** Its data sheet, the skills it stages and its own profile are the bot's
   (the team's), whichever chat wrote them; so are a routine's definition and schedule (its runs and results are the
-  conversation's). The Owner's whole-machine export (`OMB_CLOUD_EXPORT_ONLY`, the workspace backup) still carries every
-  member's private chats.
+  conversation's). The Owner's whole-machine export leaves every member's private chats out (above), the Owner's own too: an
+  export is the team's, never anyone's alone.
 - **Own apps with the team's own Composio project.** A member's own apps always use OpenMausBot's connected-apps
   service, even when the team connected a Composio project key of its own; an app that needs the project's own auth
   config can't be connected by each person.

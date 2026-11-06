@@ -308,6 +308,9 @@ export const deepseekSupport: AcpSupport = {
   selectModel: { configId: "model" },
   modelVariants: true,
   resumeMethod: "resume",
+  // dsh 0.2 rejects session/resume of a session still open in the same process
+  // ("session is already active"), so a turn with new tools needs a new process.
+  restartOnMcpChange: true,
   // Refresh only: a fresh profile boot can take long, and startup must not wait on it.
   resolveModels: (env, config) => fetchDeepSeekCatalog(config.cli || "dsh", env, tmpdir()),
   resolveModelsOnCreate: false,

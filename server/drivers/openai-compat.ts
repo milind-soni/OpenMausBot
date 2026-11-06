@@ -3,6 +3,7 @@
 import type { ModelCatalog, ProviderDriver } from "../contracts.ts";
 import { isLoopback } from "../provider-key-check.ts";
 import { lmStudioV1Catalog } from "./local-inject.ts";
+import { isContextName, isOllama, serveWithWindow } from "./ollama-context.ts";
 import { createOpenAIChatRuntime } from "./openai-chat.ts";
 import {
   freeDefault, freeFallbackCatalog, freeLabel, freeToolModels, freeToolsFirst, isOpenRouterOrigin, openRouterFreeTier,
@@ -48,6 +49,21 @@ const OPENAI_MODELS: ModelCatalog = {
     { id: "gpt-5-mini", label: "gpt-5-mini" },
   ],
 };
+
+/** Google's Gemini API, added as an OpenAI-compatible server (Settings → API keys → Other). */
+function isGeminiOrigin(url: string): boolean {
+  try {
+    return new URL(url).origin === "https://generativelanguage.googleapis.com";
+  } catch {
+    return false;
+  }
+}
+
+/** Gemini's /models names each model "models/<id>" and also lists embedding, speech, image and live-audio models. */
+function geminiChatModelId(id: string): string | null {
+  const bare = id.replace(/^models\//, "");
+  return bare.startsWith("gemini-") && !/embedding|tts|image|live|native-audio/.test(bare) ? bare : null;
+}
 
 /** OpenAI's /models also lists embeddings, speech, images, moderation and Responses-only models. */
 export function isOpenAIChatModel(id: string): boolean {
@@ -178,6 +194,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
         }
       : seeded;
     const openRouter = Boolean(apiKey) && !config.managedModels && isOpenRouterOrigin(config.url);
+    const gemini = isGeminiOrigin(config.url);
     const freeTier = () => openRouter ? openRouterFreeTier(apiKey, config.url) : Promise.resolve(null);
 
     const fetchModels = async () => {
@@ -232,8 +249,9 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
         const seen = new Set<string>();
         const options: ModelCatalog["options"] = [];
         for (const row of rows) {
-          const id = typeof row.id === "string" ? row.id : "";
-          if (!id || seen.has(id)) continue;
+          const rawId = typeof row.id === "string" ? row.id : "";
+          const id = gemini ? geminiChatModelId(rawId) ?? "" : rawId;
+          if (!id || seen.has(id) || isContextName(id)) continue;
           seen.add(id);
           const label = typeof row.name === "string" && row.name.trim() ? row.name : id;
           const contextWindow = advertisedContextWindow(row);
@@ -275,9 +293,19 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       fetchModels(),
     ]) : null;
 
+    const origin = onThisNetwork(config.url) ? config.url.replace(/\/v1$/, "") : null;
+    const servedModel = origin ? async (model: string) => {
+      if (!await isOllama(origin)) return model;
+      const served = await serveWithWindow(origin, model);
+      const option = served.window ? catalog.options.find((entry) => entry.id === model) : undefined;
+      if (option) option.contextWindow = served.window;
+      return served.model;
+    } : undefined;
+
     const runtime = createOpenAIChatRuntime({
       input,
       driverKind: DRIVER_KIND,
+      ...(servedModel ? { servedModel } : {}),
       apiKey,
       apiUrl: config.url,
       tools: config.tools,
@@ -298,7 +326,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       missingKeyError: missingKey,
       unavailableReason: missingKey,
       timeoutMs: config.replyWaitMinutes ? config.replyWaitMinutes * 60_000 : idleTimeoutMs(),
-      ...(onThisNetwork(config.url) ? { livenessEveryMs: livenessEveryMs() } : {}),
+      ...(onThisNetwork(config.url) ? { livenessEveryMs: livenessEveryMs(), localModel: true } : {}),
       reasoning: true,
       billing: "metered",
       includeUsageInCompleted: true,

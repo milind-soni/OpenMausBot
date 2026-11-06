@@ -286,9 +286,9 @@ it("boots without anyone else's session: the chat-only device is signed out, and
 it("no route mints or accepts a session without admin scope: pairing, email sign-in and invites answer in one plain line", async () => {
   const owner = await adminPairing();
   const chatOnly = await api("POST", "/api/auth/pairing", { token: owner, body: { label: "Guest phone", scopes: ["client"] } });
-  expect(chatOnly).toEqual({ status: 403, body: { error: PERSONAL, code: "cloud_personal" } });
+  expect(chatOnly).toEqual({ status: 403, body: { error: PERSONAL, code: "cloud_personal", errorKey: "serverError.cloud.personal" } });
   for (const path of ["/api/auth/email/start", "/api/auth/email/verify"]) {
-    expect(await api("POST", path, { body: { email: "friend@example.test", code: "123456" } }), path).toEqual({ status: 403, body: { error: PERSONAL, code: "cloud_personal" } });
+    expect(await api("POST", path, { body: { email: "friend@example.test", code: "123456" } }), path).toEqual({ status: 403, body: { error: PERSONAL, code: "cloud_personal", errorKey: "serverError.cloud.personal" } });
   }
   for (const signIn of [{ admins: [], members: ["friend@example.test"] }, { admins: ["friend@example.test"], members: [] }]) {
     expect((await api("PUT", "/api/config", { token: owner, body: { signIn } })).body.error).toBe(PERSONAL);

@@ -223,7 +223,7 @@ jobs:
             if docker exec -u maus home grep -qaF -- "$value" "/proc/$spid/environ"; then echo "a secret is in the server's environment"; exit 1; fi
           done
           # The root launcher runs only code maus cannot change; maus owns only the volume.
-          docker exec -u maus home sh -c 'for f in /app /app/dist-server /app/dist-server/index.js /app/dist-server/cloud-home-start.js /app/cloud/Caddyfile /usr/local/bin/caddy; do if test -w "$f"; then echo "maus can write $f"; exit 1; fi; done; test -w /data'
+          docker exec -u maus home sh -c 'for f in /app /app/dist-server /app/dist-server/index.js /app/dist-server/cloud-home-start.js /app/cloud/Caddyfile /app/cloud/Caddyfile.tls /app/cloud/Caddyfile.tunnel /app/cloud/edge-routes.caddy /usr/local/bin/caddy /usr/local/bin/cloudflared; do if test -w "$f"; then echo "maus can write $f"; exit 1; fi; done; test -w /data'
           test "$(docker exec home stat -c %U /app/dist-server/index.js)" = root
           # The shell tools bots use on a Cloud, as the user their engines run as.
           docker exec -u maus home sh -c 'python3 -c "import json, sqlite3, zipfile, csv" && pdftotext -v 2>&1 | grep -q pdftotext && unzip -v | grep -q UnZip'
@@ -267,10 +267,11 @@ jobs:
           test "$(pair "$body" "$secret" "$(date +%s)" "$(rand43)")" = 200
           docker rm -f home >/dev/null
           docker volume rm omb-home-ci >/dev/null
-      - name: Cloud home on an own server trusts only its tunnel to name a client, and starts again after an unclean kill
-        # Without FLY_APP_NAME the home is on its own server, where any local process reaches the published port: only
-        # the tunnel, in the home's own network namespace, names the client (Cf-Connecting-IP from loopback), so a header
-        # forged through the port cannot reset the pairing lockout. With FLY_APP_NAME, Fly's proxy names it, as before.
+      - name: Cloud home on an own server names a client only through its owner's proxies, serves its own domain, and starts again after an unclean kill
+        # Without FLY_APP_NAME the home is on its own server, where any local process reaches the published port and a
+        # bot reaches the edge's loopback: by default nobody names the client, so a forged header cannot reset the pairing
+        # lockout. Proxies the owner names (OMB_CLOUD_TRUSTED_PROXIES) do, in their header. OMB_CLOUD_EDGE_TLS=1 makes the
+        # edge serve 443 for the home's name, its certificate on the volume. With FLY_APP_NAME, Fly's proxy names it.
         # A SIGKILL leaves the server's lease on the volume; on one Docker host every container shares the boot id and
         # its pids start again from 1. The same container and a new one both start again on that volume, and a second
         # home beside a live one refuses to start.
@@ -306,24 +307,102 @@ jobs:
             local port=$1; shift; local signed; mapfile -t signed < <(bad_pair_headers)
             curl -s -o /dev/null -w '%{http_code}' --max-time 5 -X POST "${signed[@]}" "$@" --data-binary '{}' "http://127.0.0.1:$port/api/cloud/pairing"
           }
-          bad_pair_from_tunnel() { # name [curl options...]: from the home's own loopback, where the tunnel connects from
+          bad_pair_inside() { # name [curl options...]: from the home's own loopback, where its bots are
             local name=$1; shift; local signed; mapfile -t signed < <(bad_pair_headers)
             docker exec "$name" curl -s -o /dev/null -w '%{http_code}' --max-time 5 -X POST "${signed[@]}" "$@" --data-binary '{}' http://127.0.0.1:8080/api/cloud/pairing
           }
 
-          # Own server: every request through the port counts against the port's one peer, whatever address it forges.
+          # Own server: every request counts against its own peer, whatever address it forges, through the port or inside.
           run_home own omb-own-ci 18081
           healthy own 18081
           for i in $(seq 1 10); do
             test "$(bad_pair 18081 -H "Cf-Connecting-IP: 198.51.100.$i" -H "Fly-Client-IP: 203.0.113.$i" -H "X-Forwarded-For: 192.0.2.$i")" = 401
           done
-          test "$(bad_pair 18081 -H 'Cf-Connecting-IP: 198.51.100.99' -H 'Fly-Client-IP: 203.0.113.99')" = 429
-          # The tunnel does name the client, so the person behind it is not locked out with the port's peer; Fly's header names nobody.
-          test "$(bad_pair_from_tunnel own -H 'Cf-Connecting-IP: 198.51.100.200')" = 401
-          test "$(bad_pair_from_tunnel own -H 'Fly-Client-IP: 203.0.113.200')" = 401
-          for i in $(seq 1 9); do bad_pair_from_tunnel own -H 'Fly-Client-IP: 203.0.113.201' >/dev/null; done
-          test "$(bad_pair_from_tunnel own -H 'Cf-Connecting-IP: 198.51.100.201')" = 401
-          test "$(bad_pair_from_tunnel own -H 'Fly-Client-IP: 203.0.113.202')" = 429
+          test "$(bad_pair 18081 -H 'Cf-Connecting-IP: 198.51.100.99' -H 'X-Forwarded-For: 192.0.2.99')" = 429
+          # The loopback inside is another peer, so it is not locked out with the port's; its headers name nobody either.
+          for i in $(seq 1 10); do
+            test "$(bad_pair_inside own -H "Cf-Connecting-IP: 198.51.100.$((i + 100))" -H "X-Forwarded-For: 192.0.2.$((i + 100))")" = 401
+          done
+          test "$(bad_pair_inside own -H 'Cf-Connecting-IP: 198.51.100.250')" = 429
+
+          # Proxies the owner names: here the Docker bridge the published port arrives from. Each client they name is
+          # counted on its own; a header from the loopback, which is not named, still names nobody.
+          bridge=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Subnet}}')
+          run_home proxied omb-proxied-ci 18083 -e "OMB_CLOUD_TRUSTED_PROXIES=$bridge"
+          healthy proxied 18083
+          for i in $(seq 1 10); do test "$(bad_pair 18083 -H 'X-Forwarded-For: 192.0.2.10')" = 401; done
+          test "$(bad_pair 18083 -H 'X-Forwarded-For: 192.0.2.10')" = 429
+          test "$(bad_pair 18083 -H 'X-Forwarded-For: 192.0.2.11')" = 401
+          test "$(bad_pair 18083 -H 'X-Forwarded-For: 192.0.2.10, 192.0.2.12')" = 401   # only the proxy's own hop counts
+          test "$(bad_pair 18083 -H 'Cf-Connecting-IP: 192.0.2.11')" = 401                 # no header: the proxy itself
+          for i in $(seq 1 10); do bad_pair_inside proxied -H "X-Forwarded-For: 192.0.2.$((i + 20))" >/dev/null; done
+          test "$(bad_pair_inside proxied -H 'X-Forwarded-For: 192.0.2.40')" = 429
+          docker rm -f proxied >/dev/null
+          docker volume rm omb-proxied-ci >/dev/null
+          # A setting that would let any client name itself, or that the edge's config would read as more, never serves.
+          for bad in "OMB_CLOUD_TRUSTED_PROXIES=0.0.0.0/0" "OMB_CLOUD_TRUSTED_PROXIES=10.0.0.1}" "OMB_CLOUD_CLIENT_IP_HEADER=X-Real-IP"; do
+            if timeout 60 docker run --name home-bad -v omb-bad-ci:/data "${contract[@]}" -e "$bad" omb-cloud-home:ci; then echo "$bad served"; exit 1; fi
+            grep -q "Cloud home configuration is invalid" <<<"$(docker logs home-bad 2>&1)"
+            docker rm -f home-bad >/dev/null
+          done
+          docker volume rm omb-bad-ci >/dev/null
+
+          # Its own domain: the edge serves 443 as well as :8080, from Caddyfile.tls, and keeps its certificate on the
+          # volume, so a restart serves the same one. Caddy issues an .internal name from its own local CA: no CA is asked.
+          run_home tls omb-tls-ci 18084 -e OMB_CLOUD_EDGE_TLS=1 -e OMB_PUBLIC_URL=https://home.own-server.internal
+          healthy tls 18084
+          grep -qF "caddy run --config /app/cloud/Caddyfile.tls --adapter caddyfile" <<<"$(docker top tls -eo pid,uid,args)"
+          served() { # name: the certificate the edge serves on 443, once it answers there
+            for i in $(seq 1 30); do
+              if docker exec "$1" curl -sfk --max-time 2 --resolve home.own-server.internal:443:127.0.0.1 https://home.own-server.internal/api/health | grep -q openmausbot; then
+                docker exec "$1" sh -c 'echo | openssl s_client -connect 127.0.0.1:443 -servername home.own-server.internal 2>/dev/null | openssl x509 -noout -fingerprint -sha256'
+                return 0
+              fi
+              sleep 1
+            done
+            docker logs "$1" 2>&1 | tail -20; echo "$1 never served 443"; return 1
+          }
+          first=$(served tls)
+          docker run --rm -v omb-tls-ci:/data:ro --entrypoint sh omb-cloud-home:ci -c 'ls /data/.omb-edge/caddy/certificates/*/home.own-server.internal/home.own-server.internal.crt'
+          docker restart tls >/dev/null
+          healthy tls 18084
+          test "$(served tls)" = "$first"
+          docker rm -f tls >/dev/null
+          docker volume rm omb-tls-ci >/dev/null
+
+          # No inbound port: the home runs its tunnel's connector itself, as omb-tunnel, whose environment (the token) maus
+          # cannot read. Only the tunnel's loopback listener, :8812, believes Cf-Connecting-IP. The token here is well
+          # formed but names no tunnel, so Cloudflare refuses it and cloudflared keeps trying.
+          token=$(printf '{"a":"0123456789abcdef0123456789abcdef","t":"11111111-2222-3333-4444-555555555555","s":"%s"}' "$(openssl rand -base64 32)" | base64 -w0)
+          thost=c-0123456789abcdef0123456789abcdef.example.com
+          run_home tunnel omb-tunnel-ci 18085 -e "OMB_PUBLIC_URL=https://$thost" -e "OMB_CLOUD_TUNNEL_TOKEN=$token"
+          healthy tunnel 18085
+          grep -qF "caddy run --config /app/cloud/Caddyfile.tunnel --adapter caddyfile" <<<"$(docker top tunnel -eo pid,uid,args)"
+          for i in $(seq 1 15); do cpid=$(docker exec tunnel sh -c 'for p in /proc/[0-9]*; do case "$(tr "\0" " " < "$p/cmdline" 2>/dev/null)" in *"cloudflared tun""nel"*) echo "${p#/proc/}";; esac; done'); [ -n "$cpid" ] && break; sleep 1; done
+          test -n "$cpid"
+          test "$(docker exec tunnel stat -c %u "/proc/$cpid")" = "$(docker exec tunnel id -u omb-tunnel)"
+          if docker exec -u maus tunnel cat "/proc/$cpid/environ" >/dev/null 2>&1; then echo "maus can read the tunnel's token"; exit 1; fi
+          if docker exec tunnel sh -c "tr '\\0' ' ' < /proc/$cpid/cmdline" | grep -qF "$token"; then echo "the token is in cloudflared's command line"; exit 1; fi
+          for p in $(docker exec tunnel sh -c 'for p in /proc/[0-9]*; do case "$(tr "\0" " " < "$p/cmdline" 2>/dev/null)" in *"dist-server/in""dex.js"*|*"caddy r""un"*) echo "${p#/proc/}";; esac; done'); do
+            if docker exec -u maus tunnel grep -qaF "$token" "/proc/$p/environ"; then echo "the token is in a maus process's environment"; exit 1; fi
+          done
+          if docker logs tunnel 2>&1 | grep -qF "$token"; then echo "the token reached the log"; exit 1; fi
+          from_tunnel() { # port [curl options...]: as cloudflared reaches the edge, from the home's loopback
+            local port=$1; shift; local signed; mapfile -t signed < <(bad_pair_headers | sed "s/^Host: .*/Host: $thost/")
+            docker exec tunnel curl -s -o /dev/null -w '%{http_code}' --max-time 5 -X POST "${signed[@]}" "$@" --data-binary '{}' "http://127.0.0.1:$port/api/cloud/pairing"
+          }
+          for i in $(seq 1 10); do test "$(from_tunnel 8812 -H 'Cf-Connecting-IP: 198.51.100.1')" = 401; done
+          test "$(from_tunnel 8812 -H 'Cf-Connecting-IP: 198.51.100.1')" = 429
+          test "$(from_tunnel 8812 -H 'Cf-Connecting-IP: 198.51.100.2')" = 401
+          for i in $(seq 1 10); do test "$(from_tunnel 8080 -H "Cf-Connecting-IP: 198.51.100.$((i + 10))")" = 401; done
+          test "$(from_tunnel 8080 -H 'Cf-Connecting-IP: 198.51.100.30')" = 429
+          docker rm -f tunnel >/dev/null
+          docker volume rm omb-tunnel-ci >/dev/null
+          # Two ways to reach one home never serve.
+          if timeout 60 docker run --name home-bad -v omb-bad-ci:/data "${contract[@]}" -e OMB_CLOUD_EDGE_TLS=1 -e "OMB_CLOUD_TUNNEL_TOKEN=$token" omb-cloud-home:ci; then echo "TLS and a tunnel served"; exit 1; fi
+          grep -q "set one" <<<"$(docker logs home-bad 2>&1)"
+          docker rm -f home-bad >/dev/null
+          docker volume rm omb-bad-ci >/dev/null
 
           # Fly: the proxy's private address names the client in Fly-Client-IP, exactly as before.
           run_home fly omb-fly-ci 18082 -e FLY_APP_NAME=omb-t-ci
@@ -364,7 +443,7 @@ jobs:
           docker save omb-cloud-home:ci -o "$RUNNER_TEMP/home.tar"
           python3 - "$RUNNER_TEMP/server.tar" "$RUNNER_TEMP/home.tar" <<'PY'
           import json, re, sys, tarfile
-          cache = re.compile(r"^(root/\.npm|tmp/(npm-cache|omb-build-home|node-compile-cache|grok-install))/")
+          cache = re.compile(r"^(root/\.npm|tmp/(npm-cache|omb-build-home|node-compile-cache|grok-install|uv-install))/")
           for path in sys.argv[1:]:
               files = {}
               with tarfile.open(path) as image:
@@ -384,6 +463,8 @@ jobs:
                   assert len(caddy) == 1, f"Caddy is written {len(caddy)} times"
                   assert caddy[0].uid == 0, f"Caddy belongs to uid {caddy[0].uid}"
                   assert not any(key.startswith("SCHILY.xattr.security.") for key in caddy[0].pax_headers), "Caddy keeps a file capability"
+                  tunnel = files["usr/local/bin/cloudflared"]
+                  assert len(tunnel) == 1 and tunnel[0].uid == 0 and tunnel[0].mode & 0o7777 == 0o755, "cloudflared is not one root-owned 0755 binary"
                   grok = files["usr/local/bin/grok"]
                   assert len(grok) == 1 and grok[0].uid == 0 and grok[0].mode & 0o7777 == 0o755, "Grok is not one root-owned 0755 binary"
                   installer = sorted(name for name in files if re.match(r"(data|root)/\.grok/|usr/local/bin/agent$", name))
@@ -391,9 +472,37 @@ jobs:
               print(f"{path}: {len(files)} files, each once; no build cache; {native[0]}")
           PY
 
+  arm64-smoke:
+    name: arm64 image + boot smoke
+    # Raspberry Pi 4/5 and ARM servers pull the arm64 image; GitHub's ARM
+    # runner builds it natively and proves the server, the UI, the Data
+    # engine's native tree and the bots' Chromium all work on it.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build image
+        run: docker build -t openmausbot:arm64 .
+      - name: Boot the container; prove the server, UI, DuckDB and browser work on arm64
+        run: |
+          set -euo pipefail
+          test "$(docker image inspect -f '{{.Architecture}}' openmausbot:arm64)" = arm64
+          docker run -d --init --shm-size=512m --name omb openmausbot:arm64
+          for i in $(seq 1 40); do
+            if docker exec omb curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot; then break; fi
+            sleep 2
+            if [ "$i" = "40" ]; then docker logs omb; echo "server never became healthy"; exit 1; fi
+          done
+          docker exec omb curl -sf http://127.0.0.1:8799/ | grep -qi "<html" || { docker logs omb; echo "UI not served"; exit 1; }
+          docker exec -w /app/duckdb omb node --input-type=module -e "const { DuckDBInstance } = await import('@duckdb/node-api'); const c = await (await DuckDBInstance.create()).connect(); const r = await c.runAndReadAll('select 42 as x'); if (Number(r.getRows()[0][0]) !== 42) process.exit(1)"
+          test "$(docker exec omb id -un)" = maus
+          timeout 90 docker exec omb agent-browser --session ci-browser open 'data:text/html,<title>OMB browser smoke</title><h1>Browser ready</h1>'
+          timeout 15 docker exec omb agent-browser --session ci-browser get title | grep -Fx 'OMB browser smoke'
+          timeout 15 docker exec omb agent-browser --session ci-browser close
+
   publish:
     name: publish to GHCR
-    needs: build-and-smoke
+    needs: [build-and-smoke, arm64-smoke]
     # Release dispatches on its published tag because GITHUB_TOKEN-created
     # tags do not start another workflow. A manual branch run is smoke-only.
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v'))
@@ -403,6 +512,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The server image is published for linux/amd64 and linux/arm64.
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
@@ -430,21 +541,26 @@ jobs:
           today="date-$(date -u +%F)"
           chrome=$(curl -fsSL --max-time 30 https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json | jq -er .channels.Stable.version) || chrome=""
           [[ "$chrome" =~ ^[0-9]+(\.[0-9]+)+$ ]] || chrome=$today
+          # An arm64 image takes Debian's Chromium instead: key it on the newest bookworm build, security updates included.
+          chromium=$(curl -fsSL --max-time 30 'https://qa.debian.org/madison.php?package=chromium&s=bookworm,bookworm-security&a=arm64&text=on' | awk -F'|' '{gsub(/ /, "", $2); print $2}' | sort -V | tail -n 1) || chromium=""
+          [[ "$chromium" =~ ^[0-9][0-9A-Za-z.+~:-]*$ ]] || chromium=$today
           engines="" engines_tag=""
           for package in $CLOUD_HOME_ENGINES; do
             version=$(npm view "$package@latest" version 2>/dev/null) || version=""
             if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9][0-9A-Za-z.+-]*$ ]]; then engines=$CLOUD_HOME_ENGINES engines_tag=$today; break; fi
             engines="$engines $package@$version"
           done
-          { echo "chrome=$chrome"; echo "engines=${engines# }"; echo "engines_tag=$engines_tag"; } | tee -a "$GITHUB_OUTPUT"
+          { echo "chrome=$chrome"; echo "chromium=$chromium"; echo "engines=${engines# }"; echo "engines_tag=$engines_tag"; } | tee -a "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             CHROME_CACHE_TAG=${{ steps.keys.outputs.chrome }}
+            CHROMIUM_CACHE_TAG=${{ steps.keys.outputs.chromium }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       # The Cloud Pro home machine (the Dockerfile's cloud-home target), on the
@@ -469,6 +585,7 @@ jobs:
           target: cloud-home
           build-args: |
             CHROME_CACHE_TAG=${{ steps.keys.outputs.chrome }}
+            CHROMIUM_CACHE_TAG=${{ steps.keys.outputs.chromium }}
             CLOUD_HOME_ENGINES=${{ steps.keys.outputs.engines }}
             ENGINES_CACHE_TAG=${{ steps.keys.outputs.engines_tag }}
           push: true

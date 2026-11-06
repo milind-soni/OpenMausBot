@@ -7,14 +7,15 @@ import {
 import { BOT_HTML_NETWORK } from "../shared/app-frame/csp.ts";
 import { botHtmlDocument, mcpAppDocument, publishedBotHtml } from "../shared/app-frame/document.ts";
 import { jsxPublishedHtml } from "../shared/app-frame/jsx-page.ts";
-import { AppDocs, type AppDocPut } from "./app-docs.ts";
+import { AppDocs, type AppDocData, type AppDocPut } from "./app-docs.ts";
 import type { AgentCardResult, AgentCardStore } from "./chat-widgets.ts";
 import { compileJsxPage } from "./jsx-compile.ts";
 import { appDocRefs } from "./message-db.ts";
 import { createPageFiles } from "./page-files.ts";
-import { PageBundleError, readBotPageBundle, type BotFolders, type PageBundle, type PageFile } from "./pages/bundle.ts";
+import { PageBundleError, readBotPageBundle, skippedNote, type BotFolders, type PageBundle, type PageFile } from "./pages/bundle.ts";
 import { redactSecretsInText } from "./redact.ts";
 import type { Message, StoreChange } from "./store.ts";
+import { userError, type UserError } from "./user-errors.ts";
 import type { PublishedPageCard as PublishedPage } from "../shared/published-page.ts";
 
 const ROOM_REFUSAL = "Pages are not available in rooms yet. Answer in text.";
@@ -46,8 +47,8 @@ function scrubbed(html: string, title: string): { html: string; title: string; m
 }
 
 /** A folder page also carries the files beside its index.html and where they were read. */
-type PageText = { html: string; format?: "jsx"; files?: PageFile[]; folder?: string };
-type MadePage = { ok: true; page: PageText; title: string; masked: boolean };
+type PageText = { html: string; format?: "jsx"; files?: PageFile[]; folder?: string; videos?: AppDocData["videos"] };
+type MadePage = { ok: true; page: PageText; title: string; masked: boolean; leftOut?: string };
 
 /** The page's text, scrubbed; a jsx page is transpiled first, so one that cannot run is refused with where. */
 function pageText(value: { html?: string; jsx?: string }, title: string): MadePage | { ok: false; error: string } {
@@ -68,7 +69,10 @@ export function bundlePage(bundle: PageBundle, title: string): MadePage | { ok: 
     return { ok: false, error: `path: index.html is over the ${APP_LIMITS.htmlBytes}-byte limit; move data into files beside it.` };
   }
   const page = scrubbed(html, title);
-  return { ok: true, page: { html: page.html, files: bundle.files.filter((file) => file !== index), folder: bundle.source }, title: page.title, masked: page.masked };
+  const videos = bundle.videos && Object.keys(bundle.videos).length ? { videos: bundle.videos } : {};
+  const leftOut = skippedNote(bundle.skipped);
+  return { ok: true, page: { html: page.html, files: bundle.files.filter((file) => file !== index), folder: bundle.source, ...videos }, title: page.title, masked: page.masked,
+    ...(leftOut ? { leftOut } : {}) };
 }
 
 async function folderPage(path: string, title: string, folders: BotFolders): Promise<MadePage | { ok: false; status: 400 | 403 | 404; error: string }> {
@@ -83,11 +87,12 @@ async function folderPage(path: string, title: string, folders: BotFolders): Pro
 }
 
 function storePage(docs: AppDocs, page: PageText): AppDocPut {
-  const data = { ...(page.format ? { format: page.format } : {}), ...(page.folder ? { folder: page.folder } : {}) };
+  const data = { ...(page.format ? { format: page.format } : {}), ...(page.folder ? { folder: page.folder } : {}), ...(page.videos ? { videos: page.videos } : {}) };
   return docs.put({ source: "html", html: page.html, ...(Object.keys(data).length ? { data } : {}), ...(page.files ? { files: page.files } : {}) });
 }
 
-const pageBytes = (page: PageText) => Buffer.byteLength(page.html) + (page.files ?? []).reduce((sum, file) => sum + file.data.byteLength, 0);
+const pageBytes = (page: PageText) => Buffer.byteLength(page.html) + (page.files ?? []).reduce((sum, file) => sum + file.data.byteLength, 0) +
+  Object.values(page.videos ?? {}).reduce((sum, video) => sum + video.bytes, 0);
 
 const pageFallback = (title: string, page: PageText, given?: string) =>
   redactSecretsInText(htmlFallbackText(title, page.format === "jsx" ? "" : page.html, given));
@@ -123,7 +128,7 @@ export function createAppCard(args: {
 
 function placePage(
   args: { store: AgentCardStore; docs: AppDocs; bot: { id: string }; threadId: string; authored?(messageId: string): void },
-  value: { appId?: string; height?: number; fallbackText?: string },
+  value: { appId?: string; height?: number; fallbackText?: string; frameless?: boolean },
   made: MadePage,
 ): AgentCardResult {
   const { store, docs, bot, threadId } = args;
@@ -135,29 +140,34 @@ function placePage(
       doc: stored.ok ? stored.doc : "", rev: 0, bytes: pageBytes(page),
       ...(page.format ? { format: page.format } : {}),
       ...(value.height !== undefined ? { height: value.height } : {}),
-      border: true,
+      border: value.frameless !== true,
       network: { connect: [...BOT_HTML_NETWORK.connect], resources: [...BOT_HTML_NETWORK.resources] },
       ...(stored.ok ? {} : { blocked: "too-large" as const }),
     };
     // No `from`: in a direct thread a bot-authored row carrying one is replayed as another bot's line.
     const message = store.appendMessage(threadId, { role: "bot", kind: "app", text: pageFallback(made.title, page, value.fallbackText), app: payload });
     args.authored?.(message.id);
-    return { ok: true, messageId: message.id, ...(made.masked ? { masked: true as const } : {}) };
+    return { ok: true, messageId: message.id, ...(made.masked ? { masked: true as const } : {}), ...(made.leftOut ? { leftOut: made.leftOut } : {}) };
   }
   const existing = appRow(store, threadId, value.appId);
   if (!existing || (existing.from && existing.from.botId !== bot.id)) return { ok: false, status: 404, error: NO_SUCH_PAGE };
   if (existing.app.source !== "html") return { ok: false, status: 409, error: NOT_A_PAGE };
-  const patched = replacePage(store, docs, threadId, existing, made);
+  const patched = replacePage(store, docs, threadId, existing, made, value.frameless);
   if (!patched) return { ok: false, status: 404, error: NO_SUCH_PAGE };
   args.authored?.(patched.id);
-  return { ok: true, messageId: patched.id, ...(made.masked ? { masked: true as const } : {}) };
+  return { ok: true, messageId: patched.id, ...(made.masked ? { masked: true as const } : {}), ...(made.leftOut ? { leftOut: made.leftOut } : {}) };
 }
 
 /** The next version of a row's page; the row is unchanged when the page is the same document. */
-function replacePage(store: Pick<AgentCardStore, "patchMessage">, docs: AppDocs, threadId: string, existing: Message & { app: AppPayload }, made: MadePage): Message | null {
+function replacePage(
+  store: Pick<AgentCardStore, "patchMessage">, docs: AppDocs, threadId: string, existing: Message & { app: AppPayload }, made: MadePage, frameless?: boolean,
+): Message | null {
   const { page } = made;
   const stored = storePage(docs, page);
-  if (stored.ok && stored.doc === existing.app.doc && made.title === existing.app.title) return existing;
+  const border = frameless === undefined ? existing.app.border : !frameless;
+  if (stored.ok && stored.doc === existing.app.doc && made.title === existing.app.title) {
+    return border === existing.app.border ? existing : store.patchMessage(threadId, existing.id, { app: { ...existing.app, border } });
+  }
   // The page reloads: what the old one told the model about itself no longer holds.
   const { context: _context, blocked: _blocked, format: _format, history: earlier, ...kept } = existing.app;
   const history = [...(earlier ?? []), ...(existing.app.doc ? [existing.app.doc] : [])].slice(-(APP_PAGE_VERSIONS - 1));
@@ -167,6 +177,7 @@ function replacePage(store: Pick<AgentCardStore, "patchMessage">, docs: AppDocs,
     doc: stored.ok ? stored.doc : "",
     rev: (existing.app.rev ?? 0) + 1,
     bytes: pageBytes(page),
+    border,
     ...(history.length ? { history } : {}),
     ...(page.format ? { format: page.format } : {}),
     ...(stored.ok ? {} : { blocked: "too-large" as const }),
@@ -229,17 +240,17 @@ export function appDocument(args: {
 
 export type PublishablePage =
   | { ok: true; title: string; files: PageFile[]; rev: number; folder?: string }
-  | { ok: false; status: 404 | 409 | 422; error: string };
+  | ({ ok: false; status: 404 | 409 | 422; error: string } & Partial<UserError>);
 
 /** A bot's page as static files: index.html, and a folder page's files beside it. A jsx page carries the server's
  * transpiled code, so it loads no compiler. */
 export function publishablePage(args: { store: Pick<AgentCardStore, "messagesFor">; docs: AppDocs; threadId: string; messageId: string; rev?: number }): PublishablePage {
   const row = appRow(args.store, args.threadId, args.messageId);
-  if (!row) return { ok: false, status: 404, error: "That page is not in this conversation." };
-  if (row.app.source !== "html") return { ok: false, status: 409, error: "That app came from an MCP server; only a page a bot made can be published." };
+  if (!row) return { ok: false, status: 404, ...userError("serverError.page.notHere") };
+  if (row.app.source !== "html") return { ok: false, status: 409, ...userError("serverError.page.fromMcp") };
   const version = pageVersion(row.app, args.rev);
   const stored = version ? args.docs.read(version.doc) : null;
-  if (!version || !stored || stored.source !== "html") return { ok: false, status: 404, error: "That version of the page is no longer kept." };
+  if (!version || !stored || stored.source !== "html") return { ok: false, status: 404, ...userError("serverError.page.versionGone") };
   const title = oneLine(row.app.title);
   const index = (html: string): PageFile => ({ path: "index.html", data: Buffer.from(html) });
   if (stored.data?.format === "jsx") {
@@ -250,7 +261,7 @@ export function publishablePage(args: { store: Pick<AgentCardStore, "messagesFor
   const files = [index(publishedBotHtml(stored.html))];
   for (const path of Object.keys(stored.data?.files ?? {})) {
     const data = args.docs.readFile(version.doc, path);
-    if (!data) return { ok: false, status: 404, error: "That version of the page is no longer kept." };
+    if (!data) return { ok: false, status: 404, ...userError("serverError.page.versionGone") };
     files.push({ path, data });
   }
   return { ok: true, title, files, rev: version.rev, ...(stored.data?.folder ? { folder: stored.data.folder } : {}) };
@@ -270,6 +281,8 @@ export function showPublishedPage(args: {
     message.kind === "app" && isRecord(message.app) && message.app.source === "html" && !message.from)
     .reverse().find((message) => message.app.doc && docs.read(message.app.doc)?.data?.folder === bundle.source);
   if (shown) {
+    const videos = docs.read(shown.app.doc)?.data?.videos;
+    if (videos) made.page.videos = videos;
     const replaced = replacePage(store, docs, threadId, shown, made);
     return replaced && store.patchMessage(threadId, shown.id, { publishedPage: card }) ? shown.id : null;
   }

@@ -3,9 +3,9 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { AppConfig } from "../config.ts";
+import { instanceConfigs, type AppConfig } from "../config.ts";
 import type { ProviderAuthenticationStart, ProviderAuthenticationStatus } from "../contracts.ts";
-import { ProviderRegistry } from "../harness/registry.ts";
+import { ENGINE_LIST_REUSE_MS, ProviderRegistry } from "../harness/registry.ts";
 import { json, readBody } from "../harness/http.ts";
 import { ProviderAuthSessions } from "../provider-auth-sessions.ts";
 import { makeFakeDriver } from "../testing/fake-driver.ts";
@@ -41,7 +41,7 @@ async function serve(extra: Partial<InstanceRouteDeps> = {}) {
     hostedModels: false,
     providerConfigBusy: { get: () => false, set: () => {} },
     providerInstancesChanging: new Set<string>(),
-    describeInstances: () => registry.describe(),
+    describeInstances: () => registry.describe({ reuse: { ms: ENGINE_LIST_REUSE_MS, changed: () => {} } }),
     threadBusy: () => false,
     botForThread: () => null,
     activeGroupTurnForBot: () => null,
@@ -70,7 +70,7 @@ async function serve(extra: Partial<InstanceRouteDeps> = {}) {
     await call("GET", "/api/instances");
     return fake.probes.length;
   };
-  return { sign, call, probesAfterList, base };
+  return { sign, call, probesAfterList, base, fake };
 }
 
 describe("engine sign-in routes", () => {
@@ -100,6 +100,17 @@ describe("engine sign-in routes", () => {
 
     await call("POST", "/api/instances/a/auth/sign-out", {});
     expect(await probesAfterList()).toBe(5);
+  });
+});
+
+describe("the engine list", () => {
+  it("answers again from the last status read, and reads every engine again when asked for fresh", async () => {
+    const { call, probesAfterList, fake } = await serve();
+    expect(await probesAfterList()).toBe(1);
+    expect(await probesAfterList()).toBe(1);
+    await call("GET", "/api/instances?fresh=1");
+    expect(fake.probes).toHaveLength(2);
+    expect(await probesAfterList()).toBe(2);
   });
 });
 
@@ -191,6 +202,47 @@ describe("a server's reply wait", () => {
     expect(await status("a", { replyWaitMinutes: 20 })).toBe(400);
     for (const bad of [0, 61, 2.5, "10"]) expect(await status("openai-compat-1", { replyWaitMinutes: bad })).toBe(400);
     expect(persisted).toHaveLength(2);
+  });
+
+  it("saves minutes for the built-in OpenAI-compatible server, such as a local Ollama set by its base URL", async () => {
+    const persisted: Array<Record<string, { driver: string; config?: Record<string, unknown> }>> = [];
+    const cfg = { openaiCompat: { url: "http://127.0.0.1:11434/v1" } };
+    const { call } = await serve({
+      cfg: cfg as unknown as AppConfig,
+      persistProviderInstance: async (_id: string, instances: typeof persisted[number]) => {
+        persisted.push(structuredClone(instances));
+        (cfg as { instances?: unknown }).instances = instances;
+      },
+    });
+    await call("PATCH", "/api/instances/openaiCompat", { replyWaitMinutes: 30 });
+    expect(persisted.at(-1)!.openaiCompat).toEqual({ driver: "openai-compat", config: { replyWaitMinutes: 30 } });
+    expect(instanceConfigs(cfg as unknown as AppConfig).openaiCompat!.config).toMatchObject({ url: "http://127.0.0.1:11434/v1", replyWaitMinutes: 30 });
+  });
+});
+
+describe("hiding a provider", () => {
+  it("hides a built-in provider, lists it apart, refuses while a bot uses it, and unhides", async () => {
+    const persisted: Array<Record<string, { driver: string; hidden?: boolean }>> = [];
+    const cfg = { instances: { a: { driver: "fake" }, hermes: { driver: "fake", displayName: "Hermes" } } };
+    const bots = [{ id: "pen", modelSelection: { instanceId: "a", model: "m" } }];
+    const { call, base } = await serve({
+      cfg: cfg as unknown as AppConfig,
+      store: { bots, tasks: () => [] } as never,
+      persistProviderInstance: async (_id: string, instances: typeof persisted[number]) => {
+        persisted.push(structuredClone(instances));
+        (cfg as { instances: unknown }).instances = instances;
+      },
+    });
+    const status = async (id: string, body: unknown) => (await fetch(`${base}/api/instances/${id}`, {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    })).status;
+    expect(await status("a", { hidden: true })).toBe(409);
+    await call("PATCH", "/api/instances/hermes", { hidden: true });
+    expect(persisted.at(-1)!.hermes).toMatchObject({ driver: "fake", hidden: true });
+    expect((await call("GET", "/api/instances/hidden")).instances).toEqual([{ instanceId: "hermes", driverKind: "fake", displayName: "Hermes" }]);
+    await call("PATCH", "/api/instances/hermes", { hidden: false });
+    expect(persisted.at(-1)!.hermes).not.toHaveProperty("hidden");
+    expect((await call("GET", "/api/instances/hidden")).instances).toEqual([]);
   });
 });
 

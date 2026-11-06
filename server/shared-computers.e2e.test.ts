@@ -161,6 +161,34 @@ it("explicit edits and terminal work; old credentials and other sessions cannot 
   evidence.push("explicit hash-guarded edit and real terminal; cross-session, stale-secret, CSRF, local-control gate refusals");
 }, 60_000);
 
+it("a big lent file changes by one passage, gains lines at its end, and is deleted only once read", async () => {
+  await connector.save(env, { folders: [{ ...folder, write: true }], terminal: false, computer: false }, await connector.identity(env));
+  await expect.poll(() => connector.state(env.id).connected, { timeout: 8000 }).toBe(true);
+  const rules = "# Commands\n" + "- an unchanged rule that stays exactly as it is\n".repeat(720) + "- Where commands run: on the Mac\n";
+  writeFileSync(join(folder.path, "commands.md"), rules);
+  expect(Buffer.byteLength(rules)).toBeGreaterThan(34_000);
+
+  const edit = { path: "commands.md", old_text: "- Where commands run: on the Mac", new_text: "- Where commands run: in the Cloud terminal" };
+  const edited = await operation("edit_file", edit);
+  expect(edited.isError, JSON.stringify(edited)).toBeFalsy();
+  expect(readFileSync(join(folder.path, "commands.md"), "utf8")).toBe(rules.replace(edit.old_text, edit.new_text));
+  expect(Buffer.byteLength(JSON.stringify(edit))).toBeLessThan(200);
+  expect((await operation("edit_file", { path: "commands.md", old_text: "- an unchanged rule", new_text: "x" })).content[0].text).toContain("more than once");
+  expect((await operation("edit_file", { path: "commands.md", old_text: "not there", new_text: "x" })).content[0].text).toContain("not found");
+
+  const appended = await operation("append_file", { path: "data/metrics.jsonl", content: "{\"id\":\"x-0153\"}\n" });
+  expect(appended.isError, JSON.stringify(appended)).toBeFalsy();
+  await operation("append_file", { path: "data/metrics.jsonl", content: "{\"id\":\"x-0152\"}\n" });
+  expect(readFileSync(join(folder.path, "data", "metrics.jsonl"), "utf8")).toBe("{\"id\":\"x-0153\"}\n{\"id\":\"x-0152\"}\n");
+
+  writeFileSync(join(folder.path, "x-cookies.tmp"), "");
+  expect((await operation("delete_file", { path: "x-cookies.tmp" })).content[0].text).toContain("expected_sha256");
+  const seen = data(await operation("read_file", { path: "x-cookies.tmp" }));
+  expect(data(await operation("delete_file", { path: "x-cookies.tmp", expected_sha256: seen.sha256 })).deleted).toBe(true);
+  expect(existsSync(join(folder.path, "x-cookies.tmp"))).toBe(false);
+  evidence.push("edit_file sends one passage of a 34 KB file; append_file adds lines; delete_file needs the file read first");
+}, 60_000);
+
 it("another person's conversation can neither see nor use the lent desktop", async () => {
   const opened = await api("POST", "/api/auth/pairing", { label: "Another person", scopes: ["client"] });
   const intruder = (await api("POST", "/api/auth/pair", { code: opened.body.code })).body;

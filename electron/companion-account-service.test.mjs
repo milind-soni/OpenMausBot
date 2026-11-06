@@ -7,6 +7,7 @@ import {
   COMPANION_ACCOUNT_TOKEN_FIELD,
   COMPANION_ACCOUNT_USER_ID_FIELD,
   COMPANION_CLIENT_INSTANCE_FIELD,
+  COMPANION_ENDPOINT_PAUSED_FIELD,
   COMPANION_ENDPOINT_RELEASE_PENDING_FIELD,
   COMPANION_INSTALLATION_CREDENTIAL_FIELD,
   COMPANION_INSTALLATION_EXPIRY_FIELD,
@@ -14,6 +15,7 @@ import {
   createCompanionAccountService,
   friendlyCompanionAccountError,
   managedEndpointNeed,
+  PHONE_UNUSED_RELEASE_MS,
   resolveCompanionControlPlaneURL,
 } from "./companion-account-service.mjs";
 import {
@@ -1403,6 +1405,47 @@ describe("Companion account on demand", () => {
     }
   });
 
+  it("needs a tunnel only for an old phone seen this month once the encrypted connection is on", () => {
+    const now = LAUNCH_AT;
+    const on = (devices, extra = {}) => ({ enabled: true, devices, pairing: null, e2e: { enabled: true }, ...extra });
+    const pairing = { code: "123456", token: `omb_pair_${"a".repeat(43)}`, expiresAt: now };
+    expect(managedEndpointNeed(on([{ id: "old", lastSeenAt: now - HOUR_MS }]), now)).toBe(true);
+    expect(managedEndpointNeed(on([{ id: "new", lastSeenAt: now, e2eAt: now - HOUR_MS }]), now)).toBe(false);
+    expect(managedEndpointNeed(on([{ id: "stale", lastSeenAt: now - 31 * 24 * HOUR_MS }]), now)).toBe("unused");
+    expect(managedEndpointNeed(on([{ id: "new", lastSeenAt: now, e2eAt: now }, { id: "stale", lastSeenAt: now - 31 * 24 * HOUR_MS }]), now)).toBe("unused");
+    expect(managedEndpointNeed(on([], { pairing }), now)).toBe(false);
+    expect(managedEndpointNeed({ ...on([], { pairing }), e2e: { enabled: false } }, now)).toBe(true);
+  });
+
+  it("reports the old phones with a tunnel request, and takes 409 relay_capable as no tunnel needed", async () => {
+    const refused = Object.assign(new Error("relay capable"), { code: "relay_capable", status: 409 });
+    const client = readyClient({ ensureEndpoint: vi.fn(async () => Promise.reject(refused)) });
+    const f = onDemandFixture({ initial: {}, client, relay: { capable: () => false, legacyDevices: async () => 0 } });
+    f.companion.need = true;
+    await f.service.requestCode("ada@example.com");
+    const state = await f.service.verifyCode("ada@example.com", "12345678");
+    expect(client.ensureEndpoint).toHaveBeenCalledWith(expect.any(String), { appVersion: "1.2.3", legacyDevices: 0 });
+    expect(state).toEqual({ available: true, status: "ready", email: "ada@example.com" });
+    f.service.dispose();
+  });
+
+  it("signs a relay-capable computer in without a tunnel when no phone needs one", async () => {
+    for (const relayCapable of [true, false]) {
+      const f = onDemandFixture({ initial: {}, relay: { capable: () => relayCapable, legacyDevices: async () => 0 } });
+      f.companion.need = false;
+      await f.service.requestCode("ada@example.com");
+      const state = await f.service.verifyCode("ada@example.com", "12345678");
+      expect(f.client.ensureInstallation).toHaveBeenCalledOnce();
+      if (relayCapable) {
+        expect(f.client.ensureEndpoint).not.toHaveBeenCalled();
+        expect(state).toEqual({ available: true, status: "ready", email: "ada@example.com" });
+      } else {
+        expect(f.client.ensureEndpoint).toHaveBeenCalledOnce();
+      }
+      f.service.dispose();
+    }
+  });
+
   it("never asks for an address at launch or on the watchdog, whatever is paired", async () => {
     for (const need of [false, true, null]) {
       const f = onDemandFixture({
@@ -1688,6 +1731,131 @@ describe("Companion account on demand", () => {
       for (const call of network) expect(idle.client[call]).not.toHaveBeenCalled();
       expect(idle.activatePersistedEndpoint).not.toHaveBeenCalled();
       expect(idle.store.writes).toHaveLength(0);
+    }
+  });
+
+  it("counts a paired phone as in use until 30 days after it was last seen, and an unknown time as in use", () => {
+    const DAY_MS = 24 * HOUR_MS;
+    const now = LAUNCH_AT;
+    const phone = (lastSeenAt, id = "phone-1") => ({ id, name: "Ada", lastSeenAt });
+    const answer = (devices, overrides) => ({ enabled: true, devices, pairing: null, ...overrides });
+    expect(PHONE_UNUSED_RELEASE_MS).toBe(30 * DAY_MS);
+
+    expect(managedEndpointNeed(answer([phone(now - DAY_MS)]), now)).toBe(true);
+    expect(managedEndpointNeed(answer([phone(now - PHONE_UNUSED_RELEASE_MS + 1)]), now)).toBe(true);
+    expect(managedEndpointNeed(answer([phone(now - PHONE_UNUSED_RELEASE_MS)]), now)).toBe(true);
+    expect(managedEndpointNeed(answer([phone(now - PHONE_UNUSED_RELEASE_MS - 1)]), now)).toBe("unused");
+    expect(managedEndpointNeed(answer([phone(now - 400 * DAY_MS)]), now)).toBe("unused");
+
+    const old = phone(now - 90 * DAY_MS);
+    expect(managedEndpointNeed(answer([old, phone(now - DAY_MS, "phone-2")]), now)).toBe(true);
+    expect(managedEndpointNeed(answer([old], { connectedDeviceIds: ["phone-1"] }), now)).toBe(true);
+    expect(managedEndpointNeed(answer([old], { connectedDeviceIds: ["phone-2"] }), now)).toBe("unused");
+    const pairing = { code: "123456", token: `omb_pair_${"a".repeat(43)}`, expiresAt: now };
+    expect(managedEndpointNeed(answer([old], { pairing }), now)).toBe(true);
+    expect(managedEndpointNeed(answer([]), now)).toBe(false);
+    for (const unknown of [undefined, null, 0, -1, Number.NaN, Number.POSITIVE_INFINITY, String(now - 90 * DAY_MS), now + DAY_MS]) {
+      expect(managedEndpointNeed(answer([phone(unknown)]), now), String(unknown)).toBe(true);
+    }
+    for (const unclear of [answer([old], { devicesUnreadable: true }), answer([old], { error: "down" })]) {
+      expect(managedEndpointNeed(unclear, now)).toBeNull();
+    }
+  });
+
+  it("holds the address while a phone was seen in the last 30 days, then gives it back paused", async () => {
+    const seenAt = LAUNCH_AT - PHONE_UNUSED_RELEASE_MS + 3 * HOUR_MS;
+    const companionState = { enabled: true, devices: [{ id: "phone-1", name: "Ada", lastSeenAt: seenAt }], pairing: null };
+    const clock = { now: LAUNCH_AT };
+    const f = onDemandFixture({
+      managedEndpointNeeded: vi.fn(async () => managedEndpointNeed(companionState, clock.now)),
+      now: () => clock.now,
+    });
+
+    await f.service.restore();
+    while (clock.now < seenAt + PHONE_UNUSED_RELEASE_MS) {
+      clock.now += 15 * 60_000;
+      await f.watchdog();
+      expect(f.store.read(), new Date(clock.now).toISOString()).not.toHaveProperty(MANAGED_COMPANION_RELEASE_AT_FIELD);
+    }
+    expect(clock.now).toBe(seenAt + PHONE_UNUSED_RELEASE_MS);
+    expect(f.store.writes).toHaveLength(0);
+
+    clock.now += 15 * 60_000;
+    await f.watchdog();
+    const releaseAt = f.store.read()[MANAGED_COMPANION_RELEASE_AT_FIELD];
+    expect(releaseAt).toBe(clock.now + 2.5 * HOUR_MS);
+    while (clock.now < releaseAt) {
+      expect(f.client.deleteEndpoint).not.toHaveBeenCalled();
+      clock.now += 15 * 60_000;
+      await f.watchdog();
+    }
+    expect(f.client.deleteEndpoint).toHaveBeenCalledOnce();
+    for (const field of ADDRESS_FIELDS) expect(f.store.read()).not.toHaveProperty(field);
+    expect(f.store.read()[COMPANION_ENDPOINT_PAUSED_FIELD]).toBe(true);
+    expect(f.lines()).toContain("companion account: gave the secure address back; no paired phone was used in 30 days");
+    f.service.dispose();
+  });
+
+  it("keeps a paused address down until prepare(), which brings the same address back and clears the pause", async () => {
+    const ensureEndpoint = vi.fn(async () => ({ endpoint: { url: ENDPOINT }, connectorToken: RECLAIMED_TOKEN }));
+    const f = onDemandFixture({
+      initial: signedCredentials({ [MANAGED_COMPANION_RELEASE_AT_FIELD]: LAUNCH_AT - 1 }),
+      client: readyClient({ ensureEndpoint }),
+    });
+    f.companion.need = "unused";
+
+    await f.service.restore();
+    expect(f.client.deleteEndpoint).toHaveBeenCalledOnce();
+    expect(f.store.read()[COMPANION_ENDPOINT_PAUSED_FIELD]).toBe(true);
+    await expect(f.service.state()).resolves.toEqual({
+      available: true,
+      status: "ready",
+      email: "ada@example.com",
+      paused: true,
+    });
+
+    // Neither time nor a phone seen again on Wi-Fi brings it back without the page.
+    for (const need of ["unused", true, null, false]) {
+      f.companion.need = need;
+      f.clock.now += 10 * HOUR_MS;
+      await f.watchdog();
+    }
+    expect(ensureEndpoint).not.toHaveBeenCalled();
+    expect(f.client.deleteEndpoint).toHaveBeenCalledOnce();
+
+    f.companion.need = "unused";
+    await expect(f.service.prepare()).resolves.toEqual({
+      available: true,
+      status: "ready",
+      email: "ada@example.com",
+      endpoint: ENDPOINT,
+    });
+    expect(ensureEndpoint).toHaveBeenCalledOnce();
+    expect(f.store.read()).toMatchObject({
+      [MANAGED_COMPANION_ENDPOINT_FIELD]: ENDPOINT,
+      [MANAGED_COMPANION_TOKEN_FIELD]: RECLAIMED_TOKEN,
+    });
+    expect(f.store.read()).not.toHaveProperty(COMPANION_ENDPOINT_PAUSED_FIELD);
+    expect(f.activatePersistedEndpoint).toHaveBeenCalled();
+
+    // Signing out forgets a pause along with the account.
+    const paused = onDemandFixture({ initial: { ...signedInWithoutAddress(), [COMPANION_ENDPOINT_PAUSED_FIELD]: true } });
+    await expect(paused.service.state()).resolves.toMatchObject({ paused: true });
+    await paused.service.signOut();
+    expect(paused.store.read()).not.toHaveProperty(COMPANION_ENDPOINT_PAUSED_FIELD);
+    f.service.dispose();
+    paused.service.dispose();
+  });
+
+  it("gives an address back unpaused when nothing is paired, and never pauses on a can't-tell", async () => {
+    for (const need of [false, null]) {
+      const f = onDemandFixture({ initial: signedCredentials({ [MANAGED_COMPANION_RELEASE_AT_FIELD]: LAUNCH_AT - 1 }) });
+      f.companion.need = need;
+      await f.service.restore();
+      expect(f.client.deleteEndpoint).toHaveBeenCalledTimes(need === false ? 1 : 0);
+      expect(f.store.read()).not.toHaveProperty(COMPANION_ENDPOINT_PAUSED_FIELD);
+      expect(await f.service.state()).not.toHaveProperty("paused");
+      f.service.dispose();
     }
   });
 

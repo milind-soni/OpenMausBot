@@ -115,7 +115,7 @@ test("a server that needs this computer goes marked as running on it, and a serv
   assert.deepEqual(added, [["notes", COMPUTER], ["fetch", COMPUTER], ["lent", { environmentId: "env-other", label: "Studio iMac" }]]);
   assert.deepEqual(body("/api/mcp/servers/docs"), { type: "http", url: "https://docs.example/mcp", headers: {}, enabled: true, runsOn: null });
   assert.equal(target.calls.some(([method, route]) => method === "PATCH" && route === "/api/mcp/servers/fetch"), false, "a server switched off here stays off there");
-  assert.deepEqual(result.runsHere, [{ id: "mcp:notes", label: "notes" }, { id: "mcp:fetch", label: "fetch", needs: "uvx" }, { id: "mcp:lent", label: "lent" }]);
+  assert.deepEqual(result.runsHere, [{ id: "mcp:notes", label: "notes" }, { id: "mcp:fetch", label: "fetch", needs: "uvx", off: true }, { id: "mcp:lent", label: "lent" }]);
   assert.deepEqual(result.moved.map((item) => item.id), ["mcp:docs"]);
 });
 
@@ -207,6 +207,21 @@ test("connected apps: the same account already, the person's own project, a Clou
   const keeps = cloud({ reply: () => ({ status: 200, body: { kept: true, missing: ["gmail", "BAD SLUG"] } }) });
   assert.deepEqual(await adoptComposioId(keeps, { local, here: { ...here, mode: "own", account: "own:x" }, there: null }), { kept: true, missing: ["gmail"] });
   assert.deepEqual(keeps.calls[0], ["POST", "/api/cloud-connections/connected-apps", { apiKey: "ck", userId: "u1", apps: ["gmail"] }]);
+});
+
+test("a server of the person's own with no connected-apps service keeps MausBot's connected apps here for good, and still takes their own project", async () => {
+  const here = { id: "composio", kind: "composio", label: "Connected apps", mode: "managed", account: "managed:aaa" };
+  const local = computer({ connections: [here], answers: { composio: { connection: { composio: { apiKey: "ck", userId: "u1" } } } }, connected: { gmail: { connected: true } } });
+  assert.deepEqual(parseConnections({ computer: COMPUTER, connections: [], managedApps: false }).managedApps, false);
+  assert.equal(parseConnections({ computer: COMPUTER, connections: [] }).managedApps, undefined, "an Admin's Cloud says nothing: as before");
+  const garage = cloud();
+  await assert.rejects(adoptComposioId(garage, { local, here, there: null, managedApps: false }), (error) => error.code === "no_service" && error.final === true);
+  assert.deepEqual(garage.calls, [], "nothing asked of it");
+  const listing = { status: 200, body: { computer: { environmentId: "env-garage", label: "Garage server" }, connections: [], engines: [], commands: [], managedApps: false } };
+  const moved = await sendConnections({ computer: COMPUTER, connections: [here] }, { call: async (method, route) => (method === "GET" && route === "/api/cloud-connections" ? { ok: true, ...listing } : { ok: true, status: 200, body: {} }) }, { local, waitMs: 0 });
+  assert.deepEqual(moved.failed.map((failure) => [failure.id, failure.final]), [["composio", true]], "final: the move's check leaves it out");
+  const own = cloud({ reply: () => ({ status: 200, body: { shared: true } }) });
+  assert.deepEqual(await adoptComposioId(own, { local, here: { ...here, mode: "own", account: "own:x" }, there: null, managedApps: false }), { shared: true });
 });
 
 test("a Cloud too old for connections says so; one that does not answer, too; this computer must list its own", async () => {

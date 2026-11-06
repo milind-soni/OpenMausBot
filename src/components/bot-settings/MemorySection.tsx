@@ -10,7 +10,6 @@ import {
   fetchMemoryJournal,
   fetchMemoryOverview,
   formatBytes,
-  localizedRelativeTime,
   journalSource,
   journalSourceKey,
   fileLabel,
@@ -30,6 +29,7 @@ import {
   type LendingReview,
   markMemoryReviewed,
 } from "@/lib/memory";
+import { localizedRelativeTime } from "@/lib/relative-time";
 import { shortPath } from "@/lib/short-path";
 import { activeLocale, t } from "@/lib/i18n";
 import { roomMemoryCaptureEnabled } from "@/lib/feature-flags";
@@ -541,7 +541,7 @@ export function MemoryGauge({ index }: { index: MemoryCapacity }) {
       <div className="flex items-center justify-between gap-3 text-[13px]">
         <span className="font-medium text-ink">{t("memory.capacity.title")}</span>
         <span className={cn("text-[12px]", status.level === "over" ? "text-danger" : "text-ink-secondary")}>
-          {index.lines} / {index.maxLines} lines · {formatBytes(index.bytes)} / {formatBytes(index.maxBytes)}
+          {t("memory.capacity.summary", { lines: index.lines, maxLines: index.maxLines, bytes: formatBytes(index.bytes), maxBytes: formatBytes(index.maxBytes) })}
         </span>
       </div>
       <GaugeBar label={t("memory.capacity.lines")} share={status.lineShare} fill={fill} />

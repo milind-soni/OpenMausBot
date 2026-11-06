@@ -1,6 +1,7 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 
+import { spawnBotWork } from "../../oom-score.ts";
 import { pipeTransport, type CdpTransport } from "../cdp/transport.ts";
 import { chromeArgs, chromeEnv, type ChromeEnvInput, type ChromeFlagsInput } from "./flags.ts";
 import { diagnoseLaunchFailure } from "./host-setup.ts";
@@ -103,7 +104,7 @@ export async function launchChrome(options: LaunchOptions): Promise<ChromeProces
     sandboxHelper: options.sandboxHelper ?? null,
     profileMarker: options.profileMarker ?? null,
   });
-  const child = spawn(options.executablePath, argv, { stdio: ["ignore", "pipe", "pipe", "pipe", "pipe"], env, windowsHide: true });
+  const child = spawnBotWork(() => spawn(options.executablePath, argv, { stdio: ["ignore", "pipe", "pipe", "pipe", "pipe"], env, windowsHide: true }));
   let output = "";
   const keep = (chunk: Buffer) => {
     output = (output + chunk.toString("utf8")).slice(-OUTPUT_LIMIT);

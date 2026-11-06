@@ -130,6 +130,29 @@ describe("Settings → Engines → setup cards", () => {
     expect(unsupported).not.toMatch(/<button[^>]*>Sign in<\/button>/);
   });
 
+  it("says under Add another ChatGPT account that Business and Enterprise organizations can block it, on the ChatGPT card only", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.bots = [];
+    const note = "ChatGPT Business and Enterprise organizations can block adding an account here";
+    const chatgpt: InstanceInfo = {
+      instanceId: "chatgpt", driverKind: "codex", displayName: "ChatGPT", cliDefault: "codex",
+      snapshot: { state: "available", authenticated: true, chatgptPlan: true }, models: { default: "gpt", options: [] },
+    };
+    fixture.instances = [chatgpt];
+    const html = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(html.split(note)).toHaveLength(2);
+    expect(html).toContain("3p_delegated_access_policy_denied");
+    expect(html.indexOf(note)).toBeGreaterThan(html.indexOf("Add another ChatGPT account"));
+    const noteId = html.match(/<p id="([^"]+)"[^>]*>ChatGPT Business and Enterprise organizations/)?.[1];
+    expect(noteId).toBeTruthy();
+    expect(html).toMatch(new RegExp(`<button[^>]*aria-describedby="${noteId}"[^>]*>.*?Add another ChatGPT account`));
+    fixture.instances = [{ instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", cliDefault: "claude", snapshot: { state: "available", authenticated: true }, models: { default: "sonnet", options: [] } }];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain(note);
+    fixture.instances = [{ ...chatgpt, readOnly: true }];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain(note);
+  });
+
   it("shows the actual Google account email with an honest fallback", () => {
     vi.stubGlobal("window", {});
     fixture.bots = [];
@@ -154,6 +177,25 @@ describe("Settings → Engines → setup cards", () => {
     expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain(">Remove<");
     fixture.instances = [account("antigravity-work")];
     expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain(">Remove<");
+  });
+
+  it("offers Sign out for a signed-in Antigravity account, including the first one", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.bots = [];
+    const account = (instanceId: string, authenticated: boolean, signOut: boolean): InstanceInfo => ({
+      instanceId, driverKind: "antigravityAgent", displayName: "Google account", cliDefault: "agy_acp_server",
+      snapshot: { state: "available", authenticated }, models: { default: "gemini", options: [] },
+      authentication: { method: "browser", signOut },
+    });
+    fixture.instances = [account("antigravity", true, true)];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain(">Sign out<");
+    fixture.instances = [account("antigravity-work", true, true)];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain(">Sign out<");
+    fixture.instances = [account("antigravity", false, true)];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain(">Sign out<");
+    fixture.instances = [account("antigravity", true, false)];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain(">Sign out<");
   });
 
   it("shows every Company provider as read-only while preserving personal controls", () => {
@@ -411,5 +453,31 @@ describe("Settings → AI in Simple mode", () => {
     fixture.instances = [engine("claude", "claudeAgent", true), engine("kimi", "kimiAgent", false), engine("mistral", "mistral", false)];
     expect(simple()).toMatch(/aria-expanded="false"[^>]*>[\s\S]*?More AI providers \(2\)/);
     expect(simple(true)).toContain('data-engine-card="kimi"');
+  });
+});
+
+describe("Settings → Engines → custom Claude endpoints", () => {
+  const hostedClaude = (): InstanceInfo => ({
+    instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", readOnly: true,
+    snapshot: { state: "available", authenticated: true }, models: { default: "claude-sonnet-5", options: [] },
+  });
+
+  it("leaves the endpoint section out of a hosted workspace, which refuses instance changes", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.instances = [hostedClaude()];
+    fixture.bots = [];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("data-claude-endpoints");
+  });
+
+  it("offers the endpoint section while Claude is not listed on this computer", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.instances = [{
+      instanceId: "codex", driverKind: "codexAgent", displayName: "Codex", cliDefault: "codex",
+      snapshot: { state: "available", authenticated: true }, models: { default: "model", options: [] },
+    }];
+    fixture.bots = [];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain("data-claude-endpoints");
   });
 });

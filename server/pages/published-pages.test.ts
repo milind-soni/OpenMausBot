@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PublishedPageCard } from "../../shared/published-page.ts";
 import { FAKE_DESKTOP_TOKEN, FAKE_HOME, FAKE_TOKEN_URL, fakePagesService } from "../testing/fake-pages.ts";
 import { applyIncludedPagesMessage, pagesHomeSignature } from "./access.ts";
-import { PageBundleError, readPageBundle } from "./bundle.ts";
+import { PageBundleError, readPageBundle, skippedNote } from "./bundle.ts";
 import { PublishedPagesStore } from "./store.ts";
 import { createPublishedPages } from "./service.ts";
 import { createPagesInternalRoutes, createPublishedPageRoutes, type AppPages } from "../routes/published-pages.ts";
@@ -29,13 +29,13 @@ function writeSite(folder: string, files: Record<string, string> = SITE) {
 }
 const signIn = () => applyIncludedPagesMessage({ type: "openmausbot:included-pages", access: { url: FAKE_TOKEN_URL, token: FAKE_DESKTOP_TOKEN } });
 
-function setup(options: { home?: boolean; quota?: number } = {}) {
+function setup(options: { home?: boolean; quota?: number; selfHosted?: boolean } = {}) {
   const service = fakePagesService({ quota: options.quota });
   const work = join(dir, "work"), data = join(dir, "data");
   mkdirSync(work, { recursive: true });
   const cards: Array<{ threadId: string; id: string; text: string; card: PublishedPageCard }> = [];
   let ids = 0;
-  const pages = createPublishedPages({ dataDir: data, cloudHome: options.home ? FAKE_HOME : null, fetch: (input, init) => service.fetch(input, init),
+  const pages = createPublishedPages({ dataDir: data, cloudHome: options.home ? FAKE_HOME : null, selfHosted: options.selfHosted, fetch: (input, init) => service.fetch(input, init),
     patch: (threadId, messageId, text, card) => { const shown = cards.find((each) => each.id === messageId && each.threadId === threadId); if (shown) Object.assign(shown, { text, card }); } });
   const post = (threadId: string) => (text: string, card: PublishedPageCard) => { const id = `m${++ids}`; cards.push({ threadId, id, text, card }); return id; };
   const publish = (input: { path: string; title?: string; pageId?: string; botId?: string; threadId?: string }) => pages.publisher.publish({
@@ -50,6 +50,15 @@ describe("publishing a page", () => {
     writeSite(join(f.work, "site"));
     const outcome = await f.publish({ path: "site" });
     expect(outcome).toEqual({ status: 403, text: "Publishing a page needs a MausBot account. Sign in to MausBot in the app's Settings, then ask again." });
+    expect(f.service.minted).toEqual([]);
+    expect(f.cards).toEqual([]);
+  });
+
+  it("says publishing isn't available on a self-hosted server, never \"sign in\", since it has no Settings sign-in to hand over", async () => {
+    const f = setup({ selfHosted: true });
+    writeSite(join(f.work, "site"));
+    const outcome = await f.publish({ path: "site" });
+    expect(outcome).toEqual({ status: 503, text: "Publishing pages isn't available on self-hosted servers yet." });
     expect(f.service.minted).toEqual([]);
     expect(f.cards).toEqual([]);
   });
@@ -76,7 +85,7 @@ describe("publishing a page", () => {
     const url = `https://${page}.mausbot.page/`;
     expect(outcome.text).toContain(`Published “Bake sale” at ${url}`);
     expect(outcome.text).toContain("This account now has 1 of 5 pages.");
-    expect(outcome.text).toContain("Free pages carry a small “Made with MausBot” badge.");
+    expect(outcome.text.split("\n").at(-1)).toBe("Free pages carry a small “Made with MausBot” badge.");
     expect(f.cards).toEqual([{ threadId: "thread-1", id: "m1", text: `Published “Bake sale”: ${url} (1 of 5 pages)`,
       card: { state: "live", title: "Bake sale", pageId: page, url, usage: { pages: 1, limit: 5 } } }]);
     expect(Object.fromEntries(f.service.pages.get(page!)!.files)).toEqual(SITE);
@@ -163,19 +172,31 @@ describe("publishing a page", () => {
     writeFileSync(join(dir, "secret.txt"), "outside");
     symlinkSync(join(dir, "secret.txt"), join(site, "linked.txt"));
     const outcome = await f.publish({ path: "site" });
-    expect(outcome.text).toContain("Left out 2 files a page can't serve: app.py, node_modules/");
+    expect(outcome.text.split("\n").at(-1))
+      .toBe("Left out app.py (pages can't carry .py files), linked.txt (links a page can't follow), node_modules/ (package and cache folders) and .env, .git/ (hidden).");
     const published = [...f.service.pages.values()][1]!;
     expect([...published.files.keys()].sort()).toEqual(["img/logo.svg", "index.html", "style.css"]);
   });
 
-  it("publishes a dashboard's csv, parquet and arrow data with it, and leaves out a wasm file", async () => {
+  it("publishes a dashboard's csv, parquet, arrow and map data with it, and leaves out a wasm file", async () => {
     const f = setup();
     signIn();
-    writeSite(join(f.work, "dash"), { "index.html": "<p>Sales</p>", "data.parquet": "PAR1", "data/backup.csv": "a\n1\n", "data/live.arrow": "ARROW1", "duckdb.wasm": "x" });
+    writeSite(join(f.work, "dash"), { "index.html": "<p>Sales</p>", "data.parquet": "PAR1", "data/backup.csv": "a\n1\n", "data/live.arrow": "ARROW1",
+      "data/land.geojson": "{}", "duckdb.wasm": "x" });
     const outcome = await f.publish({ path: "dash" });
-    expect(outcome.text).toContain("Left out 1 file a page can't serve: duckdb.wasm");
+    expect(outcome.text).toContain("Left out duckdb.wasm (pages can't carry .wasm files).");
     const [published] = [...f.service.pages.values()];
-    expect([...published!.files.keys()].sort()).toEqual(["data.parquet", "data/backup.csv", "data/live.arrow", "index.html"]);
+    expect([...published!.files.keys()].sort()).toEqual(["data.parquet", "data/backup.csv", "data/land.geojson", "data/live.arrow", "index.html"]);
+  });
+
+  it("says why each file was left out, a few names per reason, and how many more", async () => {
+    const site = writeSite(join(dir, "site"), { "index.html": "<p>x</p>", "page#2.js": "x", [`${"d/".repeat(10)}deep.js`]: "x" });
+    expect((await readPageBundle(site, [dir])).skipped).toEqual([{ path: "d/".repeat(10), why: "deep" }, { path: "page#2.js", why: "name" }]);
+    expect(skippedNote([])).toBe("");
+    const py = ["a.py", "b.py", "c.py", "d.py", "e.py"].map((path) => ({ path, why: "type" as const }));
+    expect(skippedNote([{ path: ".env", why: "hidden" }, ...py, { path: "x.foo", why: "type" }, { path: "Makefile", why: "type" }, { path: "a#b.js", why: "name" }]))
+      .toBe("Left out a.py, b.py, c.py and 2 more (pages can't carry .py files), x.foo (pages can't carry .foo files), " +
+        "Makefile (pages can't carry files without an extension), a#b.js (names with characters a page can't hold) and 1 more.");
   });
 
   it("refuses a folder over a page's bytes or files before asking for a token", async () => {

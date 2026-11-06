@@ -7,11 +7,22 @@ import { cronScheduleLabel } from "../shared/cron-label.ts";
 export interface BotOverview {
   who: { name: string; title: string; blurb: string; soulLead: string };
   does: string[];
+  doesRoutines?: OverviewRoutineLine[];
+  /** The departments a Chief of Staff may also coordinate, "" for the unnamed department the English line calls "General". */
+  managedSections?: string[];
   reaches: string[];
   wont: string[];
   recent: Array<{ at: number; summary: string }>;
   grants?: BotOverviewGrant[];
   setup: SetupStep[];
+}
+
+export interface OverviewRoutineLine {
+  name: string;
+  paused?: true;
+  schedule: OverviewFacts["routines"][number]["schedule"];
+  nextRunAt?: number;
+  lastRun?: { status: string; at: number };
 }
 
 export interface BotOverviewGrant {
@@ -130,6 +141,17 @@ function latestRunFor(runs: OverviewFacts["runs"], routineId: string): OverviewF
     }
   }
   return best;
+}
+
+function routineLines(facts: OverviewFacts): OverviewRoutineLine[] {
+  return facts.routines.map((routine): OverviewRoutineLine => {
+    if (!routine.enabled) return { name: routine.name, paused: true, schedule: routine.schedule };
+    const latest = latestRunFor(facts.runs, routine.id);
+    return {
+      name: routine.name, schedule: routine.schedule, ...(routine.nextRunAt != null ? { nextRunAt: routine.nextRunAt } : {}),
+      ...(latest ? { lastRun: { status: latest.status, at: latest.finishedAt ?? latest.startedAt ?? latest.scheduledFor } } : {}),
+    };
+  });
 }
 
 function doesLines(facts: OverviewFacts): string[] {
@@ -259,6 +281,8 @@ export function buildBotOverview(facts: OverviewFacts): BotOverview {
       soulLead: soulLead(facts.bot.soul),
     },
     does: doesLines(facts),
+    doesRoutines: routineLines(facts),
+    ...(facts.bot.chiefOfStaff && facts.bot.managedSections?.length ? { managedSections: [...facts.bot.managedSections] } : {}),
     reaches: reachesLines(facts),
     wont: wontLines(facts),
     recent: facts.recent,

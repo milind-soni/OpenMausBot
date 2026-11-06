@@ -1,0 +1,29 @@
+# Edge for a Cloud home on a server with its own domain (docs/cloud-pro.md, "On
+# your own server"): the same routes as Caddyfile on :8080, for the connector,
+# and on 443 for OMB_PUBLIC_URL's name, with a Let's Encrypt certificate this
+# edge gets and renews itself. TLS-ALPN answers the challenge on 443, so port
+# 80 is optional. Clients reach 443 directly, so the client address is the TCP
+# peer unless the owner names a proxy (the launcher sets these values:
+# server/cloud-home-start.ts).
+{
+	admin off
+	persist_config off
+	# On the volume: an update or a rollback is a new container, and Let's
+	# Encrypt issues the same name at most 5 times a week.
+	storage file_system {$OMB_CLOUD_EDGE_STORAGE}
+	servers {
+		# HTTP/3 needs UDP 443, which the server does not open.
+		protocols h1 h2
+		trusted_proxies static {$OMB_CLOUD_EDGE_TRUSTED_PROXIES}
+		trusted_proxies_strict
+		client_ip_headers {$OMB_CLOUD_EDGE_CLIENT_IP_HEADER}
+	}
+}
+
+http://:8080 {
+	import edge-routes.caddy
+}
+
+{$OMB_CLOUD_PUBLIC_HOST} {
+	import edge-routes.caddy
+}

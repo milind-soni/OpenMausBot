@@ -1,15 +1,17 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TraceDetail, TraceTurn } from "../../shared/usage-trace";
-import { formatDuration, groupLabel, timeAxis, toolLabel, traceBadges, traceRows, usagePeriodRange } from "./usage-trace";
+import { setLocale } from "@/lib/i18n";
+import { toolStepLabel } from "@/lib/tool-step-label";
+import { formatCost, formatDuration, formatTick, groupLabel, timeAxis, toolLabel, traceBadges, traceRows, usagePeriodRange } from "./usage-trace";
 
 vi.mock("@/state/store", async (original) => {
   const actual = await original<typeof import("@/state/store")>();
   return { ...actual, useStore: () => ({ state: actual.initialState, dispatch: vi.fn() }), api: vi.fn(() => new Promise(() => {})) };
 });
 const { TraceWaterfall } = await import("../components/usage/TraceWaterfall");
-const { usageGroupLabel } = await import("../components/UsageSection");
+const { GroupBars, usageGroupLabel } = await import("../components/UsageSection");
 
 const T0 = Date.UTC(2026, 9, 22, 9, 0, 0);
 const turn = (id: string, botName: string, start: number, end: number | undefined, children: TraceTurn["children"], extra: Partial<TraceTurn> = {}): TraceTurn => ({
@@ -41,8 +43,21 @@ const detail: TraceDetail = {
 };
 
 describe("trace helpers", () => {
+  afterEach(() => { vi.unstubAllGlobals(); setLocale("en"); });
   it("formats durations the way the waterfall labels them", () => {
     expect([450, 6_900, 51_000, 100_000, 3_600_000, 7_500_000].map(formatDuration)).toEqual(["450ms", "6.9s", "51s", "1m 40s", "1h", "2h 5m"]);
+    expect([0, 20_000, 90_000, 5_400_000].map(formatTick)).toEqual(["0s", "20s", "1m 30s", "1h 30m"]);
+    expect([formatCost(0.0004), formatCost(0.0009), formatCost(0.005), formatCost(0.015), formatCost(1234.5)]).toEqual(["<$0.001", "<$0.001", "$0.005", "$0.01", "$1234.50"]);
+    setLocale("pt-br");
+    expect([450, 6_900, 51_000, 100_000, 3_600_000, 7_500_000].map(formatDuration)).toEqual(["450\u00a0ms", "6,9\u00a0s", "51\u00a0s", "1\u00a0min\u00a040\u00a0s", "1\u00a0h", "2\u00a0h\u00a05\u00a0min"]);
+    expect([formatTick(90_000), formatCost(0.0004)]).toEqual(["1\u00a0min\u00a030\u00a0s", "<US$\u00a00,001"]);
+    setLocale("en");
+    vi.stubGlobal("navigator", { language: "en-GB" });
+    setLocale("en");
+    expect([450, 6_900, 51_000, 100_000, 3_600_000, 7_500_000].map(formatDuration), "an English app in an en-GB region").toEqual(["450ms", "6.9s", "51s", "1m 40s", "1h", "2h 5m"]);
+    expect([0, 20_000, 90_000, 5_400_000].map(formatTick)).toEqual(["0s", "20s", "1m 30s", "1h 30m"]);
+    vi.unstubAllGlobals();
+    setLocale("en");
     expect(timeAxis(51_000)).toEqual({ max: 60_000, ticks: [0, 20_000, 40_000, 60_000] });
     expect(timeAxis(400).ticks.length).toBeGreaterThanOrEqual(2);
   });
@@ -55,6 +70,15 @@ describe("trace helpers", () => {
     expect(opened.map((row) => row.node.id)).toEqual(["chief", "c-s1", "writer"]);
     expect(traceRows([chief], new Set(["w-g1"]), T0).map((row) => row.node.id)).toContain("w-b3");
     expect(toolLabel({ name: "mcp__browser__agent_browser_type", icon: "browser" })).toBe("Type");
+    expect(toolLabel({ name: "mcp__browser__agent_browser_frobnicate_widget", icon: "browser" })).toBe("Frobnicate widget");
+    expect(["mcp__agents__x_search", "mcp__agents__research_call", "mcp__agents__use_tool", "mcp__agents__list_bots"].map((name) => toolLabel({ name, icon: "app" })))
+      .toEqual(["X search", "Research call", "Use tool", toolStepLabel({ name: "mcp__agents__list_bots", summary: undefined })]);
+    setLocale("pt-br");
+    expect(["mcp__agents__x_search", "mcp__agents__x_user_posts", "mcp__agents__research_call", "mcp__agents__use_tool", "mcp__agents__list_bots", "mcp__other__x_search"].map((name) => toolLabel({ name, icon: "app" })))
+      .toEqual(["Buscar no X", "Ler posts de um usuário no X", "Consultar uma ferramenta de pesquisa", "Usar ferramenta", toolStepLabel({ name: "mcp__agents__list_bots", summary: undefined }), "X search"]);
+    expect(["agent_browser_click", "agent_browser_get_url", "mcp__computer__type_text", "agent_browser_frobnicate"].map((name) => toolLabel({ name, icon: "computer" })))
+      .toEqual(["Clicar", "Ler o endereço", "Digitar texto", "Frobnicate"]);
+    setLocale("en");
     expect(groupLabel({ icon: "browser", count: 14, name: "x" })).toBe("Used the browser · 14 steps");
     expect(groupLabel({ icon: "computer", count: 23, name: "x" })).toBe("Used the computer · 23 actions");
   });
@@ -69,6 +93,16 @@ describe("trace helpers", () => {
     expect(usageGroupLabel("user", { key: "routine:r1", label: "Routine: Morning digest" })).toBe("Routine: Morning digest");
     expect(usageGroupLabel("user", { key: "user:ada@example.test", label: "ada@example.test" })).toBe("ada@example.test");
     expect(usageGroupLabel("routine", { key: "manual", label: "Not from a routine" })).toBe("Not from a routine");
+  });
+
+  it("ranks models by tokens, so a subscription model with no price still shows", () => {
+    const group = (label: string, input: number, costUsd: number | null) => ({ key: label, label, turns: 1, input, output: 0, cachedInput: 0, costUsd });
+    const priced = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "gemini-3.8-pro", "claude-opus-4-8", "claude-sonnet-4-8"].map((label, index) => group(label, 1_000 * (index + 1), 10 + index));
+    const html = renderToStaticMarkup(createElement(GroupBars, { groupBy: "model", groups: [...priced, group("gpt-5.5", 5_000_000, null)] }));
+    expect(html).toContain("gpt-5.5");
+    expect(html).toContain("5M");
+    expect(html).not.toContain("claude-opus-5-5");
+    expect(html).toContain("$15.00");
   });
 
   it("picks calendar periods in UTC days", () => {

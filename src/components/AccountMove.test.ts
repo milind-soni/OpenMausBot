@@ -40,6 +40,9 @@ describe("the move's words on the account", () => {
     expect(accountMoveWords("sending")).toBe("Moving to My Cloud…");
     expect(accountMoveWords("done")).toBeNull();
     expect(accountMoveWords(null)).toBeNull();
+    expect(accountMoveWords("failed", "Garage server")).toBe("Garage server move needs you");
+    expect(accountMoveWords("sending", "Garage server")).toBe("Moving to Garage server…");
+    expect(markup(AccountMoveStatus({ kind: "sending", place: "Garage server" }))).toContain("Moving to Garage server…");
   });
 
   it("is a button that opens the account menu by the account, and plain words inside a trigger", () => {
@@ -70,9 +73,19 @@ describe("the move's words on the account", () => {
     // The words shorten before Try again does.
     expect(html).toContain('<span class="truncate">My Cloud move needs you</span>');
     expect(tag).toMatch(/class="[^"]*\bshrink-0\b/);
-    const tryAgain = (status.props as { children: ReturnType<typeof createElement>[] }).children[1]!;
+    const row = (status.props as { children: ReturnType<typeof createElement>[] }).children[0]!;
+    const tryAgain = (row.props as { children: ReturnType<typeof createElement>[] }).children[1]!;
     (tryAgain.props as { onClick: () => void }).onClick();
     expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  it("says why it failed in the open, under its words, and never while it goes", () => {
+    const why = "Some of this computer's things didn't reach My Cloud yet. It tries again by itself.";
+    const html = markup(AccountMoveStatus({ kind: "failed", onOpen: noop, retry: { onRetry: noop, retrying: false, why } }));
+    expect(html).toMatch(new RegExp(`<p data-move-why[^>]*>${why.replaceAll(".", "\\.")}</p>`));
+    expect(html.indexOf(">Try again<")).toBeLessThan(html.indexOf("data-move-why"));
+    expect(markup(AccountMoveStatus({ kind: "sending", onOpen: noop, retry: { onRetry: noop, retrying: false, why } }))).not.toContain("data-move-why");
+    expect(markup(AccountMoveStatus({ kind: "failed", onOpen: noop, retry: { onRetry: noop, retrying: false, why: "" } }))).not.toContain("data-move-why");
   });
 
   it("while Try again runs: disabled and busy, with a spinner", () => {
@@ -95,19 +108,24 @@ describe("the move's row in the account menu", () => {
   const rows = (value: AccountMoveLine | null, patch: Partial<Parameters<typeof moveMenuItems>[1]> = {}) =>
     moveMenuItems(value, { onOpen: noop, onRetry: noop, onClose: noop, ...patch });
 
-  it("failing: one row the size of the others that tries again, with why in its tooltip", () => {
+  it("failing: one row that tries again, with why written under it and in its tooltip", () => {
     const onOpen = vi.fn(), onRetry = vi.fn();
     const items = rows(line({ phase: "copy", failing: { error: "Some of this computer's things did not reach My Cloud." } }), { onOpen, onRetry });
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({ key: "cloud-move", label: "Try My Cloud move again", title: "Some of this computer's things did not reach My Cloud.", disabled: false, keepOpen: true });
-    expect(items[0]).not.toHaveProperty("note");
-    expect(items[0]).not.toHaveProperty("wrap");
+    expect(items[0]).toMatchObject({ note: "Some of this computer's things did not reach My Cloud.", wrap: true });
     expect(markup(items[0]!.icon)).not.toContain("animate-spin");
     items[0]!.onSelect();
     expect(onRetry).toHaveBeenCalledOnce();
     expect(onOpen).not.toHaveBeenCalled();
     // Main gave no reason: the tooltip still says what happened.
     expect(rows(line({ phase: "finishing", failing: { error: null } }))[0]!.title).toBe("Your bots couldn't move to My Cloud yet.");
+  });
+
+  it("to a server of the person's own: the same rows, named for it", () => {
+    const place = "Garage server";
+    expect(rows(line({ phase: "copy", failing: { error: null }, place }))[0]).toMatchObject({ label: "Try Garage server move again", title: "Your bots couldn't move to Garage server yet." });
+    expect(rows(line({ phase: "copy", place }))[0]).toMatchObject({ label: "Moving to Garage server…", title: "Moving your bots to Garage server…" });
   });
 
   it("failing: the same one row, disabled with a spinner, while Try again runs, and main's words when it did not answer", () => {

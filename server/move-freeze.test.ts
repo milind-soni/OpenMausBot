@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createMoveFreeze, ENDED_REFUSAL, HOME_SCREEN, MOVED_REFUSAL, RAIL_PAGE, switchAutomationsOff, type MoveAutomations } from "./move-freeze.ts";
+import { createMoveFreeze, ENDED_REFUSAL, HOME_SCREEN, MOVED_REFUSAL, movedRefusal, RAIL_PAGE, switchAutomationsOff, type MoveAutomations } from "./move-freeze.ts";
 import type { MoveWait } from "./move-waits.ts";
 import { createMoveFreezeRoutes } from "./routes/move-freeze.ts";
 import { PASS } from "./routes/table.ts";
@@ -55,7 +55,8 @@ describe("this computer's copy, frozen at the move", () => {
       expect(freeze.refuses(method!, path!), `${method} ${path}`).toBe(MOVED_REFUSAL);
     }
     for (const [method, path] of [["GET", "/api/bots"], ["DELETE", "/api/move/freeze"], ["DELETE", "/api/cloud-send/kind"], ["POST", "/api/cloud-send/chats/verify"],
-      ["POST", "/api/auth/logout"], ["POST", "/api/workspace-backup/export"], ["POST", "/api/cloud/pairing"], ["POST", "/api/sync/upload"]]) {
+      ["POST", "/api/auth/logout"], ["POST", "/api/workspace-backup/export"], ["POST", "/api/cloud/pairing"], ["POST", "/api/sync/upload"],
+      ["POST", "/api/desktop/shared-computer-control"]]) {
       expect(freeze.refuses(method!, path!), `${method} ${path}`).toBeNull();
     }
   });
@@ -83,6 +84,7 @@ describe("this computer's copy, frozen at the move", () => {
     expect(freeze.unfreeze()).toBe(false);
     expect(freeze.frozen()).toBe(true);
     expect(freeze.refuses("POST", "/api/bots/b1/messages")).toBe(ENDED_REFUSAL);
+    expect(freeze.refuses("POST", "/api/desktop/shared-computer-control"), "an ended Cloud runs no bots, so no screen lease").toBe(ENDED_REFUSAL);
   });
 });
 
@@ -151,6 +153,19 @@ describe("/api/move/freeze", () => {
     expect(await ask(route, "POST"), "freezing again is a no-op, however busy").toEqual({ status: 200, body: { frozen: true } });
     expect(await ask(route, "DELETE")).toEqual({ status: 200, body: { frozen: false } });
     expect(await ask(route, "POST", "/api/bots/b1/messages")).toBe("pass");
+  });
+
+  it("a move to a server of the person's own names it: every refusal says where the bots live now, across a restart too", async () => {
+    const dir = dataDir();
+    const route = createMoveFreezeRoutes({ freeze: createMoveFreeze({ dataDir: dir }), busy: () => null, restart() {} });
+    expect(await ask(route, "POST", undefined, { cloud: "https://garage.example.test", place: "Garage server" })).toEqual({ status: 200, body: { frozen: true } });
+    expect(await ask(route, "GET")).toEqual({ status: 200, body: { frozen: true, cloud: "https://garage.example.test", place: "Garage server" } });
+    expect(await ask(route, "POST", "/api/bots/b1/messages")).toEqual({ status: 409, body: { error: "This bot lives on Garage server now.", code: "moved" } });
+    const relaunched = createMoveFreeze({ dataDir: dir });
+    expect([relaunched.place(), relaunched.refusal()]).toEqual(["Garage server", movedRefusal("Garage server")]);
+    expect(relaunched.unfreeze()).toBe(true);
+    expect([relaunched.place(), movedRefusal(null)]).toEqual([null, MOVED_REFUSAL]);
+    expect(await ask(route, "POST", undefined, { cloud: "https://garage.example.test", place: "x".repeat(121) }), "a name past 120 characters").toMatchObject({ status: 400 });
   });
 
   it("is only for OpenMausBot on this computer, never a paired device", async () => {

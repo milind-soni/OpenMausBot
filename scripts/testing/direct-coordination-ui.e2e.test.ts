@@ -46,6 +46,7 @@ const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBin
       expect(match).toBeDefined();
       return ui("click", "--ref", "@" + match![0]);
     };
+    await expect.poll(snapshot, { timeout: 15_000 }).toContain('textbox "Message Pepper"');
     const lead = (await api("/api/bots", { name: "Engineer", title: "Implementation", section: "" })).bot;
     const gateFile = join(temporary, "finish-teammate");
     writeFileSync(planPath, JSON.stringify({
