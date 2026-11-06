@@ -10,5 +10,9 @@
   },
   "include": [
     "companion/src"
+  ],
+  "exclude": [
+    "companion/src/e2e/gen-vectors.ts",
+    "companion/src/e2e/interop-server.ts"
   ]
 }
