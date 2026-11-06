@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { admission, admissionHash, b64u, credentialHash, ed25519RawPublicKey, fromB64u, keyId, mintRelayToken, psk } from "../../src/e2e/credentials.ts";
-import { TRANSPORT_DIRECT, TRANSPORT_RELAY } from "../../src/e2e/noise.ts";
+import { generateKeyPair, NoiseError, TRANSPORT_DIRECT, TRANSPORT_RELAY } from "../../src/e2e/noise.ts";
 import { dial } from "../../src/e2e/phone.ts";
 import { SessionClosed, type E2ESession } from "../../src/e2e/session.ts";
 import { ATTACHMENT_BYTES, attachmentByte, startFakeHarness, type FakeHarness } from "./fake-harness.ts";
@@ -313,6 +313,81 @@ describe("the sidecar's end-to-end connection", () => {
     session.shutdown();
     await control("PUT", `/devices/${deviceId}/routes`, { routes: "any" });
     await waitFor(() => relay.admitted(hid).has(adm));
+  });
+
+  describe("against a malicious relay, every attack ends in a closed session and nothing delivered", () => {
+    const flip = (data: Buffer) => {
+      const out = Buffer.from(data);
+      out[out.length - 1] ^= 1;
+      return out;
+    };
+    /** One upload through a tampered relay: it must never reach the harness. */
+    async function attempt(tamper: NonNullable<FakeRelay["tamper"]>): Promise<"refused" | "delivered"> {
+      relay.tamper = tamper;
+      try {
+        const session = await viaRelay(await control("GET", "/state"), deviceToken);
+        const reply = await http(session, "POST", "/api/files", { token: deviceToken, body: randomBytes(300_000), headers: { "content-type": "application/octet-stream" } });
+        session.shutdown();
+        return reply.status === 201 ? "delivered" : "refused";
+      } catch {
+        return "refused";
+      } finally {
+        relay.tamper = null;
+      }
+    }
+
+    it("key swap: a message 2 the computer didn't write is a hard stop", async () => {
+      relay.tamper = (direction, data, index) =>
+        direction === "toPhone" && index === 0 ? Buffer.concat([generateKeyPair().publicKey, randomBytes(data.length - 65)]) : data;
+      await expect(viaRelay(await control("GET", "/state"), deviceToken)).rejects.toBeInstanceOf(NoiseError);
+      relay.tamper = null;
+    });
+
+    it("posing as the phone: a message 1 without the psk is refused with 4001", async () => {
+      const forged = (await import("../../src/e2e/noise.ts")).phoneHello(
+        { remoteStatic: transportKey(await control("GET", "/state")), psk: randomBytes(32), transport: TRANSPORT_RELAY },
+        Buffer.from(JSON.stringify({ v: 1, conn: b64u(randomBytes(16)) })),
+        "",
+      ).message1;
+      expect(await attempt((direction, data, index) => (direction === "toHost" && index === 0 ? forged : data))).toBe("refused");
+    });
+
+    it("replaying, dropping, truncating or flipping a record", async () => {
+      let previous: Buffer | null = null;
+      const replay: NonNullable<FakeRelay["tamper"]> = (direction, data, index) => {
+        if (direction !== "toHost" || index < 1) return data;
+        const out = index === 3 && previous ? previous : data;
+        previous = data;
+        return out;
+      };
+      expect(await attempt(replay)).toBe("refused");
+      expect(await attempt((direction, data, index) => (direction === "toHost" && index === 2 ? null : data))).toBe("refused");
+      expect(await attempt((direction, data, index) => (direction === "toHost" && index === 2 ? data.subarray(0, data.length - 1) : data))).toBe("refused");
+      expect(await attempt((direction, data, index) => (direction === "toHost" && index === 2 ? flip(data) : data))).toBe("refused");
+    });
+
+    it("reflection: the computer's own record sent back to it", async () => {
+      let fromComputer: Buffer | null = null;
+      let reflected = false;
+      expect(await attempt((direction, data, index) => {
+        if (direction === "toPhone" && index >= 1) fromComputer ??= data;
+        if (direction !== "toHost" || index < 2 || !fromComputer || reflected) return data;
+        reflected = true;
+        return fromComputer;
+      })).toBe("refused");
+    });
+
+    it("a stale message 2 from an earlier session", async () => {
+      let old: Buffer | null = null;
+      relay.tamper = (direction, data, index) => {
+        if (direction === "toPhone" && index === 0) old = data;
+        return data;
+      };
+      (await viaRelay(await control("GET", "/state"), deviceToken)).shutdown();
+      relay.tamper = (direction, data, index) => (direction === "toPhone" && index === 0 && old ? old : data);
+      await expect(viaRelay(await control("GET", "/state"), deviceToken)).rejects.toBeInstanceOf(NoiseError);
+      relay.tamper = null;
+    });
   });
 
   it("closes a removed device's sessions within a second, with 4001", async () => {

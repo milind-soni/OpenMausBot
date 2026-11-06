@@ -32,6 +32,8 @@ export interface FakeRelay {
   closes: Array<{ kind: string; code: number }>;
   /** Token refreshes accepted on a live control socket. */
   refreshes: number;
+  /** Plays a malicious relay on every session spliced from now on; null passes bytes through. */
+  tamper: FakeRelayOptions["tamper"] | null;
   admitted(hid: string): Set<string>;
   restart(): void;
   /** Drops every socket without a close frame, as a crashed process would. */
@@ -44,7 +46,7 @@ const toBuffer = (data: RawData): Buffer => (Array.isArray(data) ? Buffer.concat
 
 export async function startFakeRelay(options: FakeRelayOptions): Promise<FakeRelay> {
   const hosts = new Map<string, Host>();
-  const relay = { refreshes: 0 } as FakeRelay;
+  const relay = { refreshes: 0, tamper: options.tamper ?? null } as FakeRelay;
   const closes: FakeRelay["closes"] = [];
   const server = createServer((_req, res) => res.writeHead(404).end());
   const wss = new WebSocketServer({
@@ -65,12 +67,12 @@ export async function startFakeRelay(options: FakeRelayOptions): Promise<FakeRel
     let toPhone = 0;
     phone.on("message", (raw, isBinary) => {
       if (!isBinary) return close(phone, "phone", 4400);
-      const out = options.tamper ? options.tamper("toHost", toBuffer(raw), toHost++) : toBuffer(raw);
+      const out = relay.tamper ? relay.tamper("toHost", toBuffer(raw), toHost++) : toBuffer(raw);
       if (out && data.readyState === WebSocket.OPEN) data.send(out);
     });
     data.on("message", (raw, isBinary) => {
       if (!isBinary) return close(data, "data", 4400);
-      const out = options.tamper ? options.tamper("toPhone", toBuffer(raw), toPhone++) : toBuffer(raw);
+      const out = relay.tamper ? relay.tamper("toPhone", toBuffer(raw), toPhone++) : toBuffer(raw);
       if (out && phone.readyState === WebSocket.OPEN) phone.send(out);
     });
     const end = (other: WebSocket) => (code: number) => {
