@@ -149,8 +149,9 @@ export async function cloudComputerRpc(
   const problem = cloudComputerCallProblem(params.name, args);
   if (problem) return { isError: true, content: [{ type: "text", text: problem }] };
   const control = await deps.gate();
-  deps.assertActive();
+  // A refusal acts on no Boat, so it answers even when the turn has ended meanwhile.
   if (control.held) return { isError: true, content: [{ type: "text", text: controlRefusal(control) }] };
+  deps.assertActive();
   const boxId = deps.boxId();
   if (!boxId) return { isError: true, content: [{ type: "text", text: CLOUD_COMPUTER_NOT_READY }] };
   const late = AbortSignal.timeout(Math.max(1, deadline - Date.now()));
