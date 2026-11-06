@@ -60,10 +60,6 @@ export function BotContextMenu({
   const [moreEngaged, setMoreEngaged] = useState(false);
   const [folderCopied, setFolderCopied] = useState(false);
   const folderNotice = folderCopied ? createPortal(<NoticeToast text={t("botFolder.copied")} onDone={() => setFolderCopied(false)} />, document.body) : null;
-  const folderCompleted = (action: "open" | "copy") => {
-    if (action === "copy") setFolderCopied(true);
-    onClose();
-  };
   const moreIntent = useRef<SubmenuIntent | null>(null);
   moreIntent.current ??= submenuIntent({
     open: (key) => setFlyout(key as Flyout),
@@ -86,6 +82,11 @@ export function BotContextMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const latestMenu = useRef(menu);
   useLayoutEffect(() => { latestMenu.current = menu; }, [menu]);
+  const openedFolderMenu = menu;
+  const folderCompleted = (action: "open" | "copy") => {
+    if (action === "copy") setFolderCopied(true);
+    if (latestMenu.current === openedFolderMenu) onClose();
+  };
   const readInFlight = useRef(false);
   const [readingBotId, setReadingBotId] = useState<string | null>(null);
   const [readError, setReadError] = useState<{ botId: string; message: string } | null>(null);
