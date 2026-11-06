@@ -7,6 +7,8 @@ export interface RailPlace {
   /** This computer, a Cloud of the person's own (My Cloud included), a team's Cloud, a server they connected by hand, or an
    * account signed in here with no place of its own to show. */
   kind: "computer" | "cloud" | "team" | "server" | "account";
+  /** A workspace of this computer's own, by its profile id, once My Cloud is home: the default one is This Mac (or This PC). */
+  profile?: string;
   /** With several accounts signed in here: which group it is in (a divider stands between groups). None with one account. */
   group?: string;
   /** With several accounts signed in here: the address of the account it belongs to. Only the rail's own page gets this. */
@@ -77,6 +79,7 @@ export type AddCloudView =
     };
   };
 export declare const RAIL_MIN_PLACES: number;
+export declare const PROFILE_PLACE: "profile:";
 /** main's own circles: each as the page sees it, plus the Cloud main acts on for it (never sent to a page). */
-export declare function railPlaces(input: { saved: { environments: any[]; activeId: string }; home?: string | null; mine?: string | null; state?: unknown; offers?: (entry: any) => boolean; waiting?: (id: string) => boolean }): Array<RailPlace & { cloudId?: string }>;
+export declare function railPlaces(input: { saved: { environments: any[]; activeId: string }; home?: string | null; mine?: string | null; state?: unknown; offers?: (entry: any) => boolean; waiting?: (id: string) => boolean; accounts?: any[]; profiles?: Array<{ id: string; active?: boolean }> }): Array<RailPlace & { cloudId?: string }>;
 export declare function addCloudView(state: unknown, offer: import("./cloud-home.mjs").CloudOffer | null): AddCloudView;

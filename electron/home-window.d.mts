@@ -74,6 +74,8 @@ type Timers = { set(work: () => void, ms: number): unknown; clear(timer: unknown
 
 export interface HomeWindow {
   show(options?: { open?: "phone" | null; place?: HomeAsk }): Promise<unknown>;
+  openProfile(id: string): Promise<boolean>;
+  profile(): string | null;
   cancel(): void;
   openCloud(open?: "phone" | null): Promise<unknown>;
   /** Remove from list from this computer's screen: the Cloud it shows leaves the person's list. */
