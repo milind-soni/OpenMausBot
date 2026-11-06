@@ -162,6 +162,7 @@
   "server.mcp.card.remove": "Usunąć {name}?",
   "server.mcp.card.internet": "Dostępny przez internet. Po włączeniu Twoje boty mogą korzystać z jego narzędzi.",
   "server.mcp.card.local": "Działa na tym komputerze.",
+  "server.mcp.card.elsewhere": "Działa na komputerze {computer}.",
   "server.mcp.card.newKey": "nowy klucz dla {key}",
   "server.mcp.card.cleared": "Usuwa zapisane wartości: {items}.",
   "server.mcp.card.usedBy": "Używają go: {names}.",

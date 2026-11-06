@@ -205,6 +205,7 @@
   "server.mcp.card.remove": "{name}을(를) 삭제할까요?",
   "server.mcp.card.internet": "인터넷으로 연결돼요. 켜면 봇이 이 서버의 도구를 쓸 수 있어요.",
   "server.mcp.card.local": "이 컴퓨터에서 실행돼요.",
+  "server.mcp.card.elsewhere": "{computer}에서 실행돼요.",
   "server.mcp.card.newKey": "{key}의 새 키",
   "server.mcp.card.cleared": "저장된 값을 지워요: {items}.",
   "server.mcp.card.usedBy": "사용 중인 봇: {names}.",

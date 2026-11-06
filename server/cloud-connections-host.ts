@@ -38,7 +38,7 @@ export interface CloudConnectionsHostDeps {
   /** The person's mailboxes: what a move carries, and what takes them on the Cloud they move to. */
   email?: { accounts(): readonly EmailAccount[]; adopt(accounts: unknown[]): { adopted: number; kept: number } };
   /** How the person hears what stayed on their computer; a Cloud home only. */
-  stayedNotices?: Pick<StayedNoticesDeps, "bots" | "say" | "notify" | "language">;
+  stayedNotices?: Pick<StayedNoticesDeps, "bots" | "say" | "notify" | "language" | "lent">;
 }
 
 const managedService = (): boolean => { try { return brokerAccess() !== null; } catch { return false; } };
@@ -99,7 +99,7 @@ export function createCloudConnectionsHost(deps: CloudConnectionsHostDeps) {
       return answerConnection(what.id, sources());
     },
 
-    prompt: (bot: ConnectionPromptBot): string => prompt?.(bot) ?? "",
+    prompt: (bot: ConnectionPromptBot, lent?: ReadonlyMap<string, string>): string => prompt?.(bot, lent) ?? "",
     /** What stayed on the person's computer: said when the move ends, and in the first conversation with each bot. */
     moved: (language?: string): void => stayed?.moved(language),
     personTurn: (bot: Parameters<NonNullable<typeof stayed>["personTurn"]>[0], threadId: string): void => stayed?.personTurn(bot, threadId),

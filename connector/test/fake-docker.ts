@@ -1,6 +1,6 @@
 // An in-memory Docker Engine for the connector's tests: images, containers, volumes holding files, and the fixed
 // helper commands the connector runs (cp, find, du, tar, the box probe) carried out on those files.
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { ContainerInfo, ContainerSpec, ContainerSummary, Docker, DockerInfo, DockerVersion, ImageInfo, VolumeInfo } from "../src/docker.ts";
@@ -131,7 +131,9 @@ export class FakeDocker implements Docker {
     if (this.containers.has(name)) throw new DockerError(409, `Conflict. The container name "/${name}" is already in use`);
     if (!this.images.has(spec.Image)) throw new DockerError(404, `No such image: ${spec.Image}`);
     for (const mount of spec.HostConfig.Mounts ?? []) {
-      if (!this.volumes.has(mount.Source)) this.volumes.set(mount.Source, { labels: {}, files: new Map() });
+      if (mount.Type === "bind") {
+        if (!existsSync(mount.Source)) throw new DockerError(400, `invalid mount config for type "bind": bind source path does not exist: ${mount.Source}`);
+      } else if (!this.volumes.has(mount.Source)) this.volumes.set(mount.Source, { labels: {}, files: new Map() });
     }
     const id = `c${String(this.nextId++).padStart(11, "0")}`;
     this.containers.set(name, { id, name, spec, status: "created", exitCode: 0, startedAt: 0, logs: "" });
@@ -194,8 +196,9 @@ export class FakeDocker implements Docker {
   }
 
   async volumeInspect(name: string): Promise<VolumeInfo | null> {
+    if (name === "mausbot-connector") return { Name: name, Labels: {}, Mountpoint: this.stateDir };
     const volume = this.volumes.get(name);
-    return volume ? { Name: name, Labels: volume.labels } : null;
+    return volume ? { Name: name, Labels: volume.labels, Mountpoint: `/var/lib/docker/volumes/${name}/_data` } : null;
   }
 
   async createVolume(name: string, labels: Record<string, string>): Promise<void> {

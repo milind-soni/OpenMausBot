@@ -212,6 +212,7 @@
   "server.mcp.card.remove": "{name} を削除しますか？",
   "server.mcp.card.internet": "インターネット経由で接続します。オンにすると、ボットがそのツールを使えるようになります。",
   "server.mcp.card.local": "このコンピューターで実行されます。",
+  "server.mcp.card.elsewhere": "{computer}で実行されます。",
   "server.mcp.card.newKey": "{key} の新しいキー",
   "server.mcp.card.cleared": "保存済みの値を消去します：{items}。",
   "server.mcp.card.usedBy": "使用中のボット：{names}。",

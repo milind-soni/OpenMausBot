@@ -125,6 +125,7 @@
   "server.mcp.card.remove": "{name} हटाएँ?",
   "server.mcp.card.internet": "इंटरनेट से जुड़ता है। चालू होने पर आपके बॉट इसके टूल इस्तेमाल कर सकते हैं।",
   "server.mcp.card.local": "इसी कंप्यूटर पर चलता है।",
+  "server.mcp.card.elsewhere": "{computer} पर चलता है।",
   "server.mcp.card.newKey": "{key} के लिए नई कुंजी",
   "server.mcp.card.cleared": "सहेजे गए मान हटाता है: {items}।",
   "server.mcp.card.usedBy": "इसे इस्तेमाल करते हैं: {names}।",

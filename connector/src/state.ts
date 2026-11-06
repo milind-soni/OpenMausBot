@@ -1,7 +1,10 @@
 // The connector's state volume: small JSON files, each written whole (temp file, then rename) and readable by root only,
-// in a folder only root may enter. The box's private key and the home's environment live here and nowhere else.
+// in a folder only root may enter. The box's private key and the home's environment live here and nowhere else; the
+// home's secrets are also in their own folder, the only one a container (the home, read-only) ever mounts.
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
+import { HOME_SECRET_ENV, HOME_SECRETS_DIR, HOME_SECRETS_FILE } from "./settings.ts";
 
 export interface AgentRecord {
   version: 2;
@@ -86,8 +89,7 @@ export class StateStore {
 
   constructor(dir: string) {
     this.dir = dir;
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    if (process.platform !== "win32" && (statSync(dir).mode & 0o077) !== 0) chmodSync(dir, 0o700);
+    privateDir(dir);
   }
 
   path(name: string): string {
@@ -159,6 +161,19 @@ export class StateStore {
 
   saveHomeEnv(env: Record<string, string>): void {
     this.write(FILES.env, env);
+    this.saveHomeSecrets(env);
+  }
+
+  /** The folder holding only the home's secrets file. */
+  get homeSecretsDir(): string {
+    return this.path(HOME_SECRETS_DIR);
+  }
+
+  /** The secrets of `env`, and nothing else, for the home's launcher to read. */
+  saveHomeSecrets(env: Record<string, string>): void {
+    privateDir(this.homeSecretsDir);
+    const secrets = Object.fromEntries(HOME_SECRET_ENV.flatMap((name) => (env[name] ? [[name, env[name]]] : [])));
+    this.write(join(HOME_SECRETS_DIR, HOME_SECRETS_FILE), secrets);
   }
 
   status(): StatusRecord {
@@ -200,4 +215,9 @@ export class StateStore {
     this.remove("self-update.confirmed.json");
     this.remove("self-update.aborted.json");
   }
+}
+
+function privateDir(dir: string): void {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (process.platform !== "win32" && (statSync(dir).mode & 0o077) !== 0) chmodSync(dir, 0o700);
 }

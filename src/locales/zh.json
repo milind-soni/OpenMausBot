@@ -210,6 +210,7 @@
   "server.mcp.card.remove": "移除 {name}？",
   "server.mcp.card.internet": "通过互联网访问。开启后，你的机器人可以使用它的工具。",
   "server.mcp.card.local": "在这台电脑上运行。",
+  "server.mcp.card.elsewhere": "在 {computer} 上运行。",
   "server.mcp.card.newKey": "{key} 的新密钥",
   "server.mcp.card.cleared": "清除已保存的值：{items}。",
   "server.mcp.card.usedBy": "使用它的机器人：{names}。",

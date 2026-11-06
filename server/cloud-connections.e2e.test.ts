@@ -131,7 +131,7 @@ it("moves the MCP servers with their secrets and sign-ins, the keys and the conn
   expect(servers.find((server) => server.name === "notes")).toMatchObject({ enabled: true, runsOn: collected.computer });
   expect(servers.find((server) => server.name === "easy"), "a mail connector stays with its accounts, whatever programs My Cloud has").toMatchObject({ enabled: true, runsOn: collected.computer });
   const notesTest = await onCloud("POST", "/api/mcp/servers/notes/test");
-  expect(notesTest).toMatchObject({ status: 409, body: { error: `This server runs on ${collected.computer.label}, so it isn't started here.` } });
+  expect(notesTest).toMatchObject({ status: 409, body: { error: `notes runs on ${collected.computer.label}, which isn't lent to My Cloud: it works once OpenMausBot is open on that computer and signed in to My Cloud.` } });
 
   // The sign-in moved: My Cloud refreshes it with the refresh token and the app's secret that came over...
   await onCloud("POST", "/api/mcp/servers/linear/test");

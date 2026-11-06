@@ -226,6 +226,7 @@
   "server.mcp.card.remove": "Remover {name}?",
   "server.mcp.card.internet": "A conexão é pela internet. Com o servidor ligado, seus bots podem usar as ferramentas dele.",
   "server.mcp.card.local": "Roda neste computador.",
+  "server.mcp.card.elsewhere": "Roda em {computer}.",
   "server.mcp.card.newKey": "nova chave para {key}",
   "server.mcp.card.cleared": "Limpa estes dados salvos: {items}.",
   "server.mcp.card.usedBy": "Usado por {names}.",

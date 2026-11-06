@@ -3,14 +3,15 @@
 // loopback trust. Secrets never ride a child's environment (/proc/<pid>/environ stays readable by the same user): the
 // server reads them from an inherited pipe. Root runs and trusts only the image's code, never the volume's.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { chmodSync, chownSync, closeSync, existsSync, openSync, readFileSync, realpathSync, statSync, type Stats } from "node:fs";
+import { chmodSync, chownSync, closeSync, existsSync, lstatSync, openSync, readFileSync, realpathSync, statSync, type Stats } from "node:fs";
 import { isIP } from "node:net";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  CLOUD_SECRETS_FD_ENV, cloudHomeConfiguration, cloudHomeHost, cloudHomeSecrets, prepareCloudHomeVolume,
+  CLOUD_HOME_SECRET_KEYS, CLOUD_SECRETS_FD_ENV, cloudHomeConfiguration, cloudHomeHost, cloudHomeSecrets, prepareCloudHomeVolume,
   withoutCloudSecrets, withoutIgnoredCloudKeys, type CloudHomeConfig,
 } from "./cloud-home.ts";
+import { procHidepid } from "./bot-box/hidepid.ts";
 import { boxMemory, heapSizeArgs } from "./box-memory.ts";
 import { clearRecordsFromOtherMachines } from "./data-dir-lease.ts";
 import { OOM_SCORE, protectSupervisor, spawnWithOomScore } from "./oom-score.ts";
@@ -207,7 +208,7 @@ export function prepareCloudHomeData(home: string, dataDir: string, machineId: s
 export function cloudHomeChildEnvironments(config: CloudHomeConfig, env: NodeJS.ProcessEnv, home: string) {
   const offered = withoutCloudSecrets(withoutIgnoredCloudKeys(env));
   const allowed = Object.fromEntries(Object.entries(offered).filter(([name, value]) => value !== undefined && serverEnvironmentAllowed(name)));
-  const dropped = Object.keys(offered).filter((name) => !serverEnvironmentAllowed(name) && name !== "HOME").sort();
+  const dropped = Object.keys(offered).filter((name) => !serverEnvironmentAllowed(name) && name !== "HOME" && name !== CAPS_DROPPED_ENV).sort();
   const dataDir = cloudHomeDataDir(env, home);
   const server: NodeJS.ProcessEnv = {
     ...allowed, HOME: home, OMB_DATA_DIR: dataDir,
@@ -229,20 +230,99 @@ export function cloudHomeChildEnvironments(config: CloudHomeConfig, env: NodeJS.
   return { server, edge, edgeFiles: edgeConfigFiles(env), tunnelToken: edgeTunnelToken(env), secrets: cloudHomeSecrets(env), dropped };
 }
 
+/** Set in the supervisor's own environment once it has started again without CAP_SYS_ADMIN, so it never loops. */
+export const CAPS_DROPPED_ENV = "OMB_CLOUD_CAPS_DROPPED";
+const CAP_SYS_ADMIN = 21;
+const SETPRIV = "/usr/bin/setpriv";
+
+/** A capability's bit in one of /proc/self/status's sets (CapBnd, CapEff, CapInh). */
+export function hasCapability(status: string, set: "CapBnd" | "CapEff" | "CapInh", bit: number): boolean {
+  const hex = new RegExp(`^${set}:\\s*([0-9a-f]+)$`, "m").exec(status)?.[1];
+  return hex ? ((BigInt(`0x${hex}`) >> BigInt(bit)) & 1n) === 1n : false;
+}
+
+export interface HostHardening {
+  notes: string[];
+  /** CAP_SYS_ADMIN served the remount and nothing after it: start again through setpriv without it (dropCapabilities). */
+  dropCapabilities: boolean;
+}
+
 /** What root does to the machine before anything runs as `maus` (docs/bot-box.md, "What each layer stops"): /proc hides
  * other users' processes (`hidepid=invisible`), so no `maus` process lists root's, and Fly's local API socket folder is
- * root's alone. Each step is one command; a failure is logged, never fatal, and OMB_CLOUD_HARDEN=0 skips them all. */
-export function hardenHost(env: NodeJS.ProcessEnv, run: { exec: (command: string, args: string[]) => { status: number | null; stderr?: string }; chmod: (path: string, mode: number) => void; exists: (path: string) => boolean } = {
+ * root's alone. Each step is one command; a failure is logged, never fatal, and OMB_CLOUD_HARDEN=0 skips them all.
+ * CAP_SYS_ADMIN, which an own server's connector grants only for the remount, must not outlive it. */
+export function hardenHost(env: NodeJS.ProcessEnv, run: {
+  exec: (command: string, args: string[]) => { status: number | null; stderr?: string };
+  chmod: (path: string, mode: number) => void;
+  exists: (path: string) => boolean;
+  read: (path: string) => string;
+} = {
   exec: (command, args) => spawnSync(command, args, { stdio: ["ignore", "ignore", "pipe"], encoding: "utf8", timeout: 10_000 }), chmod: chmodSync, exists: existsSync,
-}): string[] {
-  if (env.OMB_CLOUD_HARDEN === "0") return ["hardening skipped (OMB_CLOUD_HARDEN=0)"];
+  read: (path) => { try { return readFileSync(path, "utf8"); } catch { return ""; } },
+}): HostHardening {
+  if (env.OMB_CLOUD_HARDEN === "0") return { notes: ["hardening skipped (OMB_CLOUD_HARDEN=0)"], dropCapabilities: false };
   const notes: string[] = [];
-  const remount = run.exec("mount", ["-o", "remount,hidepid=invisible", "/proc"]);
-  notes.push(remount.status === 0 ? "/proc: hidepid=invisible" : `/proc: hidepid not applied (${String(remount.stderr ?? "").trim().split("\n")[0] || `exit ${remount.status}`})`);
+  if (procHidepid(() => run.read("/proc/mounts"))) notes.push("/proc: hidepid=invisible");
+  else {
+    const remount = run.exec("mount", ["-o", "remount,hidepid=invisible", "/proc"]);
+    notes.push(remount.status === 0 ? "/proc: hidepid=invisible" : `/proc: hidepid not applied (${String(remount.stderr ?? "").trim().split("\n")[0] || `exit ${remount.status}`})`);
+  }
+  const status = run.read("/proc/self/status");
+  const kept = hasCapability(status, "CapBnd", CAP_SYS_ADMIN) || hasCapability(status, "CapEff", CAP_SYS_ADMIN);
+  if (kept && env[CAPS_DROPPED_ENV] !== "1") {
+    if (run.exists(SETPRIV)) return { notes, dropCapabilities: true };
+    notes.push(`CAP_SYS_ADMIN kept: ${SETPRIV} is missing`);
+  } else if (kept) {
+    // libcap-ng (setpriv) skips a bounding-set drop without CAP_SETPCAP and still exits 0.
+    notes.push("CAP_SYS_ADMIN kept: it could not be dropped (CAP_SETPCAP is missing)");
+  } else if (env[CAPS_DROPPED_ENV] === "1") {
+    notes.push("CAP_SYS_ADMIN dropped");
+  }
   if (run.exists("/.fly")) {
     try { run.chmod("/.fly", 0o700); notes.push("/.fly: root only"); } catch (error) { notes.push(`/.fly: left as is (${error instanceof Error ? error.message : String(error)})`); }
   }
-  return notes;
+  return { notes, dropCapabilities: false };
+}
+
+/** Starts this supervisor again in its own process, without CAP_SYS_ADMIN or CAP_SETPCAP in any set it could regain them from. */
+export function setprivArgs(execPath: string, script: string): string[] {
+  return ["setpriv", "--inh-caps=-sys_admin,-setpcap", "--bounding-set=-sys_admin,-setpcap", "--", execPath, script];
+}
+
+/** Replaces this process; returns only why it could not. */
+function dropCapabilities(env: NodeJS.ProcessEnv): string {
+  if (typeof process.execve !== "function") return "this Node cannot start itself again in place";
+  try {
+    process.execve(SETPRIV, setprivArgs(process.execPath, fileURLToPath(import.meta.url)), { ...env, [CAPS_DROPPED_ENV]: "1" });
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  return "setpriv did not start";
+}
+
+/** Where an own server's connector mounts the home's secrets, read-only, instead of putting them in its environment. */
+export const CLOUD_SECRETS_FILE = "/run/mausbot/secrets.json";
+/** What the file may hold: the server's secrets, and the tunnel's token, which only cloudflared gets. */
+export const CLOUD_SECRETS_FILE_KEYS = [...CLOUD_HOME_SECRET_KEYS, "OMB_CLOUD_TUNNEL_TOKEN"] as const;
+
+/** The secrets in CLOUD_SECRETS_FILE, when it is there: root's, readable by root alone, off the volume; known names only. */
+export function readCloudSecretsFile(home: string, file = CLOUD_SECRETS_FILE, fs: {
+  exists: (path: string) => boolean;
+  lstat: (path: string) => Pick<Stats, "uid" | "mode" | "isFile" | "isSymbolicLink">;
+  stat: (path: string) => Pick<Stats, "uid" | "mode">;
+  read: (path: string) => string;
+} = { exists: existsSync, lstat: lstatSync, stat: statSync, read: (path) => readFileSync(path, "utf8") }): Record<string, string> {
+  if (!fs.exists(file)) return {};
+  const entry = fs.lstat(file);
+  const problem = !entry.isFile() || entry.isSymbolicLink() ? `${file} is not a plain file`
+    : entry.mode & 0o077 ? `${file} is readable by others than root`
+      : codeTrustProblem([file], home, fs.stat);
+  if (problem) throw new Error(`The home's secrets file is not safe to read: ${problem}.`);
+  let parsed: unknown;
+  try { parsed = JSON.parse(fs.read(file)); } catch { parsed = null; }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`The home's secrets file ${file} is not a JSON object.`);
+  const record = parsed as Record<string, unknown>;
+  return Object.fromEntries(CLOUD_SECRETS_FILE_KEYS.flatMap((key) => (typeof record[key] === "string" && record[key] ? [[key, record[key] as string]] : [])));
 }
 
 /** Each file and every folder above it must be root's and not writable by others, and never on the `maus`-owned volume:
@@ -275,21 +355,27 @@ export function spawnWithSecrets(command: string, args: string[], env: NodeJS.Pr
   return child;
 }
 
-export function startCloudHome(env: NodeJS.ProcessEnv = process.env) {
+export function startCloudHome(processEnv: NodeJS.ProcessEnv = process.env) {
   process.umask(0o077);
+  const root = process.getuid?.() === 0;
+  if (root && process.platform === "linux") {
+    const hardening = hardenHost(processEnv);
+    const notes = hardening.dropCapabilities ? [...hardening.notes, `CAP_SYS_ADMIN kept: ${dropCapabilities(processEnv)}`] : hardening.notes;
+    for (const note of notes) console.log(`cloud home: ${note}`);
+  }
+  const home = processEnv.HOME || "/data";
+  const env = root ? { ...processEnv, ...readCloudSecretsFile(home) } : processEnv;
   const config = cloudHomeConfiguration(env);
   if (!config) throw new Error("This image runs a My Cloud machine for MausBot Cloud; set its boot contract (docs/cloud-pro.md).");
   // Logged here once: the server child never sees what they are about.
   for (const warning of config.warnings) console.warn(`cloud home: ${warning}`);
-  const home = env.HOME || "/data";
   const { server, edge, edgeFiles, tunnelToken, secrets, dropped } = cloudHomeChildEnvironments(config, env, home);
   const prepare = () => prepareCloudHomeData(home, cloudHomeDataDir(env, home), config.machineId);
   let prepared: ReturnType<typeof prepare>;
   let ids: { uid: number; gid: number } | null = null;
-  if (process.getuid?.() === 0) {
+  if (root) {
     ids = passwdIds(readFileSync("/etc/passwd", "utf8"), SERVICE_USER);
     if (!ids) throw new Error(`The ${SERVICE_USER} user is missing from this image.`);
-    if (process.platform === "linux") for (const note of hardenHost(env)) console.log(`cloud home: ${note}`);
     if (protectSupervisor()) console.log("cloud home: the supervisor is never stopped for memory");
     // Only the mount point changes owner; anything inside keeps its owner.
     const stat = statSync(home);
