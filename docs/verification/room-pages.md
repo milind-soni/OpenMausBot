@@ -32,6 +32,17 @@ share a room whose lead is Pepper.
 Evidence (with `OMB_UI_EVIDENCE_DIR`): `room-pages-shown.png`, `room-pages-clicked-send.png`,
 `room-pages-clicked-app.png` and `room-pages.json` (the rows, the page document's head, the requests and the console).
 
+What it looks like when the recipe passes: both rows in the room, the page without Point or Share
+(`evidence/room-pages/shown.png`); the page after a real click on its send button, which resolved and posted nothing
+(`evidence/room-pages/clicked-send.png`); and the board after a click on "Paint it red", answered by the host with the
+room's refusal (`evidence/room-pages/clicked-app.png`).
+
+![Pepper's page and Basil's MCP app in a room, view-only](evidence/room-pages/shown.png)
+
+![The page after its send button was clicked: send() resolved and posted nothing](evidence/room-pages/clicked-send.png)
+
+![The MCP app after its server button was clicked: the host's room refusal](evidence/room-pages/clicked-app.png)
+
 ## Who may load a room's page
 
 ```sh
