@@ -7,7 +7,7 @@
 // skills", Codex with the person's own CODEX_HOME) leaves the copy out, so no engine sees a skill twice.
 import { createHash, randomUUID } from "node:crypto";
 import {
-  closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync,
+  closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync,
   statSync, symlinkSync, unlinkSync, writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -24,6 +24,8 @@ export const IMPORTED_SKILLS_DIR = join(DATA_DIR, "imported-skills");
 /** Beside each bot's own skill state, outside every folder a bot works in. */
 const INDEX_PATH = join(DATA_DIR, "skill-state", "imported-skills.json");
 const choicesPath = (botId: string) => join(DATA_DIR, "skill-state", botId, "imported-skills.json");
+/** Owner-created flag: newly unconfigured bots must opt in to imported skills. */
+const IMPORT_OPT_IN_FLAG = join(DATA_DIR, "skill-state", "imported-skills-opt-in");
 
 const sha256Hex = z.string().regex(/^[a-f0-9]{64}$/);
 const entrySchema = z.object({
@@ -44,7 +46,7 @@ const entrySchema = z.object({
 export type ImportedSkillEntry = z.infer<typeof entrySchema>;
 const indexSchema = z.record(z.string(), entrySchema);
 /** `on` holds the files a person read before switching a flagged skill on, so a copy brought in again is off again. */
-const choicesSchema = z.object({ off: z.array(z.string()), on: z.record(z.string(), sha256Hex).default({}) });
+const choicesSchema = z.object({ off: z.array(z.string()), on: z.record(z.string(), sha256Hex).default({}), mode: z.literal("allowlist").optional() });
 type Choices = z.infer<typeof choicesSchema>;
 
 /** Every imported skill by name; empty when there are none or the index cannot be trusted. */
@@ -68,7 +70,7 @@ function readChoices(botId: string): Choices {
     const parsed = choicesSchema.safeParse(JSON.parse(readFileSync(choicesPath(botId), "utf8")));
     if (parsed.success) return parsed.data;
   } catch {}
-  return { off: [], on: {} };
+  return existsSync(IMPORT_OPT_IN_FLAG) ? { off: [], on: {}, mode: "allowlist" } : { off: [], on: {} };
 }
 
 export function readFileNoFollow(path: string): Buffer | null {
@@ -271,6 +273,8 @@ export interface ImportedSkillView {
 
 function enabledFor(name: string, entry: ImportedSkillEntry, choices: Choices): boolean {
   if (choices.off.includes(name)) return false;
+  // In explicit opt-in mode, new imports never silently become enabled.
+  if (choices.mode === "allowlist") return choices.on[name] === entry.filesSha256;
   return entry.warnings.length === 0 || choices.on[name] === entry.filesSha256;
 }
 
@@ -344,9 +348,13 @@ export function setImportedSkillEnabled(botId: string, name: string, enabled: bo
   const choices = readChoices(botId);
   const off = choices.off.filter((other) => other !== name);
   const { [name]: _read, ...on } = choices.on;
-  const next: Choices = enabled
-    ? { off, on: entry.warnings.length ? { ...on, [name]: entry.filesSha256 } : on }
-    : { off: [...off, name].sort(), on };
+  const next: Choices = choices.mode === "allowlist"
+    ? enabled
+      ? { off, on: { ...on, [name]: entry.filesSha256 }, mode: "allowlist" }
+      : { off: [...off, name].sort(), on, mode: "allowlist" }
+    : enabled
+      ? { off, on: entry.warnings.length ? { ...on, [name]: entry.filesSha256 } : on }
+      : { off: [...off, name].sort(), on };
   mkdirSync(dirname(choicesPath(botId)), { recursive: true, mode: 0o700 });
   writeFileAtomic(choicesPath(botId), `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
   return importedSkillListings(botId, new Set()).find((skill) => skill.name === name)!;

@@ -20,6 +20,7 @@ import { ensureTaskWorkspace } from "./workspace.ts";
 afterEach(() => {
   rmSync(IMPORTED_SKILLS_DIR, { recursive: true, force: true });
   rmSync(join(DATA_DIR, "skill-state", "imported-skills.json"), { force: true });
+  rmSync(join(DATA_DIR, "skill-state", "imported-skills-opt-in"), { force: true });
 });
 
 const HOME = join(DATA_DIR, "..");
@@ -52,6 +53,21 @@ const names = (skills: Array<{ name: string }>) => skills.map((skill) => skill.n
 const target = (link: string) => resolve(readlinkSync(link).replace(/^\\\\\?\\/, ""));
 
 describe("skills brought in from this computer", () => {
+  it("does not auto-enable imports for new bots in opt-in mode; legacy bot choices remain intact", () => {
+    store([input("pdf"), input("review")]);
+    const legacy = newBot();
+    expect(setImportedSkillEnabled(legacy, "review", false)).toMatchObject({ enabled: false });
+    const next = newBot();
+    writeFileSync(join(DATA_DIR, "skill-state", "imported-skills-opt-in"), "1");
+    expect(importedSkillsFor(next, new Set())).toEqual([]);
+    expect(names(importedSkillsFor(legacy, new Set()))).toEqual(["pdf"]);
+    expect(setImportedSkillEnabled(next, "pdf", true)).toMatchObject({ enabled: true });
+    expect(names(importedSkillsFor(next, new Set()))).toEqual(["pdf"]);
+    store([input("more")]);
+    expect(names(importedSkillsFor(next, new Set()))).toEqual(["pdf"]);
+    expect(setImportedSkillEnabled(next, "pdf", false)).toMatchObject({ enabled: false });
+    expect(importedSkillsFor(next, new Set())).toEqual([]);
+  });
   it("reach a bot made after they came in exactly as the first: listing, index, /name and task folder links", () => {
     expect(names(store([input("pdf"), input("review", { source: "codex" })]))).toEqual(["pdf", "review"]);
     for (const bot of [newBot(), newBot()]) {
