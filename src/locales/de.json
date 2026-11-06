@@ -2699,6 +2699,7 @@
   "mcp.check.failedOff": "Verbindung fehlgeschlagen, daher bleibt er aus. {reason}",
   "mcp.check.tryAgain": "Erneut versuchen",
   "mcp.check.keysRefused": "Der Server hat die Schlüssel nicht akzeptiert ({reason}). Prüfe die Werte von {names}.",
+  "mcp.check.said": "Antwort des Servers: „{words}“.",
   "mcp.check.keysNeeded": "Der Server hat den Zugriff verweigert ({reason}). Wahrscheinlich braucht er einen Schlüssel: Füge ihn über „Schlüssel korrigieren“ hinzu.",
   "mcp.check.fixKeys": "Schlüssel korrigieren",
   "mcp.fixKeys.title": "Schlüssel für {name} korrigieren",

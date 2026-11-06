@@ -5074,6 +5074,7 @@
   "mcp.check.failedOff": "Không kết nối được nên máy chủ vẫn tắt. {reason}",
   "mcp.check.tryAgain": "Thử lại",
   "mcp.check.keysRefused": "Máy chủ không chấp nhận khóa ({reason}). Hãy kiểm tra giá trị của {names}.",
+  "mcp.check.said": "Máy chủ cho biết: \"{words}\".",
   "mcp.check.keysNeeded": "Máy chủ không cho kết nối ({reason}). Có lẽ máy chủ cần một khóa: hãy thêm bằng Sửa khóa.",
   "mcp.check.fixKeys": "Sửa khóa",
   "mcp.fixKeys.title": "Sửa khóa cho {name}",

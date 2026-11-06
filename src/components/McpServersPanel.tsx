@@ -45,6 +45,8 @@ export interface ProbeResult {
   /** `keys`: the server refused the headers it was sent; `unreachable` and `timeout` may pass on a second try. */
   reason?: "keys" | "unreachable" | "timeout";
   status?: number;
+  /** The server's own words about the failure, one line, already cleaned of every secret. */
+  said?: string;
   /** This panel's own note: the test ran right after the server was saved, so a failure means it was saved but off. */
   saved?: boolean;
 }
@@ -78,12 +80,14 @@ export async function signedInToolsCheck(
   return { ...tested, error: t("hostedMcp.testFailed", { service, reason: reason && !/[.!?]$/.test(reason) ? `${reason}.` : reason }) };
 }
 
+const withSaid = (text: string, result: ProbeResult) => (result.said ? `${text} ${t("mcp.check.said", { words: result.said })}` : text);
+
 /** Security: names the headers, never their values. */
 function failureReason(server: McpServerListing, result: ProbeResult): string {
   if (result.reason !== "keys" || !isRemoteMcpListing(server)) return result.error ?? "";
   const reason = result.status ? `HTTP ${result.status}` : t("mcp.check.unauthorized");
-  if (!server.headerKeys.length) return t("mcp.check.keysNeeded", { reason });
-  return t("mcp.check.keysRefused", { reason, names: new Intl.ListFormat(activeLocale(), { style: "long", type: "conjunction" }).format(server.headerKeys) });
+  if (!server.headerKeys.length) return withSaid(t("mcp.check.keysNeeded", { reason }), result);
+  return withSaid(t("mcp.check.keysRefused", { reason, names: new Intl.ListFormat(activeLocale(), { style: "long", type: "conjunction" }).format(server.headerKeys) }), result);
 }
 
 /** The test's answer, with what the server's tool count alone does to an AI that takes a limited number of tools. */
@@ -685,7 +689,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
                   )}
                   {result && signingIn !== server.name && (
                     <div role="status" className={cn("mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2 text-[12px]", result.ok ? "bg-success/10 text-success" : result.auth === "required" ? "bg-warning/10 text-warning" : "bg-danger/10 text-danger")}>
-                      {result.auth === "required" ? t("mcp.auth.required") : result.ok ? (
+                      {result.auth === "required" ? withSaid(t("mcp.auth.required"), result) : result.ok ? (
                         <span className="flex items-start gap-2"><CheckCircle2 size={14} className="mt-px shrink-0" /> {connectedLabel(result)}</span>
                       ) : (
                         <>

@@ -4463,6 +4463,7 @@
   "mcp.check.failedOff": "無法連線，因此保持關閉。{reason}",
   "mcp.check.tryAgain": "重試",
   "mcp.check.keysRefused": "伺服器不接受這些金鑰（{reason}）。請檢查 {names} 的值。",
+  "mcp.check.said": "伺服器回應：「{words}」。",
   "mcp.check.keysNeeded": "伺服器拒絕了連線（{reason}）。它可能需要一個金鑰：請用「修正金鑰」新增。",
   "mcp.check.fixKeys": "修正金鑰",
   "mcp.fixKeys.title": "修正 {name} 的金鑰",

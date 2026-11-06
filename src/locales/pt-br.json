@@ -5447,6 +5447,7 @@
   "mcp.check.testingOff": "Desligado até passar no teste. Testando agora.",
   "mcp.check.tryAgain": "Tentar novamente",
   "mcp.check.keysRefused": "O servidor não aceitou as chaves ({reason}). Confira os valores de {names}.",
+  "mcp.check.said": "O servidor respondeu: \"{words}\".",
   "mcp.check.keysNeeded": "O servidor não permitiu o acesso ({reason}). Ele provavelmente precisa de uma chave: adicione-a em “Corrigir as chaves”.",
   "mcp.check.fixKeys": "Corrigir as chaves",
   "mcp.fixKeys.title": "Corrigir as chaves de {name}",

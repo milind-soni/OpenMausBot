@@ -5526,6 +5526,7 @@
   "mcp.check.testingOff": "在通过测试前保持关闭：正在测试。",
   "mcp.check.tryAgain": "重试",
   "mcp.check.keysRefused": "服务器不接受这些密钥（{reason}）。请检查 {names} 的值。",
+  "mcp.check.said": "服务器返回：“{words}”。",
   "mcp.check.keysNeeded": "服务器拒绝了连接（{reason}）。它可能需要一个密钥：请用「修正密钥」添加。",
   "mcp.check.fixKeys": "修正密钥",
   "mcp.fixKeys.title": "修正 {name} 的密钥",

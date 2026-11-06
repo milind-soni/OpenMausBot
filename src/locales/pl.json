@@ -4928,6 +4928,7 @@
   "mcp.check.failedOff": "Nie udało się połączyć, więc serwer pozostaje wyłączony. {reason}",
   "mcp.check.tryAgain": "Spróbuj ponownie",
   "mcp.check.keysRefused": "Serwer nie przyjął kluczy ({reason}). Sprawdź wartości: {names}.",
+  "mcp.check.said": "Serwer odpowiedział: „{words}”.",
   "mcp.check.keysNeeded": "Serwer nie wpuścił połączenia ({reason}). Prawdopodobnie potrzebuje klucza: dodaj go przyciskiem Popraw klucze.",
   "mcp.check.fixKeys": "Popraw klucze",
   "mcp.fixKeys.title": "Popraw klucze dla {name}",

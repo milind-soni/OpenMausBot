@@ -2630,6 +2630,7 @@
   "mcp.check.failedOff": "कनेक्ट नहीं हो सका, इसलिए यह बंद रहेगा। {reason}",
   "mcp.check.tryAgain": "फिर से कोशिश करें",
   "mcp.check.keysRefused": "सर्वर ने कुंजियाँ स्वीकार नहीं कीं ({reason})। {names} के मान जाँचें।",
+  "mcp.check.said": "सर्वर ने कहा: \"{words}\"।",
   "mcp.check.keysNeeded": "सर्वर ने पहुँच नहीं दी ({reason})। शायद इसे एक कुंजी चाहिए: “कुंजियाँ ठीक करें” से जोड़ें।",
   "mcp.check.fixKeys": "कुंजियाँ ठीक करें",
   "mcp.fixKeys.title": "{name} की कुंजियाँ ठीक करें",

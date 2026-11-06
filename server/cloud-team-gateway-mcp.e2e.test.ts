@@ -80,7 +80,7 @@ it("adds the pasted command for the whole team, tests it through the gateway and
   expect(wrong).toEqual({ name: "orders", type: "http", url: gateway.url, headers: { "CF-Access-Client-Id": CLIENT_ID, "CF-Access-Client-Secret": "not-the-secret" } });
   expect((await as(admin, "POST", "/api/mcp/servers", wrong)).status).toBe(201);
   const refused = await as(admin, "POST", "/api/mcp/servers/orders/test");
-  expect(refused.body).toEqual({ ok: false, error: "The server didn't accept the keys (HTTP 403). Check the header values. It said: \"Forbidden\".", reason: "keys", status: 403 });
+  expect(refused.body).toEqual({ ok: false, said: "Forbidden", error: "The server didn't accept the keys (HTTP 403). Check the header values. It said: \"Forbidden\".", reason: "keys", status: 403 });
   expect((await as(admin, "DELETE", "/api/mcp/servers/orders")).status).toBe(200);
 
   const added = await as(admin, "POST", "/api/mcp/servers", pastedBody(command(gateway.url), { "CF-Access-Client-Id": CLIENT_ID, "CF-Access-Client-Secret": CLIENT_SECRET }));

@@ -27,7 +27,7 @@ export type McpProbeResult =
   /** `auth: "required"`: the server wants a sign-in. Either it refused initialize or tools/list with HTTP 401 and offers
    * OAuth, or it listed tools for a caller with no credentials and refused a tool call with HTTP 401 from behind an
    * RFC 9728 protected-resource document. */
-  | { ok: false; error: string; auth?: "required"; reason?: McpProbeFailure; status?: number };
+  | { ok: false; error: string; auth?: "required"; reason?: McpProbeFailure; status?: number; said?: string };
 
 export const SIGN_IN_REQUIRED = "This server needs you to sign in.";
 /** A tool name no server defines, so calling it runs nothing and the answer says only whether tool calls need a sign-in.
@@ -73,12 +73,12 @@ function publicProbeError(kind: "spawn" | "timeout" | "protocol" | "closed" | "c
 
 /** Security: words a server wrote can echo the request and a bot reads this result, so no configured value and no
  * key-shaped part of the address survives. */
-function said(words: string | undefined, server: StoredRemoteMcpServer, secrets: Record<string, string>): string {
-  if (!words) return "";
+function serverWords(words: string | undefined, server: StoredRemoteMcpServer, secrets: Record<string, string>): string | undefined {
+  if (!words) return undefined;
   const url = new URL(server.url);
   const inAddress = [...url.pathname.split("/"), ...url.searchParams.values()].filter((part) => KEY_SEGMENT.test(part));
   const configured = Object.values(secrets).filter((value) => value.length >= 4);
-  return itSaid(oneLine(redactSecretsInText(redactConfiguredValues(words, Object.fromEntries([...configured, ...inAddress].entries())))));
+  return oneLine(redactSecretsInText(redactConfiguredValues(words, Object.fromEntries([...configured, ...inAddress].entries()))));
 }
 
 function redactConfiguredValues(value: string, secrets: Record<string, string>): string {
@@ -179,19 +179,20 @@ async function probeRemoteMcpServer(
   } catch (error) {
     if (signal?.aborted) return { ok: false, error: publicProbeError("cancelled") };
     if (timeout.signal.aborted) return { ok: false, error: publicProbeError("timeout"), reason: "timeout" };
+    const said = serverWords(error instanceof McpRpcError ? error.detail : error instanceof McpHttpError && error.kind === "status" ? error.reason : undefined, server, secrets);
+    const fail = (message: string, extra: { auth?: "required"; reason?: McpProbeFailure; status?: number } = {}): McpProbeResult =>
+      ({ ok: false, error: `${message}${itSaid(said)}`, ...(said ? { said } : {}), ...extra });
     if (error instanceof McpHttpError && error.status === 401 && await asksForSignIn(server.url, error, "connect", signal)) {
-      return { ok: false, auth: "required", error: SIGN_IN_REQUIRED };
+      return sendsCredentials(server) ? fail(SIGN_IN_REQUIRED, { auth: "required" }) : { ok: false, auth: "required", error: SIGN_IN_REQUIRED };
     }
     if (error instanceof McpHttpError && error.kind === "status" && (error.status === 401 || error.status === 403)) {
-      return { ok: false, error: `The server didn't accept the keys (HTTP ${error.status}). Check the header values.${said(error.reason, server, secrets)}`, reason: "keys", status: error.status };
+      return fail(`The server didn't accept the keys (HTTP ${error.status}). Check the header values.`, { reason: "keys", status: error.status });
     }
-    if (error instanceof McpRpcError && UNAUTHORIZED.test(error.detail)) {
-      return { ok: false, error: `The server didn't accept the keys. Check the header values.${said(error.detail, server, secrets)}`, reason: "keys" };
-    }
+    if (error instanceof McpRpcError && UNAUTHORIZED.test(error.detail)) return fail("The server didn't accept the keys. Check the header values.", { reason: "keys" });
     if (error instanceof McpHttpError && error.kind === "status") {
-      return { ok: false, error: `The server answered HTTP ${error.status}. Check the address and headers.${said(error.reason, server, secrets)}`, ...(error.status !== undefined && error.status >= 500 ? { reason: "unreachable" as const } : {}) };
+      return fail(`The server answered HTTP ${error.status}. Check the address and headers.`, error.status !== undefined && error.status >= 500 ? { reason: "unreachable" } : {});
     }
-    if (error instanceof McpRpcError) return { ok: false, error: `The server returned an error.${said(error.detail, server, secrets)}` };
+    if (error instanceof McpRpcError) return fail("The server returned an error.");
     if (error instanceof McpHttpError && error.kind === "protocol") {
       return { ok: false, error: "The server did not return a valid MCP tools list." };
     }

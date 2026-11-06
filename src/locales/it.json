@@ -4644,6 +4644,7 @@
   "connectors.card.paused": "Connesso in modo sicuro. Continua l'attività in pausa quando vuoi.",
   "connectors.card.signInHint": "Accedi oppure inserisci la chiave dell'app nella pagina di connessione sicura — mai in chat.",
   "connectors.card.mcpSignInHint": "Accedi nella pagina che si apre — mai in chat.",
+  "mcp.check.said": "Il server ha risposto: \"{words}\".",
   "connectors.card.notNow": "Non ora",
   "connectors.card.waiting": "In attesa dell'accesso…",
   "connectors.card.readyToUse": "Pronto all'uso",

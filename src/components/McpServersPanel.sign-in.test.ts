@@ -56,6 +56,27 @@ it("reserves the browser tab during the click, then sends it to the sign-in page
   expect(host.querySelector("[role=alert]")).toBeNull();
 });
 
+async function testedWith(result: unknown) {
+  api.mockImplementation((path: string, init?: RequestInit) => {
+    if (path === "/api/mcp/servers") return Promise.resolve({ servers: [lusha] });
+    if (path === "/api/mcp/servers/lusha/test" && init?.method === "POST") return Promise.resolve(result);
+    return new Promise(() => {});
+  });
+  await act(async () => { [...host.querySelectorAll("button")].find((candidate) => candidate.textContent?.trim() === "Test")!.click(); });
+  await settle();
+  return [...host.querySelectorAll("[role=status]")].map((node) => node.textContent).join(" ");
+}
+
+it("passes on what the server said about a refused key beside the offer to sign in", async () => {
+  expect(await testedWith({ ok: false, auth: "required", said: "Invalid API key", error: "This server needs you to sign in. It said: \"Invalid API key\"." }))
+    .toContain("This server needs you to sign in. Sign in opens it in your browser. It said: \"Invalid API key\".");
+});
+
+it("passes on what the server said when it refused the keys", async () => {
+  expect(await testedWith({ ok: false, reason: "keys", status: 401, said: "Invalid API key", error: "The server didn't accept the keys (HTTP 401)." }))
+    .toContain("Couldn't connect. The server didn't let it in (HTTP 401). It probably needs a key: add it with Fix the keys. It said: \"Invalid API key\".");
+});
+
 it("says the browser blocked the sign-in page instead of waiting in silence", async () => {
   vi.stubGlobal("open", vi.fn(() => null));
   await act(async () => { signIn().click(); });
