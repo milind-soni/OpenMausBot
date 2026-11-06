@@ -55,13 +55,13 @@ const testEventSchema = z.object({
   triggerId: z.string().regex(TRIGGER_ID),
   data: z.record(z.string(), z.unknown()).default({}),
 }).strict();
-const cloudGrantSchema = z.object({ grant: z.string().max(256) }).strict();
+export const cloudGrantSchema = z.object({ grant: z.string().max(256) }).strict();
 
 function text(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 && value.length <= 200 ? value : undefined;
 }
 
-function base64Bytes(value: string, url: boolean) {
+export function base64Bytes(value: string, url: boolean) {
   const pattern = url ? /^[A-Za-z0-9_-]+$/ : /^[A-Za-z0-9+/]+={0,2}$/;
   if (!pattern.test(value)) return null;
   const standard = url ? value.replaceAll("-", "+").replaceAll("_", "/") : value;
@@ -72,11 +72,11 @@ function base64Bytes(value: string, url: boolean) {
   }
 }
 
-async function hmacKey(secret: string, usage: "sign" | "verify" = "verify") {
+export async function hmacKey(secret: string, usage: "sign" | "verify" = "verify") {
   return crypto.subtle.importKey("raw", utf8(secret), { name: "HMAC", hash: "SHA-256" }, false, [usage]);
 }
 
-function base64Url(bytes: ArrayBuffer) {
+export function base64Url(bytes: ArrayBuffer) {
   return btoa(String.fromCharCode(...new Uint8Array(bytes))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 

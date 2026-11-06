@@ -6,4 +6,6 @@ interface Env {
   STATS_TOKEN?: string;
   /** A var, not in wrangler.jsonc: the Cloud Admin's origin, which wakes a sleeping Cloud for its app events. */
   CLOUD_ADMIN_URL?: string;
+  /** A var, not in wrangler.jsonc: tool calls a free MausBot account's phones make per UTC day (default 300). */
+  ACCOUNT_DAILY_TOOL_CALLS?: string;
 }

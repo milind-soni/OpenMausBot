@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 
+import { accountUser } from "./accounts";
 import worker from "./index";
 
 /** D1 over node:sqlite with the real migrations: the same SQLite engine, so constraints, RETURNING and partial
@@ -132,6 +133,13 @@ export function fakeComposio() {
       return reply({ items: accounts.filter((account) => account.user_id === user && (!slugs || slugs.includes(account.toolkit.slug))), next_cursor: null });
     }
     if (method === "GET" && path === "/auth_configs") return reply({ items: [], next_cursor: null });
+    const accountPath = path.match(/^\/connected_accounts\/([^/]+)$/);
+    if (method === "DELETE" && accountPath) {
+      const index = accounts.findIndex((account) => account.id === decodeURIComponent(accountPath[1]!));
+      if (index < 0) return reply({ error: { message: "Connected account not found" } }, 404);
+      accounts.splice(index, 1);
+      return reply({ success: true });
+    }
     const sessionPayload = (session: FakeSession) => ({
       session_id: session.id,
       mcp: { type: "http", url: `https://backend.composio.dev/tool_router/${session.id}/mcp` },
@@ -242,6 +250,12 @@ export function cloudGrant(machineId: string, secret = CLOUD_GRANT_SECRET) {
   return `v1.${machineId}.${createHmac("sha256", secret).update(`omb-connected-apps-cloud:v1\n${machineId}`).digest("base64url")}`;
 }
 
+/** The Admin's account grant, written with node:crypto apart from the Worker code it checks. */
+export function accountGrant(accountId: string, installationId: string, exp: number, secret = CLOUD_GRANT_SECRET) {
+  const message = `omb-connected-apps-account:v1\n${accountId}\n${installationId}\n${exp}`;
+  return `v1.acct.${accountId}.${installationId}.${exp}.${createHmac("sha256", secret).update(message).digest("base64url")}`;
+}
+
 /** A request body of `chunks` chunks of `chunkBytes` spaces, streamed without a Content-Length, that counts how much
  *  of it was read and whether the reader cancelled it. */
 export function streamedBody(chunkBytes: number, chunks: number) {
@@ -276,6 +290,7 @@ export function brokerHarness(options: { migrations?: number } = {}) {
     CLOUD_GRANT_SECRET: CLOUD_GRANT_SECRET as string | undefined,
     STATS_TOKEN: STATS_TOKEN as string | undefined,
     CLOUD_ADMIN_URL: undefined as string | undefined,
+    ACCOUNT_DAILY_TOOL_CALLS: undefined as string | undefined,
     REGISTRATION_LIMITER: { limit: async () => ({ success: true }) },
     SESSION_LIMITER: { limit: async () => ({ success: true }) },
     EVENTS_LIMITER: { limit: async () => ({ success: limits.events }) },
@@ -298,6 +313,13 @@ export function brokerHarness(options: { migrations?: number } = {}) {
       const response = await fetchBroker("/v1/installations", { method: "POST", body: "{}" });
       const body = await response.json() as { installationId: string; token: string };
       return { id: body.installationId, token: body.token, userId: `omb_${body.installationId.replaceAll("-", "")}` };
+    },
+    bind(owner: Installation, accountId: string, exp = Math.floor(Date.now() / 1000) + 86_400) {
+      return harness.call(owner, "/v1/installation/account", { method: "PUT", body: JSON.stringify({ grant: accountGrant(accountId, owner.id, exp) }) });
+    },
+    /** The account's Composio user as an owner for `account()`; it has no installation of its own. */
+    accountOwner(accountId: string): Installation {
+      return { id: "", token: "", userId: accountUser(accountId) };
     },
     account(owner: Installation, toolkit = "gmail", status = "ACTIVE") {
       const id = `ca_${toolkit}_${++accountCount}`;

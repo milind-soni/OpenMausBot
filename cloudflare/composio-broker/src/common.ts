@@ -8,6 +8,9 @@ export interface InstallationRow {
   session_id: string | null;
   disabled_at: number | null;
   last_seen_at?: number;
+  /** Absent on a database that has not run migration 0006 yet. */
+  account_id?: string | null;
+  account_until?: number | null;
 }
 
 /** The Composio user whose connected accounts the installation reaches: the one shared with it, else its own. */
@@ -144,13 +147,14 @@ export function composioRequest(env: Env, path: string, init?: RequestInit) {
 
 const connectedAccountResponseSchema = z.object({
   id: z.string().optional(),
+  user_id: z.string().nullable().optional(),
   alias: z.string().nullable().optional(),
   status: z.string().optional(),
   updated_at: z.string().optional(),
   toolkit: z.object({ slug: z.string().optional() }).optional(),
 });
 export type ConnectedAccountResponse = z.infer<typeof connectedAccountResponseSchema>;
-const connectedAccountsPageSchema = z.object({
+export const connectedAccountsPageSchema = z.object({
   items: z.array(connectedAccountResponseSchema),
   next_cursor: z.string().nullable().optional(),
 });

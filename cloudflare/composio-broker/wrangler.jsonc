@@ -24,7 +24,8 @@
     { "name": "SESSION_LIMITER", "namespace_id": "8261702", "simple": { "limit": 120, "period": 60 } },
     { "name": "EVENTS_LIMITER", "namespace_id": "8261703", "simple": { "limit": 60, "period": 60 } }
   ],
-  // Hourly: expire app events older than 7 days, pause the triggers of installations idle for 14 days.
+  // Hourly: expire app events older than 7 days, pause the triggers of installations idle for 14 days, delete
+  // revoked accounts' sign-ins.
   "triggers": { "crons": ["23 * * * *"] },
   "observability": {
     "enabled": true,
