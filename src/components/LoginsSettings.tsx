@@ -9,6 +9,7 @@ import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useStore } from "@/state/store";
 import { LoginBotPicker, LoginForm } from "./LoginForm";
 import { Card } from "./SettingsPrimitives";
+import { LoginImport } from "./LoginImport";
 
 // Security: a row never shows the password, which no route returns.
 
@@ -165,6 +166,7 @@ export function LoginsSettings() {
             <Plus size={14} />{t("settings.logins.add")}
           </button>
         )}
+        {logins && <LoginImport logins={logins} bots={bots} onImported={load} />}
         <p className="text-[12px] leading-relaxed text-ink-tertiary">{t("settings.logins.limits")}</p>
         {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
         <OnePasswordConnection status={onePassword} disabled={logins === null} bots={bots} botNames={botNames}
