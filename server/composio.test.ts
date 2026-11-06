@@ -7,6 +7,7 @@ import {
   applyManagedBrokerMessage,
   authorizeService,
   connectedServiceSlugs,
+  verifiedConnectedServiceSlugs,
   connectedServices,
   connectedServicesInventory,
   connectionMode,
@@ -73,7 +74,7 @@ let brokerMcpTools: Array<{ name: string; description?: string }> | null = null;
 let brokerToolsListFail = false;
 // What /broker/v1/connectors/connected serves; null falls back to github
 // only, the state the existing validation tests were written against.
-let brokerConnectedServicesBody: { services: Record<string, { connected: boolean; status: string }> } | null = null;
+let brokerConnectedServicesBody: { complete?: boolean; services: Record<string, { connected: boolean; status: string }> } | null = null;
 let brokerConnectedServicesFail = false;
 // What /broker/v1/catalog serves; null falls back to github only.
 let brokerCatalogBody: { items: Array<{ slug: string; name: string }> } | null = null;
@@ -120,7 +121,7 @@ beforeAll(async () => {
         }
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify(
-          brokerConnectedServicesBody ?? { services: { github: { connected: true, status: "ACTIVE" } } },
+          brokerConnectedServicesBody ?? { complete: true, services: { github: { connected: true, status: "ACTIVE" } } },
         ));
       }
       if (req.method === "POST" && url.pathname.endsWith("/authorize")) {
@@ -341,8 +342,10 @@ beforeAll(async () => {
         items: [
           { slug: "github", connected_account: { id: "ca_github", status: "ACTIVE" } },
           { slug: "gmail", is_no_auth: true },
-          { slug: "slack" },
-          { slug: "unconnected", connected_account: null },
+          ...(url.searchParams.has("toolkits") ? [
+            { slug: "slack" },
+            { slug: "unconnected", connected_account: null },
+          ] : []),
         ],
         next_cursor: url.searchParams.has("toolkits") ? undefined : "toolkits-page-2",
       };
@@ -952,6 +955,7 @@ describe.sequential("Composio Sessions", () => {
   it("passes the connected-service slugs to the bridge alongside the allowlist", async () => {
     setManagedBrokerAccess({ url: origin + "/broker", token: "f".repeat(64) });
     brokerConnectedServicesBody = {
+      complete: true,
       services: {
         bland_ai: { connected: true, status: "ACTIVE" },
         bland: { connected: true, status: "ACTIVE" },
@@ -977,6 +981,62 @@ describe.sequential("Composio Sessions", () => {
 
   it("reads an unreachable connection inventory as no service slugs", async () => {
     await expect(connectedServiceSlugs({})).resolves.toEqual([]);
+  });
+
+  it("rejects an unreachable connection inventory instead of reporting no service slugs", async () => {
+    await expect(verifiedConnectedServiceSlugs({})).rejects.toThrow(/unavailable/);
+  });
+
+  it("does not cache a failed inventory and retries discovery on the same backend", async () => {
+    setManagedBrokerAccess({ url: origin + "/broker", token: "9".repeat(64) });
+    const broken = vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("synthetic inventory timeout"));
+    try {
+      await expect(verifiedConnectedServiceSlugs({})).rejects.toThrow(/synthetic inventory timeout/);
+      await expect(connectedServiceSlugs({})).resolves.toEqual(["github"]);
+    } finally {
+      broken.mockRestore();
+      setManagedBrokerAccess(null);
+    }
+  });
+
+  it("rejects incomplete account discovery without caching its partial service slugs", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 61_000);
+    const cfg: AppConfig = { composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" } };
+    connectedAccountsUnavailable = true;
+    try {
+      await expect(verifiedConnectedServiceSlugs(cfg)).rejects.toThrow(/inventory.*incomplete/i);
+      connectedAccountsUnavailable = false;
+      await expect(connectedServiceSlugs(cfg)).resolves.toContain("toolkit_41");
+    } finally {
+      connectedAccountsUnavailable = false;
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects a broker response without an inventory instead of caching an empty one", async () => {
+    setManagedBrokerAccess({ url: origin + "/broker", token: "b".repeat(64) });
+    const broken = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(Response.json({}));
+    try {
+      await expect(verifiedConnectedServiceSlugs({})).rejects.toThrow(/services/);
+    } finally {
+      broken.mockRestore();
+      setManagedBrokerAccess(null);
+    }
+  });
+
+  it("mounts a granted bot's bridge without service hints when inventory is unavailable", async () => {
+    setManagedBrokerAccess({ url: origin + "/broker", token: "b".repeat(64) });
+    try {
+      const integration = await mcpIntegration({}, {
+        harnessUrl: "http://127.0.0.1:1", commsToken: "fixture", botId: "bot", threadId: "thread",
+        connectorTools: { bland: { tools: "*" } },
+      });
+      expect(integration?.env[CONNECTOR_ALLOWED_TOOLS_ENV]).toBe(JSON.stringify({ bland: { tools: "*" } }));
+      expect(integration?.env[CONNECTOR_SERVICE_SLUGS_ENV]).toBeUndefined();
+    } finally {
+      setManagedBrokerAccess(null);
+    }
   });
 
   it("keeps the last service slugs when a later read fails, so the bridge's tools stay as they were", async () => {
@@ -1027,6 +1087,7 @@ describe.sequential("Composio Sessions", () => {
   it("accepts an underscored service's own tool names in its grant", async () => {
     setManagedBrokerAccess({ url: origin + "/broker", token: "f".repeat(64) });
     brokerConnectedServicesBody = {
+      complete: true,
       services: {
         bland_ai: { connected: true, status: "ACTIVE" },
         bland: { connected: true, status: "ACTIVE" },
@@ -1371,9 +1432,28 @@ describe("connector tool inventory", () => {
   const initializeCalls = () =>
     calls.filter((call) => call.path.endsWith("/v1/mcp") && call.body?.method === "initialize");
 
+  it("groups tools using the cached service inventory after a failed refresh", async () => {
+    setManagedBrokerAccess({ url: origin + "/broker", token: "8".repeat(64) });
+    brokerConnectedServicesBody = { complete: true, services: { bland_ai: { connected: true, status: "ACTIVE" } } };
+    brokerMcpTools = [{ name: "BLAND_AI_MAKE_CALL" }];
+    await expect(connectedServiceSlugs({})).resolves.toEqual(["bland_ai"]);
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000);
+    const broken = vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("synthetic inventory timeout"));
+    try {
+      await expect(listConnectorTools({})).resolves.toEqual({ bland_ai: [{ name: "BLAND_AI_MAKE_CALL" }] });
+    } finally {
+      broken.mockRestore();
+      now.mockRestore();
+      brokerMcpTools = null;
+      brokerConnectedServicesBody = null;
+      setManagedBrokerAccess(null);
+    }
+  });
+
   it("groups an underscored service under its own slug using the connected services", async () => {
     setManagedBrokerAccess({ url: origin + "/broker", token: "c".repeat(64) });
     brokerConnectedServicesBody = {
+      complete: true,
       services: { bland_ai: { connected: true, status: "ACTIVE" }, github: { connected: true, status: "ACTIVE" } },
     };
     brokerMcpTools = [

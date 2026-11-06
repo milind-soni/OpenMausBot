@@ -95,6 +95,16 @@ const toolkitPageSchema = z.object({
   items: z.array(toolkitItemSchema).optional(),
   next_cursor: z.string().nullable().optional(),
 });
+const toolkitInventoryPageSchema = toolkitPageSchema.extend({
+  items: z.array(toolkitItemSchema.extend({
+    slug: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/),
+    connected_account: z.object({
+      id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/),
+      status: z.string().optional(),
+    }).nullable().optional(),
+  }).refine((item) => item.is_no_auth === true || item.connected_account != null)),
+});
+
 const linkResponseSchema = z.object({ redirect_url: z.string().optional() });
 const aliasRequestSchema = z.object({ alias: z.string().nullable().optional() });
 const MAX_MCP_BODY = 2 * 1024 * 1024;
@@ -459,10 +469,11 @@ async function listSessionToolkits(
       `/tool_router/session/${encodeURIComponent(sessionId)}/toolkits?${params}`,
     );
     if (!response.ok) throw new Error(await upstreamError(response, "Toolkit inventory unavailable"));
-    const body = toolkitPageSchema.parse(await response.json());
-    toolkits.push(...(body.items ?? []));
+    const body = toolkitInventoryPageSchema.parse(await response.json());
+    toolkits.push(...body.items);
     const next = body.next_cursor || undefined;
-    if (!next || seenCursors.has(next)) return toolkits;
+    if (!next) return toolkits;
+    if (seenCursors.has(next)) throw new Error("Toolkit inventory contains a pagination cursor cycle");
     seenCursors.add(next);
     cursor = next;
   }
@@ -545,10 +556,11 @@ async function connectedServices(
   const session = await ensureSession(installation, env, ctx);
   const [toolkits, accounts] = await Promise.all([
     listSessionToolkits(env, session.sessionId),
-    listConnectedAccounts(env, actingUser(installation), []).catch(() => []),
+    listConnectedAccounts(env, actingUser(installation), []),
   ]);
   return json({
     configured: true,
+    complete: true,
     services: allServiceStates(summarizeAccounts(accounts, []), toolkits),
   });
 }
