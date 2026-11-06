@@ -3418,6 +3418,7 @@
   "engines.resetting": "Restableciendo…",
   "engines.setCli": "Definir CLI…",
   "engines.claudeUpdated": "Claude actualizado: {version}",
+  "engines.updatedTo": "Actualizado a {version}",
   "engines.account.signInHint": "Ejecuta este comando exacto en una terminal del equipo donde se ejecuta {app}, completa el inicio de sesión de Claude CLI y luego haz clic en «Comprobar cuenta». Si estás viendo {app} de forma remota, ejecútalo allí, no en este dispositivo.",
   "engines.account.powershell": "Usa PowerShell para este comando.",
   "accounts.claude": "Claude",

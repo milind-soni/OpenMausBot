@@ -2630,6 +2630,7 @@
   "engines.resetting": "重設中…",
   "engines.setCli": "設定 CLI…",
   "engines.claudeUpdated": "Claude 已更新 — {version}",
+  "engines.updatedTo": "已更新到 {version}",
   "engines.account.signInHint": "請在執行 {app} 的電腦終端機中執行這道完整指令，完成 Claude CLI 登入後，再點選「檢查帳戶」。若你是以遠端方式檢視 {app}，請在那裡執行，而不是這台裝置。",
   "engines.account.powershell": "這道指令請使用 PowerShell 執行。",
   "engines.none": "尚未偵測到任何模型供應商應用程式。",

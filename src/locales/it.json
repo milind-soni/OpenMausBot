@@ -3667,6 +3667,7 @@
   "engines.resetting": "Reimpostazione…",
   "engines.setCli": "Imposta CLI…",
   "engines.claudeUpdated": "Claude aggiornato — {version}",
+  "engines.updatedTo": "Aggiornato a {version}",
   "engines.account.signInHint": "Esegui questo comando esatto in un terminale sul computer dove è in esecuzione {app}, completa l'accesso alla CLI Claude, poi fai clic su Controlla account. Se stai vedendo {app} da remoto, eseguilo lì, non su questo dispositivo.",
   "engines.account.powershell": "Usa PowerShell per questo comando.",
   "accounts.count": "{count} account · {signedIn} con accesso effettuato",

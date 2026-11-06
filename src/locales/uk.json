@@ -1776,6 +1776,7 @@
   "engines.resetting": "Скидаємо…",
   "engines.setCli": "Задати CLI…",
   "engines.claudeUpdated": "Claude оновлено — {version}",
+  "engines.updatedTo": "Оновлено до {version}",
   "engines.account.signInHint": "Виконайте цю команду в терміналі на комп'ютері, де працює {app}, завершіть вхід Claude CLI, потім натисніть «Перевірити акаунт». Якщо ви дивитеся {app} віддалено, запускайте там, а не на цьому пристрої.",
   "engines.account.powershell": "Для цієї команди використайте PowerShell.",
   "engines.none": "Застосунків провайдерів моделей ще не виявлено.",

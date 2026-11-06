@@ -3786,6 +3786,7 @@
   "engines.resetting": "Сброс…",
   "engines.setCli": "Указать CLI…",
   "engines.claudeUpdated": "Claude обновлён — {version}",
+  "engines.updatedTo": "Обновлено до {version}",
   "engines.account.signInHint": "Выполните эту точную команду в терминале на компьютере, где работает {app}, завершите вход Claude CLI, затем нажмите «Проверить аккаунт». Если вы открываете {app} удалённо, выполните её там, а не на этом устройстве.",
   "engines.account.powershell": "Для этой команды используйте PowerShell.",
   "accounts.claude": "Claude",

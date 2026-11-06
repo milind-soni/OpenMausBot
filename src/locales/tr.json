@@ -3079,6 +3079,7 @@
   "engines.resetting": "Sıfırlanıyor…",
   "engines.setCli": "CLI'ı Ayarla…",
   "engines.claudeUpdated": "Claude güncellendi — {version}",
+  "engines.updatedTo": "{version} sürümüne güncellendi",
   "engines.account.signInHint": "Bu komutu aynen {app}'u çalıştıran bilgisayardaki terminalde çalıştırın, Claude CLI girişini tamamlayın ve ardından Hesabı kontrol et'e tıklayın. {app}'u uzaktan görüntülüyorsanız bu cihazda değil orada çalıştırın.",
   "engines.account.powershell": "Bu komut için PowerShell kullanın.",
   "accounts.claude": "Claude",
