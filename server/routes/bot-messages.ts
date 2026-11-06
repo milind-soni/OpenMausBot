@@ -432,7 +432,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       }
       restoreHeldSteeredQueue(held);
       if (current && !current.busy) drainQueuedSends();
-      return json(res, 200, { ok: true, queued: true, threadId: bot.threadId });
+      return json(res, 200, { ok: true, queued: true, threadId: bot.threadId, ...(current?.busy ? { blockedBy: "running-turn" } : {}) });
     }
 
     m = path.match(/^\/api\/bots\/([\w-]+)\/helper-followup$/);
