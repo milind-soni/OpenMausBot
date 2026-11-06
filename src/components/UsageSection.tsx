@@ -3,6 +3,7 @@ import { ArrowLeft, ChevronRight, Download, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { activeLocale, documentLanguage, t } from "@/lib/i18n";
 import { listenLiveFrames } from "@/lib/live-events";
+import { modelColor, modelFamily } from "@/lib/model-color";
 import { formatTokens, hasFiniteCost, headlineTokens } from "@/lib/usage";
 import { fetchTraces, formatCost, formatDuration, USAGE_PERIODS, usageExportHref, usagePeriodRange, type UsagePeriod } from "@/lib/usage-trace";
 import { api, useStore } from "@/state/store";
@@ -87,14 +88,17 @@ export function GroupBars({ groupBy, groups }: { groupBy: UsageGroupBy; groups: 
     <ul className="flex flex-col gap-2.5">
       {top.map((group) => {
         const bot = groupBy === "bot" ? state.bots.find((item) => `bot:${item.id}` === group.key) : undefined;
+        const family = groupBy === "model" ? modelFamily(group.key) : undefined;
+        const color = family ? modelColor(group.key) : undefined;
         return (
           <li key={group.key} className="grid grid-cols-[minmax(0,9rem)_1fr_auto] items-center gap-3 text-[13px]" title={t("usage.page.turns", { count: String(group.turns) })}>
             <span className="flex min-w-0 items-center gap-2 text-ink">
               {bot && <BotAvatar bot={bot} state="idle" size={18} animated={false} />}
+              {family && <span aria-hidden="true" title={family.label} data-model-color={color} className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />}
               <span className="truncate">{groupBy === "model" ? modelName(group.label, state.instances) : usageGroupLabel(groupBy, group)}</span>
             </span>
             <span className="h-2 overflow-hidden rounded-full bg-raised">
-              <span className="block h-full rounded-full bg-accent/70" style={{ width: `${Math.max(2, (headlineTokens(group) / max) * 100)}%` }} />
+              <span data-model-color={color} className={cn("block h-full rounded-full", !color && "bg-accent/70")} style={{ width: `${Math.max(2, (headlineTokens(group) / max) * 100)}%`, backgroundColor: color }} />
             </span>
             <span className="min-w-[4.5rem] text-right tabular-nums text-ink-secondary">
               {formatTokens(headlineTokens(group))}
