@@ -18,6 +18,8 @@ import { PhoneAppsCard } from "./PhoneAppsCard";
 import { ProposalStatus } from "./ProposalStatus";
 import { ToolSelectionCard } from "./ToolSelectionCard";
 import { BotApiCard } from "./BotApiCard";
+import { IMessageCard } from "./IMessageCard";
+import { TelegramCard } from "./TelegramCard";
 import { ToolBudgetLine } from "./ToolBudgetLine";
 import { useCloudPlan } from "../ProIntroduction";
 import { xResearchAction } from "@/lib/cloud-plan";
@@ -800,6 +802,8 @@ export function AccessSection({
       {!draft && shows("xResearch") && <ResearchCard bot={bot} patch={patch} />}
 
       {!draft && shows("webhooks") && <BotApiCard bot={bot} />}
+      {!draft && shows("webhooks") && <TelegramCard bot={bot} />}
+      {!draft && shows("webhooks") && <IMessageCard bot={bot} />}
 
       {!draft && shows("webhooks") && <div className="rounded-xl bg-card p-4">
         <div className="text-[15px] font-medium text-ink">{t("botAccess.webhooks.title")}</div>

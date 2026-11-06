@@ -180,6 +180,12 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
     childEnv.OMB_OPENAI_LIVE_URL = liveUrl;
     if (parentEnv.OMB_OPENAI_LIVE_KEY) childEnv.OMB_OPENAI_LIVE_KEY = parentEnv.OMB_OPENAI_LIVE_KEY;
   }
+  // A loopback stand-in for Telegram's Bot API only (server/testing/fake-telegram.ts): no test reaches the real one.
+  const telegramUrl = parentEnv.OMB_TELEGRAM_API_BASE?.trim() ?? "";
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(telegramUrl)) childEnv.OMB_TELEGRAM_API_BASE = telegramUrl;
+  // The same for Sendblue's API (server/testing/fake-sendblue.ts).
+  const sendblueUrl = parentEnv.OMB_SENDBLUE_API_BASE?.trim() ?? "";
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(sendblueUrl)) childEnv.OMB_SENDBLUE_API_BASE = sendblueUrl;
   // A loopback stand-in for Postiz Cloud only (server/testing/fake-postiz.ts): no test signs in to the real one.
   const postizUrl = parentEnv.OMB_POSTIZ_CLOUD_URL?.trim() ?? "";
   if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(postizUrl)) childEnv.OMB_POSTIZ_CLOUD_URL = postizUrl;
