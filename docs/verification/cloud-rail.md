@@ -119,6 +119,41 @@ Cloud (the Cloud's bots), then This Mac again (what was made there is still
 there, with no restart), watching the lent link every 50 ms all the while: it
 never drops. Each picture is the rail beside the page, as the window shows them.
 
+## More workspaces on this computer, and the cloud badge
+
+＋ offers New workspace on this computer first, to everyone with the rail (and
+in the Server menu where there is no rail yet). It asks a name (Work, then
+Personal, then Workspace 2 and on) and a colour, then opens it fresh: another
+profile under `~/.openmausbot-profiles/<id>`, listed with its name, colour and
+creation time in `~/.openmausbot-profiles/profiles.json` (This Mac, `default`,
+is its first entry, kept as it was). One runs at a time: opening another waits
+for the work under way in the one that runs (as the move waits for it, at most
+a minute, the circle saying so), then stops it as a quit does and starts the
+next. Once My Cloud is home every workspace is on the rail; with no home the
+named ones sit after This computer, which stays the data folder. A workspace's
+menu renames it, changes its colour and removes it, asked first; removing the
+open one moves the window to My Cloud (or This computer) and stops its server
+before its folder goes to the Trash. Every Cloud's tile has a small cloud at its
+corner, and a screen reader hears "…, Cloud"; a named workspace's has a laptop
+and a server of the person's own its server mark.
+
+```sh
+node --test electron/local-profiles.node-test.mjs electron/cloud-rail.node-test.mjs electron/environments.node-test.mjs
+pnpm exec vitest run src/components/PlacesRail.test.ts src/components/PlaceAddSheet.test.ts src/components/HomeLine.test.ts src/components/WindowPlaceTitle.test.ts
+OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/rail-profile-ui.e2e.test.ts
+```
+
+The UI test walks every path through the real pages: ＋ with Escape, Close and
+Back at each step, an empty and a taken name, a new workspace opening fresh,
+This Mac, Work and My Cloud in every order, a switch while a turn runs (the
+circle waits, the turn finishes there and its reply is there on return), two
+quick clicks, Rename, Colour, Remove with Cancel, removing the open one and the
+last one, an app restart while a workspace is open, the rail past eight, the
+badge in the light and dark looks, and, in a second world with no Cloud, the
+Server menu's New workspace and the rail appearing with a second place. It
+watches the lent link every 50 ms throughout and checks that the frozen copy's
+server never starts.
+
 ## Automated fixtures
 
 ```sh
