@@ -21,6 +21,7 @@ import {
   sweepHighLevelFlows,
 } from "./highlevel";
 import { registerPushDevice, sendPush, unregisterPushDevice } from "./push";
+import { issueRelayToken, relayAdoption } from "./relay";
 import { capacityHealth, reportEndpointAccountProblems, scanTunnelCapacity } from "./tunnel-capacity";
 import {
   createInstallation,
@@ -141,6 +142,10 @@ async function route(
     }
   }
 
+  if (request.method === "POST" && url.pathname === "/v1/installations/self/relay-token") {
+    return issueRelayToken(request, env);
+  }
+
   if (request.method === "POST" && url.pathname === "/v1/installations/self/push/register") {
     return registerPushDevice(request, env);
   }
@@ -211,10 +216,12 @@ export function createWorker(
         // gate hosted sign-in on it. Provider capacity is reported beside it
         // so a full quota never hides sign-in, recovery, or local pairing.
         const capacity = await capacityHealth(env, healthConfig, ctx).catch(() => null);
+        const adoption = await relayAdoption(env).catch(() => null);
         return secureResponse(json({
           ok: true,
           service: "openmausbot-control-plane",
           ...(capacity === null ? {} : { capacity }),
+          ...(adoption === null ? {} : { relayAdoption: adoption }),
         }), request, null, requestId);
       }
 
