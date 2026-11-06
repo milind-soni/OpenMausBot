@@ -179,7 +179,7 @@ This uses the yamux wire format (`hashicorp/yamux` spec): a 12-byte header of `v
 | Concurrent streams per session | 64, counting un-ACKed opens. The 65th is answered with RST |
 | Half close | FIN on Data or WindowUpdate. A stream ends when both FINs are seen, or on RST |
 | Keepalive | Each side sends Ping {SYN, length = opaque u32} every 20 s. The peer answers Ping {ACK, same value}. No answer within 10 s closes the session (1001) |
-| GoAway | StreamId 0, `length` = 0 normal, 1 protocol error, 2 internal error. Sent before a planned close (quit, sleep, restart) |
+| GoAway | StreamId 0, `length` = 0 normal, 1 protocol error, 2 internal error, 3 removed. 0 is sent before a planned close (quit, sleep, restart). 3 goes only from the computer to the phone, when the person removed this device, right before the 4001 close |
 | Session flow | No session-wide window. Backpressure comes from the WebSocket: a sender stops writing records while the socket's buffered amount is above 1 MiB |
 | Stream ID ceiling | At `streamId > 2^31 − 1` the phone opens a new session |
 
@@ -249,7 +249,7 @@ own the `sid`, and a `sid` is single-use with a 10 s life. The relay then splice
 | 4429 | relay | Rate, size or byte limit | Back off, at least 30 s |
 | 4503 | relay | Restarting or full. Reason is JSON `{"retryInMs":N}` | Wait N plus jitter, then try the next node |
 | 4000 | either end | E2E protocol error (AEAD, framing, window) | Hard stop for this session; reconnect with backoff |
-| 4001 | computer | Handshake rejected (no psk matched) | Phone: "This phone was removed from your computer. Pair again." Stop retrying the relay |
+| 4001 | computer | Handshake rejected (no psk matched), or the device was removed (after GoAway(3)) | Phone: on a direct route, or after GoAway(3), "This phone was removed from your computer. Pair again." Through the relay without GoAway(3), the relay may have written it: retry with backoff |
 | 4002 | either end | Handshake deadline passed | Retry with backoff |
 
 **Relay token** (minted by the control plane, checked by the relay offline):
@@ -310,7 +310,8 @@ own the `sid`, and a `sid` is single-use with a 10 s life. The relay then splice
 | Direct routes failed and the relay couldn't be reached | "Can't reach MausBot Relay right now. Trying again…" |
 | Restricted device, not on the home Wi-Fi or the tailnet | "This phone is set to Wi-Fi and Tailscale only." |
 | Message 2 failed / pin mismatch | "Couldn't verify your computer. Pair again from your computer's Settings." |
-| 4001 | "This phone was removed from your computer. Pair again." |
+| GoAway(3) inside the session, or close 4001 on a direct route | "This phone was removed from your computer. Pair again." |
+| Close 4001 through the relay with no GoAway(3) before it | Nothing yet: a relay can forge close codes, so keep retrying with backoff. It reads as "removed" only if a direct route also answers 4001 |
 | `e2e.v > 1` or 426 | "Update the MausBot app to connect to this computer." |
 | 4429 / 4503 lasting more than 30 s | "MausBot Relay is busy. Trying again…" |
 
@@ -353,6 +354,13 @@ These make the sections above exact where an implementation could otherwise choo
   `v` rejects.
 - Unknown fields are ignored. Field order is free.
 - `routes`, when present, must be the string `"any"` or `"local"`, and `"local"` with `h` or `r` rejects.
+
+**Removal**
+- A close code travels outside the encryption, and over the relay the relay writes it. When a device is removed, the
+  computer first sends GoAway with `length` 3 inside the session, then closes with 4001. The phone treats only that
+  GoAway(3), or a 4001 on a direct route, as removed. A 4001 from the relay without it (including at the handshake, where
+  no session exists yet) means "couldn't confirm": retry with backoff and try a direct route. The computer refuses a
+  GoAway(3) from the phone as a protocol error.
 - base64url is strict everywhere (descriptor, keys, `h`, `conn`, tokens): the URL-safe alphabet only, no padding, and
   canonical (unused low bits of the last character are zero). Decode, re-encode and compare is enough.
 
