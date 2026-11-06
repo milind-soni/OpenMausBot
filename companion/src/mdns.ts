@@ -387,6 +387,7 @@ export interface ResponderOptions {
   port?: number;
   multicast?: boolean;
   socketFactory?: () => ResponderSocket;
+  platform?: NodeJS.Platform;
 }
 
 export class MdnsResponder {
@@ -399,11 +400,13 @@ export class MdnsResponder {
   private readonly port: number;
   private readonly multicast: boolean;
   private readonly socketFactory: () => ResponderSocket;
+  private readonly platform: NodeJS.Platform;
 
   constructor(options: ResponderOptions = {}) {
     this.port = options.port ?? MDNS_PORT;
     this.multicast = options.multicast ?? true;
     this.socketFactory = options.socketFactory ?? (() => createSocket({ type: "udp4", reuseAddr: true }));
+    this.platform = options.platform ?? process.platform;
   }
 
   get advertising(): boolean {
@@ -467,7 +470,8 @@ export class MdnsResponder {
         } catch {
         }
       }
-      if (!joined) {
+      // On a Mac the default route may be a VPN tunnel (see MAC_TUNNEL_INTERFACE).
+      if (!joined && this.platform !== "darwin") {
         try {
           socket.addMembership(MDNS_ADDRESS);
         } catch {
