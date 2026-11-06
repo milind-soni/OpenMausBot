@@ -365,11 +365,14 @@ describe("MdnsResponder", () => {
 class FakeSocket extends EventEmitter {
   readonly ops: Array<{ op: "pin" | "send"; address: string; port?: number }> = [];
   readonly packets: Buffer[] = [];
+  readonly memberships: Array<string | undefined> = [];
   bind(_port: number, callback?: () => void) {
     callback?.();
   }
   setMulticastTTL(_ttl: number) {}
-  addMembership(_group: string, _membershipInterface?: string) {}
+  addMembership(_group: string, membershipInterface?: string) {
+    this.memberships.push(membershipInterface);
+  }
   setMulticastInterface(multicastInterface: string) {
     this.ops.push({ op: "pin", address: multicastInterface });
   }
@@ -535,6 +538,17 @@ describe("advertisableAddresses", () => {
 
   it("joins no multicast group on a Mac's VPN tunnels", () => {
     expect(advertisableAddresses(mac, "darwin")).toEqual(["192.168.1.42", "192.168.64.1"]);
+  });
+
+  it("joins the multicast group only on a Mac's LAN interfaces", async () => {
+    const socket = new FakeSocket();
+    const responder = new MdnsResponder({ socketFactory: () => socket });
+    try {
+      expect(await responder.advertise({ ...service, addresses: advertisableAddresses(mac, "darwin") })).toBe(true);
+      expect(socket.memberships).toEqual(["192.168.1.42", "192.168.64.1"]);
+    } finally {
+      await responder.stop();
+    }
   });
 
   it("keeps every LAN address on other platforms", () => {
