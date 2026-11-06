@@ -295,6 +295,14 @@ describe("settings rules", () => {
     expect(deciderReady({ decider: { ...ON.decider, jobs: { roomRouting: false } } }, "roomRouting")).toBe(false);
     expect(deciderReady({ decider: { enabled: true } }, "roomRouting")).toBe(false);
   });
+
+  it("with no key yet, status keeps the provider the person chose, so OpenRouter's key field shows (#4646)", () => {
+    expect(describeDecider({ decider: { provider: "openrouter" } })).toMatchObject({ provider: "openrouter", configured: false, enabled: false });
+    expect(describeDecider({ decider: { provider: "jev" } })).toMatchObject({ provider: "jev", configured: false });
+    expect(describeDecider({ decider: { provider: "off" } })).toMatchObject({ provider: "jev", configured: false });
+    // A key on file still reports the account in use, whatever was chosen.
+    expect(describeDecider({ decider: { ...ON.decider, provider: "openrouter" } })).toMatchObject({ provider: "jev", configured: true });
+  });
 });
 
 describe("Cloud Pro's included decisions", () => {
