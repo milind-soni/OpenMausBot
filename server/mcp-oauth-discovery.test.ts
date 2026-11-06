@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { discoverMcpAuth, isAllowedAuthUrl, resourceMetadataUrl } from "./mcp-oauth-discovery.ts";
+import { discoverMcpAuth, isAllowedAuthUrl, isAllowedDiscoveryUrl, resourceMetadataUrl } from "./mcp-oauth-discovery.ts";
 
 const AS = {
   issuer: "https://auth.example.com",
@@ -120,6 +120,66 @@ describe("discoverMcpAuth", () => {
   it("returns null when nothing answers", async () => {
     const { impl } = stubFetch({});
     expect(await discoverMcpAuth("https://mcp.example.com/mcp", null, { fetch: impl })).toBeNull();
+  });
+
+  it("stops reading a metadata document past the cap", async () => {
+    const impl = (async () => new Response("x".repeat(70_000), { status: 200 })) as typeof fetch;
+    expect(await discoverMcpAuth("https://mcp.example.com/mcp", null, { fetch: impl })).toBeNull();
+  });
+
+  it.each([
+    "http://127.0.0.1:8799/api/health",
+    "http://localhost:5000/prm",
+    "http://[::1]:5000/prm",
+    "https://10.0.0.5/prm",
+    "https://169.254.169.254/latest/meta-data",
+    "https://[fd00:ec2::254]/prm",
+    "https://metadata.google.internal/prm",
+  ])("never follows a remote metadata hint to %s", async (hint) => {
+    const { impl, asked } = stubFetch({});
+    const meta = await discoverMcpAuth("https://mcp.example.com/mcp", `Bearer resource_metadata="${hint}"`, { fetch: impl });
+    expect(meta).toBeNull();
+    expect(asked).not.toContain(hint);
+  });
+
+  it("refuses an authorization server on this machine named by a public MCP server", async () => {
+    const { impl, asked } = stubFetch({
+      "https://mcp.example.com/.well-known/oauth-protected-resource": { authorization_servers: ["http://127.0.0.1:8799"] },
+    });
+    expect(await discoverMcpAuth("https://mcp.example.com/mcp", null, { fetch: impl })).toBeNull();
+    expect(asked.some((url) => url.startsWith("http://127.0.0.1:8799"))).toBe(false);
+  });
+
+  it("refuses private endpoints named by a public authorization server", async () => {
+    const { impl } = stubFetch({
+      "https://mcp.example.com/.well-known/oauth-protected-resource": { authorization_servers: ["https://auth.example.com"] },
+      "https://auth.example.com/.well-known/oauth-authorization-server": { ...AS, token_endpoint: "https://127.0.0.1:9000/token" },
+    });
+    expect(await discoverMcpAuth("https://mcp.example.com/mcp", null, { fetch: impl })).toBeNull();
+  });
+
+  it("still discovers a loopback MCP server's own endpoints", async () => {
+    const local = { ...AS, issuer: "http://127.0.0.1:5000", authorization_endpoint: "http://127.0.0.1:5000/authorize", token_endpoint: "http://127.0.0.1:5000/token" };
+    const { impl } = stubFetch({
+      "http://127.0.0.1:5000/.well-known/oauth-protected-resource": { authorization_servers: ["http://127.0.0.1:5000"] },
+      "http://127.0.0.1:5000/.well-known/oauth-authorization-server": local,
+    });
+    const meta = await discoverMcpAuth("http://127.0.0.1:5000/mcp", null, { fetch: impl });
+    expect(meta?.tokenEndpoint).toBe("http://127.0.0.1:5000/token");
+  });
+});
+
+describe("isAllowedDiscoveryUrl", () => {
+  it("trusts a local MCP server with this machine's other ports, and a remote one with public HTTPS only", () => {
+    expect(isAllowedDiscoveryUrl("http://127.0.0.1:5000/prm", "http://127.0.0.1:5000")).toBe(true);
+    expect(isAllowedDiscoveryUrl("http://127.0.0.1:9000/prm", "http://127.0.0.1:5000")).toBe(true);
+    expect(isAllowedDiscoveryUrl("https://10.0.0.5/prm", "https://10.0.0.5")).toBe(true);
+    expect(isAllowedDiscoveryUrl("http://127.0.0.1:5000/prm", "https://mcp.example.com")).toBe(false);
+    expect(isAllowedDiscoveryUrl("https://10.0.0.5/prm", "https://mcp.example.com")).toBe(false);
+    expect(isAllowedDiscoveryUrl("https://169.254.169.254/prm", "https://mcp.example.com")).toBe(false);
+    expect(isAllowedDiscoveryUrl("https://localhost/prm", "https://mcp.example.com")).toBe(false);
+    expect(isAllowedDiscoveryUrl("https://auth.example.com/prm", "https://mcp.example.com")).toBe(true);
+    expect(isAllowedDiscoveryUrl("https://user:pw@auth.example.com/prm", "https://mcp.example.com")).toBe(false);
   });
 });
 
