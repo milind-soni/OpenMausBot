@@ -530,13 +530,16 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     const retainImages = chatImageBudget();
     for (const message of messages) retainImages(message.content);
     const model = turn.model || options.models().default;
-    const secrets = [options.apiKey].filter((value): value is string => Boolean(value));
+    // Mask only values of 8+ characters, like environmentSecrets in devs-report.ts: a short
+    // placeholder key ("1", "ollama") would otherwise turn every match in the reply into [redacted].
+    const maskable = (value: unknown): value is string => typeof value === "string" && value.length >= 8;
+    const secrets = [options.apiKey].filter(maskable);
     for (const integration of Object.values(turn.integrations ?? {})) {
       const entries = object(integration);
       const specs = entries && "command" in entries ? [entries] : Object.values(entries ?? {}).map(object);
       for (const spec of specs) {
         for (const [key, value] of Object.entries(object(spec?.env) ?? {})) {
-          if (/key|token|password|secret|authorization/i.test(key) && typeof value === "string" && value) secrets.push(value);
+          if (/key|token|password|secret|authorization/i.test(key) && maskable(value)) secrets.push(value);
         }
       }
     }
