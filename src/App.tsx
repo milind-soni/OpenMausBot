@@ -40,6 +40,7 @@ import { needsYouVersion, useTeamPeopleLoader } from "@/state/team-people";
 import { inboxVersion, useInboxLoader, useInboxPanel, useInboxReady } from "@/state/inbox";
 import { InboxPanel } from "@/components/inbox/InboxPanel";
 import { PlacesRail } from "@/components/PlacesRail";
+import { NewLocalFromMenu } from "@/components/PlaceAddSheet";
 import { CloudHowTo } from "@/components/CloudHowTo";
 import { DesktopCapabilitiesProvider, useCaptionChrome, useDesktopCapabilities, WindowDragStrip, windowFramed } from "@/components/DesktopCapabilities";
 import { WindowCaptionButtons } from "@/components/WindowCaptionButtons";
@@ -343,6 +344,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       )}
       {!calendarFocus && <PlacesRail />}
       {remoteNewBotOpen && <RemoteNewBotDialog onClose={() => setRemoteNewBotOpen(false)} />}
+      <NewLocalFromMenu />
       {/* A framed window shows the app, its sidebar and the chat or page, as one square pane under the top bar and beside
           the window's rail, running to the window's right and bottom edges. */}
       <div data-window-card={framed ? "" : undefined}

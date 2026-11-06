@@ -173,6 +173,70 @@ function relaySchemaMissing(): Response {
   return unavailable();
 }
 
+const DAY_MS = 24 * HOUR_MS;
+let dailyWarned = false;
+
+export type RelayDailyKind = "seen" | "token" | "e2e" | "new";
+
+interface RelayUse {
+  installationId: string;
+  appVersion: string;
+  e2e: number;
+  legacy: number;
+  continent: string | null;
+  /** A token is minted for this request. */
+  token: boolean;
+  now: number;
+}
+
+/**
+ * Records a request in `relay_adoption` and, once per installation per UTC day and kind, adds 1 to `relay_daily`: `seen`
+ * (asked), `token` (got one), `e2e` (reported end-to-end phones), `new` (asked for the first time). Each count runs before
+ * the row is written, in one batch, so it reads the row as the previous request left it. Without migration 0014 the
+ * daily counts are skipped and only the adoption row is written, as before. False when neither could be written.
+ */
+async function recordUse(env: Env, use: RelayUse): Promise<boolean> {
+  const day = new Date(use.now).toISOString().slice(0, 10);
+  const dayStart = use.now - (use.now % DAY_MS);
+  /** `since`: the column that says the installation was already counted today; none for `new` (any row at all). */
+  const bump = (kind: RelayDailyKind, since?: "updated_at" | "token_at" | "e2e_at") =>
+    env.DB.prepare(
+      `INSERT INTO relay_daily (day, kind, installs)
+       SELECT ?1, ?2, 1 WHERE NOT EXISTS (SELECT 1 FROM relay_adoption WHERE installation_id = ?3${since ? ` AND ${since} >= ?4` : ""})
+       ON CONFLICT (day, kind) DO UPDATE SET installs = installs + 1`,
+    ).bind(day, kind, use.installationId, ...(since ? [dayStart] : []));
+  const write = env.DB.prepare(
+    `INSERT INTO relay_adoption
+       (installation_id, app_version, e2e_devices, legacy_devices, continent, updated_at, first_seen_at, token_at, e2e_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?7, ?8)
+     ON CONFLICT(installation_id) DO UPDATE SET
+       app_version = excluded.app_version, e2e_devices = excluded.e2e_devices,
+       legacy_devices = excluded.legacy_devices, continent = excluded.continent, updated_at = excluded.updated_at,
+       first_seen_at = COALESCE(first_seen_at, excluded.first_seen_at),
+       token_at = COALESCE(excluded.token_at, token_at), e2e_at = COALESCE(excluded.e2e_at, e2e_at)`,
+  ).bind(use.installationId, use.appVersion, use.e2e, use.legacy, use.continent, use.now,
+    use.token ? use.now : null, use.e2e > 0 ? use.now : null);
+  const statements = [
+    bump("new"),
+    bump("seen", "updated_at"),
+    ...(use.token ? [bump("token", "token_at")] : []),
+    ...(use.e2e > 0 ? [bump("e2e", "e2e_at")] : []),
+    write,
+  ];
+  if (await env.DB.batch(statements).then(() => true, () => false)) return true;
+  if (!dailyWarned) {
+    dailyWarned = true;
+    console.error(JSON.stringify({ message: "relay daily counts not written; apply migration 0014", errorCode: "relay_daily_schema" }));
+  }
+  return env.DB.prepare(
+    `INSERT INTO relay_adoption (installation_id, app_version, e2e_devices, legacy_devices, continent, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(installation_id) DO UPDATE SET
+       app_version = excluded.app_version, e2e_devices = excluded.e2e_devices,
+       legacy_devices = excluded.legacy_devices, continent = excluded.continent, updated_at = excluded.updated_at`,
+  ).bind(use.installationId, use.appVersion, use.e2e, use.legacy, use.continent, use.now).run().then(() => true, () => false);
+}
+
 export async function issueRelayToken(request: Request, env: Env): Promise<Response> {
   const installation = await requireInstallation(request, env);
   const parsed = requestSchema.safeParse(await readBoundedJSON(request).catch(() => null));
@@ -196,19 +260,20 @@ export async function issueRelayToken(request: Request, env: Env): Promise<Respo
   const { hostId, blocked } = host;
   const continent = (request as Request & { cf?: { continent?: unknown } }).cf?.continent;
   const region = typeof continent === "string" && /^[A-Z]{2}$/.test(continent) ? continent : null;
-  // Counted for every relay-capable desktop, in the rollout or not: the tunnel path retires on these numbers.
-  const counted = await env.DB.prepare(
-    `INSERT INTO relay_adoption (installation_id, app_version, e2e_devices, legacy_devices, continent, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(installation_id) DO UPDATE SET
-       app_version = excluded.app_version, e2e_devices = excluded.e2e_devices,
-       legacy_devices = excluded.legacy_devices, continent = excluded.continent, updated_at = excluded.updated_at`,
-  ).bind(installation.installation_id, parsed.data.appVersion, parsed.data.devices.e2e, parsed.data.devices.legacy, region, now).run().then(() => true, () => false);
-  if (!counted) return relaySchemaMissing();
-  if (blocked) return unavailable();
   const hostBytes = fromB64u(hostId) as Uint8Array;
-  const included = settings.allowInstallations.has(installation.installation_id)
-    || (await rolloutBucket(hostBytes)) < settings.rolloutPercent;
+  const included = !blocked && (settings.allowInstallations.has(installation.installation_id)
+    || (await rolloutBucket(hostBytes)) < settings.rolloutPercent);
+  // Counted for every relay-capable desktop, in the rollout or not: the tunnel path retires on these numbers.
+  const counted = await recordUse(env, {
+    installationId: installation.installation_id,
+    appVersion: parsed.data.appVersion,
+    e2e: parsed.data.devices.e2e,
+    legacy: parsed.data.devices.legacy,
+    continent: region,
+    token: included,
+    now,
+  });
+  if (!counted) return relaySchemaMissing();
   if (!included) return unavailable();
   const iat = Math.floor(now / 1000);
   const token = await mintRelayToken({ kid: settings.kid, hid: hostId, iid: installation.installation_id, iat, exp: iat + RELAY_TOKEN_TTL_S }, settings.signingKey);

@@ -166,6 +166,16 @@ describe("cloud computer tools", () => {
     await expect(rpc({ method: "resources/read" }).done).rejects.toMatchObject({ status: 400 });
   });
 
+  it("answers a call the gate refused with the refusal, even when the turn ended while it waited", async () => {
+    const ended = () => { throw Object.assign(new Error("This bot turn has already ended"), { status: 401 }); };
+    const blockedReason = "The cloud computer could not be started: the cloud computer didn't start in time. This call was not performed.";
+    const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "screenshot", arguments: {} } }, {
+      cfg, boxId: () => null, signal: new AbortController().signal, gate: async () => ({ held: true, blockedReason }), assertActive: ended,
+    });
+    expect(result).toEqual({ isError: true, content: [{ type: "text", text: expect.stringContaining(blockedReason) }] });
+    expect(calls).toHaveLength(0);
+  });
+
   it("aborts an in-flight Boat command without retrying it", async () => {
     holdCommand = true;
     const started = new Promise<void>(resolve => { commandStarted = resolve; });

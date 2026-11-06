@@ -1734,7 +1734,10 @@ judge a pending timer by a wall-clock time stored when it was set.
 
 - no turn running (bots, rooms, delegated work), no routine run queued to start
   now or running (one waiting on a person doesn't count: their answer wakes
-  the home), no Live call, no cloud computer on or starting (its idle timer
+  the home), no work one bot handed another still moving on by itself (an
+  assignment queued, running or due to resume its requester, or a report to
+  send; one parked on a person's answer doesn't count), no Live call, no cloud
+  computer on or starting (its idle timer
   lives in this process), no maintenance (backup or restore, Move to Cloud, an
   engine or browser install, a provider sign-in) and no request in progress;
 - nobody used the home for 10 minutes (the Admin may ask for another window).
@@ -1755,8 +1758,10 @@ its own nonces. `200`:
   "nextDueAt": 1792358600000, "sleeping": false, "wokeBy": { "by": "events", "background": true } }
 ```
 
-`busy` holds fixed codes only: `turn`, `run`, `live-call`, `computer`,
-`maintenance`, `recent-activity`, `recent-work`, `just-woke`, `due-soon`.
+`busy` holds fixed codes only: `turn`, `run`, `handoff`, `live-call`,
+`computer`, `maintenance`, `recent-activity`, `recent-work`, `just-woke`,
+`due-soon`. A Team Cloud answers like any other home: its plan decides whether
+the Admin ever asks.
 `nextDueAt` is the earliest enabled routine's next run or queued run's retry,
 or, while a bot waits for something (`wait_until`), 30 minutes on, so its
 checks go on that often: the Admin starts a sleeping home a minute before it

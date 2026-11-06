@@ -36,6 +36,15 @@ tokens and a few names a shell expects. Every `OMB_CLOUD_*` setting, the server'
 A box with the host's network (`net: "shared"`, for a browser whose Chrome already goes through its own gate) has
 neither bridge.
 
+## The sign-in relay
+
+An engine that signs in through a callback on `127.0.0.1` (Antigravity's Google sign-in) listens on the box's own
+loopback, which the server cannot reach. That box alone gets one more unix socket (`server/bot-box/relay.ts`), bound in
+at `/run/omb/relay.sock`: the in-box Node bridge dials out to it and keeps one connection waiting, and when someone
+pastes the redirect from another computer the server writes the callback's port on that connection and sends the
+request through it. Only the server ever chooses the port, the box reaches nothing new on the host, and the server never
+connects to a path inside the box.
+
 ## When it is on
 
 `server/bot-box/detect.ts`: on by default on a Cloud home (`OMB_CLOUD_ROLE=home` or `team`), off everywhere else
@@ -103,7 +112,7 @@ or files, the base URL is the broker, a call with the token reaches the upstream
 | Environment allow-list | every boxed process | `OMB_CLOUD_*`, the server's placement, workspace credentials, any unlisted name | the engines' own settings |
 | Credential broker (T0b) | every boxed process with its own network | holding a provider key or an MCP header; using a token after its process or conversation ends; choosing the upstream | keys with no base-URL setting (named in the report); subscription logins |
 | seccomp filter (T0c) | every boxed process on x86-64 | 34 system calls that only reach the kernel's attack surface: mount family, kernel modules, bpf, perf, userfaultfd, the kernel keyring, `open_by_handle_at`, `setns`, kexec, reboot, swap, clock setting, I/O ports (EPERM); a process of another architecture (killed) | anything an engine, shell, git, npm, python or Chrome uses: all allowed |
-| `hidepid=invisible` on the host's /proc (T0c) | the whole machine, set by the root supervisor at boot | a `maus` process outside a box (the browser engine, a helper) listing or reading root's processes | `maus` processes seeing each other; a box has its own /proc anyway |
+| `hidepid=invisible` on the host's /proc (T0c) | the whole machine, set by the root supervisor at boot, which then starts itself again through `setpriv` without CAP_SYS_ADMIN and CAP_SETPCAP (an own server's connector grants those two only for that remount, and only to an image that drops them) | a `maus` process outside a box (the browser engine, a helper) listing or reading root's processes | `maus` processes seeing each other; a box has its own /proc anyway |
 | `/.fly` root-only (T0c) | the whole machine | a `maus` process reaching Fly's local API socket | nothing else |
 
 Not built, and why: a **separate Linux user per bot**. The server runs as `maus` under a root supervisor and cannot

@@ -20,8 +20,15 @@ const accountSchema = z.object({
   password: z.string().min(1).max(4_096),
   imap: serverSchema,
   smtp: serverSchema.optional(),
+  /** The outgoing server's own sign-in, when it isn't the incoming one's. */
+  smtpUsername: z.string().min(1).max(320).optional(),
+  smtpPassword: z.string().min(1).max(4_096).optional(),
   connectedAt: z.number(),
   problem: z.string().max(400).optional(),
+  /** Why sending doesn't work, from the last check or send; sends wait for the person while it is set. */
+  sendingProblem: z.string().max(400).optional(),
+  /** While sending doesn't work: the outgoing server that reason is about. */
+  smtpTried: serverSchema.optional(),
 });
 const fileSchema = z.object({ version: z.literal(1), accounts: z.array(accountSchema).max(MAX_EMAIL_ACCOUNTS) });
 
@@ -35,7 +42,14 @@ const EMPTY: StoreFile = { version: 1, accounts: [] };
 /** A mailbox as this store keeps it, from anywhere else (one moved from the person's own computer); null if not. */
 export function parseEmailAccount(value: unknown): EmailAccount | null {
   const parsed = accountSchema.safeParse(value);
-  return parsed.success ? parsed.data : null;
+  return parsed.success ? withoutReadOnlyProblem(parsed.data) : null;
+}
+
+/** "Reading works. …" as the problem of a mailbox with no outgoing server is a sending problem, which isn't kept there. */
+function withoutReadOnlyProblem(account: EmailAccount): EmailAccount {
+  if (account.smtp || !account.problem?.startsWith("Reading works.")) return account;
+  const { problem: _problem, ...rest } = account;
+  return rest;
 }
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -70,7 +84,8 @@ export class EmailStore {
       const key = this.key(false);
       try {
         if (!key) throw new Error("missing key");
-        data = fileSchema.parse(JSON.parse(decryptBrowserState(readFileSync(this.file), key)));
+        const parsed = fileSchema.parse(JSON.parse(decryptBrowserState(readFileSync(this.file), key)));
+        data = { ...parsed, accounts: parsed.accounts.map(withoutReadOnlyProblem) };
       } catch {
         // Never log an unreadable file's contents.
         if (!this.unreadableWarned) console.warn("Email: the saved mailboxes could not be opened; connect them again");
@@ -118,8 +133,15 @@ export class EmailStore {
     this.put({ ...rest, ...(problem ? { problem } : {}) });
   }
 
+  /** Says sending stopped working, only while the outgoing server and its password are still the ones that failed. */
+  markSendingProblem(failed: Pick<EmailAccount, "address" | "password" | "smtp" | "smtpPassword">, problem: string): void {
+    const current = this.get(failed.address);
+    if (!current || current.password !== failed.password || current.smtpPassword !== failed.smtpPassword || current.smtp?.host !== failed.smtp?.host || current.smtp?.port !== failed.smtp?.port || current.sendingProblem === problem) return;
+    this.put({ ...current, sendingProblem: problem });
+  }
+
   /** The passwords, for secret redaction. */
   secretValues(): string[] {
-    return this.list().map((account) => account.password);
+    return this.list().flatMap((account) => (account.smtpPassword ? [account.password, account.smtpPassword] : [account.password]));
   }
 }

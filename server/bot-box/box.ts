@@ -2,7 +2,8 @@
 // boxes reach through unix sockets (egress-gate.ts, harness-gate.ts), and wraps each bot spawn (server/procs.ts spawnCli
 // with owner "bot") in bubblewrap by the plan (plan.ts). Nothing here changes a spawn when the box is off: the command,
 // its arguments and its environment go through untouched, so every host that is not a Cloud home behaves as before.
-import { existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, openSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 import { engineInstallRoots } from "../engine-roots.ts";
@@ -14,8 +15,10 @@ import { detectBox, type BoxDetection, type BoxKind } from "./detect.ts";
 import { openBoxEgressGate, type BoxEgressGate } from "./egress-gate.ts";
 import { boxEnvironment } from "./env.ts";
 import { openHarnessGate, type HarnessGate } from "./harness-gate.ts";
+import { procHidepid } from "./hidepid.ts";
 import { DENIED_SYSCALLS, seccompBytes, seccompSupported } from "./seccomp.ts";
-import { boxUploadsDir, bwrapArgs, planBox, taskWorkspaceIds, type BoxBridge, type BoxPlan, type BoxRequest, type BoxSetup } from "./plan.ts";
+import { RELAY_SOCKET_NAME, boxUploadsDir, bwrapArgs, inBoxSocket, planBox, taskWorkspaceIds, type BoxBridge, type BoxPlan, type BoxRequest, type BoxSetup } from "./plan.ts";
+import { openBoxRelay, type BoxRelay } from "./relay.ts";
 
 /** The loopback port inside a box that reaches the egress gate. The harness gate sits at the server's own port. */
 export const BOX_EGRESS_PORT = 3128;
@@ -107,7 +110,8 @@ export class BoxRunner {
       for (const name of BOX_NO_PROXY_ENV) env[name] = "127.0.0.1,localhost,::1,[::1]";
     }
     const bridges = plan.net === "isolated" ? this.options.setup.bridges : [];
-    const inner = bridgedCommand(this.options.bridge, bridges, request.command, request.args);
+    const relay = plan.net === "isolated" && request.relay ? inBoxSocket(RELAY_SOCKET_NAME) : undefined;
+    const inner = bridgedCommand(this.options.bridge, bridges, request.command, request.args, relay);
     const brokered = this.broker(env, plan, request);
     const vouched = (request.allowEnv ?? []).filter((name) => /(?:KEY|TOKEN|SECRET)$/.test(name) && brokered.env[name] !== undefined && brokered.env[name] === request.env[name]);
     const unbrokered = [...new Set([...brokered.unbrokered, ...vouched])];
@@ -153,11 +157,6 @@ export function writeSeccompFile(dir: string): string | null {
   const file = join(dir, "seccomp.bpf");
   writeFileSync(file, seccompBytes(), { mode: 0o600 });
   return file;
-}
-
-/** Whether the host's /proc hides other users' processes (the Cloud supervisor remounts it so at boot). */
-export function procHidepid(mounts: () => string = () => readFileSync("/proc/mounts", "utf8")): boolean {
-  try { return /^proc \/proc proc [^\n]*\bhidepid=(?:2|invisible)\b/m.test(mounts()); } catch { return false; }
 }
 
 /** Whether Fly's local API socket folder is root's alone (no bits for group or others). */
@@ -254,6 +253,12 @@ export class BotBox {
   }
 
   enabled(): boolean { return this.runner !== null; }
+
+  /** A relay for one boxed spawn (BoxRequest.relay), or null when bot spawns are not boxed here. */
+  async openRelay(): Promise<BoxRelay | null> {
+    if (!this.runner) return null;
+    return openBoxRelay(join(this.runner.setup.dataDir, "box", `relay-${randomBytes(6).toString("hex")}.sock`));
+  }
 
   /** The box a bot's Chrome runs in: the system read-only, private /tmp and /run, the host's network (the browser's own
    * gate filters it), `ro` paths, and nothing of HOME or the data folder; the launcher binds the one profile it starts

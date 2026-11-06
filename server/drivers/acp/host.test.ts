@@ -21,7 +21,7 @@ function hostWith(key: string | null) {
   const host = new AcpHost(child, key, { source: "test.acp", logMessage: (msg) => msg, unrouted: (msg) => refused.push(msg) });
   const heard = new Map<string, any[]>();
   const link = (threadId: string, sessionId: string | null) => {
-    const linked = host.link(threadId);
+    const linked = host.link(threadId, `/work/${threadId}`);
     linked.sessionId = sessionId;
     const inbox: any[] = [];
     heard.set(threadId, inbox);
@@ -36,7 +36,7 @@ describe("an ACP process's exit", () => {
     const { child } = fakeChild();
     const host = new AcpHost(child, null, { source: "test.acp", logMessage: (msg) => msg, unrouted: () => {} });
     const exits: Array<[number | null, NodeJS.Signals | null, string]> = [];
-    const linked = host.link("a");
+    const linked = host.link("a", "/work/a");
     linked.inbound = { request: () => {}, notification: () => {}, error: () => {}, busy: () => false, exit: (code, signal) => exits.push([code, signal, host.stderrTail.text]) };
     const stderr = child.stderr as unknown as PassThrough;
     stderr.write("starting\nOpen https://accounts.google.com/o/oauth2/v2/auth?state=private-state\n");

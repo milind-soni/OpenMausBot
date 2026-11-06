@@ -614,12 +614,18 @@ old one; no identifiers) answers:
   stays in as the number grows; `RELAY_ALLOW_INSTALLATIONS` admits named installations (the team) at any percentage.
 - **Adoption.** Every request records its counts in `relay_adoption`, in the rollout or not; `/healthz` reports
   `relayAdoption: {e2eDevices, legacyDevices, installs}` over the last 30 days. The tunnel path retires on these numbers.
+- **Usage per day** (`migrations/0014`). `relay_daily` counts installations once per UTC day and kind: `seen` (asked
+  for a token), `token` (got one), `e2e` (reported end-to-end phones), `new` (asked for the first time). It holds only
+  the day, the kind and a count; `relay_adoption.first_seen_at`, `token_at` and `e2e_at` tell a request whether its
+  installation was already counted today. The stats dashboard (stats.openmausbot.com) charts it. A Worker without the
+  migration keeps minting tokens and writing `relay_adoption`, and logs `relay_daily_schema` once per isolate.
 - **Tunnels.** From `RELAY_CAPABLE_MIN_VERSION`, a desktop at that version or later that reports `legacyDevices: 0` gets
   `409 relay_capable` instead of a new tunnel. An endpoint it already holds keeps working.
 
 Setup, once:
 
-1. `wrangler d1 migrations apply DB --config wrangler.jsonc` (0012).
+1. `wrangler d1 migrations apply DB --config wrangler.jsonc --remote` (0012, and 0014 for the daily counts; apply 0014
+   before deploying the Worker that writes it).
 2. Make a key pair: a 32-byte Ed25519 seed for this Worker, its public key for the relay's `RELAY_TOKEN_KEYS`
    (`{"k1":"<b64u public key>"}`). `wrangler secret put RELAY_TOKEN_SIGNING_KEY --config wrangler.jsonc` with the seed as
    base64url. Until it exists every request answers 503. Once it is set it is listed in `secrets.required`: a deploy

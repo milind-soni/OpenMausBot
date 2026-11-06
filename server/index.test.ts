@@ -2729,7 +2729,7 @@ describe("harness HTTP API", () => {
         await mintTestCapability(BASE, chief.id, chief.threadId);
         const expired = await held.finish();
         expect(expired.status).toBe(401);
-        expect(expired.body.error).toMatch(/expired/);
+        expect(expired.body.error).toMatch(/turn has already ended/);
         held.close();
         held = undefined;
         token = await mintTestCapability(BASE, chief.id, chief.threadId, { kind: "connectors" });
@@ -2780,7 +2780,7 @@ describe("harness HTTP API", () => {
 
       const rejected = await held.finish();
       expect(rejected.status).toBe(401);
-      expect(rejected.body.error).toMatch(/expired/i);
+      expect(rejected.body.error).toMatch(/turn has already ended/i);
       const state = (await api("GET", "/api/bots?messages=0")).body;
       expect(state.bots.some((bot: { name: string }) => bot.name === lateName)).toBe(false);
     } finally {
@@ -10070,7 +10070,7 @@ describe("harness HTTP API", () => {
     { mode: "size", sizes: [25 * 1024 * 1024 + 1], message: "Uploads are limited to 25 MiB per file.", status: 200 },
     { mode: "batch", sizes: Array(5).fill(21 * 1024 * 1024) as number[], message: "Uploads are limited to 100 MiB per batch.", status: 200 },
     { mode: "changed", sizes: [1024], message: expect.stringContaining("changed while staging"), status: 200 },
-    { mode: "stop", sizes: [1024], message: "the internal turn capability has expired", status: 401 },
+    { mode: "stop", sizes: [1024], message: expect.stringContaining("turn has already ended"), status: 401 },
     { mode: "disk", sizes: [1024], message: expect.stringMatching(/ENOTDIR|EEXIST/), status: 500 },
   ])("returns the correct browser upload result for $mode", async ({ mode, sizes, message, status }) => {
     const bot = (await api("POST", "/api/bots")).body.bot;
@@ -12383,7 +12383,7 @@ describe("harness HTTP API", () => {
       expect((await api("PATCH", `/api/bots/${bot.id}`, {
         composio: true,
         connectorTools: { gmail: { tools: ["GMAIL_SEND_EMAIL"] } },
-        outbound: { policy: "allow", dailyCap: 10 },
+        outbound: { policy: "allow" },
       })).status).toBe(200);
       const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
       const call = async (frame: unknown, bearer = token) => {
@@ -12447,7 +12447,7 @@ describe("harness HTTP API", () => {
         expect((await api("PATCH", `/api/bots/${legacy.id}`, {
           composio: true,
           approvalMode: "ask",
-          outbound: { policy: "allow", dailyCap: 10 },
+          outbound: { policy: "allow" },
         })).status).toBe(200);
         const legacyToken = await mintTestCapability(BASE, legacy.id, legacy.threadId, { kind: "connectors" });
         const legacyCall = await call(

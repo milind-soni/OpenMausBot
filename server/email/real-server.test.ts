@@ -22,7 +22,7 @@ const AUTOCONFIG = `<clientConfig><emailProvider id="x">
   <incomingServer type="imap"><hostname>${HOST}</hostname><port>${IMAPS}</port><socketType>SSL</socketType><username>%EMAILADDRESS%</username></incomingServer>
   <outgoingServer type="smtp"><hostname>${HOST}</hostname><port>${SUBMISSION}</port><socketType>STARTTLS</socketType><username>%EMAILADDRESS%</username></outgoingServer>
 </emailProvider></clientConfig>`;
-const discover = { fetchText: async (url: string) => (url.includes("autoconfig.omb-test.example") ? AUTOCONFIG : null), mx: async () => [], srv: async () => [] };
+const discover = { fetchText: async (url: string) => (url.includes("autoconfig.omb-test.example") ? AUTOCONFIG : null), mx: async () => [], srv: async () => [], cname: async () => [], reverse: async () => [] };
 
 const PDF = Buffer.concat([Buffer.from("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n", "latin1"), randomBytes(2048), Buffer.from("\n%%EOF\n")]);
 const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");

@@ -107,8 +107,14 @@ function normalizeDevice(record: Partial<DeviceRecord> & { id: string; tokenHash
   };
 }
 
+/** A device saved at pairing whose token was never used: the phone never got its reply, or lost it. Dropped after this. */
+export const UNCONFIRMED_DEVICE_MS = 5 * 60_000;
+
 export class DeviceRegistry {
   private devices: DeviceRecord[] = [];
+  /** Paired in this run and not yet used; a restart forgets these, and such a device then stays until removed. */
+  private unconfirmed = new Map<string, ReturnType<typeof setTimeout>>();
+  private droppedListeners = new Set<(id: string) => void>();
   private window: PairingWindow | null = null;
   /** The window a renewal replaced: still valid until its own expiry, so a phone mid-scan never misses. */
   private previousWindow: PairingWindow | null = null;
@@ -123,6 +129,19 @@ export class DeviceRegistry {
   onChange(listener: () => void): () => void {
     this.changeListeners.add(listener);
     return () => this.changeListeners.delete(listener);
+  }
+
+  /** A device dropped because its phone never used it. */
+  onDropped(listener: (id: string) => void): void {
+    this.droppedListeners.add(listener);
+  }
+
+  /** The phone holds the token: it authenticated with it, or opened an encrypted session keyed by it. */
+  confirm(id: string): void {
+    const timer = this.unconfirmed.get(id);
+    if (!timer) return;
+    clearTimeout(timer);
+    this.unconfirmed.delete(id);
   }
 
   private changed(): void {
@@ -315,6 +334,17 @@ export class DeviceRegistry {
       return { error: `could not save the pairing: ${(e as Error).message}` };
     }
     this.changed();
+    const unconfirmed = setTimeout(() => {
+      this.unconfirmed.delete(device.id);
+      try {
+        if (!this.revoke(device.id)) return;
+      } catch {
+        return;
+      }
+      for (const listener of this.droppedListeners) listener(device.id);
+    }, UNCONFIRMED_DEVICE_MS);
+    unconfirmed.unref?.();
+    this.unconfirmed.set(device.id, unconfirmed);
     const { tokenHash: _tokenHash, ...pub } = device;
     const result = { device: pub, token };
     if (requestId) {
@@ -338,6 +368,7 @@ export class DeviceRegistry {
     const hash = sha256(token);
     const device = this.devices.find((d) => sameDigest(d.tokenHash, hash));
     if (!device) return null;
+    this.confirm(device.id);
     const now = Date.now();
     if (now - (this.lastSeenWrites.get(device.id) ?? 0) > LAST_SEEN_WRITE_MS) {
       device.lastSeenAt = now;
@@ -363,6 +394,7 @@ export class DeviceRegistry {
       throw error;
     }
     this.lastSeenWrites.delete(id);
+    this.confirm(id);
     this.changed();
     return true;
   }

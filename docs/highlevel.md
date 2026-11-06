@@ -122,7 +122,7 @@ The same rules as other connected apps, with slug `highlevel`:
   (`FORBIDDEN_PATHS`; see **Never** above).
 - `tools/list` shows only what the bot may run; a refused call answers the connector scope text ("HighLevel is
   read-only for <bot>, and Add note would write to it…") and writes a decision row (`source: connector-scope`).
-- CRM record changes are not messages: no outbound card, no daily allowance; the write scope is the control.
+- CRM record changes are not messages: no outbound card; the write scope is the control.
 
 ## Permissions (scopes)
 
