@@ -154,7 +154,7 @@ export interface JobResults {
 }
 
 export type JobErrorCode =
-  | "invalid_job" | "unknown_job" | "invalid_args" | "busy" | "interrupted"
+  | "invalid_job" | "unknown_job" | "invalid_args" | "busy" | "interrupted" | "audit_unavailable" | "refused_by_policy"
   | "no_home" | "docker" | "pull_failed" | "unhealthy" | "update_rolled_back" | "rollback_failed"
   | "not_found" | "disk_full" | "port_in_use" | "box_unavailable" | "transfer_failed" | "self_update_failed";
 
