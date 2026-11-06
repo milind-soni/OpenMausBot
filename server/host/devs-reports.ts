@@ -162,8 +162,7 @@ function withoutPastes(message: string): string {
       else kept.push(line);
     } else if (PASTED_TEXT_CLOSE.test(bare)) open = -1;
   });
-  if (open >= 0) kept.push(...lines.slice(open));
-  return kept.join("\n");
+  return (open >= 0 ? kept.concat(lines.slice(open)) : kept).join("\n");
 }
 
 /** Rides on the turn that answers a @devs message. */

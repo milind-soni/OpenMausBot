@@ -281,6 +281,15 @@ describe("a message that tags @devs", () => {
     fx.stop();
   });
 
+  it("still reads a typed @devs before an opening paste line followed by a very long unclosed tail", async () => {
+    const fx = fixture();
+    fx.person("scout-main", `@devs it broke\n<pasted-text>\n${"\n".repeat(150_000)}x`);
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toHaveLength(1);
+    fx.stop();
+  });
+
   it("reads each part on its own: a code span the quote cuts in half does not hide the person's own @devs", async () => {
     const fx = fixture();
     const said = fx.bot("scout-main", "Try: run `npm i` first.");
