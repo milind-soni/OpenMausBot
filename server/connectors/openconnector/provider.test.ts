@@ -1,7 +1,7 @@
 // The OpenConnector provider behind the ConnectorProvider seam. A stub runtime on an ephemeral
 // port answers every call; the state store lives in a temp dir. No port 3000, no real runtime.
 import { createServer, type Server } from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -129,6 +129,17 @@ describe("availability", () => {
 });
 
 describe("inventory / status", () => {
+  it("clears a stale state lock and reads records written by another instance", () => {
+    const state = newState();
+    const other = new OpenConnectorStateStore(state.file, origin);
+    other.upsertConnection({ accountId: "oc:github:work", service: "github", alias: "work", status: "ACTIVE", updatedAt: "old" });
+    writeFileSync(`${state.file}.lock`, "stale");
+    utimesSync(`${state.file}.lock`, new Date(Date.now() - 6_000), new Date(Date.now() - 6_000));
+    state.upsertConnection({ accountId: "oc:gmail:default", service: "gmail", status: "ACTIVE", updatedAt: "new" });
+    expect(state.listConnections().map((record) => record.accountId)).toEqual(["oc:github:work", "oc:gmail:default"]);
+    expect(existsSync(`${state.file}.lock`)).toBe(false);
+  });
+
   it("lists providers with connected state from /v1/apps/authenticated", async () => {
     const services = await provider().inventory(cfg);
     expect(services.complete).toBe(true);
@@ -365,6 +376,7 @@ describe("relayMcp translation", () => {
     expect(frame.result.isError).toBe(false);
     expect(JSON.parse(frame.result.content[0].text)).toEqual({ ran: "github.get_current_user", input: { verbose: true } });
     expect(lastCall()).toMatchObject({ method: "POST", path: "/v1/actions/github.get_current_user" });
+    expect(calls.filter((call) => call.method === "GET" && call.path.startsWith("/v1/actions/github."))).toEqual([]);
   });
 
   it("refuses an unmapped tool name without executing an action", async () => {

@@ -577,6 +577,17 @@ describe("encrypted full workspace backups", () => {
     expect(readFileSync(tokenPath, "utf8")).toBe("runtime-root-token");
   });
 
+  it("refuses an instance-environment file-backed OpenConnector token inside the backup root", async () => {
+    const source = directory();
+    const tokenPath = join(source, "instance-token");
+    writeFileSync(tokenPath, "instance-runtime-token", { mode: 0o600 });
+    json(join(source, "config.json"), {
+      instances: { custom: { driver: "claudeAgent", environment: { OMB_OPENCONNECTOR_ADMIN_TOKEN_REF: ` file:${tokenPath} ` } } },
+    });
+    await expect(createWorkspaceBackup(source, { password: PASSWORD })).rejects.toThrow(/OpenConnector admin token file/);
+    expect(readFileSync(tokenPath, "utf8")).toBe("instance-runtime-token");
+  });
+
   it("fails explicitly on noncanonical source auth paths rather than silently skipping them", async () => {
     const source = directory();
     mkdirSync(join(source, "vm-home", ".Browser-Profiles"), { recursive: true });

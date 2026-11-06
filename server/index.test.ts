@@ -12651,6 +12651,29 @@ describe("harness HTTP API", () => {
     });
   });
 
+  it("accepts percent-encoded OpenConnector account IDs when removing one account", async () => {
+    const configPath = join(home, ".openmausbot", "config.json");
+    const originalConfig = readFileSync(configPath, "utf8");
+    const tokenPath = join(home, ".openmausbot", "openconnector-route-test-token");
+    writeFileSync(tokenPath, "0".repeat(64), { mode: 0o600 });
+    const config = JSON.parse(originalConfig);
+    writeFileSync(configPath, JSON.stringify({
+      ...config,
+      connectors: {
+        provider: "openconnector",
+        openconnector: { url: "https://connector.example.test", adminTokenRef: `file:${tokenPath}` },
+      },
+    }));
+    try {
+      const response = await api("DELETE", `/api/connectors/github/accounts/${encodeURIComponent("oc:github:work")}`);
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ removed: 0 });
+    } finally {
+      rmSync(tokenPath, { force: true });
+      writeFileSync(configPath, originalConfig);
+    }
+  });
+
   it.skipIf(process.platform === "win32")("stores the credentials file with owner-only permissions", () => {
     expect(statSync(join(home, ".openmausbot", "config.json")).mode & 0o777).toBe(0o600);
   });

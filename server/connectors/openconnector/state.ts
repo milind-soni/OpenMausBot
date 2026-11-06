@@ -3,7 +3,7 @@
 // credentials themselves live on the OpenConnector runtime. Sealing mirrors server/webhooks.ts: a
 // random AES-256-GCM key in a 0600 file no backup carries (workspace-backup-policy excludes it).
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
+import { closeSync, constants, mkdirSync, openSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "../../atomic.ts";
@@ -58,6 +58,30 @@ const stateFileSchema = z.object({
   appOAuth: z.array(appOAuthRecordSchema).optional(),
 });
 
+const LOCK_TIMEOUT_MS = 1_000;
+const STALE_LOCK_AGE_MS = 5_000;
+
+function acquireStateLock(path: string): () => void {
+  mkdirSync(dirname(path), { recursive: true });
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  let cause: unknown;
+  do {
+    try {
+      const descriptor = openSync(path, constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+      closeSync(descriptor);
+      return () => {
+        try { unlinkSync(path); } catch {}
+      };
+    } catch (error: unknown) {
+      cause = error;
+      try {
+        if (Date.now() - statSync(path).mtimeMs > STALE_LOCK_AGE_MS) unlinkSync(path);
+      } catch {}
+    }
+  } while (Date.now() < deadline);
+  throw new Error(`Timed out waiting for the OpenConnector state lock: ${cause instanceof Error ? cause.message : "locked"}`);
+}
+
 export class OpenConnectorStateStore {
   readonly file: string;
   private readonly runtimeUrl?: string;
@@ -95,8 +119,26 @@ export class OpenConnectorStateStore {
     }), { mode: 0o600 });
   }
 
+  private locked<T>(operation: (fresh: { connections: OpenConnectorConnectionRecord[]; appOAuth: OpenConnectorAppOAuthRecord[] }) => {
+    result: T;
+    connections?: OpenConnectorConnectionRecord[];
+    appOAuth?: OpenConnectorAppOAuthRecord[];
+  }): T {
+    const unlock = acquireStateLock(`${this.file}.lock`);
+    try {
+      const fresh = this.read();
+      const next = operation(fresh);
+      this.connections = next.connections ?? fresh.connections;
+      this.appOAuth = next.appOAuth ?? fresh.appOAuth;
+      if (next.connections || next.appOAuth) this.persist();
+      return next.result;
+    } finally {
+      unlock();
+    }
+  }
+
   listConnections(): OpenConnectorConnectionRecord[] {
-    return this.connections.map((record) => ({ ...record }));
+    return this.locked((fresh) => ({ result: fresh.connections.map((record) => ({ ...record })) }));
   }
 
   connectionsForService(service: string): OpenConnectorConnectionRecord[] {
@@ -104,45 +146,61 @@ export class OpenConnectorStateStore {
   }
 
   findConnectionByAccountId(accountId: string): OpenConnectorConnectionRecord | null {
-    return this.connections.find((record) => record.accountId === accountId) ?? null;
+    return this.locked((fresh) => ({
+      result: fresh.connections.find((record) => record.accountId === accountId) ?? null,
+    }));
   }
 
-  upsertConnection(record: OpenConnectorConnectionRecord): void {
-    const index = this.connections.findIndex((existing) => existing.accountId === record.accountId);
-    if (index >= 0) this.connections[index] = record;
-    else this.connections.push(record);
-    this.persist();
+  upsertConnection(record: OpenConnectorConnectionRecord, expectedUpdatedAt?: string | null): void {
+    this.locked((fresh) => {
+      const connections = [...fresh.connections];
+      const index = connections.findIndex((existing) => existing.accountId === record.accountId);
+      const existing = index >= 0 ? connections[index] : undefined;
+      if (expectedUpdatedAt !== undefined && (existing?.updatedAt ?? null) !== expectedUpdatedAt) {
+        throw new Error(`The OpenConnector connection ${record.accountId} was updated by another process`);
+      }
+      if (index >= 0) connections[index] = record;
+      else connections.push(record);
+      return { result: undefined, connections };
+    });
   }
 
   removeConnection(accountId: string): boolean {
-    const before = this.connections.length;
-    this.connections = this.connections.filter((record) => record.accountId !== accountId);
-    if (this.connections.length === before) return false;
-    this.persist();
-    return true;
+    return this.locked((fresh) => {
+      const connections = fresh.connections.filter((record) => record.accountId !== accountId);
+      return { result: connections.length !== fresh.connections.length, connections };
+    });
   }
 
   removeConnectionsForService(service: string): number {
-    const before = this.connections.length;
-    this.connections = this.connections.filter((record) => record.service !== service);
-    const removed = before - this.connections.length;
-    if (removed) this.persist();
-    return removed;
+    return this.locked((fresh) => {
+      const connections = fresh.connections.filter((record) => record.service !== service);
+      return { result: fresh.connections.length - connections.length, connections };
+    });
   }
 
   listAppOAuth(): OpenConnectorAppOAuthRecord[] {
-    return this.appOAuth.map((record) => ({ ...record }));
+    return this.locked((fresh) => ({ result: fresh.appOAuth.map((record) => ({ ...record })) }));
   }
 
   findAppOAuth(service: string): OpenConnectorAppOAuthRecord | null {
-    return this.appOAuth.find((record) => record.service === service) ?? null;
+    return this.locked((fresh) => ({
+      result: fresh.appOAuth.find((record) => record.service === service) ?? null,
+    }));
   }
 
-  upsertAppOAuth(record: OpenConnectorAppOAuthRecord): void {
-    const index = this.appOAuth.findIndex((existing) => existing.service === record.service);
-    if (index >= 0) this.appOAuth[index] = record;
-    else this.appOAuth.push(record);
-    this.persist();
+  upsertAppOAuth(record: OpenConnectorAppOAuthRecord, expectedUpdatedAt?: string | null): void {
+    this.locked((fresh) => {
+      const appOAuth = [...fresh.appOAuth];
+      const index = appOAuth.findIndex((existing) => existing.service === record.service);
+      const existing = index >= 0 ? appOAuth[index] : undefined;
+      if (expectedUpdatedAt !== undefined && (existing?.updatedAt ?? null) !== expectedUpdatedAt) {
+        throw new Error(`The OpenConnector OAuth record for ${record.service} was updated by another process`);
+      }
+      if (index >= 0) appOAuth[index] = record;
+      else appOAuth.push(record);
+      return { result: undefined, appOAuth };
+    });
   }
 
   /** Key file pattern from server/webhooks.ts sealKey: 0600, hex, regenerated only when absent. */

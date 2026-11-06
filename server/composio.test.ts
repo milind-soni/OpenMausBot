@@ -164,7 +164,7 @@ beforeAll(async () => {
     }
 
     const apiKey = String(req.headers["x-api-key"] ?? "");
-    if (!["ak_test", "ak_catalog_a", "ak_catalog_b", "ak_catalog_pages", "ak_catalog_partial", "ak_catalog_stuck",
+    if (!["ak_test", "ak_identity_cache", "ak_status_pages", "ak_catalog_a", "ak_catalog_b", "ak_catalog_pages", "ak_catalog_partial", "ak_catalog_stuck",
         "ak_catalog_page_stuck", "ak_catalog_exhausted", "ak_catalog_stalled_total", "ak_catalog_end_short",
         "ak_catalog_http_no_total"].includes(apiKey)) {
       res.writeHead(401, { "content-type": "application/json" });
@@ -298,6 +298,15 @@ beforeAll(async () => {
         return res.end(JSON.stringify({ items: [{ slug: "linear", name: "Catalog B" }] }));
       }
       return res.end(JSON.stringify({ items: [{ slug: "x", name: "X (Twitter)" }, { slug: "github", name: "GitHub" }] }));
+    }
+    if (req.method === "GET" && apiKey === "ak_status_pages" && url.pathname.endsWith("/toolkits")) {
+      if (url.searchParams.get("cursor") === "status-page-2") {
+        return res.end(JSON.stringify({ items: [{ slug: "gmail", is_no_auth: true }] }));
+      }
+      return res.end(JSON.stringify({
+        items: [{ slug: "github", connected_account: { id: "ca_github", status: "ACTIVE" } }],
+        next_cursor: "status-page-2",
+      }));
     }
     if (req.method === "GET" && url.pathname === "/api/v3.1/tool_router/session/trs_test") {
       res.writeHead(200, { "content-type": "application/json" });
@@ -977,6 +986,22 @@ describe.sequential("Composio Sessions", () => {
 
   it("reads an unreachable connection inventory as no service slugs", async () => {
     await expect(connectedServiceSlugs({})).resolves.toEqual([]);
+  });
+
+  it("does not call Session again while the service-slug cache is fresh", async () => {
+    const cfg: AppConfig = { composio: { apiKey: "ak_identity_cache", userId: "openmausbot_existing", sessionId: "trs_test" } };
+    const slugs = await connectedServiceSlugs(cfg);
+    const before = calls.length;
+    await expect(connectedServiceSlugs(cfg)).resolves.toBe(slugs);
+    expect(calls.slice(before)).toEqual([]);
+  });
+
+  it("clears the status cursor when the final toolkit page completes", async () => {
+    const cfg: AppConfig = { composio: { apiKey: "ak_status_pages", userId: "openmausbot_existing", sessionId: "trs_test" } };
+    await expect(connectionStatus(cfg, ["github", "gmail"])).resolves.toMatchObject({
+      github: { connected: true },
+      gmail: { connected: true },
+    });
   });
 
   it("keeps the last service slugs when a later read fails, so the bridge's tools stay as they were", async () => {

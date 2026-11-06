@@ -61,6 +61,7 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
    * a failed convergence never changes what authorize already returned, it only marks the record. */
   const convergeConnection = (service: string, requestId: string, alias: string | undefined): void => {
     if (pollsInFlight.has(requestId)) return;
+    if (!available()) return;
     const accountId = accountIdForConnection(service, alias);
     const run = pollConnectionRequest(client(), state, service, requestId, alias, {
       intervalMs: options.polling?.intervalMs,
@@ -87,7 +88,7 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
   // guard in pollConnectionRequest keeps a stale poll from overwriting a newer authorization.
   for (const record of state.listConnections()) {
     if (record.status === "pending" && record.connectionRequestId) {
-      convergeConnection(record.service, record.connectionRequestId, record.alias);
+      if (available()) convergeConnection(record.service, record.connectionRequestId, record.alias);
     }
   }
 
@@ -220,6 +221,7 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
       rejectMemberInstallation(as, "authorize a connector service");
       const service = canonicalToolkitSlug(slug);
       const alias = normalizeAccountAlias(requestedAlias);
+      const expectedUpdatedAt = state.findConnectionByAccountId(accountIdForConnection(service, alias))?.updatedAt ?? null;
       const begun = await client().beginConnect(service, alias);
       if (!begun.authorizationUrl) {
         throw new Error(`OpenConnector returned no authorization link for ${service}`);
@@ -231,7 +233,7 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
         ...(begun.connectionRequestId ? { connectionRequestId: begun.connectionRequestId } : {}),
         status: "pending",
         updatedAt: new Date().toISOString(),
-      });
+      }, expectedUpdatedAt);
       if (begun.connectionRequestId) convergeConnection(service, begun.connectionRequestId, alias);
       return { url: begun.authorizationUrl, ...(begun.connectionRequestId ? { connectionRequestId: begun.connectionRequestId } : {}) };
     },
@@ -317,7 +319,7 @@ async function relayOpenConnectorMcp(
   if (method === "tools/call") {
     const params = frame?.params && typeof frame.params === "object" ? frame.params as Record<string, unknown> : {};
     const name = typeof params.name === "string" ? params.name : "";
-    const actions = await client().actionDetails(await client().actions());
+    const actions = await client().actions();
     const actionId = actionIdForConnectorTool(name, actions.map((action) => action.id));
     if (!actionId) return encode(jsonRpcError(id, -32602, `Unknown connector tool: ${name}`), 200);
     beforeSend?.();

@@ -166,6 +166,12 @@ describe("endpoint shapes", () => {
     });
   });
 
+  it("refuses a redirect instead of resending an OAuth client secret", async () => {
+    nextResponse = { status: 302, body: {}, headers: { location: "https://redirect.example.test/oauth" } };
+    await expect(client().putOauthConfig("github", { clientId: "cid", clientSecret: "csec" })).rejects.toThrow();
+    expect(lastCall()).toMatchObject({ method: "PUT", path: "/api/oauth/configs/github", body: { clientSecret: "csec" } });
+  });
+
   it("POST /v1/connections/:service/connect starts a request and reads its id and url", async () => {
     nextResponse = { status: 200, body: { success: true, data: { connectionRequestId: "cr_1", authorizationUrl: "https://github.com/login/oauth/authorize?x=1" } } };
     const begun = await client().beginConnect("github", "work");

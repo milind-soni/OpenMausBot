@@ -71,13 +71,16 @@ export function loadConnectorSettings(
     url: env[OPENCONNECTOR_URL_ENV] ?? stored?.openconnector?.url,
     adminTokenRef: env[OPENCONNECTOR_ADMIN_TOKEN_REF_ENV] ?? stored?.openconnector?.adminTokenRef,
   };
-  if (provider === "openconnector") {
-    if (!openconnector.url?.trim()) throw new Error('OpenConnector is selected but has no URL; set OMB_OPENCONNECTOR_URL');
-    if (!openconnector.adminTokenRef && !env[OPENCONNECTOR_ADMIN_TOKEN_ENV]?.trim()) {
-      throw new Error('OpenConnector is selected but has no admin token; set OMB_OPENCONNECTOR_ADMIN_TOKEN or OMB_OPENCONNECTOR_ADMIN_TOKEN_REF');
-    }
-  }
   return { provider, openconnector };
+}
+
+/** Validation belongs to operations that need OpenConnector, while status can report setup cleanly. */
+export function assertOpenConnectorSettings(settings: ConnectorSettings, env: NodeJS.ProcessEnv = process.env): void {
+  if (settings.provider !== "openconnector") return;
+  if (!settings.openconnector.url?.trim()) throw new Error('OpenConnector is selected but has no URL; set OMB_OPENCONNECTOR_URL');
+  if (!settings.openconnector.adminTokenRef && !env[OPENCONNECTOR_ADMIN_TOKEN_ENV]?.trim()) {
+    throw new Error('OpenConnector is selected but has no admin token; set OMB_OPENCONNECTOR_ADMIN_TOKEN or OMB_OPENCONNECTOR_ADMIN_TOKEN_REF');
+  }
 }
 
 /** Resolves an admin-token reference without ever persisting the value: "env:NAME" reads a variable,
@@ -111,7 +114,13 @@ export function connectorProvider(env: NodeJS.ProcessEnv = process.env): Connect
     settledFileStamp(join(DATA_DIR, "config.json")),
   ]);
   if (selected?.key === key) return selected.provider;
-  const provider = selectProvider(settings, env);
+  let provider: ConnectorProvider;
+  try {
+    assertOpenConnectorSettings(settings, env);
+    provider = selectProvider(settings, env);
+  } catch {
+    provider = unavailableOpenConnectorProvider();
+  }
   selected = { key, provider };
   return provider;
 }
@@ -125,4 +134,37 @@ function selectProvider(settings: ConnectorSettings, env: NodeJS.ProcessEnv): Co
     return createOpenConnectorProvider({ settings: settings.openconnector, env });
   }
   return composioProvider;
+}
+
+function unavailableOpenConnectorProvider(): ConnectorProvider {
+  const setupRequired = (): Error => new Error("OpenConnector setup is incomplete; set a valid URL and an admin token");
+  return {
+    id: "openconnector",
+    mode: () => "unavailable",
+    isConfigured: () => false,
+    inventory: async () => ({ services: {}, complete: false }),
+    tools: async () => ({}),
+    serviceSlugs: async () => [],
+    status: async (_cfg, slugs) => Object.fromEntries(slugs.map((slug) => [slug, {
+      connected: false, pending: false, status: "not_connected", accounts: [],
+    }])),
+    removeService: async () => { throw setupRequired(); },
+    removeAccount: async () => { throw setupRequired(); },
+    prepareAuthConfigs: async () => undefined,
+    authorize: async () => { throw setupRequired(); },
+    catalog: async () => ({
+      cards: [],
+      source: "api",
+      pagination: { items: 0, stalled: false, complete: false, reason: "http-error" },
+    }),
+    relayMcp: async (_cfg, payload) => {
+      const frame = typeof payload === "object" && payload !== null && !Array.isArray(payload) ? payload : null;
+      const bytes = new TextEncoder().encode(JSON.stringify({
+        jsonrpc: "2.0",
+        id: frame?.id ?? null,
+        error: { code: -32000, message: "OpenConnector setup is incomplete" },
+      }));
+      return { status: 503, bytes, contentType: "application/json" };
+    },
+  };
 }

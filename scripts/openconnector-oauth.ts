@@ -16,6 +16,7 @@ import {
   OPENCONNECTOR_ADMIN_TOKEN_REF_ENV,
   OPENCONNECTOR_URL_ENV,
   loadConnectorSettings,
+  assertOpenConnectorSettings,
   resolveTokenRef,
 } from "../server/connectors/provider.ts";
 import { OpenConnectorClient, normalizeOpenConnectorBaseUrl } from "../server/connectors/openconnector/client.ts";
@@ -24,7 +25,7 @@ import { DATA_DIR } from "../server/config.ts";
 import { appOAuthStatus, configureAppOAuth } from "../server/connectors/openconnector/oauth.ts";
 
 const USAGE = `Usage:
-  node scripts/openconnector-oauth.ts configure <service> --client-id <id> [--client-secret <secret>] [--scope <scope> ...]
+  node scripts/openconnector-oauth.ts configure <service> --client-id <id> [--scope <scope> ...]
   node scripts/openconnector-oauth.ts status <service>
 
 Settings come from ${CONNECTOR_PROVIDER_ENV}=openconnector, ${OPENCONNECTOR_URL_ENV},
@@ -55,6 +56,7 @@ if (settings.provider !== "openconnector") {
 if (!settings.openconnector.url) fail(`${OPENCONNECTOR_URL_ENV} is not set`);
 const adminToken = resolveTokenRef(settings.openconnector.adminTokenRef) ?? process.env[OPENCONNECTOR_ADMIN_TOKEN_ENV];
 if (!adminToken) fail(`no admin token: set ${OPENCONNECTOR_ADMIN_TOKEN_ENV} or ${OPENCONNECTOR_ADMIN_TOKEN_REF_ENV}`);
+assertOpenConnectorSettings(settings);
 
 const client = new OpenConnectorClient({ baseUrl: settings.openconnector.url, adminToken });
 const state = new OpenConnectorStateStore(join(DATA_DIR, OPENCONNECTOR_STATE_FILE), normalizeOpenConnectorBaseUrl(settings.openconnector.url));
@@ -63,7 +65,7 @@ if (verb === "configure") {
   const clientId = values["client-id"];
   if (!clientId) fail("configure needs --client-id");
   const clientSecret = process.env.OPENCONNECTOR_OAUTH_CLIENT_SECRET;
-  if (!clientSecret) fail("configure needs --client-secret or OPENCONNECTOR_OAUTH_CLIENT_SECRET");
+  if (!clientSecret) fail("configure needs OPENCONNECTOR_OAUTH_CLIENT_SECRET");
   const { expectedRedirectUri } = await configureAppOAuth(client, state, service, {
     clientId,
     clientSecret,

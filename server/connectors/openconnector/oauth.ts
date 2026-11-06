@@ -27,6 +27,7 @@ export async function configureAppOAuth(
   if (!clientId) throw inputError("OAuth clientId is required");
   if (!clientSecret) throw inputError("OAuth clientSecret is required");
   const scopes = (input.scopes ?? []).map((scope) => scope.trim()).filter(Boolean);
+  const expectedUpdatedAt = state.findAppOAuth(service)?.updatedAt ?? null;
   const { expectedRedirectUri } = await client.oauthConfigs();
   await client.putOauthConfig(service, { clientId, clientSecret, scopes });
   state.upsertAppOAuth({
@@ -35,7 +36,7 @@ export async function configureAppOAuth(
     scopes,
     sealedClientSecret: state.sealSecret(clientSecret),
     updatedAt: new Date().toISOString(),
-  });
+  }, expectedUpdatedAt);
   return { expectedRedirectUri };
 }
 
@@ -132,7 +133,7 @@ export async function pollConnectionRequest(
           status,
           updatedAt: new Date().toISOString(),
         };
-        state.upsertConnection(record);
+        state.upsertConnection(record, existing.updatedAt);
         return { status, connected: TERMINAL_OK.has(status), record };
       }
     }

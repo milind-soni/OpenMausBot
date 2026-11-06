@@ -390,15 +390,31 @@ async function connectedServices(cfg: AppConfig, as?: BrokerAccess): Promise<Rec
   return (await connectedServicesInventory(cfg, as)).services;
 }
 
-/** Cache key per backend, so a config switch never serves the previous backend's tools. */
+/** Cache the session-derived backend key briefly, so a cache hit does not make a Session request.
+ * A failed key lookup gets a one-shot identity that can never match earlier data. */
+const CONNECTOR_IDENTITY_CACHE_MS = 60_000;
+const connectorIdentityCache = new Map<string, { at: number; identity: string }>();
+let connectorIdentityFailure = 0;
+
 async function connectorToolsIdentity(cfg: AppConfig, as?: BrokerAccess): Promise<string> {
   const apiKey = as ? null : projectApiKey(cfg);
-  if (apiKey) {
-    const session = await ensureProjectSession(cfg);
-    return backendFingerprint("project-tools", apiBase(), `${apiKey}\0${session.session_id}`);
-  }
   const broker = as ?? brokerAccess();
-  return broker ? backendFingerprint("managed-tools", broker.url, broker.token) : "none";
+  const rawKey = backendFingerprint(
+    "connector-identity", apiBase(),
+    [apiKey ?? "", broker?.url ?? "", broker?.token ?? ""].join("\0"),
+  );
+  const cached = connectorIdentityCache.get(rawKey);
+  if (cached && Date.now() - cached.at < CONNECTOR_IDENTITY_CACHE_MS) return cached.identity;
+  try {
+    const identity = apiKey
+      ? backendFingerprint("project-tools", apiBase(), `${apiKey}\0${(await ensureProjectSession(cfg)).session_id}`)
+      : broker ? backendFingerprint("managed-tools", broker.url, broker.token) : "none";
+    if (connectorIdentityCache.size > 100) connectorIdentityCache.clear();
+    connectorIdentityCache.set(rawKey, { at: Date.now(), identity });
+    return identity;
+  } catch {
+    return `unavailable:${++connectorIdentityFailure}`;
+  }
 }
 
 const CONNECTOR_TOOLS_CACHE_MS = 60_000;
@@ -587,7 +603,10 @@ async function connectionStatus(cfg: AppConfig, slugs: string[]): Promise<Record
       bySlug.set(canonicalToolkitSlug(item.slug), item);
     }
     const next = body.next_cursor || undefined;
-    if (!next) break;
+    if (!next) {
+      cursor = undefined;
+      break;
+    }
     if (seenCursors.has(next)) throw new Error("Composio status inventory repeated a pagination cursor");
     seenCursors.add(next);
     cursor = next;

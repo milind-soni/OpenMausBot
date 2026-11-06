@@ -11,6 +11,7 @@ import { backup, DatabaseSync } from "node:sqlite";
 import { pipeline } from "node:stream/promises";
 import { Worker } from "node:worker_threads";
 import { writeFileAtomic } from "./atomic.ts";
+import { OPENCONNECTOR_ADMIN_TOKEN_REF_ENV } from "./connectors/provider.ts";
 import { userErrorFields, userErrorThrown } from "./user-errors.ts";
 import { WORKSPACE_BACKUP_CLIENT_KEYS } from "../shared/workspace-backup-client.ts";
 import { INSTRUCTION_FILE, restorePaths, validRelative } from "./workspace-backup-paths.ts";
@@ -174,16 +175,23 @@ function assertLocalAuthOutsideSnapshot(dataDir: string): void {
   };
   const connectors = record(config) && record(config.connectors) ? config.connectors : {};
   const openconnector = record(connectors.openconnector) ? connectors.openconnector : {};
-  if (typeof openconnector.adminTokenRef === "string" && openconnector.adminTokenRef.startsWith("file:")) {
-    const text = openconnector.adminTokenRef.trim().slice(5);
-    const resolved = text.startsWith("~/") || text.startsWith("~\\") ? join(homedir(), text.slice(2)) : resolve(text);
+  const environments = [process.env, ...Object.values(instances).filter(record).map((instance) => ({ ...process.env, ...(record(instance.environment) ? instance.environment : {}) }))];
+  const tokenRefs = [
+    ...(typeof openconnector.adminTokenRef === "string" ? [openconnector.adminTokenRef] : []),
+    ...environments.map((environment) => environment[OPENCONNECTOR_ADMIN_TOKEN_REF_ENV]),
+  ];
+  for (const tokenRef of tokenRefs) {
+    const reference = typeof tokenRef === "string" ? tokenRef.trim() : "";
+    if (!reference.startsWith("file:")) continue;
+    const resolved = resolve(reference.slice(5));
     const exists = entryExists(resolved);
     const path = relative(exists ? realpathSync(dataDir) : resolve(dataDir), exists ? realpathSync(resolved) : resolved).replaceAll("\\", "/");
-    if (path && path !== ".." && !path.startsWith("../") && !isAbsolute(path) && !excludedWorkspaceAuthPath(path)) {
+    const outsideBackup = !path || path === ".." || path.startsWith("../") || isAbsolute(path);
+    const excludedFromBackup = excluded(path.split("/")[0]) || excludedWorkspaceAuthPath(path);
+    if (!outsideBackup && !excludedFromBackup) {
       throw new Error("OpenConnector admin token file is inside backed-up workspace files. Move it outside or into the excluded providers folder, chmod 600 it, and rotate the token if a backup may already contain it.");
     }
   }
-  const environments = [process.env, ...Object.values(instances).filter(record).map((instance) => ({ ...process.env, ...(record(instance.environment) ? instance.environment : {}) }))];
   for (const environment of environments) {
     const home = String(environment.HOME || environment.USERPROFILE || homedir());
     for (const field of fields) check(environment[field], field, home);

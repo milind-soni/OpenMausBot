@@ -13,6 +13,7 @@ import {
   OPENCONNECTOR_URL_ENV,
   connectorProvider,
   loadConnectorSettings,
+  assertOpenConnectorSettings,
   resolveTokenRef,
 } from "./provider.ts";
 import { composioProvider } from "./composio.ts";
@@ -58,11 +59,15 @@ describe("loadConnectorSettings", () => {
   });
 
   it("does not silently select Composio when OpenConnector is explicit but incomplete", () => {
-    expect(() => loadConnectorSettings(env(), { provider: "openconnector" })).toThrow(/no URL/);
-    expect(() => loadConnectorSettings(
+    const settings = loadConnectorSettings(env(), { provider: "openconnector" });
+    expect(settings.provider).toBe("openconnector");
+    expect(() => assertOpenConnectorSettings(settings)).toThrow(/no URL/);
+    const tokenOnly = loadConnectorSettings(
       env({ [OPENCONNECTOR_URL_ENV]: "https://connector.example.test" }),
       { provider: "openconnector" },
-    )).toThrow(/admin token/);
+    );
+    expect(tokenOnly.provider).toBe("openconnector");
+    expect(() => assertOpenConnectorSettings(tokenOnly)).toThrow(/admin token/);
   });
 
   it("falls back to composio on an unknown provider name", () => {
@@ -103,6 +108,22 @@ describe("connectorProvider", () => {
     expect(connectorProvider(settings("1".repeat(64)))).toBe(one);
     const two = connectorProvider(settings("2".repeat(64)));
     expect(two).not.toBe(one);
+  });
+
+  it("reports incomplete or invalid OpenConnector setup without failing status construction", async () => {
+    const incomplete = connectorProvider(env({ [CONNECTOR_PROVIDER_ENV]: "openconnector" }));
+    expect(incomplete.isConfigured({} as never)).toBe(false);
+    expect(incomplete.mode({} as never)).toBe("unavailable");
+    await expect(incomplete.status({} as never, ["github"])).resolves.toEqual({
+      github: { connected: false, pending: false, status: "not_connected", accounts: [] },
+    });
+    const invalid = connectorProvider(env({
+      [CONNECTOR_PROVIDER_ENV]: "openconnector",
+      [OPENCONNECTOR_URL_ENV]: "http://example.test",
+      [OPENCONNECTOR_ADMIN_TOKEN_ENV]: "0".repeat(64),
+    }));
+    expect(invalid.isConfigured({} as never)).toBe(false);
+    await expect(invalid.tools({} as never)).resolves.toEqual({});
   });
 });
 
