@@ -584,21 +584,35 @@ describe("internal mcp_server route, Full access", () => {
 describe("internal mcp_server route, below Full access", () => {
   const PROPOSED = "A card is now visible to the person. End this turn and wait for the decision.";
 
-  it("a non-Full add saves the server off and posts a Turn on card with options Turn on and Cancel", async () => {
-    const probe = probeWith({ ok: true, tools: [] });
-    const { post, stored, lines, chat, card } = fixture({ full: false });
+  it("a non-Full add of a URL server turns it on and tests it, with no card", async () => {
+    const probe = probeWith({ ok: true, tools: [{ name: "list_issues" }] });
+    const { post, stored, lines, chat, decided } = fixture({ full: false });
     const { status, body } = await post({ action: "add", name: "linear", url: "https://mcp.linear.app/mcp?team=acme" });
     expect(status).toBe(201);
-    expect(stored("linear")?.enabled).toBe(false);
+    expect(stored("linear")?.enabled).toBe(true);
+    expect(probe).toHaveBeenCalledOnce();
+    expect(body.text).toContain("Added MCP server linear and turned it on.");
+    expect(body.text).not.toContain(PROPOSED);
+    expect(decided).toEqual([{ summary: "Added MCP server linear and turned it on", applied: "level" }]);
+    expect(lines).toEqual(["Added MCP server linear · Turned on · Test: 1 tool"]);
+    expect(chat).toHaveLength(0);
+  });
+
+  it("a non-Full add of a command server saves it off and posts a Turn on card, since turning it on runs a program", async () => {
+    const probe = probeWith({ ok: true, tools: [] });
+    const { post, stored, lines, chat, card } = fixture({ full: false });
+    const { status, body } = await post({ action: "add", name: "notes", command: "notes-mcp", args: ["--stdio"] });
+    expect(status).toBe(201);
+    expect(stored("notes")?.enabled).toBe(false);
     expect(probe).not.toHaveBeenCalled();
     expect(body.text).toContain(PROPOSED);
-    expect(lines).toEqual(["Added MCP server linear · Switched off"]);
+    expect(lines).toEqual(["Added MCP server notes · Switched off"]);
     expect(chat).toHaveLength(1);
     expect(card()).toEqual({
-      title: "Turn on linear?",
-      subtitle: "https://mcp.linear.app/mcp\nReached over the internet. Once on, your bots can use its tools.",
+      title: "Turn on notes?",
+      subtitle: "notes-mcp --stdio\nRuns on this computer.",
       options: ["Turn on", "Cancel"], requestId: expect.any(String), tool: "mcp_server", fixedOptions: true,
-      mcpRequest: { requestId: card()!.requestId, botId: BOT, threadId: THREAD, action: "enable", name: "linear", targetHash: expect.stringMatching(/^[0-9a-f]{64}$/) },
+      mcpRequest: { requestId: card()!.requestId, botId: BOT, threadId: THREAD, action: "enable", name: "notes", targetHash: expect.stringMatching(/^[0-9a-f]{64}$/) },
     });
   });
 

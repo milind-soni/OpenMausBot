@@ -8591,7 +8591,7 @@ describe("harness HTTP API", () => {
     expect(after).toEqual({ status: 200, body: { servers: [] } });
   });
 
-  it("lets a bot below Full access file an MCP server only as a disabled row", async () => {
+  it("lets a bot below Full access file a command server only as a disabled row, and turns a URL server on", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     expect((await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask" })).status).toBe(200);
     const token = await mintTestCapability(BASE, bot.id, bot.threadId);
@@ -8633,20 +8633,20 @@ describe("harness HTTP API", () => {
       });
       const remoteBody = await remote.json() as { text: string };
       expect(remote.status).toBe(201);
-      expect(remoteBody.text).toMatch(/^Saved MCP server botdocs switched off\./);
+      expect(remoteBody.text).toMatch(/^Added MCP server botdocs and turned it on\./);
       const remoteText = JSON.stringify(remoteBody);
       expect(remoteText).not.toContain(headerSecret);
       expect(remoteText).not.toContain(oauthSecret);
       const savedRemote = JSON.parse(readFileSync(configFile, "utf8")).mcpServers.botdocs;
       expect(savedRemote).toEqual({
         type: "sse", url: "https://docs.example/mcp", headers: { Authorization: headerSecret },
-        oauth: { clientId: "corp-app", clientSecret: oauthSecret }, enabled: false,
+        oauth: { clientId: "corp-app", clientSecret: oauthSecret }, enabled: true,
       });
 
       const listed = await api("GET", "/api/mcp/servers");
       expect(listed.body.servers).toEqual(expect.arrayContaining([
         expect.objectContaining({ name: "botnotes", enabled: false, envKeys: ["NOTES_TOKEN"] }),
-        expect.objectContaining({ name: "botdocs", enabled: false, headerKeys: ["Authorization"] }),
+        expect.objectContaining({ name: "botdocs", enabled: true, headerKeys: ["Authorization"] }),
       ]));
       expect(JSON.stringify(listed.body)).not.toContain(secret);
       expect(JSON.stringify(listed.body)).not.toContain(headerSecret);

@@ -210,7 +210,8 @@ async function add(deps: Deps, name: string, fields: Record<string, unknown>, si
   const server = added.server;
   const where = folderText(deps, server, added.moved ?? []);
 
-  if (!deps.fullAccess()) {
+  // Security: turning a command server on runs a program on this computer, which below Full access needs a yes.
+  if (!deps.fullAccess() && !isRemoteMcpServer(server)) {
     say(deps, { action: "add", name }, ["server.mcp.added", { name }], ["server.mcp.switchedOff"]);
     const card = deps.requestApproval({ action: "enable", name, subtitle: turnOnText(deps, server), targetHash: targetHash(server) });
     return { status: 201, text: `Saved MCP server ${name} switched off.${where} ${card.text}` };
@@ -222,7 +223,7 @@ async function add(deps: Deps, name: string, fields: Record<string, unknown>, si
   }
   joinBotList(deps, name);
   const outcome = await probe(deps, name, server, signal);
-  deps.decide(`Added MCP server ${name} and turned it on`, "full-access");
+  deps.decide(`Added MCP server ${name} and turned it on`, deps.fullAccess() ? "full-access" : "level");
   say(deps, { action: "add", name }, ["server.mcp.added", { name }], ["server.mcp.on"], outcome.line);
   return { status: 201, text: `Added MCP server ${name} and turned it on. ${outcome.text}${selection(deps, name)}${where} ${WHEN.live.arrive}` };
 }
