@@ -67,19 +67,19 @@ export function EmailConnectForm({ initialAddress = "", submit, reading, fieldCl
     } finally { setBusy(false); }
   };
 
-  const connecting = busy || Boolean(reading);
+  const anyScreenConnecting = busy || Boolean(reading);
   return (
     <form data-email-form className="flex flex-col gap-2" onSubmit={(event) => { event.preventDefault(); void connect(); }}>
-      <input type="email" autoComplete="off" spellCheck={false} dir="ltr" disabled={connecting} aria-label={t("email.address")} placeholder={t("email.address")} value={address} onChange={(event) => setAddress(event.target.value)} className={fieldClassName} />
-      <input type="password" autoComplete="new-password" spellCheck={false} dir="ltr" disabled={connecting} aria-label={t("email.password")} placeholder={t("email.password")} value={password} onChange={(event) => setPassword(event.target.value)} className={fieldClassName} />
+      <input type="email" autoComplete="off" spellCheck={false} dir="ltr" disabled={busy} aria-label={t("email.address")} placeholder={t("email.address")} value={address} onChange={(event) => setAddress(event.target.value)} className={fieldClassName} />
+      <input type="password" autoComplete="new-password" spellCheck={false} dir="ltr" disabled={busy} aria-label={t("email.password")} placeholder={t("email.password")} value={password} onChange={(event) => setPassword(event.target.value)} className={fieldClassName} />
       {needsServer && <EmailServerInputs value={server} onChange={setServer} className={fieldClassName} />}
-      {connecting && <EmailCheckLines reading={reading ? { state: "done", host: reading } : { state: "waiting" }} sending={{ state: "waiting" }} />}
+      {anyScreenConnecting && <EmailCheckLines reading={reading ? { state: "done", host: reading } : { state: "waiting" }} sending={{ state: "waiting" }} />}
       {refusal && (refusal.signIn ? <EmailSignInNote hint={refusal.signIn} /> : <p role="alert" className="text-[12px] text-danger">{refusal.error}</p>)}
       <div className="flex flex-wrap items-center gap-2">
-        <button type="submit" disabled={connecting || !address.trim() || !password} className={submitClassName} style={submitStyle}>
-          {connecting ? <Loader2 size={14} className="animate-spin" /> : t("connectors.action.connect")}
+        <button type="submit" disabled={busy || !address.trim() || !password} className={submitClassName} style={submitStyle}>
+          {busy ? <Loader2 size={14} className="animate-spin" /> : t("connectors.action.connect")}
         </button>
-        {!needsServer && !connecting && <button type="button" onClick={() => setNeedsServer(true)} className={EMAIL_LINK}>{t("email.typeServer")}</button>}
+        {!needsServer && !busy && <button type="button" onClick={() => setNeedsServer(true)} className={EMAIL_LINK}>{t("email.typeServer")}</button>}
       </div>
       {footer}
     </form>
