@@ -36,7 +36,9 @@ export function BotDropLine({ place }: { place: BotDropPlace | null | undefined 
 }
 
 /** Dragging bots between the rows outside any department and each department's, onto a bot to start a department,
- * Alt+Up/Down, and the name field a new or renamed department shows in its heading. */
+ * Alt+Up/Down, and the name field a new or renamed department shows in its heading. With `withinList` a drop may only
+ * reorder the bot inside the list it already belongs to: the icons-only rail draws no department heading, so it shows
+ * neither the department a bot would join nor the field that names a new one. */
 export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onError, onCancelled }: {
   dispatch: Dispatch<Action>;
   announce: (text: string) => void;
@@ -78,7 +80,6 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
   };
   const allowed = (botId: string, move: BotMove | null): BotMove | null => {
     if (!move) return null;
-    // The icon rail shows no department names, so there a drop only reorders inside the bot's own list.
     if (!latest.current.withinList) return move;
     const from = botListOf(latest.current.lists, botId);
     if (move.kind !== "move" || move.section !== from) return null;

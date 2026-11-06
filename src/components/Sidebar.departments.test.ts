@@ -179,7 +179,6 @@ describe("Simple's sidebar before anyone drags", () => {
   });
 
   it("reorders inside the rail's own list, and nothing else: no department is created or left unseen", () => {
-    // The rail hides department names and its naming field, so a drop there must only move a tile within its list.
     fixture.storage.set(SIDEBAR_DENSITY_KEY, "avatars");
     drag("cleo");
     row("atlas").botDrag!.row("atlas").onDrop(at(5) as never);
@@ -187,7 +186,6 @@ describe("Simple's sidebar before anyone drags", () => {
     expect(sections()).not.toContain(userSectionId(NEW_DEPARTMENT));
     fixture.dispatch.mockClear();
 
-    // Onto the middle of a bot: a place above or below, never a new department whose name field the rail hides.
     drag("cleo");
     row("atlas").botDrag!.row("atlas").onDragOver(at() as never);
     expect(row("atlas").botDrop).toBe("after");
