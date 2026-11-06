@@ -131,6 +131,13 @@ describe("SidebarSectionHeader as a Simple-mode line", () => {
     expect(renderToStaticMarkup(line({ count: 4, reserveMenu: true, onMenu: () => {} }))).not.toMatch(slot);
     expect(renderToStaticMarkup(line({ count: 1 }))).not.toMatch(slot);
     expect(renderToStaticMarkup(line({ reserveMenu: true, naming: { value: "", label: "Name", onCommit: () => {}, onCancel: () => {} } }))).not.toMatch(slot);
+    const top = (props: Parameters<typeof line>[0]) => Children.toArray(line(props).props.children).filter(isValidElement) as ReactElement<Props>[];
+    const reserved = top({ count: 1, reserveMenu: true });
+    const withMenu = top({ count: 4, onMenu: () => {} });
+    expect(reserved.map((node) => node.type)).toEqual(["button", "span"]);
+    expect(reserved[1].props).toMatchObject({ "aria-hidden": "true", className: "w-[22px] shrink-0" });
+    expect(withMenu.map((node) => node.type)).toEqual(["button", "button"]);
+    expect(withMenu[1].props["aria-label"]).toBe("Actions for Work department");
   });
 
   it("is dragged by the line itself, and only when it can be reordered", () => {
