@@ -92,6 +92,29 @@ describe("doctor --host", () => {
     expect(report.human.at(-1)).toBe("1 problem.");
   });
 
+  it("asks the MausBot connector on a server that runs one: its home's own AppArmor profile stands in for the server-wide switch", async () => {
+    const connector = (box: boolean) => async (command: string, args: string[]): Promise<CommandResult> => {
+      if (command === "docker" && args[0] === "exec") {
+        const checks = [{ id: "profiles", ok: true }, box ? { id: "box", ok: true } : { id: "box", ok: false, fix: "Our bots' safety box can't start on this server yet. Run the install command again to repair it." }];
+        return { ok: box, stdout: `${JSON.stringify({ ok: box, checks })}\n`, stderr: "", missing: false };
+      }
+      return command === "docker" ? { ok: true, stdout: "29.1.3\n", stderr: "", missing: false } : { ok: true, stdout: "yes\n", stderr: "", missing: false };
+    };
+    const stock = { files: { "/proc/sys/kernel/apparmor_restrict_unprivileged_userns": "1\n" } };
+    const passing = await checkHost(probe({ ...stock, run: connector(true) }), OPTIONS);
+    expect(byId(passing, "userns")).toMatchObject({ status: "ok", message: expect.stringContaining("its own AppArmor profile") });
+    expect(byId(passing, "connector")).toEqual({ id: "connector", status: "ok", message: "MausBot connector: its 2 checks pass, the bots' box among them" });
+    expect(hostReport(passing).exitCode).toBe(0);
+    const failing = await checkHost(probe({ ...stock, run: connector(false) }), OPTIONS);
+    expect(byId(failing, "userns")).toMatchObject({ status: "FAIL", fix: expect.stringContaining("install command again") });
+    expect(byId(failing, "connector-box")).toMatchObject({ status: "FAIL", fix: expect.stringContaining("Run the install command again") });
+    expect(hostReport(failing).exitCode).toBe(7);
+    // No connector here (docker exec answers with something else): nothing about one, and the server-wide fix.
+    const plain = await checkHost(probe(stock), OPTIONS);
+    expect(plain.some((check) => check.id.startsWith("connector"))).toBe(false);
+    expect(byId(plain, "userns")?.fix).toContain("kernel.apparmor_restrict_unprivileged_userns=0");
+  });
+
   it("warns, and still passes, on what a standalone server can live with", async () => {
     const checks = await checkHost(probe({
       arch: "arm64", cpus: 2, memoryBytes: 4 * 2 ** 30, freeBytes: () => 40 * GB, clockOffset: async () => 45_000,

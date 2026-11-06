@@ -13,6 +13,7 @@ ADMIN_URL="${MAUSBOT_ADMIN_URL:-@MAUSBOT_ADMIN_URL@}"
 CONNECTOR_IMAGE="${MAUSBOT_CONNECTOR_IMAGE:-@MAUSBOT_CONNECTOR_IMAGE@}"
 
 ETC_DIR="${MAUSBOT_ETC_DIR:-/etc/mausbot}"
+AUDIT_DIR="${MAUSBOT_AUDIT_DIR:-/var/log/mausbot}"
 APPARMOR_DIR="${MAUSBOT_APPARMOR_DIR:-/etc/apparmor.d}"
 PROFILE=omb-home-narrow
 SECCOMP=seccomp-omb-home.json
@@ -219,6 +220,8 @@ install_profiles() {
 start_connector() {
   say "Starting the MausBot connector..."
   docker volume create "$STATE_VOLUME" >/dev/null
+  # The audit log: every job MausBot runs here, root's, for you to read (mausbot-connector audit).
+  install -d -m 0750 "$AUDIT_DIR"
   docker rm -f "$CONNECTOR" "$CONNECTOR_NEXT" >/dev/null 2>&1 || true
   instance=$(cat /proc/sys/kernel/random/uuid)
   set -- --label "$ROLE_LABEL=connector" --label "com.mausbot.instance=$instance" \
@@ -229,7 +232,7 @@ start_connector() {
   esac
   docker run -d --name "$CONNECTOR" --restart unless-stopped --network host \
     --security-opt no-new-privileges=true --cap-drop ALL --read-only --tmpfs /tmp \
-    -v /var/run/docker.sock:/var/run/docker.sock -v "$STATE_VOLUME:/state" -v "$ETC_DIR:/etc/mausbot:ro" \
+    -v /var/run/docker.sock:/var/run/docker.sock -v "$STATE_VOLUME:/state" -v "$ETC_DIR:/etc/mausbot:ro" -v "$AUDIT_DIR:/var/log/mausbot" \
     --log-opt max-size=10m --log-opt max-file=3 \
     "$@" "$CONNECTOR_IMAGE" run >/dev/null || fail "The MausBot connector could not be started (Docker's message is above). Run this command again."
   for _ in 1 2 3 4 5 6 7 8 9 10; do
@@ -298,7 +301,7 @@ install_connector() {
   check_box
   connect "$code"
   say ""
-  say "Connected. Your server shows up in MausBot in a minute."
+  say "Connected. Your server shows up in MausBot in a minute, for your team's Owner to accept."
 }
 
 # Removal never deletes the data, its safety copy or its backups unless --delete-data is typed.
@@ -321,15 +324,16 @@ uninstall() {
   if command -v apparmor_parser >/dev/null 2>&1 && [ -f "$APPARMOR_DIR/$PROFILE" ]; then apparmor_parser -R "$APPARMOR_DIR/$PROFILE" >/dev/null 2>&1 || true; fi
   rm -f "$APPARMOR_DIR/$PROFILE" "$ETC_DIR/$SECCOMP"
   rmdir "$ETC_DIR" 2>/dev/null || true
-  # The connector's own state (its token, the home's settings) is not your data: MausBot hands both out again.
+  # The connector's own state (its key, the home's settings) is not your data: a new code makes a new key.
   docker volume rm "$STATE_VOLUME" >/dev/null 2>&1 || true
   if [ "$delete" = yes ]; then
     for volume in "$DATA_VOLUME" "$SNAPSHOT_VOLUME" $(docker volume ls -q --filter "label=$ROLE_LABEL=backup" 2>/dev/null); do
       docker volume rm "$volume" >/dev/null 2>&1 || true
     done
+    rm -rf "$AUDIT_DIR"
     say "MausBot is removed from this server, and so is its data."
   else
-    say "MausBot is removed from this server. Your data is kept in the Docker volume $DATA_VOLUME, with its backups."
+    say "MausBot is removed from this server. Your data is kept in the Docker volume $DATA_VOLUME, with its backups, and the audit log in $AUDIT_DIR."
     say "To delete the data too, run: $(command_line uninstall --delete-data)"
   fi
 }

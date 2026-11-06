@@ -5,6 +5,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { ContainerInfo, ContainerSpec, Docker } from "./docker.ts";
+import { digestPinnedOnly, type ImageCheck } from "./images.ts";
 import { errorText, type Log } from "./log.ts";
 import type { ConnectorIdentity, Job, JobReply } from "./protocol.ts";
 import { LABELS, NAMES } from "./settings.ts";
@@ -21,6 +22,8 @@ export interface SelfUpdateDeps {
   /** This connector's MAUSBOT_INSTANCE, also its container's instance label. */
   instance: string;
   identity: () => ConnectorIdentity;
+  /** The connector's next image, once pulled and before it runs. */
+  checkImage?: ImageCheck;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
   deadlineMs?: number;
@@ -81,6 +84,11 @@ export class SelfUpdater {
       await docker.pull(image);
     } catch (error) {
       return this.fail(job, `Could not download ${image} (${errorText(error)}). The connector was not changed.`);
+    }
+    try {
+      await (this.deps.checkImage ?? digestPinnedOnly)(image, { kind: "connector", current: self.Config.Image });
+    } catch (error) {
+      return { id: job.id, ok: false, error: { code: "image_refused", message: `${image} was refused (${errorText(error)}). The connector was not changed.` } };
     }
     const instance = randomUUID();
     const record: SelfUpdateRecord = {
