@@ -28,7 +28,7 @@ export function ownServerOwner(facts: OwnServerFacts, auth: RequestAuth): boolea
 }
 
 /** `facts()` is read on every ask, so a sign-in list changed in Settings counts at once. `here()`: this server took a computer's
- * move from its owner (cloud-send-arrived.ts); a phone's move does not count. */
+ * move from its owner; a phone's move does not count. */
 export function createOwnHome({ facts, dataDir }: { facts(): OwnServerFacts; dataDir: string }) {
   return {
     owner: (auth: RequestAuth): auth is Extract<RequestAuth, { kind: "session" }> => ownServerOwner(facts(), auth),

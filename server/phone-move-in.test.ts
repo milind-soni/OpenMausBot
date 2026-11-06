@@ -64,7 +64,7 @@ async function run(moveIn: ReturnType<typeof createPhoneMoveIn>, auth: RequestAu
   return { out, status: done?.status, body: done?.body, reads, resumed, handedOn: out === PASS ? await ctx.readBody(ctx.req) : undefined };
 }
 
-/** The phone makes a bot, and the create route makes it as the move asked. */
+/** The phone's create through the guard alone, then its bot added to the fake store in the create route's place. */
 async function create(moveIn: ReturnType<typeof createPhoneMoveIn>, id = SCOUT, auth = phone) {
   const answer = await run(moveIn, auth, "POST", "/api/bots", { id, threadId: `${id}-main`, name: "Scout", useDefaults: false });
   bots.push({ id, threadId: `${id}-main`, tasks: [{ threadId: `${id}-t1` }] });
