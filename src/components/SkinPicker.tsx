@@ -3,8 +3,7 @@
 import { Check } from "lucide-react";
 import { SKINS, applySkin, resolveSkin, type SkinId } from "@/lib/skins";
 import { cn } from "@/lib/cn";
-import { t } from "@/lib/i18n";
-import type { LocaleKey } from "@/locales";
+import { t, tFromServer } from "@/lib/i18n";
 import { setDressUp, useDressUp } from "@/lib/halloween-dress";
 import type { HalloweenBodyId } from "../../shared/halloween-bodies";
 import { MausAvatar } from "./Avatar";
@@ -108,7 +107,7 @@ export function SkinPicker() {
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium text-ink">{skin.name}</div>
                   <div className="mt-0.5 text-[11px] leading-snug text-ink-secondary">
-                    {t(`skins.tagline.${skin.id}` as LocaleKey) || skin.tagline}
+                    {tFromServer(`skins.tagline.${skin.id}`, skin.tagline)}
                   </div>
                 </div>
                 {selected && <Check size={13} className="mt-0.5 shrink-0 text-accent-text" />}

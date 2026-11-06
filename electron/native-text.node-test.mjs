@@ -78,6 +78,26 @@ test("the saved language wins over the system's, \"\" follows the system again, 
   assert.equal(broken.t("native.x"), "en");
 });
 
+test("with nothing picked, main's words follow the language the window shows, not the system's beside it", (t) => {
+  const dir = packs(t, { "en.json": { "native.x": "en" }, "pt-br.json": { "native.x": "pt" }, "de.json": { "native.x": "de" } });
+  const text = createNativeText({ dir, saved: null, system: () => "pt-BR" });
+  assert.equal(text.t("native.x"), "pt", "before the window has drawn");
+  assert.equal(text.follow("en"), true, "an English window, say a team's default, on a Portuguese system");
+  assert.equal(text.t("native.x"), "en");
+  assert.equal(text.follow("en"), false);
+  for (const code of ["../en", "xx", null]) {
+    text.follow("en");
+    assert.equal(text.follow(code), true, String(code));
+    assert.equal(text.t("native.x"), "pt", `${code}: not a pack, so the system's again`);
+  }
+  assert.equal(text.follow("de"), true);
+  assert.equal(text.set("pt-br"), true, "a pick wins");
+  assert.equal(text.follow("de"), false, "the window shows the pick, so this is a stale report");
+  assert.equal(text.t("native.x"), "pt");
+  assert.equal(text.set(""), true, "System is a pick that follows the window again");
+  assert.equal(text.t("native.x"), "de");
+});
+
 test("dates and lists follow the app's language; English keeps its own list words", (t) => {
   const dir = packs(t, { "en.json": {}, "pt-br.json": {} });
   const pt = createNativeText({ dir, saved: "pt-br", system: () => "en-US" });

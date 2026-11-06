@@ -251,6 +251,8 @@ const bridge = {
     cloudDesktop: (deviceId, allowed) => ipcRenderer.invoke("companion:cloud-desktop", deviceId, allowed),
     browserControl: (deviceId, allowed) => ipcRenderer.invoke("companion:browser-control", deviceId, allowed),
     revoke: (deviceId) => ipcRenderer.invoke("companion:revoke", deviceId),
+    renewPairing: () => ipcRenderer.invoke("companion:pairing-renew"),
+    routes: (deviceId, routes) => ipcRenderer.invoke("companion:routes", deviceId, routes),
   },
   routines: {
     wakeState: () => ipcRenderer.invoke("routines:wake-state"),
@@ -673,6 +675,7 @@ const bridge = {
       languageListeners.add(listener);
       return () => { languageListeners.delete(listener); };
     },
+    shown: language => { ipcRenderer.send("desktop-language:shown", String(language)); },
   },
 };
 
