@@ -14,7 +14,7 @@
 // lending-target.mjs) on the window's own session.
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,7 +23,8 @@ import { createServer as createViteServer, type ViteDevServer } from "vite";
 import { appPermissionHandlers } from "../../electron/app-permissions.mjs";
 import capabilities from "../../electron/capabilities.cjs";
 import { chatLinkFrom } from "../../electron/chat-link.mjs";
-import { createCleanWorkspace, DEFAULT_PROFILE } from "../../electron/clean-workspace.mjs";
+import { createCleanWorkspace } from "../../electron/clean-workspace.mjs";
+import { createLocalProfiles, createProfileRegistry } from "../../electron/local-profiles.mjs";
 import { parsePairingGrant, withCloudHome } from "../../electron/cloud-home.mjs";
 import { installCloudRail, railPlaces } from "../../electron/cloud-rail.mjs";
 import { createComputerSharing } from "../../electron/computer-sharing.mjs";
@@ -191,8 +192,9 @@ function preloadStandIn(ipcBase: string, localOrigin: string, tab = "window"): s
     for (const notice of ${JSON.stringify(NOTICES)}) localStorage.setItem(notice, "1"); } catch {}
   const listeners = new Map();
   window.__ogbEmit = (channel, ...args) => { for (const listener of [...(listeners.get(channel) ?? [])]) listener({}, ...args); };
+  let sent = 0;
   const call = async (channel, args) => {
-    const response = await fetch(${JSON.stringify(ipcBase)} + "/__ipc/" + channel + "?tab=${tab}", { method: "POST", headers: { "content-type": "text/plain" }, body: JSON.stringify({ args }) });
+    const response = await fetch(${JSON.stringify(ipcBase)} + "/__ipc/" + channel + "?tab=${tab}&seq=" + (++sent), { method: "POST", headers: { "content-type": "text/plain" }, body: JSON.stringify({ args }) });
     const answer = await response.json();
     if (!response.ok) throw new Error(answer.error);
     return answer.value;
@@ -258,6 +260,19 @@ export interface HomeWorld {
   lending: ReturnType<typeof createComputerSharing> | null;
   /** The folder this computer's server runs on now. */
   running(): string;
+  /** With `profiles`: the workspaces of this computer's own as main keeps them (local-profiles.mjs), and the Trash a
+   * removed one goes to. */
+  registry: ReturnType<typeof createProfileRegistry> | null;
+  readonly profiles: ReturnType<typeof createLocalProfiles> | null;
+  trashDir: string;
+  /** A sheet of the rail's is open: its view covers the window. */
+  railCovers(): boolean;
+  setSize(width: number, height: number): Promise<void>;
+  /** The OS's light or dark look, which both pages follow. */
+  theme(dark: boolean): Promise<void>;
+  /** The app quits and opens again: this computer's server stopped as a quit stops it and started on the data folder, and a
+   * new home window that knows nothing of the last run shows home. */
+  restartApp(): Promise<void>;
   /** Each request My Cloud's edge passed on, in order. */
   cloudRequests: Array<{ path: string; at: number }>;
   /** main.mjs's own chat-link delivery, as a link from the OS reaches it. */
@@ -311,6 +326,8 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
   const cleanup: Array<() => Promise<unknown> | unknown> = [];
   let windowRef: TabWindow | null = null, homeRef: ReturnType<typeof createHomeWindow> | null = null, responded: ((details: any) => void) | null = null;
   let railRef: TabWindow | null = null, railHandlers: ReturnType<typeof installCloudRail> | null = null;
+  let railCovers = false;
+  const size = { width: 1280, height: 800 };
 
   // My Cloud's edge: the renderer from source, and its API on the real Cloud-mode server with the edge's own headers.
   const cloudEdge = await vite(cloudPort, "localhost", (server) => {
@@ -364,6 +381,8 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
 
   // Main's ipcMain, reached by the preload's ipcRenderer.
   const handlers = new Map<string, (...args: any[]) => unknown>();
+  /** The last invoke each tab's page sent that main has started on. */
+  const started = new Map<string, number>();
   const syncHandlers = new Map<string, (event: any) => void>();
   const ipcMain = { handle: (channel: string, handler: (...args: any[]) => unknown) => { handlers.set(channel, handler); }, on: (channel: string, listener: (event: any) => void) => { syncHandlers.set(channel, listener); } };
   const ipc: Server = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -383,7 +402,11 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
     }
     if (!sync && !asked) { res.writeHead(200, { "content-type": "text/html" }); res.end("<!doctype html><title>Another server</title><p>Another server</p>"); return; }
     const { args = [] } = JSON.parse((await readBody(req)) || "{}") as { args?: unknown[] };
-    const win = new URLSearchParams(query).get("tab") === "rail" && railRef ? railRef : windowRef!;
+    const params = new URLSearchParams(query), tab = params.get("tab") ?? "window", seq = Number(params.get("seq") ?? 0);
+    // Electron hands a page's invokes to main in the order the page sent them; separate HTTP requests may arrive in any.
+    for (let waits = 0; asked && seq > 1 && (started.get(tab) ?? 0) < seq - 1 && waits < 40; waits++) await new Promise((resolve) => setTimeout(resolve, 50));
+    if (asked) started.set(tab, seq);
+    const win = tab === "rail" && railRef ? railRef : windowRef!;
     const event: Record<string, any> = { sender: win.webContents, senderFrame: win.webContents.mainFrame };
     if (sync) {
       const listener = syncHandlers.get(sync[1]!);
@@ -402,11 +425,15 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
   const STAND_INS: Record<string, (...args: any[]) => unknown> = {
     "desktop:capabilities": (event) => capabilities.desktopCapabilities({ remote: new URL(event.senderFrame.url).origin !== localOrigin, platform: "darwin", env: {}, packaged: true, localConnection: { mode: "unavailable", reason: "fixture" } }),
     "workspaces:state": (event) => ({ ...environments.workspaceSummary(envState), ...(homeAlone() && homeRef!.homePage(event) ? { home: true } : {}),
-      ...(clean?.profile() && new URL(event.senderFrame.url).origin === localOrigin ? { profile: clean.profile() } : {}) }),
+      ...(clean?.profile() && new URL(event.senderFrame.url).origin === localOrigin ? { profile: clean.profile(), ...(localProfiles?.name(clean.profile()!) ? { profileName: localProfiles.name(clean.profile()!) } : {}) } : {}) }),
     "workspaces:menu": () => null,
-    "workspaces:line": (event) => (clean?.active() && new URL(event.senderFrame.url).origin === localOrigin ? (clean.profile() ? { kind: "profile" } : { kind: "clean" }) : homePlaces.line()),
+    "workspaces:line": (event) => (clean?.active() && new URL(event.senderFrame.url).origin === localOrigin ? (clean.profile() ? { kind: "profile", ...(localProfiles?.name(clean.profile()!) ? { name: localProfiles.name(clean.profile()!) } : {}) } : { kind: "clean" }) : homePlaces.line()),
     "rail:offer": () => ({ available: true, hidden: false }),
-    "rail:expand": () => null,
+    // chrome-rail.mjs: while a sheet of the rail's is open, its view covers the window, see-through but for the sheet.
+    "rail:expand": async (_event, covering) => {
+      railCovers = covering === true;
+      if (railRef) await cdp.request("Emulation.setDeviceMetricsOverride", { width: railCovers ? size.width : 36, height: size.height, deviceScaleFactor: 2, mobile: false }, railRef.sessionId);
+    },
     "rail:draws-frame": () => null,
     "desktop-notices:state": () => ({ seen: [...NOTICES], cloud: false }),
     "desktop-notices:seen": () => null,
@@ -521,6 +548,12 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
   const clean = profiles ? createCleanWorkspace({
     dataDir: () => fx.desktopDataDir, running: () => running,
     swap: async (dir: string) => {
+      // A workspace's first config as the app writes it, with the fixture's AIs only, so nothing on this machine's PATH is used.
+      const config = join(dir, "config.json");
+      if (dir !== fx.desktopDataDir && existsSync(config)) {
+        const seeded = JSON.parse(readFileSync(config, "utf8"));
+        if (!seeded.instances) writeFileSync(config, JSON.stringify({ ...seeded, instances: JSON.parse(readFileSync(join(fx.desktopDataDir, "config.json"), "utf8")).instances }));
+      }
       await fx.relaunch({ kill: false, ...(dir === fx.desktopDataDir ? {} : { dataDir: dir }) });
       running = dir;
       persist(environments.withActive(envState, environments.LOCAL_ID));
@@ -531,7 +564,7 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
     changed: () => lending?.cloudChanged(),
   }) : null;
   const ownCopy = async (route: string, init?: RequestInit) => fetch(`${fx.desktopBase}${route}`, { ...init, headers: { "x-openmausbot-desktop-owner": fx.ownerCapability } });
-  const home = createHomeWindow({
+  const makeHome = () => createHomeWindow({
     ...(clean ? { clean } : {}),
     journal: () => (moves.moved ? { v: 1, phase: "done", cloud: { origin: cloudOrigin, account: ACCOUNT_ID, machine: cloudOrigin }, doneAt: Date.now() } : null),
     frozen: async () => (moves.moved ? (await (clean ? clean.realCopy(ownCopy) : ownCopy)("/api/move/freeze")).json() : { frozen: false }),
@@ -561,19 +594,25 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
     versionEveryMs, quietMs,
     log: () => {},
   });
-  homeRef = home;
-  installHomeWindowIpc({ ipcMain, homeWindow: home, cloudPage: (event: any) => (home.homePage(event) ? "cloud" : null) });
-  responded = (details) => home.responded(details);
-  win.webContents.on("did-navigate", (_event: unknown, url: string) => home.navigated(url));
-  win.webContents.on("did-fail-load", (_event: unknown, _code: number, _description: string, url: string) => home.failed(url));
-  cleanup.unshift(() => home.close());
+  // A launch of the app: its home window as main makes it, knowing nothing of the last run.
+  const launchHome = () => {
+    const made = makeHome();
+    homeRef = made;
+    installHomeWindowIpc({ ipcMain, homeWindow: made, cloudPage: (event: any) => (made.homePage(event) ? "cloud" : null) });
+    return made;
+  };
+  let home = launchHome();
+  responded = (details) => homeRef!.responded(details);
+  win.webContents.on("did-navigate", (_event: unknown, url: string) => homeRef!.navigated(url));
+  win.webContents.on("did-fail-load", (_event: unknown, _code: number, _description: string, url: string) => homeRef!.failed(url));
+  cleanup.unshift(() => homeRef!.close());
 
   // main.mjs's own delivery of a link the OS opened: queued, then sent to the page that is home.
   const start = MAIN.indexOf("/** To this computer's page, or to My Cloud's once it is home");
   const end = MAIN.indexOf('app.on("open-url"', start);
   const linkContext = vm.createContext({
     homeWindow: home, rendererOrigin: () => localOrigin, activeRemote: () => null, environmentsState: { environments: [], activeId: "local" },
-    showHome: () => home.show(), workspaceMenuAction: (action: () => unknown) => action(), switchEnvironment: () => {}, LOCAL_ID: "local",
+    showHome: () => homeRef!.show(), workspaceMenuAction: (action: () => unknown) => action(), switchEnvironment: () => {}, LOCAL_ID: "local",
     mainWindow: win, desktopTray: null, startupScreen: null, BrowserWindow: { getAllWindows: () => [win] }, activateExistingWindow: () => true,
     chatLinkFrom, packageUrlFromDeepLink, pendingChatLink: null, pendingPackageInstallUrl: null, URL,
   });
@@ -582,29 +621,50 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
 
   // main.mjs's rail: its list (railList, with railProfiles) and handlers, for the rail's own page in a tab of its own, as
   // wide as the window's rail view.
-  const railList = () => railPlaces({ saved: envState, home: home.cloudOrigin(), mine: cloudOrigin, state: account.state,
-    profiles: clean && home.cloudOrigin() ? [{ id: DEFAULT_PROFILE, active: home.profile() === DEFAULT_PROFILE && envState.activeId === environments.LOCAL_ID }] : [] });
+  // main.mjs's localProfiles: the registry beside the profiles' folders, the Trash a folder of the fixture's own, and what
+  // the server that runs still does asked as main asks it.
+  const trashDir = join(fx.root, "Trash");
+  const registry = profiles ? createProfileRegistry({ dataDir: () => fx.desktopDataDir }) : null;
+  const makeLocal = () => (clean && registry ? createLocalProfiles({ registry, clean, dataDir: () => fx.desktopDataDir,
+    home: () => (homeRef!.cloudOrigin() ? "cloud" : clean.marker().frozen ? null : "local"),
+    window: { openProfile: (id: string) => homeRef!.openProfile(id), profile: () => homeRef!.profile(), showCloud: () => homeRef!.show({ place: "cloud" }) },
+    showLocal: () => { homeRef!.cancel(); persist(environments.withActive(envState, environments.LOCAL_ID)); return win.loadURL(`${localOrigin}/`).catch(() => {}); },
+    onLocal: () => /^https?:/.test(win.url) && new URL(win.url).origin === localOrigin,
+    busy: async () => { const said = await (await ownCopy("/api/move/freeze")).json(); return typeof said?.busy === "string" ? { name: said.busy, what: said.what } : null; },
+    trash: async (dir: string) => { mkdirSync(trashDir, { recursive: true }); renameSync(dir, join(trashDir, `${Date.now()}-${dir.split(/[\\/]/).pop()}`)); },
+    reserved: () => "This Mac", changed: () => railHandlers?.changed() }) : null);
+  let localProfiles = makeLocal();
+  const railList = () => {
+    const settling = localProfiles?.settling() ?? null;
+    return railPlaces({ saved: envState, home: homeRef!.cloudOrigin(), mine: cloudOrigin, state: account.state,
+      profiles: localProfiles?.places({ activeLocal: envState.activeId === environments.LOCAL_ID }) ?? [], computerSettling: settling && settling.id === null ? settling.name : null });
+  };
   let lending: ReturnType<typeof createComputerSharing> | null = null;
   if (profiles) {
     railRef = await TabWindow.open(cdp, preloadStandIn(ipcBase, localOrigin, "rail"));
     await cdp.request("Emulation.setDeviceMetricsOverride", { width: 36, height: 800, deviceScaleFactor: 2, mobile: false }, railRef.sessionId);
+    await cdp.request("Emulation.setDefaultBackgroundColorOverride", { color: { r: 0, g: 0, b: 0, a: 0 } }, railRef.sessionId);
     railHandlers = installCloudRail({
       ipcMain, guard: (handler: any) => handler, trusted: () => true, lists: (event: any) => event.sender === railRef!.webContents, beside: () => true,
       places: railList, account: () => null, clipboard: { writeText: () => {} }, openCloud: async () => {},
-      add: { choices: () => ({ cloud: false, link: false, address: false }), run: () => {} },
+      add: { choices: () => ({ cloud: false, link: true, address: false }), run: () => {} },
       targets: () => [win.webContents, railRef!.webContents],
-      // main.mjs's switchEnvironment for a saved place: My Cloud is shown again.
-      open: (id: string) => {
-        home.cancel();
+      // main.mjs's switchEnvironment: This computer (its own copy, or back from a workspace), or My Cloud shown again.
+      open: async (id: string) => {
+        if (id === environments.LOCAL_ID && clean!.profile()) { await (homeRef!.cloudOrigin() ? localProfiles!.open(clean!.profile()!) : localProfiles!.computer()); railHandlers?.changed(); return; }
+        homeRef!.cancel();
+        if (id === environments.LOCAL_ID) { persist(environments.withActive(envState, environments.LOCAL_ID)); await win.loadURL(`${localOrigin}/`).catch(() => {}); return; }
         const entry = envState.environments.find((candidate: any) => candidate.id === id);
-        if (entry?.origin === home.cloudOrigin()) return home.show({ place: "cloud" }).then(() => railHandlers?.changed());
-        throw new Error("This harness opens My Cloud and This Mac only");
+        if (entry?.origin === homeRef!.cloudOrigin()) return homeRef!.show({ place: "cloud" }).then(() => railHandlers?.changed());
+        throw new Error("This harness opens My Cloud and this computer's own places only");
       },
       openProfile: async (id: string) => {
-        const opened = await home.openProfile(id);
+        const opened = await localProfiles!.open(id);
         railHandlers?.changed();
-        if (!opened) throw new Error("This computer's own place didn't open.");
+        if (opened === false) throw new Error("This computer's own place didn't open.");
       },
+      local: { creatable: () => localProfiles!.creatable(), create: (input: any) => localProfiles!.create(input), rename: (id: string, name: string) => localProfiles!.rename(id, name),
+        recolor: (id: string, color: string | null) => localProfiles!.recolor(id, color), remove: (id: string) => localProfiles!.remove(id), cancel: () => localProfiles!.cancel() } as never,
     });
     win.webContents.on("did-navigate", () => railHandlers?.changed());
     await railRef.loadURL(`${localOrigin}/rail`);
@@ -623,13 +683,40 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
 
   let startup: ReturnType<typeof createStartupScreen> | null = null;
   return {
-    rail: railRef, railList, clean, lending, running: () => running,
-    cloudOrigin, localOrigin, teamOrigin, otherOrigin, window: win, home, account, network, admin, cloudRequests, notifications, hostCache,
+    rail: railRef, railList, clean, lending, running: () => running, registry, trashDir,
+    get profiles() { return localProfiles; },
+    railCovers: () => railCovers,
+    async setSize(width: number, height: number) {
+      Object.assign(size, { width, height });
+      await cdp.request("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 2, mobile: false }, win.sessionId);
+      if (railRef) await cdp.request("Emulation.setDeviceMetricsOverride", { width: railCovers ? width : 36, height, deviceScaleFactor: 2, mobile: false }, railRef.sessionId);
+    },
+    async theme(dark: boolean) {
+      for (const tab of [win, railRef].filter(Boolean) as TabWindow[]) {
+        await cdp.request("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: dark ? "dark" : "light" }] }, tab.sessionId);
+        // The app follows the OS's look once its skin is System; a page reads that choice as it loads.
+        if (await tab.evaluate("localStorage.getItem('omb-skin') === 'system'").catch(() => true)) continue;
+        await tab.evaluate("localStorage.setItem('omb-skin', 'system')").catch(() => {});
+        await cdp.request("Page.reload", {}, tab.sessionId).catch(() => {});
+      }
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+    },
+    async restartApp() {
+      homeRef!.close();
+      // A quit stops this computer's server as main's before-quit does, and the next launch starts it on the data folder.
+      await fx.relaunch({ kill: false });
+      running = fx.desktopDataDir;
+      home = launchHome();
+      localProfiles = makeLocal();
+      await home.show();
+      if (railRef) await railRef.loadURL(`${localOrigin}/rail`);
+    },
+    cloudOrigin, localOrigin, teamOrigin, otherOrigin, window: win, get home() { return homeRef!; }, account, network, admin, cloudRequests, notifications, hostCache,
     get moved() { return moves.moved; },
     set moved(value: boolean) { moves.moved = value; },
     places: homePlaces, environments: () => envState,
-    menu: () => environments.workspaceMenuTemplate(envState, { onSwitch() {}, onConnect() {}, onForget() {}, homeOrigin: home.cloudOrigin() }),
-    async sync() { homePlaces.sync(account.state); await home.changed(); },
+    menu: () => environments.workspaceMenuTemplate(envState, { onSwitch() {}, onConnect() {}, onForget() {}, homeOrigin: homeRef!.cloudOrigin() }),
+    async sync() { homePlaces.sync(account.state); await homeRef!.changed(); },
     get splash() { return world.splash; },
     async launch() {
       const splashTab = await TabWindow.open(cdp);
@@ -640,7 +727,7 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
       startup = createStartupScreen({ BrowserWindow: SplashWindow as never, iconPath: SPLASH_ICON, platform: "darwin", isQuitting: () => false, onQuit: () => {}, onFinished: () => { startup = null; } });
       await startup.ready;
       startup.attach(win as never, { maximized: false });
-      await home.show();
+      await homeRef!.show();
     },
     openLink: (link) => linkContext.queueChatLink(link),
     async cloudCookies() { return (await cdp.request("Network.getCookies", { urls: [cloudOrigin] }, win.sessionId)).cookies; },

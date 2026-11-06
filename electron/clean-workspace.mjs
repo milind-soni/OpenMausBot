@@ -31,7 +31,8 @@ export const cleanWorkspaceDir = (dataDir) => `${dataDir}-clean`;
 export const profilesDir = (dataDir) => `${dataDir}-profiles`;
 /** The profile the rail calls This Mac (or This PC). */
 export const DEFAULT_PROFILE = "default";
-const PROFILE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+/** A profile id: its folder's name, and nothing that could reach outside the profiles' folder. */
+export const PROFILE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 export const profileDir = (dataDir, id) => path.join(profilesDir(dataDir), id);
 
 /** A clean workspace's first config: never the new-user setup, which would read as the person's bots being gone. Connecting
