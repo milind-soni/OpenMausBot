@@ -65,10 +65,10 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   (below), never off the team.
 - **Rules.** A team's Owner and Admins choose the AI engines and computers its bots may use, whether bots may add MCP servers
   of their own, and whether it opens on a phone or with a link (below, "Rules"). What they restrict shows as *Managed by Acme*.
-- **Connected apps.** The team's connections (Composio, HighLevel, MCP sign-ins, an AI key an Admin saved) belong to the
+- **Connected apps.** The team's connections (Composio, MCP sign-ins, an AI key an Admin saved) belong to the
   Team Cloud and serve every member's turn through the broker. An Admin can instead make an app or an MCP server *each
   person's own* (below): then every member connects their own, and only their own chats use it. A person's
-  connections from elsewhere have no way in: a share code, a moved MCP sign-in or a HighLevel connection is refused with
+  connections from elsewhere have no way in: a share code, a moved MCP sign-in or a mailbox is refused with
   *"Personal connections never enter Acme. Ask an admin to connect it for Acme."* A login from a sign-in card is saved by
   an Admin only, for the whole team.
 - **Browsers.** Each private chat with a bot drives that person's own browser of the bot, each group chat the group
@@ -104,7 +104,7 @@ The team's rules live on the Admin (openmaus-cloud `docs/team-cloud.md` "Rules")
 only restricts. `server/cloud-team-policy.ts` fetches it at boot, every 5 minutes and when the Admin's signed `POST
 /api/cloud/team/policy-changed` nudges it, signed with the bootstrap secret (`POST /api/cloud/machines/team-policy`), and each
 request reports the fingerprint in force here. A change applies without a restart. A turn already running keeps its engine
-process and the servers it mounted when it began, HighLevel included, and finishes with them. What it reaches for through this
+process and the servers it mounted when it began, and finishes with them. What it reaches for through this
 machine is refused from that moment, mid-turn too: a connected-apps tool (the turn carries on without it) and the first claim on
 a computer (the turn stops there, in the rule's words; a computer it already holds stays with it until it ends). Every turn that
 starts after the change, a hand-off's included, gets the new rules, even in a chat whose engine process is still warm: that
@@ -118,7 +118,7 @@ process restarts without what is now blocked.
   all come through `mcpServersHost.mounted`, which drops what isn't allowed, whoever connected it; adding or signing in to one is
   refused. `allowedMcpServers: "team"` is the plain form: admins add servers as ever, a bot can't add one, a bot's own doesn't
   start and an engine's own user settings aren't read. Every connected-apps tool crosses `POST /api/internal/connectors/mcp`, which refuses a tool of an app that isn't
-  allowed, and code that could reach any app; connecting one is refused, and HighLevel isn't mounted.
+  allowed, and code that could reach any app; connecting one is refused.
 - **Remote access** on a Team Cloud is what a member's own code opens: "Open on your phone" is refused, codes already made stop
   working and phones already open sign out. The Admin-signed pairing stays: it is how every member's app and the Admin reach
   this machine, so a rule never locks the team out.

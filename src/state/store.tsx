@@ -488,8 +488,8 @@ export interface InstanceInfo extends InstanceEndpointInfo {
     computerMcp?: boolean;
     agentsMcp?: boolean;
     composioMcp?: boolean;
-    /** the engine can mount the native HighLevel tools (a connected app without Composio), the paired phone's app tools and the Data tools */
-    highlevelMcp?: boolean; deviceMcp?: boolean; dataMcp?: boolean;
+    /** the engine can mount the native Email tools (a connected app without Composio), the paired phone's app tools and the Data tools */
+    emailMcp?: boolean; deviceMcp?: boolean; dataMcp?: boolean;
     browserMcp?: boolean;
     images?: boolean;
     effortLevels?: readonly EffortLevel[];

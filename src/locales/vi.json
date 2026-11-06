@@ -14,7 +14,6 @@
   "hostedMcp.setupFailed": "Không thể thêm {service}. Hãy làm mới và thử lại.",
   "hostedMcp.testFailed": "Đã đăng nhập, nhưng không thể tải các công cụ của {service}: {reason} Vui lòng kết nối lại để thử lại.",
   "hostedMcp.loadingTools": "Đã đăng nhập. Đang tải công cụ của {service}…",
-  "highlevel.unavailable": "Không khả dụng ở đây.",
   "postiz.description": "Soạn nháp, lên lịch và đăng bài mạng xã hội bằng Postiz.",
   "postiz.connect": "Kết nối Postiz",
   "postiz.reconnect": "Kết nối lại Postiz",

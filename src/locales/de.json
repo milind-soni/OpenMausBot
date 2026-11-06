@@ -3,7 +3,6 @@
   "voice.gemini.model": "Gemini-Sprachmodell",
   "keys.label.geminiTts": "Gemini-Sprach-API-Schlüssel",
   "keys.purpose.geminiTts": "Gemini-Stimmen für gesprochene Antworten, Sprachnachrichten und Anrufe",
-  "highlevel.unavailable": "Hier nicht verfügbar.",
   "postiz.description": "Social-Media-Beiträge mit Postiz entwerfen, planen und veröffentlichen.",
   "postiz.connect": "Postiz verbinden",
   "postiz.reconnect": "Postiz erneut verbinden",

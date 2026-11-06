@@ -3,7 +3,6 @@
   "voice.gemini.model": "Modèle de synthèse vocale Gemini",
   "keys.label.geminiTts": "Clé API de synthèse vocale Gemini",
   "keys.purpose.geminiTts": "Voix Gemini pour les réponses vocales, les notes vocales et les appels",
-  "highlevel.unavailable": "Non disponible ici.",
   "postiz.description": "Rédigez, planifiez et publiez vos posts sur les réseaux sociaux avec Postiz.",
   "postiz.connect": "Connecter Postiz",
   "postiz.reconnect": "Reconnecter Postiz",

@@ -84,8 +84,8 @@ Cloudflare Worker answers with 404), anything below it below that address, with 
 upstream's own. MCP Settings → **Test** reaches a URL server the same way where turns are boxed
 (`server/bot-box/broker-probe.ts`): a grant made like a turn's, through the broker's socket, revoked when the test
 ends. A server that answers directly but not through the broker fails the test with "Your bots can't reach this
-server", never "Connected", and says the fault is ours. Connected apps (Composio,
-HighLevel) were already behind the harness (`/api/internal/connectors/*` with a per-turn bearer) and stay there.
+server", never "Connected", and says the fault is ours. Connected apps (Composio) were already behind the harness
+(`/api/internal/connectors/*` with a per-turn bearer) and stay there.
 
 A key whose CLI takes no base URL from the environment (xAI, Mistral, Groq, Greenference, Cerebras, MiniMax, Kimi, Cursor, Factory,
 Cline, OpenCode, OpenRouter's own variable) stays raw in that box, and the report names it under `broker.unbrokered`,

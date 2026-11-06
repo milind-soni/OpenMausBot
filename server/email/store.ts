@@ -1,6 +1,6 @@
-// The person's mailboxes with their passwords, sealed under a key of their own (a 0600 file beside the store), as
-// highlevel/store.ts keeps its tokens, so they rest encrypted on a desktop and on a Cloud home alike. No route, card,
-// bot or log ever gets a password back; the box hides the data folder, so no bot's shell can open these files.
+// The person's mailboxes with their passwords, sealed under a key of their own (a 0600 file beside the store), so they
+// rest encrypted on a desktop and on a Cloud home alike. No route, card, bot or log ever gets a password back; the box
+// hides the data folder, so no bot's shell can open these files.
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";

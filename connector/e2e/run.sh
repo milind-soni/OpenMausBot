@@ -3,8 +3,8 @@
 # a fake Admin (connector/test/fake-admin.ts) mints a one-time code; install.sh checks the host, installs the profiles,
 # starts the connector and enrols; then start (the box passes every check), update to another digest, an unclean kill
 # started again, an update forced to fail rolled back (image and data), and uninstall keeping the data.
-# Nothing reaches a production service: the home's connected-apps broker points at a closed loopback port and its
-# HighLevel relay is off; the Admin is the fake one on loopback.
+# Nothing reaches a production service: the home's connected-apps broker points at a closed loopback port; the Admin is
+# the fake one on loopback.
 #   OUT=<evidence folder> bash connector/e2e/run.sh
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -94,7 +94,7 @@ expect '.heartbeats >= 1 and .lastHeartbeat.host.arch == "x86_64" and ([.lastHea
 ENV_JSON=$(jq -cn --arg secret "$SECRET" '{
   OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "e2e-connector-home", OMB_CLOUD_ADMIN_URL: "https://admin.e2e.invalid",
   OMB_PUBLIC_URL: "https://home.e2e.invalid", OMB_CLOUD_BOOTSTRAP_SECRET: $secret,
-  OMB_COMPOSIO_BROKER_URL: "http://127.0.0.1:9", OMB_HIGHLEVEL_RELAY_URL: "off"
+  OMB_COMPOSIO_BROKER_URL: "http://127.0.0.1:9"
 }')
 
 step "start: the home runs with the bot box's settings, and the box passes every check"
@@ -111,7 +111,6 @@ expect '.host | .Init and .ShmSize == 536870912 and (.MaskedPaths // [] | length
 expect '.host | (.CapDrop | map(sub("^CAP_"; ""))) == ["ALL"] and (.CapAdd | map(sub("^CAP_"; "")) | sort) == ["CHOWN", "KILL", "SETGID", "SETUID"]' "$settings" "the home's capabilities"
 expect '.host | .PortBindings["8080/tcp"] == [{"HostIp": "127.0.0.1", "HostPort": "8080"}] and (.SecurityOpt | any(startswith("seccomp="))) and (.SecurityOpt | any(. == "no-new-privileges=true" or . == "no-new-privileges"))' "$settings" "the home's port and seccomp"
 docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' mausbot-home | grep -qx "OMB_COMPOSIO_BROKER_URL=http://127.0.0.1:9" || fail "the home could reach the production connected-apps broker"
-docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' mausbot-home | grep -qx "OMB_HIGHLEVEL_RELAY_URL=off" || fail "the home could reach the production HighLevel relay"
 docker exec -u maus mausbot-home sh -c 'echo kept > /data/e2e-marker'
 
 step "update to another digest: a safety copy, a swap, and the new image's health"

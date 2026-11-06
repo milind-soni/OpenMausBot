@@ -44,7 +44,7 @@ describe("the connector protocol", () => {
 
   it("starts a home only with its contract, OMB_ settings the image does not own, and one-line values, and never echoes a value", () => {
     expect(checkHomeEnv(env)).toEqual({ ok: true, value: env });
-    expect(checkHomeEnv({ ...env, OMB_COMPOSIO_BROKER_URL: "http://127.0.0.1:9", OMB_HIGHLEVEL_RELAY_URL: "off", OMB_CLOUD_TEAM_ID: "t1" }).ok).toBe(true);
+    expect(checkHomeEnv({ ...env, OMB_COMPOSIO_BROKER_URL: "http://127.0.0.1:9", OMB_CLOUD_TEAM_ID: "t1" }).ok).toBe(true);
     for (const name of REQUIRED_HOME_ENV) {
       const { [name]: _dropped, ...rest } = env;
       expect(checkHomeEnv(rest), name).toMatchObject({ ok: false, message: `env must set ${name}` });

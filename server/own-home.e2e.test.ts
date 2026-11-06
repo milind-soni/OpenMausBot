@@ -54,7 +54,7 @@ it("only a server that is the person's alone says it is theirs, takes a move and
   expect(fx.main.chosen()).toBeNull();
   expect((await family.as("POST", "/api/cloud-send/memory", { v: 1, about: "", teams: [] })).status).toBe(403);
   expect((await family.as("POST", "/api/cloud-send/arrived", { v: 1, computer: "Work laptop", webhooks: [] })).status).toBe(404);
-  expect((await family.as("PUT", "/api/cloud-connections/highlevel", {})).status).toBe(404);
+  expect((await family.as("PUT", "/api/cloud-connections/email", { accounts: [] })).status).toBe(404);
   // Garage server takes them from this sign-in: a body it can't read is answered as such, never refused.
   expect((await garage.as("POST", "/api/cloud-send/arrived", { v: 1 })).status).toBe(400);
 }, hostTimeout(60_000));

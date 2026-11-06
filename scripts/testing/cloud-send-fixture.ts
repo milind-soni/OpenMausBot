@@ -157,8 +157,8 @@ exports.createClient = async ({ auth }) => {
  * refuse this computer's token on My Cloud. `toolCalls`: each turn on this computer makes that many tool calls first, so a
  * few turns make a conversation of several pages. `broker`: the connected-apps service both servers use, this computer
  * with an installation of its own as the desktop app registers one, My Cloud registering itself as a Cloud home does.
- * `env`: more of both servers' environment (a fake HighLevel and its relay). `cloudEngine`: lines run at the start of My
- * Cloud's synthetic Claude CLI, to script its turns (fake-claude-cli.ts). */
+ * `env`: more of both servers' environment. `cloudEngine`: lines run at the start of My Cloud's synthetic Claude CLI, to
+ * script its turns (fake-claude-cli.ts). */
 export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswordToken = onePasswordToken, toolCalls = 0, broker, env = {}, cloudEnv = {}, cloudEngine = "", desktopEngine = "", space, cloudSignedIn = true, team }: {
   onePasswordToken: string; cloudOnePasswordToken?: string; toolCalls?: number;
   /** A Team Cloud too (OMB_CLOUD_ROLE=team), with its own environment and synthetic Claude CLI lines. */

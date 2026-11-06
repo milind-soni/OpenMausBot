@@ -774,7 +774,7 @@ describe("Chat MCP tool limit", () => {
     try {
       const { session, names } = await mount(windowsTurn(51, {
         composio: catalog(syntheticToolNames("router", 14)),
-        highlevel: catalog(syntheticToolNames("crm", 20)),
+        email: catalog(syntheticToolNames("mail", 20)),
         device: catalog(syntheticToolNames("phone", 23)),
       }));
       expect(names).toHaveLength(127);
@@ -782,8 +782,8 @@ describe("Chat MCP tool limit", () => {
       expect(names).toEqual(expect.arrayContaining(CORE_COMPUTER.map((tool) => `computer_${tool}`)));
       expect(names.filter((name) => name.startsWith("data_"))).toEqual(["data_table_1", "data_table_2"]);
       expect(session.skipped).toEqual([]);
-      expect(session.trimmed).toEqual([{ server: "data", listed: 2, of: 5 }, { server: "highlevel", listed: 0, of: 20 }, { server: "device", listed: 0, of: 23 }]);
-      expect(trimmedToolsNotice(session.trimmed)).toBe(`"data" listed 2 of 5 tools, "highlevel" listed 0 of 20 tools, "device" listed 0 of 23 tools to fit the model's 128-tool limit; the rest are left out of this turn.`);
+      expect(session.trimmed).toEqual([{ server: "data", listed: 2, of: 5 }, { server: "email", listed: 0, of: 20 }, { server: "device", listed: 0, of: 23 }]);
+      expect(trimmedToolsNotice(session.trimmed)).toBe(`"data" listed 2 of 5 tools, "email" listed 0 of 20 tools, "device" listed 0 of 23 tools to fit the model's 128-tool limit; the rest are left out of this turn.`);
       expect(trimmedToolsNotice([])).toBeUndefined();
     } finally { warn.mockRestore(); }
   });

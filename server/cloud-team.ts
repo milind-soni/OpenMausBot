@@ -61,7 +61,7 @@ export function parseMemberClaim(body: Record<string, unknown>, team: CloudTeam)
   return { ok: true, member: { email: email.trim().toLowerCase(), role } };
 }
 
-/** A member's own connection (a Composio share, an MCP sign-in, HighLevel) has no path into a team. */
+/** A member's own connection (a Composio share, an MCP sign-in, a mailbox) has no path into a team. */
 export function personalConnectionRefusal(team: Pick<CloudTeam, "name">, what = "it"): string {
   return `Personal connections never enter ${team.name}. Ask an admin to connect ${what} for ${team.name}.`;
 }

@@ -514,7 +514,7 @@ export class ProviderRegistry {
             phoneMcp: inst.adapter.capabilities.phoneMcp === true,
             deviceMcp: inst.adapter.capabilities.deviceMcp === true,
             dataMcp: inst.adapter.capabilities.dataMcp === true,
-            highlevelMcp: inst.adapter.capabilities.highlevelMcp === true,
+            emailMcp: inst.adapter.capabilities.emailMcp === true,
             browserMcp: inst.adapter.capabilities.browserMcp === true,
             images: inst.adapter.capabilities.images === true,
             effortLevels: inst.adapter.capabilities.effortLevels,

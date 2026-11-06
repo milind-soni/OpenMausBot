@@ -243,7 +243,7 @@ describe("the managed policy with a team's rules", () => {
     expect(managed.appsCallRefusal([{ slug: "BLAND_AI_CALL" }], ["bland_ai"])).toMatch(/Bland Ai/);
     expect(managed.appsCallRefusal([{ slug: "BLAND_CALL" }], ["bland_ai"])).toBeUndefined();
     expect(managed.appsConnectRefusal(["gmail", "notion"])).toMatch(/Notion/);
-    expect(managed.appAllowed("highlevel")).toBe(false);
+    expect(managed.appAllowed("email")).toBe(false);
     managed.close();
     const open = managedWith({ allowedEngines: ["codex"] });
     expect(open.appsCallRefusal([{ slug: "SLACK_POST" }, { slug: "COMPOSIO_PROXY_EXECUTE" }])).toBeUndefined();

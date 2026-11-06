@@ -189,7 +189,7 @@ These stay unchanged in every pt-BR string.
 | Boat | Name of a third-party provider. Write it only where the English says Boat; the test fails otherwise. |
 | Jev, Maus, Grok Bot | Names of product features or characters. |
 | Claude, Claude Code, ChatGPT, Codex, Grok, Gemini, Cursor, OpenCode, Antigravity, OpenAI, Anthropic, xAI, OpenRouter, Ollama, Groq, Cerebras | Third-party product and company names. |
-| Slack, Discord, Telegram, WhatsApp, Gmail, Notion, GitHub, Chrome, Tailscale, Cloudflare Tunnel, Docker, Podman, HighLevel, Whop, Product Hunt | Third-party product names. |
+| Slack, Discord, Telegram, WhatsApp, Gmail, Notion, GitHub, Chrome, Tailscale, Cloudflare Tunnel, Docker, Podman, Whop, Product Hunt | Third-party product names. |
 | Admin, and labels inside the Admin console | The Admin console is not localized, so pointers keep its English labels. |
 | `SKILL.md`, `MEMORY.md`, `config.toml`, `.ombbackup`, commands, paths, URLs, environment variables, keyboard keys | Code and file names. |
 | MCP, API, CLI, URL, HTTPS, DNS, SSH, USB, ID, CSV, PNG, JPEG | Standard abbreviations. Use `IA` for AI, never `AI`. |
