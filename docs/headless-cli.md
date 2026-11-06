@@ -59,6 +59,7 @@ redaction the transcript uses). Durations are written `90`, `90s`, `5m` or `2h`.
 | 4 | Timed out (the work keeps running) |
 | 5 | Cannot reach the server, not allowed, or the server is too old |
 | 6 | `team apply --check` found changes |
+| 7 | `doctor --host`: this machine is missing something the server needs |
 | 130 | Ctrl-C (the work keeps running) |
 
 ## Commands
@@ -70,6 +71,7 @@ one of its conversations.
 | Command | What it does |
 |---|---|
 | `doctor [--wait 2m]` | Checks the server answers, is new enough, who you are to it (and when your session expires), that an engine is ready, and whether bots have a browser. |
+| `doctor --host` | Checks this Linux machine can run the server and the bots' sandbox (below). |
 | `bots`, `channels`, `models` | Your bots and what each is doing, your rooms, the engines and the models each offers. |
 | `messages TARGET [--limit 30]` | The latest messages of a conversation. |
 | `send TARGET TEXT` | Sends one message and returns at once. `--send-id ID` makes a retry safe: the same id never sends twice. |
@@ -86,6 +88,44 @@ one of its conversations.
 
 The message for `send` and `run` can be the next word, `--text TEXT`,
 `--message-file FILE`, or `-` to read it from stdin.
+
+## doctor --host
+
+Before you install a server, check the machine it will run on:
+
+```text
+$ sudo openmausbot doctor --host --data-dir /srv/mausbot
+ok    Ubuntu 24.04.1 LTS, kernel 6.8.0-45-generic
+ok    x86_64
+ok    Docker 27.3.1
+FAIL  Bot sandbox: AppArmor blocks unprivileged user namespaces
+      fix: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0   (and put it in /etc/sysctl.d/ to keep it after a reboot)
+ok    seccomp is available
+ok    cgroup v2
+ok    412 GB free for /srv/mausbot
+warn  /srv/mausbot is not on an encrypted disk
+      fix: use LUKS full-disk encryption, unless your provider encrypts the disk at rest
+ok    8 CPUs, 31 GB memory (a team of 20 needs 8 CPUs and 16 GB)
+ok    Port 8799 is free for the server
+ok    Ports 80 and 443 are free
+ok    Clock is within 1 s of network time (signed requests allow 300 s)
+1 problem, 1 warning.
+```
+
+It checks the system (Ubuntu 24.04 or 22.04, or Debian 12, are the ones we
+test), the processor (x86_64; arm64 runs a server but not a self-hosted Team
+server), Docker or Podman, that unprivileged user namespaces are allowed (the
+AppArmor and Debian switches), seccomp, cgroup v2, free disk for the data
+folder (`--data-dir`, else `OMB_DATA_DIR` or `~/.openmausbot`: at least 10 GB,
+and 100 GB for a Team server), disk encryption, CPUs and memory (a Team needs
+4 CPUs and 8 GB), the server's port (`--port`, else 8799), ports 80 and 443
+(required with `--domain HOST`, else only a warning), and the clock against
+network time (signed requests allow 300 seconds). It changes nothing.
+
+A problem fails the check (exit 7) and says its fix on the next line; a
+warning does not. `--json` prints `{ ok, problems, warnings, checks: [{ id,
+status, message, fix }] }`. On macOS and Windows it says it checks Linux
+servers, and exits 7.
 
 ## run and wait
 
