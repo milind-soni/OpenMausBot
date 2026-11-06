@@ -94,14 +94,15 @@ it("pairs three people with the Admin's signed claims, each with their role, and
   expect((await fx.onCloud("GET", "/api/auth/session")).body.team).toBeUndefined();
 }, hostTimeout(60_000));
 
-it("keeps every member's session across a restart, never sleeps, and exports for the Owner only", async () => {
+it("keeps every member's session across a restart, waits to sleep only while it is used, and exports for the Owner only", async () => {
   await team.relaunch();
   expect((await team.as(ada, "GET", "/api/auth/session")).status).toBe(200);
   expect((await team.as(cleo, "GET", "/api/auth/session")).status).toBe(200);
   expect((await team.as(owner, "GET", "/api/auth/session")).status).toBe(200);
   const sleep = await team.signed("POST", "/api/cloud/power/sleep", {});
   expect(sleep.status, JSON.stringify(sleep.body)).toBe(409);
-  expect(sleep.body.busy).toContain("team");
+  expect(sleep.body.busy).toEqual(expect.arrayContaining(["recent-activity", "just-woke"]));
+  expect(sleep.body.busy).not.toContain("team");
   expect((await team.signed("GET", "/api/cloud/power")).status).toBe(200);
   expect((await team.signed("GET", "/api/cloud/health")).status).toBe(200);
   // A member reaches nothing an admin does: the team's setup is the admins'.
