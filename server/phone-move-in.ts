@@ -21,13 +21,16 @@ export const PHONE_MOVE_REFUSAL = "This move only brings in the bots your phone 
 const OPEN_MS = 24 * 60 * 60 * 1000;
 const fileSchema = z.object({ v: z.literal(1), bots: z.record(z.string(), z.number().finite()) });
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
-/** Security invariant: no file a phone moves configures an engine or git in a bot's folders, at any depth. Each of these
- * declares settings, hooks, plugins or MCP servers that the engine (or git, which the engines run there) acts on as this
- * computer's owner with no card. Instructions (AGENTS.md, CLAUDE.md) move as notes do. */
-const ENGINE_CONFIG = new Set([".mcp.json", "opencode.json", "opencode.jsonc", ".opencode", ".claude", ".agents", ".codex", ".gemini", ".qwen", ".grok",
-  ".cursor", ".github", ".copilot", ".factory", ".kimi", ".kimi-code", ".cline", ".clinerules", ".pi", ".dsh", ".git"]);
+/** Security invariant: no file a phone moves configures an engine or what it runs in a bot's folders, at any depth: no
+ * dotfile or dot-folder (engine settings, hooks and MCP servers, git, .env), no Bun or OpenCode config, and no name with
+ * "~" (a Windows short name such as GIT~1 opens .git). Each runs code as this computer's owner with no card.
+ * Instructions (AGENTS.md, CLAUDE.md) move as notes do. */
+const RUNS_CODE = new Set(["bunfig.toml", "opencode.json", "opencode.jsonc"]);
 // APFS (macOS 27, checked) and NTFS match names ignoring case, and APFS also matches "ſ" to "s".
-const configuresEngine = (path: string) => path.split("/").some((part) => ENGINE_CONFIG.has(part.normalize("NFKC").toLowerCase()));
+const configuresEngine = (path: string) => path.split("/").some((part) => {
+  const name = part.normalize("NFKC").toLowerCase();
+  return name.startsWith(".") || name.includes("~") || RUNS_CODE.has(name);
+});
 
 /** The routes whose JSON body a phone's move is checked by, each read at its handler's own limit. */
 export const MOVE_BODY_LIMITS = {

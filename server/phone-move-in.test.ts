@@ -72,7 +72,7 @@ async function create(moveIn: ReturnType<typeof createPhoneMoveIn>, id = SCOUT, 
 }
 const refused = { status: 403, body: { error: PHONE_MOVE_REFUSAL } };
 
-/** A paired device's `POST /api/bots` through the guard and the create route, whose store makes nothing. */
+/** `POST /api/bots` with the companion header, through the guard and the create route; the fake store makes no bot. */
 async function createThrough(moveIn: ReturnType<typeof createPhoneMoveIn>, auth: RequestAuth, body: Record<string, unknown>) {
   let answered: { status: number; body: any } | null = null;
   const url = new URL("http://127.0.0.1/api/bots");
@@ -198,7 +198,7 @@ describe("a phone's move into this computer", () => {
     expect(existsSync(join(dir, "phone-move-ins.json"))).toBe(false);
   });
 
-  it("refuses a path an engine or git reads as its configuration, in any capitals and at any depth, and lets notes and instructions through", async () => {
+  it("refuses dotfiles, Bun and OpenCode config and short names, in any capitals and at any depth, and lets notes and instructions through", async () => {
     const moveIn = setup();
     await create(moveIn);
     const file = (path: string) => `/api/cloud-send/files?path=${encodeURIComponent(path)}&size=1&sha256=x&offset=0&mode=new`;
@@ -206,12 +206,14 @@ describe("a phone's move into this computer", () => {
       ".gemini/settings.json", ".qwen/settings.json", ".codex/config.toml", ".grok/config.toml", ".cursor/mcp.json", ".github/hooks/hooks.json",
       ".copilot/mcp-config.json", ".factory/mcp.json", ".kimi/config.toml", ".kimi-code/config.toml", ".cline/settings.json", ".clinerules/hooks/PreToolUse",
       ".pi/extensions/x.ts", ".dsh/config.yaml", ".git/config", ".git/hooks/pre-commit",
-      ".MCP.JSON", ".Claude/settings.json", "OpenCode.JSON", ".mcp.j\u017fon", "trip/.Git/config", "trip/site/.gemini/settings.json"]) {
+      ".MCP.JSON", ".Claude/settings.json", "OpenCode.JSON", ".mcp.j\u017fon", "trip/.Git/config", "trip/site/.gemini/settings.json",
+      ".env", ".env.local", "bunfig.toml", "BUNFIG.TOML", "trip/bunfig.toml", ".agent/x", "GIT~1/config", "a/.hidden/b", ".gitignore", "trip/.mcp.json.bak",
+      ".g\u0131t/config", "\uff0emcp.json", "GIT\uff5e1/config"]) {
       const answer = await run(moveIn, phone, "POST", file(`workspaces/${SCOUT}/${rel}`));
       expect([answer.status, answer.body, answer.reads, answer.resumed], rel).toEqual([403, { error: PHONE_MOVE_REFUSAL }, 0, 1]);
     }
     expect(await run(moveIn, phone, "POST", file(`task-workspaces/${SCOUT}/t1/.mcp.json`))).toMatchObject(refused);
-    for (const rel of ["notes.md", "AGENTS.md", "CLAUDE.md", "GEMINI.md", ".gitignore", "my.mcp.json", "opencode.json.md", "github/readme.md", "trip/.mcp.json.bak"]) {
+    for (const rel of ["notes.md", "AGENTS.md", "CLAUDE.md", "GEMINI.md", "MEMORY.md", "skills/x/SKILL.md", "my.mcp.json", "opencode.json.md", "bunfig.toml.md", "github/readme.md", "trip/notes.v2.md"]) {
       expect((await run(moveIn, phone, "POST", file(`workspaces/${SCOUT}/${rel}`))).out, rel).toBe(PASS);
     }
   });
