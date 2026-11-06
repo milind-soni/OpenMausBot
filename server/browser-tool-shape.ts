@@ -22,6 +22,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+export function verifiedBrowserNavigation(args: unknown, observation: unknown): boolean {
+  if (!isRecord(observation) || observation.isError === true || !Array.isArray(observation.content)) return false;
+  const structured = observation.structuredContent;
+  const response = isRecord(structured) ? structured.response : undefined;
+  const data = isRecord(response) ? response.data : undefined;
+  const url = isRecord(args) ? args.url : undefined;
+  if (typeof url === "string" && /^https?:\/\//i.test(url.trim()) &&
+      isRecord(data) && data.origin === "about:blank") return false;
+  return observation.content.some((item) => isRecord(item) && item.type === "text" &&
+    typeof item.text === "string" && item.text.trim().length > 0);
+}
+
 /** agent-browser 0.37.0 fetches a `url` given to agent_browser_read with its own HTTP client, around the browser and its
  * egress gate, and ignores every proxy setting; without one it reads the open tab. */
 const READ_TOOL = "agent_browser_read";

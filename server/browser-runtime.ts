@@ -1,6 +1,6 @@
 import { killCliTree, spawnCli } from "./procs.ts";
 import { scrubHeldSecrets } from "../shared/redact.ts";
-import { DEFAULT_BROWSER_RESULT_BUDGET, describePageChange, OBSERVE_PAGE_SCRIPT, parsePageState, READ_OPEN_PAGE_ONLY, readsAroundBrowser, scrubBrowserResult, shapeBrowserToolResult, slimBrowserToolList, stripHarnessOwnedArguments, type PageState } from "./browser-tool-shape.ts";
+import { DEFAULT_BROWSER_RESULT_BUDGET, describePageChange, OBSERVE_PAGE_SCRIPT, parsePageState, READ_OPEN_PAGE_ONLY, readsAroundBrowser, scrubBrowserResult, shapeBrowserToolResult, slimBrowserToolList, stripHarnessOwnedArguments, verifiedBrowserNavigation, type PageState } from "./browser-tool-shape.ts";
 import { BrowserLanes } from "./browser-lane.ts";
 import { PageSizes, type PageSize } from "./browser-page-size.ts";
 import { SECRET_ON_PAGE, SecretHolds, type SecretHold } from "./browser-secret-hold.ts";
@@ -608,9 +608,7 @@ export class BrowserRuntime {
           beforeDispatch?.();
           const navigation = result as { content?: unknown[]; structuredContent?: unknown };
           const page = observation as { content?: unknown[]; isError?: boolean } | null;
-          const observed = page?.isError !== true && Array.isArray(page?.content) && page.content.some((item) =>
-            item && typeof item === "object" && (item as { type?: unknown }).type === "text" &&
-            typeof (item as { text?: unknown }).text === "string" && (item as { text: string }).text.trim().length > 0);
+          const observed = verifiedBrowserNavigation(args, observation);
           result = {
             content: [
               ...(Array.isArray(navigation.content) ? navigation.content : []),
