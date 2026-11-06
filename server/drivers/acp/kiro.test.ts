@@ -72,8 +72,8 @@ describe("Kiro fallback model", () => {
 describe("Kiro permission handling — Full/Ask contract", () => {
   it("Full includes policyPreset and Ask omits it in session/new", async () => {
     const FAKE_CLI = join(import.meta.dirname, "../../testing/fake-acp-cli.ts");
-    const dumpFull = join(mkdtempSync(join(tmpdir(), "omb-kiro-full-")), "dump.json");
-    const scratchFull = dumpFull.replace("/dump.json", "");
+    const scratchFull = mkdtempSync(join(tmpdir(), "omb-kiro-full-"));
+    const dumpFull = join(scratchFull, "dump.json");
     const instFull = await KiroAgentDriver.create({
       instanceId: "kiro-full-meta", displayName: "Kiro", enabled: true,
       config: { cli: FAKE_CLI, fullAuto: true, workspace: scratchFull },
@@ -85,8 +85,8 @@ describe("Kiro permission handling — Full/Ask contract", () => {
     expect(JSON.parse(readFileSync(`${dumpFull}.session.json`, "utf8"))._meta).toEqual({ kiro: { policyPreset: ["allow-all"] } });
     recFull.stop(); await instFull.dispose(); await removeTempDir(scratchFull);
 
-    const dumpAsk = join(mkdtempSync(join(tmpdir(), "omb-kiro-ask-")), "dump.json");
-    const scratchAsk = dumpAsk.replace("/dump.json", "");
+    const scratchAsk = mkdtempSync(join(tmpdir(), "omb-kiro-ask-"));
+    const dumpAsk = join(scratchAsk, "dump.json");
     const instAsk = await KiroAgentDriver.create({
       instanceId: "kiro-ask-meta", displayName: "Kiro", enabled: true,
       config: { cli: FAKE_CLI, fullAuto: false, workspace: scratchAsk },
@@ -101,8 +101,8 @@ describe("Kiro permission handling — Full/Ask contract", () => {
 
   it("Full→Ask forces new native session via contractKey", async () => {
     const FAKE_CLI = join(import.meta.dirname, "../../testing/fake-acp-cli.ts");
-    const dump = join(mkdtempSync(join(tmpdir(), "omb-kiro-downgrade-")), "dump.json");
-    const scratch = dump.replace("/dump.json", "");
+    const scratch = mkdtempSync(join(tmpdir(), "omb-kiro-downgrade-"));
+    const dump = join(scratch, "dump.json");
     const inst = await KiroAgentDriver.create({
       instanceId: "kiro-downgrade", displayName: "Kiro", enabled: true,
       config: { cli: FAKE_CLI, fullAuto: false, workspace: scratch },
