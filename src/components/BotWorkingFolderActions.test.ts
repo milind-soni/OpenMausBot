@@ -40,7 +40,7 @@ async function ready() {
 describe("bot working folder actions", () => {
   it("prepares the folder then reveals the server-returned path and closes a menu", async () => {
     const closed = vi.fn();
-    render({ menu: true, onOpened: closed });
+    render({ menu: true, onCompleted: closed });
     await ready();
     expect(copyButton()).toBeNull();
     expect(openButton().title).toBe(folder.path);
@@ -50,6 +50,7 @@ describe("bot working folder actions", () => {
     await vi.waitFor(() => expect(reveal).toHaveBeenCalledWith("C:\\fixture\\Updated"));
     expect(mocks.api).toHaveBeenLastCalledWith("/api/bots/atlas/working-folder", { method: "POST", body: "{}" });
     expect(closed).toHaveBeenCalledOnce();
+    expect(closed).toHaveBeenCalledWith("open");
   });
 
   it.each(["remote", "browser", "server"])("shows only Copy path for %s", async (kind) => {
@@ -76,7 +77,7 @@ describe("bot working folder actions", () => {
 
   it.each(["prepare", "missing", "invalid", "rejected"])("shows an opening failure for %s and keeps the menu open", async (failure) => {
     const closed = vi.fn();
-    render({ menu: true, onOpened: closed });
+    render({ menu: true, onCompleted: closed });
     await ready();
     if (failure === "prepare") mocks.api.mockRejectedValueOnce(new Error("denied"));
     else if (failure === "rejected") reveal.mockRejectedValueOnce(new Error("denied"));
@@ -86,6 +87,22 @@ describe("bot working folder actions", () => {
     expect(host.querySelector('[role="status"]')).toBeNull();
     expect(closed).not.toHaveBeenCalled();
     expect(openButton().disabled).toBe(false);
+  });
+
+  it.each(["copied", "failed"])("closes the copy menu only on success: %s", async (result) => {
+    const completed = vi.fn();
+    mocks.api.mockResolvedValue({ ...folder, local: false });
+    mocks.copy.mockResolvedValue(result);
+    render({ menu: true, onCompleted: completed });
+    await vi.waitFor(() => expect(copyButton()).not.toBeNull());
+    copyButton().click();
+    if (result === "copied") {
+      await vi.waitFor(() => expect(completed).toHaveBeenCalledWith("copy"));
+      expect(completed).toHaveBeenCalledOnce();
+    } else {
+      await vi.waitFor(() => expect(document.querySelector('[data-notice-toast]')?.textContent).toContain("Could not copy path"));
+      expect(completed).not.toHaveBeenCalled();
+    }
   });
 
   it("drops a pending open after switching bots", async () => {

@@ -7,11 +7,12 @@ import { BotEditorStore, initialState, reducer, type Action, type AppState, type
 import { BotContextMenu } from "./Sidebar";
 import { setLocale } from "@/lib/i18n";
 
+const workingFolder = vi.hoisted(() => ({ path: null as string | null, local: false }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return {
     ...original,
-    api: (path: string, opts?: RequestInit) => path.endsWith("/working-folder") ? Promise.resolve({ path: null, local: false }) : original.api(path, opts),
+    api: (path: string, opts?: RequestInit) => path.endsWith("/working-folder") ? Promise.resolve({ ...workingFolder }) : original.api(path, opts),
   };
 });
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
@@ -45,6 +46,8 @@ const response = (threadId: string) => {
 };
 
 beforeEach(() => {
+  workingFolder.path = null;
+  workingFolder.local = false;
   mode.advanced = true;
   setLocale("en"); document.documentElement.dataset.reducedMotion = "true";
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
@@ -52,6 +55,19 @@ beforeEach(() => {
   menu = { botId: bot.id, x: 50, y: 50 }; onClose.mockReset();
 });
 afterEach(() => { flushSync(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); delete window.ogb; setLocale("en"); });
+
+it.each([true, false])("closes after copying and keeps the toast visible with advanced mode %s", async (advanced) => {
+  mode.advanced = advanced;
+  workingFolder.path = "C:\\fixture\\Reviewer";
+  vi.stubGlobal("navigator", { language: "en", clipboard: { writeText: vi.fn(async () => {}) } });
+  onClose.mockImplementation(() => { menu = null; draw(); });
+  draw();
+  await vi.waitFor(() => expect(button("Copy path")).toBeDefined());
+  flushSync(() => button("Copy path").click());
+  await vi.waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  await vi.waitFor(() => expect(document.querySelector("[data-bot-menu]")).toBeNull());
+  expect(document.querySelector("[data-notice-toast]")?.textContent).toBe("Path copied");
+});
 
 describe("bot menu bulk reads", () => {
   it("remains available with the full thread tree hidden, including Portuguese copy", () => {

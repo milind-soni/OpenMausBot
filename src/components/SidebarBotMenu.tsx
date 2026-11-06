@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { BotWorkingFolderActions } from "./BotWorkingFolderActions";
+import { NoticeToast } from "./NoticeCard";
 import { createPortal } from "react-dom";
 import { Archive, BellDot, Check, CheckCheck, ChevronRight, ClipboardCopy, Copy, Crown, FolderMinus, FolderOpen, FolderPlus, Loader2, MessagesSquare, MoreHorizontal, Pencil, Pin, PinOff, SquarePen, Star, Trash2, Users } from "lucide-react";
 import { api, useStore, openBot, type Bot } from "@/state/store";
@@ -57,6 +58,12 @@ export function BotContextMenu({
   const hoveredRow = useRef<Element | null>(null);
   const [flyout, setFlyout] = useState<Flyout | null>(null);
   const [moreEngaged, setMoreEngaged] = useState(false);
+  const [folderCopied, setFolderCopied] = useState(false);
+  const folderNotice = folderCopied ? createPortal(<NoticeToast text={t("botFolder.copied")} onDone={() => setFolderCopied(false)} />, document.body) : null;
+  const folderCompleted = (action: "open" | "copy") => {
+    if (action === "copy") setFolderCopied(true);
+    onClose();
+  };
   const moreIntent = useRef<SubmenuIntent | null>(null);
   moreIntent.current ??= submenuIntent({
     open: (key) => setFlyout(key as Flyout),
@@ -150,7 +157,7 @@ export function BotContextMenu({
     sheetOut.style.top = `${place.top}px`;
   });
 
-  if (!motion.shown || !bot || !shown) return <>{clearThreads.dialog}{moveToTeam.dialog}</>;
+  if (!motion.shown || !bot || !shown) return <>{folderNotice}{clearThreads.dialog}{moveToTeam.dialog}</>;
   const deleting = state.deletingBots[bot.id] === true;
   const engine = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
   const canCoordinate = engine?.capabilities?.agentsMcp === true;
@@ -282,7 +289,7 @@ export function BotContextMenu({
       item(<Archive size={16} className="text-ink-secondary" />, t("sidebar.bot.archive"), () => onArchive(bot), { disabled: archiveBlocked, hint: archiveHint }),
       <BotDeleteMenuItem key="delete" deleting={deleting} className={MENU_ITEM} onClick={() => { onClose(); onDelete(bot); }} />,
     ];
-    return <>{clearThreads.dialog}{moveToTeam.dialog}{createPortal(
+    return <>{folderNotice}{clearThreads.dialog}{moveToTeam.dialog}{createPortal(
       <div
         ref={menuRef}
         data-bot-menu
@@ -309,7 +316,7 @@ export function BotContextMenu({
         style={{ top: shown.y, left: shown.x }}
         className={cn("fixed z-40 max-h-[calc(100dvh-16px)] w-max min-w-[198px] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain", MENU_SHEET, motion.className)} {...motion.exitProps}
       >
-        <BotWorkingFolderActions bot={bot} menu onOpened={onClose} />
+        <BotWorkingFolderActions bot={bot} menu onCompleted={folderCompleted} />
         {remoteClient ? [moveToSection, ...threads, ...(rename ? [divider("rename"), rename] : []), divider("copy"), copyId, moreRow] : [
           item(
             bot.pinned ? <PinOff size={16} className="text-ink-secondary" /> : <Pin size={16} className="text-ink-secondary" />,
@@ -360,7 +367,7 @@ export function BotContextMenu({
     )}</>;
   }
 
-  return <>{clearThreads.dialog}{moveToTeam.dialog}{createPortal(
+  return <>{folderNotice}{clearThreads.dialog}{moveToTeam.dialog}{createPortal(
     <div
       ref={menuRef}
       data-bot-menu
@@ -371,7 +378,7 @@ export function BotContextMenu({
       style={{ top: shown.y, left: shown.x }}
       className={cn("fixed z-40 max-h-[calc(100dvh-16px)] w-max min-w-[198px] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain", MENU_SHEET, motion.className)} {...motion.exitProps}
     >
-      <BotWorkingFolderActions bot={bot} menu onOpened={onClose} />
+      <BotWorkingFolderActions bot={bot} menu onCompleted={folderCompleted} />
       {showThreads && <>
         {item(<SquarePen size={16} className="text-ink-secondary" />, t("task.newShort"), () => dispatch({ type: "newTask", botId: bot.id }))}
         {admin && item(<FolderOpen size={16} className="shrink-0 text-ink-secondary" />, t("task.folder.new"), () => onNewTaskFolder(bot.id))}
