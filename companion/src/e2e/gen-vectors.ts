@@ -246,6 +246,7 @@ function v5() {
     ["go_away_0", goAwayFrame(0), "GoAway normal"],
     ["go_away_1", goAwayFrame(1), "GoAway protocol error"],
     ["go_away_2", goAwayFrame(2), "GoAway internal error"],
+    ["go_away_3", goAwayFrame(3), "GoAway removed: only from the computer, before it closes with 4001"],
     ["stream_3", openFrame(3), "the next stream the phone opens"],
   ];
   return frames.map(([name, frame, about]) => {
@@ -475,6 +476,7 @@ function v6Sessions() {
       steps: [{ in: openFrame(1) }, ...fill(1, 1024 * 1024), { consume: { stream: 1, bytes: 1024 * 1024 - 1 } }, { consume: { stream: 1, bytes: 1 } }],
     },
     { name: "phone_open_ids", about: "the phone opens 1, 3, 5", role: "phone", steps: [{ open: true }, { open: true }, { open: true }] },
+    { name: "phone_hears_removed", about: "GoAway removed is no protocol error at the phone; it sends nothing back", role: "phone", steps: [{ open: true }, { in: goAwayFrame(3) }] },
   ];
   return scripts.map((script) => {
     const result = runScript(script);
