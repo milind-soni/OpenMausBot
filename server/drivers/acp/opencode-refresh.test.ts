@@ -110,6 +110,13 @@ describe("OpenCode Refresh", () => {
     await expect.poll(refreshes).toBe(2);
   });
 
+  it("leaves OpenCode 1's catalog lock free, so a refresh right after a read gets past it", async () => {
+    const { env, scratch } = home(STALE, FRESH);
+    env.FAKE_ACP_MODELS_LOCK = join(scratch, "models.lock");
+    expect(ids(await discoverOpenCodeModels(env, FAKE_CLI))).not.toContain("venice/deepseek-v4-1-flash-uncensored");
+    expect(ids(await discoverOpenCodeModels(env, FAKE_CLI, { refresh: true, settleMs: 0 }))).toContain("venice/deepseek-v4-1-flash-uncensored");
+  });
+
   it("picks up the catalog OpenCode 2 refreshes itself, as it has no `models --refresh`", async () => {
     const { env } = home(STALE, FRESH);
     env.FAKE_ACP_MODELS_LIST = "v2";
