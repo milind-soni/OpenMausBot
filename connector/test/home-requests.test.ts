@@ -34,20 +34,28 @@ const read = (stream: Duplex) => new Promise<string>((resolve) => {
 
 async function home() {
   const requests: string[] = [];
+  const counts = { opened: 0, closed: 0 };
   const server = createServer((req, res) => {
     requests.push(`${req.method} ${req.url}`);
     req.resume();
     req.on("end", () => res.writeHead(200, { "content-type": "text/plain", connection: "close" }).end("ok"));
   });
+  server.on("connection", (socket) => {
+    counts.opened += 1;
+    socket.on("close", () => { counts.closed += 1; });
+  });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  cleanups.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  cleanups.push(() => new Promise<void>((resolve) => {
+    server.closeAllConnections();
+    server.close(() => resolve());
+  }));
   const port = (server.address() as AddressInfo).port;
   const connectHome = () => new Promise<Duplex>((resolve, reject) => {
     const socket = createConnection({ host: "127.0.0.1", port });
     socket.once("connect", () => resolve(socket));
     socket.once("error", reject);
   });
-  return { requests, connectHome };
+  return { requests, connectHome, counts };
 }
 
 describe("the Admin's requests to the home", () => {
@@ -76,7 +84,7 @@ describe("the Admin's requests to the home", () => {
   });
 
   it("over the channel: the home answers the first request, a pipelined second never reaches it, and both ends hold the profile", async () => {
-    const { requests, connectHome } = await home();
+    const { requests, connectHome, counts } = await home();
     const audits: AuditEvent[] = [];
     const { admin, failures } = joined((stream, accept) => serveRequest(stream, accept, { connectHome, record: (event) => audits.push(event) }));
     const one = admin.openStream();
@@ -85,6 +93,9 @@ describe("the Admin's requests to the home", () => {
     const text = await answer;
     expect(text).toBe("HTTP/1.1 400 Bad Request\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
     expect(requests).toEqual([]);
+    // The home's connection, asked for when the first head arrived, is dropped once the stream was refused.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(counts.opened).toBe(counts.closed);
     const two = admin.openStream();
     const second = read(two);
     two.end("GET /api/cloud/health?token=secret HTTP/1.1\r\nhost: home.example\r\n\r\n");

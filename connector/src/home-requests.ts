@@ -120,6 +120,7 @@ export function serveRequest(stream: Duplex, accept: () => void, options: { conn
   let head: RequestHead | null = null;
   let body: string | null = null;
   let piped = false;
+  let refused = false;
   let recorded = false;
   // A pairing's body has passed the gate before the home can answer it, so it is known when the status is.
   const record = (status: number) => {
@@ -130,7 +131,7 @@ export function serveRequest(stream: Duplex, accept: () => void, options: { conn
   const gate = new RequestGate((parsed) => {
     head = parsed;
     options.connectHome().then((home) => {
-      if (stream.destroyed) return void home.destroy();
+      if (stream.destroyed || refused) return void home.destroy();
       piped = true;
       home.on("error", () => stream.destroy());
       home.on("close", () => {
@@ -148,6 +149,7 @@ export function serveRequest(stream: Duplex, accept: () => void, options: { conn
     body = read;
   });
   gate.on("error", () => {
+    refused = true;
     record(400);
     if (piped) stream.destroy();
     else if (!stream.destroyed) stream.end(reply(400, "Bad Request"));
