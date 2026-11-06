@@ -86,6 +86,14 @@ export function createCloudSync(options: { dataDir: string; root?: string; now?:
     if (!UUID.test(id)) throw new SyncError(404, { error: "no such upload" });
     try { return JSON.parse(readFileSync(uploadFile(id, "json"), "utf8")) as Upload; } catch { throw new SyncError(404, { error: "no such upload" }); }
   };
+  const pendingUploads = new Map<string, Promise<unknown>>();
+  const mutateUpload = <T>(id: string, work: (upload: Upload) => T | Promise<T>): Promise<T> => {
+    const run = (pendingUploads.get(id) ?? Promise.resolve()).then(() => work(readUpload(id)));
+    const settled = run.catch(() => undefined);
+    pendingUploads.set(id, settled);
+    void settled.then(() => { if (pendingUploads.get(id) === settled) pendingUploads.delete(id); });
+    return run;
+  };
   const saveUpload = (upload: Upload) => writeFileAtomic(uploadFile(upload.id, "json"), JSON.stringify(upload), { mode: 0o600 });
   const dropUpload = (id: string) => { rmSync(uploadFile(id, "json"), { force: true }); rmSync(uploadFile(id, "part"), { force: true }); };
   const uploads = (): Upload[] => {
@@ -107,7 +115,7 @@ export function createCloudSync(options: { dataDir: string; root?: string; now?:
     noteChange,
     summary() {
       store.sweepTrash();
-      for (const upload of uploads()) if (upload.updatedAt + UPLOAD_STALE_MS < now()) dropUpload(upload.id);
+      for (const upload of uploads()) if (!pendingUploads.has(upload.id) && upload.updatedAt + UPLOAD_STALE_MS < now()) dropUpload(upload.id);
       return { folders: store.folders(), cursor, disk: disk() };
     },
     register(body: unknown): SyncFolder {
@@ -158,43 +166,44 @@ export function createCloudSync(options: { dataDir: string; root?: string; now?:
       return { uploadId: upload.id, received: 0 };
     },
     async writePart(uploadId: string, offset: number, body: AsyncIterable<Buffer>): Promise<{ received: number }> {
-      const upload = readUpload(uploadId);
-      if (offset !== upload.received) throw new SyncError(409, { error: "wrong offset", received: upload.received });
-      const fd = openSync(uploadFile(uploadId, "part"), "r+");
-      let written = 0;
-      try {
-        for await (const chunk of body) {
-          if (written + chunk.length > PART_MAX || upload.received + written + chunk.length > upload.size) throw new SyncError(413, { error: "part too large" });
-          writeSync(fd, chunk, 0, chunk.length, upload.received + written);
-          written += chunk.length;
-        }
-      } finally { closeSync(fd); }
-      upload.received += written;
-      upload.updatedAt = now();
-      saveUpload(upload);
-      return { received: upload.received };
+      return mutateUpload(uploadId, async (upload) => {
+        if (offset !== upload.received) throw new SyncError(409, { error: "wrong offset", received: upload.received });
+        const fd = openSync(uploadFile(uploadId, "part"), "r+");
+        let written = 0;
+        try {
+          for await (const chunk of body) {
+            if (written + chunk.length > PART_MAX || upload.received + written + chunk.length > upload.size) throw new SyncError(413, { error: "part too large" });
+            writeSync(fd, chunk, 0, chunk.length, upload.received + written);
+            written += chunk.length;
+          }
+        } finally { closeSync(fd); }
+        upload.received += written;
+        upload.updatedAt = now();
+        saveUpload(upload);
+        return { received: upload.received };
+      });
     },
     async commit(uploadId: string): Promise<{ sha256: string }> {
-      const upload = readUpload(uploadId);
-      if (upload.received !== upload.size) throw new SyncError(409, { error: "upload incomplete", received: upload.received });
-      const part = uploadFile(uploadId, "part");
-      if (await sha256File(part) !== upload.sha256) { dropUpload(uploadId); throw new SyncError(422, { error: "the file's bytes do not match its hash" }); }
-      return mutate(upload.folderId, upload.path, async () => {
-        readUpload(uploadId);
-        const folder = folderOf(upload.folderId);
-        const target = fileOf(folder, upload.path);
-        const current = await store.current(folder, upload.path);
-        if ((current?.sha256 ?? null) !== upload.baseSha256) { dropUpload(uploadId); throw new SyncError(409, { error: "changed on My Cloud", current }); }
-        if (current) store.toTrash(folder, upload.path, target);
-        mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
-        renameSync(part, target);
-        // A copy from the person's computer: bots read it, and save their own work in their own folder.
-        if (folder.kind === "pc") chmodSync(target, 0o444);
-        dropUpload(uploadId);
-        const stat = lstatSync(target);
-        store.remember(folder, { path: upload.path, size: stat.size, mtimeMs: stat.mtimeMs, sha256: upload.sha256 });
-        noteChange(folder.id);
-        return { sha256: upload.sha256 };
+      return mutateUpload(uploadId, async (upload) => {
+        if (upload.received !== upload.size) throw new SyncError(409, { error: "upload incomplete", received: upload.received });
+        const part = uploadFile(uploadId, "part");
+        if (await sha256File(part) !== upload.sha256) { dropUpload(uploadId); throw new SyncError(422, { error: "the file's bytes do not match its hash" }); }
+        return mutate(upload.folderId, upload.path, async () => {
+          const folder = folderOf(upload.folderId);
+          const target = fileOf(folder, upload.path);
+          const current = await store.current(folder, upload.path);
+          if ((current?.sha256 ?? null) !== upload.baseSha256) { dropUpload(uploadId); throw new SyncError(409, { error: "changed on My Cloud", current }); }
+          if (current) store.toTrash(folder, upload.path, target);
+          mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+          renameSync(part, target);
+          // A copy from the person's computer: bots read it, and save their own work in their own folder.
+          if (folder.kind === "pc") chmodSync(target, 0o444);
+          dropUpload(uploadId);
+          const stat = lstatSync(target);
+          store.remember(folder, { path: upload.path, size: stat.size, mtimeMs: stat.mtimeMs, sha256: upload.sha256 });
+          noteChange(folder.id);
+          return { sha256: upload.sha256 };
+        });
       });
     },
     async download(id: string, path: unknown): Promise<{ file: string; size: number; sha256: string }> {

@@ -10,11 +10,12 @@ import { createCloudSync, type CloudSync } from "./cloud-sync.ts";
 const PC = "3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93";
 const GB = 1024 ** 3;
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
-let home: string, sync: CloudSync, folder: files.SyncFolder;
+let home: string, sync: CloudSync, folder: files.SyncFolder, now: number;
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "omb-sync-concurrent-"));
-  sync = createCloudSync({ dataDir: join(home, "data"), root: join(home, "Synced"), now: () => new Date(2026, 9, 15, 12).getTime(), statfs: () => ({ totalBytes: 10 * GB, freeBytes: 9 * GB }) });
+  now = new Date(2026, 9, 15, 12).getTime();
+  sync = createCloudSync({ dataDir: join(home, "data"), root: join(home, "Synced"), now: () => now, statfs: () => ({ totalBytes: 10 * GB, freeBytes: 9 * GB }) });
   folder = sync.register({ computerId: PC, computerName: "PC", pcPath: "/project", name: "Project" });
 });
 afterEach(() => {
@@ -46,6 +47,101 @@ function holdCurrent() {
   });
   return { entered: entered.promise, release: release.resolve };
 }
+
+function holdHash() {
+  const entered = gate(), release = gate();
+  const hash = files.sha256File;
+  vi.spyOn(files, "sha256File").mockImplementationOnce(async (path) => {
+    const result = await hash(path);
+    entered.resolve();
+    await release.promise;
+    return result;
+  });
+  return { entered: entered.promise, release: release.resolve };
+}
+
+it("rechecks a duplicate part's offset after the open writer closes", async () => {
+  const { uploadId } = sync.beginUpload(folder.id, { path: "a.txt", size: 4, sha256: sha("good"), baseSha256: null });
+  const entered = gate(), release = gate();
+  const first = sync.writePart(uploadId, 0, (async function* () { entered.resolve(); await release.promise; yield Buffer.from("good"); })());
+  await entered.promise;
+  const duplicate = Promise.allSettled([sync.writePart(uploadId, 0, (async function* () { yield Buffer.from("evil"); })())]);
+  try { await setImmediate(); } finally { release.resolve(); }
+  expect(await first).toEqual({ received: 4 });
+  expect(await duplicate).toMatchObject([{ status: "rejected", reason: { status: 409, body: { received: 4 } } }]);
+  const receipt = await sync.commit(uploadId);
+  expect(readFileSync(join(folder.cloudPath, "a.txt"), "utf8")).toBe("good");
+  expect(receipt).toEqual({ sha256: sha("good") });
+});
+
+it("waits for queued parts before verifying and committing the upload", async () => {
+  const { uploadId } = sync.beginUpload(folder.id, { path: "a.txt", size: 4, sha256: sha("good"), baseSha256: null });
+  const entered = gate(), release = gate();
+  const first = sync.writePart(uploadId, 0, (async function* () { entered.resolve(); await release.promise; yield Buffer.from("go"); })());
+  await entered.promise;
+  const second = Promise.allSettled([sync.writePart(uploadId, 2, (async function* () { yield Buffer.from("od"); })())]);
+  const committed = Promise.allSettled([sync.commit(uploadId)]);
+  try { await setImmediate(); } finally { release.resolve(); }
+  expect(await first).toEqual({ received: 2 });
+  expect(await second).toEqual([{ status: "fulfilled", value: { received: 4 } }]);
+  expect(await committed).toEqual([{ status: "fulfilled", value: { sha256: sha("good") } }]);
+  expect(readFileSync(join(folder.cloudPath, "a.txt"), "utf8")).toBe("good");
+});
+
+it.each([
+  { stage: "hash", outcome: "committed", status: 200 },
+  { stage: "destination", outcome: "committed", status: 200 },
+  { stage: "hash", outcome: "hash mismatch", status: 422 },
+  { stage: "destination", outcome: "base conflict", status: 409 },
+])("refuses a part queued during $stage after $outcome", async ({ stage, status }) => {
+  const { uploadId } = sync.beginUpload(folder.id, { path: "a.txt", size: 4, sha256: sha("good"), baseSha256: null });
+  await sync.writePart(uploadId, 0, (async function* () { yield Buffer.from(status === 422 ? "evil" : "good"); })());
+  if (status === 409) writeFileSync(join(folder.cloudPath, "a.txt"), "original");
+  const held = stage === "hash" ? holdHash() : holdCurrent();
+  const committed = Promise.allSettled([sync.commit(uploadId)]);
+  await held.entered;
+  const release = gate();
+  const late = Promise.allSettled([sync.writePart(uploadId, 4, (async function* () { await release.promise; yield Buffer.alloc(0); })())]);
+  let result;
+  try {
+    held.release();
+    result = await committed;
+  } finally { held.release(); release.resolve(); }
+  expect(await late).toMatchObject([{ status: "rejected", reason: { status: 404 } }]);
+  expect(result).toMatchObject(status === 200
+    ? [{ status: "fulfilled", value: { sha256: sha("good") } }]
+    : [{ status: "rejected", reason: { status } }]);
+  expect(existsSync(join(sync.store.syncDir(), "uploads", `${uploadId}.json`))).toBe(false);
+  expect(existsSync(join(sync.store.syncDir(), "uploads", `${uploadId}.part`))).toBe(false);
+  if (status !== 422) expect(readFileSync(join(folder.cloudPath, "a.txt"), "utf8")).toBe(status === 409 ? "original" : "good");
+  await expect(sync.writePart(uploadId, 0, (async function* () { yield Buffer.from("evil"); })())).rejects.toMatchObject({ status: 404 });
+});
+
+it("does not expire an upload with an open part writer", async () => {
+  const { uploadId } = sync.beginUpload(folder.id, { path: "a.txt", size: 4, sha256: sha("good"), baseSha256: null });
+  const entered = gate(), release = gate();
+  const part = sync.writePart(uploadId, 0, (async function* () { entered.resolve(); await release.promise; yield Buffer.from("good"); })());
+  await entered.promise;
+  try {
+    now += 24 * 60 * 60_000 + 1;
+    sync.summary();
+  } finally { release.resolve(); await part; }
+  expect(await sync.commit(uploadId)).toEqual({ sha256: sha("good") });
+  expect(readFileSync(join(folder.cloudPath, "a.txt"), "utf8")).toBe("good");
+});
+
+it("does not expire an upload while its commit verifies the hash", async () => {
+  const uploadId = await upload("good", null);
+  const held = holdHash();
+  const committed = Promise.allSettled([sync.commit(uploadId)]);
+  await held.entered;
+  try {
+    now += 24 * 60 * 60_000 + 1;
+    sync.summary();
+  } finally { held.release(); }
+  expect(await committed).toEqual([{ status: "fulfilled", value: { sha256: sha("good") } }]);
+  expect(readFileSync(join(folder.cloudPath, "a.txt"), "utf8")).toBe("good");
+});
 
 async function checkedCommit(uploadId: string) {
   const checked = gate();
