@@ -1,10 +1,11 @@
 import { Window } from "happy-dom";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { AppDocument } from "../app.ts";
+import { ROOM_VIEW_ONLY, type AppDocument } from "../app.ts";
 import { createAppBridge, type AppBridge } from "./bridge.ts";
 import { BOT_HTML_CSP, BOT_HTML_NETWORK } from "./csp.ts";
-import { APP_HELPER_SOURCE } from "./helper.ts";
+import { ROOM_CAN } from "./document.ts";
+import { APP_HELPER_SOURCE, APP_ROOM_HELPER_SOURCE } from "./helper.ts";
 
 const DOC: AppDocument = {
   v: 1, messageId: "m1", rev: 0, srcdoc: "", csp: BOT_HTML_CSP,
@@ -16,7 +17,7 @@ type Listener = (event: { source: unknown; data: unknown }) => void;
 const pages: Window[] = [];
 afterEach(async () => { for (const page of pages.splice(0)) await page.happyDOM.close(); });
 
-function boot(engaged = true) {
+function boot(engaged = true, room = false) {
   const page = new Window();
   pages.push(page);
   const listeners = new Set<Listener>();
@@ -37,7 +38,7 @@ function boot(engaged = true) {
   };
   const seen = { messages: [] as string[], links: [] as string[], contexts: [] as unknown[], heights: [] as number[] };
   bridge = createAppBridge({
-    doc: DOC,
+    doc: room ? { ...DOC, can: { ...ROOM_CAN }, room: true } : DOC,
     hostContext: { theme: "dark", styles: { variables: { "--color-text-primary": "#fafafa", "not-a-variable": "x" } } },
     source: () => frame,
     hostVersion: "1",
@@ -54,10 +55,10 @@ function boot(engaged = true) {
     },
   });
   // The helper's free names, bound to this fake frame: it runs exactly as written.
-  const run = new Function("window", "document", "ResizeObserver", "requestAnimationFrame", APP_HELPER_SOURCE);
+  const run = new Function("window", "document", "ResizeObserver", "requestAnimationFrame", room ? APP_ROOM_HELPER_SOURCE : APP_HELPER_SOURCE);
   run(frame, page.document, undefined, (callback: () => void) => setTimeout(callback, 0));
   return { bridge, seen, frame, root: page.document.documentElement, mausbot: () => frame.mausbot as {
-    send(text: string): Promise<void>; open(url: string): Promise<void>; setContext(text: string): Promise<void>; theme: string;
+    send(text: string): Promise<void>; open(url: string): Promise<void>; setContext(text: string): Promise<void>; theme: string; room: boolean;
   } };
 }
 
@@ -84,6 +85,31 @@ describe("the bot-page helper", () => {
     await page.mausbot().setContext("Looking at March");
     await expect.poll(() => page.seen.contexts.length).toBe(1);
     expect(page.seen.contexts[0]).toEqual({ content: [{ type: "text", text: "Looking at March" }] });
+  });
+
+  it("in a room, says so, and its send and setContext resolve without asking the host; a page that asks anyway is refused", async () => {
+    const page = boot(true, true);
+    expect(page.mausbot().room).toBe(true);
+    await page.mausbot().send("Book the 3pm slot");
+    await page.mausbot().setContext("Looking at March");
+    await page.mausbot().open("https://example.com/docs");
+    expect(page.seen.links).toEqual(["https://example.com/docs"]);
+    const answers: unknown[] = [];
+    (page.frame.addEventListener as (type: string, listener: Listener) => void)("message", (event) => {
+      if ([7, 8].includes((event.data as { id?: unknown }).id as number)) answers.push(event.data);
+    });
+    const parent = page.frame.parent as { postMessage(data: unknown): void };
+    parent.postMessage({ jsonrpc: "2.0", id: 7, method: "ui/message", params: { role: "user", content: [{ type: "text", text: "Book it" }] } });
+    parent.postMessage({ jsonrpc: "2.0", id: 8, method: "ui/update-model-context", params: { content: [{ type: "text", text: "March" }] } });
+    await expect.poll(() => answers.length).toBe(2);
+    expect(answers).toEqual([
+      { jsonrpc: "2.0", id: 7, error: { code: -32000, message: ROOM_VIEW_ONLY } },
+      { jsonrpc: "2.0", id: 8, error: { code: -32000, message: ROOM_VIEW_ONLY } },
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    expect(page.seen.messages).toEqual([]);
+    expect(page.seen.contexts).toEqual([]);
+    expect(boot().mausbot().room).toBe(false);
   });
 
   it("rejects when the host refuses, as it does without a click in the page", async () => {

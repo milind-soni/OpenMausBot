@@ -87,8 +87,8 @@ const BUDGET_BASELINE: Record<string, number> = {
   "voice": 59031,
   "shared": 60515,
   "shared+voice": 61296,
-  "skills": 61069,
-  "skills+voice": 61850,
+  "skills": 62334,
+  "skills+voice": 63115,
   "skills+shared": 63334,
   "skills+shared+voice": 64115,
   "non-chief": 49935,
@@ -96,9 +96,9 @@ const BUDGET_BASELINE: Record<string, number> = {
   "shared+non-chief": 52200,
   "shared+voice+non-chief": 52981,
   "skills+non-chief": 52754,
-  "skills+voice+non-chief": 52793,
+  "skills+voice+non-chief": 53899,
   "skills+shared+non-chief": 55212,
-  "skills+shared+voice+non-chief": 55058,
+  "skills+shared+voice+non-chief": 56164,
   "skills+shared+voice+cloud-home": 64782,
   "skills+shared+voice+non-chief+cloud-home": 55566,
   "default+legacy-switches": 58250,
@@ -107,9 +107,9 @@ const BUDGET_BASELINE: Record<string, number> = {
   "skills+shared+voice+escalations": 64945,
   "skills+shared+voice+escalations+x": 68784,
   "skills+shared+voice+escalations+x+team": 69416,
-  "default+no-computer-pick": 57038,
-  "default+room": 50849,
-  "non-chief+room": 41633,
+  "default+no-computer-pick": 58195,
+  "default+room": 56551,
+  "non-chief+room": 47335,
   "skills+shared+voice+escalations+x+team+images": 70755,
   "default+images": 60113,
 };
@@ -335,11 +335,12 @@ describe("agents proxy tools/list golden", () => {
     const names = (name: string) => toolsOf(wires[name]!).map((tool) => tool.name);
     expect(names("default+no-computer-pick")).toEqual(names("default").filter((tool) => tool !== "select_computer"));
     for (const name of ["default", "non-chief"]) {
-      expect(names(`${name}+room`), name).toEqual(names(name).filter((tool) => !["select_computer", "show_widget", "show_html", "wait_until", "list_waits", "cancel_wait"].includes(tool)));
+      expect(names(`${name}+room`), name).toEqual(names(name).filter((tool) => !["select_computer", "wait_until", "list_waits", "cancel_wait"].includes(tool)));
     }
     for (const [name, profile] of Object.entries(PROFILES)) {
       expect(names(name).includes("select_computer"), name).toBe(profile.env.OMB_COMPUTER_SELECTION === "1");
-      expect(names(name).includes("show_widget"), name).toBe(profile.env.OMB_ROOM !== "1");
+      expect(names(name).includes("show_widget"), name).toBe(true);
+      expect(names(name).includes("show_html"), name).toBe(true);
       expect(names(name).includes("wait_until"), name).toBe(profile.env.OMB_ROOM !== "1");
     }
   });

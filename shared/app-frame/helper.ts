@@ -6,6 +6,7 @@
 //     open(url): Promise<void>,         // ui/open-link
 //     setContext(text): Promise<void>,  // ui/update-model-context
 //     theme: "light" | "dark",
+//     room: boolean,                    // shown in a room: send and setContext resolve and do nothing
 //   }
 //
 // A page pasted from an SDK build runs its own App beside this one: the helper's request ids are strings
@@ -25,8 +26,9 @@ export const APP_THEME_STYLE = [
 ].join("");
 
 /** Plain ES2017 with no imports: it runs as written in every browser engine the apps ship in. */
-export const APP_HELPER_SOURCE = `(function () {
+const helperSource = (room: boolean) => `(function () {
   "use strict";
+  var room = ${room};
   var parent = window.parent;
   if (!parent || parent === window) return;
   var root = document.documentElement;
@@ -41,7 +43,7 @@ export const APP_HELPER_SOURCE = `(function () {
     });
   };
   var notify = function (method, params) { post({ jsonrpc: "2.0", method: method, params: params || {} }); };
-  var api = { theme: "light" };
+  var api = { theme: "light", room: room };
   var apply = function (context) {
     if (!context || typeof context !== "object") return;
     if (context.theme === "light" || context.theme === "dark") {
@@ -131,6 +133,7 @@ export const APP_HELPER_SOURCE = `(function () {
     if (result && result.isError) throw new Error("The host could not do that.");
   };
   api.send = function (text) {
+    if (room) return Promise.resolve();
     return ready.then(function () {
       return request("ui/message", { role: "user", content: [{ type: "text", text: String(text) }] });
     }).then(checked);
@@ -139,9 +142,14 @@ export const APP_HELPER_SOURCE = `(function () {
     return ready.then(function () { return request("ui/open-link", { url: String(url) }); }).then(checked);
   };
   api.setContext = function (text) {
+    if (room) return Promise.resolve();
     return ready.then(function () {
       return request("ui/update-model-context", { content: [{ type: "text", text: String(text) }] });
     }).then(function () {});
   };
   Object.defineProperty(window, "mausbot", { value: api, enumerable: true });
 })();`;
+
+export const APP_HELPER_SOURCE = helperSource(false);
+/** A room's page: everyone in the room sees it, and it speaks for none of them. */
+export const APP_ROOM_HELPER_SOURCE = helperSource(true);
