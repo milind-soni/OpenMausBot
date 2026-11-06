@@ -292,7 +292,7 @@ function VideoAttachment({ file, message }: { file: GalleryFile; message: Messag
             disabled={loading || tooLarge}
             onClick={() => void load()}
             aria-label={t("attach.previewVideo", { name: file.name })}
-            className="flex size-full flex-col items-center justify-center gap-2 p-3 text-center text-ink-secondary transition-colors hover:bg-raised/60 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 disabled:cursor-wait disabled:hover:bg-transparent"
+            className={`flex size-full flex-col items-center justify-center gap-2 p-3 text-center text-ink-secondary transition-colors hover:bg-raised/60 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 ${tooLarge ? "disabled:cursor-default" : "disabled:cursor-wait"} disabled:hover:bg-transparent`}
           >
             {loading ? <LoaderCircle size={24} className="animate-spin" /> : <Play size={24} />}
             <span className="text-[12px]">{loading ? t("attach.videoLoading") : error && !tooLarge ? t("chat.retry") : t("attach.loadVideo")}</span>
