@@ -1,4 +1,4 @@
-// An ssh_config and an `ssh` shim that add connection sharing and fail-fast timeouts to every VPS command, whatever the user's alias sets.
+// On POSIX, an ssh_config and an `ssh` shim give VPS docker commands connection sharing and fail-fast timeouts wherever the user's alias leaves them unset; the live-desktop tunnel opts out of sharing.
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -81,7 +81,7 @@ export function prepareVpsSsh(dataDir: string, pathValue: string, platform: Node
   const shim = [
     "#!/bin/sh",
     "# Written by OpenMausBot. docker's SSH transport finds this ssh first, so",
-    "# every VPS command shares one connection whether or not the alias says so.",
+    "# docker commands share one connection unless the alias turns that off.",
     `exec ${shellQuote(realSsh)} -F ${shellQuote(configPath)} "$@"`,
     "",
   ].join("\n");

@@ -40,6 +40,8 @@ supplies connection sharing and fail-fast timeouts itself: it runs each VPS comm
 `ssh_config` (under `~/.openmausbot/ssh/`) that includes your file first and fills in `ControlMaster`,
 `ControlPersist`, keepalives and a connect timeout wherever your alias leaves them unset. Anything your
 alias sets wins. Startup, previews, bot tools and their connection probes use the same settings.
+The live desktop's tunnel is the exception: it opens its own connection (`ControlPath=none`), so
+closing it never takes down a connection that docker commands share.
 For long data-directory paths, the app keeps its control socket in a private, user-owned directory
 under `/tmp` to stay within OpenSSH's socket-path limit; the config stays in the app data directory.
 Windows OpenSSH does not support connection sharing, so that platform keeps its normal SSH setup.
@@ -58,8 +60,8 @@ Host my-vps
   ConnectTimeout 10
 ```
 
-- `ControlMaster`/`ControlPath`/`ControlPersist` — every action is a docker-over-SSH exec; multiplexing turns
-  per-command connects into milliseconds over one persistent connection.
+- `ControlMaster`/`ControlPath`/`ControlPersist` — every bot action is a docker-over-SSH exec; multiplexing turns
+  per-command connects into milliseconds over one persistent connection. The live-desktop tunnel does not share it.
 - `ServerAliveInterval`/`ServerAliveCountMax`/`ConnectTimeout` — a dropped VPS must fail fast (under a
   minute, and ten seconds to connect), not hang a turn waiting on a dead TCP session.
 

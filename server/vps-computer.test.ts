@@ -299,6 +299,7 @@ describe("VPS computer", () => {
     expect(args).toContain("127.0.0.1:45678:172.17.0.5:6901");
     expect(args.at(-1)).toBe("production-vps");
     expect(args).toContain("ExitOnForwardFailure=yes");
+    expect(args).toContain("ControlPath=none");
     expect(vpsSshTunnelArgs("production-vps", 45678, "172.17.0.5", "/data/ssh/config").slice(0, 3)).toEqual(["-F", "/data/ssh/config", "-N"]);
     expect(vpsSshTunnelArgs("production-vps", 45678, "172.17.0.5", null)[0]).toBe("-N");
     expect(() => vpsSshTunnelArgs("production-vps", 80, "172.17.0.5")).toThrow(/port/);
