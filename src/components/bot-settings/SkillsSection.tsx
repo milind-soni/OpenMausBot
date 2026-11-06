@@ -279,6 +279,8 @@ export function SkillsSection({ bot }: { bot: Bot }) {
   const [source, setSource] = useState("");
   const [importing, setImporting] = useState(false);
   const [importMessage, setImportMessage] = useState("");
+  const [importedListText, setImportedListText] = useState("");
+  const [savingImported, setSavingImported] = useState(false);
   const skillDialogRef = useRef<HTMLDivElement>(null);
   const skillDialogOpen = Boolean(viewing);
 
@@ -381,6 +383,25 @@ export function SkillsSection({ bot }: { bot: Bot }) {
     }
   };
 
+  const imported = skills.filter((skill) => skill.origin === "imported");
+  const applyImportedAllowlist = async (names: string[]) => {
+    const allNames = new Set(imported.map((skill) => skill.name));
+    const missing = names.filter((name) => !allNames.has(name));
+    if (missing.length) { setError("Unknown imported skills: " + missing.join(", ")); return; }
+    const warned = names.filter((name) => imported.find((skill) => skill.name === name)?.warnings.length);
+    if (warned.length) { setError("Review these skills individually first: " + warned.join(", ")); return; }
+    if (!window.confirm("Set imported skills for " + bot.name + " to exactly: " + (names.join(", ") || "(none)") + "? Owned skills stay unchanged.")) return;
+    setSavingImported(true);
+    setError("");
+    try {
+      await api(`/api/bots/${bot.id}/skills/imported-allowlist`, {
+        method: "PUT", body: JSON.stringify({ names }),
+      });
+      setImportedListText("");
+      await refresh();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Bulk skill update failed"); }
+    finally { setSavingImported(false); }
+  };
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-xl bg-card p-4">
@@ -449,6 +470,36 @@ export function SkillsSection({ bot }: { bot: Bot }) {
           </>
         )}
 
+        {!loading && imported.length > 0 && (
+          <div className="mt-3 rounded-lg border border-hairline/40 p-3">
+            <div className="text-[13px] font-medium">Imported skills · bulk selection</div>
+            <p className="mt-1 text-[12px] text-ink-secondary">
+              Currently {imported.filter((skill) => skill.enabled).length} of {imported.length} imported skills enabled.
+              Enter only the names to keep, separated by commas or new lines. This never changes owned skills.
+            </p>
+            <textarea
+              className={inputCls + " mt-2 min-h-20 w-full"}
+              aria-label="Imported skills to keep"
+              value={importedListText}
+              disabled={savingImported || Boolean(working)}
+              placeholder="native-mcp, verification-before-completion"
+              onChange={(event) => setImportedListText(event.target.value)}
+            />
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button type="button" disabled={savingImported || Boolean(working)}
+                onClick={() => setImportedListText(imported.filter((skill) => skill.enabled).map((skill) => skill.name).join(", "))}
+                className="rounded-lg bg-control px-3 py-2 text-[12px] text-ink">Load current selection</button>
+              <button type="button" disabled={savingImported || Boolean(working)}
+                onClick={() => void applyImportedAllowlist([])}
+                className="rounded-lg bg-control px-3 py-2 text-[12px] text-ink">Disable all imported</button>
+              <button type="button" disabled={savingImported || Boolean(working)}
+                onClick={() => void applyImportedAllowlist([...new Set(importedListText.split(/[,\n]/).map((v) => v.trim()).filter(Boolean))])}
+                className="rounded-lg bg-accent px-3 py-2 text-[12px] text-white">
+                Apply only listed skills
+              </button>
+            </div>
+          </div>
+        )}
         {loading ? (
           <div className="mt-3 text-[12px] text-ink-secondary">{t("skills.loading")}</div>
         ) : skills.length === 0 ? (

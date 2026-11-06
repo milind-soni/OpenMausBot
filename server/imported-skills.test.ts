@@ -7,6 +7,7 @@ import { DATA_DIR, type AppConfig } from "./config.ts";
 import { createSkillsLibraryHost } from "./host/skills-library.ts";
 import {
   IMPORTED_CHANGED_WARNING, IMPORTED_SKILLS_DIR, importedSkillListings, importedSkillsFor, importedSkillsPrompt,
+  initializeNewBotImportedSkills, setImportedSkillAllowlist,
   nativeSkillFolders, readImportedSkillFile, setImportedSkillEnabled, storeImportedSkills, syncImportedSkillLinks, type ImportedSkillInput,
 } from "./imported-skills.ts";
 import { skillCommandTurnText } from "../shared/skill-command.ts";
@@ -71,6 +72,37 @@ describe("skills brought in from this computer", () => {
     }
   });
 
+  it("defaults NEW bot imported skills off and applies atomic exact allowlists", () => {
+    store([input("pdf"), input("review")]);
+    const previous = newBot();
+    const fresh = newBot();
+    expect(names(importedSkillsFor(previous, new Set()))).toEqual(["pdf", "review"]);
+    initializeNewBotImportedSkills(fresh);
+    expect(importedSkillsFor(fresh, new Set())).toEqual([]);
+    expect(importedSkillListings(fresh, new Set()).every((entry) => !entry.enabled)).toBe(true);
+    expect(setImportedSkillAllowlist(fresh, ["review"])).toEqual({ enabled: ["review"] });
+    expect(names(importedSkillsFor(fresh, new Set()))).toEqual(["review"]);
+    const bad = setImportedSkillAllowlist(fresh, ["missing"]);
+    expect(bad).toHaveProperty("error");
+    expect(names(importedSkillsFor(fresh, new Set()))).toEqual(["review"]);
+    store([input("pdf"), input("review"), input("fresh-import")]);
+    expect(names(importedSkillsFor(fresh, new Set()))).toEqual(["review"]);
+    expect(setImportedSkillEnabled(fresh, "review", false)).toMatchObject({ enabled: false });
+    expect(names(importedSkillsFor(fresh, new Set()))).toEqual([]);
+    expect(setImportedSkillEnabled(fresh, "pdf", true)).toMatchObject({ enabled: true });
+    expect(names(importedSkillsFor(fresh, new Set()))).toEqual(["pdf"]);
+    // Previous bots retain legacy defaults until explicitly migrated to an allowlist.
+    expect(names(importedSkillsFor(previous, new Set()))).toEqual(["fresh-import", "pdf", "review"]);
+  });
+
+  it("bulk enable refuses unreviewed warnings without mutating the existing policy", () => {
+    store([input("plain"), input("risky", { warnings: ["requires human review"] })]);
+    const bot = newBot();
+    initializeNewBotImportedSkills(bot);
+    expect(setImportedSkillAllowlist(bot, ["plain"])).toEqual({ enabled: ["plain"] });
+    expect(setImportedSkillAllowlist(bot, ["plain", "risky"])).toHaveProperty("error");
+    expect(names(importedSkillsFor(bot, new Set()))).toEqual(["plain"]);
+  });
   it("leaves a copy out of every turn once its files change, until it is brought in again", () => {
     store([input("pdf"), input("lint")]);
     const bot = newBot();

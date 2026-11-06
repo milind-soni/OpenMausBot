@@ -7,7 +7,7 @@
 // skills", Codex with the person's own CODEX_HOME) leaves the copy out, so no engine sees a skill twice.
 import { createHash, randomUUID } from "node:crypto";
 import {
-  closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync,
+  closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync,
   statSync, symlinkSync, unlinkSync, writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -44,7 +44,13 @@ const entrySchema = z.object({
 export type ImportedSkillEntry = z.infer<typeof entrySchema>;
 const indexSchema = z.record(z.string(), entrySchema);
 /** `on` holds the files a person read before switching a flagged skill on, so a copy brought in again is off again. */
-const choicesSchema = z.object({ off: z.array(z.string()), on: z.record(z.string(), sha256Hex).default({}) });
+const choicesSchema = z.object({
+  off: z.array(z.string()),
+  on: z.record(z.string(), sha256Hex).default({}),
+  // Legacy records omit this field and retain the previous defaults.
+  defaultOff: z.boolean().optional(),
+  allow: z.array(z.string()).optional(),
+});
 type Choices = z.infer<typeof choicesSchema>;
 
 /** Every imported skill by name; empty when there are none or the index cannot be trusted. */
@@ -270,6 +276,7 @@ export interface ImportedSkillView {
 }
 
 function enabledFor(name: string, entry: ImportedSkillEntry, choices: Choices): boolean {
+  if (choices.defaultOff === true && !(choices.allow ?? []).includes(name)) return false;
   if (choices.off.includes(name)) return false;
   return entry.warnings.length === 0 || choices.on[name] === entry.filesSha256;
 }
@@ -335,6 +342,34 @@ export function readImportedSkillFile(name: string): string | null {
   return text !== null && createHash("sha256").update(text).digest("hex") === entry.sha256 ? text : null;
 }
 
+/** New bots receive no imported skills until a person assigns an allowlist.
+ * Existing bots with no policy file and moved bots retain their prior settings. */
+export function initializeNewBotImportedSkills(botId: string): void {
+  const file = choicesPath(botId);
+  if (existsSync(file)) return;
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  writeFileAtomic(file, JSON.stringify({ off: [], on: {}, defaultOff: true, allow: [] }, null, 2) + "\n", { mode: 0o600 });
+}
+
+/** Replace the imported-skill policy in ONE atomic write, never touching owned or library skills.
+ * Unreviewed warnings and changed files cannot be enabled in bulk. */
+export function setImportedSkillAllowlist(botId: string, names: string[]): { enabled: string[] } | { error: string } {
+  const index = readImportedSkills();
+  const chosen = [...new Set(names)];
+  if (chosen.length > INDEX_MAX_SKILLS) return { error: "Too many imported skills" };
+  for (const name of chosen) {
+    const entry = index[name];
+    if (!entry) return { error: 'Unknown imported skill: ' + name };
+    if (entry.warnings.length) return { error: 'Review the warnings individually before enabling: ' + name };
+    if (!importedSkillIntact(name, entry)) return { error: 'Imported files changed: ' + name };
+  }
+  mkdirSync(dirname(choicesPath(botId)), { recursive: true, mode: 0o700 });
+  writeFileAtomic(choicesPath(botId), JSON.stringify({
+    off: [], on: {}, defaultOff: true, allow: chosen.sort(),
+  }, null, 2) + "\n", { mode: 0o600 });
+  return { enabled: chosen.sort() };
+}
+
 /** One bot's switch. Off stays off whatever is brought in later; on, for a flagged skill, holds only for the files the
  * person read. */
 export function setImportedSkillEnabled(botId: string, name: string, enabled: boolean): SkillListing | { error: string } {
@@ -344,9 +379,12 @@ export function setImportedSkillEnabled(botId: string, name: string, enabled: bo
   const choices = readChoices(botId);
   const off = choices.off.filter((other) => other !== name);
   const { [name]: _read, ...on } = choices.on;
-  const next: Choices = enabled
-    ? { off, on: entry.warnings.length ? { ...on, [name]: entry.filesSha256 } : on }
-    : { off: [...off, name].sort(), on };
+  const next: Choices = choices.defaultOff === true
+    ? { off, on: enabled && entry.warnings.length ? { ...on, [name]: entry.filesSha256 } : on,
+        defaultOff: true, allow: enabled ? [...new Set([...(choices.allow ?? []), name])].sort() : (choices.allow ?? []).filter((item) => item !== name) }
+    : enabled
+      ? { off, on: entry.warnings.length ? { ...on, [name]: entry.filesSha256 } : on }
+      : { off: [...off, name].sort(), on };
   mkdirSync(dirname(choicesPath(botId)), { recursive: true, mode: 0o700 });
   writeFileAtomic(choicesPath(botId), `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
   return importedSkillListings(botId, new Set()).find((skill) => skill.name === name)!;
