@@ -59,7 +59,8 @@ describe("BoxRunner.wrap", () => {
     expect(wrapped.args.slice(wrapped.args.indexOf("--") + 1)).toEqual(["/opt/chrome", "--headless"]);
   });
 
-  it("a relay is bound in and dialed by the Node bridge, even where socat bridges the gates; a shared-network box has none", () => {
+  // The box's paths are POSIX paths inside it, which Windows' path module would write with drive letters and backslashes.
+  it.skipIf(process.platform === "win32")("a relay is bound in and dialed by the Node bridge, even where socat bridges the gates; a shared-network box has none", () => {
     const runner = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set() });
     const relay = "/data/.openmausbot/box/relay-ab12.sock";
     const wrapped = runner.wrap({ command: "/data/.openmausbot/tools/agy", args: ["--uid="], env: { PATH: "/usr/bin" }, relay });
