@@ -31,10 +31,13 @@ export function isOpenAIAddress(apiUrl: string): boolean {
   return own && url.protocol === "https:" && url.pathname.replace(/\/+$/, "") === "/v1";
 }
 
-/** Each model only moves forward (chat, responses, chat-reasoning-off), so a resend can never loop. A call without tools
- * never meets the refusal and stays on Chat Completions. */
+/** Each model only moves forward, so a resend can never loop. OpenAI's own address serves Responses; another address
+ * may not, so it keeps Chat Completions while reasoning off works there and tries Responses only when that is refused.
+ * A call without tools never meets the refusal and stays on Chat Completions. */
 export function createModelRoutes(apiUrl: string) {
-  const servesResponses = isOpenAIAddress(apiUrl);
+  const order: readonly ModelRoute[] = isOpenAIAddress(apiUrl)
+    ? ["chat", "responses", "chat-reasoning-off"]
+    : ["chat", "chat-reasoning-off", "responses"];
   const routes = new Map<string, ModelRoute>();
   const noSummaries = new Set<string>();
   return {
@@ -48,15 +51,10 @@ export function createModelRoutes(apiUrl: string) {
         noSummaries.add(model);
         return true;
       }
-      if (refusal === "tools-need-responses" && route === "chat") {
-        routes.set(model, servesResponses ? "responses" : "chat-reasoning-off");
-        return true;
-      }
-      if (refusal === "responses-unavailable" && route === "responses") {
-        routes.set(model, "chat-reasoning-off");
-        return true;
-      }
-      return false;
+      const next = order[order.indexOf(route) + 1];
+      if (!next || refusal !== (route === "responses" ? "responses-unavailable" : "tools-need-responses")) return false;
+      routes.set(model, next);
+      return true;
     },
   };
 }

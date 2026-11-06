@@ -296,7 +296,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const send = options.timeoutMs > FETCH_LIMIT_MS ? fetchPastLimit : fetch;
       const response = await send(`${options.apiUrl}/${route === "responses" ? "responses" : "chat/completions"}`, {
         method: "POST",
-        ...(messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === "image_url")) ? { redirect: "error" as const } : {}),
+        ...(route === "responses" || messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === "image_url")) ? { redirect: "error" as const } : {}),
         headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
         body: payload,
         signal: activeSignal,

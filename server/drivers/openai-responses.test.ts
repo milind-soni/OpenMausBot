@@ -25,6 +25,7 @@ const refusalOf = (model: string) => JSON.stringify({ error: {
   type: "invalid_request_error", param: "reasoning_effort", code: null,
 } });
 const NONE_REFUSED = JSON.stringify({ error: { message: `Unsupported value: 'none' is not supported with the '${MODEL}' model.`, type: "invalid_request_error", param: "reasoning_effort", code: "unsupported_value" } });
+const NONE_NOT_SUPPORTED = JSON.stringify({ error: { message: "Unsupported value: 'reasoning_effort' does not support 'none' with this model. Supported values are: 'low', 'medium', 'high', and 'xhigh'.", type: "invalid_request_error", param: "reasoning_effort", code: "unsupported_value" } });
 const MISSING_SCOPE = JSON.stringify({ error: { message: "You have insufficient permissions for this operation. Missing scopes: api.responses.write.", type: "invalid_request_error", param: null, code: null } });
 
 type Call = { path: string; body: Record<string, any> };
@@ -179,7 +180,12 @@ describe("which API a model's turn uses", () => {
     const other = createModelRoutes("https://relay.example/v1");
     expect(other.advance(MODEL, "tools-need-responses")).toBe(true);
     expect(other.routeFor(MODEL, true)).toBe("chat-reasoning-off");
+    expect(other.advance(MODEL, "responses-unavailable")).toBe(false);
+    expect(other.advance(MODEL, "tools-need-responses")).toBe(true);
+    expect(other.routeFor(MODEL, true)).toBe("responses");
     expect(other.advance(MODEL, "tools-need-responses")).toBe(false);
+    expect(other.advance(MODEL, "responses-unavailable")).toBe(false);
+    expect(other.routeFor(MODEL, true)).toBe("responses");
   });
 
   it("reads the answer, not the model's name", () => {
@@ -613,11 +619,87 @@ describe("the same refusal from another provider", () => {
     expect(f.calls[4]!.body).toMatchObject({ reasoning_effort: "none" });
   });
 
-  it("tries once, and never sends anything to /responses", async () => {
-    const f = await fixture((_call, response) => reject(response, 400, refusalOf(MODEL)), "relay");
+  it("never sends anything to /responses while reasoning off works", async () => {
+    const f = await fixture((call, response) => {
+      if (call.body.reasoning_effort !== "none") return reject(response, 400, refusalOf(MODEL));
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "Relayed." }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+    }, "relay");
+    await f.turn();
+    await f.turn();
+    expect(f.paths().filter((path) => path.endsWith("/responses"))).toEqual([]);
+  });
+
+  it("moves to its Responses when it refuses reasoning off too, and stays there", async () => {
+    const f = await fixture((call, response) => {
+      if (call.path.endsWith("/responses")) return answer(response, "Over Responses.");
+      reject(response, 400, call.body.reasoning_effort === "none" ? NONE_NOT_SUPPORTED : refusalOf(MODEL));
+    }, "relay");
+    const first = await f.turn();
+    expect(first.end).toMatchObject({ ok: true });
+    expect(f.paths()).toEqual(["/v1/chat/completions", "/v1/chat/completions", "/v1/responses"]);
+    expect(f.calls[2]!.body).toMatchObject({ model: MODEL, store: false, tools: expect.any(Array) });
+    expect(f.calls[2]!.body).not.toHaveProperty("reasoning_effort");
+    expect(textOf(first.events, "assistant_text")).toBe("Over Responses.");
+
+    expect(await f.turn()).toMatchObject({ end: { ok: true } });
+    expect(f.paths()).toEqual(["/v1/chat/completions", "/v1/chat/completions", "/v1/responses", "/v1/responses"]);
+  });
+
+  it("carries a tool round through its Responses", async () => {
+    const f = await fixture((call, response, nth) => {
+      if (call.path.endsWith("/chat/completions")) return reject(response, 400, call.body.reasoning_effort === "none" ? NONE_NOT_SUPPORTED : refusalOf(MODEL));
+      if (nth === 3) return reasonedCall(response);
+      answer(response, "Stored.");
+    }, "relay");
+    const { end, events: seen } = await f.turn();
+    expect(end).toMatchObject({ ok: true });
+    expect(f.paths()).toEqual(["/v1/chat/completions", "/v1/chat/completions", "/v1/responses", "/v1/responses"]);
+    expect(f.calls[3]!.body.input.slice(1)).toEqual([
+      reasoningItem(),
+      callItem(),
+      { type: "function_call_output", call_id: "call_1", output: JSON.stringify({ ok: true, result: "Stored." }) },
+    ]);
+    expect(seen.filter((event) => event.type === "item.completed" && event.itemType === "tool").map((event) => event.ok)).toEqual([true]);
+  });
+
+  it("ends in a plain sentence when it has no Responses either, without looping", async () => {
+    const f = await fixture((call, response) => {
+      if (call.path.endsWith("/responses")) return reject(response, 404, "<html>Not found</html>");
+      reject(response, 400, call.body.reasoning_effort === "none" ? NONE_NOT_SUPPORTED : refusalOf(MODEL));
+    }, "relay");
     const { end, events: seen } = await f.turn();
     expect(end).toMatchObject({ ok: false });
-    expect(f.paths()).toEqual(["/v1/chat/completions", "/v1/chat/completions"]);
+    expect(f.paths()).toEqual(["/v1/chat/completions", "/v1/chat/completions", "/v1/responses"]);
     expect(failureOf(seen)).toContain("Choose another model");
+
+    await f.turn();
+    expect(f.paths()).toHaveLength(4);
+    expect(f.calls[3]!.path).toBe("/v1/responses");
+  });
+
+  it("shows what its Responses said when that is not a missing route", async () => {
+    const f = await fixture((call, response) => {
+      if (call.path.endsWith("/responses")) return reject(response, 400, JSON.stringify({ error: { message: "Relay quota is used up." } }));
+      reject(response, 400, call.body.reasoning_effort === "none" ? NONE_NOT_SUPPORTED : refusalOf(MODEL));
+    }, "relay");
+    const { end, events: seen } = await f.turn();
+    expect(end).toMatchObject({ ok: false });
+    expect(failureOf(seen)).toContain("Relay quota is used up.");
+    expect(failureOf(seen)).not.toContain("Choose another model");
+  });
+
+  it("does not follow a redirect from its Responses", async () => {
+    const f = await fixture((call, response) => {
+      if (call.path.endsWith("/responses")) {
+        response.writeHead(307, { location: "/v1/elsewhere" });
+        return response.end();
+      }
+      if (call.path.endsWith("/elsewhere")) return answer(response, "Followed.");
+      reject(response, 400, call.body.reasoning_effort === "none" ? NONE_NOT_SUPPORTED : refusalOf(MODEL));
+    }, "relay");
+    expect((await f.turn()).end).toMatchObject({ ok: false });
+    expect(f.paths()).not.toContain("/v1/elsewhere");
+    expect(f.paths()).toContain("/v1/responses");
   });
 });
