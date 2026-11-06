@@ -9,8 +9,10 @@ import {
   summarizeUsage,
   usageCsv,
   USAGE_GROUPINGS,
+  USAGE_SPLITS,
   type UsageGroupBy,
   type UsageRow,
+  type UsageSplitBy,
 } from "../usage-ledger.ts";
 import { DETAIL_MAX, ERROR_MAX } from "../usage-trace/detail.ts";
 import type { ToolReceipt, TraceRecorder } from "../usage-trace/recorder.ts";
@@ -83,12 +85,18 @@ export function createUsageRoutes(deps: UsageRouteDeps): RouteHandler {
       return json(res, 400, { error: `groupBy must be one of ${USAGE_GROUPINGS.join(", ")}` });
     }
     const groupBy = requested as UsageGroupBy;
+    const requestedSplit = url.searchParams.get("splitBy");
+    if (requestedSplit !== null && !USAGE_SPLITS.includes(requestedSplit as UsageSplitBy)) {
+      return json(res, 400, { error: `splitBy must be one of ${USAGE_SPLITS.join(", ")}` });
+    }
+    const splitBy = requestedSplit === null || requestedSplit === groupBy ? null : requestedSplit as UsageSplitBy;
     res.setHeader("cache-control", "no-store");
     return json(res, 200, {
       from: range.from.toISOString(),
       to: range.to.toISOString(),
       groupBy,
-      ...summarizeUsage(rows, groupBy, prices),
+      splitBy,
+      ...summarizeUsage(rows, groupBy, prices, splitBy),
       budget: deps.budget(),
       billing: prices ? { currency: deps.currency() } : null,
     });

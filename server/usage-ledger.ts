@@ -56,6 +56,10 @@ export interface UsageRow {
 export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine" | "routine" | "department";
 export const USAGE_GROUPINGS: readonly UsageGroupBy[] = ["bot", "model", "user", "day", "engine", "routine", "department"];
 
+/** The dimensions a group can be broken down by inside one bar; each has few enough values to stack. */
+export type UsageSplitBy = "model";
+export const USAGE_SPLITS: readonly UsageSplitBy[] = ["model"];
+
 export interface UsageGroup {
   key: string;
   label: string;
@@ -67,6 +71,8 @@ export interface UsageGroup {
   estimatedUsd: number | null;
   unpriced: number;
   billableUsd: number | null;
+  /** The group broken down by the requested split, largest first. */
+  segments?: UsageGroup[];
 }
 
 export interface UsageSummary {
@@ -300,9 +306,21 @@ function add(group: UsageGroup, row: UsageRow, prices: PriceList | null): void {
   if (billable !== null) group.billableUsd = (group.billableUsd ?? 0) + billable;
 }
 
-export function summarizeUsage(rows: UsageRow[], groupBy: UsageGroupBy, prices: PriceList | null = null): UsageSummary {
+/** The tokens a bar shows: fresh input plus output, the same count the Usage page writes beside each bar. */
+function barTokens(group: UsageGroup): number {
+  return Math.max(0, group.input - Math.min(group.cachedInput, group.input)) + group.output;
+}
+
+export function summarizeUsage(
+  rows: UsageRow[],
+  groupBy: UsageGroupBy,
+  prices: PriceList | null = null,
+  splitBy: UsageSplitBy | null = null,
+): UsageSummary {
   const groups = new Map<string, UsageGroup>();
   const total = emptyGroup("total", "total");
+  const splits = new Map<string, Map<string, UsageGroup>>();
+  const split = splitBy && splitBy !== groupBy ? splitBy : null;
   for (const row of rows) {
     const { key, label } = groupOf(row, groupBy);
     let group = groups.get(key);
@@ -312,6 +330,22 @@ export function summarizeUsage(rows: UsageRow[], groupBy: UsageGroupBy, prices: 
     }
     add(group, row, prices);
     add(total, row, prices);
+    if (!split) continue;
+    let inside = splits.get(key);
+    if (!inside) {
+      inside = new Map();
+      splits.set(key, inside);
+    }
+    const pieceOf = groupOf(row, split);
+    let piece = inside.get(pieceOf.key);
+    if (!piece) {
+      piece = emptyGroup(pieceOf.key, pieceOf.label);
+      inside.set(pieceOf.key, piece);
+    }
+    add(piece, row, prices);
+  }
+  for (const [key, inside] of splits) {
+    groups.get(key)!.segments = [...inside.values()].sort((a, b) => barTokens(b) - barTokens(a));
   }
   const ordered = [...groups.values()];
   if (groupBy === "day") ordered.sort((a, b) => a.key.localeCompare(b.key));
