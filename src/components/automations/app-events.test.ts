@@ -84,6 +84,16 @@ describe("app events, set up by the person", () => {
     expect(fixture.api).not.toHaveBeenCalledWith("/api/app-triggers/events?botId=bot-a");
   });
 
+  it("dims the page behind the editor without blurring it", async () => {
+    fixture.api.mockResolvedValue(catalog);
+    const container = mount(createElement(AppEventEditor, { bots: [scout], onClose: vi.fn() }));
+    const overlay = container.querySelector('[role="dialog"]')!.parentElement!;
+    expect(overlay.className).toContain("fixed inset-0");
+    expect(overlay.classList.contains("bg-black/60")).toBe(true);
+    expect(overlay.className).not.toMatch(/backdrop-blur|backdrop-filter/);
+    await vi.waitFor(() => expect(fixture.api).toHaveBeenCalled());
+  });
+
   it("picks from the bot's connected apps, filters in plain words, and creates it", async () => {
     fixture.api.mockImplementation(async (path: unknown) => {
       if (String(path).startsWith("/api/app-triggers/events")) return catalog;

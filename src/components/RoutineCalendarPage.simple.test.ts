@@ -201,6 +201,15 @@ describe("Automations page", () => {
     expect(picked).not.toContain(bot.name);
   });
 
+  it("dims the page behind the webhook editor without blurring it", async () => {
+    const { WebhookEditor } = await import("./WebhookTrigger");
+    fixture.values = [];
+    const tree = capture(() => WebhookEditor({ bots: [bot], onClose: vi.fn(), onCredential: vi.fn() }));
+    const overlay = tree.find((node) => String(node.props.className ?? "").includes("fixed inset-0"))!;
+    expect(overlay.props.className).toContain("bg-black/60");
+    expect(overlay.props.className).not.toMatch(/backdrop-blur|backdrop-filter/);
+  });
+
   it("greets an empty list, and its example fills the New box", () => {
     fixture.state = { ...fixture.state!, hydrated: true, routines: [], webhooks: [], routineRuns: [], routinesLoadState: "ready" };
     const html = markup(createElement(RoutinesPage, { onBack: vi.fn(), onOpenRoom: vi.fn() }));
