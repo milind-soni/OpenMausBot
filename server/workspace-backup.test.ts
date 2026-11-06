@@ -577,6 +577,26 @@ describe("encrypted full workspace backups", () => {
     expect(readFileSync(tokenPath, "utf8")).toBe("runtime-root-token");
   });
 
+  it("checks OpenConnector token references from instance environments and honors exclusions", async () => {
+    const source = directory();
+    mkdirSync(join(source, "providers", "openconnector"), { recursive: true });
+    const excludedToken = join(source, "providers", "openconnector", "admin-token");
+    writeFileSync(excludedToken, "runtime-root-token", { mode: 0o600 });
+    const unsafeToken = join(source, "openconnector-admin-token");
+    writeFileSync(unsafeToken, "runtime-root-token", { mode: 0o600 });
+    const saved = process.env.OMB_OPENCONNECTOR_ADMIN_TOKEN_REF;
+    process.env.OMB_OPENCONNECTOR_ADMIN_TOKEN_REF = `file:${unsafeToken}`;
+    try {
+      json(join(source, "config.json"), { connectors: { provider: "openconnector", openconnector: { url: "https://runtime.example.test" } } });
+      await expect(createWorkspaceBackup(source, { password: PASSWORD })).rejects.toThrow(/environment reference/);
+      process.env.OMB_OPENCONNECTOR_ADMIN_TOKEN_REF = `file:${excludedToken}`;
+      await expect(createWorkspaceBackup(source, { password: PASSWORD })).resolves.toMatchObject({ summary: expect.anything() });
+    } finally {
+      if (saved === undefined) delete process.env.OMB_OPENCONNECTOR_ADMIN_TOKEN_REF;
+      else process.env.OMB_OPENCONNECTOR_ADMIN_TOKEN_REF = saved;
+    }
+  });
+
   it("fails explicitly on noncanonical source auth paths rather than silently skipping them", async () => {
     const source = directory();
     mkdirSync(join(source, "vm-home", ".Browser-Profiles"), { recursive: true });

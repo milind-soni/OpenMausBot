@@ -174,16 +174,20 @@ function assertLocalAuthOutsideSnapshot(dataDir: string): void {
   };
   const connectors = record(config) && record(config.connectors) ? config.connectors : {};
   const openconnector = record(connectors.openconnector) ? connectors.openconnector : {};
-  if (typeof openconnector.adminTokenRef === "string" && openconnector.adminTokenRef.startsWith("file:")) {
-    const text = openconnector.adminTokenRef.trim().slice(5);
-    const resolved = text.startsWith("~/") || text.startsWith("~\\") ? join(homedir(), text.slice(2)) : resolve(text);
+  const checkTokenRef = (value: unknown, source: string) => {
+    const tokenRef = typeof value === "string" ? value.trim() : "";
+    if (!tokenRef.startsWith("file:")) return;
+    const path = tokenRef.slice(5);
+    const resolved = resolve(path);
     const exists = entryExists(resolved);
-    const path = relative(exists ? realpathSync(dataDir) : resolve(dataDir), exists ? realpathSync(resolved) : resolved).replaceAll("\\", "/");
-    if (path && path !== ".." && !path.startsWith("../") && !isAbsolute(path) && !excludedWorkspaceAuthPath(path)) {
-      throw new Error("OpenConnector admin token file is inside backed-up workspace files. Move it outside or into the excluded providers folder, chmod 600 it, and rotate the token if a backup may already contain it.");
+    const pathInWorkspace = relative(exists ? realpathSync(dataDir) : resolve(dataDir), exists ? realpathSync(resolved) : resolved).replaceAll("\\", "/");
+    if (pathInWorkspace && pathInWorkspace !== ".." && !pathInWorkspace.startsWith("../") && !isAbsolute(pathInWorkspace) && !forbiddenArchivePath(pathInWorkspace)) {
+      throw new Error(`OpenConnector admin token ${source} is inside backed-up workspace files. Move it outside or into an excluded folder, chmod 600 it, and rotate the token if a backup may already contain it.`);
     }
-  }
+  };
+  checkTokenRef(openconnector.adminTokenRef, "file reference");
   const environments = [process.env, ...Object.values(instances).filter(record).map((instance) => ({ ...process.env, ...(record(instance.environment) ? instance.environment : {}) }))];
+  for (const environment of environments) checkTokenRef(environment.OMB_OPENCONNECTOR_ADMIN_TOKEN_REF, "environment reference");
   for (const environment of environments) {
     const home = String(environment.HOME || environment.USERPROFILE || homedir());
     for (const field of fields) check(environment[field], field, home);

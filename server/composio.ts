@@ -8,6 +8,7 @@ import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { canonicalToolkitSlug } from "./composio-project.ts";
 import type { ConnectorToolGrant } from "../shared/wire.ts";
 import type { BrokerAccess } from "./composio-broker-access.ts";
+import { inputError } from "./composio-project.ts";
 import { connectorProvider } from "./connectors/provider.ts";
 import { normalizeAccountAlias, toolkitCategories } from "./connectors/common.ts";
 import { CURATED, CURATED_SLUGS } from "./connectors/catalog.ts";
@@ -213,7 +214,7 @@ export async function prepareConnectionAuthConfigs(
   items: ReadonlyArray<{ slug: string; authConfigId?: string }>,
 ): Promise<string | undefined> {
   if (provider().id !== "composio" && items.some((item) => item.authConfigId)) {
-    throw new Error("authConfigId is only supported by the Composio connector backend");
+    throw inputError("authConfigId is only supported by the Composio connector backend");
   }
   return provider().prepareAuthConfigs(cfg, items);
 }

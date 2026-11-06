@@ -151,6 +151,33 @@ describe("inventory / status", () => {
       { id: "oc:slack:default", status: "ACTIVE" },
     ]);
   });
+
+  it("reports setup-needed without a runtime request when settings are incomplete", async () => {
+    const state = newState();
+    state.upsertConnection({ accountId: "oc:gmail:default", service: "gmail", status: "pending", updatedAt: "t" });
+    const unavailable = createOpenConnectorProvider({ settings: { url: origin }, env: {}, state });
+    expect(unavailable.mode(cfg)).toBe("unavailable");
+    expect(await unavailable.inventory(cfg)).toEqual({ services: {}, complete: true });
+    expect(await unavailable.tools(cfg)).toEqual({});
+    expect(await unavailable.serviceSlugs(cfg)).toEqual([]);
+    expect(await unavailable.status(cfg, ["github", "gmail"])).toMatchObject({
+      github: { connected: false, pending: false, status: "setup-needed" },
+      gmail: { connected: false, pending: true, status: "pending" },
+    });
+    await expect(unavailable.authorize(cfg, "github")).rejects.toThrow(/admin token/);
+    expect(calls).toEqual([]);
+  });
+
+  it("keeps strict URL validation for operations while status still reports", async () => {
+    const unavailable = createOpenConnectorProvider({
+      settings: { url: "ftp://invalid.example.test", adminTokenRef: "env:STUB_ADMIN" },
+      env: { STUB_ADMIN: "admintok" },
+      state: newState(),
+    });
+    expect(await unavailable.status(cfg, ["github"])).toMatchObject({ github: { status: "setup-needed" } });
+    expect(await unavailable.tools(cfg)).toEqual({});
+    await expect(unavailable.catalog(cfg)).rejects.toThrow(/runtime must use HTTPS/);
+  });
 });
 
 describe("tools / catalog", () => {
@@ -334,6 +361,29 @@ describe("background authorization convergence", () => {
       expect(state.findConnectionByAccountId("oc:github:restart")).toMatchObject({ status: "connected" });
     }, { timeout: 5_000, interval: 20 });
   });
+
+  it("defers polling while unavailable and resumes when the token becomes available", async () => {
+    const env: NodeJS.ProcessEnv = {};
+    const state = newState();
+    state.upsertConnection({
+      accountId: "oc:github:deferred", service: "github", alias: "deferred",
+      connectionRequestId: "cr_deferred", status: "pending", updatedAt: "t",
+    });
+    createOpenConnectorProvider({
+      settings: { url: origin, adminTokenRef: "env:STUB_ADMIN" },
+      env,
+      state,
+      polling: { intervalMs: 1, resumeIntervalMs: 10 },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(requestPollCalls()).toEqual([]);
+    expect(state.findConnectionByAccountId("oc:github:deferred")).toMatchObject({ status: "pending" });
+    env.STUB_ADMIN = "admintok";
+    await vi.waitFor(() => {
+      expect(requestPollCalls().some((call) => call.path.includes("cr_deferred"))).toBe(true);
+      expect(state.findConnectionByAccountId("oc:github:deferred")).toMatchObject({ status: "connected" });
+    }, { timeout: 5_000, interval: 20 });
+  });
 });
 
 describe("relayMcp translation", () => {
@@ -365,6 +415,7 @@ describe("relayMcp translation", () => {
     expect(frame.result.isError).toBe(false);
     expect(JSON.parse(frame.result.content[0].text)).toEqual({ ran: "github.get_current_user", input: { verbose: true } });
     expect(lastCall()).toMatchObject({ method: "POST", path: "/v1/actions/github.get_current_user" });
+    expect(calls.filter((call) => call.method === "GET" && call.path.startsWith("/v1/actions/"))).toEqual([]);
   });
 
   it("refuses an unmapped tool name without executing an action", async () => {

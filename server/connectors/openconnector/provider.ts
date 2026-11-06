@@ -29,8 +29,10 @@ export interface OpenConnectorProviderOptions {
   fetch?: typeof fetch;
   state?: OpenConnectorStateStore;
   /** Background authorization polling; defaults come from pollConnectionRequest. */
-  polling?: { intervalMs?: number; timeoutMs?: number };
+  polling?: { intervalMs?: number; timeoutMs?: number; resumeIntervalMs?: number };
 }
+
+class OpenConnectorConfigurationError extends Error {}
 
 export function resolveAdminToken(settings: OpenConnectorSettings, env: NodeJS.ProcessEnv = process.env): string | undefined {
   const fromRef = resolveTokenRef(settings.adminTokenRef, env);
@@ -40,13 +42,31 @@ export function resolveAdminToken(settings: OpenConnectorSettings, env: NodeJS.P
 
 export function createOpenConnectorProvider(options: OpenConnectorProviderOptions): ConnectorProvider {
   const env = options.env ?? process.env;
-  const runtimeUrl = options.settings.url ? normalizeOpenConnectorBaseUrl(options.settings.url) : "";
+  const runtimeConfigurationError = (() => {
+    if (!options.settings.url?.trim()) return new OpenConnectorConfigurationError("OpenConnector is selected but has no URL; set OMB_OPENCONNECTOR_URL");
+    try {
+      normalizeOpenConnectorBaseUrl(options.settings.url);
+      return undefined;
+    } catch (error) {
+      return new OpenConnectorConfigurationError(error instanceof Error && error.message ? error.message : "OpenConnector URL is invalid");
+    }
+  })();
+  const runtimeUrl = options.settings.url && !runtimeConfigurationError ? normalizeOpenConnectorBaseUrl(options.settings.url) : "";
   const state = options.state ?? new OpenConnectorStateStore(join(DATA_DIR, OPENCONNECTOR_STATE_FILE), runtimeUrl);
   const pollsInFlight = new Map<string, Promise<void>>();
+  const deferredPolls = new Map<string, ReturnType<typeof setTimeout>>();
+  const resumeIntervalMs = options.polling?.resumeIntervalMs ?? 30_000;
 
   const client = () => new OpenConnectorClient({
     baseUrl: options.settings.url ?? "",
-    adminToken: resolveAdminToken(options.settings, env),
+    adminToken: (() => {
+      if (runtimeConfigurationError) throw runtimeConfigurationError;
+      const token = resolveAdminToken(options.settings, env);
+      if (!token) {
+        throw new OpenConnectorConfigurationError("OpenConnector is selected but has no admin token; set OMB_OPENCONNECTOR_ADMIN_TOKEN or OMB_OPENCONNECTOR_ADMIN_TOKEN_REF");
+      }
+      return token;
+    })(),
     fetch: options.fetch,
   });
 
@@ -54,13 +74,42 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
     if (access) throw new Error(`OpenConnector does not yet support member-scoped credentials; use an administrator installation to ${action}`);
   };
 
-  const available = () => Boolean(options.settings.url?.trim()) && Boolean(resolveAdminToken(options.settings, env));
+  const available = () => {
+    if (runtimeConfigurationError) return false;
+    try {
+      return Boolean(resolveAdminToken(options.settings, env));
+    } catch {
+      return false;
+    }
+  };
+
+  const clearDeferredPoll = (requestId: string): void => {
+    const timer = deferredPolls.get(requestId);
+    if (!timer) return;
+    clearTimeout(timer);
+    deferredPolls.delete(requestId);
+  };
+
+  const deferPoll = (service: string, requestId: string, alias: string | undefined): void => {
+    if (pollsInFlight.has(requestId) || deferredPolls.has(requestId)) return;
+    const timer = setTimeout(() => {
+      deferredPolls.delete(requestId);
+      if (available()) convergeConnection(service, requestId, alias);
+      else deferPoll(service, requestId, alias);
+    }, resumeIntervalMs);
+    deferredPolls.set(requestId, timer);
+  };
 
   /** Converge one authorization request in the background: the person authorizes in the browser
    * while the local record walks pending -> connected/failed on its own. One poll per request id;
    * a failed convergence never changes what authorize already returned, it only marks the record. */
   const convergeConnection = (service: string, requestId: string, alias: string | undefined): void => {
+    clearDeferredPoll(requestId);
     if (pollsInFlight.has(requestId)) return;
+    if (!available()) {
+      deferPoll(service, requestId, alias);
+      return;
+    }
     const accountId = accountIdForConnection(service, alias);
     const run = pollConnectionRequest(client(), state, service, requestId, alias, {
       intervalMs: options.polling?.intervalMs,
@@ -68,6 +117,10 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
     }).then(
       () => undefined,
       (error: unknown) => {
+        if (error instanceof OpenConnectorConfigurationError) {
+          deferPoll(service, requestId, alias);
+          return;
+        }
         const record = state.findConnectionByAccountId(accountId);
         if (!record || record.status === "connected" || record.connectionRequestId !== requestId) return;
         state.upsertConnection({
@@ -129,10 +182,15 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
 
   const inventory = async (as?: BrokerAccess): Promise<ConnectedServicesInventory> => {
     rejectMemberInstallation(as, "list connector services");
-    const providers = await client().providers();
-    const slugs = providers.map((provider) => canonicalToolkitSlug(provider.service));
-    const authenticated = new Set((await client().authenticatedServices(slugs)).map(canonicalToolkitSlug));
-    return { services: serviceStates(slugs, authenticated), complete: true };
+    try {
+      const providers = await client().providers();
+      const slugs = providers.map((provider) => canonicalToolkitSlug(provider.service));
+      const authenticated = new Set((await client().authenticatedServices(slugs)).map(canonicalToolkitSlug));
+      return { services: serviceStates(slugs, authenticated), complete: true };
+    } catch (error) {
+      if (!(error instanceof OpenConnectorConfigurationError)) throw error;
+      return { services: {}, complete: true };
+    }
   };
 
   return {
@@ -143,22 +201,27 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
     inventory: (_cfg: AppConfig, as?: BrokerAccess) => inventory(as),
 
     async tools(): Promise<Record<string, ConnectorToolListing[]>> {
-      const actions = await client().actionDetails(await client().actions());
-      const grouped = new Map<string, ConnectorToolListing[]>();
-      for (const action of actions) {
-        const listing = connectorToolListingForAction(action);
-        if (!listing) continue;
-        const row: ConnectorToolListing = {
-          name: listing.name,
-          ...(listing.description ? { description: listing.description } : {}),
-          ...(listing.inputSchema ? { inputSchema: listing.inputSchema } : {}),
-        };
-        const bucket = grouped.get(listing.service) ?? [];
-        if (!bucket.some((existing) => existing.name === row.name)) bucket.push(row);
-        grouped.set(listing.service, bucket);
+      try {
+        const actions = await client().actions();
+        const grouped = new Map<string, ConnectorToolListing[]>();
+        for (const action of actions) {
+          const listing = connectorToolListingForAction(action);
+          if (!listing) continue;
+          const row: ConnectorToolListing = {
+            name: listing.name,
+            ...(listing.description ? { description: listing.description } : {}),
+            ...(listing.inputSchema ? { inputSchema: listing.inputSchema } : {}),
+          };
+          const bucket = grouped.get(listing.service) ?? [];
+          if (!bucket.some((existing) => existing.name === row.name)) bucket.push(row);
+          grouped.set(listing.service, bucket);
+        }
+        for (const bucket of grouped.values()) bucket.sort((a, b) => a.name.localeCompare(b.name));
+        return Object.fromEntries([...grouped.entries()].sort(([a], [b]) => a.localeCompare(b)));
+      } catch (error) {
+        if (!(error instanceof OpenConnectorConfigurationError)) throw error;
+        return {};
       }
-      for (const bucket of grouped.values()) bucket.sort((a, b) => a.name.localeCompare(b.name));
-      return Object.fromEntries([...grouped.entries()].sort(([a], [b]) => a.localeCompare(b)));
     },
 
     async serviceSlugs(_cfg: AppConfig, as?: BrokerAccess): Promise<readonly string[]> {
@@ -168,7 +231,17 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
     async status(_cfg: AppConfig, slugs: string[], as?: BrokerAccess): Promise<Record<string, ConnectorServiceState>> {
       rejectMemberInstallation(as, "read connector status");
       const canonical = [...new Set(slugs.map(canonicalToolkitSlug))];
-      const authenticated = new Set((await client().authenticatedServices(canonical)).map(canonicalToolkitSlug));
+      let authenticated: ReadonlySet<string>;
+      try {
+        authenticated = new Set((await client().authenticatedServices(canonical)).map(canonicalToolkitSlug));
+      } catch (error) {
+        if (!(error instanceof OpenConnectorConfigurationError)) throw error;
+        const states = serviceStates(canonical, new Set());
+        return Object.fromEntries(Object.entries(states).map(([slug, state]) => [
+          slug,
+          { ...state, status: state.pending ? "pending" : "setup-needed" },
+        ]));
+      }
       const states = serviceStates(canonical, authenticated);
       return Object.fromEntries(slugs.map((slug) => {
         const state = states[canonicalToolkitSlug(slug)];
@@ -317,7 +390,7 @@ async function relayOpenConnectorMcp(
   if (method === "tools/call") {
     const params = frame?.params && typeof frame.params === "object" ? frame.params as Record<string, unknown> : {};
     const name = typeof params.name === "string" ? params.name : "";
-    const actions = await client().actionDetails(await client().actions());
+    const actions = await client().actions();
     const actionId = actionIdForConnectorTool(name, actions.map((action) => action.id));
     if (!actionId) return encode(jsonRpcError(id, -32602, `Unknown connector tool: ${name}`), 200);
     beforeSend?.();

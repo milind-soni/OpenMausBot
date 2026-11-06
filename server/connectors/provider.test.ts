@@ -93,6 +93,15 @@ describe("connectorProvider", () => {
     expect(selected).not.toBe(composioProvider);
   });
 
+  it("selects a degraded OpenConnector provider instead of throwing when settings are incomplete", () => {
+    const selected = connectorProvider(env({
+      [CONNECTOR_PROVIDER_ENV]: "openconnector",
+      [OPENCONNECTOR_URL_ENV]: "https://connector.example.test",
+    }));
+    expect(selected.id).toBe("openconnector");
+    expect(selected.isConfigured({} as never)).toBe(false);
+  });
+
   it("does not reuse a provider bound to a different direct admin token", () => {
     const settings = (token: string) => env({
       [CONNECTOR_PROVIDER_ENV]: "openconnector",

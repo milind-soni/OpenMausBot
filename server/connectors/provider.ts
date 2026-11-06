@@ -60,7 +60,7 @@ function readStoredConnectors(): StoredConnectors | null {
 
 /** env wins over config.json, matching how every other credential in this repo composes. `stored`
  * is injectable so tests never read the host's real config.json. */
-export function loadConnectorSettings(
+export function readConnectorSettings(
   env: NodeJS.ProcessEnv = process.env,
   stored: StoredConnectors | null = readStoredConnectors(),
 ): ConnectorSettings {
@@ -71,13 +71,27 @@ export function loadConnectorSettings(
     url: env[OPENCONNECTOR_URL_ENV] ?? stored?.openconnector?.url,
     adminTokenRef: env[OPENCONNECTOR_ADMIN_TOKEN_REF_ENV] ?? stored?.openconnector?.adminTokenRef,
   };
-  if (provider === "openconnector") {
-    if (!openconnector.url?.trim()) throw new Error('OpenConnector is selected but has no URL; set OMB_OPENCONNECTOR_URL');
-    if (!openconnector.adminTokenRef && !env[OPENCONNECTOR_ADMIN_TOKEN_ENV]?.trim()) {
-      throw new Error('OpenConnector is selected but has no admin token; set OMB_OPENCONNECTOR_ADMIN_TOKEN or OMB_OPENCONNECTOR_ADMIN_TOKEN_REF');
-    }
-  }
   return { provider, openconnector };
+}
+
+export function openConnectorConfigurationError(settings: OpenConnectorSettings, env: NodeJS.ProcessEnv): string | undefined {
+  if (!settings.url?.trim()) return 'OpenConnector is selected but has no URL; set OMB_OPENCONNECTOR_URL';
+  if (!settings.adminTokenRef?.trim() && !env[OPENCONNECTOR_ADMIN_TOKEN_ENV]?.trim()) {
+    return 'OpenConnector is selected but has no admin token; set OMB_OPENCONNECTOR_ADMIN_TOKEN or OMB_OPENCONNECTOR_ADMIN_TOKEN_REF';
+  }
+  return undefined;
+}
+
+export function loadConnectorSettings(
+  env: NodeJS.ProcessEnv = process.env,
+  stored: StoredConnectors | null = readStoredConnectors(),
+): ConnectorSettings {
+  const settings = readConnectorSettings(env, stored);
+  if (settings.provider === "openconnector") {
+    const error = openConnectorConfigurationError(settings.openconnector, env);
+    if (error) throw new Error(error);
+  }
+  return settings;
 }
 
 /** Resolves an admin-token reference without ever persisting the value: "env:NAME" reads a variable,
@@ -101,13 +115,27 @@ let selected: { key: string; provider: ConnectorProvider } | null = null;
 
 /** The provider for this process, memoized until the env or config.json changes. */
 export function connectorProvider(env: NodeJS.ProcessEnv = process.env): ConnectorProvider {
-  const settings = loadConnectorSettings(env);
+  const settings = readConnectorSettings(env);
+  const tokenIsResolvable = () => {
+    try {
+      return resolveTokenRef(settings.openconnector.adminTokenRef, env) !== undefined;
+    } catch {
+      return false;
+    }
+  };
+  const resolvedToken = () => {
+    try {
+      return resolveToken(settings.openconnector, env);
+    } catch {
+      return undefined;
+    }
+  };
   const key = JSON.stringify([
     settings.provider,
     settings.openconnector.url,
     settings.openconnector.adminTokenRef,
-    resolveTokenRef(settings.openconnector.adminTokenRef, env) !== undefined,
-    createHash("sha256").update(resolveToken(settings.openconnector, env) ?? "").digest("hex"),
+    tokenIsResolvable(),
+    createHash("sha256").update(resolvedToken() ?? "").digest("hex"),
     settledFileStamp(join(DATA_DIR, "config.json")),
   ]);
   if (selected?.key === key) return selected.provider;

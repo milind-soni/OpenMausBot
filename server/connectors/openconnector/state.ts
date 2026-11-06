@@ -3,7 +3,7 @@
 // credentials themselves live on the OpenConnector runtime. Sealing mirrors server/webhooks.ts: a
 // random AES-256-GCM key in a 0600 file no backup carries (workspace-backup-policy excludes it).
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "../../atomic.ts";
@@ -67,23 +67,73 @@ export class OpenConnectorStateStore {
   constructor(file = join(DATA_DIR, OPENCONNECTOR_STATE_FILE), runtimeUrl?: string) {
     this.file = file;
     this.runtimeUrl = runtimeUrl?.trim() || undefined;
-    const loaded = this.read();
+    const loaded = this.readUnlocked();
     this.connections = loaded.connections;
     this.appOAuth = loaded.appOAuth;
   }
 
-  private read(): { connections: OpenConnectorConnectionRecord[]; appOAuth: OpenConnectorAppOAuthRecord[] } {
+  private readUnlocked(): { runtimeUrl?: string; connections: OpenConnectorConnectionRecord[]; appOAuth: OpenConnectorAppOAuthRecord[] } {
     try {
       const parsed = stateFileSchema.safeParse(parseJson(readFileSync(this.file, "utf8")));
       if (parsed.success) {
         if (this.runtimeUrl && parsed.data.runtimeUrl && parsed.data.runtimeUrl !== this.runtimeUrl) {
-          return { connections: [], appOAuth: [] };
+          return { runtimeUrl: parsed.data.runtimeUrl, connections: [], appOAuth: [] };
         }
-        return { connections: parsed.data.connections ?? [], appOAuth: parsed.data.appOAuth ?? [] };
+        return { runtimeUrl: parsed.data.runtimeUrl, connections: parsed.data.connections ?? [], appOAuth: parsed.data.appOAuth ?? [] };
       }
     } catch {
     }
     return { connections: [], appOAuth: [] };
+  }
+
+  private refreshUnlocked(): void {
+    const loaded = this.readUnlocked();
+    if (this.runtimeUrl && loaded.runtimeUrl && loaded.runtimeUrl !== this.runtimeUrl) return;
+    this.connections = loaded.connections;
+    this.appOAuth = loaded.appOAuth;
+  }
+
+  /** A 0600 lock file serializes processes. Every public read refreshes under it, and every mutation
+   * refreshes before changing the current file, so a replacement provider cannot overwrite its update. */
+  private withLock<T>(operation: () => T, persist = true): T {
+    const path = `${this.file}.lock`;
+    const deadline = Date.now() + 5_000;
+    for (;;) {
+      let descriptor: number;
+      try {
+        mkdirSync(dirname(path), { recursive: true });
+        descriptor = openSync(path, "wx", 0o600);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        const now = Date.now();
+        if (now >= deadline) throw new Error(`Timed out waiting for the OpenConnector state lock`);
+        let owner: number | null = null;
+        try {
+          owner = Number.parseInt(readFileSync(path, "utf8").trim(), 10);
+        } catch {}
+        const ownerAlive = owner !== null && Number.isSafeInteger(owner) && owner > 0 && process.kill(owner, 0);
+        if (!ownerAlive) {
+          try {
+            unlinkSync(path);
+            continue;
+          } catch {}
+        }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+        continue;
+      }
+      try {
+        writeFileSync(descriptor, `${process.pid}\n`, { flag: "r+" });
+        this.refreshUnlocked();
+        const result = operation();
+        if (persist) this.persist();
+        return result;
+      } finally {
+        closeSync(descriptor);
+        try {
+          unlinkSync(path);
+        } catch {}
+      }
+    }
   }
 
   private persist(): void {
@@ -96,53 +146,57 @@ export class OpenConnectorStateStore {
   }
 
   listConnections(): OpenConnectorConnectionRecord[] {
-    return this.connections.map((record) => ({ ...record }));
+    return this.withLock(() => this.connections.map((record) => ({ ...record })), false);
   }
 
   connectionsForService(service: string): OpenConnectorConnectionRecord[] {
-    return this.listConnections().filter((record) => record.service === service);
+    return this.withLock(() => this.connections
+      .filter((record) => record.service === service)
+      .map((record) => ({ ...record })), false);
   }
 
   findConnectionByAccountId(accountId: string): OpenConnectorConnectionRecord | null {
-    return this.connections.find((record) => record.accountId === accountId) ?? null;
+    return this.withLock(() => this.connections.find((record) => record.accountId === accountId) ?? null, false);
   }
 
   upsertConnection(record: OpenConnectorConnectionRecord): void {
-    const index = this.connections.findIndex((existing) => existing.accountId === record.accountId);
-    if (index >= 0) this.connections[index] = record;
-    else this.connections.push(record);
-    this.persist();
+    this.withLock(() => {
+      const index = this.connections.findIndex((existing) => existing.accountId === record.accountId);
+      if (index >= 0) this.connections[index] = record;
+      else this.connections.push(record);
+    });
   }
 
   removeConnection(accountId: string): boolean {
-    const before = this.connections.length;
-    this.connections = this.connections.filter((record) => record.accountId !== accountId);
-    if (this.connections.length === before) return false;
-    this.persist();
-    return true;
+    return this.withLock(() => {
+      const before = this.connections.length;
+      this.connections = this.connections.filter((record) => record.accountId !== accountId);
+      return this.connections.length !== before;
+    });
   }
 
   removeConnectionsForService(service: string): number {
-    const before = this.connections.length;
-    this.connections = this.connections.filter((record) => record.service !== service);
-    const removed = before - this.connections.length;
-    if (removed) this.persist();
-    return removed;
+    return this.withLock(() => {
+      const before = this.connections.length;
+      this.connections = this.connections.filter((record) => record.service !== service);
+      return before - this.connections.length;
+    });
   }
 
   listAppOAuth(): OpenConnectorAppOAuthRecord[] {
-    return this.appOAuth.map((record) => ({ ...record }));
+    return this.withLock(() => this.appOAuth.map((record) => ({ ...record })), false);
   }
 
   findAppOAuth(service: string): OpenConnectorAppOAuthRecord | null {
-    return this.appOAuth.find((record) => record.service === service) ?? null;
+    return this.withLock(() => this.appOAuth.find((record) => record.service === service) ?? null, false);
   }
 
   upsertAppOAuth(record: OpenConnectorAppOAuthRecord): void {
-    const index = this.appOAuth.findIndex((existing) => existing.service === record.service);
-    if (index >= 0) this.appOAuth[index] = record;
-    else this.appOAuth.push(record);
-    this.persist();
+    this.withLock(() => {
+      const index = this.appOAuth.findIndex((existing) => existing.service === record.service);
+      if (index >= 0) this.appOAuth[index] = record;
+      else this.appOAuth.push(record);
+    });
   }
 
   /** Key file pattern from server/webhooks.ts sealKey: 0600, hex, regenerated only when absent. */

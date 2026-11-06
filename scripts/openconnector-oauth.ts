@@ -24,7 +24,7 @@ import { DATA_DIR } from "../server/config.ts";
 import { appOAuthStatus, configureAppOAuth } from "../server/connectors/openconnector/oauth.ts";
 
 const USAGE = `Usage:
-  node scripts/openconnector-oauth.ts configure <service> --client-id <id> [--client-secret <secret>] [--scope <scope> ...]
+  node scripts/openconnector-oauth.ts configure <service> --client-id <id> [--scope <scope> ...]
   node scripts/openconnector-oauth.ts status <service>
 
 Settings come from ${CONNECTOR_PROVIDER_ENV}=openconnector, ${OPENCONNECTOR_URL_ENV},
@@ -63,7 +63,7 @@ if (verb === "configure") {
   const clientId = values["client-id"];
   if (!clientId) fail("configure needs --client-id");
   const clientSecret = process.env.OPENCONNECTOR_OAUTH_CLIENT_SECRET;
-  if (!clientSecret) fail("configure needs --client-secret or OPENCONNECTOR_OAUTH_CLIENT_SECRET");
+  if (!clientSecret) fail("configure needs OPENCONNECTOR_OAUTH_CLIENT_SECRET");
   const { expectedRedirectUri } = await configureAppOAuth(client, state, service, {
     clientId,
     clientSecret,

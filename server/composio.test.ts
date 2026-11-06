@@ -77,6 +77,7 @@ let brokerConnectedServicesBody: { services: Record<string, { connected: boolean
 let brokerConnectedServicesFail = false;
 // What /broker/v1/catalog serves; null falls back to github only.
 let brokerCatalogBody: { items: Array<{ slug: string; name: string }> } | null = null;
+let sessionLookupFail = false;
 // The project's own auth configs, and those the stub Session was created with: a Session knows only the configs named at creation.
 let customAuthConfigs: Array<Record<string, unknown>> = [];
 let sessionAuthConfigs: Record<string, string> = {};
@@ -164,7 +165,7 @@ beforeAll(async () => {
     }
 
     const apiKey = String(req.headers["x-api-key"] ?? "");
-    if (!["ak_test", "ak_catalog_a", "ak_catalog_b", "ak_catalog_pages", "ak_catalog_partial", "ak_catalog_stuck",
+    if (!["ak_test", "ak_status_pages", "ak_catalog_a", "ak_catalog_b", "ak_catalog_pages", "ak_catalog_partial", "ak_catalog_stuck",
         "ak_catalog_page_stuck", "ak_catalog_exhausted", "ak_catalog_stalled_total", "ak_catalog_end_short",
         "ak_catalog_http_no_total"].includes(apiKey)) {
       res.writeHead(401, { "content-type": "application/json" });
@@ -300,6 +301,10 @@ beforeAll(async () => {
       return res.end(JSON.stringify({ items: [{ slug: "x", name: "X (Twitter)" }, { slug: "github", name: "GitHub" }] }));
     }
     if (req.method === "GET" && url.pathname === "/api/v3.1/tool_router/session/trs_test") {
+      if (sessionLookupFail) {
+        res.writeHead(503, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: { message: "Session lookup unavailable" } }));
+      }
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(JSON.stringify({
         session_id: "trs_test",
@@ -328,6 +333,14 @@ beforeAll(async () => {
       }));
     }
     if (req.method === "GET" && url.pathname.endsWith("/toolkits")) {
+      if (apiKey === "ak_status_pages") {
+        const pageTwo = url.searchParams.get("cursor") === "status-page-2";
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({
+          items: pageTwo ? [{ slug: "status_page_b" }] : [{ slug: "status_page_a" }],
+          ...(pageTwo ? {} : { next_cursor: "status-page-2" }),
+        }));
+      }
       res.writeHead(200, { "content-type": "application/json" });
       if (url.searchParams.get("cursor") === "toolkits-page-2") {
         return res.end(JSON.stringify({
@@ -995,6 +1008,38 @@ describe.sequential("Composio Sessions", () => {
       brokerConnectedServicesFail = false;
       brokerConnectedServicesBody = null;
     }
+  });
+
+  it("serves cached project slugs without a Session lookup, then falls back when the Session fails", async () => {
+    const cfg = { composio: { apiKey: "ak_test", sessionId: "trs_test" } } as AppConfig;
+    const start = Date.now();
+    const now = vi.spyOn(Date, "now");
+    const sessionReads = () => calls.filter((call) => call.path === "/api/v3.1/tool_router/session/trs_test").length;
+    try {
+      forgetProjectAuthConfigs();
+      await expect(connectedServiceSlugs(cfg)).resolves.toContain("github");
+      const firstReads = sessionReads();
+      now.mockReturnValue(start + 1_000);
+      await expect(connectedServiceSlugs(cfg)).resolves.toContain("github");
+      expect(sessionReads()).toBe(firstReads);
+      now.mockReturnValue(start + 61_000);
+      sessionLookupFail = true;
+      await expect(connectedServiceSlugs(cfg)).resolves.toContain("github");
+      expect(sessionReads()).toBe(firstReads + 1);
+    } finally {
+      sessionLookupFail = false;
+      now.mockRestore();
+      forgetProjectAuthConfigs();
+    }
+  });
+
+  it("clears a completed final pagination cursor instead of reporting the safety limit", async () => {
+    const cfg = { composio: { apiKey: "ak_status_pages", sessionId: "trs_test" } } as AppConfig;
+    calls.length = 0;
+    const status = await connectionStatus(cfg, ["status_page_a", "status_page_b"]);
+    expect(status.status_page_a).toMatchObject({ connected: false, status: "not_connected" });
+    expect(status.status_page_b).toMatchObject({ connected: false, status: "not_connected" });
+    expect(calls.filter((call) => call.query.includes("status-page-2"))).toHaveLength(1);
   });
 
   it("validates grant patches against connected services and the catalog", async () => {

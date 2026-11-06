@@ -3,6 +3,8 @@
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { spawn } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { excludedWorkspaceAuthPath } from "../../workspace-backup-policy.ts";
 import {
@@ -79,6 +81,31 @@ describe("state persistence", () => {
     expect(readRaw.runtimeUrl).toBe("https://first.example.test");
     expect(new OpenConnectorStateStore(file, "https://second.example.test").listConnections()).toEqual([]);
     expect(new OpenConnectorStateStore(file, "https://first.example.test").listConnections()).toHaveLength(1);
+  });
+
+  it("coordinates cross-process writers so a former owner cannot write stale state", async () => {
+    const file = join(dir, `locked-${Math.random().toString(36).slice(2)}.json`);
+    const former = new OpenConnectorStateStore(file);
+    former.upsertConnection({ accountId: "oc:github:old", service: "github", status: "ACTIVE", updatedAt: "old" });
+    const moduleUrl = JSON.stringify(pathToFileURL(join(import.meta.dirname, "state.ts")).href);
+    const child = spawn(process.execPath, [
+      "--experimental-strip-types", "--input-type=module", "-e",
+      `const { OpenConnectorStateStore } = await import(${moduleUrl});
+       const store = new OpenConnectorStateStore(${JSON.stringify(file)});
+       store.upsertConnection({ accountId: "oc:gmail:new", service: "gmail", status: "ACTIVE", updatedAt: "new" });
+       process.exit(0);`,
+    ], { stdio: ["ignore", "inherit", "inherit"] });
+    await new Promise<void>((resolve, reject) => {
+      child.on("error", reject);
+      child.on("exit", (code) => code === 0 ? resolve() : reject(new Error(`state writer exited ${code}`)));
+    });
+    former.upsertConnection({ accountId: "oc:github:old", service: "github", status: "ACTIVE", updatedAt: "newer" });
+    expect(former.listConnections().map((record) => record.accountId)).toEqual(["oc:github:old", "oc:gmail:new"]);
+    const reloaded = new OpenConnectorStateStore(file);
+    expect(reloaded.findConnectionByAccountId("oc:github:old")).toMatchObject({ updatedAt: "newer" });
+    expect(reloaded.findConnectionByAccountId("oc:gmail:new")).toMatchObject({ updatedAt: "new" });
+    expect(excludedWorkspaceAuthPath("openconnector-state.json.lock")).toBe(true);
+    expect(excludedWorkspaceAuthPath("openconnector-state.json.123.05a7b3e0-1234-4abc-8def-0123456789ab.tmp")).toBe(true);
   });
 
   it("reads a missing or corrupt file as empty", () => {

@@ -429,26 +429,55 @@ async function listConnectorTools(
 }
 
 const CONNECTOR_SERVICE_SLUGS_CACHE_MS = 60_000;
-let connectorServiceSlugsCache: { at: number; identity: string; slugs: readonly string[] } | null = null;
+let connectorServiceSlugsCache: {
+  at: number;
+  identity: string;
+  baseIdentity: string;
+  sessionId?: string;
+  slugs: readonly string[];
+} | null = null;
 let connectorServiceSlugsRequest: { identity: string; slugs: Promise<readonly string[]> } | null = null;
 
-/** Real backend slugs, so an underscored service (bland_ai) is never captured by a plain-prefix grant (bland); a failed read answers the last good one. */
+function connectorServiceCacheIdentity(cfg: AppConfig, as?: BrokerAccess): string {
+  const apiKey = as ? null : projectApiKey(cfg);
+  if (apiKey) return backendFingerprint("project-slugs", apiBase(), apiKey);
+  const broker = as ?? brokerAccess();
+  return broker ? backendFingerprint("managed-slugs", broker.url, broker.token) : "none";
+}
+
+/** Real backend slugs, so an underscored service (bland_ai) is never captured by a plain-prefix grant
+ * (bland); a failed read answers the last good one. A valid cache hit never wakes the Session. */
 async function connectedServiceSlugs(cfg: AppConfig, as?: BrokerAccess): Promise<readonly string[]> {
-  const identity = await connectorToolsIdentity(cfg, as);
-  if (connectorServiceSlugsCache?.identity === identity
-    && Date.now() - connectorServiceSlugsCache.at < CONNECTOR_SERVICE_SLUGS_CACHE_MS) {
-    return connectorServiceSlugsCache.slugs;
+  const apiKey = as ? null : projectApiKey(cfg);
+  const baseIdentity = connectorServiceCacheIdentity(cfg, as);
+  const cache = connectorServiceSlugsCache;
+  const cacheSessionMatches = !apiKey || cfg.composio?.sessionId === cache?.sessionId;
+  if (cache && cache.baseIdentity === baseIdentity && cacheSessionMatches
+    && Date.now() - cache.at < CONNECTOR_SERVICE_SLUGS_CACHE_MS) {
+    return cache.slugs;
   }
-  if (connectorServiceSlugsRequest?.identity === identity) return connectorServiceSlugsRequest.slugs;
-  const walk = connectedServices(cfg, as).then(
-    (services) => {
+  if (connectorServiceSlugsRequest?.identity === baseIdentity) return connectorServiceSlugsRequest.slugs;
+  const walk = (async (): Promise<readonly string[]> => {
+    let identity = baseIdentity;
+    let sessionId = apiKey ? cfg.composio?.sessionId : undefined;
+    try {
+      if (apiKey) {
+        const session = await ensureProjectSession(cfg);
+        sessionId = session.session_id;
+        identity = backendFingerprint("project-tools", apiBase(), `${apiKey}\0${sessionId}`);
+      }
+      const services = await connectedServices(cfg, as);
       const slugs = Object.keys(services);
-      connectorServiceSlugsCache = { at: Date.now(), identity, slugs };
+      connectorServiceSlugsCache = { at: Date.now(), identity, baseIdentity, ...(sessionId ? { sessionId } : {}), slugs };
       return slugs;
-    },
-    () => connectorServiceSlugsCache?.identity === identity ? connectorServiceSlugsCache.slugs : [] as readonly string[],
-  );
-  connectorServiceSlugsRequest = { identity, slugs: walk };
+    } catch {
+      const stale = connectorServiceSlugsCache;
+      const sameSession = !apiKey || sessionId === stale?.sessionId;
+      if (stale && (stale.identity === identity || stale.baseIdentity === baseIdentity) && sameSession) return stale.slugs;
+      return [] as readonly string[];
+    }
+  })();
+  connectorServiceSlugsRequest = { identity: baseIdentity, slugs: walk };
   try {
     return await walk;
   } finally {
@@ -587,7 +616,10 @@ async function connectionStatus(cfg: AppConfig, slugs: string[]): Promise<Record
       bySlug.set(canonicalToolkitSlug(item.slug), item);
     }
     const next = body.next_cursor || undefined;
-    if (!next) break;
+    if (!next) {
+      cursor = undefined;
+      break;
+    }
     if (seenCursors.has(next)) throw new Error("Composio status inventory repeated a pagination cursor");
     seenCursors.add(next);
     cursor = next;
