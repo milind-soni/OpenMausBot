@@ -5,6 +5,7 @@
 // references are swapped back. The reference names only the JSON path, never the value, so a backup, a log line or a
 // screenshot of config.json carries no secret.
 import { execFileSync } from "node:child_process";
+import type { JsonObject, JsonValue } from "../shared/json.ts";
 
 export const SECRET_REF_PREFIX = "omb-secret-ref:v1:";
 export const SECRET_SERVICE = "openmausbot";
@@ -20,7 +21,7 @@ export interface SecretBackend {
   set(account: string, value: string): void;
 }
 
-type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
+type Json = JsonValue;
 
 export function isSecretRef(value: unknown): value is string {
   return typeof value === "string" && value.startsWith(SECRET_REF_PREFIX);
@@ -30,7 +31,7 @@ function refFor(path: string): string {
   return `${SECRET_REF_PREFIX}${path}`;
 }
 
-function isPlainObject(value: unknown): value is { [key: string]: Json } {
+function isPlainObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -42,7 +43,7 @@ export function accountFor(segments: readonly string[]): string {
 function walk(value: Json, segments: string[], parentKey: string | undefined, visit: (segments: string[], leaf: string) => Json): Json {
   if (Array.isArray(value)) return value.map((item, index) => walk(item, [...segments, String(index)], undefined, visit));
   if (!isPlainObject(value)) return value;
-  const out: { [key: string]: Json } = {};
+  const out: JsonObject = {};
   for (const [key, child] of Object.entries(value)) {
     const path = [...segments, key];
     const secretHere = typeof child === "string" && child !== "" && (SECRET_LEAF.test(key) || (parentKey !== undefined && SECRET_CONTAINER.has(parentKey)));
@@ -89,7 +90,7 @@ export function unsealSecrets(config: Json, backend: SecretBackend): UnsealResul
   const strip = (value: Json): Json => {
     if (Array.isArray(value)) return value.map(strip);
     if (!isPlainObject(value)) return value;
-    const out: { [key: string]: Json } = {};
+    const out: JsonObject = {};
     for (const [key, child] of Object.entries(value)) {
       if (isSecretRef(child)) {
         const account = child.slice(SECRET_REF_PREFIX.length);
