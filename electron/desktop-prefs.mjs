@@ -152,9 +152,10 @@ export function createDesktopPrefs({ read, write }) {
  * MausBot Cloud, asked once its Cloud sign-in is restored. `localConfig()`: This computer's own workspace's config.json.
  * `languageChanged(language, sender)`: tells this desktop's other pages the language picked on one of them;
  * `onLanguage(language)`: tells main, which draws its menus, tray and dialogs in it. `onShown(language, sender)`: the
- * language a page of the window shows, which main's words follow while nothing is picked. `prefs`: the record main reads too.
+ * language a page of the window shows, which main's words follow while nothing is picked; `windowLanguage()`: the one
+ * main follows now, null before the window has said, which the rail beside the window follows too. `prefs`: the record main reads too.
  */
-export function registerDesktopPrefs({ prefs: given, ipcMain, read, write, page, cloudOffered, cloudAccount, localConfig = () => null, languageChanged = () => {}, onLanguage = () => {}, onShown = () => {}, frame = null, now = Date.now, systemName = accountFullName }) {
+export function registerDesktopPrefs({ prefs: given, ipcMain, read, write, page, cloudOffered, cloudAccount, localConfig = () => null, languageChanged = () => {}, onLanguage = () => {}, onShown = () => {}, windowLanguage = () => null, frame = null, now = Date.now, systemName = accountFullName }) {
   let prefs = given ?? null;
   const store = () => prefs ??= createDesktopPrefs({ read, write });
   const from = (channel, pages, handler) => (event, ...args) => {
@@ -196,6 +197,9 @@ export function registerDesktopPrefs({ prefs: given, ipcMain, read, write, page,
       try { onLanguage(language); } catch {}
     }
     return store().language() === language;
+  });
+  ipcMain.on("desktop-language:window", event => {
+    try { event.returnValue = page(event) ? windowLanguage() ?? null : null; } catch { event.returnValue = null; }
   });
   ipcMain.on("desktop-language:shown", (event, language) => {
     try { if (page(event) && isLanguage(language) && language) onShown(language, event.sender); } catch {}
