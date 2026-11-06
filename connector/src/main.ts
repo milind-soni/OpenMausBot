@@ -3,7 +3,7 @@ import { readFileSync, statfsSync } from "node:fs";
 import { join } from "node:path";
 
 import { Agent } from "./agent.ts";
-import { SocketDocker, type DockerInfo } from "./docker.ts";
+import { SocketDocker, dockerApiProblem, type DockerInfo } from "./docker.ts";
 import { adminOrigin, enroll } from "./enroll.ts";
 import { readHealth } from "./home-health.ts";
 import { Home } from "./home.ts";
@@ -95,6 +95,11 @@ async function run(): Promise<void> {
   log(`MausBot connector ${CONNECTOR_VERSION} starting`);
   // A connector removed with SIGKILL never said it went offline.
   state.saveStatus({ connected: false });
+  for (let problem = await dockerApiProblem(docker, PATHS.docker); problem; problem = await dockerApiProblem(docker, PATHS.docker)) {
+    log(problem);
+    state.saveStatus({ lastError: problem });
+    await sleep(10 * 60_000);
+  }
   let record: AgentRecord | null = state.agent();
   if (!record) log("waiting for this server to be connected: run the install command with the code MausBot shows");
   while (!record) {
@@ -206,6 +211,12 @@ function statusCommand(): void {
  */
 async function probeCommand(): Promise<void> {
   const docker = new SocketDocker(PATHS.docker);
+  const unusable = await dockerApiProblem(docker, PATHS.docker);
+  if (unusable) {
+    console.log(process.argv.includes("--json") ? JSON.stringify({ ok: false, checks: [{ id: "docker", ok: false, fix: unusable }] }) : `fail docker ${unusable}`);
+    process.exitCode = 1;
+    return;
+  }
   const image = process.env.MAUSBOT_CONNECTOR_IMAGE;
   let box: BoxProbeResult | null = null;
   try { box = image ? await probeBox(docker, image, seccomp()) : null; } catch (error) { box = { ok: false, fix: errorText(error) }; }
