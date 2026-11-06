@@ -161,6 +161,7 @@ export function DeviceSignIn({ instanceId, browserPkce = false, provider = "code
   const { refreshInstances, refreshModels } = useStore();
   const [auth, setAuth] = useState<DeviceSignInStatus | null>(null);
   const [busy, setBusy] = useState(autoStart);
+  const [switching, setSwitching] = useState(false);
   const started = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const base = `/api/instances/${encodeURIComponent(instanceId)}/auth`;
@@ -238,6 +239,23 @@ export function DeviceSignIn({ instanceId, browserPkce = false, provider = "code
     } finally { setBusy(false); }
   };
 
+  // Browser-pkce exits: delegated plan access can be denied per workspace
+  // ("3p_delegated_access_policy_denied"), so offer Codex's own device sign-in.
+  const switchToDevice = async () => {
+    setSwitching(true);
+    setError(null);
+    let flipped = false;
+    try {
+      await api(`${base}/start`, { method: "POST", body: JSON.stringify({ method: "device" }) });
+      flipped = true;
+      await refreshInstances();
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message
+        : flipped ? t("engineSetup.chatgpt.switchRefreshFailed")
+        : cause instanceof Error ? cause.message : failed);
+    } finally { setSwitching(false); }
+  };
+
   useEffect(() => {
     if (!autoStart || started.current) return;
     started.current = true;
@@ -262,6 +280,16 @@ export function DeviceSignIn({ instanceId, browserPkce = false, provider = "code
         </button>
       )}
       {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
+      {browserPkce && auth?.phase !== "succeeded" && auth?.phase !== "waiting" && (
+        <button
+          type="button"
+          disabled={switching}
+          onClick={() => void switchToDevice()}
+          className="w-full text-[12px] text-ink-secondary underline-offset-2 hover:text-ink hover:underline disabled:opacity-60"
+        >
+          {switching ? t("engineSetup.chatgpt.switchingDevice") : t("engineSetup.chatgpt.useDevice")}
+        </button>
+      )}
       {!browserPkce && provider === "codex" && <p className="text-[11px] leading-relaxed text-ink-secondary">{t("engineSetup.device.enableHint")}</p>}
     </div>
   );
