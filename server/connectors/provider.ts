@@ -10,6 +10,7 @@ import { parseJson } from "../schema.ts";
 import { settledFileStamp } from "../settled-file.ts";
 import type { ConnectorProvider } from "./types.ts";
 import { composioProvider } from "./composio.ts";
+import { createOpenConnectorProvider } from "./openconnector/provider.ts";
 
 export const CONNECTOR_PROVIDER_ENV = "OMB_CONNECTOR_PROVIDER";
 export const OPENCONNECTOR_URL_ENV = "OMB_OPENCONNECTOR_URL";
@@ -109,8 +110,7 @@ export function connectorProvider(env: NodeJS.ProcessEnv = process.env): Connect
 
 function selectProvider(settings: ConnectorSettings): ConnectorProvider {
   if (settings.provider === "openconnector") {
-    // Wired in the OpenConnector provider (server/connectors/openconnector/); selecting it before that lands is a config error.
-    throw new Error('Connector provider "openconnector" is not available yet');
+    return createOpenConnectorProvider({ settings: settings.openconnector });
   }
   return composioProvider;
 }

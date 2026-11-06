@@ -101,7 +101,7 @@ export interface ConnectorProvider {
   removeService(cfg: AppConfig, slug: string, as?: BrokerAccess): Promise<{ removed: number }>;
   removeAccount(cfg: AppConfig, slug: string, accountId: string): Promise<{ removed: number }>;
   prepareAuthConfigs(cfg: AppConfig, items: ReadonlyArray<ConnectorAuthItem>): Promise<string | undefined>;
-  authorize(cfg: AppConfig, slug: string, requestedAlias?: string | null, as?: BrokerAccess): Promise<{ url: string }>;
+  authorize(cfg: AppConfig, slug: string, requestedAlias?: string | null, as?: BrokerAccess): Promise<{ url: string; connectionRequestId?: string }>;
   catalog(cfg: AppConfig): Promise<ConnectorCatalog>;
   relayMcp(
     cfg: AppConfig,

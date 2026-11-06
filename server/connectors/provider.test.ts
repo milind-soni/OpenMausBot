@@ -57,12 +57,14 @@ describe("connectorProvider", () => {
     expect(one).toBe(two);
   });
 
-  it("names openconnector as a config error until the OpenConnector provider is wired", () => {
-    expect(() => connectorProvider(env({
+  it("selects the openconnector provider when configured with a url and a resolvable token", () => {
+    const selected = connectorProvider(env({
       [CONNECTOR_PROVIDER_ENV]: "openconnector",
       [OPENCONNECTOR_URL_ENV]: "https://connector.example.test",
       [OPENCONNECTOR_ADMIN_TOKEN_ENV]: "0".repeat(64),
-    }))).toThrow(/openconnector.*not available/);
+    }));
+    expect(selected.id).toBe("openconnector");
+    expect(selected).not.toBe(composioProvider);
   });
 });
 
