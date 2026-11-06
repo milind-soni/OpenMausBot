@@ -23,6 +23,31 @@ export function settleParkedFiles(
   return { land, discard };
 }
 
+/** Where a thread's turn parks its files until it settles. */
+export function parkedFilesKey(threadId: string, turnId?: string): string {
+  return `${threadId}:${turnId ?? "active"}`;
+}
+
+/** Takes what a settling turn parked, and with it anything parked on the thread under another turn: a thread runs one
+ * turn at a time, so a file parked under any other key would otherwise never reach the person. */
+export function takeParkedFiles(
+  parked: Map<string, ParkedTurnAttachment[]>,
+  threadId: string,
+  turnId: string | undefined,
+): { files: ParkedTurnAttachment[]; strays: string[] } {
+  const own = parkedFilesKey(threadId, turnId);
+  const files = [...parked.get(own) ?? []];
+  parked.delete(own);
+  const strays: string[] = [];
+  for (const [key, more] of parked) {
+    if (!key.startsWith(`${threadId}:`)) continue;
+    parked.delete(key);
+    files.push(...more);
+    strays.push(key.slice(threadId.length + 1));
+  }
+  return { files, strays };
+}
+
 const endsTurn = (message: Message) => message.kind === "activity" && message.tool !== undefined
   && (failedTurnCause(message.tool.name) !== null || isStoppedTurnName(message.tool.name));
 

@@ -229,3 +229,31 @@ it("with a voice note on every reply, says by voice how a failed turn ended", as
   await f.settle(bot, "Again.");
   await expect.poll(async () => audioOf(await f.messages(bot.activeTaskId)).map((note) => note.file.text).at(-1), { timeout: 30_000 }).toBe("All good now.");
 }), 90_000);
+
+it("attaches the note to the final reply of a long turn: folded first, said in between, two failed calls", async () => withChatVoice(async (f) => {
+  const bot = await f.newBot("Long turn voice bot");
+  await f.api("PATCH", `/api/bots/${bot.id}`, { voiceNoteEveryReply: true });
+  await f.api("PATCH", "/api/config", { context: { compactAt: 1 } });
+  f.script(() => say("Noted."));
+  for (const line of ["First older request.", "Second older request.", "Third older request."]) await f.settle(bot, line);
+  const step = (id: string, text: string, name: string, args: unknown) =>
+    frame({ content: text, tool_calls: [{ index: 0, id, type: "function", function: { name, arguments: JSON.stringify(args) } }] }, "tool_calls") + "data: [DONE]\n\n";
+  f.script((request) => {
+    const done = toolResults(request).length;
+    if (done === 0) return step("c1", "Voice note on its way…", "agents_send_voice_note", { text: "Here is the weekly summary." });
+    if (done === 1) return step("c2", "Looking at the numbers.", "agents_send_voice_note", { text: "" });
+    if (done === 2) return step("c3", "Trying another way.", "agents_list_bots", { unexpected: true });
+    if (done === 3) return step("c4", "Almost there.", "agents_list_bots", {});
+    return say("Voice note is attached to this reply.");
+  });
+  await f.settle(bot, "Summarise the week and send it as a voice note.");
+  const messages = await f.messages(bot.activeTaskId);
+  expect(messages.filter((message) => message.kind === "compaction").length).toBeGreaterThan(0);
+  const turn = messages.find((message) => message.text === "Voice note is attached to this reply.")?.turnId;
+  expect(turn).toBeTruthy();
+  const lines = messages.filter((message) => message.kind === "text" && message.turnId === turn);
+  expect(lines.length).toBeGreaterThan(1);
+  const failed = messages.filter((message) => message.kind === "activity" && message.turnId === turn && message.tool?.ok === false);
+  expect(failed.length).toBeGreaterThanOrEqual(1);
+  expect(audioOf(messages).filter((note) => note.message.turnId === turn).map((note) => [note.message.text, note.file.text])).toEqual([["Voice note is attached to this reply.", "Here is the weekly summary."]]);
+}), 120_000);

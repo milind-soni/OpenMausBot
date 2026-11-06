@@ -2,7 +2,7 @@ import { expect, it, vi } from "vitest";
 import { PERSON_STOPPED_TURN_NAME } from "../../shared/client-cancel.ts";
 import { failedTurnTool } from "../../shared/failed-turn.ts";
 import type { Message } from "../store.ts";
-import { landTurnFiles, settleParkedFiles } from "./turn-attachments.ts";
+import { landTurnFiles, parkedFilesKey, settleParkedFiles, takeParkedFiles } from "./turn-attachments.ts";
 
 const image = { kind: "image" as const, path: "/a/one.png", mime: "image/png" };
 const note = { kind: "audio" as const, path: "/a/two.mp3", mime: "audio/mpeg", text: "  the token is sk-live-abc  " };
@@ -70,4 +70,20 @@ it("appends that line when the turn ended without an error line, and does nothin
   expect(append).not.toHaveBeenCalled();
   landTurnFiles(store, { threadId: "th", turnId: "t1", from: { botId: "b", name: "B", color: "#fff" } }, [audio], append);
   expect(append).toHaveBeenCalledWith({ role: "bot", kind: "text", text: "", attachments: [audio], turnId: "t1", from: { botId: "b", name: "B", color: "#fff" } });
+});
+
+it("takes a settling turn's own files and any the thread parked under another turn, and leaves other threads' alone", () => {
+  const one = { kind: "audio" as const, path: "/a/1.mp3", mime: "audio/mpeg" };
+  const two = { kind: "image" as const, path: "/a/2.png", mime: "image/png" };
+  const three = { kind: "audio" as const, path: "/a/3.mp3", mime: "audio/mpeg" };
+  const other = { kind: "audio" as const, path: "/a/4.mp3", mime: "audio/mpeg" };
+  const parked = new Map([
+    [parkedFilesKey("th", "t2"), [one]],
+    [parkedFilesKey("th"), [two]],
+    [parkedFilesKey("th", "t1"), [three]],
+    [parkedFilesKey("th-2", "t9"), [other]],
+  ]);
+  expect(takeParkedFiles(parked, "th", "t2")).toEqual({ files: [one, two, three], strays: ["active", "t1"] });
+  expect([...parked.keys()]).toEqual([parkedFilesKey("th-2", "t9")]);
+  expect(takeParkedFiles(parked, "th", "t3")).toEqual({ files: [], strays: [] });
 });
