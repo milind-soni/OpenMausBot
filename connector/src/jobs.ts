@@ -15,7 +15,8 @@ export interface RunnerDeps {
   home: Home;
   hostHealth: () => Promise<HostHealth>;
   identity: () => ConnectorIdentity;
-  admin: () => { origin: string; token: string };
+  /** The Admin's origin, and the `Authorization` a transfer for a job sends it. */
+  admin: () => { origin: string; authorization: (jobId: string) => string };
   /** Null when the new connector took over and will answer this job itself. */
   selfUpdate: (job: Job<"self-update">) => Promise<JobReply | null>;
 }
