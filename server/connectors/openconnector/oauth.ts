@@ -118,10 +118,13 @@ export async function pollConnectionRequest(
           : body.connected === true ? "connected"
             : "pending";
       if (TERMINAL_OK.has(status) || TERMINAL_BAD.has(status)) {
+        const accountId = accountIdForConnection(service, alias);
+        const existing = state.findConnectionByAccountId(accountId);
         const record: OpenConnectorConnectionRecord = {
-          accountId: accountIdForConnection(service, alias),
+          accountId,
           service,
           ...(alias ? { alias } : {}),
+          ...(existing?.label ? { label: existing.label } : {}),
           connectionRequestId: requestId,
           status,
           updatedAt: new Date().toISOString(),

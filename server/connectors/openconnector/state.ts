@@ -36,6 +36,7 @@ const connectionRecordSchema = z.object({
   label: z.string().optional(),
   connectionRequestId: z.string().optional(),
   status: z.string(),
+  lastError: z.string().max(400).optional(),
   updatedAt: z.string(),
 });
 

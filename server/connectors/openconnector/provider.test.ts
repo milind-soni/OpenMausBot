@@ -4,7 +4,7 @@ import { createServer, type Server } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../../config.ts";
 import { createOpenConnectorProvider, resolveAdminToken } from "./provider.ts";
 import { OpenConnectorStateStore } from "./state.ts";
@@ -17,6 +17,10 @@ let providersBody: unknown = [{ id: "github", name: "GitHub" }, { id: "gmail", n
 let actionsBody: unknown = [{ id: "github.get_current_user", description: "Who am I" }, { id: "github.create_issue", description: "Open an issue" }, { id: "gmail.list_emails" }];
 let authenticatedBody: unknown = ["github"];
 let failConnect = false;
+let connectionRequestBody: unknown = { status: "connected" };
+let connectionRequestStatus = 200;
+let gateConnectionRequests = false;
+let releaseGate: (() => void) | null = null;
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "omb-oconn-"));
@@ -43,7 +47,14 @@ beforeAll(async () => {
       }
       return ok({ connectionRequestId: "cr_9", authorizationUrl: "https://provider.example.test/authorize" });
     }
-    if (url.pathname.startsWith("/v1/connection-requests/")) return ok({ status: "connected" });
+    if (url.pathname.startsWith("/v1/connection-requests/")) {
+      if (gateConnectionRequests) await new Promise<void>((resolve) => { releaseGate = resolve; });
+      if (connectionRequestStatus !== 200) {
+        res.writeHead(connectionRequestStatus, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ success: false, message: "poll failed" }));
+      }
+      return ok(connectionRequestBody);
+    }
     if (url.pathname.startsWith("/api/connections/") && req.method === "DELETE") {
       const service = url.pathname.slice("/api/connections/".length);
       if (service === "ghost" || url.searchParams.get("alias") === "ghost") {
@@ -70,16 +81,22 @@ beforeEach(() => {
   actionsBody = [{ id: "github.get_current_user", description: "Who am I" }, { id: "github.create_issue", description: "Open an issue" }, { id: "gmail.list_emails" }];
   authenticatedBody = ["github"];
   failConnect = false;
+  connectionRequestBody = { status: "connected" };
+  connectionRequestStatus = 200;
+  gateConnectionRequests = false;
+  releaseGate = null;
 });
 
 const cfg = {} as AppConfig;
 const newState = () => new OpenConnectorStateStore(join(dir, `state-${Math.random().toString(36).slice(2)}.json`));
-const provider = (state = newState()) => createOpenConnectorProvider({
+const provider = (state = newState(), polling?: { intervalMs?: number; timeoutMs?: number }) => createOpenConnectorProvider({
   settings: { url: origin, adminTokenRef: "env:STUB_ADMIN" },
   env: { STUB_ADMIN: "admintok" },
   state,
+  ...(polling ? { polling } : {}),
 });
 const lastCall = () => calls.at(-1)!;
+const requestPollCalls = () => calls.filter((call) => call.path.startsWith("/v1/connection-requests/"));
 
 describe("availability", () => {
   it("is self-hosted only with a url and a resolvable admin token", () => {
@@ -148,10 +165,13 @@ describe("disconnect", () => {
     expect(lastCall()).toMatchObject({ method: "DELETE", path: "/api/connections/github" });
   });
 
-  it("removeService answers removed:0 when the runtime has no connection", async () => {
+  it("removeService answers removed:0 when the runtime has no connection and clears stale records", async () => {
     const state = newState();
     await expect(provider(state).removeService(cfg, "github")).resolves.toEqual({ removed: 1 });
-    await expect(provider(newState()).removeService(cfg, "ghost")).resolves.toEqual({ removed: 0 });
+    const stale = newState();
+    stale.upsertConnection({ accountId: "oc:ghost:default", service: "ghost", status: "ACTIVE", updatedAt: "t" });
+    await expect(provider(stale).removeService(cfg, "ghost")).resolves.toEqual({ removed: 0 });
+    expect(stale.listConnections()).toEqual([]);
   });
 
   it("removeAccount sends the alias selector and removes only the matching record", async () => {
@@ -195,6 +215,60 @@ describe("authorize", () => {
     const state = newState();
     await expect(provider(state).authorize(cfg, "github")).rejects.toMatchObject({ code: "oauth_config_missing" });
     expect(state.listConnections()).toEqual([]);
+  });
+});
+
+describe("background authorization convergence", () => {
+  it("converges the local record to connected on its own after authorize", async () => {
+    const state = newState();
+    const result = await provider(state, { intervalMs: 10 }).authorize(cfg, "github", "work");
+    expect(result.connectionRequestId).toBe("cr_9");
+    expect(state.findConnectionByAccountId("oc:github:work")).toMatchObject({ status: "pending" });
+    await vi.waitFor(() => {
+      expect(state.findConnectionByAccountId("oc:github:work")).toMatchObject({ status: "connected", connectionRequestId: "cr_9" });
+    }, { timeout: 5_000, interval: 20 });
+  });
+
+  it("lands a terminal failure in the registry without touching authorize's return", async () => {
+    connectionRequestBody = { status: "expired" };
+    const state = newState();
+    const result = await provider(state, { intervalMs: 10 }).authorize(cfg, "github");
+    expect(result.url).toBe("https://provider.example.test/authorize");
+    await vi.waitFor(() => {
+      expect(state.findConnectionByAccountId("oc:github:default")).toMatchObject({ status: "expired" });
+    }, { timeout: 5_000, interval: 20 });
+  });
+
+  it("marks the record error when polling itself fails, still without touching authorize's return", async () => {
+    connectionRequestStatus = 500;
+    const state = newState();
+    const result = await provider(state, { intervalMs: 10 }).authorize(cfg, "github");
+    expect(result.connectionRequestId).toBe("cr_9");
+    await vi.waitFor(() => {
+      const record = state.findConnectionByAccountId("oc:github:default");
+      expect(record).toMatchObject({ status: "error" });
+      expect(record!.lastError).toBeTruthy();
+    }, { timeout: 5_000, interval: 20 });
+  });
+
+  it("polls one authorization request at a time per connection request id", async () => {
+    gateConnectionRequests = true;
+    const state = newState();
+    const one = provider(state, { intervalMs: 10 });
+    await one.authorize(cfg, "github", "work");
+    await vi.waitFor(() => {
+      expect(requestPollCalls().length).toBeGreaterThanOrEqual(1);
+    }, { timeout: 5_000, interval: 20 });
+    const polled = requestPollCalls().length;
+    await one.authorize(cfg, "github", "work");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(requestPollCalls().length).toBe(polled);
+    connectionRequestBody = { status: "connected" };
+    gateConnectionRequests = false;
+    releaseGate?.();
+    await vi.waitFor(() => {
+      expect(state.findConnectionByAccountId("oc:github:work")).toMatchObject({ status: "connected" });
+    }, { timeout: 5_000, interval: 20 });
   });
 });
 

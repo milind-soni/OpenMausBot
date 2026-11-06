@@ -15,6 +15,7 @@ import type {
 import { normalizeAccountAlias } from "../common.ts";
 import { OpenConnectorClient, OpenConnectorError } from "./client.ts";
 import { OpenConnectorStateStore, accountIdForConnection } from "./state.ts";
+import { pollConnectionRequest } from "./oauth.ts";
 import { actionForConnectorTool, connectorToolListingForAction } from "./tools.ts";
 import { OPENCONNECTOR_ADMIN_TOKEN_ENV, resolveTokenRef, type OpenConnectorSettings } from "../provider.ts";
 
@@ -26,6 +27,8 @@ export interface OpenConnectorProviderOptions {
   env?: NodeJS.ProcessEnv;
   fetch?: typeof fetch;
   state?: OpenConnectorStateStore;
+  /** Background authorization polling; defaults come from pollConnectionRequest. */
+  polling?: { intervalMs?: number; timeoutMs?: number };
 }
 
 export function resolveAdminToken(settings: OpenConnectorSettings, env: NodeJS.ProcessEnv = process.env): string | undefined {
@@ -38,6 +41,7 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
   const env = options.env ?? process.env;
   const state = options.state ?? new OpenConnectorStateStore();
   let providerListCache: { at: number; services: string[] } | null = null;
+  const pollsInFlight = new Map<string, Promise<void>>();
 
   const client = () => new OpenConnectorClient({
     baseUrl: options.settings.url ?? "",
@@ -46,6 +50,33 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
   });
 
   const available = () => Boolean(options.settings.url?.trim()) && Boolean(resolveAdminToken(options.settings, env));
+
+  /** Converge one authorization request in the background: the person authorizes in the browser
+   * while the local record walks pending -> connected/failed on its own. One poll per request id;
+   * a failed convergence never changes what authorize already returned, it only marks the record. */
+  const convergeConnection = (service: string, requestId: string, alias: string | undefined): void => {
+    if (pollsInFlight.has(requestId)) return;
+    const accountId = accountIdForConnection(service, alias);
+    const run = pollConnectionRequest(client(), state, service, requestId, alias, {
+      intervalMs: options.polling?.intervalMs,
+      timeoutMs: options.polling?.timeoutMs,
+    }).then(
+      () => undefined,
+      (error: unknown) => {
+        const record = state.findConnectionByAccountId(accountId);
+        if (!record || record.status === "connected") return;
+        state.upsertConnection({
+          ...record,
+          status: "error",
+          lastError: error instanceof Error ? error.message.slice(0, 400) : "authorization polling failed",
+          updatedAt: new Date().toISOString(),
+        });
+      },
+    ).finally(() => {
+      pollsInFlight.delete(requestId);
+    });
+    pollsInFlight.set(requestId, run);
+  };
 
   const serviceStates = (services: readonly string[], authenticated: ReadonlySet<string>): Record<string, ConnectorServiceState> =>
     Object.fromEntries(services.map((service) => {
@@ -128,7 +159,11 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
       try {
         await client().disconnect(service);
       } catch (error) {
-        if (notFound(error)) return { removed: 0 };
+        if (notFound(error)) {
+          // The runtime has nothing to drop: local records are stale, clear them like removeAccount does.
+          state.removeConnectionsForService(service);
+          return { removed: 0 };
+        }
         throw error;
       }
       state.removeConnectionsForService(service);
@@ -172,6 +207,7 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
         status: "pending",
         updatedAt: new Date().toISOString(),
       });
+      if (begun.connectionRequestId) convergeConnection(service, begun.connectionRequestId, alias);
       return { url: begun.authorizationUrl, ...(begun.connectionRequestId ? { connectionRequestId: begun.connectionRequestId } : {}) };
     },
 
@@ -191,6 +227,8 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
     async relayMcp(
       _cfg: AppConfig,
       payload: JsonValue,
+      // Accepted for interface parity and dropped: the translation is stateless per call, and one
+      // runtime backend needs no MCP session affinity (known single-backend gap, not a fork).
       _transportSessionId?: string,
       beforeSend?: () => void,
       signal?: AbortSignal,
