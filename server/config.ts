@@ -642,24 +642,12 @@ export function threadEventLogRetentionDays(cfg: AppConfig): number | null {
   return cfg.threads?.eventLogRetentionDays ?? null;
 }
 
-export function localVmMode(cfg: AppConfig): "shared" | "per-bot" | "pool" {
-  return cfg.localVm?.mode ?? DEFAULT_LOCAL_VM_MODE;
-}
-
-export function localVmMaxInstances(cfg: AppConfig): number {
-  return cfg.localVm?.maxInstances ?? DEFAULT_LOCAL_VM_MAX_INSTANCES;
-}
-
 export function localVmSource(cfg: AppConfig): "managed" | "existing" {
   return cfg.localVm?.source === "existing" ? "existing" : "managed";
 }
 
 export function localVmSshAlias(cfg: AppConfig): string | null {
   return isValidSshAlias(cfg.localVm?.sshAlias) ? cfg.localVm.sshAlias : null;
-}
-
-export function localVmIdleTimeoutMinutes(cfg: AppConfig): number {
-  return cfg.localVm?.idleTimeoutMinutes ?? DEFAULT_LOCAL_VM_IDLE_TIMEOUT_MINUTES;
 }
 export function skillAuthoringEnabled(cfg: AppConfig): boolean {
   return cfg.features?.skillAuthoring !== false;

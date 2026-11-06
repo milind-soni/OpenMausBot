@@ -10770,6 +10770,7 @@ describe("harness HTTP API", () => {
     expect(invalid.body.error).toContain("localVm.maxInstances");
 
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
+    expect(disk.localVm).toMatchObject({ mode: "per-bot", maxInstances: 5 });
 
     await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
   });
@@ -10822,6 +10823,7 @@ describe("harness HTTP API", () => {
         maxInstances: 2,
         idleTimeoutMinutes: 480,
         sshAlias: "fixture-existing-vm",
+        preserveInstalledApps: false,
       });
       expect((await api("GET", "/api/config")).body.localVm).toEqual({
         source: "existing",
@@ -10829,6 +10831,7 @@ describe("harness HTTP API", () => {
         maxInstances: 2,
         idleTimeoutMinutes: 480,
         sshAlias: "fixture-existing-vm",
+        preserveInstalledApps: false,
       });
 
       const invalid = await api("PATCH", "/api/config", { localVm: { sshAlias: "vm; reboot" } });

@@ -66,14 +66,9 @@ export interface ConfigStatus {
   automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
   /** Prompt-cache keep-warm for idle Claude threads. Absent from older servers. */
   cacheKeepWarm?: { enabled: boolean; windowMinutes: number };
-  localVm: {
-    source: "managed" | "existing";
-    mode: "shared" | "per-bot" | "pool";
-    maxInstances: number;
-    idleTimeoutMinutes?: number;
-    sshAlias: string;
-    preserveInstalledApps?: boolean;
-  };
+  localVm:
+    | { source: "managed"; mode: "shared" | "per-bot" | "pool"; maxInstances: number; idleTimeoutMinutes?: number; sshAlias: string; preserveInstalledApps?: boolean }
+    | { source: "existing"; mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number; sshAlias: string; preserveInstalledApps?: boolean };
   /** `providerKeys`: names of the keys saved for OpenCode's other
    * providers, never the keys. */
   opencodeGo?: SavedKey & { providerKeys?: string[] };

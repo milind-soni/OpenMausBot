@@ -5,7 +5,7 @@ import { reserveGmailDrafts } from "./gmail-draft-policy.ts";
 import { createGmailDrafts } from "./host/gmail-drafts.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { rm as removeDirectory } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -296,7 +296,6 @@ import { applyIncludedXMessage, holdIncludedServices, researchCredential, trialC
 import { CloudCreditProvider } from "./cloud-credit-provider.ts";
 import { createCreditMoves } from "./cloud-credit-moves.ts"; import { createRoutineHoldsHost } from "./host/routine-holds-host.ts";
 import { TRIAL_CREDIT_OWN_AI, TRIAL_KEY_HELD } from "./trial-credit.ts"; import { createHeldKeys } from "./cloud-held-keys.ts";
-import type { ProviderInstance } from "./contracts.ts";
 import { readyToRun, selectDefaultModelSelection, withInstanceConfig, withNewBotEffort, type SelectableInstance } from "./default-model-selection.ts"; import { configIdentity, createTestedAi } from "./tested-ai.ts"; import { instanceIcon } from "./provider-icon.ts";
 import { threadModelFallback, type ThreadEngine } from "./thread-model.ts";
 import { computerEngineMoveText, removedComputerInstanceIds, writeComputerEngineMoveLines } from "./computer-engine-removal.ts";
@@ -5454,21 +5453,12 @@ bus.subscribe((event: RuntimeEvent) => {
 });
 
 bus.subscribe((event: RuntimeEvent) => {
+  if (shouldIgnoreProviderEvent(event)) return;
   observeTurnStarted(event);
   if (isStaleTurnEvent(event)) return;
-  if (event.type === "request.opened") {
-    watchdog.setWaitingOnHuman(event.threadId, true);
-    renewHumanWaitLease(event.threadId);
-  } else if (event.type === "request.resolved") {
-    watchdog.setWaitingOnHuman(event.threadId, false);
-    stopHumanWaitLeaseRenewal(event.threadId);
-  }
-  else if (event.type === "turn.completed") {
-    pendingTurnInterrupts.delete(event.threadId);
-    watchdog.settle(event.threadId);
-  }
-  else watchdog.touch(event.threadId);
-  if (shouldIgnoreProviderEvent(event)) return;
+  if (event.type === "request.opened") renewHumanWaitLease(event.threadId);
+  else if (event.type === "request.resolved") stopHumanWaitLeaseRenewal(event.threadId);
+  else if (event.type === "turn.completed") pendingTurnInterrupts.delete(event.threadId);
   if (event.type !== "turn.completed" || !event.turnId) return;
   try {
     const messages = store.messagesFor(event.threadId);
@@ -8178,16 +8168,14 @@ async function beginTurn(
           computerKind = "vm";
         }
       } else if (wants === "local") {
-        if (!shouldMountLocalComputer({
-          requested: "local",
-          hostPlatform: process.platform,
-          providerSupportsLocal: mountsLocalComputer,
-        })) {
-          throw new Error("this model engine cannot control this computer — choose Claude or an ACP engine, or select another destination");
-        }
-        const cua = readCuaConnection();
-        if (!cua) throw new Error("CUA Driver is not ready for this computer — check permissions and restart OpenMausBot");
-        integrations.localComputer = cua;
+        integrations.localComputer = await mountHostComputer(
+          resourceOwner,
+          bot.id,
+          mountsLocalComputer,
+          surfaceLazyClaimRejection("this computer"),
+          () => placeSource === "auto-pin" && liveApprovalMode(bot, threadId, commsDepth > 0) !== "full",
+          savedSteps.journals(directRequestOwners.get(threadId)),
+        );
         computerKind = "local";
       }
       let browserCapture: (() => Promise<{ png: string; format: string }>) | null = null;
