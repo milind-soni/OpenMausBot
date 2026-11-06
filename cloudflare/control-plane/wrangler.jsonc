@@ -65,11 +65,10 @@
     "OMB_CLEANUP_SWEEP_LIMIT": "20",
     // HighLevel OAuth relay (README "HighLevel OAuth relay"). The client id
     // is public (it is in the authorization URL); the secret is
-    // HIGHLEVEL_CLIENT_SECRET, set with `wrangler secret put`. It is live, so it
-    // is in secrets.required: a deploy keeps only the secrets listed there, and
-    // an unlisted one is dropped (the relay would then answer 503
-    // highlevel_unavailable). The redirect URL must match the one registered in
-    // the HighLevel Marketplace app exactly.
+    // HIGHLEVEL_CLIENT_SECRET, set with `wrangler secret put` and deliberately
+    // not in secrets.required: the relay answers 503 highlevel_unavailable
+    // until it exists. The redirect URL must match the one registered in the
+    // HighLevel Marketplace app exactly.
     "HIGHLEVEL_CLIENT_ID": "6ad0c3b87999ff4de949c785-mv9n5v73",
     "HIGHLEVEL_REDIRECT_URL": "https://accounts.openmausbot.com/v1/highlevel/callback",
     "HIGHLEVEL_SCOPES": "contacts.readonly contacts.write opportunities.readonly opportunities.write conversations.readonly locations.readonly calendars.readonly calendars/events.readonly users.readonly",
@@ -90,7 +89,7 @@
     "RELAY_CAPABLE_MIN_VERSION": ""
   },
   "secrets": {
-    "required": ["BETTER_AUTH_SECRET", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_TOKEN_MAUSBOT_SI", "HIGHLEVEL_CLIENT_SECRET", "RELAY_TOKEN_SIGNING_KEY"]
+    "required": ["BETTER_AUTH_SECRET", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_TOKEN_MAUSBOT_SI", "RELAY_TOKEN_SIGNING_KEY"]
   },
   "d1_databases": [
     {

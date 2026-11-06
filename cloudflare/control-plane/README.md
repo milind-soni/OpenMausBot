@@ -661,10 +661,9 @@ Setup, once:
    On a running Worker, apply 0010 before deploying a Worker built from this
    code: its callback marks the flow in `callback_at`. An older Worker
    ignores the column.
-4. `wrangler secret put HIGHLEVEL_CLIENT_SECRET --config wrangler.jsonc`. Until
-   it exists the routes answer `503 highlevel_unavailable`. It is live, so it is
-   listed in `secrets.required`: a deploy keeps only the secrets listed there and
-   would otherwise drop it.
+4. `wrangler secret put HIGHLEVEL_CLIENT_SECRET --config wrangler.jsonc`. It is
+   deliberately not in `secrets.required`: until it exists the routes answer
+   `503 highlevel_unavailable`.
 5. `wrangler deploy --config wrangler.jsonc`.
 
 A private app stops accepting installs past five external agencies; publish it
