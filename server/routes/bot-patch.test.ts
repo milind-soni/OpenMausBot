@@ -412,3 +412,12 @@ describe("PATCH /api/bots/:id under a phone's move", () => {
     expect(refused.body.error).toMatch(/a paired device may change how a bot looks, not "soul"/);
   });
 });
+
+describe("PATCH /api/bots/:id by a moving phone", () => {
+  it("lets voiceNoteEveryReply land on a bot it brought", async () => {
+    const { store, bot, patch } = fixture(() => true);
+    const answer = await patch(bot.id, { voiceNoteEveryReply: true }, { auth: { kind: "device", scopes: [] } as unknown as RequestAuth, headers: { "x-openmausbot-companion": "1" } });
+    expect(answer.status).toBe(200);
+    expect(store.bot(bot.id)?.voiceNoteEveryReply).toBe(true);
+  });
+});

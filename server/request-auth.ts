@@ -472,7 +472,7 @@ export function adminOnlyBotSetting(fields: Record<string, unknown>): string | n
 }
 
 /** All a phone's move may set on a bot it brought: its profile, model, voice, memory settings and phone-app grant. */
-const MOVED_BOT_SETTINGS: ReadonlySet<string> = new Set([...BOT_PROFILE_SETTINGS, "voiceNotes", "memoryEnabled", "memoryUpkeep", "phoneApps"]);
+const MOVED_BOT_SETTINGS: ReadonlySet<string> = new Set([...BOT_PROFILE_SETTINGS, "voiceNotes", "voiceNoteEveryReply", "memoryEnabled", "memoryUpkeep", "phoneApps"]);
 
 export function movedBotSetting(fields: Record<string, unknown>): string | null {
   return Object.keys(fields).find((key) => !MOVED_BOT_SETTINGS.has(key)) ?? null;

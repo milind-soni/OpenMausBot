@@ -234,7 +234,7 @@ describe("scopes", () => {
   });
 
   it("lets a moved bot bring its profile, model, voice and memory settings, never what it may do", () => {
-    expect(movedBotSetting({ name: "Scout", soul: "Plans trips", voiceNotes: true, memoryEnabled: true, memoryUpkeep: "weekly", modelSelection: {}, welcomed: true })).toBeNull();
+    expect(movedBotSetting({ name: "Scout", soul: "Plans trips", voiceNotes: true, voiceNoteEveryReply: true, memoryEnabled: true, memoryUpkeep: "weekly", modelSelection: {}, welcomed: true })).toBeNull();
     for (const field of ["approvalMode", "alwaysAllow", "computer", "cwd", "mcpServers", "composio", "browser", "peers", "section", "chiefOfStaff", "defaultBot", "installedPackage"]) {
       expect(movedBotSetting({ [field]: true }), field).toBe(field);
     }

@@ -92,7 +92,9 @@ export function createPhoneMoveIn(deps: PhoneMoveInDeps) {
     if ((Array.isArray(body.runs) ? body.runs : []).some((run) => !record(run) || run.botId !== held.botId || (run.threadId !== undefined && (typeof run.threadId !== "string" || deps.store.botByThread(run.threadId)?.id !== held.botId)))) return null;
     if (held.resultsThreadId !== undefined && (typeof held.resultsThreadId !== "string" || deps.store.botByThread(held.resultsThreadId)?.id !== held.botId)) return null;
     if (deps.routines()?.listRoutines().some((other) => other.id === routine && other.botId !== held.botId)) return null;
-    return { ...body, mainIfUnused: true };
+    // The model is the owner's to pick here: a phone's move does not bring one, as it brings no package.
+    const { modelSelection: _model, ...fields } = held;
+    return { ...body, record: fields, mainIfUnused: true };
   }
 
   /** Each body route's check: the body to hand on, or null to refuse. */

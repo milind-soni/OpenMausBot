@@ -377,4 +377,13 @@ describe("a phone's move into this computer", () => {
     expect(answer.out).toBe(PASS);
     expect(answer.handedOn).toEqual({ v: 1, key: `bot:${SCOUT}`, dataDir: "/phone", record: { defaultBot: {} }, mainIfUnused: true });
   });
+
+  it("hands a routine record on without a per-routine model, which a phone's move does not bring", async () => {
+    const moveIn = setup();
+    await create(moveIn);
+    const record = { id: "brief", botId: SCOUT, target: "bot", modelSelection: { instanceId: "claude", model: "m" } };
+    const answer = await run(moveIn, phone, "PUT", "/api/cloud-send/kind", { v: 1, key: "routine:brief", dataDir: "/phone", record });
+    expect(answer.out).toBe(PASS);
+    expect(answer.handedOn).toEqual({ v: 1, key: "routine:brief", dataDir: "/phone", record: { id: "brief", botId: SCOUT, target: "bot" }, mainIfUnused: true });
+  });
 });
