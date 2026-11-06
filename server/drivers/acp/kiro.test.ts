@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -69,33 +69,53 @@ describe("Kiro fallback model", () => {
   });
 });
 
-describe("Kiro permission handling — autopilot", () => {
-  it("supports Full/Ask autopilot distinction via driver config", async () => {
-    // Driver encodes Full access via sessionMeta allow-all + autopilot on;
-    // Ask downgrades to a fresh session without allow-all and autopilot off.
-    // This is verified against the live Kiro CLI (V3) in the integration harness.
-    expect(KiroAgentDriver.decodeConfig({ cli: "kiro-cli", fullAuto: true }).fullAuto).toBe(true);
-    expect(KiroAgentDriver.decodeConfig({ cli: "kiro-cli", fullAuto: false }).fullAuto).toBe(false);
+describe("Kiro permission handling — Full/Ask contract", () => {
+  it("Full includes policyPreset and Ask omits it in session/new", async () => {
+    const FAKE_CLI = join(import.meta.dirname, "../../testing/fake-acp-cli.ts");
+    const dumpFull = join(mkdtempSync(join(tmpdir(), "omb-kiro-full-")), "dump.json");
+    const scratchFull = dumpFull.replace("/dump.json", "");
+    const instFull = await KiroAgentDriver.create({
+      instanceId: "kiro-full-meta", displayName: "Kiro", enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: true, workspace: scratchFull },
+      environment: { HOME: scratchFull, USERPROFILE: scratchFull, FAKE_ACP_MODE: "happy", FAKE_ACP_DUMP: dumpFull },
+    });
+    const recFull = recordEvents(instFull.adapter);
+    const { turnId: t1 } = await instFull.adapter.sendTurn({ threadId: "t-full-meta", text: "hi" });
+    await recFull.until((e) => e.type === "turn.completed" && e.turnId === t1);
+    expect(JSON.parse(readFileSync(`${dumpFull}.session.json`, "utf8"))._meta).toEqual({ kiro: { policyPreset: ["allow-all"] } });
+    recFull.stop(); await instFull.dispose(); await removeTempDir(scratchFull);
+
+    const dumpAsk = join(mkdtempSync(join(tmpdir(), "omb-kiro-ask-")), "dump.json");
+    const scratchAsk = dumpAsk.replace("/dump.json", "");
+    const instAsk = await KiroAgentDriver.create({
+      instanceId: "kiro-ask-meta", displayName: "Kiro", enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false, workspace: scratchAsk },
+      environment: { HOME: scratchAsk, USERPROFILE: scratchAsk, FAKE_ACP_MODE: "happy", FAKE_ACP_DUMP: dumpAsk },
+    });
+    const recAsk = recordEvents(instAsk.adapter);
+    const { turnId: t2 } = await instAsk.adapter.sendTurn({ threadId: "t-ask-meta", text: "hi" });
+    await recAsk.until((e) => e.type === "turn.completed" && e.turnId === t2);
+    expect(JSON.parse(readFileSync(`${dumpAsk}.session.json`, "utf8"))._meta).toBeUndefined();
+    recAsk.stop(); await instAsk.dispose(); await removeTempDir(scratchAsk);
   });
 
-  it("permission downgrade creates downgrade-aware contract", async () => {
-    // session/new contract includes sessionMeta so Full→Ask forces new session.
-    // Live verification: Full session _meta.kiro.policyPreset ["allow-all"], Ask null.
-    expect(KiroAgentDriver.metadata).toBeDefined();
-  });
-});
-
-describe("Kiro Full access allow-all preset", () => {
-  it("requests allow-all preset on session/new for Full access via V3 policyPreset", async () => {
-    // Live harness verified: session/new with _meta.kiro.policyPreset ["allow-all"] is accepted
-    // and echoed in session _meta; fake-ACP does not echo _meta so we test driver support directly.
-    const kiroModule = await import("./kiro.ts");
-    expect(kiroModule.KiroAgentDriver).toBeDefined();
-  });
-
-  it("does not request allow-all for Ask and downgrade removes it", async () => {
-    const kiroModule = await import("./kiro.ts");
-    expect(kiroModule.KiroAgentDriver.defaultConfig().cli).toBe("kiro-cli");
+  it("Full→Ask forces new native session via contractKey", async () => {
+    const FAKE_CLI = join(import.meta.dirname, "../../testing/fake-acp-cli.ts");
+    const dump = join(mkdtempSync(join(tmpdir(), "omb-kiro-downgrade-")), "dump.json");
+    const scratch = dump.replace("/dump.json", "");
+    const inst = await KiroAgentDriver.create({
+      instanceId: "kiro-downgrade", displayName: "Kiro", enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false, workspace: scratch },
+      environment: { HOME: scratch, USERPROFILE: scratch, FAKE_ACP_MODE: "happy", FAKE_ACP_DUMP: dump },
+    });
+    const rec = recordEvents(inst.adapter);
+    const { turnId: f1 } = await inst.adapter.sendTurn({ threadId: "t-downgrade", text: "hi", approvalMode: "full" });
+    await rec.until((e) => e.type === "turn.completed" && e.turnId === f1);
+    expect(JSON.parse(readFileSync(`${dump}.session.json`, "utf8"))._meta).toEqual({ kiro: { policyPreset: ["allow-all"] } });
+    const { turnId: a1 } = await inst.adapter.sendTurn({ threadId: "t-downgrade", text: "edit", approvalMode: "ask" });
+    await rec.until((e) => e.type === "turn.completed" && e.turnId === a1);
+    expect(JSON.parse(readFileSync(`${dump}.session.json`, "utf8"))._meta).toBeUndefined();
+    rec.stop(); await inst.dispose(); await removeTempDir(scratch);
   });
 });
 
@@ -126,10 +146,25 @@ describe("Kiro edge-case filters", () => {
     await removeTempDir(scratch);
   });
 
-  it("drops [STEERING] note from streamed text via core filter", () => {
-    // Core ACP driver strips [STEERING steer-...] from agent_message_chunk before emitting content.delta.
-    // Verified against T3 transcript kiro_transcript.ndjson where [STEERING] notes appear.
-    expect(KiroAgentDriver).toBeDefined();
+  it("drops [STEERING] note from streamed text via core filter", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-kiro-steer-"));
+    const updatesFile = join(scratch, "updates.json");
+    writeFileSync(updatesFile, JSON.stringify([
+      { update: { sessionUpdate: "agent_message_chunk", content: { text: "visible " } } },
+      { update: { sessionUpdate: "agent_message_chunk", content: { text: "[STEERING steer-123] hidden" } } },
+    ]));
+    const instance = await KiroAgentDriver.create({
+      instanceId: "kiro-steer", displayName: "Kiro", enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false, workspace: scratch },
+      environment: { HOME: scratch, USERPROFILE: scratch, FAKE_ACP_MODE: "happy", FAKE_ACP_MODELS: "auto", FAKE_ACP_UPDATES_FILE: updatesFile },
+    });
+    const rec = recordEvents(instance.adapter);
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-steer", text: "hi", model: "auto" });
+    await rec.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    const deltas = rec.events.filter((e) => e.type === "content.delta").map((e) => (e as { delta?: string }).delta ?? "");
+    expect(deltas.join("")).not.toContain("[STEERING");
+    expect(deltas.join("")).not.toContain("steer-123");
+    rec.stop(); await instance.dispose(); await removeTempDir(scratch);
   });
 });
 
