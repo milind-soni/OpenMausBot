@@ -412,6 +412,10 @@ describe("resolveRequestAuth", () => {
   it("never grants loopback trust to a request that came through a proxy, whatever Host it carries", () => {
     expect(isProxied(request({ host: "localhost", "x-forwarded-for": "203.0.113.9" }))).toBe(true);
     expect(isProxied(request({ host: "localhost", "x-forwarded-proto": "https" }))).toBe(true);
+    for (const name of ["x-real-ip", "cf-connecting-ip", "true-client-ip", "x-client-ip"]) {
+      expect(isProxied(request({ host: "localhost", [name]: "203.0.113.9" }))).toBe(true);
+      expect(resolve({ host: "localhost", [name]: "203.0.113.9" }).auth).toBeNull();
+    }
     expect(isProxied(request({ host: "localhost" }))).toBe(false);
     const viaProxy = resolve({ host: "localhost", "x-forwarded-for": "203.0.113.9" });
     expect(viaProxy.auth).toBeNull();
