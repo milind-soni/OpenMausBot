@@ -920,10 +920,9 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   );
 });
 
-export function Sidebar({ open, onClose, collapseToIcons = false }: {
-  open: boolean;
-  onClose: () => void;
-  collapseToIcons?: boolean;
+export function Sidebar({ open, onClose, collapseToIcons = false, onRemoteNewBot }: {
+  open: boolean; onClose: () => void;
+  collapseToIcons?: boolean; onRemoteNewBot?: () => void;
 }) {
   const { state, dispatch } = useStore();
   const now = useRelativeNow();
@@ -972,6 +971,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   const inboxSupport = useInboxSupport();
   const [newRoom, setNewRoom] = useState(false);
   const [newChatOpen, setNewChatOpen] = useState(false);
+  const newBot = () => { if (remoteClient) onRemoteNewBot?.(); else dispatch({ type: "newBot" }); };
   const [newFolderBotId, setNewFolderBotId] = useState<string | null>(null);
   const [newTaskFolderBotId, setNewTaskFolderBotId] = useState<string | null>(null);
   const newTaskFolderBot = state.bots.find((bot) => bot.id === newTaskFolderBotId);
@@ -1178,7 +1178,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             {t("sidebar.newChat.title")}
           </button>}
           {teamSettingsAllowed !== false && <button
-            onClick={() => { setPlusOpen(false); dispatch({ type: "newBot" }); }}
+            onClick={() => { setPlusOpen(false); newBot(); }}
             role="menuitem"
             className={plusItem}
           >
@@ -1623,7 +1623,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           anchor={sidebarRef.current}
           style={windowNoDragStyle}
           onClose={() => setNewChatOpen(false)}
-          onNewBot={teamSettingsAllowed === false ? undefined : () => { setNewChatOpen(false); dispatch({ type: "newBot" }); }}
+          onNewBot={teamSettingsAllowed === false ? undefined : () => { setNewChatOpen(false); newBot(); }}
           onNewGroup={() => { setNewChatOpen(false); setNewRoom(true); }}
         />,
         document.body,
