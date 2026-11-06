@@ -3,6 +3,7 @@
 import { posix } from "node:path";
 import { parseEvents, parseReseller, parseRetailOverride, type FleetReseller, type FleetWorkspaceEvent, type FleetWorkspaceStatus, type RateSet } from "./fleet-reseller.ts";
 import { recordWorkspaceEvent } from "./fleet-metering.ts";
+import { assertWorkspaceHost, workspaceHostFor } from "./fleet-tenancy.ts";
 
 const { join } = posix;
 
@@ -388,6 +389,8 @@ export function createPlan(input: {
     if (input.seed.openrouterDefault && !models.length) throw new Error("a default OpenRouter model requires a model assignment");
   }
   if (input.registry.workspaces[input.slug]) throw new Error(`workspace "${input.slug}" already exists`);
+  const host = workspaceHostFor(input.registry, input.slug, input.host);
+  assertWorkspaceHost({ registry: input.registry, slug: input.slug, host: host === workspaceHostFor(input.registry, input.slug) ? undefined : host, portalUrl: input.seed.portalUrl });
   if (!input.seed.admins.length) throw new Error("a workspace needs at least one admin email (--admin)");
   for (const entry of [...input.seed.admins, ...input.seed.members]) assertEmailOrDomain(entry);
   if (input.memoryMax !== undefined && !/^\d+[MG]$/.test(input.memoryMax)) throw new Error("--memory takes a size like 1G or 512M");
@@ -396,7 +399,7 @@ export function createPlan(input: {
   const createdAt = (input.now ?? new Date()).toISOString();
   const draft: FleetWorkspace = {
     slug: input.slug,
-    host: input.host ?? `${input.slug}.${input.registry.domain}`,
+    host,
     port,
     webhookPort: port + 1,
     status: "running",

@@ -7,6 +7,9 @@
 - `fleet create`: a workspace as its own OS user with private data, its
   sign-in list, brand, provider key and cap seeded, fenced ports, a service
   started now and at boot, a site block, and a health wait.
+- `fleet create --host`: a customer's own web address instead of
+  `<name>.<domain>`, validated before any step runs and served by the same site,
+  environment and registry entry.
 - `fleet users`, `suspend`, `resume`, `delete` (with `--yes`, optionally
   `--keep-data`), `upgrade` (rolling restarts), `list`.
 - Plans, never shell strings: fixed argument lists, or an inspection plan for
@@ -79,6 +82,11 @@ an actual root-to-tenant privilege transition.
   ledger contents. Missing files mean zero usage. Unsafe, oversized or failed
   reads return `unavailable: true` and null totals, never a partial/false-zero
   report. Tenant-controlled ledgers remain self-reported, not trusted billing.
+- A custom `--host` replaces the default address and stays reserved after
+  `delete --keep-data`. A retained, errored or half-built workspace still owns
+  its address, so recovery means removing or recovering that entry before the
+  address, or a name whose default it holds, can be reused. The fleet agent
+  never accepts a host.
 - Portal-seeded environments accept an HTTPS origin only; the provider URL
   must be that portal's exact per-workspace gateway, and the portal hostname
   is reserved. The seed should carry a scoped gateway credential, never the
