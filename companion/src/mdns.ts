@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { createSocket } from "node:dgram";
 import { hostname, networkInterfaces } from "node:os";
 
-import { lanAddresses } from "./listener.ts";
+import { lanInterfaces } from "./listener.ts";
 
 const MDNS_ADDRESS = "224.0.0.251";
 const MDNS_PORT = 5353;
@@ -357,8 +357,16 @@ export function defaultHostName(machine = hostname()): string {
   return `openmausbot-${digest}.local`;
 }
 
-export function advertisableAddresses(): string[] {
-  return lanAddresses();
+/** macOS point-to-point tunnels: utun (every VPN, Tailscale, tun2socks),
+ * ipsec, ppp. Multicast cannot cross them, and on macOS 27 closing a socket
+ * that held memberships on a utun that came or went hung the kernel and
+ * panicked the Mac (#2513). Typed-address and tailnet pairing do not use mDNS. */
+const MAC_TUNNEL_INTERFACE = /^(utun|ipsec|ppp)\d*$/i;
+
+export function advertisableAddresses(interfaces = networkInterfaces(), platform = process.platform): string[] {
+  return lanInterfaces(interfaces)
+    .filter((entry) => platform !== "darwin" || !MAC_TUNNEL_INTERFACE.test(entry.name))
+    .map((entry) => entry.address);
 }
 
 

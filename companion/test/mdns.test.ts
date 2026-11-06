@@ -512,16 +512,38 @@ describe("cache-flush policy on the wire", () => {
   });
 });
 
-describe("lanAddresses", () => {
-  const ipv4 = (address: string, internal = false): NetworkInterfaceInfoIPv4 => ({
-    address,
-    netmask: "255.255.255.0",
-    family: "IPv4",
-    mac: "00:00:00:00:00:00",
-    internal,
-    cidr: `${address}/24`,
+const ipv4 = (address: string, internal = false): NetworkInterfaceInfoIPv4 => ({
+  address,
+  netmask: "255.255.255.0",
+  family: "IPv4",
+  mac: "00:00:00:00:00:00",
+  internal,
+  cidr: `${address}/24`,
+});
+
+describe("advertisableAddresses", () => {
+  // The Mac from #2513: Wi-Fi plus a mesh VPN, Tailscale and a tun2socks device.
+  const mac = {
+    en0: [ipv4("192.168.1.42")],
+    utun3: [ipv4("10.20.30.40")],
+    utun4: [ipv4("100.102.178.88")],
+    utun5: [ipv4("198.18.0.1")],
+    ipsec0: [ipv4("10.9.0.2")],
+    ppp0: [ipv4("10.8.0.6")],
+    bridge100: [ipv4("192.168.64.1")],
+  };
+
+  it("joins no multicast group on a Mac's VPN tunnels", () => {
+    expect(advertisableAddresses(mac, "darwin")).toEqual(["192.168.1.42", "192.168.64.1"]);
   });
 
+  it("keeps every LAN address on other platforms", () => {
+    expect(advertisableAddresses(mac, "linux")).toEqual(lanAddresses(mac));
+    expect(advertisableAddresses(mac, "win32")).toEqual(lanAddresses(mac));
+  });
+});
+
+describe("lanAddresses", () => {
   it("ranks en0 first however the interfaces enumerate", () => {
     // deliberately listed worst-first: insertion order must not win
     const addresses = lanAddresses({
