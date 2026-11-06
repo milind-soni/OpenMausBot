@@ -348,20 +348,18 @@ it.skipIf(!existsSync("/usr/bin/flock"))("a second home on a volume a live home 
   holdVolume(home);
 });
 
-it("lets only the tunnel name the client on an own server, and only Fly's proxy on Fly, exactly as before", () => {
+it("lets nobody name the client on an own server unless its owner names a proxy, and only Fly's proxy on Fly", () => {
   const config = cloudHomeConfiguration(contract())!;
   const own = cloudHomeChildEnvironments(config, { ...contract(), PATH: "/usr/bin" }, "/data").edge;
-  expect(own).toMatchObject({ OMB_CLOUD_EDGE_CLIENT_IP_HEADER: "Cf-Connecting-IP", OMB_CLOUD_EDGE_TRUSTED_PROXIES: "127.0.0.1/32 ::1/128" });
+  expect(own).toMatchObject({ OMB_CLOUD_EDGE_CLIENT_IP_HEADER: "X-Forwarded-For", OMB_CLOUD_EDGE_TRUSTED_PROXIES: "" });
   const fly = cloudHomeChildEnvironments(config, { ...contract(), PATH: "/usr/bin", FLY_APP_NAME: "omb-u-1a2b3c4d5e6f" }, "/data").edge;
   expect(fly).toMatchObject({ OMB_CLOUD_EDGE_CLIENT_IP_HEADER: "Fly-Client-IP", OMB_CLOUD_EDGE_TRUSTED_PROXIES: "private_ranges" });
   expect(edgeClientAddress({ FLY_APP_NAME: " " })).toEqual(edgeClientAddress({}));
-  // Certificates for an own server's address live on the volume, so a new container reuses them.
-  expect(own.XDG_DATA_HOME).toBe("/data/.omb-edge");
-  // Both values are written into the edge's config as they are, so neither may come from anywhere but here.
+  // Both values are written into the edge's config as they are, so the edge's own names are never taken from outside.
   for (const env of [{}, { FLY_APP_NAME: "omb-u-1a2b3c4d5e6f" }, { OMB_CLOUD_EDGE_CLIENT_IP_HEADER: "X-Real-IP", OMB_CLOUD_EDGE_TRUSTED_PROXIES: "0.0.0.0/0" }]) {
     const edge = cloudHomeChildEnvironments(config, { ...contract(), PATH: "/usr/bin", ...env }, "/data").edge;
-    expect(edge.OMB_CLOUD_EDGE_CLIENT_IP_HEADER).toMatch(/^(?:Fly-Client-IP|Cf-Connecting-IP)$/);
-    expect(edge.OMB_CLOUD_EDGE_TRUSTED_PROXIES).toMatch(/^(?:private_ranges|127\.0\.0\.1\/32 ::1\/128)$/);
+    expect(edge.OMB_CLOUD_EDGE_CLIENT_IP_HEADER).toMatch(/^(?:Fly-Client-IP|X-Forwarded-For)$/);
+    expect(edge.OMB_CLOUD_EDGE_TRUSTED_PROXIES).toMatch(/^(?:private_ranges|)$/);
   }
   expect(cloudHomeChildEnvironments(config, { ...contract(), PATH: "/usr/bin", FLY_APP_NAME: "omb-u-1a2b3c4d5e6f" }, "/data").server).not.toHaveProperty("OMB_CLOUD_EDGE_CLIENT_IP_HEADER");
 });
@@ -441,8 +439,23 @@ it("the root supervisor runs and trusts only root's code, never the volume's or 
 });
 
 it("ships an edge and a Fly template that keep the server private", () => {
-  const caddy = readFileSync(join(import.meta.dirname, "../deploy/fly/Caddyfile"), "utf8");
-  expect(caddy).toMatch(/^:8080 \{/m);
+  const edgeFile = (name: string) => readFileSync(join(import.meta.dirname, "../deploy/fly", name), "utf8");
+  const caddy = edgeFile("edge-routes.caddy");
+  expect(edgeFile("Caddyfile")).toMatch(/^:8080 \{\n\timport edge-routes\.caddy\n\}\n/m);
+  expect(edgeFile("Caddyfile")).toMatch(/^\tauto_https off$/m);
+  expect(edgeFile("Caddyfile.tls")).toMatch(/^http:\/\/:8080 \{\n\timport edge-routes\.caddy\n\}\n\n\{\$OMB_CLOUD_PUBLIC_HOST\} \{\n\timport edge-routes\.caddy\n\}\n/m);
+  expect(edgeFile("Caddyfile.tunnel")).toMatch(/^:8080 \{\n\timport edge-routes\.caddy\n\}\n\n:8812 \{\n\tbind 127\.0\.0\.1\n\timport edge-routes\.caddy\n\}\n/m);
+  // The tunnel's listener, on loopback alone, believes Cloudflare's header; :8080 believes only what the launcher says.
+  expect(edgeFile("Caddyfile.tunnel")).toMatch(/^\tservers 127\.0\.0\.1:8812 \{\n\t\ttrusted_proxies static 127\.0\.0\.1\/32\n\t\ttrusted_proxies_strict\n\t\tclient_ip_headers Cf-Connecting-IP\n\t\}$/m);
+  expect(edgeFile("Caddyfile.tunnel").match(/^\s*(?:trusted_proxies|client_ip_headers)\b/gm)).toHaveLength(4);
+  for (const config of [edgeFile("Caddyfile"), edgeFile("Caddyfile.tls"), edgeFile("Caddyfile.tunnel")]) {
+    expect(config.match(/^(?!#)\S[^\n]* \{$/gm)?.length, "every site imports the same routes").toBe(config.match(/^\timport edge-routes\.caddy$/gm)?.length);
+    expect(config).not.toMatch(/reverse_proxy|respond/);
+    // Who may name the client on :8080 and 443, and in which header, is the launcher's to say (edgeClientAddress).
+    expect(config).toMatch(/^\t\ttrusted_proxies static \{\$OMB_CLOUD_EDGE_TRUSTED_PROXIES\}\r?\n\t\ttrusted_proxies_strict\r?\n\t\tclient_ip_headers \{\$OMB_CLOUD_EDGE_CLIENT_IP_HEADER\}\r?\n/m);
+  }
+  for (const config of [edgeFile("Caddyfile"), edgeFile("Caddyfile.tls")]) expect(config.match(/^\s*(?:trusted_proxies|client_ip_headers)\b/gm)).toHaveLength(2);
+  expect(caddy).not.toMatch(/trusted_proxies|client_ip_headers/);
   const upstreams = [...caddy.matchAll(/reverse_proxy (\S+)/g)].map(match => match[1]);
   expect(new Set(upstreams)).toEqual(new Set(["127.0.0.1:8799", "127.0.0.1:8800"]));
   expect(caddy).toMatch(/handle \/hooks\/\* \{\s*reverse_proxy 127\.0\.0\.1:8800 \{/);
@@ -453,17 +466,14 @@ it("ships an edge and a Fly template that keep the server private", () => {
   expect(caddy.slice(homeStart, homeEnd)).toContain("handle /hooks/* {");
   expect(caddy.match(/header_up X-Forwarded-For \{client_ip\}/g)).toHaveLength(upstreams.length);
   expect(caddy.match(/lb_try_interval 50ms/g)).toHaveLength(upstreams.length);
-  // Who may name the client, and in which header, is the launcher's to say (edgeClientAddress); the file names neither.
-  expect(caddy).toMatch(/^\t\ttrusted_proxies static \{\$OMB_CLOUD_EDGE_TRUSTED_PROXIES\}\r?\n\t\ttrusted_proxies_strict\r?\n\t\tclient_ip_headers \{\$OMB_CLOUD_EDGE_CLIENT_IP_HEADER\}\r?\n/m);
-  expect(caddy.match(/^\s*(?:trusted_proxies|client_ip_headers)\b/gm)).toHaveLength(2);
   // The root supervisor's code is root's, maus owns only the volume; the image's last step refuses to build otherwise.
   const dockerfile = readFileSync(join(import.meta.dirname, "../Dockerfile"), "utf8");
   const image = dockerfile.slice(dockerfile.indexOf("FROM runtime AS cloud-home"), dockerfile.indexOf("FROM runtime AS server"));
-  const check = image.indexOf('untrusted="$(find /app /usr/local/bin/caddy \\( ! -user root -o ! -type l -perm /022 \\) -print)"');
+  const check = image.indexOf('untrusted="$(find /app /usr/local/bin/caddy /usr/local/bin/cloudflared \\( ! -user root -o ! -type l -perm /022 \\) -print)"');
   expect(image.slice(check)).toMatch(/^untrusted=.*\n && if \[ -n "\$untrusted" \]; then .*exit 1; fi \\\n/);
   expect(check).toBeGreaterThan(image.lastIndexOf("COPY "));
   expect(check).toBeLessThan(image.indexOf("CMD ["));
-  expect(image).toContain("COPY deploy/fly/Caddyfile /app/cloud/Caddyfile");
+  expect(image).toContain("COPY deploy/fly/Caddyfile deploy/fly/Caddyfile.tls deploy/fly/Caddyfile.tunnel deploy/fly/edge-routes.caddy /app/cloud/");
   // The bot box (server/bot-box) needs bubblewrap and socat in the image; pnpm is what bots' projects ask for.
   expect(image).toMatch(/apt-get install -y --no-install-recommends [^\n]*\bbubblewrap\b[^\n]*\bsocat\b/);
   expect(image).toMatch(/npm install -g pnpm@10\.33\.0/);
@@ -630,9 +640,12 @@ it("takes an own server's secrets from the root-only file the connector mounts, 
       return { ...entry, isFile: () => !entry.symlink, isSymbolicLink: () => Boolean(entry.symlink) };
     },
     stat: (path: string) => (path === file ? overrides.file ?? { uid: 0, mode: 0o100400 } : path === "/run/mausbot" ? overrides.dir ?? { uid: 0, mode: 0o40700 } : { uid: 0, mode: 0o40755 }),
-    read: () => overrides.text ?? JSON.stringify({ OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_CLOUD_BOAT_TOKEN: `box_omb_${"b".repeat(43)}`, OMB_PUBLIC_URL: "https://elsewhere.example", PATH: "/tmp" }),
+    read: () => overrides.text ?? JSON.stringify({
+      OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_CLOUD_BOAT_TOKEN: `box_omb_${"b".repeat(43)}`, OMB_CLOUD_TUNNEL_TOKEN: "t".repeat(40),
+      OMB_PUBLIC_URL: "https://elsewhere.example", PATH: "/tmp",
+    }),
   });
-  expect(readCloudSecretsFile("/data", file, fs())).toEqual({ OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_CLOUD_BOAT_TOKEN: `box_omb_${"b".repeat(43)}` });
+  expect(readCloudSecretsFile("/data", file, fs())).toEqual({ OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_CLOUD_BOAT_TOKEN: `box_omb_${"b".repeat(43)}`, OMB_CLOUD_TUNNEL_TOKEN: "t".repeat(40) });
   expect(readCloudSecretsFile("/data", file, fs({ exists: false }))).toEqual({});
   expect(() => readCloudSecretsFile("/data", file, fs({ file: { uid: 0, mode: 0o100644 } }))).toThrow("readable by others than root");
   expect(() => readCloudSecretsFile("/data", file, fs({ file: { uid: 1001, mode: 0o100400 } }))).toThrow(`${file} is not root's`);

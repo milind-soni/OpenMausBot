@@ -15,6 +15,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname } from "node:path";
 import { pipeline } from "node:stream";
 
+import { PAGE_FILE_TYPES } from "../shared/published-page.ts";
 import type { AppDocs } from "./app-docs.ts";
 import type { PageVideo } from "./pages/bundle.ts";
 
@@ -23,14 +24,7 @@ const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const DAY_MS = 24 * 60 * 60_000;
 const MAX_TOKENS = 5_000;
 
-const TYPES: Readonly<Record<string, string>> = {
-  html: "text/html; charset=utf-8", htm: "text/html; charset=utf-8", css: "text/css; charset=utf-8", js: "text/javascript; charset=utf-8",
-  mjs: "text/javascript; charset=utf-8", json: "application/json; charset=utf-8", txt: "text/plain; charset=utf-8", csv: "text/csv; charset=utf-8",
-  md: "text/markdown; charset=utf-8", parquet: "application/vnd.apache.parquet", arrow: "application/vnd.apache.arrow.file", svg: "image/svg+xml",
-  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif", ico: "image/x-icon",
-  woff: "font/woff", woff2: "font/woff2", ttf: "font/ttf", otf: "font/otf",
-  mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime",
-};
+const TYPES: Readonly<Record<string, string>> = { ...PAGE_FILE_TYPES, mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime" };
 // O_NOFOLLOW refuses a symlink swapped in at the last step, and O_NONBLOCK keeps a FIFO swapped in from hanging the open.
 // Windows has neither; there the identity check on the open handle alone refuses a different file.
 const VIDEO_OPEN_FLAGS = fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0);

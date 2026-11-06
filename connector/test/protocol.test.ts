@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { CLOUD_HOME_SECRET_KEYS, cloudRequestSignature as homeSignature } from "../../server/cloud-home.ts";
-import { CAPS_DROPPED_ENV, CLOUD_SECRETS_FILE } from "../../server/cloud-home-start.ts";
+import { CAPS_DROPPED_ENV, CLOUD_SECRETS_FILE, CLOUD_SECRETS_FILE_KEYS } from "../../server/cloud-home-start.ts";
 import { HOME_SECRET_ENV, HOME_SECRETS_FILE, HOME_SECRETS_TARGET } from "../src/settings.ts";
 import { cloudRequestSignature, summarizeHealth } from "../src/home-health.ts";
 import { checkEnrollCode, checkEnrollResponse, checkHomeEnv, checkJob, checkTransferUrl, JOB_TYPES, REQUIRED_HOME_ENV } from "../src/protocol.ts";
@@ -70,7 +70,8 @@ describe("the connector protocol", () => {
   });
 
   it("keeps out of the home's environment exactly the secrets its launcher reads from the file, where it reads it", () => {
-    expect([...HOME_SECRET_ENV].sort()).toEqual([...CLOUD_HOME_SECRET_KEYS].sort());
+    expect([...HOME_SECRET_ENV].sort()).toEqual([...CLOUD_SECRETS_FILE_KEYS].sort());
+    expect(CLOUD_SECRETS_FILE_KEYS).toEqual(expect.arrayContaining([...CLOUD_HOME_SECRET_KEYS]));
     expect(`${HOME_SECRETS_TARGET}/${HOME_SECRETS_FILE}`).toBe(CLOUD_SECRETS_FILE);
     expect(checkHomeEnv({ ...env, [CAPS_DROPPED_ENV]: "1" }).ok).toBe(false);
   });

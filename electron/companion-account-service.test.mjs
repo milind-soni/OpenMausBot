@@ -1405,6 +1405,47 @@ describe("Companion account on demand", () => {
     }
   });
 
+  it("needs a tunnel only for an old phone seen this month once the encrypted connection is on", () => {
+    const now = LAUNCH_AT;
+    const on = (devices, extra = {}) => ({ enabled: true, devices, pairing: null, e2e: { enabled: true }, ...extra });
+    const pairing = { code: "123456", token: `omb_pair_${"a".repeat(43)}`, expiresAt: now };
+    expect(managedEndpointNeed(on([{ id: "old", lastSeenAt: now - HOUR_MS }]), now)).toBe(true);
+    expect(managedEndpointNeed(on([{ id: "new", lastSeenAt: now, e2eAt: now - HOUR_MS }]), now)).toBe(false);
+    expect(managedEndpointNeed(on([{ id: "stale", lastSeenAt: now - 31 * 24 * HOUR_MS }]), now)).toBe("unused");
+    expect(managedEndpointNeed(on([{ id: "new", lastSeenAt: now, e2eAt: now }, { id: "stale", lastSeenAt: now - 31 * 24 * HOUR_MS }]), now)).toBe("unused");
+    expect(managedEndpointNeed(on([], { pairing }), now)).toBe(false);
+    expect(managedEndpointNeed({ ...on([], { pairing }), e2e: { enabled: false } }, now)).toBe(true);
+  });
+
+  it("reports the old phones with a tunnel request, and takes 409 relay_capable as no tunnel needed", async () => {
+    const refused = Object.assign(new Error("relay capable"), { code: "relay_capable", status: 409 });
+    const client = readyClient({ ensureEndpoint: vi.fn(async () => Promise.reject(refused)) });
+    const f = onDemandFixture({ initial: {}, client, relay: { capable: () => false, legacyDevices: async () => 0 } });
+    f.companion.need = true;
+    await f.service.requestCode("ada@example.com");
+    const state = await f.service.verifyCode("ada@example.com", "12345678");
+    expect(client.ensureEndpoint).toHaveBeenCalledWith(expect.any(String), { appVersion: "1.2.3", legacyDevices: 0 });
+    expect(state).toEqual({ available: true, status: "ready", email: "ada@example.com" });
+    f.service.dispose();
+  });
+
+  it("signs a relay-capable computer in without a tunnel when no phone needs one", async () => {
+    for (const relayCapable of [true, false]) {
+      const f = onDemandFixture({ initial: {}, relay: { capable: () => relayCapable, legacyDevices: async () => 0 } });
+      f.companion.need = false;
+      await f.service.requestCode("ada@example.com");
+      const state = await f.service.verifyCode("ada@example.com", "12345678");
+      expect(f.client.ensureInstallation).toHaveBeenCalledOnce();
+      if (relayCapable) {
+        expect(f.client.ensureEndpoint).not.toHaveBeenCalled();
+        expect(state).toEqual({ available: true, status: "ready", email: "ada@example.com" });
+      } else {
+        expect(f.client.ensureEndpoint).toHaveBeenCalledOnce();
+      }
+      f.service.dispose();
+    }
+  });
+
   it("never asks for an address at launch or on the watchdog, whatever is paired", async () => {
     for (const need of [false, true, null]) {
       const f = onDemandFixture({

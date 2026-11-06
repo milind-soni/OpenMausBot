@@ -57,6 +57,18 @@ async function fixture() {
 }
 
 describe("the connector replacing itself", () => {
+  it("never starts a new connector the image check refuses", async () => {
+    const f = await fixture();
+    const updater = new SelfUpdater({
+      docker: f.docker, state: f.state, log: () => {}, instance: "instance-old",
+      identity: () => ({ version: "1.0.0", protocol: 1, image: OLD }),
+      checkImage: async (image, context) => { if (image === NEW && context.kind === "connector" && context.current === OLD) throw new Error("it is older than this one"); },
+    });
+    expect(await updater.run(f.job, f.agent)).toEqual({ id: "self-1", ok: false, error: { code: "image_refused", message: `${NEW} was refused (it is older than this one). The connector was not changed.` } });
+    expect([...f.docker.containers.keys()]).toEqual(["mausbot-connector"]);
+    expect(f.agent).toMatchObject({ paused: 0, resumed: 0 });
+  });
+
   it("hands over once the new connector has connected: it answers the job, removes the old one and takes its name", async () => {
     const f = await fixture();
     let candidateReply: JobReply | null = null;
