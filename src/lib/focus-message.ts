@@ -17,9 +17,9 @@ async function loadThroughMessage(
   let before = owner.messages[0]?.id;
   let hasMore = true;
   let found = false;
-  while (before && hasMore && !found) {
+  while (hasMore && !found) {
     const page = await api<{ messages?: Message[]; hasMore?: boolean }>(
-      `/api/threads/${owner.threadId}/messages?limit=${MESSAGE_PAGE_SIZE}&before=${encodeURIComponent(before)}`,
+      `/api/threads/${owner.threadId}/messages?limit=${MESSAGE_PAGE_SIZE}${before ? `&before=${encodeURIComponent(before)}` : ""}`,
     );
     const messages = page.messages ?? [];
     older.unshift(...messages);

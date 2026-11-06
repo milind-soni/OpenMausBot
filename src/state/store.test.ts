@@ -2065,6 +2065,49 @@ describe("scrollback pages", () => {
   } as never as Bot;
   const state = { ...initialState, bots: [bot] };
 
+  const deferred = () => reducer(initialState, { type: "hydrate", bots: [{ ...bot, messages: [] }],
+    groups: [], computerControl: {}, deferMessages: true });
+  const page = (snapshot: AppState): Extract<Action, { type: "transcriptLoaded" }> => ({
+    type: "transcriptLoaded", threadId: bot.threadId, revision: snapshot.snapshotRevision,
+    generation: snapshot.transcriptGeneration[bot.threadId] ?? 0, messages: [message("m3", 3)], hasMore: true,
+  });
+
+  it("rejects a deferred page from a snapshot before reconnect", () => {
+    const first = deferred();
+    const reconnected = reducer(first, { type: "hydrate", bots: [{ ...bot, messages: [] }],
+      groups: [], computerControl: {}, deferMessages: true });
+    expect(reducer(reconnected, page(first))).toBe(reconnected);
+    expect(reducer(reconnected, page(reconnected)).bots[0].messages.map((message) => message.id)).toEqual(["m3"]);
+  });
+
+  it("keeps live copies in page order and appends messages newer than the page", () => {
+    const snapshot = deferred();
+    let live = reducer(snapshot, { type: "messageAdded", threadId: bot.threadId, message: { ...message("m3", 3), text: "live" } });
+    live = reducer(live, { type: "messageAdded", threadId: bot.threadId, message: message("m5", 5) });
+    const loaded = reducer(live, { ...page(snapshot), messages: [message("m2", 2), message("m3", 3), message("m4", 4)] });
+    expect(loaded.bots[0].messages.map((message) => message.id)).toEqual(["m2", "m3", "m4", "m5"]);
+    expect(loaded.bots[0].messages[1].text).toBe("live");
+    expect(loaded.deferredTranscripts).toEqual({});
+  });
+
+  it("does not apply a deferred page over a task snapshot or changed branch", () => {
+    const snapshot = deferred();
+    const switched = reducer(snapshot, { type: "taskSwitched", bot });
+    expect(reducer(switched, page(snapshot))).toBe(switched);
+    const rewound = reducer(snapshot, { type: "threadActive", threadId: bot.threadId, activeLeafId: "another-branch" });
+    expect(reducer(rewound, page(snapshot))).toBe(rewound);
+  });
+
+  it("settles deferred loading when search supplies the history and replays pending patches", () => {
+    const snapshot = deferred();
+    const patched = reducer(snapshot, { type: "messagePatched", threadId: bot.threadId, message: { ...message("m3", 3), text: "updated" } });
+    const loaded = reducer(patched, { ...page(snapshot), type: "olderMessages", messages: [message("m2", 2), message("m3", 3)], hasMore: false });
+    expect(loaded.bots[0].messages.map((message) => message.text)).toEqual(["m2", "updated"]);
+    expect(loaded.deferredTranscripts).toEqual({});
+    expect(loaded.backgroundThreadEvents).toEqual({});
+    expect(reducer(loaded, page(snapshot))).toBe(loaded);
+  });
+
   it("marks the thread loading so one click cannot ask twice", () => {
     const loading = reducer(state, { type: "loadOlderMessages", threadId: "thread-1" });
     expect(loading.loadingOlder["thread-1"]).toBe(true);
@@ -2906,6 +2949,75 @@ describe("restoring the open conversation", () => {
       return { stored, stream };
     };
     const hello = () => ({ kind: "hello", resumed: false, cursor: "run:0" });
+
+    it("loads a large library through a 32 MiB relay by fetching only the opened transcript", async () => {
+      const { stream } = await boot();
+      const fallback = globalThis.fetch;
+      const library = Array.from({ length: 25 }, (_, index) => ({
+        ...first, id: `large-${index}`, threadId: `large-thread-${index}`, messages: [], hasMore: true,
+      }));
+      const text = "x".repeat(2 * 1024 * 1024);
+      const requests = vi.fn(async (path: string, options?: RequestInit) => {
+        let body: unknown;
+        if (path === "/api/bots?messages=0") body = { bots: library, groups: [{ ...room, messages: [], hasMore: true }] };
+        else if (path.startsWith("/api/bots?")) body = { bots: library.map((bot) => ({ ...bot, messages: [{ text }] })) };
+        else if (path.startsWith("/api/threads/")) body = {
+          messages: [{ id: `${path}-message`, role: "bot", kind: "text", at: 1, text }], hasMore: true,
+        };
+        else return fallback(path, options);
+        const serialized = JSON.stringify(body);
+        return serialized.length > 32 * 1024 * 1024
+          ? new Response(JSON.stringify({ error: "the response from OpenMausBot was too large" }), { status: 502 })
+          : new Response(serialized);
+      });
+      vi.stubGlobal("fetch", requests);
+      stream.send(hello());
+      await settle();
+      expect(seen.bots).toHaveLength(25);
+      expect(seen.bots[0].messages[0].text).toBe(text);
+      expect(seen.bots[1].messages).toEqual([]);
+      expect(seen.error).toBeNull();
+      const transcripts = () => requests.mock.calls.map(([path]) => path).filter((path) => path.startsWith("/api/threads/"));
+      expect(transcripts()).toEqual(["/api/threads/large-thread-0/messages?limit=200"]);
+
+      flushSync(() => dispatch({ type: "select", id: "large-1" }));
+      await settle();
+      expect(seen.bots[1].messages[0].text).toBe(text);
+      flushSync(() => dispatch({ type: "select", id: "large-0" }));
+      await settle();
+      expect(transcripts()).toHaveLength(2);
+      flushSync(() => dispatch({ type: "select", id: room.id }));
+      await settle();
+      expect(seen.groups[0].messages[0].text).toBe(text);
+      expect(seen.deferredTranscripts[room.threadId]).toBeUndefined();
+      expect(requests.mock.calls.some(([path]) => path.startsWith("/api/bots?") && path !== "/api/bots?messages=0")).toBe(false);
+    });
+
+    it("keeps live additions and patches while a deferred transcript is loading", async () => {
+      const { stream } = await boot();
+      const fallback = globalThis.fetch;
+      let answer!: (response: Response) => void;
+      vi.stubGlobal("fetch", (path: string, options?: RequestInit) => {
+        if (path === "/api/bots?messages=0") return Promise.resolve(new Response(JSON.stringify({
+          bots: [{ ...first, messages: [], hasMore: true }], groups: [],
+        })));
+        if (path.startsWith("/api/threads/")) return new Promise<Response>((resolve) => { answer = resolve; });
+        return fallback(path, options);
+      });
+      stream.send(hello());
+      await settle();
+      const old: Message = { id: "old", role: "bot", kind: "text", text: "snapshot", at: 1 };
+      const live: Message = { id: "live", role: "bot", kind: "text", text: "live", at: 2 };
+      flushSync(() => {
+        dispatch({ type: "messagePatched", threadId: first.threadId, message: { ...old, text: "updated" } });
+        dispatch({ type: "messageAdded", threadId: first.threadId, message: live });
+      });
+      answer(new Response(JSON.stringify({ messages: [old], hasMore: true })));
+      await settle();
+      expect(seen.bots[0].messages.map((message) => message.text)).toEqual(["updated", "live"]);
+      expect(seen.bots[0].hasMore).toBe(true);
+      expect(seen.deferredTranscripts).toEqual({});
+    });
 
     it("keeps the UI mounted when a reconnect receives a malformed bots snapshot", async () => {
       const { stream } = await boot();

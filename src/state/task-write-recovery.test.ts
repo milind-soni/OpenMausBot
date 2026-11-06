@@ -1,9 +1,9 @@
 import { createElement, type Dispatch } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { initialState, MESSAGE_PAGE_SIZE, StoreProvider, useStore, type Action, type BotAnnouncement } from "./store";
+import { initialState, StoreProvider, useStore, type Action, type BotAnnouncement } from "./store";
 
-const SNAPSHOT = `/api/bots?messages=${MESSAGE_PAGE_SIZE}`;
+const SNAPSHOT = "/api/bots?messages=0";
 
 const bot: BotAnnouncement = {
   id: "bot", threadId: "thread", name: "Fixture", title: "", description: "",

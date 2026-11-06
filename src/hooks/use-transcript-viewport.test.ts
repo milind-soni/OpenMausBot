@@ -74,6 +74,7 @@ const store = vi.hoisted(() => ({
   state: {
     focusMessage: null as null | { threadId: string; messageId: string; nonce: number; consumed: boolean },
     loadingOlder: {} as Record<string, true>,
+    deferredTranscripts: {} as Record<string, number>,
   },
   dispatch: (() => {}) as (action: unknown) => void,
 }));
