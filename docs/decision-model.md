@@ -170,7 +170,8 @@ The log stays on this machine: workspace backups leave it out.
 - **Cloud Pro:** decisions are included, with no key to paste. With no key of
   the person's own, the Cloud home uses its relay token
   (`OMB_CLOUD_DECIDER_TOKEN`), sent only to the Admin's relay, never to Jev
-  or `baseUrl`, and only for room routing and the key check (other jobs need
+  or `baseUrl`, and only for the requests the relay accepts: room routing,
+  inbox triage, a bot's own `decide` call and the key check (other jobs need
   a key of the person's own). Settings says **Included with your Cloud plan**, and
   the master switch is on until someone switches it off. A Jev or Workers AI
   key saved here wins; clearing it falls back to the included decisions. The
@@ -194,14 +195,21 @@ recent room lines and the new message) and the bots' descriptions to the
 provider whose key decides (see the key order above). With Workers AI that is
 Cloudflare, or the server `workersAiBaseUrl` points to, which also receives the
 token. With OpenRouter that is OpenRouter and the host it routes the model to,
-under OpenRouter's privacy settings and your account's data policy;
+under OpenRouter's privacy settings and your account's data policy, or the
+server `openrouterBaseUrl` points to, which also receives the key;
 OpenMausBot does not set a data-collection preference.
 
-Inbox triage sends each new email's sender, subject and preview twice: to the
-provider whose key decides, and first to the one that reads it, the first of
-your own Workers AI key, Cloud's included relay, then OpenRouter (a Jev key is
-not used for reading). Leave a job off when its data must not leave the
-machine.
+Inbox triage first has each new email read, when a reading provider is set:
+the first of your own Workers AI key (Clairic and Clef-flash each get the
+email), Cloud's included relay, then OpenRouter. A Jev key is not used for
+reading. The provider whose key decides then gets the email's sender, subject
+and preview, the details that were read (such as an ask or a deadline) and up
+to 20 recently dismissed senders.
+
+Switching inbox triage off does not keep mail on the machine: the inbox watch
+can then sort mail with the bot's own engine. Pause the watch to stop that
+(see [proactive-routines.md](proactive-routines.md)). Switch room routing off
+for rooms whose lines must not leave the machine.
 
 ## Turning it off
 

@@ -1408,16 +1408,24 @@ computers belong to this machine on every request.
   `OMB_ELEVENLABS_API` or `decider.baseUrl` when set, for development and
   tests, else Boat's, ElevenLabs' and Jev's own APIs) and an included token
   only to its relay, whatever those settings say.
-- **The decision relay takes two requests, and the app sends it nothing
-  else.** Through the included token the app sends only room routing's
-  request (one question `answer`, a choice with the fixed instructions in
-  `server/decider/room-routing.ts`, and state keys `room`, `humans_in_room`,
-  `bots_in_room`, `new_message` and, when there are recent lines,
-  `recent_messages`) and the Settings key check's fixed request, within the
-  relay's caps (a body of at most 64 KiB, a state of at most 24,000 bytes as
-  JSON). `server/decider/relay.ts` checks each request before it is sent; one
-  that does not fit is not sent, and the room falls back as for any other
-  decision-model failure. Any other decision job, now or added later, uses
+- **The decision relay takes four requests, and the app sends it nothing
+  else.** Through the included token the app sends only:
+  - room routing's request: one question `answer`, a choice with the fixed
+    instructions in `server/decider/room-routing.ts`, and state keys `room`,
+    `humans_in_room`, `bots_in_room`, `new_message` and, when there are recent
+    lines, `recent_messages`;
+  - inbox triage's request: one choice with the fixed instructions and
+    options in `server/decider/inbox-triage.ts`, and state keys `email`
+    (`from`, `subject`, `preview`), `details` (each value at most 300
+    characters) and `dismissed_senders` (at most 20);
+  - a bot's own `decide` call: 1 to 8 questions within `BOT_DECIDE_LIMITS`;
+  - the Settings key check's fixed request.
+
+  Each stays within the relay's caps (a body of at most 64 KiB, a state of at
+  most 24,000 bytes as JSON). `server/decider/relay.ts` checks each request
+  before it is sent, and Cloud's Admin runs the same checks from
+  `server/decider/fixtures/relay-seams.json`. One that does not fit is not
+  sent, and the job falls back as for any other decision-model failure. Any other decision job, now or added later, uses
   only a key of the person's own (Jev, Workers AI or OpenRouter) until the
   relay accepts it too. The relay speaks Jev's API only: included decisions
   are Jev's. An own Jev or Workers AI key comes before them; an OpenRouter key
