@@ -47,7 +47,7 @@ async function fixture() {
   const lines: string[] = [];
   const updater = (instance: string) => new SelfUpdater({
     docker, state, log: (line) => lines.push(line), instance, deadlineMs: 180_000, pollMs: 2_000,
-    identity: () => ({ version: "1.0.0", protocol: 1, image: instance === "instance-old" ? OLD : NEW }),
+    identity: () => ({ version: "1.0.0", protocol: 2, image: instance === "instance-old" ? OLD : NEW }),
     now: () => clock,
     sleep: async (ms) => { clock += ms; },
   });
@@ -66,7 +66,7 @@ describe("the connector replacing itself", () => {
     };
     const reply = await f.updater("instance-old").run(f.job, f.agent);
     expect(reply).toBeNull();
-    expect(candidateReply).toEqual({ id: "self-1", ok: true, result: { connector: { version: "1.0.0", protocol: 1, image: NEW } } });
+    expect(candidateReply).toEqual({ id: "self-1", ok: true, result: { connector: { version: "1.0.0", protocol: 2, image: NEW } } });
     expect([...f.docker.containers.keys()]).toEqual(["mausbot-connector"]);
     const now = f.docker.container("mausbot-connector")!;
     expect(now.spec.Image).toBe(NEW);
@@ -126,7 +126,7 @@ describe("the connector replacing itself", () => {
     const f = await fixture();
     const missing = `ghcr.io/milind-soni/mausbot-connector@sha256:${"3".repeat(64)}`;
     expect(await f.updater("instance-old").run({ ...f.job, args: { image: missing } }, f.agent)).toMatchObject({ ok: false, error: { code: "self_update_failed" } });
-    expect(await f.updater("instance-old").run({ ...f.job, args: { image: OLD } }, f.agent)).toEqual({ id: "self-1", ok: true, result: { connector: { version: "1.0.0", protocol: 1, image: OLD } } });
+    expect(await f.updater("instance-old").run({ ...f.job, args: { image: OLD } }, f.agent)).toEqual({ id: "self-1", ok: true, result: { connector: { version: "1.0.0", protocol: 2, image: OLD } } });
     expect(f.agent).toMatchObject({ paused: 0, resumed: 0 });
     expect([...f.docker.containers.keys()]).toEqual(["mausbot-connector"]);
     expect(await f.updater("instance-unknown").run(f.job, f.agent)).toMatchObject({ ok: false, error: { code: "self_update_failed", message: expect.stringContaining("cannot find its own container") } });

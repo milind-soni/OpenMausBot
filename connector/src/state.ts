@@ -1,15 +1,26 @@
 // The connector's state volume: small JSON files, each written whole (temp file, then rename) and readable by root only,
-// in a folder only root may enter. The agent token and the home's environment live here and nowhere else.
+// in a folder only root may enter. The box's private key and the home's environment live here and nowhere else.
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export interface AgentRecord {
-  version: 1;
+  version: 2;
   admin: string;
-  serverId: string;
-  cloudId: string;
-  agentToken: string;
+  boxId: string;
+  teamId: string;
+  /** The box key: its public half as the Admin has it, and its private half (PKCS #8, base64url), a secret. */
+  publicKey: string;
+  privateKey: string;
+  /** The Admin's signing keys by id, pinned at enrolment; only a hello signed by one of them replaces them. */
+  adminKeys: Record<string, string>;
   enrolledAt: number;
+}
+
+/** The Admin's newest signed config this box verified (protocol.ts `ConfigPayload`), kept as signed. */
+export interface ConfigRecord {
+  envelope: string;
+  version: number;
+  savedAt: number;
 }
 
 /** A step of a job that changes the home or its data, written before the step starts, so a restart can finish it. */
@@ -41,6 +52,8 @@ export interface HomeRecord {
 export interface StatusRecord {
   connected: boolean;
   unauthorized: boolean;
+  /** What the Admin last said of this box: the team's Owner has not accepted it yet, or has. */
+  boxState?: "pending" | "accepted" | null;
   lastConnectedAt: number | null;
   lastHeartbeatAt: number | null;
   lastError: string | null;
@@ -64,6 +77,8 @@ const FILES = {
   env: "home-env.json",
   status: "status.json",
   selfUpdate: "self-update.json",
+  count: "connect-count.json",
+  config: "admin-config.json",
 } as const;
 
 export class StateStore {
@@ -101,8 +116,29 @@ export class StateStore {
     rmSync(this.path(name), { force: true });
   }
 
+  /** Null until enrolled; a record from protocol v1 (a bearer token, no key) counts as not enrolled. */
   agent(): AgentRecord | null {
-    return this.read<AgentRecord>(FILES.agent);
+    const record = this.read<AgentRecord | { version: 1 }>(FILES.agent);
+    return record?.version === 2 ? record : null;
+  }
+
+  /**
+   * The next connection's count, written before it is sent, so no count is ever sent twice: the Admin takes a count it
+   * has seen before for a copy of this box's key. It is read from the disk each time, as a connector taking over in a
+   * self-update shares it.
+   */
+  nextCount(): number {
+    const count = (this.read<{ count: number }>(FILES.count)?.count ?? 0) + 1;
+    this.write(FILES.count, { count });
+    return count;
+  }
+
+  adminConfig(): ConfigRecord | null {
+    return this.read<ConfigRecord>(FILES.config);
+  }
+
+  saveAdminConfig(record: ConfigRecord): void {
+    this.write(FILES.config, record);
   }
 
   saveAgent(record: AgentRecord): void {
