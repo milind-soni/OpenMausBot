@@ -11,7 +11,7 @@ it.each([true, false])("discovers valid, unique per-agent model choices (Codex=%
   const entry = endpoint(codex);
   const request = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ data: [{ id: "model-a" }, { id: "model-b" }, { id: "model-a" }, { id: "invalid model" }, {}] }));
   await discoverAgentEndpointModels(entry, request);
-  expect(request).toHaveBeenCalledWith("https://gateway.example/v1/models", expect.objectContaining({ redirect: "manual", signal: expect.any(AbortSignal), headers: expect.objectContaining({ authorization: "Bearer fixture-secret" }) }));
+  expect(request).toHaveBeenCalledWith("https://gateway.example/v1/models", expect.objectContaining({ redirect: "manual", signal: expect.any(AbortSignal), headers: expect.objectContaining({ authorization: "Bearer fixture-secret", ...(codex ? {} : { "x-api-key": "fixture-secret", "anthropic-version": "2023-06-01" }) }) }));
   expect(entry.config).toMatchObject(codex ? { endpoint: { models: ["model-a", "model-b"] } } : { endpointModels: ["model-a", "model-b"] });
   expect(entry.environment).not.toHaveProperty("ANTHROPIC_MODEL");
 });
