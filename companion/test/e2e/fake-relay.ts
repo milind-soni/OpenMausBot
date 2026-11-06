@@ -36,6 +36,8 @@ export interface FakeRelay {
   tamper: FakeRelayOptions["tamper"] | null;
   admitted(hid: string): Set<string>;
   restart(): void;
+  /** Closes every spliced phone socket with `code`, as a malicious relay would, outside the encryption. */
+  forgeClose(code: number): void;
   /** Drops every socket without a close frame, as a crashed process would. */
   kill(): Promise<void>;
   close(): Promise<void>;
@@ -176,6 +178,9 @@ export async function startFakeRelay(options: FakeRelayOptions): Promise<FakeRel
     admitted: (hid: string) => hosts.get(hid)?.set ?? new Set<string>(),
     restart() {
       for (const host of hosts.values()) host.control.send(JSON.stringify({ t: "restarting", reconnectInMs: 0, tryForMs: 200 }));
+    },
+    forgeClose(code: number) {
+      for (const host of hosts.values()) for (const session of host.sessions) session.phone.close(code);
     },
     async kill() {
       for (const client of wss.clients) client.terminate();
