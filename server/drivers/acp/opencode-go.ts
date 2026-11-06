@@ -241,12 +241,15 @@ function runOpenCodeModelsVerbose(
   });
 }
 
-/** OpenCode (1.19.4) lists models from its models.dev cache, or without one the snapshot built into it, and neither
- * `opencode models` nor `opencode acp` refetches it; `models --refresh` does, and the next process reads it. OpenCode
- * 2.2.5 rejects the flag (exit 1): each of its processes refetches the catalog itself, in the background, at start. */
+/** OpenCode 1.19.4 lists models from its models.dev cache file and `models --refresh` refetches it. Every other
+ * process of it starts a background refetch under a cross-process lock that a process ended mid-fetch leaves held,
+ * and the next refetch waits until the lock is a minute old. OpenCode 2.2.5 rejects the flag (exit 1): each of its
+ * processes refetches its catalog itself, in the background, at start. */
+const MODELS_REFRESH_TIMEOUT_MS = 75_000;
+
 function refreshOpenCodeModelCache(cli: string, environment: Record<string, string | undefined>): Promise<boolean> {
   return new Promise((resolve) => {
-    execCli(cli, ["models", "--refresh"], { timeout: DISCOVERY_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, env: environment }, (error) => resolve(!error));
+    execCli(cli, ["models", "--refresh"], { timeout: MODELS_REFRESH_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, env: environment }, (error) => resolve(!error));
   });
 }
 
@@ -433,8 +436,10 @@ export async function discoverOpenCodeModels(
   const settleMs = options.refresh && !await refreshOpenCodeModelCache(cli, environment)
     ? options.settleMs ?? SELF_REFRESH_SETTLE_MS
     : 0;
-  const probeSession = () => probeOpenCodeSession(cli, environment, undefined, DISCOVERY_TIMEOUT_MS, settleMs);
-  const readMetadata = () => runOpenCodeModelsVerbose(cli, environment).then(parseOpenCodeModels);
+  // A listing ends long before a catalog refetch would: it reads the cache, unless it waits for OpenCode 2's own refetch.
+  const listing = settleMs ? environment : { ...environment, OPENCODE_DISABLE_MODELS_FETCH: "1" };
+  const probeSession = () => probeOpenCodeSession(cli, listing, undefined, DISCOVERY_TIMEOUT_MS, settleMs);
+  const readMetadata = () => runOpenCodeModelsVerbose(cli, listing).then(parseOpenCodeModels);
   let [session, verbose] = await Promise.allSettled([probeSession(), readMetadata()]);
   // Two OpenCode processes starting together in a fresh home race to create its database and one fails
   // (1 in 8 fresh homes). A timed-out half is not retried.
