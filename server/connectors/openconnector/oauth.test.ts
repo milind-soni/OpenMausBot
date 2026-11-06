@@ -101,13 +101,13 @@ describe("configureAppOAuth", () => {
 });
 
 describe("appOAuthStatus", () => {
-  it("reports configured from the runtime or the local record, with the redirect target", async () => {
+  it("reports configured only when the runtime is ready, with the local record for display", async () => {
     const state = newState();
     expect((await appOAuthStatus(client(), state, "github")).configured).toBe(true);
     expect((await appOAuthStatus(client(), state, "notion")).configured).toBe(false);
     state.upsertAppOAuth({ service: "notion", clientId: "nid", sealedClientSecret: "x", updatedAt: "t" });
     const status = await appOAuthStatus(client(), state, "notion");
-    expect(status.configured).toBe(true);
+    expect(status.configured).toBe(false);
     expect(status.clientId).toBe("nid");
     expect(status.expectedRedirectUri).toBe("https://runtime.example.test/oauth/callback");
   });
@@ -128,6 +128,7 @@ describe("pollConnectionRequest", () => {
       { status: 200, body: { success: true, data: { status: "connected", connected: true } } },
     ];
     const state = newState();
+    state.upsertConnection({ accountId: "oc:github:work", service: "github", alias: "work", connectionRequestId: "cr_1", status: "pending", updatedAt: "t" });
     const result = await pollConnectionRequest(client(), state, "github", "cr_1", "work", { sleep, intervalMs: 100, timeoutMs: 5_000 });
     expect(result.connected).toBe(true);
     expect(result.record).toMatchObject({
@@ -148,6 +149,7 @@ describe("pollConnectionRequest", () => {
       { status: 200, body: { success: true, data: { status: "connected" } } },
     ];
     const state = newState();
+    state.upsertConnection({ accountId: "oc:github:default", service: "github", connectionRequestId: "cr_2", status: "pending", updatedAt: "t" });
     const result = await pollConnectionRequest(client(), state, "github", "cr_2", undefined, { sleep, intervalMs: 100, timeoutMs: 60_000 });
     expect(result.connected).toBe(true);
     expect(result.record.accountId).toBe("oc:github:default");
@@ -157,6 +159,7 @@ describe("pollConnectionRequest", () => {
   it("records a terminal failure without throwing", async () => {
     requestStates = [{ status: 200, body: { success: true, data: { status: "expired" } } }];
     const state = newState();
+    state.upsertConnection({ accountId: "oc:github:default", service: "github", connectionRequestId: "cr_3", status: "pending", updatedAt: "t" });
     const result = await pollConnectionRequest(client(), state, "github", "cr_3", undefined, { sleep, intervalMs: 100, timeoutMs: 5_000 });
     expect(result.connected).toBe(false);
     expect(result.record.status).toBe("expired");

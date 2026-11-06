@@ -48,13 +48,17 @@ apps.
    (there is no product UI for this yet):
 
    ```bash
+   read -rs OPENCONNECTOR_OAUTH_CLIENT_SECRET
+   export OPENCONNECTOR_OAUTH_CLIENT_SECRET
    node scripts/openconnector-oauth.ts configure github \
-     --client-id <id> --client-secret <secret> --scope repo --scope read:user
+     --client-id <id> --scope repo --scope read:user
    node scripts/openconnector-oauth.ts status github
    ```
 
-   The script prints the `expectedRedirectUri`; register exactly that value as the OAuth app's
-   callback. The client secret travels only to the runtime; the local copy is sealed.
+   The non-echoing `read -s` prompt keeps the secret out of argv and shell history; clear the
+   exported variable when the shell exits. The script prints the `expectedRedirectUri`; register
+   exactly that value as the OAuth app's callback. The client secret travels only to the runtime;
+   the local copy is sealed.
 2. Connect from the product as usual (Connected apps → Connect). The provider asks the runtime
    to start an authorization request, returns the browser link, and records a pending local
    account.
@@ -81,8 +85,10 @@ OpenConnector action ids map onto the repo's existing connector-tool shape, so
 
 The mapping is total or null: an action id that cannot produce a
 `CONNECTOR_TOOL_NAME_PATTERN`-compliant name never becomes a tool. Services with underscores
-(`google_calendar`, `bland_ai`) keep their full slug; the inverse mapping resolves tool names
-against the real service list so the longest service wins.
+(`google_calendar`, `bland_ai`) keep their full slug; tool calls resolve against the exact runtime
+action catalog rather than guessing a service prefix. When a service has several local accounts,
+pass `_meta.openconnectorAccountAlias`; otherwise the call is rejected instead of silently using
+the default account.
 
 ## Triggers: not supported in this phase
 
@@ -94,8 +100,8 @@ does not advertise triggers, and the Composio trigger path is untouched.
 
 ## Limitations
 
-- **SaaS sources are out of scope.** Only a local or self-hosted runtime; the URL rule above is
-  the enforcement.
+- **SaaS sources are out of scope.** Use a local or self-hosted runtime. URL validation does not
+  verify where the runtime is hosted.
 - **No in-product settings UI yet.** Provider selection and per-app OAuth configuration use env
   vars, `config.json`, and the `openconnector-oauth` script; the Composio settings screens keep
   working untouched.

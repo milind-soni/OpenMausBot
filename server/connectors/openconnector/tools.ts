@@ -28,8 +28,15 @@ export function connectorToolForAction(actionId: string): ConnectorToolForAction
   return CONNECTOR_TOOL_NAME_PATTERN.test(name) ? { service, name } : null;
 }
 
-/** The inverse: which action id a granted tool name calls. Services with underscores (google_calendar)
- * need the real service slugs as candidates so the longest match wins, exactly like Composio's. */
+/** The exact inverse for a catalog: tool names are the provider's own one-to-one encodings, so a call
+ * is resolved only from the actions the runtime listed. Candidates stay for grant/service checks. */
+export function actionIdForConnectorTool(name: string, actionIds: readonly string[]): string | null {
+  if (!CONNECTOR_TOOL_NAME_PATTERN.test(name)) return null;
+  return actionIds.find((actionId) => connectorToolForAction(actionId)?.name === name) ?? null;
+}
+
+/** The service implied by a granted tool name. Services with underscores (google_calendar) need the
+ * real service slugs as candidates so the longest match wins, exactly like Composio's. */
 export function actionForConnectorTool(name: string, candidates: readonly string[]): string | null {
   if (!CONNECTOR_TOOL_NAME_PATTERN.test(name)) return null;
   let match: string | null = null;
@@ -43,15 +50,26 @@ export function actionForConnectorTool(name: string, candidates: readonly string
     if (cut <= 0) return null;
     match = name.slice(0, cut).toLowerCase();
   }
+  if (match === null) return null;
   return `${match}.${name.slice(match.length + 1).toLowerCase()}`;
 }
 
 /** The grant-editor listing row for one action. */
-export function connectorToolListingForAction(action: { id: string; description?: unknown }): { service: string; name: string; description?: string } | null {
+export function connectorToolListingForAction(action: { id: string; description?: unknown; raw?: Record<string, unknown> }): { service: string; name: string; description?: string; inputSchema?: Record<string, unknown> } | null {
   const mapped = connectorToolForAction(action.id);
   if (!mapped) return null;
   const description = typeof action.description === "string"
     ? action.description.replace(/\s+/g, " ").trim().slice(0, TOOL_DESCRIPTION_MAX)
     : "";
-  return description ? { ...mapped, description } : mapped;
+  const inputSchema = actionInputSchema(action.raw);
+  return { ...mapped, ...(description ? { description } : {}), ...(inputSchema ? { inputSchema } : {}) };
+}
+
+/** Keep the runtime's parameter contract and never erase required arguments; an action without a
+ * schema can still be called with an explicit empty object. */
+function actionInputSchema(raw?: Record<string, unknown>): Record<string, unknown> | undefined {
+  const candidate = raw?.inputSchema;
+  return candidate && typeof candidate === "object" && !Array.isArray(candidate)
+    ? candidate as Record<string, unknown>
+    : { type: "object", properties: {}, additionalProperties: false, required: [] };
 }

@@ -2,12 +2,12 @@
 // Operations entry for the OpenConnector provider's per-app OAuth configuration — the piece the
 // product UI does not cover yet. An operator with the admin token configures an app's OAuth client
 // on the runtime (where the secret lives) and reads the configuration back. The client secret is
-// accepted from --client-secret or the OPENCONNECTOR_OAUTH_CLIENT_SECRET env var and is never
-// echoed. Usage:
-//   node scripts/openconnector-oauth.ts configure <service> --client-id <id> [--client-secret <secret>] [--scope <scope> ...]
+// read from OPENCONNECTOR_OAUTH_CLIENT_SECRET so it never appears in argv or shell history. Usage:
+//   node scripts/openconnector-oauth.ts configure <service> --client-id <id> [--scope <scope> ...]
 //   node scripts/openconnector-oauth.ts status <service>
 // Connection selection comes from the same env/config as the server: OMB_CONNECTOR_PROVIDER,
 // OMB_OPENCONNECTOR_URL, OMB_OPENCONNECTOR_ADMIN_TOKEN (or OMB_OPENCONNECTOR_ADMIN_TOKEN_REF).
+import { join } from "node:path";
 import { parseArgs } from "node:util";
 
 import {
@@ -18,8 +18,9 @@ import {
   loadConnectorSettings,
   resolveTokenRef,
 } from "../server/connectors/provider.ts";
-import { OpenConnectorClient } from "../server/connectors/openconnector/client.ts";
-import { OpenConnectorStateStore } from "../server/connectors/openconnector/state.ts";
+import { OpenConnectorClient, normalizeOpenConnectorBaseUrl } from "../server/connectors/openconnector/client.ts";
+import { OPENCONNECTOR_STATE_FILE, OpenConnectorStateStore } from "../server/connectors/openconnector/state.ts";
+import { DATA_DIR } from "../server/config.ts";
 import { appOAuthStatus, configureAppOAuth } from "../server/connectors/openconnector/oauth.ts";
 
 const USAGE = `Usage:
@@ -28,7 +29,7 @@ const USAGE = `Usage:
 
 Settings come from ${CONNECTOR_PROVIDER_ENV}=openconnector, ${OPENCONNECTOR_URL_ENV},
 ${OPENCONNECTOR_ADMIN_TOKEN_ENV} (or ${OPENCONNECTOR_ADMIN_TOKEN_REF_ENV}=env:VAR|file:PATH).
-The client secret may come from --client-secret or OPENCONNECTOR_OAUTH_CLIENT_SECRET.`;
+The client secret comes from OPENCONNECTOR_OAUTH_CLIENT_SECRET (for example, a shell read -s prompt).`;
 
 function fail(message: string): never {
   console.error(`openconnector-oauth: ${message}`);
@@ -40,7 +41,6 @@ const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     "client-id": { type: "string" },
-    "client-secret": { type: "string" },
     scope: { type: "string", multiple: true },
   },
 });
@@ -57,12 +57,12 @@ const adminToken = resolveTokenRef(settings.openconnector.adminTokenRef) ?? proc
 if (!adminToken) fail(`no admin token: set ${OPENCONNECTOR_ADMIN_TOKEN_ENV} or ${OPENCONNECTOR_ADMIN_TOKEN_REF_ENV}`);
 
 const client = new OpenConnectorClient({ baseUrl: settings.openconnector.url, adminToken });
-const state = new OpenConnectorStateStore();
+const state = new OpenConnectorStateStore(join(DATA_DIR, OPENCONNECTOR_STATE_FILE), normalizeOpenConnectorBaseUrl(settings.openconnector.url));
 
 if (verb === "configure") {
   const clientId = values["client-id"];
   if (!clientId) fail("configure needs --client-id");
-  const clientSecret = values["client-secret"] ?? process.env.OPENCONNECTOR_OAUTH_CLIENT_SECRET;
+  const clientSecret = process.env.OPENCONNECTOR_OAUTH_CLIENT_SECRET;
   if (!clientSecret) fail("configure needs --client-secret or OPENCONNECTOR_OAUTH_CLIENT_SECRET");
   const { expectedRedirectUri } = await configureAppOAuth(client, state, service, {
     clientId,

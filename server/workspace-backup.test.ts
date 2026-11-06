@@ -567,6 +567,16 @@ describe("encrypted full workspace backups", () => {
     expect(readFileSync(join(target, "Sessions.json"), "utf8")).toBe("destination-session");
   });
 
+  it("refuses a file-backed OpenConnector admin token inside the backup root", async () => {
+    const source = directory();
+    const tokenPath = join(source, "openconnector-admin-token");
+    writeFileSync(tokenPath, "runtime-root-token", { mode: 0o600 });
+    json(join(source, "config.json"), { connectors: { provider: "openconnector", openconnector: { url: "https://runtime.example.test", adminTokenRef: `file:${tokenPath}` } } });
+    await expect(createWorkspaceBackup(source, { password: PASSWORD })).rejects.toThrow(/OpenConnector admin token file/);
+    expect(existsSync(join(source, ".backups"))).toBe(false);
+    expect(readFileSync(tokenPath, "utf8")).toBe("runtime-root-token");
+  });
+
   it("fails explicitly on noncanonical source auth paths rather than silently skipping them", async () => {
     const source = directory();
     mkdirSync(join(source, "vm-home", ".Browser-Profiles"), { recursive: true });

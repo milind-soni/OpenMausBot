@@ -71,6 +71,16 @@ describe("state persistence", () => {
     expect(store.removeConnection("oc:slack:c")).toBe(false);
   });
 
+  it("does not reuse records from a different runtime URL", () => {
+    const file = join(dir, `scoped-${Math.random().toString(36).slice(2)}.json`);
+    const first = new OpenConnectorStateStore(file, "https://first.example.test");
+    first.upsertConnection({ accountId: "oc:github:default", service: "github", status: "ACTIVE", updatedAt: "t" });
+    const readRaw = JSON.parse(readFileSync(file, "utf8"));
+    expect(readRaw.runtimeUrl).toBe("https://first.example.test");
+    expect(new OpenConnectorStateStore(file, "https://second.example.test").listConnections()).toEqual([]);
+    expect(new OpenConnectorStateStore(file, "https://first.example.test").listConnections()).toHaveLength(1);
+  });
+
   it("reads a missing or corrupt file as empty", () => {
     const store = newStore();
     expect(store.listConnections()).toEqual([]);

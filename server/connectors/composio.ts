@@ -241,7 +241,8 @@ async function listConnectedAccounts(
     const body = connectedAccountsPageSchema.parse(await response.json());
     accounts.push(...body.items);
     const next = body.next_cursor || undefined;
-    if (!next || seenCursors.has(next)) return accounts;
+    if (!next) return accounts;
+    if (seenCursors.has(next)) throw new Error("Composio account inventory repeated a pagination cursor");
     seenCursors.add(next);
     cursor = next;
   }
@@ -267,7 +268,8 @@ async function listSessionToolkits(
     const body = toolkitPageSchema.parse(await response.json());
     toolkits.push(...(body.items ?? []));
     const next = body.next_cursor || undefined;
-    if (!next || seenCursors.has(next)) return toolkits;
+    if (!next) return toolkits;
+    if (seenCursors.has(next)) throw new Error("Composio toolkit inventory repeated a pagination cursor");
     seenCursors.add(next);
     cursor = next;
   }
@@ -389,9 +391,12 @@ async function connectedServices(cfg: AppConfig, as?: BrokerAccess): Promise<Rec
 }
 
 /** Cache key per backend, so a config switch never serves the previous backend's tools. */
-function connectorToolsIdentity(cfg: AppConfig, as?: BrokerAccess): string {
+async function connectorToolsIdentity(cfg: AppConfig, as?: BrokerAccess): Promise<string> {
   const apiKey = as ? null : projectApiKey(cfg);
-  if (apiKey) return backendFingerprint("project-tools", apiBase(), apiKey);
+  if (apiKey) {
+    const session = await ensureProjectSession(cfg);
+    return backendFingerprint("project-tools", apiBase(), `${apiKey}\0${session.session_id}`);
+  }
   const broker = as ?? brokerAccess();
   return broker ? backendFingerprint("managed-tools", broker.url, broker.token) : "none";
 }
@@ -405,7 +410,7 @@ async function listConnectorTools(
   cfg: AppConfig,
   options: { force?: boolean } = {},
 ): Promise<Record<string, ConnectorToolListing[]>> {
-  const identity = connectorToolsIdentity(cfg);
+  const identity = await connectorToolsIdentity(cfg);
   if (!options.force && connectorToolsCache?.identity === identity
     && Date.now() - connectorToolsCache.at < CONNECTOR_TOOLS_CACHE_MS) {
     return connectorToolsCache.services;
@@ -429,7 +434,7 @@ let connectorServiceSlugsRequest: { identity: string; slugs: Promise<readonly st
 
 /** Real backend slugs, so an underscored service (bland_ai) is never captured by a plain-prefix grant (bland); a failed read answers the last good one. */
 async function connectedServiceSlugs(cfg: AppConfig, as?: BrokerAccess): Promise<readonly string[]> {
-  const identity = connectorToolsIdentity(cfg, as);
+  const identity = await connectorToolsIdentity(cfg, as);
   if (connectorServiceSlugsCache?.identity === identity
     && Date.now() - connectorServiceSlugsCache.at < CONNECTOR_SERVICE_SLUGS_CACHE_MS) {
     return connectorServiceSlugsCache.slugs;
@@ -524,6 +529,7 @@ async function collectConnectorTools(cfg: AppConfig): Promise<Record<string, Con
     cursor = typeof result.nextCursor === "string" && result.nextCursor ? result.nextCursor : undefined;
     if (!cursor) break;
   }
+  if (cursor) throw new Error("Composio tools list exceeded the pagination safety limit");
   for (const bucket of grouped.values()) bucket.sort((a, b) => a.name.localeCompare(b.name));
   return Object.fromEntries([...grouped.entries()].sort(([a], [b]) => a.localeCompare(b)));
 }
@@ -562,24 +568,34 @@ async function connectionStatus(cfg: AppConfig, slugs: string[]): Promise<Record
     ), slugs);
   }
   const session = await ensureProjectSession(cfg);
-  const params = new URLSearchParams({ limit: "50" });
-  if (canonicalSlugs.length) params.set("toolkits", canonicalSlugs.join(","));
   const userId = session.config?.user_id ?? cfg.composio?.userId;
-  const [res, accounts] = await Promise.all([
-    fetch(`${apiBase()}/tool_router/session/${encodeURIComponent(session.session_id)}/toolkits?${params}`, {
+  const bySlug = new Map<string, ToolkitItem>();
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  for (let page = 0; page < MAX_CONNECTED_ACCOUNT_PAGES; page += 1) {
+    const params = new URLSearchParams({ limit: "50" });
+    if (canonicalSlugs.length) params.set("toolkits", canonicalSlugs.join(","));
+    if (cursor) params.set("cursor", cursor);
+    const res = await fetch(`${apiBase()}/tool_router/session/${encodeURIComponent(session.session_id)}/toolkits?${params}`, {
       headers: projectHeaders(apiKey),
       signal: AbortSignal.timeout(15_000),
-    }),
-    // Session toolkits list an account only once it is usable, so read the account lifecycle too (scoped keys may be denied it).
-    userId
-      ? listConnectedAccounts(apiKey, userId, canonicalSlugs).catch(() => [])
-      : Promise.resolve([]),
-  ]);
-  if (!res.ok) throw new Error(await responseError(res, `Composio toolkits: HTTP ${res.status}`));
-  const body = toolkitPageSchema.parse(await res.json());
-  const bySlug = new Map(
-    (body.items ?? []).flatMap((item) => item.slug ? [[canonicalToolkitSlug(item.slug), item] as const] : []),
-  );
+    });
+    if (!res.ok) throw new Error(await responseError(res, `Composio toolkits: HTTP ${res.status}`));
+    const body = toolkitPageSchema.parse(await res.json());
+    for (const item of body.items ?? []) {
+      if (!item.slug) continue;
+      bySlug.set(canonicalToolkitSlug(item.slug), item);
+    }
+    const next = body.next_cursor || undefined;
+    if (!next) break;
+    if (seenCursors.has(next)) throw new Error("Composio status inventory repeated a pagination cursor");
+    seenCursors.add(next);
+    cursor = next;
+  }
+  if (cursor) throw new Error("Composio status inventory exceeded the pagination safety limit");
+  const accounts = userId
+    ? await listConnectedAccounts(apiKey, userId, canonicalSlugs).catch(() => [])
+    : [];
   const accountsBySlug = summarizeAccounts(accounts, canonicalSlugs);
   return Object.fromEntries(
     slugs.map((slug) => {
@@ -704,7 +720,7 @@ async function authorizeService(cfg: AppConfig, slug: string, requestedAlias?: s
   const { session } = await sessionForToolkit(cfg, toolkit);
   const userId = session.config?.user_id ?? cfg.composio?.userId;
   if (!userId) throw new Error("Composio Session has no user ID");
-  const accounts = await listConnectedAccounts(apiKey, userId, [toolkit]).catch(() => []);
+  const accounts = await listConnectedAccounts(apiKey, userId, [toolkit]);
   const serviceAccounts = accounts.filter((account) =>
     account.toolkit?.slug !== undefined && canonicalToolkitSlug(account.toolkit.slug) === toolkit
   );

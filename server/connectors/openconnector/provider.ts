@@ -1,7 +1,8 @@
 // The OpenConnector backend: a local or self-hosted oomol-lab/open-connector runtime serving /v1
 // actions. OpenMausBot keeps only the runtime URL, a reference to the admin token, and this host's
 // connection aliases/labels (OpenConnectorStateStore); credentials stay on the runtime.
-import type { AppConfig } from "../../config.ts";
+import { DATA_DIR, type AppConfig } from "../../config.ts";
+import type { BrokerAccess } from "../../composio-broker-access.ts";
 import { canonicalToolkitSlug } from "../../composio-project.ts";
 import type {
   CatalogPagination,
@@ -12,15 +13,15 @@ import type {
   ConnectedServicesInventory,
   JsonValue,
 } from "../types.ts";
+import { join } from "node:path";
 import { normalizeAccountAlias } from "../common.ts";
-import { OpenConnectorClient, OpenConnectorError } from "./client.ts";
-import { OpenConnectorStateStore, accountIdForConnection } from "./state.ts";
+import { OpenConnectorClient, OpenConnectorError, normalizeOpenConnectorBaseUrl } from "./client.ts";
+import { OpenConnectorStateStore, OPENCONNECTOR_STATE_FILE, accountIdForConnection } from "./state.ts";
 import { pollConnectionRequest } from "./oauth.ts";
-import { actionForConnectorTool, connectorToolListingForAction } from "./tools.ts";
+import { actionIdForConnectorTool, connectorToolListingForAction } from "./tools.ts";
 import { OPENCONNECTOR_ADMIN_TOKEN_ENV, resolveTokenRef, type OpenConnectorSettings } from "../provider.ts";
 
 const MCP_OUTPUT_MAX_BYTES = 20 * 1024 * 1024;
-const PROVIDER_LIST_CACHE_MS = 60_000;
 
 export interface OpenConnectorProviderOptions {
   settings: OpenConnectorSettings;
@@ -39,8 +40,8 @@ export function resolveAdminToken(settings: OpenConnectorSettings, env: NodeJS.P
 
 export function createOpenConnectorProvider(options: OpenConnectorProviderOptions): ConnectorProvider {
   const env = options.env ?? process.env;
-  const state = options.state ?? new OpenConnectorStateStore();
-  let providerListCache: { at: number; services: string[] } | null = null;
+  const runtimeUrl = options.settings.url ? normalizeOpenConnectorBaseUrl(options.settings.url) : "";
+  const state = options.state ?? new OpenConnectorStateStore(join(DATA_DIR, OPENCONNECTOR_STATE_FILE), runtimeUrl);
   const pollsInFlight = new Map<string, Promise<void>>();
 
   const client = () => new OpenConnectorClient({
@@ -48,6 +49,10 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
     adminToken: resolveAdminToken(options.settings, env),
     fetch: options.fetch,
   });
+
+  const rejectMemberInstallation = (access: BrokerAccess | undefined, action: string): void => {
+    if (access) throw new Error(`OpenConnector does not yet support member-scoped credentials; use an administrator installation to ${action}`);
+  };
 
   const available = () => Boolean(options.settings.url?.trim()) && Boolean(resolveAdminToken(options.settings, env));
 
@@ -64,7 +69,7 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
       () => undefined,
       (error: unknown) => {
         const record = state.findConnectionByAccountId(accountId);
-        if (!record || record.status === "connected") return;
+        if (!record || record.status === "connected" || record.connectionRequestId !== requestId) return;
         state.upsertConnection({
           ...record,
           status: "error",
@@ -78,13 +83,23 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
     pollsInFlight.set(requestId, run);
   };
 
+  // Authorization can outlive the process. Restarted polls converge persisted requests; the request
+  // guard in pollConnectionRequest keeps a stale poll from overwriting a newer authorization.
+  for (const record of state.listConnections()) {
+    if (record.status === "pending" && record.connectionRequestId) {
+      convergeConnection(record.service, record.connectionRequestId, record.alias);
+    }
+  }
+
+
+
   const serviceStates = (services: readonly string[], authenticated: ReadonlySet<string>): Record<string, ConnectorServiceState> =>
     Object.fromEntries(services.map((service) => {
       const slug = canonicalToolkitSlug(service);
       const accounts = state.connectionsForService(slug)
         .map((record) => ({
           id: record.accountId,
-          status: record.status,
+          status: record.status === "connected" ? "ACTIVE" : record.status,
           ...(record.alias ? { alias: record.alias } : {}),
         }));
       const pending = state.connectionsForService(slug).some((record) => record.status === "pending");
@@ -97,18 +112,23 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
       }];
     }));
 
-  const knownServices = async (): Promise<string[]> => {
-    if (providerListCache && Date.now() - providerListCache.at < PROVIDER_LIST_CACHE_MS) {
-      return providerListCache.services;
-    }
-    const services = (await client().providers()).map((provider) => canonicalToolkitSlug(provider.service));
-    providerListCache = { at: Date.now(), services };
-    return services;
-  };
-
   const notFound = (error: unknown) => error instanceof OpenConnectorError && (error.status === 404 || error.code === "connection_not_found" || error.code === "unknown_action");
 
-  const inventory = async (): Promise<ConnectedServicesInventory> => {
+  const actionAliasFor = (actionId: string, params: Record<string, unknown>): string | undefined => {
+    const requested = selectedAccountAlias(params);
+    const service = canonicalToolkitSlug(actionId.slice(0, actionId.indexOf(".")));
+    const records = state.connectionsForService(service);
+    if (requested) {
+      const record = records.find((item) => item.alias?.toLowerCase() === requested.toLowerCase());
+      if (!record) throw new Error(`No selected OpenConnector account named "${requested}" for ${service}`);
+      return record.alias;
+    }
+    if (records.length > 1) throw new Error(`Multiple OpenConnector accounts are connected for ${service}; select one with _meta.openconnectorAccountAlias`);
+    return undefined;
+  };
+
+  const inventory = async (as?: BrokerAccess): Promise<ConnectedServicesInventory> => {
+    rejectMemberInstallation(as, "list connector services");
     const providers = await client().providers();
     const slugs = providers.map((provider) => canonicalToolkitSlug(provider.service));
     const authenticated = new Set((await client().authenticatedServices(slugs)).map(canonicalToolkitSlug));
@@ -120,10 +140,10 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
     mode: () => (available() ? "self-hosted" : "unavailable"),
     isConfigured: () => available(),
 
-    inventory,
+    inventory: (_cfg: AppConfig, as?: BrokerAccess) => inventory(as),
 
     async tools(): Promise<Record<string, ConnectorToolListing[]>> {
-      const actions = await client().actions();
+      const actions = await client().actionDetails(await client().actions());
       const grouped = new Map<string, ConnectorToolListing[]>();
       for (const action of actions) {
         const listing = connectorToolListingForAction(action);
@@ -131,6 +151,7 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
         const row: ConnectorToolListing = {
           name: listing.name,
           ...(listing.description ? { description: listing.description } : {}),
+          ...(listing.inputSchema ? { inputSchema: listing.inputSchema } : {}),
         };
         const bucket = grouped.get(listing.service) ?? [];
         if (!bucket.some((existing) => existing.name === row.name)) bucket.push(row);
@@ -140,11 +161,12 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
       return Object.fromEntries([...grouped.entries()].sort(([a], [b]) => a.localeCompare(b)));
     },
 
-    async serviceSlugs(): Promise<readonly string[]> {
-      return Object.keys((await inventory()).services);
+    async serviceSlugs(_cfg: AppConfig, as?: BrokerAccess): Promise<readonly string[]> {
+      return Object.keys((await inventory(as)).services);
     },
 
-    async status(_cfg: AppConfig, slugs: string[]): Promise<Record<string, ConnectorServiceState>> {
+    async status(_cfg: AppConfig, slugs: string[], as?: BrokerAccess): Promise<Record<string, ConnectorServiceState>> {
+      rejectMemberInstallation(as, "read connector status");
       const canonical = [...new Set(slugs.map(canonicalToolkitSlug))];
       const authenticated = new Set((await client().authenticatedServices(canonical)).map(canonicalToolkitSlug));
       const states = serviceStates(canonical, authenticated);
@@ -154,20 +176,22 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
       }));
     },
 
-    async removeService(_cfg: AppConfig, slug: string): Promise<{ removed: number }> {
+    async removeService(_cfg: AppConfig, slug: string, as?: BrokerAccess): Promise<{ removed: number }> {
+      rejectMemberInstallation(as, "remove a connector service");
       const service = canonicalToolkitSlug(slug);
-      try {
-        await client().disconnect(service);
-      } catch (error) {
-        if (notFound(error)) {
-          // The runtime has nothing to drop: local records are stale, clear them like removeAccount does.
-          state.removeConnectionsForService(service);
-          return { removed: 0 };
+      const knownAliases = [...new Set(state.connectionsForService(service).map((record) => record.alias))];
+      const aliases = knownAliases.includes(undefined) ? knownAliases : [undefined, ...knownAliases];
+      let removed = 0;
+      for (const alias of aliases) {
+        try {
+          await client().disconnect(service, alias);
+          removed += 1;
+        } catch (error) {
+          if (!notFound(error)) throw error;
         }
-        throw error;
       }
       state.removeConnectionsForService(service);
-      return { removed: 1 };
+      return { removed };
     },
 
     async removeAccount(_cfg: AppConfig, slug: string, accountId: string): Promise<{ removed: number }> {
@@ -192,7 +216,8 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
       return undefined;
     },
 
-    async authorize(_cfg: AppConfig, slug: string, requestedAlias?: string | null) {
+    async authorize(_cfg: AppConfig, slug: string, requestedAlias?: string | null, as?: BrokerAccess) {
+      rejectMemberInstallation(as, "authorize a connector service");
       const service = canonicalToolkitSlug(slug);
       const alias = normalizeAccountAlias(requestedAlias);
       const begun = await client().beginConnect(service, alias);
@@ -232,8 +257,10 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
       _transportSessionId?: string,
       beforeSend?: () => void,
       signal?: AbortSignal,
+      as?: BrokerAccess,
     ) {
-      return relayOpenConnectorMcp(client, knownServices, payload, beforeSend, signal);
+      rejectMemberInstallation(as, "call connector tools");
+      return relayOpenConnectorMcp(client, payload, beforeSend, signal, actionAliasFor);
     },
   };
 }
@@ -245,10 +272,10 @@ type ClientFactory = () => OpenConnectorClient;
  * POST /v1/actions/:id. */
 async function relayOpenConnectorMcp(
   client: ClientFactory,
-  knownServices: () => Promise<string[]>,
   payload: JsonValue,
   beforeSend?: () => void,
   signal?: AbortSignal,
+  accountAliasFor?: (actionId: string, params: Record<string, unknown>) => string | undefined,
 ): Promise<{ status: number; bytes: Uint8Array; contentType: string }> {
   const frame = typeof payload === "object" && payload !== null && !Array.isArray(payload) ? payload : null;
   const method = typeof frame?.method === "string" ? frame.method : undefined;
@@ -280,18 +307,23 @@ async function relayOpenConnectorMcp(
     const tools = actions
       .map((action) => connectorToolListingForAction(action))
       .filter((listing): listing is NonNullable<typeof listing> => listing !== null)
-      .map((listing) => ({ name: listing.name, ...(listing.description ? { description: listing.description } : {}) }));
+      .map((listing) => ({
+        name: listing.name,
+        ...(listing.description ? { description: listing.description } : {}),
+        ...(listing.inputSchema ? { inputSchema: listing.inputSchema } : {}),
+      }));
     return encode({ jsonrpc: "2.0", id, result: { tools } });
   }
   if (method === "tools/call") {
     const params = frame?.params && typeof frame.params === "object" ? frame.params as Record<string, unknown> : {};
     const name = typeof params.name === "string" ? params.name : "";
-    const candidates = await knownServices();
-    const actionId = actionForConnectorTool(name, candidates);
+    const actions = await client().actionDetails(await client().actions());
+    const actionId = actionIdForConnectorTool(name, actions.map((action) => action.id));
     if (!actionId) return encode(jsonRpcError(id, -32602, `Unknown connector tool: ${name}`), 200);
     beforeSend?.();
     try {
-      const data = await client().execute(actionId, params.arguments ?? {}, undefined, signal);
+      const alias = accountAliasFor?.(actionId, params);
+      const data = await client().execute(actionId, params.arguments ?? {}, alias, signal);
       return encode({
         jsonrpc: "2.0",
         id,
@@ -299,9 +331,20 @@ async function relayOpenConnectorMcp(
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "OpenConnector action failed";
-      const status = error instanceof OpenConnectorError ? error.status ?? 502 : 502;
-      return encode(jsonRpcError(id, -32000, message), status >= 400 && status < 600 ? status : 502);
+      return encode({
+        jsonrpc: "2.0",
+        id,
+        result: { content: [{ type: "text", text: message }], isError: true },
+      });
     }
   }
   return encode(jsonRpcError(id ?? null, -32601, `Method not found: ${method ?? "none"}`), 200);
+}
+
+function selectedAccountAlias(params: Record<string, unknown>): string | undefined {
+  const meta = params._meta;
+  const alias = meta && typeof meta === "object" && !Array.isArray(meta)
+    ? (meta as Record<string, unknown>).openconnectorAccountAlias
+    : undefined;
+  return typeof alias === "string" && alias.trim() ? alias.trim() : undefined;
 }

@@ -2,7 +2,8 @@
 // default, so an unconfigured host keeps its exact previous behavior. Config habits follow the rest of
 // the repo: env vars win, config.json's "connectors" key is the persistent store, and secrets are only
 // referenced (env:NAME or file:PATH), never kept inline.
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { DATA_DIR } from "../config.ts";
@@ -21,14 +22,11 @@ export type ConnectorProviderId = "composio" | "openconnector";
 
 const providerIdSchema = z.enum(["composio", "openconnector"]);
 
-const storedConnectorsSchema = z.object({
-  provider: providerIdSchema.optional(),
-  openconnector: z.object({
-    url: z.string().trim().max(2048).optional(),
-    /** Where the admin token lives: "env:VAR_NAME" or "file:/abs/path". The token itself is never stored here. */
-    adminTokenRef: z.string().trim().max(400).optional(),
-  }).optional(),
-}).optional();
+const storedOpenConnectorSchema = z.object({
+  url: z.string().trim().max(2048).optional(),
+  /** Where the admin token lives: "env:VAR_NAME" or "file:/abs/path". The token itself is never stored here. */
+  adminTokenRef: z.string().trim().max(400).optional(),
+});
 
 export interface OpenConnectorSettings {
   url?: string;
@@ -47,10 +45,14 @@ interface StoredConnectors {
 
 function readStoredConnectors(): StoredConnectors | null {
   try {
-    const document = z.object({ connectors: storedConnectorsSchema }).safeParse(
-      parseJson(readFileSync(join(DATA_DIR, "config.json"), "utf8")),
-    );
-    return document.success ? (document.data.connectors ?? null) : null;
+    const parsed = parseJson(readFileSync(join(DATA_DIR, "config.json"), "utf8"));
+    const provider = z.object({ connectors: z.object({ provider: providerIdSchema.optional() }).passthrough() }).safeParse(parsed);
+    const openconnector = z.object({ connectors: z.object({ openconnector: storedOpenConnectorSchema.optional() }).passthrough() }).safeParse(parsed);
+    if (!provider.success && !openconnector.success) return null;
+    return {
+      ...(provider.success ? provider.data.connectors : {}),
+      ...(openconnector.success && openconnector.data.connectors.openconnector ? { openconnector: openconnector.data.connectors.openconnector } : {}),
+    };
   } catch {
     return null;
   }
@@ -65,13 +67,17 @@ export function loadConnectorSettings(
   const provider = providerIdSchema.safeParse(env[CONNECTOR_PROVIDER_ENV] ?? stored?.provider).success
     ? (env[CONNECTOR_PROVIDER_ENV] ?? stored?.provider) as ConnectorProviderId
     : "composio";
-  return {
-    provider,
-    openconnector: {
-      url: env[OPENCONNECTOR_URL_ENV] ?? stored?.openconnector?.url,
-      adminTokenRef: env[OPENCONNECTOR_ADMIN_TOKEN_REF_ENV] ?? stored?.openconnector?.adminTokenRef,
-    },
+  const openconnector = {
+    url: env[OPENCONNECTOR_URL_ENV] ?? stored?.openconnector?.url,
+    adminTokenRef: env[OPENCONNECTOR_ADMIN_TOKEN_REF_ENV] ?? stored?.openconnector?.adminTokenRef,
   };
+  if (provider === "openconnector") {
+    if (!openconnector.url?.trim()) throw new Error('OpenConnector is selected but has no URL; set OMB_OPENCONNECTOR_URL');
+    if (!openconnector.adminTokenRef && !env[OPENCONNECTOR_ADMIN_TOKEN_ENV]?.trim()) {
+      throw new Error('OpenConnector is selected but has no admin token; set OMB_OPENCONNECTOR_ADMIN_TOKEN or OMB_OPENCONNECTOR_ADMIN_TOKEN_REF');
+    }
+  }
+  return { provider, openconnector };
 }
 
 /** Resolves an admin-token reference without ever persisting the value: "env:NAME" reads a variable,
@@ -81,11 +87,12 @@ export function resolveTokenRef(ref: string | undefined, env: NodeJS.ProcessEnv 
   if (!value) return undefined;
   if (value.startsWith("env:")) return env[value.slice(4)]?.trim() || undefined;
   if (value.startsWith("file:")) {
-    try {
-      return readFileSync(value.slice(5), "utf8").trim() || undefined;
-    } catch {
-      return undefined;
+    const path = value.slice(5);
+    const mode = statSync(path).mode;
+    if (process.platform !== "win32" && mode & 0o077) {
+      throw new Error(`OpenConnector token file ${path} is readable by group or other; chmod 600 it and rotate the token if it may have been exposed`);
     }
+    return readFileSync(path, "utf8").trim() || undefined;
   }
   return env[value]?.trim() || undefined;
 }
@@ -100,17 +107,22 @@ export function connectorProvider(env: NodeJS.ProcessEnv = process.env): Connect
     settings.openconnector.url,
     settings.openconnector.adminTokenRef,
     resolveTokenRef(settings.openconnector.adminTokenRef, env) !== undefined,
+    createHash("sha256").update(resolveToken(settings.openconnector, env) ?? "").digest("hex"),
     settledFileStamp(join(DATA_DIR, "config.json")),
   ]);
   if (selected?.key === key) return selected.provider;
-  const provider = selectProvider(settings);
+  const provider = selectProvider(settings, env);
   selected = { key, provider };
   return provider;
 }
 
-function selectProvider(settings: ConnectorSettings): ConnectorProvider {
+function resolveToken(settings: OpenConnectorSettings, env: NodeJS.ProcessEnv): string | undefined {
+  return resolveTokenRef(settings.adminTokenRef, env) ?? (env[OPENCONNECTOR_ADMIN_TOKEN_ENV]?.trim() || undefined);
+}
+
+function selectProvider(settings: ConnectorSettings, env: NodeJS.ProcessEnv): ConnectorProvider {
   if (settings.provider === "openconnector") {
-    return createOpenConnectorProvider({ settings: settings.openconnector });
+    return createOpenConnectorProvider({ settings: settings.openconnector, env });
   }
   return composioProvider;
 }

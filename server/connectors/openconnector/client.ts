@@ -97,6 +97,7 @@ export class OpenConnectorClient {
     if (init.body) headers.set("content-type", "application/json");
     const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
       ...init,
+      redirect: "error",
       headers,
       signal: init.signal ?? AbortSignal.timeout(this.timeoutMs),
     });
@@ -147,7 +148,26 @@ export class OpenConnectorClient {
     return out;
   }
 
-  /** GET /v1/actions — every action, optionally for one service. */
+  /** GET /v1/actions/:actionId — one action, including its input schema. */
+  async action(actionId: string): Promise<OpenConnectorActionItem> {
+    const { data } = await this.request(`/v1/actions/${encodeURIComponent(actionId)}`);
+    const parsed = actionItemSchema.safeParse(data);
+    if (!parsed.success || !parsed.data.id) throw new OpenConnectorError("OpenConnector returned an action without an id");
+    return { id: parsed.data.id, description: parsed.data.description, raw: data as Record<string, unknown> };
+  }
+
+  /** Detail reads are capped so a large catalog cannot fan out an unbounded request burst. */
+  async actionDetails(actions: ReadonlyArray<OpenConnectorActionItem>, concurrency = 8): Promise<OpenConnectorActionItem[]> {
+    const detailed = [...actions];
+    for (let offset = 0; offset < detailed.length; offset += concurrency) {
+      const batch = detailed.slice(offset, offset + concurrency);
+      const schemas = await Promise.all(batch.map((action) => this.action(action.id)));
+      detailed.splice(offset, batch.length, ...schemas);
+    }
+    return detailed;
+  }
+
+  /** GET /v1/actions — every action summary, optionally for one service. */
   async actions(service?: string): Promise<OpenConnectorActionItem[]> {
     const { data } = await this.request(service ? `/v1/actions?service=${encodeURIComponent(service)}` : "/v1/actions");
     const items = Array.isArray(data) ? data : data && typeof data === "object" ? (data as { items?: unknown }).items : undefined;

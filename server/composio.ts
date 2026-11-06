@@ -212,6 +212,9 @@ export async function prepareConnectionAuthConfigs(
   cfg: AppConfig,
   items: ReadonlyArray<{ slug: string; authConfigId?: string }>,
 ): Promise<string | undefined> {
+  if (provider().id !== "composio" && items.some((item) => item.authConfigId)) {
+    throw new Error("authConfigId is only supported by the Composio connector backend");
+  }
   return provider().prepareAuthConfigs(cfg, items);
 }
 

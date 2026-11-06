@@ -124,7 +124,7 @@ describe("connectorToolListingForAction", () => {
     const listing = connectorToolListingForAction({ id: "github.get_current_user", description: `  who\n am\t${"x".repeat(TOOL_DESCRIPTION_MAX + 50)} ` });
     expect(listing!.description!.length).toBeLessThanOrEqual(TOOL_DESCRIPTION_MAX);
     expect(listing!.description).not.toContain("\n");
-    expect(connectorToolListingForAction({ id: "github.get_current_user", description: "   " })).toEqual({ service: "github", name: "GITHUB_GET_CURRENT_USER" });
+    expect(connectorToolListingForAction({ id: "github.get_current_user", description: "   " })).toEqual({ service: "github", name: "GITHUB_GET_CURRENT_USER", inputSchema: { type: "object", properties: {}, additionalProperties: false, required: [] } });
     expect(connectorToolListingForAction({ id: "bad id", description: "x" })).toBeNull();
   });
 });

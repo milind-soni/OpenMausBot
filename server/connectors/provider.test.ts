@@ -1,5 +1,10 @@
 // Provider selection. Default is Composio with zero config; env and config.json's "connectors"
 // key can name another provider; secrets are referenced, never stored inline.
+import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import {
   CONNECTOR_PROVIDER_ENV,
@@ -40,6 +45,26 @@ describe("loadConnectorSettings", () => {
     expect(settings.openconnector.url).toBe("https://env-wins.example.test");
   });
 
+  it("keeps an explicit provider when stored OpenConnector settings are malformed", () => {
+    const settings = loadConnectorSettings(
+      env({
+        [OPENCONNECTOR_URL_ENV]: "https://env-wins.example.test",
+        [OPENCONNECTOR_ADMIN_TOKEN_ENV]: "0".repeat(64),
+      }),
+      { provider: "openconnector", openconnector: { url: 123 } as never },
+    );
+    expect(settings.provider).toBe("openconnector");
+    expect(settings.openconnector.url).toBe("https://env-wins.example.test");
+  });
+
+  it("does not silently select Composio when OpenConnector is explicit but incomplete", () => {
+    expect(() => loadConnectorSettings(env(), { provider: "openconnector" })).toThrow(/no URL/);
+    expect(() => loadConnectorSettings(
+      env({ [OPENCONNECTOR_URL_ENV]: "https://connector.example.test" }),
+      { provider: "openconnector" },
+    )).toThrow(/admin token/);
+  });
+
   it("falls back to composio on an unknown provider name", () => {
     expect(loadConnectorSettings(env({ [CONNECTOR_PROVIDER_ENV]: "nonsense" }), null).provider).toBe("composio");
     expect(loadConnectorSettings(env(), { provider: "nonsense" as never }).provider).toBe("composio");
@@ -64,7 +89,20 @@ describe("connectorProvider", () => {
       [OPENCONNECTOR_ADMIN_TOKEN_ENV]: "0".repeat(64),
     }));
     expect(selected.id).toBe("openconnector");
+    expect(selected.isConfigured({} as never)).toBe(true);
     expect(selected).not.toBe(composioProvider);
+  });
+
+  it("does not reuse a provider bound to a different direct admin token", () => {
+    const settings = (token: string) => env({
+      [CONNECTOR_PROVIDER_ENV]: "openconnector",
+      [OPENCONNECTOR_URL_ENV]: "https://connector.example.test",
+      [OPENCONNECTOR_ADMIN_TOKEN_ENV]: token,
+    });
+    const one = connectorProvider(settings("1".repeat(64)));
+    expect(connectorProvider(settings("1".repeat(64)))).toBe(one);
+    const two = connectorProvider(settings("2".repeat(64)));
+    expect(two).not.toBe(one);
   });
 });
 
@@ -75,8 +113,28 @@ describe("resolveTokenRef", () => {
   });
 
   it("reads file: references from disk", () => {
-    const dir = new URL(".", import.meta.url).pathname;
-    expect(resolveTokenRef(`file:${dir}provider.ts`)).toContain("loadConnectorSettings");
+    const dir = mkdtempSync(join(tmpdir(), "omb-token-ref-"));
+    const path = join(dir, "provider.ts");
+    writeFileSync(path, readFileSync(join(dirname(fileURLToPath(import.meta.url)), "provider.ts")));
+    chmodSync(path, 0o600);
+    try {
+      expect(resolveTokenRef(`file:${path}`)).toContain("loadConnectorSettings");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a POSIX token file readable by group or other", () => {
+    if (process.platform === "win32") return;
+    const dir = mkdtempSync(join(tmpdir(), "omb-token-ref-"));
+    const path = join(dir, "admin-token");
+    writeFileSync(path, "token\n", { mode: 0o644 });
+    try {
+      expect(() => resolveTokenRef(`file:${path}`)).toThrow(/rotate the token/);
+    } finally {
+      chmodSync(path, 0o600);
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("treats a bare name as an env variable and blank as absent", () => {

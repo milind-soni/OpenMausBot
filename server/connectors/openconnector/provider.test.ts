@@ -14,7 +14,11 @@ let origin = "";
 let dir = "";
 const calls: Array<{ method: string; path: string; body: unknown }> = [];
 let providersBody: unknown = [{ id: "github", name: "GitHub" }, { id: "gmail", name: "Gmail" }];
-let actionsBody: unknown = [{ id: "github.get_current_user", description: "Who am I" }, { id: "github.create_issue", description: "Open an issue" }, { id: "gmail.list_emails" }];
+let actionsBody: unknown = [
+  { id: "github.get_current_user", description: "Who am I", inputSchema: { type: "object", properties: { verbose: { type: "boolean" } } } },
+  { id: "github.create_issue", description: "Open an issue", inputSchema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } },
+  { id: "gmail.list_emails" },
+];
 let authenticatedBody: unknown = ["github"];
 let failConnect = false;
 let connectionRequestBody: unknown = { status: "connected" };
@@ -38,6 +42,11 @@ beforeAll(async () => {
     if (url.pathname === "/v1/apps/authenticated") {
       const requested = url.searchParams.getAll("service");
       return ok(Array.isArray(authenticatedBody) ? authenticatedBody.filter((s) => requested.includes(String(s))) : []);
+    }
+    if (url.pathname.startsWith("/v1/actions/") && req.method === "GET") {
+      const id = decodeURIComponent(url.pathname.slice("/v1/actions/".length));
+      const action = (Array.isArray(actionsBody) ? actionsBody : []).find((item) => (item as { id?: string }).id === id);
+      return ok(action ?? { id });
     }
     if (url.pathname.startsWith("/v1/actions/") && req.method === "POST") return ok({ ran: url.pathname.slice("/v1/actions/".length), input: (calls.at(-1)!.body as { input?: unknown }).input });
     if (url.pathname.startsWith("/v1/connections/") && req.method === "POST") {
@@ -78,7 +87,11 @@ afterAll(async () => {
 beforeEach(() => {
   calls.length = 0;
   providersBody = [{ id: "github", name: "GitHub" }, { id: "gmail", name: "Gmail" }];
-  actionsBody = [{ id: "github.get_current_user", description: "Who am I" }, { id: "github.create_issue", description: "Open an issue" }, { id: "gmail.list_emails" }];
+  actionsBody = [
+    { id: "github.get_current_user", description: "Who am I", inputSchema: { type: "object", properties: { verbose: { type: "boolean" } } } },
+    { id: "github.create_issue", description: "Open an issue", inputSchema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } },
+    { id: "gmail.list_emails" },
+  ];
   authenticatedBody = ["github"];
   failConnect = false;
   connectionRequestBody = { status: "connected" };
@@ -132,17 +145,23 @@ describe("inventory / status", () => {
     expect(status.github.accounts).toEqual([{ id: "oc:github:work", status: "ACTIVE", alias: "work" }]);
     expect(status.github.connected).toBe(true);
     expect(status.gmail).toEqual({ connected: false, pending: true, status: "pending", accounts: [{ id: "oc:gmail:default", status: "pending" }] });
+    const connected = newState();
+    connected.upsertConnection({ accountId: "oc:slack:default", service: "slack", status: "connected", updatedAt: "t" });
+    expect((await provider(connected).status(cfg, ["slack"])).slack.accounts).toEqual([
+      { id: "oc:slack:default", status: "ACTIVE" },
+    ]);
   });
 });
 
 describe("tools / catalog", () => {
   it("groups actions under toolkit slugs with pattern-compliant names", async () => {
     const tools = await provider().tools(cfg);
+    const emptySchema = { type: "object", properties: {}, additionalProperties: false, required: [] };
     expect(tools.github).toEqual([
-      { name: "GITHUB_CREATE_ISSUE", description: "Open an issue" },
-      { name: "GITHUB_GET_CURRENT_USER", description: "Who am I" },
+      { name: "GITHUB_CREATE_ISSUE", description: "Open an issue", inputSchema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } },
+      { name: "GITHUB_GET_CURRENT_USER", description: "Who am I", inputSchema: { type: "object", properties: { verbose: { type: "boolean" } } } },
     ]);
-    expect(tools.gmail).toEqual([{ name: "GMAIL_LIST_EMAILS" }]);
+    expect(tools.gmail).toEqual([{ name: "GMAIL_LIST_EMAILS", inputSchema: emptySchema }]);
   });
 
   it("serves the provider list as the app catalog", async () => {
@@ -163,6 +182,32 @@ describe("disconnect", () => {
     await expect(provider(state).removeService(cfg, "github")).resolves.toEqual({ removed: 1 });
     expect(state.listConnections()).toEqual([]);
     expect(lastCall()).toMatchObject({ method: "DELETE", path: "/api/connections/github" });
+  });
+
+  it("removeService disconnects every named connection before clearing local records", async () => {
+    const state = newState();
+    state.upsertConnection({ accountId: "oc:github:default", service: "github", status: "ACTIVE", updatedAt: "t" });
+    state.upsertConnection({ accountId: "oc:github:work", service: "github", alias: "work", status: "ACTIVE", updatedAt: "t" });
+    await expect(provider(state).removeService(cfg, "github")).resolves.toEqual({ removed: 2 });
+    expect(state.listConnections()).toEqual([]);
+    expect(calls.filter((call) => call.method === "DELETE").map((call) => call.path)).toEqual([
+      "/api/connections/github",
+      "/api/connections/github?alias=work",
+    ]);
+  });
+
+  it("rejects member-scoped requests instead of using host admin credentials", async () => {
+    const state = newState();
+    const access = { url: "https://broker.example.test", token: "member-token" } as never;
+    const current = provider(state);
+    await expect(current.inventory(cfg, access)).rejects.toThrow(/member-scoped/);
+    await expect(current.serviceSlugs(cfg, access)).rejects.toThrow(/member-scoped/);
+    await expect(current.status(cfg, ["github"], access)).rejects.toThrow(/member-scoped/);
+    await expect(current.removeService(cfg, "github", access)).rejects.toThrow(/member-scoped/);
+    await expect(current.authorize(cfg, "github", undefined, access)).rejects.toThrow(/member-scoped/);
+    await expect(current.relayMcp(cfg, { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }, undefined, undefined, undefined, access)).rejects.toThrow(/member-scoped/);
+    expect(state.listConnections()).toEqual([]);
+    expect(calls).toEqual([]);
   });
 
   it("removeService answers removed:0 when the runtime has no connection and clears stale records", async () => {
@@ -270,6 +315,25 @@ describe("background authorization convergence", () => {
       expect(state.findConnectionByAccountId("oc:github:work")).toMatchObject({ status: "connected" });
     }, { timeout: 5_000, interval: 20 });
   });
+
+  it("resumes polling a persisted pending request after provider restart", async () => {
+    gateConnectionRequests = true;
+    const state = newState();
+    state.upsertConnection({
+      accountId: "oc:github:restart", service: "github", alias: "restart",
+      connectionRequestId: "cr_restart", status: "pending", updatedAt: "t",
+    });
+    provider(state, { intervalMs: 10 });
+    await vi.waitFor(() => {
+      expect(requestPollCalls().some((call) => call.path.includes("cr_restart"))).toBe(true);
+    }, { timeout: 5_000, interval: 20 });
+    connectionRequestBody = { status: "connected" };
+    gateConnectionRequests = false;
+    releaseGate?.();
+    await vi.waitFor(() => {
+      expect(state.findConnectionByAccountId("oc:github:restart")).toMatchObject({ status: "connected" });
+    }, { timeout: 5_000, interval: 20 });
+  });
 });
 
 describe("relayMcp translation", () => {
@@ -285,9 +349,9 @@ describe("relayMcp translation", () => {
     const relayed = await provider().relayMcp(cfg, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
     const frame = JSON.parse(new TextDecoder().decode(relayed.bytes));
     expect(frame.result.tools).toEqual([
-      { name: "GITHUB_GET_CURRENT_USER", description: "Who am I" },
-      { name: "GITHUB_CREATE_ISSUE", description: "Open an issue" },
-      { name: "GMAIL_LIST_EMAILS" },
+      { name: "GITHUB_GET_CURRENT_USER", description: "Who am I", inputSchema: { type: "object", properties: { verbose: { type: "boolean" } } } },
+      { name: "GITHUB_CREATE_ISSUE", description: "Open an issue", inputSchema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } },
+      { name: "GMAIL_LIST_EMAILS", inputSchema: { type: "object", properties: {}, additionalProperties: false, required: [] } },
     ]);
     expect(calls.some((call) => call.path === "/v1/actions")).toBe(true);
   });
@@ -310,7 +374,44 @@ describe("relayMcp translation", () => {
     expect(calls.some((call) => call.method === "POST" && call.path.startsWith("/v1/actions/"))).toBe(false);
   });
 
-  it("returns an MCP error frame with the upstream status when the action fails", async () => {
+  it("carries an explicitly selected account into the action call and rejects ambiguity", async () => {
+    const state = newState();
+    state.upsertConnection({ accountId: "oc:github:default", service: "github", status: "ACTIVE", updatedAt: "t" });
+    state.upsertConnection({ accountId: "oc:github:work", service: "github", alias: "work", status: "ACTIVE", updatedAt: "t" });
+    const selected = await provider(state).relayMcp(cfg, {
+      jsonrpc: "2.0", id: 7, method: "tools/call",
+      params: { name: "GITHUB_GET_CURRENT_USER", arguments: {}, _meta: { openconnectorAccountAlias: "work" } },
+    });
+    const selectedFrame = JSON.parse(new TextDecoder().decode(selected.bytes));
+    expect(selectedFrame.result.isError).toBe(false);
+    expect(lastCall()).toMatchObject({ path: "/v1/actions/github.get_current_user?alias=work" });
+    const ambiguous = await provider(state).relayMcp(cfg, {
+      jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "GITHUB_GET_CURRENT_USER", arguments: {} },
+    });
+    const ambiguousFrame = JSON.parse(new TextDecoder().decode(ambiguous.bytes));
+    expect(ambiguous.status).toBe(200);
+    expect(ambiguousFrame.result.isError).toBe(true);
+    expect(ambiguousFrame.result.content[0].text).toContain("_meta.openconnectorAccountAlias");
+    const missing = await provider(state).relayMcp(cfg, {
+      jsonrpc: "2.0", id: 9, method: "tools/call",
+      params: { name: "GITHUB_GET_CURRENT_USER", arguments: {}, _meta: { openconnectorAccountAlias: "missing" } },
+    });
+    const missingFrame = JSON.parse(new TextDecoder().decode(missing.bytes));
+    expect(missingFrame.result.isError).toBe(true);
+    expect(missingFrame.result.content[0].text).toContain("missing");
+  });
+
+  it("maps an action-like suffix by exact catalog identity", async () => {
+    actionsBody = [{ id: "google.calendar_list", inputSchema: { type: "object" } }];
+    const relayed = await provider().relayMcp(cfg, {
+      jsonrpc: "2.0", id: 10, method: "tools/call", params: { name: "GOOGLE_CALENDAR_LIST", arguments: {} },
+    });
+    const frame = JSON.parse(new TextDecoder().decode(relayed.bytes));
+    expect(frame.result.isError).toBe(false);
+    expect(lastCall()).toMatchObject({ path: "/v1/actions/google.calendar_list" });
+  });
+
+  it("returns an action failure as an MCP tool result", async () => {
     actionsBody = [{ id: "github.get_current_user" }];
     const failing = createOpenConnectorProvider({
       settings: { url: origin, adminTokenRef: "env:STUB_ADMIN" },
@@ -318,17 +419,18 @@ describe("relayMcp translation", () => {
       state: newState(),
       fetch: (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
         const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-        if (url.includes("/v1/actions/")) return new Response(JSON.stringify({ success: false, message: "credential_expired", errorCode: "credential_expired" }), { status: 400 });
+        if (url.includes("/v1/actions/") && init?.method === "POST") return new Response(JSON.stringify({ success: false, message: "credential_expired", errorCode: "credential_expired" }), { status: 400 });
         return fetch(input, init);
       }) as typeof fetch,
     });
     const relayed = await failing.relayMcp(cfg, {
-      jsonrpc: "2.0", id: 5, method: "tools/call",
+      jsonrpc: "2.0", id: 11, method: "tools/call",
       params: { name: "GITHUB_GET_CURRENT_USER", arguments: {} },
     });
-    expect(relayed.status).toBe(400);
+    expect(relayed.status).toBe(200);
     const frame = JSON.parse(new TextDecoder().decode(relayed.bytes));
-    expect(frame.error.message).toBe("credential_expired");
+    expect(frame.result.isError).toBe(true);
+    expect(frame.result.content[0].text).toBe("credential_expired");
   });
 
   it("rejects unknown methods as JSON-RPC method-not-found", async () => {

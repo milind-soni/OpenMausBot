@@ -49,7 +49,7 @@ export async function appOAuthStatus(
   const local = state.findAppOAuth(service);
   const runtimeHas = runtimeHasConfig(data, service);
   return {
-    configured: runtimeHas || local !== null,
+    configured: runtimeHas,
     expectedRedirectUri,
     clientId: local?.clientId,
     scopes: local?.scopes,
@@ -120,6 +120,9 @@ export async function pollConnectionRequest(
       if (TERMINAL_OK.has(status) || TERMINAL_BAD.has(status)) {
         const accountId = accountIdForConnection(service, alias);
         const existing = state.findConnectionByAccountId(accountId);
+        if (existing?.connectionRequestId !== requestId) {
+          throw new Error(`The ${service} authorization was superseded`);
+        }
         const record: OpenConnectorConnectionRecord = {
           accountId,
           service,

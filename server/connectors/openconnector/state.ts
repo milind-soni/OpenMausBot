@@ -53,17 +53,20 @@ const appOAuthRecordSchema = z.object({
 export type OpenConnectorAppOAuthRecord = z.infer<typeof appOAuthRecordSchema>;
 
 const stateFileSchema = z.object({
+  runtimeUrl: z.string().optional(),
   connections: z.array(connectionRecordSchema).optional(),
   appOAuth: z.array(appOAuthRecordSchema).optional(),
 });
 
 export class OpenConnectorStateStore {
   readonly file: string;
+  private readonly runtimeUrl?: string;
   private connections: OpenConnectorConnectionRecord[];
   private appOAuth: OpenConnectorAppOAuthRecord[];
 
-  constructor(file = join(DATA_DIR, OPENCONNECTOR_STATE_FILE)) {
+  constructor(file = join(DATA_DIR, OPENCONNECTOR_STATE_FILE), runtimeUrl?: string) {
     this.file = file;
+    this.runtimeUrl = runtimeUrl?.trim() || undefined;
     const loaded = this.read();
     this.connections = loaded.connections;
     this.appOAuth = loaded.appOAuth;
@@ -73,6 +76,9 @@ export class OpenConnectorStateStore {
     try {
       const parsed = stateFileSchema.safeParse(parseJson(readFileSync(this.file, "utf8")));
       if (parsed.success) {
+        if (this.runtimeUrl && parsed.data.runtimeUrl && parsed.data.runtimeUrl !== this.runtimeUrl) {
+          return { connections: [], appOAuth: [] };
+        }
         return { connections: parsed.data.connections ?? [], appOAuth: parsed.data.appOAuth ?? [] };
       }
     } catch {
@@ -82,7 +88,11 @@ export class OpenConnectorStateStore {
 
   private persist(): void {
     mkdirSync(dirname(this.file), { recursive: true });
-    writeFileAtomic(this.file, JSON.stringify({ connections: this.connections, appOAuth: this.appOAuth }), { mode: 0o600 });
+    writeFileAtomic(this.file, JSON.stringify({
+      ...(this.runtimeUrl ? { runtimeUrl: this.runtimeUrl } : {}),
+      connections: this.connections,
+      appOAuth: this.appOAuth,
+    }), { mode: 0o600 });
   }
 
   listConnections(): OpenConnectorConnectionRecord[] {

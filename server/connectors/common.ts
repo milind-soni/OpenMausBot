@@ -43,7 +43,8 @@ export function requestedServiceRecord<T>(services: Record<string, T>, requested
   const canonical = canonicalServiceRecord(services);
   return Object.fromEntries(
     requested.flatMap((slug) => {
-      const state = canonical[canonicalToolkitSlug(slug)];
+      const key = canonicalToolkitSlug(slug);
+      const state = Object.hasOwn(canonical, key) ? canonical[key] : undefined;
       return state === undefined ? [] : [[slug, state]];
     }),
   );

@@ -30,6 +30,7 @@ export interface ConnectedServicesInventory {
 export interface ConnectorToolListing {
   name: string;
   description?: string;
+  inputSchema?: Record<string, unknown>;
 }
 
 /** The local MCP-proxy spawn a bot's engine runs to reach connector tools; the same bridge serves every provider. */
@@ -97,7 +98,7 @@ export interface ConnectorProvider {
   inventory(cfg: AppConfig, as?: BrokerAccess): Promise<ConnectedServicesInventory>;
   tools(cfg: AppConfig, force?: boolean): Promise<Record<string, ConnectorToolListing[]>>;
   serviceSlugs(cfg: AppConfig, as?: BrokerAccess): Promise<readonly string[]>;
-  status(cfg: AppConfig, slugs: string[]): Promise<Record<string, ConnectorServiceState>>;
+  status(cfg: AppConfig, slugs: string[], as?: BrokerAccess): Promise<Record<string, ConnectorServiceState>>;
   removeService(cfg: AppConfig, slug: string, as?: BrokerAccess): Promise<{ removed: number }>;
   removeAccount(cfg: AppConfig, slug: string, accountId: string): Promise<{ removed: number }>;
   prepareAuthConfigs(cfg: AppConfig, items: ReadonlyArray<ConnectorAuthItem>): Promise<string | undefined>;
