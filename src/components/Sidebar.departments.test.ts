@@ -164,9 +164,18 @@ describe("Simple's sidebar before anyone drags", () => {
     const icons = rows();
     expect(icons.length).toBeGreaterThan(0);
     for (const props of icons) {
+      expect(props.density).toBe("icons");
       expect(props.botDragging).toBe(false);
       expect(props.botDrag!.row(props.bot.id).draggable).toBe(true);
     }
+  });
+
+  it("leaves the rail alone on a phone, where the row menu moves bots", () => {
+    fixture.storage.set(SIDEBAR_DENSITY_KEY, "avatars");
+    fixture.phone = true;
+    const icons = rows();
+    expect(icons.length).toBeGreaterThan(0);
+    for (const props of icons) expect(props.botDrag).toBeUndefined();
   });
 
   it("reorders inside the rail's own list, and nothing else: no department is created or left unseen", () => {
