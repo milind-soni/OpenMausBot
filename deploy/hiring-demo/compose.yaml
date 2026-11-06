@@ -1,0 +1,96 @@
+# Hiring demo: an OpenMausBot server with the Recruiting Desk pre-built (a Desk Manager and nine specialist bots),
+# Desk ATS beside it (the fake staffing CRM the bots work in), and Caddy for HTTPS on your own domain. README.md has
+# the whole walkthrough.
+#
+#   cp .env.example .env                                         # set DOMAIN
+#   docker compose up -d --build
+#   docker compose exec omb claude                               # sign Claude Code in, once (kept on the data volume)
+#   docker compose exec ats node template/setup-desk.mjs         # build the desk, once (re-run after upgrades)
+#   docker compose exec omb node dist-server/openmausbot.js pair # a pairing link for your own browser
+name: hiring-demo
+services:
+  omb:
+    # The published server image plus the engine CLIs (deploy/local/Dockerfile).
+    build:
+      context: ../local
+      args:
+        BASE_IMAGE: ${OMB_BASE_IMAGE:-ghcr.io/milind-soni/openmausbot:latest}
+        ENGINES: ${ENGINES:-@anthropic-ai/claude-code}
+        GROK_VERSION: ""
+    image: hiring-demo-omb:latest
+    # The published server image is built for amd64 only; Apple Silicon runs it under emulation.
+    platform: linux/amd64
+    restart: unless-stopped
+    init: true
+    shm_size: 512m
+    volumes:
+      - data:/data
+      # The bots' shared working folder; setup-desk.mjs fills it from template/recruiting-desk.
+      - desk:/desk
+    # Caddy and the ATS share this service's network namespace, so its ports are declared here.
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    environment:
+      OMB_PORT: "8799"
+      OMB_WEBHOOK_PORT: "8800"
+      OMB_WEBHOOK_PUBLIC_URL: https://${DOMAIN}
+      OMB_PUBLIC_URL: https://${DOMAIN}
+      OMB_SIGNIN_EMAILS: ${OMB_SIGNIN_EMAILS:-}
+      OMB_SIGNIN_MEMBER_EMAILS: ${OMB_SIGNIN_MEMBER_EMAILS:-}
+      # Desk HQ holds bots from four teams. A room is hidden from bots that can't see every member's team, so the
+      # demo opens teams up to each other.
+      OMB_OPEN_TEAMS: "1"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8799/api/health', { signal: AbortSignal.timeout(4000) }).then(async r => { if (!r.ok || !(await r.text()).includes('openmausbot')) process.exit(1); }).catch(() => process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+
+  ats:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: hiring-demo-ats:latest
+    restart: unless-stopped
+    # Same loopback as the server: the bots reach the ATS at 127.0.0.1:4100, the ATS reaches the webhook receiver at
+    # 127.0.0.1:8800, and the ATS is never exposed.
+    network_mode: "service:omb"
+    depends_on:
+      omb:
+        condition: service_healthy
+    environment:
+      ATS_STATE: /ats-state/state.json
+      ATS_CONFIG: /ats-state/config.json
+      DESK_FOLDER: /desk/recruiting-desk
+      DESK_STRONG_MODEL: ${DESK_STRONG_MODEL:-claude-opus-5-5}
+      DESK_FAST_MODEL: ${DESK_FAST_MODEL:-claude-sonnet-5-5}
+    volumes:
+      - ats-state:/ats-state
+      - desk:/desk
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    network_mode: "service:omb"
+    depends_on:
+      omb:
+        condition: service_healthy
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ../Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  data:
+  desk:
+  ats-state:
+  caddy_data:
+  caddy_config:
