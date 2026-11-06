@@ -426,6 +426,15 @@
    "hex": "000300000000000000000002"
   },
   {
+   "name": "go_away_3",
+   "about": "GoAway removed: only from the computer, before it closes with 4001",
+   "type": 3,
+   "flags": 0,
+   "streamId": 0,
+   "length": 3,
+   "hex": "000300000000000000000003"
+  },
+  {
    "name": "stream_3",
    "about": "the next stream the phone opens",
    "type": 1,
@@ -2068,6 +2077,26 @@
       "0001000100000001001c0000",
       "0001000100000003001c0000",
       "0001000100000005001c0000"
+     ]
+    }
+   },
+   {
+    "name": "phone_hears_removed",
+    "about": "GoAway removed is no protocol error at the phone; it sends nothing back",
+    "role": "phone",
+    "steps": [
+     {
+      "open": true
+     },
+     {
+      "in": {
+       "header": "000300000000000000000003"
+      }
+     }
+    ],
+    "expect": {
+     "sent": [
+      "0001000100000001001c0000"
      ]
     }
    }
