@@ -14,6 +14,7 @@ const HOUR = 3_600_000;
 const REFUSAL_GRACE_FOR_TEST = 10 * 60_000 + 1;
 const iso = (at: number) => new Date(at).toISOString();
 
+/** A plan-usage row for one driver, named as the usage panel names it. */
 function row(id: string, driver: PlanProviderRow["driver"], windows: PlanWindows): PlanProviderRow {
   const name = driver === "claude" ? "Claude" : driver === "codex" ? "Codex" : driver === "opencode" ? "OpenCode" : "Grok";
   return { id, name, driver, ok: true, error: null, ...windows };
