@@ -111,6 +111,7 @@ export class ProviderRegistry {
   /** Engines the start-up read has not probed yet; null outside that read. */
   private unread: Set<InstanceId> | null = null;
   private snapshotGeneration = 0;
+  private readonly signedInListeners = new Set<(instanceId: InstanceId) => void>();
   /** Per instance object: settings that reload an engine make a new one, so its status is read afresh. */
   private readsOf = new WeakMap<ProviderInstance, { snapshot: ProviderSnapshot; at: number; generation: number }>();
   private driversByKind: Map<string, AnyProviderDriver>;
@@ -452,12 +453,22 @@ export class ProviderRegistry {
     }
     // Only while this is still the live instance: a reload may have replaced it during the read.
     if (this.byId.get(instance.instanceId)?.live === instance) {
+      const before = this.lastSnapshots.get(instance.instanceId) ?? this.seeds.get(instance.instanceId);
       this.lastSnapshots.set(instance.instanceId, snapshot);
       this.unread?.delete(instance.instanceId);
       this.saveStatus();
       this.healWrongCli(instance.instanceId, snapshot);
+      if (before?.authenticated === false && snapshot.state === "available" && snapshot.authenticated === true) {
+        for (const listener of this.signedInListeners) listener(instance.instanceId);
+      }
     }
     return snapshot;
+  }
+
+  /** `listener` hears of each engine whose status read turns from signed out to signed in, however the sign-in happened:
+   * in the app, in the engine's own browser callback, or in a terminal. */
+  onSignedIn(listener: (instanceId: InstanceId) => void): void {
+    this.signedInListeners.add(listener);
   }
 
   private saveStatus(): void {
