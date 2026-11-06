@@ -111,8 +111,6 @@ export function openCredentialBroker(options: CredentialBrokerOptions): Promise<
   const requestFn = options.request;
 
   const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
-    const socket = req.socket;
-    if (!sockets.has(socket)) { sockets.add(socket); socket.once("close", () => sockets.delete(socket)); }
     const refuse = (status: number, error: string) => { res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }).end(JSON.stringify({ error })); req.resume(); };
     const match = /^\/b\/([^/]+)\/([^/?]+)(\/[^?]*)?(\?.*)?$/.exec(req.url ?? "");
     if (!match) return refuse(404, "not_found");
@@ -136,6 +134,10 @@ export function openCredentialBroker(options: CredentialBrokerOptions): Promise<
     forwarded.on("error", () => { if (!res.headersSent) res.writeHead(502, { "content-type": "application/json" }).end(JSON.stringify({ error: "upstream_unreachable" })); else res.destroy(); });
     req.pipe(forwarded);
     res.on("close", () => forwarded.destroy());
+  });
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
   });
   server.on("upgrade", (_req, socket) => { stats.refused += 1; socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"); });
 
