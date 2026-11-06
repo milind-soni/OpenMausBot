@@ -33,6 +33,7 @@ import {
 } from "@/lib/composer-attachments";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { serverErrorText } from "@/lib/server-error";
 import { FilePreviewButton } from "./FilePreviewButton";
 import { chipNameAction, SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
 import { ImageLoading } from "./ImageLoading";
@@ -235,7 +236,7 @@ export async function requestMessageFile(
   });
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { error?: string; code?: string } | null;
-    throw Object.assign(new Error(body?.error ?? t("attach.downloadFailed")), { code: body?.code });
+    throw Object.assign(new Error(serverErrorText(body, body?.error ?? t("attach.downloadFailed"))), { code: body?.code });
   }
   return response;
 }
@@ -252,6 +253,7 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
   const [reason, setReason] = useState("");
   const [savedTo, setSavedTo] = useState("");
   const [outsideWorkspace, setOutsideWorkspace] = useState(false);
+  const [tooLarge, setTooLarge] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const request = useRef<AbortController | null>(null);
   const saving = useRef(false);
@@ -273,6 +275,7 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
     setReason("");
     setSavedTo("");
     setOutsideWorkspace(false);
+    setTooLarge(false);
     setFolder(null);
     setState("idle");
   }, [filePath, entry, message?.messageId, message?.threadId]);
@@ -291,6 +294,7 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
     }
     setReason("");
     setOutsideWorkspace(false);
+    setTooLarge(false);
     setState("saving");
     request.current?.abort();
     const controller = new AbortController();
@@ -338,7 +342,9 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
     } catch (error) {
       if (!mounted.current || controller.signal.aborted) return;
       setReason(error instanceof Error ? error.message : t("attach.saveFailed"));
-      setOutsideWorkspace((error as { code?: unknown } | null)?.code === "outside_workspace");
+      const code = (error as { code?: unknown } | null)?.code;
+      setOutsideWorkspace(code === "outside_workspace");
+      setTooLarge(code === "file_too_large");
       setState("failed");
     } finally {
       if (request.current === controller) {
@@ -348,7 +354,9 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
     }
   }, [filePath, entry, message?.messageId, message?.threadId, name]);
 
-  return { state, reason, savedTo, outsideWorkspace, folder, save };
+  // Retrying can't move a file into the folder or make it smaller.
+  const retryable = state === "failed" && !outsideWorkspace && !tooLarge;
+  return { state, reason, savedTo, outsideWorkspace, retryable, folder, save };
 }
 
 export function saveFailureText(save: { reason: string; outsideWorkspace: boolean }): string {
@@ -900,7 +908,7 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
   const save = useLocalFileSave(file.path, file.name, message);
   const preview = useHtmlPreview(file.path, file.name, message);
   const failed = save.state === "failed";
-  const retryable = failed && !save.outsideWorkspace;
+  const retryable = save.retryable;
   if (compact) return <CompactFileChip file={file} message={message} linked={linked} save={save} preview={preview} className={className} />;
   if (!message || (!file.private && !linked)) {
     return (
@@ -972,7 +980,7 @@ function CompactFileChip({ file, message, linked, save, preview, className }: {
   className?: string;
 }) {
   const failed = save.state === "failed";
-  const retryable = failed && !save.outsideWorkspace;
+  const retryable = save.retryable;
   const name = <span dir="auto" className="min-w-0 truncate text-ink [unicode-bidi:isolate]">{file.name}</span>;
   if (!message || (!file.private && !linked)) {
     return (

@@ -200,6 +200,7 @@ export const USER_ERROR = {
   "serverError.mailbox.outgoingFields": "Check the outgoing server: a name like mail.example.com, a port from 1 to 65535, and SSL/TLS or STARTTLS.",
   "serverError.voice.fishKeyRequired": "Add a Fish Audio key in Settings → API keys to talk to your bots here.",
   "serverError.voice.fishTranscribeConnection": "Couldn't reach Fish Audio to hear you — check your connection.",
+  "serverError.file.tooLarge": "This file is {size}, over the {limit} limit for opening files from chat. It's still on the bot's computer as {name}.",
 } as const;
 
 export type UserErrorKey = keyof typeof USER_ERROR;
