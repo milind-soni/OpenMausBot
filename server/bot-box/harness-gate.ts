@@ -68,7 +68,8 @@ export function openHarnessGate(options: HarnessGateOptions): Promise<HarnessGat
     res.on("close", () => upstream.destroy());
   });
   // Nothing upgrades through the gate: the harness routes are plain requests and event streams.
-  server.on("upgrade", (_req, socket) => { gate.refused += 1; socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"); });
+  // Node removes its own error listener from a socket it hands to `upgrade`.
+  server.on("upgrade", (_req, socket) => { gate.refused += 1; socket.on("error", () => socket.destroy()); socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"); });
   return new Promise((done, fail) => {
     server.once("error", fail);
     server.listen(options.socketPath, () => {

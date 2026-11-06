@@ -1,8 +1,9 @@
 import { createServer, request, type Server } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { createConnection } from "node:net";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { harnessTarget, openHarnessGate, type HarnessGate } from "./harness-gate.ts";
 
@@ -15,6 +16,15 @@ function call(socketPath: string, method: string, path: string, body?: string, h
     });
     req.on("error", reject);
     req.end(body);
+  });
+}
+
+function upgradeAndHangUp(socketPath: string): Promise<void> {
+  return new Promise((resolve) => {
+    const client = createConnection(socketPath);
+    client.on("error", () => {});
+    client.once("connect", () => { client.write("GET / HTTP/1.1\r\nHost: box\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n", () => client.destroy()); });
+    client.once("close", () => resolve());
   });
 }
 
@@ -76,6 +86,13 @@ linuxBox("the harness gate", () => {
     }
     expect(seen).toEqual([]);
     expect(gate.refused).toBe(refused.length);
+  });
+
+  it("survives clients that hang up before their upgrade is refused", async () => {
+    await start();
+    for (let i = 0; i < 5; i++) await upgradeAndHangUp(gate.socketPath);
+    await vi.waitFor(() => expect(gate.refused).toBe(5));
+    expect((await call(gate.socketPath, "GET", "/api/internal/x")).status).toBe(200);
   });
 
   it("forwards the path as the server will read it, not as the box spelled it", async () => {
