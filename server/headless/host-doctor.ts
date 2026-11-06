@@ -3,7 +3,7 @@
 import { execFile } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statfsSync } from "node:fs";
 import { arch, cpus, homedir, release, totalmem } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, posix, resolve } from "node:path";
 
 import { PRODUCTION_CLOUD_ORIGIN } from "../devs-report-send.ts";
 import { EXIT, flag, usageError } from "./args.ts";
@@ -133,7 +133,7 @@ function diskCheck(probe: HostProbe, dataDir: string): HostCheck {
 /** The block device under `dataDir`, then every device it sits on: a dm-crypt mapping among them is an encrypted disk. */
 function encryptedCheck(probe: HostProbe, dataDir: string): HostCheck {
   const mounts = (probe.read("/proc/self/mountinfo") ?? "").split("\n").map((line) => line.split(" ")).filter((fields) => fields.length > 4);
-  const path = resolve(dataDir);
+  const path = posix.resolve(dataDir);
   const mount = mounts.filter(([, , , , point]) => path === point || path.startsWith(point === "/" ? "/" : `${point}/`))
     .sort((a, b) => b[4]!.length - a[4]!.length)[0];
   if (!mount || mount[2]!.startsWith("0:")) return warn("encryption", `Could not tell whether ${dataDir} is on an encrypted disk`);
@@ -278,7 +278,8 @@ export async function hostDoctor(ctx: VerbContext, probe: HostProbe = systemProb
   const rawPort = flag(ctx.flags, "port") ?? ctx.env.OMB_PORT ?? "8799";
   const port = Number(rawPort);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) throw usageError("--port must be 1-65535");
-  const dataDir = resolve(flag(ctx.flags, "data-dir") ?? ctx.env.OMB_DATA_DIR ?? join(homedir(), ".openmausbot"));
+  // A Linux machine's path, also when the checks are tested on Windows.
+  const dataDir = posix.resolve(flag(ctx.flags, "data-dir") ?? ctx.env.OMB_DATA_DIR ?? join(homedir(), ".openmausbot"));
   const domain = flag(ctx.flags, "domain")?.trim().toLowerCase();
   return hostReport(await checkHost(probe, { dataDir, port, ...(domain ? { domain } : {}) }));
 }
