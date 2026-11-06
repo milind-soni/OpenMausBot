@@ -306,6 +306,10 @@ describe("what it may not", () => {
     expect(allowed("POST", "/api/bots/bot_123/sign-in-cards/msg_3/resume")).toBe(false);
     expect(allowed("GET", "/api/bots/bot_123/sign-in-cards/msg_3/done")).toBe(false);
     expect(allowed("PATCH", "/api/groups/room-1")).toBe(false);
+    expect(allowed("GET", "/api/limit-resets/continue")).toBe(false);
+    expect(allowed("DELETE", "/api/limit-resets/continue")).toBe(false);
+    expect(allowed("GET", "/api/limit-resets")).toBe(false);
+    expect(allowed("POST", "/api/limit-resets/after-reset")).toBe(false);
   });
 
   it("lets a phone update Claude Code and change nothing else about engines", () => {
