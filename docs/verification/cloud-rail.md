@@ -97,14 +97,19 @@ would be more folders there), on the same address, one server at a time, as a
 local environment switch does. Nothing moves either way, the frozen copy keeps
 its marker and its bots, and the move's code never reaches the profile. A line
 on its page says the bots from before are on My Cloud and that an older copy
-comes in from Settings → Backups. My Cloud on the rail goes back; the profile
-keeps running, so This Mac is one click again. Every launch opens My Cloud.
+comes in from Settings → Backups, until its ✕ closes it for good in that
+workspace, or by itself once it was shown on three days or a week went by. My
+Cloud on the rail goes back; the profile keeps running, so This Mac is one
+click again. A launch opens the place open when the app last closed (My Cloud,
+another Cloud, This Mac or another workspace, a server saved by hand); one that
+can't open now (removed, ended, not answering in a few seconds) is My Cloud
+instead, with no dialog, and This Mac when My Cloud doesn't run either.
 This computer stays lent to My Cloud throughout: lending follows the sign-in,
 and only the clean workspace for nobody who can reach the bots stops it. People
 with no Cloud see no change.
 
 ```sh
-node --test electron/clean-workspace.node-test.mjs electron/home-window-profile.node-test.mjs electron/home-window-clean.node-test.mjs electron/cloud-rail.node-test.mjs electron/lending-target.node-test.mjs
+node --test electron/clean-workspace.node-test.mjs electron/home-window-profile.node-test.mjs electron/home-window-clean.node-test.mjs electron/cloud-rail.node-test.mjs electron/lending-target.node-test.mjs electron/start-place.node-test.mjs electron/home-places.node-test.mjs
 pnpm exec vitest run src/components/PlacesRail.test.ts src/components/HomeLine.test.ts
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/rail-profile-ui.e2e.test.ts
 ```

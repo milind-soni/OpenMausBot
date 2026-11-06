@@ -76,3 +76,20 @@ test("a remembered team whose place is gone from the file is still remembered by
   assert.deepEqual(bad.places.remembered(), { team: "team-acme" }, "kept in memory for this run");
   assert.equal(environments.reconcileTeams({ environments: [], activeId: "local" }, [], () => "x", HOME).state.activeId, "local");
 });
+
+test("a workspace of this computer's own or a server saved by hand is remembered as one place: the latest kept, My Cloud forgets it, and a team dropped or synced away leaves it alone", () => {
+  const w = world();
+  w.places.remember({ profile: "work" });
+  assert.deepEqual(w.places.remembered(), { profile: "work" });
+  assert.deepEqual(w.saved, { profile: "work" });
+  w.places.remember({ server: "env-1" });
+  assert.deepEqual([w.places.remembered(), w.saved], [{ server: "env-1" }, { server: "env-1" }], "one place at a time");
+  w.places.remember({ profile: "default" });
+  w.places.sync(connected([beta]));
+  w.places.drop({ id: "team-acme", name: "Acme" });
+  assert.deepEqual(w.places.remembered(), { profile: "default" }, "teams coming and going never touch it");
+  w.places.remember(null);
+  assert.equal(w.places.remembered(), null);
+  assert.deepEqual(world({ saved: { profile: "work", team: "team-acme" } }).places.remembered(), { team: "team-acme" }, "a file naming two: the first kind wins");
+  assert.equal(world({ saved: { profile: 7 } }).places.remembered(), null, "an id that isn't one: nothing");
+});

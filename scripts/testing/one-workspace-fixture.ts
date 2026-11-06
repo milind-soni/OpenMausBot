@@ -32,6 +32,7 @@ import { createLendingTarget } from "../../electron/lending-target.mjs";
 import { createCloudPowerGate } from "../../electron/cloud-power.mjs";
 import environments from "../../electron/environments.cjs";
 import { createHomePlaces } from "../../electron/home-places.mjs";
+import { openStartPlace } from "../../electron/start-place.mjs";
 import { createHomeWindow, installHomeWindowIpc, HOME_SCREEN_PATH } from "../../electron/home-window.mjs";
 import { createStartupScreen } from "../../electron/startup-screen.mjs";
 import { packageUrlFromDeepLink } from "../../electron/package-link.mjs";
@@ -270,9 +271,10 @@ export interface HomeWorld {
   setSize(width: number, height: number): Promise<void>;
   /** The OS's light or dark look, which both pages follow. */
   theme(dark: boolean): Promise<void>;
-  /** The app quits and opens again: this computer's server stopped as a quit stops it and started on the data folder, and a
-   * new home window that knows nothing of the last run shows home. */
-  restartApp(): Promise<void>;
+  /** The app quits and opens again: this computer's server stopped as a quit stops it and started on the data folder, then
+   * `whileClosed` (what changes while the app is closed), and a new home window that knows nothing of the last run opens the
+   * place remembered from it, as a launch does. */
+  restartApp(whileClosed?: () => unknown): Promise<void>;
   /** Each request My Cloud's edge passed on, in order. */
   cloudRequests: Array<{ path: string; at: number }>;
   /** main.mjs's own chat-link delivery, as a link from the OS reaches it. */
@@ -632,7 +634,7 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
     onLocal: () => /^https?:/.test(win.url) && new URL(win.url).origin === localOrigin,
     busy: async () => { const said = await (await ownCopy("/api/move/freeze")).json(); return typeof said?.busy === "string" ? { name: said.busy, what: said.what } : null; },
     trash: async (dir: string) => { mkdirSync(trashDir, { recursive: true }); renameSync(dir, join(trashDir, `${Date.now()}-${dir.split(/[\\/]/).pop()}`)); },
-    reserved: () => "This Mac", changed: () => railHandlers?.changed() }) : null);
+    reserved: () => "This Mac", remember: homePlaces.remember, changed: () => railHandlers?.changed() }) : null);
   let localProfiles = makeLocal();
   const railList = () => {
     const settling = localProfiles?.settling() ?? null;
@@ -701,14 +703,15 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
       }
       await new Promise((resolve) => setTimeout(resolve, 3_000));
     },
-    async restartApp() {
+    async restartApp(whileClosed?: () => unknown) {
       homeRef!.close();
       // A quit stops this computer's server as main's before-quit does, and the next launch starts it on the data folder.
       await fx.relaunch({ kill: false });
       running = fx.desktopDataDir;
+      await whileClosed?.();
       home = launchHome();
       localProfiles = makeLocal();
-      await home.show();
+      await openStartPlace({ home, places: homePlaces, profiles: localProfiles, server: async () => false });
       if (railRef) await railRef.loadURL(`${localOrigin}/rail`);
     },
     cloudOrigin, localOrigin, teamOrigin, otherOrigin, window: win, get home() { return homeRef!; }, account, network, admin, cloudRequests, notifications, hostCache,
