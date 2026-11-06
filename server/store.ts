@@ -1,7 +1,8 @@
 import { chmodSync, existsSync, readFileSync, mkdirSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path"; import { isDeepStrictEqual } from "node:util";
 
-import { OwnedFile, writeFileAtomic } from "./atomic.ts"; import { saveSoon } from "./save-batch.ts"; import { discardNativeLog } from "./drivers/native.ts";
+import { OwnedFile, writeFileAtomic } from "./atomic.ts";
+import { initializeNewBotImportedSkills } from "./imported-skills.ts"; import { saveSoon } from "./save-batch.ts"; import { discardNativeLog } from "./drivers/native.ts";
 import { commitRegistryChange, keptRevocation, saveRegistryFor, touchesPermissions } from "./registry-save.ts";
 import { parseToolScope, toolScopeWidens } from "../shared/tool-scope.ts"; import { grantScopedApps } from "../shared/connector-scopes.ts";
 import { reorderStable } from "../shared/bot-order.ts";
@@ -1355,6 +1356,8 @@ export class Store {
       activity: "idle",
       busy: false,
     }];
+    // Install fail-closed imported-skill policy before the new bot is visible or can run.
+    if (!opts.id) initializeNewBotImportedSkills(bot.id);
     // Persist before publishing or greeting, so an interrupted creation cannot inherit tools.
     this.saveBots([bot, ...this.bots]);
     this.bots.unshift(bot);
@@ -1424,6 +1427,10 @@ export class Store {
       nextChief.managedSections = managedSections;
     }
     nextBots[chiefAt] = nextChief;
+    // Team setup bypasses createBot: protect each newly created agent before emitting it.
+    for (const operation of request.operations) {
+      if (operation.action === "create") initializeNewBotImportedSkills(operation.botId);
+    }
     this.saveBots(nextBots);
     this.bots = nextBots;
     for (const bot of changed) {

@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import type { SkillsLibrarySkillWire } from "../../shared/wire.ts";
 import type { AppConfig } from "../config.ts";
-import { setImportedSkillEnabled } from "../imported-skills.ts";
+import { setImportedSkillAllowlist, setImportedSkillEnabled } from "../imported-skills.ts";
 import { botSkillTemplateSchema } from "../new-bot-defaults.ts";
 import { fetchSkillFromSource } from "../skill-fetch.ts";
 import { skillImportSummary } from "../skill-folder.ts";
@@ -77,6 +77,18 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
       if (!done.length) return json(res, 422, { error: errors.join("; ") || "nothing importable found" });
       const imported = done.map(({ skill, installed }) => skillImportSummary(installed.name, skill.files, skill.skipped));
       return json(res, 201, { installed: done.map(({ installed }) => installed), imported, errors });
+    }
+    // UI-authenticated bulk replacement: no 260 individual toggles and no credential bypass.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/skills\/imported-allowlist$/);
+    if (m && method === "PUT") {
+      const bot = store.bot(m[1]!);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      if (bot.tasks?.some((task) => task.busy)) return json(res, 409, { error: "Stop active bot tasks before changing skills" });
+      const parsed = z.object({ names: z.array(z.string().regex(/^[a-z0-9-]+$/)).max(1000) }).safeParse(await readBody(req));
+      if (!parsed.success) return json(res, 400, { error: "names must be an array of imported skill names" });
+      const result = setImportedSkillAllowlist(bot.id, parsed.data.names);
+      if ("error" in result) return json(res, 409, result);
+      return json(res, 200, result);
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/skills\/([a-z0-9-]+)$/);
     if (m && method === "GET") {
