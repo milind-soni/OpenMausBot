@@ -513,6 +513,12 @@ export function deletePlan(input: { registry: FleetRegistry; slug: string; keepD
       { kind: "run", argv: ["systemctl", "reload", "caddy"], why: "stop serving its address" },
       { kind: "remove", path: join(layout.instancesDir, `${workspace.slug}.env`) },
       { kind: "remove", path: join(unitsDir, `openmausbot@${workspace.slug}.service.d`, "limits.conf") },
+      ...(input.keepData
+        ? []
+        : [
+            { kind: "remove" as const, path: join(layout.brandsDir, `${workspace.slug}.json`) },
+            { kind: "remove" as const, path: join(layout.brandsDir, `${workspace.slug}.override.json`) },
+          ]),
       { kind: "write", path: layout.fenceFile, content: fenceRules(Object.values(registry.workspaces)), mode: 0o600 },
       { kind: "run", argv: ["nft", "-f", layout.fenceFile], why: input.keepData ? "keep the retained account's fence" : "drop its fence rule" },
       // Keep the nologin account too: recycling its UID would hand the preserved home to a new workspace.

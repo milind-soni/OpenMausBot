@@ -81,4 +81,13 @@ describe("a workspace on its own web address", () => {
       expect(removed.steps.findIndex((step) => step.kind === "remove" && step.path.endsWith("acme.caddy"))).toBeLessThan(removed.steps.findIndex((step) => step.kind === "run" && step.argv[0] === "nft"));
     }
   });
+
+  it("removes a deleted workspace's brand files and keeps a retained workspace's", () => {
+    const brandFiles = [{ kind: "remove", path: "/etc/openmausbot/brands/acme.json" }, { kind: "remove", path: "/etc/openmausbot/brands/acme.override.json" }];
+    const deleted = deletePlan({ registry: custom.registry, slug: "acme", keepData: false, now, layout });
+    for (const step of brandFiles) expect(deleted.steps).toContainEqual(step);
+    expect(deleted.steps).not.toContainEqual({ kind: "remove", path: "/etc/openmausbot/brands/_default.json" });
+    const retained = deletePlan({ registry: custom.registry, slug: "acme", keepData: true, now, layout });
+    for (const step of brandFiles) expect(retained.steps).not.toContainEqual(step);
+  });
 });
