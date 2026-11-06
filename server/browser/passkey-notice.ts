@@ -25,7 +25,7 @@ export function googleRefusalIn(text: string): boolean {
   return GOOGLE_REJECTED.test(text) || (GOOGLE_REJECTED_WORDS.test(text) && GOOGLE_PAGE.test(text));
 }
 
-/** Google turns down sign-in in a browser run by software, so the bot hands that step to the person (#2642). */
+/** Google turns down sign-in in a browser run by software, so the bot hands that step to the person. */
 export function googleRefusalNotice(place: BrowserPlace): string {
   return "Google sign-in refused, from OpenMausBot: Google does not let a browser run by software sign in, and retrying, waiting, a new tab or a fresh page will not change that: do not retry Google sign-in in this browser. Hand this step to the person. What works, best first: 1) For Gmail, Calendar or Drive, use connected apps instead of this browser; if Google is not connected, call COMPOSIO_MANAGE_CONNECTIONS so the person can connect it. 2) For a site's \"Sign in with Google\": tell the person in plain words that Google refused the bot's browser, and ask whether that site offers another way to sign in (email and password, or a link by email); with a saved login use fill_login, otherwise request_sign_in, and they choose that other way, not Google. 3) Or the person does this step in their own computer's browser."
     + (place === "cloud" ? " If they lend a PC to My Cloud (list_shared_computers), its own browser is an ordinary one, where Google sign-in usually works." : "");

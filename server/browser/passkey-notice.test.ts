@@ -50,7 +50,7 @@ describe("the runtime router annotates tool answers from either engine", () => {
   });
 });
 
-describe("Google's refusal page hands the sign-in to the person (#2642)", () => {
+describe("Google's refusal page hands the sign-in to the person", () => {
   const REFUSED = 'heading "Google"\nheading "Couldn’t sign you in"\ntext "This browser or app may not be secure. Learn more"\ntext "Try using a different browser."';
   const REFUSED_URL = "The page is now https://accounts.google.com/v3/signin/rejected?continue=https%3A%2F%2Fexample.com&hl=pt-BR (\"Fazer login nas Contas do Google\").";
 
