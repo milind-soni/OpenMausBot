@@ -7,8 +7,13 @@ export interface RailPlace {
   /** This computer, a Cloud of the person's own (My Cloud included), a team's Cloud, a server they connected by hand, or an
    * account signed in here with no place of its own to show. */
   kind: "computer" | "cloud" | "team" | "server" | "account";
-  /** A workspace of this computer's own, by its profile id, once My Cloud is home: the default one is This Mac (or This PC). */
+  /** A workspace of this computer's own, by its profile id: the default one is This Mac (or This PC), offered once My Cloud
+   * is home. Its circle's menu renames it, changes its colour and removes it. */
   profile?: string;
+  /** A workspace of this computer's own with a name of its own (`name`), not This Mac's. */
+  named?: true;
+  /** It opens once this bot, in the workspace that runs now, finishes what it is doing (empty: the bot isn't named). */
+  settling?: string;
   /** With several accounts signed in here: which group it is in (a divider stands between groups). None with one account. */
   group?: string;
   /** With several accounts signed in here: the address of the account it belongs to. Only the rail's own page gets this. */
@@ -52,7 +57,8 @@ export interface RailPlace {
 /** ＋'s choices here: buying a Cloud, pasting a server's pairing link, typing its address on this computer's Settings, and
  * a new organization on the Team plan this account pays for (absent from an older app's main). */
 /** `account`: Add another account (the rail's own page runs that sign-in). */
-export interface RailAddChoices { cloud: boolean; link: boolean; address: boolean; organization?: boolean; account?: boolean }
+/** `local`: a new workspace of this computer's own. */
+export interface RailAddChoices { cloud: boolean; link: boolean; address: boolean; organization?: boolean; account?: boolean; local?: boolean }
 /** `beside`: a place's page, which never reads the list, learns that the window's rail stands beside it. */
 export interface RailState { places: RailPlace[]; add: RailAddChoices; beside?: true }
 /** Buying another Cloud as a page sees it: what the sheet says, never the account, an address or the checkout page. */
@@ -81,5 +87,5 @@ export type AddCloudView =
 export declare const RAIL_MIN_PLACES: number;
 export declare const PROFILE_PLACE: "profile:";
 /** main's own circles: each as the page sees it, plus the Cloud main acts on for it (never sent to a page). */
-export declare function railPlaces(input: { saved: { environments: any[]; activeId: string }; home?: string | null; mine?: string | null; state?: unknown; offers?: (entry: any) => boolean; waiting?: (id: string) => boolean; accounts?: any[]; profiles?: Array<{ id: string; active?: boolean }> }): Array<RailPlace & { cloudId?: string }>;
+export declare function railPlaces(input: { saved: { environments: any[]; activeId: string }; home?: string | null; mine?: string | null; state?: unknown; offers?: (entry: any) => boolean; waiting?: (id: string) => boolean; accounts?: any[]; profiles?: Array<{ id: string; name?: string | null; color?: string | null; swatch?: string | null; active?: boolean; settling?: string }>; computerSettling?: string | null }): Array<RailPlace & { cloudId?: string }>;
 export declare function addCloudView(state: unknown, offer: import("./cloud-home.mjs").CloudOffer | null): AddCloudView;

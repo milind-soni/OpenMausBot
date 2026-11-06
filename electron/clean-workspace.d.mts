@@ -3,6 +3,7 @@ export function cleanWorkspaceDir(dataDir: string): string;
 export function profilesDir(dataDir: string): string;
 export function profileDir(dataDir: string, id: string): string;
 export declare const DEFAULT_PROFILE: "default";
+export declare const PROFILE_ID: RegExp;
 export function cleanWorkspaceConfig(language?: string | null, now?: Date): { language?: string; onboarding: { completedAt: string; version: number; hintsSeen: string[] } };
 export interface CleanWorkspace {
   active(): boolean;

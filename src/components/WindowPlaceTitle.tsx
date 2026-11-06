@@ -26,7 +26,7 @@ export function useWindowPlace(): WorkspaceState | null {
  * home (a team's name on a team's Cloud), else the name it was saved under. */
 export function windowPlaceName(place: WorkspaceState, team: string | undefined): string {
   if (place.home) return team || t("cloudSetup.myCloud");
-  if (place.profile) return computerName({ profile: place.profile });
+  if (place.profile) return place.profileName || computerName({ profile: place.profile });
   if (place.local && !place.localPath) return t("rail.thisComputer");
   return place.name;
 }

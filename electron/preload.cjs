@@ -174,6 +174,23 @@ const bridge = {
       ipcRenderer.on("workspaces:changed", handler);
       return () => ipcRenderer.removeListener("workspaces:changed", handler);
     },
+    // A workspace of this computer's own, from a click on the rail's page or this computer's own page (main refuses any
+    // other): a new one by its name and colour, and a name, colour or removal for one the rail lists.
+    local: {
+      create: (name, color) => isLocalPage || navigator.userActivation?.isActive === true
+        ? ipcRenderer.invoke("workspaces:local-new", String(name), color === null || color === undefined ? null : String(color)) : Promise.reject(new Error("Choose a name.")),
+      edit: (id, changes) => isLocalPage || navigator.userActivation?.isActive === true
+        ? ipcRenderer.invoke("workspaces:local-edit", String(id), typeof changes?.name === "string" ? { name: changes.name } : { color: changes?.color === null || changes?.color === undefined ? null : String(changes.color) })
+        : Promise.reject(new Error("Choose a change.")),
+      remove: (id) => isLocalPage || navigator.userActivation?.isActive === true
+        ? ipcRenderer.invoke("workspaces:local-remove", String(id)) : Promise.reject(new Error("Choose Remove.")),
+    },
+    // The Server menu's New workspace on this computer, for this computer's own page to ask its name.
+    onNewLocal: (cb) => {
+      const handler = () => cb();
+      ipcRenderer.on("workspaces:new-local", handler);
+      return () => ipcRenderer.removeListener("workspaces:new-local", handler);
+    },
   },
   // The window's own rail (this app's page at /rail, beside every place's page): while a sheet of its own is open it
   // covers the window; the skin of the page beside it comes from main, and whether that page draws the window's frame.
