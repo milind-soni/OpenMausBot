@@ -1,5 +1,7 @@
-import type { StdioMcpSpec } from "../contracts.ts";
+import type { McpServerSpec, StdioMcpSpec } from "../contracts.ts";
 import { BOX_NO_PROXY_ENV, BOX_PROXY_ENV, botBox } from "../bot-box/box.ts";
+import { MCP_RESTART_ENV } from "../mcp-app-catalog.ts";
+import { isReservedMcpEnvEntry } from "../mcp-registry.ts";
 import { tomlInlineTable } from "./codex-process.ts";
 
 /** Codex's default for one MCP server's tools (openai/codex#17843): "auto"
@@ -30,6 +32,17 @@ export function mountMcpServer(
   );
   if (Object.keys(literalEnv).length) appServerArgs.push("-c", `${prefix}.env=${tomlInlineTable(literalEnv)}`);
   if (approval !== "prompt") appServerArgs.push("-c", `${prefix}.default_tools_approval_mode="${approval}"`);
+}
+
+/** A Codex app-server and its MCP servers live for one turn, so the next turn already starts a restarted server afresh. */
+export function codexCustomServers(custom: Record<string, McpServerSpec> = {}): Array<[string, McpServerSpec]> {
+  return Object.entries(custom).map(([name, server]) => {
+    if ("url" in server) return [name, server];
+    const { [MCP_RESTART_ENV]: _restarts, ...env } = server.env;
+    const reserved = Object.entries(env).find(([key, value]) => isReservedMcpEnvEntry(key, value));
+    if (reserved) throw new Error(`Custom MCP server “${name}” cannot set reserved environment variable “${reserved[0]}”`);
+    return [name, { ...server, env }];
+  });
 }
 
 /** In the bot box the network is reached only through the box's proxy (bot-box/box.ts), and Codex starts an MCP server with

@@ -3,7 +3,7 @@ import { codexToolSurfaceArgs } from "./codex-tool-surface.ts";
 import { codexShellDisabled, GUEST_CONFINED_CODEX_ARGS } from "./codex-guest.ts";
 import { TEAM_TOOLS_FAILED, teamToolsFailed } from "./team-tools.ts";
 import { enabledMcpMounts, mcpStartupTracker, supportsMcpStartup } from "./codex-mcp-startup.ts";
-import { boxProxyEnvNames, type McpApprovalMode, mountMcpServer } from "./codex-mcp-mount.ts";
+import { boxProxyEnvNames, codexCustomServers, type McpApprovalMode, mountMcpServer } from "./codex-mcp-mount.ts";
 import { reportUnsupportedCalls, rolloutMark, type RolloutMark } from "./codex-unsupported-calls.ts";
 // The `codex` CLI headless over its app-server JSON-RPC (NDJSON on stdio): completion is
 // `turn/completed`, approvals arrive as server→client requests, resumeCursor is the codex thread id.
@@ -22,7 +22,6 @@ import { ChatGptPlanAuthController } from "./chatgpt-plan-auth.ts";
 import { captureCliTree, describeSpawnFailure, killCliTree, spawnCli, waitForExit } from "../procs.ts";
 import { cliVersionProbe } from "../cli-version-probe.ts";
 import { codexLaunch, codexLaunchesStarting, codexLaunchSlot, codexRpcTimeoutMs, keepStopping, RELAUNCH_EXIT_WAIT_MS, spawnHoldingSlot, tryCodexLaunchSlot } from "./codex-process.ts";
-import { isReservedMcpEnvEntry } from "../mcp-registry.ts";
 
 import type {
   DriverCreateInput,
@@ -533,13 +532,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const stopSignal = new AbortController();
       const { threadId } = turn;
       const approvalMode: ApprovalMode = turn.approvalMode ?? (config.fullAuto ? "full" : "ask");
-      for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
-        if ("url" in server) continue;
-        const reserved = Object.entries(server.env).find(([key, value]) => isReservedMcpEnvEntry(key, value));
-        if (reserved) {
-          throw new Error(`Custom MCP server “${name}” cannot set reserved environment variable “${reserved[0]}”`);
-        }
-      }
+      const customServers = codexCustomServers(turn.integrations?.custom);
       let autoAcceptPermissions = approvalMode === "full";
       const chatgptTurn = ownLogin &&
         decodeCodexSelection(turn.model || models.default).modelProvider === OFFICIAL_CODEX_PROVIDER;
@@ -640,7 +633,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (turn.toolScope !== undefined) {
           for (const name of declaredInCodexConfig) appServerArgs.push("-c", `mcp_servers.${name}.enabled=false`);
         }
-        for (const [name, server] of Object.entries(turn.integrations?.custom ?? {}).filter(([name, server]) => turn.toolScope !== undefined || !codexConfigRunsServer(codexConfig, name, server))) {
+        for (const [name, server] of customServers.filter(([name, server]) => turn.toolScope !== undefined || !codexConfigRunsServer(codexConfig, name, server))) {
           const mountName = mountedMcpServerName(name, declaredInCodexConfig);
           if (mountName !== name) noteRenamedMcpServer(name, mountName);
           mountSelected(name, mountName, server, "prompt", turn.toolScope === undefined && !("url" in server) ? boxProxyEnvNames() : []);
