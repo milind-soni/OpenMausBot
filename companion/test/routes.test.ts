@@ -116,6 +116,8 @@ describe("what the app may do", () => {
     ["POST", "/api/routines/routine_1/run"],
     ["POST", "/api/routine-runs/run_1/cancel"],
     ["POST", "/api/routine-runs/run_1/seen"],
+    // The stopped turn's "Continue when your limit resets" makes a one-time automation, like POST /api/routines.
+    ["POST", "/api/limit-resets/continue"],
     ["GET", "/api/connectors/catalog"],
     ["GET", "/api/connectors/connected"],
     ["GET", "/api/connectors"],
