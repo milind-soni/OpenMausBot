@@ -70,6 +70,55 @@ afterEach(() => {
 });
 
 describe("Inspector on the app's live stream", () => {
+  it("does not expand a replacement native record after refresh, while keeping runtime expansion", async () => {
+    let nativeMessage = "first private record";
+    vi.stubGlobal("fetch", () => Promise.resolve(new Response(JSON.stringify({
+      entries: [
+        { kind: "runtime", at: "1", data: runtime("keep-open", { type: "item.started", itemType: "tool", title: "retained runtime" }) },
+        { kind: "native", at: nativeMessage, data: { at: nativeMessage, dir: "out", source: "fixture", msg: { secretDetail: nativeMessage } } },
+      ],
+      total: { runtime: 1, native: 400 },
+    }))));
+    await mount(InspectorPanel);
+    const tab = (name: string) => [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((el) => el.textContent === name)!;
+    const row = (text: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((el) => el.textContent?.includes(text))!;
+    flushSync(() => tab("events").click());
+    flushSync(() => row("retained runtime").click());
+    expect(document.querySelector("pre")?.textContent).toContain("keep-open");
+    flushSync(() => tab("raw").click());
+    flushSync(() => row("fixture").click());
+    expect(document.querySelector("pre")?.textContent).toContain("first private record");
+    frame(runtime("live-only", { type: "item.started", itemType: "tool", title: "live update" }));
+    flushSync(() => tab("events").click());
+    await vi.waitFor(() => expect(document.body.textContent).toContain("live update"));
+    flushSync(() => tab("raw").click());
+    expect(document.querySelector("pre")?.textContent).toContain("first private record");
+    nativeMessage = "replacement private record";
+    missed();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("replacement private record"));
+    expect(document.querySelector("pre")).toBeNull();
+    flushSync(() => tab("events").click());
+    expect(document.querySelector("pre")?.textContent).toContain("keep-open");
+  });
+
+  it("keeps a native record expanded when reloading its snapshot fails", async () => {
+    vi.stubGlobal("fetch", () => Promise.resolve(new Response(JSON.stringify({
+      entries: [{ kind: "native", at: "1", data: { at: "1", dir: "out", source: "fixture", msg: { detail: "still the same record" } } }],
+      total: { runtime: 0, native: 1 },
+    }))));
+    await mount(InspectorPanel);
+    const raw = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((el) => el.textContent === "raw")!;
+    flushSync(() => raw.click());
+    const row = [...document.querySelectorAll<HTMLButtonElement>("button")].find((el) => el.textContent?.includes("fixture"))!;
+    flushSync(() => row.click());
+    const expanded = document.querySelector("pre");
+    expect(expanded?.textContent).toContain("still the same record");
+    vi.stubGlobal("fetch", () => Promise.resolve(new Response("", { status: 503 })));
+    missed();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("503"));
+    expect(document.querySelector("pre")).toBe(expanded);
+  });
+
   it("keeps only the newest 400 runtime entries during a long turn, with its total and raw snapshot", async () => {
     vi.stubGlobal("fetch", () => Promise.resolve(new Response(JSON.stringify({
       entries: [{ kind: "native", at: "2026-10-04T09:00:00.000Z", data: { at: "2026-10-04T09:00:00.000Z", dir: "out", source: "fixture", msg: { type: "raw retained" } } }],
