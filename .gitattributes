@@ -39,3 +39,6 @@ shared/app-frame/app-host.html text eol=lf
 
 # Imported by a vitest test: a CRLF checkout of its first lines broke the import on Windows.
 scripts/tighten-ratchets.mjs text eol=lf
+# The end-to-end test vectors are pinned by SHA-256 (v1.sha256), and other implementations check their copy against
+# it. A CRLF checkout on Windows changes every hash for a reason that has nothing to do with the wire.
+companion/src/e2e/vectors/* text eol=lf
