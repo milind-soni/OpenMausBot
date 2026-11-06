@@ -125,7 +125,6 @@ describe("calendar event details drawer", () => {
 });
 
 describe("calendar event editor", () => {
-  // A backdrop blur re-blurs the whole page behind the editor on every repaint, which is costly without GPU compositing.
   it("dims the page behind the editor without blurring it", () => {
     const tree = render(() => EventEditor({
       seed: { kind: "routine", at: 1, durationMinutes: 30, botIds: [bot.id], routine },

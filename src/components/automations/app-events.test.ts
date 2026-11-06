@@ -84,7 +84,6 @@ describe("app events, set up by the person", () => {
     expect(fixture.api).not.toHaveBeenCalledWith("/api/app-triggers/events?botId=bot-a");
   });
 
-  // A backdrop blur re-blurs the whole page behind the editor on every repaint, which is costly without GPU compositing.
   it("dims the page behind the editor without blurring it", async () => {
     fixture.api.mockResolvedValue(catalog);
     const container = mount(createElement(AppEventEditor, { bots: [scout], onClose: vi.fn() }));
