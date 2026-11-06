@@ -121,6 +121,12 @@ describe("summarize", () => {
     expect(long.endsWith("…")).toBe(true);
     expect(summarize("short")).toBe("short");
   });
+
+  it("reads Markdown as plain text, not literal markers", () => {
+    expect(summarize("**Facture reçue** — consulter le [document](https://example.com/facture)"))
+      .toBe("Facture reçue — consulter le document");
+    expect(summarize("price is $5 * 2")).toBe("price is $5 * 2");
+  });
 });
 
 describe("buildSpendNotification", () => {
