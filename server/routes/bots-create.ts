@@ -97,6 +97,10 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "bot must be a JSON object" });
       }
+      // Security invariant: a paired phone keeps a bot's own id only in a move the owner allowed, where the move records it.
+      if (auth.kind === "loopback" && auth.companionDevice && !auth.companionMove && body.id !== undefined) {
+        return json(res, 403, { error: "Allow this move on the computer first." });
+      }
       if (req.headers["x-openmausbot-companion"] === "1") {
         const field = adminOnlyBotSetting(askedSettings(body));
         if (field) {

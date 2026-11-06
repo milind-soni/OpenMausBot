@@ -72,6 +72,16 @@ async function create(moveIn: ReturnType<typeof createPhoneMoveIn>, id = SCOUT, 
 }
 const refused = { status: 403, body: { error: PHONE_MOVE_REFUSAL } };
 
+/** A paired device's `POST /api/bots` through the guard and the create route, whose store makes nothing. */
+async function createThrough(moveIn: ReturnType<typeof createPhoneMoveIn>, auth: RequestAuth, body: Record<string, unknown>) {
+  let answered: { status: number; body: any } | null = null;
+  const url = new URL("http://127.0.0.1/api/bots");
+  await dispatchRoutes([moveIn.guard, createBotCreateRoutes({ store: store(), routines: () => null } as never)], {
+    req: { headers: { "x-openmausbot-companion": "1" }, resume() {} } as never, res: {} as never, url, path: url.pathname, method: "POST", auth,
+    json: ((_res: unknown, status: number, sent: any) => { answered = { status, body: sent }; }) as never, readBody: (async () => body) as never });
+  return answered as { status: number; body: any } | null;
+}
+
 describe("a phone's move into this computer", () => {
   it("does nothing for a request that is not a phone's move", async () => {
     const moveIn = setup();
@@ -165,23 +175,27 @@ describe("a phone's move into this computer", () => {
 
   it("a computer bot's id or conversation in other capitals is taken: the create answers 409 and nothing opens", async () => {
     const moveIn = setup();
-    const created = createBotCreateRoutes({ store: store(), routines: () => null } as never);
-    const make = async (auth: RequestAuth, body: Record<string, unknown>) => {
-      let answered: { status: number; body: any } | null = null;
-      const url = new URL("http://127.0.0.1/api/bots");
-      await dispatchRoutes([moveIn.guard, created], { req: { headers: { "x-openmausbot-companion": "1" }, resume() {} } as never, res: {} as never, url, path: url.pathname,
-        method: "POST", auth, json: ((_res: unknown, status: number, sent: any) => { answered = { status, body: sent }; }) as never, readBody: (async () => body) as never });
-      return answered as { status: number; body: any } | null;
-    };
+    const make = (auth: RequestAuth, body: Record<string, unknown>) => createThrough(moveIn, auth, body);
     for (const body of [{ id: "HERE-BOT-0001" }, { id: "Here-Thread-01" }, { id: "ROOM-THREAD-01" }, { id: "pocket-new-0005", threadId: "HERE-THREAD-01" },
       { id: "pocket-new-0006", threadId: "Here-Bot-0001" }, { id: "pocket-new-0007", threadId: "POCKET-NEW-0007" }]) {
       expect((await make(phone, body))?.status, JSON.stringify(body)).toBe(409);
       expect(moveIn.brings(phone, body.id), body.id).toBe(false);
     }
     expect(existsSync(join(dir, "phone-move-ins.json"))).toBe(false);
-    // An everyday paired phone's create, with no move, is held to the same rule.
-    expect((await make(everyday, { id: "Here-Bot-0001" }))?.status).toBe(409);
-    expect((await make(everyday, { id: "pocket-new-0008", threadId: "HERE-THREAD-01" }))?.status).toBe(409);
+    // The desktop owner's create is held to the same rule.
+    expect((await make(owner, { id: "Here-Bot-0001" }))?.status).toBe(409);
+    expect((await make(owner, { id: "pocket-new-0008", threadId: "HERE-THREAD-01" }))?.status).toBe(409);
+  });
+
+  it("a paired phone without the grant keeps no bot id of its own: 403 before anything is made or opened", async () => {
+    const moveIn = setup();
+    const lapsed = { status: 403, body: { error: "Allow this move on the computer first." } };
+    for (const body of [{ id: SCOUT, threadId: `${SCOUT}-main`, name: "Scout", useDefaults: false }, { id: SCOUT }, { id: "here-bot-0001" }, { id: "HERE-BOT-0001" }]) {
+      expect(await createThrough(moveIn, everyday, body), JSON.stringify(body)).toEqual(lapsed);
+    }
+    expect(bots.map((bot) => bot.id)).toEqual(["here-bot-0001"]);
+    expect(moveIn.brings(phone, SCOUT)).toBe(false);
+    expect(existsSync(join(dir, "phone-move-ins.json"))).toBe(false);
   });
 
   it("refuses every move write for a bot the phone did not bring", async () => {

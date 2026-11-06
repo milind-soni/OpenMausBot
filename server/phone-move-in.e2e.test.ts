@@ -176,6 +176,9 @@ it("a phone without the grant gets today's refusals, and the move never touches 
   const look = await f.paired("PATCH", `/api/bots/${starter}`, { approvalMode: "full" });
   expect(look.status).toBe(403);
   expect(look.body.error).toMatch(/a paired device may change how a bot looks/);
+  const lapsed = { status: 403, body: { error: "Allow this move on the computer first." } };
+  expect(await f.paired("POST", "/api/bots", { id: SCOUT, threadId: SCOUT_THREAD, name: "Scout", useDefaults: false })).toEqual(lapsed);
+  expect(await f.paired("POST", "/api/bots", { id: starter, name: "Scout", useDefaults: false })).toEqual(lapsed);
 
   const soul = await f.moving("PATCH", `/api/bots/${starter}`, { soul: "x" });
   expect(soul.status).toBe(403);
@@ -189,6 +192,9 @@ it("a phone without the grant gets today's refusals, and the move never touches 
     expect(out.body.error).toBe(PHONE_MOVE_REFUSAL);
   }
   expect(JSON.stringify([(await f.asOwner("GET", "/api/bots")).body, (await f.asOwner("GET", "/api/routines")).body])).toBe(before);
+  const everyday = await f.paired("POST", "/api/bots", { name: "Notes" });
+  expect(everyday.status).toBe(201);
+  expect(everyday.body.bot.id).not.toBe(SCOUT);
 }), 120_000);
 
 it("a starter with a user line stays main, and the phone's MausBot arrives beside it as an ordinary bot", () => fixture(async (f) => {
