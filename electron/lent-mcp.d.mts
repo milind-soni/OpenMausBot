@@ -7,6 +7,7 @@ export function isLoopbackAddress(url: string): boolean;
 export function lentMcpRefusal(grant: { cloud?: unknown; terminal?: boolean }, server: LentMcpServer): string | null;
 export function ownEnvironmentIds(dataDirs: ReadonlyArray<string | null | undefined>): string[];
 export function inheritedEnvironment(env?: NodeJS.ProcessEnv): Record<string, string>;
+export function windowsLaunch(command: string, args: string[], env: Record<string, string | undefined>, exists?: (file: string) => boolean): { file: string; args: string[]; verbatim: boolean } | null;
 export function createLentMcp(options?: {
   environment?: () => Record<string, string> | Promise<Record<string, string>>;
   home?: string;

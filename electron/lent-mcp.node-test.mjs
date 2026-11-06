@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { createLentMcp, isLoopbackAddress, lentMcpRefusal, ownEnvironmentIds, validLentMcpServer } from "./lent-mcp.mjs";
+import { createLentMcp, inheritedEnvironment, isLoopbackAddress, lentMcpRefusal, ownEnvironmentIds, validLentMcpServer, windowsLaunch } from "./lent-mcp.mjs";
 import { executeSharedOperation } from "./shared-computer-access.mjs";
 import { validSharedOperation } from "./computer-sharing.mjs";
 
@@ -33,7 +33,7 @@ async function stdioFixture(t) {
   await writeFile(script, SERVER_SCRIPT);
   const home = path.join(dir, "home");
   await mkdir(home);
-  const lent = createLentMcp({ environment: () => ({ PATH: process.env.PATH ?? "" }), home });
+  const lent = createLentMcp({ environment: () => ({ ...inheritedEnvironment(), PATH: process.env.PATH ?? "" }), home });
   t.after(() => lent.close());
   return { dir, home, script, lent, server: { name: "notes", command: process.execPath, args: [script], env: { NOTES_TOKEN: "saved-env-key" } } };
 }
@@ -163,6 +163,18 @@ test("an address that refuses its keys, redirects or isn't there says so plainly
   });
   await assert.rejects(lent.call({ action: "mcp_tools", server: http(url) }, signal()), /local is not answering at 127\.0\.0\.1:\d+ on this computer/);
   await assert.rejects(lent.call({ action: "mcp_tools", server: http("http://127.0.0.1:9/mcp") }, signal()), /local is not answering at 127\.0\.0\.1:9 on this computer/);
+});
+
+test("on Windows a program starts directly, a .cmd shim through cmd.exe with each word quoted, and a missing one is named", () => {
+  const env = { PATH: "C:\\Tools;C:\\Program Files\\nodejs", PATHEXT: ".COM;.EXE;.BAT;.CMD", ComSpec: "C:\\Windows\\system32\\cmd.exe" };
+  const on = files => candidate => files.some(file => file.toLowerCase() === candidate.toLowerCase());
+  assert.deepEqual(windowsLaunch("npx", ["-y", "notes mcp", 'say "hi"'], env, on(["C:\\Program Files\\nodejs\\npx.cmd"])), {
+    file: "C:\\Windows\\system32\\cmd.exe", verbatim: true,
+    args: ["/d", "/s", "/c", '""C:\\Program Files\\nodejs\\npx.cmd" "-y" "notes mcp" "say ""hi""""'],
+  });
+  assert.deepEqual(windowsLaunch("uvx", ["mcp"], env, on(["C:\\Tools\\uvx.exe", "C:\\Tools\\uvx.cmd"])), { file: "C:\\Tools\\uvx.exe", args: ["mcp"], verbatim: false }, "PATHEXT's order");
+  assert.deepEqual(windowsLaunch("C:\\Users\\Ada\\bin\\notes.exe", [], env, on(["C:\\Users\\Ada\\bin\\notes.exe"])), { file: "C:\\Users\\Ada\\bin\\notes.exe", args: [], verbatim: false });
+  assert.equal(windowsLaunch("notes-mcp", [], env, on([])), null);
 });
 
 test("this computer's own installs, by the environment id each keeps", async t => {

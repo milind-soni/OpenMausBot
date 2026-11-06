@@ -26,7 +26,7 @@ const MAX_PAGES = 10;
 const PROTOCOL = "2025-03-26";
 
 /** What a lent server inherits from this app: where things live, never a key. */
-const INHERITED = ["HOME", "USERPROFILE", "USER", "LOGNAME", "SHELL", "LANG", "TMPDIR", "TEMP", "TMP", "PATHEXT", "SystemRoot", "SystemDrive", "windir", "APPDATA", "LOCALAPPDATA", "ProgramData"];
+const INHERITED = ["HOME", "USERPROFILE", "USER", "LOGNAME", "SHELL", "LANG", "TMPDIR", "TEMP", "TMP", "PATHEXT", "SystemRoot", "SystemDrive", "windir", "ComSpec", "APPDATA", "LOCALAPPDATA", "ProgramData"];
 export const inheritedEnvironment = (env = process.env) => Object.fromEntries(INHERITED.filter(key => env[key]).map(key => [key, env[key]]));
 
 const record = value => Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -78,8 +78,18 @@ const failure = message => new Error(message);
 /** The server answered the request with an error: it is still running. */
 const refusal = message => Object.assign(new Error(message), { answered: true });
 
-/** Windows starts a .cmd shim (npx.cmd, uvx.cmd) only through cmd.exe, so there each word is quoted for it. */
-const windowsWord = word => (/[\s"]/.test(word) ? `"${word.replace(/"/g, '\\"')}"` : word);
+/** How Windows starts `command`: a program directly, found on PATH with PATHEXT as Windows finds it, and a .cmd or .bat
+ * shim (npx.cmd, uvx.cmd) through cmd.exe, which alone runs one, each word quoted for it. Null when it isn't there. */
+export function windowsLaunch(command, args, env, exists = fs.existsSync) {
+  const extensions = (env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean).map(extension => extension.toLowerCase());
+  const names = path.win32.extname(command) ? [command] : extensions.map(extension => `${command}${extension}`);
+  const dirs = /[\\/]/.test(command) ? [""] : (env.PATH || env.Path || "").split(";").filter(Boolean);
+  const file = dirs.flatMap(dir => names.map(name => (dir ? path.win32.join(dir, name) : name))).find(candidate => exists(candidate));
+  if (!file) return null;
+  if (!/\.(?:cmd|bat)$/i.test(file)) return { file, args, verbatim: false };
+  const line = [file, ...args].map(word => `"${word.replace(/"/g, '""')}"`).join(" ");
+  return { file: env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", `"${line}"`], verbatim: true };
+}
 
 function killTree(child) {
   if (!child.pid) return;
@@ -91,10 +101,15 @@ function killTree(child) {
   }
 }
 
+const notHere = server => failure(`${server.name} could not start: ${path.basename(server.command)} is not on this computer`);
+
 function stdioClient(server, { environment, home }) {
   const windows = process.platform === "win32";
-  const child = spawn(windows ? windowsWord(server.command) : server.command, windows ? server.args.map(windowsWord) : server.args, {
-    cwd: home, detached: !windows, windowsHide: true, shell: windows, stdio: ["pipe", "pipe", "ignore"], env: { ...environment, ...server.env },
+  const env = { ...environment, ...server.env };
+  const launch = windows ? windowsLaunch(server.command, server.args, { ...env, ComSpec: env.ComSpec || process.env.ComSpec }) : { file: server.command, args: server.args, verbatim: false };
+  if (!launch) throw notHere(server);
+  const child = spawn(launch.file, launch.args, {
+    cwd: home, detached: !windows, windowsHide: true, windowsVerbatimArguments: launch.verbatim, stdio: ["pipe", "pipe", "ignore"], env,
   });
   let sequence = 0; let closed = null; let bytes = 0;
   const pending = new Map();
@@ -104,7 +119,7 @@ function stdioClient(server, { environment, home }) {
     for (const item of pending.values()) item.reject(error);
     pending.clear(); killTree(child);
   };
-  child.on("error", error => end(failure(error.code === "ENOENT" ? `${server.name} could not start: ${path.basename(server.command)} is not on this computer` : `${server.name} could not start`)));
+  child.on("error", error => end(error.code === "ENOENT" ? notHere(server) : failure(`${server.name} could not start`)));
   child.stdin.on("error", () => end(failure(`${server.name} stopped`)));
   child.on("exit", () => end(failure(`${server.name} stopped`)));
   child.stdout.on("data", chunk => { bytes += chunk.length; if (bytes > RESULT_LIMIT) end(failure(`${server.name} answered with more than ${RESULT_LIMIT} bytes`)); });
