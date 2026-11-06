@@ -296,7 +296,7 @@ describe("settings rules", () => {
     expect(deciderReady({ decider: { enabled: true } }, "roomRouting")).toBe(false);
   });
 
-  it("with no key yet, status keeps the provider the person chose, so OpenRouter's key field shows (#4646)", () => {
+  it("with no key yet, status keeps the provider the person chose, so OpenRouter's key field shows", () => {
     expect(describeDecider({ decider: { provider: "openrouter" } })).toMatchObject({ provider: "openrouter", configured: false, enabled: false });
     expect(describeDecider({ decider: { provider: "jev" } })).toMatchObject({ provider: "jev", configured: false });
     expect(describeDecider({ decider: { provider: "off" } })).toMatchObject({ provider: "jev", configured: false });

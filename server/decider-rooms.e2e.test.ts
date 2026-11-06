@@ -441,7 +441,7 @@ describe("Auto rooms ask the decision model who answers", { timeout: 90_000 }, (
 
       const keyed = await api("PUT", "/api/config", { openrouter: { key: SHARED } });
       expect(keyed.status).toBe(200);
-      // OpenRouter stays the chosen provider in Settings (#4646), still with no key of its own.
+      // OpenRouter stays the chosen provider in Settings, still with no key of its own.
       expect(keyed.body.decider).toEqual({ provider: "openrouter", model: MODEL, api: "chat", configured: false, enabled: false, jobs: { roomRouting: true } });
       expect((await api("PUT", "/api/config", { decider: { enabled: true } })).status).toBe(400);
       expect(await api("POST", "/api/decider/test", {})).toMatchObject({ body: { ok: false, reason: "no_key" } });
