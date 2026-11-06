@@ -24,18 +24,19 @@ const LOGIN_NOTE = "Kiro is not signed in. Run `kiro-cli login` in a terminal, t
 const AUTH_IDS = new Set(["aws-builder-id", "aws-iam-identity-center", "kiro-login"]);
 const FALLBACK_MODEL = "auto";
 
+/** Kiro's SQLite auth store, honoring XDG_DATA_HOME per XDG spec. */
 function kiroDataDir(env: Record<string, string | undefined>): string {
-  // Kiro CLI stores auth in XDG_DATA_HOME/kiro-cli/data.sqlite3, falling back to $HOME/.local/share
   const xdg = env.XDG_DATA_HOME?.trim();
   if (xdg) return join(xdg, "kiro-cli");
   return join(harnessHome("kiro-cli", env));
 }
 
+/** Kiro's per-user agent config dir, honoring KIRO_HOME. */
 function kiroHome(env: Record<string, string | undefined>): string {
-  // Some builds use ~/.kiro for agent configs; keep consistent with T3's kiroHome
   return env.KIRO_HOME?.trim() ? String(env.KIRO_HOME) : join(env.HOME || homedir(), ".kiro");
 }
 
+/** Whether the Kiro CLI appears signed in for this env (token or persisted store). */
 export function kiroSignedIn(env: Record<string, string | undefined>): boolean {
   if (env.KIRO_API_KEY?.trim()) return true;
   // Prefer token env that Kiro CLI itself would accept if present
@@ -65,6 +66,7 @@ const DISCOVERY: AcpDiscoveryOptions = {
   label: (model) => model.label,
 };
 
+/** Live model catalog via ACP discovery with Kiro V3 hooks kept server-side. */
 export function resolveKiroModels(
   env: Record<string, string | undefined>,
   config: { cli: string },
@@ -72,6 +74,7 @@ export function resolveKiroModels(
   return discoverAcpModels(env, config.cli, [...SPAWN_ARGS] as string[], DISCOVERY);
 }
 
+/** Prefer Builder ID over IAM Identity Center for Kiro's advertised auth methods. */
 function pickKiroAuthMethod(methods: Array<{ id: string }>): string | null {
   // Prefer AWS Builder ID over IAM Identity Center; kiro-login is the fallback name in older bundles
   const ids = new Set(methods.map((m) => String(m.id)));
