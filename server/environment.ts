@@ -39,6 +39,8 @@ export interface EnvironmentDescriptor {
     longCommands?: true;
     /** A lent computer may say it takes edit_file, append_file and delete_file; only then does this server send them. */
     fileEdits?: true;
+    /** A lent computer may say it runs the MCP servers saved here that run on it (mcp_tools, mcp_call). Never a team Cloud. */
+    lentMcp?: true;
     /** A person's own OMB Cloud home. */
     cloudHome?: true;
     /** A team's Cloud home: `label` is the team's name. */
@@ -152,6 +154,7 @@ export function environmentDescriptor(input: { environmentId: string; desktopMan
       // lendingDetails: a lent computer may say its platform, and this server remembers what was lent to it.
       ...(input.sharedComputers === true ? { sharedComputers: true as const, lendingDetails: true as const, commandTimeouts: true as const, longCommands: true as const, fileEdits: true as const } : {}),
       ...(input.sharedComputers === true && input.cloudHome === true ? { deviceLink: true as const } : {}),
+      ...(input.sharedComputers === true && input.cloudTeam !== true ? { lentMcp: true as const } : {}),
       ...(input.sharedComputers === true && input.cloudHome === true && input.cloudTeam !== true ? { myChromeLink: true as const, computerAsks: true as const } : {}),
       ...(input.cloudHome === true ? { cloudHome: true as const, move: 1 as const } : {}),
       ...(input.ownHome === true && input.cloudHome !== true ? { move: 1 as const } : {}),

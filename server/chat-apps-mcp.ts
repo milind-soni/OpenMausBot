@@ -392,7 +392,7 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
       queued.delete(name);
       if (closed || deps.personMcp?.().includes(name)) return;
       const stored = storedServer(name, deps.storedServers()[name]);
-      if (!stored?.enabled || stored.apps === false) return;
+      if (!stored?.enabled || stored.apps === false || stored.runsOn) return;
       if (isRemoteMcpServer(stored) && deps.oauth.authState(name, stored.url) === "needs-sign-in") return;
       const target = isRemoteMcpServer(stored) ? await signedIn(name, stored) : stored;
       if (!target) return;
@@ -420,7 +420,7 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
   const startup = deps.startupProbes === false ? undefined : setTimeout(() => {
     for (const [name, raw] of Object.entries(deps.storedServers())) {
       const stored = storedServer(name, raw);
-      if (stored?.enabled && stored.apps !== false && isRemoteMcpServer(stored) && catalog.stale(name, stored)) probeStale(name);
+      if (stored?.enabled && stored.apps !== false && !stored.runsOn && isRemoteMcpServer(stored) && catalog.stale(name, stored)) probeStale(name);
     }
   }, STARTUP_PROBE_DELAY_MS);
   startup?.unref?.();

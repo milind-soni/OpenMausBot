@@ -89,7 +89,7 @@ import capabilitiesModule from "./capabilities.cjs";
 import environmentsModule from "./environments.cjs";
 import localOriginModule from "./local-origin.cjs";
 import { buildApplicationMenu } from "./menu.mjs";
-import { createComputerSharing, isHomeFolder, validateSharedFolders } from "./computer-sharing.mjs";
+import { createComputerSharing, isHomeFolder, validateSharedFolders } from "./computer-sharing.mjs"; import { ownEnvironmentIds } from "./lent-mcp.mjs";
 import { createHostScreenLease } from "./host-screen-lease.mjs";
 import { acquireDataDirLease } from "./data-dir-lease.mjs";
 import { switchLocalEnvironment } from "./environment-switch.mjs";
@@ -1443,7 +1443,7 @@ function sharingController() {
     // Each holds provider API keys and sessions.json: a broad share must never reach them.
     protectedPaths: [desktopDataDir(), cleanWorkspaceDir(desktopDataDir()), profilesDir(desktopDataDir())],
     fetch: (...args) => session.defaultSession.fetch(...args),
-    environments: () => environmentsState.environments,
+    environments: () => environmentsState.environments, localEnvironments: () => ownEnvironmentIds([desktopDataDir(), runningDataDir]),
     enabled: refreshSharedComputersAllowed, t: nativeT,
     cloud: lendingTarget.cloud, myCloud: lendingTarget.environment, ownClouds: lendingTarget.places, screen: screenControl.now, askForScreen, power: cloudPower, cloudPower: origin => cloudAccount?.powerOf?.(origin) ?? null, reconnect: reconnectCloud,
     prompt: createAskPrompt({ t: nativeT, dialog, window: () => mainWindow, idleSeconds: () => powerMonitor.getSystemIdleState(1) === "unknown" ? null : powerMonitor.getSystemIdleTime() }), startScreen: screenControl.start, confirmTerminal: () => lendingDialogs.lendTerminal(true, () => sharingController().lendTerminal(true)), log: slog,

@@ -157,6 +157,7 @@
   "server.mcp.card.remove": "Gỡ {name}?",
   "server.mcp.card.internet": "Kết nối qua internet. Khi bật, các bot của bạn có thể dùng công cụ của nó.",
   "server.mcp.card.local": "Chạy trên máy tính này.",
+  "server.mcp.card.elsewhere": "Chạy trên {computer}.",
   "server.mcp.card.newKey": "khóa mới cho {key}",
   "server.mcp.card.cleared": "Xóa các giá trị đã lưu: {items}.",
   "server.mcp.card.usedBy": "Được dùng bởi {names}.",

@@ -19,13 +19,14 @@ const SERVERS = {
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
-function fixture(bots: Array<{ id: string; name: string; threadId: string; chiefOfStaff?: boolean; mcpServers?: string[]; toolScope?: unknown }>, servers: Record<string, unknown> = SERVERS, file?: string, mailConnected?: () => boolean) {
+function fixture(bots: Array<{ id: string; name: string; threadId: string; chiefOfStaff?: boolean; mcpServers?: string[]; toolScope?: unknown }>, servers: Record<string, unknown> = SERVERS, file?: string, mailConnected?: () => boolean, lent?: (runsOn: { environmentId: string; label: string }) => boolean) {
   const dir = mkdtempSync(join(tmpdir(), "omb-stayed-")); dirs.push(dir);
   const said: Array<{ threadId: string; text: string; kind: string }> = [];
   const notified: Array<{ text: string; bot: string; threadId: string }> = [];
   const notices = createStayedNotices({
     file: file ?? join(dir, "told.json"), origin: "https://omb-u-1.fly.dev", servers: () => servers, programs: () => ["npx", "node", "python3"], bots: () => bots, language: () => undefined,
     ...(mailConnected ? { mailConnected } : {}),
+    ...(lent ? { lent } : {}),
     say: (threadId, text, kind) => { said.push({ threadId, text, kind }); },
     notify: (text, bot, threadId) => { notified.push({ text, bot: bot.id, threadId }); },
   });
@@ -33,11 +34,23 @@ function fixture(bots: Array<{ id: string; name: string; threadId: string; chief
 }
 
 describe("what stayed on the person's computer", () => {
+  it("says nothing stayed when the computer a connector runs on is lent here, since bots reach it through that computer", () => {
+    const bots = [{ id: "a", name: "Ada", threadId: "t-a", chiefOfStaff: true }];
+    const lentHere = fixture(bots, SERVERS, undefined, undefined, (runsOn) => runsOn.environmentId === MAC.environmentId);
+    lentHere.notices.moved();
+    lentHere.notices.personTurn(bots[0]!, "t-a");
+    expect(lentHere.said).toEqual([]);
+    expect(lentHere.notified).toEqual([]);
+    const notLent = fixture(bots, SERVERS, undefined, undefined, () => false);
+    notLent.notices.moved();
+    expect(notLent.said).toHaveLength(1);
+  });
+
   it("names each connector that runs elsewhere with why, and leaves out one that was off anyway", () => {
     expect(stayedConnectors(SERVERS, ["npx", "node", "python3"])).toEqual([
-      { name: "easy", computer: "Mac mini", why: { kind: "mail" } },
-      { name: "fetch", computer: "Mac mini", why: { kind: "program", program: "uvx" } },
-      { name: "notes", computer: "Mac mini", why: { kind: "here" } },
+      { name: "easy", computer: "Mac mini", runsOn: MAC, why: { kind: "mail" } },
+      { name: "fetch", computer: "Mac mini", runsOn: MAC, why: { kind: "program", program: "uvx" } },
+      { name: "notes", computer: "Mac mini", runsOn: MAC, why: { kind: "here" } },
     ]);
   });
 
