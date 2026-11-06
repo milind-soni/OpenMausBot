@@ -259,8 +259,7 @@ export function createCompanionAccountService({
   firstEndpointCheckMs = DEFAULT_FIRST_ENDPOINT_CHECK_MS,
   onDemand = false,
   managedEndpointNeeded = async () => null,
-  /** This computer reaches its phones through MausBot Relay: a "no" from managedEndpointNeeded then holds even right
-   * after sign-in. */
+  /** Reaches its phones through MausBot Relay: a "no" from managedEndpointNeeded then holds even right after sign-in. */
   relayCapable = () => false,
   releaseGraceMs = DEFAULT_RELEASE_GRACE_MS,
   releaseJitterMs = DEFAULT_RELEASE_JITTER_MS,
@@ -780,20 +779,11 @@ export function createCompanionAccountService({
   let phonesUnused = false;
   /** "unused" (paired phones, none seen for 30 days) reads as false and is remembered for the release. */
   const currentNeed = async () => {
-    phonesUnused = false;
-    let need = null;
-    try {
-      const answer = await managedEndpointNeeded();
-      phonesUnused = answer === MANAGED_ENDPOINT_PHONES_UNUSED;
-      need = phonesUnused ? false : typeof answer === "boolean" ? answer : null;
-    } catch {
-      need = null;
-    }
+    const answer = await Promise.resolve().then(() => managedEndpointNeeded()).catch(() => null);
+    phonesUnused = answer === MANAGED_ENDPOINT_PHONES_UNUSED;
+    const need = phonesUnused ? false : typeof answer === "boolean" ? answer : null;
     if (need === false && relayCapable()) return false;
-    if (requestedRecently()) {
-      phonesUnused = false;
-      return true;
-    }
+    if (requestedRecently()) return (phonesUnused = false), true;
     return need;
   };
 
