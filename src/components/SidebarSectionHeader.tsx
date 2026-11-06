@@ -24,6 +24,7 @@ export function SidebarSectionHeader({
   onContextMenu,
   line = false,
   onMenu,
+  reserveMenu = false,
   menuOpen = false,
   count,
   naming,
@@ -43,6 +44,8 @@ export function SidebarSectionHeader({
   onContextMenu?: (event: MouseEvent<HTMLDivElement>) => void;
   line?: boolean;
   onMenu?: (button: HTMLButtonElement) => void;
+  /** Keep the ⋯ button's space when this line has none, so counts line up with lines that do (Simple). */
+  reserveMenu?: boolean;
   menuOpen?: boolean;
   /** How many rows the section holds, shown at rest where the chevron shows on hover (Simple). */
   count?: number;
@@ -127,6 +130,7 @@ export function SidebarSectionHeader({
             <MoreHorizontal size={15} aria-hidden="true" />
           </button>
         )}
+        {!onMenu && reserveMenu && !naming && <span aria-hidden="true" className="w-[22px] shrink-0" />}
       </div>
     );
   }

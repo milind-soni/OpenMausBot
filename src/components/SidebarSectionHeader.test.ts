@@ -125,6 +125,14 @@ describe("SidebarSectionHeader as a Simple-mode line", () => {
     expect(html).toMatch(/<span class="text-\[12px\] tabular-nums leading-4 text-ink-secondary transition-opacity group-hover\/section:opacity-0 group-focus-within\/section:opacity-0 touch:opacity-0">3<\/span>/);
   });
 
+  it("keeps the count in the same column whether or not the line has a ⋯ menu", () => {
+    const slot = /<span aria-hidden="true" class="w-\[22px\] shrink-0"><\/span>/;
+    expect(renderToStaticMarkup(line({ count: 1, reserveMenu: true }))).toMatch(slot);
+    expect(renderToStaticMarkup(line({ count: 4, reserveMenu: true, onMenu: () => {} }))).not.toMatch(slot);
+    expect(renderToStaticMarkup(line({ count: 1 }))).not.toMatch(slot);
+    expect(renderToStaticMarkup(line({ reserveMenu: true, naming: { value: "", label: "Name", onCommit: () => {}, onCancel: () => {} } }))).not.toMatch(slot);
+  });
+
   it("is dragged by the line itself, and only when it can be reordered", () => {
     const onDragStart = vi.fn();
     const onDragEnd = vi.fn();
