@@ -1,7 +1,10 @@
 // Each job type of the protocol, and nothing else: what runs for a job is fixed here, and its arguments were checked
 // (protocol.ts checkJob) before it got here.
+import { auditArgs, type AuditEvent, type AuditLog, type AuditSource } from "./audit.ts";
 import { asJobError } from "./failure.ts";
 import type { Home } from "./home.ts";
+import { errorText, type Log } from "./log.ts";
+import { policyRefusal, readPolicy } from "./policy.ts";
 import type { ConnectorIdentity, HostHealth, Job, JobArgs, JobReply, JobResults, JobType } from "./protocol.ts";
 
 /** Jobs that change the home, its data or the connector; they wait for each other. */
@@ -65,4 +68,60 @@ export function jobRunner(deps: RunnerDeps): (job: Job) => Promise<JobReply | nu
       waiting -= 1;
     }
   };
+}
+
+/** Jobs only read: they run even when the audit log cannot be written, and that is logged. */
+const READS: ReadonlySet<JobType> = new Set(["status", "host-health"]);
+
+export interface Desk {
+  /**
+   * Every job, from any channel, comes in here: recorded in the audit log, run, and its result recorded. A job that
+   * would change something is refused when it cannot be recorded. Null: the new connector answers a self-update.
+   */
+  submit(job: Job, by: AuditSource): Promise<JobReply | null>;
+}
+
+export function jobDesk(deps: { run: (job: Job) => Promise<JobReply | null>; audit: AuditLog; log: Log; policyFile?: string }): Desk {
+  const record = (event: AuditEvent): boolean => {
+    try {
+      deps.audit.append(event);
+      return true;
+    } catch (error) {
+      deps.log(`could not write the audit log ${deps.audit.file}: ${errorText(error)}`);
+      return false;
+    }
+  };
+  return {
+    async submit(job, by) {
+      if (!record({ event: "job", by, id: job.id, type: job.type, args: auditArgs(job) }) && !READS.has(job.type)) {
+        return { id: job.id, ok: false, error: { code: "audit_unavailable", message: `The audit log at ${deps.audit.file} cannot be written, so nothing was done. Run the install command again to repair it.` } };
+      }
+      const refusal = by === "admin" && deps.policyFile ? policyRefusal(job, readPolicy(deps.policyFile), deps.policyFile) : null;
+      if (refusal) {
+        const refused: JobReply = { id: job.id, ok: false, error: { code: "refused_by_policy", message: refusal } };
+        record(resultEvent(by, job.type, refused));
+        return refused;
+      }
+      const reply = await deps.run(job);
+      if (reply) record(resultEvent(by, job.type, reply));
+      return reply;
+    },
+  };
+}
+
+export function resultEvent(by: AuditSource, type: JobType, reply: JobReply): AuditEvent {
+  return reply.ok ? { event: "result", by, id: reply.id, type, ok: true, detail: resultDetail(reply.result as Record<string, unknown>) } : { event: "result", by, id: reply.id, type, ok: false, error: reply.error };
+}
+
+/** The images and copies a result names: what the server's owner looks for afterwards. */
+function resultDetail(result: Record<string, unknown>): Record<string, unknown> {
+  const home = result.home as { state?: string; image?: string | null } | undefined;
+  const detail: Record<string, unknown> = {};
+  if (home) Object.assign(detail, { home: home.state, image: home.image ?? null });
+  for (const key of ["previousImage", "backupId", "bytes", "sha256"]) if (result[key] !== undefined) detail[key] = result[key];
+  const copy = (result.snapshot ?? result.backup) as { id?: string } | null | undefined;
+  if (copy?.id) detail.copy = copy.id;
+  const connector = result.connector as { version?: string; image?: string | null } | undefined;
+  if (connector) Object.assign(detail, { connector: connector.version, connectorImage: connector.image ?? null });
+  return detail;
 }

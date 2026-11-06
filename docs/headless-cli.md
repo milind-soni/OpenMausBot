@@ -140,6 +140,14 @@ and 100 GB for a Team server), disk encryption, CPUs and memory (a Team needs
 (required with `--domain HOST`, else only a warning), and the clock against
 network time (signed requests allow 300 seconds). It changes nothing.
 
+On a server that runs MausBot's own connector (a team on its own server), it
+also asks the connector for its checks (`mausbot-connector probe --json`,
+which starts the bots' box once under the home's own security settings) and
+lists any that fail. There the home runs under its own AppArmor profile, so
+AppArmor's server-wide switch can stay on: the user-namespace check passes
+when the connector's box check does, and otherwise says to run the install
+command again.
+
 A problem fails the check (exit 7) and says its fix on the next line; a
 warning does not. `--json` prints `{ ok, problems, warnings, checks: [{ id,
 status, message, fix }] }`. On macOS and Windows it says it checks Linux
