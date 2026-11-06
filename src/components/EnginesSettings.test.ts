@@ -36,7 +36,8 @@ describe("Settings → Engines → ChatGPT accounts", () => {
     expect(html).toContain('data-account="codex" data-account-state="signedOut"');
     expect(html).toContain("Not signed in");
     expect(html.match(/<button[^>]*>Sign in<\/button>/g)).toHaveLength(1);
-    expect(html).not.toContain("Provider icon");
+    expect(html).toContain("Provider icon");
+    expect(html).toContain('aria-label="Provider icon for Codex"');
     expect(html).not.toContain("Check account");
   });
 
@@ -116,7 +117,7 @@ describe("Settings → Engines → setup cards", () => {
       expect(html.indexOf(label)).toBeGreaterThan(html.indexOf(`data-engine-card="${instance.instanceId}"`));
       expect(html.indexOf(label)).toBeLessThan(html.lastIndexOf("</details>"));
       expect(html).not.toContain(other);
-      expect(html).not.toContain("Provider icon");
+      expect(html).toContain("Provider icon");
       fixture.instances = [{ ...instance, readOnly: true }];
       expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain(label);
     }
