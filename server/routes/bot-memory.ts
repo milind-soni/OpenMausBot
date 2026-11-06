@@ -1,10 +1,11 @@
 import { mkdir } from "node:fs/promises";
-import { isAbsolute, normalize } from "node:path";
+import { isAbsolute, join, normalize } from "node:path";
 import { z } from "zod";
 import type { ServerResponse } from "node:http";
 
 import type { BotWorkingFolder } from "../../shared/bot-working-folder.ts";
-import { workspaceDir } from "../workspace.ts";
+import type { Surface } from "../../shared/wire.ts";
+import { TASK_WORKSPACES_DIR } from "../workspace.ts";
 import { json } from "../harness/http.ts";
 import {
   MEMORY_INDEX,
@@ -28,8 +29,8 @@ import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface BotMemoryRouteDeps {
-  bot(id: string): { id: string; cwd?: string; computer?: string; memoryUpkeep?: boolean } | null | undefined;
-  taskByThread(botId: string, threadId: string): { title?: string } | undefined;
+  bot(id: string): { id: string; threadId: string; cwd?: string; computer?: string; memoryUpkeep?: boolean } | null | undefined;
+  taskByThread(botId: string, threadId: string): { title?: string; cwd?: string | null; surface?: Surface } | undefined;
   upkeep: Pick<MemoryUpkeep, "status" | "tidy">;
   /** The caller's About me: the server's profile's, or on a Team Cloud the signed-in person's own. */
   aboutMe(auth: RequestAuth): string;
@@ -67,13 +68,17 @@ export function createBotMemoryRoutes(deps: BotMemoryRouteDeps): RouteHandler {
     if (m && (method === "GET" || method === "POST")) {
       const bot = deps.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
-      const folder = bot.cwd || workspaceDir(bot.id);
-      const available = bot.computer !== "vm" && bot.computer !== "cloud"
+      const threadId = url.searchParams.get("threadId") ?? bot.threadId;
+      const task = /^[\w-]{1,128}$/.test(threadId) ? deps.taskByThread(bot.id, threadId) : undefined;
+      if (!task) return json(res, 404, { error: "no such task" });
+      const folder = task.cwd !== undefined ? task.cwd : bot.cwd ?? join(TASK_WORKSPACES_DIR, bot.id, threadId);
+      const computer = task.surface ?? bot.computer;
+      const available = folder !== null && computer !== "vm" && computer !== "cloud"
         && isAbsolute(folder) && !folder.includes("\0") && !/^[\\/]{2}/.test(folder)
         && !/^[\\/]{2}/.test(normalize(folder));
       const result: BotWorkingFolder = { path: available ? folder : null, local: available && auth.kind === "loopback" };
       if (method === "GET") return json(res, 200, result);
-      if (!available || auth.kind !== "loopback") return json(res, 403, { error: "This folder cannot be opened on this computer." });
+      if (!available || !folder || auth.kind !== "loopback") return json(res, 403, { error: "This folder cannot be opened on this computer." });
       try {
         await mkdir(folder, { recursive: true, mode: 0o700 });
       } catch {

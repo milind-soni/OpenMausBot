@@ -245,18 +245,23 @@ describe("Show in folder for a file outside the workspace", () => {
     assert.deepEqual(shown, []);
   });
 
-  it("opens a directory's contents through the desktop shell and reports shell failures", async () => {
+  it("reveals application bundles without dispatching to a default application opener", async () => {
     const { shown, reveal } = shell();
     const opened = [];
     const openDirectory = async (folder) => { opened.push(folder); return ""; };
-    assert.equal(await revealInFolder(botHome, { reveal, openDirectory }), "shown");
-    assert.deepEqual(opened, [botHome]);
-    assert.deepEqual(shown, []);
-    assert.equal(await revealInFolder(botHome, { reveal, openDirectory: async () => "Permission denied" }), "invalid");
-    assert.equal(await revealInFolder(botHome, { reveal, openDirectory: async () => { throw new Error("denied"); } }), "invalid");
-    assert.equal(await revealInFolder(path.join(home, "secret.txt"), { reveal, openDirectory }), "shown");
-    assert.deepEqual(shown, [path.join(home, "secret.txt")]);
-    assert.deepEqual(opened, [botHome]);
+    const fsp = { stat: async () => ({ isDirectory: () => true, isFile: () => false }) };
+    for (const target of ["/Applications/Example.app", "/Applications/Example.APP", "/Users/fixture/project"]) {
+      assert.equal(await revealInFolder(target, { reveal, openDirectory, fsp, pathApi: path.posix }), "shown");
+    }
+    assert.deepEqual(shown, ["/Applications/Example.app", "/Applications/Example.APP", "/Users/fixture/project"]);
+    assert.deepEqual(opened, []);
+  });
+
+  it("keeps the renderer reveal bridge wired only to file-manager selection", () => {
+    const main = fs.readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
+    const handler = main.slice(main.indexOf('ipcMain.handle("desktop:reveal-file"'), main.indexOf('ipcMain.handle("desktop:open-html"'));
+    assert.match(handler, /shell\.showItemInFolder\(target\)/);
+    assert.doesNotMatch(handler, /shell\.openPath|shell\.openExternal/);
   });
 
   it("refuses relative paths, URLs and network shares without touching the disk", async () => {

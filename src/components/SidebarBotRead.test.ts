@@ -7,17 +7,23 @@ import { BotEditorStore, initialState, reducer, type Action, type AppState, type
 import { BotContextMenu } from "./Sidebar";
 import { setLocale } from "@/lib/i18n";
 
-const workingFolder = vi.hoisted(() => ({ path: null as string | null, local: false }));
+const workingFolder = vi.hoisted(() => ({ path: null as string | null, local: false, requests: vi.fn() }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return {
     ...original,
-    api: (path: string, opts?: RequestInit) => path.endsWith("/working-folder") ? Promise.resolve({ ...workingFolder }) : original.api(path, opts),
+    api: (path: string, opts?: RequestInit) => {
+      if (path.split("?")[0].endsWith("/working-folder")) {
+        workingFolder.requests(path);
+        return Promise.resolve({ path: workingFolder.path, local: workingFolder.local });
+      }
+      return original.api(path, opts);
+    },
   };
 });
-vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => mode.admin }));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
-const mode = vi.hoisted(() => ({ advanced: true }));
+const mode = vi.hoisted(() => ({ advanced: true, admin: true }));
 vi.mock("@/lib/interface-mode", async (original) => ({
   ...await original<typeof import("@/lib/interface-mode")>(), useAdvancedMode: () => mode.advanced,
 }));
@@ -46,15 +52,28 @@ const response = (threadId: string) => {
 };
 
 beforeEach(() => {
+  workingFolder.requests.mockReset();
   workingFolder.path = null;
   workingFolder.local = false;
   mode.advanced = true;
+  mode.admin = true;
   setLocale("en"); document.documentElement.dataset.reducedMotion = "true";
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
   state = { ...initialState, bots: [structuredClone(bot)], selectedId: "another-bot" };
   menu = { botId: bot.id, x: 50, y: 50 }; onClose.mockReset();
 });
 afterEach(() => { flushSync(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); delete window.ogb; setLocale("en"); });
+
+it.each([true, false])("does not request a working folder for a client-only menu with advanced mode %s", (advanced) => {
+  mode.advanced = advanced;
+  mode.admin = false;
+  workingFolder.path = "C:\\fixture\\Reviewer";
+  draw();
+  expect(workingFolder.requests).not.toHaveBeenCalled();
+  expect(button("Copy path")).toBeUndefined();
+  expect(button("Open working folder")).toBeUndefined();
+  expect(document.querySelector("[data-notice-toast]")).toBeNull();
+});
 
 it.each([true, false])("closes after copying and keeps the toast visible with advanced mode %s", async (advanced) => {
   mode.advanced = advanced;

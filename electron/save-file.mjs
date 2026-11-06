@@ -114,7 +114,7 @@ export async function withSavableFile(
 
 // Only absolute local filesystem paths reach the desktop shell. Network shares are refused, since merely looking
 // one up can hand this computer's sign-in to whoever runs that server.
-export async function revealInFolder(rawPath, { reveal, openDirectory, fsp = fs.promises, pathApi = path }) {
+export async function revealInFolder(rawPath, { reveal, fsp = fs.promises, pathApi = path }) {
   const local = (value) => !/^[\\/]{2}/.test(value) && pathApi.isAbsolute(value);
   if (typeof rawPath !== "string" || rawPath.includes("\0") || /^[a-z][a-z\d+.-]+:/i.test(rawPath) || !local(rawPath)) {
     return "invalid";
@@ -128,9 +128,6 @@ export async function revealInFolder(rawPath, { reveal, openDirectory, fsp = fs.
     return "missing";
   }
   if (!stats.isFile() && !stats.isDirectory()) return "invalid";
-  if (stats.isDirectory() && openDirectory) {
-    try { return await openDirectory(target) === "" ? "shown" : "invalid"; } catch { return "invalid"; }
-  }
   reveal(target);
   return "shown";
 }
