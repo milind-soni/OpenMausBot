@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import type { FleetDeps } from "../fleet-cli.ts";
 import { meterLedgerText } from "../fleet-metering.ts";
 import { readUsage, summarizeUsage } from "../usage-ledger.ts";
@@ -11,6 +11,8 @@ export interface FleetMachineOptions {
   root?: boolean;
   /** Features the licence key entitles; none by default. */
   features?: string[];
+  /** Unix users whose ledger cannot be metered: their people read throws, as an unsafe tenant file does. */
+  unmeterable?: string[];
 }
 
 /**
@@ -32,6 +34,7 @@ export function fleetMachine(root: string, options: FleetMachineOptions = {}) {
     readText: (path) => files.get(path) ?? null,
     pathExists: (path) => files.has(path),
     readBytes: (path) => bytes.get(path) ?? null,
+    listDir: (path) => [...files.keys()].filter((name) => posix.dirname(name) === path).map((name) => posix.basename(name)),
     usage: (dataDir, owner, now) => {
       calls.push(`usage ${dataDir} as ${owner}`);
       const total = summarizeUsage(readUsage(dataDir, { from: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)), to: now }), "bot").total;
@@ -39,8 +42,11 @@ export function fleetMachine(root: string, options: FleetMachineOptions = {}) {
     },
     people: async (dataDir, owner, month, maxUsers) => {
       calls.push(`people ${dataDir} ${month} as ${owner}`);
+      if (options.unmeterable?.includes(owner)) throw new Error("unsafe workspace file or directory");
       const file = join(dataDir, "usage", `${month}.jsonl`);
-      return meterLedgerText(existsSync(file) ? readFileSync(file, "utf8") : "", month, maxUsers);
+      const configFile = join(dataDir, "config.json");
+      const config = files.get(configFile) ?? (existsSync(configFile) ? readFileSync(configFile, "utf8") : null);
+      return meterLedgerText(existsSync(file) ? readFileSync(file, "utf8") : "", month, maxUsers, config);
     },
     entitlements: async () => (feature) => options.features?.includes(feature) ?? false,
     writeText: (path, content) => { files.set(path, content); },

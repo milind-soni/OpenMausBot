@@ -139,12 +139,13 @@ describe("plans", () => {
   it("creates a workspace as its own account with private data, a fenced port, a unit and a site", () => {
     const registry = emptyRegistry("agentada.cc");
     const plan = createPlan({ registry, slug: "acme", seed: { admins: ["ada@example.test"], members: [] }, licenseKey: "omb1.k", memoryMax: "1G", now, layout });
-    expect(plan.workspace).toEqual({ slug: "acme", host: "acme.agentada.cc", port: 8810, webhookPort: 8811, status: "running", createdAt: now.toISOString() });
+    expect(plan.workspace).toEqual({ slug: "acme", host: "acme.agentada.cc", port: 8810, webhookPort: 8811, status: "running", createdAt: now.toISOString(), events: [{ at: now.toISOString(), status: "running" }] });
     expect(plan.registry.nextPort).toBe(8820);
     const checkpoints = plan.steps.flatMap((step) => step.kind === "write" && step.path === layout.registryFile ? [JSON.parse(step.content)] : []);
+    const { events: _events, ...reserved } = plan.workspace;
     expect(checkpoints.map((checkpoint) => checkpoint.workspaces.acme)).toEqual([
-      { ...plan.workspace, status: "provisioning", accountCreated: false },
-      { ...plan.workspace, status: "provisioning", accountCreated: true },
+      { ...reserved, status: "provisioning", accountCreated: false },
+      { ...reserved, status: "provisioning", accountCreated: true },
       plan.workspace,
     ]);
     expect(plan.steps[0]).toMatchObject({ kind: "write", path: layout.registryFile });

@@ -329,6 +329,11 @@ export function csvCell(value: string | number | null): string {
   return /[",\n\r]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
 }
 
+/** A number, never text: a negative amount keeps its sign instead of getting the formula-neutralising apostrophe. */
+export function csvNumber(value: number | null): string {
+  return value === null || !Number.isFinite(value) ? "" : String(value);
+}
+
 export function usageCsv(rows: UsageRow[], prices: PriceList | null = null): string {
   const header = ["time", "bot", "model", "engine", "triggered_by", "input_tokens", "output_tokens", "cached_input_tokens", "cost_usd", "cost_source", ...(prices ? ["billable_usd"] : []), "thread", "department", "person"];
   const lines = [header.join(",")];

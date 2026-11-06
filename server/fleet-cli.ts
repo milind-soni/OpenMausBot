@@ -1,11 +1,12 @@
 // Runs fleet.ts plans as root with fixed argument lists, or prints them for a root shell; never a shell command from user input.
 import { spawn } from "node:child_process";
-import { appendFileSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { posix } from "node:path";
 import { writeFileAtomic } from "./atomic.ts";
+import type { BrandField } from "./brand-schema.ts";
 import { unstableInstallWarning } from "./service-unit.ts";
 import { assertWorkspaceHost, workspaceHostFor } from "./fleet-tenancy.ts";
-import { brandCreateNotes, planCreateBrand, planFleetBrand, resolveCreateBrandJson } from "./fleet-brand.ts";
+import { brandCreateNotes, redactPrintedSteps, planCreateBrand, planFleetBrand, resolveCreateBrandJson } from "./fleet-brand.ts";
 import { planFleetRates, runFleetBilling, snapshotBeforeDelete } from "./fleet-billing.ts";
 import { meterTenantPeople, tenantIo, type PeopleResult } from "./fleet-tenant-io.ts";
 import { TWO_DECIMAL_CURRENCIES, type FleetReseller, type RateSet } from "./fleet-reseller.ts";
@@ -40,8 +41,7 @@ export interface BrandPatch {
   supportUrl?: string;
 }
 
-export const BRAND_FIELDS = ["name", "tagline", "accent", "logo", "favicon", "supportUrl"] as const;
-export type BrandField = (typeof BRAND_FIELDS)[number];
+export { BRAND_FIELDS, type BrandField } from "./brand-schema.ts";
 
 /** Rates in minor units, as `fleet rates` flags name them. */
 export interface RatesPatch {
@@ -71,6 +71,8 @@ export interface FleetInput {
   month?: string;
   csv?: boolean;
   detail?: boolean;
+  /** `billing`: how many distinct people one workspace may have before its ledger counts as unavailable; 1000 when absent. */
+  maxUsers?: number;
   ratesPatch?: RatesPatch;
   licenseKeyFile?: string;
   /** The operator's Unix user: the one workspace allowed to talk to the fleet agent. */
@@ -124,6 +126,8 @@ export interface FleetDeps {
   people?(dataDir: string, owner: string, month: string, maxUsers?: number): Promise<PeopleResult>;
   entitlements?(licenseKey: string | undefined): Promise<Entitlements>;
   readBytes?(path: string): Uint8Array | null;
+  /** File names in a root-owned directory; none when it does not exist. */
+  listDir?(path: string): string[];
 }
 
 export function defaultFleetDeps(): FleetDeps {
@@ -147,6 +151,12 @@ export function defaultFleetDeps(): FleetDeps {
     pathExists: (path) => { try { lstatSync(path); return true; } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; } },
     readText: (path, owner) => owner ? tenantIo(owner, path, "read") as string | null : (existsSync(path) ? readFileSync(path, "utf8") : null),
     readBytes: (path) => (existsSync(path) ? readFileSync(path) : null),
+    listDir: (path) => { try { return readdirSync(path); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; } },
+    entitlements: async (licenseKey) => {
+      const { entitled, loadEnterpriseLayer } = await import("./enterprise.ts");
+      await loadEnterpriseLayer(licenseKey ? { licenseKey } : {});
+      return (feature) => entitled(feature);
+    },
     people: (dataDir, owner, month, maxUsers) => meterTenantPeople(dataDir, owner, month, maxUsers),
     usage: (dataDir, owner, now) => {
       const at = now.toISOString();
@@ -369,7 +379,7 @@ export function markProvisioningFailed(input: FleetInput, deps: FleetDeps): void
 function printPlan(steps: FleetStep[], io: FleetIo, reason: string): number {
   io.log(`${reason}; inspect this plan, then rerun the fleet command as root without --dry-run (with --yes where required):`);
   io.log("");
-  for (const line of describeSteps(steps)) io.log(line);
+  for (const line of describeSteps(redactPrintedSteps(steps))) io.log(line);
   return 0;
 }
 

@@ -4,7 +4,7 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, rmSync } from "node:f
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { dirname } from "node:path";
 import { billingReply, snapshotBeforeDelete } from "./fleet-billing.ts";
-import { brandInputFromBody, omitBrandAssets } from "./fleet-brand.ts";
+import { brandFieldsTouched, brandInputFromBody, omitBrandAssets, workspaceBrandPath } from "./fleet-brand.ts";
 import { defaultFleetDeps, executePlan, loadRegistry, markProvisioningFailed, planFleetAction, type FleetDeps, type FleetInput } from "./fleet-cli.ts";
 import { assertSlug, fleetLayout, fleetUser, openRouterModelIds, workspaceDataDir, type FleetLayout, type FleetWorkspace } from "./fleet.ts";
 
@@ -23,6 +23,8 @@ export interface FleetAgentOptions {
 
 export interface FleetWorkspaceView extends FleetWorkspace {
   live: string;
+  /** What the workspace shows, without its images; present when the fleet has a reseller. */
+  brand?: Record<string, unknown>;
   usage: { month: string; turns: number | null; costUsd: number | null; billableUsd: number | null; unavailable?: true };
 }
 
@@ -77,6 +79,15 @@ export function workspaceUsage(layout: FleetLayout, slug: string, now: Date, dep
   catch { return { month, turns: null, costUsd: null, billableUsd: null, unavailable: true }; }
 }
 
+function workspaceBrand(layout: FleetLayout, slug: string, deps: FleetDeps): { brand?: Record<string, unknown> } {
+  try {
+    const parsed: unknown = JSON.parse(deps.readText(workspaceBrandPath(layout, slug)) ?? "null");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? { brand: parsed as Record<string, unknown> } : {};
+  } catch {
+    return {};
+  }
+}
+
 export function createFleetAgent(options: FleetAgentOptions): Server {
   const deps = options.deps ?? defaultFleetDeps();
   const layout = fleetLayout(options.root ?? "/");
@@ -95,6 +106,8 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
     }
   };
 
+  const auditBrand = (input: FleetInput) => (input.action === "brand" ? { brand: brandFieldsTouched(input) } : {});
+
   const runAction = async (input: FleetInput): Promise<{ status: number; body: unknown }> => {
     const log: string[] = [];
     const errors: string[] = [];
@@ -104,7 +117,7 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
       if (input.action === "delete" && input.yes) await snapshotBeforeDelete(input, deps, now());
       steps = planFleetAction(input, deps);
     } catch (error) {
-      audit({ action: input.action, slug: input.slug, ok: false, error: error instanceof Error ? error.message : String(error) });
+      audit({ action: input.action, slug: input.slug, ...auditBrand(input), ok: false, error: error instanceof Error ? error.message : String(error) });
       return { status: 400, body: { error: error instanceof Error ? error.message : String(error) } };
     }
     let code = 1;
@@ -120,7 +133,7 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
         errors.push("could not record the failed provisioning; inspect the reserved workspace before recovery");
       }
     }
-    audit({ action: input.action, slug: input.slug, ok: code === 0, ...(input.email ? { email: input.email } : {}) });
+    audit({ action: input.action, slug: input.slug, ...auditBrand(input), ok: code === 0, ...(input.email ? { email: input.email } : {}) });
     return code === 0 ? { status: 200, body: { ok: true, log } } : { status: 500, body: { error: errors[0] ?? "the step failed", log: [...log, ...errors] } };
   };
 
@@ -149,7 +162,7 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
           const live = workspace.status === "running" || workspace.status === "suspended"
             ? (await deps.run(["systemctl", "is-active", `openmausbot@${workspace.slug}.service`])).output.trim() || "unknown"
             : workspace.status;
-          workspaces.push(statusOnly ? { slug: workspace.slug, live } : omitBrandAssets({ ...workspace, live, usage: workspaceUsage(layout, workspace.slug, now(), deps) }));
+          workspaces.push(statusOnly ? { slug: workspace.slug, live } : omitBrandAssets({ ...workspace, live, usage: workspaceUsage(layout, workspace.slug, now(), deps), ...workspaceBrand(layout, workspace.slug, deps) }));
         }
         return send(200, { domain: registry.domain, operator: registry.operator ?? null, workspaces });
       }
@@ -166,6 +179,7 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
       }
       if (method === "GET" && url.pathname === "/billing") {
         const reply = await billingReply(url.searchParams, { layout, deps, now: now() });
+        audit({ action: "billing", month: url.searchParams.get("month") ?? undefined, ok: reply.status === 200 });
         return send(reply.status, reply.body);
       }
       if (method === "PUT" && url.pathname === "/brand") {
