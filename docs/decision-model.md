@@ -2,16 +2,47 @@
 
 OpenMausBot can use a fast decision model to pick things for your bots. It
 answers in a few hundred milliseconds for a fraction of a cent. It never does
-the work: the chosen bot still runs its own turn on its own engine. Two
-providers are supported: TypeSafe's [Jev](https://typesafe.ai) (the default)
-and a model of your choice on [OpenRouter](https://openrouter.ai).
+the work: the chosen bot still runs its own turn on its own engine. Three
+providers are supported: Cloudflare's Clef on
+[Workers AI](https://developers.cloudflare.com/workers-ai/) (free tier),
+TypeSafe's [Jev](https://typesafe.ai) (the default) and a model of your choice
+on [OpenRouter](https://openrouter.ai).
 
-Everything is in **Settings → Decision model**: the provider, for OpenRouter
-the model, one master switch, that provider's key with **Save** and **Test**,
-and one switch per job it can do. Each provider keeps its own key, so you can
-switch between them without pasting a key again. OpenRouter needs no key here
-when you already saved one under **Settings → API keys**: the decision model
-uses that one.
+Everything is in **Settings → Decision and extraction** (Advanced mode): the
+Cloudflare Workers AI card, the Jev/OpenRouter picker under **Another key**,
+for OpenRouter the model, one master switch, each key with **Save** and
+**Test**, and one switch per job it can do. Each provider keeps its own key, so
+you can switch between them without pasting a key again. OpenRouter needs no
+key here when you already saved one under **Settings → API keys**: the decision
+model uses that one.
+
+With several keys saved, one fixed order picks whose key decides: your own Jev
+key, then your own Workers AI key, then Cloud's included decisions, then
+OpenRouter.
+
+## Cloudflare Workers AI (free tier)
+
+A Cloudflare token decides with Clef (Clef-flash by default, Clef for a hard
+case such as a bot's own `decide` call) and also reads with Clairic, the
+extraction model the inbox uses (see
+[proactive-routines.md](proactive-routines.md)). It needs two values:
+
+1. **Account ID.** In the Cloudflare dashboard, open **Workers AI** and choose
+   **Use REST API**, and copy the Account ID (32 letters and digits).
+2. **API token.** On the same page, choose **Create a Workers AI API Token**,
+   then **Create API Token**, and copy it. A custom token needs both
+   **Workers AI - Read** and **Workers AI - Edit**.
+
+Paste both into the **Cloudflare Workers AI (free tier)** card and choose
+**Save**. The token alone is refused: it must come with its account ID.
+Saving checks the token and switches the decision model on. **Test** answers
+*Cloudflare answered in … ms. Extraction works too.*
+
+Cloudflare's free allocation is 10,000 Neurons a day, on the Workers Free and
+Paid plans. Past it, requests fail until the daily reset (00:00 UTC) on Free,
+and are billed on Paid
+([pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/)).
+A failed decision falls back as described in "It fails open".
 
 ## Choosing a provider
 
@@ -107,15 +138,19 @@ The log stays on this machine: workspace backups leave it out.
 
 - **Desktop app:** in the operating system's encrypted store
   (`credentials.bin`), like the other workspace keys. The server receives the
-  Jev key as `OMB_JEV_API_KEY` and the OpenRouter key as
-  `OMB_OPENROUTER_DECIDER_KEY` at start-up; `config.json` keeps only an
-  empty placeholder.
+  Jev key as `OMB_JEV_API_KEY`, the OpenRouter key as
+  `OMB_OPENROUTER_DECIDER_KEY` and the Workers AI token as
+  `OMB_WORKERS_AI_TOKEN` at start-up; `config.json` keeps only an empty
+  placeholder.
 - **Server or browser use:** in the server's own `config.json` (mode 0600),
-  under `decider.key` (Jev) or `decider.openrouterKey` (OpenRouter).
-  `OMB_JEV_API_KEY` and `OMB_OPENROUTER_DECIDER_KEY` override them.
+  under `decider.key` (Jev), `decider.openrouterKey` (OpenRouter) or
+  `decider.workersAiToken` (Workers AI). `OMB_JEV_API_KEY`,
+  `OMB_OPENROUTER_DECIDER_KEY` and `OMB_WORKERS_AI_TOKEN` override them.
+- **The Cloudflare account ID is not a secret.** It is kept in `config.json`
+  as `decider.workersAiAccountId` and shown back in Settings.
 - **The OpenRouter key is shared with your OpenRouter models.** The decision
   model uses the first of these it finds:
-  1. a key saved here, in **Settings → Decision model** (`decider.openrouterKey`
+  1. a key saved here, in **Settings → Decision and extraction** (`decider.openrouterKey`
      or `OMB_OPENROUTER_DECIDER_KEY`): the optional "use a different key"
      override, which wins so a key saved before sharing keeps working;
   2. the OpenRouter key under **Settings → API keys** (`openrouter.key` or
@@ -156,8 +191,9 @@ usually a similar fraction of a cent.
 
 Each decision sends the state described above (the room's name, its people,
 recent room lines and the new message) and the bots' descriptions to the
-selected provider. With OpenRouter that is OpenRouter and the host it routes
-the model to, under OpenRouter's privacy settings and your account's data
+selected provider. With Workers AI that is Cloudflare, which also receives the
+emails Clairic reads for the inbox. With OpenRouter that is OpenRouter and the
+host it routes the model to, under OpenRouter's privacy settings and your account's data
 policy; OpenMausBot does not set a data-collection preference. Use Jev, or
 leave the job off, for rooms that must not leave the machine.
 
@@ -183,6 +219,9 @@ responds** or **Only when mentioned**.
   "openrouterModel": "typesafe/jev-1.13",
   "openrouterApi": "decisions",
   "openrouterBaseUrl": "https://openrouter.ai/api/v1",
+  "workersAiToken": "",
+  "workersAiAccountId": "",
+  "workersAiBaseUrl": "https://api.cloudflare.com/client/v4",
   "jobs": { "roomRouting": true }
 }
 ```
@@ -209,6 +248,12 @@ decisions model's go to `/alpha/decisions` beside it (for the default base,
 `https://openrouter.ai/api/alpha/decisions`), with Jev's request body. That
 API is alpha at OpenRouter and may change. The model list comes from
 `GET /api/decider/models`, which needs no key and spends nothing.
+
+`workersAiAccountId` is 32 hexadecimal characters. `workersAiBaseUrl` has no
+Settings UI, follows the same https-or-loopback rule, and must include
+`/client/v4`. Requests go to
+`{workersAiBaseUrl}/accounts/{workersAiAccountId}/ai/run/@cf/cloudflare/clef-flash`
+(or `clef`, or `clairic` for extraction).
 
 ## Measuring it
 

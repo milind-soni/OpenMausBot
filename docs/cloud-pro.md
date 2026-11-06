@@ -1420,11 +1420,11 @@ computers belong to this machine on every request.
   decision-model failure. Any other decision job, now or added later, uses
   only the person's own Jev key until the relay accepts it too. The relay
   speaks Jev's API only: included decisions are Jev's, and with OpenRouter
-  selected in **Settings → Decision model** nothing is included (it needs an
+  selected in **Settings → Decision and extraction** nothing is included (it needs an
   OpenRouter key: one saved there, or the one under **Settings → API keys**).
 - **Included decisions are on until switched off.** While the decision model
   runs on the included token, its master switch counts as on unless the person
-  switched it off in **Settings → Decision model**; an explicit off always
+  switched it off in **Settings → Decision and extraction**; an explicit off always
   wins, and switching it back on needs no key. The per-job switches keep their
   defaults, so rooms set to Auto ask who answers, and new rooms start on Auto,
   as with a saved key. An own Jev key is on once saved, as anywhere else, and
