@@ -16,6 +16,9 @@ const SOON_AFTER_REFUSAL_MS = 5_000;
 
 type Driver = EngineLimit["driver"];
 
+/** The drivers whose plan usage gives a limit to show and to route around. */
+const REPORTED_DRIVERS: ReadonlySet<string> = new Set(["claude", "codex", "grok", "opencode"]);
+
 function windowLine(name: LimitWindowName, window: PlanWindow): { window: LimitWindowName; used: number; resetsAt: number | null } | null {
   if (!window.available || window.usedPercent === null) return null;
   const resetsAt = window.resetsAt ? Date.parse(window.resetsAt) : NaN;
@@ -25,7 +28,7 @@ function windowLine(name: LimitWindowName, window: PlanWindow): { window: LimitW
 /** An engine's limit from its plan-usage row. The windows at their limit decide, and all must reset, so the latest of
  * their resets counts; with none at the limit, the fullest window counts. Null when the row has no usage. */
 export function engineLimitFromUsage(row: PlanProviderRow): EngineLimit | null {
-  if (!row.ok || (row.driver !== "claude" && row.driver !== "codex" && row.driver !== "grok")) return null;
+  if (!row.ok || !REPORTED_DRIVERS.has(row.driver)) return null;
   const windows = [windowLine("5-hour", row.fiveHour), windowLine("weekly", row.weekly)].filter((line) => line !== null);
   const base = { engine: row.id, name: row.name, driver: row.driver as Driver,
     windows: windows.map(({ window, used, resetsAt }) => ({ window, usedPercent: used, resetsAt })) };
@@ -52,7 +55,7 @@ function codexHoldGone(row: PlanProviderRow, limit: EngineLimit, held: number | 
   return windows.every((line) => line === null || (line.resetsAt !== null && Math.abs(line.resetsAt - held) > SAME_RESET_MS));
 }
 
-const PRODUCT_NAMES: Record<string, string> = { claudeAgent: "Claude", codex: "Codex", grokAgent: "Grok" };
+const PRODUCT_NAMES: Record<string, string> = { claudeAgent: "Claude", codex: "Codex", grokAgent: "Grok", opencodeGo: "OpenCode" };
 
 /** "Claude", "Codex", or the name the person gave that engine. */
 export function engineLabel(engine: string, instance?: { displayName?: string; driverKind: string }): string {

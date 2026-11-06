@@ -61,6 +61,15 @@ describe("usage limits a bot reads", () => {
     ]);
   });
 
+  it("lists an OpenCode Go account's allowance like the other plans", () => {
+    const [account] = read({
+      instances: [instance("oc", "opencodeGo", "OpenCode")],
+      report: report(row("oc", { driver: "opencode", plan: "Go", fiveHour: open(30), weekly: open(55) })),
+    });
+    expect(account).toMatchObject({ account: "OpenCode", engine: "opencodeGo", status: "ok", plan: "Go" });
+    expect(account?.windows.map((window) => window.name)).toEqual(["5-hour", "weekly"]);
+  });
+
   it("says unknown, not unsupported, when the read itself failed", () => {
     expect(read({ instances: [instance("claude"), instance("cursor", "cursorAgent", "Cursor")], report: null }).map((account) => account.status)).toEqual(["unknown", "unsupported"]);
   });
