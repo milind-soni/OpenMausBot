@@ -120,6 +120,7 @@ async function run(): Promise<void> {
     docker, state, log, readHealth, seccomp, transfer: httpTransfer,
     diskFree: () => reader.disk().free,
     updateWindowMs: envSeconds("MAUSBOT_UPDATE_WAIT_S", 600, 60, 3600) * 1000,
+    onStep: ({ id, type, step, detail }) => note({ event: "step", id, type, step, ...(detail ? { detail } : {}) }),
   });
   const updater = new SelfUpdater({ docker, state, log, instance, identity });
   const heartbeat = async (): Promise<Heartbeat> => {

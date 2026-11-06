@@ -2,7 +2,8 @@
 # The connector end to end on a stock Ubuntu 24.04 host with Docker and AppArmor on, installed as a person installs it:
 # a fake Admin (connector/test/fake-admin.ts) mints a one-time code; install.sh checks the host, installs the profiles,
 # starts the connector and enrols; then start (the box passes every check), update to another digest, an unclean kill
-# started again, an update forced to fail rolled back (image and data), and uninstall keeping the data.
+# started again, an update forced to fail rolled back (image and data), a job from root on the server, the audit log of
+# all of it, and uninstall keeping the data and the log.
 # Nothing reaches a production service: the home's connected-apps broker points at a closed loopback port and its
 # HighLevel relay is off; the Admin is the fake one on loopback.
 #   OUT=<evidence folder> bash connector/e2e/run.sh
@@ -171,6 +172,23 @@ docker logs mausbot-connector >"$OUT/connector.log" 2>&1
 if grep -qF "$SECRET" "$OUT/connector.log"; then fail "the bootstrap secret reached the connector's log"; fi
 if grep -q "ombs_" "$OUT/connector.log"; then fail "the agent token reached the connector's log"; fi
 
+step "the audit log: every job, its steps and its result, each line linked to the one before, nothing secret"
+local_status=$(docker exec mausbot-connector mausbot-connector job status '{}')
+expect '.ok and .result.home.state == "running"' "$local_status" "a job from root on this server"
+expect '.ok == false and .error.code == "unknown_job"' "$(docker exec mausbot-connector mausbot-connector job shell '{}' || true)" "a job outside the list"
+[ "$(sudo stat -c %a /var/log/mausbot/audit.jsonl)" = 600 ] || fail "the audit log is not root's alone"
+sudo cat /var/log/mausbot/audit.jsonl >"$OUT/audit.jsonl"
+docker exec mausbot-connector mausbot-connector audit --verify | tee "$OUT/audit-verify.txt"
+grep -q "each linked to the one before it" "$OUT/audit-verify.txt" || fail "the audit log's chain is broken"
+audit=$(jq -cs . "$OUT/audit.jsonl")
+expect 'any(.[]; .event == "job" and .by == "admin" and .id == "start-1" and (.args.env | index("OMB_CLOUD_BOOTSTRAP_SECRET")))' "$audit" "the start, with its environment's names"
+expect '[.[] | select(.id == "update-1" and .event == "step") | .step] == ["pull", "checked", "stop", "snapshot", "swap", "wait", "healthy"]' "$audit" "the update's steps"
+expect 'any(.[]; .event == "result" and .id == "update-1" and .ok)' "$audit" "the update's result"
+expect 'any(.[]; .event == "result" and .id == "update-2" and .error.code == "update_rolled_back")' "$audit" "the rollback's result"
+expect 'any(.[]; .event == "step" and .id == "update-2" and .step == "rollback")' "$audit" "the rollback step"
+expect 'any(.[]; .event == "job" and .by == "local" and .type == "status")' "$audit" "the job from this server"
+if grep -qF "$SECRET" "$OUT/audit.jsonl"; then fail "the bootstrap secret reached the audit log"; fi
+
 step "uninstall stops everything and keeps the data; --delete-data deletes it"
 sudo env "${INSTALL_ENV[@]}" sh "$ROOT/connector/install.sh" uninstall | tee "$OUT/uninstall.txt"
 for container in mausbot-connector mausbot-home; do
@@ -179,7 +197,9 @@ done
 [ ! -e /etc/apparmor.d/omb-home-narrow ] || fail "the AppArmor profile is still installed"
 [ "$(docker run --rm -v mausbot-data:/data --entrypoint cat "$HOME_B" /data/e2e-marker)" = kept ] || fail "uninstall did not keep the data"
 docker volume inspect mausbot-snapshot >/dev/null || fail "uninstall did not keep the safety copy"
+sudo test -s /var/log/mausbot/audit.jsonl || fail "uninstall did not keep the audit log"
 sudo env "${INSTALL_ENV[@]}" sh "$ROOT/connector/install.sh" uninstall --delete-data | tee -a "$OUT/uninstall.txt"
 if docker volume inspect mausbot-data >/dev/null 2>&1; then fail "--delete-data kept the data"; fi
+if sudo test -e /var/log/mausbot; then fail "--delete-data kept the audit log"; fi
 
 step "all passed"
