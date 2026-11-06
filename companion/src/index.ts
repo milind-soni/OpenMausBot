@@ -24,6 +24,13 @@ import {
 } from "./mdns.ts";
 import { notifyDeviceRevoked } from "./harness-notice.ts";
 import { createProxyHandler } from "./proxy.ts";
+import { parseE2EMessage, parseRelayConfig, relayBaseUrlOverride, standaloneTransportKey, type RelayConfig } from "./e2e/config.ts";
+import { b64u } from "./e2e/credentials.ts";
+import { handleDirectUpgrade, isE2EUpgrade } from "./e2e/direct.ts";
+import { CLOSE, TRANSPORT_RELAY } from "./e2e/noise.ts";
+import { createE2EOrigin } from "./e2e/origin.ts";
+import { E2ERegistry } from "./e2e/registry.ts";
+import { RelayClient } from "./e2e/relay-client.ts";
 import { companionOriginSocket, listenCompanionOrigin } from "./origin.ts";
 import { gzipTunnelReplies } from "./tunnel-gzip.ts";
 import { normalizedPhoneSecretPublicKey } from "./phone-secret-key.ts";
@@ -43,6 +50,8 @@ const controlReady = controlToken ? Promise.resolve() : new Promise<void>((resol
 parentPort?.on("message", ({ data }) => {
   if (!data || typeof data !== "object") return;
   const message = data as Record<string, unknown>;
+  if (message.type === "openmausbot:companion-e2e") return void configureE2E(message);
+  if (message.type === "openmausbot:companion-e2e-redial") return void relay?.redial();
   if (message.type !== "openmausbot:companion-mutation-token") return;
   if (typeof message.token === "string" && /^[A-Za-z0-9_-]{43}$/.test(message.token)) {
     mutationToken = message.token;
@@ -111,6 +120,9 @@ let stopping = false;
 
 const devices = new DeviceRegistry();
 const mdns = new MdnsResponder();
+const e2e = new E2ERegistry(devices);
+let relay: RelayClient | null = null;
+const relayBaseUrl = relayBaseUrlOverride(process.env.OMB_COMPANION_RELAY_URL);
 
 /** Advertise when a network appears, re-advertise when DHCP moves us, withdraw
  * when it goes. */
@@ -150,14 +162,55 @@ const proxy = createProxyHandler({
           return true;
         }
       : undefined,
+    e2eDescriptor: (deviceId) => e2e.descriptor(deviceId),
+    e2ePaired: (context, deviceId) => e2e.paired(context, deviceId),
   });
-const companion = createServer(proxy);
-// `createServer(proxy)` handles plain HTTP only; noVNC's WebSocket arrives as
-// Node's separate `upgrade` event.
-companion.on("upgrade", proxy.upgrade);
+const e2eOrigin = createE2EOrigin((req, res) => proxy(req, res), (req, socket, head) => proxy.upgrade(req, socket, head));
+const companion = createServer((req, res) => proxy(req, res, "lan"));
+// `createServer` handles plain HTTP only; noVNC's WebSocket and /v1/e2e arrive as Node's separate `upgrade` event.
+companion.on("upgrade", (req, socket, head) =>
+  isE2EUpgrade(req) ? handleDirectUpgrade(req, socket, head, e2e, e2eOrigin) : proxy.upgrade(req, socket, head, "lan"));
 // Large JSON replies go gzipped here: this is the only listener whose replies go up the home connection to Cloudflare.
-const managedOrigin = PRIVATE_ORIGIN ? createServer(gzipTunnelReplies(proxy)) : null;
-managedOrigin?.on("upgrade", proxy.upgrade);
+const managedOrigin = PRIVATE_ORIGIN ? createServer(gzipTunnelReplies((req, res) => proxy(req, res, "origin"))) : null;
+managedOrigin?.on("upgrade", (req, socket, head) => proxy.upgrade(req, socket, head, "origin"));
+
+function applyRelay(config: RelayConfig | null): void {
+  const sameHost = relay && config && e2e.relay?.hostId.equals(config.hostId);
+  if (!config || !e2e.enabled || !sameHost) {
+    relay?.stop();
+    relay = null;
+  }
+  e2e.setRelay(config && e2e.enabled ? { hostId: config.hostId, nodes: config.nodes } : null);
+  if (!config || !e2e.enabled) return;
+  if (relay) return relay.setToken(config.token, config.nodes);
+  relay = new RelayClient({
+    nodes: config.nodes,
+    token: config.token,
+    admissionSet: () => e2e.admissionSet(),
+    accept: (transport) => {
+      const session = e2e.accept(transport, TRANSPORT_RELAY, "relay", (context) => e2eOrigin.connect(context));
+      return session && { receive: (data, binary) => session.receive(data, binary), transportClosed: (code) => session.transportClosed(code) };
+    },
+    tokenRejected: () => parentPort?.postMessage({ type: "openmausbot:companion-e2e-token-rejected" }),
+    statusChanged: (status, node) => console.log(`e2e: relay ${status}${node ? ` via ${node}` : ""}`),
+    baseUrl: relayBaseUrl,
+  });
+  relay.start();
+}
+
+/** The desktop app's message; a malformed one changes nothing. */
+function configureE2E(message: Record<string, unknown>): void {
+  const config = parseE2EMessage(message);
+  if (!config) return void console.warn("e2e: ignored a malformed configuration");
+  e2e.setKey(config.transportKey);
+  applyRelay(config.relay);
+}
+
+/** A removal closes the device's sessions with an authenticated GoAway(3) first; the relay drops a session whose
+ * admission leaves the set at once (4404), so the smaller set follows a moment later. */
+const ADMISSION_SETTLE_MS = 300;
+devices.onChange(() => setTimeout(() => relay?.refreshAdmission(), ADMISSION_SETTLE_MS).unref());
+e2e.onAdmissionChange(() => relay?.refreshAdmission());
 
 const control = createControlServer({
   devices,
@@ -178,10 +231,23 @@ const control = createControlServer({
   // The harness hears a phone as this computer, so only the sidecar can tell
   // it the phone lost access and end the Live call that phone holds.
   revoked: (deviceId) => {
+    e2e.closeDevice(deviceId);
     if (parentPort && !mutationToken) return;
     void notifyDeviceRevoked({ harnessPort: HARNESS_PORT, deviceId, mutationToken: mutationToken ?? undefined });
   },
   refreshTailscale: () => refreshTailnetName(),
+  e2e: () => ({ enabled: e2e.enabled, relay: relay?.status ?? "off", node: relay?.node ?? null, descriptor: e2e.descriptor(null) }),
+  liveRoutes: () => e2e.routes(),
+  routesChanged: (deviceId, routes) => {
+    relay?.refreshAdmission();
+    if (routes === "local") e2e.closeDevice(deviceId, CLOSE.normal, "relay");
+  },
+  setRelay: (body) => {
+    const config = parseRelayConfig(body);
+    if (config === "invalid" || !e2e.enabled) return false;
+    applyRelay(config);
+    return true;
+  },
 });
 
 const listen = (server: ReturnType<typeof createServer>, port: number, host: string): Promise<void> =>
@@ -225,6 +291,12 @@ async function main(): Promise<void> {
   }
 
   await controlReady;
+  // Standing alone, end-to-end is opt-in and keeps its own key; the desktop app sends its key over its port.
+  if (!parentPort && process.env.OMB_COMPANION_E2E === "1") {
+    const key = standaloneTransportKey();
+    e2e.setKey(key);
+    console.log(`e2e: on, transport key ${b64u(key.publicKey).slice(0, 8)}…`);
+  }
   await listen(control, CONTROL_PORT, "127.0.0.1");
   await listen(companion, COMPANION_PORT, "0.0.0.0");
   if (managedOrigin && PRIVATE_ORIGIN) {
@@ -239,8 +311,10 @@ async function main(): Promise<void> {
 
   // Through the watcher: a laptop may have no addresses yet, and they change
   // under a running sidecar. Discovery failing is never fatal.
-  await watcher.check();
-  watcher.start();
+  if (process.env.OMB_COMPANION_BONJOUR !== "0") {
+    await watcher.check();
+    watcher.start();
+  }
   // A rename in Settings reaches the phone within one tick: the watcher re-advertises when the name moves.
   nameTimer = setInterval(() => void refreshMachineName().then((changed) => (changed && !stopping ? watcher.check() : undefined)), 30_000);
   nameTimer.unref?.();
@@ -265,6 +339,9 @@ const shutdown = async (signal: string): Promise<void> => {
   if (nameTimer) clearInterval(nameTimer);
   await mdns.stop().catch(() => {});
   // close() waits for open connections, and an SSE stream never ends on its own.
+  relay?.stop();
+  e2e.closeAll();
+  e2eOrigin.close();
   proxy.closeViewers();
   companion.closeAllConnections?.();
   control.closeAllConnections?.();

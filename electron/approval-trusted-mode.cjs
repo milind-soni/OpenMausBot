@@ -1,5 +1,12 @@
 "use strict";
 
+const { englishText } = require("./native-text.cjs");
+const ERROR_KEYS = Object.freeze({
+  "serverError.approval.allThreads": "native.approval.allThreads",
+  "serverError.approval.pending": "native.approval.pending",
+  "serverError.approval.provider": "native.approval.provider",
+});
+
 const BOT_ID = /^[A-Za-z0-9_-]{1,120}$/;
 const REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const APPROVAL_MODES = new Set(["ask", "edits", "auto", "full", "custom"]);
@@ -112,11 +119,12 @@ function decodeTrustedApprovalModeResult(rawMessage) {
     requestId: message.requestId,
     ok: false,
     error: (error || "The approval mode could not be enabled").slice(0, 300),
+    ...(Object.hasOwn(ERROR_KEYS, message.errorKey) ? { errorKey: message.errorKey } : {}),
   };
 }
 
 /** The process object is part of the correlation key, so a stale or replacement child cannot answer another child's grant. */
-function createTrustedApprovalModeCoordinator({ randomId, timeoutMs = 10_000 } = {}) {
+function createTrustedApprovalModeCoordinator({ randomId, timeoutMs = 10_000, t = englishText.t } = {}) {
   if (typeof randomId !== "function") throw new Error("trusted approval-mode request id generator is unavailable");
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000) {
     throw new Error("invalid trusted approval-mode request timeout");
@@ -316,7 +324,9 @@ function createTrustedApprovalModeCoordinator({ randomId, timeoutMs = 10_000 } =
     // Consume late, duplicated or foreign answers, but never let one cross processes.
     if (!waiting || waiting.proc !== proc || waiting.phase !== "setting") return true;
     if (!result.ok) {
-      settle(result.requestId, ({ reject }) => reject(new Error(result.error)));
+      const key = ERROR_KEYS[result.errorKey];
+      const text = key && result.error === englishText.t(key) ? t(key) : result.error;
+      settle(result.requestId, ({ reject }) => reject(new Error(text)));
       return true;
     }
     const resultMode = waiting.threadOnly && (waiting.mode === "full" || waiting.mode === "custom")

@@ -54,6 +54,7 @@ function profiles(): Record<string, Profile> {
   all["skills+shared+voice+escalations+x"] = { env: { ...all["skills+shared+voice+escalations"]!.env, OMB_X_RESEARCH: "1", OMB_RESEARCH: "1" } };
   // A Team Cloud mounts message_person; the fullest profile carries it.
   all["skills+shared+voice+escalations+x+team"] = { env: { ...all["skills+shared+voice+escalations+x"]!.env, OMB_TEAM_PEOPLE: "1" } };
+  all["skills+shared+voice+escalations+x+team+images"] = { env: { ...all["skills+shared+voice+escalations+x+team"]!.env, OMB_IMAGE_GENERATION: "1" } };
   all["default+legacy-switches"] = {
     env: { ...all.default!.env, OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1", OMB_EXTERNAL_RUNTIME: "1", OMB_ACTIVE_WAITS: "0" },
   };
@@ -62,6 +63,7 @@ function profiles(): Record<string, Profile> {
   // A chat that can never pick its computer: its Works on is Off, or it works on its team's computer. A room is one too.
   all["default+no-computer-pick"] = { env: { ...all.default!.env, OMB_COMPUTER_SELECTION: "0" } };
   for (const name of ["default", "non-chief"]) all[`${name}+room`] = { env: { ...all[name]!.env, OMB_COMPUTER_SELECTION: "0", OMB_ROOM: "1" } };
+  all["default+images"] = { env: { ...all.default!.env, OMB_IMAGE_GENERATION: "1" } };
   return all;
 }
 
@@ -77,37 +79,39 @@ const RESEARCH_TOOLS = ["x_search", "research_search", "research_endpoint", "res
 /** Only on the person's own Cloud: never on the fullest profile, a Team Cloud's. */
 const OWN_CLOUD_TOOLS = ["ask_for_computer"];
 /** The fullest profile, checked in whole; every other one is pinned by tool names, bytes and sha256. */
-const FULL = "skills+shared+voice+escalations+x+team";
+const FULL = "skills+shared+voice+escalations+x+team+images";
 
 /** Bytes when the budget was last set; a profile may move at most 2% either way (lower it to lock in a win). */
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 58250,
+  "default": 59416,
   "voice": 59031,
   "shared": 60515,
   "shared+voice": 61296,
-  "skills": 61069,
-  "skills+voice": 61850,
-  "skills+shared": 63334,
+  "skills": 62343,
+  "skills+voice": 63124,
+  "skills+shared": 64608,
   "skills+shared+voice": 64115,
   "non-chief": 49935,
   "voice+non-chief": 50716,
   "shared+non-chief": 52200,
   "shared+voice+non-chief": 52981,
   "skills+non-chief": 52754,
-  "skills+voice+non-chief": 52793,
+  "skills+voice+non-chief": 53908,
   "skills+shared+non-chief": 55212,
-  "skills+shared+voice+non-chief": 55058,
+  "skills+shared+voice+non-chief": 56173,
   "skills+shared+voice+cloud-home": 64782,
   "skills+shared+voice+non-chief+cloud-home": 55566,
-  "default+legacy-switches": 58250,
+  "default+legacy-switches": 59416,
   "default+mausbot": 58901,
   "skills+shared+voice+mausbot": 64766,
   "skills+shared+voice+escalations": 64945,
   "skills+shared+voice+escalations+x": 68784,
   "skills+shared+voice+escalations+x+team": 69416,
-  "default+no-computer-pick": 57038,
+  "default+no-computer-pick": 58204,
   "default+room": 50849,
   "non-chief+room": 41633,
+  "skills+shared+voice+escalations+x+team+images": 70755,
+  "default+images": 60113,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';
@@ -263,6 +267,14 @@ describe("agents proxy tools/list golden", () => {
     }
     const team = catalogProfileFromEnv({ ...PROFILES["skills+shared+voice+cloud-home"]!.env, OMB_TEAM_PEOPLE: "1", OMB_BOT_ID: "bot-golden" });
     expect(availableTools(team).map((tool) => tool.name)).not.toContain("ask_for_computer");
+  });
+
+  it("mounts generate_image only when an image provider is set up, and adds nothing else", () => {
+    const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
+    expect(names(wires["default+images"]!).filter((tool) => tool !== "generate_image")).toEqual(names(wires.default!));
+    for (const [name, profile] of Object.entries(PROFILES)) {
+      expect(names(wires[name]!).includes("generate_image"), name).toBe(profile.env.OMB_IMAGE_GENERATION === "1");
+    }
   });
 
   it("ignores the switches that once picked a catalog profile", () => {

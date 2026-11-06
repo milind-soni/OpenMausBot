@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import "../server-line-packs.ts";
+import { setConversationLanguage } from "../server-lines.ts";
 import { boxUploadsDir } from "../bot-box/plan.ts";
 import { EmailError, openGuard } from "./client.ts";
 import { outsideRouteRefused } from "../host/outside-fence.ts";
@@ -153,4 +155,18 @@ describe("a turn's Email tools", () => {
     expect(host.prompt({ id: "b", name: "A" })).not.toContain(PASSWORD);
     expect(host.prompt({ id: "b", name: "A", composio: false })).toBe("");
   });
+});
+
+it.each([
+  ["en", "Sent from me@shop.example to 1 recipient(s)"],
+  ["pt-br", "Enviado de me@shop.example. Destinatários: 1"],
+  ["de", "Von me@shop.example an 1 Empfänger gesendet"],
+])("the send activity uses the conversation's language %s", async (language, summary) => {
+  setConversationLanguage(() => language);
+  try {
+    const { rows, call } = await fixture({ sendMessage: (async () => ({ messageId: "<1@x>", accepted: ["a@b.example"], rejected: [], filed: true })) as never });
+    await call("EMAIL_SEND_MESSAGE", { to: ["a@b.example"], subject: "Hi", text: "Body" });
+    expect(rows[0]).toMatchObject({ tool: { summary } });
+    expect(JSON.stringify(rows)).not.toContain("a@b.example");
+  } finally { setConversationLanguage(() => undefined); }
 });

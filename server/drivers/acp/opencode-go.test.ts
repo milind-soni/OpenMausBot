@@ -6,6 +6,7 @@ import { delimiter, dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
+import { runtimeNoticeTool } from "../../chat-notices.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
 import {
   canRunOpenCode,
@@ -1289,8 +1290,9 @@ describe("OpenCode session variants", () => {
   it("is stored as a status row the person always sees", () => {
     const source = readFileSync(new URL("../../index.ts", import.meta.url), "utf8");
     const handler = source.slice(source.indexOf('case "runtime.notice":'), source.indexOf('case "runtime.error":'));
-    // Room for a memory wait in full, Starter line included, in the longer languages.
-    expect(handler).toContain("name: `notice: ${event.message.slice(0, 400)}`");
+    expect(handler).toContain('role: "bot", kind: "activity", tool: { ...runtimeNoticeTool(event), name: `notice: ${event.message.slice(0, 400)}` }');
+    const message = "Retired model ".repeat(30);
+    expect(runtimeNoticeTool({ message })).toEqual({ name: `notice: ${message.slice(0, 240)}`, ok: true });
   });
 
   it("still switches to a model the session offers", async () => {

@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setLocale } from "@/lib/i18n";
-import { moveLine } from "./cloud-send";
+import { readFileSync } from "node:fs";
+import en from "@/locales/en.json";
+import ptBr from "@/locales/pt-br.json";
+import { ipcErrorText, moveLine } from "./cloud-send";
 
 beforeEach(() => { setLocale("en"); });
 afterEach(() => { setLocale("en"); });
@@ -57,6 +60,19 @@ describe("the one-time move's line", () => {
     expect(moveLine({ phase: "finishing", failing: { error: null } }, "local")?.text).toBe("Your bots couldn't move to My Cloud yet.");
   });
 
+  it("keeps a coded failure in the reader's language for My Cloud and a server of the person's own", () => {
+    const place = "Garage server";
+    const failing = { error: "Sign in to Garage server in the app first.", errorKey: "serverError.team.signInFirst", errorParams: { team: place } };
+    expect(moveLine({ phase: "copy", failing, place }, "local")).toMatchObject({
+      text: "Your bots couldn't move to Garage server yet: Sign in to Garage server in the app first.", reason: failing.error,
+    });
+    setLocale("pt-br");
+    expect(moveLine({ phase: "copy", failing }, "local")?.reason).toBe("Primeiro, faça login em Garage server no app.");
+    expect(moveLine({ phase: "copy", failing, place }, "local")).toMatchObject({
+      text: "Seus bots ainda não conseguiram ir para Garage server: Primeiro, faça login em Garage server no app.", reason: "Primeiro, faça login em Garage server no app.",
+    });
+  });
+
   it("names what did not move and why, on a failing line and on the done line, for My Cloud and a server of the person's own", () => {
     const items = [{ label: "tidy", error: "OpenMausBot on this computer did not answer." }, { label: "Reply to email", error: "This app automation stays on the computer it came from." }];
     const lines = ["tidy: OpenMausBot on this computer did not answer.", "Reply to email: This app automation stays on the computer it came from."];
@@ -109,6 +125,30 @@ describe("the line on a computer whose bots come home because the person keeps t
     expect(moveLine({ phase: "back", kept: true }, "local"))
       .toEqual({ kind: "done", text: "This computer's bots are back here, and their automations run on this computer. My Cloud keeps a copy of them with their automations off.", extra: [] });
     expect(moveLine({ phase: "back", kept: true }, "cloud")).toBeNull();
+  });
+});
+
+describe("a refusal the preload words before main is asked", () => {
+  const unclicked = en["cloudAccount.keepHere.unclicked"];
+  const keys = ["cloudAccount.keepHere.unclicked", "cloudSend.move.unclicked", "teamMove.unclicked"] as const;
+
+  it("is the preload's own sentence", () => {
+    const preload = readFileSync(new URL("../../electron/preload.cjs", import.meta.url), "utf8");
+    for (const key of keys) expect(preload, key).toContain(`new Error(${JSON.stringify(en[key])})`);
+  });
+
+  it("each one shown on a page reads in pt-BR", () => {
+    setLocale("pt-br");
+    for (const key of keys) expect(ipcErrorText(new Error(en[key])), key).toBe(ptBr[key]);
+  });
+
+  it("shows in the app's language, and main's own words stay as main wrote them", () => {
+    expect(ipcErrorText(new Error(unclicked))).toBe(unclicked);
+    setLocale("pt-br");
+    expect(ipcErrorText(new Error(unclicked))).toBe(ptBr["cloudAccount.keepHere.unclicked"]);
+    expect(ipcErrorText(new Error("Error invoking remote method 'one-home:keep-set': Error: Os bots deste computador estão voltando.")))
+      .toBe("Os bots deste computador estão voltando.");
+    expect(ipcErrorText("not an error")).toBeNull();
   });
 });
 

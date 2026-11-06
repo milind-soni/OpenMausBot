@@ -18,9 +18,11 @@ import { installOrgSkill, installSkill, parseSkillMd, setSkillEnabled } from "..
 import type { BotRecord, Store } from "../store.ts";
 import type { TeamPeople } from "../team-people.ts";
 import { writeMemoryFile, writeMemoryTopic } from "../workspace.ts";
+import { refusalBody, userError } from "../user-errors.ts";
+import type { ServerErrorBody } from "../../shared/server-text.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
-export type ModelSelectionCheck = { ok: true; selection: ModelSelection } | { ok: false; status: number; error: string };
+export type ModelSelectionCheck = { ok: true; selection: ModelSelection } | ({ ok: false; status: number } & ServerErrorBody);
 
 export interface BotCreateRouteDeps {
   store: Store;
@@ -145,9 +147,9 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       }
       if (settings.managedSections?.length) {
         if (!settings.chiefOfStaff || settings.managedSections.some(name => name !== "" && !store.sections.includes(name))) {
-          return json(res, 400, { error: "Only a Chief may manage existing additional departments" });
+          return json(res, 400, userError("serverError.department.chiefOnlyExtra"));
         }
-        if (body.acknowledgePeerScope !== true) return json(res, 400, { error: "Confirm additional department access (acknowledgePeerScope)" });
+        if (body.acknowledgePeerScope !== true) return json(res, 400, userError("serverError.department.confirmExtra"));
         if (auth.kind === "loopback" && !DESKTOP_MANAGED && store.bots.some(bot => bot.busy)) {
           return json(res, 409, { error: "Stop running bots before granting access to another department" });
         }
@@ -178,10 +180,10 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       const creator = auth.kind === "session" && auth.session.membershipAuthority === "team" ? auth.session.email : undefined;
       let reportsTo: string | undefined;
       if (body.reportsTo !== undefined && body.reportsTo !== null) {
-        if (!deps.team) return json(res, 400, { error: "Only a team's bots report to someone." });
+        if (!deps.team) return json(res, 400, userError("serverError.owner.teamOnly"));
         if (typeof body.reportsTo !== "string" || !body.reportsTo.trim()) return json(res, 400, { error: "reportsTo must be an email" });
         const email = body.reportsTo.trim().toLowerCase();
-        if (email !== creator?.toLowerCase() && !deps.team.people.has(email)) return json(res, 400, { error: `Choose someone in ${deps.team.name}.` });
+        if (email !== creator?.toLowerCase() && !deps.team.people.has(email)) return json(res, 400, userError("serverError.owner.choose", { team: deps.team.name }));
         reportsTo = email;
       }
       let selection: ModelSelection;
@@ -189,7 +191,7 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
         selection = await defaultSelection();
       } else {
         const checked = checkedModelSelection(body.modelSelection, undefined, body.requireAvailableModel === true);
-        if (!checked.ok) return json(res, checked.status, { error: checked.error });
+        if (!checked.ok) return json(res, checked.status, refusalBody(checked));
         selection = checked.selection;
       }
       if (hostedModels && !hostedModels.allows(selection)) return json(res, 400, { error: hostedModels.error() });

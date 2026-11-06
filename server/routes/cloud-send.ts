@@ -23,6 +23,7 @@ import type { MoveAutomations } from "../move-freeze.ts";
 import { threadHeads } from "../message-db.ts";
 import type { LineLanguage } from "../server-lines.ts";
 import type { RequestAuth } from "../request-auth.ts";
+import type { ServerErrorBody } from "../../shared/server-text.ts";
 import type { BotRecord } from "../store.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
@@ -49,7 +50,7 @@ export interface CloudSendRouteDeps extends Pick<CloudSendSources, "appVersion" 
   automations?: MoveAutomations;
   /** A team's server: nothing of one person's computer moves in, and every send or move route answers this but to a
    * sign-in that moves one bot in (`scope`). */
-  refusal?: string;
+  refusal?: ServerErrorBody;
   /** The one bot a request's sign-in moves into this team, which every read here is kept to; null for any other. */
   scope?(auth: RequestAuth): string | null;
 }
@@ -80,7 +81,7 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
     if (path !== "/api/cloud-send" && !path.startsWith("/api/cloud-send/")) return PASS;
     const home = deps.cloudHome === true || deps.ownHome?.(ctx.auth) === true;
     const scoped = deps.scope?.(ctx.auth) ?? null;
-    if (deps.refusal && !scoped) { req.resume(); return json(res, 403, { error: deps.refusal }); }
+    if (deps.refusal && !scoped) { req.resume(); return json(res, 403, deps.refusal); }
     // A move of one bot into a team reads that bot only, on both sides.
     const bot = scoped ?? (/^[\w-]{1,128}$/u.test(url.searchParams.get("bot") ?? "") ? url.searchParams.get("bot")! : undefined);
     if (deps.chats && await cloudSendChatsRoute({ ...deps.chats, ...(bot ? { bot } : {}) }, ctx)) return;

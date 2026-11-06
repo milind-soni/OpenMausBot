@@ -74,7 +74,12 @@ it("is the person's own: private on the wire, its notes in their layer, and nobo
   for (const token of [olive, ben]) expect(await everything(token, maus)).not.toContain("Kestrel19");
 }, hostTimeout(120_000));
 
-it("a MausBot made before this: at the next start its main chat becomes its person's and its earlier notes move to their layer", async () => {
+it.each([
+  ["en", "This note moved here from where the bot kept it before, so it can't be reverted here."],
+  ["pt-br", "Esta nota veio de onde o bot a guardava antes, então não é possível reverter a alteração aqui."],
+])("moves earlier notes to their person's layer in %s when the server is English", async (language, reason) => {
+  expect((await team.as(olive, "PUT", "/api/config", { language: "en" })).status).toBe(200);
+  expect((await team.as(ben, "POST", "/api/presence/active", { source: "desktop", language })).status).toBe(200);
   const maus = await ownMausBot(ben);
   expect((await team.as(ben, "POST", `/api/bots/${maus.id}/messages`, { text: "NO-SCRIPT Heron77 hello", threadId: maus.threadId })).status).toBe(202);
   await expect.poll(async () => JSON.stringify((await team.as(ben, "GET", `/api/threads/${maus.threadId}/messages?limit=50`)).body), { timeout: 60_000 }).toContain("Heron77");
@@ -85,12 +90,16 @@ it("a MausBot made before this: at the next start its main chat becomes its pers
   mkdirSync(dataDir("workspaces", maus.id), { recursive: true });
   writeFileSync(dataDir("workspaces", maus.id, "MEMORY.md"), `# Memory\n\n- ${OLD_NOTE}\n`);
   mkdirSync(dataDir("memory-journal"), { recursive: true });
-  writeFileSync(dataDir("memory-journal", `${maus.id}.ndjson`), `${JSON.stringify({ id: "old-1", botId: maus.id, at: Date.now(), path: "MEMORY.md", actor: "bot", after: OLD_NOTE })}\n`);
+  writeFileSync(dataDir("memory-journal", `${maus.id}.ndjson`), `${JSON.stringify({ id: `old-${language}`, botId: maus.id, at: Date.now(), path: "MEMORY.md", actor: "bot", after: OLD_NOTE })}\n`);
 
   await team.relaunch();
   olive = (await team.pair(OLIVE)).token!;
   ben = (await team.pair(BEN)).token!;
+  expect((await team.as(olive, "GET", "/api/config")).body.language).toBe("en");
   await expect.poll(() => read(layer(maus, BEN.email)), { timeout: 30_000 }).toContain(OLD_NOTE);
+  const journal = read(dataDir("memory-journal", `${maus.id}--member-${personKey({ id: "", email: BEN.email })}.ndjson`))
+    .trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  expect(journal.find((row) => row.id === `old-${language}`)).toMatchObject({ before: null, canRevert: false, revertUnavailableReason: reason });
   expect(read(dataDir("workspaces", maus.id, "MEMORY.md"))).not.toContain(OLD_NOTE);
   expect(read(dataDir("memory-journal", `${maus.id}.ndjson`))).not.toContain(OLD_NOTE);
   expect((await ownMausBot(ben)).tasks!.find((task) => task.threadId === maus.threadId)?.private).toBe(true);

@@ -1,3 +1,4 @@
+import { t } from "@/lib/i18n";
 import { api, ApiError } from "@/state/store";
 import type { AppBlockedReason, AppDocument } from "../../../shared/app";
 import type { PublishedPageCard } from "../../../shared/published-page";
@@ -38,7 +39,7 @@ export async function fetchAppDocument(threadId: string, messageId: string, sign
   const query = new URLSearchParams({ origin: window.location.origin, ...(rev === undefined ? {} : { rev: String(rev) }) });
   try {
     const doc = await api<AppDocument>(`${appDocumentPath(threadId, messageId)}?${query}`, { signal });
-    if (!isRecord(doc) || typeof doc.srcdoc !== "string" || !isRecord(doc.can)) throw new AppDocumentError({ offline: false, status: 500, error: "The app's page did not arrive whole." });
+    if (!isRecord(doc) || typeof doc.srcdoc !== "string" || !isRecord(doc.can)) throw new AppDocumentError({ offline: false, status: 500, error: t("app.strip.incomplete") });
     return doc;
   } catch (error) {
     if (error instanceof AppDocumentError) throw error;

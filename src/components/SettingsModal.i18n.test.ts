@@ -40,7 +40,7 @@ describe("Settings → General", () => {
     expect(pt).toContain("Configurações");
     expect(pt).toContain("Provedores de modelos");
     expect(pt).toContain("Idioma do app");
-    expect(pt).toContain("Parar sem progresso após");
+    expect(pt).toContain("Parar após este tempo sem avançar");
 
     // Same module instance, no reload: a frozen label would still say "Provedores de modelos" here.
     setLocale("ja");

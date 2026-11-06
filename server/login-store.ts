@@ -221,12 +221,12 @@ export class LoginStore {
     return true;
   }
 
-  usableFor(pageHost: string, botId: string): StoredLogin[] {
+  usableFor(pageHost: string, botId: string | readonly string[]): StoredLogin[] {
     return this.read().logins.filter((login) => loginMatchesHost(login, pageHost) && loginUsableBy(login, botId));
   }
 
   /** Where each login a bot may use fills, and its username, for the bot's prompt. */
-  sitesFor(botId: string): Array<LoginPlace & { username: string }> {
+  sitesFor(botId: string | readonly string[]): Array<LoginPlace & { username: string }> {
     return this.read().logins.filter((login) => loginUsableBy(login, botId))
       .map((login) => ({ site: login.site, hosts: [...login.hosts], exactHost: login.exactHost, username: login.username }))
       .sort((a, b) => a.site.localeCompare(b.site) || a.username.localeCompare(b.username));

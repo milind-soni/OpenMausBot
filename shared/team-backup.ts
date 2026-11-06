@@ -12,10 +12,22 @@ const key = z.string().min(1).max(200);
 const name = z.string().trim().min(1).max(200);
 const timestamp = z.number().finite().nonnegative();
 const color = z.enum(MAUS_COLOR_NAMES);
+export const goalHistoryWords = z.object({
+  role: z.literal("bot"),
+  text: z.string().max(2_000_000),
+  textCode: z.enum([
+    "chat.notice.exportedGoal.working", "chat.notice.exportedGoal.completed", "chat.notice.exportedGoal.needs-input", "chat.notice.exportedGoal.blocked",
+    "chat.notice.exportedGoal.limit-reached", "chat.notice.exportedGoal.paused", "chat.notice.exportedGoal.stopped", "chat.notice.exportedGoal.failed",
+  ]),
+  textParams: z.object({ before: z.string().max(2_000_000), content: z.string().max(2_000_000) }),
+});
 const message = z.object({
   id: key,
   role: z.enum(["bot", "user"]),
-  text: z.string().max(2_000_000),
+  text: goalHistoryWords.shape.text,
+  /** Optional fixed goal-history wording; older readers retain the English text. */
+  textCode: goalHistoryWords.shape.textCode.optional(),
+  textParams: goalHistoryWords.shape.textParams.optional(),
   at: timestamp,
   parentId: key.nullable(),
   replyToId: key.optional(),

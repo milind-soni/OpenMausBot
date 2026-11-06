@@ -5,7 +5,9 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type Server, type ServerResponse } from "node:http";
 
-import type { DeviceRegistry } from "./devices.ts";
+import type { DeviceRegistry, DeviceRoutes } from "./devices.ts";
+import type { E2EDescriptor } from "./e2e/descriptor.ts";
+import type { LiveRoute } from "./e2e/registry.ts";
 import { companionEndpointCandidates, hostedCompanionUrl } from "./endpoints.ts";
 import { lanAddresses, lanInterfaces, tailnetName, tailscaleAddress } from "./listener.ts";
 import { defaultHostName } from "./mdns.ts";
@@ -35,6 +37,22 @@ export interface ControlOptions {
   revoked?: (deviceId: string) => void;
   refreshTailscale?: () => Promise<void>;
   publicNetworks?: () => ReadonlySet<string>;
+  /** End-to-end status; absent or `enabled: false` while it is off. */
+  e2e?: () => E2EStatus;
+  /** The best live encrypted route of each connected device. */
+  liveRoutes?: () => Record<string, LiveRoute>;
+  /** After a device's allowed routes change: the relay admission set and its relay sessions follow. */
+  routesChanged?: (deviceId: string, routes: DeviceRoutes) => void;
+  /** A standalone sidecar's relay identity and token (`PUT /e2e/relay`); false when refused. */
+  setRelay?: (body: unknown) => boolean;
+}
+
+export interface E2EStatus {
+  enabled: boolean;
+  relay: "connected" | "connecting" | "off";
+  node: string | null;
+  /** What the pairing QR carries as `e2e`. */
+  descriptor: E2EDescriptor | null;
 }
 
 /** A bracketed IPv6 literal has colons of its own. A malformed authority comes
@@ -126,6 +144,28 @@ const readHostedEndpoint = (
     });
   });
 
+/** A small JSON body of any shape, for the caller to validate. */
+const readSmallJson = (req: import("node:http").IncomingMessage): Promise<unknown> =>
+  new Promise((resolve, reject) => {
+    let text = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk: string) => {
+      text += chunk;
+      if (text.length > 4096) {
+        reject(new Error("body too large"));
+        req.destroy();
+      }
+    });
+    req.on("error", reject);
+    req.on("end", () => {
+      try {
+        resolve(JSON.parse(text));
+      } catch {
+        reject(new Error("invalid JSON body"));
+      }
+    });
+  });
+
 const currentHostedUrl = (options: Pick<ControlOptions, "hostedUrl">): string | null =>
   options.hostedUrl?.() ?? null;
 
@@ -178,7 +218,8 @@ export function companionState(options: Omit<ControlOptions, "controlToken">) {
     ),
     ...(secretPublicKey ? { secretPublicKey } : {}),
     pairing: pairing ? { code: pairing.code, token: pairing.token, expiresAt: pairing.expiresAt } : null,
-    devices: options.devices.list(),
+    devices: options.devices.list().map((device) => ({ ...device, route: options.liveRoutes?.()[device.id] ?? null })),
+    e2e: options.e2e?.() ?? { enabled: false, relay: "off", node: null, descriptor: null },
     // An empty list from an unreadable file must not read as "nothing paired".
     ...(options.devices.devicesUnreadable() ? { devicesUnreadable: true } : {}),
     connectedDeviceIds: options.connectedDeviceIds?.() ?? [],
@@ -236,6 +277,18 @@ export function createControlServer(options: ControlOptions): Server {
         code: window.code,
         token: window.token,
       });
+    }
+    const setRelay = options.setRelay;
+    if (method === "PUT" && path === "/e2e/relay" && setRelay) {
+      readSmallJson(req).then(
+        (body) => (setRelay(body) ? json(res, 200, companionState(options)) : json(res, 400, { error: "invalid relay configuration" })),
+        (error: Error) => json(res, 400, { error: error.message }),
+      );
+      return;
+    }
+    if (method === "POST" && path === "/pairing/renew") {
+      const window = options.devices.renewPairing();
+      return json(res, 201, { ...companionState(options), code: window.code, token: window.token });
     }
     if (method === "DELETE" && path === "/pairing") {
       const expectedToken = requestUrl.searchParams.get("expectedToken") ?? undefined;
@@ -296,6 +349,24 @@ export function createControlServer(options: ControlOptions): Server {
         options.moves?.refuse(move[1]);
       }
       return json(res, 200, companionState(options));
+    }
+    const routes = path.match(/^\/devices\/([\w-]+)\/routes$/);
+    if (routes && method === "PUT") {
+      readSmallJson(req).then(
+        (body) => {
+          const next = (body as { routes?: unknown } | null)?.routes;
+          if (next !== "any" && next !== "local") return json(res, 400, { error: 'routes must be "any" or "local"' });
+          try {
+            if (!options.devices.setRoutes(routes[1], next)) return json(res, 404, { error: "no such device" });
+          } catch {
+            return json(res, 500, { error: "could not save where this device connects from" });
+          }
+          options.routesChanged?.(routes[1], next);
+          return json(res, 200, companionState(options));
+        },
+        (error: Error) => json(res, 400, { error: error.message }),
+      );
+      return;
     }
     const revoke = path.match(/^\/devices\/([\w-]+)$/);
     if (revoke && method === "DELETE") {

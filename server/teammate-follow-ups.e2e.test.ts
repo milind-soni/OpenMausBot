@@ -261,6 +261,7 @@ it("P1 lets Clive, as Mira's Chief, answer for the person the question she asks 
   expect(f.given("C-ANSWER")).toContain(PERSON_QUESTION);
   const [sent] = f.replies("C-ANSWER");
   expect(sent.receipts).toEqual([expect.objectContaining({ outcome: "injected", threadId: chat, detail: expect.stringContaining(`answered its question "${PERSON_QUESTION}" for the person`) })]);
+  expect(sent.message, "an answer alone hands no work out, so Clive continues and tells the person").toContain("Answered for the person. Nothing from this call comes back or resumes you");
   await expect.poll(async () => (await f.messages(chat)).some((message: any) => message.role === "bot" && String(message.text).startsWith("P1-RESULT")), { timeout: 30_000 }).toBe(true);
   const result = (await f.messages(chat)).find((message: any) => String(message.text).startsWith("P1-RESULT")).text as string;
   expect(result).toContain("@Clive answered for the person");
@@ -324,6 +325,25 @@ it("P4 keeps Mira's question from a Clive turn a webhook started: it is not list
   await expect.poll(() => f.keys(f.clive.id), { timeout: 30_000 }).toEqual(["C-HOOK"]);
   expect(f.given("C-HOOK")).not.toContain("Teammates you manage wait on the person's answer");
   expect(f.replies("C-HOOK")).toEqual([`"${chat}" is not a thread you opened on Mira: use a threadId one of your coordinate_bots receipts gave, or one list_threads shows on them`]);
+  expect((await asking(f, chat))?.answered).toBeUndefined();
+  expect(f.children()).toEqual([]);
+}), hostTimeout(90_000));
+
+it("P7 keeps Mira's question from a Clive turn a scheduled routine started: it is not listed, the thread is refused, and it stays the person's", () => scenario(async (f) => {
+  await f.askMeFirst();
+  const chat = f.mira.activeTaskId as string;
+  askThePerson(f, "P7");
+  f.script(f.clive.id, { key: "C-ROUTINE", match: ["P7-ROUTINE"], steps: [{ arguments: { bot_ids: [f.mira.id], message: "Keep it", thread: chat }, expectError: true }], reply: "C-ROUTINE: refused." });
+  await f.say(f.mira.id, chat, "P7: redo the pricing page.");
+  await expect.poll(async () => (await asking(f, chat)) !== undefined, { timeout: 30_000 }).toBe(true);
+
+  const routine = await f.api("POST", "/api/routines", { name: "P7", prompt: "P7-ROUTINE: tell Mira to keep it.", botId: f.clive.id, schedule: { type: "daily", time: "09:00", weekdays: [1] } });
+  expect(routine.status, JSON.stringify(routine.body)).toBe(201);
+  expect((await f.api("POST", `/api/routines/${routine.body.routine.id}/run`)).status).toBe(201);
+  await expect.poll(() => f.keys(f.clive.id), { timeout: 30_000 }).toEqual(["C-ROUTINE"]);
+  expect(f.given("C-ROUTINE")).not.toContain("Teammates you manage wait on the person's answer");
+  expect(f.replies("C-ROUTINE")).toEqual([`"${chat}" is not a thread you opened on Mira: use a threadId one of your coordinate_bots receipts gave, or one list_threads shows on them`]);
+  expect(await asking(f, chat)).toBeDefined();
   expect((await asking(f, chat))?.answered).toBeUndefined();
   expect(f.children()).toEqual([]);
 }), hostTimeout(90_000));

@@ -266,9 +266,9 @@ it("a conversation a guest left behind is never captured into the bot's memory; 
   const mine = await newBot("Mine", "done");
   await completedTurn(() => say(owner, mine, "I like my answers short."));
   await settled(mine.threadId);
-  // Capture runs once the chat is quiet; the owner's chat proves it ran. It is an engine run of its own, as slow as the
-  // host: a shard running several files at once doubles the wait.
-  await expect.poll(() => memoryText(mine), { timeout: hostTimeout(20_000) }).toContain(INJECTED);
+  // Capture runs once the chat is quiet; the owner's chat proves it ran. Captures queue one at a time, each an engine
+  // run or two of its own, so a Linux shard running four files at once needs far longer than an idle host.
+  await expect.poll(() => memoryText(mine), { timeout: hostTimeout(45_000) }).toContain(INJECTED);
   expect(await memoryText(shared)).not.toContain(INJECTED);
   const logs = (bot: { id: string }) => {
     const dir = join(home, ".openmausbot", "workspaces", bot.id, "memory", "log");
@@ -276,7 +276,7 @@ it("a conversation a guest left behind is never captured into the bot's memory; 
   };
   expect(logs(mine)).toContain("hello from fake claude");
   expect(logs(shared)).not.toContain("hello from fake claude");
-}, hostTimeout(60_000));
+}, hostTimeout(90_000));
 
 it("a turn in a conversation a guest left behind cannot write a bot's memory with its tools; the owner's own can", async () => {
   const bot = await newBot("Notes", "held");
@@ -522,9 +522,9 @@ it("a conversation a guest left behind is never the owner's, whoever writes in i
   await settled(named);
   const next = await completedTurn(async () => say(owner, bot, "What's next? I'm free all afternoon.", await newThread(bot)));
   expect(next.system).not.toContain("setup.sh");
-  await expect.poll(() => memoryText(bot), { timeout: hostTimeout(20_000) }).toContain(INJECTED);
+  await expect.poll(() => memoryText(bot), { timeout: hostTimeout(45_000) }).toContain(INJECTED);
   expect(await memoryText(bot)).not.toContain("setup.sh");
-}, hostTimeout(90_000));
+}, hostTimeout(120_000));
 
 it("the owner's turn in a conversation a guest left behind cannot use the Mac", async () => {
   const bot = await newBot("Opened", "held");

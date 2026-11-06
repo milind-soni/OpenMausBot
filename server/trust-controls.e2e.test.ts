@@ -642,6 +642,15 @@ it("settles only the source task after approval or Stop, leaving the selected si
   }
 });
 
+it("keeps two backups on one account with different models, and drops an exact repeat", async () => {
+  const b = await bot("Same-account backups");
+  const sonnet = { instanceId: "claude", model: "claude-sonnet-5" }, opus = { instanceId: "claude", model: "claude-opus-5" };
+  const saved = await api("PATCH", `/api/bots/${b.id}`, { fallback: [sonnet, opus, { ...sonnet, model: " claude-sonnet-5 " }] });
+  expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+  const fleet = await api("GET", "/api/bots");
+  expect(fleet.body.bots.find((row: any) => row.id === b.id).fallback).toEqual([sonnet, opus]);
+});
+
 it("preserves accounts referenced by a fallback chain before delete or credential-directory change", async () => {
   const account = await api("POST", "/api/instances/claude-accounts", { displayName: "Fallback fixture account" });
   expect(account.status, JSON.stringify(account.body)).toBe(201);

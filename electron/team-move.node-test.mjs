@@ -173,7 +173,9 @@ test("a bot that stays on My Cloud (its Chief of Staff, or gone) stops the move 
 test("one move per bot: starting it again goes on with it, to another team is refused", async () => {
   const w = world({ passes: ["no network"] });
   await w.moves.start({ bot: SCOUT, team: ACME });
-  assert.throws(() => w.moves.start({ bot: SCOUT, team: { id: "team-beta", name: "Beta" } }), /Scout is moving to Acme/u);
+  const refused = (() => { try { w.moves.start({ bot: SCOUT, team: { id: "team-beta", name: "Beta" } }); } catch (error) { return error; } return null; })();
+  assert.equal(refused?.message, "Scout is moving to Acme.", "the English alone, as an older page reads it");
+  assert.deepEqual(refused.refusal, { code: "movingElsewhere", params: { bot: "Scout", team: "Acme" } });
   await w.moves.retry();
   assert.equal(phase(w), "done");
   assert.equal(w.journal.moves.length, 1);

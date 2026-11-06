@@ -115,7 +115,7 @@ try {
     return answer.body;
   };
   const payroll = (await as("ada", "POST", "/api/bots", { name: "Payroll", title: "Answers pay questions", color: "teal" })).bot as { id: string; threadId: string };
-  await as("ada", "POST", "/api/bots", { name: "Helpdesk", title: "IT questions", color: "blue" });
+  const helpdesk = (await as("ada", "POST", "/api/bots", { name: "Helpdesk", title: "IT questions", color: "blue" })).bot as { id: string };
   if (before) await as("ada", "PATCH", `/api/bots/${payroll.id}`, { visibility: { people: [PEOPLE.bob.email, PEOPLE.cara.email, PEOPLE.dan.email] } });
   else await as("ada", "PUT", `/api/bots/${payroll.id}/access`, { everyone: "none", people: { [PEOPLE.bob.email]: "view", [PEOPLE.cara.email]: "chat", [PEOPLE.dan.email]: "edit" } });
   const sales = (await as("ada", "POST", "/api/bots", { name: "Sales notes", title: "Keeps the deal notes", color: "orange" })).bot as { id: string };
@@ -298,6 +298,29 @@ try {
       await crowd(); await openSettings();
       await page.evaluate(`(() => { const field = document.querySelector("[data-access-search]"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(field, "payroll"); field.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
       await page.until("document.querySelectorAll('[data-access-row]').length === 1", "the search");
+    } },
+    { name: "department-access-preview", who: "ada", query: "mode=simple", act: async () => {
+      for (const id of [payroll.id, helpdesk.id]) await as("ada", "PATCH", `/api/bots/${id}`, { section: "Finance" });
+      await page.click('[aria-label="Actions for Finance department"]', "Finance's menu");
+      await page.until(`(() => { const item = [...document.querySelectorAll('[role=menuitem]')].find((entry) => entry.textContent.includes("Set for all bots")); item?.click(); return Boolean(item); })()`, "Set for all bots");
+      await page.until(`(() => { const tab = [...document.querySelectorAll('[data-testid=team-settings-dialog] [role=tab]')].find((entry) => entry.textContent.trim() === "Access"); tab?.click(); return Boolean(tab); })()`, "the Access tab");
+      const pick = (label: string, value: string) => page.evaluate(`(() => { const field = document.querySelector('[data-testid=team-settings-dialog] select[aria-label="${label}"]'); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
+      await pick("Everyone in Acme", "chat");
+      await pick("A person", PEOPLE.eve.email);
+      await page.until("Boolean(document.querySelector('[data-testid=team-settings-rows]'))", "the preview");
+    } },
+    { name: "department-access-applied", who: "ada", query: "mode=simple", act: async () => {
+      for (const id of [payroll.id, helpdesk.id]) await as("ada", "PATCH", `/api/bots/${id}`, { section: "Finance" });
+      await page.click('[aria-label="Actions for Finance department"]', "Finance's menu");
+      await page.until(`(() => { const item = [...document.querySelectorAll('[role=menuitem]')].find((entry) => entry.textContent.includes("Set for all bots")); item?.click(); return Boolean(item); })()`, "Set for all bots");
+      await page.until(`(() => { const tab = [...document.querySelectorAll('[data-testid=team-settings-dialog] [role=tab]')].find((entry) => entry.textContent.trim() === "Access"); tab?.click(); return Boolean(tab); })()`, "the Access tab");
+      const pick = (label: string, value: string) => page.evaluate(`(() => { const field = document.querySelector('[data-testid=team-settings-dialog] select[aria-label="${label}"]'); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
+      await pick("Everyone in Acme", "chat");
+      await pick("A person", PEOPLE.eve.email);
+      await page.until(`(() => { const apply = [...document.querySelectorAll('[data-testid=team-settings-dialog] button')].find((entry) => entry.textContent.startsWith("Apply to")); apply?.click(); return Boolean(apply); })()`, "Apply");
+      await page.until("Boolean(document.querySelector('[data-testid=team-settings-dialog] [role=status]')?.textContent.includes('applied'))", "the results");
+      const shared = ((await as("ada", "GET", "/api/bots")).bots as Array<{ id: string; access?: { everyone: string; people: Record<string, string> } }>).filter((bot) => bot.id === payroll.id || bot.id === helpdesk.id);
+      if (shared.length !== 2 || !shared.every((bot) => bot.access?.everyone === "chat" && bot.access.people[PEOPLE.eve.email] === "chat")) throw new Error(`department access not applied: ${JSON.stringify(shared)}`);
     } },
   ];
   let crowded = false;

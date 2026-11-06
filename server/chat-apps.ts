@@ -12,9 +12,10 @@ import type { AgentCardResult, AgentCardStore } from "./chat-widgets.ts";
 import { compileJsxPage } from "./jsx-compile.ts";
 import { appDocRefs } from "./message-db.ts";
 import { createPageFiles } from "./page-files.ts";
-import { PageBundleError, readBotPageBundle, type BotFolders, type PageBundle, type PageFile } from "./pages/bundle.ts";
+import { PageBundleError, readBotPageBundle, skippedNote, type BotFolders, type PageBundle, type PageFile } from "./pages/bundle.ts";
 import { redactSecretsInText } from "./redact.ts";
 import type { Message, StoreChange } from "./store.ts";
+import { userError, type UserError } from "./user-errors.ts";
 import type { PublishedPageCard as PublishedPage } from "../shared/published-page.ts";
 
 const ROOM_REFUSAL = "Pages are not available in rooms yet. Answer in text.";
@@ -47,7 +48,7 @@ function scrubbed(html: string, title: string): { html: string; title: string; m
 
 /** A folder page also carries the files beside its index.html and where they were read. */
 type PageText = { html: string; format?: "jsx"; files?: PageFile[]; folder?: string; videos?: AppDocData["videos"] };
-type MadePage = { ok: true; page: PageText; title: string; masked: boolean };
+type MadePage = { ok: true; page: PageText; title: string; masked: boolean; leftOut?: string };
 
 /** The page's text, scrubbed; a jsx page is transpiled first, so one that cannot run is refused with where. */
 function pageText(value: { html?: string; jsx?: string }, title: string): MadePage | { ok: false; error: string } {
@@ -69,7 +70,9 @@ export function bundlePage(bundle: PageBundle, title: string): MadePage | { ok: 
   }
   const page = scrubbed(html, title);
   const videos = bundle.videos && Object.keys(bundle.videos).length ? { videos: bundle.videos } : {};
-  return { ok: true, page: { html: page.html, files: bundle.files.filter((file) => file !== index), folder: bundle.source, ...videos }, title: page.title, masked: page.masked };
+  const leftOut = skippedNote(bundle.skipped);
+  return { ok: true, page: { html: page.html, files: bundle.files.filter((file) => file !== index), folder: bundle.source, ...videos }, title: page.title, masked: page.masked,
+    ...(leftOut ? { leftOut } : {}) };
 }
 
 async function folderPage(path: string, title: string, folders: BotFolders): Promise<MadePage | { ok: false; status: 400 | 403 | 404; error: string }> {
@@ -144,7 +147,7 @@ function placePage(
     // No `from`: in a direct thread a bot-authored row carrying one is replayed as another bot's line.
     const message = store.appendMessage(threadId, { role: "bot", kind: "app", text: pageFallback(made.title, page, value.fallbackText), app: payload });
     args.authored?.(message.id);
-    return { ok: true, messageId: message.id, ...(made.masked ? { masked: true as const } : {}) };
+    return { ok: true, messageId: message.id, ...(made.masked ? { masked: true as const } : {}), ...(made.leftOut ? { leftOut: made.leftOut } : {}) };
   }
   const existing = appRow(store, threadId, value.appId);
   if (!existing || (existing.from && existing.from.botId !== bot.id)) return { ok: false, status: 404, error: NO_SUCH_PAGE };
@@ -152,7 +155,7 @@ function placePage(
   const patched = replacePage(store, docs, threadId, existing, made, value.frameless);
   if (!patched) return { ok: false, status: 404, error: NO_SUCH_PAGE };
   args.authored?.(patched.id);
-  return { ok: true, messageId: patched.id, ...(made.masked ? { masked: true as const } : {}) };
+  return { ok: true, messageId: patched.id, ...(made.masked ? { masked: true as const } : {}), ...(made.leftOut ? { leftOut: made.leftOut } : {}) };
 }
 
 /** The next version of a row's page; the row is unchanged when the page is the same document. */
@@ -237,17 +240,17 @@ export function appDocument(args: {
 
 export type PublishablePage =
   | { ok: true; title: string; files: PageFile[]; rev: number; folder?: string }
-  | { ok: false; status: 404 | 409 | 422; error: string };
+  | ({ ok: false; status: 404 | 409 | 422; error: string } & Partial<UserError>);
 
 /** A bot's page as static files: index.html, and a folder page's files beside it. A jsx page carries the server's
  * transpiled code, so it loads no compiler. */
 export function publishablePage(args: { store: Pick<AgentCardStore, "messagesFor">; docs: AppDocs; threadId: string; messageId: string; rev?: number }): PublishablePage {
   const row = appRow(args.store, args.threadId, args.messageId);
-  if (!row) return { ok: false, status: 404, error: "That page is not in this conversation." };
-  if (row.app.source !== "html") return { ok: false, status: 409, error: "That app came from an MCP server; only a page a bot made can be published." };
+  if (!row) return { ok: false, status: 404, ...userError("serverError.page.notHere") };
+  if (row.app.source !== "html") return { ok: false, status: 409, ...userError("serverError.page.fromMcp") };
   const version = pageVersion(row.app, args.rev);
   const stored = version ? args.docs.read(version.doc) : null;
-  if (!version || !stored || stored.source !== "html") return { ok: false, status: 404, error: "That version of the page is no longer kept." };
+  if (!version || !stored || stored.source !== "html") return { ok: false, status: 404, ...userError("serverError.page.versionGone") };
   const title = oneLine(row.app.title);
   const index = (html: string): PageFile => ({ path: "index.html", data: Buffer.from(html) });
   if (stored.data?.format === "jsx") {
@@ -258,7 +261,7 @@ export function publishablePage(args: { store: Pick<AgentCardStore, "messagesFor
   const files = [index(publishedBotHtml(stored.html))];
   for (const path of Object.keys(stored.data?.files ?? {})) {
     const data = args.docs.readFile(version.doc, path);
-    if (!data) return { ok: false, status: 404, error: "That version of the page is no longer kept." };
+    if (!data) return { ok: false, status: 404, ...userError("serverError.page.versionGone") };
     files.push({ path, data });
   }
   return { ok: true, title, files, rev: version.rev, ...(stored.data?.folder ? { folder: stored.data.folder } : {}) };

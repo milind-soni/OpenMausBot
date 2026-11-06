@@ -2,6 +2,7 @@
 // sessions) and the turn running in it.
 import type { RequestOutcome, SendTurnInput } from "../../contracts.ts";
 import type { spawnCli } from "../../procs.ts";
+import { noticeFailure } from "../../chat-notices.ts";
 import { errorReplyFailure, type ErrorReplyFailure } from "../engine-errors.ts";
 import type { AcpConfig } from "./core.ts";
 import type { AcpHost, AcpLink } from "./host.ts";
@@ -90,6 +91,6 @@ export function endTurn(current: AcpTurn, ok: boolean, stopReason: string | null
     const { stopReason: failed, ...error } = errorReply;
     return { ok: false, stopReason: failed, error };
   }
-  if (ended && !current.state.producedItem) return { ok: false, stopReason: "empty_turn", error: { message: `${ai} finished without replying.` } };
+  if (ended && !current.state.producedItem) return { ok: false, stopReason: "empty_turn", error: noticeFailure("chat.notice.acpEmpty", { provider: ai }) };
   return { ok, stopReason };
 }

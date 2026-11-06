@@ -5,10 +5,9 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renam
 import { dirname, join, relative } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
+import { serverLine } from "./server-lines.ts";
 import { flushMemoryJournal, journalFile, JOURNAL_DIR } from "./memory-journal.ts";
 import { ensureWorkspace, isMemorySeed, readMemoryText, syncMemoryIndex, workspaceDir } from "./workspace.ts";
-
-const MOVED = "This note moved here from where the bot kept it before, so it can't be reverted here.";
 
 function filesUnder(dir: string): string[] {
   if (!existsSync(dir)) return [];
@@ -55,7 +54,7 @@ export async function moveMemoryLayer(from: string, to: string, language?: strin
   const journal = journalFile(from);
   if (existsSync(journal)) {
     const rows = readFileSync(journal, "utf8").split("\n").filter(Boolean).flatMap((line) => {
-      try { return [JSON.stringify({ ...JSON.parse(line), botId: to, before: null, canRevert: false, revertUnavailableReason: MOVED })]; } catch { return []; }
+      try { return [JSON.stringify({ ...JSON.parse(line), botId: to, before: null, canRevert: false, revertUnavailableReason: serverLine(language, "server.memory.movedNote") })]; } catch { return []; }
     });
     mkdirSync(JOURNAL_DIR, { recursive: true, mode: 0o700 });
     if (rows.length) appendFileSync(journalFile(to), `${rows.join("\n")}\n`, { mode: 0o600 });

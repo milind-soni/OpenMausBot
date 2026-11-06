@@ -49,6 +49,26 @@ prove real OAuth login or native Windows execution.
   provider.
 - Model-picker rendering is Electron UI and remains outside this first map.
 
+## Slow or empty CLI version responses
+
+```sh
+pnpm exec vitest run server/cli-version-probe.test.ts server/procs.test.ts server/engine-status-reads.e2e.test.ts src/App.engine-status.test.ts
+```
+
+The disposable server fixture runs a synthetic Claude CLI that takes nine
+seconds to report its version, and another that returns empty output once.
+Concurrent engine-list reads must report it available and signed in, using
+one version process for the slow case and two for the empty-response retry.
+Both cases send two chat turns through the control surface and retain the
+bot's saved model selection.
+
+The probe tests cover the thirty-second total budget, overlapping checks,
+temporary failures, and clearing a remembered version when the executable is
+missing or cannot be executed. The renderer test keeps an existing chat
+visible while engine status is unavailable and retains setup when there is
+no conversation. These checks do not prove a real provider's login or a
+packaged Windows window.
+
 ## Groq API setup
 
 ```sh

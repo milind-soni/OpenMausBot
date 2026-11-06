@@ -106,6 +106,13 @@ it("sends events without any stored or current address, polls nothing, and sends
     await analytics.initAnalytics();
     analytics.track("app_snapshot", { bots: 3 });
     await minutes(11);
+    // posthog-js gzips each batch with the platform's CompressionStream, which finishes on the real clock, not the fake
+    // one: on a busy machine the batches leave after the last tick. Wait for both events to have left, not for ticks.
+    await vi.waitFor(async () => {
+      const bodies = (await Promise.all(sent.map(({ body }) => bodyText(body)))).join("\n");
+      expect(bodies).toContain("app_snapshot");
+      expect(bodies).toContain("app_active");
+    }, { timeout: 30_000, interval: 20 });
 
     const urls = sent.map(({ url }) => new URL(url));
     expect(urls.length).toBeGreaterThan(0);

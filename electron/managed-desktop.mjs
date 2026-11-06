@@ -89,6 +89,24 @@ export const unreadableRecord = error => error?.code === "unreadable_record";
 const unreadable = message => Object.assign(new Error(message), { code: "unreadable_record" });
 export const retryDelay = attempt => [15_000, 30_000, 60_000][Math.min(attempt, 3) - 1];
 
+export const MANAGED_TEXT = Object.freeze({
+  clearFailed: "The saved company sign-in could not be cleared. Unlock your system keychain and Disconnect again before reconnecting.",
+  disconnected: "Disconnected on this computer.",
+  runtimeRunning: "The local runtime did not confirm stopping Company tasks. Quit and reopen OpenMausBot before using Company models again.",
+  portalUnreachable: "The portal was unreachable; ask your administrator to revoke this device there too.",
+  confirmStopped: "Quit and reopen OpenMausBot to confirm Company tasks have stopped.",
+  expired: "Your company sign-in expired. Reconnect to continue using company models and backups.",
+  accessEnded: "Company access ended or needs a new sign-in. Your personal and local providers are unchanged.",
+  retrying: "Can't reach the Admin portal or apply company models. Personal and local providers are still available. We'll retry shortly.",
+  codeExpired: "The sign-in code expired. Start again.",
+  denied: "Sign-in was denied, expired or already used. Start again on this computer.",
+  completeFailed: "Could not complete sign-in. Check your Admin address and start again.",
+  removed: "This computer's company sign-in couldn't be read, so it was removed. Sign in again.",
+  restoreFailed: "The saved company sign-in can't be read right now. OpenMausBot tries again every minute.",
+  startFailed: "Could not start company sign-in. Check the Admin portal address and your connection.",
+});
+const said = (...codes) => ({ message: codes.map(code => MANAGED_TEXT[code]).join(" "), messageCodes: codes });
+
 /** OS-encrypted; company tokens never go into config.json, backups, renderer storage, environment variables or CLI homes. */
 export function createManagedDesktopStore({ file, encryption }) {
   let tail = Promise.resolve();
@@ -159,7 +177,7 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
   };
   const reset = () => { generation++; stopTimer(); controller.abort(); controller = new AbortController(); pending = null; return generation; };
   const current = stamp => !closed && stamp === generation;
-  const view = (status, message) => ({ status, ...(message ? { message } : {}), ...(connection ? {
+  const view = (status, ...codes) => ({ status, ...(codes.length ? said(...codes) : {}), ...(connection ? {
     organization: { id: connection.organizationId, name: connection.organizationName }, email: connection.email,
     deviceId: connection.deviceId, expiresAt: connection.expiresAt,
     branding,
@@ -281,24 +299,23 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
       if (persisted.status === "fulfilled") { cleanupGrant = null; cleanupNeeded = false; }
       if (!current(stamp)) return snapshot();
       const warnings = [];
-      if (runtime.status === "rejected") warnings.push("The local runtime did not confirm stopping Company tasks. Quit and reopen OpenMausBot before using Company models again.");
-      if (revoked.status === "rejected") warnings.push("The portal was unreachable; ask your administrator to revoke this device there too.");
-      if (persisted.status === "rejected") return publish({ status: "unavailable", message: [
-        "The saved company sign-in could not be cleared. Unlock your system keychain and Disconnect again before reconnecting.", ...warnings,
-      ].join(" ") });
-      return publish({ status: "signed-out", ...(warnings.length ? { message: ["Disconnected on this computer.", ...warnings].join(" ") } : {}) });
+      if (runtime.status === "rejected") warnings.push("runtimeRunning");
+      if (revoked.status === "rejected") warnings.push("portalUnreachable");
+      if (persisted.status === "rejected") return publish({ status: "unavailable", ...said("clearFailed", ...warnings) });
+      return publish({ status: "signed-out", ...(warnings.length ? said("disconnected", ...warnings) : {}) });
     })().finally(() => { if (clearing === operation) clearing = null; });
     clearing = operation;
     return operation;
   }
-  async function endAccess(stamp, message) {
+  async function endAccess(stamp, code) {
+    const codes = [code];
     connection = null; policyLifted = true;
     notifyLibrary(target => target.clear());
     await sendIdentity(grant);
     await Promise.resolve().then(() => applyPolicy(null)).catch(() => {});
     try { await applyConnection(null); }
-    catch { message += " Quit and reopen OpenMausBot to confirm Company tasks have stopped."; }
-    return current(stamp) ? publish({ status: "reauth-required", message }) : snapshot();
+    catch { codes.push("confirmStopped"); }
+    return current(stamp) ? publish({ status: "reauth-required", ...said(...codes) }) : snapshot();
   }
   async function renew(stamp) {
     const enrolled = grant;
@@ -321,7 +338,7 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
   async function synchronize(stamp) {
     if (!grant || !current(stamp)) return snapshot();
     if (grant.expiresAt <= now()) {
-      return endAccess(stamp, "Your company sign-in expired. Reconnect to continue using company models and backups.");
+      return endAccess(stamp, "expired");
     }
     // A restarted runtime has no policy: restore the saved one before any network call.
     if (grant.policy && !policyLifted) await sendPolicy(grant);
@@ -373,12 +390,12 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
         if (!current(stamp)) return snapshot();
         publish(view("license-expired"));
       } else if ([401, 403].includes(error?.status)) {
-        return endAccess(stamp, "Company access ended or needs a new sign-in. Your personal and local providers are unchanged.");
+        return endAccess(stamp, "accessEnded");
       } else {
         if (connection && connection.expiresAt > now()) await applyConnection(connection).catch(() => {});
         await sendPolicy(grant);
         if (!current(stamp)) return snapshot();
-        publish(view("unavailable", "Can't reach the Admin portal or apply company models. Personal and local providers are still available. We'll retry shortly."));
+        publish(view("unavailable", "retrying"));
       }
     }
     if (current(stamp)) schedule(() => refresh(), Math.max(1000, Math.min(60_000, grant.expiresAt - now())));
@@ -397,7 +414,7 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
     if (!attempt || !current(stamp)) return;
     if (attempt.expiresAt <= now()) {
       pending = null;
-      return publish({ status: "signed-out", message: "The sign-in code expired. Start again." });
+      return publish({ status: "signed-out", ...said("codeExpired") });
     }
     try {
       const result = await request(attempt.portalOrigin, "/api/desktop/enrollment/token", { method: "POST", body: { deviceCode: attempt.deviceCode } });
@@ -418,24 +435,23 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
       else if (error?.code === "authorization_pending") {}
       else if (["access_denied", "expired_token", "invalid_grant"].includes(error?.code)) {
         pending = null;
-        return publish({ status: "signed-out", message: "Sign-in was denied, expired or already used. Start again on this computer." });
+        return publish({ status: "signed-out", ...said("denied") });
       } else if (error?.status && error.status !== 429) {
         pending = null;
-        return publish({ status: "signed-out", message: "Could not complete sign-in. Check your Admin address and start again." });
+        return publish({ status: "signed-out", ...said("completeFailed") });
       }
       schedule(poll, attempt.interval);
     }
   }
-  const RESTORE_FAILED = "The saved company sign-in can't be read right now. OpenMausBot tries again every minute.";
   /** A record that may only be locked in the keychain is kept, never removed, and read again shortly. */
   async function restoreFailed(stamp, unreadable) {
     if (unreadable) {
       const removed = await store.write(null).then(() => true, () => false);
       if (!current(stamp)) return snapshot();
-      if (removed) { restoreFailures = 0; return publish({ status: "signed-out", message: "This computer's company sign-in couldn't be read, so it was removed. Sign in again." }); }
+      if (removed) { restoreFailures = 0; return publish({ status: "signed-out", ...said("removed") }); }
     }
     restoreFailures++;
-    if (state.message !== RESTORE_FAILED) publish({ status: "unavailable", message: RESTORE_FAILED });
+    if (state.message !== MANAGED_TEXT.restoreFailed) publish({ status: "unavailable", ...said("restoreFailed") });
     schedule(start, retryDelay(restoreFailures));
     return snapshot();
   }
@@ -479,7 +495,7 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
         await openBrowser(result.verificationUriComplete);
         if (current(stamp)) schedule(poll, pending.interval);
       } catch (error) {
-        if (current(stamp)) { pending = null; publish(licenseExpired(error) ? { status: "signed-out", notice: "license-expired" } : { status: "signed-out", message: "Could not start company sign-in. Check the Admin portal address and your connection." }); }
+        if (current(stamp)) { pending = null; publish(licenseExpired(error) ? { status: "signed-out", notice: "license-expired" } : { status: "signed-out", ...said("startFailed") }); }
       }
       return snapshot();
     },

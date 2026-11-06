@@ -589,6 +589,7 @@ describe("an engine's adapter on a Cloud home", () => {
     await settle();
     expect(seen.map((event) => event.type === "runtime.error" ? event.message : event.type)).toEqual([
       `${memoryStopText(false)} (opencodeGo exited null before the prompt result)`, "turn.completed"]);
+    expect(seen[0]).toMatchObject({ text: { key: "chat.notice.memoryReclaimedTaskDetail", params: { detail: "opencodeGo exited null before the prompt result" } } });
     expect(h.memory.stopText("b")).toBeNull();
     // An engine that ends its turn without an error of its own: the reason comes first.
     h.oomKill();

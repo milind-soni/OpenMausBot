@@ -63,6 +63,14 @@ describe("POST /api/bots/<bot>/secret-cards/<card>/save", () => {
     expect(ctx.json).toHaveBeenCalledExactlyOnceWith(ctx.res, 200, { provided: true, resumed: true });
   });
 
+  it("keeps the unowned conversation refusal as uncoded English", async () => {
+    const { handler, saveCustomSecret } = route({ context: team(null, "p:bob") });
+    const ctx = context({ threadId: "thread-1", value: "sk_live_canary" });
+    await handler(ctx);
+    expect(saveCustomSecret).not.toHaveBeenCalled();
+    expect(ctx.json).toHaveBeenCalledExactlyOnceWith(ctx.res, 403, { error: "Only a workspace admin can enter this secret." });
+  });
+
   it.each([
     ["a form post", { contentType: "text/plain" }, 415],
     ["a conversation the session cannot see", { visible: false }, 404],

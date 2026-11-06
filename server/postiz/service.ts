@@ -1,3 +1,4 @@
+import { userError, userErrorFields } from "../user-errors.ts";
 // The Postiz connection as the Apps card and Settings → API keys see it. It is one `postiz` MCP server entry, so the
 // MCP gate, each bot's server selection and a Team Cloud's scopes treat it like any other.
 // Security: a key is checked before it is saved and only ever sent to the address it was saved for; no answer carries a
@@ -11,7 +12,7 @@ import { isRemoteMcpServer, parseStoredMcpServer, type StoredMcpServer, type Sto
 import { postizAddress, postizCloud, postizEntryMethod, postizKeyUrl, postizSignInUrl, savedPostizAddress } from "./connection.ts";
 
 export type PostizProblem = "address" | "unreachable" | "key_rejected" | "not_postiz" | "taken" | "busy" | "managed_policy";
-export type PostizRefusal = { status: number; error: string; code: PostizProblem };
+export type PostizRefusal = { status: number; error: string; errorKey?: string; errorParams?: import("../../shared/server-text.ts").ServerTextParams; code: PostizProblem };
 export type PostizKeyCheck = { ok: true; tools: number } | ({ ok: false } & PostizRefusal);
 
 export interface PostizDeps {
@@ -117,7 +118,7 @@ export function createPostiz(deps: PostizDeps) {
   /** Initialize and tools/list with this key: nothing is saved, no tool runs. */
   const checkKey = async (rawAddress: string | undefined, key: string, signal?: AbortSignal): Promise<PostizKeyCheck> => {
     const address = postizAddress(rawAddress, { loopback: deps.loopback });
-    if (!address.ok) return { ok: false, status: 400, code: "address", error: address.error };
+    if (!address.ok) return { ok: false, status: 400, code: "address", error: address.error, ...userErrorFields(address) };
     const target = server(postizKeyUrl(address.address), true);
     const refusal = deps.mcpPolicyRefusal(POSTIZ_SERVER, target);
     if (refusal) return { ok: false, status: 403, code: "managed_policy", error: refusal };
@@ -132,7 +133,7 @@ export function createPostiz(deps: PostizDeps) {
     /** Sets the `postiz` entry up for Postiz Cloud's sign-in, still off: the MCP sign-in routes run the sign-in, and the
      * card turns it on once its tools load. */
     prepareSignIn(): { ok: true; status: PostizStatus } | ({ ok: false } & PostizRefusal) {
-      if (deps.mcpConfigBusy.get()) return { ok: false, status: 409, code: "busy", error: "MCP servers are being updated. Try again in a moment." };
+      if (deps.mcpConfigBusy.get()) return { ok: false, status: 409, code: "busy", ...userError("serverError.postiz.mcpUpdating") };
       if (method() === "taken") return { ok: false, ...taken };
       const url = postizSignInUrl();
       const refusal = deps.mcpPolicyRefusal(POSTIZ_SERVER, server(url, false));
@@ -150,7 +151,7 @@ export function createPostiz(deps: PostizDeps) {
       const cfg = deps.cfg();
       if (patch.postiz.url !== undefined) {
         const address = postizAddress(patch.postiz.url, { loopback: deps.loopback });
-        if (!address.ok) return { status: 400, code: "address", error: address.error };
+        if (!address.ok) return { status: 400, code: "address", error: address.error, ...userErrorFields(address) };
         patch.postiz.url = address.address === postizCloud() ? "" : address.address;
       }
       const key = patch.postiz.key?.trim();
@@ -182,7 +183,7 @@ export function createPostiz(deps: PostizDeps) {
     /** Signs out and removes the entry, with every person's own sign-in and key for it. The key itself is removed by
      * the save that stores it (the desktop's encrypted store, or this server's config). */
     async disconnect(): Promise<{ ok: true; status: PostizStatus } | ({ ok: false } & PostizRefusal)> {
-      if (deps.mcpConfigBusy.get()) return { ok: false, status: 409, code: "busy", error: "MCP servers are being updated. Try again in a moment." };
+      if (deps.mcpConfigBusy.get()) return { ok: false, status: 409, code: "busy", ...userError("serverError.postiz.mcpUpdating") };
       const how = method();
       if (how === "taken") return { ok: false, ...taken };
       const current = entry();

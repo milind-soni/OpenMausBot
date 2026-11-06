@@ -68,6 +68,28 @@ describe("complete chat tool calls", () => {
 });
 
 describe("streamed tool calls without an index (Gemini's OpenAI-compatible endpoint)", () => {
+  it("keeps each call's thought signature", () => {
+    const calls = new ChatToolCalls();
+    const extra_content = { google: { thought_signature: "c2ln" } };
+    calls.add([{ ...completeCall, extra_content }, { ...completeCall, id: "call_two" }], true);
+    expect(calls.finish("stop", false)).toEqual([{ ...completeCall, extra_content }, { ...completeCall, id: "call_two" }]);
+  });
+
+  it("ignores extra content that is not an object", () => {
+    const calls = new ChatToolCalls();
+    calls.add([{ ...completeCall, extra_content: "sig" }], true);
+    expect(calls.finish("stop", false)).toEqual([completeCall]);
+  });
+
+  it("counts a signature repeated on every chunk once toward the size limit", () => {
+    const calls = new ChatToolCalls();
+    const extra_content = { google: { thought_signature: "s".repeat(100_000) } };
+    calls.add([{ index: 0, ...completeCall, extra_content }], true);
+    calls.add([{ index: 0, extra_content }], true);
+    calls.add([{ index: 0, extra_content }], true);
+    expect(calls.finish("stop", false)).toEqual([{ ...completeCall, extra_content }]);
+  });
+
   const whole = (id: string, name: string, args = "{}") => ({ id, type: "function", function: { name, arguments: args } });
 
   it("keeps two whole calls sent in one chunk", () => {
@@ -97,5 +119,66 @@ describe("streamed tool calls without an index (Gemini's OpenAI-compatible endpo
     const calls = new ChatToolCalls();
     calls.add(Array.from({ length: 32 }, (_, n) => whole(`call_${n}`, "f")), true);
     expect(() => calls.add([whole("call_32", "f")], true)).toThrow(/invalid tool-call index/);
+  });
+});
+
+describe("legacy function_call from OpenAI-compatible relays", () => {
+  it("turns a streamed legacy call into one structured call", () => {
+    const calls = new ChatToolCalls();
+    calls.addLegacy({ name: "echo", arguments: "" });
+    calls.addLegacy({ arguments: "{\"a\":" });
+    calls.addLegacy({ name: null, arguments: "1}" });
+    const [call, ...rest] = calls.finish("function_call", false);
+    expect(rest).toEqual([]);
+    expect(call).toMatchObject({ type: "function", function: { name: "echo", arguments: "{\"a\":1}" } });
+    expect(call?.id).toMatch(/^call_[0-9a-f]{32}$/);
+  });
+
+  it("takes a whole legacy call from a non-streamed message", () => {
+    const calls = new ChatToolCalls();
+    calls.addLegacy({ name: "echo", arguments: "{}" });
+    expect(calls.finish("stop", false)).toMatchObject([{ function: { name: "echo", arguments: "{}" } }]);
+  });
+
+  it("ignores an empty placeholder so a plain reply still finishes", () => {
+    const calls = new ChatToolCalls();
+    calls.addLegacy({});
+    calls.addLegacy({ name: "", arguments: "" });
+    expect(calls.finish("stop", false)).toEqual([]);
+  });
+
+  it("keeps the structured calls when a relay mirrors one into function_call", () => {
+    const calls = new ChatToolCalls();
+    calls.add([completeCall], false);
+    calls.addLegacy({ name: "echo", arguments: "{}" });
+    expect(calls.finish("tool_calls", false)).toEqual([completeCall]);
+  });
+
+  it.each(["function_call", "stop"])("rejects a nameless legacy call with arguments (finish %s)", (reason) => {
+    const calls = new ChatToolCalls();
+    calls.addLegacy({ arguments: "{}" });
+    expect(() => calls.finish(reason, false)).toThrow(/without a complete call/);
+  });
+
+  it.each(["call", [], { name: 1 }, { arguments: {} }])("rejects a malformed legacy call %j", (value) => {
+    const calls = new ChatToolCalls();
+    calls.addLegacy(value);
+    expect(() => calls.finish("function_call", false)).toThrow(/invalid function_call/);
+  });
+
+  it.each(["call", { name: 1 }, { name: "n".repeat(65) }])("ignores a malformed mirror %j next to structured calls", (value) => {
+    const calls = new ChatToolCalls();
+    calls.add([completeCall], false);
+    calls.addLegacy(value);
+    expect(calls.finish("tool_calls", false)).toEqual([completeCall]);
+  });
+
+  it("applies the name rules and size limits to legacy calls", () => {
+    const named = new ChatToolCalls();
+    named.addLegacy({ name: "bad name", arguments: "{}" });
+    expect(() => named.finish("function_call", false)).toThrow();
+    const long = new ChatToolCalls();
+    long.addLegacy({ name: "n".repeat(65) });
+    expect(() => long.finish("function_call", false)).toThrow(/size limit/);
   });
 });

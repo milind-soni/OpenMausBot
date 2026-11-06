@@ -2281,6 +2281,9 @@ describe("ACP turns (fake CLI)", () => {
     // The person reads the AI's name in plain words, never the internal id.
     expect(message).toBe("Grok finished without replying.");
     expect(message).not.toContain("grokAgent");
+    expect(recorder.events.find((e) => e.type === "runtime.error")).toMatchObject({
+      text: { key: "chat.notice.acpEmpty", params: { provider: "Grok" } },
+    });
   });
 
   // omp 18.12's ACP mode sends a provider's refusal as the reply's text and ends the turn with end_turn.
@@ -2319,6 +2322,9 @@ describe("ACP turns (fake CLI)", () => {
       expect(error.limit).toBe("engine");
       expect(error.limitResetsAt).toBeGreaterThanOrEqual(before + 115_636_000);
       expect(error.limitResetsAt).toBeLessThanOrEqual(after + 115_636_000);
+      expect(error.text).toMatchObject({ key: "chat.notice.usageLimitResets", params: {
+        provider: "Grok", resetsAt: error.limitResetsAt, timeZone: expect.any(String),
+      } });
       expect(error.message).toMatch(/^This Grok account has reached its usage limit \(Grok says: "\[1310\]\[Weekly\/Monthly Limit Exhausted"\), which resets .+\. Until then, switch this bot to another AI\.$/);
       expect(error.message).not.toMatch(/rate_limit_error|retry-after-ms|request_id/);
       expect(classifyError({ text: error.message }).reason).toBe("quota");

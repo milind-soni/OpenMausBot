@@ -3370,6 +3370,7 @@ describe("managed endpoints in several Cloudflare accounts", () => {
           },
         ],
       },
+      relayAdoption: { e2eDevices: 0, legacyDevices: 0, installs: 0 },
     });
     for (const secret of [
       PRIMARY_ACCOUNT,

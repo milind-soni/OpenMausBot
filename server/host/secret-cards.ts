@@ -1,3 +1,4 @@
+import { userError } from "../user-errors.ts";
 // The secure credential cards request_credential adds: the card on the conversation's visible branch, settling it,
 // resuming the turn it paused, and the value a paired phone sealed for this computer. No card, message or log holds the value.
 import { randomUUID } from "node:crypto";
@@ -202,27 +203,27 @@ export function createSecretCards(deps: SecretCardsDeps) {
   /** A value typed into a custom card in the app: kept, then the paused turn resumes. */
   function saveCustomSecret(botId: string, threadId: string, messageId: string, raw: unknown): { status: number; body: Record<string, unknown> } {
     const message = secretMessage(botId, threadId, messageId);
-    if (!message?.secret) return { status: 404, body: { error: "no such credential request" } };
+    if (!message?.secret) return { status: 404, body: { ...userError("serverError.secret.missing") } };
     const secret = message.secret;
-    if (!custom(secret)) return { status: 400, body: { error: "this card saves a key in Settings" } };
+    if (!custom(secret)) return { status: 400, body: { ...userError("serverError.secret.settingsCard") } };
     if (phoneSecretSubmissions.has(phoneSecretSubmissionKey(threadId, message.id, secret.requestKey))) {
-      return { status: 409, body: { error: "this secret is currently being saved from a phone" } };
+      return { status: 409, body: { ...userError("serverError.secret.savingFromPhone") } };
     }
-    if (secret.dismissed) return { status: 409, body: { error: "this request was declined" } };
-    if (secret.superseded) return { status: 409, body: { error: "this request was replaced by a newer one" } };
-    if (secret.stopped) return { status: 409, body: { error: "this request stopped with its task" } };
-    if (secret.provided || secret.savedAt !== undefined) return { status: 409, body: { error: "this secret was already saved" } };
+    if (secret.dismissed) return { status: 409, body: { ...userError("serverError.secret.declined") } };
+    if (secret.superseded) return { status: 409, body: { ...userError("serverError.secret.replaced") } };
+    if (secret.stopped) return { status: 409, body: { ...userError("serverError.secret.taskStopped") } };
+    if (secret.provided || secret.savedAt !== undefined) return { status: 409, body: { ...userError("serverError.secret.alreadySaved") } };
     const value = typeof raw === "string" ? raw.trim() : "";
     if (!value || Buffer.byteLength(value) > SECRET_VALUE_MAX_BYTES) {
-      return { status: 400, body: { error: `Enter the secret: up to ${SECRET_VALUE_MAX_BYTES} bytes.` } };
+      return { status: 400, body: { ...userError("serverError.secret.valueSize", { bytes: SECRET_VALUE_MAX_BYTES }) } };
     }
     try {
       storeCustomSecret(message, botId, threadId, value);
     } catch (error) {
       console.warn(`secret card: could not keep a secret: ${error instanceof Error ? error.message : String(error)}`);
-      return { status: 500, body: { error: "The secret could not be kept safely. Nothing was saved." } };
+      return { status: 500, body: { ...userError("serverError.secret.notKeptSafely") } };
     }
-    if (!resumeSecretCard(botId, threadId, message.id, "provided")) return { status: 409, body: { error: "this credential request is no longer available" } };
+    if (!resumeSecretCard(botId, threadId, message.id, "provided")) return { status: 409, body: { ...userError("serverError.secret.unavailableLower") } };
     return { status: 200, body: currentSecretState(botId, threadId, message.id) ?? { provided: true, resumed: false } };
   }
 
@@ -230,23 +231,23 @@ export function createSecretCards(deps: SecretCardsDeps) {
    * leaves the card open with why, so the person isn't sent back to a new card. */
   async function saveEmailSecret(botId: string, threadId: string, messageId: string, fields: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }> {
     const message = secretMessage(botId, threadId, messageId);
-    if (!message?.secret || message.secret.delivery !== "email") return { status: 404, body: { error: "no such credential request" } };
+    if (!message?.secret || message.secret.delivery !== "email") return { status: 404, body: userError("serverError.secret.missing") };
     const secret = message.secret;
-    if (phoneSecretSubmissions.has(phoneSecretSubmissionKey(threadId, message.id, secret.requestKey))) return { status: 409, body: { error: "this secret is currently being saved from a phone" } };
-    if (secret.dismissed) return { status: 409, body: { error: "this request was declined" } };
-    if (secret.superseded) return { status: 409, body: { error: "this request was replaced by a newer one" } };
-    if (secret.stopped) return { status: 409, body: { error: "this request stopped with its task" } };
-    if (secret.provided || secret.savedAt !== undefined) return { status: 409, body: { error: "this mailbox was already connected" } };
+    if (phoneSecretSubmissions.has(phoneSecretSubmissionKey(threadId, message.id, secret.requestKey))) return { status: 409, body: userError("serverError.secret.savingFromPhone") };
+    if (secret.dismissed) return { status: 409, body: userError("serverError.secret.declined") };
+    if (secret.superseded) return { status: 409, body: userError("serverError.secret.replaced") };
+    if (secret.stopped) return { status: 409, body: userError("serverError.secret.taskStopped") };
+    if (secret.provided || secret.savedAt !== undefined) return { status: 409, body: userError("serverError.secret.mailboxAlreadyConnected") };
     const password = typeof fields.value === "string" ? fields.value : "";
     const address = typeof fields.address === "string" && fields.address.trim() ? fields.address.trim() : secret.address ?? "";
-    if (!address || !password.trim() || Buffer.byteLength(password) > SECRET_VALUE_MAX_BYTES) return { status: 400, body: { error: "Enter your email address and its password." } };
-    if (!deps.email) return { status: 409, body: { error: "Email can't be connected here." } };
+    if (!address || !password.trim() || Buffer.byteLength(password) > SECRET_VALUE_MAX_BYTES) return { status: 400, body: userError("serverError.secret.emailAndPassword") };
+    if (!deps.email) return { status: 409, body: userError("serverError.secret.emailUnavailable") };
     const answer = await deps.email.connect({ address, password, ...emailServerFields(fields) });
     if (!answer.ok) return { status: 400, body: { error: answer.error, ...(answer.needsServer ? { needsServer: true } : {}) } };
     const current = secretMessage(botId, threadId, messageId);
-    if (!current?.secret) return { status: 409, body: { error: "this credential request is no longer available" } };
+    if (!current?.secret) return { status: 409, body: userError("serverError.secret.unavailableLower") };
     store.patchMessage(threadId, message.id, { secret: { ...current.secret, address: answer.account.address, savedAt: Date.now() } });
-    if (!resumeSecretCard(botId, threadId, message.id, "provided")) return { status: 409, body: { error: "this credential request is no longer available" } };
+    if (!resumeSecretCard(botId, threadId, message.id, "provided")) return { status: 409, body: userError("serverError.secret.unavailableLower") };
     return { status: 200, body: { ...currentSecretState(botId, threadId, message.id), ...(answer.sending.ok ? {} : { sendingProblem: answer.sending.problem }) } };
   }
 
@@ -378,7 +379,7 @@ export function createSecretCards(deps: SecretCardsDeps) {
       if (opened !== null) {
         if (current.secret.stopped) throw new PhoneSecretError("This request stopped with its task", 409);
         if (current.secret.delivery === "email") {
-          if (!current.secret.address || !deps.email) throw new PhoneSecretError("Type your email address and password on your computer.", 409);
+          if (!current.secret.address || !deps.email) throw new PhoneSecretError(serverLine(deps.threadLanguage?.(context.threadId), "server.connect.emailOnComputer"), 409);
           const answer = await deps.email.connect({ address: current.secret.address, password: opened });
           if (!answer.ok) throw new PhoneSecretError(answer.error, 400);
           store.patchMessage(context.threadId, current.id, { secret: { ...current.secret, savedAt: Date.now() } });
@@ -429,6 +430,13 @@ export function createSecretCards(deps: SecretCardsDeps) {
         target: credentialId,
         label: target.label,
         description: `${reason ? `${target.description} ${reason}` : target.description} ${serverLine(language, "server.connect.secretNeverRead", { bot: from.name })}`,
+        ...(credentialId === "greenferenceApiKey" || credentialId === "geminiTtsKey" ? {
+          descriptionParts: {
+            baseCode: credentialId === "greenferenceApiKey" ? "secretCard.greenference.description" as const : "secretCard.geminiTts.description" as const,
+            reason,
+            bot: from.name,
+          },
+        } : {}),
         placeholder: target.placeholder,
         helpUrl: target.helpUrl,
         requestKey: randomUUID(),

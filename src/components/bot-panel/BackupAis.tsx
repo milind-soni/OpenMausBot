@@ -24,6 +24,8 @@ type Backup = NonNullable<Bot["fallback"]>[number];
 export const MAX_BACKUPS = 5;
 
 const NO_SELECTION = { instanceId: "", model: "" };
+/** One model of one account: a bot's backups may share an account, never a model. */
+const modelKey = (instanceId: string, model: string) => `${instanceId}\u0000${model}`;
 const NOTHING_PROBED: ReadonlySet<string> = new Set();
 
 function BackupChooser({ bot, current, exclude, onPick, label, title, buttonRef, className, children, ...rest }: {
@@ -107,12 +109,18 @@ function BackupChooser({ bot, current, exclude, onPick, label, title, buttonRef,
   };
 
   const menuFor = () => {
-    const listed = configuredModelInstances(state.instances, current?.instanceId).filter((instance) => !exclude.has(instance.instanceId));
+    const listed = configuredModelInstances(state.instances, current?.instanceId).flatMap((instance) => {
+      const options = instance.models.options.filter((option) => !exclude.has(modelKey(instance.instanceId, option.id)));
+      if (options.length === instance.models.options.length) return [instance];
+      return options.length ? [{ ...instance, models: { ...instance.models, options } }] : [];
+    });
     const built = simpleModelMenu({
       instances: state.instances, listed, selection: current ?? NO_SELECTION,
       bot: { name: bot.name, selection: bot.modelSelection }, query, expanded, probing: NOTHING_PROBED, loading, refreshing,
     });
-    return current ? built : { ...built, current: null };
+    const groups = built.groups.map((group) => group.instance.instanceId === bot.modelSelection.instanceId
+      ? { ...group, note: t("botPanel.backups.sameAccount") } : group);
+    return { ...built, groups, ...(current ? {} : { current: null }) };
   };
 
   const onMenuKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -208,8 +216,8 @@ export function BackupAis({ bot, onChange }: { bot: Bot; onChange: (fallback: Ba
   const { state } = useStore();
   const chain = bot.fallback ?? [];
   const addRef = useRef<HTMLButtonElement>(null);
-  const others = (except: number | null) =>
-    new Set([bot.modelSelection.instanceId, ...chain.filter((_, index) => index !== except).map((entry) => entry.instanceId)]);
+  const others = (except: number | null) => new Set([bot.modelSelection, ...chain.filter((_, index) => index !== except)]
+    .map((entry) => modelKey(entry.instanceId, entry.model)));
   const describe = (entry: Backup) => {
     const instance = state.instances.find((candidate) => candidate.instanceId === entry.instanceId);
     const option = instance?.models.options.find((candidate) => candidate.id === entry.model);
@@ -230,7 +238,7 @@ export function BackupAis({ bot, onChange }: { bot: Bot; onChange: (fallback: Ba
             {chain.map((entry, index) => {
               const { instance, name, short } = describe(entry);
               return (
-                <li key={entry.instanceId} data-backup={entry.instanceId} className="flex min-w-0 items-center gap-1.5">
+                <li key={index} data-backup={entry.instanceId} className="flex min-w-0 items-center gap-1.5">
                   <span className="w-3 shrink-0 text-[12px] tabular-nums text-ink-tertiary" aria-hidden="true">{index + 1}</span>
                   <BackupChooser
                     bot={bot}

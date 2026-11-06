@@ -96,7 +96,8 @@ it("work parked on a card follows the newer card that replaced it, and saving th
   await expect.poll(() => f.nodes().filter((node) => node.status === "needs_input"), { timeout: 15_000 }).toEqual([]);
 }), hostTimeout(90_000));
 
-it("at start, work left parked on a card nothing can answer is let go, and work on an open card stays", () => scenario(async (f) => {
+it.each(["en", "pt-br"])("at start, work left parked on a card nothing can answer is let go, and work on an open card stays (%s)", (language) => scenario(async (f) => {
+  await f.api("/api/config", { language }, "PATCH");
   f.plan(plans(f));
   const work = await f.handOff();
   const card = (await f.cards(work))[0];
@@ -117,5 +118,10 @@ it("at start, work left parked on a card nothing can answer is let go, and work 
   } finally { db.close(); }
   await f.server.start();
   await expect.poll(() => parked()?.status, { timeout: 20_000 }).toBe("cancelled");
+  expect(parked()).toMatchObject({ result: "The card it waited on was replaced or closed", outcomeDetail: "The card it waited on was replaced or closed" });
+  const expected = language === "pt-br"
+    ? "Postie — trabalho cancelado: O cartão aguardado foi substituído ou fechado"
+    : "Postie — cancelled: The card it waited on was replaced or closed";
+  await expect.poll(async () => (await f.messages(f.chief.threadId)).some((message) => message.tool?.name === expected), { timeout: 20_000 }).toBe(true);
   expect(f.nodes().filter((node) => node.status === "needs_input")).toEqual([]);
 }), hostTimeout(90_000));
