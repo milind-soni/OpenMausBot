@@ -82,6 +82,19 @@ export async function resolveTarget(ctx: VerbContext, positional: string | undef
   return withTask({ type, id: record.id, name: record.name });
 }
 
+export async function conversationFor(client: HeadlessClient, target: Target, task: string, title = "Headless run"): Promise<string> {
+  if (task === "new") return (await client.tool("create_task", { target_type: target.type, target_id: target.id, title })).task.taskId;
+  if (task !== "current") return task;
+  const fleet = await client.json<Fleet>("/api/bots?messages=0");
+  const owner = (target.type === "bot" ? fleet.bots : fleet.groups)?.find((record) => record.id === target.id);
+  if (!owner) throw usageError(`no ${target.type === "bot" ? "bot" : "room"} with id ${target.id}`);
+  return owner.threadId;
+}
+
+/** --title, else the message's first line. */
+export const conversationTitle = (ctx: VerbContext, text: string): string =>
+  (flag(ctx.flags, "title") ?? text.split("\n")[0]!).trim().slice(0, 80) || "Headless run";
+
 export async function readMessage(ctx: VerbContext, positional: string | undefined): Promise<string> {
   const text = flag(ctx.flags, "text");
   const file = flag(ctx.flags, "message-file");

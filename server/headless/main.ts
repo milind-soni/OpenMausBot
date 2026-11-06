@@ -27,10 +27,12 @@ openmausbot doctor --host [--data-dir DIR] [--port 8799] [--domain HOST]
   models: "openmausbot models\n  The engines and the models each offers (use them as INSTANCE/MODEL).",
   messages: `openmausbot messages TARGET [--limit 30]\n  The latest messages of a conversation (at most 200).
   ${T}`,
-  send: `openmausbot send TARGET (TEXT | --text TEXT | --message-file FILE | -) [--send-id ID] [--dry-run]
-  Send one message and return at once. The same --send-id never sends twice.
+  send: `openmausbot send TARGET (TEXT | --text TEXT | --message-file FILE | -) [--task new|current|ID] [--title T] [--send-id ID] [--dry-run]
+  Send one message and return at once. It goes to the conversation the bot or room has open (--task current,
+  the default), to a new one (--task new, titled by --title or the message's first line), or to --task ID.
+  It says which conversation it went to. The same --send-id never sends twice.
   ${T}`,
-  "send-channel": "openmausbot send-channel --channel ID (TEXT | --text TEXT) [--task ID] [--dry-run]\n  The same as send, for a room named by id.",
+  "send-channel": "openmausbot send-channel --channel ID (TEXT | --text TEXT) [--task new|current|ID] [--title T] [--dry-run]\n  The same as send, for a room named by id.",
   run: `openmausbot run TARGET (TEXT | --message-file FILE | -) [--task new|current|ID] [--title T]
                 [--wait job|turn|none] [--timeout 30m] [--on-input exit|wait|stop] [--on-timeout leave|stop]
                 [--strict] [--export DIR [--force]]

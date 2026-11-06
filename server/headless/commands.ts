@@ -1,6 +1,6 @@
 // `--json` prints a tool's result unchanged; plain output is a line per item.
 import { EXIT, flag, parseCount, parseDuration, requiredFlag, usageError } from "./args.ts";
-import { newSendId, readMessage, resolveTarget, type Target, type VerbContext, type VerbOutcome } from "./context.ts";
+import { conversationFor, conversationTitle, newSendId, readMessage, resolveTarget, type Target, type VerbContext, type VerbOutcome } from "./context.ts";
 import { oneLine, shortId } from "./output.ts";
 import { stopConversation } from "./run.ts";
 
@@ -9,7 +9,7 @@ type Rec = Record<string, any>;
 const dryRun = (ctx: VerbContext, tool: string, args: Rec, extra: Rec = {}): VerbOutcome | undefined =>
   ctx.flags["dry-run"] === true
     ? { result: { ok: true, dryRun: true, command: ctx.verb, tool, arguments: args, ...extra }, exitCode: EXIT.done,
-      human: [`Would call ${tool} with ${JSON.stringify(args)}${extra.tree ? ", then stop every teammate still working on it" : ""}. Nothing was sent.`] }
+      human: [`Would ${extra.newConversation ? `start a new conversation, "${extra.newConversation.title}", then ` : ""}call ${tool} with ${JSON.stringify(args)}${extra.tree ? ", then stop every teammate still working on it" : ""}. Nothing was sent.`] }
     : undefined;
 
 const targetArgs = (target: Target): Rec => ({ [`${target.type}_id`]: target.id, ...(target.taskId ? { task_id: target.taskId } : {}) });
@@ -116,15 +116,21 @@ export async function send(ctx: VerbContext): Promise<VerbOutcome> {
   const named = Boolean(flag(ctx.flags, "bot") ?? flag(ctx.flags, "channel") ?? flag(ctx.flags, "thread"));
   const [first, second] = ctx.positionals;
   const text = await readMessage(ctx, named ? first : second);
-  const target = await resolveTarget(ctx, named ? undefined : first, channelOnly ? "channel" : "any");
+  const task = flag(ctx.flags, "task")?.trim();
+  const opened = task === "new" || task === "current" ? task : undefined;
+  if (flag(ctx.flags, "title") !== undefined && opened !== "new") throw usageError("--title names a new conversation: add --task new");
+  const target = await resolveTarget(opened ? { ...ctx, flags: { ...ctx.flags, task: undefined } } : ctx, named ? undefined : first, channelOnly ? "channel" : "any");
   const tool = target.type === "bot" ? "send_bot_message" : "send_channel_message";
-  const args = { ...targetArgs(target), text, send_id: flag(ctx.flags, "send-id") ?? newSendId() };
-  const preview = dryRun(ctx, tool, args);
+  const title = opened === "new" && !target.taskId ? conversationTitle(ctx, text) : undefined;
+  const current = opened === "current" && !target.taskId ? await conversationFor(await ctx.client(), target, "current") : undefined;
+  const args = { ...targetArgs(current ? { ...target, taskId: current } : target), text, send_id: flag(ctx.flags, "send-id") ?? newSendId() };
+  const preview = dryRun(ctx, tool, args, title !== undefined ? { newConversation: { title } } : {});
   if (preview) return preview;
-  const result = await (await ctx.client()).tool(tool, args);
+  const client = await ctx.client();
+  const result = await client.tool(tool, title !== undefined ? { ...args, task_id: await conversationFor(client, target, "new", title) } : args);
   return {
-    result, exitCode: EXIT.done,
-    human: [`Sent to ${target.name ?? target.id} (thread ${result.taskId})${result.queued ? "; it waits until the turn running there ends" : ""}.`,
+    result: title !== undefined ? { ...result, newConversation: { title } } : result, exitCode: EXIT.done,
+    human: [`Sent to ${target.name ?? target.id} ${title !== undefined ? `in a new conversation, "${title}", ` : ""}(thread ${result.taskId})${result.queued ? "; it waits until the turn running there ends" : ""}.`,
       `Follow it with: openmausbot wait --thread ${result.taskId}`],
   };
 }
