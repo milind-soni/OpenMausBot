@@ -45,6 +45,7 @@ vi.mock("@/state/store", async (importOriginal) => {
 
 import { initialState } from "@/state/store";
 import { BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId } from "@/lib/sidebar-layout";
+import { SIDEBAR_DENSITY_KEY } from "@/lib/sidebar-preferences";
 import { PHONE_LAYOUT } from "@/lib/use-media-query";
 import { BotContextMenu, BotListItem, Sidebar, TeamMenuItems } from "./Sidebar";
 import { NEW_DEPARTMENT } from "./SidebarBotDrag";
@@ -154,6 +155,18 @@ describe("Simple's sidebar before anyone drags", () => {
   it("leaves rows still on a phone, where the menu moves them", () => {
     fixture.phone = true;
     expect(rows().every((props) => props.botDrag === undefined)).toBe(true);
+  });
+
+  it("keeps every row draggable in the icons-only rail, where the whole tile is the drag source", () => {
+    // The rail (density "icons") collapses the sidebar to bot tiles. sections.interactive is false there, so the
+    // arrange used to answer with no drag handles at all and the rail could not be reordered.
+    fixture.storage.set(SIDEBAR_DENSITY_KEY, "avatars");
+    const icons = rows();
+    expect(icons.length).toBeGreaterThan(0);
+    for (const props of icons) {
+      expect(props.botDragging).toBe(false);
+      expect(props.botDrag!.row(props.bot.id).draggable).toBe(true);
+    }
   });
 });
 
