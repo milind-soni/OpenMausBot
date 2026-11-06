@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { codexLimitResetsAt } from "./drivers/codex-errors.ts";
 import { engineLimitFromUsage, LimitResetClock, nearLimitNote, UNNAMED_LIMIT_MS } from "./limit-resets.ts";
 import type { RuntimeEvent } from "../shared/runtime-events.ts";
-import { parseClaudeUsage, parseCodexUsage, type PlanProviderRow, type PlanUsageReport, type PlanWindows } from "./plan-usage.ts";
+import { parseClaudeUsage, parseCodexUsage, parseOpenCodeUsage, type PlanProviderRow, type PlanUsageReport, type PlanWindows } from "./plan-usage.ts";
 
 const NOW = Date.parse("2026-10-19T10:00:00Z");
 const HOUR = 3_600_000;
@@ -14,8 +14,9 @@ const HOUR = 3_600_000;
 const REFUSAL_GRACE_FOR_TEST = 10 * 60_000 + 1;
 const iso = (at: number) => new Date(at).toISOString();
 
-function row(id: string, driver: "claude" | "codex", windows: PlanWindows): PlanProviderRow {
-  return { id, name: driver === "claude" ? "Claude" : "Codex", driver, ok: true, error: null, ...windows };
+function row(id: string, driver: PlanProviderRow["driver"], windows: PlanWindows): PlanProviderRow {
+  const name = driver === "claude" ? "Claude" : driver === "codex" ? "Codex" : driver === "opencode" ? "OpenCode" : "Grok";
+  return { id, name, driver, ok: true, error: null, ...windows };
 }
 /** As the Claude usage endpoint answers (utilization, resets_at). */
 const claude = (fiveHour: [number, number | null], weekly: [number, number | null]) => row("claude", "claude", parseClaudeUsage({
@@ -39,6 +40,20 @@ describe("engineLimitFromUsage", () => {
       windows: [{ window: "5-hour", usedPercent: 92, resetsAt: NOW + 2 * HOUR }, { window: "weekly", usedPercent: 40, resetsAt: NOW + 50 * HOUR }],
     });
     expect(engineLimitFromUsage(claude([10, NOW + 2 * HOUR], [95, NOW + 50 * HOUR]))).toMatchObject({ window: "weekly", usedPercent: 95, resetsAt: NOW + 50 * HOUR });
+  });
+
+  it("reads OpenCode Go's rolling and weekly allowance for its marker", () => {
+    const opencode = row("opencodeGo", "opencode", parseOpenCodeUsage({
+      usage: {
+        rolling: { percent: 30, resetsAt: iso(NOW + 3 * HOUR) },
+        weekly: { percent: 55, resetsAt: iso(NOW + 4 * 24 * HOUR) },
+        monthly: { percent: 20, resetsAt: iso(NOW + 20 * 24 * HOUR) },
+      },
+    }));
+    expect(engineLimitFromUsage(opencode)).toMatchObject({
+      engine: "opencodeGo", name: "OpenCode", driver: "opencode", window: "weekly", usedPercent: 55, resetsAt: NOW + 4 * 24 * HOUR, blocked: false,
+    });
+    expect(engineLimitFromUsage(opencode)?.windows.map((window) => window.window)).toEqual(["5-hour", "weekly"]);
   });
 
   it("waits for the latest reset of every window at its limit, and knows no time when one has none", () => {
