@@ -74,6 +74,8 @@ it("applies independent creation templates through the real isolated HTTP routes
     expect((await api("POST", "/api/bots", { name: "Never every reply" }, 201)).bot.voiceNoteEveryReply).toBe(false);
     await api("PATCH", "/api/config", { newBotDefaults: { profile: { voiceNoteEveryReply: null } } });
     expect((await api("POST", "/api/bots", { name: "Follows Voice" }, 201)).bot.voiceNoteEveryReply).toBeUndefined();
+    await api("PATCH", "/api/config", { newBotDefaults: { profile: { voiceNotes: true } } });
+    expect((await api("POST", "/api/bots", { name: "Voice notes on" }, 201)).bot.voiceNotes).toBe(true);
     await api("PATCH", "/api/config", { newBotDefaults: { profile: { voiceNotes: "off" } } }, 400);
     await api("PATCH", "/api/config", { newBotDefaults: { profile: { approvalMode: "full" } } });
     expect((await api("POST", "/api/bots", {}, 201)).bot.approvalMode).toBe("full");
