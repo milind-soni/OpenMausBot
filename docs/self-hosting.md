@@ -661,6 +661,24 @@ decided only by your allow-list. Wrong codes count against the same lockout
 as pairing codes. Sessions from a sign-in show the email in
 `openmausbot sessions` and can be revoked the same way.
 
+To send the codes through your own mail server instead, so nobody signs in
+through the account service and no MausBot account is made, give the server
+an SMTP address:
+
+```sh
+OMB_SIGNIN_SMTP_URL="smtps://signin%40yourcompany.com:PASSWORD@smtp.yourcompany.com:465"
+OMB_SIGNIN_SMTP_FROM="OpenMausBot <signin@yourcompany.com>"   # else the user name, if it is an address
+```
+
+`smtps://` uses TLS from the start (port 465); `smtp://` upgrades with
+STARTTLS (port 587) and refuses a server that cannot, unless the mail server
+is on this machine (`smtp://localhost:25`). Write the user name and password
+URL-encoded (`@` is `%40`). Your server then makes each code itself: 8 digits,
+single use, ten minutes and five tries, kept only as a hash in memory (a
+restart ends the open ones), and at most one every 30 seconds per address.
+The allow-list, the lockout and the sessions work as above. Keep the URL in
+the service's environment file, never on a command line.
+
 ### Inviting people
 
 **Settings → People** lists who may sign in, their role, when they were last

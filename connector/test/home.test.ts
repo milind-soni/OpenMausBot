@@ -36,6 +36,10 @@ function fixture(options: { free?: number } = {}) {
   docker.now = () => clock;
   for (const [ref, version] of [[A, "v0.1.130"], [B, "v0.1.131"], [C, "v0.1.132"]] as const) docker.publish(ref, version);
   const healthy = new Set<string>([A, B, C]);
+  /** What each image's bot box reports; every check passes unless a test says otherwise. */
+  const boxes = new Map<string, { box: string; checks: string | null; failed: string[] }>();
+  const steps: string[] = [];
+  const refused = new Set<string>();
   const lines: string[] = [];
   const readHealth: HealthRead = async (target) => {
     const home = docker.container("mausbot-home");
@@ -44,7 +48,7 @@ function fixture(options: { free?: number } = {}) {
     if (target.secret !== homeEnv.OMB_CLOUD_BOOTSTRAP_SECRET) return { status: 401, report: { error: "invalid_signature" } };
     if (target.publicHost !== new URL(homeEnv.OMB_PUBLIC_URL).hostname || target.port !== 8080) return { status: 403, report: null };
     if (!healthy.has(home.spec.Image)) return { status: 0, report: null };
-    return { status: 200, report: { version: "0.1.130", image: homeEnv.OMB_CLOUD_IMAGE, box: { box: "bwrap", checks: "32/32", failed: [] } } };
+    return { status: 200, report: { version: "0.1.130", image: homeEnv.OMB_CLOUD_IMAGE, box: boxes.get(home.spec.Image) ?? { box: "bwrap", checks: "32/32", failed: [] } } };
   };
   const uploads: { url: string; headers: Record<string, string>; body: string }[] = [];
   const downloads: { url: string; headers: Record<string, string> }[] = [];
@@ -67,11 +71,13 @@ function fixture(options: { free?: number } = {}) {
     now: () => clock,
     sleep: async (ms) => { clock += ms; },
     updateWindowMs: 600_000, startWindowMs: 600_000, pollMs: 2_000,
+    checkImage: async (ref) => { if (refused.has(ref)) throw new Error("it is not signed by MausBot"); },
+    onStep: ({ id, step }) => steps.push(`${id} ${step}`),
   });
   const data = () => docker.files("mausbot-data");
   const write = (path: string, content: string) => docker.volume("mausbot-data").files.set(path, content);
   return {
-    dir, state, docker, home, healthy, lines, uploads, downloads, data, write,
+    dir, state, docker, home, healthy, boxes, steps, refused, lines, uploads, downloads, data, write,
     clock: () => clock,
     advance: (ms: number) => { clock += ms; },
     setArchive: (value: string) => { archive = value; },
@@ -263,6 +269,61 @@ describe("the home on an own server", () => {
     expect(full.toJobError()).toMatchObject({ code: "disk_full" });
     expect(full.message).toMatch(/needs about [\d.]+ GB and 0.5 GB are free/);
     expect(tight.docker.container("mausbot-home")).toMatchObject({ status: "running", spec: { Image: A } });
+  });
+
+  it("records each step of an update as it begins it", async () => {
+    const f = fixture();
+    await started(f);
+    f.steps.splice(0);
+    await f.home.update("update-1", B);
+    expect(f.steps).toEqual(["update-1 pull", "update-1 checked", "update-1 stop", "update-1 snapshot", "update-1 swap", "update-1 wait", "update-1 healthy"]);
+    f.steps.splice(0);
+    f.healthy.delete(C);
+    await failure(f.home.update("update-2", C));
+    expect(f.steps.at(-1)).toBe("update-2 rollback");
+  });
+
+  it("runs no image the image check refuses, and keeps nothing of it", async () => {
+    const f = fixture();
+    f.refused.add(A);
+    expect((await failure(f.home.start("start-1", A, env))).toJobError()).toEqual({
+      code: "image_refused", message: `${A} was refused (it is not signed by MausBot). Nothing was changed.`,
+    });
+    expect(f.state.home()).toMatchObject({ desired: "stopped", image: null, operation: null });
+    expect(f.state.homeEnv()).toBeNull();
+    await f.home.supervise();
+    expect(f.docker.container("mausbot-home")).toBeNull();
+    await started(f, B);
+    f.refused.add(C);
+    f.docker.calls.splice(0);
+    expect((await failure(f.home.update("update-1", C))).toJobError()).toMatchObject({ code: "image_refused" });
+    expect(f.docker.calls.filter((call) => /^(stop|rm|create) /.test(call))).toEqual([]);
+    expect(f.docker.container("mausbot-home")).toMatchObject({ status: "running", spec: { Image: B } });
+    expect(f.state.home()).toMatchObject({ image: B, operation: null });
+  });
+
+  it("rolls back an update whose bot box no longer passes every check, or is off", async () => {
+    const f = fixture();
+    await started(f);
+    f.write("a.txt", "1");
+    f.boxes.set(B, { box: "bwrap", checks: "31/32", failed: ["server-pid-hidden"] });
+    expect((await failure(f.home.update("update-1", B))).toJobError()).toMatchObject({
+      code: "update_rolled_back", image: A,
+      message: "The new version did not become healthy (its bot box failed server-pid-hidden (31/32)). The previous version and its data are back.",
+    });
+    expect(f.docker.container("mausbot-home")).toMatchObject({ status: "running", spec: { Image: A } });
+    expect(f.data()).toEqual({ "a.txt": "1" });
+    f.boxes.set(B, { box: "off", checks: null, failed: [] });
+    expect((await failure(f.home.update("update-2", B))).message).toContain("(its bot box is off)");
+    // A self-check that never finishes is not a pass either.
+    f.boxes.set(B, { box: "bwrap", checks: null, failed: [] });
+    const began = f.clock();
+    expect((await failure(f.home.update("update-3", B))).message).toContain("(its bot box did not finish its self-check within 3 minutes)");
+    expect(f.clock() - began).toBeLessThan(600_000);
+    // A box that already failed before the update does not hold an update back: it may be the fix.
+    f.boxes.set(A, { box: "bwrap", checks: "31/32", failed: ["server-pid-hidden"] });
+    await f.home.refreshHealth();
+    expect((await f.home.update("update-4", B)).home).toMatchObject({ image: B });
   });
 
   it("keeps the newest three backups and restores one, taking a safety copy of the data first", async () => {
