@@ -8,6 +8,7 @@ import type { ImageGenerationConfig } from "../shared/image-generation.ts";
 import { imageGenConfigSchema, imageGenPatchSchema, keepKeysOutOfImageModels, type ImageGenCredentialPatch } from "./image-generation-config.ts";
 import { botAvatarUrlSchema } from "../shared/bot-avatar.ts";
 import { writeFileAtomic } from "./atomic.ts";
+import { configuredSecretBackend, sealSecrets, unsealSecrets } from "./secret-store.ts";
 import { defaultBotThreads, MAX_CONCURRENT_BOT_THREADS } from "./bot-thread-limits.ts";
 import { anthropicKeyEnv } from "./anthropic-key-env.ts";
 import { withoutComputerEngine } from "./computer-engine-removal.ts";
@@ -727,7 +728,24 @@ export function ensureDirs() {
 }
 
 let lastIgnoredConfigWarning = "";
-const storedConfig = settledFileCache(() => join(DATA_DIR, "config.json"), () => parseStoredConfig(parseJson(readFileSync(join(DATA_DIR, "config.json"), "utf8"))));
+/** OMB_SECRET_STORE=keychain: credentials live in the OS store and config.json holds only references to them. */
+function withSecretsRestored(value: JsonValue): JsonValue {
+  const backend = configuredSecretBackend();
+  if (!backend) return value;
+  const { config, missing } = unsealSecrets(value, backend);
+  if (missing.length) console.warn(`config: ${missing.length} credential(s) missing from ${backend.name}: ${missing.join(", ")}`);
+  return config;
+}
+
+function withSecretsSealed(value: JsonObject): JsonObject {
+  const backend = configuredSecretBackend();
+  if (!backend) return value;
+  const { config, failed } = sealSecrets(value, backend);
+  if (failed.length) console.warn(`config: ${failed.length} credential(s) kept in config.json because ${backend.name} refused them: ${failed.join(", ")}`);
+  return config as JsonObject;
+}
+
+const storedConfig = settledFileCache(() => join(DATA_DIR, "config.json"), () => parseStoredConfig(withSecretsRestored(parseJson(readFileSync(join(DATA_DIR, "config.json"), "utf8")))));
 
 export function loadConfig(): AppConfig {
   let cfg: AppConfig = {};
@@ -1026,7 +1044,7 @@ export function saveConfig(
     }
   }
   mkdirSync(DATA_DIR, { recursive: true });
-  writeFileAtomic(p, JSON.stringify(disk, null, 2), { mode: 0o600 });
+  writeFileAtomic(p, JSON.stringify(withSecretsSealed(disk), null, 2), { mode: 0o600 });
   storedConfig.forget();
   for (const listener of configSaveListeners) {
     try {
