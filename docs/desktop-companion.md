@@ -19,9 +19,9 @@ below. The two connection types intentionally do not share credentials.
 
 ## Pair over secure HTTPS
 
-1. On the host, open **Settings → Remote access** and finish **Secure HTTPS pairing**.
+1. On the host, open **Settings → Phone & devices** and finish **Secure HTTPS pairing**.
 2. Open a pairing window so the host displays a six-digit code.
-3. On the client, open **Settings → Remote access → Connect to another computer**
+3. On the client, open **Settings → Servers → Connect to another computer**
    and choose **Desktop companion**.
 4. Enter the host's managed companion address (`https://c-….openmausbot.com` or `https://c-….mausbot.si`) and the six-digit code.
 5. Choose **Pair and switch to client mode**. The client restarts and opens the host's bot UI.
@@ -31,17 +31,17 @@ The HTTPS address uses the host's managed outbound tunnel. TLS is verified by th
 ## Pair over Tailscale
 
 1. Install Tailscale on both computers, sign into the same tailnet, and leave MagicDNS enabled.
-2. On the host, open **Settings → Remote access**, turn on Remote access, and open **Pair over Tailscale** to display a six-digit code.
-3. On the client, open **Settings → Remote access → Connect to another computer**
+2. On the host, open **Settings → Phone & devices → More ways in**, turn **Tailscale** on (the app never runs Tailscale until you do), then **Pair a device → A computer** to display a six-digit code.
+3. On the client, open **Settings → Servers → Connect to another computer**
    and choose **Desktop companion**.
 4. Enter the host's full `.ts.net` MagicDNS name and the six-digit code.
 5. Choose **Pair and switch to client mode**. The client restarts and opens the host's bot UI.
 
-To switch that installation back, open **Settings → Remote access** and choose **Disconnect and use this computer**.
+To switch that installation back, open **Settings → Servers** and choose **Disconnect and use this computer**.
 
 ## Control a VPS desktop remotely
 
-A desktop client can open an agent's self-hosted VPS display through either paired transport. On the host, enable **Cloud desktop access** for that paired desktop in **Settings → Remote access**. On the client, open the bot's **Computer** panel and choose **Take control**.
+A desktop client can open an agent's self-hosted VPS display through either paired transport. On the host, enable **Cloud desktop access** for that paired desktop in **Settings → Phone & devices**. On the client, open the bot's **Computer** panel and choose **Take control**.
 
 The Computer panel also shows a periodically refreshed VPS screenshot. Preview and live control share the same per-device permission, which defaults off. The VPS still publishes no VNC port. The host opens its existing loopback-only SSH tunnel, the companion creates a random device-scoped viewer path, and the client relays noVNC HTTP and WebSocket traffic through its loopback Electron service. Closing the viewer removes the companion session, closes the SSH tunnel, and hands control back to the agent.
 
@@ -66,7 +66,7 @@ Pairing creates an independent device identity on the host. The resulting bearer
 - injected by a loopback-only Electron relay after browser `Origin` headers are removed;
 - sent only to the exact saved managed HTTPS or `.ts.net` origin; absolute-form request targets cannot redirect it elsewhere.
 
-The host companion remains the authorization boundary. Its route list defaults to deny, strips sensitive response fields, and can revoke the desktop client from **Settings → Remote access** like any other paired device. Interactive desktop access is a separate per-device capability that defaults off. Client mode does not expose host-only settings, local browser surfaces, Local VM controls, plugin credentials, destructive account revocation, or the event inspector. Connected Apps may be viewed and authorized remotely while their tokens and execution remain on the host.
+The host companion remains the authorization boundary. Its route list defaults to deny, strips sensitive response fields, and can revoke the desktop client from **Settings → Phone & devices** like any other paired device. Interactive desktop access is a separate per-device capability that defaults off. Client mode does not expose host-only settings, local browser surfaces, Local VM controls, plugin credentials, destructive account revocation, or the event inspector. Connected Apps may be viewed and authorized remotely while their tokens and execution remain on the host.
 
 The desktop client matches the reviewed companion feature surface: chats, rooms, streamed responses, approvals, inline Connected Apps authorization, search, routines, attachments, and a narrowly scoped cloud/VPS viewer the host explicitly grants to that paired device. Expanding the desktop client must be done by explicitly reviewing and adding companion routes; it must not bypass the companion API or proxy the full harness.
 

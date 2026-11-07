@@ -10,11 +10,9 @@ describe("tailscaleCandidates", () => {
     expect(candidates).toContain("C:\\Program Files (x86)\\Tailscale\\tailscale.exe");
   });
 
-  it("keeps the absolute candidates in documented lookup order with bare PATH last", () => {
+  it("tries every CLI, PATH included, before the macOS app's own executable", () => {
     const home = "/home/test";
     expect(tailscaleCandidates(home)).toEqual([
-      "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
-      join(home, "Applications", "Tailscale.app", "Contents", "MacOS", "Tailscale"),
       "/opt/homebrew/bin/tailscale",
       "/usr/local/bin/tailscale",
       "/usr/bin/tailscale",
@@ -22,6 +20,8 @@ describe("tailscaleCandidates", () => {
       "C:\\Program Files\\Tailscale\\tailscale.exe",
       "C:\\Program Files (x86)\\Tailscale\\tailscale.exe",
       "tailscale",
+      "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+      join(home, "Applications", "Tailscale.app", "Contents", "MacOS", "Tailscale"),
     ]);
   });
 });
