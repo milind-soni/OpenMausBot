@@ -11,9 +11,12 @@ import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 import type { Upgrades } from "./upgrades.ts";
 
 const LINK = /^\/api\/shared-computers\/([\w-]+)\/link$/;
+const OWNER_ONLY = "Only this server's owner can share a computer with it. Pair this desktop with a code for everything, from the server or an owner's Settings.";
 
 export function createSharedComputerRoutes(deps: {
   enabled: () => boolean;
+  /** Any paired session may lend (the maintainer flag); otherwise, off a Cloud home, only an admin (owner) pairing. */
+  everyPairing?: () => boolean;
   computers: SharedComputers;
   sessionLive: (id: string) => boolean;
   environmentId: string;
@@ -62,6 +65,7 @@ export function createSharedComputerRoutes(deps: {
       const registration = parsed.data;
       if (registration.environmentId !== deps.environmentId) return json(res, 409, { error: "Workspace identity changed. Pair again before sharing this computer." });
       if (deps.cloudHomeLender && !auth.scopes.includes("admin")) return json(res, 403, { error: "Only your own computers can be shared with the Cloud. On this computer, choose Open the Cloud in Settings → MausBot Cloud first." });
+      if (!deps.cloudHomeLender && deps.everyPairing?.() !== true && !auth.scopes.includes("admin")) return json(res, 403, { error: OWNER_ONLY });
       deps.computers.register(registration, { session: auth.session.id, person: deps.cloudHomeLender ?? deps.personKey(auth.session) }, secret);
       return json(res, 200, { ok: true });
     }

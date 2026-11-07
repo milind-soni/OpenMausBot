@@ -7,9 +7,10 @@ import { LendingActivityList } from "./LendingActivity";
 import { t } from "@/lib/i18n";
 
 /** Security: grants are edited locally and confirmed by a native dialog, never by the hosted page. */
-export function ComputerSharingSettings({ workspace, onClose }: { workspace: { id: string; name: string; origin: string }; onClose: () => void }) {
+/** `own`: a server of the person's own (this desktop is its admin), lent without the maintainer flag once they allowed it. */
+export function ComputerSharingSettings({ workspace, own = false, onClose }: { workspace: { id: string; name: string; origin: string }; own?: boolean; onClose: () => void }) {
   const { state: appState } = useStore();
-  const offered = sharedComputersEnabled(appState.config);
+  const offered = own || sharedComputersEnabled(appState.config);
   const bridge = offered ? window.ogb?.computerSharing : undefined;
   const [state, setState] = useState<DesktopComputerSharing | null>(null);
   const [folders, setFolders] = useState<DesktopSharedFolder[]>([]);
@@ -51,7 +52,14 @@ export function ComputerSharingSettings({ workspace, onClose }: { workspace: { i
         <p role="status" className="text-ink-secondary">{!state ? t("computerSharing.loading") : !state.enabled ? t("computerSharing.notShared") : state.connected ? t("computerSharing.sharing") : "Waiting for the workspace to connect"}</p>
         <button type="button" aria-label={t("computerSharing.close")} onClick={onClose} className="rounded p-1 text-ink-secondary hover:bg-control"><X size={16} /></button>
       </div>
-      <p className="text-ink-secondary">Choose what this workspace’s bots can use. Shared files and screen content may be sent to its AI provider. Access stays on when you switch workspaces, until you stop sharing or close the desktop app.</p>
+      <p className="text-ink-secondary">{own ? t("computerSharing.ownIntro", { name: workspace.name }) : "Choose what this workspace’s bots can use. Shared files and screen content may be sent to its AI provider. Access stays on when you switch workspaces, until you stop sharing or close the desktop app."}</p>
+      {own && state?.enabled && <div data-sharing-pause className="flex items-center gap-3 rounded-lg bg-inset px-3 py-2">
+        <p className="min-w-0 flex-1 text-[12px] text-ink-secondary">{t(state.paused ? "computerSharing.paused" : "computerSharing.pauseHint")}</p>
+        <button type="button" disabled={busy} onClick={() => void perform(async () => {
+          await (state.paused ? bridge.resume?.() : bridge.pause?.());
+          const next = await bridge.state(workspace.id); if (mounted.current) setState(next);
+        })} className="shrink-0 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink hover:bg-control disabled:opacity-50">{t(state.paused ? "computerSharing.resume" : "computerSharing.pause")}</button>
+      </div>}
       <fieldset disabled={busy || !state} className="flex flex-col gap-3 disabled:opacity-50">
         <legend className="mb-2 font-medium text-ink">{t("computerSharing.folders")}</legend>
         {folders.length === 0 && <p className="text-[12px] text-ink-secondary">{t("computerSharing.noFolders")}</p>}
