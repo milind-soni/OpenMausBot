@@ -69,8 +69,8 @@ access  who may sign in with an emailed code at /pair: an address or
         Takes effect at once, no restart.
 service keep the server running across reboots: writes a systemd unit
         (Linux) or a launchd agent (macOS) for the same serve options and
-        prints the commands that install it. Install the package
-        permanently first (npm install -g openmausbot).
+        prints the commands that install it. Run from npx, it first
+        installs a copy of this version next to your data for the service.
 browser install: the bots' browser engine (agent-browser, pinned) into the
         data dir, and Chrome for Testing into the user's browser cache.
         --with-deps also installs

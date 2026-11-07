@@ -104,7 +104,7 @@ describe("login and logout against the control plane", () => {
 
     const status = fakeIo([]);
     await runStatus(options(dir, { command: "status" }), status.io);
-    expect(status.out.join("\n")).toContain(`public address: ${stub.endpointUrl}`);
+    expect(status.out.join("\n")).toContain(`MausBot web address: ${stub.endpointUrl}`);
 
     const bye = fakeIo([]);
     expect(await runLogout(options(dir, { command: "logout" }), bye.io)).toBe(0);
