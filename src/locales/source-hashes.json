@@ -32841,7 +32841,9 @@
       "pair.noCode": "1b206510b50ba46a5ada2bb240bc4a8e0b24dfca793b7a3cc93d890c6332cc46",
       "pair.invitedByEmail": "9ca8c859198fcd02607a4bada9956c81ce6fe8e7aff293889902aeed0739710b",
       "pair.notEncrypted": "1b0489066c525fad4839564422cb75bb8040352ee56feee3fc6cfd51c0913d9c",
-      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1"
+      "pairing.worksOnceUntil": "963fabc865d8e4dd0cb9c87096d78285f95dfb6b8bacc5b7c52e37a84f4919b1",
+      "attach.previewTooLarge": "df69c38cd9e10e3bfd396c4fabbfcc23a1b9615f2f85abccf0d1a9a41de3bfe9",
+      "serverError.file.tooLarge": "74735b3ab69b9d0f83c0a48b9a9cc5887ca26ed9cf7b28355496a0e326b7fa3f"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
