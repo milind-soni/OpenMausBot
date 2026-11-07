@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { modelEffortLevels } from "../../../shared/model-effort.ts";
 import { GrokAgentDriver, readGrokModelCatalog, STATIC_GROK_MODELS } from "./grok.ts";
 
 const scratchDirs: string[] = [];
@@ -106,6 +107,27 @@ describe("GrokAgentDriver catalog", () => {
     try {
       expect(instance.models.options.some((o) => o.id === "local-glm" && o.label === "GLM local")).toBe(true);
       expect(instance.refreshModels).toEqual(expect.any(Function));
+    } finally {
+      await instance.dispose();
+    }
+  });
+
+  it("offers xhigh on the models that advertise it, not on grok-4.5 or a local slug", async () => {
+    const home = scratchConfig(`[model.local-glm]\nname = "GLM local"\n`);
+    const instance = await GrokAgentDriver.create({
+      instanceId: "grok-efforts",
+      displayName: "Grok",
+      environment: { HOME: home, USERPROFILE: home },
+      enabled: true,
+      config: GrokAgentDriver.defaultConfig(),
+    });
+    try {
+      const levels = (model: string) => modelEffortLevels(instance.adapter.capabilities.effortLevels, instance.models, model);
+      const base = ["low", "medium", "high"];
+      expect(levels("grok-4.7")).toEqual([...base, "xhigh"]);
+      expect(levels("grok-4.6")).toEqual([...base, "xhigh"]);
+      expect(levels("grok-4.5")).toEqual(base);
+      expect(levels("local-glm")).toEqual(base);
     } finally {
       await instance.dispose();
     }

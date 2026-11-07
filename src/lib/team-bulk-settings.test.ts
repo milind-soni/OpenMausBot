@@ -137,6 +137,18 @@ describe("team-wide settings", () => {
     expect(planTeamChange([bot("a")], blocked, { kind: "model", model: "opus" })[0]).toMatchObject({ status: "skip" });
   });
 
+  it("follows the levels of the model each bot ends up on", () => {
+    const grok = engine("grok", "grokAgent", ["grok-4.7", "grok-4.5"], { capabilities: { effortLevels: ["low", "high", "xhigh"] } });
+    grok.models.options[1]!.effortLevels = ["low", "high"];
+    const onNew = bot("new", { modelSelection: { instanceId: "grok", model: "grok-4.7", effort: "xhigh" } });
+    const onOld = bot("old", { modelSelection: { instanceId: "grok", model: "grok-4.5", effort: "high" } });
+
+    expect(planTeamChange([onOld], [grok], { kind: "model", effort: "xhigh" })[0]).toMatchObject({ status: "skip", reason: "Grok does not offer this effort level" });
+    expect(planTeamChange([{ ...onNew, modelSelection: { instanceId: "grok", model: "grok-4.7", effort: "high" } }], [grok], { kind: "model", effort: "xhigh" })[0]).toMatchObject({ patch: { modelSelection: { instanceId: "grok", model: "grok-4.7", effort: "xhigh" } } });
+    const moved = planTeamChange([onNew], [grok], { kind: "model", model: "grok-4.5" })[0] as { patch: { modelSelection: object } };
+    expect(moved.patch.modelSelection).toEqual({ instanceId: "grok", model: "grok-4.5" });
+  });
+
   it("lists each model once with the engines offering it, and only effort levels some engine offers", () => {
     const bots = [bot("a"), bot("b", { modelSelection: { instanceId: "codex", model: "gpt-5" } })];
     expect(teamModelChoices(bots, instances).map((choice) => `${choice.id}:${choice.engines.join("+")}`))

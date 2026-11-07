@@ -387,6 +387,25 @@ describe("MCP tool execution", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it("checks an effort against the chosen model's own levels", async () => {
+    const fetcher = vi.fn(async (path: string) => {
+      if (path === "/api/bots?messages=0") return { bots: [{ id: "bot-1", busy: false }] };
+      if (path === "/api/instances") return { instances: [{
+        instanceId: "grok", snapshot: { state: "available" },
+        models: { default: "grok-4.7", options: [{ id: "grok-4.7" }, { id: "grok-4.5", effortLevels: ["high"] }] },
+        capabilities: { effortLevels: ["high", "xhigh"] },
+      }] };
+      if (path === "/api/bots/bot-1") return { bot: { id: "bot-1", modelSelection: { instanceId: "grok", model: "grok-4.7", effort: "xhigh" } } };
+      throw new Error(`unexpected path ${path}`);
+    });
+    await expect(handleToolCall("set_bot_model", {
+      bot_id: "bot-1", instance_id: "grok", model: "grok-4.5", effort: "xhigh",
+    }, fetcher)).rejects.toThrow("effort 'xhigh' is not offered for model 'grok-4.5' on instance 'grok'");
+    await expect(handleToolCall("set_bot_model", {
+      bot_id: "bot-1", instance_id: "grok", model: "grok-4.7", effort: "xhigh",
+    }, fetcher)).resolves.toMatchObject({ success: true });
+  });
+
   it("requires an exact available model and refuses changes while busy", async () => {
     const busyFetcher = vi.fn(async () => ({ bots: [{ id: "bot-1", busy: true }] }));
     await expect(handleToolCall("set_bot_model", {

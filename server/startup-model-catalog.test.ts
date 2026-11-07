@@ -118,6 +118,13 @@ describe("startup model catalogs", () => {
     expect(readStartupModelCache("org-blocked")?.options[1]).toEqual({ id: "b", label: "B", orgBlocked: true });
   });
 
+  it("keeps a model's own effort levels in the saved list, without any it does not know", () => {
+    writeStartupModelCache("model-efforts", { default: "a", options: [{ id: "a", label: "A", effortLevels: ["low", "high"] }, { id: "b", label: "B" }] });
+    expect(readStartupModelCache("model-efforts")?.options).toEqual([{ id: "a", label: "A", effortLevels: ["low", "high"] }, { id: "b", label: "B" }]);
+    writeStartupModelCache("model-efforts-odd", { default: "a", options: [{ id: "a", label: "A", effortLevels: ["low", "extreme"] as never }] });
+    expect(readStartupModelCache("model-efforts-odd")?.options[0]?.effortLevels).toEqual(["low"]);
+  });
+
   it("does not wait for a slow refresh when a later start already has a catalog", async () => {
     seedBots();
     writeStartupModelCache("slow", CACHED, STALE);
