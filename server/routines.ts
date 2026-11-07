@@ -35,7 +35,7 @@ import { applyHolds, holdCauses, type AppliedHolds } from "./routine-holds.ts";
 import { sanitizeInput } from "./routine-input.ts";
 import { applyCheckResult, routineLine, runLineFields, type RoutineLineCodes, type RoutineTroubleCode } from "./routine-lines.ts";
 import { checkHold, CHECK_BOOT_HOLD_MS, type CheckHold } from "./routine-check-pacing.ts";
-import { resolveRoutineResultsThread, routineRunDefinition, type ResultsThreadAllocation } from "./routine-run-definition.ts";
+import { chatOfOneTimeRoutine, discardResultsThreads, resolveRoutineResultsThread, routineRunDefinition, type ResultsThreadAllocation } from "./routine-run-definition.ts";
 
 export type { RoutineContextAttachment, RoutineIntervalWindow, RoutineRunStatus, RoutineRunTrigger };
 export { intervalHasRestrictions } from "./routine-intervals.ts";
@@ -230,6 +230,7 @@ export interface RoutineManagerOptions {
   joinConversation?: (run: RoutineRun) => string | null;
   createGoalTask?: (groupId: string, title: string) => { threadId: string } | null;
   isResultsThread?: (botId: string, threadId: string) => boolean;
+  oneTimeReportsToItsChat?: boolean;
   resolveResultsThread?: (routine: Routine, forceNew: boolean) => { threadId: string; main?: true } | undefined;
   eventResultsThread?: (event: { webhookId: string; webhookName: string; botId: string }) => string | undefined;
   frozenResultsThread?: (botId: string, threadId: string) => boolean;
@@ -545,7 +546,7 @@ export class RoutineManager {
       createdAt: at,
       updatedAt: at,
     };
-    const discardResults = this.applyResultsInput(routine, input.resultsThreadId);
+    const discardResults = this.applyResultsInput(routine, input.resultsThreadId === undefined ? chatOfOneTimeRoutine(routine, this.options) : input.resultsThreadId);
     this.commitMutation(() => {
       this.routines.unshift(routine);
       if (request) this.rememberRoutineRequest(request, routine.id, at);
@@ -1431,13 +1432,7 @@ export class RoutineManager {
   }
 
   private discardResultsThreads(allocations: ResultsThreadAllocation[]) {
-    for (const { botId, threadId } of allocations) {
-      try {
-        this.options.discardResultsThread?.(botId, threadId);
-      } catch (error) {
-        console.error("routine: could not discard uncommitted results thread", error);
-      }
-    }
+    discardResultsThreads(allocations, this.options.discardResultsThread);
   }
 
   private applyResultsInput(routine: Routine, value: RoutineInput["resultsThreadId"]) {

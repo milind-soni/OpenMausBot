@@ -22,6 +22,24 @@ export function resolveRoutineResultsThread(
   return destination?.threadId;
 }
 
+export function chatOfOneTimeRoutine(
+  { schedule, botId, sourceThreadId }: Routine,
+  options: Pick<RoutineManagerOptions, "oneTimeReportsToItsChat" | "isResultsThread">,
+): string | undefined {
+  const oneTime = schedule.type === "once" || (schedule.type === "limit_reset" && schedule.repeat === "once");
+  return oneTime && sourceThreadId && options.oneTimeReportsToItsChat && options.isResultsThread?.(botId, sourceThreadId) ? sourceThreadId : undefined;
+}
+
+export function discardResultsThreads(allocations: ResultsThreadAllocation[], discard: RoutineManagerOptions["discardResultsThread"]) {
+  for (const { botId, threadId } of allocations) {
+    try {
+      discard?.(botId, threadId);
+    } catch (error) {
+      console.error("routine: could not discard uncommitted results thread", error);
+    }
+  }
+}
+
 export function routineRunDefinition(routine: Routine): Pick<RoutineRun,
   "routineName" | "prompt" | "durationMinutes" | "timeoutMinutes" | "attachments" | "target" | "groupId" | "botId" | "runOn" | "access" | "deliver"> {
   return {

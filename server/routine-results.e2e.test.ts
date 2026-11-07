@@ -208,8 +208,8 @@ it("reports a routine made in a chat into that chat once the person writes there
   }
 }, 90_000);
 
-async function resultsFixture() {
-  const fixture = await launchVerificationServer();
+async function resultsFixture(scripted = false) {
+  const fixture = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted });
   const { dataDir, url, logPath } = fixture.info;
   let server: ChildProcess | undefined;
   const api = async (method: string, path: string, body?: unknown, status = 200) => {
@@ -258,8 +258,49 @@ async function resultsFixture() {
     await waitForExit(server, { signal: "SIGTERM" });
     await fixture.close();
   };
-  return { api, control, messages, savedBot, destination, routine, report, restart, close };
+  return { dataDir, api, control, messages, savedBot, destination, routine, report, restart, close };
 }
+
+it("reports a one-time routine made in a chat into that chat after the person moves to another, and the person can still send it to the main thread", async () => {
+  const f = await resultsFixture(true);
+  try {
+    const { bot } = await f.control("new-bot", "--name", "One-time fixture");
+    const chat = (await f.api("POST", `/api/bots/${bot.id}/tasks`, { title: "Planning" }, 201)).task.threadId as string;
+    const later = (await f.api("POST", `/api/bots/${bot.id}/tasks`, { title: "Something else" }, 201)).task.threadId as string;
+    const made = (schedule: unknown, name: string) => ({ steps: [{ tool: "create_trigger", arguments: {
+      when: "schedule", name, instructions: "Report the fixture state; no external services.", schedule } }], reply: "Scheduled." });
+    writeFileSync(join(f.dataDir, "room-plan.json"), JSON.stringify({ [bot.id]: { turns: [
+      made({ type: "once", at: new Date(Date.now() + 3_600_000).toISOString() }, "Once"),
+      made({ type: "once", at: new Date(Date.now() + 7_200_000).toISOString() }, "Once, moved"),
+      made({ type: "cron", expression: "0 9 1 * *", timeZone: "UTC" }, "Monthly"),
+      { steps: [], reply: "Moved on." },
+      { steps: [], reply: "One-time report" }, { steps: [], reply: "Moved report" }, { steps: [], reply: "Monthly report" },
+    ] } }));
+    for (const text of ["Remind me once.", "Remind me once more.", "Remind me monthly."]) {
+      await f.control("send", "--bot", bot.id, "--task", chat, "--text", text);
+      expect((await f.control("wait", "--bot", bot.id, "--task", chat, "--timeout", "20")).status).toBe("settled");
+    }
+    await f.control("send", "--bot", bot.id, "--task", later, "--text", "A new subject.");
+    expect((await f.control("wait", "--bot", bot.id, "--task", later, "--timeout", "20")).status).toBe("settled");
+
+    const saved = (await f.api("GET", "/api/routines")).routines as any[];
+    const id = (name: string) => saved.find((routine) => routine.name === name).id as string;
+    expect(await f.destination(id("Once"))).toBe(chat);
+    expect(await f.destination(id("Monthly"))).toBeUndefined();
+    await f.api("PATCH", `/api/routines/${id("Once, moved")}`, { resultsThreadId: null });
+    expect(await f.destination(id("Once, moved"))).toBeUndefined();
+
+    expect(await f.report(id("Once"))).toBe(chat);
+    expect(await f.report(id("Once, moved"))).toBe(later);
+    expect(await f.report(id("Monthly"))).toBe(later);
+    await expect.poll(async () => (await f.messages(chat)).filter((message) => message.automation).map((message) => message.text), { timeout: 15_000 })
+      .toEqual(["One-time report"]);
+    await expect.poll(async () => (await f.messages(later)).filter((message) => message.automation).map((message) => message.text), { timeout: 15_000 })
+      .toEqual(["Moved report", "Monthly report"]);
+  } finally {
+    await f.close();
+  }
+}, 90_000);
 
 it("reports into the conversation the person is in, the one a bot with hidden threads opens, after they used threads", async () => {
   const f = await resultsFixture();

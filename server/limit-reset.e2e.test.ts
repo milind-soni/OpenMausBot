@@ -150,6 +150,30 @@ it("with no other AI to carry on, the stopped turn's Continue sets up a run that
   });
 }, 120_000);
 
+it("a set-up Continue stays in the stopped conversation after the person writes in another", async () => {
+  await withLimitFixture({ codex: false }, async ({ api, control, limit, lift, evidence }) => {
+    const resetsAt = Math.floor(Date.now() / 1000) + 10;
+    limit(resetsAt);
+    const { bot } = await control("new-bot", "--name", "Scout");
+    const threadId = bot.activeTaskId;
+    await control("send", "--bot", bot.id, "--task", threadId, "--text", "Write the quarterly report");
+    expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status).toBe("failed");
+    const { routine } = await api("POST", "/api/limit-resets/continue", { botId: bot.id, threadId }, 201);
+    expect(routine.resultsThreadId).toBe(threadId);
+
+    const later = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Something else" }, 201)).task.threadId as string;
+    await control("send", "--bot", bot.id, "--task", later, "--text", "A new subject");
+    expect((await control("wait", "--bot", bot.id, "--task", later, "--timeout", "30")).status).toBe("failed");
+    lift();
+
+    await expect.poll(async () => (await api("GET", "/api/routines")).runs.find((run: any) => run.routineId === routine.id)?.status, { timeout: 40_000 }).toBe("completed");
+    const run = (await api("GET", "/api/routines")).runs.find((candidate: any) => candidate.routineId === routine.id);
+    expect(run).toMatchObject({ threadId, resultsThreadId: threadId });
+    expect((await messagesOf(api, later)).some((message) => message.automation)).toBe(false);
+    evidence.push({ routine, run });
+  });
+}, 120_000);
+
 it("continues on the backup engine with one line, and goes back to its own engine after the reset", async () => {
   await withLimitFixture({ recovery: { enabled: true, backup: codex } }, async ({ api, control, limit, lift, claudePrompts, evidence }) => {
     const resetsAt = Math.floor(Date.now() / 1000) + 25;
