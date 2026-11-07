@@ -151,6 +151,114 @@ function WindowRow({
   );
 }
 
+/** One allowance row from the hub console's /api/quota (relayed here as /hub/quota). */
+interface HubQuota {
+  name?: string;
+  displayName?: string;
+  used?: number;
+  total?: number;
+  unlimited?: boolean;
+  recurring?: boolean;
+  resetAt?: string;
+  remainingPercentage?: number;
+}
+
+interface HubQuotaWorker {
+  worker: string;
+  account?: string;
+  plan?: string;
+  quotas?: HubQuota[];
+}
+
+interface HubQuotaReport {
+  updatedAt?: string;
+  workers?: Record<string, HubQuotaWorker>;
+}
+
+const NO_WINDOW: PlanWindow = { available: false, remainingPercent: null, usedPercent: null, resetsAt: null };
+
+/** The hub console already knows each worker's remaining allowance (it reads the vendor dashboards). This turns one
+ * worker into the same shape the plan probe returns, so both sources render through one code path. */
+/** "Bonus Pack 1", "Bonus Pack 2" … are one bucket in the vendor's books: same kind, different expiry. Read as a
+ * single row, or a provider with twenty of them pushes the real plan off the card. */
+function hubBucket(label: string): string {
+  return label.replace(/\s*#?\s*\d+\s*$/, "").trim() || label;
+}
+
+function hubProvider(key: string, worker: HubQuotaWorker): PlanProvider {
+  // Sum same-kind buckets first: used/total add up, the earliest reset is the one that matters.
+  const pooled = new Map<string, { label: string; used: number; total: number; resetAt: string | null }>();
+  for (const quota of worker.quotas ?? []) {
+    const rawLabel = quota.displayName || quota.name || "Quota";
+    const label = hubBucket(rawLabel);
+    const total = typeof quota.total === "number" ? quota.total : 0;
+    const used = typeof quota.used === "number" ? quota.used : 0;
+    const at = pooled.get(label);
+    if (!at) {
+      pooled.set(label, { label, used, total, resetAt: quota.resetAt ?? null });
+      continue;
+    }
+    at.used += used;
+    at.total += total;
+    if (quota.resetAt && (!at.resetAt || quota.resetAt < at.resetAt)) at.resetAt = quota.resetAt;
+  }
+  const extra: PlanExtra[] = [...pooled.values()].map((bucket) => {
+    const remaining = bucket.total > 0 ? ((bucket.total - bucket.used) / bucket.total) * 100 : 100;
+    const remainingPercent = Math.min(100, Math.max(0, remaining));
+    return {
+      label: bucket.label,
+      remainingPercent,
+      usedPercent: 100 - remainingPercent,
+      resetsAt: bucket.resetAt,
+    };
+  });
+  const account = worker.account?.trim();
+  return {
+    // `hub:` keeps these from colliding with the probe's own provider ids.
+    id: `hub:${key}`,
+    name: key,
+    driver: key,
+    plan: [worker.plan, account].filter(Boolean).join(" · ") || null,
+    ok: extra.length > 0,
+    error: extra.length > 0 ? null : t("planUsage.notReported"),
+    fiveHour: NO_WINDOW,
+    weekly: NO_WINDOW,
+    extra,
+  };
+}
+
+/** Name key used to decide "the probe and the hub are talking about the same provider". */
+function providerKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Fold the hub's numbers into the probe's report.
+ *
+ * The probe only answers for what OpenMausBot itself signed in to; everything else comes back
+ * "Sign in again". The hub console signs in through each vendor's own CLI, so it often has numbers for
+ * exactly those providers — and for workers the probe does not know at all. A provider the probe could
+ * not read is replaced by the hub's numbers; a provider that answered stays authoritative.
+ */
+export function mergeHubQuota(report: PlanUsageReport | null, hub: HubQuotaReport | null): PlanUsageReport | null {
+  if (!report || !hub?.workers) return report;
+  const providers = [...report.providers];
+  const index = new Map(providers.map((provider, at) => [providerKey(provider.name), at]));
+  for (const [key, worker] of Object.entries(hub.workers)) {
+    const fromHub = hubProvider(key, worker);
+    if (!fromHub.ok) continue;
+    const at = index.get(providerKey(key)) ?? index.get(providerKey(worker.worker ?? ""));
+    if (at === undefined) {
+      index.set(providerKey(key), providers.length);
+      providers.push(fromHub);
+      continue;
+    }
+    const current = providers[at]!;
+    if (!current.ok) providers[at] = { ...fromHub, id: current.id, name: current.name };
+  }
+  return { ...report, providers };
+}
+
 function usePlanUsage() {
   const [report, setReport] = useState<PlanUsageReport | null>(null);
   const [loading, setLoading] = useState(true);
@@ -162,8 +270,13 @@ function usePlanUsage() {
     setLoading(true);
     setError("");
     try {
-      const data = await api<PlanUsageReport>(refresh ? "/api/plan-usage?refresh=1" : "/api/plan-usage");
-      setReport(data);
+      // The hub relay is best effort: no console, no numbers, and the probe's own report still renders.
+      const [data, hub] = await Promise.all([
+        api<PlanUsageReport>(refresh ? "/api/plan-usage?refresh=1" : "/api/plan-usage"),
+        // No refresh flag: the relay always reads the console's live snapshot, and an unknown query 404s there.
+        api<HubQuotaReport>("/hub/quota").catch(() => null),
+      ]);
+      setReport(mergeHubQuota(data, hub));
       setNow(Date.now());
     } catch (cause) {
       setError(cause instanceof Error && cause.message ? cause.message : t("planUsage.fetchError"));

@@ -1159,7 +1159,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       </GlassBar>
 
       <div
-        ref={scrollRef}
+        ref={scrollRef} data-chat-scroller
         className="glass-scroller h-full overflow-x-hidden overflow-y-auto overscroll-y-contain px-5 [overflow-anchor:none]"
         // Simple mode's composer sits on plain canvas, so a row scrolled into view stops clear of it.
         style={advanced ? undefined : { scrollPaddingBottom: composerDock.pad }}

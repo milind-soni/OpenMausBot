@@ -95,7 +95,7 @@ const support: AcpSupport = {
     if (profile.tempDirectory) scheduleAntigravityTempSweep(instanceId);
     return {
       command: runtime.executablePath,
-      args: process.platform === "linux" ? ["--uid="] : [],
+      args: runtime.spawnArgs,
       env: profile.environment,
     };
   },

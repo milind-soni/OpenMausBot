@@ -605,6 +605,7 @@ import { createInternalThreadRoutes } from "./routes/internal-threads.ts";
 import { createBrowserEvidenceRoutes } from "./routes/browser-evidence.ts";
 import { createSignInCardRoutes } from "./routes/sign-in-cards.ts";
 import { createInternalEscalateRoutes } from "./routes/internal-escalate.ts";
+import { createHubBridgeRoutes } from "./hub-bridge.ts";
 import { createInternalChiefTeamRoutes } from "./routes/internal-chief-team.ts";
 import { createRoomHoldRoutes } from "./routes/room-holds.ts";
 import { checkedGroupResponder, createGroupRoutes } from "./routes/groups.ts";
@@ -651,6 +652,8 @@ import { connectorRequestItems } from "./connector-request-items.ts";
 import { onThreadSeen, personAsks as personAskAt, sawThread } from "./thread-presence.ts"; import { createWarmSummaryHost, HARNESS_IDLE_FRACTION } from "./host/warm-summary-host.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
+/** OMB_HOST widens the bind for LAN devices; pairing still needs loopback, so this hands out no owner access. */
+const HOST = process.env.OMB_HOST?.trim() || "127.0.0.1";
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
 const WEBHOOK_PUBLIC_URL = process.env.OMB_WEBHOOK_PUBLIC_URL || undefined;
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
@@ -1018,7 +1021,6 @@ function cloudGuestOpened(threadId: string): boolean {
 
 const guestDrivenTurns = new Map<string, string>();
 
-
 /** Never the owner when a guest drives the source, so the new conversation is confined like it. On a Team Cloud it is the
  * source's audience: one person's only from their own private chat (else a shared chat's work reads their notes). */
 function openerFrom(fromThreadId: string): string | undefined {
@@ -1037,8 +1039,6 @@ function parentThreadModel(botId: string, parentThreadId: string): { modelSelect
     registry.cliTarget(modelSelection.instanceId)?.driverKind);
   return { modelSelection, ...(needsAsk ? { approvalMode: "ask" as const } : {}) };
 }
-
-
 
 /** Loopback is not the owner on a Cloud home: only processes on the machine (a bot's shell) arrive that way. */
 function cloudOwnerSession(auth: RequestAuth): boolean {
@@ -1361,7 +1361,6 @@ function adminAuditRows(
   }
   return rows;
 }
-
 
 function operatorPrices(): PriceList | null {
   return entitled("billing") && cfg.billing?.prices && Object.keys(cfg.billing.prices).length ? cfg.billing.prices : null;
@@ -1846,7 +1845,6 @@ function agentsIntegration(
     { generation, depth, skillAuthoring, roomHandoffId, ...(hostFiles && !CLOUD_HOME && !HOSTED_WORKSPACE ? { deliversSavedFiles: true } : {}) },
     (turn) => mintInternalCapability({ botId, threadId, kind: "agents", createdBots: 0, openedThreads: 0, ...turn }), `http://127.0.0.1:${PORT}`) };
 }
-
 
 const hooksEnabled = () => process.env.OMB_HOOKS !== "0";
 function hooksIntegration(botId: string, threadId: string, generation: string): { url: string; token: string } {
@@ -11541,7 +11539,6 @@ function maybeResumeConnectors(threadId: string, resumeKey: string) {
   return true;
 }
 
-
 const phoneSecretSubmissions = new PhoneSecretSubmissionRegistry();
 
 function claimPhoneSecretBotDeletion(botId: string): (() => void) | null {
@@ -12129,7 +12126,8 @@ let restartRequested = false;
 const cloudMoveRoutes = createCloudMoveRoutes();
 
 // `workspaceAccess` is assigned at boot, after this line: read it per request.
-ROUTES.push(createHostedSlackRoutes({ bot: (id) => store.bot(id), hostedReady: () => Boolean(workspaceAccess) && entitled("admin") })); ROUTES.push(createStopLineRoutes());
+ROUTES.push(createHostedSlackRoutes({ bot: (id) => store.bot(id), hostedReady: () => Boolean(workspaceAccess) && entitled("admin") })); ROUTES.push(createStopLineRoutes()); ROUTES.push(createHubBridgeRoutes());
+// The multi-agent-hub console and scheduler, bridged in from their fixed loopback upstreams (server/hub-bridge.ts).
 const orgInstallStatuses = () => orgLibrary?.installStatuses() ?? new Map();
 ROUTES.push(createBotPresetRoutes({ presets: presetStore, orgStatuses: orgInstallStatuses })); ROUTES.push(createWorkspaceBannerRoutes({ changed: () => broadcast({ kind: "config", ...configStatus() }) }));
 ROUTES.push(createSharedComputerRoutes({ enabled: lendingEnabled, computers: sharedComputers, sessionLive: (id) => sessions.isLive(id), environmentId: ENVIRONMENT_ID,
@@ -12636,7 +12634,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return;
     }
     // Two public routes come first; everything else needs the loopback owner or a paired session with the right scope.
-    if (method === "GET" && !path.startsWith("/api/") && !path.startsWith("/.well-known/") && (moveFreeze.screen(path) ? (res.writeHead(302, { location: moveFreeze.screen(path)!, "cache-control": "no-store" }).end(), true) : serveStatic(res, path, STATIC_DIR))) return;
+    if (method === "GET" && !path.startsWith("/api/") && !path.startsWith("/hub/") && !path.startsWith("/.well-known/") && (moveFreeze.screen(path) ? (res.writeHead(302, { location: moveFreeze.screen(path)!, "cache-control": "no-store" }).end(), true) : serveStatic(res, path, STATIC_DIR))) return;
     if (method === "GET" && path === "/.well-known/openmausbot/environment") {
       return json(res, 200, environmentDescriptor({ environmentId: ENVIRONMENT_ID, ...TEAM_LABEL, desktopManaged: DESKTOP_MANAGED, emailSignIn: !HOSTED_WORKSPACE && !CLOUD_HOME && emailSignIn.enabled(), sharedComputers: lendingEnabled(), cloudHome: Boolean(CLOUD_HOME), cloudTeam: CLOUD_TEAM !== null, ownHome: ownHome.takesMove() }));
     }
@@ -15520,9 +15518,9 @@ if (CLOUD_HOME) registerCloudPower(cloudPower = createCloudPower({ dataDir: DATA
   liveCall: () => liveCalls.current() !== null, computer: () => cloudComputerPower.awake() || boatLifecycleBusyBots.size > 0, nextDueAt: () => { const due = [routines?.nextDueAt() ?? null, proactive.brief.nextWakeAt(), botWaits.nextWakeAt()].filter((at): at is number => at !== null); return due.length ? Math.min(...due) : null; },
   maintenance: () => workspaceMaintenance.active || providerFleetReloading || providerAuthSessions.active || browserEngineInstall !== null } }));
 
-server.listen(PORT, "127.0.0.1", async () => {
+server.listen(PORT, HOST, async () => {
   companyRuntimeReady();
-  console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
+  console.log(`openmausbot server on http://${HOST}:${PORT}`);
   personWaits.boot(); browserSweep.start(); startCloudTeamPolicy({ cloudHome: CLOUD_HOME, dataDir: DATA_DIR, managed: managedPolicy, sessions }); moveFreeze.hold(() => appTriggers.start(), () => void appTriggers.stop()); startCloudHomeConnectedApps({ cloudHome: CLOUD_HOME !== null, dataDir: DATA_DIR, cloudGrant: CLOUD_ENV.OMB_CLOUD_CONNECTED_APPS_GRANT, apply: (access) => { composio.setManagedBrokerAccess(access); broadcast({ kind: "config", ...configStatus() }); } });
   void afterFirstEngineRead().then(() => { if (builtInBrowserEnabled(cfg)) chromeLauncher.start(); });
   followupsReady = true;

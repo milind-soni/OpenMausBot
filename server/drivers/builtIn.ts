@@ -13,7 +13,12 @@ import { QwenAgentDriver } from "./acp/qwen.ts";
 import { CustomAcpDriver } from "./acp/custom.ts";
 import { HermesAgentDriver } from "./acp/hermes.ts";
 import { DeepSeekAgentDriver } from "./acp/deepseek.ts";
+import { CodeBuddyCnDriver, CodeBuddyDriver } from "./acp/codebuddy.ts";
+import { QoderCnDriver, QoderDriver } from "./acp/qoder.ts";
 import { ClineAgentDriver } from "./acp/cline.ts";
+import { CodeArtsAgentDriver } from "./acp/codearts.ts";
+import { McodeAgentDriver } from "./acp/mcode.ts";
+import { MeooAgentDriver } from "./acp/meoo.ts";
 import { CopilotAgentDriver } from "./acp/copilot.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 import { PiDriver } from "./pi.ts";
@@ -51,4 +56,11 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   MetaDriver,
   MuseCodeDriver,
   DeepSeekAgentDriver,
+  CodeBuddyDriver,
+  CodeBuddyCnDriver,
+  QoderDriver,
+  QoderCnDriver,
+  CodeArtsAgentDriver,
+  McodeAgentDriver,
+  MeooAgentDriver,
 ];

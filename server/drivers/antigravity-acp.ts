@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
@@ -142,6 +142,13 @@ export async function prepareAntigravityProfile(input: {
 }): Promise<AntigravityProfile> {
   const directory = resolve(input.profileDirectory ?? antigravityProfileDirectory(input.instanceId, input.baseDir));
   const acpDirectory = join(directory, "antigravity-acp");
+  const cli = input.runtime.kind === "cli";
+  /** The agy CLI stores its Google sign-in under $GEMINI_HOME/antigravity-cli. Pointing the CLI runtime at the real
+   * GEMINI_HOME reuses a sign-in that already exists, instead of demanding a second Google login into an isolated
+   * profile nobody signed in to. Google's packaged runtime keeps its own isolated GEMINI_HOME. */
+  const geminiHome = cli
+    ? resolve((input.baseEnv ?? process.env).GEMINI_HOME?.trim() || join(homedir(), ".gemini"))
+    : directory;
   await mkdir(acpDirectory, { recursive: true, mode: 0o700 });
   if (process.platform !== "win32") {
     const { chmod } = await import("node:fs/promises");
@@ -167,9 +174,10 @@ export async function prepareAntigravityProfile(input: {
   }
   stripWorkspaceCredentialEnv(environment);
   Object.assign(environment, {
-    GEMINI_HOME: directory,
+    GEMINI_HOME: geminiHome,
     AGY_ACP_FORCE_FILE_STORAGE: "1",
-    ANTIGRAVITY_HARNESS_PATH: input.runtime.harnessPath,
+    // The CLI carries its own harness behind the `acp` subcommand; only Google's packaged runtime reads this.
+    ...(cli ? {} : { ANTIGRAVITY_HARNESS_PATH: input.runtime.harnessPath }),
     BROWSER: browserCommand,
     PYTHONUNBUFFERED: "1",
     ELECTRON_RUN_AS_NODE: "1",
@@ -184,7 +192,9 @@ export async function prepareAntigravityProfile(input: {
   }
   return {
     directory,
-    tokenPath: join(acpDirectory, "acp_token.json"),
+    tokenPath: cli
+      ? join(geminiHome, "antigravity-cli", "antigravity-oauth-token")
+      : join(acpDirectory, "acp_token.json"),
     environment,
     ...(tempDirectory ? { tempDirectory } : {}),
   };
@@ -236,7 +246,7 @@ export class AntigravityAcpClient {
     this.tempDirectory = profile.tempDirectory;
     this.child = spawnCli(
       runtime.executablePath,
-      process.platform === "linux" ? ["--uid="] : [],
+      runtime.spawnArgs,
       { cwd, env: profile.environment, stdio: ["pipe", "pipe", "pipe"] },
       "bot",
     );

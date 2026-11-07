@@ -59,9 +59,16 @@ const INSTALL_RECORD = ".install-complete.json";
 
 export interface AntigravityRuntime {
   executablePath: string;
+  /** Empty for a `cli` runtime: the 1.5+ agy CLI carries its own ACP server, so there is no separate harness binary. */
   harnessPath: string;
   source: "managed" | "override" | "path";
   version: string | null;
+  /** Arguments that put the executable into ACP stdio mode: Google's packaged agy_acp_server.par takes `--uid=`,
+   * the agy CLI takes its `acp` subcommand. */
+  spawnArgs: string[];
+  /** `packaged` is Google's runtime (executable + localharness sibling) with its own isolated Google profile;
+   * `cli` is the person's own agy CLI, which reuses the Google sign-in they already did. */
+  kind: "packaged" | "cli";
 }
 
 export class AntigravitySetupError extends Error {
@@ -99,6 +106,17 @@ function executableNames(platform: NodeJS.Platform = process.platform) {
     : { executable: "agy_acp_server.par", harness: "localharness_external" };
 }
 
+/** Google's packaged runtime is started bare on Linux (it reads --uid=) and with no argument elsewhere. */
+function packagedSpawnArgs(platform: NodeJS.Platform = process.platform): string[] {
+  return platform === "linux" ? ["--uid="] : [];
+}
+
+/** The `agy` CLI (and the `agy.bin` payload its wrapper execs) speaks ACP through a subcommand instead of being one. */
+export function isAgyCli(candidate: string): boolean {
+  const base = candidate.split(/[\\/]/u).pop()?.toLowerCase() ?? "";
+  return /^agy(?:\.bin)?(?:\.(?:cmd|bat|exe|ps1))?$/u.test(base) || base === "antigravity";
+}
+
 async function executableFile(path: string, bytes?: number): Promise<boolean> {
   try {
     const info = await stat(path);
@@ -125,7 +143,7 @@ async function completedRelease(directory: string, asset: AntigravityReleaseAsse
     const harnessPath = join(directory, asset.harness.name);
     if (!(await executableFile(executablePath, asset.executable.bytes))) return null;
     if (!(await executableFile(harnessPath, asset.harness.bytes))) return null;
-    return { executablePath, harnessPath, source: "managed", version: asset.version };
+    return { executablePath, harnessPath, source: "managed", version: asset.version, spawnArgs: packagedSpawnArgs(), kind: "packaged" };
   } catch {
     return null;
   }
@@ -146,9 +164,16 @@ function pathCandidates(binary: string, env: NodeJS.ProcessEnv): string[] {
 async function externalRuntime(candidate: string, source: "override" | "path"): Promise<AntigravityRuntime | null> {
   const names = executableNames();
   const executablePath = resolve(candidate);
+  if (!(await executableFile(executablePath))) return null;
   const harnessPath = join(dirname(executablePath), names.harness);
-  if (!(await executableFile(executablePath)) || !(await executableFile(harnessPath))) return null;
-  return { executablePath, harnessPath, source, version: null };
+  if (await executableFile(harnessPath)) {
+    return { executablePath, harnessPath, source, version: null, spawnArgs: packagedSpawnArgs(), kind: "packaged" };
+  }
+  // A person's own agy CLI is the whole runtime: it answers ACP on `agy acp` and already holds their Google sign-in.
+  if (isAgyCli(executablePath)) {
+    return { executablePath, harnessPath: "", source, version: null, spawnArgs: ["acp"], kind: "cli" };
+  }
+  return null;
 }
 
 /** Legacy `agy` commands (saved absolute paths, Windows shims) migrate without editing user config. */
@@ -178,6 +203,11 @@ export async function resolveAntigravityRuntime(
   }
   const names = executableNames();
   for (const candidate of pathCandidates(names.executable, env)) {
+    const found = await externalRuntime(candidate, "path");
+    if (found) return found;
+  }
+  // The official runtime has a fixed name; a person's own CLI is `agy` on PATH, which is what its installer writes.
+  for (const candidate of pathCandidates("agy", env)) {
     const found = await externalRuntime(candidate, "path");
     if (found) return found;
   }
@@ -299,6 +329,8 @@ async function installOnce(options: AntigravityInstallOptions): Promise<Antigrav
       harnessPath: join(runtimeDirectory, asset.harness.name),
       source: "managed",
       version: asset.version,
+      spawnArgs: packagedSpawnArgs(),
+      kind: "packaged",
     };
     await options.validate?.(candidate, asset.version);
     const record: InstallRecord = {

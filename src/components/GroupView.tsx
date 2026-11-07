@@ -1084,7 +1084,7 @@ export function GroupView({ group }: { group: Group }) {
       </GlassBar>
 
       <div
-        ref={scrollRef}
+        ref={scrollRef} data-chat-scroller
         className="glass-scroller h-full overflow-x-hidden overflow-y-auto px-5 [overflow-anchor:none]"
         {...scrollHandlers}
       >

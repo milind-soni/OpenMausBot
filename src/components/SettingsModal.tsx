@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Archive, ChartNoAxesColumn, Cloud, CloudDownload, Coins, Download, FlaskConical, KeyRound, LockKeyhole, Monitor, Palette, ScrollText, Search, Settings, Sparkles, TabletSmartphone, Terminal, User, Users, X, Building2, Zap, BookOpen, ImagePlus } from "lucide-react";
+import { Archive, CalendarCheck, ChartNoAxesColumn, Cloud, CloudDownload, Coins, Download, FlaskConical, KeyRound, LockKeyhole, Monitor, Palette, ScrollText, Search, Settings, Sparkles, TabletSmartphone, Terminal, User, Users, X, Building2, Zap, BookOpen, ImagePlus, LayoutGrid } from "lucide-react";
 import { useStore, type AppSettingsSection } from "@/state/store";
 import { skillsLibraryEnabled } from "@/lib/feature-flags";
 import { type LocaleKey } from "@/locales";
@@ -58,6 +58,8 @@ import { DefaultBotSettings } from "./NewBotDialog";
 import { WorkspaceBackupSettings } from "./WorkspaceBackupSettings";
 import { CompanyBackupSettings } from "./CompanyBackupSettings";
 import { ImportSettings } from "./ImportSettings";
+import { HubSection } from "./HubSection";
+import { DailySection } from "./DailySection";
 import { cn } from "@/lib/cn";
 import { scrollWithin } from "@/lib/scroll-within";
 import { glassPopupFrameStyle } from "@/lib/glass-popup";
@@ -108,6 +110,7 @@ export const SECTIONS: Array<{
   { id: "activity", group: "account", labelKey: "settings.section.activity", icon: ScrollText, keywords: ["activity", "audit", "log", "history", "who changed", "approvals", "decisions", "admin"] },
   { id: "workspaces", group: "account", labelKey: "settings.section.workspaces", icon: Building2, keywords: ["clients", "tenants", "fleet", "workspaces", "installation", "installations"] },
   { id: "experimental", group: "account", labelKey: "settings.section.experimental", icon: FlaskConical, keywords: ["early", "preview", "learn", "skill", "authoring"] },
+  { id: "hub", group: "computers", labelKey: "settings.section.hub", icon: LayoutGrid, keywords: ["hub", "check-in", "checkin", "签到", "sign in", "console", "workers", "tasks", "webui"] },
 ];
 
 export type SimpleSettingsPage = {
@@ -127,6 +130,11 @@ export const SIMPLE_PAGES: SimpleSettingsPage[] = [
   { id: "billing", labelKey: "settings.simple.page.billing", icon: ChartNoAxesColumn, sections: ["usage", "cloudAccount"], keywords: ["billing", "included", "allowance", "cloud hours", "voice"] },
   { id: "updates", labelKey: "settings.simple.page.updates", icon: CloudDownload, sections: ["updates"],
     keywords: ["update", "version", "release", "product updates", "newsletter", "email updates", "welcome", "tour", "diagnostics", "logs", "support"] },
+  { id: "hub", labelKey: "settings.section.hub", icon: LayoutGrid, sections: ["hub"],
+    keywords: ["hub", "check-in", "checkin", "签到", "sign in", "console", "workers", "tasks", "webui"] },
+  // The check-in and the quotas it feeds, on one page of their own rather than behind the console's iframe.
+  { id: "daily", labelKey: "settings.section.daily", icon: CalendarCheck, sections: ["daily"],
+    keywords: ["daily", "checkin", "check-in", "签到", "quota", "配额", "credit", "余额", "allowance"] },
 ];
 
 export const SIMPLE_HIDDEN_SECTIONS: readonly AppSettingsSection[] = ["backups", "experimental", "workspaces", "skills", "decisionModel", "imageGeneration"];
@@ -206,7 +214,8 @@ export function SettingsModal() {
   const availableSections = baseSections.filter((entry) => entry.id !== "skills" || skillsLibraryEnabled(state.config));
   const visibleSections = availableSections.filter((entry) => sectionMatches(entry, q));
 
-  const simpleAvailable = new Set<AppSettingsSection>([...availableSections.map((entry) => entry.id), ...(remoteActive ? [] : ["updates" as const])]);
+  // "daily" has no entry in SECTIONS (it is a simple-mode page only), so it is added to the set by hand.
+  const simpleAvailable = new Set<AppSettingsSection>([...availableSections.map((entry) => entry.id), ...(remoteActive ? [] : ["updates" as const]), "daily"]);
   const simplePages = advanced ? [] : simpleSettingsPages(simpleAvailable, section);
   const visiblePages = simplePages.filter((page) => simplePageMatches(page, q));
   const currentPage = simplePages.find((page) => page.sections.includes(section));
@@ -426,6 +435,10 @@ export function SettingsModal() {
         return <AccessOverview />;
       case "workspaces":
         return <WorkspacesSection />;
+      case "hub":
+        return <HubSection />;
+      case "daily":
+        return <DailySection />;
       default:
         return null;
     }
