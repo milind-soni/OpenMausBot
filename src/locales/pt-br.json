@@ -4804,6 +4804,8 @@
   "automations.wake": "Manter este computador acordado para automações agendadas",
   "automations.wakeBattery": "Ligue na tomada para mantê-lo acordado.",
   "automations.allBots": "Todos os bots",
+  "automations.allDepartments": "Todas as equipes",
+  "automations.generalDepartment": "Geral",
   "automations.status.working": "Ligada",
   "automations.status.paused": "Pausada",
   "automations.status.needsYou": "Aguardando você",
