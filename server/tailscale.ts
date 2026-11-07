@@ -53,7 +53,7 @@ function run(cli: string, args: string[], timeoutMs: number): Promise<{ ok: bool
     execFile(
       cli,
       args,
-      { timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: 16 * 1024 * 1024, env: tailscaleEnvironment() },
+      { timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: 16 * 1024 * 1024, env: tailscaleEnvironment(), windowsHide: true },
       (error, stdout, stderr) => {
         const code = error && "code" in error && typeof error.code === "number" ? error.code : error ? null : 0;
         resolve({ ok: !error, stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), code });

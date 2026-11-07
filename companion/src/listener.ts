@@ -131,6 +131,7 @@ async function refreshTailnetNameOnce(
           // large tailnet with ENOBUFS, which would read as "not installed".
           maxBuffer: 16 * 1024 * 1024,
           env: tailscaleEnvironment(),
+          windowsHide: true,
         },
         (error, stdout) => {
           if (error) {
