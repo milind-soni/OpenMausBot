@@ -1,12 +1,25 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { AlertTriangle, Loader2, Shield } from "lucide-react";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { macCuaPermissionMessage, missingMacCuaPermissions } from "@/lib/mac-cua-permissions";
 import { MacCuaRecoveryActions } from "./MacCuaRecoveryActions";
+import { NotNowButton } from "./NoticeCard";
 import { t } from "@/lib/i18n";
+
+// "Not now" hides the card in every place it shows until the app starts again; nothing is saved.
+let hiddenUntilRelaunch = false;
+const hiddenListeners = new Set<() => void>();
+const subscribeHidden = (listener: () => void) => { hiddenListeners.add(listener); return () => { hiddenListeners.delete(listener); }; };
+const readHidden = () => hiddenUntilRelaunch;
+
+export function hideMacLocalControlUntilRelaunch() {
+  hiddenUntilRelaunch = true;
+  for (const listener of hiddenListeners) listener();
+}
 
 export function MacLocalControl() {
   const { capabilities } = useDesktopCapabilities();
+  const hidden = useSyncExternalStore(subscribeHidden, readHidden, readHidden);
   const reason = capabilities.localComputer.available ? null : capabilities.localComputer.message;
   const permissionMessage = macCuaPermissionMessage(missingMacCuaPermissions(reason));
   const [pending, setPending] = useState(false);
@@ -56,7 +69,7 @@ export function MacLocalControl() {
   }, [awaitingGrant]);
 
   if (capabilities.host.platform !== "darwin" || capabilities.localComputer.reasonCode === "remote-server") return null;
-  if (capabilities.localComputer.available) return null;
+  if (capabilities.localComputer.available || hidden) return null;
 
   return (
     <section className="mt-4 rounded-xl border border-warning/25 bg-warning/10 p-4">
@@ -95,6 +108,7 @@ export function MacLocalControl() {
               {pending && <Loader2 size={13} className="animate-spin" />}
               {t("commandAllowlist.retry")}
             </button>
+            <NotNowButton onClick={hideMacLocalControlUntilRelaunch} />
           </div>
         </div>
       </div>

@@ -12,7 +12,7 @@ vi.mock("./DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({ capabilities: { host: { platform: "darwin" }, localComputer: fixture.localComputer }, ready: true }),
 }));
 
-const { MacLocalControl } = await import("./MacLocalControl");
+const { MacLocalControl, hideMacLocalControlUntilRelaunch } = await import("./MacLocalControl");
 afterAll(() => vi.unstubAllGlobals());
 
 describe("Mac local computer status", () => {
@@ -23,6 +23,7 @@ describe("Mac local computer status", () => {
     expect(markup).toContain("Relaunch MausBot");
     expect(markup).not.toContain("Open Screen Recording Settings");
     expect(markup).toContain("Driver detail");
+    expect(markup).toContain(">Not now</button>");
   });
 
   it("does not turn a missing reason into a claimed permission diagnosis", () => {
@@ -35,6 +36,13 @@ describe("Mac local computer status", () => {
 
   it("does not offer host repair actions to a remote renderer", () => {
     fixture.localComputer = { available: false, status: "unavailable", reasonCode: "remote-server" } as DesktopCapabilities["localComputer"];
+    expect(renderToStaticMarkup(createElement(MacLocalControl))).toBe("");
+  });
+
+  it("hides the card after Not now until the app starts again", () => {
+    fixture.localComputer = { available: false, message: "Accessibility required; grant access in System Settings" } as DesktopCapabilities["localComputer"];
+    expect(renderToStaticMarkup(createElement(MacLocalControl))).toContain("Allow control of this computer");
+    hideMacLocalControlUntilRelaunch();
     expect(renderToStaticMarkup(createElement(MacLocalControl))).toBe("");
   });
 });
