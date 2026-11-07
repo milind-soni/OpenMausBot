@@ -16,7 +16,6 @@ export function hideMacLocalControlUntilRelaunch() {
   for (const listener of hiddenListeners) listener();
 }
 
-/** Opens Accessibility, then Screen Recording settings; stops if the card was dismissed in between. */
 export async function openMacControlSettings(
   open: (pane: "accessibility" | "screen") => Promise<void> | undefined = (pane) => window.ogb?.permOpenSettings?.(pane),
 ) {
