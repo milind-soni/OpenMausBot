@@ -1,7 +1,9 @@
+import { formatTime } from "@/lib/clock-time";
 import { t } from "@/lib/i18n";
 
-export function minutesLeft(expiresAt: number, now = Date.now()): number {
-  return Math.max(0, Math.ceil((expiresAt - now) / 60_000));
+/** "Works once, until 11:14": a code's end as a clock time, never a countdown. */
+export function codeUntil(expiresAt: number): string {
+  return t("pairing.worksOnceUntil", { time: formatTime(expiresAt) });
 }
 
 export function lastSeen(lastSeenAt: number, now = Date.now()): string {

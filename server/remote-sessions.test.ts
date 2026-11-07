@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { LOCKOUT } from "./sessions.ts";
+import { PAIRING_LOCKOUT } from "./sessions.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { openSse } from "./testing/sse.ts";
 import { workerPort } from "./testing/worker-port.ts";
@@ -564,14 +564,14 @@ describe("pairing", () => {
   });
 
   it("locks a source out after repeated bad codes and says how long", async () => {
-    for (let i = 0; i < LOCKOUT.failures; i++) {
+    for (let i = 0; i < PAIRING_LOCKOUT.failures; i++) {
       const r = await call("/api/auth/pair", { method: "POST", headers: remote("10.0.0.99"), body: JSON.stringify({ code: `BAD${i}-BADB-ADBA` }) });
       expect(r.status).toBe(401);
     }
     const opened = await pairingCode();
     const locked = await call("/api/auth/pair", { method: "POST", headers: remote("10.0.0.99"), body: JSON.stringify({ code: opened.code }) });
     expect(locked.status).toBe(429);
-    expect(locked.body.error).toMatch(/from your address; try again in \d+s/);
+    expect(locked.body.error).toMatch(/^Too many wrong codes\. Try again at \d{2}:\d{2} UTC\.$/);
     expect((await call("/api/auth/pair", { method: "POST", headers: remote("10.0.0.100"), body: JSON.stringify({ code: opened.code }) })).status).toBe(200);
     expect(stderr).toMatch(/pairing refused from 10\.0\.0\.99/);
   });
