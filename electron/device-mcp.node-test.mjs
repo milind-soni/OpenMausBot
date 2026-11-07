@@ -185,6 +185,21 @@ test("a no holds ten minutes per name and per target; the prompt shows again aft
   assert.equal(asks.length, 2);
 });
 
+test("an answer that lands after close() is dropped: no Allow is kept and no No holds", async (t) => {
+  const { door, asks, saved } = await setup(t);
+  assert.deepEqual(await door.open({ name: "native", port: 19501 }), { refused: "needs-approval" });
+  door.close();
+  asks[0].answer(true);
+  await answered();
+  assert.deepEqual(saved(), {});
+  assert.deepEqual(await door.open({ name: "native", port: 19501 }), { refused: "needs-approval" });
+  door.close();
+  asks[1].answer(false);
+  await answered();
+  assert.deepEqual(await door.open({ name: "native", port: 19501 }), { refused: "needs-approval" }, "asked again, not held");
+  assert.equal(asks.length, 3);
+});
+
 test("a no for a command holds for the same command under another name; a different command asks", async (t) => {
   const { door, asks } = await setup(t, { echo: echoEntry(), copy: echoEntry(), other: echoEntry("tree") });
   assert.deepEqual(await door.open(frame("echo", echoEntry())), { refused: "needs-approval" });

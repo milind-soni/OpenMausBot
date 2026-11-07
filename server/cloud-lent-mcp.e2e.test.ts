@@ -243,12 +243,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   // The program: Test asks on the Mac once, then, once the person allows it, it starts there, from the connector, never
   // on My Cloud, with the terminal still off.
   const program = await api("POST", "/api/mcp/servers/notes/test", { token: owner });
+  expect(program).toMatchObject({ status: 200, body: { ok: false, reason: "unreachable" } });
   expect(program.body.error).toContain("Allow notes on");
   expect(program.body.error).toContain("a prompt is waiting there");
   expect(asks).toHaveLength(2);
   expect(asks[1]).toEqual({ name: "notes", target: { kind: "command", command: `${process.execPath} ${script}`, env: ["NOTES_TOKEN"] } });
   answers[1]!(true);
   await expect.poll(() => connector!.mcpApprovals.read().notes?.kind).toBe("command");
+  expect(await api("POST", "/api/mcp/servers/notes/test", { token: owner })).toEqual({ status: 200, body: { ok: true, tools: [{ name: "whoami" }] } });
   const second = await turnOf("Program bot");
   const notes = second.mcpConfig.mcpServers.notes!;
   expect(notes).toBeDefined();

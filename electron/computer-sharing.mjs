@@ -399,7 +399,9 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
   const supportsMcp = new Set();
   /** The Clouds that take this computer's MCP servers over the device link. */
   const supportsMcpLink = new Set();
-  const lendsMcpLink = (env, grant) => Boolean(grant.cloud) && grant.mcp === true && supportsMcpLink.has(env.id);
+  /** Security: only the switch lends MCP servers, and only to its own account's Clouds; what a grant recorded never does. */
+  const mcpLent = grant => mcpAccount !== null && grant?.cloud?.accountId === mcpAccount;
+  const lendsMcpLink = (env, grant) => mcpLent(grant) && supportsMcpLink.has(env.id);
   const supportsDetails = new Set();
   const supportsLink = new Set();
   /** The Clouds that take the person's Chrome over the device link. */
@@ -411,7 +413,8 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
    * runs; never while My Cloud sleeps, so a sleeping Cloud is never dialled. One MCP door serves the link's whole life,
    * so a person's No holds across its streams; stop() closes it. */
   const keepLink = async (env, grant, signal, live) => {
-    live.door = mcp?.(env, name => request(env, `/api/shared-computers/${grant.id}/mcp-server`, { name }, signal, grant.secret).then(answer => answer.server ?? null));
+    try { live.door = mcp?.(env, name => request(env, `/api/shared-computers/${grant.id}/mcp-server`, { name }, signal, grant.secret).then(answer => answer.server ?? null)); }
+    catch { log("lending: this computer's MCP door did not start"); }
     for (let failures = 0; !signal.aborted;) {
       if (sleepsHere(env) && sleepGate(env).asleep()) {
         await sleepGate(env).wait(signal);
@@ -441,7 +444,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
   const run = (env, grant) => {
     stop(env.id);
     if (closed || !grant.enabled || (grant.cloud ? paused : maintainerOff)) return;
-    const live = { abort: new AbortController(), cua: null, door: null };
+    const live = { abort: new AbortController(), cua: null };
     running.set(env.id, live);
     const signal = live.abort.signal;
     const call = (action, body = {}, held = signal) => request(env, `/api/shared-computers/${grant.id}/${action}`, body, held, grant.secret);
@@ -476,7 +479,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
             ...(supportsDetails.has(env.id) && LENT_PLATFORMS.has(process.platform) ? { platform: process.platform } : {}),
             ...(grant.cloud && supportsLink.has(env.id) ? { internet: lendsInternet(grant) } : {}),
             ...(grant.cloud && supportsChrome.has(env.id) ? { chrome: grant.chrome === true } : {}),
-            ...(grant.cloud && supportsMcpLink.has(env.id) ? { mcp: grant.mcp === true } : {}),
+            ...(grant.cloud && supportsMcpLink.has(env.id) ? { mcp: mcpLent(grant) } : {}),
             ...(supportsTimeouts.has(env.id) ? { commandTimeouts: true } : {}),
             ...(supportsLong.has(env.id) ? { longCommands: true } : {}),
             ...(supportsEdits.has(env.id) ? { fileEdits: true } : {}),
@@ -610,7 +613,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
       folders: lent && Array.isArray(lent.folders) ? lent.folders : [],
       screen: lent?.computer === true,
       terminal: lent?.enabled === true && lent.terminal === true,
-      mcp: lent?.enabled === true && lent.mcp === true,
+      mcp: lent?.enabled === true && mcpLent(lent),
       ...internetState(env, lent),
       ...chromeState(env, lent),
       busy: Boolean(env && executing?.env === env.id),
@@ -640,7 +643,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
     let info = { sessionId: null, environmentId: null };
     try { info = await cloudIdentity(env); } catch (error) { if (error.problem !== "connect-first") throw error; }
     if (grantVersions.get(env.id) !== version) return cloudState(env);
-    const grant = cloudGrant(env, current, info, { ...input, folders });
+    const grant = cloudGrant(env, current, info, { ...input, folders, mcp: mcpAccount === current.accountId });
     disconnect(env, records[env.id]);
     store({ ...records, [env.id]: grant }); run(env, grant); changed();
     return cloudState(env);
@@ -856,7 +859,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
       mcpAccount = account;
       mcpApprovals = {};
       try { store(records); } catch (error) { ({ account: mcpAccount, approvals: mcpApprovals } = before); throw error; }
-      for (const [id, grant] of Object.entries(records)) if (grant?.cloud && grant.mcp === true && grant.cloud.accountId !== account) stop(id);
+      if (before.account) for (const [id, grant] of Object.entries(records)) if (grant?.cloud?.accountId === before.account) stop(id);
       changed();
       return lendAutomatically();
     },
@@ -902,6 +905,8 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
         const entry = asking.get(id);
         if (entry) { entry.stop.abort(); asking.delete(id); }
       }
+      // Security: the MCP switch and the Allows given under it leave with their account.
+      if (accountId === mcpAccount) { mcpAccount = null; mcpApprovals = {}; try { store(records); } catch {} }
       changed();
     },
     cloudChanged() {

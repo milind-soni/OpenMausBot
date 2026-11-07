@@ -83,8 +83,13 @@ export function createMcpDoor({
   const ask = (name, wanted, entry) => {
     const target = wanted.kind === "url" ? wanted : { kind: "command", command: shownCommand(entry.command, entry.args), env: Object.keys(entry.env).sort() };
     asking = true;
+    const asked = generation;
     void Promise.resolve().then(() => prompt({ name, target }))
-      .then((ok) => { if (ok === true) approvals.write({ ...approvals.read(), [name]: wanted }); else for (const key of holds(name, wanted)) declined.set(key, now() + declineMs); })
+      .then((ok) => {
+        // Security: an answer given after close() belongs to a door that no longer lends anything.
+        if (asked !== generation) return;
+        if (ok === true) approvals.write({ ...approvals.read(), [name]: wanted }); else for (const key of holds(name, wanted)) declined.set(key, now() + declineMs);
+      })
       .catch(() => {})
       .finally(() => { asking = false; });
   };

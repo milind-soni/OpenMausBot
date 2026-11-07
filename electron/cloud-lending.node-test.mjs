@@ -3,9 +3,11 @@ import { test } from "node:test";
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { cloudLendingVerdict, createComputerSharing } from "./computer-sharing.mjs";
+import { createLinkMux } from "./device-link-protocol.mjs";
+import { createMcpDoor } from "./device-mcp.mjs";
 import nativeText from "./native-text.cjs";
 import { PERSON_AWAY_SECONDS, personActiveText } from "./lent-screen-presence.mjs";
 
@@ -98,8 +100,10 @@ async function lendingFixture(t, options = {}) {
   const leases = [];
   const dials = [];
   const driver = await hangingDriver(dir);
+  const file = path.join(dir, "profile", "computer-sharing.json");
+  if (options.saved) { await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, JSON.stringify(options.saved)); }
   const sharing = createComputerSharing({
-    file: path.join(dir, "profile", "computer-sharing.json"), fetch: home.fetch, environments: () => [options.env ?? env],
+    file, fetch: home.fetch, environments: () => [options.env ?? env],
     ...(options.reconnect ? { reconnect: options.reconnect } : {}), ...(options.now ? { now: options.now } : {}), ...(options.ownClouds ? { ownClouds: options.ownClouds } : {}),
     ...(options.t ? { t: options.t } : {}),
     // The maintainer flag is off, as for every Cloud Pro user.
@@ -107,11 +111,22 @@ async function lendingFixture(t, options = {}) {
     cloud: asked => (typeof cloud === "function" ? cloud(asked) : cloud), home: path.join(dir, "home"),
     cuaConnection: async () => driver.connection, ...(options.idleSeconds ? { idleSeconds: options.idleSeconds } : {}),
     hostControl: options.hostControl ?? (async id => { leases.push(`acquire:${id}`); return { renew: async () => {}, release: async () => { leases.push(`release:${id}`); } }; }),
-    onChange: summary => summaries.push(summary), WebSocket: class { constructor(url) { dials.push(url); } close() {} send() {} },
+    onChange: summary => summaries.push(summary), WebSocket: options.WebSocket ?? class { constructor(url) { dials.push(url); } close() {} send() {} },
+    ...(options.mcp ? { mcp: options.mcp } : {}),
   });
   t.after(() => sharing.close());
   return { dir, folderPath, home, sharing, driver, summaries, leases, dials, maintainerChecks: () => maintainerChecks, setCloud: next => { cloud = next; } };
 }
+/** A device link that opens at once; `ends` gets My Cloud's side of each, which asks this computer for streams. */
+const openingLink = ends => class {
+  constructor() {
+    this.end = createLinkMux({ send: frame => setImmediate(() => this.onmessage?.({ data: frame })) });
+    ends.push(this.end);
+    setImmediate(() => this.onopen?.());
+  }
+  send(frame) { setImmediate(() => this.end.receive(frame)); }
+  close() { this.end.close(); }
+};
 const connected = async (sharing, count = 1, home) => {
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
@@ -176,15 +191,22 @@ test("Your Chrome does not outlive the switch: after an Off nothing reports it a
 
 test("the connect body carries mcp only to a Cloud that advertises lentMcpLink, and the link stays open while MCP is lent", async t => {
   for (const mcpLink of [false, true]) {
-    const { folderPath, home, sharing, dials } = await lendingFixture(t, { home: { link: true, mcpLink } });
+    let own = [env];
+    const { folderPath, home, sharing, dials } = await lendingFixture(t, { home: { link: true, mcpLink }, ownClouds: () => own });
     const folders = [{ id: randomUUID(), path: folderPath, write: false }];
-    await sharing.saveCloud(env, { folders, mcp: true });
+    const turnedOn = sharing.lendMcp(true);
+    // The switch takes the signed-in account; with no Cloud of its own left, the automatic pass lends nothing, so the
+    // grant saved below is the one lent: folders and MCP servers, no internet connection.
+    own = [];
+    await turnedOn;
+    await sharing.saveCloud(env, { folders, mcp: false });
     await connected(sharing, 1, home);
-    assert.equal(sharing.cloudState(env).mcp, true);
+    assert.equal(sharing.cloudState(env).mcp, true, "the switch decides, not what the save asked for");
     if (mcpLink) {
       assert.equal(home.connects[0].mcp, true);
       await until(() => dials.length === 1, "the link, kept open for MCP alone");
-      await sharing.saveCloud(env, { folders });
+      await sharing.lendMcp(false);
+      await sharing.saveCloud(env, { folders, mcp: true });
       await connected(sharing, 2, home);
       assert.equal(home.connects[1].mcp, false);
     } else assert.equal("mcp" in home.connects[0], false, "an older Cloud refuses fields it does not know");
@@ -192,6 +214,23 @@ test("the connect body carries mcp only to a Cloud that advertises lentMcpLink, 
     await until(() => home.results.length === 1, "a job's answer");
     assert.equal(dials.length, mcpLink ? 1 : 0, "no link for a Cloud that can't use it, or once nothing needs it");
   }
+});
+
+test("a grant kept for another account lends no MCP servers, whatever it recorded", async t => {
+  const ends = [];
+  const kept = { sessionId: null, environmentId: null, id: randomUUID(), secret: randomBytes(32).toString("hex"), enabled: true, folders: [], terminal: false, computer: false,
+    internet: true, chrome: false, mcp: true, cloud: { accountId: "acct_2", origin: ORIGIN } };
+  const { home, sharing } = await lendingFixture(t, {
+    home: { link: true, mcpLink: true }, cloud: { status: "connected", accountId: "acct_2", origin: ORIGIN }, WebSocket: openingLink(ends),
+    saved: { version: 1, records: { [env.id]: kept }, automatic: { paused: false, mcpAccount: "acct_1" }, mcpApprovals: { local: { kind: "url", port: 19501 } } },
+    mcp: (_env, definition) => createMcpDoor({ approvals: sharing.mcpApprovals, prompt: () => new Promise(() => {}), ownPorts: async () => [], definition }),
+  });
+  sharing.start();
+  await connected(sharing, 1, home);
+  assert.equal(home.connects[0].mcp, false, "the switch is acct_1's");
+  assert.equal(sharing.cloudState(env).mcp, false);
+  await until(() => sharing.cloudState(env).link === "on", "the link, for the internet connection");
+  assert.deepEqual(await ends.at(-1).open({ mcp: { name: "local", port: 19501 } }), { refused: "not-lent" }, "acct_1's Allow is never acct_2's");
 });
 
 test("refuses to lend unless the Cloud sign-in is verified for this exact machine, and never to a server that is not a Cloud home", async t => {
