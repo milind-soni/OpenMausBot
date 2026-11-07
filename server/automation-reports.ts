@@ -264,7 +264,8 @@ export function createAutomationReports(deps: AutomationReportDeps) {
       if (run.target !== "bot" || run.status !== "completed" || !run.threadId) return;
       if (run.deliver === "brief") return deps.brief?.(run, turnId);
       const path = store.activePath(run.threadId);
-      const said = turnId ? path.findLast((message) => saidLine(message) && message.turnId === turnId) ?? path.slice(path.findLastIndex(asks) + 1).findLast(saidLine)
+      const earlier = (message: Message) => asks(message) || (message.turnId !== undefined && message.turnId !== turnId);
+      const said = turnId ? path.findLast((message) => saidLine(message) && message.turnId === turnId) ?? path.slice(path.findLastIndex(earlier) + 1).findLast(saidLine)
         : replyOf(run);
       const reply = read(run, said);
       const bot = store.bot(run.botId);

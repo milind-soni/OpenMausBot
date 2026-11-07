@@ -469,6 +469,7 @@ describe("automation reports", () => {
     const pdf = { kind: "file" as const, path: "brief-1.pdf", mime: "application/pdf", name: "Brief.pdf" };
     f.store.appendMessage(run.threadId!, { role: "user", kind: "text", text: "Do the Daily brief check." });
     f.store.appendMessage(run.threadId!, { role: "bot", kind: "text", text: "", attachments: [pdf] });
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "activity", tool: { name: "Bash", ok: true }, turnId: `turn-${run.id}` });
     f.reports.runSettled(run, `turn-${run.id}`);
     expect(f.lines()).toEqual([expect.objectContaining({ text: "", attachments: [pdf] })]);
     expect(f.runs.get(run.id)!.report).toMatchObject({ state: "posted" });
@@ -498,6 +499,16 @@ describe("automation reports", () => {
     f.reports.runSettled(ok, `turn-${ok.id}`);
     expect(f.lines().at(-1)).toMatchObject({ automation: expect.objectContaining({ recovered: true }) });
     expect(f.lines().at(-1)).not.toHaveProperty("attachments");
+  });
+
+  it("keeps a run quiet whose last turn, resumed after a hand-off, said and sent nothing", () => {
+    const f = fixture();
+    const run = f.finished(null);
+    f.store.appendMessage(run.threadId!, { role: "user", kind: "text", text: "Do the Stock check." });
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "text", text: "Asked Sam to count the stock.", turnId: "turn-before", turnTerminal: true });
+    f.reports.runSettled(run, `turn-${run.id}`);
+    expect(f.added()).toEqual([]);
+    expect(f.runs.get(run.id)!.report).toEqual({ state: "quiet" });
   });
 
   it("keeps a run quiet that said nothing and sent nothing, though its tools returned images", () => {
