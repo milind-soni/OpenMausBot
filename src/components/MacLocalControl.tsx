@@ -107,7 +107,7 @@ export function MacLocalControl() {
               {pending && <Loader2 size={13} className="animate-spin" />}
               {t("commandAllowlist.retry")}
             </button>
-            <NotNowButton onClick={hideMacLocalControlUntilRelaunch} />
+            {!pending && <NotNowButton onClick={hideMacLocalControlUntilRelaunch} />}
           </div>
         </div>
       </div>
