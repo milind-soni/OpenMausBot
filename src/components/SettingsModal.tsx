@@ -321,7 +321,7 @@ export function SettingsModal() {
   const phoneFocus = state.appSettingsPhonePairing;
   const computerPairs = currentPhonePairingTarget(state.config?.cloudHome === true) === "computer";
   const remoteAccess = {
-    client: <RemoteComputerSection hideWhenUnavailable={!advanced} />,
+    client: <RemoteComputerSection hideWhenUnavailable legacyOnly />,
     domain: remoteActive || thisComputer ? null : <CustomDomainSettings />,
     // Security: the server decides who may pair (an owner or admin session), not this gate.
     pairing: thisComputer ? null : <ServerPairingCard cloudHome={state.config?.cloudHome === true} focusRequest={computerPairs ? 0 : phoneFocus} team={state.config?.team?.name} teamPhoneBlocked={state.config?.managedPolicy?.remoteAccess === false ? t("policy.teamRemoteBlocked", { organization: state.config.managedPolicy.organizationName }) : null} simple={!advanced} />,

@@ -96,3 +96,21 @@ describe("remote connection Settings", () => {
     expect(html).not.toContain("<input");
   });
 });
+
+describe("the desktop companion client, ending Dec 7", () => {
+  const legacy = (ogb: unknown) => {
+    vi.stubGlobal("window", { ogb });
+    setLocale("en");
+    return renderToStaticMarkup(createElement(RemoteComputerSection, { legacyOnly: true, hideWhenUnavailable: true }));
+  };
+
+  it("is not offered to start; only an installation already in client mode sees it", () => {
+    expect(legacy({ environments: { addFromLink: vi.fn() }, remoteClient: { active: false } })).toBe("");
+  });
+
+  it("tells a client-mode installation the mode ends Dec 7, beside Disconnect", () => {
+    const html = legacy({ remoteClient: { active: true } });
+    expect(html).toContain("This connection type ends Dec 7.");
+    expect(html).toContain("Disconnect and use this computer");
+  });
+});

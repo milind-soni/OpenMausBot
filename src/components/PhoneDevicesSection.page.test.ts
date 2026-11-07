@@ -16,7 +16,7 @@ vi.mock("./PhoneSetupFlow", () => ({
   loadCompanionBridgeState: () => null,
   shouldHydrateCompanionEmail: () => false,
 }));
-import { PairDeviceDialog, PhoneDevicesSection, reachLine, routeStateText } from "./PhoneDevicesSection";
+import { OpenCodeRow, PairDeviceDialog, PhoneDevicesSection, reachLine, routeStateText } from "./PhoneDevicesSection";
 
 const off = { on: false, since: null };
 const NOV_7 = new Date(2026, 10, 7).getTime();
@@ -77,17 +77,10 @@ describe("Pair a device", () => {
   it("says what it will turn on before anything listens", () => {
     const html = dialog();
     expect(html).toContain('data-pair-dialog="consent"');
-    expect(html).toContain("What are you pairing?");
     expect(html).toContain("To reach this computer, MausBot will turn on:");
     expect(html.match(/type="checkbox"/g)).toHaveLength(2);
     expect(html).toContain("You can turn these off any time in Phone &amp; devices.");
     expect(html).not.toContain("PAIRING_CODE_VIEW");
-  });
-
-  it("asks a computer only for Same Wi-Fi and points at the other ways in", () => {
-    const html = dialog({}, { initialKind: "computer" });
-    expect(html.match(/type="checkbox"/g)).toHaveLength(1);
-    expect(html).toContain("Or use Tailscale or an HTTPS address: More ways in.");
   });
 
   it("goes straight to the code when a way in is already on, and says how the device will reach this computer", () => {
@@ -104,5 +97,16 @@ describe("route words", () => {
     expect(routeStateText({ on: true, since: NOV_7 }, 0)).toBe("On · waiting for a paired device");
     expect(reachLine({ routes: routes() })).toBe("No way in is on yet.");
     expect(reachLine({ routes: routes({ tailscale: true, relay: true }) })).toBe("Reaches this computer on your tailnet and anywhere through MausBot.");
+  });
+});
+
+describe("open pairing codes", () => {
+  it("lists a code still open, until when it works, with Revoke", () => {
+    const expiresAt = new Date(2026, 10, 7, 11, 14).getTime();
+    const html = renderToStaticMarkup(createElement(OpenCodeRow, { c: c(), state: state({ pairing: { code: "123456", token: "omb_pair_x", expiresAt } }) }));
+    expect(html).toMatch(/Pairing code open · works until 11:14/);
+    expect(html).toContain(">Revoke<");
+    expect(html).not.toContain("123456");
+    expect(renderToStaticMarkup(createElement(OpenCodeRow, { c: c(), state: state() }))).toBe("");
   });
 });

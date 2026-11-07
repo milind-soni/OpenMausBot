@@ -200,18 +200,15 @@ function RouteRow({ c, state, route, blocked }: { c: PhoneSetupController; state
 type PairStep = "consent" | "pairing";
 
 /** Pair a device: says what it will turn on before anything listens, then shows the code. */
-export function PairDeviceDialog({ c, state, onClose, initialKind = "phone", askKind = true, secureAddress = false }: {
+export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
   c: PhoneSetupController;
   state: CompanionState;
   onClose: () => void;
-  initialKind?: "phone" | "computer";
-  askKind?: boolean;
   /** HTTPS address → Set up: the free web address, with its sign-in, before the code. */
   secureAddress?: boolean;
 }) {
-  const [kind, setKind] = useState<"phone" | "computer">(initialKind);
   const [picked, setPicked] = useState<Record<"wifi" | "relay", boolean>>({ wifi: true, relay: true });
-  const needed: Array<"wifi" | "relay"> = kind === "phone" ? ["wifi", "relay"] : ["wifi"];
+  const needed: Array<"wifi" | "relay"> = ["wifi", "relay"];
   const anyOn = needed.some((route) => state.routes?.[route]?.on) || state.routes?.tailscale?.on === true;
   const [step, setStep] = useState<PairStep>(anyOn || secureAddress ? "pairing" : "consent");
   const { start } = c;
@@ -220,33 +217,17 @@ export function PairDeviceDialog({ c, state, onClose, initialKind = "phone", ask
   }, [secureAddress, start]);
   const chosen = needed.filter((route) => picked[route]);
   const begin = async () => {
-    const companion = companionBridge();
-    if (!companion) return;
     for (const route of chosen) await c.act((bridge) => setRoute(bridge, route, true));
     setStep("pairing");
     c.useLocal();
   };
-  const title = kind === "phone" ? t("devices.pair.titlePhone") : t("devices.pair.titleComputer");
   return (
-    <div role="dialog" aria-modal="true" aria-label={step === "consent" ? t("devices.pair.title") : title}
+    <div role="dialog" aria-modal="true" aria-label={step === "consent" ? t("devices.pair.title") : t("devices.pair.titlePhone")}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" data-pair-dialog={step}>
       <div className="flex max-h-full w-full max-w-[460px] flex-col gap-4 overflow-y-auto rounded-2xl bg-card p-5 shadow-xl">
-        <div className="text-[15px] font-semibold text-ink">{step === "consent" ? t("devices.pair.title") : title}</div>
+        <div className="text-[15px] font-semibold text-ink">{step === "consent" ? t("devices.pair.title") : t("devices.pair.titlePhone")}</div>
         {step === "consent" ? (
           <>
-            {askKind && (
-              <fieldset className="flex flex-col gap-2">
-                <legend className="text-[13px] text-ink">{t("devices.pair.what")}</legend>
-                <div className="flex gap-4 text-[13px] text-ink">
-                  {(["phone", "computer"] as const).map((option) => (
-                    <label key={option} className="flex items-center gap-1.5">
-                      <input type="radio" name="pair-kind" checked={kind === option} onChange={() => setKind(option)} />
-                      {t(option === "phone" ? "devices.pair.aPhone" : "devices.pair.aComputer")}
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-            )}
             <div className="flex flex-col gap-2 text-[13px] text-ink">
               <div>{t("devices.pair.willTurnOn", { app: productName() })}</div>
               {needed.map((route) => (
@@ -258,7 +239,6 @@ export function PairDeviceDialog({ c, state, onClose, initialKind = "phone", ask
                   </span>
                 </label>
               ))}
-              {kind === "computer" && <div className="text-[12px] text-ink-secondary">{t("devices.pair.computerMore")}</div>}
               <div className="text-[12px] text-ink-secondary">{t("devices.pair.changeLater")}</div>
               {chosen.length === 0 && <div role="alert" className="text-[12px] text-danger">{t("devices.pair.pickOne")}</div>}
             </div>
@@ -270,7 +250,6 @@ export function PairDeviceDialog({ c, state, onClose, initialKind = "phone", ask
           </>
         ) : (
           <>
-            {kind === "computer" && <div className="text-[13px] leading-relaxed text-ink-secondary">{t("devices.pair.computerHow")}</div>}
             <PhoneSetupFlowView controller={c} />
             <div className="text-[12px] leading-relaxed text-ink-secondary">{reachLine(state)}</div>
             <div className="flex justify-end">
@@ -279,6 +258,22 @@ export function PairDeviceDialog({ c, state, onClose, initialKind = "phone", ask
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/** A pairing code still open: anyone holding it can pair until it runs out, so it can be revoked here. */
+export function OpenCodeRow({ c, state }: { c: PhoneSetupController; state: CompanionState }) {
+  const pairing = state.pairing;
+  if (!pairing) return null;
+  const until = new Date(pairing.expiresAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-hairline/40 bg-card px-3 py-2.5" data-open-code="">
+      <div className="min-w-0 text-[13px] text-ink">
+        {t("devices.openCode", { until })}
+      </div>
+      <button type="button" className={button} disabled={c.busy}
+        onClick={() => void c.act((companion) => companion.pairing(false, pairing.token))}>{t("devices.revoke")}</button>
     </div>
   );
 }
@@ -363,7 +358,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
             {pairButton(t("devices.pairAnother"))}
           </div>
         )}
-        {pairing && <PairDeviceDialog c={c} state={state} onClose={() => setPairing(false)} askKind={false} />}
+        {pairing && <PairDeviceDialog c={c} state={state} onClose={() => setPairing(false)} />}
       </div>
     );
   }
@@ -378,7 +373,8 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
 
       <section className="flex flex-col gap-2" data-devices-block="paired">
         <div className="text-[13px] font-medium text-ink">{t("devices.paired")}</div>
-        {pairedCount ? <PairedPhones c={c} state={state} /> : <div className="text-[12px] text-ink-secondary">{t("devices.pairedNone")}</div>}
+        <OpenCodeRow c={c} state={state} />
+        {pairedCount ? <PairedPhones c={c} state={state} /> : !state.pairing && <div className="text-[12px] text-ink-secondary">{t("devices.pairedNone")}</div>}
         <PhonesList />
       </section>
 
