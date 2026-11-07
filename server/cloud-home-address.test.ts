@@ -9,7 +9,7 @@ import {
   trustedProxyList, tunnelCommand, tunnelRestartDelay, TUNNEL_USER,
 } from "./cloud-home-start.ts";
 import { requestSource } from "./request-auth.ts";
-import { LOCKOUT, SessionRegistry } from "./sessions.ts";
+import { PAIRING_LOCKOUT, SessionRegistry } from "./sessions.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
 const directories: string[] = [];
@@ -134,7 +134,7 @@ it("counts each client behind the edge on its own: one stranger's wrong codes lo
   };
 
   const stranger = requestSource(fromEdge("203.0.113.7"));
-  for (let i = 0; i < LOCKOUT.failures; i++) expect(sessions.exchange({ code: "AAAAAAAAAAAA", label: "", source: stranger }).ok).toBe(false);
+  for (let i = 0; i < PAIRING_LOCKOUT.failures; i++) expect(sessions.exchange({ code: "AAAAAAAAAAAA", label: "", source: stranger }).ok).toBe(false);
   expect(sessions.exchange({ code: "AAAAAAAAAAAA", label: "", source: stranger })).toMatchObject({ ok: false, status: 429 });
 
   // The Admin's request reaches the edge through the agent, whose address the edge names like any other.
@@ -151,6 +151,6 @@ it("counts each client behind the edge on its own: one stranger's wrong codes lo
   // Only the edge's own hop counts: a client's forged X-Forwarded-For comes before it.
   expect(requestSource(fromEdge("10.9.9.9, 203.0.113.7"))).toBe(stranger);
 
-  now += LOCKOUT.lockMs + 1;
+  now += PAIRING_LOCKOUT.lockMs + 1;
   expect(adminPairs(stranger).status).toBe(200);
 });

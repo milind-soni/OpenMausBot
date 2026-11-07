@@ -68,7 +68,7 @@ const link = phonePairingLink({ address: "192.168.1.20", port: 8810, token: TOKE
   e2e: state.e2e?.descriptor });
 const controller = {
   state, account: { available: true, status: "ready", email: "ada@example.com" }, phase: "qr", email: "", code: "", codeSent: false,
-  busy: false, accountBusy: false, error: null, accountError: null, pairingLink: link, secondsLeft: 110, address: "192.168.1.20",
+  busy: false, accountBusy: false, error: null, accountError: null, pairingLink: link, address: "192.168.1.20",
   pairingPort: 8810, addressText: "192.168.1.20:8810", hostedReady: false, localFallback: true, tailscaleFallback: false,
   tailscaleAvailable: true, pairingExpired: false, setupTimedOut: false, act: async () => {}, accountAct: async () => {},
 } as unknown as PhoneSetupController;

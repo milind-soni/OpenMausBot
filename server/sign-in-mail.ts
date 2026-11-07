@@ -22,7 +22,8 @@ export type CodeCheck = "ok" | "format" | "wrong" | "tooMany";
 
 export interface SignInMail {
   /** "tooSoon": a code went to this address moments ago; it still works. */
-  send(email: string): Promise<"sent" | "tooSoon">;
+  /** `target` names the server the code signs in to, so a code asked for elsewhere is recognised as not this one. */
+  send(email: string, target?: string | null): Promise<"sent" | "tooSoon">;
   check(email: string, code: string): CodeCheck;
 }
 
@@ -65,7 +66,7 @@ export function createSignInMail(options: { url: string; from?: string; now?: ()
     for (const [email, entry] of pending) if (now() - entry.sentAt >= SIGNIN_CODE_TTL_MS) pending.delete(email);
   };
   return {
-    async send(email) {
+    async send(email, target) {
       prune();
       const open = pending.get(email);
       if (open && now() - open.sentAt < SIGNIN_CODE_RESEND_MS) return "tooSoon";
@@ -76,8 +77,8 @@ export function createSignInMail(options: { url: string; from?: string; now?: ()
       pending.set(email, { hash: digest(code), sentAt: now(), tries: 0 });
       try {
         await (await transport).sendMail({
-          from: sender, to: email, subject: "Your OpenMausBot sign-in code",
-          text: `Your code to sign in to OpenMausBot is\n\n    ${code.slice(0, 4)} ${code.slice(4)}\n\nIt works once, for the next ten minutes.\n`
+          from: sender, to: email, subject: target ? `Your MausBot sign-in code for ${target}` : "Your MausBot sign-in code",
+          text: `Your code to sign in to ${target ?? "MausBot"} is\n\n    ${code.slice(0, 4)} ${code.slice(4)}\n\nIt works once, for the next ten minutes.\n`
             + "If you did not ask to sign in, ignore this email: nobody gets in without the code.\n",
         });
       } catch (error) {
