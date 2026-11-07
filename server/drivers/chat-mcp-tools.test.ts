@@ -10,6 +10,7 @@ import { ChatToolSessionError, SAVED_RESULTS_FOLDER, SAVED_RESULTS_KEPT, chatToo
 import { EXECUTOR_LIKE_TOOLS } from "../testing/executor-like-tools.ts";
 import type { ToolScope } from "../../shared/tool-scope.ts";
 import { catalogServer, CUA_DRIVER_WINDOWS_TOOLS, syntheticToolNames } from "../testing/cua-driver-tools.ts";
+import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
 import { wideSchema } from "../testing/oversized-tool-schema.ts";
@@ -394,6 +395,32 @@ describe("Chat MCP session", () => {
     await expect(mountChatTools({ agents: failed.server, custom: { ready: ready.server } }, ready.controller.signal)).rejects.toThrow("invalid result");
     expect(alive(ready.read().pid)).toBe(false);
     expect(alive(failed.read().pid)).toBe(false);
+  });
+
+  it("skips a connected-apps mount that fails, and keeps the turn alive", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ready = fixture();
+    const refused = fixture(`if(message.method === "tools/list") { send({jsonrpc:"2.0",id:message.id,error:{code:-32000,message:"connector service returned HTTP 503"}}); continue; }`);
+    const session = await mountChatTools({ composio: refused.server, custom: { ready: ready.server } }, ready.controller.signal);
+    sessions.push(session);
+    expect(session.definitions.map((definition) => definition.function.name)).toEqual(["ready_write"]);
+    expect(session.skipped).toEqual([{ server: "composio", reason: expect.stringContaining("MCP request failed") }]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`"composio"`));
+    await vi.waitFor(() => expect(alive(refused.read().pid)).toBe(false));
+    expect(alive(ready.read().pid)).toBe(true);
+    await expect(session.execute("ready_write", { value: "still works" }, ready.controller.signal)).resolves.toMatchObject({ ok: true, text: "recorded:still works" });
+    warn.mockRestore();
+  });
+
+  it("skips the connected-apps own-apps mount that fails, and keeps the turn alive", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ready = fixture();
+    const missing = { command: join(ready.dir, "does-not-exist"), args: [], env: {} };
+    const session = await mountChatTools({ composioOwn: missing, custom: { ready: ready.server } }, ready.controller.signal);
+    sessions.push(session);
+    expect(session.definitions.map((definition) => definition.function.name)).toEqual(["ready_write"]);
+    expect(session.skipped.map((entry) => entry.server)).toEqual([OWN_APPS_SERVER]);
+    warn.mockRestore();
   });
 
   it("fails setup when the Local VM lists no tools, but not when the owner's selection leaves none", async () => {
