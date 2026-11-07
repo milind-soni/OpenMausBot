@@ -19,6 +19,10 @@ const ICON_BUTTON = "ui-icon-button shrink-0 hover:text-ink";
 /** Google's Gemini API speaks the OpenAI protocol here; the key comes from Google AI Studio. */
 export const GEMINI_PRESET = { name: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai" } as const;
 
+/** The server accepts at most this many model IDs per server, each up to this many characters. */
+const MODEL_ID_LIMITS = { count: 64, length: 200 } as const;
+const withinModelIdLimits = (ids: string[]) => ids.length <= MODEL_ID_LIMITS.count && ids.every((id) => id.length <= MODEL_ID_LIMITS.length);
+
 const saveSettings = (instanceId: string, settings: { replyWaitMinutes?: number | null; models?: string[] }): Promise<{ instances?: unknown }> =>
   api(`/api/instances/${encodeURIComponent(instanceId)}`, { method: "PATCH", body: JSON.stringify(settings) });
 
@@ -81,13 +85,14 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
   const [key, setKey] = useState("");
   const [models, setModels] = useState("");
   const [busy, setBusy] = useState<"add" | "other" | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  /** The last failure, and the server whose model-ID editor it belongs to (shown there instead of below the add form). */
+  const [error, setError] = useState<{ text: string; at?: string } | null>(null);
   /** The server whose model IDs are open for editing, and the text being edited. */
   const [editing, setEditing] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const ready = Boolean(name.trim() && url.trim() && key.trim());
 
-  const run = (kind: "add" | "other", request: () => Promise<{ instances?: unknown }>, onDone?: () => void) => {
+  const run = (kind: "add" | "other", request: () => Promise<{ instances?: unknown }>, onDone?: () => void, at?: string) => {
     if (busy) return;
     setBusy(kind);
     setError(null);
@@ -97,7 +102,7 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
         else await refreshInstances({ reportErrors: true });
         onDone?.();
       })
-      .catch((e: Error) => setError(e.message || t("apiInstances.failed")))
+      .catch((e: Error) => setError({ text: e.message || t("apiInstances.failed"), at }))
       .finally(() => setBusy(null));
   };
 
@@ -135,6 +140,7 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
               onClick={() => {
                 setEditText((server.managedModels ?? []).join(", "));
                 setEditing(editing === server.instanceId ? null : server.instanceId);
+                setError(null);
               }}
               disabled={busy !== null}
               aria-label={t("apiInstances.editModels", { name: server.displayName })}
@@ -173,11 +179,14 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
               <div className="flex gap-1.5">
                 <button
                   type="button"
-                  onClick={() => run(
-                    "other",
-                    () => saveSettings(server.instanceId, { models: modelIds(editText) }),
-                    () => setEditing(null),
-                  )}
+                  onClick={() => {
+                    const ids = modelIds(editText);
+                    if (!withinModelIdLimits(ids)) {
+                      setError({ text: t("apiInstances.modelsLimit", MODEL_ID_LIMITS), at: server.instanceId });
+                      return;
+                    }
+                    run("other", () => saveSettings(server.instanceId, { models: ids }), () => setEditing(null), server.instanceId);
+                  }}
                   disabled={busy !== null}
                   className="ui-button"
                 >
@@ -185,6 +194,7 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
                 </button>
                 <button type="button" onClick={() => setEditing(null)} disabled={busy !== null} className="ui-button">{t("common.cancel")}</button>
               </div>
+              {error?.at === server.instanceId && <div role="alert" className="text-[12px] leading-4 text-danger">{error.text}</div>}
             </div>
           )}
         </div>
@@ -218,7 +228,7 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
           {busy === "add" ? t("apiInstances.adding") : t("apiInstances.add")}
         </button>
       </div>
-      {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
+      {error && !error.at && <div className="mt-1 text-[12px] text-danger">{error.text}</div>}
     </div>
   );
 }

@@ -211,6 +211,28 @@ describe("an added server's model IDs", () => {
     expect(persisted).toHaveLength(2);
   });
 
+  it("refuses to drop the default model from the list, and allows going back to detecting models", async () => {
+    const persisted: unknown[] = [];
+    const cfg = {
+      defaultModelSelection: { instanceId: "openai-compat-1", model: "glm-4.6" },
+      instances: { "openai-compat-1": { driver: "openai-compat", config: { url: "https://api.example.com/v1", key: "k", managedModels: ["glm-4.6"] } } },
+    };
+    const { base } = await serve({
+      cfg: cfg as unknown as AppConfig,
+      persistProviderInstance: async (_id: string, instances: unknown) => { persisted.push(structuredClone(instances)); },
+    });
+    const patch = (models: string[]) => fetch(`${base}/api/instances/openai-compat-1`, {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ models }),
+    });
+    const refused = await patch(["glm-5"]);
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({ errorKey: "serverError.instance.defaultModelRemoved", errorParams: { model: "glm-4.6" } });
+    expect(persisted).toHaveLength(0);
+    expect((await patch(["glm-5", "glm-4.6"])).status).toBe(200);
+    expect((await patch([])).status).toBe(200);
+    expect(persisted).toHaveLength(2);
+  });
+
   it("lists the IDs entered for an added server so they can be edited", async () => {
     const cfg = { instances: { "openai-compat-1": { driver: "openai-compat", config: { url: "https://api.example.com/v1", key: "k", managedModels: ["glm-4.6", "glm-5"] } } } };
     const { base } = await serve({

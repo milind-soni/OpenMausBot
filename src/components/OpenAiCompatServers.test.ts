@@ -297,11 +297,11 @@ describe("changing an added server's model IDs", () => {
   const nodes = (tree: ReactNode): Array<ReactElement<Props>> =>
     Children.toArray(tree).flatMap((child) => isValidElement<Props>(child) ? [child, ...nodes(child.props.children)] : []);
   const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
-  function row(managedModels?: string[]) {
+  function row(managedModels?: string[], dispatch = vi.fn()) {
     vi.stubGlobal("window", {});
     const servers = [instance("openai-compat-1", "Zhipu", { url: "https://open.bigmodel.cn/api/paas/v4", ...(managedModels ? { managedModels } : {}) })];
     vi.spyOn(store, "useStore").mockReturnValue({
-      state: { ...store.initialState, instances: servers }, dispatch: vi.fn(), flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
+      state: { ...store.initialState, instances: servers }, dispatch, flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
     });
     const added = nodes(OtherOpenAiCompatServers()).find((node) => node.props.servers !== undefined)!;
     fixture.counting = true;
@@ -318,15 +318,18 @@ describe("changing an added server's model IDs", () => {
   it("opens the saved IDs for editing and saves the new list", async () => {
     fixture.values = [];
     fixture.api.mockReset();
-    fixture.api.mockResolvedValue({ instances: [] });
+    const dispatch = vi.fn();
+    const updated = [instance("openai-compat-1", "Zhipu", { managedModels: ["glm-5", "qwen3"] })];
+    fixture.api.mockResolvedValue({ instances: updated });
     expect(labelled(row(["glm-4.6", "glm-5"]), "Model IDs for Zhipu")).toBeUndefined();
     labelled(row(["glm-4.6", "glm-5"]), "Change model IDs for Zhipu")!.props.onClick!();
     const field = labelled(row(["glm-4.6", "glm-5"]), "Model IDs for Zhipu")!;
     expect(field.props.value).toBe("glm-4.6, glm-5");
     field.props.onChange!({ target: { value: "glm-5，qwen3 glm-5" } });
-    save(row(["glm-4.6", "glm-5"])).props.onClick!();
+    save(row(["glm-4.6", "glm-5"], dispatch)).props.onClick!();
     await flush();
     expect(fixture.api).toHaveBeenCalledExactlyOnceWith("/api/instances/openai-compat-1", { method: "PATCH", body: JSON.stringify({ models: ["glm-5", "qwen3"] }) });
+    expect(dispatch).toHaveBeenCalledExactlyOnceWith({ type: "instances", instances: updated });
     expect(labelled(row(["glm-5", "qwen3"]), "Model IDs for Zhipu")).toBeUndefined();
   });
 
@@ -339,5 +342,17 @@ describe("changing an added server's model IDs", () => {
     save(row()).props.onClick!();
     await flush();
     expect(fixture.api).toHaveBeenCalledExactlyOnceWith("/api/instances/openai-compat-1", { method: "PATCH", body: JSON.stringify({ models: [] }) });
+  });
+
+  it("shows the model-ID limits next to the editor instead of sending a list the server refuses", async () => {
+    fixture.values = [];
+    fixture.api.mockReset();
+    labelled(row(["glm-4.6"]), "Change model IDs for Zhipu")!.props.onClick!();
+    labelled(row(["glm-4.6"]), "Model IDs for Zhipu")!.props.onChange!({ target: { value: Array.from({ length: 65 }, (_, i) => `m${i}`).join(" ") } });
+    save(row(["glm-4.6"])).props.onClick!();
+    await flush();
+    expect(fixture.api).not.toHaveBeenCalled();
+    const alert = row(["glm-4.6"]).find((node) => (node.props as { role?: string }).role === "alert");
+    expect(alert?.props.children).toBe("Use at most 64 model IDs, each up to 200 characters.");
   });
 });
