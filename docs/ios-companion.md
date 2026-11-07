@@ -3,7 +3,7 @@
 The iOS app is a thin, native client for the OpenMausBot instance running on
 your Mac. The Mac remains the only machine that persists agent processes,
 credentials, SQLite data, transcripts, and computers. The iPhone trusts a Mac
-by scanning the QR code shown in desktop **Settings → Remote access**; it does not need
+by scanning the QR code shown in desktop **Settings → Phone & devices**; it does not need
 an OpenMausBot account of its own.
 
 ## Use My Cloud on your phone
@@ -30,7 +30,7 @@ is shown only to a session allowed to make pairing codes there.
 
 The first version includes:
 
-- QR-first pairing from desktop **Settings → Remote access**, with the computer name
+- QR-first pairing from desktop **Settings → Phone & devices**, with the computer name
   confirmed on the iPhone before it connects.
 - Hosted HTTPS for the default QR after the desktop owner enables it, with
   dedicated Tailscale and trusted-local QR routes only after an explicit
@@ -60,7 +60,7 @@ to the user's own computer; it is not a cloud transcript store and cannot wake
 a terminated iOS app.
 
 The Mac must be running OpenMausBot and must not be asleep. Desktop
-**Settings → Remote access** offers an off-by-default **Keep this computer awake**
+**Settings → Phone & devices** offers an off-by-default **Keep this computer awake**
 switch that prevents system sleep while device access is on; the display may
 still turn off. A sleeping or powered-off computer cannot receive phone
 requests or run its local routines, including through the optional hosted
@@ -154,7 +154,7 @@ not belong in the message database.
 
 The QR code is still the primary path on the same Wi-Fi. If it is unavailable,
 the user can open **Other ways to connect** and choose a nearby computer or
-enter the address shown in desktop Settings → Remote access. Nearby discovery does not
+enter the address shown in desktop Settings → Phone & devices. Nearby discovery does not
 run until the user opens that fallback.
 
 Nearby discovery uses Bonjour and direct LAN traffic. Use it only on a network
@@ -168,16 +168,12 @@ direct LAN requires choosing that computer or address again.
 ### Tailscale
 
 Tailscale is an optional route away from home and on Wi-Fi networks that
-isolate clients. In desktop **Settings → Remote access**, the primary card remains
-**Secure HTTPS pairing — Recommended**. The separate **Tailscale pairing**
-card is only for people who already use Tailscale, and its switch is off
-until you turn it on: the app never starts, checks or configures Tailscale by
-itself. Install or open Tailscale on both devices, sign in to the same tailnet,
-leave MagicDNS enabled, turn the **Tailscale pairing** switch on (under
-**Advanced**), then choose **Pair over Tailscale**. Turning it on also starts
-Remote access so the phone has a listener to reach. OpenMausBot then places the
-computer's tailnet addresses in that dedicated QR; it never silently replaces
-the default hosted HTTPS route. Manual entry remains available as a fallback.
+isolate clients. In desktop **Settings → Phone & devices**, open **More ways
+in** and turn **Tailscale** on: until you do, the app never runs Tailscale.
+Install or open Tailscale on both devices, sign in to the same tailnet and
+leave MagicDNS enabled, then choose **Pair a device**. OpenMausBot places the
+computer's tailnet name in the QR beside its other ways in; it never silently
+replaces the default route. Manual entry remains available as a fallback.
 
 With the switch on, the link also answers on this computer's tailnet address
 (found by Tailscale's own interface, never by a 100.64/10 address alone),
@@ -204,7 +200,7 @@ relay or create a cloud copy of local transcript data.
 
 ### Optional hosted HTTPS
 
-In desktop **Settings → Remote access**, **Use your phone anywhere** accepts a
+In desktop **Settings → Phone & devices**, **Use your phone anywhere** accepts a
 passwordless email code and provisions one HTTPS address for that computer.
 This desktop sign-in is only for hosted HTTPS. The iPhone never signs in; it
 trusts the computer through the same pairing QR. Nearby, manual, and Tailscale
@@ -219,7 +215,7 @@ Tailscale pairing remains an explicit choice in its own optional card.
 The address is held only while something needs it. The desktop creates it
 when you sign in, choose Retry, or start pairing (a few seconds under the
 "Creating secure remote access" spinner), keeps it while any phone or desktop
-is paired, and gives it back one to four hours after Remote access shows
+is paired, and gives it back one to four hours after Phone & devices shows
 nothing paired and no pairing open. The next pairing gets the same address
 back. If no HTTPS address is free, the panel says when to try again, and
 Wi-Fi or Tailscale pairing still works.
@@ -244,7 +240,7 @@ and the LAN port are sent as they always were.
 
 ## Pairing and device security
 
-1. On the Mac, open **Settings → Remote access** and choose **Pair a phone**. The app
+1. On the Mac, open **Settings → Phone & devices** and choose **Pair a phone**. The app
    starts device access as part of setup.
 2. On the iPhone, choose **Connect my computer** and scan the QR.
 3. Confirm the computer name and the displayed transport — **HTTPS connection**,
