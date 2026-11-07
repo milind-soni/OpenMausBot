@@ -11,10 +11,10 @@ on [OpenRouter](https://openrouter.ai).
 Everything is in **Settings → Decision and extraction** (Advanced mode): the
 Cloudflare Workers AI card, the Jev/OpenRouter picker under **Another key**,
 for OpenRouter the model, one master switch, each key with **Save** and
-**Test**, and one switch per job it can do. Each provider keeps its own key, so
-you can switch between them without pasting a key again. OpenRouter needs no
-key here when you already saved one under **Settings → API keys**: the decision
-model uses that one.
+**Test**, and a switch for room routing (**Who answers in rooms**). Each
+provider keeps its own key, so you can switch between them without pasting a
+key again. OpenRouter needs no key here when you already saved one under
+**Settings → API keys**: the decision model uses that one.
 
 With several keys saved, one fixed order picks whose key decides: your own Jev
 key, then your own Workers AI key, then Cloud's included decisions, then
@@ -22,21 +22,23 @@ OpenRouter.
 
 ## Cloudflare Workers AI (free tier)
 
-A Cloudflare token decides with Clef (Clef-flash by default, Clef for a hard
-case such as a bot's own `decide` call) and also reads with Clairic, the
+A Cloudflare token decides with Clef (Clef-flash by default, Clef for a bot's
+own `decide` call) and also reads with Clairic, the
 extraction model the inbox uses (see
 [proactive-routines.md](proactive-routines.md)). It needs two values:
 
 1. **Account ID.** In the Cloudflare dashboard, open **Workers AI** and choose
-   **Use REST API**, and copy the Account ID (32 letters and digits).
+   **Use REST API**, and copy the Account ID (32 characters: digits and the
+   letters a to f).
 2. **API token.** On the same page, choose **Create a Workers AI API Token**,
    then **Create API Token**, and copy it. A custom token needs both
    **Workers AI - Read** and **Workers AI - Edit**.
 
 Paste both into the **Cloudflare Workers AI (free tier)** card and choose
 **Save**. The token alone is refused: it must come with its account ID.
-Saving checks the token and switches the decision model on. **Test** answers
-*Cloudflare answered in … ms. Extraction works too.*
+Saving checks the token and switches the decision model on. Once it is saved,
+**Test** with no new token pasted also checks extraction: *Cloudflare answered
+in … ms. Extraction works too.*
 
 Cloudflare's free allocation is 10,000 Neurons a day, on the Workers Free and
 Paid plans. Past it, requests fail until the daily reset (00:00 UTC) on Free,
@@ -46,6 +48,9 @@ A failed decision falls back as described in "It fails open".
 
 ## Choosing a provider
 
+- **Cloudflare Workers AI** runs Clef on your own Cloudflare account, free up
+  to the daily allocation above, and the same token also reads mail with
+  Clairic.
 - **TypeSafe Jev** is a classifier built for this: it returns calibrated
   probabilities, and the 0.6 threshold below was measured against it.
 - **OpenRouter** routes to one of OpenRouter's own *decisions models* (Jev,
@@ -72,9 +77,9 @@ above 1.5 seconds, rooms would fall back to the lead, so pick a faster one.
 ## What it decides today
 
 **Who answers in rooms.** A room whose responder is set to **Auto (Jev)** asks
-the decision model (Jev or your OpenRouter model, whichever is selected) who
-should answer each message that @mentions nobody. The room's labels keep the
-name "Jev" under either provider. The question offers
+the decision model who should answer each message that @mentions nobody; the
+key that decides follows the order above. The responder setting keeps the name
+**Auto (Jev)** under any provider. The question offers
 the room's active bots, each described by name, title and description, plus
 "several members". The state it reads is the room's name, its people, the last
 room lines (the same window room turns use, clipped in size) and the new
@@ -92,11 +97,12 @@ the decision model. The message is appended and the send returns straight away; 
 is awaited only when the room's turn starts, within 1.5 seconds.
 
 A reply whose speaker the decision model picked shows a small line under it:
-*Picked by Jev · 94%*, or *Picked by OpenRouter · 94%*.
+*Picked by Jev · 94%*, *Picked by OpenRouter · 94%* or
+*Picked by Clef · 94%*.
 
 New rooms start on Auto while the decider and its room job are on. Existing
-rooms keep their mode. With Jev off, an Auto room shows a one-line hint and
-answers like lead mode.
+rooms keep their mode. With the decision model off, an Auto room shows a
+one-line hint and answers like lead mode.
 
 Browser clicks, tool selection and where work runs are listed as "Coming
 soon" and have no switch yet.
@@ -127,8 +133,10 @@ from the approvals log in `decisions/`.
 {"at":"…","seam":"roomRouting","provider":"jev","ok":true,"choice":"<bot id>","pTop":0.94,"margin":0.9,"latencyMs":341,"inputTokens":712,"stateHash":"3f1c…"}
 ```
 
-With OpenRouter, `provider` is `"openrouter"` and the row also has a
-`model` field with the model id that was asked. A row never holds the message text, the bots' descriptions or the key; a
+With OpenRouter, `provider` is `"openrouter"` and the row also has a `model`
+field with the model id that was asked. With Workers AI, `provider` is
+`"workersai"` and a successful row has `model`, the model that answered. A row
+never holds the message text, the bots' descriptions or the key; a
 16-character hash of the state is enough to spot repeats. Failed calls record
 the reason (`timeout`, `overloaded`, …) and the HTTP status. Month files are
 kept for the approvals log's retention window (180 days by default).
@@ -150,9 +158,10 @@ The log stays on this machine: workspace backups leave it out.
   as `decider.workersAiAccountId` and shown back in Settings.
 - **The OpenRouter key is shared with your OpenRouter models.** The decision
   model uses the first of these it finds:
-  1. a key saved here, in **Settings → Decision and extraction** (`decider.openrouterKey`
-     or `OMB_OPENROUTER_DECIDER_KEY`): the optional "use a different key"
-     override, which wins so a key saved before sharing keeps working;
+  1. a key saved here, in **Settings → Decision and extraction**
+     (`decider.openrouterKey` or `OMB_OPENROUTER_DECIDER_KEY`): the optional
+     "use a different key" override, which wins so a key saved before
+     sharing keeps working;
   2. the OpenRouter key under **Settings → API keys** (`openrouter.key` or
      `OMB_OPENROUTER_API_KEY`);
   3. none: it is off until one is saved.
@@ -169,30 +178,35 @@ The log stays on this machine: workspace backups leave it out.
   until a key is saved again.
 - **Cloud Pro:** decisions are included, with no key to paste. With no key of
   the person's own, the Cloud home uses its relay token
-  (`OMB_CLOUD_DECIDER_TOKEN`), sent only to the Admin's relay, never to Jev
-  or `baseUrl`, and only for the requests the relay accepts: room routing,
-  inbox triage, a bot's own `decide` call and the key check (other jobs need
-  a key of the person's own). Settings says **Included with your Cloud plan**, and
-  the master switch is on until someone switches it off. A Jev or Workers AI
-  key saved here wins; clearing it falls back to the included decisions. The
+  (`OMB_CLOUD_DECIDER_TOKEN`), sent only to the Admin's relay, never to Jev or
+  `baseUrl`, and only for the requests the relay accepts: room routing, inbox
+  triage, a bot's own `decide` call and the key check, plus extraction for inbox
+  reading, a bot's own `extract` call and the extraction key check (other jobs
+  need a key of the person's own). Settings says **Included with your Cloud
+  plan**, and the master switch is on until someone switches it off. A Jev or
+  Workers AI key saved here wins for decisions (for reading, only a Workers AI
+  key does); clearing it falls back to the included decisions. For decisions the
   relay speaks Jev's API only, so the included decisions are Jev's, and they
   come before an OpenRouter key whichever provider is selected. See
-  [cloud-pro.md](cloud-pro.md), "Included Boat computers, voice and
-  decisions".
+  [cloud-pro.md](cloud-pro.md), "Included Boat computers, voice and decisions".
 
 The keys are write-only: `GET /api/config` reports only whether one is saved,
-the provider and model, and which switches are on. Engines never inherit
+the provider and model, the Workers AI account ID (not a secret), and which
+switches are on. Engines never inherit
 them, and diagnostics exports mask them. Saving a key makes one tiny test
 call; a key the provider rejects is not saved. The **Test** button makes the
-same call on demand. A Jev room decision costs about $0.00003; the test call
-costs less. An OpenRouter decision costs whatever the chosen model charges,
+same call on demand and, with no key pasted, also checks extraction. A Jev
+room decision costs about $0.00003; the test call costs less. An OpenRouter decision costs whatever the chosen model charges,
 usually a similar fraction of a cent.
 
 ## What leaves this machine
 
-Each decision sends the state described above (the room's name, its people,
-recent room lines and the new message) and the bots' descriptions to the
-provider whose key decides (see the key order above). With Workers AI that is
+Each decision goes to the provider whose key decides (see the key order
+above). A room decision sends the state described above (the room's name, its
+people, recent room lines and the new message) and the bots' descriptions. A
+bot's own `decide` call sends the text and questions the bot writes. Inbox
+triage sends what is listed below, and a bot's own `extract` call sends its
+text or image to the reading provider. With Workers AI the provider is
 Cloudflare, or the server `workersAiBaseUrl` points to, which also receives the
 token. With OpenRouter that is OpenRouter and the host it routes the model to,
 under OpenRouter's privacy settings and your account's data policy, or the
@@ -202,24 +216,29 @@ OpenMausBot does not set a data-collection preference.
 Inbox triage first has each new email read, when a reading provider is set:
 the first of your own Workers AI key (Clairic and Clef-flash each get the
 email), Cloud's included relay, then OpenRouter. A Jev key is not used for
-reading. The provider whose key decides then gets the email's sender, subject
-and preview, the details that were read (such as an ask or a deadline) and up
-to 20 recently dismissed senders.
+reading. Through OpenRouter, mail is read by `google/gemini-2.5-flash`, or by
+your decision model when it is saved with `openrouterApi: "chat"`, with the
+same OpenRouter key. The provider whose key decides then gets the email's
+sender, subject and preview, the details that were read (such as an ask or a
+deadline) and up to 20 recently dismissed senders.
 
-Switching inbox triage off does not keep mail on the machine: the inbox watch
-can then sort mail with the bot's own engine. Pause the watch to stop that
-(see [proactive-routines.md](proactive-routines.md)). Switch room routing off
-for rooms whose lines must not leave the machine.
+Inbox triage has no switch in Settings: it stops with the master switch, or
+with `"inboxTriage": false` under `jobs` in `config.json`. Either way, that
+does not keep mail on the machine: the inbox watch can then sort mail with the
+bot's own engine. Pause the watch to stop that (see
+[proactive-routines.md](proactive-routines.md)). Likewise, switching room
+routing off stops only the decision request: the bots' own engines still
+receive the room's lines.
 
 ## Turning it off
 
-Switch off **Use Jev for fast decisions** (**Use OpenRouter for fast
-decisions**), or clear the key (on Cloud Pro,
+Switch off **Use fast decisions and extraction** (**Use OpenRouter for fast
+decisions** when OpenRouter's key decides), or clear the key (on Cloud Pro,
 clearing a key falls back to the included decisions: switch off to stop
 them; with OpenRouter it falls back to the key under **Settings → API keys**,
-so switch off to stop them). To keep Jev on but stop room routing, switch off **Who answers in
-rooms**. To stop one room asking, set its responder to a lead, **Everyone
-responds** or **Only when mentioned**.
+so switch off to stop them). To keep the decision model on but stop room
+routing, switch off **Who answers in rooms**. To stop one room asking, set
+its responder to a lead, **Everyone responds** or **Only when mentioned**.
 
 ## Configuration reference
 
@@ -236,7 +255,7 @@ responds** or **Only when mentioned**.
   "workersAiToken": "",
   "workersAiAccountId": "",
   "workersAiBaseUrl": "https://api.cloudflare.com/client/v4",
-  "jobs": { "roomRouting": true }
+  "jobs": { "roomRouting": true, "inboxTriage": true }
 }
 ```
 
