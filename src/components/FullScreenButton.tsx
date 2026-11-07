@@ -65,24 +65,29 @@ function WatchFullScreen({ frame, name, takeDisabled, error, onClose, onTakeCont
   const exitRef = useRef<HTMLButtonElement>(null);
   const { dragProps, noDragStyle } = useCaptionChrome();
   const macInset = useDesktopCapabilities().capabilities.windowChrome === "mac-inset";
-  // An error from before this view opened belongs to the panel; only a Take control tried here shows its outcome.
+  const takeRef = useRef<HTMLButtonElement>(null);
   const [tried, setTried] = useState(false);
   useModalDialog(dialogRef, onClose);
   // After the dialog has noted Full screen as the place to return to, so autoFocus can't take that place.
   useEffect(() => exitRef.current?.focus(), []);
 
   useEffect(() => {
-    // Capture, and claim the key, so the same press cannot also close something beneath the overlay. A press from
-    // a dialog opened over this view (such as keyboard shortcuts) is that dialog's own.
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
       if (!(event.target instanceof Node) || !dialogRef.current?.contains(event.target)) return;
       event.preventDefault();
+      event.stopPropagation();
       onClose();
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose]);
+
+  // A disabled button loses focus to the page, where Escape would no longer reach this view.
+  useEffect(() => {
+    const active = document.activeElement;
+    if (takeDisabled && (active === takeRef.current || active === document.body)) dialogRef.current?.focus();
+  }, [takeDisabled]);
 
   const iconButton = "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] focus-visible:outline-2 focus-visible:outline-focus disabled:opacity-50";
   const label = t("computer.screenOf", { name });
@@ -93,11 +98,12 @@ function WatchFullScreen({ frame, name, takeDisabled, error, onClose, onTakeCont
         <span className="pointer-events-none rounded-full bg-black/70 px-2.5 py-1 text-[11px] font-medium text-white shadow-sm">
           {t("computer.watchingBotWorks")}
         </span>
-        <button ref={exitRef} type="button" style={noDragStyle} onClick={onClose} className={cn(iconButton, "ml-auto bg-control text-ink hover:bg-raised-hover")}>
+        <button ref={exitRef} type="button" style={noDragStyle} onClick={onClose} aria-label={t("desktopViewer.exitFullscreen")} className={cn(iconButton, "ml-auto bg-control text-ink hover:bg-raised-hover")}>
           <Minimize2 size={14} aria-hidden="true" />
           <span className="max-sm:hidden">{t("desktopViewer.exitFullscreen")}</span>
         </button>
         <button
+          ref={takeRef}
           type="button"
           style={noDragStyle}
           onClick={() => { setTried(true); onTakeControl(); }}

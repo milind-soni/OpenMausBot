@@ -179,7 +179,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** Escape where a person presses it: on whatever has focus. */
 function pressEscape() {
   (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
 }
@@ -215,9 +214,21 @@ describe("taking control of a Local VM", () => {
     expect(fixture.controls, "watching must not pause the bot").toEqual([]);
     expect(liveDesktop()).toBeNull();
 
-    pressEscape();
-    await settle();
+    const exit = watch()!.querySelector<HTMLButtonElement>("header button")!;
+    expect(exit.getAttribute("aria-label"), "Exit keeps its name when its text is hidden on narrow windows").toBe("Exit fullscreen");
+
+    // Something beneath the view that also listens for Escape (a turns call ends on it) must not get the same press.
+    const beneath: string[] = [];
+    const listen = (event: KeyboardEvent) => beneath.push(event.key);
+    window.addEventListener("keydown", listen);
+    try {
+      pressEscape();
+      await settle();
+    } finally {
+      window.removeEventListener("keydown", listen);
+    }
     expect(watch(), "Escape leaves full screen").toBeNull();
+    expect(beneath, "the Escape that closes full screen is not also handled beneath it").toEqual([]);
     expect(fixture.controls).toEqual([]);
 
     await press("Full screen");
@@ -240,10 +251,15 @@ describe("taking control of a Local VM", () => {
     expect(watch()!.querySelector("[role=alert]"), "an earlier panel error is not news in full screen").toBeNull();
 
     const over = document.createElement("button");
+    const overKeys = vi.fn();
+    over.addEventListener("keydown", overKeys);
     document.body.append(over);
     over.focus();
-    over.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    over.dispatchEvent(escape);
     await settle();
+    expect(overKeys, "the dialog over full screen gets its Escape").toHaveBeenCalledOnce();
+    expect(escape.defaultPrevented).toBe(false);
     expect(watch(), "Escape in a dialog over full screen belongs to that dialog").not.toBeNull();
     over.remove();
   });
@@ -254,11 +270,17 @@ describe("taking control of a Local VM", () => {
     await press("Full screen");
     const watch = () => document.querySelector<HTMLElement>("[data-watch-full-screen]");
     const take = [...watch()!.querySelectorAll("button")].find((candidate) => candidate.textContent?.trim() === "Take control")!;
+    take.focus();
     flushSync(() => take.click());
+    expect(take.disabled, "Take control waits while the request is out").toBe(true);
+    expect(document.activeElement, "focus stays in full screen, not on a button that went disabled").toBe(watch());
     await settle();
     expect(fixture.controls.map((control) => control.action)).toEqual(["take"]);
     expect(watch(), "a failed take must not drop the person out of full screen").not.toBeNull();
     expect(watch()!.querySelector("[role=alert]")?.textContent).toBeTruthy();
+    pressEscape();
+    await settle();
+    expect(watch(), "Escape still leaves full screen after a refused take").toBeNull();
   });
 
   it("full screen keeps Tab inside and gives focus back to Full screen when it closes", async () => {
