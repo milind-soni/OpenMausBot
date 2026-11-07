@@ -8,7 +8,9 @@ import {
   type EngineLimit, type UsageTone,
 } from "@/lib/limit-resets";
 import type { Routine } from "@/lib/routines";
-import { api, useStore } from "@/state/store";
+import { api, useStore, type Message } from "@/state/store";
+import { failedTurnNotice } from "@/lib/failed-turn";
+import { codexUsageLimitReached } from "../../shared/codex-usage-limit";
 import { openBotSettings } from "./bot-panel/panel-link";
 import { threadUpdatedLabel } from "./SidebarThreadRow";
 
@@ -34,6 +36,36 @@ export function useLimitResetContinue(botId: string | undefined, threadId: strin
         });
     },
   };
+}
+
+/** A usage-limit refusal whose reset time has passed stays in the transcript as evidence, collapsed, not as a current
+ * blocker: the reset passing does not prove today's quota is available again. Null while the refusal is still current. */
+export function usePastLimitNotice(tool: NonNullable<Message["tool"]>, messageAt: number | undefined) {
+  const at = tool.limitResetsAt;
+  const [clock, setClock] = useState(Date.now);
+  useEffect(() => {
+    if (typeof at !== "number" || !Number.isFinite(at)) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const arm = () => {
+      const remaining = at - Date.now();
+      if (remaining <= 0) {
+        setClock(Date.now());
+        return;
+      }
+      timer = setTimeout(arm, Math.min(remaining + 1_000, 2_147_483_647));
+    };
+    arm();
+    return () => { if (timer) clearTimeout(timer); };
+  }, [at]);
+  if (typeof at !== "number" || !Number.isFinite(at) || typeof messageAt !== "number" || messageAt > at || clock < at) return null;
+  const { cause, notice } = failedTurnNotice(tool);
+  if (!codexUsageLimitReached(cause)) return null;
+  return (
+    <details className="my-1 w-fit max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-lg border border-hairline/40 bg-raised px-3 py-2 text-[12px] text-ink-secondary">
+      <summary className="cursor-pointer">{t("chat.error.pastUsageLimit")}</summary>
+      <p className="mt-2 break-words">{notice ?? cause}</p>
+    </details>
+  );
 }
 
 function useEngineUsage(engine: string | undefined): EngineLimit | undefined {

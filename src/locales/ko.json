@@ -2189,6 +2189,7 @@
   "chat.rescue.connect": "내 구독 연결",
   "chat.rescue.connectHint": "이미 결제 중인 AI 요금제로 로그인하세요",
   "chat.error.signedOut": "{name}이(가) 아직 로그인되어 있지 않아요. 아래에서 로그인한 뒤 메시지를 다시 보내세요.",
+  "chat.error.pastUsageLimit": "지난 사용 한도 알림 (재설정 시각이 지났습니다. 현재 사용량을 확인하세요)",
   "chat.error.details": "세부 정보",
   "chat.error.requestTooLarge": "이 메시지는 {model}에 비해 너무 커요. 새 채팅을 시작하거나 더 많이 받는 모델을 고르세요.",
   "chat.error.dismiss": "닫기",

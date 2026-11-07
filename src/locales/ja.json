@@ -2301,6 +2301,7 @@
   "chat.error.signedOut": "{name} にまだサインインしていません。下でサインインしてから、メッセージをもう一度送信してください。",
   "chat.notice.signIn": "サインイン",
   "chat.notice.signInHint": "AI の設定を開いて、もう一度サインイン",
+  "chat.error.pastUsageLimit": "過去の利用制限通知（リセット時刻は経過しています。現在の利用状況を確認）",
   "chat.error.details": "詳細",
   "chat.error.partial": "一部だけ完了しました。返信は届きましたが、うまくいかなかった手順があります。結果を使う前に、その手順を確認してください。",
   "chat.error.partialPreview": "一部完了：うまくいかなかった手順があります",
