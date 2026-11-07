@@ -5721,7 +5721,6 @@
   "skills.learned.hintOn": "検証カードからボットの検証実行をスキルとして保存するか、下でインポートしてください。新規・変更済みのスキルは、元に戻す操作とともにチャットに表示されます。",
   "skills.learned.hintOff": "スキルの作成はオフですが、すでに有効にしたスキルは引き続きここで管理できます。",
   "skills.origin.imported": "このコンピューター",
-  "skills.origin.importedHint": "このコンピューターから、すべてのボット用に取り込まれました。このボットだけに無効にするには、ここでオフにしてください。",
   "skills.origin.native": "AI",
   "skills.origin.nativeHint": "ボットの AI が、Source に表示されているフォルダーから読み込みます。編集や削除はそのフォルダーで行ってください。",
   "skills.write.title": "コマンドを作成",

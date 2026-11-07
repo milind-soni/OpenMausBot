@@ -5696,7 +5696,6 @@
   "skills.learned.hintOn": "可以在「验证」卡片把机器人的验证运行保存为技能，也可以在下方导入。每个新增或变更的技能都会显示在对话中，并可撤销。",
   "skills.learned.hintOff": "技能撰写已关闭，但你已激活的技能仍在此由你掌控。",
   "skills.origin.imported": "这台电脑",
-  "skills.origin.importedHint": "从这台电脑引入，所有机器人都可用。在这里关闭只影响这个机器人。",
   "skills.origin.native": "AI",
   "skills.origin.nativeHint": "机器人的 AI 会从「来源」下的文件夹加载此技能。请在那里编辑或移除。",
   "skills.write.title": "编写命令",

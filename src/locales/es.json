@@ -4721,7 +4721,6 @@
   "skills.learned.hintOn": "Guarda la ejecución de verificación de un bot como habilidad desde la tarjeta de verificación, o importa una abajo. Cada habilidad nueva o modificada aparece en el chat con «Deshacer».",
   "skills.learned.hintOff": "La creación de habilidades está desactivada, pero las habilidades que ya activaste siguen bajo tu control aquí.",
   "skills.origin.imported": "este equipo",
-  "skills.origin.importedHint": "Traída desde este equipo para todos los bots. Desactívala aquí solo para este bot.",
   "skills.write.title": "Escribir un comando",
   "skills.write.hint": "Dale al bot un comando corto para algo que pides a menudo. Escribe /nombre en un chat para ejecutarlo. Lo que escribas después del nombre rellena {input}.",
   "skills.write.name": "Nombre del comando",

@@ -4936,7 +4936,6 @@
   "skills.learned.hintOn": "Salva l'esecuzione di verifica di un bot come abilità dalla scheda Verifica, oppure importane una qui sotto. Ogni abilità nuova o modificata compare in chat con Annulla.",
   "skills.learned.hintOff": "La creazione di abilità è disattivata, ma le abilità che hai già attivato restano sotto il tuo controllo qui.",
   "skills.origin.imported": "Questo computer",
-  "skills.origin.importedHint": "Importata da questo computer per ogni bot. Disattivala qui solo per questo bot.",
   "skills.write.title": "Scrivi un comando",
   "skills.write.hint": "Dai al bot un comando breve per qualcosa che chiedi spesso. Digita /nome in una chat per eseguirlo. Quello che scrivi dopo il nome va in {input}.",
   "skills.write.name": "Nome del comando",
