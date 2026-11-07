@@ -31,7 +31,6 @@ afterEach(() => {
   vi.restoreAllMocks();
   globalThis.fetch = ORIGINAL_FETCH;
   delete process.env.OPENMAUSBOT_TOKEN;
-  delete process.env.ALLOW_INSECURE_HTTP;
 });
 
 describe("MCP JSON-RPC protocol", () => {
@@ -709,7 +708,11 @@ describe("connection security and discovery", () => {
     expect(() => validateBaseUrl("ftp://maus.example.com")).toThrow("http:// or https://");
     expect(() => validateBaseUrl("https://maus.example.com/api")).toThrow("origin without a path");
     expect(() => validateBaseUrl("https://user:pass@maus.example.com")).toThrow("must not contain credentials");
-    expect(() => validateBaseUrl("http://0.0.0.0:8799")).toThrow("Insecure cleartext HTTP");
+    expect(() => validateBaseUrl("http://0.0.0.0:8799")).toThrow("open internet");
+    expect(() => validateBaseUrl("http://203.0.113.9:8799")).toThrow("put HTTPS in front");
+    expect(validateBaseUrl("http://192.168.1.20:8799")).toBe("http://192.168.1.20:8799");
+    expect(validateBaseUrl("http://100.101.102.103:8799")).toBe("http://100.101.102.103:8799");
+    expect(validateBaseUrl("http://box.tail1234.ts.net:8799")).toBe("http://box.tail1234.ts.net:8799");
   });
 
   it("skips a foreign process and discovers the real fallback port", async () => {
