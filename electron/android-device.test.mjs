@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   createAndroidDeviceController,
@@ -21,6 +21,13 @@ describe("Android USB device bridge", () => {
       expect.objectContaining({ serial: "emulator-5554", connection: "emulator" }),
       expect.objectContaining({ serial: "192.0.2.4:5555", connection: "network" }),
     ]);
+  });
+
+  it("starts ADB with no console window on Windows", async () => {
+    const run = vi.fn(async () => ({ stdout: devicesOutput, stderr: "" }));
+    await createAndroidDeviceController({ run, resolveBinary: () => "/trusted/adb" }).status();
+    expect(run).toHaveBeenCalled();
+    for (const [, , options] of run.mock.calls) expect(options.windowsHide).toBe(true);
   });
 
   it("resolves an explicit ADB path before PATH and SDK fallbacks", () => {

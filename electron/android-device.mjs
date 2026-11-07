@@ -119,6 +119,7 @@ export function createAndroidDeviceController(options = {}) {
       maxBuffer: extra.maxBuffer ?? 32 * 1024 * 1024,
       encoding: extra.encoding ?? "utf8",
       env: { ...process.env, ADB_TRACE: "" },
+      windowsHide: true,
     });
     return result;
   };

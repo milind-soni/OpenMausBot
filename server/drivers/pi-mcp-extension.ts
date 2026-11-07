@@ -102,6 +102,7 @@ export class StdioMcp {
     this.child = spawn(def.command, def.args ?? [], {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, ...def.env },
+      windowsHide: true,
     });
     this.child.stderr.on("data", () => {
       /* best-effort drain so a chatty server never blocks */
