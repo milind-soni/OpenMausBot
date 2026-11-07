@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { parseServerInput } from "../../electron/server-address.mjs";
 import { t } from "@/lib/i18n";
 import { Laptop, Loader2, Unplug } from "lucide-react";
 import { Select } from "./Select";
@@ -14,18 +15,12 @@ function errorText(error: unknown): string {
   );
 }
 
+/** A whole pairing link with its code: https anywhere, http on a private network. */
 export function isServerPairingLink(input: string): boolean {
   const link = input.trim();
-  if (!/^https:\/\//i.test(link) || /[\s\\]/.test(link)) return false;
-  try {
-    const url = new URL(link);
-    const code = /(?:^|[#&])code=([^&]+)/.exec(url.hash)?.[1];
-    return url.protocol === "https:" && !url.username && !url.password && !url.search
-      && (url.pathname === "/pair" || url.pathname === "/pair/")
-      && Boolean(code && decodeURIComponent(code).trim());
-  } catch {
-    return false;
-  }
+  if (!/^https?:\/\//i.test(link)) return false;
+  const read = parseServerInput(link);
+  return read.ok && (read.code !== null || read.credential !== null);
 }
 
 /** `legacyOnly`: only an installation already in client mode sees this card, to leave it before the mode ends. */
