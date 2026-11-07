@@ -98,10 +98,7 @@ import { cloudComputerRpc } from "./cloud-computer-tools.ts";
 import { chartRenderer, compileChart, dataEngine, validateVegaLite } from "./data/deps.ts";
 import { BUILT_IN_DATA_SYSTEM_PROMPT } from "./data/instructions.ts";
 import { DATA_INTERNAL_MCP_PATH, dataRpc } from "./data/rpc.ts";
-import { createHighLevelHost } from "./highlevel/host.ts";
-import { HIGHLEVEL_INTERNAL_MCP_PATH } from "./highlevel/rpc.ts";
-import { createHighLevelService } from "./highlevel/service.ts";
-import { createHighLevelRoutes } from "./routes/highlevel.ts"; import { createEmailRoutes } from "./routes/email.ts"; import { createEmailHost, EMAIL_INTERNAL_MCP_PATH } from "./email/host.ts"; import { createEmailService } from "./email/service.ts"; import { createPostizRoutes } from "./routes/postiz.ts"; import { createPostiz } from "./postiz/service.ts";
+import { removeRetiredAppFiles } from "./retired-apps.ts"; import { createEmailRoutes } from "./routes/email.ts"; import { createEmailHost, EMAIL_INTERNAL_MCP_PATH } from "./email/host.ts"; import { createEmailService } from "./email/service.ts"; import { createPostizRoutes } from "./routes/postiz.ts"; import { createPostiz } from "./postiz/service.ts";
 import { createPhones } from "./host/phones.ts";
 import { NOT_THE_OWNER } from "./phones/owner.ts";
 import { PHONE_INTERNAL_MCP_PATH } from "./phones/rpc.ts";
@@ -737,7 +734,7 @@ const threadStarters = new ThreadStarters(join(DATA_DIR, "thread-starters.json")
 const commandAllowlist = new CommandAllowlistStore(join(DATA_DIR, "command-allowlist.json"));
 // Every saved login value is scrubbed from whatever a bot or a transcript can read.
 const logins = new LoginStore({ dataDir: DATA_DIR });
-const highlevel = createHighLevelService({ dataDir: DATA_DIR }); const emailService = createEmailService({ dataDir: DATA_DIR, publicOnly: Boolean(CLOUD_HOME), refusal: CLOUD_TEAM ? "Email isn't on a Team Cloud yet: every bot there would read the same mailbox." : null }); addHeldSecretScrubber((text) => emailService.scrub(text));
+removeRetiredAppFiles(DATA_DIR); const emailService = createEmailService({ dataDir: DATA_DIR, publicOnly: Boolean(CLOUD_HOME), refusal: CLOUD_TEAM ? "Email isn't on a Team Cloud yet: every bot there would read the same mailbox." : null }); addHeldSecretScrubber((text) => emailService.scrub(text));
 const heldSecrets = new HeldSecrets(logins);
 addHeldSecretScrubber((text) => heldSecrets.scrub(text));
 const onePassword = new OnePasswordLogins({
@@ -1605,7 +1602,7 @@ type InternalCapability = {
   threadId: string;
   generation: string;
   depth: number;
-  kind: "agents" | "connectors" | "computer" | "browser" | "hooks" | "phone" | "data" | "highlevel" | "email" | "device" | "lent";
+  kind: "agents" | "connectors" | "computer" | "browser" | "hooks" | "phone" | "data" | "email" | "device" | "lent";
   skillAuthoring: boolean;
   createdBots: number;
   createdRooms?: number;
@@ -2426,10 +2423,7 @@ function dataIntegration(botId: string, turn: { threadId: string; generation: st
     },
   };
 }
-/** Only with a connection and for a bot allowed to use it (connected apps on; scopes and grants name highlevel). */
-function highlevelIntegration(bot: BotRecord, turn: { threadId: string; generation: string }) {
-  return !managedPolicy.appAllowed("highlevel") ? null : highlevelHost.integration(bot, () => mintInternalCapability({ botId: bot.id, ...turn, kind: "highlevel", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 }), `http://127.0.0.1:${PORT}`);
-} const emailIntegration = (bot: BotRecord, turn: { threadId: string; generation: string }) => emailHost.integration(bot, () => mintInternalCapability({ botId: bot.id, ...turn, kind: "email", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 }), `http://127.0.0.1:${PORT}`);
+const emailIntegration = (bot: BotRecord, turn: { threadId: string; generation: string }) => emailHost.integration(bot, () => mintInternalCapability({ botId: bot.id, ...turn, kind: "email", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 }), `http://127.0.0.1:${PORT}`);
 
 let browserEngineInstall: Promise<void> | null = null;
 let browserEngineInstallError: string | null = null;
@@ -2845,9 +2839,8 @@ const creditMoves = cloudCredit && createCreditMoves({ credit: cloudCredit, stor
 const routineHolds = CLOUD_HOME ? createRoutineHoldsHost({ dataDir: DATA_DIR, store, mcpServers: () => Object.keys(cfg.mcpServers ?? {}).length, log: (line) => console.warn(line),
   appsConnected: async () => composio.configured(cfg) ? Object.values(await composio.connectedServices(cfg)).some((service) => service.connected) : false }) : null;
 const skillsHost = createSkillsLibraryHost({ store, cfg, appendSkillRequestCard, engineConfig: (instanceId) => providerConfigs()[instanceId], instanceOf: (instanceId) => { const instance = registry.get(instanceId); return instance ? { instanceId, driverKind: instance.driverKind } : undefined; } });
-const { listBotSkills, readBotSkillFile } = skillsHost; const cloudConnections = createCloudConnectionsHost({ cloudHome: CLOUD_HOME, ownHome: ownHome.owner, config: () => cfg, environmentId: ENVIRONMENT_ID, mcpOAuth, highlevel, heldKeys, dataDir: DATA_DIR, email: { accounts: () => emailService.store.list(), adopt: (accounts) => emailService.adopt(accounts) }, stayedNotices: { bots: () => store.bots, language: (threadId) => threadLanguage(threadId), say: (threadId, text, kind) => { store.appendMessage(threadId, kind === "line" ? { role: "bot", kind: "text", text } : { role: "bot", kind: "activity", tool: { name: `notice: ${text}`, ok: true } }); }, notify: (text, bot, threadId) => notify(buildNoticeNotification(bot, threadId, text)), lent: (runsOn) => { const at = sharedComputers.runsOn(CLOUD_HOME_LENDER, runsOn); return Boolean(at.online ?? at.known?.lent); } }, engines: async () => selectableInstances(await registry.describe()).filter((instance) => readyToRun(instance, selectionContext)).map((instance) => instance.instanceId) }); const lentMcp = createLentMcp({ cfg: () => cfg, computers: sharedComputers, policy: (servers) => managedPolicy.filterMcp(servers), bot: (id) => store.bot(id), principal: (turn) => (CLOUD_TEAM || !lendingEnabled() ? null : sharedComputerPrincipal(turn)), notice: (turn) => (CLOUD_HOME ? cloudLendingRefusalNotice(turn) : null), refusal: (turn) => (CLOUD_HOME ? cloudLendingRefusalForBot(turn) : null), mint: (turn) => mintInternalCapability({ ...turn, kind: "lent", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 }), active: (turn) => activeInternalGenerationByThread.get(turn.threadId) === turn.generation, origin: `http://127.0.0.1:${PORT}`, personal: CLOUD_PERSONAL, place: CLOUD_HOME ? "My Cloud" : "this server" }); // Security: a team Cloud lends nothing, so nobody's own computer serves its bots.
-const highlevelHost = createHighLevelHost({ service: highlevel, dataDir: DATA_DIR, bot: (id) => store.bot(id),
-  inRoom: (threadId) => Boolean(store.groupByThread(threadId)), appendMessage: (threadId, message) => { store.appendMessage(threadId, message as Parameters<typeof store.appendMessage>[1]); } }); const emailHost = createEmailHost({ service: emailService, dataDir: DATA_DIR, bot: (id) => store.bot(id), inRoom: (threadId) => Boolean(store.groupByThread(threadId)), appendMessage: (threadId, message) => { store.appendMessage(threadId, message as Parameters<typeof store.appendMessage>[1]); }, appAllowed: () => managedPolicy.appAllowed("email"), onChange: (listener) => store.onChange(listener as never), markOutside: (threadId) => outsideLineage.mark(threadId) });
+const { listBotSkills, readBotSkillFile } = skillsHost; const cloudConnections = createCloudConnectionsHost({ cloudHome: CLOUD_HOME, ownHome: ownHome.owner, config: () => cfg, environmentId: ENVIRONMENT_ID, mcpOAuth, heldKeys, dataDir: DATA_DIR, email: { accounts: () => emailService.store.list(), adopt: (accounts) => emailService.adopt(accounts) }, stayedNotices: { bots: () => store.bots, language: (threadId) => threadLanguage(threadId), say: (threadId, text, kind) => { store.appendMessage(threadId, kind === "line" ? { role: "bot", kind: "text", text } : { role: "bot", kind: "activity", tool: { name: `notice: ${text}`, ok: true } }); }, notify: (text, bot, threadId) => notify(buildNoticeNotification(bot, threadId, text)), lent: (runsOn) => { const at = sharedComputers.runsOn(CLOUD_HOME_LENDER, runsOn); return Boolean(at.online ?? at.known?.lent); } }, engines: async () => selectableInstances(await registry.describe()).filter((instance) => readyToRun(instance, selectionContext)).map((instance) => instance.instanceId) }); const lentMcp = createLentMcp({ cfg: () => cfg, computers: sharedComputers, policy: (servers) => managedPolicy.filterMcp(servers), bot: (id) => store.bot(id), principal: (turn) => (CLOUD_TEAM || !lendingEnabled() ? null : sharedComputerPrincipal(turn)), notice: (turn) => (CLOUD_HOME ? cloudLendingRefusalNotice(turn) : null), refusal: (turn) => (CLOUD_HOME ? cloudLendingRefusalForBot(turn) : null), mint: (turn) => mintInternalCapability({ ...turn, kind: "lent", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 }), active: (turn) => activeInternalGenerationByThread.get(turn.threadId) === turn.generation, origin: `http://127.0.0.1:${PORT}`, personal: CLOUD_PERSONAL, place: CLOUD_HOME ? "My Cloud" : "this server" }); // Security: a team Cloud lends nothing, so nobody's own computer serves its bots.
+const emailHost = createEmailHost({ service: emailService, dataDir: DATA_DIR, bot: (id) => store.bot(id), inRoom: (threadId) => Boolean(store.groupByThread(threadId)), appendMessage: (threadId, message) => { store.appendMessage(threadId, message as Parameters<typeof store.appendMessage>[1]); }, appAllowed: () => managedPolicy.appAllowed("email"), onChange: (listener) => store.onChange(listener as never), markOutside: (threadId) => outsideLineage.mark(threadId) });
 const phones = createPhones({
   dataDir: DATA_DIR, shared: Boolean(HOSTED_WORKSPACE || CLOUD_TEAM), cloudHome: Boolean(CLOUD_HOME), cloudOwnerKey: CLOUD_OWNER_KEY,
   loopbackTrust: LOOPBACK.trust, sharedMembership, store, sessions, routines: () => routines, ownerOrAdmin, cloudOwnerSession,
@@ -2859,7 +2852,7 @@ const phones = createPhones({
 const cloudPlanTier = createCloudPlanTier({ dataDir: DATA_DIR, cloudHome: Boolean(CLOUD_HOME), changed: () => broadcast({ kind: "config", ...configStatus() }) }); const botLimit = createBotLimit({ starter: () => cloudPlanTier.starter(), bots: () => store.bots }); let cloudPower: CloudPower | null = null; // The sleep handshake of a plan that sleeps (server/cloud-power.ts), made just before the server listens.
 const { cloudHealth, cloudSigned } = createCloudSignedHost({ cloudHome: CLOUD_HOME, sessions, power: () => cloudPower, box: () => botBox.report(), teamAdmin: teamAdminHost(), policyChanged: nudgeCloudTeamPolicy, plan: (cancelled) => routineHolds?.plan(cancelled), planTier: (tier) => cloudPlanTier.set(tier), memberLeft: (email) => leaveTeam ? leaveTeam(email).then((result) => { botApi.manager.revokeMintedBy(personKey({ id: "", email })); teamOwners.left(email); teamMessages.inbox.forget(personKey({ id: "", email })); forgetSetupPresser(store, personKey({ id: "", email })); devsReports.forget(personKey({ id: "", email })); return result; }) : Promise.reject(new Error("not a team")), health: { store, bus, dataDir: DATA_DIR, eventsDir: EVENTS_DIR, version: serverVersion(), image: process.env.OMB_CLOUD_IMAGE,
   engines: () => registry.instances().map((instance) => ({ instanceId: instance.instanceId, driverKind: instance.driverKind, snapshot: registry.knownSnapshot(instance.instanceId) })),
-  connectors: () => emailHost.health(highlevelHost.health(composio.configured(cfg) ? composio.connectedServices(cfg) : null)),
+  connectors: () => emailHost.health(composio.configured(cfg) ? composio.connectedServices(cfg) : null),
   browser: () => ({ available: browserReady(undefined), installing: Boolean(browserEngineInstall), interrupted: browserRuntime.interruptedCount() }), firstHour: () => firstHourHooks.health(), ...(engineMemory.enabled ? { room: () => engineMemory.dayPressure() } : {}) } });
 const teamComputers = new TeamComputers(join(DATA_DIR, "team-computers.json"), ENVIRONMENT_ID);
 let followupsReady = false;
@@ -3000,7 +2993,7 @@ function previewSystemPrompt(bot: BotRecord) {
     }, { note: previewPlan.note, cloudHome: Boolean(CLOUD_HOME), ownComputer: CLOUD_HOME && agentsMounted && lendingEnabled() ? sharedComputers.known(CLOUD_HOME_LENDER) : undefined }) },
     { id: "cloud-home", label: "My Cloud", text: CLOUD_HOME ? cloudHomePrompt(agentsMounted && lendingEnabled(), syncedFolders(DATA_DIR), sharedComputers.known(CLOUD_HOME_LENDER), CLOUD_PERSONAL) + firstHourHooks.prompt(bot.id, bot.threadId) : "" },
     { id: "composio", label: "Connected apps", text: caps?.composioMcp && bot.composio !== false && composio.configured(cfg) ? composioSystemPrompt(bot.connectorTools) + describeConnectorScopes(bot.connectorScopes) : "" },
-    { id: "highlevel", label: "HighLevel", text: caps?.highlevelMcp === true && highlevelHost.mounts(bot) ? highlevelHost.prompt(bot) : "" }, { id: "email", label: "Email", text: caps?.highlevelMcp === true ? emailHost.prompt(bot) : "" },
+    { id: "email", label: "Email", text: caps?.emailMcp === true ? emailHost.prompt(bot) : "" },
     ...phones.previewParts(bot, caps?.deviceMcp === true),
     { id: "mcp", label: "MCP servers", text: caps?.customMcp ? customMcpPrompt(Object.keys(engineMcpServers(bot)), mcpServersHost.off(bot)) : "" }, { id: "to-connect", label: "Connections to make", text: cloudConnections.prompt(bot) },
     { id: "browser", label: "Browser", text: previewPlan.browser ? browserPromptFor(bot, agentsMounted) : "" },
@@ -8334,7 +8327,7 @@ async function beginTurn(
         const data = dataIntegration(bot.id, { threadId, generation: dispatchClaimId });
         if (data) integrations.data = data;
       }
-      if (liveBot && instance.adapter.capabilities.highlevelMcp === true) { const crm = highlevelIntegration(liveBot, { threadId, generation: dispatchClaimId }); if (crm) integrations.highlevel = crm; const mail = emailIntegration(liveBot, { threadId, generation: dispatchClaimId }); if (mail) integrations.email = mail; }
+      if (liveBot && instance.adapter.capabilities.emailMcp === true) { const mail = emailIntegration(liveBot, { threadId, generation: dispatchClaimId }); if (mail) integrations.email = mail; }
       const phone = liveBot && instance.adapter.capabilities.deviceMcp === true ? phones.integration(liveBot, { threadId, generation: dispatchClaimId }) : null;
       if (phone) integrations.device = phone;
       const mountedComputer = surfaceOfComputerKind(computerKind);
@@ -8403,7 +8396,7 @@ async function beginTurn(
         { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {}), mcpServersHost.off(bot)) }, { id: "to-connect", label: "Connections to make", text: cloudConnections.prompt(liveBot ?? bot, lentMcp.lines(liveBot ?? bot, { botId: bot.id, threadId, generation: dispatchClaimId })) + teamConnections.prompt(threadId, dispatchClaimId, integrations) },
         { id: "browser", label: "Browser", text: integrations.browser ? browserPromptFor(bot, Boolean(integrations.agents)) : "" },
         { id: "data", label: "Data", text: integrations.data ? BUILT_IN_DATA_SYSTEM_PROMPT : "" },
-        { id: "highlevel", label: "HighLevel", text: integrations.highlevel ? highlevelHost.prompt(liveBot ?? bot) : "" }, { id: "email", label: "Email", text: instance.adapter.capabilities.highlevelMcp === true ? emailHost.prompt(liveBot ?? bot) : "" },
+        { id: "email", label: "Email", text: instance.adapter.capabilities.emailMcp === true ? emailHost.prompt(liveBot ?? bot) : "" },
         ...phones.promptParts(liveBot ?? bot, {
           mounted: Boolean(integrations.device), offered: instance.adapter.capabilities.deviceMcp === true, turn: { botId: bot.id, threadId, generation: dispatchClaimId },
           place: phones.place(threadId, !(commsDepth > 0 || opts?.automationSource !== undefined || opts?.unattended || opts?.peerAsk || opts?.coordination)),
@@ -10010,7 +10003,7 @@ async function runClaimedGroupMemberTurn(
     const data = dataIntegration(readyBot.id, { threadId, generation: internalGeneration });
     if (data) integrations.data = data;
   }
-  if (instance.adapter.capabilities.highlevelMcp === true) { const crm = highlevelIntegration(readyBot, { threadId, generation: internalGeneration }); if (crm) integrations.highlevel = crm; const mail = emailIntegration(readyBot, { threadId, generation: internalGeneration }); if (mail) integrations.email = mail; }
+  if (instance.adapter.capabilities.emailMcp === true) { const mail = emailIntegration(readyBot, { threadId, generation: internalGeneration }); if (mail) integrations.email = mail; }
   const phone = instance.adapter.capabilities.deviceMcp === true ? phones.integration(readyBot, { threadId, generation: internalGeneration }) : null;
   if (phone) integrations.device = phone;
   if (roomPlan.browser && !(roomPlan.computer === undefined && roomTeamComputer)) {
@@ -10219,7 +10212,7 @@ async function runClaimedGroupMemberTurn(
     { id: "cloud-home", label: "My Cloud", text: CLOUD_HOME ? cloudHomePrompt(Boolean(integrations.agents) && lendingEnabled(), syncedFolders(DATA_DIR), sharedComputers.known(CLOUD_HOME_LENDER), CLOUD_PERSONAL) : "" },
     { id: "browser", label: "Browser", text: integrations.browser ? browserPromptFor(bot, Boolean(integrations.agents)) : "" },
     { id: "data", label: "Data", text: integrations.data ? BUILT_IN_DATA_SYSTEM_PROMPT : "" },
-    { id: "highlevel", label: "HighLevel", text: integrations.highlevel ? highlevelHost.prompt(readyBot) : "" }, { id: "email", label: "Email", text: instance.adapter.capabilities.highlevelMcp === true ? emailHost.prompt(readyBot) : "" },
+    { id: "email", label: "Email", text: instance.adapter.capabilities.emailMcp === true ? emailHost.prompt(readyBot) : "" },
     ...phones.promptParts(readyBot, {
       mounted: Boolean(integrations.device), offered: instance.adapter.capabilities.deviceMcp === true,
       turn: { botId: readyBot.id, threadId, generation: internalGeneration }, place: "computer",
@@ -12199,7 +12192,7 @@ ROUTES.push(createBotLifecycleRoutes({
   activeGroupTurnForBot, cancelGroupTurnOperations, runningTurnInstance, closeOpenApprovals, deleteBotWithLifecycle,
 }));
 ROUTES.push(createBotSkillsRoutes({ store, cfg, listBotSkills, readBotSkillFile, stagedSkillListing }));
-ROUTES.push(createHighLevelRoutes({ service: highlevel })); ROUTES.push(createEmailRoutes({ service: emailService }));
+ROUTES.push(createEmailRoutes({ service: emailService }));
 ROUTES.push(phones.routes);
 ROUTES.push(createSkillShareRoutes({ enabled: () => skillsHost.mode() !== "off", botExists: (id) => Boolean(store.bot(id)),
   cardRefusal: (auth, threadId, requestId) => cardAnswerRefusal(auth, threadId, requestId, "allow"), shareFromReceipt: skillsHost.shareFromReceipt, shareFromBot: skillsHost.shareFromBot }));
@@ -12913,7 +12906,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const parsed = z.object({
         botId: z.string().regex(/^[\w-]{1,128}$/),
         threadId: z.string().regex(/^[\w-]{1,128}$/),
-        kind: z.enum(["agents", "connectors", "computer", "data", "highlevel", "email", "device"]).default("agents"),
+        kind: z.enum(["agents", "connectors", "computer", "data", "email", "device"]).default("agents"),
         depth: z.number().int().min(0).max(MAX_COMMS_DEPTH).default(0),
         skillAuthoring: z.boolean().default(false),
         deliversSavedFiles: z.boolean().default(false),
@@ -12967,8 +12960,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         ? "browser"
         : path === DATA_INTERNAL_MCP_PATH
         ? "data"
-        : path === HIGHLEVEL_INTERNAL_MCP_PATH
-        ? "highlevel" : path === EMAIL_INTERNAL_MCP_PATH ? "email"
+        : path === EMAIL_INTERNAL_MCP_PATH ? "email"
         : path === PHONE_INTERNAL_MCP_PATH
         ? "device" : isLentMcpPath(path) ? "lent"
         : path === "/api/internal/phone/claim"
@@ -13211,10 +13203,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           },
         }) });
       }
-      // The CRM tokens stay here; the agent process holds only the turn's capability, and every call gets the live bot's verdict.
-      if (method === "POST" && path === HIGHLEVEL_INTERNAL_MCP_PATH) {
-        return json(res, 200, { result: await highlevelHost.handle(await readInternalBody(), internalCapability, requireActiveInternalCapability) });
-      } if (method === "POST" && path === EMAIL_INTERNAL_MCP_PATH) { return json(res, 200, { result: await emailHost.handle(await readInternalBody(), internalCapability, requireActiveInternalCapability) }); }
+      // The mail passwords stay here; the agent process holds only the turn's capability, and every call gets the live bot's verdict.
+      if (method === "POST" && path === EMAIL_INTERNAL_MCP_PATH) { return json(res, 200, { result: await emailHost.handle(await readInternalBody(), internalCapability, requireActiveInternalCapability) }); }
       if (method === "POST" && path === PHONE_INTERNAL_MCP_PATH) {
         return json(res, 200, { result: await phones.handle(await readInternalBody(), internalCapability, requireActiveInternalCapability) });
       }
@@ -15136,12 +15126,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     if (method === "GET" && path === "/api/connectors/tools") {
       const availability = composio.connectorAvailability(cfg);
-      const highlevelTools = { ...highlevelHost.toolListing(), ...emailHost.toolListing(), ...phones.toolListing() };
+      const nativeTools = { ...emailHost.toolListing(), ...phones.toolListing() };
       if (availability !== "configured") {
-        return json(res, 200, { configured: Object.keys(highlevelTools).length > 0, services: highlevelTools });
+        return json(res, 200, { configured: Object.keys(nativeTools).length > 0, services: nativeTools });
       }
       try {
-        return json(res, 200, { configured: true, services: { ...await composio.listConnectorTools(cfg), ...highlevelTools } });
+        return json(res, 200, { configured: true, services: { ...await composio.listConnectorTools(cfg), ...nativeTools } });
       } catch (e) {
         return json(res, 502, { configured: true, services: {}, error: e instanceof Error ? e.message : String(e) });
       }

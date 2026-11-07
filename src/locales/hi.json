@@ -3,7 +3,6 @@
   "voice.gemini.model": "Gemini वाक् मॉडल",
   "keys.label.geminiTts": "Gemini वाक् API कुंजी",
   "keys.purpose.geminiTts": "बोलकर दिए गए जवाबों, वॉइस नोट और कॉल के लिए Gemini की आवाज़ें",
-  "highlevel.unavailable": "यहाँ उपलब्ध नहीं।",
   "postiz.description": "Postiz से सोशल मीडिया पोस्ट का ड्राफ़्ट बनाएँ, शेड्यूल करें और प्रकाशित करें।",
   "postiz.connect": "Postiz कनेक्ट करें",
   "postiz.reconnect": "Postiz फिर से कनेक्ट करें",

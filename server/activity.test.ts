@@ -27,8 +27,6 @@ describe("describeTool", () => {
     expect(describeTool("GMAIL_SEND_EMAIL")).toEqual({ app: "Gmail", label: "Send email" });
     expect(describeTool("mcp__composio__GITHUB_CREATE_AN_ISSUE")).toEqual({ app: "GitHub", label: "Create an issue" });
     expect(describeTool("GOOGLESHEETS_BATCH_UPDATE")).toEqual({ app: "Google Sheets", label: "Batch update" });
-    expect(describeTool("mcp__highlevel__HIGHLEVEL_ADD_NOTE")).toEqual({ app: "HighLevel", label: "Add note" });
-    expect(describeTool("HIGHLEVEL_UPDATE_CONTACT")).toEqual({ app: "HighLevel", label: "Update contact" });
     expect(describeTool("mcp__device__PHONE_CREATE_EVENT")).toEqual({ app: "Phone", label: "Create event" });
   });
 
@@ -98,7 +96,7 @@ describe("describeTool", () => {
   });
 
   it("keeps an unknown or third-party tool in its own words, with no key", () => {
-    for (const name of ["GMAIL_SEND_EMAIL", "mcp__composio__GITHUB_CREATE_AN_ISSUE", "mcp__claude_ai_Gmail__search_threads", "mcp__highlevel__HIGHLEVEL_ADD_NOTE",
+    for (const name of ["GMAIL_SEND_EMAIL", "mcp__composio__GITHUB_CREATE_AN_ISSUE", "mcp__claude_ai_Gmail__search_threads",
       "mcp__agents__brand_new_tool", "mcp__computer__teleport", "mcp__some_server__do_thing", "TaskUpdate", "constructor"]) {
       expect(describedTool(name).labelKey, name).toBeUndefined();
     }

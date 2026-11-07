@@ -8,6 +8,9 @@ import environments from "./environments.cjs";
 import { listedColors, ownCloudPlaces } from "./cloud-list.mjs";
 
 const idOf = (value) => (typeof value === "string" && value ? value : null);
+/** What home-place.json may name: a team's Cloud, another Cloud of the person's own, a workspace of this computer's own
+ * (by its profile id) or a server saved by hand (by its saved place's id). */
+const KINDS = Object.freeze(["team", "cloud", "profile", "server"]);
 
 /**
  * @param {{
@@ -23,31 +26,38 @@ const idOf = (value) => (typeof value === "string" && value ? value : null);
 export function createHomePlaces({ store, environments: read, persist, makeId, homeOrigin, log = () => {} }) {
   let cached = null;
   const pending = [];
+  /** One kind of place at most: the first of KINDS the record names. */
+  function only(record) {
+    const kind = KINDS.find((key) => idOf(record?.[key]));
+    return Object.fromEntries(KINDS.map((key) => [key, key === kind ? record[key] : null]));
+  }
   function load() {
-    try {
-      const record = store.read();
-      const team = idOf(record?.team);
-      return { team, cloud: team ? null : idOf(record?.cloud) };
-    } catch { return { team: null, cloud: null }; }
+    try { return only(store.read()); } catch { return only(null); }
   }
   const current = () => (cached ??= load());
   function save(next) {
     cached = next;
-    try { store.write(next.cloud ? { cloud: next.cloud } : { team: next.team }); } catch (error) { log(`home places: could not save (${error?.message ?? error})`); }
+    const kind = KINDS.find((key) => next[key]) ?? "team";
+    try { store.write({ [kind]: next[kind] }); } catch (error) { log(`home places: could not save (${error?.message ?? error})`); }
   }
   const entryOf = (key, id) => read().environments.find((entry) => entry[key]?.id === id) ?? null;
   const places = {
-    /** The team or Cloud shown last time, as saved: its id, and its name and address while it is still a saved place. */
+    /** The place shown last time, as saved: its id, and for a team or Cloud its name and address while it is still a
+     * saved place. */
     remembered() {
-      const { team, cloud } = current(), key = team ? "team" : cloud ? "cloud" : null;
+      const saved = current(), key = KINDS.find((kind) => saved[kind]);
       if (!key) return null;
-      const id = team ?? cloud, entry = entryOf(key, id);
+      const id = saved[key];
+      if (key === "profile") return { profile: id };
+      if (key === "server") return { server: id };
+      const entry = entryOf(key, id);
       return entry ? { [key]: id, name: entry.name, origin: entry.origin } : { [key]: id };
     },
-    /** What the window opens next time: a team (`{ team }`), another Cloud (`{ cloud }`), or My Cloud (null). */
+    /** What the window opens next time: a team (`{ team }`), another Cloud (`{ cloud }`), a workspace of this computer's
+     * own (`{ profile }`), a server saved by hand (`{ server }`), or My Cloud (null). */
     remember(place) {
-      const team = idOf(place?.team), cloud = team ? null : idOf(place?.cloud);
-      if (team !== current().team || cloud !== current().cloud) save({ team, cloud });
+      const next = only(place);
+      if (KINDS.some((key) => next[key] !== current()[key])) save(next);
     },
     /** The team shown is no longer this person's: said once, on the next page that asks. */
     left(name) {

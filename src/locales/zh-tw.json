@@ -13,7 +13,6 @@
   "hostedMcp.botSettings": "管理 {name} 的存取權",
   "hostedMcp.setupFailed": "無法新增 {service}。請重新整理後再試一次。",
   "hostedMcp.testFailed": "已登入，但無法載入 {service} 的工具：{reason} 請重新連線以重試。",
-  "highlevel.unavailable": "這裡無法使用。",
   "postiz.description": "用 Postiz 撰寫草稿、排程並發布社群貼文。",
   "postiz.connect": "連結 Postiz",
   "postiz.reconnect": "重新連結 Postiz",

@@ -1,5 +1,4 @@
 // The config pins one deliberately unknown driver, so the suite is deterministic with or without agent CLIs installed.
-import { HIGHLEVEL_TOOLS } from "./highlevel/tools.js";
 import { EMAIL_TOOLS } from "./email/tools.ts";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -12643,9 +12642,7 @@ describe("harness HTTP API", () => {
           { name: "GMAIL_SEND_EMAIL", description: "Send an email" },
         ],
         slack: [{ name: "SLACK_POST_MESSAGE", description: "a".repeat(240) }],
-        // HighLevel's tools are listed whenever its relay is configured, so grants can be set before connecting.
-        highlevel: HIGHLEVEL_TOOLS.map(({ name, description }) => ({ name, description })),
-        // So are email's, wherever a mailbox can be connected here.
+        // Email's tools are listed wherever a mailbox can be connected here, so grants can be set before connecting.
         email: EMAIL_TOOLS.map(({ name, description }) => ({ name, description })),
       },
     });
