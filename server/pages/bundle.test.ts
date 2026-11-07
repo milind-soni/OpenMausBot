@@ -12,7 +12,9 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   return { ...real, open: vi.fn(real.open), readdir: vi.fn(real.readdir), realpath: vi.fn(real.realpath), stat: vi.fn(real.stat) };
 });
 
-const folder = () => realpathSync(mkdtempSync(join(tmpdir(), "omb-page-bundle-")));
+// The native resolver, like fs/promises realpath: on Windows it expands a short (RUNNER~1) temp path, so pageSignature's
+// own realpath check sees the same path it was given.
+const folder = () => realpathSync.native(mkdtempSync(join(tmpdir(), "omb-page-bundle-")));
 
 describe("readPageBundle", () => {
   it("does not follow its folder swapped for a link while it is being read", async () => {

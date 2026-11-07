@@ -901,7 +901,9 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
           log(`memory upkeep: could not queue turns saved at the last shutdown: ${(error as Error).message}`);
         }
       }
-      const started = ++generation;
+      // stop() already ended the last generation; a capture that began before the first start (a chat answered while
+      // the engines are still being read at boot) is kept.
+      const started = generation;
       const scheduledTick = () => { if (started === generation) void tick(); };
       timer = setInterval(scheduledTick, TIDY_CHECK_MS);
       timer.unref?.();

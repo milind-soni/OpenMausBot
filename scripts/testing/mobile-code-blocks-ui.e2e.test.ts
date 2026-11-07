@@ -70,7 +70,7 @@ async function connect(url: string) {
   let chrome: ChildProcess | undefined;
   let cdp: Awaited<ReturnType<typeof connect>> | undefined;
   let evidence: string | undefined;
-  const receipts: Record<string, any> = { geometry: [], copied: [], wrapping: [], clipboard: "Chrome Clipboard API read/write after real pointer events; permission granted only to the isolated fixture origin; refusal stubbed afterward" };
+  const receipts: Record<string, any> = { geometry: [], copied: [], wrapping: [], clipboard: "Chrome Clipboard API read/write after real pointer events; permission granted only to the isolated fixture origin; refusal (Clipboard API and legacy copy command) stubbed afterward" };
   try {
     const tools = await ensureUiBrowser();
     if (!tools.chrome) throw new Error("This recipe needs the pinned Chrome for Testing");
@@ -207,11 +207,14 @@ async function connect(url: string) {
     }
     const feedbackLayout = () => evaluate(`(() => { const card=${blocks}[0]; const button=card.querySelectorAll('button')[2]; const c=card.getBoundingClientRect(), b=button.getBoundingClientRect(); return {height:c.height,buttonWidth:b.width,buttonHeight:b.height,left:b.left-c.left,top:b.top-c.top}; })()`);
     const beforeFeedback = await feedbackLayout();
+    // A refused Clipboard API write falls back to the legacy copy command, so refuse both to see the failure feedback.
+    await evaluate(`document.execCommand = () => false; true`);
     await evaluate(`Object.defineProperty(navigator.clipboard, 'writeText', { configurable:true,value:async()=>{throw new Error('fixture denial');} }); true`);
     await tap(0, "copy");
     await expect.poll(() => evaluate(`${blocks}[0].querySelector('[role="status"]')?.textContent`)).toBe("Could not copy");
     expect(await feedbackLayout()).toEqual(beforeFeedback);
     receipts.failureFeedback = true;
+    await evaluate(`delete document.execCommand; true`);
     await evaluate(`Object.defineProperty(navigator.clipboard, 'writeText', { configurable:true,value:window.fixtureClipboardWrite }); true`);
     await tap(0, "copy");
     await expect.poll(() => evaluate(`${blocks}[0].querySelector('[role="status"]')?.textContent`)).toBe("Copied");
