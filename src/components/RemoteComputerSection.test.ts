@@ -71,11 +71,11 @@ describe("remote connection Settings", () => {
     expect(html).not.toContain("<select");
   });
 
-  it("preserves six-digit companion pairing when the server bridge is unavailable", () => {
+  it("keeps companion pairing, by pairing code, when the server bridge is unavailable", () => {
     const html = render({ remoteClient: { active: false } });
     expect(html).toContain("Companion address");
-    expect(html).toContain("Six-digit companion code");
-    expect(html).toContain('placeholder="000000"');
+    expect(html).toContain(">Pairing code<");
+    expect(html).toContain('placeholder="XXXX-XXXX-XXXX"');
     expect(html).toContain("managed MausBot HTTPS address");
     expect(html).toContain("Tailscale name ending in .ts.net");
     expect(html).not.toContain("<select");

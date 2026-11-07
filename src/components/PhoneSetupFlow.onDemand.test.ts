@@ -40,7 +40,7 @@ function desktop() {
         companion = {
           ...companion,
           pairing: open
-            ? { code: "123456", token: `omb_pair_${"a".repeat(43)}`, expiresAt: Date.now() + 120_000 }
+            ? { code: "7KQ2M9XDH4TP", token: `omb_pair_${"a".repeat(43)}`, expiresAt: Date.now() + 120_000 }
             : null,
         };
         return companion;

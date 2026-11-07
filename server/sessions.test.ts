@@ -210,13 +210,42 @@ describe("pairing codes", () => {
     expect(locked.ok).toBe(false);
     if (!locked.ok) {
       expect(locked.status).toBe(429);
-      expect(locked.error).toMatch(/from your address; try again in 60s/);
-      expect(locked).toMatchObject({ errorKey: "serverError.pair.tooMany", errorParams: { seconds: 60 } });
+      expect(locked.error).toMatch(/^Too many wrong codes\. Try again at \d{2}:\d{2} UTC\.$/);
+      expect(locked).toMatchObject({ errorKey: "serverError.pair.tooMany", errorParams: { seconds: 300, until: clock + 300_000 } });
     }
     expect(registry.exchange({ code, label: "", source: "friend" }).ok).toBe(true);
     clock += LOCKOUT.lockMs + 1;
     const { code: fresh } = registry.openPairing();
     expect(registry.exchange({ code: fresh, label: "", source: "attacker" }).ok).toBe(true);
+  });
+
+  it("five wrong codes in five minutes lock that address for five minutes; a code lives ten minutes", () => {
+    expect(LOCKOUT).toEqual({ failures: 5, windowMs: 300_000, lockMs: 300_000 });
+    expect(PAIRING_CODE_TTL_MS).toBe(600_000);
+    for (let i = 0; i < 4; i++) registry.exchange({ code: "AAAAAAAAAAAA", label: "", source: "slow" });
+    clock += 299_000;
+    const fifth = registry.exchange({ code: "AAAAAAAAAAAA", label: "", source: "slow" });
+    expect(fifth.ok === false && fifth.status).toBe(401);
+    const { code } = registry.openPairing();
+    const locked = registry.exchange({ code, label: "", source: "slow" });
+    expect(locked.ok === false && locked.status).toBe(429);
+  });
+
+  it("explains a code of the wrong kind and does not count it as a guess", () => {
+    for (const [input, key] of [["1234 5678", "serverError.pair.emailCode"], ["123456", "serverError.pair.oldCode"], [`omb_sess_${"a".repeat(43)}`, "serverError.pair.scriptKey"]] as const) {
+      for (let i = 0; i < LOCKOUT.failures + 1; i++) {
+        const refused = registry.exchange({ code: input, label: "", source: "mixed-up" });
+        expect(refused).toMatchObject({ ok: false, status: 400, errorKey: key });
+      }
+    }
+    expect(registry.failureSources()).not.toContain("mixed-up");
+  });
+
+  it("takes the code or the credential out of a pasted link", () => {
+    const a = registry.openPairing();
+    expect(registry.exchange({ code: `https://maus.example.com/pair#code=${formatPairingCode(a.code)}`, label: "", source: "s" }).ok).toBe(true);
+    const b = registry.openPairing();
+    expect(registry.exchange({ code: `openmausbot://pair?address=https%3A%2F%2Fmaus.example.com&token=${b.credential}`, label: "", source: "s" }).ok).toBe(true);
   });
 
   it("answers a lost-response retry with the same session for a minute, keyed on the client's attempt id", () => {

@@ -3,6 +3,13 @@ import { t } from "@/lib/i18n";
 import { Laptop, Loader2, Unplug } from "lucide-react";
 import { Select } from "./Select";
 import { Card } from "./SettingsPrimitives";
+import { readPairingInput } from "../../shared/pairing-code";
+
+/** A pairing code, or the six digits a computer on an older release still shows. */
+function companionCodeTyped(code: string): boolean {
+  const read = readPairingInput(code);
+  return read.kind === "code" || (read.kind === "wrong" && read.problem === "oldCode");
+}
 
 const inputClass =
   "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none";
@@ -203,12 +210,13 @@ export function RemoteComputerSection({ hideWhenUnavailable = false }: { hideWhe
                 {t("remote.client.companion.code")}
                 <input
                   value={code}
-                  onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
-                  placeholder="000000"
+                  onChange={(event) => setCode(event.target.value)}
+                  placeholder="XXXX-XXXX-XXXX"
                   disabled={busy}
-                  inputMode="numeric"
+                  autoCapitalize="characters"
                   autoComplete="one-time-code"
-                  className={`${inputClass} max-w-40 font-mono tracking-[0.2em]`}
+                  spellCheck={false}
+                  className={`${inputClass} max-w-56 font-mono tracking-[0.12em]`}
                 />
               </label>
             </>
@@ -216,7 +224,7 @@ export function RemoteComputerSection({ hideWhenUnavailable = false }: { hideWhe
           {error ? <p role="alert" className="text-[13px] text-danger">{error}</p> : null}
           <button
             type="submit"
-            disabled={busy || (serverMode ? !serverLink.trim() : endpoint.trim() === "" || code.length !== 6)}
+            disabled={busy || (serverMode ? !serverLink.trim() : endpoint.trim() === "" || !companionCodeTyped(code))}
             className="flex w-fit items-center gap-2 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50"
           >
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Laptop size={14} />}

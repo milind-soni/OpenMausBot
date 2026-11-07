@@ -96,7 +96,7 @@ describe("companion status refresh", () => {
     };
     const pairedState: CompanionState = {
       ...staleState,
-      pairing: { code: "004209", token: pairingToken, expiresAt: Date.now() + 60_000 },
+      pairing: { code: "7KQ2M9XDH4TP", token: pairingToken, expiresAt: Date.now() + 60_000 },
     };
     let signalCompanionRead = () => {};
     const companionRead = new Promise<void>((resolve) => {

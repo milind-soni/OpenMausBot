@@ -26,6 +26,12 @@ describe("a refusal the server names by key", () => {
     expect((refused as ApiError).body?.error).toBe("this bot is working in channel Launch");
   });
 
+  it("words a lockout's end on this device's clock, not the server's", () => {
+    const until = new Date(2026, 10, 7, 11, 19).getTime();
+    expect(serverErrorText({ errorKey: "serverError.pair.tooMany", errorParams: { seconds: 300, until, time: "03:19 UTC" } }, "fallback"))
+      .toBe("Too many wrong codes. Try again at 11:19 AM.");
+  });
+
   it("reaches a member saving a login on a team, where only an admin may", async () => {
     setLocale("pt-br");
     vi.stubGlobal("fetch", respond(403, {

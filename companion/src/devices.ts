@@ -1,11 +1,12 @@
 // Paired phones. The harness trusts loopback, so off loopback a device token is
 // the credential. Only its SHA-256 is stored: a stolen devices.json is not a
 // stolen fleet.
-import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { DATA_DIR, ensureDataDir, writeFileAtomic } from "./state.ts";
+import { generatePairingCode, isOldPairingCode, normalizePairingCode } from "./pairing-code.ts";
 
 export interface DeviceRecord {
   id: string;
@@ -31,8 +32,8 @@ export type DeviceRoutes = "any" | "local";
 export type PublicDevice = Omit<DeviceRecord, "tokenHash">;
 
 /** `token` rides in the QR, has enough entropy to stand alone and is never
- * persisted. `code` is six digits, so it lives two minutes and dies after a
- * few wrong guesses. Redeeming either burns both. */
+ * persisted. `code` is the 12-character pairing code a person types; it dies
+ * after a few wrong guesses. Redeeming either burns both. */
 export interface PairingWindow {
   code: string;
   token: string;
@@ -51,7 +52,7 @@ interface PairingReplay {
 }
 
 const DEVICES_FILE = join(DATA_DIR, "devices.json");
-export const PAIRING_TTL_MS = 120_000;
+export const PAIRING_TTL_MS = 10 * 60_000;
 export const MAX_PAIRING_ATTEMPTS = 5;
 export const MAX_DEVICES = 20;
 /** lastSeen is a UI nicety, not an audit log. */
@@ -227,10 +228,9 @@ export class DeviceRegistry {
     return next;
   }
 
-  /** `randomInt`, not `Math.random`: the code is a credential. */
   private newWindow(): PairingWindow {
     return {
-      code: String(randomInt(0, 1_000_000)).padStart(6, "0"),
+      code: generatePairingCode(),
       token: `omb_pair_${randomBytes(32).toString("base64url")}`,
       expiresAt: Date.now() + PAIRING_TTL_MS,
       attemptsLeft: MAX_PAIRING_ATTEMPTS,
@@ -295,10 +295,12 @@ export class DeviceRegistry {
     }
 
     const windows = this.pairingWindows();
-    const window = windows.find((candidate) => sameCredential(candidate.code, presented) || sameCredential(candidate.token, presented));
+    const typed = normalizePairingCode(presented);
+    const window = windows.find((candidate) => sameCredential(candidate.code, typed) || sameCredential(candidate.token, presented));
     if (windows.length === 0) return { error: "no pairing is in progress — open Phone settings on your computer" };
+    if (!window && isOldPairingCode(presented)) return { error: "Update the MausBot app to pair." };
     if (!window) {
-      // Every open window pays for a wrong guess: without burning them, six digits is seconds of guessing.
+      // Every open window pays for a wrong guess.
       for (const open of windows) open.attemptsLeft -= 1;
       if (windows.some((open) => open.attemptsLeft <= 0)) {
         this.closePairing();
@@ -348,15 +350,17 @@ export class DeviceRegistry {
     const { tokenHash: _tokenHash, ...pub } = device;
     const result = { device: pub, token };
     if (requestId) {
+      // Never past the unconfirmed drop: a replay then would hand out a token for a device already gone.
+      const expiresAt = Math.min(window.expiresAt, Date.now() + UNCONFIRMED_DEVICE_MS);
       this.replay = {
         requestId,
         credentialHash: sha256(presented),
-        expiresAt: window.expiresAt,
+        expiresAt,
         result,
       };
       this.replayExpiryTimer = setTimeout(
         () => this.clearReplay(),
-        Math.max(0, window.expiresAt - Date.now()),
+        Math.max(0, expiresAt - Date.now()),
       );
       this.replayExpiryTimer.unref?.();
     }

@@ -11,10 +11,10 @@ describe("user errors", () => {
   });
 
   it("fills in the English and keeps the key and params beside it", () => {
-    expect(userError("serverError.pair.tooMany", { seconds: 42 })).toEqual({
-      error: "too many failed pairing attempts from your address; try again in 42s",
+    expect(userError("serverError.pair.tooMany", { time: "11:19 UTC" })).toEqual({
+      error: "Too many wrong codes. Try again at 11:19 UTC.",
       errorKey: "serverError.pair.tooMany",
-      errorParams: { seconds: 42 },
+      errorParams: { time: "11:19 UTC" },
     });
     expect(userError("serverError.pair.codeWrong")).toEqual({
       error: "pairing code is wrong or has expired; create a new one on the server",

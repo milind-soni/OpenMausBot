@@ -12,6 +12,8 @@ export interface EmailSignInRouteDeps {
   sessions: Pick<SessionRegistry, "attemptAllowed" | "noteFailure" | "clearFailures" | "issue">;
   cookieName: string;
   environment(): unknown;
+  /** The host a sign-in code from here is for: never one a request merely claims on the open internet. */
+  target(req: IncomingMessage): string | null;
 }
 
 export async function emailSignInRoute(deps: EmailSignInRouteDeps, req: IncomingMessage, res: ServerResponse, path: string, method: string): Promise<boolean> {
@@ -39,7 +41,7 @@ export async function emailSignInRoute(deps: EmailSignInRouteDeps, req: Incoming
   const body = await readBody(req);
   const email = typeof body?.email === "string" ? body.email : "";
   if (path === "/api/auth/email/start") {
-    const started = await emailSignIn.start(email);
+    const started = await emailSignIn.start(email, deps.target(req));
     if (!started.ok) {
       if (started.status === 403) sessions.noteFailure(source);
       json(res, started.status, refusalBody(started));

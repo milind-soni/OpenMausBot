@@ -20,7 +20,9 @@ import {
   Wifi,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
+import { formatPairingCode } from "../../shared/pairing-code";
 import { phonePairingLink } from "../../shared/pairing-link";
+import { codeUntil } from "@/lib/pairing-time";
 import {
   companionPairingAddressText,
   companionPairingRoute,
@@ -132,7 +134,6 @@ export interface PhoneSetupController {
   error: string | null;
   accountError: string | null;
   pairingLink: string | null;
-  secondsLeft: number;
   address: string | undefined;
   pairingPort: number;
   addressText: string | undefined;
@@ -172,7 +173,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
   const [setupTimedOut, setSetupTimedOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [accountError, setAccountError] = useState<string | null>(null);
-  const [now, setNow] = useState(() => Date.now());
+  const [, setNow] = useState(() => Date.now());
   const [flow, dispatchFlow] = useReducer(phoneSetupReducer, initialPhoneSetupFlowState);
   const emailEdited = useRef(false);
   const pairingUiOwner = useRef<PhonePairingAttemptLock>({ generation: null });
@@ -740,8 +741,8 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
   );
   const pairingLink = useMemo(() => {
     if (!state?.pairing || !pairingRoute) return null;
-    // An encrypted-connection QR carries no six-digit code: phones pair by the QR or a pasted link only.
-    return phonePairingLink({ ...pairingRoute, code: state.e2e?.enabled ? undefined : state.pairing.code, token: state.pairing.token,
+    // The QR carries the credential, never the typed code: older phone apps refuse a link whose code is not six digits.
+    return phonePairingLink({ ...pairingRoute, token: state.pairing.token,
       name: state.discovery?.name, secretPublicKey: state.secretPublicKey, e2e: state.e2e?.descriptor });
   }, [pairingRoute, state]);
 
@@ -786,9 +787,6 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
     error,
     accountError,
     pairingLink,
-    secondsLeft: state?.pairing
-      ? Math.max(0, Math.round((state.pairing.expiresAt - now) / 1000))
-      : 0,
     address: pairingRoute?.address,
     pairingPort: pairingRoute?.port ?? state?.port ?? 8810,
     addressText: pairingRoute ? companionPairingAddressText(pairingRoute) : undefined,
@@ -1065,12 +1063,12 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
         <div className="mt-4 w-full max-w-[320px] rounded-xl bg-inset px-4 py-3 text-[13px] text-ink-secondary">
           <div>{t("phone.code.manualIntro")}</div>
           <div className="mt-2 font-mono text-[22px] tracking-[0.25em] text-ink">
-            {c.state.pairing.code}
+            {formatPairingCode(c.state.pairing.code)}
           </div>
         </div>
       )}
       {!c.pairingExpired && manualCodeMode === "details" && c.state?.pairing && (
-        <p className="mt-3 text-[12px] text-ink-secondary">{t("phone.code.expiresIn", { seconds: c.secondsLeft })}</p>
+        <p className="mt-3 text-[12px] text-ink-secondary">{codeUntil(c.state.pairing.expiresAt)}</p>
       )}
       {!c.pairingExpired && c.localFallback && c.state?.publicNetwork && (
         <p role="note" className="mt-3 w-full max-w-[390px] rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-left text-[12px] leading-relaxed text-warning">
@@ -1087,7 +1085,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
           <summary className="cursor-pointer text-[12px] text-ink-secondary">{t("phone.code.trouble")}</summary>
           <div className="mt-3 text-[12px] text-ink-secondary">
             {t("phone.code.manual")}
-            <div className="mt-1 font-mono text-[22px] tracking-[0.25em] text-ink">{c.state.pairing.code}</div>
+            <div className="mt-1 font-mono text-[22px] tracking-[0.25em] text-ink">{formatPairingCode(c.state.pairing.code)}</div>
             {c.address && (
               <div className="mt-3">
                 <ConnectionDetail label={t("phone.code.address")} value={c.addressText ?? `${c.address}:${c.pairingPort}`} />

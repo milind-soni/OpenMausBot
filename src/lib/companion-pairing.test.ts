@@ -37,7 +37,7 @@ describe("companionPairingRoute", () => {
       hosts: ["device.openmausbot.com"],
       endpoints: [endpoints[0]],
     });
-    const link = phonePairingLink({ ...route!, code: "004209", token });
+    const link = phonePairingLink({ ...route!, token });
     const url = new URL(link!);
     expect(url.searchParams.get("address")).toBe("device.openmausbot.com:443");
     expect(url.searchParams.get("hosts")).toBe("device.openmausbot.com");
@@ -154,7 +154,7 @@ describe("companionPairingRoute", () => {
       "192.168.1.42",
       "openmausbot-aa.local",
     ]);
-    const link = phonePairingLink({ ...route!, code: "004209", token });
+    const link = phonePairingLink({ ...route!, token });
     expect(new URL(link!).searchParams.get("address")).toBe("192.168.1.42:8810");
     expect(decodedEndpoints(link!)).toEqual([
       { url: "http://192.168.1.42:8810", kind: "lan", priority: 0 },
@@ -182,7 +182,7 @@ describe("companionPairingRoute", () => {
       port: 8810,
       hosts: ["mac.tail1234.ts.net"],
     });
-    const link = phonePairingLink({ ...route!, code: "004209", token });
+    const link = phonePairingLink({ ...route!, token });
     expect(decodedEndpoints(link!)).toEqual([
       { url: "http://mac.tail1234.ts.net:8810", kind: "tailnet", priority: 0 },
       { url: "https://device.openmausbot.com", kind: "hosted", priority: 100 },

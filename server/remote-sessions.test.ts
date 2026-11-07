@@ -569,7 +569,7 @@ describe("pairing", () => {
     const opened = await pairingCode();
     const locked = await call("/api/auth/pair", { method: "POST", headers: remote("10.0.0.99"), body: JSON.stringify({ code: opened.code }) });
     expect(locked.status).toBe(429);
-    expect(locked.body.error).toMatch(/from your address; try again in \d+s/);
+    expect(locked.body.error).toMatch(/^Too many wrong codes\. Try again at \d{2}:\d{2} UTC\.$/);
     expect((await call("/api/auth/pair", { method: "POST", headers: remote("10.0.0.100"), body: JSON.stringify({ code: opened.code }) })).status).toBe(200);
     expect(stderr).toMatch(/pairing refused from 10\.0\.0\.99/);
   });

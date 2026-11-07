@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { lastSeen, minutesLeft } from "../lib/pairing-time";
+import { codeUntil, lastSeen } from "../lib/pairing-time";
 import { canPairDevices, pairingBlockedReason, ServerPairingCard, shownDevices } from "./ServerPairingCard";
 
 describe("pairing devices from a hosted server's settings", () => {
@@ -15,10 +15,8 @@ describe("pairing devices from a hosted server's settings", () => {
     expect(canPairDevices(null)).toBe(false);
   });
 
-  it("counts down whole minutes and describes when a device was last seen", () => {
-    expect(minutesLeft(60_000 * 5 + 1, 0)).toBe(6);
-    expect(minutesLeft(60_000 * 5, 0)).toBe(5);
-    expect(minutesLeft(0, 1)).toBe(0);
+  it("says until when a code works as a clock time, and when a device was last seen", () => {
+    expect(codeUntil(new Date(2026, 10, 7, 11, 14).getTime())).toBe("Works once, until 11:14 AM");
     expect(lastSeen(1_000, 30_000)).toBe("just now");
     expect(lastSeen(0, 3 * 60_000)).toBe("3 min ago");
     expect(lastSeen(0, 5 * 3_600_000)).toBe("5 h ago");
