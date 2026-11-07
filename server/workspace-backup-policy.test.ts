@@ -61,13 +61,6 @@ describe("workspace backup data boundary", () => {
     for (const path of ["logins.json", "logins.md", "workspaces/bot/logins.json.enc", "attachments/logins-key"]) expect(excludedWorkspaceAuthPath(path)).toBe(false);
   });
 
-  it("never exports or restores the HighLevel connection or its key", () => {
-    for (const path of ["highlevel.json.enc", "highlevel-key", "highlevel.json.enc.4242.05a7b3e0-1234-4abc-8def-0123456789ab.tmp", "highlevel-key.12.05a7b3e0-1234.tmp"]) {
-      expect(excludedWorkspaceAuthPath(path)).toBe(true);
-    }
-    for (const path of ["highlevel.md", "workspaces/bot/highlevel.json.enc", "attachments/highlevel-key"]) expect(excludedWorkspaceAuthPath(path)).toBe(false);
-  });
-
   it("never exports or restores a Cloud home's connected-apps installation", () => {
     for (const path of ["connected-apps-installation.json", "connected-apps-installation.json.4242.05a7b3e0-1234-4abc-8def-0123456789ab.tmp"]) {
       expect(excludedWorkspaceAuthPath(path)).toBe(true);

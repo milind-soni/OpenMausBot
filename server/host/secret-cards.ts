@@ -21,6 +21,7 @@ import {
   type SecretDelivery,
 } from "../../shared/credential-request.ts";
 import { EMAIL_CREDENTIAL, type EmailConnectAnswer, type EmailConnectRequest, type EmailServerFields } from "../../shared/email.ts";
+import { EMAIL_CANT_SEND_TEXT } from "../email/instructions.ts";
 import type { SecretRequestCardData } from "../../shared/wire.ts";
 import type { AppConfig } from "../config.ts";
 import { perBotLocalVmTarget, poolLocalVmTarget, SHARED_LOCAL_VM_TARGET, VM_WORKSPACE_GUEST } from "../container-computer.ts";
@@ -72,11 +73,13 @@ export interface SecretCardsDeps {
   threadLanguage?(threadId: string): string | undefined;
   /** The Email connector the mailbox card saves to: connecting proves it reads a real header before anything is kept. */
   email?: {
-    connect(request: EmailConnectRequest): Promise<EmailConnectAnswer>;
+    connect(request: EmailConnectRequest, reading?: (imapHost: string) => void): Promise<EmailConnectAnswer>;
     /** Why a mailbox can't be connected here, if so. */
     refusal(): string | undefined;
     /** Already connected and working. */
     connected(address: string): boolean;
+    /** Why a connected mailbox can't send, if it can't. */
+    sendingProblem(address: string): string | undefined;
     /** The person's own address, the likeliest mailbox when the bot names none. */
     profileAddress(): string | undefined;
   };
@@ -113,18 +116,22 @@ function vmFileHome(botId: string, vm: string): SecretFileHome | null {
 }
 
 /** What the bot hears when the mailbox card settles; it never hears the password. */
-function emailUpdateText(secret: SecretRequestCardData, outcome: "provided" | "dismissed"): string {
-  return outcome === "provided"
-    ? `OpenMausBot secret update: the person connected the mailbox ${secret.address ?? "they typed"}. The email tools (EMAIL_LIST_MESSAGES, EMAIL_READ_MESSAGE, EMAIL_SEND_MESSAGE and others) are ready. Continue the task that paused for it.`
-    : "OpenMausBot secret update: the person chose not to connect a mailbox. Say briefly what you cannot do without it, and do not ask for the password in chat.";
+function emailUpdateText(secret: SecretRequestCardData, outcome: "provided" | "dismissed", sendingProblem: string | undefined): string {
+  if (outcome === "dismissed") return "OpenMausBot secret update: the person chose not to connect a mailbox. Say briefly what you cannot do without it, and do not ask for the password in chat.";
+  const address = secret.address ?? "they typed";
+  return sendingProblem
+    ? `OpenMausBot secret update: the person connected the mailbox ${address} for reading: EMAIL_LIST_MESSAGES, EMAIL_READ_MESSAGE and the other reading tools are ready. Sending from it doesn't work yet: ${sendingProblem} Only the person can fix that, under Outgoing server in Connected apps › Email. Continue the task as far as reading allows; don't try to send another way.`
+    : `OpenMausBot secret update: the person connected the mailbox ${address}. The email tools (EMAIL_LIST_MESSAGES, EMAIL_READ_MESSAGE, EMAIL_SEND_MESSAGE and others) are ready. Continue the task that paused for it.`;
 }
 
-const SERVER_FIELDS = ["imapHost", "imapPort", "smtpHost", "smtpPort", "username"] as const;
+const SERVER_FIELDS = ["imapHost", "imapPort", "smtpHost", "smtpPort", "smtpSecurity", "username", "smtpUsername", "smtpPassword"] as const;
 function emailServerFields(fields: Record<string, unknown>): EmailServerFields {
   const out: Record<string, unknown> = {};
   for (const name of SERVER_FIELDS) {
     const value = fields[name];
-    if ((name.endsWith("Port") && Number.isInteger(value)) || (!name.endsWith("Port") && typeof value === "string" && value.trim())) out[name] = value;
+    if (name === "smtpSecurity") { if (value === "tls" || value === "starttls") out[name] = value; }
+    else if (name === "smtpPassword") { if (typeof value === "string" && value && Buffer.byteLength(value) <= SECRET_VALUE_MAX_BYTES) out[name] = value; }
+    else if ((name.endsWith("Port") && Number.isInteger(value)) || (!name.endsWith("Port") && typeof value === "string" && value.trim())) out[name] = value;
   }
   return out as EmailServerFields;
 }
@@ -155,7 +162,7 @@ export function createSecretCards(deps: SecretCardsDeps) {
 
   function updateText(messageId: string, secret: SecretRequestCardData, outcome: "provided" | "dismissed"): string {
     if (!custom(secret)) return credentialUpdateText(secret.label, outcome);
-    if (secret.delivery === "email") return emailUpdateText(secret, outcome);
+    if (secret.delivery === "email") return emailUpdateText(secret, outcome, secret.address ? deps.email?.sendingProblem(secret.address) : undefined);
     return outcome === "provided"
       ? `OpenMausBot secret update: ${savedSecretText(secret.label, vault.savedFor(messageId))} Continue the task that paused for it.`
       : `OpenMausBot secret update: the person declined to provide ${secret.label}. Continue without it if you can, or say briefly what you cannot do. Do not ask for it in chat.`;
@@ -242,11 +249,18 @@ export function createSecretCards(deps: SecretCardsDeps) {
     const address = typeof fields.address === "string" && fields.address.trim() ? fields.address.trim() : secret.address ?? "";
     if (!address || !password.trim() || Buffer.byteLength(password) > SECRET_VALUE_MAX_BYTES) return { status: 400, body: userError("serverError.secret.emailAndPassword") };
     if (!deps.email) return { status: 409, body: userError("serverError.secret.emailUnavailable") };
-    const answer = await deps.email.connect({ address, password, ...emailServerFields(fields) });
-    if (!answer.ok) return { status: 400, body: { error: answer.error, ...(answer.needsServer ? { needsServer: true } : {}) } };
+    const reading = (emailReading: string) => {
+      const card = secretMessage(botId, threadId, messageId);
+      if (card?.secret && card.secret.savedAt === undefined) store.patchMessage(threadId, message.id, { secret: { ...card.secret, emailReading } });
+    };
+    const answer = await deps.email.connect({ address, password, ...emailServerFields(fields) }, reading);
     const current = secretMessage(botId, threadId, messageId);
+    if (!answer.ok) {
+      if (current?.secret?.emailReading) { const { emailReading: _reading, ...rest } = current.secret; store.patchMessage(threadId, message.id, { secret: rest }); }
+      return { status: 400, body: { error: answer.error, ...(answer.needsServer ? { needsServer: true } : {}), ...(answer.signIn ? { signIn: answer.signIn } : {}) } };
+    }
     if (!current?.secret) return { status: 409, body: userError("serverError.secret.unavailableLower") };
-    store.patchMessage(threadId, message.id, { secret: { ...current.secret, address: answer.account.address, savedAt: Date.now() } });
+    store.patchMessage(threadId, message.id, { secret: { ...current.secret, address: answer.account.address, emailReading: answer.account.imapHost, savedAt: Date.now() } });
     if (!resumeSecretCard(botId, threadId, message.id, "provided")) return { status: 409, body: userError("serverError.secret.unavailableLower") };
     return { status: 200, body: { ...currentSecretState(botId, threadId, message.id), ...(answer.sending.ok ? {} : { sendingProblem: answer.sending.problem }) } };
   }
@@ -456,7 +470,10 @@ export function createSecretCards(deps: SecretCardsDeps) {
     const refusal = deps.email ? deps.email.refusal() : "Email can't be connected here.";
     if (refusal || !deps.email) return { status: 403, body: { error: refusal } };
     const named = typeof body.address === "string" && /^[^\s@]+@[^\s@]+$/u.test(body.address.trim()) ? body.address.trim() : undefined;
-    if (named && deps.email.connected(named)) return { status: 200, body: { alreadyConfigured: true, label: named } };
+    if (named && deps.email.connected(named)) {
+      const sending = deps.email.sendingProblem(named);
+      return { status: 200, body: { alreadyConfigured: true, label: named, text: sending ? `${named} is connected for reading. ${EMAIL_CANT_SEND_TEXT(named, sending)}` : `${named} is already connected. Use the email tools.` } };
+    }
     const address = named ?? deps.email.profileAddress();
     const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, CUSTOM_SECRET_REASON_MAX) : "";
     const language = deps.threadLanguage?.(threadId);

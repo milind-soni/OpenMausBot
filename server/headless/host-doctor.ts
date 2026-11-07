@@ -1,5 +1,6 @@
 // `doctor --host`: can this Linux machine run the server and the bots' sandbox? It only looks: files under /proc and /sys,
-// version queries to docker, podman and timedatectl, the sockets already listening, and one HEAD request for the time.
+// version queries to docker, podman and timedatectl, the sockets already listening, and one HEAD request for the time. On
+// a server that runs the MausBot connector it also asks that for its own checks, which start one throwaway box probe.
 import { execFile } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statfsSync } from "node:fs";
 import { arch, cpus, homedir, release, totalmem } from "node:os";
@@ -91,14 +92,50 @@ async function containerCheck(probe: HostProbe): Promise<HostCheck> {
   return fail("containers", "Neither Docker nor Podman is installed", "sudo apt-get install -y docker.io   (or podman)");
 }
 
-function userNamespaceCheck(probe: HostProbe): HostCheck {
+/** What the MausBot connector on this server says of it, when one runs there: its own checks (connector/src/host.ts). */
+export interface ConnectorReport {
+  checks: { id: string; ok: boolean; warning?: boolean; fix?: string }[];
+}
+
+const CONNECTOR = "mausbot-connector";
+
+/** Asks the connector's container, as root may; null where none runs or it cannot be asked. */
+export async function connectorReport(probe: HostProbe): Promise<ConnectorReport | null> {
+  // `probe --json` exits 1 when a check fails, with the same one line.
+  const result = await probe.run("docker", ["exec", CONNECTOR, CONNECTOR, "probe", "--json"]);
+  let parsed: unknown;
+  try { parsed = JSON.parse(result.stdout.trim().split("\n").at(-1) ?? ""); } catch { return null; }
+  const checks = (parsed as { checks?: unknown } | null)?.checks;
+  if (!Array.isArray(checks)) return null;
+  return {
+    checks: checks.filter((check): check is ConnectorReport["checks"][number] =>
+      typeof check === "object" && check !== null && typeof check.id === "string" && typeof check.ok === "boolean"),
+  };
+}
+
+function connectorChecks(report: ConnectorReport | null): HostCheck[] {
+  if (!report) return [];
+  const problems = report.checks.filter((check) => !check.ok || check.warning);
+  if (!problems.length) return [ok("connector", `MausBot connector: its ${report.checks.length} checks pass, the bots' box among them`)];
+  return problems.map((check) => check.ok
+    ? warn(`connector-${check.id}`, `MausBot connector: ${check.id}`, check.fix)
+    : fail(`connector-${check.id}`, `MausBot connector: the ${check.id} check fails`, check.fix ?? "run MausBot's install command again"));
+}
+
+function userNamespaceCheck(probe: HostProbe, connector: ConnectorReport | null): HostCheck {
   const sysctl = (name: string) => probe.read(`/proc/sys/${name.replaceAll(".", "/")}`)?.trim();
   const keep = (setting: string) => `sudo sysctl -w ${setting}   (and put it in /etc/sysctl.d/ to keep it after a reboot)`;
   if (!probe.list("/proc/self/ns").includes("user")) {
     return fail("userns", "Bot sandbox: this kernel has no user namespaces", "use a stock Ubuntu or Debian kernel (CONFIG_USER_NS)");
   }
   if (sysctl("kernel.apparmor_restrict_unprivileged_userns") === "1") {
-    return fail("userns", "Bot sandbox: AppArmor blocks unprivileged user namespaces", keep("kernel.apparmor_restrict_unprivileged_userns=0"));
+    // A MausBot home runs under its own AppArmor profile (omb-home-narrow), which allows them for that container alone.
+    if (connector?.checks.some((check) => check.id === "box" && check.ok)) {
+      return ok("userns", "Unprivileged user namespaces: AppArmor restricts them here, and MausBot's home has them through its own AppArmor profile");
+    }
+    return fail("userns", "Bot sandbox: AppArmor blocks unprivileged user namespaces", connector
+      ? "run MausBot's install command again: it loads the home's own AppArmor profile, so this server-wide switch can stay on"
+      : keep("kernel.apparmor_restrict_unprivileged_userns=0"));
   }
   if (sysctl("kernel.unprivileged_userns_clone") === "0") {
     return fail("userns", "Bot sandbox: unprivileged user namespaces are turned off", keep("kernel.unprivileged_userns_clone=1"));
@@ -207,9 +244,9 @@ export async function checkHost(probe: HostProbe, options: HostOptions): Promise
     const name = probe.platform === "darwin" ? "macOS" : probe.platform === "win32" ? "Windows" : probe.platform;
     return [fail("platform", `doctor --host checks a Linux server, and this is ${name}`, "run it on the Linux server that will host OpenMausBot")];
   }
-  const [containers, ports, clock] = await Promise.all([containerCheck(probe), portChecks(probe, options), clockCheck(probe)]);
-  return [systemCheck(probe), archCheck(probe), containers, userNamespaceCheck(probe), seccompCheck(probe), cgroupCheck(probe),
-    diskCheck(probe, options.dataDir), encryptedCheck(probe, options.dataDir), sizeCheck(probe), ...ports, clock];
+  const [containers, ports, clock, connector] = await Promise.all([containerCheck(probe), portChecks(probe, options), clockCheck(probe), connectorReport(probe)]);
+  return [systemCheck(probe), archCheck(probe), containers, userNamespaceCheck(probe, connector), seccompCheck(probe), cgroupCheck(probe),
+    diskCheck(probe, options.dataDir), encryptedCheck(probe, options.dataDir), sizeCheck(probe), ...ports, clock, ...connectorChecks(connector)];
 }
 
 export function hostReport(checks: readonly HostCheck[]): { result: Record<string, unknown>; exitCode: number; human: string[] } {

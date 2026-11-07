@@ -122,9 +122,18 @@ describe("recordMcpAppCall", () => {
       bot: { id: bot.id, name: bot.name, color: "blue" }, threadId: THREAD, input: { tool: "mcp_app" } })).toEqual({ ok: false, status: 400, error: "MCP apps are not available on this computer." });
   }, 30_000);
 
-  it("writes no row for a room, an unmounted server, one outside the bot's scope, or one whose apps are off (rule 17)", async () => {
+  it("shows a room member's app in the room as that bot's row, view-only for everyone", async () => {
+    const { record, row, apps } = setup();
+    expect(await record(REPORT, ROOM)).toEqual({ ok: true, messageId: "m1" });
+    expect(row("m1", ROOM)).toMatchObject({ role: "bot", kind: "app", from: { botId: "bot-scout", name: "Scout", color: "blue" }, app: { source: "mcp", title: "Show board" } });
+    const doc = apps.appDocument(ROOM, "m1")!;
+    expect(doc.srcdoc).toContain("<h1>Fake board</h1>");
+    expect(doc).toMatchObject({ room: true, toolResult: REPORT.result, can: { serverTools: false, serverResources: false, message: false, modelContext: false, openLinks: true } });
+    expect(doc).not.toHaveProperty("blocked");
+  }, 30_000);
+
+  it("writes no row for an unmounted server, one outside the bot's scope, or one whose apps are off (rule 17)", async () => {
     const base = setup();
-    expect(await base.record(REPORT, ROOM)).toMatchObject({ ok: false, status: 409 });
     expect(await base.record({ ...REPORT, server: "elsewhere" })).toMatchObject({ ok: false, status: 404 });
     expect(await base.record({ ...REPORT, definition: { ...REPORT.definition, _meta: {} } })).toMatchObject({ ok: false, status: 400 });
     expect(await base.record({ ...REPORT, result: { content: "x" } })).toMatchObject({ ok: false, status: 400 });

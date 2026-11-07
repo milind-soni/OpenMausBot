@@ -4,8 +4,8 @@
 # starts the connector and enrols; then start (the box passes every check), update to another digest, an unclean kill
 # started again, an update forced to fail rolled back (image and data), a job from root on the server, the audit log of
 # all of it, and uninstall keeping the data and the log.
-# Nothing reaches a production service: the home's connected-apps broker points at a closed loopback port and its
-# HighLevel relay is off; the Admin is the fake one on loopback.
+# Nothing reaches a production service: the home's connected-apps broker points at a closed loopback port; the Admin is
+# the fake one on loopback.
 #   OUT=<evidence folder> bash connector/e2e/run.sh
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -71,18 +71,18 @@ control state >/dev/null || fail "the fake Admin did not start: $(cat "$OUT/admi
 
 step "install.sh with the code, as a person runs it"
 sudo env "${INSTALL_ENV[@]}" sh "$ROOT/connector/install.sh" "$CODE" | tee "$OUT/install.txt"
-[ "$(tail -n 1 "$OUT/install.txt")" = "Connected. Your server shows up in MausBot in a minute." ] || fail "install.sh did not end connected"
+[ "$(tail -n 1 "$OUT/install.txt")" = "Connected. Your server shows up in MausBot in a minute, for your team's Owner to accept." ] || fail "install.sh did not end connected"
 state=$(control state)
 expect '.connected and (.servers | length) == 1' "$state" "enrolled once"
 expect '.servers[0].host | .arch == "x86_64" and .apparmor and .userns and .cpus >= 2 and .diskGb >= 20 and (.docker | length) > 0' "$state" "enrolled with the host's facts"
-expect '.servers[0].connector.protocol == 1 and .servers[0].connector.image == "mausbot-connector:e2e"' "$state" "enrolled with its identity"
+expect '.servers[0].connector.protocol == 2 and .servers[0].connector.image == "mausbot-connector:e2e" and .servers[0].state == "pending"' "$state" "enrolled with its identity, waiting to be accepted"
 state_dir=/var/lib/docker/volumes/mausbot-connector/_data
 [ "$(sudo stat -c %a "$state_dir")" = 700 ] || fail "the connector's state folder is not root's alone"
-[ "$(sudo stat -c %a "$state_dir/agent.json")" = 600 ] || fail "the agent token is not root's alone"
+[ "$(sudo stat -c %a "$state_dir/agent.json")" = 600 ] || fail "the box key is not root's alone"
 
 step "running it again repairs and stays connected, without a new code"
 sudo env "${INSTALL_ENV[@]}" sh "$ROOT/connector/install.sh" | tee "$OUT/repair.txt"
-[ "$(tail -n 1 "$OUT/repair.txt")" = "Connected. Your server shows up in MausBot in a minute." ] || fail "the repair did not end connected"
+[ "$(tail -n 1 "$OUT/repair.txt")" = "Connected. Your server shows up in MausBot in a minute, for your team's Owner to accept." ] || fail "the repair did not end connected"
 expect '(.servers | length) == 1 and .connections >= 2 and .connected' "$(control state)" "the same server, connected again"
 
 step "a heartbeat with every check passing"
@@ -95,8 +95,16 @@ expect '.heartbeats >= 1 and .lastHeartbeat.host.arch == "x86_64" and ([.lastHea
 ENV_JSON=$(jq -cn --arg secret "$SECRET" '{
   OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "e2e-connector-home", OMB_CLOUD_ADMIN_URL: "https://admin.e2e.invalid",
   OMB_PUBLIC_URL: "https://home.e2e.invalid", OMB_CLOUD_BOOTSTRAP_SECRET: $secret,
-  OMB_COMPOSIO_BROKER_URL: "http://127.0.0.1:9", OMB_HIGHLEVEL_RELAY_URL: "off"
+  OMB_COMPOSIO_BROKER_URL: "http://127.0.0.1:9"
 }')
+
+step "the team's Owner accepts the server; until then it takes no job that changes anything"
+expect '.ok == false and .error.code == "pending_box"' "$(job stop '{}')" "a stop before the Owner accepted"
+curl -sS --max-time 30 -X POST "$ADMIN/control/accept" >/dev/null
+for _ in $(seq 1 30); do
+  if docker exec mausbot-connector mausbot-connector status | jq -e '.accepted' >/dev/null; then break; fi
+  sleep 1
+done
 
 step "start: the home runs with the bot box's settings, and the box passes every check"
 reply=$(job start "$(jq -cn --arg image "$HOME_A" --argjson env "$ENV_JSON" '{image: $image, env: $env}')" start-1)
@@ -112,7 +120,6 @@ expect '.host | .Init and .ShmSize == 536870912 and (.MaskedPaths // [] | length
 expect '.host | (.CapDrop | map(sub("^CAP_"; ""))) == ["ALL"] and (.CapAdd | map(sub("^CAP_"; "")) | sort) == ["CHOWN", "KILL", "SETGID", "SETUID"]' "$settings" "the home's capabilities"
 expect '.host | .PortBindings["8080/tcp"] == [{"HostIp": "127.0.0.1", "HostPort": "8080"}] and (.SecurityOpt | any(startswith("seccomp="))) and (.SecurityOpt | any(. == "no-new-privileges=true" or . == "no-new-privileges"))' "$settings" "the home's port and seccomp"
 docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' mausbot-home | grep -qx "OMB_COMPOSIO_BROKER_URL=http://127.0.0.1:9" || fail "the home could reach the production connected-apps broker"
-docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' mausbot-home | grep -qx "OMB_HIGHLEVEL_RELAY_URL=off" || fail "the home could reach the production HighLevel relay"
 docker exec -u maus mausbot-home sh -c 'echo kept > /data/e2e-marker'
 
 step "update to another digest: a safety copy, a swap, and the new image's health"
@@ -170,7 +177,7 @@ expect '.result.home.health.box.checks == "32/32"' "$status" "the box after the 
 step "nothing secret in the connector's log"
 docker logs mausbot-connector >"$OUT/connector.log" 2>&1
 if grep -qF "$SECRET" "$OUT/connector.log"; then fail "the bootstrap secret reached the connector's log"; fi
-if grep -q "ombs_" "$OUT/connector.log"; then fail "the agent token reached the connector's log"; fi
+if grep -qF "$(sudo jq -r .privateKey "$state_dir/agent.json")" "$OUT/connector.log"; then fail "the box's private key reached the connector's log"; fi
 
 step "the audit log: every job, its steps and its result, each line linked to the one before, nothing secret"
 local_status=$(docker exec mausbot-connector mausbot-connector job status '{}')

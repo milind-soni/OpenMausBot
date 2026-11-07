@@ -211,6 +211,10 @@ function configureE2E(message: Record<string, unknown>): void {
 const ADMISSION_SETTLE_MS = 300;
 devices.onChange(() => setTimeout(() => relay?.refreshAdmission(), ADMISSION_SETTLE_MS).unref());
 e2e.onAdmissionChange(() => relay?.refreshAdmission());
+devices.onDropped((deviceId) => {
+  e2e.closeDevice(deviceId);
+  console.log("companion: dropped a paired device its phone never used");
+});
 
 const control = createControlServer({
   devices,
@@ -238,9 +242,17 @@ const control = createControlServer({
   refreshTailscale: () => refreshTailnetName(),
   e2e: () => ({ enabled: e2e.enabled, relay: relay?.status ?? "off", node: relay?.node ?? null, descriptor: e2e.descriptor(null) }),
   liveRoutes: () => e2e.routes(),
+  // The phone hears where it may connect from inside its session first. Narrowed, the relay keeps it a moment so that
+  // lands, then refuses it (4404) and its relay sessions close; direct ones stay. Widened, it is admitted before it hears.
   routesChanged: (deviceId, routes) => {
-    relay?.refreshAdmission();
-    if (routes === "local") e2e.closeDevice(deviceId, CLOSE.normal, "relay");
+    if (routes === "any") {
+      relay?.refreshAdmission();
+      proxy.sendEndpoints(deviceId);
+      return;
+    }
+    const held = e2e.holdAdmission(deviceId, ADMISSION_SETTLE_MS);
+    proxy.sendEndpoints(deviceId);
+    void held.then(() => e2e.closeDevice(deviceId, CLOSE.normal, "relay"));
   },
   setRelay: (body) => {
     const config = parseRelayConfig(body);

@@ -280,7 +280,7 @@ describe("WaitManager", () => {
     await h.create({ kind: "url_contains", url: "https://x.test/", text: "shipped" });
     const idle = () => false;
     const power = createCloudPower({ dataDir: dirname(h.file), now: h.now, broadcast: () => {}, probes: {
-      turn: idle, run: idle, liveCall: idle, computer: idle, maintenance: idle, nextDueAt: () => h.manager.nextWakeAt(),
+      turn: idle, run: idle, handoff: idle, liveCall: idle, computer: idle, maintenance: idle, nextDueAt: () => h.manager.nextWakeAt(),
     } });
     try {
       for (let left = CLOUD_IDLE_AWAKE_MS; left > 0; left -= 5_000) { h.advance(5_000); power.tick(); }

@@ -3,6 +3,8 @@ export function createLendingTarget<E extends { origin: string; cloud?: { id: st
   environments: () => E[];
   /** A server of the person's own their bots moved to, while home is there. */
   ownHome?: () => { origin: string; environmentId: string } | null;
+  /** The clean workspace: nothing is lent while its workspace for nobody who can reach the bots runs. */
+  clean?: { stranded(): boolean } | null;
 }): {
   /** The sign-in as `env`'s lending checks it: another Cloud of the person's own at its own address, else My Cloud. */
   cloud(env?: E | null): { status: string; accountId: string | null; origin: string | null } | null;

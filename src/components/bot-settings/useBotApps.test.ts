@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
 
+import type { EmailStatus } from "../../../shared/email";
 import type { ToolkitCard } from "../PluginsPanel";
 
 // PluginsPanel reads `window` when it loads; the src suite runs without one.
@@ -10,8 +11,8 @@ vi.hoisted(() => {
 afterAll(() => vi.unstubAllGlobals());
 
 const { botAppsFrom } = await import("./useBotApps");
-const highlevel = (state: "connected" | "signed-out" | "needs-sign-in" | "connecting" | "unavailable") =>
-  ({ state, ...(state === "connected" ? { kind: "oauth" as const, location: { id: "loc_1", name: "Example Profiles" } } : {}) });
+const email = (state: "connected" | "signed-out" | "unavailable") =>
+  ({ state, accounts: state === "connected" ? [{ address: "ana@example.test" }] : [] }) as unknown as EmailStatus;
 
 const card = (slug: string, label: string): ToolkitCard => ({ slug, label, blurb: `${label} things`, logo: `https://logo.test/${slug}.png`, domain: `${slug}.com` });
 const cards = new Map([card("gmail", "Gmail"), card("slack", "Slack")].map((entry) => [entry.slug, entry]));
@@ -53,27 +54,25 @@ describe("the connected apps as one bot sees them", () => {
     expect(off.map((app) => app.scope)).toEqual([null, null]);
   });
 
-  it("lists HighLevel, by name and in order, only while the server reports it connected", () => {
-    const connected = botAppsFrom({}, inventory({ slack: true, gmail: true }), cards, highlevel("connected"));
-    expect(connected.connectedSlugs).toEqual(["gmail", "highlevel", "slack"]);
-    const app = connected.apps.find((entry) => entry.slug === "highlevel")!;
-    expect(app).toMatchObject({ label: "HighLevel", blurb: "Also Growably and other HighLevel-based CRMs.", scope: "write", card: { logo: null, domain: "gohighlevel.com", label: "HighLevel" } });
-    for (const state of ["signed-out", "needs-sign-in", "connecting", "unavailable"] as const) {
-      expect(botAppsFrom({}, inventory({ gmail: true }), cards, highlevel(state)).connectedSlugs, state).toEqual(["gmail"]);
+  it("lists Email, by name and in order, only while the server reports a mailbox connected", () => {
+    const connected = botAppsFrom({}, inventory({ slack: true, gmail: true }), cards, email("connected"));
+    expect(connected.connectedSlugs).toEqual(["email", "gmail", "slack"]);
+    const app = connected.apps.find((entry) => entry.slug === "email")!;
+    expect(app).toMatchObject({ label: "Email", blurb: "Read and send mail on any mail host, with your address and password.", scope: "write", card: { logo: null, domain: null, label: "Email" } });
+    for (const state of ["signed-out", "unavailable"] as const) {
+      expect(botAppsFrom({}, inventory({ gmail: true }), cards, email(state)).connectedSlugs, state).toEqual(["gmail"]);
     }
     expect(botAppsFrom({}, inventory({ gmail: true }), cards, null).connectedSlugs).toEqual(["gmail"]);
-    expect(botAppsFrom({}, inventory({}), cards, highlevel("connected")).apps.map((entry) => entry.slug)).toEqual(["highlevel"]);
   });
 
-  it("reads HighLevel's switch from connectorScopes.apps.highlevel like any other app", () => {
+  it("reads Email's switch from connectorScopes.apps.email like any other app", () => {
     const connected = inventory({ gmail: true });
-    expect(botAppsFrom({ connectorScopes: { apps: { highlevel: "read" } } }, connected, cards, highlevel("connected")).apps.map((app) => [app.slug, app.scope]))
-      .toEqual([["gmail", null], ["highlevel", "read"]]);
-    expect(botAppsFrom({ connectorScopes: { apps: { gmail: "write" } } }, connected, cards, highlevel("connected")).apps.map((app) => app.scope)).toEqual(["write", null]);
-    expect(botAppsFrom({ composio: false }, connected, cards, highlevel("connected")).apps.map((app) => app.scope)).toEqual([null, null]);
+    expect(botAppsFrom({ connectorScopes: { apps: { email: "read" } } }, connected, cards, email("connected")).apps.map((app) => [app.slug, app.scope]))
+      .toEqual([["email", "read"], ["gmail", null]]);
+    expect(botAppsFrom({ composio: false }, connected, cards, email("connected")).apps.map((app) => app.scope)).toEqual([null, null]);
   });
 
-  it("still says it does not know when the account store is unreadable, even with HighLevel connected", () => {
-    expect(botAppsFrom({}, inventory({}, false), cards, highlevel("connected"))).toEqual({ phase: "unknown", apps: [], connectedSlugs: [] });
+  it("still says it does not know when the account store is unreadable, even with a mailbox connected", () => {
+    expect(botAppsFrom({}, inventory({}, false), cards, email("connected"))).toEqual({ phase: "unknown", apps: [], connectedSlugs: [] });
   });
 });

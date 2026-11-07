@@ -33,7 +33,6 @@ export function turnStdioMcpServers(turn: SendTurnInput, options: { schemaProfil
   add(OWN_APPS_SERVER, turn.integrations?.composioOwn);
   add("browser", turn.integrations?.browser);
   add("data", turn.integrations?.data);
-  add("highlevel", turn.integrations?.highlevel);
   add("email", turn.integrations?.email);
   add("device", turn.integrations?.device);
   // Cua connections expose Cua Driver's own MCP server; a cloud turn runs on its boat, so none is mounted.
@@ -85,7 +84,7 @@ type NameValue = Array<{ name: string; value: string }>;
 export type AcpMcpServer = { name: string; command: string; args: string[]; env: NameValue }
   | { type: "http"; name: string; url: string; headers: NameValue };
 
-const HARNESS_KINDS = ["browser", "computer", "data", "highlevel", "email", "device"] as const;
+const HARNESS_KINDS = ["browser", "computer", "data", "email", "device"] as const;
 
 /** OpenMausBot's own server behind a stdio proxy, as its HTTP endpoint on this server; null for any other server (the
  * person's, or one wrapped in a tool-selection gate). */

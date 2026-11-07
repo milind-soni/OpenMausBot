@@ -352,6 +352,12 @@ function harnessControlCheck(options: ProxyOptions) {
 export function createProxyHandler(options: ProxyOptions) {
   const viewers = new CompanionViewerRelay({ checkControl: harnessControlCheck(options) });
   const capabilityStreams = new Map<string, Set<() => void>>();
+  /** Each device's open `/api/events` streams, for the events the sidecar itself sends. */
+  const eventStreams = new Map<string, Set<(event: string) => void>>();
+  const endpointsFor = (deviceId: string | null) => {
+    const descriptor = options.e2eDescriptor?.(deviceId) ?? null;
+    return { ...endpointSnapshot(options), ...(descriptor ? { e2e: descriptor } : {}) };
+  };
   const handle = function handle(req: IncomingMessage, res: ServerResponse, listener: ProxyListener = "lan"): void {
     const target = requestTarget(req.url);
     if (!target) return sendJson(res, 400, { error: "invalid request target" });
@@ -457,8 +463,7 @@ export function createProxyHandler(options: ProxyOptions) {
     // Sidecar-owned state: answered here after the bearer and default-deny
     // checks, never sent to the harness.
     if (method === "GET" && path === "/api/companion/endpoints") {
-      const descriptor = options.e2eDescriptor?.(device?.id ?? null) ?? null;
-      return sendJson(res, 200, { ...endpointSnapshot(options), ...(descriptor ? { e2e: descriptor } : {}) });
+      return sendJson(res, 200, endpointsFor(device?.id ?? null));
     }
     if (path === "/api/companion/move") return answerMove(options, req, res, device ?? {});
 
@@ -562,9 +567,24 @@ export function createProxyHandler(options: ProxyOptions) {
             open.add(disconnect);
             capabilityStreams.set(capabilityOwner, open);
           }
+          // The scrubber hands on whole events only, so an event written here never splits one of the harness's.
+          const pushTo = tracksDeviceConnection && currentDevice?.id ? currentDevice.id : undefined;
+          const push = (event: string) => {
+            if (!res.destroyed && !res.writableEnded) res.write(event);
+          };
+          if (pushTo) {
+            const open = eventStreams.get(pushTo) ?? new Set<(event: string) => void>();
+            open.add(push);
+            eventStreams.set(pushTo, open);
+          }
           const release = () => {
             releaseConnection?.();
             releaseConnection = null;
+            if (pushTo) {
+              const open = eventStreams.get(pushTo);
+              open?.delete(push);
+              if (open && open.size === 0) eventStreams.delete(pushTo);
+            }
             if (capabilityOwner) {
               const open = capabilityStreams.get(capabilityOwner);
               open?.delete(disconnect);
@@ -756,6 +776,15 @@ export function createProxyHandler(options: ProxyOptions) {
     viewers.handleUpgrade(req, socket, head, device);
   };
   handle.closeViewers = (): void => viewers.closeAll();
+  /** The endpoint list again, as an event on every event stream the device holds: a phone hears a change of where it
+   * may connect from inside its session, before the relay acts on it. No `id:`, so the replay cursor stays put. */
+  handle.sendEndpoints = (deviceId: string): number => {
+    const open = eventStreams.get(deviceId);
+    if (!open) return 0;
+    const event = `data: ${JSON.stringify({ kind: "companion.endpoints", ...endpointsFor(deviceId) })}\n\n`;
+    for (const push of open) push(event);
+    return open.size;
+  };
   handle.disconnectDevice = (deviceId: string): void => {
     viewers.closeDevice(deviceId);
     // Revoking a capability closes the streams it already granted.

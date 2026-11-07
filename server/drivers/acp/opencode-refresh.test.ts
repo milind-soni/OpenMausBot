@@ -14,6 +14,7 @@ import {
   openCodeSpawnFingerprint,
   resetOpenCodeModelCache,
   type OpenCodeCatalogLoader,
+  type OpenCodeRefreshSchedule,
 } from "./opencode-go.ts";
 import { declareTypedOpenCodeModel } from "./opencode-typed-model.ts";
 
@@ -50,8 +51,13 @@ function home(cached: string, offered: string) {
 
 const ids = (catalog: ModelCatalog) => catalog.options.map((option) => option.id);
 
-async function start(name: string, environment: Record<string, string | undefined>, loader: OpenCodeCatalogLoader = discoverOpenCodeModels) {
-  const instance = await createOpenCodeDriver(loader).create({
+async function start(
+  name: string,
+  environment: Record<string, string | undefined>,
+  loader: OpenCodeCatalogLoader = discoverOpenCodeModels,
+  schedule: OpenCodeRefreshSchedule = {},
+) {
+  const instance = await createOpenCodeDriver(loader, schedule).create({
     instanceId: name, displayName: "OpenCode", enabled: true,
     config: { cli: FAKE_CLI, fullAuto: false, workspace: environment.HOME },
     environment: Object.fromEntries(Object.entries(environment).filter((entry): entry is [string, string] => entry[1] !== undefined)),
@@ -74,16 +80,48 @@ describe("OpenCode Refresh", () => {
     expect(ids(await discoverOpenCodeModels(env, FAKE_CLI, { refresh: true }))).toContain("venice/deepseek-v4-1-flash-uncensored");
   });
 
-  it("is what the picker's refresh runs, and only it", async () => {
+  it("is what the picker's refresh runs; a start within hours of the last one reads OpenCode's cache", async () => {
     const asked: Array<boolean | undefined> = [];
     const { env } = home(STALE, STALE);
     const { instance } = await start("opencode-refresh-asks", env, async (_environment, _cli, options) => {
       asked.push(options?.refresh);
       return { default: "opencode/big-pickle", options: [{ id: "opencode/big-pickle", label: "Zen · Big Pickle" }] };
-    });
+    }, { now: () => 0 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(asked.every((refresh) => refresh === false)).toBe(true);
     await instance.refreshModels?.();
     expect(asked.at(-1)).toBe(true);
+  });
+
+  it("reads the models past every cache on its own at start and once they are hours old", async () => {
+    let clock = 10_000;
+    const asked: Array<boolean | undefined> = [];
+    const { env } = home(STALE, STALE);
+    await start("opencode-refresh-schedule", env, async (_environment, _cli, options) => {
+      asked.push(options?.refresh);
+      return { default: "opencode/big-pickle", options: [{ id: "opencode/big-pickle", label: "Zen · Big Pickle" }] };
+    }, { now: () => clock, everyMs: 1_000, checkMs: 20 });
+    const refreshes = () => asked.filter(Boolean).length;
+    await expect.poll(refreshes).toBe(1);
+    clock += 500;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(refreshes()).toBe(1);
+    clock += 1_000;
+    await expect.poll(refreshes).toBe(2);
+  });
+
+  it("leaves OpenCode 1's catalog lock free, so a refresh right after a read gets past it", async () => {
+    const { env, scratch } = home(STALE, FRESH);
+    env.FAKE_ACP_MODELS_LOCK = join(scratch, "models.lock");
+    expect(ids(await discoverOpenCodeModels(env, FAKE_CLI))).not.toContain("venice/deepseek-v4-1-flash-uncensored");
+    expect(ids(await discoverOpenCodeModels(env, FAKE_CLI, { refresh: true, settleMs: 0 }))).toContain("venice/deepseek-v4-1-flash-uncensored");
+  });
+
+  it("picks up the catalog OpenCode 2 refreshes itself, as it has no `models --refresh`", async () => {
+    const { env } = home(STALE, FRESH);
+    env.FAKE_ACP_MODELS_LIST = "v2";
+    expect(ids(await discoverOpenCodeModels(env, FAKE_CLI))).not.toContain("venice/deepseek-v4-1-flash-uncensored");
+    expect(ids(await discoverOpenCodeModels(env, FAKE_CLI, { refresh: true, settleMs: 1_500 }))).toContain("venice/deepseek-v4-1-flash-uncensored");
   });
 
   it("starts a fresh OpenCode for the next turn only when the refresh changed the models", async () => {
@@ -99,7 +137,7 @@ describe("OpenCode Refresh", () => {
 
   it("runs a newly offered model on the turn right after the refresh", async () => {
     const { env, upstream } = home(STALE, STALE);
-    const { instance, run } = await start("opencode-refresh-turn", env);
+    const { instance, run } = await start("opencode-refresh-turn", env, discoverOpenCodeModels, { now: () => 0 });
     expect((await run("t-before", "opencode/big-pickle")).done).toMatchObject({ ok: true });
     writeFileSync(upstream, FRESH);
     await instance.refreshModels?.();
@@ -107,6 +145,53 @@ describe("OpenCode Refresh", () => {
     const after = await run("t-after", "venice/deepseek-v4-1-flash-uncensored");
     expect(after.done).toMatchObject({ ok: true });
     expect(after.events.find((event) => event.type === "session.started")).toMatchObject({ model: "venice/deepseek-v4-1-flash-uncensored" });
+  });
+});
+
+describe("OpenCode provider's own model list", () => {
+  const listing = (body: unknown, status = 200) => async () => new Response(JSON.stringify(body), { status });
+  const venice = {
+    data: [
+      { id: "deepseek-v9-flash", model_spec: { capabilities: { supportsE2EE: false } } },
+      { id: "e2ee-deepseek-v9-flash", model_spec: { capabilities: { supportsE2EE: true } } },
+      { id: "bad id" },
+    ],
+  };
+
+  it("offers a model the provider lists before OpenCode's catalog has it, runs it, and keeps it when the list fails", async () => {
+    const { env } = home(STALE, STALE);
+    env.VENICE_API_KEY = "venice-fixture-key";
+    const asked: Array<{ url: string; authorization: string | null }> = [];
+    let answer = listing(venice);
+    const { instance, run } = await start("opencode-live", env, discoverOpenCodeModels, {
+      now: () => 0,
+      fetch: (async (url: string, init?: RequestInit) => {
+        asked.push({ url, authorization: new Headers(init?.headers).get("authorization") });
+        return answer();
+      }) as typeof fetch,
+    });
+    expect(asked[0]).toEqual({ url: "https://api.venice.ai/api/v1/models?type=text", authorization: "Bearer venice-fixture-key" });
+    expect(ids(instance.models)).toContain("venice/deepseek-v9-flash");
+    expect(ids(instance.models)).not.toContain("venice/e2ee-deepseek-v9-flash");
+    const turn = await run("t-live", "venice/deepseek-v9-flash");
+    expect(turn.done).toMatchObject({ ok: true });
+    expect(turn.events.find((event) => event.type === "session.started")).toMatchObject({ model: "venice/deepseek-v9-flash" });
+    answer = listing({ error: "down" }, 503);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await instance.refreshModels?.();
+      expect(ids(instance.models)).toContain("venice/deepseek-v9-flash");
+    }
+  });
+
+  it("asks no provider whose key OpenCode was not given", async () => {
+    const { env } = home(STALE, STALE);
+    delete env.VENICE_API_KEY;
+    let asked = 0;
+    const { instance } = await start("opencode-live-none", env, discoverOpenCodeModels, {
+      fetch: (async () => { asked += 1; return new Response("{}"); }) as typeof fetch,
+    });
+    expect(asked).toBe(0);
+    expect(ids(instance.models)).toEqual(["opencode/big-pickle", "venice/deepseek-v4-flash"]);
   });
 });
 
