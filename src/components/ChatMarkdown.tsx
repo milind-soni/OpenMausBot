@@ -341,7 +341,7 @@ function LocalFileLink({ filePath, name, source, children, message }: { filePath
     <span dir="ltr" className="inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]" {...revealMenu.targetProps(source)}>
       {revealMenu.menu}
       {preview.html
-        ? <SaveIconButton name={name ?? fileName(filePath)} save={save} retryable={save.state === "failed" && !save.outsideWorkspace} />
+        ? <SaveIconButton name={name ?? fileName(filePath)} save={save} retryable={save.retryable} />
         : <FilePreviewButton path={filePath} name={name ?? fileName(filePath)} message={message} />}
       <button
         type="button"
@@ -358,7 +358,7 @@ function LocalFileLink({ filePath, name, source, children, message }: { filePath
         ) : save.state === "saved" ? (
           <Check size={12} className="shrink-0 text-success" aria-hidden="true" />
         ) : save.state === "failed" ? (
-          !save.outsideWorkspace && <RotateCcw size={12} className="shrink-0" aria-hidden="true" />
+          save.retryable && <RotateCcw size={12} className="shrink-0" aria-hidden="true" />
         ) : (
           <Download size={12} className="shrink-0" aria-hidden="true" />
         )}

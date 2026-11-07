@@ -15,7 +15,7 @@ const NTH_WEEKEND: Record<Nth, ServerLineKey> = {
 };
 
 function presetText(preset: CronPreset, language: string | undefined): string {
-  const locale = byLanguage({ en: "en-US", de: "de-DE", "pt-br": "pt-BR" }, language);
+  const locale = byLanguage({ en: "en-US", de: "de-DE", "pt-br": "pt-BR", "zh-tw": "zh-TW" }, language);
   const time = locale === "en-US" ? preset.time.replace(/^0(?=\d:)/, "") : preset.time;
   const weekdayName = (day: number) => new Intl.DateTimeFormat(locale, { weekday: "long", timeZone: "UTC" }).format(Date.UTC(2023, 0, 1 + day));
   const monthName = (month: number) => new Intl.DateTimeFormat(locale, { month: "long", timeZone: "UTC" }).format(Date.UTC(2023, month, 1));

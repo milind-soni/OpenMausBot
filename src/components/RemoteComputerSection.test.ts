@@ -14,7 +14,10 @@ describe("self-hosted server pairing links", () => {
     "https://bots.example.com/pair#code=ABCD-EFGH-JKLM",
     " https://custom.example.com:8443/pair/#code=ABCD%2DEFGH%2DJKLM ",
     "https://random.trycloudflare.com/pair#code=ABCDEFGHJKLM",
-  ])("accepts a complete custom HTTPS link: %s", (link) => {
+    "https://bots.example.com/pair?code=ABCD-EFGH-JKLM",
+    "http://192.168.1.20:8799/pair#code=ABCD-EFGH-JKLM",
+    "http://100.101.102.103:8799/pair#code=ABCD-EFGH-JKLM",
+  ])("accepts a complete HTTPS link, or plain http on a private network: %s", (link) => {
     expect(isServerPairingLink(link)).toBe(true);
   });
 
@@ -30,8 +33,6 @@ describe("self-hosted server pairing links", () => {
     "https://bots.example.com/pair#code=%20",
     "https://bots.example.com/pair#code=%",
     "https://bots.example.com/other#code=ABCD-EFGH-JKLM",
-    "https://bots.example.com/pair?code=ABCD-EFGH-JKLM",
-    "https://bots.example.com/pair?code=secret#code=ABCD-EFGH-JKLM",
     "https://bots.example.com/pair#code=ABCD EFGH JKLM",
     "https://bots.example.com\\@other.example/pair#code=ABCD-EFGH-JKLM",
     "openmausbot://pair?code=123456",

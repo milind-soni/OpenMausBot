@@ -105,7 +105,7 @@ const BUDGET_BASELINE: Record<string, number> = {
   "default+mausbot": 60129,
   "skills+shared+voice+mausbot": 66102,
   "skills+shared+voice+escalations": 66281,
-  "skills+shared+voice+escalations+x": 68784,
+  "skills+shared+voice+escalations+x": 70321,
   "skills+shared+voice+escalations+x+team": 69416,
   "default+no-computer-pick": 58204,
   "default+room": 56622,

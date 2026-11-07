@@ -39,6 +39,9 @@ function waitingIn(routines: readonly Routine[], botId: string, threadId: string
 }
 
 const text = (value: unknown, max: number) => typeof value === "string" && value.trim() && value.length <= max ? value.trim() : null;
+// Ids are taken exactly as sent: the visibility checks before this route (a team phone, the relay) look at the raw id,
+// so a padded id that only matched after trimming would reach a conversation those checks never saw.
+const exactId = (value: unknown) => typeof value === "string" && value && value.length <= 128 && value === value.trim() ? value : null;
 
 export function createLimitResetRoutes(deps: LimitResetRouteDeps): RouteHandler {
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
@@ -50,7 +53,7 @@ export function createLimitResetRoutes(deps: LimitResetRouteDeps): RouteHandler 
     }
     if (path === "/api/limit-resets/continue" && method === "POST") {
       const body = await readBody(req, 4096) as Record<string, unknown> | null;
-      const botId = text(body?.botId, 128), threadId = text(body?.threadId, 128);
+      const botId = exactId(body?.botId), threadId = exactId(body?.threadId);
       if (!botId || !threadId) return json(res, 400, { error: "botId and threadId are required" });
       const title = deps.threadTitle(botId, threadId);
       if (title === null) return json(res, 404, { error: "no such conversation" });

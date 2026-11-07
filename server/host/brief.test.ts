@@ -292,6 +292,14 @@ describe("the brief", () => {
     expect(s.shown()).toContain("8:09 AM · Standup");
   });
 
+  it("points to Connected apps when one of several accounts was read and refused", async () => {
+    const s = setup();
+    await s.brief.active("desktop", "UTC");
+    await s.brief.report({ routine: {} as never, at: s.now(), trouble: [{ app: "gmail", signedOut: false, severalAccounts: true }] });
+    expect(s.shown()).toContain("Reconnect Gmail in Connected apps.");
+    expect(s.shown()).not.toContain("I'll try again soon.");
+  });
+
   it("waits for a busy chat instead of writing into a turn", async () => {
     const s = setup();
     await s.brief.active("desktop", "UTC");

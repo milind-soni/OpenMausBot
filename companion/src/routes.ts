@@ -212,6 +212,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "DELETE", path: /^\/api\/routines\/[\w-]+$/ },
   { method: "POST", path: /^\/api\/routines\/[\w-]+\/run$/ },
   { method: "POST", path: /^\/api\/routine-runs\/[\w-]+\/(?:cancel|seen)$/ },
+  // The stopped turn's "Continue when your limit resets": a one-time automation in an existing
+  // conversation, less than POST /api/routines already allows.
+  { method: "POST", path: /^\/api\/limit-resets\/continue$/ },
 
   // Opaque ids and aliases only. Account removal is allowed (the handler proves
   // ownership first); the whole-service DELETE stays with the host.

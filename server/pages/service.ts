@@ -8,6 +8,9 @@ import { createPagesClient } from "./client.ts";
 import { createPagePublisher } from "./publisher.ts";
 import { PublishedPagesStore } from "./store.ts";
 
+/** How often live published pages' folders are checked for changes. */
+const LIVE_EVERY_MS = 15_000;
+
 /** Pages bots publish to a link: the bot tools' internal routes, the card's Unpublish, the desktop's sign-in message, and
  * the chat's page cards, which show a published page and its link. */
 export function createPublishedPages(options: {
@@ -35,6 +38,9 @@ export function createPublishedPages(options: {
     else options.patch(threadId, messageId, text, card);
   };
   const publisher = createPagePublisher({ client, store, patch });
+  // Live pages whose folders changed are published again; each at most once a minute (the publisher's own limit).
+  const liveTimer = setInterval(() => { void publisher.refreshLive(); }, LIVE_EVERY_MS);
+  liveTimer.unref?.();
   const appPages = apps ? {
     botOf: (threadId: string) => (apps.store.groupByThread(threadId) ? null : apps.store.botByThread(threadId) ?? null),
     page: (threadId: string, messageId: string, rev?: number) => apps.chat.publishablePage(threadId, messageId, rev),

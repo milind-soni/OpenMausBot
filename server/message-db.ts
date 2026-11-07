@@ -695,6 +695,11 @@ export function appDocRefs(): string[] {
   return rows.flatMap((row) => (typeof row.doc === "string" && row.doc ? [row.doc] : []));
 }
 
+/** Pages shown with show_html `live`, newest first: the rows a server picks up again after a restart. */
+export function liveAppRows(limit = 100): Array<{ threadId: string; messageId: string }> {
+  return db().prepare("SELECT thread_id AS threadId, id AS messageId FROM messages WHERE kind = 'app' AND json_extract(json, '$.app.live') = 1 ORDER BY rowid DESC LIMIT ?").all(limit) as Array<{ threadId: string; messageId: string }>;
+}
+
 export function threadsReferencing(fragment: string): string[] {
   if (!fragment) return [];
   const rows = db().prepare("SELECT DISTINCT thread_id FROM messages WHERE instr(json, ?) > 0").all(fragment) as Array<{ thread_id: string }>;

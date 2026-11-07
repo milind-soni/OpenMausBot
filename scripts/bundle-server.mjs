@@ -61,6 +61,8 @@ const ENTRY_POINTS = [
   "bot-box/box-bridge.ts",
   "bot-box/box-probe.ts",
   "bot-box/box-check.ts",
+  // the meeting bot, copied to a cloud computer and run there with its own Node
+  "meetings/meetbot.ts",
 ];
 
 await build({

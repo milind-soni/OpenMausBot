@@ -203,7 +203,8 @@ describe("bot-first sidebar", () => {
     noteTurnEvent({ eventId: "e1", provider: "claudeAgent", threadId: "leads", createdAt: "2026-10-28T12:00:00.000Z", turnId: "t1",
       type: "turn.progress", activity: "command", itemId: "c1", target: "scrape.py", quiet: { kind: "busy" } } as RuntimeEvent);
     const working = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)));
-    expect(working).toContain('<span dir="auto" data-sidebar-working-phrase="" class="truncate">Running scrape.py</span>');
+    expect(working).toContain('<span dir="auto" data-sidebar-working-phrase="" class="truncate">Running a command</span>');
+    expect(working, "the sidebar names the kind of step, never the command").not.toContain("scrape.py");
     expect(working, "the row's second line keeps its height: no taller dots").not.toContain("h-[1.5em]");
     expect(working).not.toContain("Monday");
     expect(working, "the row says the step alone, not how it is doing").not.toContain("busy, no output yet");
@@ -221,7 +222,7 @@ describe("bot-first sidebar", () => {
       tasks: [{ threadId: "open", title: "Open", createdAt: 1 }, { threadId: "leads", title: "Leads", createdAt: 2, busy: true, activity: "working" }] };
     noteTurnEvent({ eventId: "e2", provider: "codex", threadId: "leads", createdAt: "2026-10-28T12:00:00.000Z", turnId: "t1",
       type: "turn.progress", activity: "web", itemId: "w1", target: "Acme construction leads" } as RuntimeEvent);
-    expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)))).toContain(">Searching the web for “Acme construction leads”</span>");
+    expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)))).toContain(">Searching the web</span>");
     resetTurnLive();
   });
 

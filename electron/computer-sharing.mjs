@@ -4,6 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
+import { allowedServerOrigin } from "./server-address.mjs";
 import { createSharedCua, executeSharedOperation, personalSecretPaths, sharedComputerError, validCommandSeconds } from "./shared-computer-access.mjs";
 import { createLentMcp, LENT_MCP_ACTIONS, validLentMcpServer } from "./lent-mcp.mjs";
 import { sharedCuaConnection } from "./shared-cua-connection.mjs";
@@ -332,8 +333,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
     return ownGates.get(env.id);
   };
   const request = async (env, route, body, signal, secret) => {
-    const origin = new URL(env.origin);
-    if (origin.protocol !== "https:" && !(origin.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname))) throw new Error("Computer sharing requires an HTTPS server address");
+    if (!allowedServerOrigin(env.origin)) throw new Error("Computer sharing needs the server's HTTPS address, or one on your own network");
     const response = await fetchImpl(`${env.origin}${route}`, {
       method: body === undefined ? "GET" : "POST", credentials: "include", redirect: "error", cache: "no-store",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(35_000)]) : AbortSignal.timeout(10_000),

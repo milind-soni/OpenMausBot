@@ -238,7 +238,7 @@ export const WORDS = Object.freeze({
     "lending.action.screenTools": "檢查應用程式與螢幕控制",
     "lending.action.screen": "使用應用程式與螢幕",
     "lending.action.website": "開啟網站",
-    "lending.action.chrome": "Used your Chrome",
+    "lending.action.chrome": "使用了你的 Chrome",
     "lending.action.invalid": "格式錯誤的要求",
     "lending.action.other": "其他要求",
   }),

@@ -33,45 +33,6 @@ function normalizeOrigin(input) {
   return url.origin;
 }
 
-function parsePairingLink(input) {
-  const origin = normalizeOrigin(input);
-  if (!origin) return null;
-  let url;
-  try {
-    url = new URL(input.trim());
-  } catch {
-    return null;
-  }
-  // A code travels in the hash only: a query string reaches server logs.
-  if (url.searchParams.has("code")) return null;
-  const code = /(?:^|[#&])code=([^&]+)/.exec(url.hash)?.[1] ?? null;
-  const isPairPage = url.pathname === "/pair" || url.pathname === "/pair/";
-  if (code && !isPairPage) return null;
-  try {
-    return { origin, code: code ? decodeURIComponent(code) : null, url: code ? `${origin}/pair#code=${code}` : origin };
-  } catch {
-    return null;
-  }
-}
-
-function parseHostedWorkspaceLink(input) {
-  if (typeof input !== "string") return null;
-  const text = input.trim();
-  if (!text || /[\s\\]/.test(text)) return null;
-  try {
-    const url = new URL(text.includes("://") ? text : `https://${text}`);
-    const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-    if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) return null;
-    if (url.username || url.password || url.search || !["/", "/pair", "/pair/"].includes(url.pathname)) return null;
-    if (!loopback && !url.hostname.includes(".")) return null;
-    const parsed = parsePairingLink(url.href);
-    if (!parsed || (url.hash && (!parsed.code || !/^[A-Z0-9-]{12,16}$/i.test(parsed.code)))) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
 /** Remote renderers learn only their current workspace, never the local list. */
 function workspaceSummary(state) {
   const active = activeEnvironment(state);
@@ -514,8 +475,6 @@ module.exports = {
   normalizeOrigin,
   otherPlaces,
   parseEnvironments,
-  parsePairingLink,
-  parseHostedWorkspaceLink,
   savedPlace,
   serializeEnvironments,
   startupEnvironmentDir,

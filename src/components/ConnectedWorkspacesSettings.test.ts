@@ -69,7 +69,7 @@ it("lists local environments with their folders above the servers, marking a mis
   expect(html.indexOf("Environments on this computer")).toBeLessThan(html.indexOf("Your servers"));
   expect(html).toContain("/home/me/.openmausbot-work");
   expect(html.match(/>missing</g)).toHaveLength(1);
-  expect(html).toContain("https://bots.example.test");
+  expect(html).toContain("bots.example.test · HTTPS");
 });
 
 it("hides local environments and the create form in a dev build", async () => {
@@ -180,9 +180,9 @@ it("a Cloud of the person's own has no lending control here, since this computer
   vi.mocked((globalThis.window as unknown as { ogb: { environments: { state: ReturnType<typeof vi.fn> } } }).ogb.environments.state)
     .mockResolvedValue({ localOrigin: "http://127.0.0.1:1", remote: false, activeId: "local", environments: [VPS, cloud, other] });
   await mount();
-  const labels = render().nodes.filter(node => node.type === "button").map(node => node.props["aria-label"] ?? Children.toArray(node.props.children).join(""));
-  expect(labels).toContain("Computer access for VPS");
-  expect(labels.filter(label => /Computer access for (My Cloud|Client A)|use this/.test(label))).toEqual([]);
+  const { html } = render();
+  expect(html).toContain('aria-label="Computer access for VPS"');
+  expect(html).not.toMatch(/Computer access for (My Cloud|Client A)|use this/);
   expect(render().html).not.toContain("data-cloud-lending-link");
 });
 

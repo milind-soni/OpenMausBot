@@ -132,21 +132,21 @@ const submit = async (form: Element | null) => {
   await act(async () => { (form as HTMLFormElement).requestSubmit(); await Promise.resolve(); await Promise.resolve(); });
 };
 
-it("＋ offers buying a Cloud or adding the person's own server: a box to paste its pairing link, sent to main's own Connect dialog", async () => {
+it("＋ offers buying a Cloud or connecting to the person's own server: a box for its link or address, sent to main", async () => {
   await mount(createElement(PlacesRail));
   await click(host.querySelector("[data-rail-add]"));
   const sheet = document.querySelector("[data-place-add-sheet]")!;
   expect([...sheet.querySelectorAll("[data-place-add-choice]")].map((choice) => choice.getAttribute("data-place-add-choice"))).toEqual(["cloud", "server"]);
   await click(sheet.querySelector('[data-place-add-choice="server"]'));
   const form = document.querySelector('[data-place-add="own-server"]')!;
-  expect(form.textContent).toContain("Paste pairing link");
-  expect(form.textContent, "no install commands: the server's Settings shows its link").not.toContain("npx");
+  expect(form.textContent).toContain("Link or address");
+  expect(form.textContent, "no commands before the person starts typing").not.toContain("npx");
   expect(document.activeElement).toBe(form.querySelector("[data-own-server-link]"));
   const connect = [...form.querySelectorAll("button")].find((button) => button.textContent === "Connect")!;
   expect(connect.disabled, "nothing pasted yet").toBe(true);
   await type(form.querySelector("[data-own-server-link]"), "  https://bots.example.test/#pair=abc  ");
   await submit(form);
-  expect(workspaces.add.mock.calls).toEqual([["link", "https://bots.example.test/#pair=abc"]]);
+  expect(workspaces.add.mock.calls).toEqual([["link", "https://bots.example.test/#pair=abc", ""]]);
   expect(document.querySelector("[data-place-add-sheet]")).toBeNull();
 });
 
@@ -156,15 +156,51 @@ it("a pasted link main can't open says so and keeps the sheet; cancelling main's
   await click(document.querySelector('[data-place-add-choice="server"]'));
   const form = document.querySelector('[data-place-add="own-server"]')!;
   await type(form.querySelector("[data-own-server-link]"), "not a link");
-  workspaces.add.mockRejectedValueOnce(new Error("Enter an HTTPS server address or a full pairing link."));
+  workspaces.add.mockRejectedValueOnce(new Error("Error invoking remote method 'workspaces:add': Error: That isn't a server address."));
   await submit(form);
-  expect(form.querySelector('[role="alert"]')?.textContent).toContain("isn't a pairing link");
+  expect(form.querySelector('[role="alert"]')?.textContent).toBe("That isn't a server address.");
   expect(document.querySelector("[data-place-add-sheet]")).toBeTruthy();
   await type(form.querySelector("[data-own-server-link]"), "https://bots.example.test/#pair=abc");
   expect(form.querySelector('[role="alert"]'), "editing the link clears the error").toBeNull();
   workspaces.add.mockResolvedValueOnce(false);
   await submit(form);
   expect(document.querySelector("[data-place-add-sheet]"), "the person cancelled Connect").toBeTruthy();
+});
+
+const settle = () => act(async () => { await new Promise((done) => setTimeout(done, 450)); });
+
+it("Connect to a server takes an address and a code typed apart: a code pasted alone moves to its field, and main names the server it found", async () => {
+  const probe = vi.fn(async (address: string): Promise<unknown> => (address.includes("192.168.1.20")
+    ? { outcome: "found", origin: "http://192.168.1.20:8799", label: "kitchen-box", version: "0.1.147", transport: "private-http", code: null, credential: null }
+    : { outcome: "problem", problem: "publicHttp", host: "203.0.113.9" }));
+  Object.assign(window, { ogb: { workspaces: { ...workspaces, probe }, cloudAdd } });
+  await mount(createElement(PlacesRail));
+  await click(host.querySelector("[data-rail-add]"));
+  await click(document.querySelector('[data-place-add-choice="server"]'));
+  const form = document.querySelector('[data-place-add="own-server"]')!;
+  await type(form.querySelector("[data-own-server-link]"), "abcd-efgh-jklm");
+  expect((form.querySelector("[data-own-server-link]") as HTMLInputElement).value, "the code left the address field").toBe("");
+  expect((form.querySelector("[data-own-server-code]") as HTMLInputElement).value).toBe("ABCD-EFGH-JKLM");
+  expect(form.querySelector("[data-connect-hint]")?.textContent).toBe("Now add the server's address, like http://192.168.1.20:8799.");
+  await type(form.querySelector("[data-own-server-link]"), "http://203.0.113.9");
+  await settle();
+  expect(form.querySelector("[data-connect-problem]")?.textContent).toContain("http://203.0.113.9 is on the open internet");
+  expect((form.querySelector("[data-own-server-connect]") as HTMLButtonElement).disabled).toBe(true);
+  await type(form.querySelector("[data-own-server-link]"), "192.168.1.20:8799");
+  await settle();
+  expect(probe).toHaveBeenLastCalledWith("192.168.1.20:8799", "ABCD-EFGH-JKLM");
+  expect(form.querySelector("[data-connect-found]")?.textContent).toBe("✓ kitchen-box · MausBot 0.1.147 · Private network, not encrypted. Fine on your own network or Tailscale.");
+  expect(form.querySelector("[data-connect-problem]")).toBeNull();
+  const button = form.querySelector("[data-own-server-connect]") as HTMLButtonElement;
+  expect([button.disabled, button.textContent]).toEqual([false, "Connect to kitchen-box"]);
+  expect(form.textContent).toContain("npx openmausbot pair");
+  workspaces.add.mockResolvedValueOnce({ outcome: "problem", problem: "unreachable", host: "192.168.1.20:8799" });
+  await submit(form);
+  expect(form.querySelector('[role="alert"]')?.textContent).toBe("Can't reach 192.168.1.20:8799. Check the server is running and reachable from this computer.");
+  workspaces.add.mockResolvedValueOnce({ outcome: "connected", label: "kitchen-box" });
+  await submit(form);
+  expect(workspaces.add.mock.calls.at(-1)).toEqual(["link", "192.168.1.20:8799", "ABCD-EFGH-JKLM"]);
+  expect(document.querySelector("[data-place-add-sheet]")).toBeNull();
 });
 
 const createButton = () => [...document.querySelectorAll<HTMLButtonElement>('[data-place-add="organization"] button[type="submit"]')][0];
@@ -286,7 +322,7 @@ it("a server of the person's own that signed in: a small server mark, the offlin
   expect(connect.textContent, "it runs OpenMausBot already: only its pairing link is left").not.toContain("npx");
   await type(connect.querySelector("[data-own-server-link]"), "https://render.example.test/#pair=xyz");
   await submit(connect);
-  expect(workspaces.add.mock.calls).toEqual([["link", "https://render.example.test/#pair=xyz"]]);
+  expect(workspaces.add.mock.calls).toEqual([["link", "https://render.example.test/#pair=xyz", ""]]);
 });
 
 it("where no pairing link can be pasted here, a signed-in server not connected yet opens nothing", async () => {
