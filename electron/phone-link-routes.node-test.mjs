@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createPhoneLinkRoutes, PHONE_LINK_SLEEP_GRACE_MS } from "./phone-link-routes.mjs";
-import { checkTailscale, readTailscaleStatus, tailscaleEnvironment, tailscaleInstalled } from "./tailscale-check.mjs";
+import { checkTailscale, readTailscaleStatus, TAILSCALE_CLI_PATHS, tailscaleEnvironment, tailscaleInstall } from "./tailscale-check.mjs";
 
 function world({ check = async () => ({ state: "ready", name: "mac.tail1.ts.net" }), tailscaleOn = false, sidecar = null } = {}) {
   const w = { routes: { tailscale: tailscaleOn }, names: [], checks: 0, wakes: 0, sleeps: 0, changed: [], clock: 1_000_000, sidecar, running: sidecar !== null };
@@ -85,24 +85,31 @@ test("an empty sidecar goes back to sleep after the grace for a code, never one 
 });
 
 test("Tailscale presence is checked by looking for files; nothing runs when none is there", async () => {
-  assert.equal(tailscaleInstalled({ exists: () => false, env: { PATH: "" }, home: "/nowhere" }), false);
-  assert.equal(tailscaleInstalled({ exists: (file) => file === "/usr/bin/tailscale", env: { PATH: "" }, home: "/nowhere" }), true);
+  const none = { exists: () => false, env: { PATH: "" }, home: "/nowhere", platform: "darwin" };
+  assert.equal(tailscaleInstall(none), "none");
+  assert.equal(tailscaleInstall({ ...none, exists: (file) => file === "/usr/bin/tailscale" }), "cli");
+  assert.equal(tailscaleInstall({ ...none, exists: (file) => file === "/Applications/Tailscale.app" }), "app-only");
   let runs = 0;
-  assert.deepEqual(await checkTailscale({ installed: () => false, run: async () => { runs++; return { missing: false, stdout: "" }; } }), { state: "not-installed" });
+  const run = async () => { runs++; return { missing: false, stdout: "", stderr: "" }; };
+  assert.deepEqual(await checkTailscale({ install: () => "none", run }), { state: "not-installed" });
+  assert.deepEqual(await checkTailscale({ install: () => "app-only", run }), { state: "no-cli" }, "the macOS app's executable is never run");
   assert.equal(runs, 0);
 });
 
-test("one status reading tells ready from signed out, the CLI before the macOS app", async () => {
+test("one status reading tells ready, signed out, not running and not allowed apart", async () => {
   assert.deepEqual(readTailscaleStatus(JSON.stringify({ BackendState: "Running", Self: { DNSName: "Mac.tail1.ts.net." } })), { state: "ready", name: "mac.tail1.ts.net" });
   assert.deepEqual(readTailscaleStatus(JSON.stringify({ BackendState: "NeedsLogin", Self: { DNSName: "" } })), { state: "signed-out" });
-  assert.deepEqual(readTailscaleStatus("The Tailscale GUI failed to start"), { state: "signed-out" });
+  assert.deepEqual(readTailscaleStatus(JSON.stringify({ BackendState: "Stopped" })), { state: "not-running" });
+  assert.deepEqual(readTailscaleStatus("", "failed to connect to local tailscaled; it doesn't appear to be running"), { state: "not-running" });
+  assert.deepEqual(readTailscaleStatus("", "Access denied: watch IPN bus access denied"), { state: "needs-permission" });
   const tried = [];
   const result = await checkTailscale({
-    installed: () => true,
-    candidates: ["/usr/bin/tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale"],
-    run: async (cli) => { tried.push(cli); return { missing: false, stdout: JSON.stringify({ BackendState: "Running", Self: { DNSName: "mac.tail1.ts.net." } }) }; },
+    install: () => "cli",
+    candidates: ["/opt/homebrew/bin/tailscale", "/usr/bin/tailscale"],
+    run: async (cli) => { tried.push(cli); return cli === "/opt/homebrew/bin/tailscale" ? { missing: true, stdout: "", stderr: "" } : { missing: false, stdout: JSON.stringify({ BackendState: "Running", Self: { DNSName: "mac.tail1.ts.net." } }), stderr: "" }; },
   });
   assert.deepEqual(result, { state: "ready", name: "mac.tail1.ts.net" });
-  assert.deepEqual(tried, ["/usr/bin/tailscale"]);
-  assert.equal(tailscaleEnvironment({ PATH: "" }).TAILSCALE_BE_CLI, "1", "the macOS app executable only ever runs in CLI mode");
+  assert.deepEqual(tried, ["/opt/homebrew/bin/tailscale", "/usr/bin/tailscale"]);
+  assert.ok(!TAILSCALE_CLI_PATHS.some((cli) => /Tailscale\.app/.test(cli)), "no app executable among the candidates");
+  assert.equal(tailscaleEnvironment({ PATH: "" }).TAILSCALE_BE_CLI, "1");
 });

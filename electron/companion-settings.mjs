@@ -103,14 +103,9 @@ export function readPairedDevices(file = companionDevicesFile()) {
 
 export const countPairedPhones = (file) => readPairedDevices(file)?.length ?? null;
 
-/** Looks at this computer's interfaces only: true while Tailscale has given it an address. */
+/** Looks at this computer's interfaces only: Tailscale's own interface (`tailscale0`, "Tailscale", or the utun that
+ * carries a fd7a:115c:a1e0::/48 address). A 100.64/10 address alone is not Tailscale: carrier NAT and other VPNs use it. */
 export function hasTailnetAddress(interfaces = os.networkInterfaces()) {
-  return Object.values(interfaces).flat().some((entry) => {
-    const address = entry?.address ?? "";
-    if (entry?.family === "IPv4" || entry?.family === 4) {
-      const [first, second] = address.split(".").map(Number);
-      return first === 100 && second >= 64 && second <= 127;
-    }
-    return /^fd7a:115c:a1e0:/i.test(address);
-  });
+  return Object.entries(interfaces).some(([name, entries]) =>
+    (entries ?? []).length > 0 && (/^tailscale/i.test(name) || (entries ?? []).some((entry) => /^fd7a:115c:a1e0:/i.test(entry?.address ?? ""))));
 }

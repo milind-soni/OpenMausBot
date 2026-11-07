@@ -5,7 +5,7 @@ import { createSocket } from "node:dgram";
 import { hostname, networkInterfaces } from "node:os";
 
 import { lanAddresses } from "./listener.ts";
-import { directRoutes, isTailnetAddress } from "./direct-routes.ts";
+import { directRoutes, isPrivateLanAddress, isTailnetAddress, tailnetInterfaceAddresses } from "./direct-routes.ts";
 
 const MDNS_ADDRESS = "224.0.0.251";
 const MDNS_PORT = 5353;
@@ -360,7 +360,9 @@ export function defaultHostName(machine = hostname()): string {
 
 /** Bonjour is part of Same Wi-Fi: nothing is advertised while it is off, and never the tailnet address. */
 export function advertisableAddresses(): string[] {
-  return directRoutes().wifi ? lanAddresses().filter((address) => !isTailnetAddress(address)) : [];
+  if (!directRoutes().wifi) return [];
+  const tailnet = tailnetInterfaceAddresses();
+  return lanAddresses().filter((address) => !isTailnetAddress(address, tailnet) && isPrivateLanAddress(address));
 }
 
 

@@ -35,7 +35,7 @@ export interface CompanionState {
   /** Routes the update kept on that the person has not been told about yet. */
   notices?: CompanionRoute[];
   /** Why Tailscale could not be turned on or checked just now. */
-  tailscaleProblem?: "not-installed" | "signed-out";
+  tailscaleProblem?: "not-installed" | "no-cli" | "not-running" | "needs-permission" | "signed-out";
   lan?: string | null;
   hosts?: string[];
   endpoints?: CompanionEndpoint[];

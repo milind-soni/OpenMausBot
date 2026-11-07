@@ -94,9 +94,11 @@ test("paired devices are read from the companion's own store", () => {
   }
 });
 
-test("a tailnet address is seen from the interfaces alone", () => {
+test("Tailscale is seen by its own interface, never by a 100.64/10 address alone", () => {
   assert.equal(hasTailnetAddress({ en0: [{ family: "IPv4", address: "192.168.1.4" }] }), false);
-  assert.equal(hasTailnetAddress({ utun4: [{ family: "IPv4", address: "100.101.2.3" }] }), true);
-  assert.equal(hasTailnetAddress({ utun4: [{ family: "IPv6", address: "fd7a:115c:a1e0::1" }] }), true);
-  assert.equal(hasTailnetAddress({ en0: [{ family: "IPv4", address: "100.128.0.1" }] }), false);
+  assert.equal(hasTailnetAddress({ utun4: [{ family: "IPv4", address: "100.101.2.3" }] }), false, "carrier NAT or another VPN");
+  assert.equal(hasTailnetAddress({ en0: [{ family: "IPv4", address: "100.80.0.1" }] }), false);
+  assert.equal(hasTailnetAddress({ utun4: [{ family: "IPv4", address: "100.101.2.3" }, { family: "IPv6", address: "fd7a:115c:a1e0::1" }] }), true);
+  assert.equal(hasTailnetAddress({ tailscale0: [{ family: "IPv4", address: "100.70.0.1" }] }), true);
+  assert.equal(hasTailnetAddress({ Tailscale: [{ family: "IPv4", address: "100.70.0.1" }] }), true);
 });

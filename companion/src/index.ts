@@ -13,7 +13,7 @@ import { createConnectedDeviceTracker } from "./connected-devices.ts";
 import { DeviceRegistry } from "./devices.ts";
 import { companionEndpointCandidates, hostedCompanionUrl } from "./endpoints.ts";
 import { tailnetName, tailscaleAddress } from "./listener.ts";
-import { acceptsLocalAddress, anyDirectRoute, directRoutes, directRoutesFromEnv, routedAddresses, setDirectRoutes } from "./direct-routes.ts";
+import { acceptsConnection, anyDirectRoute, directRoutes, directRoutesFromEnv, routedAddresses, setDirectRoutes } from "./direct-routes.ts";
 import {
   advertisableAddresses,
   clampBytes,
@@ -162,7 +162,7 @@ const e2eOrigin = createE2EOrigin((req, res) => proxy(req, res), (req, socket, h
 const companion = createServer((req, res) => proxy(req, res, "lan"));
 const directSockets = new Set<import("node:net").Socket>();
 companion.on("connection", (socket) => {
-  if (!acceptsLocalAddress(socket.localAddress)) return void socket.destroy();
+  if (!acceptsConnection(socket.localAddress, socket.remoteAddress)) return void socket.destroy();
   directSockets.add(socket);
   socket.once("close", () => directSockets.delete(socket));
 });
@@ -170,7 +170,7 @@ let directListening = false;
 
 /** Binds the device port while Same Wi-Fi or Tailscale is on, and drops connections on a way in just turned off. */
 async function syncDirectListener(): Promise<void> {
-  for (const socket of directSockets) if (!acceptsLocalAddress(socket.localAddress)) socket.destroy();
+  for (const socket of directSockets) if (!acceptsConnection(socket.localAddress, socket.remoteAddress)) socket.destroy();
   if (anyDirectRoute() && !directListening) {
     await listen(companion, COMPANION_PORT, "0.0.0.0");
     directListening = true;

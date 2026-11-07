@@ -179,11 +179,13 @@ Remote access so the phone has a listener to reach. OpenMausBot then places the
 computer's tailnet addresses in that dedicated QR; it never silently replaces
 the default hosted HTTPS route. Manual entry remains available as a fallback.
 
-With the switch on, the link also answers on this computer's tailnet address,
+With the switch on, the link also answers on this computer's tailnet address
+(found by Tailscale's own interface, never by a 100.64/10 address alone),
 and the app asks Tailscale for the computer's MagicDNS name once: when you turn
-the switch on, and again only when you choose **Check again**. It looks for the
-`tailscale` command line tool first and runs the macOS app's own executable only
-in its command-line mode; it never opens the Tailscale app or signs it in. The
+the switch on, and again only when you choose **Check again**. It runs only
+Tailscale's command-line tool (`tailscale status --json`), never the macOS app's
+executable: with only the app installed it asks you to choose **Install CLI** in
+the Tailscale app's settings. It never opens the Tailscale app or signs it in. The
 URL is `http://<computer>.<tailnet>.ts.net:8810`, encrypted and authenticated
 by WireGuard inside the tailnet. Use the MagicDNS name rather than the
 `100.64.0.0/10` address: App Transport Security exceptions are domain-based,
