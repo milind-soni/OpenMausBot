@@ -268,7 +268,8 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     // nonblank groupId from an older tool list.
     const snakeBlank = canonical.group_id === undefined || canonical.group_id === null
       || (typeof canonical.group_id === "string" && canonical.group_id.trim() === "");
-    if (snakeBlank && typeof args.groupId === "string" && args.groupId.trim() !== "") canonical.group_id = args.groupId;
+    // A non-text groupId still fails the check below, as it always has.
+    if (snakeBlank && args.groupId != null && !(typeof args.groupId === "string" && args.groupId.trim() === "")) canonical.group_id = args.groupId;
     if (canonical.done_when === undefined) canonical.done_when = args.doneWhen;
     const ids = canonical.bot_ids;
     const optional = (key: string, type: "boolean" | "string") => canonical[key] === undefined || typeof canonical[key] === type;
