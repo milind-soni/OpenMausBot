@@ -12,9 +12,12 @@ Everything is in **Settings → Decision and extraction** (Advanced mode): the
 Cloudflare Workers AI card, the Jev/OpenRouter picker under **Another key**,
 for OpenRouter the model, one master switch, each key with **Save** and
 **Test**, and a switch for room routing (**Who answers in rooms**). Each
-provider keeps its own key, so you can switch between them without pasting a
-key again. OpenRouter needs no key here when you already saved one under
-**Settings → API keys**: the decision model uses that one.
+provider keeps its own key, but picking a provider does not choose whose key
+decides: the fixed order below does. To use Workers AI or OpenRouter while a
+Jev key is saved, clear the Jev key (an `OMB_JEV_API_KEY` in the environment
+replaces the saved one, so remove it too). OpenRouter needs no key here when
+you already saved one under **Settings → API keys**: the decision model uses
+that one.
 
 With several keys saved, one fixed order picks whose key decides: your own Jev
 key, then your own Workers AI key, then Cloud's included decisions, then
@@ -234,12 +237,13 @@ receive the room's lines.
 ## Turning it off
 
 Switch off **Use fast decisions and extraction** (**Use OpenRouter for fast
-decisions** when OpenRouter's key decides), or clear the key (on Cloud Pro,
-clearing a key falls back to the included decisions: switch off to stop
-them; with OpenRouter it falls back to the key under **Settings → API keys**,
-so switch off to stop them). To keep the decision model on but stop room
-routing, switch off **Who answers in rooms**. To stop one room asking, set
-its responder to a lead, **Everyone responds** or **Only when mentioned**.
+decisions** when OpenRouter's key decides) to stop every decision. Clearing a
+key hands over to the next key in the order above (another key of yours,
+Cloud's included decisions, or the OpenRouter key under **Settings → API
+keys**); decisions stop only when no key is left. To keep the decision model
+on but stop room routing, switch off **Who answers in rooms**. To stop one
+room asking, set its responder to a lead, **Everyone responds** or **Only when
+mentioned**.
 
 ## Configuration reference
 
