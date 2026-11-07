@@ -23,7 +23,8 @@ const MODELS: ModelCatalog = {
 
 export interface MinimaxConfig {
   tools?: boolean;
-  url: string;
+  /** An explicit instance or environment URL; absent uses mmx-cli's endpoint, then the international API. */
+  url?: string;
 }
 
 interface LocalMiniMaxConfig {
@@ -66,9 +67,10 @@ export function decodeMinimaxConfig(raw: unknown): MinimaxConfig {
   if (tools !== undefined && typeof tools !== "boolean") throw new Error("tools must be a boolean");
   const parsed = driverConfigSchema.safeParse(raw ?? {});
   const config = parsed.success ? parsed.data : {};
+  const url = config.url?.trim() || process.env.MINIMAX_BASE_URL?.trim();
   return {
     ...(tools !== undefined ? { tools } : {}),
-    url: normalizedApiUrl(config.url?.trim() || process.env.MINIMAX_BASE_URL?.trim() || DEFAULT_URL),
+    ...(url ? { url: normalizedApiUrl(url) } : {}),
   };
 }
 
@@ -95,9 +97,7 @@ export const MinimaxDriver: ProviderDriver<MinimaxConfig> = {
       input.environment[API_KEY_ENV]?.trim() ||
       process.env[API_KEY_ENV]?.trim() ||
       local.apiKey;
-    const apiUrl = input.config.url === DEFAULT_URL && local.url !== DEFAULT_URL
-      ? local.url
-      : input.config.url;
+    const apiUrl = input.config.url ?? local.url;
     const models = local.defaultModel && MODELS.options.some((model) => model.id === local.defaultModel)
       ? { ...MODELS, default: local.defaultModel }
       : MODELS;
