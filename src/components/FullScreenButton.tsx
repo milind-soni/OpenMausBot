@@ -65,14 +65,18 @@ function WatchFullScreen({ frame, name, takeDisabled, error, onClose, onTakeCont
   const exitRef = useRef<HTMLButtonElement>(null);
   const { dragProps, noDragStyle } = useCaptionChrome();
   const macInset = useDesktopCapabilities().capabilities.windowChrome === "mac-inset";
+  // An error from before this view opened belongs to the panel; only a Take control tried here shows its outcome.
+  const [tried, setTried] = useState(false);
   useModalDialog(dialogRef, onClose);
   // After the dialog has noted Full screen as the place to return to, so autoFocus can't take that place.
   useEffect(() => exitRef.current?.focus(), []);
 
   useEffect(() => {
-    // Capture, and claim the key, so the same press cannot also close something beneath the overlay.
+    // Capture, and claim the key, so the same press cannot also close something beneath the overlay. A press from
+    // a dialog opened over this view (such as keyboard shortcuts) is that dialog's own.
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (!(event.target instanceof Node) || !dialogRef.current?.contains(event.target)) return;
       event.preventDefault();
       onClose();
     };
@@ -96,7 +100,7 @@ function WatchFullScreen({ frame, name, takeDisabled, error, onClose, onTakeCont
         <button
           type="button"
           style={noDragStyle}
-          onClick={onTakeControl}
+          onClick={() => { setTried(true); onTakeControl(); }}
           disabled={takeDisabled}
           className={cn(iconButton, "bg-accent font-medium text-accent-ink hover:brightness-110")}
           title={t("computer.takeControlTitle")}
@@ -105,7 +109,7 @@ function WatchFullScreen({ frame, name, takeDisabled, error, onClose, onTakeCont
           {t("computer.takeControl")}
         </button>
       </header>
-      {error && (
+      {tried && error && (
         <div role="alert" className="shrink-0 border-b border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>
       )}
       <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-inset">

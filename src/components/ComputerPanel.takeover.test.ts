@@ -179,6 +179,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** Escape where a person presses it: on whatever has focus. */
+function pressEscape() {
+  (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+}
+
 describe("taking control of a Local VM", () => {
   it("turns the panel's own picture into the live desktop at once; no window or tab opens", async () => {
     await open(makeBot({ computer: "vm" }));
@@ -210,7 +215,7 @@ describe("taking control of a Local VM", () => {
     expect(fixture.controls, "watching must not pause the bot").toEqual([]);
     expect(liveDesktop()).toBeNull();
 
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    pressEscape();
     await settle();
     expect(watch(), "Escape leaves full screen").toBeNull();
     expect(fixture.controls).toEqual([]);
@@ -223,6 +228,24 @@ describe("taking control of a Local VM", () => {
     await shownLive();
     expect(liveDesktop()!.dataset.expanded, "taking control from full screen stays full screen").toBe("true");
     expect(watch()).toBeNull();
+  });
+
+  it("full screen shows only errors from a Take control tried there, and leaves Escape to a dialog opened over it", async () => {
+    fixture.refuse = true;
+    await open(makeBot({ computer: "vm" }));
+    await press("Take control");
+    expect(fixture.controls.map((control) => control.action)).toEqual(["take"]);
+    await press("Full screen");
+    const watch = () => document.querySelector<HTMLElement>("[data-watch-full-screen]");
+    expect(watch()!.querySelector("[role=alert]"), "an earlier panel error is not news in full screen").toBeNull();
+
+    const over = document.createElement("button");
+    document.body.append(over);
+    over.focus();
+    over.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    await settle();
+    expect(watch(), "Escape in a dialog over full screen belongs to that dialog").not.toBeNull();
+    over.remove();
   });
 
   it("a refused Take control in full screen keeps watching and says why", async () => {
@@ -248,7 +271,7 @@ describe("taking control of a Local VM", () => {
     expect(document.activeElement).toBe(exit);
     exit!.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
     expect(document.activeElement, "Shift+Tab from Exit must stay in full screen").toBe(take);
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    pressEscape();
     await settle();
     expect(document.querySelector("[data-watch-full-screen]")).toBeNull();
     expect(document.activeElement).toBe(trigger);
