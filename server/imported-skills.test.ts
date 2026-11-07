@@ -129,9 +129,9 @@ describe("skills brought in from this computer", () => {
     expect(claude(true)).toEqual(["review"]);
     expect(claude(false)).toEqual(["pdf", "review"]);
     expect(claude(false, { OMB_CLAUDE_INHERIT_USER_CONFIG: "1" })).toEqual(["review"]);
-    // Codex loads $CODEX_HOME/skills from the person's own home; a ChatGPT-plan or company home does not.
+    // Codex loads $CODEX_HOME/skills from the person's own home, linked into a ChatGPT-plan home too; a company home does not.
     expect(codex()).toEqual(["pdf"]);
-    expect(codex({ authMode: "chatgpt-plan" })).toEqual(["pdf", "review"]);
+    expect(codex({ authMode: "chatgpt-plan" })).toEqual(["pdf"]);
     expect(codex(undefined, { CODEX_HOME: join(DATA_DIR, "providers", "company", "codex") })).toEqual(["pdf", "review"]);
     expect(names(importedSkillsFor(bot, new Set(), nativeSkillFolders({ driverKind: "geminiAgent" }, { claudeUserSkills: true, home: HOME, env: {} })))).toEqual(["pdf", "review"]);
     // Gone from ~/.claude/skills: Claude no longer has it, so the copy stays in.

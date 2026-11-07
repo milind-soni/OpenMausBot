@@ -360,7 +360,7 @@ export interface SkillTurnEngine {
 }
 
 /** The skill folders a turn's engine loads in place: ~/.claude/skills for Claude Code with "Also use my Claude Code
- * skills" (or OMB_CLAUDE_INHERIT_USER_CONFIG), and $CODEX_HOME/skills for Codex on the person's own CODEX_HOME. */
+ * skills" (or OMB_CLAUDE_INHERIT_USER_CONFIG), and the person's own $CODEX_HOME/skills for Codex, ChatGPT plan included. */
 export function nativeSkillFolders(
   engine: SkillTurnEngine | undefined,
   options: { claudeUserSkills: boolean; home?: string; env?: Record<string, string | undefined> },
@@ -380,8 +380,7 @@ export function nativeSkillFolders(
     }
   }
   if (engine.driverKind === "codex") {
-    // A ChatGPT-plan instance runs on a CODEX_HOME of its own.
-    if ((engine.config as { authMode?: unknown } | undefined)?.authMode === "chatgpt-plan") return [];
+    // A ChatGPT-plan instance signs in on a CODEX_HOME of its own, with the person's skills folder linked into it.
     return [join(absolute(env.CODEX_HOME) ?? join(home, ".codex"), "skills")];
   }
   return [];
