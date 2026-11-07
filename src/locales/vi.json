@@ -5487,5 +5487,20 @@
   "native.connect.dns": "{host} chưa tồn tại. Hãy kiểm tra chính tả, hoặc chờ bản ghi DNS.",
   "native.connect.certificate": "Chứng chỉ của {host} chưa hợp lệ. Máy chủ mới có thể mất một phút để nhận chứng chỉ.",
   "native.connect.notMausBot": "Địa chỉ đó có phản hồi, nhưng không phải máy chủ MausBot.",
-  "native.connect.loopback": "Địa chỉ này trỏ tới máy tính này ({host}), không phải máy chủ. Hãy dùng địa chỉ riêng của máy chủ."
+  "native.connect.loopback": "Địa chỉ này trỏ tới máy tính này ({host}), không phải máy chủ. Hãy dùng địa chỉ riêng của máy chủ.",
+  "serverError.pair.tooMany": "Quá nhiều mã sai. Hãy thử lại lúc {time}.",
+  "serverError.pair.emailCode": "Đó là mã đăng nhập từ email. Ghép nối cần mã 12 ký tự như 7KQ2-M9XD-H4TP.",
+  "serverError.pair.oldCode": "Đó là mã từ phiên bản MausBot cũ hơn. Hãy tạo mã mới trên máy tính kia: Điện thoại và thiết bị → Ghép nối thiết bị.",
+  "serverError.pair.scriptKey": "Đó là khóa script. Ghép nối cần mã ghép nối.",
+  "serverError.pair.notACode": "Đó không phải mã ghép nối. Ghép nối cần mã 12 ký tự như 7KQ2-M9XD-H4TP.",
+  "pair.emailCode": "Mã đăng nhập từ email của bạn",
+  "pair.useEmail": "Đăng nhập bằng email",
+  "pair.intro.code": "Nhập mã ghép nối từ máy chủ. Mã dùng được một lần, trong mười phút.",
+  "pair.fromLink": "Từ liên kết",
+  "pair.onPhone": "Đang dùng điện thoại?",
+  "pair.openInApp": "Mở trong ứng dụng {app}",
+  "pair.noCode": "Chưa có mã? Trên máy chủ, hãy chạy",
+  "pair.invitedByEmail": "Được mời qua email?",
+  "pair.notEncrypted": "Kết nối này không được mã hóa.",
+  "pairing.worksOnceUntil": "Dùng được một lần, đến {time}"
 }

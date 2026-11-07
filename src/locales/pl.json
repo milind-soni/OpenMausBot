@@ -6750,5 +6750,20 @@
   "native.connect.dns": "{host} jeszcze nie istnieje. Sprawdź pisownię albo poczekaj na rekord DNS.",
   "native.connect.certificate": "Certyfikat {host} nie jest jeszcze ważny. Nowy serwer może potrzebować minuty, żeby go dostać.",
   "native.connect.notMausBot": "Ten adres odpowiada, ale to nie jest serwer MausBot.",
-  "native.connect.loopback": "To wskazuje na ten komputer ({host}), a nie na serwer. Użyj adresu samego serwera."
+  "native.connect.loopback": "To wskazuje na ten komputer ({host}), a nie na serwer. Użyj adresu samego serwera.",
+  "serverError.pair.tooMany": "Za dużo błędnych kodów. Spróbuj ponownie o {time}.",
+  "serverError.pair.emailCode": "To kod logowania z e-maila. Do parowania potrzebny jest 12-znakowy kod, np. 7KQ2-M9XD-H4TP.",
+  "serverError.pair.oldCode": "To kod ze starszej wersji MausBot. Utwórz nowy na drugim komputerze: Telefon i urządzenia → Sparuj urządzenie.",
+  "serverError.pair.scriptKey": "To klucz skryptu. Do parowania potrzebny jest kod parowania.",
+  "serverError.pair.notACode": "To nie jest kod parowania. Do parowania potrzebny jest 12-znakowy kod, np. 7KQ2-M9XD-H4TP.",
+  "pair.emailCode": "Kod logowania z e-maila",
+  "pair.useEmail": "Zaloguj się e-mailem",
+  "pair.intro.code": "Wpisz kod parowania z serwera. Działa raz, przez dziesięć minut.",
+  "pair.fromLink": "Z linku",
+  "pair.onPhone": "Na telefonie?",
+  "pair.openInApp": "Otwórz w aplikacji {app}",
+  "pair.noCode": "Nie masz kodu? Na serwerze uruchom",
+  "pair.invitedByEmail": "Zaproszenie e-mailem?",
+  "pair.notEncrypted": "To połączenie nie jest szyfrowane.",
+  "pairing.worksOnceUntil": "Działa raz, do {time}"
 }

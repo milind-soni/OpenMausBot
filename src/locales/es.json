@@ -5988,5 +5988,20 @@
   "native.connect.dns": "{host} todavía no existe. Revisa cómo está escrito o espera al registro DNS.",
   "native.connect.certificate": "El certificado de {host} todavía no es válido. Un servidor nuevo puede tardar un minuto en obtenerlo.",
   "native.connect.notMausBot": "Esa dirección responde, pero no es un servidor de MausBot.",
-  "native.connect.loopback": "Esto apunta a este ordenador ({host}), no al servidor. Usa la dirección del propio servidor."
+  "native.connect.loopback": "Esto apunta a este ordenador ({host}), no al servidor. Usa la dirección del propio servidor.",
+  "serverError.pair.tooMany": "Demasiados códigos incorrectos. Vuelve a intentarlo a las {time}.",
+  "serverError.pair.emailCode": "Ese es un código de inicio de sesión de un correo. Para vincular necesitas un código de 12 caracteres como 7KQ2-M9XD-H4TP.",
+  "serverError.pair.oldCode": "Ese es un código de una versión anterior de MausBot. Crea uno nuevo en el otro ordenador: Teléfono y dispositivos → Vincular un dispositivo.",
+  "serverError.pair.scriptKey": "Esa es una clave de script. Para vincular necesitas un código de vinculación.",
+  "serverError.pair.notACode": "Eso no es un código de vinculación. Para vincular necesitas un código de 12 caracteres como 7KQ2-M9XD-H4TP.",
+  "pair.emailCode": "Código de inicio de sesión de tu correo",
+  "pair.useEmail": "Iniciar sesión con correo",
+  "pair.intro.code": "Introduce el código de vinculación del servidor. Funciona una vez, durante diez minutos.",
+  "pair.fromLink": "Del enlace",
+  "pair.onPhone": "¿En tu teléfono?",
+  "pair.openInApp": "Abrir en la app de {app}",
+  "pair.noCode": "¿Sin código? En el servidor, ejecuta",
+  "pair.invitedByEmail": "¿Te invitaron por correo?",
+  "pair.notEncrypted": "Esta conexión no está cifrada.",
+  "pairing.worksOnceUntil": "Funciona una vez, hasta las {time}"
 }
