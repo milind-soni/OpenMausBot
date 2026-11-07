@@ -43,6 +43,7 @@ import { openLiveEvents, type LiveEventSourceLike, type LiveEventsPlatform } fro
 import type { ModelVariantState, RuntimeEvent } from "../../shared/runtime-events";
 import type { ConnectorToolGrant } from "../../shared/wire";
 import type { RoutineRun } from "../lib/routines";
+import { optimisticUserMessage } from "./optimistic-send";
 
 describe("api refusals", () => {
   afterEach(() => { vi.unstubAllGlobals(); });
@@ -2136,6 +2137,24 @@ describe("scrollback pages", () => {
     const loaded = reducer(opened, { ...page(opened), messages: [message("m1", 1), reply("m2", 2), reply("m3", 3)] });
     expect(loaded.unreadDivider).toEqual({ threadId: bot.threadId, messageId: "m2" });
     expect(loaded.deferredUnreadDivider).toBeNull();
+  });
+
+  it("replaces a send's temporary copy when the deferred history already holds it", () => {
+    const snapshot = deferred();
+    const sent = reducer(snapshot, { type: "messageAdded", threadId: bot.threadId, message: optimisticUserMessage("hi", "s1") });
+    expect(sent.bots[0].activeLeafId).toBe("optimistic-s1");
+    const accepted = { ...message("m5", 5), sendId: "s1" };
+    const loaded = reducer(sent, { ...page(sent), messages: [message("m4", 4), accepted] });
+    expect(loaded.bots[0].messages.map((line) => line.id)).toEqual(["m4", "m5"]);
+    expect(loaded.bots[0].activeLeafId).toBe("m5");
+  });
+
+  it("drops an older page asked for before the transcript was deferred again", () => {
+    const reconnected = reducer(deferred(), { type: "loadOlderMessages", threadId: bot.threadId });
+    const stale = reducer(reconnected, { type: "olderMessages", threadId: bot.threadId, generation: 0, messages: [message("m1", 1)], hasMore: true });
+    expect(stale.bots[0].messages).toEqual([]);
+    expect(stale.deferredTranscripts[bot.threadId]).toBe(reconnected.snapshotRevision);
+    expect(stale.loadingOlder).toEqual({});
   });
 
   it("marks the thread loading so one click cannot ask twice", () => {

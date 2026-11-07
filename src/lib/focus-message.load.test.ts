@@ -36,7 +36,7 @@ describe("landing on a search hit older than the loaded page", () => {
       const before = new URL(path, "http://x").searchParams.get("before");
       return before ? pages[before] : { messages: range(400, 600), hasMore: true };
     });
-    const deferred = { ...state, bots: [{ ...bot, messages: [] }], groups: [{ ...group, messages: [] }] };
+    const deferred = { ...state, bots: [{ ...bot, messages: [] }], groups: [{ ...group, messages: [] }], deferredTranscripts: { t: 7, rt: 7 } };
     const threadId = owner === "bot" ? "t" : "rt";
     await landOnSearchHit({ ...hit, threadId, ...(owner === "bot" ? { botId: "scout" } : { groupId: "room" }) }, deferred, dispatch, true);
     expect(fixture.api.mock.calls.map(([path]) => path)).toEqual([
@@ -44,7 +44,7 @@ describe("landing on a search hit older than the loaded page", () => {
       `/api/threads/${threadId}/messages?limit=200&before=m400`,
       `/api/threads/${threadId}/messages?limit=200&before=m200`,
     ]);
-    expect(actions[1]).toMatchObject({ type: "olderMessages", threadId, messages: range(0, 600), hasMore: false });
+    expect(actions[1]).toMatchObject({ type: "olderMessages", threadId, revision: 7, messages: range(0, 600), hasMore: false });
     expect(actions[2]).toMatchObject({ type: "focusMessage", threadId, messageId: "m50" });
   });
 

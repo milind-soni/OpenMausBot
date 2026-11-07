@@ -10,6 +10,7 @@ async function loadThroughMessage(
   owner: { threadId: string; messages: Message[]; hasMore?: boolean },
   messageId: string,
   generation: number,
+  revision: number | undefined,
   dispatch: React.Dispatch<Action>,
 ): Promise<void> {
   if (!owner.hasMore || owner.messages.some((message) => message.id === messageId)) return;
@@ -27,12 +28,12 @@ async function loadThroughMessage(
     hasMore = Boolean(page.hasMore) && messages.length > 0;
     before = messages[0]?.id;
   }
-  if (older.length) dispatch({ type: "olderMessages", threadId: owner.threadId, generation, messages: older, hasMore });
+  if (older.length) dispatch({ type: "olderMessages", threadId: owner.threadId, generation, revision, messages: older, hasMore });
 }
 
 export async function landOnSearchHit(
   hit: SearchHit,
-  state: Pick<AppState, "bots" | "groups" | "transcriptGeneration">,
+  state: Pick<AppState, "bots" | "groups" | "transcriptGeneration"> & Partial<Pick<AppState, "deferredTranscripts">>,
   dispatch: React.Dispatch<Action>,
   threadsShown: boolean,
 ): Promise<void> {
@@ -52,7 +53,7 @@ export async function landOnSearchHit(
     if (result?.group) dispatch({ type: "groupPatched", group: result.group });
   }
   const open = bot?.threadId === hit.threadId ? bot : group?.threadId === hit.threadId ? group : undefined;
-  if (open) await loadThroughMessage(open, hit.messageId, state.transcriptGeneration[hit.threadId] ?? 0, dispatch);
+  if (open) await loadThroughMessage(open, hit.messageId, state.transcriptGeneration[hit.threadId] ?? 0, state.deferredTranscripts?.[hit.threadId], dispatch);
   if (bot && !hit.onActivePath) {
     const branch = await api(`/api/bots/${bot.id}/active-branch`, {
       method: "POST",

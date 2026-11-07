@@ -54,7 +54,9 @@ import type { Routine, RoutineInput, RoutineRun, RoutineRunStatusFilter } from "
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { duplicateBotProfile, restrictedCopyRequest } from "@/lib/bot-duplicate";
 import { botShowsUnread } from "@/lib/bot-unread";
-import { firstUnreadMessageId, threadOpensUnread, threadReadCursor } from "@/lib/unread-divider";
+import { threadOpensUnread, threadReadCursor } from "@/lib/unread-divider";
+import { deferAwaitingTranscripts, heldPatch, olderMessages, openedThread, requestOlderMessages, settleIfDeferred, switchedTranscript, transcriptLoaded, useDeferredTranscript, MESSAGE_PAGE_SIZE } from "./transcript-pages";
+export { MESSAGE_PAGE_SIZE } from "./transcript-pages";
 import type { ComputerStart } from "@/lib/computer-start";
 import { parseComputerHelp } from "@/lib/computer-control";
 import { answerResponse, dismissResponse } from "@/lib/card-answer";
@@ -399,12 +401,6 @@ function taskPatchFields(patch: TaskUpdatePatch): Partial<Task> {
     ...(link === undefined ? {} : { link: link ?? undefined }) };
 }
 
-function openedUnreadDivider(state: AppState, threadId: string, unread: boolean, messages: readonly Message[], lastReadMessageId?: string): AppState["unreadDivider"] {
-  if (!unread) return state.unreadDivider?.threadId === threadId ? state.unreadDivider : null;
-  const messageId = firstUnreadMessageId(messages, lastReadMessageId);
-  return messageId ? { threadId, messageId } : null;
-}
-
 import type { BrowserEngineSummary, BrowserProfile, ConfigStatus, ManagedPolicySummary } from "./config-status";
 export type { BrowserEngineSummary, BrowserProfile, ConfigStatus, ManagedPolicySummary };
 
@@ -736,7 +732,7 @@ export type Action =
   | { type: "switchBranch"; botId: string; messageId: string; threadId?: string }
   | { type: "threadActive"; threadId: string; activeLeafId: string }
   | { type: "loadOlderMessages"; threadId: string }
-  | { type: "olderMessages"; threadId: string; generation: number; messages: Message[]; hasMore: boolean }
+  | { type: "olderMessages"; threadId: string; generation: number; revision?: number; messages: Message[]; hasMore: boolean }
   | { type: "transcriptLoaded"; threadId: string; revision: number; generation: number; messages: Message[]; hasMore: boolean }
   | { type: "answerCard"; botId: string; messageId: string; answer: string; threadId?: string; groupId?: string }
   | { type: "answerCardFailed"; botId: string; messageId: string; answer: string; groupId?: string }
@@ -895,44 +891,9 @@ function dismissOnboardingCard(state: AppState, botId: string): AppState {
 
 export const CLOUD_LINK_SETTINGS = { type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true } as const satisfies Action;
 
-const awaitsTranscript = (owner: { messages: readonly Message[]; hasMore?: boolean }) => Boolean(owner.hasMore) && owner.messages.length === 0;
-
-function deferTranscript(state: AppState, threadId: string): AppState {
-  const snapshotRevision = state.snapshotRevision + 1;
-  return { ...state, snapshotRevision, deferredTranscripts: { ...state.deferredTranscripts, [threadId]: snapshotRevision } };
-}
-
-function settleTranscript(state: AppState, threadId: string): AppState {
-  const { [threadId]: _loaded, ...deferredTranscripts } = state.deferredTranscripts;
-  const { [threadId]: _spinner, ...loadingOlder } = state.loadingOlder;
-  const { [threadId]: frames = [], ...backgroundThreadEvents } = state.backgroundThreadEvents;
-  let next: AppState = { ...state, deferredTranscripts, loadingOlder, backgroundThreadEvents };
-  const waiting = state.deferredUnreadDivider;
-  if (waiting?.threadId === threadId) {
-    const bot = state.bots.find((candidate) => candidate.threadId === threadId);
-    const messages = bot ? visibleMessages(bot) : state.groups.find((group) => group.threadId === threadId)?.messages ?? [];
-    const messageId = firstUnreadMessageId(messages, waiting.lastReadMessageId);
-    next = { ...next, deferredUnreadDivider: null, unreadDivider: messageId ? { threadId, messageId } : null };
-  }
-  for (const frame of frames) next = reducer(next, frame);
-  return next;
-}
-
-function openedThread(state: AppState, threadId: string, unread: boolean, messages: readonly Message[], lastReadMessageId?: string): Pick<AppState, "unreadDivider" | "deferredUnreadDivider"> {
-  return unread && state.deferredTranscripts[threadId] !== undefined
-    ? { unreadDivider: null, deferredUnreadDivider: { threadId, lastReadMessageId } }
-    : { unreadDivider: openedUnreadDivider(state, threadId, unread, messages, lastReadMessageId), deferredUnreadDivider: null };
-}
-
 export function reducer(state: AppState, action: Action): AppState {
-  if (action.type === "messagePatched" && state.deferredTranscripts[action.threadId]) {
-    const owner = [...state.bots, ...state.groups].find((candidate) => candidate.threadId === action.threadId);
-    if (owner && !owner.messages.some((message) => message.id === action.message.id)) {
-      return { ...state, backgroundThreadEvents: { ...state.backgroundThreadEvents,
-        [action.threadId]: [...(state.backgroundThreadEvents[action.threadId] ?? [])
-          .filter((frame) => frame.type !== "messagePatched" || frame.message.id !== action.message.id), action].slice(-256) } };
-    }
-  }
+  const held = heldPatch(state, action);
+  if (held) return held;
   if (action.type === "messageAdded" || action.type === "messagePatched" || action.type === "threadActive" || action.type === "optimisticMessageRemoved") {
     const owner = state.bots.find((bot) => (bot.threadId !== action.threadId || bot.awaitingThreadSnapshot) && bot.tasks?.some((task) => task.threadId === action.threadId));
     if (owner) {
@@ -975,58 +936,20 @@ export function reducer(state: AppState, action: Action): AppState {
         transcriptGeneration: {},
         modelVariantSessions: {},
       };
-      const snapshotRevision = state.snapshotRevision + 1;
-      const deferredTranscripts: AppState["deferredTranscripts"] = action.deferMessages
-        ? Object.fromEntries([...hydrated.bots, ...hydrated.groups]
-          .filter(awaitsTranscript)
-          .map((owner) => [owner.threadId, snapshotRevision]))
-        : {};
-      const snapshot = { ...hydrated, snapshotRevision, deferredTranscripts };
+      const snapshot = action.deferMessages ? deferAwaitingTranscripts(hydrated) : { ...hydrated, deferredTranscripts: {} };
       return reconcileSnapshotQueues(
         action.botQueuedMessages ? replaceBotQueues(snapshot, action.botQueuedMessages) : snapshot,
         [...action.bots, ...action.groups],
       );
     }
-    case "transcriptLoaded": {
-      if (state.deferredTranscripts[action.threadId] !== action.revision ||
-          (state.transcriptGeneration[action.threadId] ?? 0) !== action.generation) return state;
-      const received = new Set(action.messages.map((message) => message.id));
-      const merge = <T extends { threadId: string; messages: Message[] }>(owner: T): T => {
-        if (owner.threadId !== action.threadId) return owner;
-        const live = new Map(owner.messages.map((message) => [message.id, message]));
-        return { ...owner, hasMore: action.hasMore,
-          messages: [...action.messages.map((message) => live.get(message.id) ?? message),
-            ...owner.messages.filter((message) => !received.has(message.id))] };
-      };
-      return settleTranscript({ ...state, bots: state.bots.map(merge), groups: state.groups.map(merge) }, action.threadId);
-    }
+    case "transcriptLoaded":
+      return transcriptLoaded(state, action, reducer);
     case "loadOlderMessages":
       return state.loadingOlder[action.threadId]
         ? state
         : { ...state, loadingOlder: { ...state.loadingOlder, [action.threadId]: true } };
-    case "olderMessages": {
-      const { [action.threadId]: _done, ...loadingOlder } = state.loadingOlder;
-      if ((state.transcriptGeneration[action.threadId] ?? 0) !== action.generation) {
-        return { ...state, loadingOlder };
-      }
-      const prepend = <T extends { messages: Message[]; threadId: string; hasMore?: boolean }>(owner: T): T => {
-        const held = new Set(owner.messages.map((message) => message.id));
-        return {
-          ...owner,
-          // A page that raced an edit can overlap held rows; the held copy is newer.
-          messages: [...action.messages.filter((message) => !held.has(message.id)), ...owner.messages],
-          hasMore: action.hasMore,
-        };
-      };
-      const paged = {
-        ...state,
-        loadingOlder,
-        bots: state.bots.map((bot) => (bot.threadId === action.threadId ? prepend(bot) : bot)),
-        groups: state.groups.map((group) => (group.threadId === action.threadId ? prepend(group) : group)),
-      };
-      return action.messages.length && state.deferredTranscripts[action.threadId]
-        ? settleTranscript(paged, action.threadId) : paged;
-    }
+    case "olderMessages":
+      return olderMessages(state, action, reducer);
     case "sectionDeleted":
       return {
         ...state, sections: action.sections,
@@ -1117,8 +1040,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "groupPatched": {
       const fenced = action.group.messages ? bumpTranscriptGeneration(state, action.group.threadId) : state;
       const patched = { ...fenced, groups: patchedGroups(state.groups, action.group) };
-      return action.group.messages && action.group.threadId && state.deferredTranscripts[action.group.threadId]
-        ? settleTranscript(patched, action.group.threadId) : patched;
+      return action.group.messages ? settleIfDeferred(patched, action.group.threadId, reducer) : patched;
     }
     case "groupSnapshot": {
       const group = snapshotPatch(state, action);
@@ -1833,10 +1755,7 @@ export function reducer(state: AppState, action: Action): AppState {
         awaitingThreadSnapshot: false,
         switchingTo: undefined,
       }));
-      const arrived = switched.bots.find((bot) => bot.id === action.bot.id);
-      switched = arrived && awaitsTranscript(arrived)
-        ? deferTranscript(switched, action.bot.threadId)
-        : settleTranscript(switched, action.bot.threadId);
+      switched = switchedTranscript(switched, action.bot.id, action.bot.threadId, reducer);
       const opened = switched.bots.find((bot) => bot.id === action.bot.id);
       if (opened && opened.id === switched.selectedId) {
         switched = { ...switched, ...openedThread(switched, opened.threadId, threadOpensUnread(opened), visibleMessages(opened), threadReadCursor(opened)) };
@@ -1990,7 +1909,6 @@ export const initialState: AppState = {
 export { api, ApiError, liveCallFromFrame, nextLiveCallLookup };
 
 /** Messages per snapshot thread and per scrollback page: the server's own page maximum. */
-export const MESSAGE_PAGE_SIZE = 200;
 
 
 type TrustedApprovalBridge = {
@@ -2382,37 +2300,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         action.type !== "deleteBot"
       ) rawDispatch(action);
       switch (action.type) {
-        case "loadOlderMessages": {
-          if (stateRef.current.deferredTranscripts[action.threadId]) break;
-          // The guard, not the reducer flag: stateRef still holds the pre-dispatch state.
-          if (olderPagesInFlight.has(action.threadId)) break;
-          olderPagesInFlight.add(action.threadId);
-          const current = stateRef.current;
-          const owner = [...current.bots, ...current.groups].find((candidate) => candidate.threadId === action.threadId);
-          const before = owner?.messages[0]?.id;
-          const generation = current.transcriptGeneration[action.threadId] ?? 0;
-          if (!before) {
-            olderPagesInFlight.delete(action.threadId);
-            rawDispatch({ type: "olderMessages", threadId: action.threadId, generation, messages: [], hasMore: false });
-            break;
-          }
-          api<{ messages: Message[]; hasMore?: boolean }>(
-            `/api/threads/${action.threadId}/messages?limit=${MESSAGE_PAGE_SIZE}&before=${encodeURIComponent(before)}`,
-          )
-            .finally(() => olderPagesInFlight.delete(action.threadId))
-            .then((page) => rawDispatch({
-              type: "olderMessages",
-              threadId: action.threadId,
-              generation,
-              messages: page.messages ?? [],
-              hasMore: Boolean(page.hasMore),
-            }))
-            .catch((error) => {
-              rawDispatch({ type: "olderMessages", threadId: action.threadId, generation, messages: [], hasMore: true });
-              showError(error);
-            });
+        case "loadOlderMessages":
+          // The in-flight set, not the reducer flag: stateRef still holds the pre-dispatch state.
+          requestOlderMessages(stateRef.current, action.threadId, olderPagesInFlight, rawDispatch, showError);
           break;
-        }
         case "notice":
           if (action.notice) setTimeout(() => rawDispatch({ type: "notice", notice: null }), action.notice.kind === "note" ? 20_000 : 6000);
           break;
@@ -3363,33 +3254,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const instanceProbes = useRef(new Map<string, Promise<void>>());
-  const selectedOwner = state.bots.find((bot) => bot.id === state.selectedId)
-    ?? state.groups.find((group) => group.id === state.selectedId);
-  const deferredThread = selectedOwner?.threadId;
-  const deferredRevision = deferredThread ? state.deferredTranscripts[deferredThread] : undefined;
-  const deferredGeneration = deferredThread ? state.transcriptGeneration[deferredThread] ?? 0 : 0;
-  useEffect(() => {
-    if (!deferredThread || deferredRevision === undefined) return;
-    const controller = new AbortController();
-    let retry: ReturnType<typeof setTimeout> | undefined;
-    let attempt = 0;
-    const load = () => {
-      void api<{ messages: Message[]; hasMore?: boolean }>(
-        `/api/threads/${deferredThread}/messages?limit=${MESSAGE_PAGE_SIZE}`,
-        { signal: controller.signal },
-      ).then((page) => {
-        if (controller.signal.aborted) return;
-        rawDispatch({ type: "transcriptLoaded", threadId: deferredThread, revision: deferredRevision,
-          generation: deferredGeneration, messages: page.messages, hasMore: Boolean(page.hasMore) });
-      }).catch((error) => {
-        if (controller.signal.aborted) return;
-        if (attempt === 0) rawDispatch({ type: "error", message: error instanceof Error ? error.message : String(error) });
-        retry = setTimeout(load, Math.min(30_000, 1000 * 2 ** attempt++));
-      });
-    };
-    load();
-    return () => { controller.abort(); clearTimeout(retry); };
-  }, [deferredThread, deferredRevision, deferredGeneration]);
+  useDeferredTranscript(state, rawDispatch);
 
   const refreshInstances = useCallback(async (options?: { reportErrors?: boolean; cached?: boolean }) => {
     const path = options?.cached ? "/api/instances" : "/api/instances?fresh=1", probes = instanceProbes.current;
