@@ -102,7 +102,7 @@ it.each([
   const copy = vi.fn(async () => { await gate; });
   const reveal = vi.fn(async () => { await gate; return "shown" as const; });
   vi.stubGlobal("navigator", { language: "en", clipboard: { writeText: copy } });
-  window.ogb = { revealInFolder: reveal } as typeof window.ogb;
+  Object.defineProperty(window, "ogb", { configurable: true, value: { revealInFolder: reveal } });
   onClose.mockImplementation(() => { menu = null; draw(); });
   const label = action === "open" ? "Open working folder" : "Copy path";
   draw();
