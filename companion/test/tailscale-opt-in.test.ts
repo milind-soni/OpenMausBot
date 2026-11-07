@@ -3,12 +3,12 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ENTRY = join(HERE, "..", "src", "index.ts");
-const RECORDER = join(HERE, "fixtures", "record-exec.mjs");
+const RECORDER = pathToFileURL(join(HERE, "fixtures", "record-exec.mjs")).href;
 const dirs: string[] = [];
 
 afterEach(() => {
