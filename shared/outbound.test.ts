@@ -25,6 +25,17 @@ describe("isOutboundTool", () => {
       "mcp__x__post",
       "mcp__other__x_post",
       "TWITTER_X_POST",
+      // Placing a phone call reaches a person; buying a number moves money.
+      "mcp__vapi__create_call",
+      "mcp__agentphone__make_call",
+      "mcp__agentphone__make_conversation_call",
+      "mcp__agentphone__buy_number",
+      "TWILIO_MAKE_CALL",
+      "mcp__telnyx__dial",
+      "mcp__shop__purchase_item",
+      // A raw API call can place a call, send a text or buy a number.
+      "mcp__telnyx__invoke_api_endpoint",
+      "mcp__telnyx-2__invoke_api_endpoint",
     ]) {
       expect(isOutboundTool(name), name).toBe(true);
     }
@@ -52,6 +63,13 @@ describe("isOutboundTool", () => {
       "agents_x_post",
       "x_post",
       "mcp__agents__x_user_posts",
+      "mcp__vapi__get_call",
+      "mcp__vapi__list_calls",
+      "mcp__vapi__create_assistant",
+      "mcp__agentphone__end_call",
+      "mcp__agentphone__list_numbers",
+      "mcp__telnyx__list_api_endpoints",
+      "mcp__telnyx__get_api_endpoint_schema",
       "Bash",
       "Read",
       "Edit",
