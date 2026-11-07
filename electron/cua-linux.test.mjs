@@ -37,7 +37,7 @@ function healthyDoctor() {
   return {
     ok: true,
     probes: [
-      { label: "binary", status: "ok", message: "cua-driver 0.19.3" },
+      { label: "binary", status: "ok", message: "cua-driver 0.41.3" },
       { label: "display server", status: "ok", message: "X11 (DISPLAY=:0)" },
       { label: "X11 connection", status: "ok", message: "connected, 1 visible top-level window" },
       { label: "AT-SPI", status: "ok", message: "org.a11y.Bus reachable via session bus" },
@@ -50,7 +50,7 @@ function healthyWaylandDoctor() {
   return {
     ok: true,
     probes: [
-      { label: "binary", status: "ok", message: "cua-driver 0.19.3" },
+      { label: "binary", status: "ok", message: "cua-driver 0.41.3" },
       {
         label: "display server",
         status: "ok",
@@ -66,13 +66,13 @@ function successfulRunner(binary, { doctor = healthyDoctor() } = {}) {
   return vi.fn(async (_command, args, options) => {
     expect(_command).toBe(binary);
     expect(options.env.OPENAI_API_KEY).toBeUndefined();
-    if (args[0] === "--version") return { exitCode: 0, stdout: "cua-driver 0.19.3\n", stderr: "" };
+    if (args[0] === "--version") return { exitCode: 0, stdout: "cua-driver 0.41.3\n", stderr: "" };
     if (args[0] === "manifest") {
       return {
         exitCode: 0,
         stdout: JSON.stringify({
           schema_version: "1",
-          binary_version: "0.19.3",
+          binary_version: "0.41.3",
           binary_path: binary,
           mcp_invocation: { command: binary, args: ["mcp"] },
         }),
@@ -148,7 +148,7 @@ describe.skipIf(process.platform === "win32")("Linux CUA discovery", () => {
 
   it("resolves the official user-local symlink to its canonical executable", () => {
     const root = temporaryDirectory();
-    const release = executable(path.join(root, ".cua-driver", "packages", "releases", "0.19.3"));
+    const release = executable(path.join(root, ".cua-driver", "packages", "releases", "0.41.3"));
     const localBin = path.join(root, ".local", "bin");
     fs.mkdirSync(localBin, { recursive: true, mode: 0o700 });
     fs.symlinkSync(release, path.join(localBin, "cua-driver"));
@@ -183,7 +183,7 @@ describe.skipIf(process.platform === "win32")("Linux CUA discovery", () => {
     "accepts the official 0775 layout only for a proven user-private primary group",
     () => {
       const root = temporaryDirectory();
-      const releaseDirectory = path.join(root, ".cua-driver", "packages", "releases", "0.19.3");
+      const releaseDirectory = path.join(root, ".cua-driver", "packages", "releases", "0.41.3");
       const release = executable(releaseDirectory);
       const localBin = path.join(root, ".local", "bin");
       fs.mkdirSync(localBin, { recursive: true, mode: 0o775 });
@@ -421,7 +421,7 @@ describe.skipIf(process.platform === "win32")("Linux CUA diagnostics", () => {
       status: "ready",
       path: binary,
       fileIdentity: validateDriverCandidate(binary).fileIdentity,
-      driverVersion: "0.19.3",
+      driverVersion: "0.41.3",
       manifestSchema: "1",
       mcp: { command: binary, args: ["mcp"] },
     });
@@ -511,12 +511,12 @@ describe.skipIf(process.platform === "win32")("Linux CUA diagnostics", () => {
     const root = temporaryDirectory();
     const binary = executable(path.join(root, "bin"));
     const run = successfulRunner(binary);
-    run.mockImplementationOnce(async () => ({ exitCode: 0, stdout: "cua-driver 0.19.3", stderr: "" }));
+    run.mockImplementationOnce(async () => ({ exitCode: 0, stdout: "cua-driver 0.41.3", stderr: "" }));
     run.mockImplementationOnce(async () => ({
       exitCode: 0,
       stdout: JSON.stringify({
         schema_version: "1",
-        binary_version: "0.19.3",
+        binary_version: "0.41.3",
         mcp_invocation: { command: binary, args: ["mcp"] },
       }),
       stderr: "",

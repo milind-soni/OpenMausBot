@@ -4657,7 +4657,7 @@
   "computer.preview.cantConnect": "Nie udało się połączyć z ekranem.",
   "computer.preview.retry": "Ponów podgląd",
   "computer.linux.title": "Sterowanie lokalne",
-  "computer.linux.meta": "Beta · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.19.3",
+  "computer.linux.meta": "Beta · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.41.3",
   "computer.linux.ready": "Gotowe",
   "computer.linux.waylandBadge": "Niedostępne na Wayland",
   "computer.linux.waylandBefore": "Sterowanie lokalne jest dostępne na Ubuntu Xorg. Pozostaje wyłączone na Wayland, dopóki granica bezpieczeństwa danych wejściowych nie zostanie zweryfikowana. Wyloguj się i wybierz",

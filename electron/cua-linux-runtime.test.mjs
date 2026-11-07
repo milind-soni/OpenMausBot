@@ -65,8 +65,8 @@ function fakeChild(pid = 4321) {
 function handshake(pid = 4321) {
   return {
     metadata: {
-      driver_version: "0.19.3",
-      contract_version: "0.6.0",
+      driver_version: "0.41.3",
+      contract_version: "0.8.0",
       tools_list_schema_version: "1",
       capability_version: "1",
       mcp_protocol_version: "2025-06-18",
@@ -85,10 +85,10 @@ function healthyWaylandHealth() {
       structuredContent: {
         schema_version: "1",
         platform: "linux",
-        driver_version: "0.19.3",
+        driver_version: "0.41.3",
         overall: "ok",
         checks: [
-          { name: "binary_version", status: "pass", message: "cua-driver 0.19.3" },
+          { name: "binary_version", status: "pass", message: "cua-driver 0.41.3" },
           { name: "platform_supported", status: "pass", message: "Ubuntu 24.04" },
           { name: "session_active", status: "pass", message: "MCP session is active." },
           { name: "ax_capability", status: "pass", message: "AT-SPI is reachable." },
@@ -130,7 +130,7 @@ function harness({
       path: binary,
       fileIdentity,
       source: "environment",
-      driverVersion: "0.19.3",
+      driverVersion: "0.41.3",
       manifestSchema: "1",
       mcp: { command: binary, args: ["mcp"] },
       doctor: { ok: true, probes: [], warnings: [] },
@@ -380,12 +380,12 @@ describe.skipIf(process.platform === "win32")("Linux CUA opt-in and lifecycle", 
       generation: "01234567-89ab-cdef-0123-456789abcdef",
       driver: {
         path: context.binary,
-        version: "0.19.3",
+        version: "0.41.3",
         source: "environment",
         manifestSchema: "1",
         fileIdentity: validateDriverCandidate(context.binary).fileIdentity,
       },
-      daemon: { pid: 4321, contractVersion: "0.6.0" },
+      daemon: { pid: 4321, contractVersion: "0.8.0" },
       mcp: {
         command: context.binary,
         args: ["mcp", "--embedded", "--socket", expect.stringMatching(/driver\.sock$/)],

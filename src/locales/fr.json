@@ -1877,7 +1877,7 @@
   "computer.preview.cantConnect": "Impossible de se connecter à l'écran.",
   "computer.preview.retry": "Réessayer l'aperçu",
   "computer.linux.title": "Contrôle local",
-  "computer.linux.meta": "Bêta · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.19.3",
+  "computer.linux.meta": "Bêta · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.41.3",
   "computer.linux.ready": "Prêt",
   "computer.linux.waylandBadge": "Indisponible sur Wayland",
   "computer.linux.waylandBefore": "Le contrôle local est disponible sur Ubuntu Xorg. Il reste désactivé sur Wayland tant que sa frontière de sécurité des entrées n'est pas validée. Déconnectez-vous et choisissez",

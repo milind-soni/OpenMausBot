@@ -5472,7 +5472,7 @@
   "computer.preview.cantConnect": "Couldn't connect to the screen.",
   "computer.preview.retry": "Retry preview",
   "computer.linux.title": "Local control",
-  "computer.linux.meta": "Beta · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.19.3",
+  "computer.linux.meta": "Beta · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.41.3",
   "computer.linux.ready": "Ready",
   "computer.linux.waylandBadge": "Unavailable on Wayland",
   "computer.linux.waylandBefore": "Local control is available on Ubuntu Xorg. It remains disabled on Wayland until its input-safety boundary is validated. Sign out and choose",

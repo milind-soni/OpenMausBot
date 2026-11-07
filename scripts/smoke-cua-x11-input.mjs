@@ -203,7 +203,7 @@ try {
     },
     "the overlay-free driver handshake",
   );
-  if (metadata.driver_version !== "0.19.3" || metadata.embedded !== true) {
+  if (metadata.driver_version !== "0.41.3" || metadata.embedded !== true) {
     throw new Error(`unexpected driver metadata: ${JSON.stringify(metadata)}`);
   }
 

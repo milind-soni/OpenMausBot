@@ -236,7 +236,7 @@ describe("desktop capabilities", () => {
       status: "ready",
       driver: {
         path: "/home/test/.local/bin/cua-driver",
-        version: "0.19.3",
+        version: "0.41.3",
         source: "user-local",
       },
     };
@@ -251,7 +251,7 @@ describe("desktop capabilities", () => {
       support: "limited",
       enabled: true,
       status: "ready",
-      driverVersion: "0.19.3",
+      driverVersion: "0.41.3",
       driverSource: "user-local",
     });
     expect(localComputerReady("linux", { ...connection, session: "wayland" })).toBe(false);

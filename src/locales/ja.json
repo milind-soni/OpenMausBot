@@ -5288,7 +5288,7 @@
   "computer.preview.cantConnect": "画面に接続できませんでした。",
   "computer.preview.retry": "プレビューを再試行",
   "computer.linux.title": "ローカル操作",
-  "computer.linux.meta": "ベータ · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.19.3",
+  "computer.linux.meta": "ベータ · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.41.3",
   "computer.linux.ready": "準備完了",
   "computer.linux.waylandBadge": "Wayland では利用できません",
   "computer.linux.waylandBefore": "ローカル操作は Ubuntu Xorg で利用できます。Wayland では入力の安全境界が検証されるまで無効のままです。サインアウトして選んでください：",

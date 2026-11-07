@@ -3741,7 +3741,7 @@
   "computer.preview.cantConnect": "Không thể kết nối với màn hình.",
   "computer.preview.retry": "Thử tải lại xem trước",
   "computer.linux.title": "Điều khiển cục bộ",
-  "computer.linux.meta": "Beta · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.19.3",
+  "computer.linux.meta": "Beta · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.41.3",
   "computer.linux.ready": "Sẵn sàng",
   "computer.linux.waylandBadge": "Không khả dụng trên Wayland",
   "computer.linux.waylandBefore": "Tính năng điều khiển cục bộ khả dụng trên Ubuntu Xorg. Tính năng này tạm thời bị vô hiệu hóa trên Wayland cho đến khi cơ chế an toàn nhập liệu được xác thực. Đăng xuất và chọn",

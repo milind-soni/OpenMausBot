@@ -5209,7 +5209,7 @@
   "computer.preview.cantConnect": "Não foi possível conectar à tela.",
   "computer.preview.retry": "Recarregar prévia",
   "computer.linux.title": "Controle local",
-  "computer.linux.meta": "Beta · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.19.3",
+  "computer.linux.meta": "Beta · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.41.3",
   "computer.linux.ready": "Pronto",
   "computer.linux.waylandBadge": "Indisponível no Wayland",
   "computer.linux.waylandBefore": "O controle local está disponível no Ubuntu Xorg. No Wayland, ele continua desativado até que as proteções para entrada de mouse e teclado sejam validadas. Saia da sessão e escolha",

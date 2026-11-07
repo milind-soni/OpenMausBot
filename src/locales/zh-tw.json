@@ -5471,7 +5471,7 @@
   "computer.preview.cantConnect": "無法連線到螢幕。",
   "computer.preview.retry": "重試預覽",
   "computer.linux.title": "本機控制",
-  "computer.linux.meta": "Beta · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.19.3",
+  "computer.linux.meta": "Beta · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.41.3",
   "computer.linux.ready": "就緒",
   "computer.linux.waylandBadge": "在 Wayland 上無法使用",
   "computer.linux.waylandBefore": "本機控制可在 Ubuntu Xorg 上使用。在其輸入安全性界線通過驗證之前，於 Wayland 上仍維持停用。請登出並選擇",
