@@ -39,6 +39,10 @@ it("saving and replacing a workspace key reaches an existing bot's next request 
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ provider: "openaiCompat" }),
     });
     expect(missing.status).toBe(400);
+    for (const url of ["http://127.example.test/v1", "http://127.0.0.1.example.test/v1"]) {
+      expect(await api("POST", "/api/keys/test", { provider: "openaiCompat", key: "fixture-key", url }))
+        .toEqual({ ok: false, reason: "unexpected" });
+    }
     const status = await api("PUT", "/api/config", {
       openaiCompat: { url: `http://127.0.0.1:${address.port}/v1`, key: "fixture-first-key" },
       instances: { openaiCompat: { driver: "openai-compat" } },
