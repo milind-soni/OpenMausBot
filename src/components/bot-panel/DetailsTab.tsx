@@ -17,7 +17,7 @@ type Derived = ReturnType<typeof useBotSettingsDerived>;
 export const CONVERSATION_ITEMS = ["find", "usage", "activity"];
 
 /** A ⋯ menu item drawn as a panel row: the same label, icon, value and handler. */
-function ItemRow({ item }: { item: SidebarMenuItem }) {
+export function ItemRow({ item }: { item: SidebarMenuItem }) {
   return (
     <button
       type="button"
@@ -30,8 +30,8 @@ function ItemRow({ item }: { item: SidebarMenuItem }) {
       <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-ink/[0.05] text-ink-secondary [&_svg]:size-[15px]" aria-hidden="true">
         {item.icon}
       </span>
-      <span className={cn("min-w-0 flex-1 truncate text-[14px] font-medium", item.active ? "text-accent-text" : "text-ink")}>{item.label}</span>
-      {item.trailing && <span className="flex shrink-0 items-center">{item.trailing}</span>}
+      <span className={cn("min-w-0 truncate text-[14px] font-medium", item.active ? "text-accent-text" : "text-ink")}>{item.label}</span>
+      {item.trailing && <span className="flex min-w-0 flex-1 items-center justify-end text-right">{item.trailing}</span>}
     </button>
   );
 }
