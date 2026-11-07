@@ -245,6 +245,7 @@
   "workspaces.onChanged",
   "workspaces.open",
   "workspaces.places",
+  "workspaces.probe",
   "workspaces.recolor",
   "workspaces.remove",
   "workspaces.state"
