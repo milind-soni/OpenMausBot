@@ -27,6 +27,7 @@ export async function configureAppOAuth(
   if (!clientId) throw inputError("OAuth clientId is required");
   if (!clientSecret) throw inputError("OAuth clientSecret is required");
   const scopes = (input.scopes ?? []).map((scope) => scope.trim()).filter(Boolean);
+  const expectedUpdatedAt = state.findAppOAuth(service)?.updatedAt ?? null;
   const { expectedRedirectUri } = await client.oauthConfigs();
   await client.putOauthConfig(service, { clientId, clientSecret, scopes });
   state.upsertAppOAuth({
@@ -35,7 +36,7 @@ export async function configureAppOAuth(
     scopes,
     sealedClientSecret: state.sealSecret(clientSecret),
     updatedAt: new Date().toISOString(),
-  });
+  }, expectedUpdatedAt);
   return { expectedRedirectUri };
 }
 

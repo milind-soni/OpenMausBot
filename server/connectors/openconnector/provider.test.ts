@@ -26,6 +26,8 @@ let connectionRequestBody: unknown = { status: "connected" };
 let connectionRequestStatus = 200;
 let gateConnectionRequests = false;
 let releaseGate: (() => void) | null = null;
+let holdConnectResponse = false;
+let onConnectRequest: (() => void) | null = null;
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "omb-oconn-"));
@@ -56,6 +58,8 @@ beforeAll(async () => {
         res.writeHead(400, { "content-type": "application/json" });
         return res.end(JSON.stringify({ success: false, message: "oauth not configured", errorCode: "oauth_config_missing" }));
       }
+      onConnectRequest?.();
+      if (holdConnectResponse) await new Promise((resolve) => setTimeout(resolve, 20));
       return ok({ connectionRequestId: "cr_9", authorizationUrl: "https://provider.example.test/authorize" });
     }
     if (url.pathname.startsWith("/v1/connection-requests/")) {
@@ -309,6 +313,41 @@ describe("authorize", () => {
     const state = newState();
     await expect(provider(state).authorize(cfg, "github")).rejects.toMatchObject({ code: "oauth_config_missing" });
     expect(state.listConnections()).toEqual([]);
+  });
+
+  it("captures the existing version before the network and refuses to replace a concurrent update", async () => {
+    const state = newState();
+    state.upsertConnection({ accountId: "oc:github:work", service: "github", alias: "work", connectionRequestId: "cr_old", status: "connected", updatedAt: "old" });
+    const before = readFileSync(state.file, "utf8");
+    holdConnectResponse = true;
+    onConnectRequest = () => {
+      const other = new OpenConnectorStateStore(state.file, origin);
+      other.upsertConnection({ accountId: "oc:github:work", service: "github", alias: "work", connectionRequestId: "cr_new", status: "pending", updatedAt: "new" });
+    };
+    const authorize = provider(state).authorize(cfg, "github", "work");
+    authorize.catch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const racedBytes = readFileSync(state.file, "utf8");
+    await expect(authorize).rejects.toThrow(/updated by another process/);
+    expect(readFileSync(state.file, "utf8")).toBe(racedBytes);
+    expect(racedBytes).not.toBe(before);
+    expect(new OpenConnectorStateStore(state.file, origin).findConnectionByAccountId("oc:github:work")).toMatchObject({ connectionRequestId: "cr_new", status: "pending" });
+  });
+
+  it("captures the existing version before the network and refuses to resurrect a concurrent deletion", async () => {
+    const state = newState();
+    state.upsertConnection({ accountId: "oc:github:work", service: "github", alias: "work", connectionRequestId: "cr_old", status: "connected", updatedAt: "old" });
+    holdConnectResponse = true;
+    onConnectRequest = () => {
+      new OpenConnectorStateStore(state.file, origin).removeConnection("oc:github:work");
+    };
+    const authorize = provider(state).authorize(cfg, "github", "work");
+    authorize.catch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const racedBytes = readFileSync(state.file, "utf8");
+    await expect(authorize).rejects.toThrow(/updated by another process/);
+    expect(readFileSync(state.file, "utf8")).toBe(racedBytes);
+    expect(new OpenConnectorStateStore(state.file, origin).listConnections()).toEqual([]);
   });
 });
 

@@ -2,7 +2,7 @@
 // PUT /api/oauth/configs/:service and GET /v1/connection-requests/:id from fixture queues; the browser
 // leg is never executed, which is exactly what MANUAL-ACCEPTANCE.md leaves to a human.
 import { createServer, type Server } from "node:http";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -97,6 +97,56 @@ describe("configureAppOAuth", () => {
     const state = newState();
     await expect(configureAppOAuth(client(), state, "github", { clientId: "cid", clientSecret: "sec" })).rejects.toThrow();
     expect(state.findAppOAuth("github")).toBeNull();
+  });
+
+  it("captures the existing version before network writes and refuses to replace a concurrent update", async () => {
+    const state = newState();
+    state.upsertAppOAuth({ service: "github", clientId: "old", scopes: ["old"], sealedClientSecret: state.sealSecret("old"), updatedAt: "old" });
+    const racedClient = {
+      async oauthConfigs() {
+        new OpenConnectorStateStore(state.file, origin).upsertAppOAuth({ service: "github", clientId: "new", scopes: ["new"], sealedClientSecret: "sealed", updatedAt: "new" });
+        return { expectedRedirectUri: "https://runtime.example.test/oauth/callback" };
+      },
+      async putOauthConfig() {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      },
+    } as unknown as OpenConnectorClient;
+    const configure = configureAppOAuth(racedClient, state, "github", { clientId: "cid", clientSecret: "sec" });
+    await expect(configure).rejects.toThrow(/updated by another process/);
+    expect(state.findAppOAuth("github")).toMatchObject({ clientId: "new", scopes: ["new"] });
+  });
+
+  it("captures the existing version before network writes and refuses to resurrect a concurrent deletion", async () => {
+    const state = newState();
+    state.upsertAppOAuth({ service: "github", clientId: "old", scopes: ["old"], sealedClientSecret: state.sealSecret("old"), updatedAt: "old" });
+    const racedClient = {
+      async oauthConfigs() {
+        const current = JSON.parse(readFileSync(state.file, "utf8"));
+        current.appOAuth = [];
+        writeFileSync(state.file, JSON.stringify(current), { mode: 0o600 });
+        return { expectedRedirectUri: "https://runtime.example.test/oauth/callback" };
+      },
+      async putOauthConfig() {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      },
+    } as unknown as OpenConnectorClient;
+    await expect(configureAppOAuth(racedClient, state, "github", { clientId: "cid", clientSecret: "sec" })).rejects.toThrow(/updated by another process/);
+    expect(state.findAppOAuth("github")).toBeNull();
+  });
+
+  it("captures an absent record before network writes and refuses to overwrite a concurrent create", async () => {
+    const state = newState();
+    const racedClient = {
+      async oauthConfigs() {
+        new OpenConnectorStateStore(state.file, origin).upsertAppOAuth({ service: "github", clientId: "new", scopes: ["new"], sealedClientSecret: "sealed", updatedAt: "new" });
+        return { expectedRedirectUri: "https://runtime.example.test/oauth/callback" };
+      },
+      async putOauthConfig() {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      },
+    } as unknown as OpenConnectorClient;
+    await expect(configureAppOAuth(racedClient, state, "github", { clientId: "cid", clientSecret: "sec" })).rejects.toThrow(/updated by another process/);
+    expect(state.findAppOAuth("github")).toMatchObject({ clientId: "new" });
   });
 });
 

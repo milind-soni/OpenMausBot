@@ -296,18 +296,20 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
       rejectMemberInstallation(as, "authorize a connector service");
       const service = canonicalToolkitSlug(slug);
       const alias = normalizeAccountAlias(requestedAlias);
+      const accountId = accountIdForConnection(service, alias);
+      const expectedUpdatedAt = state.findConnectionByAccountId(accountId)?.updatedAt ?? null;
       const begun = await client().beginConnect(service, alias);
       if (!begun.authorizationUrl) {
         throw new Error(`OpenConnector returned no authorization link for ${service}`);
       }
       state.upsertConnection({
-        accountId: accountIdForConnection(service, alias),
+        accountId,
         service,
         ...(alias ? { alias } : {}),
         ...(begun.connectionRequestId ? { connectionRequestId: begun.connectionRequestId } : {}),
         status: "pending",
         updatedAt: new Date().toISOString(),
-      });
+      }, expectedUpdatedAt);
       if (begun.connectionRequestId) convergeConnection(service, begun.connectionRequestId, alias);
       return { url: begun.authorizationUrl, ...(begun.connectionRequestId ? { connectionRequestId: begun.connectionRequestId } : {}) };
     },
