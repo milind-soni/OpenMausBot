@@ -279,8 +279,12 @@ describe("the device link", () => {
         headers: { authorization: `Bearer session-${session}`, "x-omb-computer-secret": secret },
         lends: () => ({ internet: false, chrome: false, mcp }),
         mcp: { open: async (target) => { targets.push(target); doors.push(session); return { socket: tcpConnect((echo.address() as AddressInfo).port, "127.0.0.1") }; } },
+        onOpen: () => opened(),
       });
+      let opened!: () => void;
+      const open = new Promise<void>((resolve) => { opened = resolve; });
       cleanups.push(() => { stop.abort(); return ended; });
+      return { ended, open };
     };
     const lends = await home.register("owner", false, randomUUID(), false, true);
     const keeps = await home.register("other", false, randomUUID(), false, false);
@@ -293,11 +297,9 @@ describe("the device link", () => {
     const opened = await home.links.mcpRoute(PERSON, lends)!.open({ name: "local", port: 19501 });
     expect("join" in opened, JSON.stringify(opened)).toBe(true);
     expect(targets).toEqual([{ name: "local", port: 19501 }]);
-    // The same computer dialling again from another session is a newer link, and the newest one is chosen.
     await home.register("other", false, lends, false, true);
-    connect("other", lends, true);
-    await until(() => home.links.mcpRoute(PERSON, lends) !== null && doors.length === 1, "the newer link");
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    const other = connect("other", lends, true);
+    await other.open;
     await home.links.mcpRoute(PERSON, lends)!.open({ name: "local", port: 19502 });
     expect(doors).toEqual(["owner", "other"]);
   });
