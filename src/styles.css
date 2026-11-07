@@ -2878,49 +2878,50 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   }
 }
 
-/* Fixed to the window, so the band runs on unbroken from one pane to the next. */
+/* Fixed to the window, so the band runs on unbroken from one pane to the next. Its dots are drawn at one CSS pixel
+   each, so the field scales up pixelated; the pane's contents scale as usual. */
 @scope ([data-skin="aurora"]:not([data-skin-preview])) to ([data-skin]) {
   main.bg-app {
-    isolation: isolate;
-  }
-  main.bg-app::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    pointer-events: none;
-    background: var(--aurora-field, none) 0 0 / var(--aurora-field-size, cover) no-repeat fixed;
+    background-image: var(--aurora-field, none);
+    background-size: var(--aurora-field-size, cover);
+    background-repeat: no-repeat;
+    background-attachment: fixed;
     image-rendering: pixelated;
   }
-  main.bg-app :is(.bg-card, .bg-composer, .bg-bubble-user) {
-    -webkit-backdrop-filter: blur(28px) saturate(150%);
-    backdrop-filter: blur(28px) saturate(150%);
-  }
-  main.bg-app :is(.bg-card, .bg-composer) {
-    background-color: color-mix(in srgb, var(--color-card) 62%, transparent);
-  }
-  main.bg-app .bg-bubble-user {
-    background-color: color-mix(in srgb, var(--color-bubble-user) 78%, transparent);
-  }
-  main.bg-app .glass-bar[data-glass-fade]::before,
-  main.bg-app [data-composer-backdrop] {
-    background: color-mix(in srgb, var(--color-app) 35%, transparent);
-    -webkit-backdrop-filter: blur(20px) saturate(140%);
-    backdrop-filter: blur(20px) saturate(140%);
-  }
-  main.bg-app .glass-bar[data-glass-fade]::before {
-    mask-image: linear-gradient(to bottom, black 40%, transparent);
-  }
-  main.bg-app [data-composer-backdrop] {
-    mask-image: linear-gradient(to bottom, transparent, black 20px);
+  main.bg-app > * {
+    image-rendering: auto;
   }
 }
 
-@media (prefers-reduced-transparency: reduce) {
-  [data-skin="aurora"] main.bg-app :is(.bg-card, .bg-composer, .bg-bubble-user) {
-    background-color: revert-layer;
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
+@media (prefers-reduced-transparency: no-preference) and (forced-colors: none) {
+  @scope ([data-skin="aurora"]:not([data-skin-preview])) to ([data-skin]) {
+    main.bg-app :is(.bg-card, .bg-composer, .bg-bubble-user) {
+      -webkit-backdrop-filter: blur(28px) saturate(150%);
+      backdrop-filter: blur(28px) saturate(150%);
+    }
+    main.bg-app .glass-bar[data-glass-fade]::before,
+    main.bg-app [data-composer-backdrop] {
+      background: color-mix(in srgb, var(--color-app) 35%, transparent);
+      -webkit-backdrop-filter: blur(20px) saturate(140%);
+      backdrop-filter: blur(20px) saturate(140%);
+    }
+    main.bg-app .glass-bar[data-glass-fade]::before {
+      mask-image: linear-gradient(to bottom, black 40%, transparent);
+    }
+    main.bg-app [data-composer-backdrop] {
+      mask-image: linear-gradient(to bottom, transparent, black 20px);
+    }
+  }
+  /* In Tailwind's own layer, at a utility's weight, so hover and expanded fills still win over the glass. */
+  @layer utilities {
+    @scope ([data-skin="aurora"]:not([data-skin-preview])) to ([data-skin]) {
+      :where(main.bg-app) :is(.bg-card, .bg-composer) {
+        background-color: color-mix(in srgb, var(--color-card) 62%, transparent);
+      }
+      :where(main.bg-app) .bg-bubble-user {
+        background-color: color-mix(in srgb, var(--color-bubble-user) 78%, transparent);
+      }
+    }
   }
 }
 
