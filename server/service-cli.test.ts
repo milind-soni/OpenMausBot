@@ -18,12 +18,13 @@ describe("openmausbot service", () => {
   });
   afterEach(() => removeTempDir(dir));
 
-  it("repeats the serve options, one access mode at a time", () => {
-    expect(serviceServeArgs({ port: 8799, dataDir: "/d", domain: "a.example.com", tunnel: true, label: "x" })).toEqual(["--port", "8799", "--data-dir", "/d", "--no-pair", "--domain", "a.example.com", "--label", "x"]);
-    expect(serviceServeArgs({ port: 1, dataDir: "/d", tailscale: true })).toEqual(["--port", "1", "--data-dir", "/d", "--no-pair", "--tailscale"]);
+  it("repeats the serve options the person gave, --public-url and --lan included", () => {
+    expect(serviceServeArgs({ port: 8799, dataDir: "/d", domain: "a.example.com", tunnel: true, label: "x" })).toEqual(["--port", "8799", "--data-dir", "/d", "--domain", "a.example.com", "--label", "x"]);
+    expect(serviceServeArgs({ port: 1, dataDir: "/d", tailscale: true })).toEqual(["--port", "1", "--data-dir", "/d", "--tailscale"]);
+    expect(serviceServeArgs({ port: 1, dataDir: "/d", publicUrl: "https://maus.example.com", lan: true })).toEqual(["--port", "1", "--data-dir", "/d", "--public-url", "https://maus.example.com", "--lan"]);
   });
 
-  it("writes the unit next to the data and prints how to install it; refuses an npx cache", () => {
+  it("writes the unit next to the data and prints how to install it; under npx, runs a copy kept beside the data", () => {
     const code = runServiceCommand({ action: "install", dataDir: dir, port: 8799, domain: "maus.example.com", script: "/usr/lib/node_modules/openmausbot/cli.js", node: "/usr/bin/node", platform: "linux", home: "/home/maus", user: "maus" }, io);
     expect(code).toBe(0);
     const unit = readFileSync(join(dir, "openmausbot.service"), "utf8");
@@ -33,10 +34,18 @@ describe("openmausbot service", () => {
     expect(out.join("\n")).toContain("no setcap is needed");
 
     out.length = 0;
-    const refused = runServiceCommand({ action: "install", dataDir: join(dir, "x"), port: 8799, script: "/home/maus/.npm/_npx/deadbeef/node_modules/openmausbot/cli.js", node: "/usr/bin/node", platform: "linux" }, io);
-    expect(refused).toBe(1);
-    expect(err.join("\n")).toMatch(/npm install -g openmausbot/);
+    const npx = { action: "install" as const, dataDir: join(dir, "x"), port: 8799, publicUrl: "https://maus.example.com", script: "/home/maus/.npm/_npx/deadbeef/node_modules/openmausbot/dist-server/openmausbot.js", node: "/usr/bin/node", platform: "linux" as const, home: "/home/maus", user: "maus" };
+    const installs: string[] = [];
+    expect(runServiceCommand({ ...npx, installCopy: (prefix) => { installs.push(prefix); return false; } }, io)).toBe(1);
+    expect(err.join("\n")).toContain(`npm install --prefix ${join(dir, "x", "app", "latest")} openmausbot@latest`);
     expect(existsSync(join(dir, "x", "openmausbot.service"))).toBe(false);
+    expect(runServiceCommand({ ...npx, installCopy: (prefix) => { installs.push(prefix); return true; }, exists: () => true }, io)).toBe(0);
+    const pinned = readFileSync(join(dir, "x", "openmausbot.service"), "utf8");
+    expect(pinned).toContain(`ExecStart=/usr/bin/node ${join(dir, "x", "app", "latest", "node_modules", "openmausbot", "dist-server", "openmausbot.js")} serve`);
+    expect(pinned).toContain("--public-url https://maus.example.com");
+    expect(pinned).not.toContain("--no-pair");
+    expect(pinned).toContain('Environment="OMB_CLI_PREFIX=npx openmausbot"');
+    expect(installs).toEqual([join(dir, "x", "app", "latest"), join(dir, "x", "app", "latest")]);
   });
 
   it("writes a launchd agent on macOS and explains uninstall on both", () => {

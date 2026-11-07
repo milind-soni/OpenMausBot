@@ -21,21 +21,26 @@ export const HEADLESS_USAGE = `Drive a running workspace (scripts, CI, other age
   Token: OPENMAUSBOT_TOKEN or --token-file FILE. --json prints one JSON document;
   progress goes to stderr (--quiet drops it). openmausbot help VERB for the details.`;
 
+/** The usage text, its commands written the way this CLI was started (`npx openmausbot …`). */
+export function usage(prefix = "openmausbot"): string {
+  return USAGE.split("\n").map((line) => line.replace(/^(\s+)openmausbot(?= )/, `$1${prefix}`)).join("\n");
+}
+
 export const USAGE = `openmausbot — your team of AI bots, ready in a few steps
 
   openmausbot                         set up once, then open your workspace
   openmausbot setup [--data-dir DIR]
   openmausbot start [the same options as serve]
   openmausbot serve [--port 8799] [--data-dir DIR] [--label NAME]
-                    [--public-url https://host] [--tailscale | --tunnel | --domain HOST] [--no-pair]
-  openmausbot pair  [--label NAME] [--client] [--phone ios|android] [--ttl 24h]
-                    [--public-url https://host]
-  openmausbot sessions [revoke ID]
+                    [--public-url https://host | --domain HOST | --tunnel | --tailscale] [--lan]
+  openmausbot pair  [--label NAME] [--phone [ios|android]] [--ttl 24h] [--public-url https://host]
+  openmausbot devices [revoke ID]
   openmausbot status
+  openmausbot --version
   openmausbot login [--email you@example.com]
   openmausbot logout
   openmausbot access list | add EMAIL [--chat-only] | remove EMAIL
-  openmausbot service install [--domain HOST | --tunnel | --tailscale] [--port N] [--data-dir DIR] | uninstall
+  openmausbot service install [the same way-in options as serve] [--port N] [--data-dir DIR] | uninstall
                     [--sentinel]   (the health scan below, every two minutes, instead of the server)
   openmausbot sentinel [--data-dir DIR] [--out DIR] [--once] [--json]   (read-only health scan; see --help)
   openmausbot browser install [--with-deps] | status
@@ -47,11 +52,15 @@ export const USAGE = `openmausbot — your team of AI bots, ready in a few steps
 
 setup   choose AI access and optional phone access; keep existing bots and chats
 start   same as openmausbot: use your saved settings and open the workspace
-serve   starts the server without prompts and prints a pairing link + QR code
-pair    mints a pairing code against a running server (--client: chat only;
-        --ttl keeps it open up to 24h, still single use)
-sessions lists paired devices; "sessions revoke ID" signs one out
-status  what the server says about itself
+serve   starts the server without prompts; in a terminal it prints a pairing
+        code, the link to paste into the desktop app (＋ → Connect to a
+        server) and a QR for a phone
+pair    a new pairing code for the running server, with its link and QR
+        (--phone: chat and approvals only; --ttl keeps it open up to 24h,
+        still single use)
+devices lists paired devices; "devices revoke ID" signs one out
+status  the running server, the address others reach it at, and whether
+        that address answers as this server
 login   signs this machine in to an OpenMausBot account (an emailed code)
         and reserves its public address for --tunnel
 logout  releases that address and signs out
@@ -76,9 +85,16 @@ fleet   many client workspaces on one Linux server, each its own account,
         on a Unix socket only USER may open, so the workspace running as
         USER manages the others from Settings → Installations.
 
+Ways in (pick one; --lan can join any):
+--public-url you already have HTTPS in front (cloudflared, Caddy, nginx):
+             the link uses that address, after checking it reaches this
+             server. http:// is accepted only for a private network address.
+--lan        this network only, plain http: listens on this machine's
+             private addresses and answers nobody on the open internet
 --tailscale  serve over your tailnet: Tailscale terminates HTTPS and the
              link uses this machine's MagicDNS name (needs Tailscale signed in
-             and HTTPS certificates enabled for the tailnet)
+             and HTTPS certificates enabled for the tailnet); the share ends
+             when serve stops
 --tunnel     serve at a public https://c-… address through a
              Cloudflare tunnel: no domain, no proxy, no open port. Run
              \`openmausbot login\` once on this machine first.
@@ -88,7 +104,7 @@ fleet   many client workspaces on one Linux server, each its own account,
              open ports 80 and 443.
 
 --no-open   do not open a browser window
---no-pair   skip phone setup and do not print a pairing code
+--no-pair   do not print a pairing code
 --local     start locally this time, ignoring saved remote-access settings
 
 ${HEADLESS_USAGE}
