@@ -73,7 +73,7 @@ export function reachLines(route: Route, origin: string, port: number, prefix: s
   if (check.ok) return [`Reach    ${origin}   ✓ answers as this server (${clock(check.at)})${NOTE[route] ? ` · ${NOTE[route]}` : ""}`];
   if (check.kind === "other-server") return [`Reach    ✗ ${origin} answers as a different server.`, `           Check your tunnel or proxy points at this machine's port ${port}.`];
   if (route === "domain") return [`Reach    … ${origin} doesn't answer yet (${check.reason ?? "no answer"}).`, "           Check the domain's DNS points at this machine and ports 80 and 443 are open; the certificate follows."];
-  return [`Reach    ✗ ${origin} doesn't reach this server (${check.reason ?? "no answer"}).`, `           Point your tunnel or proxy at http://127.0.0.1:${port}, then run: ${prefix} status`];
+  return [`Reach    ✗ ${origin} doesn't reach this server (${check.reason ?? "no answer"}).`, `           Point your tunnel or proxy at http://127.0.0.1:${port} (on another machine: add --lan and use this machine's address), then run: ${prefix} status`];
 }
 
 /** `serve` with no way in: nothing to pair from elsewhere yet, so no code; the ways in, as commands that paste. */

@@ -427,29 +427,21 @@ export async function runSessions(options: CliOptions): Promise<number> {
 }
 
 export async function runStatus(options: CliOptions, io: CliIo = defaultIo()): Promise<number> {
-  let body: any;
-  try {
-    body = await (await fetch(`http://127.0.0.1:${options.port}/.well-known/openmausbot/environment`)).json();
-  } catch {
-    io.error(`No MausBot server is running here. Start it: ${cliCommand("serve")}`);
-    return 1;
+  const body: any = await fetch(`http://127.0.0.1:${options.port}/.well-known/openmausbot/environment`).then((r) => r.json()).catch(() => null);
+  if (body && options.json) io.log(JSON.stringify(body, null, 2));
+  if (!body) io.error(`No MausBot server is running here. Start it: ${cliCommand("serve")}`);
+  if (body && !options.json) {
+    io.log(`Server "${body.label}"   running · MausBot ${body.version} on ${body.platform}\n  Local        127.0.0.1:${options.port}`);
+    const address = await api(options.port, "/api/auth/pairing").then((r) => (typeof r.body?.publicUrl === "string" ? r.body.publicUrl as string : null)).catch(() => null);
+    if (!address || isLoopbackHost(new URL(address).hostname)) io.log(`  Address      none: reachable from this machine only. Ways in: ${cliCommand("serve --help")}`);
+    else for (const line of reachLines(address.startsWith("http:") ? "lan" : "public-url", address, options.port, cliPrefix(), address.startsWith("http:") ? undefined : await checkReach(options.port, address))) io.log(`  ${line.replace(/^Reach   /, "Address     ")}`);
+    const sessions = await api(options.port, "/api/auth/sessions").catch(() => null);
+    if (Array.isArray(sessions?.body?.sessions)) io.log(`Paired   ${sessions.body.sessions.length} device${sessions.body.sessions.length === 1 ? "" : "s"}   ${cliCommand("devices")}`);
   }
-  if (options.json) {
-    io.log(JSON.stringify(body, null, 2));
-    return 0;
-  }
-  io.log(`Server "${body.label}"   running · MausBot ${body.version} on ${body.platform}`);
-  io.log(`  Local        127.0.0.1:${options.port}`);
-  const advertised = await api(options.port, "/api/auth/pairing").catch(() => null);
-  const address = typeof advertised?.body?.publicUrl === "string" ? advertised.body.publicUrl : null;
-  if (!address || isLoopbackHost(new URL(address).hostname)) io.log(`  Address      none: reachable from this machine only. Ways in: ${cliCommand("serve --help")}`);
-  else for (const line of reachLines(address.startsWith("http:") ? "lan" : "public-url", address, options.port, cliPrefix(), address.startsWith("http:") ? undefined : await checkReach(options.port, address))) io.log(`  ${line.replace(/^Reach   /, "Address     ")}`);
-  const sessions = await api(options.port, "/api/auth/sessions").catch(() => null);
-  if (Array.isArray(sessions?.body?.sessions)) io.log(`Paired   ${sessions.body.sessions.length} device${sessions.body.sessions.length === 1 ? "" : "s"}   ${cliCommand("devices")}`);
-  const account = describeTunnelAccount(createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() }).credentials.read());
-  if (fleetCredential()) io.log(`MausBot web address: managed by the fleet (${FLEET_CREDENTIAL_ENV} is set)`);
-  else if (account.address) io.log(`MausBot web address: ${account.address} (signed in as ${account.email ?? "?"}; serve it with ${cliCommand("serve --tunnel")})`);
-  return 0;
+  const account = options.json ? null : describeTunnelAccount(createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() }).credentials.read());
+  if (!options.json && fleetCredential()) io.log(`MausBot web address: managed by the fleet (${FLEET_CREDENTIAL_ENV} is set)`);
+  else if (account?.address) io.log(`MausBot web address: ${account.address} (signed in as ${account.email ?? "?"}; serve it with ${cliCommand("serve --tunnel")})`);
+  return body ? 0 : 1;
 }
 
 /** Edits the sign-in allow-list in config.json, server live or stopped (read per request); OMB_SIGNIN_EMAILS wins when set. */
@@ -995,7 +987,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (HEADLESS_VERB_NAMES.has(argv[0] ?? "") || (argv[0] === "help" && HEADLESS_VERB_NAMES.has(argv[1] ?? ""))) return (await import("./headless/main.ts")).runHeadless(argv);
   const options = parseArgs(argv);
   if ("error" in options) {
-    console.error(`${options.error}\n\n${usage(cliPrefix())}`);
+    console.error(`${options.error}\nAll commands and options: ${cliCommand("--help")}`);
     return 2;
   }
   process.env.OMB_DATA_DIR = options.dataDir;

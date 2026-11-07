@@ -46,7 +46,7 @@ describe("the Reach line", () => {
   it("says what to fix when it doesn't, as a command that pastes", () => {
     expect(reachLines("public-url", "https://maus.example.com", 8799, "npx openmausbot", { ok: false, kind: "unreachable", reason: "connection refused" })).toEqual([
       "Reach    ✗ https://maus.example.com doesn't reach this server (connection refused).",
-      "           Point your tunnel or proxy at http://127.0.0.1:8799, then run: npx openmausbot status",
+      "           Point your tunnel or proxy at http://127.0.0.1:8799 (on another machine: add --lan and use this machine's address), then run: npx openmausbot status",
     ]);
     expect(reachLines("public-url", "https://maus.example.com", 8799, "openmausbot", { ok: false, kind: "other-server" })[0]).toContain("answers as a different server");
     expect(reachLines("lan", "http://192.168.1.20:8799", 8799, "openmausbot")).toEqual(["Reach    http://192.168.1.20:8799   this network only, not encrypted"]);
