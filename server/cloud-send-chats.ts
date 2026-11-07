@@ -9,7 +9,7 @@ import { z } from "zod";
 
 import type { ApprovalMode } from "../shared/approval-mode.ts";
 import type { BotVisibility, ModelSelection } from "../shared/wire.ts";
-import { ATTACHMENTS_DIR, FILE_MAX_BYTES, saveNamedAttachment } from "./attachments.ts";
+import { ATTACHMENTS_DIR, fileMaxBytes, saveNamedAttachment } from "./attachments.ts";
 import { audienceEquals, narrowestAudience } from "./bot-visibility.ts";
 import { activePath, addSentChats, attachmentNames, ATTACHMENT_NAME, type ChatStore, type SentConversation, type SentRoom } from "./cloud-chat-merge.ts";
 import { threadHeads, threadRowNumbers, threadRowsFrom } from "./message-db.ts";
@@ -388,7 +388,7 @@ export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, 
     const file = join(ATTACHMENTS_DIR, named);
     if (method === "GET") {
       const stat = await lstat(file).catch(() => null);
-      if (!stat?.isFile() || stat.size > FILE_MAX_BYTES) { json(res, 404, { error: "no such attachment" }); return true; }
+      if (!stat?.isFile() || stat.size > fileMaxBytes()) { json(res, 404, { error: "no such attachment" }); return true; }
       res.writeHead(200, { "content-type": "application/octet-stream", "content-length": String(stat.size) });
       res.end(await readFile(file));
       return true;

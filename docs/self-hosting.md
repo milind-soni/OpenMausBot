@@ -801,6 +801,13 @@ folder holds 512 MB. A team fills that sooner: set
 `OMB_ATTACHMENTS_MAX_BYTES` in the server's environment and restart, for
 example `OMB_ATTACHMENTS_MAX_BYTES=4294967296` for 4 GB.
 
+Each single file is capped at 25 MiB — uploads, browser staging and
+message-file reads all enforce it. Set `OMB_FILE_MAX_BYTES` in the server's
+environment and restart to raise it (bytes, for example
+`OMB_FILE_MAX_BYTES=52428800` for 50 MB). Whatever sits in front of the
+server still applies: a proxy or transport that won't carry the bigger
+payload drops it before OpenMausBot sees it.
+
 ## Putting a proxy in front
 
 Any reverse proxy works, given three things:

@@ -4,7 +4,7 @@ import { basename, join, posix } from "node:path";
 import {
   extensionForFileMime,
   extensionForMime,
-  FILE_MAX_BYTES,
+  fileMaxBytes,
   IMAGE_MAX_BYTES,
   saveFile,
   saveImage,
@@ -90,7 +90,7 @@ export async function saveBotAttachment(input: SaveBotAttachmentInput): Promise<
     if (!extensionForFileMime(mime)) {
       throw statusError(415, `${file.name} is not a supported attachment type. Supported: ${ATTACH_SUPPORTED_TYPES}.`);
     }
-    if (file.bytes > FILE_MAX_BYTES) throw statusError(413, `file exceeds ${FILE_MAX_BYTES} bytes`);
+    if (file.bytes > fileMaxBytes()) throw statusError(413, `file exceeds ${fileMaxBytes()} bytes`);
     const saved = await saveFile(file.handle.createReadStream({ start: 0, autoClose: false }), name || basename(file.name), mime, {
       expectedBytes: file.bytes,
     });
