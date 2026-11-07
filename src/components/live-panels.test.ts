@@ -70,6 +70,27 @@ afterEach(() => {
 });
 
 describe("Inspector on the app's live stream", () => {
+  it("retains a distinct equal-time live event received before a later refresh", async () => {
+    await mount(InspectorPanel);
+    const events = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((tab) => tab.textContent === "events")!;
+    flushSync(() => events.click());
+    frame(runtime("before-equal", { type: "item.started", itemType: "tool", title: "pre-refresh equal tail" }));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("pre-refresh equal tail"));
+    vi.stubGlobal("fetch", () => Promise.resolve(new Response(JSON.stringify({
+      entries: [{ kind: "runtime", at: "2026-10-04T09:00:00.000Z", data: runtime("disk-equal", { type: "item.started", itemType: "tool", title: "equal disk snapshot" }) }],
+      total: { runtime: 1, native: 0 },
+    }))));
+    missed();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("equal disk snapshot"));
+    expect(document.body.textContent).toContain("pre-refresh equal tail");
+    expect(document.querySelectorAll('button .tabular-nums')).toHaveLength(2);
+    expect(document.body.textContent).toContain("2 entries");
+    missed();
+    await settle();
+    expect(document.querySelectorAll('button .tabular-nums')).toHaveLength(2);
+    expect(document.body.textContent).toContain("2 entries");
+  });
+
   it("buffers distinct equal-time live events during the initial snapshot load", async () => {
     let finish!: (response: Response) => void;
     vi.stubGlobal("fetch", () => new Promise<Response>((resolve) => { finish = resolve; }));

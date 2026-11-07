@@ -44,7 +44,8 @@ export function appendInspectorRuntime(page: InspectorPage | null, events: Runti
 /**
  * Reconciles a disk snapshot with the retained runtime tail when persistence lags.
  * A shared event ID anchors publication order even for equal timestamps; without
- * an overlap, only a later timestamp establishes that a retained event is newer.
+ * an overlap, equal-time records remain ambiguous and distinct IDs are retained
+ * alongside later records rather than risking the loss of a live event.
  * Events arriving during the request must be buffered separately by the caller
  * and appended afterward, including distinct events with equal timestamps.
  * Native records come from the snapshot, while the runtime total never decreases.
@@ -57,7 +58,7 @@ export function mergeInspectorSnapshot(previous: InspectorPage | null, snapshot:
   const ids = new Set(snapshotRuntime.map((entry) => entry.data.eventId));
   const overlap = runtime.findLastIndex((event) => ids.has(event.eventId));
   const latest = snapshotRuntime.at(-1)?.at;
-  const tail = overlap >= 0 ? runtime.slice(overlap + 1) : runtime.filter((event) => latest === undefined || event.createdAt > latest);
+  const tail = overlap >= 0 ? runtime.slice(overlap + 1) : runtime.filter((event) => latest === undefined || event.createdAt >= latest);
   const merged = appendInspectorRuntime(next, tail)!;
   return { ...merged, total: { ...merged.total, runtime: Math.max(previous.total.runtime, merged.total.runtime) } };
 }

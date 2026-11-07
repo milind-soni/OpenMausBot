@@ -9,6 +9,18 @@ const event = (i: number): RuntimeEvent => ({
 const entry = (i: number): InspectorEntry => ({ kind: "runtime", at: String(i), data: event(i) });
 
 describe("Inspector's recent event window", () => {
+  it("preserves distinct equal-time records without an overlap and counts the union once", () => {
+    const first = { ...event(1), createdAt: "same" };
+    const second = { ...event(2), createdAt: "same" };
+    const previous: InspectorPage = { entries: [{ kind: "runtime", at: "same", data: second }], total: { runtime: 1, native: 0 } };
+    const snapshot: InspectorPage = { entries: [{ kind: "runtime", at: "same", data: first }], total: { runtime: 1, native: 0 } };
+    const merged = mergeInspectorSnapshot(previous, snapshot);
+    expect(merged.entries).toEqual([...snapshot.entries, ...previous.entries]);
+    expect(merged.total.runtime).toBe(2);
+    expect(mergeInspectorSnapshot(merged, snapshot)).toEqual(merged);
+    expect(mergeInspectorSnapshot(merged, merged)).toEqual(merged);
+  });
+
   it("retains a live tail across stale snapshots and counts it once when disk catches up", () => {
     const previous: InspectorPage = { entries: [entry(1), entry(2), entry(3)], total: { runtime: 53, native: 12 } };
     const snapshot: InspectorPage = { entries: [entry(1), entry(2)], total: { runtime: 52, native: 10 } };
