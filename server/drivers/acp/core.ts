@@ -17,7 +17,7 @@ import { decodeInjectId } from "../local-inject.ts";
 import { DeviceAuthController, type DeviceSignIn } from "../device-auth.ts";
 import { deletePromptSplitReceipt, promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
 import type { PromptSplitReceipt } from "../prompt-split.ts";
-import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../../procs.ts";
+import { describeSpawnFailure, execCli, killCliTree, sharedBoxScope, spawnCli } from "../../procs.ts";
 import { runAcpOneShot } from "./background-text.ts";
 import { sanitizeAcpToolMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
@@ -632,7 +632,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         hostKey: string | null): AcpHost => {
         const running = sharedHost(hostKey, threadId, cwd);
         if (running) return running;
-        const child = spawnCli(launch.command, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { allowEnv: instanceEnvNames(input.environment, env) } }, "bot");
+        const child = spawnCli(launch.command, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { allowEnv: instanceEnvNames(input.environment, env), botThreads: hostKey !== null } }, "bot");
         const host = new AcpHost(child, hostKey, { source: SOURCE, logMessage: nativeLogMessage, unrouted: refuse });
         hosts.add(host);
         child.once("close", () => hosts.delete(host));
@@ -1093,8 +1093,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           ? { ...spawnEnv, [support.sessionModelEnv]: launchModel }
           : spawnEnv;
         let launchedThisTurn = false;
-        // The folder and the tool selection ride session/new, so threads differing only there can share a process; never two audiences of a Team Cloud, whose engine homes differ.
-        const hostKey = support.shareProcess && inheritedScopeFingerprint === null ? JSON.stringify([...processContract, launchModel ?? null, engineHomes.scope()]) : null;
+        // The folder and the tool selection ride session/new, so threads differing only there can share a process (in the bot box, only one bot's); never two audiences of a Team Cloud, whose engine homes differ.
+        const hostKey = support.shareProcess && inheritedScopeFingerprint === null ? JSON.stringify([...processContract, launchModel ?? null, engineHomes.scope(), sharedBoxScope(cwd)]) : null;
         const launchSession = () => {
           const opened = openSession(threadId, launch, [...(launch.args ?? []), ...spawnArgs], launchEnv, cwd, contractKey, hostKey);
           opened.launchModel = launchModel;

@@ -231,11 +231,16 @@ export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, bes
     throw new Error(t("native.places.noLongerHere"));
   });
   listed("workspaces:local-remove", (_event, id) => local.remove(profileListed(id)));
-  // A link pasted on ＋'s sheet goes to main's own Connect dialog, which checks it and names its host before connecting.
-  listed("workspaces:add", (_event, choice, link) => {
+  // The Connect sheet's address (a link, or an address with the code typed apart): main finds the server there first,
+  // then connects only to what it found.
+  listed("workspaces:add", (_event, choice, link, code) => {
     if (!CHOICES.includes(choice) || !add.choices()[choice]) throw new Error(t("native.places.cannotAdd"));
     const pasted = choice === "link" ? plain(link).trim().slice(0, 4096) : "";
-    return pasted ? add.run(choice, pasted) : add.run(choice);
+    return pasted ? add.run(choice, pasted, typeof code === "string" ? code.trim().slice(0, 256) : null) : add.run(choice);
+  });
+  listed("workspaces:probe", (_event, address, code) => {
+    if (!add.choices().link || !add.probe) throw new Error(t("native.places.cannotAdd"));
+    return add.probe(plain(address).trim().slice(0, 4096), plain(code).trim().slice(0, 256));
   });
   handle("cloud-add:state", () => view());
   handle("cloud-add:start", async (_event, tier, name, color, source) => {
