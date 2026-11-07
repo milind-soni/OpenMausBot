@@ -8,7 +8,7 @@ export interface WidgetMoment {
 
 export type WidgetTextParam = string | number | WidgetText | WidgetMoment;
 
-/** A server card's words as a `brief.*` (or a cause's `chat.notice.*`) catalog key and its params, which may name other keys or moments. The node
+/** A server card's words as a `brief.*` or `server.meetings.*` (or a cause's `chat.notice.*`) catalog key and its params, which may name other keys or moments. The node
  * keeps its English beside it, which older clients and every bot widget show. */
 export interface WidgetText {
   key: string;
@@ -19,7 +19,7 @@ export interface WidgetText {
 export type WidgetTextFields = Partial<Record<"value" | "label" | "title" | "caption", WidgetText>>;
 
 const FIELDS = ["value", "label", "title", "caption"] as const;
-const KEY = /^(?:brief|chat\.notice)\.[\w.]{1,80}$/;
+const KEY = /^(?:brief|chat\.notice|server\.meetings)\.[\w.]{1,80}$/;
 const STYLES = new Set<WidgetMoment["style"]>(["clock", "bareClock", "longDate", "shortDate"]);
 const MAX_PARAMS = 8;
 const MAX_DEPTH = 3;

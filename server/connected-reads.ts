@@ -2,6 +2,7 @@
 // the default connected account of each app, or the one the host names when an app has several. Tool names, arguments
 // and answer shapes follow Composio's documentation; the fixtures are not yet checked against the live service, so an
 // answer of any other shape is an error, never an empty list.
+import { findMeetingLink } from "../shared/meetings.ts";
 import { parseMcpResponse } from "./connector-tools-list.ts";
 
 export const READ_APPS = ["gmail", "googlecalendar"] as const;
@@ -198,7 +199,8 @@ function calendarEvent(raw: unknown, calendar: { id: string; owned: boolean }): 
   const original = record(item.originalStartTime);
   const originalStart = Date.parse(String(original?.dateTime ?? original?.date ?? ""));
   const organizer = record(item.organizer)?.email;
-  const joinUrl = [item.hangoutLink, video, location].find((value): value is string => typeof value === "string" && /^https:\/\/\S+$/i.test(value.trim()));
+  const joinUrl = [item.hangoutLink, video, location].find((value): value is string => typeof value === "string" && /^https:\/\/\S+$/i.test(value.trim()))
+    ?? findMeetingLink(typeof item.description === "string" ? item.description : undefined) ?? undefined;
   return {
     id: item.id,
     title: flat(item.summary) || "Untitled meeting",
