@@ -110,6 +110,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // A credential value crosses only as an HPKE envelope, bound to the
   // authenticated device and the exact pending card.
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/provide$/ },
+  // A typed custom secret: the harness checks thread visibility and that only
+  // the conversation's own person may answer it.
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/save$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/active-branch$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/compact$/ },
   // Set me up under a new bot's greeting and the x on its chip: no more than a typed /setup.

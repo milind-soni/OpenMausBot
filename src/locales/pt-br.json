@@ -5537,6 +5537,7 @@
   "engineSetup.device.cancelled": "Login cancelado. Você pode pedir um novo código quando quiser.",
   "engineSetup.device.expired": "Este código expirou. Peça um novo código para tentar novamente.",
   "engineSetup.device.failed": "Não foi possível concluir o login. Tente novamente ou verifique a instalação do Codex.",
+  "engineSetup.device.unreachable": "Perdemos a conexão com o servidor durante o login. Verifique a conexão e comece de novo.",
   "engineSetup.device.invalidChallenge": "O Codex não devolveu um link e um código de login válidos da OpenAI. Cancele e tente novamente.",
   "engineSetup.device.flowEnded": "Esta sessão de login não está mais disponível. Verifique se este navegador ainda está pareado com “Acesso total” e peça um novo código.",
   "engineSetup.device.tryAgain": "Tentar novamente",

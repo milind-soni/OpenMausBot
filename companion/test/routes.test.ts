@@ -129,6 +129,7 @@ describe("what the app may do", () => {
     ["POST", "/api/bots/bot_123/connector-cards/msg_2/dismiss"],
     ["POST", "/api/bots/bot_123/secret-cards/msg_2/resume"],
     ["POST", "/api/bots/bot_123/secret-cards/msg_2/dismiss"],
+    ["POST", "/api/bots/bot_123/secret-cards/msg_2/save"],
     ["POST", "/api/bots/bot_123/sign-in-cards/msg_3/done"],
     ["POST", "/api/bots/bot_123/sign-in-cards/msg_3/cancel"],
   ];
@@ -268,6 +269,13 @@ describe("what it may not", () => {
     expect(allowed("GET", "/api/bots/bot_123/secret-cards/message_1/provide")).toBe(false);
     expect(allowed("POST", "/api/bots/bot_123/secret-cards/message_1/provided")).toBe(false);
     expect(allowed("POST", "/api/bots/bot_123/secret-cards/message_1/provide/extra")).toBe(false);
+  });
+
+  it("allows a typed custom secret only through the exact save verb", () => {
+    expect(allowed("POST", "/api/bots/bot_123/secret-cards/message_1/save")).toBe(true);
+    expect(allowed("GET", "/api/bots/bot_123/secret-cards/message_1/save")).toBe(false);
+    expect(allowed("POST", "/api/bots/bot_123/secret-cards/message_1/save/extra")).toBe(false);
+    expect(allowed("POST", "/api/bots/bot_123/secret-cards/message_1/saved")).toBe(false);
   });
 
   it("allows a path only for the methods it was allowed for", () => {

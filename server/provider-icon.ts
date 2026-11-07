@@ -30,6 +30,7 @@ const SERVER_HOSTS: Record<string, ProviderIconPreset> = {
   "api.x.ai": "xai",
   "api.deepseek.com": "deepseek",
   "dashscope.aliyuncs.com": "qwen", "dashscope-*.aliyuncs.com": "qwen",
+  "*.*.maas.aliyuncs.com": "qwen",
   "api.moonshot.ai": "moonshot", "api.moonshot.cn": "moonshot",
   "api.mistral.ai": "mistral", "codestral.mistral.ai": "mistral",
   "api.cohere.com": "cohere", "api.cohere.ai": "cohere",

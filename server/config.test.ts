@@ -1,5 +1,8 @@
-import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir, userInfo } from "node:os";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { botThreadLimitText, defaultBotThreads, maxConcurrentBotThreads, maxConcurrentChildThreads } from "./bot-thread-limits.ts";
@@ -2375,5 +2378,48 @@ describe("X research's included relay token", () => {
   it("keeps the plan's research token and the person's own treg key as workspace credentials that never reach an engine", () => {
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_CLOUD_X_TOKEN");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_TREG_KEY");
+  });
+});
+
+describe("DATA_DIR outside the suite's throwaway home", () => {
+  function childDataDir(env: NodeJS.ProcessEnv): string {
+    const script = "const m = await import(process.env.OMB_CONFIG_URL); process.stdout.write(m.DATA_DIR);";
+    const { OMB_DATA_DIR: _dataDir, VITEST: _vitest, NODE_ENV: _nodeEnv, ...inherited } = process.env;
+    return execFileSync(process.execPath, ["--experimental-strip-types", "--no-warnings", "--input-type=module", "-e", script], {
+      env: { ...inherited, OMB_CONFIG_URL: pathToFileURL(join(import.meta.dirname, "config.ts")).href, ...env }, encoding: "utf8",
+    });
+  }
+
+  it("never resolves to the person's real data folder when a test runs without the setup file", () => {
+    const realHome = userInfo().homedir;
+    const dataDir = childDataDir({ HOME: realHome, USERPROFILE: realHome, VITEST: "true" });
+    try {
+      expect(dataDir).not.toBe(join(realHome, ".openmausbot"));
+      expect(dataDir.startsWith(tmpdir())).toBe(true);
+    } finally {
+      // Only ever a throwaway folder: a broken guard would hand back the real home here.
+      const throwaway = dirname(dataDir);
+      if (throwaway.startsWith(join(realpathSync(tmpdir()), "omb-test-home-")) || throwaway.startsWith(join(tmpdir(), "omb-test-home-"))) {
+        rmSync(throwaway, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it("treats an empty OMB_DATA_DIR as unset", () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-config-home-"));
+    try {
+      expect(childDataDir({ HOME: home, USERPROFILE: home, OMB_DATA_DIR: "" })).toBe(join(home, ".openmausbot"));
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the home folder outside tests", () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-config-home-"));
+    try {
+      expect(childDataDir({ HOME: home, USERPROFILE: home })).toBe(join(home, ".openmausbot"));
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
