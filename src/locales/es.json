@@ -5999,5 +5999,19 @@
   "server.meetings.end.meet_refused": "Google Meet no me dejó entrar como invitado. El anfitrión puede permitir invitados en los controles del anfitrión, o puede que la reunión no admita personas de fuera de la organización.",
   "server.meetings.end.speech_unavailable": "No pude conseguir la transcripción de voz para esta reunión, así que no entré.",
   "server.meetings.card.settingUp": "Preparando la transcripción (una sola vez, alrededor de un minuto)…",
-  "server.meetings.card.speechStopped": "La transcripción se detuvo: {problem}"
+  "server.meetings.card.speechStopped": "La transcripción se detuvo: {problem}",
+  "native.connect.empty": "Escribe la dirección del servidor o pega su enlace.",
+  "native.connect.codeOnly": "Eso es un código de vinculación. Escribe también la dirección del servidor, por ejemplo {example}.",
+  "native.connect.emailCode": "Eso es un código de inicio de sesión de un correo. Para vincular hace falta un código de 12 caracteres como 7KQ2-M9XD-H4TP.",
+  "native.connect.oldCode": "Eso es un código de una versión anterior de MausBot. Para vincular hace falta un código de 12 caracteres como 7KQ2-M9XD-H4TP: en el servidor, ejecuta openmausbot pair.",
+  "native.connect.scriptKey": "Eso es una clave de script. Para vincular hace falta un código de vinculación.",
+  "native.connect.notACode": "Eso no es un código de vinculación. Para vincular hace falta un código de 12 caracteres como 7KQ2-M9XD-H4TP.",
+  "native.connect.publicHttp": "http://{host} está en internet abierto y no está cifrado, así que otros podrían leer tus chats. Usa su dirección https, o pon HTTPS delante (cloudflared, Caddy o Tailscale).",
+  "native.connect.phoneLink": "Ese enlace es para la app de MausBot del teléfono. Pega el enlace que mostró el servidor, o su dirección.",
+  "native.connect.notAnAddress": "Eso no es una dirección de servidor. Pega el enlace que mostró el servidor, o escribe su dirección, por ejemplo {example}.",
+  "native.connect.unreachable": "No se puede contactar con {host}. Comprueba que el servidor está en marcha y que se puede alcanzar desde este ordenador.",
+  "native.connect.dns": "{host} todavía no existe. Revisa cómo está escrito o espera al registro DNS.",
+  "native.connect.certificate": "El certificado de {host} todavía no es válido. Un servidor nuevo puede tardar un minuto en obtenerlo.",
+  "native.connect.notMausBot": "Esa dirección responde, pero no es un servidor de MausBot.",
+  "native.connect.loopback": "Esto apunta a este ordenador ({host}), no al servidor. Usa la dirección del propio servidor."
 }

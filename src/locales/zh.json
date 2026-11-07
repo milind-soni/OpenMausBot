@@ -7563,5 +7563,19 @@
   "server.meetings.end.meet_refused": "Google Meet 没有让我以访客身份进入。主持人可以在主持人控制中允许访客，或者该会议可能不允许组织外的人加入。",
   "server.meetings.end.speech_unavailable": "我无法为这场会议获得语音转文字服务，所以没有加入。",
   "server.meetings.card.settingUp": "正在设置转写（仅首次，约一分钟）…",
-  "server.meetings.card.speechStopped": "转写已停止：{problem}"
+  "server.meetings.card.speechStopped": "转写已停止：{problem}",
+  "native.connect.empty": "输入服务器的地址，或粘贴它的链接。",
+  "native.connect.codeOnly": "这是配对码。还请输入服务器的地址，例如 {example}。",
+  "native.connect.emailCode": "这是邮件里的登录码。配对需要像 7KQ2-M9XD-H4TP 这样的 12 位配对码。",
+  "native.connect.oldCode": "这是旧版 MausBot 的代码。配对需要像 7KQ2-M9XD-H4TP 这样的 12 位配对码：请在服务器上运行 openmausbot pair。",
+  "native.connect.scriptKey": "这是脚本密钥。配对需要配对码。",
+  "native.connect.notACode": "这不是配对码。配对需要像 7KQ2-M9XD-H4TP 这样的 12 位配对码。",
+  "native.connect.publicHttp": "http://{host} 位于公共互联网且未加密，别人可能读到你的聊天。请使用它的 https 地址，或在前面加上 HTTPS（cloudflared、Caddy 或 Tailscale）。",
+  "native.connect.phoneLink": "这个链接是给手机上的 MausBot 应用用的。请粘贴服务器显示的链接，或它的地址。",
+  "native.connect.notAnAddress": "这不是服务器地址。请粘贴服务器显示的链接，或输入它的地址，例如 {example}。",
+  "native.connect.unreachable": "无法连接到 {host}。请确认服务器正在运行，并且这台电脑可以访问它。",
+  "native.connect.dns": "{host} 还不存在。请检查拼写，或等待 DNS 记录生效。",
+  "native.connect.certificate": "{host} 的证书还无效。新服务器可能需要一分钟来获取证书。",
+  "native.connect.notMausBot": "这个地址有响应，但它不是 MausBot 服务器。",
+  "native.connect.loopback": "这指向这台电脑（{host}），而不是服务器。请使用服务器自己的地址。"
 }

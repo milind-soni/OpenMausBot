@@ -7677,5 +7677,19 @@
   "server.meetings.end.meet_refused": "Google Meet にゲストとして入れてもらえませんでした。主催者は主催者用の管理機能でゲストを許可できます。または、この会議は組織外の参加者を許可していない可能性があります。",
   "server.meetings.end.speech_unavailable": "この会議の音声文字起こしを利用できなかったため、参加しませんでした。",
   "server.meetings.card.settingUp": "文字起こしを準備しています（初回のみ、約 1 分）…",
-  "server.meetings.card.speechStopped": "文字起こしが停止しました: {problem}"
+  "server.meetings.card.speechStopped": "文字起こしが停止しました: {problem}",
+  "native.connect.empty": "サーバーのアドレスを入力するか、リンクを貼り付けてください。",
+  "native.connect.codeOnly": "これはペアリングコードです。サーバーのアドレスも入力してください（例：{example}）。",
+  "native.connect.emailCode": "これはメールで届いたサインインコードです。ペアリングには 7KQ2-M9XD-H4TP のような 12 文字のコードが必要です。",
+  "native.connect.oldCode": "これは古い MausBot のコードです。ペアリングには 7KQ2-M9XD-H4TP のような 12 文字のコードが必要です。サーバーで openmausbot pair を実行してください。",
+  "native.connect.scriptKey": "これはスクリプトキーです。ペアリングにはペアリングコードが必要です。",
+  "native.connect.notACode": "これはペアリングコードではありません。ペアリングには 7KQ2-M9XD-H4TP のような 12 文字のコードが必要です。",
+  "native.connect.publicHttp": "http://{host} はインターネットに公開されていて暗号化されていないため、他人にチャットを読まれるおそれがあります。https のアドレスを使うか、前段に HTTPS を置いてください（cloudflared、Caddy、Tailscale）。",
+  "native.connect.phoneLink": "このリンクはスマートフォンの MausBot アプリ用です。サーバーが表示したリンクかアドレスを貼り付けてください。",
+  "native.connect.notAnAddress": "これはサーバーのアドレスではありません。サーバーが表示したリンクを貼り付けるか、アドレスを入力してください（例：{example}）。",
+  "native.connect.unreachable": "{host} に接続できません。サーバーが動作していて、このコンピュータから到達できるか確認してください。",
+  "native.connect.dns": "{host} はまだ存在しません。綴りを確認するか、DNS レコードを待ってください。",
+  "native.connect.certificate": "{host} の証明書はまだ有効ではありません。新しいサーバーでは取得に 1 分ほどかかることがあります。",
+  "native.connect.notMausBot": "そのアドレスは応答しますが、MausBot サーバーではありません。",
+  "native.connect.loopback": "これはサーバーではなく、このコンピュータ（{host}）を指しています。サーバー自身のアドレスを使ってください。"
 }

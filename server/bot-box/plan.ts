@@ -68,6 +68,9 @@ export interface BoxRequest {
   net?: BoxNet;
   /** The bot whose own folder (workspaces/<bot>) is put back; derived from a task-workspace cwd when absent. */
   botId?: string;
+  /** One process serves every conversation of the bot (a shared OpenCode process): all of the bot's conversation folders
+   * are read-write and all of their uploads read-only, in place of only the starting conversation's. */
+  botThreads?: boolean;
   /** A Team Cloud audience's engine home, bound read-write in place of the server's HOME, none of which the box then has. */
   home?: string;
   /** Files bound read-write over their names in `home`: the team's engine sign-ins. */
@@ -179,6 +182,8 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   const cwd = request.cwd ? resolve(request.cwd) : null;
   const ids = cwd ? taskWorkspaceIds(cwd, dataDir) : null;
   const botId = request.botId ?? ids?.botId ?? null;
+  const threads = request.botThreads && ids ? ids.botId : null;
+  if (threads) rw(join(dataDir, "task-workspaces", threads));
   if (cwd && !covered(cwd)) rw(cwd);
   if (botId && ID.test(botId)) {
     const own = join(dataDir, "workspaces", botId);
@@ -206,7 +211,7 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   }
   // The person's uploads for this conversation, after every read-write line: readable, but never writable or swappable.
   if (ids) {
-    const shown = boxUploadsDir(dataDir, ids.botId, ids.threadId);
+    const shown = threads ? join(dataDir, "box-uploads", threads) : boxUploadsDir(dataDir, ids.botId, ids.threadId);
     mounts.push({ kind: "ro", source: shown, target: shown, optional: true });
   }
   const readOnly = new Set<string>();
