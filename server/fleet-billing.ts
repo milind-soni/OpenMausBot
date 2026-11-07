@@ -9,6 +9,7 @@ import { csvCell, csvNumber } from "./usage-ledger.ts";
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 const FOOTER = "This report is built from tenant-reported ledgers; evidence, not enforcement.";
 const METER_CONCURRENCY = 4;
+const roundUsd = (value: number | null): number | null => (value === null ? null : Math.round(value * 1e6) / 1e6);
 const REQUIRED_FEATURES = ["admin", "billing"] as const;
 
 export function billingMonth(raw: string | undefined, now: Date): string {
@@ -88,7 +89,7 @@ async function lineFor(input: { reseller: FleetReseller; layout: FleetLayout; de
   const users = ledgerOk ? (metered?.people.length ?? 0) : null;
   const priced = priceWorkspace({ reseller, workspace, billable: billing.billable, users });
   const people: FleetBillingUser[] | undefined = detail && ledgerOk
-    ? (metered?.people ?? []).map((person) => ({ ...person })).sort((a, b) => b.attributed - a.attributed || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    ? (metered?.people ?? []).map((person) => ({ ...person, costUsd: roundUsd(person.costUsd) })).sort((a, b) => b.attributed - a.attributed || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     : undefined;
   return {
     ...base,
@@ -97,7 +98,7 @@ async function lineFor(input: { reseller: FleetReseller; layout: FleetLayout; de
     ledger: ledgerOk ? "ok" : "unavailable",
     ...(unavailableReason ? { unavailableReason } : {}),
     turns: ledgerOk ? (metered?.turns ?? 0) : null,
-    costUsd: ledgerOk ? (metered?.costUsd ?? null) : null,
+    costUsd: ledgerOk ? roundUsd(metered?.costUsd ?? null) : null,
     activeUsers: users,
     provisionedSeats: ledgerOk ? (metered?.seats ?? { emails: 0, domains: 0 }) : null,
     wholesale: priced.wholesale,
@@ -203,13 +204,13 @@ export function billingCsv(report: FleetBillingReport): string {
   const text = (value: string) => csvCell(value);
   const row = (cells: string[]) => rows.push(cells.join(","));
   for (const line of report.workspaces) {
-    row([text(report.month), "workspace", text(line.slug), text(line.host), "", "", "", csvNumber(line.turns), csvNumber(line.costUsd), line.billable === null ? "" : String(line.billable), line.ledger, csvNumber(line.wholesale.totalMinor), csvNumber(line.retail.totalMinor), csvNumber(line.marginMinor), text(report.currency)]);
+    row([text(report.month), "workspace", text(line.slug), text(line.host), "", "", "", csvNumber(line.turns), csvNumber(roundUsd(line.costUsd)), line.billable === null ? "" : String(line.billable), line.ledger, csvNumber(line.wholesale.totalMinor), csvNumber(line.retail.totalMinor), csvNumber(line.marginMinor), text(report.currency)]);
     for (const user of line.users ?? []) {
-      row([text(report.month), "user", text(line.slug), text(line.host), text(user.id), user.kind, csvNumber(user.asked), csvNumber(user.attributed), csvNumber(user.costUsd), "", "", "", "", "", text(report.currency)]);
+      row([text(report.month), "user", text(line.slug), text(line.host), text(user.id), user.kind, csvNumber(user.asked), csvNumber(user.attributed), csvNumber(roundUsd(user.costUsd)), "", "", "", "", "", text(report.currency)]);
     }
   }
   const priced = report.workspaces.filter((line) => line.costUsd !== null);
-  const cost = report.complete && priced.length ? priced.reduce((total, line) => total + line.costUsd!, 0) : null;
+  const cost = report.complete && priced.length ? roundUsd(priced.reduce((total, line) => total + line.costUsd!, 0)) : null;
   const turns = sum(report.workspaces.map((line) => line.turns));
   row([text(report.month), "total", "", "", "", "", "", csvNumber(turns), csvNumber(cost), "", report.complete ? "ok" : "unavailable", csvNumber(report.totals.wholesaleMinor), csvNumber(report.totals.retailMinor), csvNumber(report.totals.marginMinor), text(report.currency)]);
   return `${rows.join("\n")}\n`;
