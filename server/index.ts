@@ -8844,6 +8844,7 @@ routines = new RoutineManager({
     const task = store.taskByThread(botId, threadId);
     return Boolean(bot && !bot.hidden && task && !task.routineRunId);
   },
+  oneTimeReportsToItsChat: !CLOUD_HOME,
   resolveResultsThread: (routine, forceNew) => automationDestinations.routine(routine, forceNew),
   eventResultsThread: (event) => automationDestinations.event(event),
   frozenResultsThread: (botId, threadId) => wasOldestThread(store.tasks(botId), threadId) && !cloudGuestOpened(threadId),
