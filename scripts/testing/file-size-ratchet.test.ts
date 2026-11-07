@@ -46,6 +46,7 @@ const LINES: Record<string, number> = {
   "server/cli.ts": 1070,
   "src/components/AttachmentPreview.tsx": 1035,
   "server/meetings/meetbot.ts": 1047,
+  "server/message-db.ts": 1005,
 };
 
 function sourceFiles(): string[] {
