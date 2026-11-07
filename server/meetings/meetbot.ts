@@ -202,7 +202,7 @@ export function pageOp(a: any): any {
       if (a.platform === "jitsi") {
         const tiles = all('[id^="participant_"]').filter((tile) => /^participant_[^_]+$/.test(tile.id));
         return {
-          inMeeting: present('[aria-label="Leave the meeting"]'),
+          inMeeting: present('[aria-label="Leave the meeting"]') && !present('#premeeting-name-input, .premeeting-screen, [class*="premeeting"]'),
           lobby: said("asking to join|knocking|waiting for (the|a) moderator|wait until the host|lobby"),
           denied: said("request to join (was|has been) (denied|rejected)|denied your request|declined"),
           removed: said("removed (you )?from the (meeting|conference)|you have been kicked|kicked out"),
