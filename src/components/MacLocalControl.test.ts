@@ -48,4 +48,18 @@ describe("Mac local computer status", () => {
     expect(renderToStaticMarkup(createElement(isolated.MacLocalControl))).toBe("");
     expect(renderToStaticMarkup(createElement(MacLocalControl))).toContain("Allow control of this computer");
   });
+
+  it("does not open Screen Recording settings after Not now during the Accessibility step", async () => {
+    vi.resetModules();
+    const isolated = await import("./MacLocalControl");
+    const open = vi.fn(async (pane: string) => { if (pane === "accessibility") isolated.hideMacLocalControlUntilRelaunch(); });
+    await isolated.openMacControlSettings(open);
+    expect(open.mock.calls).toEqual([["accessibility"]]);
+
+    vi.resetModules();
+    const fresh = await import("./MacLocalControl");
+    const openAll = vi.fn(async () => {});
+    await fresh.openMacControlSettings(openAll);
+    expect(openAll.mock.calls).toEqual([["accessibility"], ["screen"]]);
+  });
 });

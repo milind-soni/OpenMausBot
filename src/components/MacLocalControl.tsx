@@ -16,6 +16,15 @@ export function hideMacLocalControlUntilRelaunch() {
   for (const listener of hiddenListeners) listener();
 }
 
+/** Opens Accessibility, then Screen Recording settings; stops if the card was dismissed in between. */
+export async function openMacControlSettings(
+  open: (pane: "accessibility" | "screen") => Promise<void> | undefined = (pane) => window.ogb?.permOpenSettings?.(pane),
+) {
+  await open("accessibility");
+  if (hiddenUntilRelaunch) return;
+  await open("screen");
+}
+
 export function MacLocalControl() {
   const { capabilities } = useDesktopCapabilities();
   const hidden = useSyncExternalStore(subscribeHidden, readHidden, readHidden);
@@ -41,8 +50,7 @@ export function MacLocalControl() {
     setError(null);
     setAwaitingGrant(true);
     try {
-      await window.ogb?.permOpenSettings?.("accessibility");
-      await window.ogb?.permOpenSettings?.("screen");
+      await openMacControlSettings();
     } catch (reason) {
       setAwaitingGrant(false);
       setError(reason instanceof Error ? reason.message : String(reason));
