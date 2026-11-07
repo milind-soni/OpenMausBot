@@ -108,10 +108,11 @@ export function windowsLaunch(command, args, env, exists = fs.existsSync) {
   return { file: env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", `"${line}"`], verbatim: true };
 }
 
-function killTree(child) {
+/** Ends a child and everything it started: the process group, or taskkill's whole tree on Windows. */
+export function killTree(child, { platform = process.platform, spawn: start = spawn } = {}) {
   if (!child.pid) return;
-  if (process.platform === "win32") {
-    const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+  if (platform === "win32") {
+    const killer = start("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
     killer.on("error", () => child.kill());
   } else {
     try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); }

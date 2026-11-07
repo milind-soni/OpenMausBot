@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { commandFingerprint, createLentMcp, inheritedEnvironment, isLoopbackAddress, lentMcpRefusal, ownEnvironmentIds, ownPorts, validLentMcpServer, windowsLaunch } from "./lent-mcp.mjs";
+import { commandFingerprint, createLentMcp, inheritedEnvironment, isLoopbackAddress, killTree, lentMcpRefusal, ownEnvironmentIds, ownPorts, validLentMcpServer, windowsLaunch } from "./lent-mcp.mjs";
 import { executeSharedOperation } from "./shared-computer-access.mjs";
 import { validSharedOperation } from "./computer-sharing.mjs";
 
@@ -225,4 +225,25 @@ test("this computer's own installs, by the environment id each keeps", async t =
   await mkdir(path.join(dir, "a")); await writeFile(path.join(dir, "a", "environment-id"), `${id}\n`);
   await mkdir(path.join(dir, "b")); await writeFile(path.join(dir, "b", "environment-id"), "not-an-id");
   assert.deepEqual(ownEnvironmentIds([path.join(dir, "a"), path.join(dir, "b"), path.join(dir, "missing"), null, path.join(dir, "a")]), [id]);
+});
+
+test("killTree ends the process group, or taskkill /T /F on win32", async () => {
+  const calls = [];
+  const spawn = (...call) => { calls.push(call); return { on() {} }; };
+  killTree({ pid: 4321, kill() { assert.fail("a Windows tree is ended by taskkill"); } }, { platform: "win32", spawn });
+  assert.deepEqual(calls, [["taskkill", ["/PID", "4321", "/T", "/F"], { windowsHide: true, stdio: "ignore" }]]);
+  killTree({ kill() { assert.fail("no pid, nothing to kill"); } }, { platform: "win32", spawn });
+  assert.equal(calls.length, 1);
+
+  // A real group: the child starts a grandchild of its own, and both die.
+  const { spawn: spawnReal } = await import("node:child_process");
+  const child = spawnReal(process.execPath, ["-e", 'const c = require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }); console.log(c.pid); setInterval(() => {}, 1000)'], { detached: true, stdio: ["ignore", "pipe", "ignore"] });
+  const grandchild = Number(await new Promise(resolve => child.stdout.once("data", resolve)));
+  const exited = new Promise(resolve => child.once("exit", resolve));
+  killTree(child, { platform: process.platform, spawn });
+  await exited;
+  const gone = () => { try { process.kill(grandchild, 0); return false; } catch { return true; } };
+  for (let i = 0; i < 300 && !gone(); i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.ok(gone(), "the grandchild died with it");
+  assert.equal(calls.length, 1, "the real spawn is not touched off Windows");
 });
