@@ -1017,7 +1017,10 @@ describe.sequential("Composio Sessions", () => {
       composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
     };
     const email = { tools: [...EMAIL_READ_TOOL_NAMES] };
+    const before = calls.length;
     await expect(validateConnectorGrants(cfg, { [EMAIL_SLUG]: email })).resolves.toBeNull();
+    // An Email-only grant never waits on the connected-apps catalog.
+    expect(calls.slice(before).filter((call) => call.path === "/api/v3/toolkits")).toHaveLength(0);
     await expect(validateConnectorGrants(cfg, { [EMAIL_SLUG]: { tools: "*" }, github: { tools: "*" } })).resolves.toBeNull();
     // Other services are still checked next to it.
     await expect(validateConnectorGrants(cfg, { [EMAIL_SLUG]: email, slack: { tools: ["SLACK_POST_MESSAGE"] } })).resolves.toMatch(/not connected: slack$/);
