@@ -41,6 +41,7 @@ import { sameModelSelection } from "../shared/thread-model.ts";
 import { initialGreetingMessage } from "./initial-greeting.ts"; import { createDefaultBot, defaultBotRefusal, type DefaultBotIntro } from "./default-bot.ts";
 import { appsFromCreator } from "./inherited-apps.ts";
 import { ThreadCache, type ThreadState } from "./thread-cache.ts";
+import { toolResultPrefix } from "./tool-results.ts";
 export type {
   BotActivity, GroupDefaultResponder, OptionCardData,
   SecretRequestCardData, Surface, TaskClosedBy, TaskOpenedBy, TaskUsage,
@@ -147,7 +148,7 @@ export function threadTitleFrom(title?: string): string {
 
 export function titleFromMessage(text: string): string {
   const line = text.trim().split("\n")[0]!.trim();
-  return line.length > 48 ? `${line.slice(0, 47)}…` : line || UNTITLED_TASK;
+  return line.length > 48 ? `${toolResultPrefix(line, 47)}…` : line || UNTITLED_TASK;
 }
 
 export function titleFromLlm(raw: string): string | null {
