@@ -1503,7 +1503,7 @@ async function openCloudSettings() {
 
 const lendingActivity = createActivityWindow({ BrowserWindow, icon: APP_ICON, background: () => windowBackground(nativeTheme.shouldUseDarkColors),
   entries: () => sharingController().activity(undefined, 200),
-  locale: () => { try { return jsonFile(path.join(app.getPath("userData"), "desktop-prefs.json")).read()?.language || app.getLocale(); } catch { return app.getLocale(); } } });
+  locale: nativeText.intlTag });
 let lendingTray = null;
 function lendingIndicator() {
   lendingTray ??= createLendingIndicator({
