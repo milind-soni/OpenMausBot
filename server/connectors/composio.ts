@@ -436,7 +436,7 @@ let connectorServiceSlugsCache: {
   sessionId?: string;
   slugs: readonly string[];
 } | null = null;
-let connectorServiceSlugsRequest: { identity: string; slugs: Promise<readonly string[]> } | null = null;
+const connectorServiceSlugsRequests = new Map<string, Promise<readonly string[]>>();
 
 function connectorServiceCacheIdentity(cfg: AppConfig, as?: BrokerAccess): string {
   const apiKey = as ? null : projectApiKey(cfg);
@@ -456,8 +456,13 @@ async function connectedServiceSlugs(cfg: AppConfig, as?: BrokerAccess): Promise
     && Date.now() - cache.at < CONNECTOR_SERVICE_SLUGS_CACHE_MS) {
     return cache.slugs;
   }
-  if (connectorServiceSlugsRequest?.identity === baseIdentity) return connectorServiceSlugsRequest.slugs;
+  if (!apiKey) {
+    const existing = connectorServiceSlugsRequests.get(baseIdentity);
+    if (existing) return existing;
+  }
+  let request: Promise<readonly string[]> | undefined;
   const walk = (async (): Promise<readonly string[]> => {
+    if (!apiKey) await Promise.resolve();
     let identity = baseIdentity;
     let sessionId = apiKey ? cfg.composio?.sessionId : undefined;
     try {
@@ -466,6 +471,9 @@ async function connectedServiceSlugs(cfg: AppConfig, as?: BrokerAccess): Promise
         sessionId = session.session_id;
         identity = backendFingerprint("project-tools", apiBase(), `${apiKey}\0${sessionId}`);
       }
+      const existing = connectorServiceSlugsRequests.get(identity);
+      if (existing) return existing;
+      connectorServiceSlugsRequests.set(identity, request!);
       const services = await connectedServices(cfg, as);
       const slugs = Object.keys(services);
       connectorServiceSlugsCache = { at: Date.now(), identity, baseIdentity, ...(sessionId ? { sessionId } : {}), slugs };
@@ -475,13 +483,18 @@ async function connectedServiceSlugs(cfg: AppConfig, as?: BrokerAccess): Promise
       const sameSession = !apiKey || sessionId === stale?.sessionId;
       if (stale && (stale.identity === identity || stale.baseIdentity === baseIdentity) && sameSession) return stale.slugs;
       return [] as readonly string[];
+    } finally {
+      const active = connectorServiceSlugsRequests.get(identity);
+      if (active === request) connectorServiceSlugsRequests.delete(identity);
     }
   })();
-  connectorServiceSlugsRequest = { identity: baseIdentity, slugs: walk };
+  request = walk;
   try {
     return await walk;
   } finally {
-    if (connectorServiceSlugsRequest?.slugs === walk) connectorServiceSlugsRequest = null;
+    for (const [identity, active] of connectorServiceSlugsRequests) {
+      if (active === request) connectorServiceSlugsRequests.delete(identity);
+    }
   }
 }
 

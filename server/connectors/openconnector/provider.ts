@@ -121,14 +121,13 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
           deferPoll(service, requestId, alias);
           return;
         }
-        const record = state.findConnectionByAccountId(accountId);
-        if (!record || record.status === "connected" || record.connectionRequestId !== requestId) return;
-        state.upsertConnection({
-          ...record,
-          status: "error",
-          lastError: error instanceof Error ? error.message.slice(0, 400) : "authorization polling failed",
-          updatedAt: new Date().toISOString(),
-        });
+        state.updateConnectionIf(accountId, requestId, (record) =>
+          record.status === "connected" ? null : {
+            ...record,
+            status: "error",
+            lastError: error instanceof Error ? error.message.slice(0, 400) : "authorization polling failed",
+            updatedAt: new Date().toISOString(),
+          });
       },
     ).finally(() => {
       pollsInFlight.delete(requestId);

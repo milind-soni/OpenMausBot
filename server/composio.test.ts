@@ -167,12 +167,22 @@ beforeAll(async () => {
     const apiKey = String(req.headers["x-api-key"] ?? "");
     if (!["ak_test", "ak_status_pages", "ak_catalog_a", "ak_catalog_b", "ak_catalog_pages", "ak_catalog_partial", "ak_catalog_stuck",
         "ak_catalog_page_stuck", "ak_catalog_exhausted", "ak_catalog_stalled_total", "ak_catalog_end_short",
-        "ak_catalog_http_no_total"].includes(apiKey)) {
+        "ak_catalog_http_no_total", "ak_isolation_a", "ak_isolation_b"].includes(apiKey)) {
       res.writeHead(401, { "content-type": "application/json" });
       return res.end(JSON.stringify({ error: { message: "invalid project key" } }));
     }
 
     if (req.method === "POST" && url.pathname === "/api/v3.1/tool_router/session") {
+      const isolation = /^ak_isolation_(a|b)$/.exec(apiKey);
+      if (isolation) {
+        const sessionId = `trs_isolation_${isolation[1]}`;
+        res.writeHead(201, { "content-type": "application/json" });
+        return res.end(JSON.stringify({
+          session_id: sessionId,
+          mcp: { type: "http", url: `https://app.composio.dev/tool_router/v3/${sessionId}/mcp` },
+          config: { user_id: body.user_id, multi_account: body.multi_account },
+        }));
+      }
       sessionAuthConfigs = body.auth_configs ?? {};
       res.writeHead(201, { "content-type": "application/json" });
       return res.end(JSON.stringify({
@@ -300,6 +310,18 @@ beforeAll(async () => {
       }
       return res.end(JSON.stringify({ items: [{ slug: "x", name: "X (Twitter)" }, { slug: "github", name: "GitHub" }] }));
     }
+    if (req.method === "GET" && /^\/api\/v3.1\/tool_router\/session\/trs_isolation_[ab]$/.test(url.pathname)) {
+      const sessionId = url.pathname.split("/").at(-1)!;
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({
+        session_id: sessionId,
+        mcp: { type: "http", url: `https://app.composio.dev/tool_router/v3/${sessionId}/mcp` },
+        config: {
+          user_id: "openmausbot_existing",
+          multi_account: { enable: true, max_accounts_per_toolkit: 5, require_explicit_selection: true },
+        },
+      }));
+    }
     if (req.method === "GET" && url.pathname === "/api/v3.1/tool_router/session/trs_test") {
       if (sessionLookupFail) {
         res.writeHead(503, { "content-type": "application/json" });
@@ -332,6 +354,14 @@ beforeAll(async () => {
         config: { user_id: "openmausbot_legacy" },
       }));
     }
+    if (req.method === "GET" && url.pathname.endsWith("/toolkits")
+      && (apiKey === "ak_isolation_a" || apiKey === "ak_isolation_b")) {
+      const slug = apiKey === "ak_isolation_a" ? "github" : "linear";
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({
+        items: [{ slug, connected_account: { id: `ca_${slug}`, status: "ACTIVE" } }],
+      }));
+    }
     if (req.method === "GET" && url.pathname.endsWith("/toolkits")) {
       if (apiKey === "ak_status_pages") {
         const pageTwo = url.searchParams.get("cursor") === "status-page-2";
@@ -360,6 +390,14 @@ beforeAll(async () => {
         next_cursor: url.searchParams.has("toolkits") ? undefined : "toolkits-page-2",
       };
       return res.end(JSON.stringify(page));
+    }
+    if (req.method === "GET" && url.pathname === "/api/v3.1/connected_accounts"
+      && (apiKey === "ak_isolation_a" || apiKey === "ak_isolation_b")) {
+      const slug = apiKey === "ak_isolation_a" ? "github" : "linear";
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({
+        items: [{ id: `ca_${slug}`, toolkit: { slug }, status: "ACTIVE" }],
+      }));
     }
     if (req.method === "GET" && url.pathname === "/api/v3.1/connected_accounts") {
       if (connectedAccountsUnavailable) {
@@ -1030,6 +1068,33 @@ describe.sequential("Composio Sessions", () => {
       sessionLookupFail = false;
       now.mockRestore();
       forgetProjectAuthConfigs();
+    }
+  });
+
+  it("does not share unresolved project slug requests across sessions, and still serves a valid cache", async () => {
+    const configA = { composio: { apiKey: "ak_isolation_a", sessionId: "trs_isolation_a" } } as AppConfig;
+    const configB = { composio: { apiKey: "ak_isolation_b", sessionId: "trs_isolation_b" } } as AppConfig;
+    forgetProjectAuthConfigs();
+    const before = calls.length;
+    const [slugsA, slugsB] = await Promise.all([
+      connectedServiceSlugs(configA),
+      connectedServiceSlugs(configB),
+    ]);
+    expect(slugsA).toEqual(["github"]);
+    expect(slugsB).toEqual(["linear"]);
+    const concurrent = calls.slice(before);
+    expect(concurrent.filter((call) => call.path.endsWith("/tool_router/session/trs_isolation_a"))).not.toHaveLength(0);
+    expect(concurrent.filter((call) => call.path.endsWith("/tool_router/session/trs_isolation_b"))).not.toHaveLength(0);
+
+    const afterResolved = calls.length;
+    const start = Date.now();
+    const now = vi.spyOn(Date, "now");
+    try {
+      now.mockReturnValue(start + 1_000);
+      await expect(connectedServiceSlugs(configB)).resolves.toEqual(["linear"]);
+      expect(calls.slice(afterResolved)).toEqual([]);
+    } finally {
+      now.mockRestore();
     }
   });
 

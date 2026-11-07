@@ -79,32 +79,112 @@ describe("state persistence", () => {
     first.upsertConnection({ accountId: "oc:github:default", service: "github", status: "ACTIVE", updatedAt: "t" });
     const readRaw = JSON.parse(readFileSync(file, "utf8"));
     expect(readRaw.runtimeUrl).toBe("https://first.example.test");
-    expect(new OpenConnectorStateStore(file, "https://second.example.test").listConnections()).toEqual([]);
+
+    const second = new OpenConnectorStateStore(file, "https://second.example.test");
+    expect(second.listConnections()).toEqual([]);
+    const before = readFileSync(file, "utf8");
+    expect(() => second.upsertConnection({
+      accountId: "oc:github:default",
+      service: "github",
+      status: "ACTIVE",
+      updatedAt: "wrong-runtime",
+    })).toThrow(/different runtime URL/);
+    expect(() => second.upsertAppOAuth({
+      service: "github",
+      clientId: "cid",
+      updatedAt: "wrong-runtime",
+    })).toThrow(/different runtime URL/);
+    expect(readFileSync(file, "utf8")).toBe(before);
     expect(new OpenConnectorStateStore(file, "https://first.example.test").listConnections()).toHaveLength(1);
   });
 
-  it("coordinates cross-process writers so a former owner cannot write stale state", async () => {
+  it("updates connections only when the expected request id still owns the row", () => {
+    const file = join(dir, `cas-${Math.random().toString(36).slice(2)}.json`);
+    const store = new OpenConnectorStateStore(file);
+    const record = {
+      accountId: "oc:github:work",
+      service: "github",
+      alias: "work",
+      connectionRequestId: "request-1",
+      status: "pending",
+      updatedAt: "old",
+    };
+    store.upsertConnection(record);
+    expect(store.updateConnectionIf(record.accountId, "stale", () => ({
+      ...record,
+      status: "connected",
+      updatedAt: "stale",
+    }))).toBeNull();
+    expect(store.findConnectionByAccountId(record.accountId)?.status).toBe("pending");
+
+    store.upsertConnection({ ...record, connectionRequestId: "request-2" });
+    expect(store.updateConnectionIf(record.accountId, "request-1", () => ({
+      ...record,
+      status: "connected",
+      updatedAt: "replaced",
+    }))).toBeNull();
+    expect(store.findConnectionByAccountId(record.accountId)).toMatchObject({
+      connectionRequestId: "request-2",
+      status: "pending",
+    });
+
+    expect(store.updateConnectionIf(record.accountId, "request-2", (current) => ({
+      ...current,
+      status: "connected",
+      updatedAt: "current",
+    }))).toMatchObject({ connectionRequestId: "request-2", status: "connected" });
+
+    store.removeConnection(record.accountId);
+    expect(store.updateConnectionIf(record.accountId, "request-2", () => ({
+      ...record,
+      status: "connected",
+      updatedAt: "revived",
+    }))).toBeNull();
+    expect(store.findConnectionByAccountId(record.accountId)).toBeNull();
+  });
+
+  it("serializes simultaneous cross-process writers under the SQLite lock", async () => {
     const file = join(dir, `locked-${Math.random().toString(36).slice(2)}.json`);
     const former = new OpenConnectorStateStore(file);
     former.upsertConnection({ accountId: "oc:github:old", service: "github", status: "ACTIVE", updatedAt: "old" });
     const moduleUrl = JSON.stringify(pathToFileURL(join(import.meta.dirname, "state.ts")).href);
-    const child = spawn(process.execPath, [
-      "--experimental-strip-types", "--input-type=module", "-e",
-      `const { OpenConnectorStateStore } = await import(${moduleUrl});
-       const store = new OpenConnectorStateStore(${JSON.stringify(file)});
-       store.upsertConnection({ accountId: "oc:gmail:new", service: "gmail", status: "ACTIVE", updatedAt: "new" });
-       process.exit(0);`,
-    ], { stdio: ["ignore", "inherit", "inherit"] });
-    await new Promise<void>((resolve, reject) => {
-      child.on("error", reject);
-      child.on("exit", (code) => code === 0 ? resolve() : reject(new Error(`state writer exited ${code}`)));
-    });
+    const startWriter = (index: number) => {
+      const child = spawn(process.execPath, [
+        "--experimental-strip-types", "--input-type=module", "-e",
+        `const index = ${index};
+         const { OpenConnectorStateStore } = await import(${moduleUrl});
+         const store = new OpenConnectorStateStore(${JSON.stringify(file)});
+         store.upsertConnection({
+           accountId: "oc:service:" + index,
+           service: "service",
+           alias: String(index),
+           status: "ACTIVE",
+           updatedAt: "writer-" + index,
+         });
+         process.exit(0);`,
+      ], { stdio: ["ignore", "pipe", "pipe"] });
+      let output = "";
+      child.stdout.on("data", (chunk) => { output += chunk; });
+      child.stderr.on("data", (chunk) => { output += chunk; });
+      return new Promise<void>((resolve, reject) => {
+        child.on("error", reject);
+        child.on("exit", (code) => code === 0 ? resolve() : reject(new Error(`writer ${index} exited ${code}: ${output}`)));
+      });
+    };
+    await Promise.all([1, 2, 3, 4].map(startWriter));
     former.upsertConnection({ accountId: "oc:github:old", service: "github", status: "ACTIVE", updatedAt: "newer" });
-    expect(former.listConnections().map((record) => record.accountId)).toEqual(["oc:github:old", "oc:gmail:new"]);
     const reloaded = new OpenConnectorStateStore(file);
     expect(reloaded.findConnectionByAccountId("oc:github:old")).toMatchObject({ updatedAt: "newer" });
-    expect(reloaded.findConnectionByAccountId("oc:gmail:new")).toMatchObject({ updatedAt: "new" });
+    expect(reloaded.listConnections()).toHaveLength(5);
+    for (let index = 1; index <= 4; index += 1) {
+      expect(reloaded.findConnectionByAccountId(`oc:service:${index}`)).toMatchObject({ updatedAt: `writer-${index}` });
+    }
+    expect(statSync(`${file}.lock.db`).mode & 0o777).toBe(0o600);
     expect(excludedWorkspaceAuthPath("openconnector-state.json.lock")).toBe(true);
+    expect(excludedWorkspaceAuthPath("openconnector-state.json.lock.db")).toBe(true);
+    expect(excludedWorkspaceAuthPath("openconnector-state.json.lock.db-journal")).toBe(true);
+    expect(excludedWorkspaceAuthPath("openconnector-state.json.lock.db-wal")).toBe(true);
+    expect(excludedWorkspaceAuthPath("openconnector-state.json.lock.db-shm")).toBe(true);
     expect(excludedWorkspaceAuthPath("openconnector-state.json.123.05a7b3e0-1234-4abc-8def-0123456789ab.tmp")).toBe(true);
   });
 

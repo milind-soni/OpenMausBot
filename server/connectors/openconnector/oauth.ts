@@ -119,20 +119,18 @@ export async function pollConnectionRequest(
             : "pending";
       if (TERMINAL_OK.has(status) || TERMINAL_BAD.has(status)) {
         const accountId = accountIdForConnection(service, alias);
-        const existing = state.findConnectionByAccountId(accountId);
-        if (existing?.connectionRequestId !== requestId) {
-          throw new Error(`The ${service} authorization was superseded`);
-        }
-        const record: OpenConnectorConnectionRecord = {
+        const record = state.updateConnectionIf(accountId, requestId, (existing) => ({
           accountId,
           service,
           ...(alias ? { alias } : {}),
-          ...(existing?.label ? { label: existing.label } : {}),
+          ...(existing.label ? { label: existing.label } : {}),
           connectionRequestId: requestId,
           status,
           updatedAt: new Date().toISOString(),
-        };
-        state.upsertConnection(record);
+        }));
+        if (!record) {
+          throw new Error(`The ${service} authorization was superseded`);
+        }
         return { status, connected: TERMINAL_OK.has(status), record };
       }
     }

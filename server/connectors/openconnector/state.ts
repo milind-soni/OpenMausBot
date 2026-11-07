@@ -3,7 +3,8 @@
 // credentials themselves live on the OpenConnector runtime. Sealing mirrors server/webhooks.ts: a
 // random AES-256-GCM key in a 0600 file no backup carries (workspace-backup-policy excludes it).
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "../../atomic.ts";
@@ -61,13 +62,17 @@ const stateFileSchema = z.object({
 export class OpenConnectorStateStore {
   readonly file: string;
   private readonly runtimeUrl?: string;
+  private readonly lockPath: string;
+  private runtimeMismatch = false;
   private connections: OpenConnectorConnectionRecord[];
   private appOAuth: OpenConnectorAppOAuthRecord[];
 
   constructor(file = join(DATA_DIR, OPENCONNECTOR_STATE_FILE), runtimeUrl?: string) {
     this.file = file;
     this.runtimeUrl = runtimeUrl?.trim() || undefined;
+    this.lockPath = `${file}.lock.db`;
     const loaded = this.readUnlocked();
+    this.runtimeMismatch = Boolean(this.runtimeUrl && loaded.runtimeUrl && loaded.runtimeUrl !== this.runtimeUrl);
     this.connections = loaded.connections;
     this.appOAuth = loaded.appOAuth;
   }
@@ -88,51 +93,50 @@ export class OpenConnectorStateStore {
 
   private refreshUnlocked(): void {
     const loaded = this.readUnlocked();
-    if (this.runtimeUrl && loaded.runtimeUrl && loaded.runtimeUrl !== this.runtimeUrl) return;
-    this.connections = loaded.connections;
-    this.appOAuth = loaded.appOAuth;
+    this.runtimeMismatch = Boolean(this.runtimeUrl && loaded.runtimeUrl && loaded.runtimeUrl !== this.runtimeUrl);
+    this.connections = this.runtimeMismatch ? [] : loaded.connections;
+    this.appOAuth = this.runtimeMismatch ? [] : loaded.appOAuth;
   }
 
-  /** A 0600 lock file serializes processes. Every public read refreshes under it, and every mutation
-   * refreshes before changing the current file, so a replacement provider cannot overwrite its update. */
+  private lock(): DatabaseSync {
+    mkdirSync(dirname(this.lockPath), { recursive: true });
+    const database = new DatabaseSync(this.lockPath);
+    if (process.platform !== "win32" && (statSync(this.lockPath).mode & 0o777) !== 0o600) chmodSync(this.lockPath, 0o600);
+    database.exec("PRAGMA busy_timeout = 5000");
+    database.exec("CREATE TABLE IF NOT EXISTS state_lock (id INTEGER PRIMARY KEY CHECK (id = 1))");
+    return database;
+  }
+
+  /** A SQLite exclusive transaction serializes hosts, threads and processes without path-unlink races.
+   * Every read refreshes under it; every mutation refreshes first and persists before commit, so a
+   * store bound to another runtime can read an empty view but can never overwrite the newer state. */
   private withLock<T>(operation: () => T, persist = true): T {
-    const path = `${this.file}.lock`;
-    const deadline = Date.now() + 5_000;
-    for (;;) {
-      let descriptor: number;
-      try {
-        mkdirSync(dirname(path), { recursive: true });
-        descriptor = openSync(path, "wx", 0o600);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        const now = Date.now();
-        if (now >= deadline) throw new Error(`Timed out waiting for the OpenConnector state lock`);
-        let owner: number | null = null;
-        try {
-          owner = Number.parseInt(readFileSync(path, "utf8").trim(), 10);
-        } catch {}
-        const ownerAlive = owner !== null && Number.isSafeInteger(owner) && owner > 0 && process.kill(owner, 0);
-        if (!ownerAlive) {
-          try {
-            unlinkSync(path);
-            continue;
-          } catch {}
-        }
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
-        continue;
+    const database = this.lock();
+    database.exec("BEGIN EXCLUSIVE");
+    let committed = false;
+    try {
+      this.refreshUnlocked();
+      if (persist && this.runtimeMismatch) {
+        throw new Error("Refusing to write OpenConnector state for a different runtime URL");
       }
-      try {
-        writeFileSync(descriptor, `${process.pid}\n`, { flag: "r+" });
-        this.refreshUnlocked();
-        const result = operation();
-        if (persist) this.persist();
-        return result;
-      } finally {
-        closeSync(descriptor);
+      const connectionsBefore = JSON.stringify(this.connections);
+      const appOAuthBefore = JSON.stringify(this.appOAuth);
+      const result = operation();
+      if (persist && (JSON.stringify(this.connections) !== connectionsBefore || JSON.stringify(this.appOAuth) !== appOAuthBefore)) {
+        this.persist();
+      }
+      database.exec("COMMIT");
+      committed = true;
+      return result;
+    } finally {
+      if (!committed) {
         try {
-          unlinkSync(path);
+          database.exec("ROLLBACK");
         } catch {}
       }
+      try {
+        database.close();
+      } catch {}
     }
   }
 
@@ -157,6 +161,27 @@ export class OpenConnectorStateStore {
 
   findConnectionByAccountId(accountId: string): OpenConnectorConnectionRecord | null {
     return this.withLock(() => this.connections.find((record) => record.accountId === accountId) ?? null, false);
+  }
+
+  /** CAS for authorization convergence: the mutation sees the latest record inside the same lock and
+   * can only replace that row. A replacement or deletion makes the expected request id stale, so no
+   * stale poll can write or resurrect the connection. */
+  updateConnectionIf(
+    accountId: string,
+    expectedConnectionRequestId: string | undefined,
+    mutate: (record: OpenConnectorConnectionRecord) => OpenConnectorConnectionRecord | null | undefined,
+  ): OpenConnectorConnectionRecord | null {
+    return this.withLock(() => {
+      const index = this.connections.findIndex((record) => record.accountId === accountId);
+      if (index < 0) return null;
+      const current = { ...this.connections[index] };
+      if (current.connectionRequestId !== expectedConnectionRequestId) return null;
+      const updated = mutate(current);
+      if (!updated) return null;
+      const next = { ...updated, accountId: current.accountId };
+      this.connections[index] = next;
+      return { ...next };
+    });
   }
 
   upsertConnection(record: OpenConnectorConnectionRecord): void {
