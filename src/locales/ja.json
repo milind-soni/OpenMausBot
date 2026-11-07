@@ -7635,11 +7635,15 @@
   "server.meetings.end.denied": "主催者が参加リクエストを拒否しました。",
   "server.meetings.end.lobby_timeout": "誰も入室を許可しなかったため、待つのをやめました。",
   "server.meetings.end.guests_blocked": "この会議はゲストの参加を許可していません（主催者の設定でサインイン済みのアカウントが必要です）。そのため入れませんでした。",
-  "server.meetings.end.not_found": "そのリンクは会議につながりません。リンクを確認してください。",
+  "server.meetings.end.not_found": "この会議のリンクは有効ではありません。リンクを確認してください。会議が終了している可能性があります。",
   "server.meetings.end.join_failed": "会議の参加画面を通過できませんでした。",
   "server.meetings.end.consent_failed": "会議のチャットにメモを取る旨の通知を投稿できませんでした（ゲストのチャットがオフかもしれません）。そのため何も記録せずに退出しました。",
   "server.meetings.end.alone": "ほかの全員が退出したため、私も退出しました。",
   "server.meetings.end.max_length": "会議が 4 時間の上限に達したため、退出しました。",
   "server.meetings.end.crashed": "会議ボットが予期せず停止しました。それまでに聞き取った内容は保存されています。",
-  "server.meetings.end.lost": "会議を実行しているクラウドコンピューターとの接続が切れました。それまでに聞き取った内容は保存されています。"
+  "server.meetings.end.lost": "会議を実行しているクラウドコンピューターとの接続が切れました。それまでに聞き取った内容は保存されています。",
+  "server.meetings.end.meet_refused": "Google Meet にゲストとして入れてもらえませんでした。主催者は主催者用の管理機能でゲストを許可できます。または、この会議は組織外の参加者を許可していない可能性があります。",
+  "server.meetings.end.speech_unavailable": "この会議の音声文字起こしを利用できなかったため、参加しませんでした。",
+  "server.meetings.card.settingUp": "文字起こしを準備しています（初回のみ、約 1 分）…",
+  "server.meetings.card.speechStopped": "文字起こしが停止しました: {problem}"
 }

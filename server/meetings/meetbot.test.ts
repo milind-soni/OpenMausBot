@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ADAPTERS, attribute, noteQuestion, runSession, teamsSafeName, type CallPage, type MeetbotConfig, type SessionParts } from "./meetbot.ts";
+import { ADAPTERS, attribute, chunkStream, noteQuestion, runSession, teamsSafeName, type CallPage, type MeetbotConfig, type SessionParts } from "./meetbot.ts";
 
 const config: MeetbotConfig = {
   url: "https://meet.systemli.org/room", platform: "jitsi", name: "Ada (notes)", consent: "Hi, I'm Ada (notes). Ask me with @notes.",
@@ -121,5 +121,58 @@ describe("meeting bot helpers", () => {
   it("keeps a Teams guest name to the characters Teams accepts", () => {
     expect(teamsSafeName("Ada (notes)")).toBe("Ada notes");
     expect(teamsSafeName("((()))")).toBe("Notes");
+  });
+});
+
+describe("the meeting bot on Google Meet", () => {
+  it("stops at Meet's home page instead of typing its name into the code box, and only says lobby when waiting", async () => {
+    const { page, sent } = fakePage({ probes: [{ inMeeting: false, home: true }] });
+    const run = parts(page, { config: { ...config, platform: "meet", url: "https://meet.google.com/abc-defg-hij" }, adapter: ADAPTERS.meet });
+    expect(await runSession(run.session)).toBe("not_found");
+    expect(sent).toEqual([]);
+    expect(run.events.map((e) => e.data?.phase)).toEqual(["joining"]);
+  });
+
+  it("keeps the meeting code and asks for the signed-in account", () => {
+    expect(ADAPTERS.meet.url("https://meet.google.com/meet/abc-defg-hij", true)).toBe("https://meet.google.com/meet/abc-defg-hij?hl=en&authuser=0");
+    expect(ADAPTERS.meet.url("https://meet.google.com/abc-defg-hij", false)).toBe("https://meet.google.com/abc-defg-hij?hl=en");
+  });
+
+  it("joins as the signed-in account without typing a guest name", async () => {
+    const { page, sent } = fakePage({ probes: [{ inMeeting: false }, { inMeeting: true }, { inMeeting: false }, { inMeeting: false }] });
+    const exists = page.exists as unknown as ReturnType<typeof vi.fn>;
+    exists.mockImplementation(async (spec: { css?: string }) => !String(spec.css ?? "").includes("name"));
+    const op = page.op as unknown as ReturnType<typeof vi.fn>;
+    const base = op.getMockImplementation() as (a: { op: string }) => Promise<unknown>;
+    op.mockImplementation(async (a: { op: string }) => (a.op === "account" ? "Milind" : base(a)));
+    const run = parts(page, { config: { ...config, platform: "meet", url: "https://meet.google.com/abc-defg-hij", profileDir: "/p" }, adapter: ADAPTERS.meet });
+    await runSession(run.session);
+    expect(run.events.find((e) => e.type === "signed_in")?.data).toEqual({ as: "Milind" });
+    expect(sent[0]).toBe(config.consent);
+  });
+});
+
+describe("speech-to-text done by the server", () => {
+  it("sends each utterance, cut on silence, as an audio event and attributes the words that come back", async () => {
+    const events: Array<{ type: string; data?: Record<string, any> }> = [];
+    const replies: Array<{ start: number; words: Array<{ w: string; s: number; e: number }> }> = [];
+    const heard: Array<{ w: string; s: number }> = [];
+    const stream = chunkStream((type, data) => { events.push({ type, data }); }, () => replies.splice(0), (words) => heard.push(...words), () => {},
+      async (pcm) => Buffer.from(`OGG${pcm.length}`));
+    const tone = (ms: number, loud: boolean) => {
+      const out = Buffer.alloc(ms * 32);
+      for (let i = 0; i < out.length; i += 2) out.writeInt16LE(loud ? Math.round(3_000 * Math.sin(i / 10)) : 0, i);
+      return out;
+    };
+    stream.write(Buffer.concat([tone(600, false), tone(900, true), tone(900, false)]));
+    for (let i = 0; i < 50 && !events.some((e) => e.type === "audio"); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    const audio = events.find((e) => e.type === "audio")!.data!;
+    expect(audio).toMatchObject({ n: 1 });
+    expect(Buffer.from(audio.b64, "base64").toString()).toMatch(/^OGG\d+$/);
+    expect(audio.ms).toBeGreaterThanOrEqual(900);
+    expect(audio.ms).toBeLessThan(1_500);
+    replies.push({ start: audio.start, words: [{ w: "Hello", s: 100, e: 400 }] });
+    await stream.stop();
+    expect(heard).toEqual([{ w: "Hello", s: audio.start + 100, e: audio.start + 400 }]);
   });
 });

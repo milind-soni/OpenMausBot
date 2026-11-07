@@ -34,6 +34,7 @@ export const MEETING_TOOL_DEFINITIONS = [
         link: line(2_000, "The meeting link, for example https://meet.google.com/abc-defg-hij."),
         note: line(200, "Optional: what the meeting is, such as its calendar title."),
         every_calendar_meeting: { type: "boolean", description: "Instead of a link: set up the routine \"Join my meetings and take notes\" that joins the person's calendar meetings with a Meet or Teams link as they start." },
+        local_transcription: { type: "boolean", description: "Only when the person asks for it: transcribe on the cloud computer itself (slower, set up once) instead of with a speech service." },
       },
     },
   },

@@ -6716,11 +6716,15 @@
   "server.meetings.end.denied": "Organizator odrzucił moją prośbę o dołączenie.",
   "server.meetings.end.lobby_timeout": "Nikt mnie nie wpuścił, więc przestałem czekać.",
   "server.meetings.end.guests_blocked": "To spotkanie nie przyjmuje gości (ustawienia organizatora wymagają zalogowanego konta), więc nie mogłem wejść.",
-  "server.meetings.end.not_found": "Ten link nie prowadzi do żadnego spotkania. Sprawdź link.",
+  "server.meetings.end.not_found": "Ten link do spotkania nie jest aktywny. Sprawdź link; spotkanie mogło się zakończyć.",
   "server.meetings.end.join_failed": "Nie udało mi się przejść przez ekran dołączania do spotkania.",
   "server.meetings.end.consent_failed": "Nie mogłem opublikować informacji o robieniu notatek na czacie spotkania (czat może być wyłączony dla gości), więc wyszedłem, niczego nie nagrywając.",
   "server.meetings.end.alone": "Wszyscy inni wyszli, więc ja też wyszedłem.",
   "server.meetings.end.max_length": "Spotkanie osiągnęło limit 4 godzin, więc wyszedłem.",
   "server.meetings.end.crashed": "Bot spotkania niespodziewanie się zatrzymał. To, co usłyszał do tej pory, zostało zachowane.",
-  "server.meetings.end.lost": "Straciłem kontakt z komputerem w chmurze, na którym trwało spotkanie. To, co usłyszano do tej pory, zostało zachowane."
+  "server.meetings.end.lost": "Straciłem kontakt z komputerem w chmurze, na którym trwało spotkanie. To, co usłyszano do tej pory, zostało zachowane.",
+  "server.meetings.end.meet_refused": "Google Meet nie wpuścił mnie jako gościa. Organizator może zezwolić na gości w ustawieniach organizatora albo spotkanie nie przyjmuje osób spoza organizacji.",
+  "server.meetings.end.speech_unavailable": "Nie udało się uzyskać zamiany mowy na tekst dla tego spotkania, więc nie dołączyłem.",
+  "server.meetings.card.settingUp": "Konfiguruję transkrypcję (jednorazowo, około minuty)…",
+  "server.meetings.card.speechStopped": "Transkrypcja zatrzymana: {problem}"
 }

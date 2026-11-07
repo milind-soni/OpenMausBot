@@ -70,7 +70,7 @@ export function createMeetingsHost(deps: MeetingsHostDeps, routeDeps: () => Meet
   const meetings = createMeetings({
     dataDir: deps.dataDir,
     engine,
-    speech: () => speechSource(cfg.tts?.key),
+    speech: (record) => speechSource(cfg, { local: record.local === true }),
     async computerFor(record) {
       const bot = store.bot(record.botId);
       if (!bot) return { error: "The bot is gone." };

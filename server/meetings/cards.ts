@@ -13,9 +13,9 @@ export const LEAVE_ACTION = "meeting_leave";
 export const END_LINE = {
   left: "server.meetings.end.left", stop_requested: "server.meetings.end.stop_requested", meeting_ended: "server.meetings.end.meeting_ended",
   removed: "server.meetings.end.removed", denied: "server.meetings.end.denied", lobby_timeout: "server.meetings.end.lobby_timeout",
-  guests_blocked: "server.meetings.end.guests_blocked", not_found: "server.meetings.end.not_found", join_failed: "server.meetings.end.join_failed",
+  guests_blocked: "server.meetings.end.guests_blocked", meet_refused: "server.meetings.end.meet_refused", not_found: "server.meetings.end.not_found", join_failed: "server.meetings.end.join_failed",
   consent_failed: "server.meetings.end.consent_failed", alone: "server.meetings.end.alone", max_length: "server.meetings.end.max_length",
-  crashed: "server.meetings.end.crashed", lost: "server.meetings.end.lost",
+  crashed: "server.meetings.end.crashed", lost: "server.meetings.end.lost", speech_unavailable: "server.meetings.end.speech_unavailable",
 } as const satisfies Record<MeetingEndReason, ServerLineKey>;
 
 const words = (key: string, params?: WidgetText["params"]): WidgetText => ({ key, ...(params ? { params } : {}) });
@@ -50,6 +50,9 @@ export function liveCard(record: MeetingRecord, minutes: number): WidgetRoot {
   const where = MEETING_PLATFORM_NAMES[record.platform];
   const children: Node[] = [status(record, minutes)];
   if (record.phase === "in_meeting" && record.questions > 0) children.push(caption(`Questions answered in the chat: ${record.questions}`, words("server.meetings.card.questions", { count: record.questions })));
+  if (record.phase !== "ended" && record.speechState === "installing") children.push(caption("Setting up transcription (one-time, about a minute)…", words("server.meetings.card.settingUp")));
+  if (record.phase !== "ended" && record.speechProblem) children.push(text(`Transcription stopped: ${record.speechProblem}`, words("server.meetings.card.speechStopped", { problem: record.speechProblem })));
+  if (record.phase === "ended" && record.endReason === "speech_unavailable" && record.endDetail) children.push(text(record.endDetail));
   if (record.phase === "ended" && record.notes === "asked") children.push(caption("Writing the notes…", words("server.meetings.card.writing")));
   if (record.phase !== "ended") {
     children.push({ type: "Row", gap: 2, wrap: true, children: [{ type: "Button", label: "Leave meeting", style: "secondary", onClickAction: { type: LEAVE_ACTION, payload: { meetingId: record.id } }, i18n: { label: words("server.meetings.card.leave") } }] });

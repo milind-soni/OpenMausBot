@@ -3288,11 +3288,15 @@
   "server.meetings.end.denied": "Der Host hat meine Beitrittsanfrage abgelehnt.",
   "server.meetings.end.lobby_timeout": "Niemand hat mich hereingelassen, also habe ich aufgehört zu warten.",
   "server.meetings.end.guests_blocked": "Diese Besprechung lässt keine Gäste zu (die Einstellungen des Organisators verlangen ein angemeldetes Konto), daher kam ich nicht hinein.",
-  "server.meetings.end.not_found": "Dieser Link führt zu keiner Besprechung. Prüfe den Link.",
+  "server.meetings.end.not_found": "Dieser Besprechungslink ist nicht aktiv. Prüfe den Link; die Besprechung ist vielleicht beendet.",
   "server.meetings.end.join_failed": "Ich bin nicht über die Beitrittsseite der Besprechung hinausgekommen.",
   "server.meetings.end.consent_failed": "Ich konnte meinen Hinweis zum Mitschreiben nicht im Besprechungschat posten (der Chat ist für Gäste vielleicht aus), daher bin ich gegangen, ohne etwas aufzuzeichnen.",
   "server.meetings.end.alone": "Alle anderen sind gegangen, also bin ich auch gegangen.",
   "server.meetings.end.max_length": "Die Besprechung hat das Limit von 4 Stunden erreicht, also bin ich gegangen.",
   "server.meetings.end.crashed": "Der Besprechungsbot wurde unerwartet beendet. Was er bis dahin gehört hat, bleibt erhalten.",
-  "server.meetings.end.lost": "Die Verbindung zum Cloud-Computer der Besprechung ist abgebrochen. Was bis dahin gehört wurde, bleibt erhalten."
+  "server.meetings.end.lost": "Die Verbindung zum Cloud-Computer der Besprechung ist abgebrochen. Was bis dahin gehört wurde, bleibt erhalten.",
+  "server.meetings.end.meet_refused": "Google Meet hat mich nicht als Gast hereingelassen. Der Host kann Gäste in den Hoststeuerelementen zulassen, oder die Besprechung lässt keine Personen außerhalb der Organisation zu.",
+  "server.meetings.end.speech_unavailable": "Ich konnte für diese Besprechung keine Spracherkennung bekommen, daher bin ich nicht beigetreten.",
+  "server.meetings.card.settingUp": "Transkription wird eingerichtet (einmalig, etwa eine Minute)…",
+  "server.meetings.card.speechStopped": "Transkription gestoppt: {problem}"
 }

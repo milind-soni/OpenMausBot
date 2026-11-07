@@ -9,8 +9,8 @@ import {
 } from "../../shared/meetings.ts";
 import { writeFileAtomic } from "../atomic.ts";
 import { recordsBlock, recordsText } from "../records-block.ts";
-import type { MeetingComputer, MeetingEngine, MeetingEvent } from "./engine.ts";
-import type { SpeechSource } from "./speech.ts";
+import type { MeetingComputer, MeetingEngine, MeetingEvent, SpeechGrant } from "./engine.ts";
+import type { HeardWord, SpeechSource } from "./speech.ts";
 
 export interface MeetingRecord {
   id: string;
@@ -33,7 +33,13 @@ export interface MeetingRecord {
   attendees: string[];
   lines: number;
   seq: number;
-  speech: "eleven" | "whisper";
+  speech: SpeechSource["kind"];
+  /** The person asked for transcription on the computer itself. */
+  local?: boolean;
+  /** Local Whisper is installing on the computer (one time). */
+  speechState?: "installing";
+  /** Why transcription stopped, in plain words, while it is stopped. */
+  speechProblem?: string;
   cardMessageId?: string;
   questions: number;
   notes?: "waiting" | "asked" | "posted" | "none";
@@ -43,7 +49,7 @@ export interface MeetingRecord {
 export interface MeetingDeps {
   dataDir: string;
   engine: MeetingEngine;
-  speech(): SpeechSource;
+  speech(record: MeetingRecord): SpeechSource;
   /** The computer for a meeting being started: woken or created for it. Null with a plain reason when it has none. */
   computerFor(record: MeetingRecord): Promise<{ boxId: string } | { error: string }>;
   /** The computer of a meeting already started, by its Boat. */
@@ -69,6 +75,8 @@ const LOST_AFTER_MS = 10 * 60_000;
 const SEND_WAIT_MS = 25_000;
 const KEEP_ENDED = 200;
 const INLINE_CHARS = 60_000;
+/** What a Cloud whose included transcription refused can do instead: never taken without the person asking. */
+export const LOCAL_OFFER = "To transcribe on the cloud computer itself instead (slower, set up once, about a minute), ask me to join again with local transcription.";
 /** Read through a function: a handled event changes the phase under a narrowed check. */
 const isEnded = (record: MeetingRecord) => record.phase === "ended";
 
@@ -82,6 +90,7 @@ export function createMeetings(deps: MeetingDeps) {
   const readers = new Map<string, Promise<void>>();
   const sends = new Map<string, (result: { ok: boolean; error?: string }) => void>();
   const shownMinute = new Map<string, number>();
+  const chains = new Map<string, Promise<void>>();
   let closed = false;
 
   try {
@@ -125,7 +134,7 @@ export function createMeetings(deps: MeetingDeps) {
     if (!heard) {
       deps.say(record, {
         reason, joined: Boolean(record.joinedAt) && reason !== "consent_failed",
-        ...(detail && (reason === "join_failed" || reason === "crashed") ? { detail: detail.slice(0, 200) } : {}),
+        ...(detail && (reason === "join_failed" || reason === "crashed" || reason === "speech_unavailable") ? { detail: detail.slice(0, 400) } : {}),
       });
       return;
     }
@@ -149,12 +158,44 @@ export function createMeetings(deps: MeetingDeps) {
     ].join("\n");
   }
 
+  const problem = (record: MeetingRecord, text: string | undefined) => {
+    if (record.speechProblem === text) return;
+    if (text) record.speechProblem = text.slice(0, 300);
+    else delete record.speechProblem;
+    deps.card.update(record);
+  };
+
   async function grant(record: MeetingRecord, computer: MeetingComputer): Promise<void> {
+    const source = deps.speech(record);
+    if (source.kind !== "relay" && source.kind !== "eleven") return;
     try {
-      await deps.engine.supply(computer, record.id, await deps.speech().grant());
+      await deps.engine.supply(computer, record.id, await source.grant());
+      problem(record, undefined);
     } catch (error) {
-      deps.log(`meeting ${record.id}: no speech token: ${error instanceof Error ? error.message : String(error)}`);
+      const text = error instanceof Error ? error.message : String(error);
+      deps.log(`meeting ${record.id}: no speech token: ${text}`);
+      problem(record, text);
     }
+  }
+
+  /** Each utterance the computer sent back, transcribed here in order and its words handed back. */
+  function transcribe(record: MeetingRecord, computer: MeetingComputer, chunk: { start: number; b64: string }): void {
+    const source = deps.speech(record);
+    if (source.kind !== "chunks") return;
+    const next = (chains.get(record.id) ?? Promise.resolve()).then(async () => {
+      let words: HeardWord[] = [];
+      try {
+        words = await source.transcribe(Buffer.from(chunk.b64, "base64"));
+        problem(record, undefined);
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        deps.log(`meeting ${record.id}: transcription failed: ${text}`);
+        problem(record, text);
+      }
+      await deps.engine.heard(computer, record.id, { start: chunk.start, words })
+        .catch((error: unknown) => deps.log(`meeting ${record.id}: words not handed back: ${String(error)}`));
+    });
+    chains.set(record.id, next);
   }
 
   async function handle(record: MeetingRecord, computer: MeetingComputer, event: MeetingEvent): Promise<void> {
@@ -191,6 +232,15 @@ export function createMeetings(deps: MeetingDeps) {
       case "need_token":
         await grant(record, computer);
         break;
+      case "audio":
+        transcribe(record, computer, event);
+        break;
+      case "stt":
+        if (event.status === "installing") record.speechState = "installing";
+        else delete record.speechState;
+        if (event.status === "failed") problem(record, event.detail ?? "Transcription on the computer failed.");
+        else deps.card.update(record);
+        break;
       case "ended":
         end(record, event.reason, event.detail);
         break;
@@ -208,13 +258,13 @@ export function createMeetings(deps: MeetingDeps) {
       try {
         const { events, alive } = await deps.engine.events(computer, record.id, record.seq, deps.waitSeconds ?? 20);
         lastContact = now();
-        for (const event of events) {
-          if (event.seq <= record.seq) continue;
+        const fresh = events.filter((event) => event.seq > record.seq);
+        for (const event of fresh) {
           await handle(record, computer, event);
           record.seq = event.seq;
         }
         save();
-        if (!alive && !isEnded(record) && !events.length) end(record, "crashed", "The meeting bot is no longer running.");
+        if (!alive && !isEnded(record) && !fresh.length) end(record, "crashed", "The meeting bot is no longer running.");
         if (record.phase === "in_meeting" && shownMinute.get(record.id) !== minutes(record)) {
           shownMinute.set(record.id, minutes(record));
           deps.card.update(record);
@@ -235,13 +285,19 @@ export function createMeetings(deps: MeetingDeps) {
 
   async function begin(record: MeetingRecord, person: string | undefined): Promise<void> {
     try {
+      const speech = deps.speech(record);
+      record.speech = speech.kind;
+      let grant: SpeechGrant;
+      try {
+        grant = speech.kind === "relay" || speech.kind === "eleven" ? await speech.grant() : { kind: speech.kind };
+      } catch (error) {
+        const said = error instanceof Error ? error.message : String(error);
+        return end(record, "speech_unavailable", speech.kind === "relay" ? `${said} ${LOCAL_OFFER}` : said);
+      }
       const computer = await deps.computerFor(record);
       if ("error" in computer) return end(record, "join_failed", computer.error);
       record.boxId = computer.boxId;
       save();
-      const speech = deps.speech();
-      const grant = await speech.grant();
-      record.speech = grant.kind;
       await deps.engine.join(deps.computer(computer.boxId), {
         id: record.id, url: record.url, platform: record.platform, name: meetingDisplayName(record.botName), consent: consentLine(record.botName, person),
         speech: grant, maxMs: MEETING_MAX_MS, lobbyMs: MEETING_LOBBY_MS, aloneMs: MEETING_ALONE_MS,
@@ -263,7 +319,7 @@ export function createMeetings(deps: MeetingDeps) {
 
   return {
     /** Starts joining in the background; answers at once. */
-    join(input: { botId: string; botName: string; threadId: string; owner: string; link: string; note?: string; person?: string }): { record: MeetingRecord; already: boolean } {
+    join(input: { botId: string; botName: string; threadId: string; owner: string; link: string; note?: string; person?: string; local?: boolean }): { record: MeetingRecord; already: boolean } {
       const link = parseMeetingLink(input.link);
       if (!link.ok) throw new MeetingError(link.error);
       const running = [...records.values()].find((record) => record.botId === input.botId && record.phase !== "ended" && record.url === link.url);
@@ -271,7 +327,7 @@ export function createMeetings(deps: MeetingDeps) {
       const record: MeetingRecord = {
         id: `m-${randomUUID()}`, botId: input.botId, botName: input.botName, threadId: input.threadId, owner: input.owner,
         platform: link.platform, url: link.url, ...(input.note?.trim() ? { note: input.note.trim().slice(0, 200) } : {}),
-        createdAt: now(), phase: "starting", others: 0, attendees: [], lines: 0, seq: 0, speech: "eleven", questions: 0,
+        createdAt: now(), phase: "starting", others: 0, attendees: [], lines: 0, seq: 0, speech: "whisper", questions: 0, ...(input.local ? { local: true } : {}),
       };
       records.set(record.id, record);
       record.cardMessageId = deps.card.show(record) ?? undefined;

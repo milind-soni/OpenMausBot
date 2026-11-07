@@ -43,7 +43,7 @@ export interface MeetingRouteDeps {
 
 const id = z.string().min(1).max(80);
 const schemas = {
-  join: z.object({ link: z.string().max(2_000).optional(), note: z.string().max(200).optional(), every_calendar_meeting: z.boolean().optional() }),
+  join: z.object({ link: z.string().max(2_000).optional(), note: z.string().max(200).optional(), every_calendar_meeting: z.boolean().optional(), local_transcription: z.boolean().optional() }),
   status: z.object({ meeting_id: id, page: z.number().int().min(1).optional() }),
   chat: z.object({ meeting_id: id, text: z.string().trim().min(1).max(1_500) }),
   leave: z.object({ meeting_id: id }),
@@ -70,7 +70,7 @@ export function createMeetingRoutes(deps: MeetingRouteDeps) {
         if (!input.link) return { status: 400, error: "Give the meeting link, or every_calendar_meeting: true." };
         const owner = deps.computerOwner(botId);
         if (typeof owner !== "string") return { status: 409, error: owner.error };
-        const { record, already } = meetings.join({ botId, botName: ctx.bot.name, threadId: ctx.threadId, owner, link: input.link, ...(input.note ? { note: input.note } : {}), person: deps.personName(ctx.threadId) });
+        const { record, already } = meetings.join({ botId, botName: ctx.bot.name, threadId: ctx.threadId, owner, link: input.link, ...(input.note ? { note: input.note } : {}), ...(input.local_transcription ? { local: true } : {}), person: deps.personName(ctx.threadId) });
         return {
           status: 200,
           text: already

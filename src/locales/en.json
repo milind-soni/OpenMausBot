@@ -9701,11 +9701,15 @@
   "server.meetings.end.denied": "The host turned down my request to join.",
   "server.meetings.end.lobby_timeout": "Nobody let me in, so I gave up waiting.",
   "server.meetings.end.guests_blocked": "This meeting doesn't let guests join (the organizer's settings need a signed-in account), so I couldn't get in.",
-  "server.meetings.end.not_found": "That meeting link doesn't lead to a meeting. Check the link.",
+  "server.meetings.end.not_found": "This meeting link isn't active. Check the link; the meeting may have ended.",
   "server.meetings.end.join_failed": "I couldn't get through the meeting's join screen.",
   "server.meetings.end.consent_failed": "I couldn't post my note-taking notice in the meeting chat (chat may be off for guests), so I left without recording anything.",
   "server.meetings.end.alone": "Everyone else left, so I left too.",
   "server.meetings.end.max_length": "The meeting reached the 4-hour limit, so I left.",
   "server.meetings.end.crashed": "The meeting bot stopped unexpectedly. What it heard until then is kept.",
-  "server.meetings.end.lost": "I lost contact with the cloud computer running the meeting. What it heard until then is kept."
+  "server.meetings.end.lost": "I lost contact with the cloud computer running the meeting. What it heard until then is kept.",
+  "server.meetings.end.meet_refused": "Google Meet didn't let me in as a guest. The host can allow guests in Host controls, or the meeting may not allow people outside the organization.",
+  "server.meetings.end.speech_unavailable": "I couldn't get speech-to-text for this meeting, so I didn't join.",
+  "server.meetings.card.settingUp": "Setting up transcription (one-time, about a minute)…",
+  "server.meetings.card.speechStopped": "Transcription stopped: {problem}"
 }

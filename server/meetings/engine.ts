@@ -5,8 +5,9 @@ import { readFileSync } from "node:fs";
 import type { MeetingEndReason, MeetingPlatform } from "../../shared/meetings.ts";
 import { resolveProxy } from "../proxy-paths.ts";
 
-/** One speech-to-text grant for the computer: a short-lived token, never a provider key. */
-export type SpeechGrant = { kind: "eleven"; token: string; rotateMs?: number } | { kind: "whisper" };
+/** How the computer does speech-to-text: with a short-lived token, by sending audio back here (`chunks`), or by itself.
+ * Never a provider key. */
+export type SpeechGrant = { kind: "eleven"; token: string; rotateMs?: number } | { kind: "chunks" } | { kind: "whisper" };
 
 export interface MeetingStart {
   id: string;
@@ -29,6 +30,7 @@ export type MeetingEvent = { seq: number; at: number } & (
   | { type: "question"; from: string; text: string }
   | { type: "sent"; id: string; ok: boolean; error?: string }
   | { type: "need_token" }
+  | { type: "audio"; n: number; start: number; ms: number; b64: string }
   | { type: "stt"; status: string; detail?: string }
   | { type: "ended"; reason: MeetingEndReason; detail?: string }
 );
@@ -47,6 +49,8 @@ export interface MeetingEngine {
   leave(computer: MeetingComputer, id: string): Promise<void>;
   /** Answers a need_token event. */
   supply(computer: MeetingComputer, id: string, grant: SpeechGrant): Promise<void>;
+  /** Answers an audio event with its words, in milliseconds from `start`. */
+  heard(computer: MeetingComputer, id: string, chunk: { start: number; words: Array<{ w: string; s: number; e: number }> }): Promise<void>;
 }
 
 const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
@@ -89,7 +93,7 @@ export function createBotEngine(source: () => { text: string; file: string } = b
     const bot = source();
     await must(computer, `node ${bot.file} put ${folder(id)} ${Buffer.from(JSON.stringify(command)).toString("base64")}`, "Reaching the meeting bot", 30_000);
   }
-  const speech = (grant: SpeechGrant) => (grant.kind === "eleven" ? { kind: "eleven", token: grant.token, ...(grant.rotateMs ? { rotateMs: grant.rotateMs } : {}) } : { kind: "whisper" });
+  const speech = (grant: SpeechGrant) => (grant.kind === "eleven" ? { kind: "eleven", token: grant.token, ...(grant.rotateMs ? { rotateMs: grant.rotateMs } : {}) } : { kind: grant.kind });
 
   return {
     async join(computer, start) {
@@ -117,5 +121,6 @@ export function createBotEngine(source: () => { text: string; file: string } = b
     chatSend: (computer, id, message) => put(computer, id, { kind: "chat", id: message.id, text: message.text }),
     leave: (computer, id) => put(computer, id, { kind: "leave" }),
     supply: (computer, id, grant) => (grant.kind === "eleven" ? put(computer, id, { kind: "token", token: grant.token }) : Promise.resolve()),
+    heard: (computer, id, chunk) => put(computer, id, { kind: "words", start: chunk.start, words: chunk.words }),
   };
 }

@@ -9701,11 +9701,15 @@
   "server.meetings.end.denied": "O anfitrião recusou meu pedido para entrar.",
   "server.meetings.end.lobby_timeout": "Ninguém me deixou entrar, então parei de esperar.",
   "server.meetings.end.guests_blocked": "Esta reunião não aceita convidados (as configurações do organizador exigem uma conta conectada), então não consegui entrar.",
-  "server.meetings.end.not_found": "Esse link não leva a nenhuma reunião. Confira o link.",
+  "server.meetings.end.not_found": "Este link de reunião não está ativo. Confira o link; a reunião pode ter terminado.",
   "server.meetings.end.join_failed": "Não consegui passar da tela de entrada da reunião.",
   "server.meetings.end.consent_failed": "Não consegui publicar meu aviso de anotações no chat da reunião (o chat pode estar desativado para convidados), então saí sem gravar nada.",
   "server.meetings.end.alone": "Todos os outros saíram, então saí também.",
   "server.meetings.end.max_length": "A reunião chegou ao limite de 4 horas, então saí.",
   "server.meetings.end.crashed": "O bot da reunião parou inesperadamente. O que ele ouviu até ali foi mantido.",
-  "server.meetings.end.lost": "Perdi o contato com o computador na nuvem da reunião. O que foi ouvido até ali foi mantido."
+  "server.meetings.end.lost": "Perdi o contato com o computador na nuvem da reunião. O que foi ouvido até ali foi mantido.",
+  "server.meetings.end.meet_refused": "O Google Meet não me deixou entrar como convidado. O anfitrião pode permitir convidados nos controles do organizador, ou a reunião pode não aceitar pessoas de fora da organização.",
+  "server.meetings.end.speech_unavailable": "Não consegui a transcrição de voz para esta reunião, então não entrei.",
+  "server.meetings.card.settingUp": "Preparando a transcrição (só uma vez, cerca de um minuto)…",
+  "server.meetings.card.speechStopped": "A transcrição parou: {problem}"
 }

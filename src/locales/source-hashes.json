@@ -3267,13 +3267,17 @@
       "server.meetings.end.denied": "35f71f7e8b101cf0a6979f6a6b81f0f6464912ad65bbaed1edb22ae17a161792",
       "server.meetings.end.lobby_timeout": "5e03fcdd4e24628852c2c612e6c2517f19a397a3d3f74b346a29d1f273fa3d77",
       "server.meetings.end.guests_blocked": "8118e5ceb830602daa84e2a0f23480965d6a18b67fd2e1b3260853b7dc55e6fb",
-      "server.meetings.end.not_found": "1813911ff59ff98eb2836c505b9f0aa306216871fc1900c34b95ce2f30a45b1f",
+      "server.meetings.end.not_found": "6004fb65dff86c3a834e10b55de0e7ec57bb6f3a3c306edd1170e825796df8dc",
       "server.meetings.end.join_failed": "16e14e65c7bc4f211886a9c4ce726af910d80a3d37701272c4715a63c47dfe6f",
       "server.meetings.end.consent_failed": "310b92a1fbb5c01a88815acfc3ddca9498ce424fdd13e123a56c77e7051957d0",
       "server.meetings.end.alone": "a891008df5b6041dbbf7282e3436c6bf0d64fc030af054959d62956e956040ce",
       "server.meetings.end.max_length": "909e6bb74ae2b580ce7e116e88225ff57d4a3a67ed8dfc14bcc4a0efe73fabf9",
       "server.meetings.end.crashed": "0416356b5fff397a8491ff7122511f66b521906094e4933e06add926b5425ed0",
-      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1"
+      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1",
+      "server.meetings.end.meet_refused": "48cdfee3f11a93ad6fa5bc528e6aa09d9239bfeb784400d333c18e32b706869c",
+      "server.meetings.end.speech_unavailable": "4d028002724699a9b097dc8e935e4e536f2cb95604013f2cfb3c291953b1edbd",
+      "server.meetings.card.settingUp": "d81cfcf225f32d72d2a48a5465074c34913dfbddbb22096076ddb87f02bb3e32",
+      "server.meetings.card.speechStopped": "dfbb5ca1820e4ed45f043ef17627fe2caa67914519d34b1dd285aabda61e2c47"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -9207,13 +9211,17 @@
       "server.meetings.end.denied": "35f71f7e8b101cf0a6979f6a6b81f0f6464912ad65bbaed1edb22ae17a161792",
       "server.meetings.end.lobby_timeout": "5e03fcdd4e24628852c2c612e6c2517f19a397a3d3f74b346a29d1f273fa3d77",
       "server.meetings.end.guests_blocked": "8118e5ceb830602daa84e2a0f23480965d6a18b67fd2e1b3260853b7dc55e6fb",
-      "server.meetings.end.not_found": "1813911ff59ff98eb2836c505b9f0aa306216871fc1900c34b95ce2f30a45b1f",
+      "server.meetings.end.not_found": "6004fb65dff86c3a834e10b55de0e7ec57bb6f3a3c306edd1170e825796df8dc",
       "server.meetings.end.join_failed": "16e14e65c7bc4f211886a9c4ce726af910d80a3d37701272c4715a63c47dfe6f",
       "server.meetings.end.consent_failed": "310b92a1fbb5c01a88815acfc3ddca9498ce424fdd13e123a56c77e7051957d0",
       "server.meetings.end.alone": "a891008df5b6041dbbf7282e3436c6bf0d64fc030af054959d62956e956040ce",
       "server.meetings.end.max_length": "909e6bb74ae2b580ce7e116e88225ff57d4a3a67ed8dfc14bcc4a0efe73fabf9",
       "server.meetings.end.crashed": "0416356b5fff397a8491ff7122511f66b521906094e4933e06add926b5425ed0",
-      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1"
+      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1",
+      "server.meetings.end.meet_refused": "48cdfee3f11a93ad6fa5bc528e6aa09d9239bfeb784400d333c18e32b706869c",
+      "server.meetings.end.speech_unavailable": "4d028002724699a9b097dc8e935e4e536f2cb95604013f2cfb3c291953b1edbd",
+      "server.meetings.card.settingUp": "d81cfcf225f32d72d2a48a5465074c34913dfbddbb22096076ddb87f02bb3e32",
+      "server.meetings.card.speechStopped": "dfbb5ca1820e4ed45f043ef17627fe2caa67914519d34b1dd285aabda61e2c47"
     },
     "fr": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -12347,13 +12355,17 @@
       "server.meetings.end.denied": "35f71f7e8b101cf0a6979f6a6b81f0f6464912ad65bbaed1edb22ae17a161792",
       "server.meetings.end.lobby_timeout": "5e03fcdd4e24628852c2c612e6c2517f19a397a3d3f74b346a29d1f273fa3d77",
       "server.meetings.end.guests_blocked": "8118e5ceb830602daa84e2a0f23480965d6a18b67fd2e1b3260853b7dc55e6fb",
-      "server.meetings.end.not_found": "1813911ff59ff98eb2836c505b9f0aa306216871fc1900c34b95ce2f30a45b1f",
+      "server.meetings.end.not_found": "6004fb65dff86c3a834e10b55de0e7ec57bb6f3a3c306edd1170e825796df8dc",
       "server.meetings.end.join_failed": "16e14e65c7bc4f211886a9c4ce726af910d80a3d37701272c4715a63c47dfe6f",
       "server.meetings.end.consent_failed": "310b92a1fbb5c01a88815acfc3ddca9498ce424fdd13e123a56c77e7051957d0",
       "server.meetings.end.alone": "a891008df5b6041dbbf7282e3436c6bf0d64fc030af054959d62956e956040ce",
       "server.meetings.end.max_length": "909e6bb74ae2b580ce7e116e88225ff57d4a3a67ed8dfc14bcc4a0efe73fabf9",
       "server.meetings.end.crashed": "0416356b5fff397a8491ff7122511f66b521906094e4933e06add926b5425ed0",
-      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1"
+      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1",
+      "server.meetings.end.meet_refused": "48cdfee3f11a93ad6fa5bc528e6aa09d9239bfeb784400d333c18e32b706869c",
+      "server.meetings.end.speech_unavailable": "4d028002724699a9b097dc8e935e4e536f2cb95604013f2cfb3c291953b1edbd",
+      "server.meetings.card.settingUp": "d81cfcf225f32d72d2a48a5465074c34913dfbddbb22096076ddb87f02bb3e32",
+      "server.meetings.card.speechStopped": "dfbb5ca1820e4ed45f043ef17627fe2caa67914519d34b1dd285aabda61e2c47"
     },
     "hi": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -15339,13 +15351,17 @@
       "server.meetings.end.denied": "35f71f7e8b101cf0a6979f6a6b81f0f6464912ad65bbaed1edb22ae17a161792",
       "server.meetings.end.lobby_timeout": "5e03fcdd4e24628852c2c612e6c2517f19a397a3d3f74b346a29d1f273fa3d77",
       "server.meetings.end.guests_blocked": "8118e5ceb830602daa84e2a0f23480965d6a18b67fd2e1b3260853b7dc55e6fb",
-      "server.meetings.end.not_found": "1813911ff59ff98eb2836c505b9f0aa306216871fc1900c34b95ce2f30a45b1f",
+      "server.meetings.end.not_found": "6004fb65dff86c3a834e10b55de0e7ec57bb6f3a3c306edd1170e825796df8dc",
       "server.meetings.end.join_failed": "16e14e65c7bc4f211886a9c4ce726af910d80a3d37701272c4715a63c47dfe6f",
       "server.meetings.end.consent_failed": "310b92a1fbb5c01a88815acfc3ddca9498ce424fdd13e123a56c77e7051957d0",
       "server.meetings.end.alone": "a891008df5b6041dbbf7282e3436c6bf0d64fc030af054959d62956e956040ce",
       "server.meetings.end.max_length": "909e6bb74ae2b580ce7e116e88225ff57d4a3a67ed8dfc14bcc4a0efe73fabf9",
       "server.meetings.end.crashed": "0416356b5fff397a8491ff7122511f66b521906094e4933e06add926b5425ed0",
-      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1"
+      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1",
+      "server.meetings.end.meet_refused": "48cdfee3f11a93ad6fa5bc528e6aa09d9239bfeb784400d333c18e32b706869c",
+      "server.meetings.end.speech_unavailable": "4d028002724699a9b097dc8e935e4e536f2cb95604013f2cfb3c291953b1edbd",
+      "server.meetings.card.settingUp": "d81cfcf225f32d72d2a48a5465074c34913dfbddbb22096076ddb87f02bb3e32",
+      "server.meetings.card.speechStopped": "dfbb5ca1820e4ed45f043ef17627fe2caa67914519d34b1dd285aabda61e2c47"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -22960,13 +22976,17 @@
       "server.meetings.end.denied": "35f71f7e8b101cf0a6979f6a6b81f0f6464912ad65bbaed1edb22ae17a161792",
       "server.meetings.end.lobby_timeout": "5e03fcdd4e24628852c2c612e6c2517f19a397a3d3f74b346a29d1f273fa3d77",
       "server.meetings.end.guests_blocked": "8118e5ceb830602daa84e2a0f23480965d6a18b67fd2e1b3260853b7dc55e6fb",
-      "server.meetings.end.not_found": "1813911ff59ff98eb2836c505b9f0aa306216871fc1900c34b95ce2f30a45b1f",
+      "server.meetings.end.not_found": "6004fb65dff86c3a834e10b55de0e7ec57bb6f3a3c306edd1170e825796df8dc",
       "server.meetings.end.join_failed": "16e14e65c7bc4f211886a9c4ce726af910d80a3d37701272c4715a63c47dfe6f",
       "server.meetings.end.consent_failed": "310b92a1fbb5c01a88815acfc3ddca9498ce424fdd13e123a56c77e7051957d0",
       "server.meetings.end.alone": "a891008df5b6041dbbf7282e3436c6bf0d64fc030af054959d62956e956040ce",
       "server.meetings.end.max_length": "909e6bb74ae2b580ce7e116e88225ff57d4a3a67ed8dfc14bcc4a0efe73fabf9",
       "server.meetings.end.crashed": "0416356b5fff397a8491ff7122511f66b521906094e4933e06add926b5425ed0",
-      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1"
+      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1",
+      "server.meetings.end.meet_refused": "48cdfee3f11a93ad6fa5bc528e6aa09d9239bfeb784400d333c18e32b706869c",
+      "server.meetings.end.speech_unavailable": "4d028002724699a9b097dc8e935e4e536f2cb95604013f2cfb3c291953b1edbd",
+      "server.meetings.card.settingUp": "d81cfcf225f32d72d2a48a5465074c34913dfbddbb22096076ddb87f02bb3e32",
+      "server.meetings.card.speechStopped": "dfbb5ca1820e4ed45f043ef17627fe2caa67914519d34b1dd285aabda61e2c47"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -32647,13 +32667,17 @@
       "server.meetings.end.denied": "35f71f7e8b101cf0a6979f6a6b81f0f6464912ad65bbaed1edb22ae17a161792",
       "server.meetings.end.lobby_timeout": "5e03fcdd4e24628852c2c612e6c2517f19a397a3d3f74b346a29d1f273fa3d77",
       "server.meetings.end.guests_blocked": "8118e5ceb830602daa84e2a0f23480965d6a18b67fd2e1b3260853b7dc55e6fb",
-      "server.meetings.end.not_found": "1813911ff59ff98eb2836c505b9f0aa306216871fc1900c34b95ce2f30a45b1f",
+      "server.meetings.end.not_found": "6004fb65dff86c3a834e10b55de0e7ec57bb6f3a3c306edd1170e825796df8dc",
       "server.meetings.end.join_failed": "16e14e65c7bc4f211886a9c4ce726af910d80a3d37701272c4715a63c47dfe6f",
       "server.meetings.end.consent_failed": "310b92a1fbb5c01a88815acfc3ddca9498ce424fdd13e123a56c77e7051957d0",
       "server.meetings.end.alone": "a891008df5b6041dbbf7282e3436c6bf0d64fc030af054959d62956e956040ce",
       "server.meetings.end.max_length": "909e6bb74ae2b580ce7e116e88225ff57d4a3a67ed8dfc14bcc4a0efe73fabf9",
       "server.meetings.end.crashed": "0416356b5fff397a8491ff7122511f66b521906094e4933e06add926b5425ed0",
-      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1"
+      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1",
+      "server.meetings.end.meet_refused": "48cdfee3f11a93ad6fa5bc528e6aa09d9239bfeb784400d333c18e32b706869c",
+      "server.meetings.end.speech_unavailable": "4d028002724699a9b097dc8e935e4e536f2cb95604013f2cfb3c291953b1edbd",
+      "server.meetings.card.settingUp": "d81cfcf225f32d72d2a48a5465074c34913dfbddbb22096076ddb87f02bb3e32",
+      "server.meetings.card.speechStopped": "dfbb5ca1820e4ed45f043ef17627fe2caa67914519d34b1dd285aabda61e2c47"
     },
     "zh": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -40154,13 +40178,17 @@
       "server.meetings.end.denied": "35f71f7e8b101cf0a6979f6a6b81f0f6464912ad65bbaed1edb22ae17a161792",
       "server.meetings.end.lobby_timeout": "5e03fcdd4e24628852c2c612e6c2517f19a397a3d3f74b346a29d1f273fa3d77",
       "server.meetings.end.guests_blocked": "8118e5ceb830602daa84e2a0f23480965d6a18b67fd2e1b3260853b7dc55e6fb",
-      "server.meetings.end.not_found": "1813911ff59ff98eb2836c505b9f0aa306216871fc1900c34b95ce2f30a45b1f",
+      "server.meetings.end.not_found": "6004fb65dff86c3a834e10b55de0e7ec57bb6f3a3c306edd1170e825796df8dc",
       "server.meetings.end.join_failed": "16e14e65c7bc4f211886a9c4ce726af910d80a3d37701272c4715a63c47dfe6f",
       "server.meetings.end.consent_failed": "310b92a1fbb5c01a88815acfc3ddca9498ce424fdd13e123a56c77e7051957d0",
       "server.meetings.end.alone": "a891008df5b6041dbbf7282e3436c6bf0d64fc030af054959d62956e956040ce",
       "server.meetings.end.max_length": "909e6bb74ae2b580ce7e116e88225ff57d4a3a67ed8dfc14bcc4a0efe73fabf9",
       "server.meetings.end.crashed": "0416356b5fff397a8491ff7122511f66b521906094e4933e06add926b5425ed0",
-      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1"
+      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1",
+      "server.meetings.end.meet_refused": "48cdfee3f11a93ad6fa5bc528e6aa09d9239bfeb784400d333c18e32b706869c",
+      "server.meetings.end.speech_unavailable": "4d028002724699a9b097dc8e935e4e536f2cb95604013f2cfb3c291953b1edbd",
+      "server.meetings.card.settingUp": "d81cfcf225f32d72d2a48a5465074c34913dfbddbb22096076ddb87f02bb3e32",
+      "server.meetings.card.speechStopped": "dfbb5ca1820e4ed45f043ef17627fe2caa67914519d34b1dd285aabda61e2c47"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -44969,13 +44997,17 @@
       "server.meetings.end.denied": "35f71f7e8b101cf0a6979f6a6b81f0f6464912ad65bbaed1edb22ae17a161792",
       "server.meetings.end.lobby_timeout": "5e03fcdd4e24628852c2c612e6c2517f19a397a3d3f74b346a29d1f273fa3d77",
       "server.meetings.end.guests_blocked": "8118e5ceb830602daa84e2a0f23480965d6a18b67fd2e1b3260853b7dc55e6fb",
-      "server.meetings.end.not_found": "1813911ff59ff98eb2836c505b9f0aa306216871fc1900c34b95ce2f30a45b1f",
+      "server.meetings.end.not_found": "6004fb65dff86c3a834e10b55de0e7ec57bb6f3a3c306edd1170e825796df8dc",
       "server.meetings.end.join_failed": "16e14e65c7bc4f211886a9c4ce726af910d80a3d37701272c4715a63c47dfe6f",
       "server.meetings.end.consent_failed": "310b92a1fbb5c01a88815acfc3ddca9498ce424fdd13e123a56c77e7051957d0",
       "server.meetings.end.alone": "a891008df5b6041dbbf7282e3436c6bf0d64fc030af054959d62956e956040ce",
       "server.meetings.end.max_length": "909e6bb74ae2b580ce7e116e88225ff57d4a3a67ed8dfc14bcc4a0efe73fabf9",
       "server.meetings.end.crashed": "0416356b5fff397a8491ff7122511f66b521906094e4933e06add926b5425ed0",
-      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1"
+      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1",
+      "server.meetings.end.meet_refused": "48cdfee3f11a93ad6fa5bc528e6aa09d9239bfeb784400d333c18e32b706869c",
+      "server.meetings.end.speech_unavailable": "4d028002724699a9b097dc8e935e4e536f2cb95604013f2cfb3c291953b1edbd",
+      "server.meetings.card.settingUp": "d81cfcf225f32d72d2a48a5465074c34913dfbddbb22096076ddb87f02bb3e32",
+      "server.meetings.card.speechStopped": "dfbb5ca1820e4ed45f043ef17627fe2caa67914519d34b1dd285aabda61e2c47"
     },
     "uk": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",
@@ -48402,13 +48434,17 @@
       "server.meetings.end.denied": "35f71f7e8b101cf0a6979f6a6b81f0f6464912ad65bbaed1edb22ae17a161792",
       "server.meetings.end.lobby_timeout": "5e03fcdd4e24628852c2c612e6c2517f19a397a3d3f74b346a29d1f273fa3d77",
       "server.meetings.end.guests_blocked": "8118e5ceb830602daa84e2a0f23480965d6a18b67fd2e1b3260853b7dc55e6fb",
-      "server.meetings.end.not_found": "1813911ff59ff98eb2836c505b9f0aa306216871fc1900c34b95ce2f30a45b1f",
+      "server.meetings.end.not_found": "6004fb65dff86c3a834e10b55de0e7ec57bb6f3a3c306edd1170e825796df8dc",
       "server.meetings.end.join_failed": "16e14e65c7bc4f211886a9c4ce726af910d80a3d37701272c4715a63c47dfe6f",
       "server.meetings.end.consent_failed": "310b92a1fbb5c01a88815acfc3ddca9498ce424fdd13e123a56c77e7051957d0",
       "server.meetings.end.alone": "a891008df5b6041dbbf7282e3436c6bf0d64fc030af054959d62956e956040ce",
       "server.meetings.end.max_length": "909e6bb74ae2b580ce7e116e88225ff57d4a3a67ed8dfc14bcc4a0efe73fabf9",
       "server.meetings.end.crashed": "0416356b5fff397a8491ff7122511f66b521906094e4933e06add926b5425ed0",
-      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1"
+      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1",
+      "server.meetings.end.meet_refused": "48cdfee3f11a93ad6fa5bc528e6aa09d9239bfeb784400d333c18e32b706869c",
+      "server.meetings.end.speech_unavailable": "4d028002724699a9b097dc8e935e4e536f2cb95604013f2cfb3c291953b1edbd",
+      "server.meetings.card.settingUp": "d81cfcf225f32d72d2a48a5465074c34913dfbddbb22096076ddb87f02bb3e32",
+      "server.meetings.card.speechStopped": "dfbb5ca1820e4ed45f043ef17627fe2caa67914519d34b1dd285aabda61e2c47"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -53825,13 +53861,17 @@
       "server.meetings.end.denied": "35f71f7e8b101cf0a6979f6a6b81f0f6464912ad65bbaed1edb22ae17a161792",
       "server.meetings.end.lobby_timeout": "5e03fcdd4e24628852c2c612e6c2517f19a397a3d3f74b346a29d1f273fa3d77",
       "server.meetings.end.guests_blocked": "8118e5ceb830602daa84e2a0f23480965d6a18b67fd2e1b3260853b7dc55e6fb",
-      "server.meetings.end.not_found": "1813911ff59ff98eb2836c505b9f0aa306216871fc1900c34b95ce2f30a45b1f",
+      "server.meetings.end.not_found": "6004fb65dff86c3a834e10b55de0e7ec57bb6f3a3c306edd1170e825796df8dc",
       "server.meetings.end.join_failed": "16e14e65c7bc4f211886a9c4ce726af910d80a3d37701272c4715a63c47dfe6f",
       "server.meetings.end.consent_failed": "310b92a1fbb5c01a88815acfc3ddca9498ce424fdd13e123a56c77e7051957d0",
       "server.meetings.end.alone": "a891008df5b6041dbbf7282e3436c6bf0d64fc030af054959d62956e956040ce",
       "server.meetings.end.max_length": "909e6bb74ae2b580ce7e116e88225ff57d4a3a67ed8dfc14bcc4a0efe73fabf9",
       "server.meetings.end.crashed": "0416356b5fff397a8491ff7122511f66b521906094e4933e06add926b5425ed0",
-      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1"
+      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1",
+      "server.meetings.end.meet_refused": "48cdfee3f11a93ad6fa5bc528e6aa09d9239bfeb784400d333c18e32b706869c",
+      "server.meetings.end.speech_unavailable": "4d028002724699a9b097dc8e935e4e536f2cb95604013f2cfb3c291953b1edbd",
+      "server.meetings.card.settingUp": "d81cfcf225f32d72d2a48a5465074c34913dfbddbb22096076ddb87f02bb3e32",
+      "server.meetings.card.speechStopped": "dfbb5ca1820e4ed45f043ef17627fe2caa67914519d34b1dd285aabda61e2c47"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -59248,13 +59288,17 @@
       "server.meetings.end.denied": "35f71f7e8b101cf0a6979f6a6b81f0f6464912ad65bbaed1edb22ae17a161792",
       "server.meetings.end.lobby_timeout": "5e03fcdd4e24628852c2c612e6c2517f19a397a3d3f74b346a29d1f273fa3d77",
       "server.meetings.end.guests_blocked": "8118e5ceb830602daa84e2a0f23480965d6a18b67fd2e1b3260853b7dc55e6fb",
-      "server.meetings.end.not_found": "1813911ff59ff98eb2836c505b9f0aa306216871fc1900c34b95ce2f30a45b1f",
+      "server.meetings.end.not_found": "6004fb65dff86c3a834e10b55de0e7ec57bb6f3a3c306edd1170e825796df8dc",
       "server.meetings.end.join_failed": "16e14e65c7bc4f211886a9c4ce726af910d80a3d37701272c4715a63c47dfe6f",
       "server.meetings.end.consent_failed": "310b92a1fbb5c01a88815acfc3ddca9498ce424fdd13e123a56c77e7051957d0",
       "server.meetings.end.alone": "a891008df5b6041dbbf7282e3436c6bf0d64fc030af054959d62956e956040ce",
       "server.meetings.end.max_length": "909e6bb74ae2b580ce7e116e88225ff57d4a3a67ed8dfc14bcc4a0efe73fabf9",
       "server.meetings.end.crashed": "0416356b5fff397a8491ff7122511f66b521906094e4933e06add926b5425ed0",
-      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1"
+      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1",
+      "server.meetings.end.meet_refused": "48cdfee3f11a93ad6fa5bc528e6aa09d9239bfeb784400d333c18e32b706869c",
+      "server.meetings.end.speech_unavailable": "4d028002724699a9b097dc8e935e4e536f2cb95604013f2cfb3c291953b1edbd",
+      "server.meetings.card.settingUp": "d81cfcf225f32d72d2a48a5465074c34913dfbddbb22096076ddb87f02bb3e32",
+      "server.meetings.card.speechStopped": "dfbb5ca1820e4ed45f043ef17627fe2caa67914519d34b1dd285aabda61e2c47"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -65950,13 +65994,17 @@
       "server.meetings.end.denied": "35f71f7e8b101cf0a6979f6a6b81f0f6464912ad65bbaed1edb22ae17a161792",
       "server.meetings.end.lobby_timeout": "5e03fcdd4e24628852c2c612e6c2517f19a397a3d3f74b346a29d1f273fa3d77",
       "server.meetings.end.guests_blocked": "8118e5ceb830602daa84e2a0f23480965d6a18b67fd2e1b3260853b7dc55e6fb",
-      "server.meetings.end.not_found": "1813911ff59ff98eb2836c505b9f0aa306216871fc1900c34b95ce2f30a45b1f",
+      "server.meetings.end.not_found": "6004fb65dff86c3a834e10b55de0e7ec57bb6f3a3c306edd1170e825796df8dc",
       "server.meetings.end.join_failed": "16e14e65c7bc4f211886a9c4ce726af910d80a3d37701272c4715a63c47dfe6f",
       "server.meetings.end.consent_failed": "310b92a1fbb5c01a88815acfc3ddca9498ce424fdd13e123a56c77e7051957d0",
       "server.meetings.end.alone": "a891008df5b6041dbbf7282e3436c6bf0d64fc030af054959d62956e956040ce",
       "server.meetings.end.max_length": "909e6bb74ae2b580ce7e116e88225ff57d4a3a67ed8dfc14bcc4a0efe73fabf9",
       "server.meetings.end.crashed": "0416356b5fff397a8491ff7122511f66b521906094e4933e06add926b5425ed0",
-      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1"
+      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1",
+      "server.meetings.end.meet_refused": "48cdfee3f11a93ad6fa5bc528e6aa09d9239bfeb784400d333c18e32b706869c",
+      "server.meetings.end.speech_unavailable": "4d028002724699a9b097dc8e935e4e536f2cb95604013f2cfb3c291953b1edbd",
+      "server.meetings.card.settingUp": "d81cfcf225f32d72d2a48a5465074c34913dfbddbb22096076ddb87f02bb3e32",
+      "server.meetings.card.speechStopped": "dfbb5ca1820e4ed45f043ef17627fe2caa67914519d34b1dd285aabda61e2c47"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -72714,13 +72762,17 @@
       "server.meetings.end.denied": "35f71f7e8b101cf0a6979f6a6b81f0f6464912ad65bbaed1edb22ae17a161792",
       "server.meetings.end.lobby_timeout": "5e03fcdd4e24628852c2c612e6c2517f19a397a3d3f74b346a29d1f273fa3d77",
       "server.meetings.end.guests_blocked": "8118e5ceb830602daa84e2a0f23480965d6a18b67fd2e1b3260853b7dc55e6fb",
-      "server.meetings.end.not_found": "1813911ff59ff98eb2836c505b9f0aa306216871fc1900c34b95ce2f30a45b1f",
+      "server.meetings.end.not_found": "6004fb65dff86c3a834e10b55de0e7ec57bb6f3a3c306edd1170e825796df8dc",
       "server.meetings.end.join_failed": "16e14e65c7bc4f211886a9c4ce726af910d80a3d37701272c4715a63c47dfe6f",
       "server.meetings.end.consent_failed": "310b92a1fbb5c01a88815acfc3ddca9498ce424fdd13e123a56c77e7051957d0",
       "server.meetings.end.alone": "a891008df5b6041dbbf7282e3436c6bf0d64fc030af054959d62956e956040ce",
       "server.meetings.end.max_length": "909e6bb74ae2b580ce7e116e88225ff57d4a3a67ed8dfc14bcc4a0efe73fabf9",
       "server.meetings.end.crashed": "0416356b5fff397a8491ff7122511f66b521906094e4933e06add926b5425ed0",
-      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1"
+      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1",
+      "server.meetings.end.meet_refused": "48cdfee3f11a93ad6fa5bc528e6aa09d9239bfeb784400d333c18e32b706869c",
+      "server.meetings.end.speech_unavailable": "4d028002724699a9b097dc8e935e4e536f2cb95604013f2cfb3c291953b1edbd",
+      "server.meetings.card.settingUp": "d81cfcf225f32d72d2a48a5465074c34913dfbddbb22096076ddb87f02bb3e32",
+      "server.meetings.card.speechStopped": "dfbb5ca1820e4ed45f043ef17627fe2caa67914519d34b1dd285aabda61e2c47"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -79276,13 +79328,17 @@
       "server.meetings.end.denied": "35f71f7e8b101cf0a6979f6a6b81f0f6464912ad65bbaed1edb22ae17a161792",
       "server.meetings.end.lobby_timeout": "5e03fcdd4e24628852c2c612e6c2517f19a397a3d3f74b346a29d1f273fa3d77",
       "server.meetings.end.guests_blocked": "8118e5ceb830602daa84e2a0f23480965d6a18b67fd2e1b3260853b7dc55e6fb",
-      "server.meetings.end.not_found": "1813911ff59ff98eb2836c505b9f0aa306216871fc1900c34b95ce2f30a45b1f",
+      "server.meetings.end.not_found": "6004fb65dff86c3a834e10b55de0e7ec57bb6f3a3c306edd1170e825796df8dc",
       "server.meetings.end.join_failed": "16e14e65c7bc4f211886a9c4ce726af910d80a3d37701272c4715a63c47dfe6f",
       "server.meetings.end.consent_failed": "310b92a1fbb5c01a88815acfc3ddca9498ce424fdd13e123a56c77e7051957d0",
       "server.meetings.end.alone": "a891008df5b6041dbbf7282e3436c6bf0d64fc030af054959d62956e956040ce",
       "server.meetings.end.max_length": "909e6bb74ae2b580ce7e116e88225ff57d4a3a67ed8dfc14bcc4a0efe73fabf9",
       "server.meetings.end.crashed": "0416356b5fff397a8491ff7122511f66b521906094e4933e06add926b5425ed0",
-      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1"
+      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1",
+      "server.meetings.end.meet_refused": "48cdfee3f11a93ad6fa5bc528e6aa09d9239bfeb784400d333c18e32b706869c",
+      "server.meetings.end.speech_unavailable": "4d028002724699a9b097dc8e935e4e536f2cb95604013f2cfb3c291953b1edbd",
+      "server.meetings.card.settingUp": "d81cfcf225f32d72d2a48a5465074c34913dfbddbb22096076ddb87f02bb3e32",
+      "server.meetings.card.speechStopped": "dfbb5ca1820e4ed45f043ef17627fe2caa67914519d34b1dd285aabda61e2c47"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -86563,13 +86619,17 @@
       "server.meetings.end.denied": "35f71f7e8b101cf0a6979f6a6b81f0f6464912ad65bbaed1edb22ae17a161792",
       "server.meetings.end.lobby_timeout": "5e03fcdd4e24628852c2c612e6c2517f19a397a3d3f74b346a29d1f273fa3d77",
       "server.meetings.end.guests_blocked": "8118e5ceb830602daa84e2a0f23480965d6a18b67fd2e1b3260853b7dc55e6fb",
-      "server.meetings.end.not_found": "1813911ff59ff98eb2836c505b9f0aa306216871fc1900c34b95ce2f30a45b1f",
+      "server.meetings.end.not_found": "6004fb65dff86c3a834e10b55de0e7ec57bb6f3a3c306edd1170e825796df8dc",
       "server.meetings.end.join_failed": "16e14e65c7bc4f211886a9c4ce726af910d80a3d37701272c4715a63c47dfe6f",
       "server.meetings.end.consent_failed": "310b92a1fbb5c01a88815acfc3ddca9498ce424fdd13e123a56c77e7051957d0",
       "server.meetings.end.alone": "a891008df5b6041dbbf7282e3436c6bf0d64fc030af054959d62956e956040ce",
       "server.meetings.end.max_length": "909e6bb74ae2b580ce7e116e88225ff57d4a3a67ed8dfc14bcc4a0efe73fabf9",
       "server.meetings.end.crashed": "0416356b5fff397a8491ff7122511f66b521906094e4933e06add926b5425ed0",
-      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1"
+      "server.meetings.end.lost": "c7f87d1cf558c3a4564b3b90dc72a087dc4879e40b3ec11d45cf74cf79a2d4b1",
+      "server.meetings.end.meet_refused": "48cdfee3f11a93ad6fa5bc528e6aa09d9239bfeb784400d333c18e32b706869c",
+      "server.meetings.end.speech_unavailable": "4d028002724699a9b097dc8e935e4e536f2cb95604013f2cfb3c291953b1edbd",
+      "server.meetings.card.settingUp": "d81cfcf225f32d72d2a48a5465074c34913dfbddbb22096076ddb87f02bb3e32",
+      "server.meetings.card.speechStopped": "dfbb5ca1820e4ed45f043ef17627fe2caa67914519d34b1dd285aabda61e2c47"
     }
   }
 }

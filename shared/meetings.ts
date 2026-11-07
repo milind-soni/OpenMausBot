@@ -5,8 +5,8 @@ export type MeetingPlatform = "meet" | "teams" | "jitsi";
 export const MEETING_PLATFORM_NAMES: Record<MeetingPlatform, string> = { meet: "Google Meet", teams: "Microsoft Teams", jitsi: "Jitsi Meet" };
 
 /** Why a meeting ended, as the bot on the cloud computer reports it. */
-export type MeetingEndReason = "left" | "stop_requested" | "meeting_ended" | "removed" | "denied" | "lobby_timeout" | "guests_blocked"
-  | "not_found" | "join_failed" | "consent_failed" | "alone" | "max_length" | "crashed" | "lost";
+export type MeetingEndReason = "left" | "stop_requested" | "meeting_ended" | "removed" | "denied" | "lobby_timeout" | "guests_blocked" | "meet_refused"
+  | "not_found" | "join_failed" | "consent_failed" | "alone" | "max_length" | "crashed" | "lost" | "speech_unavailable";
 
 export type MeetingPhase = "starting" | "joining" | "lobby" | "in_meeting" | "ended";
 
@@ -18,13 +18,15 @@ export const END_REASON_TEXT: Record<MeetingEndReason, string> = {
   denied: "The host turned down my request to join.",
   lobby_timeout: "Nobody let me in, so I gave up waiting.",
   guests_blocked: "This meeting doesn't let guests join (the organizer's settings need a signed-in account), so I couldn't get in.",
-  not_found: "That meeting link doesn't lead to a meeting. Check the link.",
+  meet_refused: "Google Meet didn't let me in as a guest. The host can allow guests in Host controls, or the meeting may not allow people outside the organization.",
+  not_found: "This meeting link isn't active. Check the link; the meeting may have ended.",
   join_failed: "I couldn't get through the meeting's join screen.",
   consent_failed: "I couldn't post my note-taking notice in the meeting chat (chat may be off for guests), so I left without recording anything.",
   alone: "Everyone else left, so I left too.",
   max_length: "The meeting reached the 4-hour limit, so I left.",
   crashed: "The meeting bot stopped unexpectedly. What it heard until then is kept.",
   lost: "I lost contact with the cloud computer running the meeting. What it heard until then is kept.",
+  speech_unavailable: "I couldn't get speech-to-text for this meeting, so I didn't join.",
 };
 
 export type MeetingLink = { ok: true; platform: MeetingPlatform; url: string } | { ok: false; error: string };

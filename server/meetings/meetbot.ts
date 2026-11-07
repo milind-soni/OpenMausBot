@@ -19,7 +19,8 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renam
 import { join } from "node:path";
 
 export type MeetbotPlatform = "meet" | "teams" | "jitsi";
-export type MeetbotStt = { kind: "eleven"; token: string; language?: string; rotateMs?: number } | { kind: "whisper" };
+/** `chunks`: the server transcribes (Groq, OpenAI): utterances go out as `audio` events and their words come back with `put`. */
+export type MeetbotStt = { kind: "eleven"; token: string; language?: string; rotateMs?: number } | { kind: "chunks" } | { kind: "whisper" };
 
 export interface MeetbotConfig {
   url: string;
@@ -33,9 +34,11 @@ export interface MeetbotConfig {
   aloneMs: number;
   speakerLagMs?: number;
   chrome?: string;
+  /** A Chrome profile that outlives the meeting, such as one a person signed in to Google in themselves. */
+  profileDir?: string;
 }
 
-export type EndReason = "left" | "stop_requested" | "meeting_ended" | "removed" | "denied" | "lobby_timeout" | "guests_blocked"
+export type EndReason = "left" | "stop_requested" | "meeting_ended" | "removed" | "denied" | "lobby_timeout" | "guests_blocked" | "meet_refused"
   | "not_found" | "join_failed" | "consent_failed" | "alone" | "max_length" | "crashed";
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -50,15 +53,20 @@ export function eventLog(dir: string) {
   };
 }
 
-export function readEvents(dir: string, after: number, limit = 300): Array<Record<string, unknown> & { seq: number }> {
+/** At most `limit` events and about `maxBytes` of them: an answer has to fit one command's output. */
+export function readEvents(dir: string, after: number, limit = 300, maxBytes = 200_000): Array<Record<string, unknown> & { seq: number }> {
   const file = join(dir, "events.jsonl");
   if (!existsSync(file)) return [];
   const out: Array<Record<string, unknown> & { seq: number }> = [];
+  let bytes = 0;
   for (const line of readFileSync(file, "utf8").split("\n")) {
     if (!line) continue;
     try {
       const event = JSON.parse(line);
-      if (event.seq > after) out.push(event);
+      if (event.seq <= after) continue;
+      if (out.length && bytes + line.length > maxBytes) break;
+      out.push(event);
+      bytes += line.length;
     } catch { /* a line being written */ }
     if (out.length >= limit) break;
   }
@@ -155,6 +163,11 @@ export function pageOp(a: any): any {
 
   switch (a.op) {
     case "url": return location.href;
+    case "account": {
+      const label = document.querySelector('a[aria-label^="Google Account:" i], [aria-label^="Google Account:" i]')?.getAttribute("aria-label") ?? "";
+      const name = /^Google Account:\s*([^\n(]+)/i.exec(label)?.[1]?.trim();
+      return name || (said("signed in as|joining as") ? "a signed-in account" : null);
+    }
     case "point": {
       const el = find(a.spec);
       if (!el) return null;
@@ -214,6 +227,8 @@ export function pageOp(a: any): any {
           ended: said("you left the meeting|you.ve left the (call|meeting)|the call (has )?ended|meeting (has )?ended|call ended"),
           blocked: said("can.t join this video call|can.t join this call|cannot join this call|not allowed to join this video call"),
           notFound: said("check your meeting code|meeting not found|invalid video call name|this meeting link is not valid"),
+          home: !/^\/(?:meet\/)?[a-z]{3}-[a-z]{4}-[a-z]{3}\/?$/i.test(location.pathname)
+            || present('input[aria-label*="code or nickname" i], input[placeholder*="code or nickname" i], input[aria-label*="code or link" i]'),
           others: total > 0 ? Math.max(0, total - 1) : names.length || null,
           names,
         };
@@ -334,7 +349,7 @@ class Cdp {
   }
 }
 
-type Probe = { inMeeting: boolean; lobby: boolean; knockExpired?: boolean; denied: boolean; removed: boolean; ended: boolean; blocked: boolean; notFound?: boolean; /** Null when the page shows no count: the alone rule then never fires. */ others: number | null; names: string[] };
+type Probe = { inMeeting: boolean; lobby: boolean; /** Meet's home page: the link led to no meeting (or one that ended). */ home?: boolean; knockExpired?: boolean; denied: boolean; removed: boolean; ended: boolean; blocked: boolean; notFound?: boolean; /** Null when the page shows no count: the alone rule then never fires. */ others: number | null; names: string[] };
 type Spec = { css?: string; text?: string; within?: string; disabled?: boolean };
 
 /** One call page, driven through the DevTools protocol with real (trusted) mouse and key events. */
@@ -380,9 +395,9 @@ export class CallPage {
 }
 
 interface Adapter {
-  url(link: string): string;
+  url(link: string, signedIn: boolean): string;
   /** Fills the pre-join screen and asks to join; the lobby wait is the caller's. */
-  prejoin(page: CallPage, name: string, until: number): Promise<void | EndReason>;
+  prejoin(page: CallPage, name: string, until: number, emit: SessionParts["emit"]): Promise<void | EndReason>;
   /** Clicks through notices that sit over a call just joined. */
   settle(page: CallPage): Promise<void>;
   chatToggle: Spec;
@@ -413,24 +428,33 @@ export const ADAPTERS: Record<MeetbotPlatform, Adapter> = {
     leave: { css: '[aria-label="Leave the meeting"]' },
   },
   meet: {
-    url: (link) => {
+    url: (link, signedIn) => {
       const url = new URL(link);
       if (!url.searchParams.has("hl")) url.searchParams.set("hl", "en");
+      if (signedIn && !url.searchParams.has("authuser")) url.searchParams.set("authuser", "0");
       return url.toString();
     },
-    async prejoin(page, name, until) {
-      const nameField: Spec = { css: 'input[type="text"][aria-label="Your name"], input[jsname][type="text"], input[placeholder*="name" i]' };
+    async prejoin(page, name, until, emit) {
+      const nameField: Spec = { css: 'input[type="text"][aria-label="Your name"], input[type="text"][placeholder="Your name"], input[type="text"][aria-label*="your name" i]' };
+      const join: Spec = { css: "button", text: "^(ask to join|join now|switch here)\\b" };
+      let signedIn = false;
       while (Date.now() < until) {
         const probe = await page.probe();
-        if (probe.notFound) return "not_found";
-        if (probe.blocked) return "guests_blocked";
+        if (probe.notFound || probe.home) return "not_found";
+        if (probe.blocked) return "meet_refused";
         if (await page.exists(nameField)) break;
+        const account: string | null = await page.op({ op: "account" });
+        if (account && (await page.exists(join))) {
+          signedIn = true;
+          emit("signed_in", { as: account });
+          break;
+        }
         await sleep(1_000);
       }
-      if (!(await page.type(nameField, name))) return "join_failed";
+      if (!signedIn && !(await page.type(nameField, name))) return "join_failed";
       for (const toggle of KEEP_MUTED) await page.click(toggle);
       await sleep(500);
-      if (!(await page.click({ css: "button", text: "^(ask to join|join now)\\b" }))) await page.enter();
+      if (!(await page.click(join))) await page.enter();
     },
     async settle(page) {
       await page.click({ within: '[role="dialog"],[role="alertdialog"]', css: "button", text: "^join now\\b" });
@@ -503,9 +527,9 @@ export async function runSession(parts: SessionParts): Promise<EndReason> {
   const now = parts.now ?? Date.now;
   const pause = parts.pause ?? sleep;
   emit("phase", { phase: "joining" });
-  await page.goto(adapter.url(config.url));
+  await page.goto(adapter.url(config.url, Boolean(config.profileDir)));
   const lobbyUntil = now() + config.lobbyMs;
-  const refused = await adapter.prejoin(page, config.name, now() + 90_000);
+  const refused = await adapter.prejoin(page, config.name, Date.now() + 90_000, emit);
   if (refused) return refused;
   let knocks = 1;
   let lobbyShown = false;
@@ -513,10 +537,10 @@ export async function runSession(parts: SessionParts): Promise<EndReason> {
     const probe = await page.probe();
     if (probe.inMeeting) break;
     if (probe.denied) return "denied";
-    if (probe.notFound) return "not_found";
-    if (probe.blocked) return "guests_blocked";
+    if (probe.notFound || probe.home) return "not_found";
+    if (probe.blocked) return config.platform === "meet" ? "meet_refused" : "guests_blocked";
     if (probe.knockExpired && knocks < 5 && (await page.click({ css: "button", text: "ask to join again|ask to join" }))) knocks += 1;
-    if (!lobbyShown) {
+    if (!lobbyShown && probe.lobby) {
       lobbyShown = true;
       emit("phase", { phase: "lobby" });
     }
@@ -614,7 +638,8 @@ async function launchChrome(dir: string, config: MeetbotConfig, sink: string): P
   const silence = join(media, "silence.wav"), black = join(media, "black.y4m");
   execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-f", "lavfi", "-t", "5", "-i", "anullsrc=r=48000:cl=mono", silence]);
   execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=black:s=320x180:r=5", "-frames:v", "5", "-pix_fmt", "yuv420p", black]);
-  const profile = join(dir, "profile");
+  const profile = config.profileDir ?? join(dir, "profile");
+  rmSync(join(profile, "DevToolsActivePort"), { force: true });
   const [width, height] = config.platform === "jitsi" ? [800, 600] : [1280, 800];
   const chrome = spawn(config.chrome ?? "/usr/bin/google-chrome", [
     `--user-data-dir=${profile}`, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", `--window-size=${width},${height}`,
@@ -632,6 +657,7 @@ async function launchChrome(dir: string, config: MeetbotConfig, sink: string): P
     if (!target) await sleep(200);
   }
   const cdp = await Cdp.connect(target.webSocketDebuggerUrl);
+  await cdp.send("Page.enable");
   return { chrome, cdp };
 }
 
@@ -641,7 +667,7 @@ type Sink = (chunk: Buffer) => void;
 function sttStream(config: MeetbotConfig, emit: SessionParts["emit"], takeToken: () => string | null, onWords: (words: Word[]) => void, log: (line: string) => void) {
   const stt = config.stt;
   const rotateMs = stt.kind === "eleven" ? stt.rotateMs ?? 0 : 0;
-  let token: string | null = stt.kind === "whisper" ? null : stt.token;
+  let token: string | null = stt.kind === "eleven" ? stt.token : null;
   let socket: WebSocket | null = null;
   let connecting: WebSocket | null = null;
   let draining: WebSocket | null = null;
@@ -811,7 +837,84 @@ function whisperStream(emit: SessionParts["emit"], onWords: (words: Word[]) => v
   };
 }
 
-function capture(dir: string, config: MeetbotConfig, sink: string, page: CallPage, emit: SessionParts["emit"], takeToken: () => string | null, log: (line: string) => void) {
+type Mail = { takeToken(): string | null; takeWords(): Array<{ start: number; words: Word[] }> };
+
+/** Each utterance, cut on silence, goes to the server as Ogg Opus in an `audio` event; its words come back through the inbox
+ * with times in milliseconds from the utterance's start. */
+export function chunkStream(emit: SessionParts["emit"], takeWords: Mail["takeWords"], onWords: (words: Word[]) => void, log: (line: string) => void,
+  encode: (pcm: Buffer) => Promise<Buffer> = encodeOpus) {
+  const FRAME = 960, THRESHOLD = 300, END_SILENT = 20, MAX_FRAMES = 400, PRE_ROLL = 10;
+  let buffered = Buffer.alloc(0), bufferedAt = 0;
+  let ring: Array<{ at: number; frame: Buffer }> = [];
+  let speech: Array<{ at: number; frame: Buffer }> = [];
+  let silent = 0, sent = 0, answered = 0;
+  const encoding = new Set<Promise<void>>();
+  const flush = () => {
+    if (!speech.length) return;
+    const frames = speech;
+    speech = [];
+    silent = 0;
+    const n = ++sent;
+    const job: Promise<void> = encode(Buffer.concat(frames.map((f) => f.frame)))
+      .then((audio) => { emit("audio", { n, start: Math.round(frames[0].at), ms: frames.length * 30, b64: audio.toString("base64") }); })
+      .catch((error: Error) => { answered += 1; log(`encoding an utterance failed: ${error.message}`); })
+      .finally(() => { encoding.delete(job); });
+    encoding.add(job);
+  };
+  const words = setInterval(() => {
+    for (const batch of takeWords()) {
+      answered += 1;
+      onWords(batch.words.map((w) => ({ w: w.w, s: batch.start + w.s, e: batch.start + w.e })));
+    }
+  }, 300);
+  emit("stt", { status: "connected" });
+  return {
+    write(chunk: Buffer) {
+      if (!buffered.length) bufferedAt = Date.now() - chunk.length / 32;
+      buffered = Buffer.concat([buffered, chunk]);
+      while (buffered.length >= FRAME) {
+        const frame = Buffer.from(buffered.subarray(0, FRAME));
+        buffered = buffered.subarray(FRAME);
+        const at = bufferedAt;
+        bufferedAt += 30;
+        let sum = 0;
+        for (let i = 0; i < FRAME; i += 2) sum += frame.readInt16LE(i) ** 2;
+        const loud = Math.sqrt(sum / (FRAME / 2)) > THRESHOLD;
+        if (!speech.length) {
+          ring = [...ring, { at, frame }].slice(-PRE_ROLL);
+          if (loud) speech = ring;
+          continue;
+        }
+        speech.push({ at, frame });
+        silent = loud ? 0 : silent + 1;
+        if (silent >= END_SILENT || speech.length >= MAX_FRAMES) {
+          speech = speech.slice(0, speech.length - Math.max(0, silent - 3));
+          flush();
+          ring = [];
+        }
+      }
+    },
+    async stop() {
+      flush();
+      await Promise.all(encoding);
+      for (let i = 0; i < 40 && answered < sent; i++) await sleep(250);
+      clearInterval(words);
+    },
+  };
+}
+
+function encodeOpus(pcm: Buffer): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const ffmpeg = spawn("ffmpeg", ["-loglevel", "error", "-f", "s16le", "-ar", "16000", "-ac", "1", "-i", "-", "-c:a", "libopus", "-b:a", "32k", "-f", "ogg", "-"], { stdio: ["pipe", "pipe", "ignore"] });
+    const out: Buffer[] = [];
+    ffmpeg.stdout!.on("data", (data: Buffer) => out.push(data));
+    ffmpeg.on("error", reject);
+    ffmpeg.on("close", (code) => (code === 0 ? resolve(Buffer.concat(out)) : reject(new Error(`ffmpeg exited ${code}`))));
+    ffmpeg.stdin!.end(pcm);
+  });
+}
+
+function capture(dir: string, config: MeetbotConfig, sink: string, page: CallPage, emit: SessionParts["emit"], mail: Mail, log: (line: string) => void) {
   const timeline: Array<{ at: number; name: string | null }> = [];
   const lag = config.speakerLagMs ?? 1_200;
   const transcript = join(dir, "transcript.jsonl");
@@ -821,7 +924,8 @@ function capture(dir: string, config: MeetbotConfig, sink: string, page: CallPag
       emit("segment", line);
     }
   };
-  const stt = config.stt.kind === "whisper" ? whisperStream(emit, onWords, log) : sttStream(config, emit, takeToken, onWords, log);
+  const stt = config.stt.kind === "whisper" ? whisperStream(emit, onWords, log)
+    : config.stt.kind === "chunks" ? chunkStream(emit, mail.takeWords, onWords, log) : sttStream(config, emit, mail.takeToken, onWords, log);
   const speaker = setInterval(() => {
     page.op({ op: "speaker" }).then((name: string | null) => {
       if (!timeline.length || timeline.at(-1)!.name !== name) timeline.push({ at: Date.now(), name });
@@ -842,18 +946,21 @@ function inbox(dir: string) {
   const folder = join(dir, "inbox");
   mkdirSync(folder, { recursive: true });
   const tokens: string[] = [];
+  const words: Array<{ start: number; words: Word[] }> = [];
   const commands: Array<{ kind: string; [key: string]: unknown }> = [];
   const pull = () => {
     for (const name of readdirSync(folder).filter((file) => file.endsWith(".json")).sort()) {
       const command = readJson(join(folder, name));
       rmSync(join(folder, name), { force: true });
       if (command?.kind === "token" && typeof command.token === "string") tokens.push(command.token);
+      else if (command?.kind === "words" && typeof command.start === "number" && Array.isArray(command.words)) words.push({ start: command.start, words: command.words });
       else if (command && typeof command.kind === "string") commands.push(command);
     }
   };
   return {
     nextCommand: () => { pull(); return commands.shift() ?? null; },
     takeToken: () => { pull(); return tokens.shift() ?? null; },
+    takeWords: () => { pull(); return words.splice(0); },
   };
 }
 
@@ -894,7 +1001,7 @@ async function run(dir: string): Promise<void> {
   const mail = inbox(dir);
   const reason = await runSession({
     config, emit, page, adapter, nextCommand: mail.nextCommand,
-    startCapture: async () => capture(dir, config, audio.sink, page, emit, mail.takeToken, log),
+    startCapture: async () => capture(dir, config, audio.sink, page, emit, mail, log),
   });
   await finish(reason);
   process.exit(0);
@@ -906,7 +1013,7 @@ async function waitFor(dir: string, after: number, seconds: number): Promise<voi
     const state = readJson(join(dir, "state.json"));
     const events = readEvents(dir, after);
     const running = alive(state?.pid);
-    if (!running && state?.pid && !readEvents(dir, 0, Number.MAX_SAFE_INTEGER).some((event) => event.type === "ended")) {
+    if (!running && state?.pid && !readEvents(dir, 0, Number.MAX_SAFE_INTEGER, Number.POSITIVE_INFINITY).some((event) => event.type === "ended")) {
       eventLog(dir)("ended", { reason: "crashed", detail: "The meeting bot stopped without saying why." });
       continue;
     }

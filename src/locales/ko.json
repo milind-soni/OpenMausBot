@@ -7301,11 +7301,15 @@
   "server.meetings.end.denied": "호스트가 참여 요청을 거절했습니다.",
   "server.meetings.end.lobby_timeout": "아무도 들여보내 주지 않아서 기다리기를 그만뒀습니다.",
   "server.meetings.end.guests_blocked": "이 회의는 게스트 참여를 허용하지 않습니다(주최자 설정상 로그인한 계정이 필요합니다). 그래서 들어가지 못했습니다.",
-  "server.meetings.end.not_found": "이 링크는 회의로 연결되지 않습니다. 링크를 확인하세요.",
+  "server.meetings.end.not_found": "이 회의 링크는 활성 상태가 아닙니다. 링크를 확인하세요. 회의가 끝났을 수 있습니다.",
   "server.meetings.end.join_failed": "회의 참여 화면을 통과하지 못했습니다.",
   "server.meetings.end.consent_failed": "회의 채팅에 메모 작성 안내를 올리지 못했습니다(게스트 채팅이 꺼져 있을 수 있습니다). 그래서 아무것도 기록하지 않고 나왔습니다.",
   "server.meetings.end.alone": "다른 사람들이 모두 나가서 저도 나왔습니다.",
   "server.meetings.end.max_length": "회의가 4시간 제한에 도달해서 나왔습니다.",
   "server.meetings.end.crashed": "회의 봇이 예기치 않게 멈췄습니다. 그때까지 들은 내용은 보관됩니다.",
-  "server.meetings.end.lost": "회의를 실행하던 클라우드 컴퓨터와 연결이 끊겼습니다. 그때까지 들은 내용은 보관됩니다."
+  "server.meetings.end.lost": "회의를 실행하던 클라우드 컴퓨터와 연결이 끊겼습니다. 그때까지 들은 내용은 보관됩니다.",
+  "server.meetings.end.meet_refused": "Google Meet이 저를 게스트로 들여보내지 않았습니다. 호스트는 호스트 제어에서 게스트를 허용할 수 있으며, 또는 이 회의가 조직 외부 사람을 허용하지 않을 수 있습니다.",
+  "server.meetings.end.speech_unavailable": "이 회의에 음성 텍스트 변환을 사용할 수 없어서 참여하지 않았습니다.",
+  "server.meetings.card.settingUp": "녹취 설정 중(최초 1회, 약 1분)…",
+  "server.meetings.card.speechStopped": "녹취가 중단됨: {problem}"
 }
