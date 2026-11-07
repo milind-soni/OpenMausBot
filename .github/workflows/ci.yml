@@ -100,6 +100,7 @@ jobs:
         run: pnpm exec vitest run scripts/ci-scope.test.ts scripts/ci-linux-lanes.test.ts scripts/ci-workflow.test.ts scripts/testing/verification-docs.test.ts
       - name: Validate locale catalogs
         run: pnpm i18n:check
+      - run: pnpm check:contrast
       - run: pnpm lint
       - name: Source guards
         # The tests that only read the source: seconds here, and they stay in the shards. On Nov 3-4 2026 one of them was
