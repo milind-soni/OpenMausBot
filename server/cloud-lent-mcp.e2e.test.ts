@@ -270,3 +270,52 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   expect(refused.result.content[0].text).not.toContain("Could not reach");
   expect(macRequests.length).toBe(before);
 }, hostTimeout(90_000));
+
+it("an older computer keeps the job path; a computer that sent mcp is never served by jobs", async () => {
+  const edge = { host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", origin: `https://${HOST}` };
+  const { environmentId } = await (await fetch(`${base}/.well-known/openmausbot/environment`, { headers: edge })).json() as { environmentId: string };
+  const computer = { id: randomUUID(), secret: randomBytes(32).toString("hex"), runsOn: { environmentId: randomUUID(), label: "Ada's Old Mac" } };
+  const post = (path: string, body: unknown, signal?: AbortSignal) => fetch(`${base}${path}`, {
+    method: "POST", signal, body: JSON.stringify(body),
+    headers: { ...edge, authorization: `Bearer ${owner}`, "content-type": "application/json", "x-omb-computer-secret": computer.secret },
+  });
+  const register = async (extra: { mcp?: boolean }) => {
+    const response = await post("/api/shared-computers/connect", {
+      id: computer.id, name: computer.runsOn.label, environmentId, folders: [], terminal: false, computer: false, platform: "darwin",
+      mcpServers: true, environments: [computer.runsOn.environmentId], ...extra,
+    });
+    expect(response.status, await response.clone().text()).toBe(200);
+  };
+  /** The computer's poll: it answers each job it is handed with one tool, and records the job's action. */
+  const poller = () => {
+    const stop = new AbortController();
+    const jobs: string[] = [];
+    void (async () => {
+      while (!stop.signal.aborted) {
+        const { job } = await (await post(`/api/shared-computers/${computer.id}/poll`, {}, stop.signal)).json() as { job: { id: string; operation: { action: string } } | null };
+        if (!job) continue;
+        jobs.push(job.operation.action);
+        await post(`/api/shared-computers/${computer.id}/result`, { jobId: job.id, result: { tools: [{ name: "search_notes", description: "Search the notes", inputSchema: { type: "object" } }] } });
+      }
+    })().catch(() => {});
+    return { jobs, stop: () => stop.abort() };
+  };
+
+  const added = await api("POST", "/api/mcp/servers", { token: owner, body: { name: "older", type: "http", url: "http://127.0.0.1:19577/mcp", headers: {}, runsOn: computer.runsOn } });
+  expect(added.status).toBe(201);
+  expect((await api("PATCH", "/api/mcp/servers/older", { token: owner, body: { enabled: true } })).status).toBe(200);
+
+  await register({});
+  const jobPath = poller();
+  expect(await api("POST", "/api/mcp/servers/older/test", { token: owner })).toEqual({ status: 200, body: { ok: true, tools: [{ name: "search_notes", description: "Search the notes" }] } });
+  expect(jobPath.jobs).toEqual(["mcp_tools"]);
+  jobPath.stop();
+
+  await register({ mcp: false });
+  const linkPath = poller();
+  const off = await api("POST", "/api/mcp/servers/older/test", { token: owner });
+  expect(off).toEqual({ status: 409, body: { error: `older runs on your Mac (Ada's Old Mac), which isn't lending its MCP servers to My Cloud: turn on "Let My Cloud use your MCP servers on this Mac" from the OpenMausBot icon on that Mac.` } });
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+  expect(linkPath.jobs, "no mcp_tools job reaches a computer that sent mcp").toEqual([]);
+  linkPath.stop();
+}, hostTimeout(30_000));
