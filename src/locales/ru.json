@@ -4971,6 +4971,7 @@
   "mcp.check.failedOff": "Подключиться не удалось, поэтому сервер остаётся выключенным. {reason}",
   "mcp.check.tryAgain": "Повторить попытку",
   "mcp.check.keysRefused": "Сервер не принял ключи ({reason}). Проверьте значения {names}.",
+  "mcp.check.said": "Ответ сервера: «{words}».",
   "mcp.check.keysNeeded": "Сервер не пустил подключение ({reason}). Вероятно, нужен ключ: добавьте его через «Исправить ключи».",
   "mcp.check.fixKeys": "Исправить ключи",
   "mcp.fixKeys.title": "Исправить ключи для {name}",

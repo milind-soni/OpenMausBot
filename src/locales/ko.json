@@ -5334,6 +5334,7 @@
   "mcp.check.failedOff": "연결하지 못해서 꺼진 상태로 남아요. {reason}",
   "mcp.check.tryAgain": "다시 시도",
   "mcp.check.keysRefused": "서버가 키를 받지 않았어요({reason}). {names}의 값을 확인하세요.",
+  "mcp.check.said": "서버 응답: \"{words}\"",
   "mcp.check.keysNeeded": "서버가 접속을 허용하지 않았어요({reason}). 키가 필요할 수 있으니 키 고치기에서 추가하세요.",
   "mcp.check.fixKeys": "키 고치기",
   "mcp.fixKeys.title": "{name}의 키 고치기",

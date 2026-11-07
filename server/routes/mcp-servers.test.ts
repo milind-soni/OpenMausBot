@@ -266,7 +266,7 @@ describe.skipIf(process.platform === "win32")("Test, where bots reach URL server
   it("never says Connected when bots can't reach a server that answers directly, and says the fault is ours", async () => {
     mcp = await startFakeHttpMcp({ exactPath: true, tools: [{ name: "lookup_order" }], requireHeaders: HEADERS });
     const result = await tested(await brokerPath(true), mcp.url);
-    expect(result).toEqual({ ok: false, reason: "unreachable", error: "Your bots can't reach this server: The server answered HTTP 404. It answers when tested directly, so the fault is on our side, not in your settings: tell us with @devs in any chat." });
+    expect(result).toEqual({ ok: false, reason: "unreachable", error: "Your bots can't reach this server: The server answered HTTP 404. It said: \"Not found\". It answers when tested directly, so the fault is on our side, not in your settings: tell us with @devs in any chat." });
   });
 
   it("says a server that answers neither way can't be reached, as before", async () => {

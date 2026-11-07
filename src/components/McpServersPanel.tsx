@@ -19,6 +19,7 @@ import { cn } from "@/lib/cn";
 import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { updateMcpServers } from "@/lib/mcp-servers";
+import { reserveConnectionPage } from "@/lib/connector-oauth";
 import { completeMcpSignIn, mcpSignInLink, runMcpSignIn, type McpSignInStatus } from "@/lib/mcp-sign-in";
 import { listenLiveFrames } from "@/lib/live-events";
 import { api, useStore } from "@/state/store";
@@ -44,6 +45,8 @@ export interface ProbeResult {
   /** `keys`: the server refused the headers it was sent; `unreachable` and `timeout` may pass on a second try. */
   reason?: "keys" | "unreachable" | "timeout";
   status?: number;
+  /** The server's own words about the failure, one line, already cleaned of every secret. */
+  said?: string;
   /** This panel's own note: the test ran right after the server was saved, so a failure means it was saved but off. */
   saved?: boolean;
 }
@@ -77,12 +80,14 @@ export async function signedInToolsCheck(
   return { ...tested, error: t("hostedMcp.testFailed", { service, reason: reason && !/[.!?]$/.test(reason) ? `${reason}.` : reason }) };
 }
 
+const withSaid = (text: string, result: ProbeResult) => (result.said ? `${text} ${t("mcp.check.said", { words: result.said })}` : text);
+
 /** Security: names the headers, never their values. */
 function failureReason(server: McpServerListing, result: ProbeResult): string {
   if (result.reason !== "keys" || !isRemoteMcpListing(server)) return result.error ?? "";
   const reason = result.status ? `HTTP ${result.status}` : t("mcp.check.unauthorized");
-  if (!server.headerKeys.length) return t("mcp.check.keysNeeded", { reason });
-  return t("mcp.check.keysRefused", { reason, names: new Intl.ListFormat(activeLocale(), { style: "long", type: "conjunction" }).format(server.headerKeys) });
+  if (!server.headerKeys.length) return withSaid(t("mcp.check.keysNeeded", { reason }), result);
+  return withSaid(t("mcp.check.keysRefused", { reason, names: new Intl.ListFormat(activeLocale(), { style: "long", type: "conjunction" }).format(server.headerKeys) }), result);
 }
 
 /** The test's answer, with what the server's tool count alone does to an AI that takes a limited number of tools. */
@@ -328,6 +333,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
   };
 
   async function signIn(server: McpServerListing) {
+    const launch = reserveConnectionPage();
     const controller = new AbortController();
     signInAbort.current = controller;
     setSigningIn(server.name);
@@ -340,7 +346,10 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
     forgetProbe(server.name);
     const hosted = hostedOf(server);
     try {
-      const result = await runMcpSignIn(server.name, { api, open: openExternalLink, signal: controller.signal, onStarted: (status, complete) => {
+      const open = async (url: string) => {
+        if (!await launch.open(url) && mounted.current && !controller.signal.aborted) setCallbackError(t("connectors.card.popupBlocked"));
+      };
+      const result = await runMcpSignIn(server.name, { api, open, signal: controller.signal, onStarted: (status, complete) => {
         setSignInFlow(status);
         signInComplete.current = complete;
       } });
@@ -361,6 +370,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
     } catch (cause) {
       if (mounted.current && !controller.signal.aborted) setProbe((current) => ({ ...current, [server.name]: { ok: false, error: cause instanceof Error ? cause.message : String(cause) } }));
     } finally {
+      launch.cancel();
       if (signInAbort.current === controller) {
         signInAbort.current = null;
         signInComplete.current = null;
@@ -475,7 +485,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
           <Loader2 size={13} className="animate-spin" /> {signInFlow?.phase !== "succeeded" ? t("mcp.auth.waiting") : hosted ? t("hostedMcp.loadingTools", { service: hosted.label }) : t("mcp.auth.loadingTools")}
         </div>
         {signInFlow?.authorizationUrl && mcpSignInLink(signInFlow.authorizationUrl) && (
-          <button type="button" onClick={() => void openExternalLink(signInFlow.authorizationUrl!).catch(() => setCallbackError(t("mcp.auth.openFailed")))} className="text-accent hover:underline">
+          <button type="button" onClick={() => { setCallbackError(null); void openExternalLink(signInFlow.authorizationUrl!).catch(() => setCallbackError(t("mcp.auth.openFailed"))); }} className="text-accent hover:underline">
             {t("mcp.auth.openAgain")}
           </button>
         )}
@@ -679,7 +689,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
                   )}
                   {result && signingIn !== server.name && (
                     <div role="status" className={cn("mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2 text-[12px]", result.ok ? "bg-success/10 text-success" : result.auth === "required" ? "bg-warning/10 text-warning" : "bg-danger/10 text-danger")}>
-                      {result.auth === "required" ? t("mcp.auth.required") : result.ok ? (
+                      {result.auth === "required" ? withSaid(t("mcp.auth.required"), result) : result.ok ? (
                         <span className="flex items-start gap-2"><CheckCircle2 size={14} className="mt-px shrink-0" /> {connectedLabel(result)}</span>
                       ) : (
                         <>

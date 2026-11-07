@@ -5738,6 +5738,7 @@
   "mcp.check.testingOff": "Off until it passes a test: testing it now.",
   "mcp.check.tryAgain": "Try again",
   "mcp.check.keysRefused": "The server didn't accept the keys ({reason}). Check the values of {names}.",
+  "mcp.check.said": "It said: \"{words}\".",
   "mcp.check.keysNeeded": "The server didn't let it in ({reason}). It probably needs a key: add it with Fix the keys.",
   "mcp.check.fixKeys": "Fix the keys",
   "mcp.fixKeys.title": "Fix the keys for {name}",

@@ -4566,6 +4566,7 @@
   "mcp.check.failedOff": "No se pudo conectar, así que sigue apagado. {reason}",
   "mcp.check.tryAgain": "Reintentar",
   "mcp.check.keysRefused": "El servidor no aceptó las claves ({reason}). Revisa los valores de {names}.",
+  "mcp.check.said": "El servidor dijo: \"{words}\".",
   "mcp.check.keysNeeded": "El servidor no dejó pasar la conexión ({reason}). Seguramente necesita una clave: añádela con «Corregir las claves».",
   "mcp.check.fixKeys": "Corregir las claves",
   "mcp.fixKeys.title": "Corregir las claves de {name}",

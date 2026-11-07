@@ -5555,6 +5555,7 @@
   "mcp.check.testingOff": "テストに合格するまでオフです。今テストしています。",
   "mcp.check.tryAgain": "再試行",
   "mcp.check.keysRefused": "サーバーがキーを受け付けませんでした（{reason}）。{names} の値を確認してください。",
+  "mcp.check.said": "サーバーの応答：「{words}」",
   "mcp.check.keysNeeded": "サーバーに接続を拒否されました（{reason}）。キーが必要と思われます。「キーを修正」から追加してください。",
   "mcp.check.fixKeys": "キーを修正",
   "mcp.fixKeys.title": "{name} のキーを修正",

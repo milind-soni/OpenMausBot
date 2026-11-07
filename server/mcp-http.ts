@@ -11,13 +11,53 @@ export class McpHttpError extends Error {
   readonly kind: McpHttpFailure;
   readonly status: number | undefined;
   readonly wwwAuthenticate: string | undefined;
+  /** What the server said about a refused request, or the system's code for one that got no answer. */
+  readonly reason: string | undefined;
 
-  constructor(kind: McpHttpFailure, message: string, status?: number, wwwAuthenticate?: string) {
+  constructor(kind: McpHttpFailure, message: string, status?: number, wwwAuthenticate?: string, reason?: string) {
     super(message);
     this.name = "McpHttpError";
     this.kind = kind;
     this.status = status;
     this.wwwAuthenticate = wwwAuthenticate;
+    this.reason = reason;
+  }
+}
+
+/** A server's own words are untrusted: one line, no control or formatting characters, 200 characters at most. */
+export function oneLine(text: string): string | undefined {
+  return text.replace(/[\p{Cc}\p{Cf}\s]+/gu, " ").trim().slice(0, 200) || undefined;
+}
+
+export const itSaid = (words: string | undefined) => (words ? ` It said: "${words}".` : "");
+
+/** The reason in an OAuth or JSON error body: `error_description`, a JSON-RPC style `error.message`, `message`, or a bare `error`. */
+export function serverReason(body: unknown): string | undefined {
+  if (!body || typeof body !== "object") return undefined;
+  const { error, error_description: description, message } = body as Record<string, unknown>;
+  const nested = error && typeof error === "object" ? (error as { message?: unknown }).message : undefined;
+  const words = [description, nested, message, error].find((value): value is string => typeof value === "string" && value.trim() !== "");
+  return words === undefined ? undefined : oneLine(words);
+}
+
+/** The system's code for a request that got no answer: ENOTFOUND, ECONNREFUSED, CERT_HAS_EXPIRED and the like. */
+export function networkReason(error: unknown): string | undefined {
+  const cause = error instanceof Error && error.cause !== undefined ? error.cause : error;
+  const code = (cause as { code?: unknown } | null)?.code;
+  return typeof code === "string" ? oneLine(code) : undefined;
+}
+
+async function refusalReason(response: Response): Promise<string | undefined> {
+  const type = response.headers.get("content-type") ?? "";
+  if (!type.includes("json") && !type.startsWith("text/plain")) {
+    drain(response);
+    return undefined;
+  }
+  try {
+    const text = await readBounded(response, 16_384);
+    return type.includes("json") ? serverReason(JSON.parse(text)) : oneLine(text);
+  } catch {
+    return undefined;
   }
 }
 
@@ -274,11 +314,10 @@ export class RemoteMcpClient {
       response = await this.fetchImpl(url, { method: "POST", headers, body: JSON.stringify(frame), signal });
     } catch (error) {
       if (signal.aborted) throw error;
-      throw new McpHttpError("network", "request failed");
+      throw new McpHttpError("network", "request failed", undefined, undefined, networkReason(error));
     }
     if (!response.ok) {
-      drain(response);
-      throw new McpHttpError("status", `HTTP ${response.status}`, response.status, response.headers.get("www-authenticate") ?? undefined);
+      throw new McpHttpError("status", `HTTP ${response.status}`, response.status, response.headers.get("www-authenticate") ?? undefined, await refusalReason(response));
     }
     const session = response.headers.get("mcp-session-id");
     if (session) this.sessionId = session;
@@ -333,8 +372,7 @@ export class RemoteMcpClient {
       this.fetchImpl(this.target.url, { method: "GET", headers, signal: opening })
         .then(async (response) => {
           if (!response.ok) {
-            drain(response);
-            throw new McpHttpError("status", `HTTP ${response.status}`, response.status, response.headers.get("www-authenticate") ?? undefined);
+            throw new McpHttpError("status", `HTTP ${response.status}`, response.status, response.headers.get("www-authenticate") ?? undefined, await refusalReason(response));
           }
           await readSse(response, this.sseAbort.signal, (event) => {
             if (event.event === "endpoint") {
@@ -366,7 +404,7 @@ export class RemoteMcpClient {
           fail(new McpHttpError("network", "event stream ended"));
         })
         .catch((error: unknown) => {
-          fail(error instanceof McpHttpError ? error : new McpHttpError("network", "event stream failed"));
+          fail(error instanceof McpHttpError ? error : new McpHttpError("network", "event stream failed", undefined, undefined, networkReason(error)));
         });
     });
     return this.sseEndpoint;
