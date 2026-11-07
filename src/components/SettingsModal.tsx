@@ -19,7 +19,8 @@ import { DecisionModelSettings } from "./DecisionModelSettings";
 import { ImageGenerationSettings } from "./ImageGenerationSettings";
 import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
-import { CompanionSection } from "./CompanionSection";
+import { PhoneDevicesSection } from "./PhoneDevicesSection";
+import { pageIsThisComputer } from "@/lib/companion-bridge";
 import { ServerPairingCard } from "./ServerPairingCard";
 import { PeopleSection } from "./PeopleSection";
 import { ActivitySection } from "./ActivitySection";
@@ -184,7 +185,9 @@ export function SettingsModal() {
   const remoteActive = window.ogb?.remoteClient?.active === true;
   const requested = state.appSettingsSection;
   const section: AppSettingsSection =
-    (remoteActive && !["appearance", "desktopWorkspaces"].includes(requested)) || requested === "remote"
+    advanced && requested === "remote" && window.ogb?.environments
+      ? "desktopWorkspaces"
+      : (remoteActive && !["appearance", "desktopWorkspaces"].includes(requested)) || requested === "remote"
       ? "companion"
       : advanced && requested === "updates" ? "general" : requested;
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -195,7 +198,11 @@ export function SettingsModal() {
   useEffect(() => window.ogb?.onOpenAppSettings?.(() => setQuery("")), []);
   const q = query.trim().toLowerCase();
   const ownerOrAdmin = useOwnerOrAdmin();
-  const baseSections = SECTIONS.filter((entry) => !remoteActive || entry.id === "companion" || entry.id === "appearance" || entry.id === "desktopWorkspaces")
+  const thisComputer = pageIsThisComputer();
+  const sectionsHere = SECTIONS.map((entry) => entry.id === "companion"
+    ? { ...entry, labelKey: thisComputer ? "settings.section.phoneDevices" as const : "settings.section.thisServer" as const }
+    : entry);
+  const baseSections = sectionsHere.filter((entry) => !remoteActive || entry.id === "companion" || entry.id === "appearance" || entry.id === "desktopWorkspaces")
     .filter((entry) => entry.id !== "desktopWorkspaces" || Boolean(window.ogb?.environments))
     .filter((entry) => entry.id !== "organization" || Boolean(window.ogb?.organization))
     .filter((entry) => entry.id !== "cloudAccount" || Boolean(window.ogb?.cloudAccount || (window.ogb?.cloudPlan && state.config?.cloudHome === true)))
@@ -212,7 +219,7 @@ export function SettingsModal() {
   const currentPage = simplePages.find((page) => page.sections.includes(section));
 
   const sectionLabelKey = advanced
-    ? SECTIONS.find((entry) => entry.id === section)?.labelKey
+    ? sectionsHere.find((entry) => entry.id === section)?.labelKey
     : currentPage?.labelKey;
   const nextVisibleSection = advanced
     ? visibleSections.some((entry) => entry.id === section) ? undefined : visibleSections[0]?.id
@@ -314,17 +321,17 @@ export function SettingsModal() {
   const phoneFocus = state.appSettingsPhonePairing;
   const computerPairs = currentPhonePairingTarget(state.config?.cloudHome === true) === "computer";
   const remoteAccess = {
-    client: <RemoteComputerSection hideWhenUnavailable={!advanced} />,
-    domain: remoteActive ? null : <CustomDomainSettings />,
+    client: <RemoteComputerSection hideWhenUnavailable legacyOnly />,
+    domain: remoteActive || thisComputer ? null : <CustomDomainSettings />,
     // Security: the server decides who may pair (an owner or admin session), not this gate.
-    pairing: <ServerPairingCard cloudHome={state.config?.cloudHome === true} focusRequest={computerPairs ? 0 : phoneFocus} team={state.config?.team?.name} teamPhoneBlocked={state.config?.managedPolicy?.remoteAccess === false ? t("policy.teamRemoteBlocked", { organization: state.config.managedPolicy.organizationName }) : null} simple={!advanced} />,
-    companion: remoteActive ? null : <CompanionSection profileEmail={state.config?.profile?.email} focusRequest={computerPairs ? phoneFocus : 0} />,
+    pairing: thisComputer ? null : <ServerPairingCard cloudHome={state.config?.cloudHome === true} focusRequest={computerPairs ? 0 : phoneFocus} team={state.config?.team?.name} teamPhoneBlocked={state.config?.managedPolicy?.remoteAccess === false ? t("policy.teamRemoteBlocked", { organization: state.config.managedPolicy.organizationName }) : null} simple={!advanced} />,
+    companion: thisComputer ? <PhoneDevicesSection profileEmail={state.config?.profile?.email} focusRequest={phoneFocus} simple={!advanced} /> : null,
   };
 
   const renderSection = (id: AppSettingsSection) => {
     switch (id) {
       case "desktopWorkspaces":
-        return <ConnectedWorkspacesSettings />;
+        return <><ConnectedWorkspacesSettings />{remoteAccess.client}</>;
       case "organization":
         return window.ogb?.organization && !remoteActive ? <OrganizationSettings /> : null;
       case "cloudAccount":
@@ -409,7 +416,7 @@ export function SettingsModal() {
       case "backups": return <AdminOnly><WorkspaceBackupSettings /><CompanyBackupSettings /></AdminOnly>;
       case "import": return <AdminOnly><ImportSettings /></AdminOnly>;
       case "companion":
-        return <>{remoteAccess.client}{remoteAccess.domain}{remoteAccess.pairing}{remoteAccess.companion}</>;
+        return <>{remoteAccess.companion}{remoteAccess.pairing}{remoteAccess.domain}{window.ogb?.environments ? null : remoteAccess.client}</>;
       case "computer":
         return <><BuiltInBrowserRow /><ServerSitesRow /><BrowserProfilesRow /><AdminOnly><LocalComputerSection /></AdminOnly></>;
       case "logins":
@@ -438,7 +445,7 @@ export function SettingsModal() {
         ? <SimpleLooksPage onBack={() => { setLooks(false); setReveal("appearance"); }} />
         : <SimpleGeneralPage has={has} peopleOpen={section === "people"} onLooks={() => setLooks(true)} />;
       case "ai": return <SimpleAiPage has={has} disclose={disclose} connections={renderSection("connections")} />;
-      case "computer": return <SimpleComputerPage has={has} remoteAccess={remoteAccess} servers={renderSection("desktopWorkspaces")} disclose={disclose} />;
+      case "computer": return <SimpleComputerPage has={has} remoteAccess={remoteAccess} servers={<ConnectedWorkspacesSettings />} disclose={disclose} />;
       case "billing": return <SimpleBillingPage has={has} disclose={disclose} cloudAccount={renderSection("cloudAccount")} />;
       case "updates": return <SimpleUpdatesPage remoteActive={remoteActive} />;
       default:
