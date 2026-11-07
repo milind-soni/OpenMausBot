@@ -11,7 +11,7 @@ import { timelineEvents } from "@/lib/taskTimeline";
 import { activeLocale, t } from "@/lib/i18n";
 import { capital } from "@/lib/automations";
 import type { LocaleKey } from "@/locales";
-import { appendInspectorRuntime, boundInspectorEntries, INSPECTOR_WINDOW_LIMIT } from "@/lib/inspector-window";
+import { appendInspectorRuntime, mergeInspectorSnapshot, INSPECTOR_WINDOW_LIMIT } from "@/lib/inspector-window";
 
 const tabLabel = (key: LocaleKey) => (activeLocale() === "en" ? t(key) : capital(t(key)));
 
@@ -41,7 +41,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
       // SAFETY: the same-version harness's typed inspector endpoint; malformed transport data is handled by catch.
       const next = (await res.json()) as InspectorPage;
       if (controller.signal.aborted) return;
-      setPage({ ...next, entries: boundInspectorEntries(next.entries) });
+      setPage((previous) => mergeInspectorSnapshot(previous, next));
       setExpanded((previous) => new Set([...previous].filter((key) => key.startsWith("runtime:"))));
       setError(null);
     } catch (e) {

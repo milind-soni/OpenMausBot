@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RuntimeEvent } from "../../shared/runtime-events";
 import type { InspectorEntry, InspectorPage } from "../../shared/inspector";
-import { appendInspectorRuntime, boundInspectorEntries } from "./inspector-window";
+import { appendInspectorRuntime, boundInspectorEntries, mergeInspectorSnapshot } from "./inspector-window";
 
 const event = (i: number): RuntimeEvent => ({
   eventId: `e${i}`, provider: "fixture", threadId: "t", createdAt: String(i), type: "turn.started",
@@ -9,6 +9,46 @@ const event = (i: number): RuntimeEvent => ({
 const entry = (i: number): InspectorEntry => ({ kind: "runtime", at: String(i), data: event(i) });
 
 describe("Inspector's recent event window", () => {
+  it("retains a live tail across stale snapshots and counts it once when disk catches up", () => {
+    const previous: InspectorPage = { entries: [entry(1), entry(2), entry(3)], total: { runtime: 53, native: 12 } };
+    const snapshot: InspectorPage = { entries: [entry(1), entry(2)], total: { runtime: 52, native: 10 } };
+    const merged = mergeInspectorSnapshot(previous, snapshot);
+    expect(merged).toEqual({ entries: previous.entries, total: { runtime: 53, native: 10 } });
+    expect(mergeInspectorSnapshot(merged, snapshot)).toEqual(merged);
+    expect(mergeInspectorSnapshot(merged, { ...snapshot, entries: previous.entries, total: { runtime: 53, native: 10 } })).toEqual(merged);
+    expect(snapshot.entries).toEqual([entry(1), entry(2)]);
+    expect(previous.total.native).toBe(12);
+  });
+
+  it("preserves publication order for equal-time events using the overlap anchor", () => {
+    const entries: InspectorEntry[] = [1, 2, 3].map((i) => ({ kind: "runtime", at: "same", data: { ...event(i), createdAt: "same" } }));
+    const previous: InspectorPage = { entries, total: { runtime: 3, native: 0 } };
+    const snapshot: InspectorPage = { entries: entries.slice(0, 2), total: { runtime: 2, native: 0 } };
+    expect(mergeInspectorSnapshot(previous, snapshot)).toEqual(previous);
+  });
+
+  it("does not reintroduce old rows when the snapshot has advanced past the retained window", () => {
+    const previous: InspectorPage = { entries: [entry(1), entry(2)], total: { runtime: 2, native: 0 } };
+    const snapshot: InspectorPage = { entries: [entry(3), entry(4)], total: { runtime: 4, native: 0 } };
+    expect(mergeInspectorSnapshot(previous, snapshot)).toEqual(snapshot);
+    expect(mergeInspectorSnapshot(null, snapshot)).toEqual(snapshot);
+  });
+
+  it("bounds the merged runtime window while keeping fresh native records and cumulative totals", () => {
+    const entries = Array.from({ length: 401 }, (_, i) => {
+      const data = { ...event(i), createdAt: String(i).padStart(4, "0") };
+      return { kind: "runtime" as const, at: data.createdAt, data };
+    });
+    const native: InspectorEntry = { kind: "native", at: "0001", data: { at: "0001", dir: "out", source: "fixture", msg: "fresh" } };
+    const merged = mergeInspectorSnapshot(
+      { entries: entries.slice(1), total: { runtime: 501, native: 100 } },
+      { entries: [...entries.slice(0, 400), native], total: { runtime: 500, native: 101 } },
+    );
+    expect(merged.entries.filter((item) => item.kind === "runtime")).toEqual(entries.slice(1));
+    expect(merged.entries).toContainEqual(native);
+    expect(merged.total).toEqual({ runtime: 501, native: 101 });
+  });
+
   it("bounds each log separately while keeping the original interleaving and totals", () => {
     const entries: InspectorEntry[] = [];
     for (let i = 0; i < 500; i++) {

@@ -29,3 +29,16 @@ export function appendInspectorRuntime(page: InspectorPage | null, events: Runti
     total: { ...previous.total, runtime: previous.total.runtime + added.length },
   };
 }
+
+export function mergeInspectorSnapshot(previous: InspectorPage | null, snapshot: InspectorPage): InspectorPage {
+  const next = { ...snapshot, entries: boundInspectorEntries(snapshot.entries) };
+  if (!previous) return next;
+  const runtime = previous.entries.flatMap((entry) => entry.kind === "runtime" ? [entry.data] : []);
+  const snapshotRuntime = next.entries.filter((entry) => entry.kind === "runtime");
+  const ids = new Set(snapshotRuntime.map((entry) => entry.data.eventId));
+  const overlap = runtime.findLastIndex((event) => ids.has(event.eventId));
+  const latest = snapshotRuntime.at(-1)?.at;
+  const tail = overlap >= 0 ? runtime.slice(overlap + 1) : runtime.filter((event) => latest === undefined || event.createdAt > latest);
+  const merged = appendInspectorRuntime(next, tail)!;
+  return { ...merged, total: { ...merged.total, runtime: Math.max(previous.total.runtime, merged.total.runtime) } };
+}

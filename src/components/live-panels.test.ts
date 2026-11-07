@@ -70,6 +70,21 @@ afterEach(() => {
 });
 
 describe("Inspector on the app's live stream", () => {
+  it("keeps live events missing from a stale refresh snapshot, including an unflushed batch", async () => {
+    await mount(InspectorPanel);
+    const events = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((tab) => tab.textContent === "events")!;
+    flushSync(() => events.click());
+    frame(runtime("before-refresh", { type: "item.started", itemType: "tool", title: "not on disk yet" }));
+    missed();
+    await settle();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("not on disk yet"));
+    expect(document.querySelectorAll('button .tabular-nums')).toHaveLength(1);
+    missed();
+    await settle();
+    expect(document.body.textContent).toContain("not on disk yet");
+    expect(document.querySelectorAll('button .tabular-nums')).toHaveLength(1);
+  });
+
   it("does not expand a replacement native record after refresh, while keeping runtime expansion", async () => {
     let nativeMessage = "first private record";
     vi.stubGlobal("fetch", () => Promise.resolve(new Response(JSON.stringify({
@@ -176,6 +191,26 @@ describe("Inspector on the app's live stream", () => {
     await vi.waitFor(() => expect(document.body.textContent).toContain("after snapshot"));
     expect(document.querySelectorAll('button .tabular-nums')).toHaveLength(2);
     expect(document.body.textContent).toContain("71");
+  });
+
+  it("lets only the newest refresh merge its buffered tail", async () => {
+    await mount(InspectorPanel);
+    const events = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((tab) => tab.textContent === "events")!;
+    flushSync(() => events.click());
+    frame(runtime("before", { type: "item.started", itemType: "tool", title: "before either fetch" }));
+    const finishes: Array<(response: Response) => void> = [];
+    vi.stubGlobal("fetch", () => new Promise<Response>((resolve) => { finishes.push(resolve); }));
+    missed();
+    frame(runtime("during", { type: "item.started", itemType: "tool", title: "during both fetches" }));
+    missed();
+    const snapshot = { entries: [], total: { runtime: 0, native: 0 } };
+    finishes[1](new Response(JSON.stringify(snapshot)));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("during both fetches"));
+    finishes[0](new Response(JSON.stringify(snapshot)));
+    await settle();
+    expect(document.body.textContent).toContain("before either fetch");
+    expect(document.body.textContent).toContain("during both fetches");
+    expect(document.querySelectorAll('button .tabular-nums')).toHaveLength(2);
   });
 
   it("cancels the old thread's queued batch when switching conversations", async () => {
