@@ -264,17 +264,11 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     delete canonical.groupId;
     delete canonical.doneWhen;
     if (canonical.bot_ids === undefined) canonical.bot_ids = args.botIds;
-    // Both destination spellings are accepted. A blank group_id must not
-    // mask a nonblank groupId, and two different nonblank destinations
-    // conflict; resolve both spellings before the check below.
+    // Both destination spellings are accepted and the documented group_id wins, but a blank group_id must not mask a
+    // nonblank groupId from an older tool list.
     const snakeBlank = canonical.group_id === undefined || canonical.group_id === null
       || (typeof canonical.group_id === "string" && canonical.group_id.trim() === "");
-    const camelBlank = args.groupId === undefined || args.groupId === null
-      || (typeof args.groupId === "string" && args.groupId.trim() === "");
-    const destinationConflict = !snakeBlank && !camelBlank
-      && typeof canonical.group_id === "string" && typeof args.groupId === "string"
-      && canonical.group_id.trim() !== args.groupId.trim();
-    if (snakeBlank && !camelBlank && typeof args.groupId === "string") canonical.group_id = args.groupId;
+    if (snakeBlank && typeof args.groupId === "string" && args.groupId.trim() !== "") canonical.group_id = args.groupId;
     if (canonical.done_when === undefined) canonical.done_when = args.doneWhen;
     const ids = canonical.bot_ids;
     const optional = (key: string, type: "boolean" | "string") => canonical[key] === undefined || typeof canonical[key] === type;
@@ -284,9 +278,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       && (canonical.reply === undefined || canonical.reply === "resume" || canonical.reply === "none")
       && optional("consult", "boolean") && optional("in_my_folder", "boolean")
       && optional("done_when", "string") && optional("reason", "string") && optional("title", "string") && optional("answers", "string")
-      && (canonical.group_id === undefined || canonical.group_id === null || typeof canonical.group_id === "string")
-      && (args.groupId === undefined || args.groupId === null || typeof args.groupId === "string")
-      && !destinationConflict;
+      && (canonical.group_id === undefined || canonical.group_id === null || typeof canonical.group_id === "string");
     if (!usable) {
       return {
         text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids) and message are required; group_id, reason, rework, title, thread ("standing", "new" or the id of a thread you opened on that teammate), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false), done_when and answers are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
