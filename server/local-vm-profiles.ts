@@ -36,7 +36,7 @@ export async function rescueFirefoxProfile(runtime: string, target: LocalVmTarge
   try {
     const { command, args } = resolveCliSpawn(runtime, ["cp", `${target.containerName}:${PROFILE_IN_CONTAINER}`, staging]);
     try {
-      await run(command, args, { timeout: 5 * 60_000, maxBuffer: 1024 * 1024, env: { ...process.env, PATH: augmentedPath() } });
+      await run(command, args, { timeout: 5 * 60_000, maxBuffer: 1024 * 1024, env: { ...process.env, PATH: augmentedPath() }, windowsHide: true });
     } catch (error) {
       const failure = error as { stderr?: string; message?: string };
       if (NOT_IN_CONTAINER.test(`${failure.stderr ?? ""} ${failure.message ?? ""}`)) return "none";
@@ -76,7 +76,7 @@ export async function rescueInstalledApps(runtime: string, target: LocalVmTarget
   try {
     const { command, args } = resolveCliSpawn(runtime, ["cp", `${target.containerName}:${APPS_IN_CONTAINER}`, staging]);
     try {
-      await run(command, args, { timeout: 5 * 60_000, maxBuffer: 1024 * 1024, env: { ...process.env, PATH: augmentedPath() } });
+      await run(command, args, { timeout: 5 * 60_000, maxBuffer: 1024 * 1024, env: { ...process.env, PATH: augmentedPath() }, windowsHide: true });
     } catch (error) {
       const failure = error as { stderr?: string; message?: string };
       if (NOT_IN_CONTAINER.test(`${failure.stderr ?? ""} ${failure.message ?? ""}`)) return "none";
