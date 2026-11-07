@@ -192,3 +192,15 @@ it("shows local environment controls in Simplified Chinese", async () => {
   expect(html).toContain("每个环境都有自己的机器人、会话和数据文件夹");
   expect(html).not.toContain("Separate setups on this computer");
 });
+
+it("says who runs each saved place: this computer, a Cloud run for you, or your own server it only connects to", async () => {
+  const CLOUD = { id: "cloud", name: "Cloud", origin: "https://omb-t-1.fly.dev", home: true };
+  stubEnvironments({ environments: [VPS, CLOUD] });
+  await mount();
+  const { html } = render();
+  const kind = (id: string) => new RegExp(`data-server-kind="${id}"[^>]*>([^<]+)<`).exec(html)?.[1];
+  expect(kind("this-computer")).toBe("Runs on this computer");
+  expect(kind("cloud")).toBe("The Cloud: started and stopped for you");
+  expect(kind("external")).toBe("Your own server: this app only connects to it and never starts or stops it");
+  expect(html.indexOf('data-server-kind="external"')).toBeGreaterThan(html.indexOf("https://bots.example.test"));
+});

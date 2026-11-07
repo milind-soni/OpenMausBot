@@ -51,7 +51,7 @@ const { marker } = vi.hoisted(() => ({
 vi.mock("./EnginesSettings", () => ({ EnginesSettings: marker("engines") }));
 vi.mock("./DecisionModelSettings", () => ({ DecisionModelSettings: marker("decisionModel") }));
 vi.mock("./keys/KeysPage", () => ({ KeysPage: marker("apiKey") }));
-vi.mock("./RemoteComputerSection", () => ({ RemoteComputerSection: marker("companion") }));
+vi.mock("./RemoteComputerSection", () => ({ RemoteComputerSection: marker("remoteClient"), RemoteAccessScope: () => null }));
 vi.mock("./CustomDomainSettings", () => ({ CustomDomainSettings: () => null }));
 vi.mock("./CompanionSection", () => ({ CompanionSection: () => null }));
 vi.mock("./ServerPairingCard", () => ({ ServerPairingCard: () => null }));
@@ -241,8 +241,8 @@ describe("Settings in Simple mode", () => {
     expect(placement(open("connections"), "MARKER:apiKey;")).toBe("shown");
     expect(placement(open("engines"), "MARKER:apiKey;")).toBe("folded");
     expect(placement(open("desktopWorkspaces"), "MARKER:desktopWorkspaces;")).toBe("shown");
-    expect(placement(open("remote"), "MARKER:companion;")).toBe("shown");
-    expect(placement(open("companion"), "MARKER:companion;")).toBe("folded");
+    expect(placement(open("remote"), "MARKER:remoteClient;")).toBe("shown");
+    expect(placement(open("companion"), "MARKER:remoteClient;")).toBe("folded");
     expect(SIMPLE_FOLDED).toEqual({ connections: "ai-keys", remote: "computer-elsewhere", desktopWorkspaces: "computer-elsewhere" });
   });
 
@@ -256,12 +256,12 @@ describe("Settings in Simple mode", () => {
     expect(html).not.toContain("API keys and connections");
   });
 
-  it("orders Computer as your bots' computers, your devices, the browser, logins, then Connect from elsewhere", () => {
+  it("orders Computer as your bots' computers, this computer's remote access, the browser, logins, then the servers it connects to", () => {
     fixture.section = "companion";
     const html = render();
     expect(currentPage(html)).toBe("computer");
-    expect(blocks(html)).toEqual(["computer", "companion", "browser", "logins", "elsewhere", "remote", "desktopWorkspaces"]);
-    expect(groupLabels(html)).toEqual(["Your bots’ computers", "Your devices", "Built-in browser"].map((label) => label.replace("’", "&#x27;")));
+    expect(blocks(html)).toEqual(["computer", "companion", "browser", "logins", "elsewhere", "desktopWorkspaces", "remote"]);
+    expect(groupLabels(html)).toEqual(["Your bots’ computers", "Remote access", "Built-in browser"].map((label) => label.replace("’", "&#x27;")));
     expect(html).toContain('aria-label="Enable the built-in browser"');
   });
 
@@ -287,13 +287,13 @@ describe("Settings in Simple mode", () => {
     expect(groupLabels(html)).toContain("Activity");
   });
 
-  it("keeps a paired remote client's reduced set: General for appearance, and Computer with your devices and Connect from elsewhere", () => {
+  it("keeps a paired remote client's reduced set: General for appearance, and Computer with remote access and the servers it connects to", () => {
     vi.stubGlobal("window", { ogb: { ...desktop.ogb, remoteClient: { active: true } } });
     fixture.section = "desktopWorkspaces";
     const html = render();
     expect(pages(html)).toEqual(["general", "computer"]);
     expect(currentPage(html)).toBe("computer");
-    expect(blocks(html)).toEqual(["companion", "elsewhere", "remote", "desktopWorkspaces"]);
+    expect(blocks(html)).toEqual(["companion", "elsewhere", "desktopWorkspaces", "remote"]);
     expect(html).not.toContain('aria-label="Enable the built-in browser"');
     fixture.section = "appearance";
     const general = render();

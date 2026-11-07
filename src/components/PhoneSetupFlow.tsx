@@ -932,7 +932,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
             </label>
             {c.codeSent && (
               <label className="flex flex-col gap-1.5">
-                <span className="text-[12px] font-medium text-ink-secondary">{t("phone.signIn.code")}</span>
+                <span className="text-[12px] font-medium text-ink-secondary">{t("phone.signIn.emailCode")}</span>
                 <input
                   autoFocus
                   autoComplete="one-time-code"
@@ -1086,7 +1086,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
         <details className="mt-4 w-full max-w-[390px] rounded-lg border border-hairline/40 px-3 py-2 text-left">
           <summary className="cursor-pointer text-[12px] text-ink-secondary">{t("phone.code.trouble")}</summary>
           <div className="mt-3 text-[12px] text-ink-secondary">
-            {t("phone.code.manual")}
+            {t("phone.code.phoneLinkCode")}
             <div className="mt-1 font-mono text-[22px] tracking-[0.25em] text-ink">{c.state.pairing.code}</div>
             {c.address && (
               <div className="mt-3">

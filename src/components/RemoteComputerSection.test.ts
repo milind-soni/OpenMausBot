@@ -2,97 +2,58 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
-import { isServerPairingLink, RemoteComputerSection } from "./RemoteComputerSection";
+import { pageIsThisComputer, RemoteAccessScope, RemoteComputerSection } from "./RemoteComputerSection";
 
 afterEach(() => {
   vi.unstubAllGlobals();
   setLocale("en");
 });
 
-describe("self-hosted server pairing links", () => {
-  it.each([
-    "https://bots.example.com/pair#code=ABCD-EFGH-JKLM",
-    " https://custom.example.com:8443/pair/#code=ABCD%2DEFGH%2DJKLM ",
-    "https://random.trycloudflare.com/pair#code=ABCDEFGHJKLM",
-  ])("accepts a complete custom HTTPS link: %s", (link) => {
-    expect(isServerPairingLink(link)).toBe(true);
+const render = (ogb?: unknown, component: () => unknown = RemoteComputerSection) => {
+  vi.stubGlobal("window", { ogb });
+  setLocale("en");
+  return renderToStaticMarkup(createElement(component as () => null));
+};
+
+describe("another computer's desktop app", () => {
+  it("asks for its address and its six-digit phone link code, and points a server at its own path", () => {
+    const html = render({ remoteClient: { active: false }, environments: {} });
+    expect(html).toContain("Another computer&#x27;s desktop app");
+    expect(html).toContain("Phone link code (6 digits)");
+    expect(html).toContain('placeholder="000000"');
+    expect(html).toContain("12-character pairing code");
+    expect(html).toContain("＋ → Add your own server");
+    expect(html).not.toContain("<select");
+    expect(html).not.toContain("npx openmausbot pair");
   });
 
-  it.each([
-    "",
-    "ABCD-EFGH-JKLM",
-    "http://bots.example.com/pair#code=ABCD-EFGH-JKLM",
-    "https:example.com/pair#code=ABCD-EFGH-JKLM",
-    "https://user:secret@bots.example.com/pair#code=ABCD-EFGH-JKLM",
-    "https://bots.example.com",
-    "https://bots.example.com/pair",
-    "https://bots.example.com/pair#code=",
-    "https://bots.example.com/pair#code=%20",
-    "https://bots.example.com/pair#code=%",
-    "https://bots.example.com/other#code=ABCD-EFGH-JKLM",
-    "https://bots.example.com/pair?code=ABCD-EFGH-JKLM",
-    "https://bots.example.com/pair?code=secret#code=ABCD-EFGH-JKLM",
-    "https://bots.example.com/pair#code=ABCD EFGH JKLM",
-    "https://bots.example.com\\@other.example/pair#code=ABCD-EFGH-JKLM",
-    "openmausbot://pair?code=123456",
-  ])("rejects an incomplete, malformed, or insecure link: %s", (link) => {
-    expect(isServerPairingLink(link)).toBe(false);
+  it("keeps an active connection on its disconnect screen", () => {
+    const html = render({ remoteClient: { active: true } });
+    expect(html).toContain("Disconnect and use this computer");
+    expect(html).not.toContain("<form");
+  });
+
+  it.each([undefined, { platform: "darwin" }, { environments: {} }])("shows nothing where this app cannot be a client: %o", (bridge) => {
+    expect(render(bridge)).toBe("");
   });
 });
 
-describe("remote connection Settings", () => {
-  const render = (ogb?: unknown) => {
+describe("whose remote access Settings sets", () => {
+  it("names this computer only on the desktop app's own page", () => {
+    vi.stubGlobal("window", { ogb: { companion: {} } });
+    expect(pageIsThisComputer()).toBe(true);
+    expect(render({ companion: {} }, RemoteAccessScope)).toContain("reach this computer");
+  });
+
+  it.each([
+    ["a browser", undefined],
+    ["a server's page in the app", { platform: "darwin" }],
+    ["client mode", { companion: {}, remoteClient: { active: true } }],
+  ])("names the bots here, not this computer, in %s", (_where, ogb) => {
     vi.stubGlobal("window", { ogb });
-    setLocale("en");
-    return renderToStaticMarkup(createElement(RemoteComputerSection));
-  };
-  const environments = { addFromLink: vi.fn() };
-
-  it("defaults to server pairing and explains how to obtain a fresh full link", () => {
-    const html = render({ environments, remoteClient: { active: false } });
-    expect(html).toContain('<option value="server" selected="">Self-hosted server</option>');
-    expect(html).toContain('<option value="companion">Desktop companion</option>');
-    expect(html).toContain("Server pairing link");
-    // Full access first: only it can make a server you own your bots' home; chat-only says what it can't do.
-    expect(html.indexOf('data-pair-access="full"')).toBeLessThan(html.indexOf('data-pair-access="client"'));
-    expect(html).toMatch(/data-pair-access="full"[\s\S]*?Your own server: full access[\s\S]*?>npx openmausbot pair<\/code>/);
-    expect(html).toMatch(/data-pair-access="client"[\s\S]*?chat and approvals only[\s\S]*?>npx openmausbot pair --client<\/code>[\s\S]*?make the server your bots[\s\S]{1,8}home/);
-    expect(html).toContain("12-character code");
-    expect(html).toContain("custom domains and Cloudflare Tunnel");
-    expect(html).toContain("Connect to server");
-    expect(html).toContain("Server menu");
-    expect(html).not.toContain('placeholder="000000"');
-    expect(environments.addFromLink).not.toHaveBeenCalled();
-  });
-
-  it("allows a server-only bridge without presenting a companion option", () => {
-    const html = render({ environments });
-    expect(html).toContain("Server pairing link");
-    expect(html).not.toContain("<select");
-  });
-
-  it("preserves six-digit companion pairing when the server bridge is unavailable", () => {
-    const html = render({ remoteClient: { active: false } });
-    expect(html).toContain("Companion address");
-    expect(html).toContain("Six-digit companion code");
-    expect(html).toContain('placeholder="000000"');
-    expect(html).toContain("managed MausBot HTTPS address");
-    expect(html).toContain("Tailscale name ending in .ts.net");
-    expect(html).not.toContain("<select");
-    expect(html).not.toContain("Server pairing link");
-  });
-
-  it("keeps an active companion connection on its disconnect screen", () => {
-    const html = render({ environments, remoteClient: { active: true } });
-    expect(html).toContain("Disconnect and use this computer");
-    expect(html).not.toContain("<form");
-    expect(html).not.toContain("<select");
-  });
-
-  it.each([undefined, { platform: "darwin" }])("hides unavailable actions on browser and remote server pages", (bridge) => {
-    const html = render(bridge);
-    expect(html).toContain("requires the installed app");
-    expect(html).not.toContain("<form");
-    expect(html).not.toContain("<input");
+    expect(pageIsThisComputer()).toBe(false);
+    const html = render(ogb, RemoteAccessScope);
+    expect(html).toContain("reach the bots here");
+    expect(html).not.toContain("this computer");
   });
 });

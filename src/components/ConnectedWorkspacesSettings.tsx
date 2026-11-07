@@ -15,6 +15,18 @@ type SavedEntry = SavedWorkspaces["environments"][number] | { id: string; name: 
 /** My Cloud, or another Cloud of the person's own: this computer is lent to it by itself, never through Computer access. */
 const ownCloud = (entry: SavedEntry) => ("home" in entry && entry.home === true) || ("cloud" in entry && Boolean(entry.cloud));
 
+/** Who runs a saved place: this computer and a Cloud are run for the person; their own server is only connected to. */
+export function serverKind(entry: SavedEntry): "this-computer" | "cloud" | "external" {
+  if (entry.id === "local") return "this-computer";
+  return ownCloud(entry) ? "cloud" : "external";
+}
+
+const SERVER_KIND_LABEL = {
+  "this-computer": "servers.kind.thisComputer",
+  cloud: "servers.kind.cloud",
+  external: "servers.kind.external",
+} as const;
+
 export function ConnectedWorkspacesSettings() {
   const bridge = window.ogb?.environments;
   // Security: the desktop bridge alone is not enough; never offer access the server refuses.
@@ -152,7 +164,8 @@ export function ConnectedWorkspacesSettings() {
             return <li key={entry.id} className="flex items-center gap-3 py-3">
               {cloudColor(entry.color) ? <CloudTile color={entry.color} size={20} /> : <Icon size={18} className="shrink-0 text-ink-secondary" />}
               <div className="min-w-0 flex-1"><div className="truncate text-[13px] font-medium text-ink">{entry.name}</div>
-                <div className="break-all text-[12px] text-ink-secondary">{entry.origin || t("servers.localHint")}</div></div>
+                <div className="break-all text-[12px] text-ink-secondary">{entry.origin || t("servers.localHint")}</div>
+                <div data-server-kind={serverKind(entry)} className="mt-0.5 text-[11px] text-ink-secondary">{t(SERVER_KIND_LABEL[serverKind(entry)])}</div></div>
               {active ? <span className="flex shrink-0 items-center gap-1 text-[12px] text-ink-secondary"><Check size={13} />{t("servers.current")}</span> :
                 <button type="button" disabled={busy} aria-label={t("servers.switchTo", { name: entry.name })} onClick={() => void perform(async () => { await bridge.switch(entry.id); return true; })}
                   className="rounded-md px-2 py-1.5 text-[12px] text-ink hover:bg-control disabled:opacity-50">{t("servers.switch")}</button>}

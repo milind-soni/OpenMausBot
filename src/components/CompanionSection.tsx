@@ -167,14 +167,7 @@ export function CompanionSection({ profileEmail = "", focusRequest = 0 }: { prof
   const remoteBlocked = managedPolicy?.remoteAccess === false ? t("policy.remoteBlocked", { organization: managedPolicy.organizationName }) : null;
   const managedBy = managedPolicy?.remoteAccess === false ? t("policy.managedBy", { organization: managedPolicy.organizationName }) : null;
 
-  if (!companionBridge()) {
-    return (
-      <Card
-        title={t("remote.desktopOnly.title", { app: productName() })}
-        subtitle={t("remote.desktopOnly.subtitle")}
-      />
-    );
-  }
+  if (!companionBridge()) return null;
 
   if (!state) {
     return (

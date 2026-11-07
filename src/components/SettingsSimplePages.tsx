@@ -126,16 +126,18 @@ export function SimpleAiPage({ has, disclose, connections }: { has: Has; disclos
   );
 }
 
-export type RemoteAccessCards = Record<"client" | "domain" | "pairing" | "companion", ReactNode>;
+export type RemoteAccessCards = Record<"client" | "scope" | "domain" | "pairing" | "companion", ReactNode>;
 
 export function SimpleComputerPage({ has, remoteAccess, servers, disclose }: { has: Has; remoteAccess: RemoteAccessCards; servers: ReactNode; disclose: Disclose }) {
   return (
     <>
       {has("computer") && <SettingsGroup label={t("settings.simple.computer.bots")} block="computer"><AdminOnly><LocalComputerSection /></AdminOnly></SettingsGroup>}
       {has("companion") && (
-        <SettingsGroup label={t("settings.simple.computer.devices")} block="companion">
+        <SettingsGroup label={t("settings.section.companion")} block="companion">
+          {remoteAccess.scope}
           {remoteAccess.pairing}
           {remoteAccess.companion}
+          {remoteAccess.domain}
         </SettingsGroup>
       )}
       {has("computer") && (
@@ -146,9 +148,9 @@ export function SimpleComputerPage({ has, remoteAccess, servers, disclose }: { h
       )}
       {has("logins") && <div data-settings-block="logins" className="scroll-mt-4"><LoginsSettings /></div>}
       {(has("companion") || has("desktopWorkspaces")) && (
-        <SettingsDisclosureRow title={t("settings.simple.computer.elsewhere")} block="elsewhere" {...disclose("computer-elsewhere")}>
-          {has("companion") && <div data-settings-block="remote" className="flex scroll-mt-4 flex-col gap-4 empty:hidden">{remoteAccess.client}{remoteAccess.domain}</div>}
+        <SettingsDisclosureRow title={t("settings.section.desktopWorkspaces")} block="elsewhere" {...disclose("computer-elsewhere")}>
           {has("desktopWorkspaces") && <div data-settings-block="desktopWorkspaces" className="flex scroll-mt-4 flex-col gap-4">{servers}</div>}
+          {has("companion") && <div data-settings-block="remote" className="flex scroll-mt-4 flex-col gap-4 empty:hidden">{remoteAccess.client}</div>}
         </SettingsDisclosureRow>
       )}
     </>

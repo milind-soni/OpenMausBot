@@ -29,7 +29,7 @@ import { currentPhonePairingTarget, phonePairingSettingsAction } from "@/lib/pho
 import { CustomDomainSettings } from "./CustomDomainSettings";
 import { BuiltInBrowserRow, ServerSitesRow } from "./BrowserSettingsRows";
 import { LoginsSettings } from "./LoginsSettings";
-import { RemoteComputerSection } from "./RemoteComputerSection";
+import { RemoteAccessScope, RemoteComputerSection } from "./RemoteComputerSection";
 import { ConnectedWorkspacesSettings } from "./ConnectedWorkspacesSettings";
 import { PlaceLookCard } from "./PlaceLookCard";
 import { ChromeRailRow } from "./ChromeRailToggle";
@@ -95,7 +95,7 @@ export const SECTIONS: Array<{
   { id: "decisionModel", group: "ai", labelKey: "settings.section.decisionModel", icon: Zap, keywords: ["decision", "extraction", "jev", "typesafe", "cloudflare", "workers ai", "clef", "clairic", "email", "routing", "auto", "rooms", "who answers"] },
   { id: "imageGeneration", group: "ai", labelKey: "settings.section.imageGeneration", icon: ImagePlus, keywords: ["image", "images", "picture", "generate", "avatar", "gpt image", "grok imagine", "gemini", "nano banana", "openrouter", "flux", "backup"] },
   { id: "skills", group: "ai", labelKey: "settings.section.skills", icon: BookOpen, keywords: ["skills", "library", "assign", "agent skills", "skill md"] },
-  { id: "desktopWorkspaces", group: "computers", labelKey: "settings.section.desktopWorkspaces", icon: Building2, keywords: ["workspace", "cloud", "hosted", "vps", "server", "servers", "connect", "pair", "switch", "local"] },
+  { id: "desktopWorkspaces", group: "computers", labelKey: "settings.section.desktopWorkspaces", icon: Building2, keywords: ["workspace", "cloud", "hosted", "vps", "server", "servers", "connect", "pair", "switch", "local", "client", "companion", "another computer", "desktop companion"] },
   { id: "computer", group: "computers", labelKey: "settings.section.computer", icon: Monitor, keywords: ["vm", "virtual", "desktop", "browser", "built-in browser", "profiles", "browser profiles"] },
   { id: "logins", group: "computers", labelKey: "settings.section.logins", icon: LockKeyhole, keywords: ["logins", "login", "passwords", "password", "sign in", "2fa", "one-time code", "totp", "fill_login", "1password", "vault"] },
   { id: "cloudAccount", group: "account", labelKey: "settings.section.cloudAccount", icon: Cloud, keywords: ["cloud", "my cloud", "account", "personal", "sign in", "pro", "subscription", "billing", "sync", "send", "this computer", "bots", "logins", "1password"] },
@@ -184,7 +184,9 @@ export function SettingsModal() {
   const remoteActive = window.ogb?.remoteClient?.active === true;
   const requested = state.appSettingsSection;
   const section: AppSettingsSection =
-    (remoteActive && !["appearance", "desktopWorkspaces"].includes(requested)) || requested === "remote"
+    advanced && requested === "remote" && window.ogb?.environments
+      ? "desktopWorkspaces"
+      : (remoteActive && !["appearance", "desktopWorkspaces"].includes(requested)) || requested === "remote"
       ? "companion"
       : advanced && requested === "updates" ? "general" : requested;
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -314,7 +316,8 @@ export function SettingsModal() {
   const phoneFocus = state.appSettingsPhonePairing;
   const computerPairs = currentPhonePairingTarget(state.config?.cloudHome === true) === "computer";
   const remoteAccess = {
-    client: <RemoteComputerSection hideWhenUnavailable={!advanced} />,
+    client: <RemoteComputerSection />,
+    scope: <RemoteAccessScope />,
     domain: remoteActive ? null : <CustomDomainSettings />,
     // Security: the server decides who may pair (an owner or admin session), not this gate.
     pairing: <ServerPairingCard cloudHome={state.config?.cloudHome === true} focusRequest={computerPairs ? 0 : phoneFocus} team={state.config?.team?.name} teamPhoneBlocked={state.config?.managedPolicy?.remoteAccess === false ? t("policy.teamRemoteBlocked", { organization: state.config.managedPolicy.organizationName }) : null} simple={!advanced} />,
@@ -324,7 +327,7 @@ export function SettingsModal() {
   const renderSection = (id: AppSettingsSection) => {
     switch (id) {
       case "desktopWorkspaces":
-        return <ConnectedWorkspacesSettings />;
+        return <><ConnectedWorkspacesSettings />{remoteAccess.client}</>;
       case "organization":
         return window.ogb?.organization && !remoteActive ? <OrganizationSettings /> : null;
       case "cloudAccount":
@@ -409,7 +412,7 @@ export function SettingsModal() {
       case "backups": return <AdminOnly><WorkspaceBackupSettings /><CompanyBackupSettings /></AdminOnly>;
       case "import": return <AdminOnly><ImportSettings /></AdminOnly>;
       case "companion":
-        return <>{remoteAccess.client}{remoteAccess.domain}{remoteAccess.pairing}{remoteAccess.companion}</>;
+        return <>{remoteAccess.scope}{remoteAccess.pairing}{remoteAccess.companion}{remoteAccess.domain}{window.ogb?.environments ? null : remoteAccess.client}</>;
       case "computer":
         return <><BuiltInBrowserRow /><ServerSitesRow /><BrowserProfilesRow /><AdminOnly><LocalComputerSection /></AdminOnly></>;
       case "logins":
@@ -438,7 +441,7 @@ export function SettingsModal() {
         ? <SimpleLooksPage onBack={() => { setLooks(false); setReveal("appearance"); }} />
         : <SimpleGeneralPage has={has} peopleOpen={section === "people"} onLooks={() => setLooks(true)} />;
       case "ai": return <SimpleAiPage has={has} disclose={disclose} connections={renderSection("connections")} />;
-      case "computer": return <SimpleComputerPage has={has} remoteAccess={remoteAccess} servers={renderSection("desktopWorkspaces")} disclose={disclose} />;
+      case "computer": return <SimpleComputerPage has={has} remoteAccess={remoteAccess} servers={<ConnectedWorkspacesSettings />} disclose={disclose} />;
       case "billing": return <SimpleBillingPage has={has} disclose={disclose} cloudAccount={renderSection("cloudAccount")} />;
       case "updates": return <SimpleUpdatesPage remoteActive={remoteActive} />;
       default:

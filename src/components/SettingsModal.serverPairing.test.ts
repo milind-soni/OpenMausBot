@@ -15,7 +15,8 @@ vi.mock("@/state/store", async (importOriginal) => ({
   api: vi.fn(),
   useStore: () => ({ state: { appSettingsSection: fixture.section, config: fixture.config, appSettingsPhonePairing: fixture.phonePairing }, dispatch: vi.fn() }),
 }));
-vi.mock("./RemoteComputerSection", () => ({ RemoteComputerSection: () => null }));
+vi.mock("./RemoteComputerSection", () => ({ RemoteComputerSection: () => "OTHER_APP_CLIENT_CARD", RemoteAccessScope: () => "REMOTE_ACCESS_SCOPE" }));
+vi.mock("./ConnectedWorkspacesSettings", () => ({ ConnectedWorkspacesSettings: () => "SAVED_SERVERS" }));
 vi.mock("./CustomDomainSettings", () => ({ CustomDomainSettings: () => null }));
 vi.mock("./CompanionSection", () => ({ CompanionSection: ({ focusRequest }: { focusRequest?: number }) => `COMPANION_SECTION focus=${focusRequest ?? 0}` }));
 vi.mock("./ServerPairingCard", () => ({ ServerPairingCard: ({ cloudHome, focusRequest }: { cloudHome?: boolean; focusRequest?: number }) => `SERVER_PAIRING_CARD_MARKER${cloudHome ? " cloud" : ""} focus=${focusRequest ?? 0}` }));
@@ -93,5 +94,36 @@ describe("Settings → Remote access opened by Connect your phone", () => {
     const html = render();
     expect(html).toContain("COMPANION_SECTION focus=0");
     expect(html).toContain("SERVER_PAIRING_CARD_MARKER focus=0");
+  });
+});
+
+describe("Settings keeps this computer as a server apart from connecting to one", () => {
+  const desktop = { ogb: { companion: {}, environments: {}, remoteClient: { active: false } } };
+
+  it("Remote access holds who can reach this computer, never the cards that make it a client", () => {
+    vi.stubGlobal("window", desktop);
+    const html = render();
+    expect(html).toContain("REMOTE_ACCESS_SCOPE");
+    expect(html).toContain("SERVER_PAIRING_CARD_MARKER");
+    expect(html).toContain("COMPANION_SECTION");
+    expect(html).not.toContain("OTHER_APP_CLIENT_CARD");
+    expect(html).not.toContain("SAVED_SERVERS");
+  });
+
+  it("Servers holds the saved servers and the other desktop app, never this computer's remote access", () => {
+    vi.stubGlobal("window", desktop);
+    fixture.section = "desktopWorkspaces";
+    const html = render();
+    expect(html).toContain("SAVED_SERVERS");
+    expect(html).toContain("OTHER_APP_CLIENT_CARD");
+    expect(html.indexOf("SAVED_SERVERS")).toBeLessThan(html.indexOf("OTHER_APP_CLIENT_CARD"));
+    expect(html).not.toContain("COMPANION_SECTION");
+    expect(html).not.toContain("SERVER_PAIRING_CARD_MARKER");
+  });
+
+  it("a link to connect this app elsewhere opens Servers", () => {
+    vi.stubGlobal("window", desktop);
+    fixture.section = "remote";
+    expect(render()).toContain("SAVED_SERVERS");
   });
 });
