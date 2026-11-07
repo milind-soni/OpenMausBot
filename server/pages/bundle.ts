@@ -57,6 +57,10 @@ const containedBy = (root: string, candidate: string) => {
 const servable = (name: string) => PAGE_FILE_EXTENSIONS.has(extname(name).slice(1).toLowerCase());
 const isHtml = (name: string) => /^\.html?$/i.test(extname(name));
 const isVideo = (name: string) => /^\.(?:mp4|webm|mov)$/i.test(extname(name));
+/** A file or folder name a page can carry: a plain segment that does not end in a dot. */
+const pageName = (name: string) => SEGMENT.test(name) && !name.endsWith(".");
+/** A file a page carries: one it can serve, and with `videos`, a video. */
+const carried = (name: string, videos?: boolean) => servable(name) || Boolean(videos && isVideo(name));
 
 async function canonicalRoots(roots: readonly string[]): Promise<string[]> {
   const found = await Promise.all(roots.map(async (root) => {
@@ -117,18 +121,19 @@ export async function readPageBundle(requested: string, roots: readonly string[]
       if (inSecretFolder(full)) continue;
       const own = await lstat(full), path = relative(target, full).split(sep).join("/");
       if (name.startsWith(".")) { skipped.push({ path: own.isDirectory() ? `${path}/` : path, why: "hidden" }); continue; }
-      const real = own.isSymbolicLink() ? await realpath(full).catch(() => null) : full;
+      // Every entry is resolved, not only links: a folder on the way swapped for a link while it is read resolves outside.
+      const real = await realpath(full).catch(() => null);
       if (!real || !containedBy(root, real) || inSecretFolder(real)) { skipped.push({ path, why: "link" }); continue; }
       const entry = own.isSymbolicLink() ? await stat(real) : own;
       if (entry.isDirectory()) {
-        const why = SKIPPED_FOLDERS.has(name) ? "packages" : depth >= 9 ? "deep" : !SEGMENT.test(name) || name.endsWith(".") ? "name" : null;
+        const why = SKIPPED_FOLDERS.has(name) ? "packages" : depth >= 9 ? "deep" : !pageName(name) ? "name" : null;
         if (why) { skipped.push({ path: `${path}/`, why }); continue; }
         await walk(full, depth + 1);
         continue;
       }
       if (!entry.isFile()) continue;
-      if (!servable(name) && !(options.videos && isVideo(name))) { skipped.push({ path, why: isVideo(name) ? "video" : "type" }); continue; }
-      if (!SEGMENT.test(name) || name.endsWith(".")) { skipped.push({ path, why: "name" }); continue; }
+      if (!carried(name, options.videos)) { skipped.push({ path, why: isVideo(name) ? "video" : "type" }); continue; }
+      if (!pageName(name)) { skipped.push({ path, why: "name" }); continue; }
       if (isVideo(name)) {
         if (files.length + Object.keys(videos).length >= limits.files) throw new PageBundleError(`The folder has more than ${limits.files} files a page can hold. Publish a smaller folder.`, 413);
         const identity = await stat(real, { bigint: true });
@@ -201,8 +206,9 @@ export async function botFileSource(requested: string, folders: BotFolders): Pro
 
 /** A cheap fingerprint of a page's file or folder, by the same walk and filters as readPageBundle (hidden, secret, badly
  * named, unservable and linked-out files left out): each file's path, size and modified time. null when it is gone or no
- * longer at that real path. A live page re-reads its folder only when this changes. */
-export async function pageSignature(source: string, limit = PAGE_MAX_FILES * 4): Promise<string | null> {
+ * longer at that real path. Videos count only with `videos`, as only a chat page carries them. A live page re-reads its
+ * folder only when this changes. */
+export async function pageSignature(source: string, options: { videos?: boolean } = {}, limit = PAGE_MAX_FILES * 4): Promise<string | null> {
   // A folder swapped for a link to somewhere else is not the folder the page was read from.
   if (await realpath(source).catch(() => null) !== source) return null;
   const info = await stat(source).catch(() => null);
@@ -214,14 +220,14 @@ export async function pageSignature(source: string, limit = PAGE_MAX_FILES * 4):
     for (const name of (await readdir(folder).catch(() => [] as string[])).sort()) {
       if (parts.length >= limit) return;
       const full = join(folder, name);
-      if (name.startsWith(".") || !SEGMENT.test(name) || name.endsWith(".") || inSecretFolder(full)) continue;
+      if (name.startsWith(".") || !pageName(name) || inSecretFolder(full)) continue;
       const own = await lstat(full).catch(() => null);
       const real = own?.isSymbolicLink() ? await realpath(full).catch(() => null) : full;
       if (!own || !real || !containedBy(source, real) || inSecretFolder(real)) continue;
       const entry = own.isSymbolicLink() ? await stat(real).catch(() => null) : own;
       if (entry?.isDirectory()) {
         if (!SKIPPED_FOLDERS.has(name) && depth < 9) await walk(full, depth + 1);
-      } else if (entry?.isFile() && (servable(name) || isVideo(name))) {
+      } else if (entry?.isFile() && carried(name, options.videos)) {
         parts.push(`${relative(source, full)}:${entry.size}:${entry.mtimeMs}`);
       }
     }

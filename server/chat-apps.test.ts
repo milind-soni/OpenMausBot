@@ -13,9 +13,15 @@ import {
   showPublishedPage, withAppContext, type ChatApps,
 } from "./chat-apps.ts";
 import { folderPageCsp } from "../shared/app-frame/csp.ts";
-import { readPageBundle } from "./pages/bundle.ts";
+import { PageBundleError, readPageBundle } from "./pages/bundle.ts";
 import { createAgentCard, type AgentCardStore } from "./chat-widgets.ts";
 import type { Message, StoreChange } from "./store.ts";
+
+// The real reader, wrapped so a test can make one read fail or wait.
+vi.mock("./pages/bundle.ts", async (importOriginal) => {
+  const real = await importOriginal<typeof import("./pages/bundle.ts")>();
+  return { ...real, readPageBundle: vi.fn(real.readPageBundle) };
+});
 
 const THREAD = "thread-scout";
 const SCOUT = { id: "bot-scout", name: "Scout", color: "blue" as const };
@@ -769,6 +775,51 @@ describe("a live folder page", () => {
     busy = false;
     expect(await apps.refreshLive()).toBe(1);
     expect(row("m1").app).toMatchObject({ rev: 1 });
+  });
+
+  it("tries a folder again later when it was briefly not found, without another change", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { apps, dash, live, show, row } = liveSetup();
+      await show({ path: "dash", live: true });
+      live.mockReturnValue([{ threadId: THREAD, messageId: "m1" }]);
+      await apps.refreshLive();
+      writeFileSync(join(dash, "data.csv"), "day,sales\n1,14\n");
+      vi.mocked(readPageBundle).mockRejectedValueOnce(new PageBundleError("Nothing was found at dash.", 404));
+      expect(await apps.refreshLive()).toBe(0);
+      expect(await apps.refreshLive()).toBe(0);
+      vi.advanceTimersByTime(61_000);
+      expect(await apps.refreshLive()).toBe(1);
+      expect(row("m1").app).toMatchObject({ rev: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("writes nothing when a backup starts while its folder is read, and a backup waits for that read", async () => {
+    let busy = false;
+    const { apps, dash, live, show, row } = liveSetup(undefined, () => busy);
+    await show({ path: "dash", live: true });
+    live.mockReturnValue([{ threadId: THREAD, messageId: "m1" }]);
+    await apps.refreshLive();
+    writeFileSync(join(dash, "data.csv"), "day,sales\n1,15\n");
+    const read = vi.mocked(readPageBundle), actual = read.getMockImplementation()!;
+    let release: (() => void) | undefined;
+    read.mockImplementationOnce(async (...args) => { await new Promise<void>((done) => { release = done; }); return actual(...args); });
+    const running = apps.refreshLive();
+    let settled = false;
+    const settling = apps.settleLive().then(() => { settled = true; });
+    await vi.waitFor(() => expect(release).toBeDefined());
+    busy = true;
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    release!();
+    expect(await running).toBe(0);
+    await settling;
+    expect(settled).toBe(true);
+    expect(row("m1").app).toMatchObject({ rev: 0 });
+    busy = false;
+    expect(await apps.refreshLive()).toBe(1);
   });
 
   it("keeps the page it shows when there is no room for a new version, and tries again later", async () => {

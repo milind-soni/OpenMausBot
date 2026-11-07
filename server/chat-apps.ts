@@ -470,6 +470,8 @@ export interface ChatApps {
   sweep(): number;
   /** Re-reads each live page whose folder changed and replaces it in place; how many pages changed. */
   refreshLive(): Promise<number>;
+  /** Resolves once a live refresh under way is over: a backup waits for it before its snapshot. */
+  settleLive(): Promise<void>;
   close(): void;
 }
 
@@ -556,7 +558,7 @@ export function createChatApps(deps: {
       const retryLater = () => Object.assign(entry, { signature: undefined, retryAt: Date.now() + LIVE_RETRY_MS });
       try {
         // null too when the folder is no longer where the page was shown from (swapped for a link elsewhere).
-        const signature = await pageSignature(folder);
+        const signature = await pageSignature(folder, { videos: true });
         if (signature === null || signature === entry.signature) continue;
         // A half-written folder (no index.html yet, over a limit) is read again only on its next change.
         Object.assign(entry, { signature, retryAt: undefined });
@@ -567,15 +569,17 @@ export function createChatApps(deps: {
         if (!now?.app.live || now.app.doc !== row.app.doc) continue;
         const made = bundlePage(bundle, now.app.title);
         if (!made.ok) continue;
+        // A backup or restore began while the folder was read: nothing is written; the folder is read again after it.
+        if (deps.paused?.()) { entry.signature = undefined; break; }
         // No room for the new version: the card keeps the one it shows, and the folder is tried again later.
         if (!storePage(docs, made.page).ok) { retryLater(); continue; }
         const patched = replacePage(deps.store, docs, entry.threadId, now, made);
         if (patched && patched.app?.rev !== now.app.rev) changed++;
       } catch (error) {
-        if (error instanceof PageBundleError) continue;
-        // Anything else (a folder briefly unreadable) is tried again later, changed or not.
+        // A folder that can't make a page waits for its next change; one briefly not found or unreadable is tried again later.
+        if (error instanceof PageBundleError && error.status !== 404) continue;
         retryLater();
-        if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") console.error("chat apps: live page refresh failed", error);
+        if (!(error instanceof PageBundleError) && (error as NodeJS.ErrnoException)?.code !== "ENOENT") console.error("chat apps: live page refresh failed", error);
       }
     }
     // The versions a live page replaced are cleared once they are past the sweep's grace.
@@ -601,6 +605,7 @@ export function createChatApps(deps: {
     withAppContext: (text, threadId) => withAppContext(deps.store, text, threadId),
     sweep,
     refreshLive,
+    settleLive: async () => { await refreshing?.catch(() => {}); },
     close() {
       unsubscribe?.();
       if (liveTimer) clearInterval(liveTimer);
