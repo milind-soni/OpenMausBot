@@ -375,3 +375,53 @@ describe("page tools", () => {
       { path: "/api/internal/pages/unpublish", body: { page_id: "abcdefghijklmnopqrstuvwxyz" } }]);
   });
 });
+
+describe("blank optional arguments", () => {
+  it("drops blank session_search ids, so a blank-filled search stays a search", async () => {
+    const paths: string[] = [];
+    const result = await callTool("session_search", { query: "launch post", thread_id: "", message_id: "  " }, context({
+      client: {
+        api: async (path) => {
+          paths.push(path);
+          return { hits: [] };
+        },
+        apiResponse: async () => ({ ok: true, status: 200, body: {} }),
+      },
+    }));
+    expect(result.isError).toBeFalsy();
+    expect(result.text).toContain('Nothing of yours matches "launch post"');
+    expect(paths).toEqual(["/api/internal/session-search?fromBotId=bot-voice&fromThreadId=thread-voice&q=launch+post"]);
+  });
+
+  it("drops a blank jsx from show_html, so the html page is shown", async () => {
+    const calls: Array<{ path: string; body: unknown }> = [];
+    const result = await callTool("show_html", { html: "<p>hi</p>", jsx: "", title: "Hi" }, context({
+      client: {
+        api: async () => ({}),
+        apiResponse: async (path, init) => {
+          calls.push({ path, body: JSON.parse(String(init?.body)) });
+          return { ok: true, status: 201, body: { messageId: "m9" } };
+        },
+      },
+    }));
+    expect(result).toEqual({ text: "Shown as app m9. To change it, call show_html again with app_id \"m9\"." });
+    expect(calls).toEqual([{ path: "/api/internal/options-card", body: { tool: "show_html", html: "<p>hi</p>", title: "Hi" } }]);
+  });
+
+  it("keeps a blank manage_room bulletin, which clears the bulletin", async () => {
+    const calls: Array<{ path: string; body: any }> = [];
+    const result = await callTool("manage_room", { action: "set_bulletin", room_id: "room-1", bulletin: "" }, context({
+      client: {
+        api: async (path, init) => {
+          calls.push({ path, body: JSON.parse(String(init?.body)) });
+          return { message: "Cleared the bulletin." };
+        },
+        apiResponse: async () => ({ ok: true, status: 200, body: {} }),
+      },
+    }));
+    expect(result).toEqual({ text: "Cleared the bulletin." });
+    expect(calls).toEqual([
+      { path: "/api/internal/manage-room", body: { fromBotId: "bot-voice", fromThreadId: "thread-voice", roomId: "room-1", action: "set_bulletin", bulletin: "" } },
+    ]);
+  });
+});
