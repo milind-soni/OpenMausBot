@@ -49,5 +49,8 @@ describe("cron words on a routine request", () => {
   it("uses Traditional Chinese weekday names for zh-TW", () => {
     const schedule = { type: "cron" as const, expression: "0 9 * * 1", timeZone: "UTC" };
     expect(routineCronText(schedule, "zh-tw")).toContain("星期一");
+    const yearly = routineCronText({ type: "cron" as const, expression: "0 9 1 3 *", timeZone: "UTC" }, "zh-tw");
+    expect(yearly).toContain("3月");
+    expect(yearly).not.toContain("March");
   });
 });
