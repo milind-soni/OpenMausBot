@@ -40,7 +40,7 @@ function chain(target: string): Step[] {
   if (!stage) throw new Error(`the Dockerfile has no ${target} stage`);
   return [...(all.some(s => s.name === stage.from) ? chain(stage.from) : []), ...stage.steps];
 }
-const shipped = () => all.filter(s => s.name !== "build" && s.name !== "edge").flatMap(s => s.steps);
+const shipped = () => all.filter(s => s.name !== "build" && s.name !== "edge" && s.name !== "tunnel").flatMap(s => s.steps);
 const npmInstall = (step: Step) => step.op === "RUN" && /\bnpm install\b/.test(step.args);
 const browserRun = () => chain("runtime").find(step => step.op === "RUN" && step.args.includes("agent-browser install"))!;
 const grokRun = (steps: Step[]) => steps.findIndex(step => step.op === "RUN" && step.args.includes("https://x.ai/cli/install.sh"));
@@ -65,7 +65,7 @@ describe("container images", () => {
     for (const target of ["server", "cloud-home"]) {
       const steps = chain(target);
       const heavy = steps.flatMap((step, i) => (npmInstall(step) ? [i] : []));
-      const app = steps.flatMap((step, i) => (step.op === "COPY" && !step.args.includes("--from=edge") ? [i] : []));
+      const app = steps.flatMap((step, i) => (step.op === "COPY" && !/--from=(?:edge|tunnel) /.test(step.args) ? [i] : []));
       // agent-browser + Chrome, then (Cloud home only) pnpm in the tools layer, then the engines, then the app files
       // (and the Cloud home's Caddyfile)
       expect(heavy, target).toHaveLength(target === "cloud-home" ? 3 : 2);
@@ -106,6 +106,12 @@ describe("container images", () => {
     // pinned, so beneath the engines: an engine release does not re-pull it
     expect(home.findIndex(step => step.args.startsWith("--from=edge "))).toBeLessThan(home.findLastIndex(npmInstall));
     expect(home.filter(step => step.op === "RUN" && /\b(cp|mv)\b[^&]*caddy/.test(step.args))).toEqual([]);
+    // The tunnel's connector: the release scripts/prepare-cloudflared.mjs pins and checks, once, beneath the engines.
+    expect(all.find(s => s.name === "tunnel")!.steps.find(step => step.op === "RUN")!.args).toMatch(/^node \/stage\/prepare-cloudflared\.mjs --current --root \/stage /);
+    expect(home.filter(step => step.args.includes("/usr/local/bin/cloudflared") && step.op === "COPY")).toEqual([
+      { op: "COPY", args: "--from=tunnel /cloudflared /usr/local/bin/cloudflared" },
+    ]);
+    expect(home.findIndex(step => step.args.startsWith("--from=tunnel "))).toBeLessThan(home.findLastIndex(npmInstall));
     expect(home.filter(step => step.args.includes("--from=build")).map(step => step.args)).toEqual([
       "/src/dist-native/duckdb/target ./duckdb", "/src/dist-server ./dist-server", "/src/dist ./dist", "/src/skills ./skills",
     ].map(path => `--from=build ${path}`));

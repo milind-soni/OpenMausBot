@@ -441,7 +441,7 @@ test("the Server menu opens My Cloud through the Cloud's own connection, never a
     openCloudSettings: async () => { calls.push("settings"); },
     persistEnvironments: next => { calls.push(`active:${next.activeId}`); context.environmentsState = next; }, withActive: environments.withActive,
     navigateMainWindow: url => calls.push(`navigate:${url}`), activeOrigin: () => context.environmentsState.environments.find(e => e.id === context.environmentsState.activeId)?.origin,
-    homeWindow: { cloudOrigin: () => null, asking: () => false, cancel: () => {} }, showHome: async (options) => { calls.push(options ? `home:${JSON.stringify(options)}` : "home"); },
+    homeWindow: { cloudOrigin: () => null, asking: () => false, cancel: () => {} }, cleanWorkspace: { profile: () => null }, showHome: async (options) => { calls.push(options ? `home:${JSON.stringify(options)}` : "home"); },
     homePlaces: { remember: (place) => calls.push(`remember:${JSON.stringify(place)}`) },
     runningDataDir: "/data", desktopDataDir: () => "/data",
     handSaved, serverOpens: async (place) => { calls.push(`look:${place.id}`); return answers; }, session: { defaultSession: { fetch: async () => null } }, dialog: {},

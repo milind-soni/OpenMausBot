@@ -63,7 +63,7 @@ import { parseProtocolAskQuestions, questionChoices } from "../../shared/ask-que
 import { codexQuestionReply, openAsyncQuestion, type CodexAsk } from "./codex-questions.ts";
 import { codexReleaseUpdate, codexUpdateCommand } from "./codex-update.ts";
 export { codexUpdateCommand };
-import { effectiveApprovalPolicy, effectiveApprovalsReviewer } from "./codex-approval-config.ts"; import { AGENTS_TOOL_TIMEOUT_SECONDS } from "./agents-tool-limit.ts";
+import { effectiveApprovalPolicy, effectiveApprovalsReviewer } from "./codex-approval-config.ts"; import { AGENTS_TOOL_TIMEOUT_SECONDS } from "./agents-tool-limit.ts"; import { COMPUTER_PROXY_TIMEOUT_MS } from "../harness-budget.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
 import { appMountFor, gateServer, mcpStdioServer } from "../mcp-gate-config.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
@@ -618,12 +618,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           mountSelected("agents", "agents", turn.integrations.agents, "approve"); if (selectedMcp.has("agents")) appServerArgs.push("-c", `mcp_servers.agents.tool_timeout_sec=${AGENTS_TOOL_TIMEOUT_SECONDS}`);
         }
         if (turn.integrations?.localComputer) {
-          mountSelected("computer", "computer", turn.integrations.localComputer);
+          mountSelected("computer", "computer", turn.integrations.localComputer); if (selectedMcp.has("computer")) appServerArgs.push("-c", `mcp_servers.computer.tool_timeout_sec=${COMPUTER_PROXY_TIMEOUT_MS / 1_000 + 10}`);
         }
         if (turn.integrations?.browser) {
           mountSelected("browser", "browser", turn.integrations.browser);
         }
-        for (const name of ["data", "highlevel", "email", "device"] as const) if (turn.integrations?.[name]) mountSelected(name, name, turn.integrations[name]);
+        for (const name of ["data", "email", "device"] as const) if (turn.integrations?.[name]) mountSelected(name, name, turn.integrations[name]);
         // A `-c` override merges with a same-named server in config.toml, and stdio over url is
         // "invalid configuration" that kills the turn, so such a server mounts under its own name.
         const codexConfig = codexConfigMcp(env), declaredInCodexConfig = codexConfig.names;
@@ -1684,7 +1684,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       customMcp: true,
         phoneMcp: true,
         browserMcp: true,
-        dataMcp: true, highlevelMcp: true, deviceMcp: true,
+        dataMcp: true, emailMcp: true, deviceMcp: true,
         images: true,
         nativeImageInput: true,
         effortLevels: ["low", "medium", "high", "xhigh", "max"],

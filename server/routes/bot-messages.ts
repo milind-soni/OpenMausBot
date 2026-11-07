@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 
+import { ROOM_VIEW_ONLY } from "../../shared/app.ts";
 import { approvalModeFor } from "../../shared/approval-mode.ts";
 import { isPersistentQuestionCard } from "../../shared/ask-question.ts";
 import { normalizeReaction, reactionAnswer } from "../../shared/reactions.ts";
@@ -225,6 +226,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         return json(res, 400, { error: "threadId must be a task id" });
       }
       const threadId = body.threadId ?? bot.threadId;
+      if ((pressed || fromAnApp) && store.groupByThread(threadId)) return json(res, 409, { error: ROOM_VIEW_ONLY });
       const notYours = cloudGuestSendRefusal(auth, threadId);
       if (notYours) return json(res, 403, { error: notYours });
       if (body.mode !== undefined && body.mode !== "chat" && body.mode !== "goal") return json(res, 400, { error: "mode must be chat or goal" });

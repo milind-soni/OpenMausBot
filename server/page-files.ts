@@ -2,7 +2,9 @@
 // sign-in, so the route answers before the sign-in gate, and the token is the whole of its authority:
 //
 // - a token is made only for a document the person was allowed to fetch, names that one document (one version of one
-//   page in one conversation), and is forgotten after a day unused;
+//   page in one conversation), and is that person's own: it answers only while they may still see that conversation and
+//   the page is still in it, so someone who leaves a room, or loses sight of a bot, loses its files too. It is forgotten
+//   after a day unused;
 // - only the files stored with that document are served, by their exact path. The one exception is a video the document
 //   recorded when it was shown: it stays in the bot's folder, and is served only while the file that was checked then
 //   is still the file on disk, compared on the open handle;
@@ -46,6 +48,12 @@ export interface PageFilesTarget {
   doc: string;
 }
 
+/** Who a token is for: `key` names them, and `allowed()` is asked again on every file. */
+export interface PageFilesViewer {
+  key: string;
+  allowed(): boolean;
+}
+
 /** A path inside the folder, as stored: segments of the folder's own names, never "." or "..", no backslash or NUL.
  * null for anything else. */
 export function pageFilePath(raw: string): string | null {
@@ -80,9 +88,9 @@ async function openRecordedVideo(video: PageVideo): Promise<FileHandle | null> {
 
 export function createPageFiles(deps: { docs: AppDocs; now?: () => number }) {
   const now = deps.now ?? Date.now;
-  const tokens = new Map<string, PageFilesTarget & { used: number }>();
+  const tokens = new Map<string, PageFilesTarget & { viewer: string; allowed?: () => boolean; used: number }>();
   const byTarget = new Map<string, string>();
-  const keyOf = (target: PageFilesTarget) => `${target.threadId}\n${target.messageId}\n${target.doc}`;
+  const keyOf = (target: PageFilesTarget & { viewer: string }) => `${target.threadId}\n${target.messageId}\n${target.doc}\n${target.viewer}`;
   const forget = (token: string) => {
     const known = tokens.get(token);
     tokens.delete(token);
@@ -116,17 +124,18 @@ export function createPageFiles(deps: { docs: AppDocs; now?: () => number }) {
   };
 
   return {
-    /** The folder URL path a document's files load from: the same token while it is in use. */
-    folder(target: PageFilesTarget): string {
+    /** The folder URL path a document's files load from for this viewer: the same token while it is in use. */
+    folder(target: PageFilesTarget, viewer?: PageFilesViewer): string {
       const at = now();
       for (const [token, known] of tokens) if (at - known.used > DAY_MS) forget(token);
-      let token = byTarget.get(keyOf(target));
+      const entry = { threadId: target.threadId, messageId: target.messageId, doc: target.doc, viewer: viewer?.key ?? "", ...(viewer ? { allowed: viewer.allowed } : {}) };
+      let token = byTarget.get(keyOf(entry));
       if (!token) {
         while (tokens.size >= MAX_TOKENS) forget(tokens.keys().next().value!);
         token = randomBytes(32).toString("base64url");
-        byTarget.set(keyOf(target), token);
+        byTarget.set(keyOf(entry), token);
       }
-      tokens.set(token, { ...target, used: at });
+      tokens.set(token, { ...entry, used: at });
       return `${PAGE_FILES_PREFIX}${token}/`;
     },
 
@@ -146,7 +155,7 @@ export function createPageFiles(deps: { docs: AppDocs; now?: () => number }) {
         return true;
       }
       const target = TOKEN.test(token) ? tokens.get(token) : undefined;
-      if (!target || now() - target.used > DAY_MS || slash === -1) {
+      if (!target || now() - target.used > DAY_MS || slash === -1 || (target.allowed && !target.allowed())) {
         answer(res, 404, "Not found.");
         return true;
       }

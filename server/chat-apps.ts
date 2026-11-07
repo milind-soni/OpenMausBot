@@ -5,20 +5,20 @@ import {
   type AppCan, type AppDocument, type AppPayload,
 } from "../shared/app.ts";
 import { BOT_HTML_NETWORK } from "../shared/app-frame/csp.ts";
-import { botHtmlDocument, mcpAppDocument, publishedBotHtml } from "../shared/app-frame/document.ts";
+import { botHtmlDocument, mcpAppDocument, publishedBotHtml, ROOM_CAN } from "../shared/app-frame/document.ts";
 import { jsxPublishedHtml } from "../shared/app-frame/jsx-page.ts";
 import { AppDocs, type AppDocData, type AppDocPut } from "./app-docs.ts";
-import type { AgentCardResult, AgentCardStore } from "./chat-widgets.ts";
+import { speakerIn, type AgentCardResult, type AgentCardStore } from "./chat-widgets.ts";
 import { compileJsxPage } from "./jsx-compile.ts";
 import { appDocRefs } from "./message-db.ts";
-import { createPageFiles } from "./page-files.ts";
+import { createPageFiles, type PageFilesViewer } from "./page-files.ts";
 import { PageBundleError, readBotPageBundle, skippedNote, type BotFolders, type PageBundle, type PageFile } from "./pages/bundle.ts";
 import { redactSecretsInText } from "./redact.ts";
 import type { Message, StoreChange } from "./store.ts";
 import { userError, type UserError } from "./user-errors.ts";
 import type { PublishedPageCard as PublishedPage } from "../shared/published-page.ts";
+import type { MausColor } from "../shared/wire.ts";
 
-const ROOM_REFUSAL = "Pages are not available in rooms yet. Answer in text.";
 const NO_SUCH_PAGE = "No page with that id in this conversation.";
 const NOT_A_PAGE = "That app came from an MCP server, not from show_html; it cannot be replaced. Show a new page instead.";
 
@@ -102,7 +102,7 @@ const pageFallback = (title: string, page: PageText, given?: string) =>
 export function createAppCard(args: {
   store: AgentCardStore;
   docs: AppDocs;
-  bot: { id: string; name: string };
+  bot: { id: string; name: string; color: MausColor };
   threadId: string;
   input: Record<string, unknown>;
   authored?(messageId: string): void;
@@ -112,7 +112,6 @@ export function createAppCard(args: {
   if (input.tool !== "show_html" && input.tool !== "update_html") {
     return { ok: false, status: 400, error: "tool: must be show_html or update_html." };
   }
-  if (store.groupByThread(threadId)) return { ok: false, status: 409, error: ROOM_REFUSAL };
   const parsed = input.tool === "show_html" ? parseShowHtmlInput(input) : parseUpdateHtmlInput(input);
   if (!parsed.ok) return { ok: false, status: 400, error: parsed.error };
   const existing = "appId" in parsed.value ? appRow(store, threadId, parsed.value.appId) : undefined;
@@ -127,7 +126,7 @@ export function createAppCard(args: {
 }
 
 function placePage(
-  args: { store: AgentCardStore; docs: AppDocs; bot: { id: string }; threadId: string; authored?(messageId: string): void },
+  args: { store: AgentCardStore; docs: AppDocs; bot: { id: string; name: string; color: MausColor }; threadId: string; authored?(messageId: string): void },
   value: { appId?: string; height?: number; fallbackText?: string; frameless?: boolean },
   made: MadePage,
 ): AgentCardResult {
@@ -144,8 +143,7 @@ function placePage(
       network: { connect: [...BOT_HTML_NETWORK.connect], resources: [...BOT_HTML_NETWORK.resources] },
       ...(stored.ok ? {} : { blocked: "too-large" as const }),
     };
-    // No `from`: in a direct thread a bot-authored row carrying one is replayed as another bot's line.
-    const message = store.appendMessage(threadId, { role: "bot", kind: "app", text: pageFallback(made.title, page, value.fallbackText), app: payload });
+    const message = store.appendMessage(threadId, { role: "bot", kind: "app", text: pageFallback(made.title, page, value.fallbackText), app: payload, ...speakerIn(store, threadId, bot) });
     args.authored?.(message.id);
     return { ok: true, messageId: message.id, ...(made.masked ? { masked: true as const } : {}), ...(made.leftOut ? { leftOut: made.leftOut } : {}) };
   }
@@ -202,7 +200,7 @@ export function pageVersion(app: AppPayload, rev?: number): { doc: string; rev: 
 }
 
 export function appDocument(args: {
-  store: Pick<AgentCardStore, "messagesFor">;
+  store: Pick<AgentCardStore, "messagesFor" | "groupByThread">;
   docs: AppDocs;
   threadId: string;
   messageId: string;
@@ -219,14 +217,15 @@ export function appDocument(args: {
   const stored = args.docs.read(version.doc);
   if (!stored || stored.source !== row.app.source) return null;
   const rev = version.rev;
+  const room = Boolean(args.store.groupByThread(args.threadId));
   if (stored.source === "html") {
     const files = stored.data?.folder && args.files
       ? `${args.files.origin}${args.files.folder({ threadId: args.threadId, messageId: row.id, doc: version.doc })}` : undefined;
     return botHtmlDocument({ messageId: row.id, rev, html: stored.html, title: row.app.title,
-      ...(stored.data?.format === "jsx" ? { format: "jsx" as const } : {}), ...(files ? { files } : {}) });
+      ...(stored.data?.format === "jsx" ? { format: "jsx" as const } : {}), ...(files ? { files } : {}), ...(room ? { room } : {}) });
   }
   if (!stored.data?.tool) return null;
-  const access = (args.mcpAccess ?? MCP_READ_ONLY)(row, args.threadId);
+  const access: ReturnType<McpAppAccess> = room ? { can: ROOM_CAN } : (args.mcpAccess ?? MCP_READ_ONLY)(row, args.threadId);
   return mcpAppDocument({
     messageId: row.id, rev, html: stored.html,
     network: { connect: stored.data.network?.connect ?? [], resources: stored.data.network?.resources ?? [] },
@@ -235,6 +234,7 @@ export function appDocument(args: {
     ...(stored.data.toolResult ? { toolResult: stored.data.toolResult } : {}),
     can: access.can,
     ...(access.blocked ? { blocked: access.blocked } : {}),
+    ...(room ? { room } : {}),
   });
 }
 
@@ -267,18 +267,19 @@ export function publishablePage(args: { store: Pick<AgentCardStore, "messagesFor
   return { ok: true, title, files, rev: version.rev, ...(stored.data?.folder ? { folder: stored.data.folder } : {}) };
 }
 
-/** Where publish_page's page shows in its conversation: the inline card of a page already shown from the same file or
- * folder gains the new version and the link, or a new card holds both. null when a card can't hold it (a room, or a
+/** Where publish_page's page shows in its conversation: the inline card of a page the same bot already showed from the
+ * same file or folder gains the new version and the link, or a new card holds both. null when a card can't hold it (a
  * page with nothing to preview); the caller then posts the plain link. */
 export function showPublishedPage(args: {
-  store: AgentCardStore; docs: AppDocs; threadId: string; card: PublishedPage; bundle: PageBundle;
+  store: AgentCardStore; docs: AppDocs; threadId: string; card: PublishedPage; bundle: PageBundle; bot: { id: string; name: string; color: MausColor };
 }): string | null {
   const { store, docs, threadId, card, bundle } = args;
-  if (store.groupByThread(threadId) || card.state !== "live") return null;
+  if (card.state !== "live") return null;
   const made = bundlePage(bundle, card.title);
   if (!made.ok) return null;
+  const speaker = speakerIn(store, threadId, args.bot);
   const shown = store.messagesFor(threadId).filter((message): message is Message & { app: AppPayload } =>
-    message.kind === "app" && isRecord(message.app) && message.app.source === "html" && !message.from)
+    message.kind === "app" && isRecord(message.app) && message.app.source === "html" && message.from?.botId === speaker.from?.botId)
     .reverse().find((message) => message.app.doc && docs.read(message.app.doc)?.data?.folder === bundle.source);
   if (shown) {
     const videos = docs.read(shown.app.doc)?.data?.videos;
@@ -292,7 +293,7 @@ export function showPublishedPage(args: {
     v: 1, source: "html", title: made.title, doc: stored.doc, rev: 0, bytes: pageBytes(made.page), border: true,
     network: { connect: [...BOT_HTML_NETWORK.connect], resources: [...BOT_HTML_NETWORK.resources] },
   };
-  return store.appendMessage(threadId, { role: "bot", kind: "app", text: pageFallback(made.title, made.page), app: payload, publishedPage: card }).id;
+  return store.appendMessage(threadId, { role: "bot", kind: "app", text: pageFallback(made.title, made.page), app: payload, publishedPage: card, ...speaker }).id;
 }
 
 export type AppRouteResult = { ok: true } | { ok: false; status: 400 | 404 | 409 | 429; error: string };
@@ -445,12 +446,13 @@ export function rowRate(limit: number, windowMs: number): { take(key: string, no
 export interface ChatApps {
   readonly docs: AppDocs;
   createAppCard(args: {
-    bot: { id: string; name: string }; threadId: string; input: Record<string, unknown>; authored?(messageId: string): void; folders?: BotFolders;
+    bot: { id: string; name: string; color: MausColor }; threadId: string; input: Record<string, unknown>; authored?(messageId: string): void; folders?: BotFolders;
   }): AgentCardResult | Promise<AgentCardResult>;
-  /** `origin`: the web origin the client reaches this app at, which a folder page's files load from. */
-  appDocument(threadId: string, messageId: string, rev?: number, origin?: string): AppDocument | null;
+  /** `origin`: the web origin the client reaches this app at, which a folder page's files load from. `viewer`: who asked,
+   * whose own token those files load with. */
+  appDocument(threadId: string, messageId: string, rev?: number, origin?: string, viewer?: PageFilesViewer): AppDocument | null;
   publishablePage(threadId: string, messageId: string, rev?: number): PublishablePage;
-  showPublishedPage(args: { threadId: string; card: PublishedPage; bundle: PageBundle }): string | null;
+  showPublishedPage(args: { threadId: string; card: PublishedPage; bundle: PageBundle; bot: { id: string; name: string; color: MausColor } }): string | null;
   /** The folder pages' files route, ahead of the sign-in gate: true when the request was its own. */
   serveFile(req: IncomingMessage, res: ServerResponse, path: string, method: string): boolean;
   setAppContext(args: { threadId: string; messageId: string; content?: unknown; structuredContent?: unknown }): AppRouteResult;
@@ -491,11 +493,16 @@ export function createChatApps(deps: {
   });
   if (deps.sweeps !== false) later(30_000);
   const files = createPageFiles({ docs });
+  const stillShown = (target: { threadId: string; messageId: string; doc: string }) => {
+    const row = appRow(deps.store, target.threadId, target.messageId);
+    return Boolean(row && (row.app.doc === target.doc || row.app.history?.includes(target.doc)));
+  };
   const apps: ChatApps = {
     docs,
     createAppCard: (args) => createAppCard({ ...args, store: deps.store, docs }),
-    appDocument: (threadId, messageId, rev, origin) => appDocument({ store: deps.store, docs, threadId, messageId, ...(rev !== undefined ? { rev } : {}),
-      ...(apps.mcpAccess ? { mcpAccess: apps.mcpAccess } : {}), ...(origin ? { files: { origin, folder: files.folder } } : {}) }),
+    appDocument: (threadId, messageId, rev, origin, viewer) => appDocument({ store: deps.store, docs, threadId, messageId, ...(rev !== undefined ? { rev } : {}),
+      ...(apps.mcpAccess ? { mcpAccess: apps.mcpAccess } : {}),
+      ...(origin ? { files: { origin, folder: (target) => files.folder(target, { key: viewer?.key ?? "", allowed: () => stillShown(target) && (viewer?.allowed() ?? true) }) } } : {}) }),
     publishablePage: (threadId, messageId, rev) => publishablePage({ store: deps.store, docs, threadId, messageId, ...(rev !== undefined ? { rev } : {}) }),
     showPublishedPage: (args) => showPublishedPage({ ...args, store: deps.store, docs }),
     serveFile: (req, res, path, method) => files.serve(req, res, path, method),

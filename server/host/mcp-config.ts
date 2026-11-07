@@ -35,6 +35,8 @@ export interface McpConfigDeps {
   botsPath?(): BrokerPath | null;
   /** How Test starts a command server when no bot asks: as the turns of its bot, or of any bot (server/mcp-probe.ts `asBot`). */
   probeAs?(server: { bot?: string }): NonNullable<McpProbeOptions["asBot"]>;
+  /** Test for a server that runs on another computer: on that computer, through lending, for whoever tests (`lender`). */
+  testElsewhere?(name: string, server: StoredMcpServer & { runsOn: McpRunsOn }, lender: string | null, signal: AbortSignal): Promise<McpConfigResult>;
 }
 
 export type McpConfigRefusal = { status: number; error: string; code?: string } & Partial<Pick<UserError, "errorKey" | "errorParams">>;
@@ -57,6 +59,8 @@ export interface McpConfig {
     signal: AbortSignal;
     /** A person's own connection, asked for only when the server is theirs; null when there is no one to answer for it. */
     person?: (url: string) => { oauth: McpOAuthManager; key?: { header: string; value: string } } | null;
+    /** Whose lent computers a server that runs elsewhere is tested on; null or absent: nobody's. */
+    lender?: string | null;
   }): Promise<McpConfigResult>;
   /** The one flag every writer of `cfg.mcpServers` takes: two writers must not interleave a read with a save. */
   busy: BusyFlag;
@@ -225,12 +229,13 @@ export function createMcpConfig(deps: McpConfigDeps & { changed(): void }): McpC
       deps.connectionsChanged?.("removed");
       return saved(200);
     }),
-    test: async (name, { signal, person, asBot }) => {
+    test: async (name, { signal, person, asBot, lender }) => {
       const raw = cfg.mcpServers?.[name];
       if (raw === undefined) return { status: 404, error: "MCP server not found." };
       const parsed = parseStoredMcpServer(name, raw);
       if (!parsed.ok) return { status: 400, error: parsed.error };
-      if (parsed.server.runsOn) return { status: 409, error: runsElsewhere(parsed.server.runsOn) };
+      const { runsOn } = parsed.server;
+      if (runsOn) return deps.testElsewhere ? deps.testElsewhere(name, { ...parsed.server, runsOn }, lender ?? null, signal) : { status: 409, error: runsElsewhere(runsOn) };
       if (mcpProbesInFlight >= MAX_CONCURRENT_MCP_PROBES) {
         return { status: 429, error: "Two MCP connection tests are already running." };
       }

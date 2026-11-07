@@ -39,6 +39,8 @@ describe("a cloud computer starts only when the bot uses it", () => {
    * hours are used up. */
   const refuse = { creates: false };
   const requests: Request[] = [];
+  /** Files the bots wrote on their computers, by path. */
+  const written = new Map<string, string>();
   /** Boat ids in Boat's own alphabet, one per computer created. */
   const boxId = (n: number) => `bx_${"23456789abcdefgh"[n]}3456789`;
 
@@ -134,6 +136,15 @@ describe("a cloud computer starts only when the bot uses it", () => {
         // Every request is counted, a stray own-key one included.
         const path = url.pathname.replace(/^\/relay\/api\/box\/v1/, "");
         requests.push({ method: req.method ?? "GET", path });
+        // The computer's own transfer links: no key, the file's path in the link.
+        const linked = /^\/sandbox\/(get|put)\/([^/]+)$/.exec(url.pathname);
+        if (linked) {
+          if (req.headers.authorization) return send(400, { ok: false, message: "a transfer link takes no key" });
+          const file = Buffer.from(linked[2]!, "base64url").toString("utf8");
+          if (linked[1] === "put") { written.set(file, raw); res.writeHead(200); return res.end(); }
+          res.writeHead(200, { "content-type": "application/octet-stream", "content-length": String(FRAME.length) });
+          return res.end(FRAME);
+        }
         if (req.headers.authorization !== `Bearer ${INCLUDED}` || !url.pathname.startsWith("/relay/api/box/v1")) {
           return send(401, { ok: false, code: "unauthorized", message: "Unauthorized" });
         }
@@ -166,6 +177,11 @@ describe("a cloud computer starts only when the bot uses it", () => {
         }
         if (verb === "desktop" && req.method === "POST") return send(200, { desktopUrl: `https://desktop.invalid/${row.id}` });
         if (verb === "commands" && req.method === "POST") return send(200, { exitCode: 0, stdout: "captured", stderr: "" });
+        if ((verb === "files/download-url" || verb === "files/upload-url") && req.method === "POST") {
+          const get = verb === "files/download-url";
+          return send(200, { ok: true, url: `http://${req.headers.host}/sandbox/${get ? "get" : "put"}/${Buffer.from(body.path).toString("base64url")}`,
+            method: get ? "GET" : "PUT", path: body.path, expiresAt: new Date(Date.now() + 300_000).toISOString() });
+        }
         if (verb === "artifacts" && req.method === "GET") {
           res.writeHead(200, { "content-type": "image/jpeg", "content-length": String(FRAME.length) });
           return res.end(FRAME);
@@ -458,5 +474,35 @@ describe("a cloud computer starts only when the bot uses it", () => {
     } finally {
       refuse.creates = false;
     }
+  }, 60_000);
+
+  it("copies files between the cloud computer and the folder the turn works in, in a chat and in a room", async () => {
+    const bot = await cloudBot("Copier");
+    const sent = await startTurn(bot.id, "Bring the results back");
+    const call = (turn: any, name: string, args: unknown) => computerCall(turn, "tools/call", { name, arguments: args });
+    const brought = await call(sent, "copy_from_computer", { path: "/home/user/out/frame.jpg", to: "results/frame.jpg" });
+    expect(brought.body.result, JSON.stringify(brought.body)).toEqual({ content: [{ type: "text", text: JSON.stringify({ path: join("results", "frame.jpg"), bytes: FRAME.length }) }] });
+    expect(readFileSync(join(sent.cwd, "results", "frame.jpg"))).toEqual(FRAME);
+    writeFileSync(join(sent.cwd, "query.sql"), "select 1;");
+    expect((await call(sent, "copy_to_computer", { from: "query.sql", path: "/tmp/query.sql" })).body.result.isError).toBeFalsy();
+    expect(written.get("/tmp/query.sql")).toBe("select 1;");
+    expect((await call(sent, "copy_from_computer", { path: "/tmp/x", to: "../escaped" })).body.result.isError).toBe(true);
+    expect(requests.filter(request => /files\/(download|upload)-url$|^\/sandbox\//.test(request.path)).map(request => `${request.method} ${request.path.split("/").slice(0, 3).join("/")}`))
+      .toEqual([`POST /boxes/${rows.at(-1)!.id}`, "GET /sandbox/get", `POST /boxes/${rows.at(-1)!.id}`, "PUT /sandbox/put"]);
+    expect(JSON.stringify([brought.body])).not.toContain("/sandbox/");
+    await finish(bot.id);
+
+    const { group } = await apiOk("POST", "/api/groups", { name: "Copy room", memberIds: [bot.id] });
+    await apiOk("PATCH", `/api/groups/${group.id}/setup`, { action: "skip" });
+    rmSync(dumpFile, { force: true });
+    rmSync(finishFile, { force: true });
+    await apiOk("POST", `/api/groups/${group.id}/messages`, { text: "Bring it here too" });
+    const roomTurn = await dump();
+    expect(roomTurn.cwd).not.toBe(sent.cwd);
+    expect((await call(roomTurn, "copy_from_computer", { path: "/tmp/frame.jpg" })).body.result.isError).toBeFalsy();
+    expect(readFileSync(join(roomTurn.cwd, "frame.jpg"))).toEqual(FRAME);
+    await finish(bot.id);
+    await apiOk("DELETE", `/api/groups/${group.id}`);
+    await apiOk("DELETE", `/api/bots/${bot.id}`);
   }, 60_000);
 });

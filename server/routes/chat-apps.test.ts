@@ -1,9 +1,11 @@
-import { rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AppPayload } from "../../shared/app.ts";
+import { ROOM_VIEW_ONLY, type AppPayload } from "../../shared/app.ts";
 import { BOT_HTML_CSP } from "../../shared/app-frame/csp.ts";
 import { CSP_META_PREFIX } from "../../shared/app-frame/document.ts";
 import { createChatApps, type ChatApps } from "../chat-apps.ts";
@@ -35,7 +37,12 @@ async function fixture(extra: Partial<ChatAppRouteDeps> = {}) {
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     try {
-      const auth = { kind: "loopback", scopes: ["admin", "client"] } as RequestAuth;
+      if (chatApps.serveFile(req, res, url.pathname, req.method ?? "GET")) return;
+      // A test names a paired person with x-session; otherwise the request is the owner's, on this computer.
+      const person = req.headers["x-session"];
+      const auth = (typeof person === "string"
+        ? { kind: "session", session: { id: person, email: `${person}@example.com` }, via: "bearer", scopes: ["client"] }
+        : { kind: "loopback", scopes: ["admin", "client"] }) as RequestAuth;
       if (!await dispatchRoutes(routes, { req, res, url, path: url.pathname, method: req.method ?? "GET", auth, json, readBody })) json(res, 404, { from: "inline routes" });
     } catch (error) {
       json(res, (error as { status?: number }).status ?? 500, { error: error instanceof Error ? error.message : String(error) });
@@ -44,9 +51,13 @@ async function fixture(extra: Partial<ChatAppRouteDeps> = {}) {
   servers.push(server);
   await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const get = async (path: string) => {
-    const response = await fetch(`${base}${path}`);
+  const get = async (path: string, session?: string) => {
+    const response = await fetch(`${base}${path}`, session ? { headers: { "x-session": session } } : {});
     return { status: response.status, body: await response.json() as Record<string, any>, cache: response.headers.get("cache-control") };
+  };
+  const file = async (url: string) => {
+    const response = await fetch(url);
+    return { status: response.status, text: await response.text() };
   };
   const post = async (path: string, body: unknown) => {
     const response = await fetch(`${base}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -63,7 +74,18 @@ async function fixture(extra: Partial<ChatAppRouteDeps> = {}) {
     const app: AppPayload = { v: 1, source: "mcp", title: "Get time", doc: stored.doc, rev: 0, bytes: 11, border: true, network: { connect: [], resources: [] }, mcp: { server: "basic", tool: "get-time", resourceUri: "ui://basic/view" } };
     return store.appendMessage(threadId, { role: "bot", kind: "app", text: "Basic · Get time", app }).id;
   };
-  return { store, bot, other, chatApps, get, post, page, mcpRow };
+  const room = () => store.createGroup("Launch", [bot.id, other.id]);
+  /** A folder page with a data file beside its index.html, shown by `bot` in `threadId`. */
+  const folderPage = async (threadId: string) => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), "omb-room-page-")));
+    mkdirSync(join(base, "dash"));
+    writeFileSync(join(base, "dash", "index.html"), "<h1>Dash</h1>");
+    writeFileSync(join(base, "dash", "data.csv"), "a\n1");
+    const result = await chatApps.createAppCard({ bot, threadId, input: { tool: "show_html", path: "dash", title: "Dash" }, folders: async () => ({ roots: [base], vmWorkspace: null }) });
+    if (!result.ok) throw new Error(result.error);
+    return result.messageId;
+  };
+  return { store, bot, other, chatApps, get, post, page, mcpRow, room, folderPage, file, base };
 }
 
 describe("GET /api/threads/:threadId/messages/:messageId/app", () => {
@@ -125,6 +147,70 @@ describe("POST /api/bots/:botId/apps/:messageId/context", () => {
     for (let index = 0; index < 121; index += 1) statuses.push((await post(`/api/bots/${bot.id}/apps/${id}/context`, { threadId: bot.threadId, content: [{ type: "text", text: String(index) }] })).status);
     expect(statuses.slice(0, 120).every((status) => status === 200)).toBe(true);
     expect(statuses[120]).toBe(429);
+  });
+});
+
+describe("an app shown in a room", () => {
+  it("is served to whoever can see the room, view-only, and to nobody else", async () => {
+    let roomVisible = true;
+    const { bot, get, page, room } = await fixture({ threadVisible: (auth, threadId) => auth.kind !== "session" || (threadId === group.threadId ? roomVisible : true) });
+    const group = room();
+    const id = page(group.threadId);
+    const seen = await get(`/api/threads/${group.threadId}/messages/${id}/app`, "ann");
+    expect(seen.status).toBe(200);
+    expect(seen.body).toMatchObject({ room: true, can: { message: false, modelContext: false, serverTools: false, serverResources: false, openLinks: true } });
+    expect(String(seen.body.srcdoc)).toContain("var room = true;");
+    roomVisible = false;
+    expect(await get(`/api/threads/${group.threadId}/messages/${id}/app`, "ann")).toMatchObject({ status: 404, body: { error: "no such conversation" } });
+    expect((await get(`/api/threads/${group.threadId}/messages/${id}/app`)).status).toBe(200);
+    const own = await get(`/api/threads/${bot.threadId}/messages/${page()}/app`, "ann");
+    expect(own.body).toMatchObject({ can: { message: true, modelContext: true } });
+    expect(own.body).not.toHaveProperty("room");
+  });
+
+  it("loads a folder page's files only with the viewer's own token, and only while they can see the room", async () => {
+    let annSees = true;
+    const { get, room, folderPage, file, base } = await fixture({ threadVisible: (auth) => auth.kind !== "session" || auth.session.id !== "ann" || annSees });
+    const group = room();
+    const id = await folderPage(group.threadId);
+    const folderOf = async (session: string) => {
+      const answer = await get(`/api/threads/${group.threadId}/messages/${id}/app?origin=${encodeURIComponent(base)}`, session);
+      expect(answer.status).toBe(200);
+      return /<base href="([^"]+)">/.exec(String(answer.body.srcdoc))![1]!;
+    };
+    const ann = await folderOf("ann");
+    const bob = await folderOf("bob");
+    expect(ann).not.toBe(bob);
+    expect(await file(`${ann}data.csv`)).toEqual({ status: 200, text: "a\n1" });
+    annSees = false;
+    expect(await file(`${ann}data.csv`)).toEqual({ status: 404, text: "Not found." });
+    expect(await file(`${bob}data.csv`)).toEqual({ status: 200, text: "a\n1" });
+  });
+
+  it("stops a page's files once the page is gone from its conversation", async () => {
+    const { store, get, room, folderPage, file, base } = await fixture();
+    const group = room();
+    const id = await folderPage(group.threadId);
+    const answer = await get(`/api/threads/${group.threadId}/messages/${id}/app?origin=${encodeURIComponent(base)}`);
+    const folder = /<base href="([^"]+)">/.exec(String(answer.body.srcdoc))![1]!;
+    expect((await file(`${folder}data.csv`)).status).toBe(200);
+    const row = store.messagesFor(group.threadId).find((message) => message.id === id)!;
+    store.patchMessage(group.threadId, id, { app: { ...row.app!, doc: "", history: [] } });
+    expect(await file(`${folder}data.csv`)).toEqual({ status: 404, text: "Not found." });
+  });
+
+  it("refuses its context and its server calls on the server, whatever the page or the client sends", async () => {
+    const mcpRpc = vi.fn();
+    const { store, bot, post, page, mcpRow, room } = await fixture({ mcpRpc });
+    const group = room();
+    const id = page(group.threadId);
+    const app = mcpRow(group.threadId);
+    expect(await post(`/api/bots/${bot.id}/apps/${id}/context`, { threadId: group.threadId, content: [{ type: "text", text: "Ann is looking at March" }] }))
+      .toEqual({ status: 409, body: { error: ROOM_VIEW_ONLY } });
+    expect(await post(`/api/bots/${bot.id}/apps/${app}/rpc`, { threadId: group.threadId, method: "tools/call", params: { name: "get-time", arguments: {} } }))
+      .toEqual({ status: 409, body: { error: ROOM_VIEW_ONLY } });
+    expect(mcpRpc).not.toHaveBeenCalled();
+    expect(store.messagesFor(group.threadId).find((message) => message.id === id)?.app).not.toHaveProperty("context");
   });
 });
 

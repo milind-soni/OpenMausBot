@@ -14,6 +14,7 @@ export const HEADLESS_USAGE = `Drive a running workspace (scripts, CI, other age
   openmausbot team apply FILE           make the workspace match a team file (team export writes one)
   openmausbot engine set claude --key-env ANTHROPIC_API_KEY   give it an engine without a screen
   openmausbot connect URL --code CODE --out FILE              get a token for a workspace elsewhere
+  openmausbot token create NAME --out FILE [--expires 90d]    a token for CI that ends on its date (token list, token revoke ID)
   openmausbot new-bot | new-channel | set-model | edit | mcp
 
   Server: --url URL (or OPENMAUSBOT_URL), --port N (or OMB_PORT), else this computer's.
@@ -27,7 +28,7 @@ export const USAGE = `openmausbot — your team of AI bots, ready in a few steps
   openmausbot start [the same options as serve]
   openmausbot serve [--port 8799] [--data-dir DIR] [--label NAME]
                     [--public-url https://host] [--tailscale | --tunnel | --domain HOST] [--no-pair]
-  openmausbot pair  [--label NAME] [--client] [--phone ios|android]
+  openmausbot pair  [--label NAME] [--client] [--phone ios|android] [--ttl 24h]
                     [--public-url https://host]
   openmausbot sessions [revoke ID]
   openmausbot status
@@ -47,7 +48,8 @@ export const USAGE = `openmausbot — your team of AI bots, ready in a few steps
 setup   choose AI access and optional phone access; keep existing bots and chats
 start   same as openmausbot: use your saved settings and open the workspace
 serve   starts the server without prompts and prints a pairing link + QR code
-pair    mints a pairing code against a running server (--client: chat only)
+pair    mints a pairing code against a running server (--client: chat only;
+        --ttl keeps it open up to 24h, still single use)
 sessions lists paired devices; "sessions revoke ID" signs one out
 status  what the server says about itself
 login   signs this machine in to an OpenMausBot account (an emailed code)

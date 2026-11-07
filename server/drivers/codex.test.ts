@@ -1821,6 +1821,8 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv.join(" ")).toContain("mcp_servers.computer.command");
+    // Codex would end a cloud computer file copy after its own 60 s default.
+    expect(seen.argv).toContain("mcp_servers.computer.tool_timeout_sec=560");
     expect(seen.argv.join(" ")).toContain("/tmp/container-mcp.js");
     expect(seen.argv.join(" ")).toContain("OMB_VM_TOKEN");
     expect(seen.argv.join(" ")).not.toContain("vm-secret");

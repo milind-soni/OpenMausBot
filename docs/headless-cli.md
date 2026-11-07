@@ -34,7 +34,9 @@ openmausbot connect https://maus.example.com --code ABCD1234 --out ~/.openmausbo
 openmausbot doctor --url https://maus.example.com --token-file ~/.openmausbot-token
 ```
 
-Get the code in the app under **Settings → Phone → Set up a phone**. On this
+Get the code in the app under **Settings → Phone → Set up a phone**, or on
+the server with `openmausbot pair --client --ttl 24h` (a code lasts five
+minutes unless `--ttl` says otherwise, at most a day, and works once). On this
 computer's own server, `connect` makes the code itself (`--client` gives a
 token that can chat but not change settings). The token goes to a file only
 you can read, and is never printed. Pass it with `--token-file FILE` or
@@ -42,13 +44,28 @@ you can read, and is never printed. Pass it with `--token-file FILE` or
 read by other programs. A token is never sent while the command is still
 looking for a server: with a token, name the server.
 
+For CI, make an access token that ends on a date you choose:
+
+```sh
+openmausbot token create "Nightly CI" --scope client --expires 90d --out ci-token   # on the server, or with an admin token
+openmausbot token list                     # name, scope, end date, last used (never the token)
+openmausbot token revoke ID                # it stops working at once
+```
+
+A `connect` session renews itself while it is used, up to 180 days; an access
+token never renews and ends on its date. `--expires` is at most the server's
+session limit (180 days unless `OMB_SESSION_MAX_DAYS` says otherwise), and
+`--scope client`, the default, can chat and answer approvals but not change
+settings. Tokens are listed and revoked like any session (`openmausbot
+sessions`, and Settings), and the token itself is written only to `--out`.
+
 ## Output and exit codes
 
 Without `--json` you get plain lines. With `--json` you get exactly one JSON
 document on stdout, a failure included (`{ "ok": false, "error", "hint",
 "exitCode" }`). Progress goes to stderr as one JSON object per line; `--quiet`
 drops it. Everything printed, either way, has secrets removed (the same
-redaction the transcript uses). Durations are written `90`, `90s`, `5m` or `2h`.
+redaction the transcript uses). Durations are written `90`, `90s`, `5m`, `2h` or `30d`.
 
 | Exit code | Meaning |
 |---|---|
@@ -74,7 +91,7 @@ one of its conversations.
 | `doctor --host` | Checks this Linux machine can run the server and the bots' sandbox (below). |
 | `bots`, `channels`, `models` | Your bots and what each is doing, your rooms, the engines and the models each offers. |
 | `messages TARGET [--limit 30]` | The latest messages of a conversation. |
-| `send TARGET TEXT` | Sends one message and returns at once. `--send-id ID` makes a retry safe: the same id never sends twice. |
+| `send TARGET TEXT` | Sends one message and returns at once, to the conversation the bot or room has open. `--task new` starts a new conversation for it (`--title` names it, else the message's first line), and `--task ID` picks one. It says which conversation it went to. `--send-id ID` makes a retry safe: the same id never sends twice. |
 | `run TARGET TEXT` | Gives a bot or room one job and waits until it is done (below). |
 | `wait TARGET` | Waits on work already running. |
 | `interrupt TARGET [--tree]` | Presses Stop. `--tree` also stops every teammate still working on its job, in that teammate's own conversation. |
@@ -83,6 +100,7 @@ one of its conversations.
 | `team apply FILE`, `team export --out FILE` | Makes the workspace match a team file, or writes one (below). |
 | `engine set KIND`, `engine list` | Gives the workspace an engine key without a screen (below). |
 | `connect [URL]` | Gets a token for a workspace elsewhere. |
+| `token create NAME`, `token list`, `token revoke ID` | Access tokens for CI that end on their date (above). |
 | `new-bot`, `new-channel`, `set-model`, `edit` | Make a bot or a room, change a bot's model, rewrite an earlier message. |
 | `mcp` | The OpenMausBot MCP server on stdin and stdout ([docs/mcp-server.md](mcp-server.md)). |
 
@@ -121,6 +139,14 @@ and 100 GB for a Team server), disk encryption, CPUs and memory (a Team needs
 4 CPUs and 8 GB), the server's port (`--port`, else 8799), ports 80 and 443
 (required with `--domain HOST`, else only a warning), and the clock against
 network time (signed requests allow 300 seconds). It changes nothing.
+
+On a server that runs MausBot's own connector (a team on its own server), it
+also asks the connector for its checks (`mausbot-connector probe --json`,
+which starts the bots' box once under the home's own security settings) and
+lists any that fail. There the home runs under its own AppArmor profile, so
+AppArmor's server-wide switch can stay on: the user-namespace check passes
+when the connector's box check does, and otherwise says to run the install
+command again.
 
 A problem fails the check (exit 7) and says its fix on the next line; a
 warning does not. `--json` prints `{ ok, problems, warnings, checks: [{ id,

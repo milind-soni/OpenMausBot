@@ -62,7 +62,6 @@ const EXACT: ReadonlySet<string> = new Set([
   "POST /api/internal/connectors/mcp",
   "POST /api/internal/connectors/request",
   "POST /api/internal/data/mcp",
-  "POST /api/internal/highlevel/mcp",
   "POST /api/internal/email/mcp",
 ]);
 const ASKED_MCP_PREFIX = "/api/internal/mcp-http/";

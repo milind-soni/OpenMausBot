@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { cleanWorkspaceConfig, cleanWorkspaceDir, createCleanWorkspace } from "./clean-workspace.mjs";
+import { cleanWorkspaceConfig, cleanWorkspaceDir, createCleanWorkspace, DEFAULT_PROFILE, profileDir, profilesDir } from "./clean-workspace.mjs";
 import { cloudLendingVerdict } from "./computer-sharing.mjs";
 import { createLendingTarget } from "./lending-target.mjs";
 import { installOneHome } from "./one-home-main.mjs";
@@ -275,7 +275,7 @@ test("no lending from the clean workspace: nothing is lent or asked while it run
   const w = computer(t);
   const env = { id: "c", origin: CLOUD, cloud: { id: "c" } };
   const state = { status: "connected", account: owner, machine: { status: "ready", origin: CLOUD } };
-  const target = createLendingTarget({ account: () => (w.clean.active() ? null : { state: () => state, isOwnCloud: () => true, ownClouds: () => [] }), environments: () => [env] });
+  const target = createLendingTarget({ account: () => ({ state: () => state, isOwnCloud: () => true, ownClouds: () => [] }), clean: w.clean, environments: () => [env] });
   const grant = { accountId: owner.id, origin: CLOUD };
   assert.deepEqual(cloudLendingVerdict(grant, target.cloud(env), env), { allow: true });
   await w.clean.enter();
@@ -284,4 +284,60 @@ test("no lending from the clean workspace: nothing is lent or asked while it run
   assert.deepEqual(cloudLendingVerdict(grant, target.cloud(env), env), { pause: "unverified" });
   await w.clean.leave();
   assert.deepEqual(cloudLendingVerdict(grant, target.cloud(env), env), { allow: true });
+});
+
+test("a profile sits in a folder of its own, by its stable id, under one folder beside the data folder: never in the frozen copy's", () => {
+  assert.equal(profilesDir("/Users/a/.openmausbot"), "/Users/a/.openmausbot-profiles");
+  assert.equal(profileDir("/Users/a/.openmausbot", DEFAULT_PROFILE), join("/Users/a/.openmausbot-profiles", "default"));
+});
+
+test("This Mac's profile opens fresh on its own folder, and the frozen copy stays frozen: its marker, its bots and its config untouched", async (t) => {
+  const w = computer(t);
+  w.write("config.json", JSON.stringify({ language: "pt-BR", providers: { key: "secret-of-the-frozen-copy" } }));
+  w.write("bots.json", JSON.stringify([{ id: "nova" }]));
+  const dir = profileDir(w.dataDir, DEFAULT_PROFILE);
+  assert.equal(await w.clean.open(), true);
+  assert.deepEqual(w.swaps, [dir]);
+  assert.deepEqual([w.clean.active(), w.clean.profile(), w.clean.stranded(), w.clean.ownCopy()], [true, DEFAULT_PROFILE, false, false]);
+  assert.equal(w.changes, 1, "lending looks again");
+  const config = JSON.parse(readFileSync(join(dir, "config.json"), "utf8"));
+  assert.deepEqual(Object.keys(config).sort(), ["language", "onboarding"], "fresh: nothing of the frozen copy's but its language");
+  assert.equal(existsSync(join(dir, "bots.json")), false);
+  assert.deepEqual(JSON.parse(readFileSync(join(w.dataDir, "moved.json"), "utf8")), { v: 1, at: 1, cloud: CLOUD }, "never unfrozen");
+  assert.equal(readFileSync(join(w.dataDir, "bots.json"), "utf8"), JSON.stringify([{ id: "nova" }]));
+  assert.equal(JSON.parse(readFileSync(join(w.dataDir, "config.json"), "utf8")).providers.key, "secret-of-the-frozen-copy");
+  assert.equal(existsSync(w.cleanDir), false, "the workspace for nobody signed in is another folder");
+  assert.equal(await w.clean.open(DEFAULT_PROFILE), true);
+  assert.deepEqual(w.swaps, [dir], "open already: no second start");
+  writeFileSync(join(dir, "config.json"), JSON.stringify({ theirs: true }));
+  assert.equal(await w.clean.leave(), true);
+  assert.equal(w.running, w.dataDir);
+  assert.equal(await w.clean.open(), true);
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, "config.json"), "utf8")), { theirs: true }, "what they made there stays");
+});
+
+test("a profile id is a folder name and nothing else, and the move's code never reaches a profile", async (t) => {
+  const w = computer(t);
+  for (const id of ["../.openmausbot", "", "Work", "a/b", "."]) assert.equal(await w.clean.open(id), false, id);
+  assert.deepEqual(w.swaps, []);
+  await w.clean.open();
+  const request = w.clean.realCopy(w.request);
+  assert.deepEqual(await (await request("/api/move/freeze")).json(), { frozen: true, cloud: CLOUD }, "the frozen copy's own marker");
+  await assert.rejects(request("/api/move/freeze", { method: "DELETE" }), (error) => error.code === "clean-workspace");
+  await assert.rejects(request("/api/bots"), (error) => error.code === "clean-workspace");
+  assert.deepEqual(w.requests, []);
+});
+
+test("lending goes on from a profile: the sign-in alone decides, and only the workspace for nobody who can reach the bots stops it", async (t) => {
+  const w = computer(t);
+  const env = { id: "c", origin: CLOUD, cloud: { id: "c" } };
+  let state = { status: "connected", account: owner, machine: { status: "ready", origin: CLOUD } };
+  const target = createLendingTarget({ account: () => ({ state: () => state, isOwnCloud: () => true }), clean: w.clean, environments: () => [env] });
+  const grant = { accountId: owner.id, origin: CLOUD };
+  await w.clean.open();
+  assert.equal(target.environment(), env);
+  assert.deepEqual(target.places(), [env]);
+  assert.deepEqual(cloudLendingVerdict(grant, target.cloud(env), env), { allow: true });
+  state = { status: "signed-out", account: null, machine: null };
+  assert.notDeepEqual(cloudLendingVerdict(grant, target.cloud(env), env), { allow: true }, "signed out: nothing is lent, profile or not");
 });

@@ -58,6 +58,26 @@ describe("Store", () => {
     expect(loaded.bot(bot.id)?.connectorTools, "a list already chosen for an app stays").toEqual({ gmail: { tools: ["GMAIL_FETCH_EMAILS"] }, github: { tools: "*" } });
   });
 
+  it("loads a bot saved with the retired HighLevel app, dropping it from its scopes and tool grants", () => {
+    const store = new Store(selection);
+    const crm = store.createBot({ name: "CRM helper" });
+    const only = store.createBot({ name: "Limited bot" });
+    const file = join(DATA_DIR, "bots.json");
+    const rows = JSON.parse(readFileSync(file, "utf8")) as BotRecord[];
+    Object.assign(rows.find((row) => row.id === crm.id)!, { composio: true,
+      connectorTools: { gmail: { tools: "*" }, highlevel: { tools: ["HIGHLEVEL_GET_CONTACT"] } }, connectorScopes: { apps: { gmail: "read", highlevel: "write" } } });
+    Object.assign(rows.find((row) => row.id === only.id)!, { composio: true, connectorTools: { highlevel: { tools: "*" } }, connectorScopes: { apps: { highlevel: "read" } } });
+    writeFileSync(file, JSON.stringify(rows));
+
+    const loaded = new Store(selection);
+    expect(loaded.bot(crm.id)).toMatchObject({ name: "CRM helper", connectorTools: { gmail: { tools: "*" } }, connectorScopes: { apps: { gmail: "read" } } });
+    expect(loaded.bot(crm.id)?.connectorTools).not.toHaveProperty("highlevel");
+    expect(loaded.bot(only.id), "limited to HighLevel alone, it stays limited, to no app").toMatchObject({ name: "Limited bot", connectorTools: {}, connectorScopes: { apps: {} } });
+    const saved = readFileSync(file, "utf8");
+    expect(saved, "saved").not.toContain("highlevel");
+    expect(JSON.parse(saved).map((row: BotRecord) => row.id)).toEqual(expect.arrayContaining([crm.id, only.id]));
+  });
+
   it.each([undefined, { allow: ["native:read"] }, { deny: ["native:bash"] }])("does not activate a wider tool selection when saving %j fails", (toolScope) => {
     const store = new Store(selection);
     const bot = store.createBot();
