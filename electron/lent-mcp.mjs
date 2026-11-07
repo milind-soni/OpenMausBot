@@ -56,7 +56,8 @@ export function isLoopbackAddress(url) {
 }
 
 /** Why this computer won't run `server` for this grant, or null. A command server starts a program here, which only a
- * lent terminal allows; a URL server must be at this computer's own loopback address. */
+ * lent terminal allows; a URL server must be at this computer's own loopback address on an explicit port of 1024 or
+ * higher, and `createLentMcp` refuses this computer's own ports as it calls. */
 export function lentMcpRefusal(grant, server) {
   if (!grant?.cloud) return "MCP servers run here only for the person's own Clouds";
   if ("command" in server) return grant.terminal === true ? null : "Running commands is not enabled for this server";
