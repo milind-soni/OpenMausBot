@@ -8325,6 +8325,7 @@
   "shortcuts.category.groups": "Gestão e grupos",
   "shortcuts.command-palette": "Abrir a paleta de comandos (troca rápida e busca nas conversas)",
   "shortcuts.new-bot": "Criar um novo bot",
+  "shortcuts.new-thread": "Iniciar uma nova conversa com o bot selecionado",
   "shortcuts.jump-bot": "Ir para o bot 1–9 da lista",
   "shortcuts.switch-bot": "Ir para o bot anterior / seguinte",
   "shortcuts.find-conversation": "Buscar na conversa",
