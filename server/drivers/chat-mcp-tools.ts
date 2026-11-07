@@ -434,6 +434,12 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   if (integrations?.data && eligible("data")) servers.push(["data", integrations.data]);
   if (integrations?.email && eligible("email")) servers.push(["email", integrations.email]);
   if (integrations?.device && eligible("device")) servers.push(["device", integrations.device]);
+  // Connected apps are optional: their tool catalog is fetched from the connected-apps service while
+  // mounting, so an unreachable service must not fail the whole turn. A failed mount is skipped like a
+  // configured server's, which the model is told about. (CLI engines already drop them and go on.)
+  const optionalBuiltIns = new Set<string>();
+  if (integrations?.composio) optionalBuiltIns.add("composio");
+  if (integrations?.composioOwn) optionalBuiltIns.add(OWN_APPS_SERVER);
   const builtIns = servers.length;
   const besideBrowser = servers.some(([, descriptor]) => descriptor === integrations?.browser);
   const merged: MergedChatMcpServers[] = [];
@@ -597,12 +603,15 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     }));
     for (const [index, mount] of mounts.entries()) {
       if (signal.aborted || closed) throw aborted();
+      const name = servers[index]![0];
+      if (mount.status === "rejected") {
+        if (index >= builtIns || optionalBuiltIns.has(name)) { await skip(name, mount.reason); continue; }
+        throw mount.reason;
+      }
       if (index < builtIns) {
-        if (mount.status === "rejected") throw mount.reason;
         offeredTools.push({ origin: mount.value.origin, tools: checkedTools(mount.value.tools, mount.value.origin.server) });
         continue;
       }
-      if (mount.status === "rejected") { await skip(servers[index]![0], mount.reason); continue; }
       try { configured.push({ origin: mount.value.origin, tools: checkedTools(mount.value.tools, mount.value.origin.server) }); }
       catch (error) { await skip(mount.value.origin.server, error); }
     }
