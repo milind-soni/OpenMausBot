@@ -107,8 +107,10 @@ export async function pageSource(requested: string, roots: readonly string[]): P
 const openedPath = (handle: FileHandle) => readlink(`/proc/self/fd/${handle.fd}`).catch(() => null);
 
 /** The file at `real`, read only when the file opened is inside `root`. On Linux the kernel names the opened file, so a
- * folder on the way swapped for a link before, during or after the open cannot hand over a file from elsewhere; other
- * systems check that the path still resolves inside `root` to the same file. Null when it moved. */
+ * folder on the way swapped for a link before, during or after the open cannot hand over a file from elsewhere. Other
+ * systems (no /proc: macOS, Windows) check that the path still resolves inside `root` to the same file; known open risk:
+ * that check is not race-safe, as a swap, put back and swap again around open/realpath/stat can still pass it (it needs
+ * write access to the bot's own folder; main read the path directly). Null when it moved. */
 async function readContained(real: string, root: string): Promise<Buffer | null> {
   const handle = await open(real, "r");
   try {

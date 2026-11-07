@@ -557,7 +557,8 @@ export function createChatApps(deps: {
       if (entry.retryAt !== undefined && Date.now() < entry.retryAt) continue;
       const retryLater = () => Object.assign(entry, { signature: undefined, retryAt: Date.now() + LIVE_RETRY_MS });
       try {
-        // null too when the folder is no longer where the page was shown from (swapped for a link elsewhere).
+        // null too when the folder is no longer where the page was shown from (swapped for a link elsewhere). Known open
+        // risk: the folder was checked against the bot's folders when the page was shown, not again on each refresh.
         const signature = await pageSignature(folder, { videos: true });
         if (signature === null || signature === entry.signature) continue;
         // A half-written folder (no index.html yet, over a limit) is read again only on its next change.
