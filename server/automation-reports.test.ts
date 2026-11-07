@@ -451,13 +451,27 @@ describe("automation reports", () => {
     const page = { kind: "image" as const, path: "page-1.png", mime: "image/png", fromTool: true as const };
     const drawn = { kind: "image" as const, path: "chart-1.png", mime: "image/png" };
     const note = { kind: "audio" as const, path: "note-1.ogg", mime: "audio/ogg", text: "Today's brief." };
+    const slides = { kind: "file" as const, path: "brief-1.pptx", mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation", name: "Brief.pptx" };
     f.store.appendMessage(thread, { role: "bot", kind: "text", text: "", attachments: [earlier] });
     f.store.appendMessage(thread, { role: "user", kind: "text", text: "Go on." });
     f.store.appendMessage(thread, { role: "bot", kind: "text", text: "", attachments: [pdf] });
+    f.store.appendMessage(thread, { role: "user", kind: "text", text: "Add the audio too.", steered: true });
     f.store.appendMessage(thread, { role: "bot", kind: "text", text: "", attachments: [mp3] });
-    f.store.appendMessage(thread, { role: "bot", kind: "text", text: "Your brief.", attachments: [page, drawn, note], turnId: `turn-${run.id}`, turnTerminal: true });
+    f.store.appendMessage(thread, { role: "bot", kind: "text", text: "Your brief.", attachments: [page, drawn, note], turnId: `turn-${run.id}` });
+    f.store.appendMessage(thread, { role: "bot", kind: "text", text: "", attachments: [slides] });
     f.reports.runSettled(run, `turn-${run.id}`);
-    expect(f.lines()).toEqual([expect.objectContaining({ text: "Your brief.", attachments: [pdf, mp3, drawn, note] })]);
+    expect(f.lines()).toEqual([expect.objectContaining({ text: "Your brief.", attachments: [pdf, mp3, drawn, note, slides] })]);
+  });
+
+  it("reports a run that only sent files, without a word", () => {
+    const f = fixture();
+    const run = f.finished(null);
+    const pdf = { kind: "file" as const, path: "brief-1.pdf", mime: "application/pdf", name: "Brief.pdf" };
+    f.store.appendMessage(run.threadId!, { role: "user", kind: "text", text: "Do the Daily brief check." });
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "text", text: "", attachments: [pdf] });
+    f.reports.runSettled(run, `turn-${run.id}`);
+    expect(f.lines()).toEqual([expect.objectContaining({ text: "", attachments: [pdf] })]);
+    expect(f.runs.get(run.id)!.report).toMatchObject({ state: "posted" });
   });
 
   it("keeps a run quiet that said nothing and sent nothing, though its tools returned images", () => {

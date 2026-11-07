@@ -79,6 +79,17 @@ export function newestAutomationLines(messages: readonly Pick<Message, "id" | "a
   return new Set(newest.values());
 }
 
+const saidLine = (message: Message) => message.role === "bot" && message.kind === "text";
+/** A person's line that starts a turn, not one folded into a turn already running. */
+const asks = (message: Message) => message.role === "user" && !message.steered && !message.aside;
+
+/** The lines of the turn that holds this line: after the person's line that started it, up to their next. */
+function turnOf(path: readonly Message[], line: Message): Message[] {
+  const at = path.findIndex((message) => message.id === line.id);
+  const next = path.findIndex((message, index) => index > at && asks(message));
+  return path.slice(path.findLastIndex((message, index) => index < at && asks(message)) + 1, next < 0 ? undefined : next);
+}
+
 type Waiting =
   | { kind: "reply"; run: RoutineRun; messageId?: string }
   | { kind: "failure"; run: RoutineRun; detail: string }
@@ -118,18 +129,14 @@ export function createAutomationReports(deps: AutomationReportDeps) {
   /** The reply a run ends with: its last turn's last text, or after a restart the last one a turn settled on. */
   const replyOf = (run: RoutineRun, messageId?: string) => {
     const path = run.threadId ? store.activePath(run.threadId) : [];
-    const said = (message: Message) => message.role === "bot" && message.kind === "text";
-    return messageId ? path.find((message) => message.id === messageId) : path.findLast((message) => said(message) && message.turnTerminal) ?? path.findLast(said);
+    return messageId ? path.find((message) => message.id === messageId) : path.findLast((message) => saidLine(message) && message.turnTerminal) ?? path.findLast(saidLine);
   };
 
   /** The files the reply's turn sent the person, in order: its attach_file lines' and the reply's own, without the
    * images its tools returned. */
   const sentWith = (run: RoutineRun, reply: Message | undefined): NonNullable<Message["attachments"]> => {
     if (!reply) return [];
-    const path = store.activePath(run.threadId!);
-    const end = path.findIndex((message) => message.id === reply.id);
-    const turn = path.slice(path.findLastIndex((message, at) => at < end && message.role === "user") + 1, end + 1);
-    return turn.flatMap((message) => message.role === "bot" && message.kind === "text" ? message.attachments ?? [] : [])
+    return turnOf(store.activePath(run.threadId!), reply).flatMap((message) => message.role === "bot" && message.kind === "text" ? message.attachments ?? [] : [])
       .filter((file) => file.kind !== "image" || !file.fromTool);
   };
 
@@ -256,7 +263,9 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     runSettled(run: RoutineRun, turnId?: string): void {
       if (run.target !== "bot" || run.status !== "completed" || !run.threadId) return;
       if (run.deliver === "brief") return deps.brief?.(run, turnId);
-      const said = turnId ? store.activePath(run.threadId).findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === turnId) : replyOf(run);
+      const path = store.activePath(run.threadId);
+      const said = turnId ? path.findLast((message) => saidLine(message) && message.turnId === turnId) ?? path.slice(path.findLastIndex(asks) + 1).findLast(saidLine)
+        : replyOf(run);
       const reply = read(run, said);
       const bot = store.bot(run.botId);
       const target = destination(run);
