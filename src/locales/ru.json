@@ -4636,6 +4636,8 @@
   "computer.tab.files": "Файлы",
   "computer.tabsAria": "Панель бота",
   "computer.fullScreen": "Полный экран",
+  "computer.watchFullScreenTitle": "Смотреть на весь экран; бот продолжает работать",
+  "computer.watchingBotWorks": "Просмотр · бот продолжает работать",
   "computer.browserOff.title": "Браузер выключен",
   "computer.browserOff.body": "Включите встроенный браузер, чтобы наблюдать, как {name} работает в интернете, и перехватить управление в любой момент.",
   "computer.browserOff.turnOn": "Включить браузер",

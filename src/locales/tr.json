@@ -3664,6 +3664,8 @@
   "computer.tab.files": "Dosyalar",
   "computer.tabsAria": "Bot paneli görünümü",
   "computer.fullScreen": "Tam ekran",
+  "computer.watchFullScreenTitle": "Tüm ekranı izle; bot çalışmaya devam eder",
+  "computer.watchingBotWorks": "İzleniyor · bot çalışmaya devam ediyor",
   "computer.browserOff.title": "Tarayıcı kapalı",
   "computer.browserOff.body": "{name} botunun internette gezinmesini izlemek ve istediğiniz zaman kontrolü devralmak için yerleşik tarayıcıyı açın.",
   "computer.browserOff.turnOn": "Tarayıcıyı aç",

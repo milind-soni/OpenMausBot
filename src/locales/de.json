@@ -1880,6 +1880,8 @@
   "computer.viewerTitle": "Live-Desktop von {name}",
   "computer.openLiveDesktopAria": "Live-Desktop von {name} öffnen",
   "computer.openLiveDesktop": "Live-Desktop öffnen",
+  "computer.watchFullScreenTitle": "Den ganzen Bildschirm ansehen; der Bot arbeitet weiter",
+  "computer.watchingBotWorks": "Zuschauen · der Bot arbeitet weiter",
   "computer.open": "Öffnen",
   "computer.watchOnly": "Vorschau nur zum Zusehen",
   "computer.waitingFrame": "Warte auf das erste Bild…",
