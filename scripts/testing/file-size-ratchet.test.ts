@@ -16,7 +16,7 @@ const HARD_CAP = 2000;
 const LISTED_FROM = 1000;
 
 const LINES: Record<string, number> = {
-  "server/index.ts": 15651,
+  "server/index.ts": 15636,
   "src/state/store.tsx": 3349,
   "electron/main.mjs": 3232,
   "server/store.ts": 2307,
@@ -45,6 +45,7 @@ const LINES: Record<string, number> = {
   "src/components/PhoneSetupFlow.tsx": 1104,
   "server/cli.ts": 1070,
   "src/components/AttachmentPreview.tsx": 1035,
+  "server/meetings/meetbot.ts": 1047,
 };
 
 function sourceFiles(): string[] {

@@ -40,6 +40,12 @@ const EXACT: ReadonlySet<string> = new Set([
   "POST /api/internal/retry-thread",
   "POST /api/internal/trigger-requests",
   "POST /api/internal/manage-room",
+  // A meeting's questions and notes come from outside by nature; a chat post still waits on the sending rule.
+  "POST /api/internal/meetings/join",
+  "POST /api/internal/meetings/status",
+  "POST /api/internal/meetings/chat",
+  "POST /api/internal/meetings/leave",
+  "POST /api/internal/meetings/notes",
   "POST /api/internal/memory",
   "POST /api/internal/memory/log",
   "POST /api/internal/team-memory",
@@ -62,7 +68,6 @@ const EXACT: ReadonlySet<string> = new Set([
   "POST /api/internal/connectors/mcp",
   "POST /api/internal/connectors/request",
   "POST /api/internal/data/mcp",
-  "POST /api/internal/highlevel/mcp",
   "POST /api/internal/email/mcp",
 ]);
 const ASKED_MCP_PREFIX = "/api/internal/mcp-http/";

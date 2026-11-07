@@ -63,22 +63,13 @@
     // Cleanup rows per five-minute cron run. 20 needs Workers Paid; use 4 on
     // Workers Free (50 subrequests per invocation).
     "OMB_CLEANUP_SWEEP_LIMIT": "20",
-    // HighLevel OAuth relay (README "HighLevel OAuth relay"). The client id
-    // is public (it is in the authorization URL); the secret is
-    // HIGHLEVEL_CLIENT_SECRET, set with `wrangler secret put` and deliberately
-    // not in secrets.required: the relay answers 503 highlevel_unavailable
-    // until it exists. The redirect URL must match the one registered in the
-    // HighLevel Marketplace app exactly.
-    "HIGHLEVEL_CLIENT_ID": "6ad0c3b87999ff4de949c785-mv9n5v73",
-    "HIGHLEVEL_REDIRECT_URL": "https://accounts.openmausbot.com/v1/highlevel/callback",
-    "HIGHLEVEL_SCOPES": "contacts.readonly contacts.write opportunities.readonly opportunities.write conversations.readonly locations.readonly calendars.readonly calendars/events.readonly users.readonly",
     // MausBot Relay (README "MausBot Relay"). Host tokens are signed with RELAY_TOKEN_SIGNING_KEY (b64u of a 32-byte
     // Ed25519 seed, `wrangler secret put`). It is in secrets.required so a deploy can't drop it: set it before the
     // first deploy that lists it. The relay holds only the matching public key. RELAY_NODES lists only nodes that
     // exist; add relay2 when its box and DNS are up.
     // RELAY_ROLLOUT_PERCENT (0-100) admits computers by a stable hash of their host id; RELAY_ALLOW_INSTALLATIONS
     // (comma-separated installation ids) admits a few by name; RELAY_DISABLED "1" turns every token off.
-    "RELAY_NODES": "relay1.openmausbot.com",
+    "RELAY_NODES": "relay1.openmausbot.com,relay2.openmausbot.com",
     "RELAY_NODES_AMERICAS": "",
     "RELAY_TOKEN_KID": "k1",
     "RELAY_ROLLOUT_PERCENT": "0",
