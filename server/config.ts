@@ -1,6 +1,6 @@
 // ~/.openmausbot/config.json, with env vars overriding its credentials.
-import { readFileSync, mkdirSync, mkdtempSync, existsSync, renameSync } from "node:fs";
-import { homedir, tmpdir, userInfo } from "node:os";
+import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
+import { dataHome } from "./data-dir.ts";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
@@ -710,14 +710,8 @@ export function changedInstanceIds(before: Record<string, unknown>, after: Recor
     .filter((id) => !isDeepStrictEqual(before[id], after[id]));
 }
 
-function dataHome(): string {
-  const home = homedir();
-  const underTest = process.env.VITEST !== undefined || process.env.NODE_ENV === "test";
-  return underTest && home === userInfo().homedir ? mkdtempSync(join(tmpdir(), "omb-test-home-")) : home;
-}
-
 export const DATA_DIR = process.env.OMB_DATA_DIR || join(dataHome(), ".openmausbot");
-const LEGACY_DATA_DIR = join(homedir(), ".opengrokbot");
+const LEGACY_DATA_DIR = join(dataHome(), ".opengrokbot");
 export const EVENTS_DIR = join(DATA_DIR, "events");
 export const NATIVE_DIR = join(DATA_DIR, "native");
 

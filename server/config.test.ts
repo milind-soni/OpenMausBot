@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -2397,7 +2397,11 @@ describe("DATA_DIR outside the suite's throwaway home", () => {
       expect(dataDir).not.toBe(join(realHome, ".openmausbot"));
       expect(dataDir.startsWith(tmpdir())).toBe(true);
     } finally {
-      rmSync(dirname(dataDir), { recursive: true, force: true });
+      // Only ever a throwaway folder: a broken guard would hand back the real home here.
+      const throwaway = dirname(dataDir);
+      if (throwaway.startsWith(join(realpathSync(tmpdir()), "omb-test-home-")) || throwaway.startsWith(join(tmpdir(), "omb-test-home-"))) {
+        rmSync(throwaway, { recursive: true, force: true });
+      }
     }
   });
 
