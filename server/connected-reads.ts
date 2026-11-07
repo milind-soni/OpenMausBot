@@ -316,6 +316,19 @@ export function calendarsFromData(data: unknown): Array<{ id: string; name: stri
 
 export const READ_TIMEOUT_MS = 60_000;
 
+/** `promise`, or a rejection with the signal's reason once `signal` aborts first (after `onAbort`). */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal, onAbort: () => void): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      onAbort();
+      reject(signal.reason);
+    };
+    if (signal.aborted) return abort();
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
 /** The account to name per app, for apps with several connected. */
 type AppAccounts = Partial<Record<ReadApp, string>>;
 
@@ -386,7 +399,11 @@ export function createConnectedReads(deps: ConnectedReadDeps): ConnectedReads {
           accounts = undefined;
           return {};
         }) ?? Promise.resolve({});
-        account = (await accounts)[app];
+        // The lookup counts toward this read's time limit; one that runs out is dropped so the next read asks again.
+        const lookup = accounts;
+        account = (await untilAborted(lookup, signal, () => {
+          if (accounts === lookup) accounts = undefined;
+        }))[app];
         const answer = await deps.relay({
           jsonrpc: "2.0", id: CALL_ID, method: "tools/call",
           params: { name: MULTI_EXECUTE, arguments: { tools: [{ tool_slug: slug, arguments: args, ...(account ? { account } : {}) }] } },

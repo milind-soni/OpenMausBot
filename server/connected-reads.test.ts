@@ -146,4 +146,19 @@ describe("a check's reads", () => {
     const error = await session.address().catch((caught: unknown) => caught);
     expect(error).toMatchObject({ app: "gmail", severalAccounts: false });
   });
+
+  it("gives up on an account lookup that outlasts the read's time limit, and asks again on the next read", async () => {
+    const { deps, frames } = relay({ GMAIL_GET_PROFILE: () => ({ successful: true, data: { emailAddress: "new@x.test" } }) });
+    let asked = 0;
+    const accounts = () => {
+      asked += 1;
+      return asked === 1 ? new Promise<never>(() => {}) : Promise.resolve({ gmail: "ca_newest" });
+    };
+    const session = createConnectedReads({ ...deps, accounts, readTimeoutMs: 50 }).session();
+    const error = await session.address().catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ app: "gmail", message: expect.stringMatching(/did not answer within/) });
+    expect(await session.address()).toBe("new@x.test");
+    expect(asked).toBe(2);
+    expect(frames.filter((one) => one.slug === "GMAIL_GET_PROFILE").map((one) => one.item!.account)).toEqual(["ca_newest"]);
+  });
 });
