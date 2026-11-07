@@ -11,7 +11,7 @@ import type { VerbContext, VerbOutcome } from "./context.ts";
 type Rec = Record<string, any>;
 
 /** The command that makes a pairing code on a server, whichever way that server was installed. */
-const PAIR_ON_SERVER = "npx openmausbot pair (Docker: docker compose exec omb node dist-server/openmausbot.js pair)";
+const PAIR_ON_SERVER = "npx openmausbot pair (Docker: docker compose exec omb openmausbot pair)";
 
 const isLoopback = (origin: string) => /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/i.test(origin);
 

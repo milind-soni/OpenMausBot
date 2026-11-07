@@ -39,7 +39,7 @@ vi.mock("node:os", async (original) => ({
   }),
 }));
 
-import { tailscaleServe, tailscaleServeOff, tailscaleStatus } from "../../server/tailscale.ts";
+import { tailscaleStatus } from "../../server/tailscale.ts";
 
 let control: Server | undefined;
 
@@ -60,18 +60,11 @@ afterEach(async () => {
 });
 
 describe("Tailscale from a shell-less standalone macOS app", () => {
-  it("also forces CLI mode for self-hosted status, HTTPS Serve, and Serve off", async () => {
+  it("also forces CLI mode for the self-hosted server's status check", async () => {
     const result = await tailscaleStatus();
     expect(result).toHaveProperty("status");
-    if (!("status" in result)) throw new Error("fixture CLI not found");
-    expect(await tailscaleServe(result.status, 8799)).toEqual({ origin: "https://fixture.tail1234.ts.net" });
-    await tailscaleServeOff(result.status);
     const ran = fixture.calls.filter(({ cli }) => cli === standalone);
-    expect(ran.map(({ args }) => args)).toEqual([
-      ["status", "--json"],
-      ["serve", "--bg", "--https=443", "http://127.0.0.1:8799"],
-      ["serve", "--https=443", "off"],
-    ]);
+    expect(ran.map(({ args }) => args)).toEqual([["status", "--json"]]);
     expect(ran.every(({ options }) => options.env?.TAILSCALE_BE_CLI === "1" && !options.shell)).toBe(true);
   });
 });

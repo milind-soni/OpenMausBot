@@ -413,10 +413,9 @@ describe("Settings → Appearance", () => {
     vi.stubGlobal("window", { ogb: { environments: {} } });
     const local = render();
     expect(local).toContain('<option value="desktopWorkspaces" selected="">Servers</option>');
-    expect(local).toContain("Server address or pairing link");
-    expect(local).toContain("Name (optional)");
     expect(local).toContain("Your servers");
-    expect(local).toContain("npx openmausbot pair --label");
+    expect(local).toContain("Loading servers…");
+    expect(local, "connecting is the same sheet as ＋, not a form of its own").not.toContain("Name (optional)");
     fixture.section = "general";
     vi.stubGlobal("window", { ogb: { workspaces: {} } });
     expect(render()).not.toContain('<option value="desktopWorkspaces"');

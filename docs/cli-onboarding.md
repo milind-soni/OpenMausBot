@@ -46,7 +46,7 @@ After the connection is ready:
 - **iPhone/iPad:** scan the QR with Camera to open Safari. If you already have the OpenMausBot iOS app, use its pairing scanner or paste the full link there.
 - **Android:** the QR is an app link, so scan it inside the OpenMausBot app. To use a browser instead, open the web address printed above it and type the code.
 
-Choose **Connect** on the phone. Scanning alone is not a successful pairing. The code is private, single-use, and expires after five minutes. Guided phone pairing grants client access for chat and approvals, not settings or pairing administration.
+Choose **Connect** on the phone. Scanning alone is not a successful pairing. The code is private, single-use, and works for 10 minutes. Guided phone pairing grants client access for chat and approvals, not settings or pairing administration.
 
 If the workspace starts but its HTTPS check fails, the local workspace remains usable and no phone code is created. Fix the connection and run `openmausbot pair` in another terminal to try again. A missing account, connector, or Tailscale prerequisite can prevent startup; follow the printed error, or use `openmausbot --local`. To add phone access after skipping it, stop the server, run `openmausbot setup`, then start it again.
 
@@ -62,7 +62,7 @@ The examples below assume a global install; prefix them with `npx` otherwise.
 | `openmausbot --local` | Ignore saved remote access for this launch; keep the saved choice for next time. |
 | `openmausbot --no-pair` | Suppress phone setup prompts and pairing invitations. This does **not** turn off saved remote access; use `--local` for that. |
 | `openmausbot pair` | Create another phone invitation while the configured workspace and HTTPS connection are running. |
-| `openmausbot sessions` | List paired devices; `openmausbot sessions revoke ID` signs one out. |
+| `openmausbot devices` | List paired devices; `openmausbot devices revoke ID` signs one out. |
 | `openmausbot serve` | Start without onboarding prompts or automatic browser opening; specify remote-access flags explicitly for a service. |
 | `openmausbot login` | Sign in to an OpenMausBot account for `--tunnel`; this does not sign in to an AI provider or start the tunnel. |
 

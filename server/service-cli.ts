@@ -1,12 +1,14 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import {
   currentUser, launchdPlist, sentinelCommand, sentinelLaunchdPlist, sentinelServicePlan, sentinelSystemdService, sentinelSystemdTimer,
   servicePlan, shippedSentinelCli, systemdUnit, unstableInstallWarning,
 } from "./service-unit.ts";
 import { defaultSentinelOut, outRefusal } from "./sentinel/paths.ts";
+import { cliCommand } from "./cli-invocation.ts";
 
 export interface ServiceInstallInput {
   action: "install" | "uninstall";
@@ -15,6 +17,8 @@ export interface ServiceInstallInput {
   domain?: string;
   tunnel?: boolean;
   tailscale?: boolean;
+  publicUrl?: string;
+  lan?: boolean;
   label?: string;
   sentinel?: boolean;
   /** Defaults to the platform's Sentinel folder. */
@@ -25,6 +29,8 @@ export interface ServiceInstallInput {
   hasSentinel?: (script: string) => boolean;
   script: string;
   node: string;
+  /** Under npx: installs `openmausbot@version` into `prefix` and resolves whether npm succeeded. */
+  installCopy?: (prefix: string, version: string) => boolean;
   platform?: NodeJS.Platform;
   home?: string;
   user?: string;
@@ -35,11 +41,15 @@ export interface ServiceIo {
   error(line: string): void;
 }
 
-export function serviceServeArgs(input: Pick<ServiceInstallInput, "port" | "dataDir" | "domain" | "tunnel" | "tailscale" | "label">): string[] {
-  const args = ["--port", String(input.port), "--data-dir", input.dataDir, "--no-pair"];
+/** The same `serve` flags the person gave, so the service reaches people the way `serve` did. Not a terminal, `serve`
+ * prints no pairing code into the service log. */
+export function serviceServeArgs(input: Pick<ServiceInstallInput, "port" | "dataDir" | "domain" | "tunnel" | "tailscale" | "publicUrl" | "lan" | "label">): string[] {
+  const args = ["--port", String(input.port), "--data-dir", input.dataDir];
   if (input.domain) args.push("--domain", input.domain);
   else if (input.tunnel) args.push("--tunnel");
   else if (input.tailscale) args.push("--tailscale");
+  if (input.publicUrl && !input.domain && !input.tunnel) args.push("--public-url", input.publicUrl);
+  if (input.lan) args.push("--lan");
   if (input.label) args.push("--label", input.label);
   return args;
 }
@@ -58,20 +68,22 @@ export function runServiceCommand(input: ServiceInstallInput, io: ServiceIo): nu
     for (const line of plan.deactivate) io.log(`  ${line}`);
     return 0;
   }
-  const warning = unstableInstallWarning(input.script);
-  if (warning) {
-    io.error(warning);
-    return 1;
+  let script = input.script;
+  if (unstableInstallWarning(script)) {
+    const pinned = pinnedCopy(input, io);
+    if (!pinned) return 1;
+    script = pinned;
   }
   const spec = {
     node: input.node,
-    script: input.script,
+    script,
     serveArgs: serviceServeArgs(input),
     dataDir: input.dataDir,
     user: input.user ?? currentUser(),
     home,
     bindsLowPorts: Boolean(input.domain),
     ...(input.label ? { label: input.label } : {}),
+    ...(script !== input.script ? { cliPrefix: "npx openmausbot" } : {}),
   };
   const rendered = platform === "darwin" ? launchdPlist(spec) : systemdUnit(spec);
   mkdirSync(input.dataDir, { recursive: true, mode: 0o700 });
@@ -83,8 +95,32 @@ export function runServiceCommand(input: ServiceInstallInput, io: ServiceIo): nu
   io.log("");
   if (input.domain && platform === "linux") io.log("the unit grants Caddy the capability for ports 80 and 443, so no setcap is needed under the service");
   io.log(`logs: ${platform === "darwin" ? `${input.dataDir}/logs/service.log` : "journalctl -u openmausbot -f"}`);
-  io.log(`change options later by running \`openmausbot service install\` again with the new ones, then: ${platform === "darwin" ? plan.activate[1] : "sudo systemctl daemon-reload && sudo systemctl restart openmausbot"}`);
+  io.log(`change options later by running \`${cliCommand("service install")}\` again with the new ones, then: ${platform === "darwin" ? plan.activate[1] : "sudo systemctl daemon-reload && sudo systemctl restart openmausbot"}`);
   return 0;
+}
+
+/** npm prunes its npx cache, so a service runs a copy of this exact version kept beside the data instead. */
+function pinnedCopy(input: ServiceInstallInput, io: ServiceIo): string | null {
+  let version: string | undefined;
+  try {
+    version = JSON.parse(readFileSync(join(dirname(input.script), "..", "package.json"), "utf8")).version;
+  } catch {
+    version = undefined;
+  }
+  const prefix = join(input.dataDir, "app", version ?? "latest");
+  const command = `npm install --prefix ${prefix} openmausbot@${version ?? "latest"}`;
+  io.log(`this run comes from npx's cache, which npm prunes: installing openmausbot ${version ?? ""} into ${prefix} for the service`.replace("  ", " "));
+  const installed = (input.installCopy ?? installWithNpm)(prefix, version ?? "latest");
+  const script = join(prefix, "node_modules", "openmausbot", "dist-server", "openmausbot.js");
+  if (installed && (input.exists ?? existsSync)(script)) return script;
+  io.error(`could not install that copy. Run this, then the same service install command again from it:\n  ${command}\n  node ${script} service install …`);
+  return null;
+}
+
+function installWithNpm(prefix: string, version: string): boolean {
+  mkdirSync(prefix, { recursive: true, mode: 0o700 });
+  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+  return spawnSync(npm, ["install", "--prefix", prefix, `openmausbot@${version}`, "--no-audit", "--no-fund"], { stdio: "inherit" }).status === 0;
 }
 
 function bundleHasSentinel(script: string): boolean {
