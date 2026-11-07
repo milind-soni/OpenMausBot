@@ -3269,8 +3269,6 @@
   "pair.emailCode": "Anmeldecode aus deiner E-Mail",
   "pair.useEmail": "Mit E-Mail anmelden",
   "pair.intro.code": "Gib den Kopplungscode vom Server ein. Er funktioniert einmal, zehn Minuten lang.",
-  "remote.client.companion.hint": "Öffne in der anderen Desktop-App Einstellungen → Fernzugriff und erstelle einen Kopplungscode. Verwende ihre verwaltete {app}-HTTPS-Adresse oder den vollständigen Tailscale-Namen, der auf .ts.net endet. Für einen selbst gehosteten Server oder eine eigene Domain wähle in der installierten App dieses Computers „Selbst gehosteter Server“.",
-  "remote.client.companion.code": "Kopplungscode",
   "pair.fromLink": "Aus dem Link",
   "pair.onPhone": "Auf dem Telefon?",
   "pair.openInApp": "In der {app}-App öffnen",

@@ -11,7 +11,7 @@ const state: CompanionState = {
   keepAwake: false,
   port: 8810,
   devices: [],
-  pairing: { code: "7KQ2M9XDH4TP", token: `omb_pair_${"a".repeat(43)}`, expiresAt: Date.now() + 120_000 },
+  pairing: { code: "123456", token: `omb_pair_${"a".repeat(43)}`, expiresAt: Date.now() + 120_000 },
   lan: "192.168.1.34",
   publicNetwork: "Wi-Fi",
 };

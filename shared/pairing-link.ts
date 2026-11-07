@@ -40,6 +40,8 @@ export interface PhonePairingLinkOptions {
   port?: number;
   /** The high-entropy one-time credential the scanner redeems. */
   token: string;
+  /** The six digits the desktop shows; servers have none. */
+  code?: string;
   name?: string;
   /** Every host the phone could dial later, best first. */
   hosts?: string[];
@@ -164,6 +166,7 @@ export function phonePairingLink({
   address,
   port,
   token,
+  code,
   name,
   hosts,
   endpoints,
@@ -172,8 +175,10 @@ export function phonePairingLink({
 }: PhonePairingLinkOptions): string | null {
   const dial = linkAddress(address, port);
   if (!dial || !/^omb_pair_[A-Za-z0-9_-]{43}$/.test(token)) return null;
+  if (code !== undefined && !/^\d{6}$/.test(code)) return null;
 
   const fields: Array<[string, string]> = [["address", dial], ["token", token]];
+  if (code !== undefined) fields.push(["code", code]);
   if (name?.trim()) fields.push(["name", name.trim()]);
   // Comma-joined, which no hostname or IP literal can contain. A bad candidate
   // is filtered, not fatal: it costs the phone one failed dial.

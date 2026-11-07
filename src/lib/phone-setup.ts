@@ -1,5 +1,4 @@
 import type { CompanionAccountState } from "../types/ogb";
-import { readPairingInput } from "../../shared/pairing-code";
 import { t } from "./i18n";
 import type { CompanionEndpoint, CompanionPairingRouteMode } from "./companion-pairing";
 
@@ -315,7 +314,7 @@ export function companionPairingOpenFailure(
     !pairing
     || pairing.token === previousToken
     || !/^omb_pair_[A-Za-z0-9_-]{43}$/.test(pairing.token)
-    || readPairingInput(pairing.code ?? "").kind !== "code"
+    || !/^\d{6}$/.test(pairing.code ?? "")
     || !Number.isFinite(pairing.expiresAt)
     || (pairing.expiresAt ?? 0) <= now
   ) {

@@ -20,7 +20,6 @@ import {
   Wifi,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { formatPairingCode } from "../../shared/pairing-code";
 import { phonePairingLink } from "../../shared/pairing-link";
 import { codeUntil } from "@/lib/pairing-time";
 import {
@@ -741,8 +740,8 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
   );
   const pairingLink = useMemo(() => {
     if (!state?.pairing || !pairingRoute) return null;
-    // The QR carries the credential, never the typed code: older phone apps refuse a link whose code is not six digits.
-    return phonePairingLink({ ...pairingRoute, token: state.pairing.token,
+    // An encrypted-connection QR carries no six-digit code: phones pair by the QR or a pasted link only.
+    return phonePairingLink({ ...pairingRoute, code: state.e2e?.enabled ? undefined : state.pairing.code, token: state.pairing.token,
       name: state.discovery?.name, secretPublicKey: state.secretPublicKey, e2e: state.e2e?.descriptor });
   }, [pairingRoute, state]);
 
@@ -1063,7 +1062,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
         <div className="mt-4 w-full max-w-[320px] rounded-xl bg-inset px-4 py-3 text-[13px] text-ink-secondary">
           <div>{t("phone.code.manualIntro")}</div>
           <div className="mt-2 font-mono text-[22px] tracking-[0.25em] text-ink">
-            {formatPairingCode(c.state.pairing.code)}
+            {c.state.pairing.code}
           </div>
         </div>
       )}
@@ -1085,7 +1084,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
           <summary className="cursor-pointer text-[12px] text-ink-secondary">{t("phone.code.trouble")}</summary>
           <div className="mt-3 text-[12px] text-ink-secondary">
             {t("phone.code.manual")}
-            <div className="mt-1 font-mono text-[22px] tracking-[0.25em] text-ink">{formatPairingCode(c.state.pairing.code)}</div>
+            <div className="mt-1 font-mono text-[22px] tracking-[0.25em] text-ink">{c.state.pairing.code}</div>
             {c.address && (
               <div className="mt-3">
                 <ConnectionDetail label={t("phone.code.address")} value={c.addressText ?? `${c.address}:${c.pairingPort}`} />

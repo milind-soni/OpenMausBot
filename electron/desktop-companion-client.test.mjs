@@ -185,14 +185,6 @@ describe("desktop companion pairing", () => {
     });
   });
 
-  it("sends a 12-character pairing code however it was typed", async () => {
-    const fetchImpl = vi.fn(async () =>
-      new Response(JSON.stringify({ token, device: { id: deviceId }, serverName: "Office computer" }), { status: 201 }),
-    );
-    await pairDesktopCompanion({ endpoint: "host.example-tailnet.ts.net", code: "7kq2-m9xd h4tp", deviceName: "Laptop", requestId: "request-00000002", fetchImpl });
-    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).code).toBe("7KQ2M9XDH4TP");
-  });
-
   it("pairs through a managed HTTPS companion address", async () => {
     const fetchImpl = vi.fn(async () =>
       new Response(JSON.stringify({ token, device: { id: deviceId }, serverName: "Office computer" }), {
@@ -241,7 +233,7 @@ describe("desktop companion pairing", () => {
   it("rejects bad codes and surfaces a sidecar error without returning secrets", async () => {
     await expect(
       pairDesktopCompanion({ endpoint: access.endpoint, code: "123", deviceName: "Laptop" }),
-    ).rejects.toThrow("pairing code shown");
+    ).rejects.toThrow("six-digit");
     await expect(
       pairDesktopCompanion({
         endpoint: access.endpoint,

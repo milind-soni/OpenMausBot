@@ -386,7 +386,7 @@ function page(): string {
             padding: 1rem 1.15rem; margin-bottom: 1rem; }
   h2 { font-size: .95rem; margin: 0 0 .5rem; }
   code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .code { font: 600 2rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .12em; }
+  .code { font: 600 2rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .3em; }
   .dim { color: var(--dim); }
   button { font: inherit; padding: .4rem .8rem; border-radius: 8px; border: 1px solid var(--line);
            background: transparent; color: inherit; cursor: pointer; }
@@ -457,10 +457,10 @@ function render(s) {
       : "");
 
   el("pair").innerHTML = s.pairing
-    ? "<h2>Pair a phone</h2><div class=code>" + esc(s.pairing.code.match(/.{1,4}/g).join("-")) + "</div>" +
-      "<p class=dim>Works once, until " + esc(new Date(s.pairing.expiresAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })) + ". Enter it on your phone.</p>" +
+    ? "<h2>Pair a phone</h2><div class=code>" + esc(s.pairing.code) + "</div>" +
+      "<p class=dim>Expires in <span id=left></span>s. Enter it on your phone.</p>" +
       "<button id=cancel>Cancel</button>"
-    : "<h2>Pair a phone</h2><p class=dim>The code works once, for ten minutes.</p><button id=start>Start pairing</button>";
+    : "<h2>Pair a phone</h2><p class=dim>The code lasts two minutes.</p><button id=start>Start pairing</button>";
 
   el("devices").innerHTML =
     "<h2>Paired devices</h2>" +
@@ -491,6 +491,14 @@ function render(s) {
       "/devices/" + b.dataset.browser + "/browser-control",
       b.dataset.browserAllowed === "1" ? "DELETE" : "POST"
     )));
+  }
+  if (s.pairing) {
+    const tick = () => {
+      const left = Math.max(0, Math.round((s.pairing.expiresAt - Date.now()) / 1000));
+      const node = el("left");
+      if (node) node.textContent = left;
+    };
+    tick();
   }
 }
 

@@ -10,8 +10,7 @@ import path from "node:path";
 export const DESKTOP_COMPANION_FIELD = "desktopCompanionRemote";
 const DEVICE_TOKEN = /^omb_[A-Za-z0-9_-]{43}$/;
 const DEVICE_ID = /^[0-9a-f-]{36}$/i;
-/** The 12-character pairing code; six digits still reach a computer on an older release. */
-const PAIRING_CODE = /^(?:[23456789A-HJ-NP-Z]{12}|\d{6})$/;
+const PAIRING_CODE = /^\d{6}$/;
 const MAX_ERROR_BYTES = 64 * 1024;
 
 /** Losing either argument makes the renderer unsafe or makes a live relay look local. */
@@ -138,8 +137,8 @@ export async function pairDesktopCompanion({
   if (!endpoint) {
     throw new Error("Enter the OpenMausBot HTTPS companion address or full Tailscale name ending in .ts.net");
   }
-  const code = String(rawCode ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  if (!PAIRING_CODE.test(code)) throw new Error("Enter the pairing code shown on the other computer");
+  const code = String(rawCode ?? "").trim();
+  if (!PAIRING_CODE.test(code)) throw new Error("Enter the six-digit code shown on the other computer");
   const response = await fetchImpl(`${endpoint}/api/pair`, {
     method: "POST",
     headers: { "content-type": "application/json" },

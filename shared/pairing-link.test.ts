@@ -22,11 +22,11 @@ describe("phonePairingLink", () => {
     return item === undefined ? undefined : decodeURIComponent(item.slice(name.length + 1));
   };
 
-  it("carries the dialable address, one-time token and display name, never the typed code", () => {
+  it("carries the dialable address, one-time token, fallback code, and display name", () => {
     const link = phonePairingLink({
       address: "macbook.tail1234.ts.net",
       port: 8810,
-      
+      code: "004209",
       token,
       name: "Milind's Mac",
       secretPublicKey,
@@ -37,13 +37,13 @@ describe("phonePairingLink", () => {
     expect(url.host).toBe("pair");
     expect(url.searchParams.get("address")).toBe("macbook.tail1234.ts.net:8810");
     expect(url.searchParams.get("token")).toBe(token);
-    expect(url.searchParams.get("code")).toBeNull();
+    expect(url.searchParams.get("code")).toBe("004209");
     expect(url.searchParams.get("name")).toBe("Milind's Mac");
     expect(url.searchParams.get("secretKey")).toBe(secretPublicKey);
   });
 
   it("omits malformed secure-entry keys instead of advertising an unusable key", () => {
-    const base = { address: "mac.local", port: 8810, token };
+    const base = { address: "mac.local", port: 8810, code: "123456", token };
     expect(new URL(phonePairingLink({ ...base, secretPublicKey: secretPublicKey.slice(1) })!)
       .searchParams.get("secretKey")).toBeNull();
     expect(new URL(phonePairingLink({ ...base, secretPublicKey: `A${secretPublicKey.slice(1)}` })!)
@@ -51,13 +51,14 @@ describe("phonePairingLink", () => {
   });
 
   it("refuses to make a link from an invalid pairing window", () => {
-    expect(phonePairingLink({ address: "", port: 8810, token })).toBeNull();
-    expect(phonePairingLink({ address: "mac.local", port: 0, token })).toBeNull();
-    expect(phonePairingLink({ address: "mac.local", port: 8810, token: "weak" })).toBeNull();
+    expect(phonePairingLink({ address: "", port: 8810, code: "123456", token })).toBeNull();
+    expect(phonePairingLink({ address: "mac.local", port: 0, code: "123456", token })).toBeNull();
+    expect(phonePairingLink({ address: "mac.local", port: 8810, code: "12345", token })).toBeNull();
+    expect(phonePairingLink({ address: "mac.local", port: 8810, code: "123456", token: "weak" })).toBeNull();
   });
 
   it("makes an IPv6 address unambiguous", () => {
-    const link = phonePairingLink({ address: "2001:db8::1", port: 8810, token });
+    const link = phonePairingLink({ address: "2001:db8::1", port: 8810, code: "123456", token });
     expect(new URL(link!).searchParams.get("address")).toBe("[2001:db8::1]:8810");
   });
 
@@ -65,7 +66,7 @@ describe("phonePairingLink", () => {
     const link = phonePairingLink({
       address: "macbook.tail1234.ts.net",
       port: 8810,
-      
+      code: "004209",
       token,
       hosts: ["macbook.tail1234.ts.net", "192.168.1.42", "openmausbot-abcd1234.local"],
     });
@@ -78,7 +79,7 @@ describe("phonePairingLink", () => {
     const link = phonePairingLink({
       address: "192.168.1.42",
       port: 8810,
-      
+      code: "004209",
       token,
       hosts: ["192.168.1.42", "openmausbot-abcd1234.local"],
       endpoints: [
@@ -103,7 +104,7 @@ describe("phonePairingLink", () => {
     const link = phonePairingLink({
       address: "mac.local",
       port: 8810,
-      
+      code: "004209",
       token,
       endpoints: [
         { url: "http://hosted.example", kind: "hosted", priority: 0 },
@@ -131,7 +132,7 @@ describe("phonePairingLink", () => {
     const link = phonePairingLink({
       address: "mac.local",
       port: 8810,
-      
+      code: "004209",
       token,
       hosts: ["  192.168.1.42  ", "", "has space", "has/slash", "a,b"],
     });
@@ -139,12 +140,12 @@ describe("phonePairingLink", () => {
     expect(url.searchParams.get("hosts")).toBe("192.168.1.42");
     expect(url.searchParams.get("address")).toBe("mac.local:8810");
 
-    const none = phonePairingLink({ address: "mac.local", port: 8810, token, hosts: [] });
+    const none = phonePairingLink({ address: "mac.local", port: 8810, code: "004209", token, hosts: [] });
     expect(new URL(none!).searchParams.get("hosts")).toBeNull();
   });
 
   it("writes a space as %20, never +, so a phone shows the name it was given", () => {
-    const link = phonePairingLink({ address: "192.168.1.34", port: 8810, token, name: "Miguel's computer" })!;
+    const link = phonePairingLink({ address: "192.168.1.34", port: 8810, code: "004209", token, name: "Miguel's computer" })!;
     expect(link).toContain("name=Miguel's%20computer");
     expect(link).not.toContain("+");
     expect(rawField(link, "name")).toBe("Miguel's computer");

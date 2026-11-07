@@ -64,7 +64,7 @@ const bridge = {
 const account = { state: async () => ({ available: true, status: "ready", email: "ada@example.com" }) };
 (globalThis as unknown as { ogb: unknown }).ogb = { companion: bridge, companionAccount: account };
 
-const link = phonePairingLink({ address: "192.168.1.20", port: 8810, token: TOKEN, name: "Ada's MacBook",
+const link = phonePairingLink({ address: "192.168.1.20", port: 8810, token: TOKEN, code: e2eOn ? undefined : "482913", name: "Ada's MacBook",
   e2e: state.e2e?.descriptor });
 const controller = {
   state, account: { available: true, status: "ready", email: "ada@example.com" }, phase: "qr", email: "", code: "", codeSent: false,

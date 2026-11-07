@@ -3135,8 +3135,6 @@
   "pair.emailCode": "Code de connexion reçu par e-mail",
   "pair.useEmail": "Se connecter avec un e-mail",
   "pair.intro.code": "Saisissez le code d'association du serveur. Il fonctionne une fois, pendant dix minutes.",
-  "remote.client.companion.hint": "Dans l'autre application de bureau, ouvrez Réglages → Accès à distance et créez un code d'association. Utilisez son adresse HTTPS {app} gérée ou le nom Tailscale complet se terminant par .ts.net. Pour un serveur auto-hébergé ou un domaine personnalisé, choisissez Serveur auto-hébergé dans l'application installée sur cet ordinateur.",
-  "remote.client.companion.code": "Code d'association",
   "pair.fromLink": "Depuis le lien",
   "pair.onPhone": "Sur votre téléphone ?",
   "pair.openInApp": "Ouvrir dans l'application {app}",
