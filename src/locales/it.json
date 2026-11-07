@@ -2097,6 +2097,8 @@
   "chat.stop": "Interrompi",
   "chat.stopTurn": "Interrompi questo turno",
   "chat.computer": "Schermo del bot",
+  "chat.watchScreen": "Guarda",
+  "chat.watchScreenHint": "Guarda cosa fa il bot sul suo schermo",
   "chat.advancedOnly": "In modalità avanzata",
   "chat.inspector": "Ispettore",
   "chat.inspectorHint": "Ispettore — eventi di esecuzione e protocollo grezzo di questa discussione",

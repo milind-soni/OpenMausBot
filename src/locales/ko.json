@@ -2297,6 +2297,8 @@
   "chat.stop": "중지",
   "chat.stopTurn": "이번 턴 중지",
   "chat.computer": "봇의 화면",
+  "chat.watchScreen": "보기",
+  "chat.watchScreenHint": "봇이 화면에서 하는 일 보기",
   "chat.advancedOnly": "고급 모드에서",
   "chat.inspector": "인스펙터",
   "chat.inspectorHint": "인스펙터 — 이 스레드의 런타임 이벤트와 원본 프로토콜",

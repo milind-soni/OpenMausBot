@@ -2436,6 +2436,8 @@
   "chat.stop": "停止",
   "chat.stopTurn": "停止本轮",
   "chat.computer": "机器人的屏幕",
+  "chat.watchScreen": "观看",
+  "chat.watchScreenHint": "观看机器人在屏幕上做什么",
   "chat.advancedOnly": "高级模式中",
   "chat.inspector": "检查器",
   "chat.inspectorHint": "检查器——本对话的运行时事件与原始协议",

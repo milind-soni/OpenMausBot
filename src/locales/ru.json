@@ -2175,6 +2175,8 @@
   "chat.stop": "Стоп",
   "chat.stopTurn": "Остановить этот ход",
   "chat.computer": "Экран бота",
+  "chat.watchScreen": "Смотреть",
+  "chat.watchScreenHint": "Смотреть, что бот делает на своём экране",
   "chat.advancedOnly": "В расширенном режиме",
   "chat.inspector": "Инспектор",
   "chat.inspectorHint": "Инспектор — события рантайма и необработанный протокол этого треда",

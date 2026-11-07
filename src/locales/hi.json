@@ -871,6 +871,8 @@
   "chat.stop": "रोकें",
   "chat.stopTurn": "यह बारी रोकें",
   "chat.computer": "बॉट की स्क्रीन",
+  "chat.watchScreen": "देखें",
+  "chat.watchScreenHint": "देखें कि बॉट अपनी स्क्रीन पर क्या कर रहा है",
   "chat.inspector": "इंस्पेक्टर",
   "chat.inspectorHint": "इंस्पेक्टर — इस बातचीत के रनटाइम इवेंट और कच्चा प्रोटोकॉल",
   "chat.conversationWith": "{name} के साथ बातचीत",
