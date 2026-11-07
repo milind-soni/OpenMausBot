@@ -71,7 +71,7 @@ export function createLendingDialogs({ dialog, window, validate, isHome = async 
         buttons: [t("native.lend.mcp.allow"), t("native.lend.mcp.deny")], defaultId: 1, cancelId: 1 };
       const shown = window();
       const parent = shown && !shown.isDestroyed() ? shown : null;
-      // Electron 43 runs a message box without a window synchronously on macOS, where it can sit unseen behind other apps.
+      // Electron 43 runs a message box without a window synchronously on macOS.
       if (platform === "darwin" && !parent) throw new Error("No window to ask in.");
       if (parent && !parent.isVisible()) parent.show();
       const { response } = await (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
