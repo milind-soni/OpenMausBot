@@ -210,7 +210,8 @@ describe("egress gate", () => {
   });
 
   it("reaches the next address when the first family cannot route, as autoSelectFamily was meant to", async () => {
-    const reachable = NodeNet.createServer((socket) => socket.end("reached"));
+    // Answers only once the client speaks, so the answer never shares a packet with the gate's SOCKS reply.
+    const reachable = NodeNet.createServer((socket) => socket.once("data", () => socket.end("reached")));
     await new Promise<void>((resolve) => reachable.listen(0, "127.0.0.1", resolve));
     const reachablePort = (reachable.address() as NodeNet.AddressInfo).port;
     // A mixed list is what a public name usually resolves to. The first address fails (nothing listens on ::1 at this
@@ -223,6 +224,7 @@ describe("egress gate", () => {
     ];
     const { port } = await gate({ ...serverRules, host: "desktop" }, [], resolve);
     const { code, socket } = await connectThrough(port, domainTarget("localhost", reachablePort));
+    socket.write("hello");
     const answer = await new Promise<Buffer>((resolveAnswer, decline) => {
       socket.once("data", resolveAnswer);
       socket.once("close", () => decline(new Error("closed before an answer")));
