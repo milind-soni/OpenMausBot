@@ -29,7 +29,7 @@ upstream hardened its loopback gate.
 
 | | |
 |---|---|
-| **Pairing** | A high-entropy QR credential plus a six-digit manual fallback, valid two minutes and single-use. Redeeming either returns a device token stored only as a SHA-256 digest. |
+| **Pairing** | A high-entropy QR credential plus the 12-character pairing code to type (dashes and case don't matter), valid ten minutes and single-use. Redeeming either returns a device token stored only as a SHA-256 digest. A phone app that still sends six digits is told to update. |
 | **Authorisation** | Every request needs that token. Computer access — the cloud desktop, and seeing or taking control of the Local VM — is a separate per-device capability, off by default. A rebinding page cannot obtain either. |
 | **The allowlist** | Default deny, per method and path (`src/routes.ts`). Bot PATCH accepts only reading state, pins, colour, mascot and avatar image or framing fields; the harness rejects other fields before applying any change. A new bot may carry only its name, profile, look and model; asking for anything else (approval level, computer, folder, Chief of Staff, peers, tools, department, preset) is refused and no bot is made. General room PATCH stays closed, and approval grants use narrow verbs. A new harness route stays closed to devices until it is explicitly listed. |
 | **Scrubbing** | `resumeCursors` — the harness's own provider session ids — never reach a device, whether or not the harness still sends them. |
@@ -100,7 +100,7 @@ Open the pairing page from that exact link: the token after `#token=` is new
 each time the sidecar starts, and every control request needs it, so a web
 page that some other browser tab (or a bot's browser) opens on port 8811
 cannot pair a device or change one. The token stays in the address fragment,
-which never leaves the page. Click **Start pairing**, and type the six digits into
+which never leaves the page. Click **Start pairing**, and type the pairing code into
 the phone. The normal desktop panel also turns that short-lived code and the
 dialable address into a QR handoff, so the mobile app can fill both in without
 putting the long-lived device token in the QR. Stopping the process is the off

@@ -121,10 +121,29 @@ describe("DeviceRegistry", () => {
     expect(registry.authenticate(`${token}x`)).toBeNull();
   });
 
+  it("opens a 12-character code for ten minutes, typed however the person likes", () => {
+    const registry = new DeviceRegistry();
+    const { code, expiresAt } = registry.openPairing();
+    expect(code).toMatch(/^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{12}$/);
+    expect(PAIRING_TTL_MS).toBe(600_000);
+    expect(expiresAt - Date.now()).toBeGreaterThan(599_000);
+    const typed = `${code.slice(0, 4).toLowerCase()}-${code.slice(4, 8)} ${code.slice(8)}`;
+    expect(registry.redeem(typed, "iPhone")).toHaveProperty("token");
+  });
+
+  it("tells an old phone app sending six digits to update, without spending a guess", () => {
+    const registry = new DeviceRegistry();
+    registry.openPairing();
+    for (let i = 0; i < MAX_PAIRING_ATTEMPTS + 1; i++) {
+      expect(registry.redeem("004209", "iPhone")).toEqual({ error: "Update the MausBot app to pair." });
+    }
+    expect(registry.pairing()).not.toBeNull();
+  });
+
   it("burns the pairing window after too many wrong codes", () => {
     const registry = new DeviceRegistry();
     const { code } = registry.openPairing();
-    const wrong = code === "000000" ? "111111" : "000000";
+    const wrong = code === "AAAAAAAAAAAA" ? "BBBBBBBBBBBB" : "AAAAAAAAAAAA";
 
     for (let i = 1; i < MAX_PAIRING_ATTEMPTS; i++) {
       expect(registry.redeem(wrong, "iPhone")).toEqual({ error: "that pairing credential is not right" });
@@ -182,7 +201,7 @@ describe("DeviceRegistry", () => {
     });
   });
 
-  it("actively erases a redemption replay at the original window expiry", () => {
+  it("actively erases a redemption replay once the device would be dropped as unconfirmed", () => {
     vi.useFakeTimers();
     try {
       const registry = new DeviceRegistry();
@@ -196,13 +215,15 @@ describe("DeviceRegistry", () => {
       expect(memory.replay).not.toBeNull();
       expect(memory.replayExpiryTimer).not.toBeNull();
 
-      vi.advanceTimersByTime(PAIRING_TTL_MS + 1);
+      vi.advanceTimersByTime(UNCONFIRMED_DEVICE_MS - 1);
+      expect(memory.replay).not.toBeNull();
+      vi.advanceTimersByTime(2);
       expect(memory.replay).toBeNull();
       expect(memory.replayExpiryTimer).toBeNull();
       expect(registry.redeem(credential, "iPhone", requestId)).toMatchObject({
         error: expect.stringContaining("no pairing"),
       });
-      expect(registry.count()).toBe(1);
+      expect(registry.count()).toBe(0);
     } finally {
       vi.useRealTimers();
     }

@@ -1,18 +1,26 @@
-// Pairing codes (60-bit, single use, 5 min unless asked for up to a day), sessions (256-bit, only the sha256 stored) and stream tickets (EventSource cannot set headers).
+// Pairing codes (60-bit, single use, 10 min unless asked for up to a day), sessions (256-bit, only the sha256 stored) and stream tickets (EventSource cannot set headers).
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
 import { teamSessionExpiresAt, type TeamMember, type TeamRole } from "./cloud-team.ts";
+import {
+  formatPairingCode,
+  normalizePairingCode,
+  PAIRING_CODE_ALPHABET,
+  PAIRING_CODE_LENGTH,
+  PAIRING_CREDENTIAL_PREFIX,
+  PAIRING_INPUT_PROBLEM_KEY,
+  readPairingInput,
+} from "../shared/pairing-code.ts";
 import { userError, type UserError } from "./user-errors.ts";
 
 export type Scope = "admin" | "client";
 export const SCOPES: readonly Scope[] = ["admin", "client"];
 
-export const PAIRING_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
-export const PAIRING_CODE_LENGTH = 12;
-export const PAIRING_CODE_TTL_MS = 5 * 60_000;
+export { formatPairingCode, normalizePairingCode, PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH, PAIRING_CREDENTIAL_PREFIX };
+export const PAIRING_CODE_TTL_MS = 10 * 60_000;
 export const PAIRING_CODE_MAX_TTL_MS = 24 * 3_600_000;
 /** Not clamped: an invalid value falls back to the default, so a typo never becomes a policy. */
 export function daysMs(value: string | undefined, fallbackDays: number): number {
@@ -31,7 +39,7 @@ export function cookieMaxAgeSeconds(session: { expiresAt: number }, now = Date.n
 }
 export const STREAM_TICKET_TTL_MS = 5 * 60_000;
 /** Slow-down only: a 60-bit code cannot be guessed online in a day, and sources are shared (NAT), so the lock stays short. */
-export const LOCKOUT = { failures: 10, windowMs: 60_000, lockMs: 60_000 } as const;
+export const LOCKOUT = { failures: 5, windowMs: 5 * 60_000, lockMs: 5 * 60_000 } as const;
 /** A consumed code re-presented with the same client-made attempt id gets the same answer; sharing an address is not enough. */
 export const EXCHANGE_REPLAY_MS = 60_000;
 export const MAX_STREAM_TICKETS_PER_SESSION = 5;
@@ -113,9 +121,11 @@ export interface PublicPairing {
 
 export type ExchangeResult =
   | { ok: true; token: string; session: PublicSession }
-  | ({ ok: false; status: 401 | 403 | 429 } & UserError);
+  | ({ ok: false; status: 400 | 401 | 403 | 429 } & UserError);
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+/** The English fallback's clock; a client words `until` in its own time zone. */
+const utcClock = (at: number) => `${new Date(at).toISOString().slice(11, 16)} UTC`;
 
 function deviceLabel(value: string | undefined): string {
   return (value ?? "").replace(/[\p{Cc}\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu, "").trim();
@@ -141,9 +151,6 @@ export function generatePairingCode(): string {
   return code;
 }
 
-/** A credential is matched byte for byte; only a typed code is normalized. */
-export const PAIRING_CREDENTIAL_PREFIX = "omb_pair_";
-
 /** 9 + 43 characters: the Android companion checks that length exactly. */
 export function generatePairingCredential(): string {
   return `${PAIRING_CREDENTIAL_PREFIX}${randomBytes(32).toString("base64url")}`;
@@ -151,18 +158,6 @@ export function generatePairingCredential(): string {
 
 export function isPairingCredential(value: string): boolean {
   return value.startsWith(PAIRING_CREDENTIAL_PREFIX);
-}
-
-export function normalizePairingCode(input: string): string {
-  return input
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "")
-    .replace(/0/g, "O")
-    .replace(/1/g, "I");
-}
-
-export function formatPairingCode(code: string): string {
-  return code.match(/.{1,4}/g)?.join("-") ?? code;
 }
 
 function publicSession(record: SessionRecord): PublicSession {
@@ -424,18 +419,18 @@ export class SessionRegistry {
   exchange(input: { code: string; label: string; source: string; fallbackLabel?: string; attemptId?: string; browser?: boolean }): ExchangeResult {
     this.prune();
     const now = this.now();
-    // Hashed as presented: normalizePairingCode folds 0 to O and 1 to I, which would merge distinct secrets.
-    const presented = isPairingCredential(input.code)
-      ? sha256(input.code)
-      : sha256(normalizePairingCode(input.code));
+    const read = readPairingInput(input.code);
+    if (read.kind === "wrong" && read.problem !== "notACode") return { ok: false, status: 400, ...userError(PAIRING_INPUT_PROBLEM_KEY[read.problem]) };
+    // A credential is hashed as presented: normalizePairingCode folds 0 to O and 1 to I, which would merge distinct secrets.
+    const presented = sha256(read.kind === "credential" ? read.credential : read.kind === "code" ? read.code : normalizePairingCode(input.code));
     const browser = input.browser === true;
     const attemptId = typeof input.attemptId === "string" && /^[\w-]{8,64}$/.test(input.attemptId) ? input.attemptId : null;
     const replay = attemptId ? this.replays.find((r) => r.attemptId === attemptId && r.browser === browser && sameDigest(r.codeHash, presented)) : undefined;
     if (replay) return replay.result;
     const lock = this.lockState(input.source);
     if (lock.locked) {
-      const seconds = Math.ceil(lock.retryAfterMs / 1000);
-      return { ok: false, status: 429, ...userError("serverError.pair.tooMany", { seconds }) };
+      const until = now + lock.retryAfterMs;
+      return { ok: false, status: 429, ...userError("serverError.pair.tooMany", { seconds: Math.ceil(lock.retryAfterMs / 1000), until, time: utcClock(until) }) };
     }
     const index = this.pairings.findIndex((p) => (p.browser === true) === browser &&
       (sameDigest(p.credentialHash, presented) || (!p.browser && sameDigest(p.codeHash, presented))));

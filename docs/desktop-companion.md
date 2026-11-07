@@ -20,10 +20,10 @@ below. The two connection types intentionally do not share credentials.
 ## Pair over secure HTTPS
 
 1. On the host, open **Settings → Remote access** and finish **Secure HTTPS pairing**.
-2. Open a pairing window so the host displays a six-digit code.
+2. Open a pairing window so the host displays a pairing code (12 characters, like `7KQ2-M9XD-H4TP`).
 3. On the client, open **Settings → Remote access → Connect to another computer**
    and choose **Desktop companion**.
-4. Enter the host's managed companion address (`https://c-….openmausbot.com` or `https://c-….mausbot.si`) and the six-digit code.
+4. Enter the host's managed companion address (`https://c-….openmausbot.com` or `https://c-….mausbot.si`) and the pairing code.
 5. Choose **Pair and switch to client mode**. The client restarts and opens the host's bot UI.
 
 The HTTPS address uses the host's managed outbound tunnel. TLS is verified by the operating system, and the client does not need Tailscale. HTTPS is intentionally restricted to the names OpenMausBot issues (`c-` and 32 hexadecimal characters under `openmausbot.com` or `mausbot.si`) so a typo, or any other host in those domains, cannot receive the pairing code or a paired-device token. Desktop releases up to 0.1.103 accept only `openmausbot.com` names; update the client to pair with a host whose address is on `mausbot.si`, or pair over Tailscale.
@@ -31,10 +31,10 @@ The HTTPS address uses the host's managed outbound tunnel. TLS is verified by th
 ## Pair over Tailscale
 
 1. Install Tailscale on both computers, sign into the same tailnet, and leave MagicDNS enabled.
-2. On the host, open **Settings → Remote access**, turn on Remote access, and open **Pair over Tailscale** to display a six-digit code.
+2. On the host, open **Settings → Remote access**, turn on Remote access, and open **Pair over Tailscale** to display a pairing code.
 3. On the client, open **Settings → Remote access → Connect to another computer**
    and choose **Desktop companion**.
-4. Enter the host's full `.ts.net` MagicDNS name and the six-digit code.
+4. Enter the host's full `.ts.net` MagicDNS name and the pairing code.
 5. Choose **Pair and switch to client mode**. The client restarts and opens the host's bot UI.
 
 To switch that installation back, open **Settings → Remote access** and choose **Disconnect and use this computer**.

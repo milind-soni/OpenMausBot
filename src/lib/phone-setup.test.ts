@@ -469,7 +469,7 @@ describe("phone setup flow", () => {
   it("requires pairing(true) to return a healthy live pairing window", () => {
     const token = `omb_pair_${"a".repeat(43)}`;
     const fresh = {
-      code: "123456",
+      code: "7KQ2M9XDH4TP",
       token,
       expiresAt: 2_000,
     };
