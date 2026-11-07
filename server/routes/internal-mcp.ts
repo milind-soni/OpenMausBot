@@ -218,8 +218,9 @@ async function add(deps: Deps, name: string, fields: Record<string, unknown>, si
   redeemed.commit();
   const where = folderText(deps, server, added.moved ?? []);
 
-  // Security: turning a command server on runs a program on this computer, which below Full access needs a yes.
-  if (!deps.fullAccess() && !isRemoteMcpServer(server)) {
+  // Security: below Full access, turning on a command server (it runs a program) or a server on the person's own
+  // computer needs their yes; a URL server elsewhere only connects to an address.
+  if (!deps.fullAccess() && (!isRemoteMcpServer(server) || server.runsOn)) {
     say(deps, { action: "add", name }, ["server.mcp.added", { name }], ["server.mcp.switchedOff"]);
     const card = deps.requestApproval({ action: "enable", name, subtitle: turnOnText(deps, server), targetHash: targetHash(server) });
     return { status: 201, text: `Saved MCP server ${name} switched off.${where} ${card.text}` };
