@@ -3,6 +3,8 @@
 import { appendFileSync, chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { dirname } from "node:path";
+import { billingReply, snapshotBeforeDelete } from "./fleet-billing.ts";
+import { brandFieldsTouched, brandInputFromBody, omitBrandAssets, workspaceBrandPath } from "./fleet-brand.ts";
 import { defaultFleetDeps, executePlan, loadRegistry, markProvisioningFailed, planFleetAction, type FleetDeps, type FleetInput } from "./fleet-cli.ts";
 import { assertSlug, fleetLayout, fleetUser, openRouterModelIds, workspaceDataDir, type FleetLayout, type FleetWorkspace } from "./fleet.ts";
 
@@ -21,12 +23,18 @@ export interface FleetAgentOptions {
 
 export interface FleetWorkspaceView extends FleetWorkspace {
   live: string;
+  /** What the workspace shows, without its images; present when the fleet has a reseller. */
+  brand?: Record<string, unknown>;
   usage: { month: string; turns: number | null; costUsd: number | null; billableUsd: number | null; unavailable?: true };
 }
 
 const MAX_BODY = 256 * 1024;
+const BILLING_CACHE_MS = 60_000;
+const BILLING_CACHE_ENTRIES = 32;
+/** A logo and a favicon at their schema limits, as data URIs, plus the rest of a brand. */
+export const MAX_BRAND_BODY = 512 * 1024;
 
-export function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+export function readBody(req: IncomingMessage, limit = MAX_BODY): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let bytes = 0;
@@ -34,7 +42,7 @@ export function readBody(req: IncomingMessage): Promise<Record<string, unknown>>
     req.on("data", (chunk: Buffer) => {
       if (tooLarge) return;
       bytes += chunk.length;
-      if (bytes > MAX_BODY) {
+      if (bytes > limit) {
         // Keep draining so the 413 can still be sent, but stop holding bytes.
         tooLarge = true;
         chunks.length = 0;
@@ -73,6 +81,15 @@ export function workspaceUsage(layout: FleetLayout, slug: string, now: Date, dep
   catch { return { month, turns: null, costUsd: null, billableUsd: null, unavailable: true }; }
 }
 
+function workspaceBrand(layout: FleetLayout, slug: string, deps: FleetDeps): { brand?: Record<string, unknown> } {
+  try {
+    const parsed: unknown = JSON.parse(deps.readText(workspaceBrandPath(layout, slug)) ?? "null");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? { brand: parsed as Record<string, unknown> } : {};
+  } catch {
+    return {};
+  }
+}
+
 export function createFleetAgent(options: FleetAgentOptions): Server {
   const deps = options.deps ?? defaultFleetDeps();
   const layout = fleetLayout(options.root ?? "/");
@@ -91,15 +108,18 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
     }
   };
 
+  const auditBrand = (input: FleetInput) => (input.action === "brand" ? { brand: brandFieldsTouched(input) } : {});
+
   const runAction = async (input: FleetInput): Promise<{ status: number; body: unknown }> => {
     const log: string[] = [];
     const errors: string[] = [];
     const io = { log: (line: string) => log.push(line), error: (line: string) => errors.push(line) };
     let steps;
     try {
+      if (input.action === "delete" && input.yes) await snapshotBeforeDelete(input, deps, now());
       steps = planFleetAction(input, deps);
     } catch (error) {
-      audit({ action: input.action, slug: input.slug, ok: false, error: error instanceof Error ? error.message : String(error) });
+      audit({ action: input.action, slug: input.slug, ...auditBrand(input), ok: false, error: error instanceof Error ? error.message : String(error) });
       return { status: 400, body: { error: error instanceof Error ? error.message : String(error) } };
     }
     let code = 1;
@@ -115,16 +135,45 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
         errors.push("could not record the failed provisioning; inspect the reserved workspace before recovery");
       }
     }
-    audit({ action: input.action, slug: input.slug, ok: code === 0, ...(input.email ? { email: input.email } : {}) });
+    audit({ action: input.action, slug: input.slug, ...auditBrand(input), ok: code === 0, ...(input.email ? { email: input.email } : {}) });
     return code === 0 ? { status: 200, body: { ok: true, log } } : { status: 500, body: { error: errors[0] ?? "the step failed", log: [...log, ...errors] } };
   };
 
   // Planning reads the registry too: serialize the whole read/modify/execute sequence so ports and updates cannot collide.
   let mutationTail: Promise<unknown> = Promise.resolve();
   const act = (input: FleetInput) => {
-    const result = mutationTail.then(() => runAction(input));
+    forgetBilling();
+    const result = mutationTail.then(() => runAction(input)).finally(forgetBilling);
     mutationTail = result.catch(() => {});
     return result;
+  };
+
+  type Reply = { status: number; body: unknown };
+  const billingCache = new Map<string, { at: number; reply: Reply }>();
+  const billingBuilds = new Map<string, Promise<Reply>>();
+  let billingEpoch = 0;
+  function forgetBilling() {
+    billingEpoch++;
+    billingCache.clear();
+    billingBuilds.clear();
+  }
+  const billingAnswer = (query: URLSearchParams): Promise<Reply> => {
+    const key = JSON.stringify([query.get("month"), query.get("detail") === "true", query.get("maxUsers")]);
+    const cached = billingCache.get(key);
+    if (cached && now().getTime() - cached.at < BILLING_CACHE_MS) return Promise.resolve(cached.reply);
+    const building = billingBuilds.get(key);
+    if (building) return building;
+    const epoch = billingEpoch;
+    const build: Promise<Reply> = billingReply(query, { layout, deps, now: now() }).then((reply) => {
+      if (reply.status === 200 && epoch === billingEpoch) {
+        for (const [name, entry] of billingCache) if (now().getTime() - entry.at >= BILLING_CACHE_MS) billingCache.delete(name);
+        if (billingCache.size >= BILLING_CACHE_ENTRIES) billingCache.delete(billingCache.keys().next().value!);
+        billingCache.set(key, { at: now().getTime(), reply });
+      }
+      return reply;
+    }).finally(() => { if (billingBuilds.get(key) === build) billingBuilds.delete(key); });
+    billingBuilds.set(key, build);
+    return build;
   };
 
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
@@ -144,7 +193,7 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
           const live = workspace.status === "running" || workspace.status === "suspended"
             ? (await deps.run(["systemctl", "is-active", `openmausbot@${workspace.slug}.service`])).output.trim() || "unknown"
             : workspace.status;
-          workspaces.push(statusOnly ? { slug: workspace.slug, live } : { ...workspace, live, usage: workspaceUsage(layout, workspace.slug, now(), deps) });
+          workspaces.push(statusOnly ? { slug: workspace.slug, live } : omitBrandAssets({ ...workspace, live, usage: workspaceUsage(layout, workspace.slug, now(), deps), ...workspaceBrand(layout, workspace.slug, deps) }));
         }
         return send(200, { domain: registry.domain, operator: registry.operator ?? null, workspaces });
       }
@@ -159,11 +208,20 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
         });
         return send(result.status, result.body);
       }
+      if (method === "GET" && url.pathname === "/billing") {
+        const reply = await billingAnswer(url.searchParams);
+        audit({ action: "billing", month: url.searchParams.get("month") ?? undefined, ok: reply.status === 200 });
+        return send(reply.status, reply.body);
+      }
+      if (method === "PUT" && url.pathname === "/brand") {
+        const result = await act(brandInputFromBody(base(), await readBody(req, MAX_BRAND_BODY), undefined));
+        return send(result.status, result.body);
+      }
       if (method === "POST" && url.pathname === "/upgrade") {
         const result = await act({ ...base(), action: "upgrade" });
         return send(result.status, result.body);
       }
-      const match = /^\/workspaces\/([a-z0-9-]+)(?:\/(users|providers|suspend|resume))?$/.exec(url.pathname);
+      const match = /^\/workspaces\/([a-z0-9-]+)(?:\/(users|providers|suspend|resume|brand))?$/.exec(url.pathname);
       if (match) {
         const slug = match[1]!;
         assertSlug(slug);
@@ -171,6 +229,10 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
         if (method === "POST" && sub === "providers") {
           const body = await readBody(req);
           const result = await act({ ...base(), action: "providers", slug, openrouterModels: models(body.models) });
+          return send(result.status, result.body);
+        }
+        if (method === "POST" && sub === "brand") {
+          const result = await act(brandInputFromBody(base(), await readBody(req, MAX_BRAND_BODY), slug));
           return send(result.status, result.body);
         }
         if (method === "POST" && sub === "users") {

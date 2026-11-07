@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { markProvisioningFailed, runFleetCommand, type FleetDeps, type FleetInput } from "./fleet-cli.ts";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { defaultFleetDeps, markProvisioningFailed, runFleetCommand, type FleetDeps, type FleetInput } from "./fleet-cli.ts";
 import { emptyRegistry, fenceRules, MANAGED_OPENROUTER, type FleetWorkspace } from "./fleet.ts";
+import { removeTempDir } from "./testing/cleanup.ts";
 
 // A machine that records what the CLI would do to it. Nothing here touches
 // the real filesystem, systemd, nftables or Caddy.
@@ -85,6 +89,27 @@ describe("openmausbot fleet", () => {
     expect(dry.out[0]).toBe("dry run; inspect this plan, then rerun the fleet command as root without --dry-run (with --yes where required):");
     expect(dry.out.join("\n")).toContain("useradd --system --create-home --home-dir /var/lib/openmausbot/acme");
     expect(rooted.calls).toEqual([]);
+  });
+
+  it("prints a plan without the licence key, the mail relay address or a provider key", async () => {
+    const smtpUrl = "smtps://login%40acme.test:SMTP-SECRET-4@smtp.acme.test:465";
+    const reseller = { name: "Acme Chat", currency: "USD", wholesale: { workspaceMonthMinor: 0, userMonthMinor: 0 }, retail: { workspaceMonthMinor: 0, userMonthMinor: 0 }, smtp: { urlFile: "/etc/openmausbot/smtp.url", from: "login@acme.test" } };
+    const files = { [registryFile]: JSON.stringify({ ...emptyRegistry("agentada.cc"), reseller, workspaces: {} }), "/etc/openmausbot/smtp.url": `${smtpUrl}\n` };
+    const input: FleetInput = {
+      ...base, action: "create", slug: "acme", admins: ["ada@example.test"], licenseKey: "LICENSE-SECRET-2", anthropicKey: "sk-ant-SECRET-1",
+      portalUrl: "https://admin.example.test", openrouterKey: "OPENROUTER-SECRET-3", openrouterUrl: "https://admin.example.test/api/gateway/acme/openrouter/v1", openrouterModels: ["provider/first"],
+    };
+    for (const [root, dryRun] of [[true, true], [false, false]] as const) {
+      const m = machine({ root, files });
+      const log = io();
+      expect(await runFleetCommand({ ...input, dryRun }, log.io, m.deps)).toBe(0);
+      const printed = [...log.out, ...log.err].join("\n");
+      expect(printed).toContain("cat > /etc/openmausbot/instances/acme.env <<'OMB_EOF'");
+      expect(printed).toContain("OMB_LICENSE_KEY=(the licence key, left out of this listing)");
+      expect(printed).toContain("OMB_SIGNIN_SMTP_URL=(read from the reseller's SMTP file when this runs)");
+      for (const secret of ["LICENSE-SECRET-2", "sk-ant-SECRET-1", "OPENROUTER-SECRET-3", "SMTP-SECRET-4", smtpUrl]) expect(printed).not.toContain(secret);
+      expect(m.calls.filter((call) => call.startsWith("run ") || call.startsWith("write "))).toEqual([]);
+    }
   });
 
   it("refuses an npx cache as the unit's script and asks for the domain", async () => {
@@ -209,5 +234,48 @@ describe("openmausbot fleet", () => {
     expect(await runFleetCommand({ ...base, action: "create", slug: "acme", admins: ["a@example.test"] }, duplicate.io, ready.deps)).toBe(2);
     expect(duplicate.err.join("\n")).toContain('workspace "acme" already exists');
     expect(ready.calls).toEqual([]);
+  });
+});
+
+describe.skipIf(process.platform === "win32")("reading a --logo or --favicon file", () => {
+  const dirs: string[] = [];
+  afterEach(async () => {
+    for (const dir of dirs.splice(0)) await removeTempDir(dir);
+  });
+  const folder = () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "omb-fleet-image-")));
+    dirs.push(dir);
+    return dir;
+  };
+  const readBytes = defaultFleetDeps().readBytes!;
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+
+  it("reads a regular file, and finds nothing where there is nothing", () => {
+    const dir = folder();
+    writeFileSync(join(dir, "logo.png"), PNG);
+    expect(Buffer.from(readBytes(join(dir, "logo.png"))!)).toEqual(PNG);
+    expect(readBytes(join(dir, "missing.png"))).toBeNull();
+  });
+
+  it("refuses a symbolic link, even to a real image", () => {
+    const dir = folder();
+    writeFileSync(join(dir, "logo.png"), PNG);
+    symlinkSync(join(dir, "logo.png"), join(dir, "link.png"));
+    expect(() => readBytes(join(dir, "link.png"))).toThrow(`${join(dir, "link.png")} is a symbolic link; pass the image file itself`);
+  });
+
+  it("refuses a directory and a device", () => {
+    const dir = folder();
+    mkdirSync(join(dir, "logo.png"));
+    expect(() => readBytes(join(dir, "logo.png"))).toThrow(`${join(dir, "logo.png")} is not a regular file`);
+    expect(() => readBytes("/dev/zero")).toThrow("/dev/zero is not a regular file");
+  });
+
+  it("refuses a file over 1 MiB without reading it, and takes one of exactly 1 MiB", () => {
+    const dir = folder();
+    writeFileSync(join(dir, "huge.png"), Buffer.concat([PNG, Buffer.alloc(1024 * 1024 + 1 - PNG.length)]));
+    expect(() => readBytes(join(dir, "huge.png"))).toThrow(`${join(dir, "huge.png")} is larger than 1 MiB`);
+    writeFileSync(join(dir, "edge.png"), Buffer.concat([PNG, Buffer.alloc(1024 * 1024 - PNG.length)]));
+    expect(readBytes(join(dir, "edge.png"))!.length).toBe(1024 * 1024);
   });
 });

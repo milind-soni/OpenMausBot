@@ -31,9 +31,11 @@ import { writeFileAtomic } from "./atomic.ts";
 import { ensureCaddy, normalizeDomainOption, startCaddy, type RunningCaddy } from "./caddy.ts";
 import { runServiceCommand } from "./service-cli.ts";
 import { runSentinelCli } from "./sentinel/cli.ts";
-import { runFleetCommand, type FleetInput } from "./fleet-cli.ts";
+import { BRAND_FIELDS, runFleetCommand, type BrandField, type BrandPatch, type FleetInput, type RatesPatch } from "./fleet-cli.ts";
 import { startFleetAgent } from "./fleet-agent.ts";
-import { fleetLayout } from "./fleet.ts";
+import { MAX_USERS_LIMIT } from "./fleet-metering.ts";
+import { parseMinorAmount, TWO_DECIMAL_CURRENCIES, type RateSet } from "./fleet-reseller.ts";
+import { FLEET_SLUG, fleetLayout } from "./fleet.ts";
 import { explainTailscaleFailure, tailscaleServe, tailscaleServeOff, tailscaleStatus, type TailscaleStatus } from "./tailscale.ts";
 import { defaultSetupIo, SetupCancelled, type SetupIo } from "./cli-prompts.ts";
 import { HEADLESS_VERB_NAMES, USAGE } from "./cli-usage.ts";
@@ -85,7 +87,7 @@ export interface CliOptions {
   email?: string;
   /** `browser install [--with-deps]` */
   browserAction?: "install" | "status";
-  /** `fleet init|create|list|users|suspend|resume|delete|upgrade|agent` */
+  /** `fleet init|create|list|users|suspend|resume|delete|upgrade|brand|billing|rates|agent` */
   fleetAction?: FleetInput["action"] | "agent";
   operator?: string;
   socket?: string;
@@ -97,7 +99,21 @@ export interface CliOptions {
   anthropicKeyFile?: string;
   cap?: number;
   licenseKey?: string;
+  licenseKeyFile?: string;
   memory?: string;
+  host?: string;
+  resellerName?: string;
+  currency?: string;
+  brandDefault?: boolean;
+  brandPatch?: BrandPatch;
+  brandClear?: BrandField[];
+  logoSource?: string;
+  faviconSource?: string;
+  month?: string;
+  csv?: boolean;
+  detail?: boolean;
+  maxUsers?: number;
+  ratesPatch?: RatesPatch;
   dryRun?: boolean;
   yes?: boolean;
   keepData?: boolean;
@@ -175,8 +191,8 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       else if (options.command === "service" && arg === "--sentinel") options.sentinel = true;
       else if (options.command === "browser" && (arg === "install" || arg === "status")) options.browserAction = arg;
       else if (options.command === "browser" && arg === "--with-deps") options.withDeps = true;
-      else if (options.command === "fleet" && !options.fleetAction && ["init", "create", "list", "users", "suspend", "resume", "delete", "upgrade", "agent"].includes(arg)) options.fleetAction = arg as FleetInput["action"] | "agent";
-      else if (options.command === "fleet" && options.fleetAction && !["init", "list", "upgrade", "agent"].includes(options.fleetAction) && !options.slug && !arg.startsWith("--")) options.slug = arg;
+      else if (options.command === "fleet" && !options.fleetAction && ["init", "create", "list", "users", "suspend", "resume", "delete", "upgrade", "brand", "billing", "rates", "agent"].includes(arg)) options.fleetAction = arg as FleetInput["action"] | "agent";
+      else if (options.command === "fleet" && options.fleetAction && !["init", "list", "upgrade", "billing", "rates", "agent"].includes(options.fleetAction) && !options.slug && !arg.startsWith("--")) options.slug = arg;
       else if (options.command === "fleet" && arg === "--operator") options.operator = value();
       else if (options.command === "fleet" && arg === "--socket") options.socket = value();
       else if (options.command === "fleet" && arg === "--group") options.group = value();
@@ -187,6 +203,49 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       else if (options.command === "fleet" && arg === "--anthropic-key-file") options.anthropicKeyFile = resolve(value());
       else if (options.command === "fleet" && arg === "--cap") options.cap = Number(value());
       else if (options.command === "fleet" && arg === "--license-key") options.licenseKey = value();
+      else if (options.command === "fleet" && arg === "--license-key-file") options.licenseKeyFile = resolve(value());
+      else if (options.command === "fleet" && arg === "--host") options.host = value();
+      else if (options.command === "fleet" && arg === "--reseller-name") options.resellerName = value();
+      else if (options.command === "fleet" && arg === "--currency") {
+        const currency = value().toUpperCase();
+        if (!TWO_DECIMAL_CURRENCIES.has(currency)) return { error: `--currency ${currency} is not supported; use a currency with two decimals, such as USD, EUR or GBP` };
+        options.currency = currency;
+      }
+      else if (options.command === "fleet" && arg === "--default") options.brandDefault = true;
+      else if (options.command === "fleet" && arg === "--brand-name") options.brandPatch = { ...options.brandPatch, name: value() };
+      else if (options.command === "fleet" && arg === "--tagline") options.brandPatch = { ...options.brandPatch, tagline: value() };
+      else if (options.command === "fleet" && arg === "--accent") options.brandPatch = { ...options.brandPatch, accent: value() };
+      else if (options.command === "fleet" && arg === "--support-url") options.brandPatch = { ...options.brandPatch, supportUrl: value() };
+      else if (options.command === "fleet" && arg === "--logo") options.logoSource = logoSource(arg, value(), true);
+      else if (options.command === "fleet" && arg === "--favicon") options.faviconSource = logoSource(arg, value(), false);
+      else if (options.command === "fleet" && arg === "--clear") {
+        const field = value();
+        if (!BRAND_FIELDS.includes(field as BrandField)) return { error: `--clear takes one of ${BRAND_FIELDS.join(", ")}` };
+        options.brandClear = [...(options.brandClear ?? []), field as BrandField];
+      }
+      else if (options.command === "fleet" && arg === "--wholesale-workspace") options.ratesPatch = ratesPatch(options.ratesPatch, "wholesale", "workspaceMonthMinor", arg, value());
+      else if (options.command === "fleet" && arg === "--wholesale-user") options.ratesPatch = ratesPatch(options.ratesPatch, "wholesale", "userMonthMinor", arg, value());
+      else if (options.command === "fleet" && arg === "--retail-workspace") options.ratesPatch = ratesPatch(options.ratesPatch, "retail", "workspaceMonthMinor", arg, value());
+      else if (options.command === "fleet" && arg === "--retail-user") options.ratesPatch = ratesPatch(options.ratesPatch, "retail", "userMonthMinor", arg, value());
+      else if (options.command === "fleet" && arg === "--retail-override") options.ratesPatch = retailOverride(options.ratesPatch, value());
+      else if (options.command === "fleet" && arg === "--clear-override") {
+        const slug = value();
+        if (!FLEET_SLUG.test(slug)) return { error: `--clear-override takes a workspace name, not "${slug}"` };
+        options.ratesPatch = { ...options.ratesPatch, clearOverrides: [...(options.ratesPatch?.clearOverrides ?? []), slug] };
+      }
+      else if (options.command === "fleet" && arg === "--month") {
+        const month = value();
+        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return { error: "--month takes a month such as 2026-09" };
+        options.month = month;
+      }
+      else if (options.command === "fleet" && arg === "--csv") options.csv = true;
+      else if (options.command === "fleet" && arg === "--detail") options.detail = true;
+      else if (options.command === "fleet" && arg === "--max-users") {
+        const raw = value();
+        const count = Number(raw);
+        if (!/^\d+$/.test(raw) || count < 1 || count > MAX_USERS_LIMIT) return { error: `--max-users takes a whole number from 1 to ${MAX_USERS_LIMIT}` };
+        options.maxUsers = count;
+      }
       else if (options.command === "fleet" && arg === "--memory") options.memory = value();
       else if (options.command === "fleet" && arg === "--dry-run") options.dryRun = true;
       else if (options.command === "fleet" && arg === "--yes") options.yes = true;
@@ -206,12 +265,55 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   if (options.local && (options.tailscale || options.tunnel || options.publicUrl)) return { error: "--local cannot be combined with a remote-access option" };
   if (options.command === "browser" && !options.browserAction) return { error: "browser needs an action: install or status" };
   if (options.command === "fleet") {
-    if (!options.fleetAction) return { error: "fleet needs one of: init --domain HOST [--operator USER], create NAME --admin EMAIL, list, users NAME add|remove EMAIL, suspend NAME, resume NAME, delete NAME --yes, upgrade, agent" };
+    if (!options.fleetAction) return { error: "fleet needs one of: init --domain HOST [--operator USER], create NAME --admin EMAIL, list, users NAME add|remove EMAIL, suspend NAME, resume NAME, delete NAME --yes, upgrade, brand NAME|--default, rates, billing, agent" };
     if (["create", "users", "suspend", "resume", "delete"].includes(options.fleetAction) && !options.slug) return { error: `fleet ${options.fleetAction} needs a workspace name` };
+    if (options.fleetAction === "brand" && !options.slug && !options.brandDefault) return { error: "fleet brand needs a workspace name or --default" };
+    if (options.fleetAction === "brand" && options.slug && options.brandDefault) return { error: "fleet brand takes a workspace name or --default, not both" };
+    const misplaced = fleetFlagMisplaced(options);
+    if (misplaced) return { error: misplaced };
     if (options.fleetAction === "users" && !options.fleetUserAction) return { error: "fleet users needs: NAME add|remove EMAIL [--chat-only]" };
     if (options.cap !== undefined && (!Number.isFinite(options.cap) || options.cap < 0)) return { error: "--cap must be a dollar amount of 0 or more" };
   }
   return options;
+}
+
+function logoSource(flag: string, text: string, allowUrl: boolean): string {
+  if (/^https:\/\//i.test(text)) {
+    if (!allowUrl) throw new Error(`${flag} takes an image file; an https:// address is not fetched`);
+    return text;
+  }
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) throw new Error(`${flag} takes ${allowUrl ? "an image file or an https:// address" : "an image file"}`);
+  return resolve(text);
+}
+
+function ratesPatch(patch: RatesPatch | undefined, side: "wholesale" | "retail", field: keyof RateSet, flag: string, text: string): RatesPatch {
+  return { ...patch, [side]: { ...patch?.[side], [field]: parseMinorAmount(text, flag) } };
+}
+
+function retailOverride(patch: RatesPatch | undefined, text: string): RatesPatch {
+  const match = /^([^=]+)=([^/]*)\/([^/]*)$/.exec(text);
+  if (!match || !FLEET_SLUG.test(match[1]!) || (!match[2] && !match[3])) throw new Error("--retail-override takes NAME=WORKSPACE/USER, such as acme=49.00/5.00 (either amount may be left empty)");
+  if (patch?.overrides?.[match[1]!]) throw new Error(`--retail-override names ${match[1]} twice`);
+  const rates: Partial<RateSet> = {
+    ...(match[2] ? { workspaceMonthMinor: parseMinorAmount(match[2], "--retail-override") } : {}),
+    ...(match[3] ? { userMonthMinor: parseMinorAmount(match[3], "--retail-override") } : {}),
+  };
+  return { ...patch, overrides: { ...patch?.overrides, [match[1]!]: rates } };
+}
+
+function fleetFlagMisplaced(options: CliOptions): string | undefined {
+  const action = options.fleetAction ?? "";
+  const only: [string, boolean, string][] = [
+    ["--host", options.host !== undefined, "create"],
+    ["--reseller-name", options.resellerName !== undefined, "init"],
+    ["--default, --brand-name, --tagline, --accent, --support-url, --logo, --favicon and --clear", options.brandDefault !== undefined || options.brandPatch !== undefined || options.logoSource !== undefined || options.faviconSource !== undefined || options.brandClear !== undefined, "brand"],
+    ["the rate flags", options.ratesPatch !== undefined, "rates"],
+    ["--month, --csv and --detail", options.month !== undefined || options.csv !== undefined || options.detail !== undefined, "billing"],
+    ["--max-users", options.maxUsers !== undefined, "billing"],
+  ];
+  const wrong = only.find(([, present, owner]) => present && owner !== action);
+  if (wrong) return `only fleet ${wrong[2]} takes ${wrong[0]}`;
+  return options.currency !== undefined && action !== "init" && action !== "rates" ? "only fleet init and fleet rates take --currency" : undefined;
 }
 
 export interface CliIo {
@@ -243,6 +345,16 @@ export function serverVersion(here = HERE): string {
   } catch {
     return "0.0.0";
   }
+}
+
+function fleetLicenseKey(options: Pick<CliOptions, "licenseKey" | "licenseKeyFile">): string | undefined {
+  if (options.licenseKey) return options.licenseKey;
+  if (options.licenseKeyFile) {
+    const key = existsSync(options.licenseKeyFile) ? readFileSync(options.licenseKeyFile, "utf8").trim() : "";
+    if (!key) throw new Error(`${options.licenseKeyFile} is missing or empty`);
+    return key;
+  }
+  return process.env.OMB_LICENSE_KEY;
 }
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -1023,7 +1135,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         action: options.serviceAction ?? "install", dataDir: options.dataDir, port: options.port, domain: options.domain, tunnel: options.tunnel,
         tailscale: options.tailscale, label: options.label, sentinel: options.sentinel, script: process.argv[1] ?? "", node: process.execPath,
       }, { log: (line) => console.log(line), error: (line) => console.error(line) });
-    case "fleet":
+    case "fleet": {
+      let licenseKey: string | undefined;
+      try { licenseKey = fleetLicenseKey(options); } catch (error) { console.error(`fleet: ${message(error)}`); return 2; }
       if (options.fleetAction === "agent") {
         const layout = fleetLayout();
         await startFleetAgent({
@@ -1031,7 +1145,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
           group: options.group,
           node: process.execPath,
           script: process.argv[1] ?? "",
-          licenseKey: options.licenseKey ?? process.env.OMB_LICENSE_KEY,
+          licenseKey,
         }, { log: (line) => console.log(line) });
         await new Promise<void>((resolveStop) => {
           for (const signal of ["SIGTERM", "SIGINT"] as const) process.once(signal, () => resolveStop());
@@ -1048,7 +1162,21 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         brandFile: options.brandFile,
         anthropicKeyFile: options.anthropicKeyFile,
         cap: options.cap,
-        licenseKey: options.licenseKey ?? process.env.OMB_LICENSE_KEY,
+        licenseKey,
+        licenseKeyFile: options.licenseKeyFile,
+        host: options.host,
+        resellerName: options.resellerName,
+        currency: options.currency,
+        brandDefault: options.brandDefault,
+        brandPatch: options.brandPatch,
+        brandClear: options.brandClear,
+        logoSource: options.logoSource,
+        faviconSource: options.faviconSource,
+        month: options.month,
+        csv: options.csv,
+        detail: options.detail,
+        maxUsers: options.maxUsers,
+        ratesPatch: options.ratesPatch,
         memory: options.memory,
         dryRun: options.dryRun ?? false,
         yes: options.yes ?? false,
@@ -1059,6 +1187,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         node: process.execPath,
         script: process.argv[1] ?? "",
       }, { log: (line) => console.log(line), error: (line) => console.error(line) });
+    }
     case "logout":
       return runLogout(options);
     case "browser":

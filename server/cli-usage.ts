@@ -39,10 +39,17 @@ export const USAGE = `openmausbot — your team of AI bots, ready in a few steps
                     [--sentinel]   (the health scan below, every two minutes, instead of the server)
   openmausbot sentinel [--data-dir DIR] [--out DIR] [--once] [--json]   (read-only health scan; see --help)
   openmausbot browser install [--with-deps] | status
-  openmausbot fleet init --domain HOST [--operator USER] | create NAME --admin EMAIL [--member EMAIL] [--brand FILE]
+  openmausbot fleet init --domain HOST [--operator USER] [--reseller-name NAME] [--currency USD]
+                  | create NAME --admin EMAIL [--member EMAIL] [--host HOST] [--brand FILE]
                     [--anthropic-key-file FILE] [--cap USD] [--license-key KEY] [--memory 1G]
                   | list | users NAME add|remove EMAIL [--chat-only] | suspend NAME | resume NAME
                   | delete NAME --yes [--keep-data] | upgrade   (all take --dry-run)
+                  | brand NAME|--default [--brand-name N] [--tagline T] [--accent #RRGGBB] [--logo FILE|URL]
+                    [--favicon FILE] [--support-url URL] [--clear FIELD]
+                  | rates [--currency USD] [--wholesale-workspace A] [--wholesale-user A]
+                    [--retail-workspace A] [--retail-user A] [--retail-override NAME=WS/USER] [--clear-override NAME]
+                  | billing [--month YYYY-MM] [--csv] [--detail] [--max-users N]
+                  (all take --license-key-file FILE, which keeps the key out of the process list)
                   | agent [--socket PATH] [--group USER]   (root; installed by init --operator)
 
 setup   choose AI access and optional phone access; keep existing bots and chats

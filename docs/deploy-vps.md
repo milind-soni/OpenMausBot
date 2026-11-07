@@ -4,6 +4,8 @@ From a blank Linux server to OpenMausBot running on it around the clock, reachab
 
 Three ways to make the server reachable are covered. Pick one; the rest of the guide is the same.
 
+Reselling private, branded workspaces on your own domain? `deploy/vps/install.sh` automates that whole server setup: see [Install a reseller server on a VPS](reseller/install-vps.md).
+
 | | You need | Who can reach it | Best for |
 |---|---|---|---|
 | **A. Public address, no domain** (`serve --tunnel`) | an OpenMausBot account (email code) | anyone with a pairing code, over HTTPS | the fastest path; a phone on cellular |

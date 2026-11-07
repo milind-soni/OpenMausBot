@@ -51,11 +51,11 @@ must not silently fall back to standalone email or pairing credentials.
 
 | id | grants | status |
 |---|---|---|
-| `whitelabel` | product name, tagline, accent colour, logo, favicon and support link from `brand.json` (below) | shipped |
+| `whitelabel` | product name, tagline, accent colour, logo, favicon and support link from `brand.json` (below), or from a fleet default brand in a root-owned file that the workspace cannot edit | shipped |
 | `sso` | sign-in through a company identity provider | planned: nothing checks it yet |
 | `admin` | Settings → Installations and the optional hosted workspace sign-in adapter | shipped |
 | `budgets` | one monthly spend limit for the whole workspace, refusing new turns at the cap, with a warning percentage and admin notices (not per bot or per section) | shipped |
-| `billing` | sell prices per model: a billable column in Usage → History and its CSV, and per-model prices that replace list prices in cost estimates | shipped |
+| `billing` | sell prices per model: a billable column in Usage → History and its CSV, and per-model prices that replace list prices in cost estimates; with `admin`, the reseller report `openmausbot fleet billing` (and `GET /api/fleet/billing`) of workspaces and users per month with wholesale, retail and margin | shipped |
 
 [FEATURES](./FEATURES) is the authoritative list.
 
@@ -121,6 +121,17 @@ so edits show on the next reload; the app fetches it before the first paint,
 so the window never flashes the default name. An unlicensed server, or a
 file with a mistake, keeps the default brand and says why in `/api/brand`
 and the startup log.
+
+### One brand for a fleet of workspaces
+
+A reseller running a fleet (`openmausbot fleet init --reseller-name …`) sets a
+default brand with `openmausbot fleet brand --default` and may override it per
+workspace with `openmausbot fleet brand NAME`. The CLI writes root-owned files
+in `/etc/openmausbot/brands/` and points each workspace at its merged file with
+`OMB_BRAND_FILE`, so a workspace cannot change its own brand. Each workspace
+still needs a licence key that grants `whitelabel`: without one it shows the
+default brand and `/api/brand` says why. See
+[the branding guide](../docs/reseller/branding.md).
 
 What `brand.json` cannot change, because it is baked at packaging time: the
 desktop app's bundle and menu-bar name, installer names, the macOS

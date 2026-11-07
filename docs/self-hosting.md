@@ -388,6 +388,12 @@ in with an emailed code. `OMB_LICENSE_KEY` in the environment (or
 key covers them all. Not root? Every command prints the exact steps to run as
 root instead, and `--dry-run` always prints.
 
+To install Node, Caddy, the package and a branded fleet on a blank Debian or
+Ubuntu server in one go, use `deploy/vps/install.sh`; it ends with these same
+`fleet init`, `fleet brand` and `fleet create` commands, can be run again
+safely, and prints every command first with `--dry-run`. See
+[Install a reseller server on a VPS](reseller/install-vps.md).
+
 ## Signing the engines in without a terminal
 
 On a hosted server, the engine CLIs sign in from Settings → Engines:

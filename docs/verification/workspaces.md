@@ -8,6 +8,9 @@
   scope plus the `admin` entitlement, 404 without an agent.
 - Settings → Installations: list with state and this month's cost, create, users,
   suspend, resume, delete (with keep-data), upgrade all.
+- `GET /billing` on the agent and `GET /api/fleet/billing` on the operator server:
+  a reseller's month by workspace and user, and a closing snapshot before a delete;
+  see [the white-label record](white-label-reseller.md#billing-by-workspace-and-user).
 
 ## Driving it
 

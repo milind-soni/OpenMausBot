@@ -140,3 +140,7 @@ scope on both routes.
 - A member's chat-only device cannot open traces: the routes are owner-only,
   like the rest of Usage, and a trace leaves out turns in threads its viewer
   cannot see.
+
+See also: a reseller's per-workspace and per-user billing reads these same ledgers
+(`fleet billing`); its record is in
+[white-label-reseller.md](white-label-reseller.md#billing-by-workspace-and-user).
