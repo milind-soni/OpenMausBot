@@ -16,6 +16,9 @@ export const MAX_STREAMS = 128;
 export const OPEN_MS = 20_000;
 const MAX_ID = 0xffff_ffff;
 
+// An MCP target names a server and exactly one way to it: a port, or a fingerprint of the server's saved entry.
+const validMcp = (mcp) => Boolean(mcp) && typeof mcp === "object" && typeof mcp.name === "string" && mcp.name !== ""
+  && Number.isInteger(mcp.port) !== (typeof mcp.fingerprint === "string") && (mcp.port === undefined || Number.isInteger(mcp.port)) && (mcp.fingerprint === undefined || typeof mcp.fingerprint === "string");
 const openTarget = (message) => {
   if (message.chrome === true) return { chrome: true };
   if (message.mcp && typeof message.mcp === "object") {
@@ -95,6 +98,7 @@ export function createLinkMux({ send, accept = null, window = STREAM_WINDOW, max
       case "open": {
         if (!accept || !validId(message.id) || streams.has(message.id)) return;
         if (streams.size >= maxStreams) return control({ t: "failed", id: message.id, reason: "busy" });
+        if (message.chrome !== true && "mcp" in message && !validMcp(message.mcp)) return control({ t: "failed", id: message.id, reason: "bad-target" });
         const opening = stream(message.id);
         streams.set(opening.id, opening);
         void Promise.resolve().then(() => accept(openTarget(message))).catch(() => ({ failed: "unreachable" })).then((result) => {
@@ -164,6 +168,7 @@ export function createLinkMux({ send, accept = null, window = STREAM_WINDOW, max
     /** My Cloud's side: a stream to `host:port`, to the computer's Chrome, or to one of its MCP servers, through the computer. `{ gone }` when the link ended before it answered. */
     open(target) {
       if (closed) return Promise.resolve({ gone: true });
+      if (target.mcp && !validMcp(target.mcp)) return Promise.resolve({ failed: "bad-target" });
       if (streams.size >= maxStreams) return Promise.resolve({ failed: "busy" });
       while (streams.has(nextId)) nextId = nextId >= MAX_ID ? 1 : nextId + 1;
       const entry = stream(nextId);

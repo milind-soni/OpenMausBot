@@ -271,13 +271,14 @@ describe("the device link", () => {
     await new Promise<void>((resolve) => echo.listen(0, "127.0.0.1", resolve));
     cleanups.push(() => new Promise<void>((resolve) => { echo.close(() => resolve()); }));
     const targets: unknown[] = [];
+    const doors: string[] = [];
     const connect = (session: string, id: string, mcp: boolean) => {
       const stop = new AbortController();
       const ended = runDeviceLink({
         url: `${home.base.replace("http", "ws")}${linkPath(id)}`, signal: stop.signal,
         headers: { authorization: `Bearer session-${session}`, "x-omb-computer-secret": secret },
         lends: () => ({ internet: false, chrome: false, mcp }),
-        mcp: { open: async (target) => { targets.push(target); return { socket: tcpConnect((echo.address() as AddressInfo).port, "127.0.0.1") }; } },
+        mcp: { open: async (target) => { targets.push(target); doors.push(session); return { socket: tcpConnect((echo.address() as AddressInfo).port, "127.0.0.1") }; } },
       });
       cleanups.push(() => { stop.abort(); return ended; });
     };
@@ -292,6 +293,13 @@ describe("the device link", () => {
     const opened = await home.links.mcpRoute(PERSON, lends)!.open({ name: "local", port: 19501 });
     expect("join" in opened, JSON.stringify(opened)).toBe(true);
     expect(targets).toEqual([{ name: "local", port: 19501 }]);
+    // The same computer dialling again from another session is a newer link, and the newest one is chosen.
+    await home.register("other", false, lends, false, true);
+    connect("other", lends, true);
+    await until(() => home.links.mcpRoute(PERSON, lends) !== null && doors.length === 1, "the newer link");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await home.links.mcpRoute(PERSON, lends)!.open({ name: "local", port: 19502 });
+    expect(doors).toEqual(["owner", "other"]);
   });
 
   it("a computer registered without Chrome has no Chrome route, while its internet route still works", async () => {
