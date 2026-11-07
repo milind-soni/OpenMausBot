@@ -412,4 +412,22 @@ describe("coordinate_bots", () => {
     const { calls } = await coordinate({ ...BASE, groupId: "" });
     expect(calls[0].body).not.toHaveProperty("groupId");
   });
+
+it("rejects a non-string group_id instead of delegating to the current room", async () => {
+    const { result, calls } = await coordinate({ ...BASE, group_id: 42 });
+    expect(result.isError).toBe(true);
+    expect(calls).toEqual([]);
+  });
+
+  it("rejects a non-string camelCase groupId", async () => {
+    const { result, calls } = await coordinate({ ...BASE, groupId: 7 });
+    expect(result.isError).toBe(true);
+    expect(calls).toEqual([]);
+  });
+
+  it("still drops a null group_id", async () => {
+    const { result, calls } = await coordinate({ ...BASE, group_id: null });
+    expect(result.isError).toBeFalsy();
+    expect(calls[0].body).not.toHaveProperty("groupId");
+  });
 });
