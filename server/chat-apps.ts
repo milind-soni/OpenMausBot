@@ -562,7 +562,7 @@ export function createChatApps(deps: {
         if (signature === null || signature === entry.signature) continue;
         // A half-written folder (no index.html yet, over a limit) is read again only on its next change.
         Object.assign(entry, { signature, retryAt: undefined });
-        const bundle = await readPageBundle(folder, [folder], undefined, { videos: true });
+        const bundle = await readPageBundle(folder, [folder], undefined, { videos: true, exactRoots: true });
         if (bundle.source !== folder) continue;
         // The row may have been replaced, renamed or turned off while the folder was read.
         const now = appRow(deps.store, entry.threadId, entry.messageId);

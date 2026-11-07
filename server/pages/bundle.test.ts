@@ -1,5 +1,5 @@
-import { mkdirSync, mkdtempSync, realpathSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
-import { open, readdir } from "node:fs/promises";
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { open, readdir, realpath, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -9,7 +9,7 @@ import { pageSignature, PageBundleError, readPageBundle } from "./bundle.ts";
 // The real file system, wrapped so a test can change a folder at the moment it is listed.
 vi.mock("node:fs/promises", async (importOriginal) => {
   const real = await importOriginal<typeof import("node:fs/promises")>();
-  return { ...real, open: vi.fn(real.open), readdir: vi.fn(real.readdir) };
+  return { ...real, open: vi.fn(real.open), readdir: vi.fn(real.readdir), realpath: vi.fn(real.realpath), stat: vi.fn(real.stat) };
 });
 
 const folder = () => realpathSync(mkdtempSync(join(tmpdir(), "omb-page-bundle-")));
@@ -49,6 +49,46 @@ describe("readPageBundle", () => {
     const read = readPageBundle(page, [page]);
     await expect(read).rejects.toBeInstanceOf(PageBundleError);
     await expect(read).rejects.toThrow(/no index\.html/);
+  });
+
+  it.skipIf(process.platform !== "linux")("does not read a file through its folder swapped, put back and swapped again around the open", async () => {
+    const base = folder();
+    const page = join(base, "page"), other = join(base, "other"), moved = join(base, "moved");
+    mkdirSync(page);
+    mkdirSync(other);
+    writeFileSync(join(page, "index.html"), "<h1>Mine</h1>");
+    writeFileSync(join(other, "index.html"), "<h1>Not mine</h1>");
+    const swap = () => { renameSync(page, moved); symlinkSync(other, page); };
+    const opener = vi.mocked(open), actualOpen = opener.getMockImplementation()!;
+    const resolver = vi.mocked(realpath), actualRealpath = resolver.getMockImplementation()!;
+    const stater = vi.mocked(stat), actualStat = stater.getMockImplementation()!;
+    opener.mockImplementationOnce((async (...args: Parameters<typeof actualOpen>) => {
+      swap();
+      const handle = await actualOpen(...args);
+      // Put back before the path is resolved, swapped again before it is compared with the opened file.
+      resolver.mockImplementationOnce((async (...rest: Parameters<typeof actualRealpath>) => {
+        unlinkSync(page);
+        renameSync(moved, page);
+        return actualRealpath(...rest);
+      }) as typeof actualRealpath);
+      stater.mockImplementationOnce((async (...rest: Parameters<typeof actualStat>) => {
+        swap();
+        return actualStat(...rest);
+      }) as typeof actualStat);
+      return handle;
+    }) as typeof actualOpen);
+    const read = readPageBundle(page, [page]);
+    await expect(read).rejects.toBeInstanceOf(PageBundleError);
+    await expect(read).rejects.toThrow(/no index\.html/);
+  });
+
+  it("with exact roots, does not follow the root itself swapped for a link", async () => {
+    const base = folder();
+    const page = join(base, "page"), other = join(base, "other");
+    mkdirSync(other);
+    writeFileSync(join(other, "index.html"), "<h1>Not mine</h1>");
+    symlinkSync(other, page);
+    await expect(readPageBundle(page, [page], undefined, { exactRoots: true })).rejects.toMatchObject({ status: 403 });
   });
 });
 
