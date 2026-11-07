@@ -164,6 +164,30 @@ async function fixture(script: Script, provider: Provider = "openai-compat", api
 describe("bounded action announcement recovery", () => {
   const later = `${"The terminal output is absent; the launch receipt only confirms the process. ".repeat(7)}\n\nLet me execute the commands to create the file and read it back.`;
 
+  it.each(["我会先运行命令，保存并核对回执。", "我會先執行命令，保存並核對回執。"])("continues a Chinese announcement into one real tool effect: %s", async (announcement) => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) answer(response, announcement);
+      else if (round === 2) sse(response, [chunk({ tool_calls: [toolCall()] }, "tool_calls")]);
+      else answer(response, "回执已保存并核对。");
+    });
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(3);
+    expect(f.effects()).toHaveLength(1);
+  });
+
+  it.each([
+    "我会先执行命令，你确认吗？…",
+    "我会在收到你的许可后发送邮件。",
+    "我先检查了文件，确认没有问题。",
+  ])("does not continue a Chinese clarification, approval wait, or completed report: %s", async (reply) => {
+    const f = await fixture((_body, response) => answer(response, reply));
+    await f.start({ approvalMode: "ask" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(1);
+    expect(f.effects()).toEqual([]);
+  });
+
   it("recovers a later long announcement after the first nudge and preserves earlier results", async () => {
     const f = await fixture((_body, response, round) => {
       if (round === 1) answer(response, "I'll open the terminal.");
