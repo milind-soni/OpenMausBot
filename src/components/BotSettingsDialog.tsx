@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { BotWorkingFolderActions } from "./BotWorkingFolderActions";
 import { ChevronDown, Search, X } from "lucide-react";
 
 import { useStore, type Bot, type BotSettingsSection } from "@/state/store";
@@ -192,6 +193,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
             {bot.name}
           </span>
           <span className="flex shrink-0 items-center gap-1">
+            <BotWorkingFolderActions bot={bot} />
             <ShareBotButton bot={bot} className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink" />
             <button
               type="button"

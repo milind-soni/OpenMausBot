@@ -192,6 +192,7 @@ describe("CI outputs", () => {
       "electron/updater.test.mjs",
       "scripts/generate-locale.test.mjs",
       "scripts/testing/bot-tools-ui.e2e.test.ts",
+      "scripts/testing/bot-working-folder-ui.e2e.test.ts",
       "scripts/testing/key-readback.e2e.test.ts",
       "scripts/testing/one-workspace-ui.e2e.test.ts",
       "scripts/testing/rail-profile-ui.e2e.test.ts",

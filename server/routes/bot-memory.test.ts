@@ -1,3 +1,5 @@
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -11,7 +13,7 @@ import { launchVerificationServer, type VerificationServer } from "../../scripts
 import { createBotMemoryRoutes, type BotMemoryRouteDeps } from "./bot-memory.ts";
 import { dispatchRoutes } from "./table.ts";
 
-const BOTS: Record<string, { id: string }> = { "bot-123": { id: "bot-123" } };
+const BOTS: Record<string, { id: string; threadId: string }> = { "bot-123": { id: "bot-123", threadId: "thread-123" } };
 const servers: Server[] = [];
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise((done) => server.close(done))));
@@ -20,7 +22,7 @@ afterEach(async () => {
 /** As index.ts runs the table: hooks may be installed before dispatchRoutes, and anything passed on falls to a stand-in. */
 async function serve(deps: Partial<BotMemoryRouteDeps> = {}, beforeDispatch?: (res: import("node:http").ServerResponse) => void): Promise<string> {
   const routes = [createBotMemoryRoutes({
-    bot: (id) => BOTS[id], taskByThread: () => undefined,
+    bot: (id) => BOTS[id], taskByThread: (_botId, threadId) => threadId === "thread-123" ? {} : undefined,
     upkeep: { status: () => ({ modelSteps: false }), tidy: async () => { throw new Error("unexpected tidy"); } },
     aboutMe: () => "", saveAboutMe: () => { throw new Error("unexpected profile save"); },
     ...deps,
@@ -44,6 +46,81 @@ async function serve(deps: Partial<BotMemoryRouteDeps> = {}, beforeDispatch?: (r
 }
 
 describe("the bot-memory module through the route table", () => {
+  it("resolves default and custom folders and creates on demand without launching a file manager", async () => {
+    const root = await mkdtemp(join(tmpdir(), "omb-folder-"));
+    const folder = join(root, "new folder");
+    const base = await serve({
+      bot: (id) => id === "custom" ? { id, threadId: "thread-123", cwd: folder } : BOTS[id],
+    });
+    try {
+      expect(await (await fetch(`${base}/api/bots/bot-123/working-folder`)).json()).toMatchObject({ path: expect.stringContaining(join("task-workspaces", "bot-123", "thread-123")), local: true });
+      expect(await (await fetch(`${base}/api/bots/custom/working-folder`)).json()).toEqual({ path: folder, local: true });
+      await expect(stat(folder)).rejects.toThrow();
+      const prepared = await fetch(`${base}/api/bots/custom/working-folder`, { method: "POST" });
+      expect(prepared.status).toBe(200);
+      expect(await prepared.json()).toEqual({ path: folder, local: true });
+      expect((await stat(folder)).isDirectory()).toBe(true);
+      expect((await fetch(`${base}/api/bots/custom/working-folder`, { method: "POST" })).status).toBe(200);
+      expect((await fetch(`${base}/api/bots/missing/working-folder`)).status).toBe(404);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("resolves an explicitly selected thread and respects its pinned folder ahead of the bot default", async () => {
+    const root = await mkdtemp(join(tmpdir(), "omb-thread-folder-"));
+    const pinned = join(root, "earlier project");
+    const base = await serve({
+      bot: (id) => ({ id, threadId: "active", cwd: join(root, "bot default") }),
+      taskByThread: (_id, threadId) => threadId === "active" ? {} : threadId === "older" ? { cwd: pinned } : undefined,
+    });
+    try {
+      const endpoint = `${base}/api/bots/b1/working-folder?threadId=older`;
+      expect(await (await fetch(endpoint)).json()).toEqual({ path: pinned, local: true });
+      await expect(stat(pinned)).rejects.toThrow();
+      expect(await (await fetch(endpoint, { method: "POST" })).json()).toEqual({ path: pinned, local: true });
+      expect((await stat(pinned)).isDirectory()).toBe(true);
+      for (const threadId of ["unknown", "../elsewhere"]) {
+        expect((await fetch(`${base}/api/bots/b1/working-folder?threadId=${encodeURIComponent(threadId)}`)).status).toBe(404);
+        expect((await fetch(`${base}/api/bots/b1/working-folder?threadId=${encodeURIComponent(threadId)}`, { method: "POST" })).status).toBe(404);
+      }
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("keeps independent default folders for different conversations of the same bot", async () => {
+    const base = await serve({ taskByThread: (id, threadId) => id === "bot-123" && ["thread-123", "sibling"].includes(threadId) ? {} : undefined });
+    for (const threadId of ["thread-123", "sibling"]) {
+      const result = await (await fetch(`${base}/api/bots/bot-123/working-folder?threadId=${threadId}`)).json();
+      expect(result).toMatchObject({ path: expect.stringContaining(join("task-workspaces", "bot-123", threadId)), local: true });
+    }
+  });
+
+  it("does not invent a folder for an explicitly unbound or remote conversation", async () => {
+    for (const task of [{ cwd: null }, { surface: "vm" as const }, { surface: "cloud" as const }]) {
+      const base = await serve({ taskByThread: () => task });
+      expect(await (await fetch(`${base}/api/bots/bot-123/working-folder`)).json()).toEqual({ path: null, local: false });
+      expect((await fetch(`${base}/api/bots/bot-123/working-folder`, { method: "POST" })).status).toBe(403);
+    }
+  });
+
+  it("refuses VM, cloud, relative and network folders before opening", async () => {
+    for (const extra of [{ computer: "vm" }, { computer: "cloud" }, { cwd: "relative" }, { cwd: "//server/share" }, { cwd: "\\\\server\\share" }, { cwd: "C:\\bad\0folder" }]) {
+      const base = await serve({ bot: (id) => ({ id, threadId: "thread-123", ...extra }) });
+      expect(await (await fetch(`${base}/api/bots/b1/working-folder`)).json()).toEqual({ path: null, local: false });
+      expect((await fetch(`${base}/api/bots/b1/working-folder`, { method: "POST" })).status).toBe(403);
+    }
+  });
+
+  it("reports a folder creation failure without replacing an existing file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "omb-folder-file-"));
+    const file = join(root, "file.txt");
+    try {
+      await writeFile(file, "keep");
+      const base = await serve({ bot: (id) => ({ id, threadId: "thread-123", cwd: file }) });
+      const response = await fetch(`${base}/api/bots/b1/working-folder`, { method: "POST" });
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({ error: "Could not create the working folder. Check its location and permissions." });
+      expect((await stat(file)).isFile()).toBe(true);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
   it("serves the overview and reads a file from the bot's workspace", async () => {
     const base = await serve();
     const overview = await fetch(`${base}/api/bots/bot-123/memory`);
@@ -95,7 +172,7 @@ describe("the bot-memory module through the route table", () => {
     const tidied: string[] = [];
     const report = { at: 1, expired: 2, duplicates: 0, superseded: 0, deferred: 0, contradictionsChecked: false };
     const base = await serve({
-      bot: (id) => ({ id, memoryUpkeep: enabled }),
+      bot: (id) => ({ id, threadId: "thread-123", memoryUpkeep: enabled }),
       upkeep: {
         status: () => ({ modelSteps: false, lastTidy: report }),
         tidy: async (id) => { tidied.push(id); return report; },
@@ -185,6 +262,8 @@ describe("the bot-memory module through the route table", () => {
 
   it("is admin-scoped by path in request-auth.ts, every arm of it", () => {
     for (const [method, path] of [
+      ["GET", "/api/bots/b1/working-folder"],
+      ["POST", "/api/bots/b1/working-folder"],
       ["GET", "/api/bots/b1/memory"],
       ["PUT", "/api/bots/b1/memory"],
       ["GET", "/api/bots/b1/memory/file"],
@@ -206,6 +285,8 @@ describe("the bot-memory module through the route table", () => {
 describe("the bot-memory family behind the gate on a real server", () => {
   let fixture: VerificationServer;
   const arms: Array<[string, string, unknown?]> = [
+    ["GET", "/api/bots/b1/working-folder"],
+    ["POST", "/api/bots/b1/working-folder", {}],
     ["GET", "/api/bots/b1/memory"],
     ["PUT", "/api/bots/b1/memory", { text: "x" }],
     ["GET", "/api/bots/b1/memory/file"],
@@ -236,6 +317,34 @@ describe("the bot-memory family behind the gate on a real server", () => {
   });
   afterAll(async () => {
     await fixture?.close();
+  });
+
+  it("resolves a created bot through the real isolated server", async () => {
+    const created = await fetch(`${fixture.info.url}/api/bots`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Folder fixture" }) });
+    expect(created.status).toBe(201);
+    const { bot } = await created.json() as { bot: { id: string; threadId: string } };
+    const response = await fetch(`${fixture.info.url}/api/bots/${bot.id}/working-folder`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ path: join(fixture.info.dataDir, "task-workspaces", bot.id, bot.threadId), local: true });
+    const prepared = await fetch(`${fixture.info.url}/api/bots/${bot.id}/working-folder`, { method: "POST" });
+    expect(prepared.status).toBe(200);
+    const folder = (await prepared.json()) as { path: string; local: boolean };
+    expect(folder).toEqual({ path: join(fixture.info.dataDir, "task-workspaces", bot.id, bot.threadId), local: true });
+    expect((await stat(folder.path)).isDirectory()).toBe(true);
+    console.log(JSON.stringify({ fixture: fixture.info, action: "create bot, resolve and prepare working folder", botId: bot.id, folder }));
+  });
+
+  it("lets an authenticated remote admin copy a server path but refuses preparing it", async () => {
+    const created = await fetch(`${fixture.info.url}/api/bots`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Remote folder fixture" }) });
+    const { bot } = await created.json() as { bot: { id: string; threadId: string } };
+    const opened = await fetch(`${fixture.info.url}/api/auth/pairing`, { method: "POST", headers: { "content-type": "application/json", origin: fixture.info.url }, body: JSON.stringify({ scopes: ["admin"] }) });
+    const { code } = await opened.json() as { code: string };
+    const paired = await fetch(`${fixture.info.url}/api/auth/pair`, { method: "POST", headers: { "content-type": "application/json", origin: fixture.info.url }, body: JSON.stringify({ code }) });
+    const { token } = await paired.json() as { token: string };
+    const headers = { authorization: `Bearer ${token}`, origin: fixture.info.url };
+    const response = await fetch(`${fixture.info.url}/api/bots/${bot.id}/working-folder`, { headers });
+    expect(await response.json()).toEqual({ path: join(fixture.info.dataDir, "task-workspaces", bot.id, bot.threadId), local: false });
+    expect(await call("POST", `/api/bots/${bot.id}/working-folder`, {}, headers)).toBe(403);
   });
 
   it("refuses every arm for a request with no session, before any handler runs", async () => {

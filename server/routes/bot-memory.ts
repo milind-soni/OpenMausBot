@@ -1,6 +1,11 @@
+import { mkdir } from "node:fs/promises";
+import { isAbsolute, join, normalize } from "node:path";
 import { z } from "zod";
 import type { ServerResponse } from "node:http";
 
+import type { BotWorkingFolder } from "../../shared/bot-working-folder.ts";
+import type { Surface } from "../../shared/wire.ts";
+import { TASK_WORKSPACES_DIR } from "../workspace.ts";
 import { json } from "../harness/http.ts";
 import {
   MEMORY_INDEX,
@@ -24,8 +29,8 @@ import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface BotMemoryRouteDeps {
-  bot(id: string): { id: string; memoryUpkeep?: boolean } | null | undefined;
-  taskByThread(botId: string, threadId: string): { title?: string } | undefined;
+  bot(id: string): { id: string; threadId: string; cwd?: string; computer?: string; memoryUpkeep?: boolean } | null | undefined;
+  taskByThread(botId: string, threadId: string): { title?: string; cwd?: string | null; surface?: Surface } | undefined;
   upkeep: Pick<MemoryUpkeep, "status" | "tidy">;
   /** The caller's About me: the server's profile's, or on a Team Cloud the signed-in person's own. */
   aboutMe(auth: RequestAuth): string;
@@ -59,6 +64,28 @@ export function createBotMemoryRoutes(deps: BotMemoryRouteDeps): RouteHandler {
 
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     let m: RegExpMatchArray | null = null;
+    m = path.match(/^\/api\/bots\/([\w-]+)\/working-folder$/);
+    if (m && (method === "GET" || method === "POST")) {
+      const bot = deps.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const threadId = url.searchParams.get("threadId") ?? bot.threadId;
+      const task = /^[\w-]{1,128}$/.test(threadId) ? deps.taskByThread(bot.id, threadId) : undefined;
+      if (!task) return json(res, 404, { error: "no such task" });
+      const folder = task.cwd !== undefined ? task.cwd : bot.cwd ?? join(TASK_WORKSPACES_DIR, bot.id, threadId);
+      const computer = task.surface ?? bot.computer;
+      const available = folder !== null && computer !== "vm" && computer !== "cloud"
+        && isAbsolute(folder) && !folder.includes("\0") && !/^[\\/]{2}/.test(folder)
+        && !/^[\\/]{2}/.test(normalize(folder));
+      const result: BotWorkingFolder = { path: available ? folder : null, local: available && auth.kind === "loopback" };
+      if (method === "GET") return json(res, 200, result);
+      if (!available || !folder || auth.kind !== "loopback") return json(res, 403, { error: "This folder cannot be opened on this computer." });
+      try {
+        await mkdir(folder, { recursive: true, mode: 0o700 });
+      } catch {
+        return json(res, 500, { error: "Could not create the working folder. Check its location and permissions." });
+      }
+      return json(res, 200, result);
+    }
     const write = <T>(botId: string, change: () => T): T => deps.ownersWrite ? deps.ownersWrite(auth, botId, change) : change();
     /** One memory file of `id`, a bot's own folder or a layer of it. */
     const serveFile = async (id: string, guarded: <T>(change: () => T) => T) => {
