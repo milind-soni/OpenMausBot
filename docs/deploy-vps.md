@@ -122,7 +122,7 @@ One container for the server plus Caddy for HTTPS at `https://maus.example.com`.
 In this path, every `npx openmausbot …` command below is run inside the container instead:
 
 ```sh
-docker compose exec omb node dist-server/openmausbot.js pair --label "My MacBook"
+docker compose exec omb openmausbot pair --label "My MacBook"
 ```
 
 ## Path C: only your Tailscale network

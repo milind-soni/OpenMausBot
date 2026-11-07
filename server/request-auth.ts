@@ -176,10 +176,19 @@ export function requestOrigin(req: IncomingMessage): string | null {
   return `${proto}://${host.toLowerCase()}`;
 }
 
-/** A proxy that hands the server a loopback Host must not turn a remote client into the owner. */
+/** Security: loopback trust rests on the Host header, which any client writes, so a request is remote (never the owner)
+ * when it came through a proxy, over the IPC socket, or from another machine's address, as on a LAN listener. */
 export function isProxied(req: IncomingMessage): boolean {
   const h = req.headers;
-  return ipcPeer(req) || Boolean(h["x-forwarded-for"] || h["x-forwarded-proto"] || h["x-forwarded-host"] || h["forwarded"]);
+  return ipcPeer(req) || networkPeer(req) || Boolean(h["x-forwarded-for"] || h["x-forwarded-proto"] || h["x-forwarded-host"] || h["forwarded"]);
+}
+
+const LOOPBACK_PEER = /^(?:127\.|::1$|::ffff:127\.)/;
+
+/** A TCP peer other than this machine. */
+export function networkPeer(req: IncomingMessage): boolean {
+  const address = req.socket?.remoteAddress;
+  return typeof address === "string" && !LOOPBACK_PEER.test(address);
 }
 
 /** An IPC listener's only peer is a forwarding gateway, so its requests are remote: never loopback trust. */

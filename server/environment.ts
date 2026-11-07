@@ -145,7 +145,7 @@ export function serverVersion(root = SERVER_ROOT): string {
 export function environmentDescriptor(input: { environmentId: string; desktopManaged: boolean; emailSignIn?: boolean; sharedComputers?: boolean; cloudHome?: boolean; cloudTeam?: boolean; ownHome?: boolean; label?: string }): EnvironmentDescriptor {
   return {
     environmentId: input.environmentId,
-    label: input.label?.trim() || process.env.OMB_ENVIRONMENT_LABEL?.trim() || hostname(),
+    label: input.label?.trim() || process.env.OMB_ENVIRONMENT_LABEL?.trim() || process.env.OMB_SERVER_NAME?.trim() || hostname(),
     platform: process.platform,
     version: serverVersion(),
     capabilities: {
