@@ -39,10 +39,12 @@ export function cardText(card: PublishedPageCard): string {
 }
 
 /** A publish, with the folder's fingerprint when a live republish took it before reading the files. */
-type LivePublish = Pick<PublishInput, "botId" | "threadId" | "title" | "pageId" | "post" | "call" | "live"> & { signature?: string };
+type LivePublish = Pick<PublishInput, "botId" | "threadId" | "title" | "pageId" | "post" | "call" | "live"> & { signature?: string | null; refresh?: true };
 
 /** A live page is published again at most this often, however often its folder changes. */
 const LIVE_MIN_MS = 60_000;
+/** A live page whose folder can't be published as it is (no index.html, over a limit) waits this long before another try. */
+const LIVE_BROKEN_MS = 10 * 60_000;
 
 const failureStatus: Record<PagesFailure["reason"], number> = { sign_in: 403, limit: 402, rate_limited: 429, gone: 410, refused: 400, unavailable: 503 };
 
@@ -79,14 +81,18 @@ export function createPagePublisher(deps: {
     async publish(input: PublishInput): Promise<PageOutcome> {
       if (!pageTitle(input.title)) return TITLE_REQUIRED;
       if (input.pageId !== undefined && !PAGE_ID.test(input.pageId)) return { status: 400, text: "page_id must be the id of a page you published, from its link." };
-      let bundle;
+      let bundle, signature: string | null = null;
       try {
+        // A live page's fingerprint is taken before its files are read, so a change made during the read is published next.
+        const source = await pageSource(input.path, input.roots);
+        const remembered = input.pageId ? store.get(input.pageId) : store.fromSource(input.botId, source);
+        if (input.live ?? remembered?.live === true) signature = await pageSignature(source);
         bundle = await readPageBundle(input.path, input.roots);
       } catch (error) {
         if (error instanceof PageBundleError) return { status: error.status, text: error.message };
         throw error;
       }
-      return publishBundle(input, bundle);
+      return publishBundle({ ...input, signature }, bundle);
     },
 
     /** A page built here rather than read from a folder (a chat page the person publishes from the preview); `source`
@@ -104,10 +110,12 @@ export function createPagePublisher(deps: {
   async function publishNow(input: LivePublish, bundle: PageBundle): Promise<PageOutcome> {
     const title = pageTitle(input.title);
     if (!title) return TITLE_REQUIRED;
+    // A republish that waited its turn behind an unpublish, or a publish that turned live off, is no longer wanted.
+    if (input.refresh && !(input.pageId && store.get(input.pageId)?.live)) return { status: 409, text: "The page is no longer live." };
     const remembered = input.pageId ? store.get(input.pageId) : store.fromSource(input.botId, bundle.source);
     const target = input.pageId ?? remembered?.pageId;
     const live = input.live ?? remembered?.live === true;
-    const signature = live ? input.signature ?? await pageSignature(bundle.source) : null;
+    const signature = live ? input.signature ?? null : null;
     const files = live ? liveFiles(bundle.files) : bundle.files;
     let result = await client.publish({ title, files, ...(target ? { pageId: target } : {}) }, input.call);
     // The page this folder was published to before is gone (unpublished, or taken down): it gets a new link.
@@ -140,8 +148,9 @@ export function createPagePublisher(deps: {
     return { status: 200, text: lines.filter(Boolean).join("\n"), card };
   }
 
-  // Live pages tried since they were last published, so a page that fails to publish waits as long as one that changed.
-  const tried = new Map<string, number>();
+  // When each live page may next be tried: one that fails to publish waits as long as one that changed, and one whose
+  // folder can't be published as it is waits longer.
+  const nextTry = new Map<string, number>();
   let refreshing = false;
 
   return {
@@ -154,18 +163,20 @@ export function createPagePublisher(deps: {
       let changed = 0;
       try {
         for (const record of store.list().filter((each) => each.live)) {
-          if (now - Math.max(record.updatedAt, tried.get(record.pageId) ?? 0) < LIVE_MIN_MS) continue;
+          if (now < Math.max(record.updatedAt + LIVE_MIN_MS, nextTry.get(record.pageId) ?? 0)) continue;
           const signature = await pageSignature(record.source);
           if (signature === null || signature === record.signature) continue;
-          tried.set(record.pageId, now);
+          nextTry.set(record.pageId, now + LIVE_MIN_MS);
           let bundle;
           try {
             bundle = await readPageBundle(record.source, [record.source]);
           } catch (error) {
-            if (error instanceof PageBundleError) continue;
-            throw error;
+            if (!(error instanceof PageBundleError)) throw error;
+            nextTry.set(record.pageId, now + LIVE_BROKEN_MS);
+            continue;
           }
-          const outcome = await publishBundle({ botId: record.botId, threadId: "", title: record.title, pageId: record.pageId, post: () => null, live: true, signature }, bundle);
+          if (bundle.source !== record.source) continue;
+          const outcome = await publishBundle({ botId: record.botId, threadId: "", title: record.title, pageId: record.pageId, post: () => null, live: true, signature, refresh: true }, bundle);
           if (outcome.status === 200) changed++;
           // Taken down elsewhere: its cards say so, and it stops being published.
           else if (outcome.status === 410) markUnpublished(record.pageId, null);

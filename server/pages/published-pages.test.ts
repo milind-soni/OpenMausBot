@@ -459,4 +459,19 @@ describe("a live published page", () => {
     expect(f.pages.store.get(page!)).not.toHaveProperty("live");
     expect(f.service.pages.get(page!)!.files.get("index.html")).toBe(SITE["index.html"]);
   });
+
+  it("waits ten minutes before trying a folder that can't be published as it is", async () => {
+    const f = setup();
+    signIn();
+    const site = writeSite(join(f.work, "site"));
+    await publishLive(f, true);
+    const start = Date.now();
+    rmSync(join(site, "index.html"));
+    expect(await f.pages.publisher.refreshLive(start + 61_000)).toBe(0);
+    writeFileSync(join(site, "index.html"), "<h1>Back</h1>");
+    expect(await f.pages.publisher.refreshLive(start + 130_000)).toBe(0);
+    expect(await f.pages.publisher.refreshLive(start + 662_000)).toBe(1);
+    expect(f.service.minted.map((call) => call.action)).toEqual(["create", "update"]);
+  });
 });
+

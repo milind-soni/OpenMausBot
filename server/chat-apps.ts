@@ -7,7 +7,7 @@ import {
 import { BOT_HTML_NETWORK } from "../shared/app-frame/csp.ts";
 import { botHtmlDocument, mcpAppDocument, publishedBotHtml, ROOM_CAN } from "../shared/app-frame/document.ts";
 import { jsxPublishedHtml } from "../shared/app-frame/jsx-page.ts";
-import { AppDocs, type AppDocData, type AppDocPut } from "./app-docs.ts";
+import { APP_DOCS_SWEEP_GRACE_MS, AppDocs, type AppDocData, type AppDocPut } from "./app-docs.ts";
 import { speakerIn, type AgentCardResult, type AgentCardStore } from "./chat-widgets.ts";
 import { compileJsxPage } from "./jsx-compile.ts";
 import { appDocRefs } from "./message-db.ts";
@@ -476,6 +476,8 @@ export interface ChatApps {
 /** How often live pages' folders are checked, and how many pages are watched at most (the newest). */
 const LIVE_EVERY_MS = 5_000;
 const LIVE_PAGES_MAX = 50;
+/** How often the live pages are listed again from the store, and how long a failed read or store waits to be tried again. */
+const LIVE_RELOAD_MS = 60_000, LIVE_RETRY_MS = 60_000;
 
 export function createChatApps(deps: {
   store: ChatAppsStore;
@@ -485,6 +487,8 @@ export function createChatApps(deps: {
   sweeps?: boolean;
   /** The live pages already in the store, read once: the server picks them up again after a restart. */
   liveRows?(limit: number): Array<{ threadId: string; messageId: string }>;
+  /** True while the workspace is being backed up or restored: live pages wait, so they don't write mid-snapshot. */
+  paused?(): boolean;
 }): ChatApps {
   const docs = new AppDocs(`${deps.dataDir}/app-docs`, deps.maxBytes ? { maxBytes: deps.maxBytes } : {});
   const references = deps.references ?? appDocRefs;
@@ -513,10 +517,11 @@ export function createChatApps(deps: {
     const row = appRow(deps.store, target.threadId, target.messageId);
     return Boolean(row && (row.app.doc === target.doc || row.app.history?.includes(target.doc)));
   };
-  // Live pages, by row: the page's folder (looked up again only when its document changes) and the folder's
-  // fingerprint when it was last read. Loaded from the store on the first check.
-  const live = new Map<string, { threadId: string; messageId: string; doc?: string; folder?: string; signature?: string }>();
-  let liveLoaded = false, refreshing: Promise<number> | null = null;
+  // Live pages, by row: the page's folder (looked up again only when its document changes), the folder's fingerprint
+  // when it was last read, and when a failed read or store is tried again. Listed from the store every minute, so a
+  // live page that arrived another way (an imported conversation) is picked up too.
+  const live = new Map<string, { threadId: string; messageId: string; doc?: string; folder?: string; signature?: string; retryAt?: number }>();
+  let liveListedAt = -Infinity, refreshing: Promise<number> | null = null;
   const watch = (threadId: string, messageId: string) => {
     const key = `${threadId}\n${messageId}`;
     if (live.has(key)) return;
@@ -529,8 +534,9 @@ export function createChatApps(deps: {
     return result;
   };
   const refreshOnce = async (): Promise<number> => {
-    if (!liveLoaded) {
-      liveLoaded = true;
+    if (deps.paused?.()) return 0;
+    if (Date.now() - liveListedAt >= LIVE_RELOAD_MS) {
+      liveListedAt = Date.now();
       try { for (const row of [...(deps.liveRows?.(LIVE_PAGES_MAX) ?? [])].reverse()) watch(row.threadId, row.messageId); } catch (error) {
         console.error("chat apps: could not read live pages", error);
       }
@@ -538,25 +544,42 @@ export function createChatApps(deps: {
     let changed = 0;
     for (const [key, entry] of live) {
       const row = appRow(deps.store, entry.threadId, entry.messageId);
-      if (row?.app.live && row.app.doc && row.app.doc !== entry.doc) Object.assign(entry, { doc: row.app.doc, folder: docs.read(row.app.doc)?.data?.folder });
+      if (row?.app.live && row.app.doc && row.app.doc !== entry.doc) {
+        const folder = docs.read(row.app.doc)?.data?.folder;
+        // Another folder: its first look is a change, whatever the old folder's fingerprint was.
+        if (folder !== entry.folder) Object.assign(entry, { signature: undefined, retryAt: undefined });
+        Object.assign(entry, { doc: row.app.doc, folder });
+      }
       const folder = row?.app.live && row.app.doc ? entry.folder : undefined;
       if (!row || !folder) { live.delete(key); continue; }
+      if (entry.retryAt !== undefined && Date.now() < entry.retryAt) continue;
+      const retryLater = () => Object.assign(entry, { signature: undefined, retryAt: Date.now() + LIVE_RETRY_MS });
       try {
+        // null too when the folder is no longer where the page was shown from (swapped for a link elsewhere).
         const signature = await pageSignature(folder);
         if (signature === null || signature === entry.signature) continue;
         // A half-written folder (no index.html yet, over a limit) is read again only on its next change.
-        entry.signature = signature;
-        const made = bundlePage(await readPageBundle(folder, [folder], undefined, { videos: true }), row.app.title);
-        if (!made.ok) continue;
-        // The row may have been replaced or turned off while the folder was read.
+        Object.assign(entry, { signature, retryAt: undefined });
+        const bundle = await readPageBundle(folder, [folder], undefined, { videos: true });
+        if (bundle.source !== folder) continue;
+        // The row may have been replaced, renamed or turned off while the folder was read.
         const now = appRow(deps.store, entry.threadId, entry.messageId);
         if (!now?.app.live || now.app.doc !== row.app.doc) continue;
+        const made = bundlePage(bundle, now.app.title);
+        if (!made.ok) continue;
+        // No room for the new version: the card keeps the one it shows, and the folder is tried again later.
+        if (!storePage(docs, made.page).ok) { retryLater(); continue; }
         const patched = replacePage(deps.store, docs, entry.threadId, now, made);
         if (patched && patched.app?.rev !== now.app.rev) changed++;
       } catch (error) {
-        if (!(error instanceof PageBundleError) && (error as NodeJS.ErrnoException)?.code !== "ENOENT") console.error("chat apps: live page refresh failed", error);
+        if (error instanceof PageBundleError) continue;
+        // Anything else (a folder briefly unreadable) is tried again later, changed or not.
+        retryLater();
+        if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") console.error("chat apps: live page refresh failed", error);
       }
     }
+    // The versions a live page replaced are cleared once they are past the sweep's grace.
+    if (changed && deps.sweeps !== false) later(APP_DOCS_SWEEP_GRACE_MS + 1_000);
     return changed;
   };
   const refreshLive = () => (refreshing ??= refreshOnce().finally(() => { refreshing = null; }));

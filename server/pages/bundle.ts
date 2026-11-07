@@ -199,10 +199,12 @@ export async function botFileSource(requested: string, folders: BotFolders): Pro
   return pageSource(path, vmWorkspace ? [vmWorkspace, ...roots] : roots);
 }
 
-/** A cheap fingerprint of a page's file or folder, by the same walk as readPageBundle (hidden files, package folders and
- * the secret folder left out): each file's path, size and modified time. null when it is gone. A live page re-reads its
- * folder only when this changes. */
+/** A cheap fingerprint of a page's file or folder, by the same walk and filters as readPageBundle (hidden, secret, badly
+ * named, unservable and linked-out files left out): each file's path, size and modified time. null when it is gone or no
+ * longer at that real path. A live page re-reads its folder only when this changes. */
 export async function pageSignature(source: string, limit = PAGE_MAX_FILES * 4): Promise<string | null> {
+  // A folder swapped for a link to somewhere else is not the folder the page was read from.
+  if (await realpath(source).catch(() => null) !== source) return null;
   const info = await stat(source).catch(() => null);
   if (!info) return null;
   if (info.isFile()) return `${info.size}:${info.mtimeMs}`;
@@ -212,12 +214,14 @@ export async function pageSignature(source: string, limit = PAGE_MAX_FILES * 4):
     for (const name of (await readdir(folder).catch(() => [] as string[])).sort()) {
       if (parts.length >= limit) return;
       const full = join(folder, name);
-      if (name.startsWith(".") || inSecretFolder(full)) continue;
-      const entry = await stat(full).catch(() => null);
-      if (!entry) continue;
-      if (entry.isDirectory()) {
+      if (name.startsWith(".") || !SEGMENT.test(name) || name.endsWith(".") || inSecretFolder(full)) continue;
+      const own = await lstat(full).catch(() => null);
+      const real = own?.isSymbolicLink() ? await realpath(full).catch(() => null) : full;
+      if (!own || !real || !containedBy(source, real) || inSecretFolder(real)) continue;
+      const entry = own.isSymbolicLink() ? await stat(real).catch(() => null) : own;
+      if (entry?.isDirectory()) {
         if (!SKIPPED_FOLDERS.has(name) && depth < 9) await walk(full, depth + 1);
-      } else if (entry.isFile()) {
+      } else if (entry?.isFile() && (servable(name) || isVideo(name))) {
         parts.push(`${relative(source, full)}:${entry.size}:${entry.mtimeMs}`);
       }
     }

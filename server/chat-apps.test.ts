@@ -666,7 +666,7 @@ describe("createChatApps", () => {
 });
 
 describe("a live folder page", () => {
-  function liveSetup() {
+  function liveSetup(maxBytes?: number, paused?: () => boolean) {
     const fake = fakeStore();
     const base = mkdtempSync(join(tmpdir(), "omb-live-pages-"));
     const dash = join(base, "dash");
@@ -675,12 +675,12 @@ describe("a live folder page", () => {
     writeFileSync(join(dash, "app.js"), "draw()");
     writeFileSync(join(dash, "data.csv"), "day,sales\n1,10\n");
     const live = vi.fn((): Array<{ threadId: string; messageId: string }> => []);
-    const apps = createChatApps({ store: fake.store, dataDir: mkdtempSync(join(tmpdir(), "omb-chat-apps-")), sweeps: false, liveRows: live });
+    const apps = createChatApps({ store: fake.store, dataDir: mkdtempSync(join(tmpdir(), "omb-chat-apps-")), sweeps: false, liveRows: live, ...(maxBytes ? { maxBytes } : {}), ...(paused ? { paused } : {}) });
     opened.push(apps);
     const folders = async () => ({ roots: [base], vmWorkspace: null });
     const show = (input: Record<string, unknown>) => apps.createAppCard({ bot: SCOUT, threadId: THREAD, input: { tool: "show_html", title: "Dash", ...input }, folders });
     const row = (id: string) => fake.rows(THREAD).find((message) => message.id === id)!;
-    return { apps, dash, live, show, row, rows: () => fake.rows(THREAD) };
+    return { apps, base, dash, live, show, row, rows: () => fake.rows(THREAD), patch: fake.store.patchMessage };
   }
 
   it("is marked live only when asked, and only for a page from a folder", async () => {
@@ -731,4 +731,67 @@ describe("a live folder page", () => {
       .toEqual({ ok: true, messageId: "m1" });
     expect(row("m1").app).not.toHaveProperty("live");
   });
+
+  it("uses the card's current title, skips files a read leaves out, and stops at a folder swapped for a link", async () => {
+    const { apps, base, dash, live, show, row, patch } = liveSetup();
+    await show({ path: "dash", live: true });
+    live.mockReturnValue([{ threadId: THREAD, messageId: "m1" }]);
+    await apps.refreshLive();
+    // Files a page never takes (hidden, badly named, not a page file) are not a change.
+    writeFileSync(join(dash, ".notes"), "x");
+    writeFileSync(join(dash, "a?b.html"), "x");
+    writeFileSync(join(dash, "build.zip"), "x");
+    expect(await apps.refreshLive()).toBe(0);
+    patch(THREAD, "m1", { app: { ...row("m1").app!, title: "Sales" } });
+    writeFileSync(join(dash, "data.csv"), "day,sales\n1,11\n");
+    expect(await apps.refreshLive()).toBe(1);
+    expect(row("m1").app).toMatchObject({ title: "Sales", rev: 1 });
+    // The folder swapped for a link to another one: not the folder the page was shown from.
+    const other = join(base, "other");
+    mkdirSync(other);
+    writeFileSync(join(other, "index.html"), "<h1>Other</h1>");
+    rmSync(dash, { recursive: true, force: true });
+    symlinkSync(other, dash);
+    expect(await apps.refreshLive()).toBe(0);
+    expect(row("m1").app!.rev).toBe(1);
+  });
+
+  it("waits while the workspace is being backed up or restored", async () => {
+    let busy = false;
+    const { apps, dash, live, show, row } = liveSetup(undefined, () => busy);
+    await show({ path: "dash", live: true });
+    live.mockReturnValue([{ threadId: THREAD, messageId: "m1" }]);
+    await apps.refreshLive();
+    busy = true;
+    writeFileSync(join(dash, "data.csv"), "day,sales\n1,13\n");
+    expect(await apps.refreshLive()).toBe(0);
+    expect(row("m1").app).toMatchObject({ rev: 0 });
+    busy = false;
+    expect(await apps.refreshLive()).toBe(1);
+    expect(row("m1").app).toMatchObject({ rev: 1 });
+  });
+
+  it("keeps the page it shows when there is no room for a new version, and tries again later", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { apps, dash, live, show, row } = liveSetup(100_000);
+      await show({ path: "dash", live: true });
+      expect(apps.docs.usage()).toBeLessThan(50_000);
+      live.mockReturnValue([{ threadId: THREAD, messageId: "m1" }]);
+      await apps.refreshLive();
+      writeFileSync(join(dash, "data.csv"), "x".repeat(200_000));
+      expect(await apps.refreshLive()).toBe(0);
+      expect(row("m1").app).toMatchObject({ live: true, rev: 0 });
+      expect(row("m1").app).not.toHaveProperty("blocked");
+      writeFileSync(join(dash, "data.csv"), "day,sales\n1,12\n");
+      // Not before the wait is over, then without needing another change.
+      expect(await apps.refreshLive()).toBe(0);
+      vi.advanceTimersByTime(61_000);
+      expect(await apps.refreshLive()).toBe(1);
+      expect(row("m1").app).toMatchObject({ rev: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
+
