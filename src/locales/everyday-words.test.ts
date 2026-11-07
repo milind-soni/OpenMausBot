@@ -82,6 +82,7 @@ const PENDING_WORDS: readonly Word[] = [
 
 const ALLOWED: Record<string, string> = {
   "settings.section.desktopWorkspaces": "the Servers page shares its name with the app menu's Server menu; both change with the one-workspace switcher",
+  "settings.section.thisServer": "the title of a person's own server's Phone & devices page, seen only on that server's own pages",
   "sidebar.servers": "the switcher's own Servers list, renamed with the one-workspace switcher",
   "sidebar.switchServer": "the switcher's own Servers list, renamed with the one-workspace switcher",
   "sidebar.switchServerError": "points at the app menu's Server menu",

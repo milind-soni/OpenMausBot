@@ -328,7 +328,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
             read: () => companion.state(),
             start: () => mutateCompanionBridgeState(
               companionMutationEpoch,
-              () => companion.start(routeMode === "tailscale" ? [] : undefined),
+              () => companion.start(routeMode === "automatic" ? undefined : []),
             ),
             refreshTailscale: () => mutateCompanionBridgeState(
               companionMutationEpoch,

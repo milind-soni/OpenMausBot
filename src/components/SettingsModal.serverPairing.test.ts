@@ -17,7 +17,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
 }));
 vi.mock("./RemoteComputerSection", () => ({ RemoteComputerSection: () => null }));
 vi.mock("./CustomDomainSettings", () => ({ CustomDomainSettings: () => null }));
-vi.mock("./CompanionSection", () => ({ CompanionSection: ({ focusRequest }: { focusRequest?: number }) => `COMPANION_SECTION focus=${focusRequest ?? 0}` }));
+vi.mock("./PhoneDevicesSection", () => ({ PhoneDevicesSection: ({ focusRequest }: { focusRequest?: number }) => `COMPANION_SECTION focus=${focusRequest ?? 0}` }));
 vi.mock("./ServerPairingCard", () => ({ ServerPairingCard: ({ cloudHome, focusRequest }: { cloudHome?: boolean; focusRequest?: number }) => `SERVER_PAIRING_CARD_MARKER${cloudHome ? " cloud" : ""} focus=${focusRequest ?? 0}` }));
 
 beforeEach(() => {
@@ -60,13 +60,13 @@ describe("Settings → Remote access: server pairing card visibility", () => {
   });
 });
 
-describe("Settings → Remote access opened by Connect your phone", () => {
+describe("Settings → Phone & devices opened by Connect your phone", () => {
   it("on this computer, reveals the phone flow, not the server's pairing code", () => {
     fixture.phonePairing = 3;
     vi.stubGlobal("window", { ogb: { companion: {} } });
     const html = render();
     expect(html).toContain("COMPANION_SECTION focus=3");
-    expect(html).toContain("SERVER_PAIRING_CARD_MARKER focus=0");
+    expect(html).not.toContain("SERVER_PAIRING_CARD_MARKER");
   });
 
   it("on the person's own Cloud in this window, reveals the Cloud's own pairing code", () => {
@@ -75,7 +75,7 @@ describe("Settings → Remote access opened by Connect your phone", () => {
     vi.stubGlobal("window", { ogb: { cloudPlan: {} } });
     const html = render();
     expect(html).toContain("SERVER_PAIRING_CARD_MARKER cloud focus=2");
-    expect(html).toContain("COMPANION_SECTION focus=0");
+    expect(html).not.toContain("COMPANION_SECTION");
   });
 
   it("on another server, in a browser or as a remote client, reveals that server's pairing code", () => {
@@ -92,6 +92,13 @@ describe("Settings → Remote access opened by Connect your phone", () => {
     vi.stubGlobal("window", { ogb: { companion: {} } });
     const html = render();
     expect(html).toContain("COMPANION_SECTION focus=0");
-    expect(html).toContain("SERVER_PAIRING_CARD_MARKER focus=0");
+    expect(html).not.toContain("SERVER_PAIRING_CARD_MARKER");
+  });
+
+  it("this computer's page is Phone & devices; a server's own page is This server", () => {
+    vi.stubGlobal("window", { ogb: { companion: {} } });
+    expect(render()).toContain(">Phone &amp; devices<");
+    vi.stubGlobal("window", {});
+    expect(render()).toContain(">This server<");
   });
 });

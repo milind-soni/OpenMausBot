@@ -18,7 +18,7 @@ import {
   pairingSurfaceCopy,
   RouteNotices,
   shouldHydrateCompanionEmail,
-} from "./CompanionSection";
+} from "./PhoneDevicesSection";
 import type { PhoneSetupController } from "./PhoneSetupFlow";
 
 const account = (status: CompanionAccountState["status"], message?: string): CompanionAccountState => ({

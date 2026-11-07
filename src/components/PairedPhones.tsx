@@ -4,7 +4,7 @@ import { MoreHorizontal } from "lucide-react";
 import { t } from "@/lib/i18n";
 import type { CompanionState, PhoneDevice, PhoneSetupController } from "./PhoneSetupFlow";
 import { Switch } from "./SettingsPrimitives";
-import { relative } from "./CompanionSection";
+import { relative } from "./PhoneDevicesSection";
 
 const ROUTE_LABEL = { wifi: "remote.devices.route.wifi", tailscale: "remote.devices.route.tailscale", relay: "remote.devices.route.relay" } as const;
 
