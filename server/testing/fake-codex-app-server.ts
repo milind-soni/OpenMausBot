@@ -5,7 +5,7 @@
 //     mcp-app-approval | mcp-form | permissions-approval | question | multi-question | mixed-question |
 //     empty-question | malformed-question | config-profile | config-profile-unsupported | config-read-error |
 //     image | logged-in-stdout | logged-out | unauthorized | late-request | retry-then-complete | signin-refused |
-//     auth-recovery | mcp-401 | legacy-error | key-401 | recovered-403 | recovered-401 | recovering-403 | usage-limit
+//     auth-recovery | mcp-401 | mcp-image | legacy-error | key-401 | recovered-403 | recovered-401 | recovering-403 | usage-limit
 //     | async-question (an agentMessage with delivery async and questions, as codex 0.160 sends request_user_input_async)
 //   FAKE_CODEX_MISSING_BEARER  the first N launches fail their turn as codex-cli 0.160.1 holding no login does (count in FAKE_CODEX_STATE)
 //   FAKE_CODEX_LAUNCH_CRASHES  the first N launches die pre-ack at turn/start, transient stderr, exit 1 (count in FAKE_CODEX_STATE)
@@ -744,6 +744,12 @@ process.stdin.on("data", (chunk) => {
         if (mode === "mcp-401") {
           out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
           notify("item/completed", { item: { id: "t1", type: "mcpToolCall", tool: "fetch", status: "failed", error: { message: "HTTP 401 Unauthorized: Please sign in again" } } });
+          finishTurn();
+          break;
+        }
+        if (mode === "mcp-image") {
+          out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+          notify("item/completed", { item: { id: "t1", type: "mcpToolCall", tool: "screenshot", status: "completed", result: { content: [{ type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }] } } });
           finishTurn();
           break;
         }

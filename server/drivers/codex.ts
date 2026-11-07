@@ -1172,7 +1172,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               });
               if (item.type === "mcpToolCall") {
                 for (const img of extractMcpImages(item.result)) {
-                  emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_image", data: img.data });
+                  emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_image", data: img.data, fromTool: true });
                 }
               }
             } else if (item.type === "reasoning") {

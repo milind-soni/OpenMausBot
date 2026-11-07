@@ -1,6 +1,6 @@
 // Automations report into the bot's chat, end to end: the real server and Claude driver, the scripted fake engine
 // answering each turn by what it was sent, and the permission broker reached the way the CLI's proxy reaches it.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -416,4 +416,21 @@ it("tells the main chat about a run missed while the computer was off, which has
   } finally {
     await restartable.close();
   }
+}, 120_000);
+
+it("brings the files a run sent with attach_file into its report", async () => {
+  const s = await server();
+  const folder = join(s.dataDir, "workspaces", s.bot.id);
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, "brief.pdf"), "%PDF-brief");
+  s.script([{
+    key: "run", match: [s.header("Daily brief")], steps: [{ tool: "attach_file", arguments: { path: join(folder, "brief.pdf") } }],
+    reply: "Today's brief is attached.",
+  }]);
+  const id = await s.runNow(await s.routine("Daily brief"));
+  await s.settled(id);
+  await s.reported(id, "posted");
+  expect(await s.lines()).toEqual([expect.objectContaining({
+    text: "Today's brief is attached.", attachments: [expect.objectContaining({ kind: "file", name: "brief.pdf" })],
+  })]);
 }, 120_000);

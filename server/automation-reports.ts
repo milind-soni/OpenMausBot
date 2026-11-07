@@ -122,7 +122,18 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     return messageId ? path.find((message) => message.id === messageId) : path.findLast((message) => said(message) && message.turnTerminal) ?? path.findLast(said);
   };
 
-  const read = (message: Message | undefined) => readRunReply(message?.text ?? "", Boolean(message?.attachments?.length));
+  /** The files the reply's turn sent the person, in order: its attach_file lines' and the reply's own, without the
+   * images its tools returned. */
+  const sentWith = (run: RoutineRun, reply: Message | undefined): NonNullable<Message["attachments"]> => {
+    if (!reply) return [];
+    const path = store.activePath(run.threadId!);
+    const end = path.findIndex((message) => message.id === reply.id);
+    const turn = path.slice(path.findLastIndex((message, at) => at < end && message.role === "user") + 1, end + 1);
+    return turn.flatMap((message) => message.role === "bot" && message.kind === "text" ? message.attachments ?? [] : [])
+      .filter((file) => file.kind !== "image" || !file.fromTool);
+  };
+
+  const read = (run: RoutineRun, message: Message | undefined) => readRunReply(message?.text ?? "", sentWith(run, message).length > 0);
 
   /** The automation's line before this run's in the chat, written or still waiting ahead of it, says a run failed. */
   const lastSaidFailed = (run: RoutineRun, threadId: string): boolean => {
@@ -171,7 +182,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     }
     const source = line.kind === "reply" ? replyOf(run, line.messageId) : undefined;
     const language = deps.threadLanguage?.(target.threadId);
-    const said: RunReply = line.kind === "reply" ? read(source)
+    const said: RunReply = line.kind === "reply" ? read(run, source)
       : { quiet: false, text: line.detail ? serverLine(language, run.partial ? "server.runs.partlyDoneWhy" : "server.runs.didNotFinishWhy", { detail: line.detail }) : serverLine(language, "server.runs.didNotFinish") };
     const recovered = said.quiet && lastSaidFailed(run, target.threadId);
     if (said.quiet && !recovered) {
@@ -179,9 +190,10 @@ export function createAutomationReports(deps: AutomationReportDeps) {
       return true;
     }
     const reply: Extract<RunReply, { quiet: false }> = said.quiet ? { quiet: false, text: recoveredText(run.routineName, run.finishedAt ?? Date.now(), language) } : said;
+    const files = recovered ? [] : sentWith(run, source);
     const posted = store.appendMessage(target.threadId, {
       role: "bot", kind: "text", text: reply.text,
-      ...(source?.attachments?.length && !recovered ? { attachments: source.attachments } : {}),
+      ...(files.length ? { attachments: files } : {}),
       automation: lineOf(run, line.kind === "failure" ? { failed: true, ...(run.partial ? { partial: true as const } : {}) } : recovered ? { recovered: true } : reply.question ? { needsYou: true } : {}),
     });
     deps.routines()?.noteReport(run.id, { state: "posted", threadId: target.threadId, messageId: posted.id });
@@ -245,7 +257,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
       if (run.target !== "bot" || run.status !== "completed" || !run.threadId) return;
       if (run.deliver === "brief") return deps.brief?.(run, turnId);
       const said = turnId ? store.activePath(run.threadId).findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === turnId) : replyOf(run);
-      const reply = read(said);
+      const reply = read(run, said);
       const bot = store.bot(run.botId);
       const target = destination(run);
       if (target && (!reply.quiet || lastSaidFailed(run, target.threadId))) hold(run.id, { kind: "reply", run, ...(said ? { messageId: said.id } : {}) });

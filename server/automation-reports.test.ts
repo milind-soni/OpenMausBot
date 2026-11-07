@@ -441,6 +441,35 @@ describe("automation reports", () => {
     expect(f.lines()).toEqual([expect.objectContaining({ text: "Here is this week's report.", attachments })]);
   });
 
+  it("carries the files the run's last turn sent, in order, and not the images its tools returned", () => {
+    const f = fixture();
+    const run = f.finished(null);
+    const thread = run.threadId!;
+    const earlier = { kind: "file" as const, path: "old.pdf", mime: "application/pdf", name: "Old.pdf" };
+    const pdf = { kind: "file" as const, path: "brief-1.pdf", mime: "application/pdf", name: "Brief.pdf" };
+    const mp3 = { kind: "file" as const, path: "brief-1.mp3", mime: "audio/mpeg", name: "Brief.mp3" };
+    const page = { kind: "image" as const, path: "page-1.png", mime: "image/png", fromTool: true as const };
+    const drawn = { kind: "image" as const, path: "chart-1.png", mime: "image/png" };
+    const note = { kind: "audio" as const, path: "note-1.ogg", mime: "audio/ogg", text: "Today's brief." };
+    f.store.appendMessage(thread, { role: "bot", kind: "text", text: "", attachments: [earlier] });
+    f.store.appendMessage(thread, { role: "user", kind: "text", text: "Go on." });
+    f.store.appendMessage(thread, { role: "bot", kind: "text", text: "", attachments: [pdf] });
+    f.store.appendMessage(thread, { role: "bot", kind: "text", text: "", attachments: [mp3] });
+    f.store.appendMessage(thread, { role: "bot", kind: "text", text: "Your brief.", attachments: [page, drawn, note], turnId: `turn-${run.id}`, turnTerminal: true });
+    f.reports.runSettled(run, `turn-${run.id}`);
+    expect(f.lines()).toEqual([expect.objectContaining({ text: "Your brief.", attachments: [pdf, mp3, drawn, note] })]);
+  });
+
+  it("keeps a run quiet that said nothing and sent nothing, though its tools returned images", () => {
+    const f = fixture();
+    const run = f.finished(null);
+    const page = { kind: "image" as const, path: "page-1.png", mime: "image/png", fromTool: true as const };
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "text", text: "", attachments: [page], turnId: `turn-${run.id}`, turnTerminal: true });
+    f.reports.runSettled(run, `turn-${run.id}`);
+    expect(f.added()).toEqual([]);
+    expect(f.runs.get(run.id)!.report).toEqual({ state: "quiet" });
+  });
+
   it("reads a report still waiting after a restart again, and writes nothing if the run's last reply had nothing new", () => {
     const f = fixture();
     const run = f.finished("Checked again.\nNOTHING NEW");
