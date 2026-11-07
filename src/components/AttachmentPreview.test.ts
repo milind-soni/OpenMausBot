@@ -215,7 +215,7 @@ describe("a file over the download limit", () => {
       await expect(requestMessageFile("reel.mp4", { threadId: "t", messageId: "m" }, new AbortController().signal))
         .rejects.toMatchObject({
           code: "file_too_large",
-          message: "This file is 612 MB, over the 500 MB limit for opening files from chat. It's still on the bot's computer as reel.mp4.",
+          message: "This file is 612 MB, over the 500 MB limit for opening files from chat. The file itself is still saved as reel.mp4.",
         });
     } finally {
       vi.unstubAllGlobals();

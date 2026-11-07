@@ -205,7 +205,8 @@ async function readMessageVideo(
       const { value, done } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > FILE_MAX_BYTES) throw new Error(t("attach.fileTooLarge"));
+      // Bytes read so far are not the file size, so this says only the preview limit; still no Retry.
+      if (size > FILE_MAX_BYTES) throw Object.assign(new Error(t("attach.fileTooLarge")), { code: "file_too_large" });
       chunks.push(new Uint8Array(value));
       progress();
     }

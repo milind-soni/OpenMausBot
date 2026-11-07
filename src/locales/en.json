@@ -9561,7 +9561,7 @@
   "serverError.mailbox.addressAndPassword": "Enter your email address and password.",
   "serverError.voice.fishKeyRequired": "Add a Fish Audio key in Settings → API keys to talk to your bots here.",
   "serverError.voice.fishTranscribeConnection": "Couldn't reach Fish Audio to hear you — check your connection.",
-  "serverError.file.tooLarge": "This file is {size}, over the {limit} limit for opening files from chat. It's still on the bot's computer as {name}.",
+  "serverError.file.tooLarge": "This file is {size}, over the {limit} limit for opening files from chat. The file itself is still saved as {name}.",
   "server.botApi.engineRefusal": "This thread came in through the Bot API, and this bot's AI can't work in it. Start a new conversation.",
   "server.botApi.confinedWhy": "This call came in through the Bot API, so it can only answer from what this bot already knows.",
   "voice.openai.description": "Read replies and voice messages with AI-generated voices. Uses your OpenAI API key and is billed by OpenAI based on API usage. Live call settings are separate.",
