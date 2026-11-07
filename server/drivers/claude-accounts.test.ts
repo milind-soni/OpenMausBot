@@ -49,12 +49,12 @@ function account(name: string, auth: unknown = { loggedIn: true, email: `${name}
   return dir;
 }
 
-async function create(configDir?: string, environment: Record<string, string> = {}) {
+async function create(configDir?: string, environment: Record<string, string> = {}, extra: Record<string, unknown> = {}) {
   const instance = await ClaudeDriver.create({
     instanceId: `claude-${instances.length}`,
     displayName: "Fixture Claude",
     enabled: true,
-    config: { cli, configDir, permissionMode: "acceptEdits" },
+    config: { cli, configDir, permissionMode: "acceptEdits", ...extra },
     environment,
   });
   instances.push(instance);
@@ -131,6 +131,14 @@ describe("Claude account configuration", () => {
     expect(await provider.generateText?.("fixture review")).toBe("existing@example.test");
     expect(calls(dir)[0]?.env.ANTHROPIC_AUTH_TOKEN).toBe("fixture-parent-ANTHROPIC_AUTH_TOKEN");
     expect(calls(dir)[0]?.env.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
+  it("gives an endpoint without its own directory none of the parent's credentials", async () => {
+    const dir = account("endpoint-no-dir");
+    vi.stubEnv("CLAUDE_CONFIG_DIR", dir);
+    const provider = await create(undefined, { ANTHROPIC_BASE_URL: "https://api.anthropic.com", ANTHROPIC_API_KEY: "fixture-endpoint-key" }, { endpointModels: ["claude-sonnet-5"] });
+    await provider.generateText?.("fixture review");
+    expect(calls(dir)[0]?.env).toEqual({ ANTHROPIC_BASE_URL: "https://api.anthropic.com", ANTHROPIC_API_KEY: "fixture-endpoint-key" });
   });
 
   it("preserves explicit custom endpoints and injected local models without inheriting subscription OAuth", async () => {
