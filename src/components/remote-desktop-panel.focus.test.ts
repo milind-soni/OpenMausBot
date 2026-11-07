@@ -6,16 +6,17 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import type { AppState, Bot, InstanceInfo } from "@/state/store";
 import { rememberComputerPanelOpen } from "@/lib/computer-panel-focus";
 
+const fixture = vi.hoisted(() => ({ visible: false, api: vi.fn(async () => ({})) }));
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
   useCaptionChrome: () => ({ padClass: undefined }),
 }));
-vi.mock("@/lib/page-visible", () => ({ usePageVisible: () => false }));
+vi.mock("@/lib/page-visible", () => ({ usePageVisible: () => fixture.visible }));
 vi.mock("./BrowserPanel", () => ({ BrowserPanel: () => null }));
 vi.mock("./RoutinesPage", () => ({ RoutineEditor: () => null }));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
-  api: async () => ({}),
+  api: fixture.api,
 }));
 
 const { RemoteDesktopPanel } = await import("./remote-desktop-panel");
@@ -67,6 +68,8 @@ beforeAll(() => {
   vi.stubGlobal("ogb", undefined);
 });
 beforeEach(() => {
+  fixture.visible = false;
+  fixture.api.mockClear();
   frames = [];
   nextFrame = 1;
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -86,6 +89,15 @@ afterEach(() => {
 });
 
 describe("remote desktop panel entry focus", () => {
+  it("explains that a private desktop is host-only instead of offering cloud control", async () => {
+    fixture.visible = true;
+    await open(makeBot({ computer: "vm" }));
+    expect(document.body.textContent).toContain("This private desktop can only be opened on the host computer");
+    expect(document.body.textContent).not.toContain("Take control");
+    expect(document.body.textContent).not.toContain("Cloud desktop");
+    expect(document.body.textContent).toContain("Scheduled tasks");
+    expect(fixture.api).not.toHaveBeenCalled();
+  });
   it("opens onto its close button, the only entry a panel without tabs has", async () => {
     rememberComputerPanelOpen({ botId: "scout", opener: null, tabs: true });
     await open(makeBot());
