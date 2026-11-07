@@ -158,7 +158,7 @@ test("main asks in its own dialog before a server gets this computer, and Cancel
 
 test("allowMcpServer defaults to Don't allow, names the port or the shown command with its setting names, and answers true only on Allow", async () => {
   const ask = fakeDialog({ response: 0 });
-  const dialogs = createLendingDialogs({ dialog: ask.dialog, window: liveWindow, validate: named, device: "Mac" });
+  const dialogs = createLendingDialogs({ dialog: ask.dialog, window: () => null, validate: named, device: "Mac", platform: "linux" });
   assert.equal(await dialogs.allowMcpServer({ name: "notes", target: { kind: "url", port: 4100 } }), true);
   assert.equal(await dialogs.allowMcpServer({ name: "files", target: { kind: "command", command: "npx files --token ***", env: ["API_KEY", "HOST"] } }), true);
   assert.equal(await dialogs.allowMcpServer({ name: "plain", target: { kind: "command", command: "npx plain", env: [] } }), true);
@@ -173,6 +173,21 @@ test("allowMcpServer defaults to Don't allow, names the port or the shown comman
   assert.equal(options[2].detail, "It runs this command here as you, with its saved settings (secrets hidden):\nnpx plain");
   for (const response of [1, -1]) {
     const deny = fakeDialog({ response });
-    assert.equal(await createLendingDialogs({ dialog: deny.dialog, window: liveWindow, validate: named }).allowMcpServer({ name: "a", target: { kind: "url", port: 4100 } }), false);
+    assert.equal(await createLendingDialogs({ dialog: deny.dialog, window: () => null, validate: named, platform: "linux" }).allowMcpServer({ name: "a", target: { kind: "url", port: 4100 } }), false);
+  }
+});
+
+test("allowMcpServer on macOS asks over the app's window, shown first, and never without one", async () => {
+  const shown = [];
+  const win = { isDestroyed: () => false, isVisible: () => shown.length > 0, show: () => shown.push(true) };
+  const ask = fakeDialog({ response: 0 });
+  assert.equal(await createLendingDialogs({ dialog: ask.dialog, window: () => win, validate: named, platform: "darwin" }).allowMcpServer({ name: "notes", target: { kind: "url", port: 4100 } }), true);
+  assert.equal(shown.length, 1);
+  assert.equal(ask.calls[0][1], win);
+  assert.equal(ask.calls[0][2].defaultId, 1);
+  for (const missing of [null, { isDestroyed: () => true }]) {
+    const none = fakeDialog({ response: 0 });
+    await assert.rejects(createLendingDialogs({ dialog: none.dialog, window: () => missing, validate: named, platform: "darwin" }).allowMcpServer({ name: "notes", target: { kind: "url", port: 4100 } }));
+    assert.equal(none.calls.length, 0);
   }
 });

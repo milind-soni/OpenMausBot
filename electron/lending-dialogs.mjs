@@ -24,7 +24,7 @@ export function serverAccessDetail(env, { folders, terminal, computer }, t = nat
  *   t?: (key: string, params?: Record<string, string | number>) => string,
  * }} deps
  */
-export function createLendingDialogs({ dialog, window, validate, isHome = async () => false, device = deviceWord(), t = nativeText.englishText.t }) {
+export function createLendingDialogs({ dialog, window, validate, isHome = async () => false, device = deviceWord(), platform = process.platform, t = nativeText.englishText.t }) {
   let askingTerminal = false;
   return {
     /** Turning the terminal on runs `lend` only once the person confirms, one question at a time; turning it off never asks.
@@ -67,8 +67,14 @@ export function createLendingDialogs({ dialog, window, validate, isHome = async 
       const where = device === "computer" ? t("native.lendTray.computer") : device;
       const detail = target.kind === "url" ? t("native.lend.mcp.port", { port: target.port, device: where })
         : [t("native.lend.mcp.command", { command: target.command }), ...target.env?.length ? [t("native.lend.mcp.settings", { names: target.env.join(", ") })] : []].join("\n\n");
-      const { response } = await dialog.showMessageBox({ type: "warning", message: t("native.lend.mcp.title", { name, device: where }), detail,
-        buttons: [t("native.lend.mcp.allow"), t("native.lend.mcp.deny")], defaultId: 1, cancelId: 1 });
+      const options = { type: "warning", message: t("native.lend.mcp.title", { name, device: where }), detail,
+        buttons: [t("native.lend.mcp.allow"), t("native.lend.mcp.deny")], defaultId: 1, cancelId: 1 };
+      const shown = window();
+      const parent = shown && !shown.isDestroyed() ? shown : null;
+      // Electron 43 runs a message box without a window synchronously on macOS, where it can sit unseen behind other apps.
+      if (platform === "darwin" && !parent) throw new Error("No window to ask in.");
+      if (parent && !parent.isVisible()) parent.show();
+      const { response } = await (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
       return response === 0;
     },
     async confirmServerAccess(env, grant) {
