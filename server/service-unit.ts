@@ -13,6 +13,8 @@ export interface ServiceSpec {
   home: string;
   bindsLowPorts: boolean;
   label?: string;
+  /** OMB_SECRET_STORE for the service, so credentials stay in the OS store after a reboot too. */
+  secretStore?: string;
 }
 
 export const SYSTEMD_UNIT_NAME = "openmausbot.service";
@@ -45,6 +47,7 @@ export function systemdUnit(spec: ServiceSpec): string {
     `WorkingDirectory=${spec.home}`,
     `Environment=HOME=${spec.home}`,
     `Environment=OMB_DATA_DIR=${spec.dataDir}`,
+    ...(spec.secretStore ? [`Environment=OMB_SECRET_STORE=${spec.secretStore}`] : []),
     `ExecStart=${serviceCommand(spec).map(quoteSystemd).join(" ")}`,
     "Restart=always",
     "RestartSec=3",
@@ -83,6 +86,7 @@ export function launchdPlist(spec: ServiceSpec): string {
     `\t\t<string>${xml(spec.home)}</string>`,
     "\t\t<key>OMB_DATA_DIR</key>",
     `\t\t<string>${xml(spec.dataDir)}</string>`,
+    ...(spec.secretStore ? ["\t\t<key>OMB_SECRET_STORE</key>", `\t\t<string>${xml(spec.secretStore)}</string>`] : []),
     "\t\t<key>PATH</key>",
     "\t\t<string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>",
     "\t</dict>",

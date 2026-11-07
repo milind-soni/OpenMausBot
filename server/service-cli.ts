@@ -71,6 +71,7 @@ export function runServiceCommand(input: ServiceInstallInput, io: ServiceIo): nu
     user: input.user ?? currentUser(),
     home,
     bindsLowPorts: Boolean(input.domain),
+    ...(process.env.OMB_SECRET_STORE?.trim() ? { secretStore: process.env.OMB_SECRET_STORE.trim() } : {}),
     ...(input.label ? { label: input.label } : {}),
   };
   const rendered = platform === "darwin" ? launchdPlist(spec) : systemdUnit(spec);
