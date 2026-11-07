@@ -139,12 +139,10 @@ export class StdioSessions {
     this.#sessions.set(session.id, session);
     const lines = createLineSplitter((line) => this.#line(session, line));
     ours.on("data", (chunk: Buffer) => { session.heard = true; session.lastAt = this.#now(); lines.push(chunk); });
-    // The request that opened a session whose child never said a byte is answered by `handle`'s caller.
     ours.on("end", () => { lines.flush(); if (!session.heard) session.pending.clear(); this.#end(session, 502); });
     return session;
   }
 
-  /** False when the stream ended before the child's first byte. */
   #heard(session: Session): Promise<boolean> {
     return new Promise((done) => {
       if (session.heard) return done(true);

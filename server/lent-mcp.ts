@@ -148,7 +148,7 @@ export function lentLine(name: string, state: Exclude<LentState, { kind: "ready"
     case "declined": return `On ${theirs}, the person didn't allow ${name}. Ask them before trying again.`;
     case "no-window": return `Open OpenMausBot on ${theirs}, then try again: it asks there before ${place} uses ${name}.`;
     case "no-server": return `${theirs.replace(/^your /u, "Your ")} has no definition of ${name} to run.`;
-    case "changed": return `${name} changed since the person allowed it on ${theirs}: a new prompt is waiting there.`;
+    case "changed": return `${name} changed on ${place} just as ${theirs} was starting it: try again.`;
     case "cant-start": return `${name} couldn't start on ${theirs}: its program may not be installed there, or it stopped as soon as it started.`;
     case "unreachable": return `${name} on ${theirs} didn't answer. Check that it is running there.`;
   }
@@ -352,7 +352,8 @@ export function createLentMcp(deps: LentMcpDeps) {
     if (threads.get(key) === entry && !entry.sessions.size) forget(key, entry);
     if (!outcome || outcome === "opened") return;
     if (!at.active()) return void res.writeHead(401).end();
-    return answerHere(req, res, at, linkProblem(outcome.refused), outcome.body);
+    const linkGone = "failed" in outcome.refused && outcome.refused.failed === "spawn-failed" && !deps.links.mcpRoute(at.principal, at.state.computerId);
+    return answerHere(req, res, at, linkGone ? linkProblem(null) : linkProblem(outcome.refused), outcome.body);
   }
 
   /** Test over the link: the probe reaches the server, as a turn of its own, through a loopback door only its token opens. */

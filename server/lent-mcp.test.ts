@@ -266,7 +266,7 @@ it("the words for a server the computer's link can't run now", () => {
   expect(lentLine("local", { kind: "declined", ...mac }, words)).toBe("On your Mac (Ada's Mac), the person didn't allow local. Ask them before trying again.");
   expect(lentLine("local", { kind: "no-server", ...mac }, words)).toBe("Your Mac (Ada's Mac) has no definition of local to run.");
   expect(lentLine("local", { kind: "no-server", computer: "studio", device: "PC" }, { ...words, personal: false })).toBe("studio has no definition of local to run.");
-  expect(lentLine("local", { kind: "changed", ...mac }, words)).toBe("local changed since the person allowed it on your Mac (Ada's Mac): a new prompt is waiting there.");
+  expect(lentLine("local", { kind: "changed", ...mac }, words)).toBe("local changed on My Cloud just as your Mac (Ada's Mac) was starting it: try again.");
   expect(lentLine("local", { kind: "unreachable", ...mac }, words)).toBe("local on your Mac (Ada's Mac) didn't answer. Check that it is running there.");
   expect(lentLine("local", { kind: "no-link", ...mac }, words)).toBe("local runs on your Mac (Ada's Mac), whose connection to My Cloud isn't up yet: try again in a moment. If it stays this way, the network there may be blocking it.");
   expect(lentLine("local", { kind: "no-window", ...mac }, words)).toBe("Open OpenMausBot on your Mac (Ada's Mac), then try again: it asks there before My Cloud uses local.");
@@ -480,6 +480,16 @@ describe("a computer that lends its MCP servers over its link", () => {
       expect(started, session).toMatchObject({ status: 200, session, body: { result: { instructions: line } } });
       expect((await post("notes", rpc("tools/call", { name: "search" }, 2), started.session)).body.result).toEqual({ content: [{ type: "text", text: line }], isError: true });
     }
+  });
+
+  it("a command whose stream ends with the link before its first byte is answered as no-link, not as a program that couldn't start", async () => {
+    let up = true;
+    const dropped: LinkStream = { join: (socket) => { up = false; socket.end(); }, cancel() {} };
+    const { lent } = fixture({ online: { mcpLink: true }, links: { mcpRoute: () => (up ? { open: async () => dropped } : null) } });
+    const { post } = await engine(lent);
+    const line = "notes runs on your Mac (Ada's Mac), whose connection to My Cloud isn't up yet: try again in a moment. If it stays this way, the network there may be blocking it.";
+    const started = await post("notes", initialize);
+    expect(started).toMatchObject({ status: 200, session: "refused-no-link", body: { result: { instructions: line } } });
   });
 
   it("a computer online with no link up yet is answered as no-link, and its refused session keeps that word", async () => {
