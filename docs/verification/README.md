@@ -98,6 +98,7 @@ Use only mapped, tested commands:
 - [Fleet: many workspaces on one server](fleet.md)
 - [Workspaces screen and the fleet agent](workspaces.md)
 - [White-label reseller on a fleet](white-label-reseller.md)
+- [White-label reseller in an Ubuntu 24.04 systemd container, 2026-11-07](white-label-reseller-container-2026-11-07.md)
 - [Hosted workspace sign-in and revocation](hosted-workspaces.md)
 - [Shared-workspace trust: loopback, card answerers, decision log](shared-workspace-trust.md)
 - [Shared-workspace governance: bot visibility and admin activity](shared-workspace-governance.md)

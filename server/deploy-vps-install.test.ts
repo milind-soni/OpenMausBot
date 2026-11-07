@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -339,6 +340,30 @@ describe.skipIf(process.platform === "win32")("deploy/vps/install.sh", () => {
       }
     });
 
+    it("installs a local tarball by path, prints its sha256 and does not call it unpinned", () => {
+      const tarball = join(work, "openmausbot-0.1.146.tgz");
+      writeFileSync(tarball, "tarball bytes\n");
+      const digest = createHash("sha256").update("tarball bytes\n").digest("hex");
+      const ran = dryRun([...baseArgs(), "--package", "openmausbot-0.1.146.tgz"]);
+      expect(ran.status, ran.output).toBe(0);
+      expect(commandsOf(ran.stdout)).toContain(`+ npm install -g ${tarball}`);
+      expect(commandsOf(ran.stdout).some((line) => line.includes("openmausbot@"))).toBe(false);
+      expect(ran.stdout).toContain(`package: ${tarball}, sha256 ${digest}; a local tarball is pinned by its content`);
+      expect(ran.stdout).toContain(`Package: ${tarball}, sha256 ${digest} (pinned by content)`);
+      expect(ran.stdout).not.toContain("UNPINNED");
+      expect(ran.stdout).not.toContain("npm view openmausbot version");
+    });
+
+    it("warns that a tarball address is not pinned and passes it to npm unchanged", () => {
+      const url = "https://releases.acme.test/openmausbot-0.1.146.tgz";
+      const ran = dryRun([...baseArgs(), "--package", url]);
+      expect(ran.status, ran.output).toBe(0);
+      expect(commandsOf(ran.stdout)).toContain(`+ npm install -g ${url}`);
+      expect(ran.stdout).toContain(`warning: UNPINNED: --package ${url} is an address`);
+      expect(ran.stdout).toContain("check its sha256");
+      expect(ran.stdout).not.toContain("sha256 ");
+    });
+
     it("prints usage for --help and exits 0", () => {
       const ran = install(["--help"]);
       expect(ran.status).toBe(0);
@@ -378,6 +403,17 @@ describe.skipIf(process.platform === "win32")("deploy/vps/install.sh", () => {
       const minimal = fleetLines(dryRun(baseArgs()).stdout);
       expect(minimal.map((tokens) => tokens[1])).toEqual(["init", "create"]);
       for (const tokens of minimal) expect(parseArgs(tokens, {}), tokens.join(" ")).not.toHaveProperty("error");
+    });
+
+    it("accepts every fleet line of a run that installs a tarball", () => {
+      writeFileSync(join(work, "omb.tgz"), "x");
+      const args = fullArgs();
+      args.splice(args.indexOf("--version"), 2);
+      const lines = fleetLines(dryRun([...args, "--package", "omb.tgz"]).stdout);
+      expect(lines.map((tokens) => tokens[1])).toEqual(["init", "brand", "create"]);
+      for (const tokens of lines) expect(parseArgs(tokens, {}), tokens.join(" ")).not.toHaveProperty("error");
+      expect(parseArgs(lines[0]!, {})).toMatchObject({ fleetAction: "init", domain: "example.test", resellerName: "Acme Cloud" });
+      expect(parseArgs(lines[2]!, {})).toMatchObject({ fleetAction: "create", slug: "acme", host: "app.customer.example" });
     });
 
     it("accepts the re-run form with --yes", () => {
@@ -439,6 +475,24 @@ describe.skipIf(process.platform === "win32")("deploy/vps/install.sh", () => {
       refuse([...baseArgs(), "--version", "1.0;rm -rf /"], "--version takes a version");
       refuse([...baseArgs(), "--operator", "Bad User"], "--operator takes a Unix user name");
       refuse(["--domain", "example.test", "--admin", "a@acme.test", "--reseller-name", "x".repeat(41)], "--reseller-name must be 40 characters or fewer");
+    });
+
+    it("rejects a package that is not a readable .tgz file or an https address, or that comes with --version", () => {
+      const tarball = join(work, "omb.tgz");
+      writeFileSync(tarball, "x");
+      refuse([...baseArgs(), "--package", "missing.tgz"], `--package: ${join(work, "missing.tgz")} is not a readable, non-empty file`);
+      refuse([...baseArgs(), "--package", "http://releases.acme.test/omb.tgz"], "--package takes a .tgz file or an https:// address");
+      refuse([...baseArgs(), "--package", "ftp://releases.acme.test/omb.tgz"], "--package takes a .tgz file or an https:// address");
+      refuse([...baseArgs(), "--package", "https://releases.acme.test/a b.tgz"], "--package address must not contain spaces");
+      refuse([...baseArgs(), "--package", "omb.zip"], "must be a .tgz file made by npm pack");
+      refuse([...baseArgs(), "--package", "--yes"], "--package needs a value, not --yes");
+      refuse([...baseArgs(), "--package", tarball, "--version", "0.1.145"], "--package and --version cannot be used together");
+      refuse([...baseArgs(), "--version", "0.1.145", "--package", tarball], "--package and --version cannot be used together");
+      refuse([...baseArgs(), "--package", "https://releases.acme.test/omb.tgz", "--version", "latest"], "--package and --version cannot be used together");
+      writeFileSync(join(work, "empty.tgz"), "");
+      refuse([...baseArgs(), "--package", "empty.tgz"], "is not a readable, non-empty file");
+      mkdirSync(join(work, "dir.tgz"));
+      refuse([...baseArgs(), "--package", "dir.tgz"], "is not a readable, non-empty file");
     });
 
     it("rejects a logo that is not a file or an https address", () => {
@@ -529,6 +583,18 @@ describe.skipIf(process.platform === "win32")("deploy/vps/install.sh", () => {
       expect(ran.stdout).toContain("openmausbot fleet billing");
       expect(ran.stdout).toContain("warning: no sign-in mail relay");
       expect(ran.stdout).not.toContain("warning: no licence key");
+    });
+
+    it("gives npm the tarball path instead of a registry name and keeps the rest of the run unchanged", () => {
+      const tarball = join(work, "omb.tgz");
+      writeFileSync(tarball, "x");
+      const ran = runStubbed([...fullRunArgs(), "--package", tarball]);
+      expect(ran.status, ran.output).toBe(0);
+      expect(phasesOf(ran.stdout)).toEqual(PHASES);
+      expect(calls()).toContain(`npm install -g ${tarball}`);
+      expect(calls().some((line) => line.startsWith("npm install -g openmausbot@"))).toBe(false);
+      expect(ran.stdout).toContain(`sha256 ${createHash("sha256").update("x").digest("hex")}`);
+      expect(ran.stdout).not.toContain("UNPINNED");
     });
 
     it("resolves the name before the first fleet command, which is what reloads Caddy", () => {

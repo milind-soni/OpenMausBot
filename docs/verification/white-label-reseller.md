@@ -158,12 +158,16 @@ pnpm exec vitest run server/deploy-vps-install.test.ts server/cli.test.ts
   `OMB_LICENSE_KEY` never in the output; no change under HOME, the working
   directory or the temp directory; exit 0 as a plain user and on macOS, where
   the unsupported system is a warning.
+- Package: `--package FILE` gives `npm install -g` the tarball's absolute path and prints
+  its sha256 in the plan and the summary with no `UNPINNED` warning; `--package URL` is
+  passed unchanged and warned about; the fleet lines are unchanged.
 - Contract: every `openmausbot fleet` line of a dry run (full, minimal, logo
   URL, re-run with `--yes`, a name holding a quote and a space) is parsed by the
   real `parseArgs` in `server/cli.ts` and must not return an error.
 - Refusals exit 2 with a message and print nothing else: missing `--domain`,
   `--admin` or `--reseller-name`; an invalid domain, admin, host, workspace,
-  accent, support link, cap, currency, version or engine; an unknown flag; a flag
+  accent, support link, cap, currency, version or engine; a `--package` that is not a
+  readable `.tgz` file or an `https://` address, or comes with `--version`; an unknown flag; a flag
   without a value; a missing `--logo` file; an unreadable or empty key file.
 - A non-dry run against recording stubs for `apt-get`, `curl`, `gpg`, `bash`,
   `npm`, `node`, `openmausbot`, `systemctl`, `id`, `nft`, `ss`, `getent` and `ip`,
@@ -184,7 +188,10 @@ order and the arguments the script gives its tools, not what those tools do.
 
 ### Disposable Linux VPS recipe
 
-Not yet run. Use a fresh Ubuntu 24.04 server that you delete afterwards, with a
+Not yet run on a VPS. A container run of the installer on Ubuntu 24.04 with
+systemd, and of most of the steps below, is in
+[the container record](white-label-reseller-container-2026-11-07.md); it lists
+what a container cannot prove. Use a fresh Ubuntu 24.04 server that you delete afterwards, with a
 firewall that opens 22 from your address only until the script runs, then 80 and
 443. Do not use a server that holds anything else.
 

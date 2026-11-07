@@ -20,6 +20,8 @@ ANTHROPIC_KEY_FILE=
 OPERATOR=
 VERSION=latest
 VERSION_GIVEN=0
+PACKAGE=
+PACKAGE_SHA256=
 ENGINE=
 CAP=
 DRY_RUN=0
@@ -69,6 +71,8 @@ Server:
   --operator USER            Unix user whose workspace manages the fleet
   --currency CODE            billing currency, two decimals only (default USD)
   --version X.Y.Z            openmausbot release to install; pin one (default: latest, unpinned)
+  --package FILE|URL         install this npm pack tarball (.tgz file, or an https:// address)
+                             instead of a registry release; not combinable with --version
   --engine claude            also install the Claude Code CLI for the workspaces
   --dry-run                  print every step and change nothing
   -h, --help                 show this text
@@ -174,6 +178,16 @@ is_email() {
   printf '%s\n' "$1" | grep -Eq '^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,63}$'
 }
 
+sha256_of() {
+  if have sha256sum; then
+    sha256sum "$1" | awk '{ print $1 }'
+  elif have shasum; then
+    shasum -a 256 "$1" | awk '{ print $1 }'
+  else
+    printf 'unavailable'
+  fi
+}
+
 value_of() {
   if [ "$2" -lt 2 ]; then
     bad_usage "$1 needs a value"
@@ -204,7 +218,7 @@ parse_args() {
         shift
         continue
         ;;
-      --domain | --admin | --workspace | --host | --reseller-name | --currency | --logo | --accent | --tagline | --support-url | --license-key-file | --anthropic-key-file | --operator | --version | --engine | --cap)
+      --domain | --admin | --workspace | --host | --reseller-name | --currency | --logo | --accent | --tagline | --support-url | --license-key-file | --anthropic-key-file | --operator | --version | --package | --engine | --cap)
         value_of "$flag" "$#" "${2-}"
         given=$2
         ;;
@@ -234,6 +248,7 @@ parse_args() {
         VERSION=$given
         VERSION_GIVEN=1
         ;;
+      --package) PACKAGE=$given ;;
       --engine) ENGINE=$given ;;
       --cap) CAP=$given ;;
     esac
@@ -273,6 +288,9 @@ validate_args() {
   if [ -n "$OPERATOR" ]; then
     printf '%s\n' "$OPERATOR" | grep -Eq '^[a-z_][a-z0-9_-]{0,31}$' || bad_usage "--operator takes a Unix user name"
   fi
+  if [ -n "$PACKAGE" ]; then
+    [ "$VERSION_GIVEN" = 0 ] || bad_usage "--package and --version cannot be used together"
+  fi
   printf '%s\n' "$VERSION" | grep -Eq '^[0-9A-Za-z][0-9A-Za-z.+_-]*$' || bad_usage "--version takes a version such as 0.1.145 or a tag such as latest"
   if [ -n "$ENGINE" ] && [ "$ENGINE" != claude ]; then
     bad_usage "--engine takes claude"
@@ -287,6 +305,23 @@ validate_args() {
   if [ -n "$ANTHROPIC_KEY_FILE" ]; then
     ANTHROPIC_KEY_FILE=$(absolute "$ANTHROPIC_KEY_FILE")
     readable_file --anthropic-key-file "$ANTHROPIC_KEY_FILE"
+  fi
+  if [ -n "$PACKAGE" ]; then
+    case $PACKAGE in
+      [Hh][Tt][Tt][Pp][Ss]://*) printf '%s\n' "$PACKAGE" | grep -Eq '^[^[:space:]]+$' || bad_usage "--package address must not contain spaces" ;;
+      *://*) bad_usage "--package takes a .tgz file or an https:// address" ;;
+      *)
+        PACKAGE=$(absolute "$PACKAGE")
+        case $PACKAGE in
+          *.tgz) ;;
+          *) bad_usage "--package: $PACKAGE must be a .tgz file made by npm pack" ;;
+        esac
+        if [ ! -f "$PACKAGE" ] || [ ! -r "$PACKAGE" ] || [ ! -s "$PACKAGE" ]; then
+          bad_usage "--package: $PACKAGE is not a readable, non-empty file"
+        fi
+        PACKAGE_SHA256=$(sha256_of "$PACKAGE")
+        ;;
+    esac
   fi
   if [ -n "$LOGO" ]; then
     case $LOGO in
@@ -460,24 +495,43 @@ pinned_version() {
   printf '%s\n' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
 }
 
+unpinned() {
+  if [ -n "$PACKAGE" ]; then
+    [ -z "$PACKAGE_SHA256" ]
+  elif pinned_version; then
+    return 1
+  fi
+}
+
 warn_unpinned() {
-  if [ "$VERSION_GIVEN" = 1 ]; then
+  if [ -n "$PACKAGE" ]; then
+    warn "UNPINNED: --package $PACKAGE is an address, so this installs whatever it serves right now. Download it, check its sha256, and pass the file instead."
+  elif [ "$VERSION_GIVEN" = 1 ]; then
     warn "UNPINNED: --version $VERSION is a tag or a range, so this installs whatever openmausbot@$VERSION points to right now."
   else
     warn "UNPINNED: no --version was given, so this installs openmausbot@latest, whatever the registry serves right now."
   fi
   warn "npm installs it as root and runs the install scripts of it and of every package it pulls in, as root."
-  warn "Pin a release you have checked: run 'npm view openmausbot version', then rerun with --version X.Y.Z"
+  if [ -z "$PACKAGE" ]; then
+    warn "Pin a release you have checked: run 'npm view openmausbot version', then rerun with --version X.Y.Z"
+  fi
 }
 
 install_openmausbot() {
   phase install_openmausbot
-  if ! pinned_version; then
+  if unpinned; then
     printf '\n'
     warn_unpinned
     printf '\n'
   fi
-  run npm install -g "openmausbot@$VERSION"
+  if [ -n "$PACKAGE_SHA256" ]; then
+    note "package: $PACKAGE, sha256 $PACKAGE_SHA256; a local tarball is pinned by its content, so it needs no version pin"
+  fi
+  if [ -n "$PACKAGE" ]; then
+    run npm install -g "$PACKAGE"
+  else
+    run npm install -g "openmausbot@$VERSION"
+  fi
 }
 
 install_engine() {
@@ -621,7 +675,11 @@ summary() {
   if [ "$FLEET_EXISTED" = 1 ]; then
     note "Existing workspaces keep their old release until you run: openmausbot fleet upgrade"
   fi
-  if ! pinned_version; then
+  if [ -n "$PACKAGE_SHA256" ]; then
+    note "Package: $PACKAGE, sha256 $PACKAGE_SHA256 (pinned by content)"
+  elif [ -n "$PACKAGE" ]; then
+    warn "UNPINNED: --package $PACKAGE is an address that is not checked against a hash; download it and pass the file"
+  elif ! pinned_version; then
     warn "UNPINNED: openmausbot@$VERSION is not a pinned release; rerun with --version X.Y.Z (see: npm view openmausbot version)"
   fi
   if [ -z "$LICENSE_KEY_FILE" ] && [ -z "${OMB_LICENSE_KEY:-}" ]; then

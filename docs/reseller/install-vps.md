@@ -5,7 +5,10 @@ reseller fleet: Node 24, Caddy, OpenMausBot, the fleet itself, your default
 brand and the first customer workspace. It is plain POSIX `sh`, it prints every
 command before it runs it, and `--dry-run` prints them without running any.
 
-It has not been run on a real server yet. The offline checks are listed in
+It has not been run on a real VPS yet. It has been run once on Ubuntu 24.04 with
+systemd inside a container, see
+[the container record](../verification/white-label-reseller-container-2026-11-07.md),
+and the offline checks are listed in
 [the verification record](../verification/white-label-reseller.md#vps-install).
 
 ## Before you start
@@ -48,6 +51,19 @@ script installs `latest`, so rebuilding the server later can bring a different
 release than the one you tested, and every workspace on it. Change the pinned
 version on purpose, then run `openmausbot fleet upgrade`.
 
+To install a build you made yourself instead of a registry release, for example
+a release candidate, pack it and pass the file:
+
+```sh
+pnpm build:server && pnpm exec vite build && node scripts/build-npm-package.mjs
+(cd release/npm && npm pack)
+scp release/npm/openmausbot-*.tgz root@SERVER_IP:
+sh install.sh --domain example.com --admin owner@acme.test \
+  --reseller-name "Acme Cloud" --package /root/openmausbot-0.1.146.tgz
+```
+
+Compare the sha256 the script prints with `sha256sum` of the file you built.
+
 A bad option is refused with exit status 2 before anything changes.
 
 ## Options
@@ -67,6 +83,7 @@ A bad option is refused with exit status 2 before anything changes.
 | `--operator USER` | Existing Unix user whose workspace manages the fleet from Settings, Installations. |
 | `--currency CODE` | Billing currency with two decimals, default `USD`. See [billing](billing.md). |
 | `--version VERSION` | The `openmausbot` version to install, for example `0.1.145`. Always pass one: the default, `latest`, is whatever the vendor published most recently, so two installs a week apart can differ. |
+| `--package FILE or URL` | Install this tarball from `npm pack` (a `.tgz` file, or an `https://` address) in place of `openmausbot@VERSION`. Not combinable with `--version`. A file is pinned by its content: the script prints its sha256 in the plan and the summary and gives no `UNPINNED` warning. An address is not hashed and is warned about. |
 | `--engine claude` | Also install the Claude Code CLI. |
 | `--dry-run` | Print every step and change nothing. |
 
@@ -81,7 +98,8 @@ The phases run in this order, and each prints a `== name ==` heading.
 4. `install_caddy`: Caddy from its official apt repository, then a Caddyfile
    that starts with the global block `{ email ... }`. The fleet appends its
    `import` line after it.
-5. `install_openmausbot`: `npm install -g openmausbot@VERSION`. The install is
+5. `install_openmausbot`: `npm install -g openmausbot@VERSION`, or with
+   `--package` the same command on that tarball. The install is
    global because `fleet init` refuses to point services at an `npx` cache.
 6. `install_engine`: the Claude Code CLI, only with `--engine claude`.
 7. `check_dns`: the first workspace address must resolve to this server. This
@@ -118,7 +136,8 @@ This is a known residual risk:
 - The Caddy apt signing key, `https://dl.cloudsmith.io/public/caddy/stable/gpg.key`,
   and the repository list next to it. apt checks the `caddy` package against
   that key. Skipped when `caddy` is already installed.
-- npm packages: `openmausbot@VERSION` and every dependency it pulls in, and,
+- npm packages: `openmausbot@VERSION` (or the `--package` tarball, whose own
+  dependencies still come from the registry) and every dependency it pulls in, and,
   with `--engine claude`, `@anthropic-ai/claude-code` at its latest release.
   `npm install -g` runs as root, and so do the install scripts of those
   packages. npm checks each download against the integrity hash the registry
