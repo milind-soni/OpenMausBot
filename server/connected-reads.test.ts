@@ -101,4 +101,22 @@ describe("a check's reads", () => {
     const calendar = await session.events(0, 1).catch((error: unknown) => error);
     expect(calendar).toMatchObject({ app: "googlecalendar", signedOut: false });
   });
+
+  it("names the account the host chose for an app with several, asking once per session, and says so when it fails", async () => {
+    const { deps, frames } = relay({
+      GMAIL_GET_PROFILE: () => ({ successful: true, data: { emailAddress: "new@x.test" } }),
+      GMAIL_FETCH_EMAILS: () => ({ successful: false, error: "Backend error 500" }),
+      GOOGLECALENDAR_LIST_CALENDARS: () => ({ successful: true, data: { items: [] } }),
+      GOOGLECALENDAR_EVENTS_LIST: () => ({ successful: true, data: { items: [] } }),
+    });
+    let asked = 0;
+    const session = createConnectedReads({ ...deps, accounts: async () => { asked += 1; return { gmail: "ca_newest" }; } }).session();
+    expect(await session.address()).toBe("new@x.test");
+    const mail = await session.emails(0, 5).catch((error: unknown) => error);
+    expect(mail).toMatchObject({ app: "gmail", signedOut: false, severalAccounts: true });
+    await session.events(0, 1);
+    expect(asked).toBe(1);
+    for (const frame of frames.filter((one) => one.slug?.startsWith("GMAIL_"))) expect(frame.item!.account).toBe("ca_newest");
+    for (const frame of frames.filter((one) => one.slug?.startsWith("GOOGLECALENDAR_"))) expect(frame.item).not.toHaveProperty("account");
+  });
 });

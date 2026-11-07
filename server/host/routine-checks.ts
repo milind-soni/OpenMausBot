@@ -63,7 +63,7 @@ export interface CheckReport {
   /** Other routines' runs that finished since the last check. */
   runs?: RoutineRun[];
   /** Apps that could not be read, and whether reconnecting fixes it. */
-  trouble?: Array<{ app: ReadApp; signedOut: boolean }>;
+  trouble?: ReadTrouble[];
   /** New emails that wait for a later run, or true when there were more than one check reads. */
   waiting?: number | true;
   /** Mail and meetings that need an AI this bot's engine cannot fence, so they were not sorted. */
@@ -102,10 +102,15 @@ const ACTIVE = new Set(["queued", "running", "waiting"]);
 const appName: Record<ReadApp, string> = { gmail: "Gmail", googlecalendar: "Google Calendar" };
 const addressOf = (from: string): string => (/<([^<>\s]+)>/.exec(from)?.[1] ?? from).trim().toLowerCase();
 
-export function troubleSentence(trouble: ReadonlyArray<{ app: ReadApp; signedOut: boolean }>): string | undefined {
+/** A read that failed; `severalAccounts` when it named one of the app's several connected accounts. */
+export interface ReadTrouble { app: ReadApp; signedOut: boolean; severalAccounts?: boolean }
+
+export function troubleSentence(trouble: ReadonlyArray<ReadTrouble>): string | undefined {
   if (!trouble.length) return undefined;
   const names = trouble.map((one) => appName[one.app]).join(" or ");
-  return trouble.some((one) => one.signedOut) ? `Couldn't read ${names}. Reconnect it in Connected apps.` : `Couldn't read ${names}. I'll try again soon.`;
+  if (trouble.some((one) => one.signedOut)) return `Couldn't read ${names}. Reconnect it in Connected apps.`;
+  if (trouble.some((one) => one.severalAccounts)) return `Couldn't read ${names}. Several accounts are connected, so I read the newest one; check it in Connected apps.`;
+  return `Couldn't read ${names}. I'll try again soon.`;
 }
 
 export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
@@ -182,12 +187,13 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
   }
 
   /** A read that failed counts toward its app's failure streak, so the brief says so once and reads back off. */
-  function failed(entry: RoutineState, app: ReadApp, error: unknown): { app: ReadApp; signedOut: boolean } {
+  function failed(entry: RoutineState, app: ReadApp, error: unknown): ReadTrouble {
     const signedOut = error instanceof SourceError && error.signedOut;
+    const severalAccounts = error instanceof SourceError && error.severalAccounts;
     const previous = entry.failures?.[app];
     entry.failures = { ...entry.failures, [app]: { since: previous?.since ?? now(), count: (previous?.count ?? 0) + 1, lastAt: now(), ...(signedOut ? { signedOut } : {}) } };
     console.warn(`checks: could not read ${appName[app]}: ${error instanceof Error ? error.message : String(error)}`);
-    return { app, signedOut };
+    return { app, signedOut, ...(severalAccounts ? { severalAccounts } : {}) };
   }
   const readsBackOff = (entry: RoutineState, app: ReadApp): boolean => {
     const failure = entry.failures?.[app];
@@ -210,7 +216,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
     const brief = routine.deliver === "brief";
     const aiAllowed = !context.hold && (routine.access !== "read-and-draft" || deps.fenced(routine.botId));
     const report: CheckReport = { routine, at };
-    const trouble: Array<{ app: ReadApp; signedOut: boolean }> = [];
+    const trouble: ReadTrouble[] = [];
     const items: CheckItems = { mail: [], prep: [], runs: [] };
     const pending: Omit<Pending, "at"> = { mail: [], prep: [], replies: [] };
     const held = new Set(Object.values(entry.pending ?? {}).flatMap((one) => [...one.mail, ...one.prep]));
