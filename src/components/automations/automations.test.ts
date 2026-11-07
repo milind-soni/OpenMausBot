@@ -290,7 +290,8 @@ describe("the Automations list switch", () => {
       flushSync(() => pick([...department()!.options].find((option) => option.textContent === "General")!.value));
       fixture.state.bots = sectioned.map((bot) => ({ ...bot, section: "Social" }));
       rerender();
-      expect(department()!.value).toBe("all");
+      // One department left and no General: nothing to choose between, so the filter hides.
+      expect(department()).toBeNull();
       expect(row("general-routine")).not.toBeNull();
     });
 
