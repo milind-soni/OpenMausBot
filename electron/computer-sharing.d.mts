@@ -118,6 +118,8 @@ export function createComputerSharing(options: {
   WebSocket?: typeof globalThis.WebSocket;
   /** The Chrome door's options, for tests: an object with `open` stands in for the door. */
   chrome?: Parameters<typeof import("./device-chrome.mjs").createChromeDoor>[0];
+  /** The ports this app's own OpenMausBot server is on now: a lent MCP server is never reached there. */
+  serverPorts?: () => number[];
   /** This computer's own check on each connection, for tests: how it looks names up and connects. */
   egress?: Omit<NonNullable<Parameters<typeof import("./device-egress.mjs").createDeviceEgress>[0]>, "seenAs">;
   /** The saved server that is the person's own My Cloud: the move's project folders are lent to it. */
