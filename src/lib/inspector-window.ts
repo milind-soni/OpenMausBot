@@ -47,9 +47,6 @@ export function appendInspectorRuntime(page: InspectorPage | null, events: Runti
 }
 
 /**
- * Reconciles a disk snapshot with live records not yet observed on disk.
- * Provenance follows immutable page identities in a WeakMap, so displaced disk
- * records cannot re-enter as live events and discarded pages can be collected.
  * A shared event ID anchors publication order even for equal timestamps; without
  * an overlap, equal-time records remain ambiguous and distinct IDs are retained
  * alongside later records rather than risking the loss of a live event.
