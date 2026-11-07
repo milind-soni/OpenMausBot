@@ -1,7 +1,7 @@
 // A page's files, read from inside the bot's own folders only: the path is resolved and every file re-checked with
 // realpath containment, symlinks out of the folder are skipped, and hidden files and folders (.git, .env) never go.
 // Everything left out is named to the bot, except the secret folder, which a page never mentions.
-import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
+import { lstat, open, readdir, realpath, stat } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { PAGE_FILE_EXTENSIONS, PAGE_MAX_BYTES, PAGE_MAX_FILES } from "../../shared/published-page.ts";
 import { guestWorkspaceToHost } from "../bot-attachment.ts";
@@ -102,6 +102,20 @@ export async function pageSource(requested: string, roots: readonly string[]): P
   return (await locate(requested, roots)).target;
 }
 
+/** The file at `real`, read only when the file opened is still the one at a path inside `root` after opening, so a folder
+ * on the way swapped for a link between the check and the read cannot hand over a file from elsewhere. Null when it moved. */
+async function readContained(real: string, root: string): Promise<Buffer | null> {
+  const handle = await open(real, "r");
+  try {
+    const [opened, now] = await Promise.all([handle.stat({ bigint: true }), realpath(real).catch(() => null)]);
+    if (!now || !containedBy(root, now) || inSecretFolder(now)) return null;
+    const there = await stat(now, { bigint: true });
+    return there.dev === opened.dev && there.ino === opened.ino ? await handle.readFile() : null;
+  } finally {
+    await handle.close();
+  }
+}
+
 /** The page at `requested`: one .html file (published as index.html), or a folder with index.html at its top. */
 export async function readPageBundle(requested: string, roots: readonly string[], limits = { bytes: PAGE_MAX_BYTES, files: PAGE_MAX_FILES }, options: { videos?: boolean } = {}): Promise<PageBundle> {
   const { target, root } = await locate(requested, roots);
@@ -109,7 +123,8 @@ export async function readPageBundle(requested: string, roots: readonly string[]
   if (info.isFile()) {
     if (!isHtml(target)) throw new PageBundleError("A single file must be an .html page. For anything else, publish a folder with an index.html.");
     if (info.size > limits.bytes) throw new PageBundleError(`The page is ${info.size} bytes; a page can be at most ${limits.bytes}.`, 413);
-    const data = await readFile(target);
+    const data = await readContained(target, root);
+    if (!data) throw new PageBundleError("The page moved while it was being read. Publish it again.");
     return { source: target, files: [{ path: "index.html", data }], bytes: data.byteLength, skipped: [] };
   }
   if (!info.isDirectory()) throw new PageBundleError("Publish an .html file or a folder.");
@@ -143,7 +158,9 @@ export async function readPageBundle(requested: string, roots: readonly string[]
       if (files.length >= limits.files) throw new PageBundleError(`The folder has more than ${limits.files} files a page can hold. Publish a smaller folder.`, 413);
       bytes += entry.size;
       if (bytes > limits.bytes) throw new PageBundleError(`The folder's files come to more than ${limits.bytes} bytes, a page's limit. Make the images smaller or leave some out.`, 413);
-      files.push({ path, data: await readFile(real) });
+      const data = await readContained(real, root);
+      if (!data) { skipped.push({ path, why: "link" }); continue; }
+      files.push({ path, data });
     }
   };
   await walk(target, 0);
