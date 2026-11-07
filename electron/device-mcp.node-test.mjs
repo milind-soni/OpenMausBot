@@ -222,6 +222,29 @@ test("one prompt at a time across servers: another server's open while one is up
   assert.deepEqual(asks.map(({ name }) => name), ["echo", "native"]);
 });
 
+test("with nowhere to ask, a server that needs a prompt is refused no-window: nothing shown, stored or held; an allowed or declined one never consults canAsk", async (t) => {
+  const port = await echoServer(t);
+  let window = false;
+  let checks = 0;
+  const { door, asks, saved } = await setup(t, { echo: echoEntry() }, { saved: { allowed: { kind: "url", port } }, canAsk: () => { checks += 1; return window; } });
+  const { socket } = await door.open({ name: "allowed", port });
+  assert.ok(socket, "an allowed server opens");
+  socket.destroy();
+  assert.equal(checks, 0);
+  assert.deepEqual(await door.open({ name: "native", port: 19501 }), { refused: "no-window" });
+  assert.deepEqual(await door.open(frame("echo", echoEntry())), { refused: "no-window" });
+  assert.equal(asks.length, 0);
+  assert.deepEqual(Object.keys(saved()), ["allowed"]);
+  window = true;
+  assert.deepEqual(await door.open({ name: "native", port: 19501 }), { refused: "needs-approval" }, "nothing held");
+  assert.deepEqual(asks.map(({ name }) => name), ["native"]);
+  asks[0].answer(false);
+  await answered();
+  window = false;
+  assert.deepEqual(await door.open({ name: "native", port: 19501 }), { refused: "declined" }, "a no still holds");
+  assert.equal(checks, 3);
+});
+
 test("an unreachable port and a port that never connects", async (t) => {
   const closed = createServer();
   await new Promise((resolve) => closed.listen(0, "127.0.0.1", resolve));
@@ -299,6 +322,15 @@ test("a command that cannot start is spawn-failed", async (t) => {
   const entry = { command: join(tmpdir(), "no-such-mcp-server-here"), args: [], env: {} };
   const { door } = await setup(t, { nope: entry }, { saved: { nope: approved(entry) } });
   assert.deepEqual(await door.open(frame("nope", entry)), { failed: "spawn-failed" });
+});
+
+test("a command that exits at once still opens, and its stream ends before any byte", async (t) => {
+  const entry = { command: process.execPath, args: ["-e", "process.exit(1)"], env: {} };
+  const { door } = await setup(t, { quits: entry }, { saved: { quits: approved(entry) } });
+  const { socket } = await door.open(frame("quits", entry));
+  const got = collect(socket);
+  await bounded(new Promise((resolve) => socket.once("close", resolve)), "the stream to end");
+  assert.equal(got.text, "");
 });
 
 test("windowsLaunch and taskkill /T are used on win32", async (t) => {

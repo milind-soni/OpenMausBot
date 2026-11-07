@@ -111,7 +111,7 @@ export type LentState =
   | { kind: "ready"; computerId: string; link: boolean; computer: string; device: Device }
   | { kind: "offline" | "stopped" | "never" | "outdated" | "no-terminal" | "port" | "not-lending"; computer: string; device: Device };
 
-const PROBLEMS = ["no-link", "not-lending", "needs-approval", "declined", "no-server", "changed", "unreachable"] as const;
+const PROBLEMS = ["no-link", "not-lending", "needs-approval", "declined", "no-window", "no-server", "changed", "cant-start", "unreachable"] as const;
 export type LentProblem = (typeof PROBLEMS)[number];
 const isProblem = (word: string): word is LentProblem => (PROBLEMS as readonly string[]).includes(word);
 
@@ -146,17 +146,21 @@ export function lentLine(name: string, state: Exclude<LentState, { kind: "ready"
     case "not-lending": return `${name} runs on ${theirs}, which isn't lending its MCP servers to ${place}: turn on "Let My Cloud use your MCP servers on this ${device}" from the OpenMausBot icon on that ${device}.`;
     case "needs-approval": return `Allow ${name} on ${theirs}: a prompt is waiting there. Then try again.`;
     case "declined": return `On ${theirs}, the person didn't allow ${name}. Ask them before trying again.`;
+    case "no-window": return `Open OpenMausBot on ${theirs}, then try again: it asks there before ${place} uses ${name}.`;
     case "no-server": return `${theirs.replace(/^your /u, "Your ")} has no definition of ${name} to run.`;
     case "changed": return `${name} changed since the person allowed it on ${theirs}: a new prompt is waiting there.`;
+    case "cant-start": return `${name} couldn't start on ${theirs}: its program may not be installed there, or it stopped as soon as it started.`;
     case "unreachable": return `${name} on ${theirs} didn't answer. Check that it is running there.`;
   }
 }
 
+const REFUSED = new Map<string, LentProblem>([["not-lent", "not-lending"], ["needs-approval", "needs-approval"], ["declined", "declined"], ["no-window", "no-window"]]);
+const FAILED = new Map<string, LentProblem>([["no-server", "no-server"], ["changed", "changed"], ["spawn-failed", "cant-start"]]);
+
 /** Why a link to the computer opened no stream; null: there is no open link to it. */
 export function linkProblem(opened: Exclude<LinkOpened, LinkStream> | null): LentProblem {
   if (!opened) return "no-link";
-  if ("refused" in opened) return opened.refused === "not-lent" ? "not-lending" : opened.refused === "needs-approval" || opened.refused === "declined" ? opened.refused : "unreachable";
-  return "failed" in opened && (opened.failed === "no-server" || opened.failed === "changed") ? opened.failed : "unreachable";
+  return ("refused" in opened ? REFUSED.get(opened.refused) : "failed" in opened ? FAILED.get(opened.failed) : undefined) ?? "unreachable";
 }
 
 type Turn = { botId: string; threadId: string; generation: string };
@@ -345,7 +349,6 @@ export function createLentMcp(deps: LentMcpDeps) {
     const key = `${at.turn.threadId}\n${at.name}`;
     const entry = sessionsOf(key, at, at.server, session === undefined);
     const outcome = await entry.sessions.handle(req, res);
-    if (outcome === "opened" && threads.get(key) !== entry) forget(key, entry);
     if (threads.get(key) === entry && !entry.sessions.size) forget(key, entry);
     if (!outcome || outcome === "opened") return;
     if (!at.active()) return void res.writeHead(401).end();

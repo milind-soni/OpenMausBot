@@ -15,3 +15,11 @@ test("lentMcpOptions builds the door with the computer's own ports and passes do
   assert.deepEqual(asked, []);
   door.close();
 });
+
+test("lentMcpOptions hands canAsk to the door", async () => {
+  const sharing = () => ({ mcpApprovals: { read: () => ({}), write: () => {} } });
+  const { mcp } = lentMcpOptions({ sharing, prompt: async () => assert.fail("never asked"), canAsk: () => false, serverPorts: () => [] });
+  const door = mcp({ id: "env" }, async () => null);
+  assert.deepEqual(await door.open({ name: "notes", port: 4100 }), { refused: "no-window" });
+  door.close();
+});

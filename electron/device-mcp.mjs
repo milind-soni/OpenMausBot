@@ -42,13 +42,13 @@ function childStream(child, { platform, spawn }) {
 /**
  * `open(target)` answers `{ socket }`, `{ refused }` ("needs-approval": a prompt, for this server or another, is up on
  * this computer or was just shown; "declined": its person said no to this name, or to this port or command under any
- * name, in the last `declineMs`) or `{ failed }`.
+ * name, in the last `declineMs`; "no-window": a prompt was needed and `canAsk()` said none can be shown) or `{ failed }`.
  * `approvals` is this computer's record of what its person allowed; `prompt` asks them and resolves true for Allow;
  * `definition(name)` is the command My Cloud now serves for a name, and `ownPorts()` the ports of this computer's own listeners.
  * `close()` ends every child it started, and any still starting.
  */
 export function createMcpDoor({
-  approvals, prompt, ownPorts, definition,
+  approvals, prompt, ownPorts, definition, canAsk = () => true,
   environment = async () => ({ ...inheritedEnvironment(), PATH: await commandPath() }), home = homedir(),
   connect = tcpConnect, spawn = spawnChild, now = Date.now, platform = process.platform,
   declineMs = DECLINE_MS, connectMs = CONNECT_MS,
@@ -143,7 +143,9 @@ export function createMcpDoor({
       // Security: approvals are this computer's own record of what its person allowed, never My Cloud's word.
       if (!isDeepStrictEqual(approvals.read()[name], found.wanted)) {
         if (holds(name, found.wanted).some((key) => (declined.get(key) ?? 0) > now())) return { refused: "declined" };
-        if (!asking) ask(name, found.wanted, found.entry);
+        if (asking) return { refused: "needs-approval" };
+        if (!canAsk()) return { refused: "no-window" };
+        ask(name, found.wanted, found.entry);
         return { refused: "needs-approval" };
       }
       return found.wanted.kind === "url" ? reach(found.wanted.port, started) : run(found.entry, started);

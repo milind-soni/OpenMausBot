@@ -5,7 +5,7 @@ export type McpApproval = { kind: "url"; port: number } | { kind: "command"; fin
 export type McpPromptTarget = { kind: "url"; port: number } | { kind: "command"; command: string; env: string[] };
 export type McpDoorOpened =
   | { socket: Duplex }
-  | { refused: "needs-approval" | "declined" }
+  | { refused: "needs-approval" | "declined" | "no-window" }
   | { failed: "bad-port" | "no-server" | "changed" | "unreachable" | "timeout" | "spawn-failed" };
 export interface McpDoor {
   open(target: { name: unknown; port?: unknown; fingerprint?: unknown }): Promise<McpDoorOpened>;
@@ -17,6 +17,7 @@ export declare function createMcpDoor(options: {
   prompt(ask: { name: string; target: McpPromptTarget }): Promise<boolean>;
   ownPorts(): Promise<number[]>;
   definition(name: string): Promise<{ command: string; args: string[]; env: Record<string, string> } | null>;
+  canAsk?: () => boolean;
   environment?: () => Promise<Record<string, string>>;
   home?: string;
   connect?: (options: { host: string; port: number }) => import("node:net").Socket;

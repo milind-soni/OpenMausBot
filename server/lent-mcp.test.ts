@@ -269,10 +269,12 @@ it("the words for a server the computer's link can't run now", () => {
   expect(lentLine("local", { kind: "changed", ...mac }, words)).toBe("local changed since the person allowed it on your Mac (Ada's Mac): a new prompt is waiting there.");
   expect(lentLine("local", { kind: "unreachable", ...mac }, words)).toBe("local on your Mac (Ada's Mac) didn't answer. Check that it is running there.");
   expect(lentLine("local", { kind: "no-link", ...mac }, words)).toBe("local runs on your Mac (Ada's Mac), whose connection to My Cloud isn't up yet: try again in a moment. If it stays this way, the network there may be blocking it.");
-  const problems = [null, { refused: "not-lent" }, { refused: "needs-approval" }, { refused: "declined" }, { failed: "no-server" }, { failed: "changed" },
-    { refused: "API_KEY=sk-secret" }, { failed: "bad-port" }, { failed: "busy" }, { failed: "timeout" }, { failed: "spawn-failed" }, { gone: true }] as const;
-  expect(problems.map((opened) => linkProblem(opened))).toEqual(["no-link", "not-lending", "needs-approval", "declined", "no-server", "changed",
-    "unreachable", "unreachable", "unreachable", "unreachable", "unreachable", "unreachable"]);
+  expect(lentLine("local", { kind: "no-window", ...mac }, words)).toBe("Open OpenMausBot on your Mac (Ada's Mac), then try again: it asks there before My Cloud uses local.");
+  expect(lentLine("notes", { kind: "cant-start", ...mac }, words)).toBe("notes couldn't start on your Mac (Ada's Mac): its program may not be installed there, or it stopped as soon as it started.");
+  const problems = [null, { refused: "not-lent" }, { refused: "needs-approval" }, { refused: "declined" }, { refused: "no-window" }, { failed: "no-server" }, { failed: "changed" }, { failed: "spawn-failed" },
+    { refused: "API_KEY=sk-secret" }, { refused: "toString" }, { refused: "spawn-failed" }, { failed: "no-window" }, { failed: "bad-port" }, { failed: "busy" }, { failed: "timeout" }, { gone: true }] as const;
+  expect(problems.map((opened) => linkProblem(opened))).toEqual(["no-link", "not-lending", "needs-approval", "declined", "no-window", "no-server", "changed", "cant-start",
+    "unreachable", "unreachable", "unreachable", "unreachable", "unreachable", "unreachable", "unreachable", "unreachable"]);
 });
 
 describe("a computer that lends its MCP servers over its link", () => {
@@ -461,6 +463,22 @@ describe("a computer that lends its MCP servers over its link", () => {
       expect((await send(name, "GET", undefined, started.session)).status).toBe(405);
       expect((await send(name, "DELETE", undefined, started.session)).status).toBe(200);
       expect(link.opened, name).toHaveLength(1);
+    }
+  });
+
+  it("a computer with no window to ask in, a command refused as spawn-failed and one that ends before its first byte are each answered in their own words, and their refused sessions keep them", async () => {
+    const quiet: LinkStream = { join: (socket) => socket.end(), cancel() {} };
+    const cases: Array<[LinkOpened, string, string]> = [
+      [{ refused: "no-window" }, "refused-no-window", "Open OpenMausBot on your Mac (Ada's Mac), then try again: it asks there before My Cloud uses notes."],
+      [{ failed: "spawn-failed" }, "refused-cant-start", "notes couldn't start on your Mac (Ada's Mac): its program may not be installed there, or it stopped as soon as it started."],
+      [quiet, "refused-cant-start", "notes couldn't start on your Mac (Ada's Mac): its program may not be installed there, or it stopped as soon as it started."],
+    ];
+    for (const [opened, session, line] of cases) {
+      const { lent } = fixture({ online: { mcpLink: true }, links: { mcpRoute: () => ({ open: async () => opened }) } });
+      const { post } = await engine(lent);
+      const started = await post("notes", initialize);
+      expect(started, session).toMatchObject({ status: 200, session, body: { result: { instructions: line } } });
+      expect((await post("notes", rpc("tools/call", { name: "search" }, 2), started.session)).body.result).toEqual({ content: [{ type: "text", text: line }], isError: true });
     }
   });
 

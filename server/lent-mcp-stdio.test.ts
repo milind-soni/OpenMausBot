@@ -1,5 +1,6 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { Duplex } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { LinkOpened } from "../electron/device-link-protocol.mjs";
@@ -24,6 +25,13 @@ const until = async (check: () => boolean) => {
     await new Promise((done) => setTimeout(done, 5));
   }
 };
+
+/** An injected clock; `swept()` resolves once the sweep has read it on two more passes, so a whole pass saw the time. */
+function sweptClock() {
+  let reads = 0;
+  const clock = { at: 1_000, now: () => { reads += 1; return clock.at; }, swept: () => { const seen = reads; return until(() => reads >= seen + 2); } };
+  return clock;
+}
 
 async function make(open: () => Promise<LinkOpened>, extra: { idleMs?: number; now?: () => number; sweepMs?: number; onEmpty?: () => void } = {}) {
   const outcomes: unknown[] = [];
@@ -118,17 +126,30 @@ describe("StdioSessions", () => {
     expect(stdio.size).toBe(0);
     expect((await post({ jsonrpc: "2.0", id: 2, method: "tools/list" }, session)).status).toBe(404);
 
-    let now = 1_000;
-    const { child: idle, session: quiet, post: postQuiet, stdio: quietStdio } = await opened({ idleMs: 60_000, now: () => now, sweepMs: 10 });
-    const pending = postQuiet({ jsonrpc: "2.0", id: 3, method: "slow" }, quiet);
-    await until(() => idle.lines.length === 2);
-    now += 59_999;
-    await new Promise((done) => setTimeout(done, 50));
+    const clock = sweptClock();
+    const { child: idle, stdio: quietStdio } = await opened({ idleMs: 60_000, now: clock.now, sweepMs: 10 });
+    clock.at += 59_999;
+    await clock.swept();
     expect(quietStdio.size, "a session quiet for less than idleMs stays").toBe(1);
-    now += 1;
-    expect((await pending).status, "a POST pending when the session idles out").toBe(504);
+    clock.at += 1;
     await until(() => idle.closed);
     expect(quietStdio.size).toBe(0);
+  });
+
+  it("a call in flight keeps its session past idleMs; once its caller gives up, the next sweep ends it", async () => {
+    const clock = sweptClock();
+    const { child, session, url, stdio } = await opened({ idleMs: 60_000, now: clock.now, sweepMs: 10 });
+    const caller = new AbortController();
+    const pending = fetch(url, { method: "POST", signal: caller.signal, headers: { "content-type": "application/json", "mcp-session-id": session }, body: JSON.stringify({ jsonrpc: "2.0", id: 3, method: "slow" }) }).catch(() => "gave up");
+    await until(() => child.lines.length === 2);
+    clock.at += 600_000;
+    await clock.swept();
+    expect(stdio.size).toBe(1);
+    expect(child.closed).toBe(false);
+    caller.abort();
+    expect(await pending).toBe("gave up");
+    await until(() => child.closed);
+    expect(stdio.size).toBe(0);
   });
 
   it("the computer ending the stream answers pending POSTs 502 and ends the SSE", async () => {
@@ -174,6 +195,17 @@ describe("StdioSessions", () => {
 
     const thrown = await make(async () => { throw new Error("link gone"); });
     expect(await (await thrown.post(initialize)).json()).toEqual({ gone: true });
+  });
+
+  it("a child that ends before its first byte never started: its initialize comes back to the caller as spawn-failed", async () => {
+    const ends: Array<(socket: Duplex) => void> = [(socket) => socket.end(), (socket) => void socket.once("data", () => socket.end())];
+    for (const end of ends) {
+      const { post, outcomes, stdio } = await make(async () => ({ join: end, cancel() {} }));
+      const answer = await post(initialize);
+      expect(await answer.json()).toEqual({ failed: "spawn-failed" });
+      expect(outcomes).toEqual([{ refused: { failed: "spawn-failed" }, body: initialize }]);
+      expect(stdio.size).toBe(0);
+    }
   });
 
   it("a refused initialize comes back with the parsed body, batch or not, so the caller answers without reading it again", async () => {

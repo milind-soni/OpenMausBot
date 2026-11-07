@@ -191,3 +191,11 @@ test("allowMcpServer on macOS asks over the app's window, shown first, and never
     assert.equal(none.calls.length, 0);
   }
 });
+
+test("canAskMcp is false exactly where allowMcpServer won't ask: macOS with no live window", () => {
+  const canAsk = (window, platform) => createLendingDialogs({ dialog: fakeDialog().dialog, window: () => window, validate: named, platform }).canAskMcp();
+  assert.equal(canAsk(null, "darwin"), false);
+  assert.equal(canAsk({ isDestroyed: () => true }, "darwin"), false);
+  assert.equal(canAsk(liveWindow(), "darwin"), true);
+  for (const platform of ["win32", "linux"]) assert.equal(canAsk(null, platform), true, platform);
+});

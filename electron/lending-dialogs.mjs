@@ -26,6 +26,9 @@ export function serverAccessDetail(env, { folders, terminal, computer }, t = nat
  */
 export function createLendingDialogs({ dialog, window, validate, isHome = async () => false, device = deviceWord(), platform = process.platform, t = nativeText.englishText.t }) {
   let askingTerminal = false;
+  const liveWindow = () => { const shown = window(); return shown && !shown.isDestroyed() ? shown : null; };
+  // Electron 43 runs a message box without a window synchronously on macOS.
+  const canAskMcp = () => platform !== "darwin" || liveWindow() !== null;
   return {
     /** Turning the terminal on runs `lend` only once the person confirms, one question at a time; turning it off never asks.
      * True once `lend` ran. */
@@ -62,6 +65,7 @@ export function createLendingDialogs({ dialog, window, validate, isHome = async 
       }
       return (await validate([folder]))[0];
     },
+    canAskMcp,
     /** One MCP server this computer's person is asked to let My Cloud use; Don't allow is the default, and anything but Allow is no. */
     async allowMcpServer({ name, target }) {
       const where = device === "computer" ? t("native.lendTray.computer") : device;
@@ -69,10 +73,8 @@ export function createLendingDialogs({ dialog, window, validate, isHome = async 
         : [t("native.lend.mcp.command", { command: target.command }), ...target.env?.length ? [t("native.lend.mcp.settings", { names: target.env.join(", ") })] : []].join("\n\n");
       const options = { type: "warning", message: t("native.lend.mcp.title", { name, device: where }), detail,
         buttons: [t("native.lend.mcp.allow"), t("native.lend.mcp.deny")], defaultId: 1, cancelId: 1 };
-      const shown = window();
-      const parent = shown && !shown.isDestroyed() ? shown : null;
-      // Electron 43 runs a message box without a window synchronously on macOS.
-      if (platform === "darwin" && !parent) throw new Error("No window to ask in.");
+      if (!canAskMcp()) throw new Error("No window to ask in.");
+      const parent = liveWindow();
       if (parent && !parent.isVisible()) parent.show();
       const { response } = await (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
       return response === 0;
