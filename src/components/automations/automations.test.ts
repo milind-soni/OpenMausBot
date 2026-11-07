@@ -310,6 +310,23 @@ describe("the Automations list switch", () => {
       expect([...bots().options].map((option) => option.textContent)).toEqual(["All bots", "Ledger"]);
       expect(container.querySelectorAll("[data-automation]")).toHaveLength(4);
     });
+
+    it("clears a bot picked in a department that then disappears, so nothing stays filtered under All departments", async () => {
+      fixture.state.bots = sectioned;
+      fixture.state.sections = ["Dev", "Social"];
+      fixture.state.webhooks = [];
+      fixture.state.routines = Array.from({ length: 9 }, (_, index) => ({ ...routine, id: `r-${index}`, name: `Check ${index}`, botId: index < 5 ? "bot-a" : "bot-b" }));
+      mountPage();
+      const bots = () => container.querySelector<HTMLSelectElement>('select[aria-label="All bots"]')!;
+      flushSync(() => pick("Dev"));
+      flushSync(() => { bots().value = "bot-b"; bots().dispatchEvent(new Event("change", { bubbles: true })); });
+      expect(container.querySelectorAll("[data-automation]")).toHaveLength(4);
+      fixture.state.bots = sectioned.map((bot) => bot.id === "bot-b" ? { ...bot, section: "Social" } : bot);
+      flushSync(() => root!.render(createElement(TriggersPage, { onBack: vi.fn(), onOpenRoom: vi.fn() })));
+      await vi.waitFor(() => expect(container.querySelectorAll("[data-automation]")).toHaveLength(9));
+      expect(department()!.value).toBe("all");
+      expect(bots().value).toBe("all");
+    });
   });
 });
 

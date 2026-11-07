@@ -55,6 +55,11 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
   const departments = filterableDepartments(state.bots, [...new Set([...(state.sections ?? []), ...state.bots.flatMap((bot) => bot.section ? [bot.section] : [])])]);
   const showDepartments = departments.names.length > 0;
   const activeDepartment = department === "all" || (department === GENERAL_DEPARTMENT ? departments.hasGeneral : departments.names.includes(department)) ? department : "all";
+  useEffect(() => {
+    if (activeDepartment === department) return;
+    setDepartment("all");
+    setBotFilter("all");
+  }, [activeDepartment, department]);
   const inDepartment = (botId: string) => botInDepartment(state.bots.find((bot) => bot.id === botId), activeDepartment);
   const departmentBots = visibleBots.filter((bot) => botInDepartment(bot, activeDepartment));
   const showFilter = all.length >= FILTER_FROM && new Set(all.map((automation) => automation.botId)).size > 1;
