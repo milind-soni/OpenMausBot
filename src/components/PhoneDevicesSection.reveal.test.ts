@@ -20,11 +20,11 @@ vi.mock("./PhoneSetupFlow", () => ({
   loadCompanionBridgeState: () => null,
   shouldHydrateCompanionEmail: () => false,
 }));
-import { CompanionSection } from "./CompanionSection";
+import { PhoneDevicesSection } from "./PhoneDevicesSection";
 
 function render(focusRequest: number) {
   f.index = 0; f.effects = [];
-  renderToStaticMarkup(createElement(() => CompanionSection({ focusRequest })));
+  renderToStaticMarkup(createElement(() => PhoneDevicesSection({ focusRequest })));
   f.effects[0]!();
 }
 const flow = () => f.values[0] as { current: unknown };
@@ -69,8 +69,8 @@ const unusedPhone = { id: "phone-1", name: "Ada", lastSeenAt: Date.now() - 40 * 
 
 function visit() {
   f.index = 0; f.effects = [];
-  const markup = renderToStaticMarkup(createElement(() => CompanionSection({})));
-  // CompanionSection's own effects come first: the reveal, then the resume. Later ones belong to child lists.
+  const markup = renderToStaticMarkup(createElement(() => PhoneDevicesSection({})));
+  // PhoneDevicesSection's own effects come first: the reveal, then the resume. Later ones belong to child lists.
   f.effects[1]!();
   return markup;
 }

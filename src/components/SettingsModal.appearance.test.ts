@@ -353,7 +353,7 @@ describe("Settings → Appearance", () => {
     vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
     const html = render();
     expect(html).toContain('<option value="appearance" selected="">Appearance</option>');
-    expect(html).toContain('<option value="companion">Remote access</option>');
+    expect(html).toContain('<option value="companion">This server</option>');
     expect(html).not.toContain('<option value="general">');
     expect(html).not.toContain('<option value="connections">');
     expect(html).not.toContain('<option value="engines">');
