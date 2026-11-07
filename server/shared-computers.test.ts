@@ -472,7 +472,7 @@ describe("MCP servers a lent computer runs for this server", () => {
     const broker = new SharedComputers(() => live, new LentComputers(join(dir, "lent.json")));
     const computer = lender(); broker.register(computer, alice, secret);
     const runsOn = { environmentId: home, label: "Old name" };
-    expect(broker.runsOn(alice.person, runsOn)).toEqual({ online: { id: computer.id, name: "Ada's Mac", platform: "darwin", terminal: false, mcpServers: true }, known: { name: "Ada's Mac", platform: "darwin", lent: true } });
+    expect(broker.runsOn(alice.person, runsOn)).toEqual({ online: { id: computer.id, name: "Ada's Mac", platform: "darwin", terminal: false, mcpServers: true, mcpLink: null }, known: { name: "Ada's Mac", platform: "darwin", lent: true } });
     expect(broker.runsOn(bob.person, runsOn)).toEqual({ online: null, known: null });
     expect(broker.runsOn(alice.person, { environmentId: randomUUID(), label: "Ada's Mac" }).online, "its installs are known, so its name alone is not it").toBeNull();
     expect(broker.mcpLenders(alice.person)).toEqual([expect.objectContaining({ id: computer.id, name: "Ada's Mac", session: alice.session, environmentId: home })]);
@@ -487,6 +487,29 @@ describe("MCP servers a lent computer runs for this server", () => {
     expect(restarted.runsOn(alice.person, runsOn).known, "remembered across restarts").toEqual({ name: "Ada's Mac", platform: "darwin", lent: false });
     broker.close(); restarted.close();
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("mcp in a registration reaches runsOn as mcpLink, null for an older computer, and a change drops the link", () => {
+    const drop = vi.fn();
+    const broker = new SharedComputers(() => true, undefined, { drop });
+    const computer = lender();
+    const online = () => broker.runsOn(alice.person, { environmentId: home, label: "Ada's Mac" }).online;
+    broker.register(computer, alice, secret);
+    expect(online()?.mcpLink).toBeNull();
+    broker.register({ ...computer, mcp: true }, alice, secret);
+    expect(online()?.mcpLink).toBe(true);
+    expect(drop).toHaveBeenCalledTimes(1);
+    expect(drop).toHaveBeenCalledWith(`${alice.session}\n${computer.id}`);
+    broker.register({ ...computer, mcp: false }, alice, secret);
+    expect(online()?.mcpLink).toBe(false);
+    expect(drop).toHaveBeenCalledTimes(2);
+    broker.close();
+  });
+
+  it("an mcp_tools job is refused for a computer that sent mcp", () => {
+    expect(sharedComputerScopeRefusal(lender({ mcp: true }), { action: "mcp_tools", server: address })).toMatch(/through its link/);
+    expect(sharedComputerScopeRefusal(lender({ mcp: false }), { action: "mcp_call", server: command })).toMatch(/through its link/);
+    expect(sharedComputerScopeRefusal(lender(), { action: "mcp_tools", server: address })).toBeNull();
   });
 
   it("an older desktop that never said its installs is known by its name", () => {

@@ -15,7 +15,7 @@ const here = (over: Partial<HereChecks> = {}): HereChecks => ({ exists: () => fa
 type Online = NonNullable<ReturnType<SharedComputers["runsOn"]>["online"]>;
 function fixture(options: { online?: Partial<Online> | null; known?: { lent: boolean } | null; principal?: string | null; servers?: Record<string, unknown>; mcpServers?: string[]; toolScope?: unknown; answer?: (operation: Record<string, unknown>) => unknown; lenders?: ReturnType<SharedComputers["mcpLenders"]>; here?: HereChecks } = {}) {
   const requests: Array<{ operation: Record<string, unknown>; principal: string | null }> = [];
-  const online = options.online === null ? null : { id: "mac-1", name: "Ada's Mac", platform: "darwin" as const, terminal: false, mcpServers: true, ...options.online };
+  const online = options.online === null ? null : { id: "mac-1", name: "Ada's Mac", platform: "darwin" as const, terminal: false, mcpServers: true, mcpLink: null, ...options.online };
   const computers: LentMcpDeps["computers"] = {
     runsOn: (principal) => (principal === "cloud-home" ? { online, known: options.known === null ? null : { name: "Ada's Mac", platform: "darwin", lent: options.known?.lent ?? true } } : { online: null, known: null }),
     mcpLenders: (principal) => (principal === "cloud-home" ? options.lenders ?? [] : []),

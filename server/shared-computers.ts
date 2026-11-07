@@ -26,6 +26,8 @@ export const sharedComputerRegistration = z.object({
   mcpServers: z.literal(true).optional(),
   /** The environment ids of its own OpenMausBot installs, which an MCP server's `runsOn` names; sent with mcpServers. */
   environments: z.array(z.string().uuid()).max(8).optional(),
+  /** It takes MCP streams over its link and lends them (`true`) or not (`false`); sent only to a server that advertises lentMcpLink. */
+  mcp: z.boolean().optional(),
 }).strict();
 const wireSecrets = z.record(z.string().min(1).max(256), z.string().max(16_384));
 /** An MCP server as this server keeps it for a lent computer: that computer starts, or reaches, exactly this and nothing else. */
@@ -100,6 +102,8 @@ export function sharedComputerScopeRefusal(registration: Registration, operation
       const device = deviceWord(registration.platform);
       if (!registration.mcpServers) return `${registration.name} runs an older OpenMausBot that can't run MCP servers for this server. Tell the person in one sentence to update OpenMausBot on that ${device}.`;
       if (!operation.server) return "Name the MCP server.";
+      // Security: a computer with its own MCP switch is reached only through its link, so the job path is never a way around that switch.
+      if (registration.mcp !== undefined) return `${registration.name} runs MCP servers for this server through its link, not as a job.`;
       if (!("command" in operation.server) || registration.terminal) return null;
       // Security: a command server starts a program on the person's computer, which is what its terminal switch lends.
       const starts = `${operation.server.name} starts a program on ${registration.name}, which doesn't let this server run programs right now.`;
@@ -169,7 +173,7 @@ export class SharedComputers {
     if (old) {
       this.authorize(registration.id, owner.session, secret);
       // Its link was let in for the internet connection and Chrome as lent then: lent or taken back since, the link starts over.
-      if ((old.registration.internet === true) !== (registration.internet === true) || (old.registration.chrome === true) !== (registration.chrome === true)) this.links?.drop(key);
+      if ((old.registration.internet === true) !== (registration.internet === true) || (old.registration.chrome === true) !== (registration.chrome === true) || (old.registration.mcp === true) !== (registration.mcp === true)) this.links?.drop(key);
       old.registration = registration; old.seen = Date.now();
       this.remember(registration, old.owner.person);
       this.changed();
@@ -218,7 +222,7 @@ export class SharedComputers {
   /** The computer of this person's that `runsOn` names: online now (and what it lends), else as last known, else neither.
    * It is known by its installs' environment ids, or, from a desktop that never said them, by its name. */
   runsOn(principal: string | null, runsOn: { environmentId: string; label: string }): {
-    online: { id: string; name: string; platform: LentPlatform | null; terminal: boolean; mcpServers: boolean } | null;
+    online: { id: string; name: string; platform: LentPlatform | null; terminal: boolean; mcpServers: boolean; mcpLink: boolean | null } | null;
     known: { name: string; platform: LentPlatform | null; lent: boolean } | null;
   } {
     if (!principal) return { online: null, known: null };
@@ -226,7 +230,7 @@ export class SharedComputers {
     const entry = [...this.computers.values()].find((candidate) => candidate.owner.person === principal && this.online(candidate) && names(candidate.registration.environments, candidate.registration.name));
     const record = this.lent?.list(principal).find((candidate) => names(candidate.environments, candidate.name));
     return {
-      online: entry ? { id: entry.registration.id, name: entry.registration.name, platform: entry.registration.platform ?? null, terminal: entry.registration.terminal, mcpServers: entry.registration.mcpServers === true } : null,
+      online: entry ? { id: entry.registration.id, name: entry.registration.name, platform: entry.registration.platform ?? null, terminal: entry.registration.terminal, mcpServers: entry.registration.mcpServers === true, mcpLink: entry.registration.mcp ?? null } : null,
       known: record ? { name: record.name, platform: record.platform, lent: record.stoppedAt === null } : null,
     };
   }
@@ -281,7 +285,7 @@ export class SharedComputers {
   linkable(id: string, session: string, secret: string): LinkedComputer {
     const entry = this.authorize(id, session, secret);
     entry.seen = Date.now();
-    return { key: SharedComputers.key(session, id), person: entry.owner.person, internet: entry.registration.internet === true, chrome: entry.registration.chrome === true, seenAs: null,
+    return { key: SharedComputers.key(session, id), id, mcp: entry.registration.mcp === true, person: entry.owner.person, internet: entry.registration.internet === true, chrome: entry.registration.chrome === true, seenAs: null,
       live: () => this.sessionLive(session), used: () => this.lent?.used(entry.owner.person, id) };
   }
   status(principal: string | null): SharedComputerStatus[] {

@@ -50,9 +50,9 @@ async function cloud(options: { sleeping?: () => boolean; sleep?: AbortControlle
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   cleanups.push(() => new Promise<void>((resolve) => { computers.close(); links.close(); upgrades.close(); server.closeAllConnections(); server.close(() => resolve()); }));
-  const register = async (session = "owner", internet = true, id: string = randomUUID(), chrome = false) => {
+  const register = async (session = "owner", internet = true, id: string = randomUUID(), chrome = false, mcp?: boolean) => {
     const response = await fetch(`${base}/api/shared-computers/connect`, { method: "POST", headers: { authorization: `Bearer session-${session}`, "content-type": "application/json", "x-omb-computer-secret": secret },
-      body: JSON.stringify({ id, name: "Ash's MacBook", environmentId: "11111111-1111-4111-8111-111111111111", folders: [], terminal: false, computer: false, platform: "darwin", internet, ...(chrome ? { chrome } : {}) }) });
+      body: JSON.stringify({ id, name: "Ash's MacBook", environmentId: "11111111-1111-4111-8111-111111111111", folders: [], terminal: false, computer: false, platform: "darwin", internet, ...(chrome ? { chrome } : {}), ...(mcp === undefined ? {} : { mcp }) }) });
     expect(response.status, await response.clone().text()).toBe(200);
     return id;
   };
@@ -263,6 +263,35 @@ describe("the device link", () => {
     expect(echoed).toBe("ping");
     client.destroy();
     relay.close();
+  });
+
+  it("mcpRoute picks the newest open link of that computer that lends mcp, and opens { mcp: target }", async () => {
+    const home = await cloud();
+    const echo = createTcpServer((socket) => socket.pipe(socket));
+    await new Promise<void>((resolve) => echo.listen(0, "127.0.0.1", resolve));
+    cleanups.push(() => new Promise<void>((resolve) => { echo.close(() => resolve()); }));
+    const targets: unknown[] = [];
+    const connect = (session: string, id: string, mcp: boolean) => {
+      const stop = new AbortController();
+      const ended = runDeviceLink({
+        url: `${home.base.replace("http", "ws")}${linkPath(id)}`, signal: stop.signal,
+        headers: { authorization: `Bearer session-${session}`, "x-omb-computer-secret": secret },
+        lends: () => ({ internet: false, chrome: false, mcp }),
+        mcp: { open: async (target) => { targets.push(target); return { socket: tcpConnect((echo.address() as AddressInfo).port, "127.0.0.1") }; } },
+      });
+      cleanups.push(() => { stop.abort(); return ended; });
+    };
+    const lends = await home.register("owner", false, randomUUID(), false, true);
+    const keeps = await home.register("other", false, randomUUID(), false, false);
+    connect("other", keeps, false);
+    connect("owner", lends, true);
+    await until(() => home.links.mcpRoute(PERSON, lends) !== null, "the link to be offered as a way to MCP");
+    expect(home.links.mcpRoute(PERSON, keeps), "it sent mcp: false").toBeNull();
+    expect(home.links.mcpRoute(PERSON, randomUUID())).toBeNull();
+    expect(home.links.route(PERSON), "mcp does not lend the internet connection").toBeNull();
+    const opened = await home.links.mcpRoute(PERSON, lends)!.open({ name: "local", port: 19501 });
+    expect("join" in opened, JSON.stringify(opened)).toBe(true);
+    expect(targets).toEqual([{ name: "local", port: 19501 }]);
   });
 
   it("a computer registered without Chrome has no Chrome route, while its internet route still works", async () => {

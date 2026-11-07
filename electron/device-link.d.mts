@@ -11,10 +11,11 @@ export declare function runDeviceLink(options: {
   pingMs?: number;
   silentMs?: number;
   openMs?: number;
-  lends?: () => { internet: boolean; chrome: boolean };
+  lends?: () => { internet: boolean; chrome: boolean; mcp?: boolean };
   chrome?: NonNullable<Parameters<typeof createChromeDoor>[0]> | ChromeDoor;
+  mcp?: { open(target: { name: unknown; port?: unknown; fingerprint?: unknown }): Promise<{ socket?: import("node:stream").Duplex; refused?: string; failed?: string }> };
   onOpen?: () => void;
-  onStream?: (target: { host: string; port: number } | { chrome: true }, result: { socket?: import("node:stream").Duplex; refused?: string; failed?: string }) => void;
+  onStream?: (target: { host: string; port: number } | { chrome: true } | { mcp: { name: unknown; port?: unknown; fingerprint?: unknown } }, result: { socket?: import("node:stream").Duplex; refused?: string; failed?: string }) => void;
   traffic?: () => void;
   now?: () => number;
 }): Promise<{ code: number; reason: string }>;

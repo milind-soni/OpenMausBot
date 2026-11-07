@@ -322,6 +322,40 @@ test("a Chrome stream reaches the computer as { chrome: true } and never carries
   assert.deepEqual(targets[1], { host: "example.test", port: 443 });
 });
 
+test("an open with mcp reaches accept as { mcp: { name, port } } and { mcp: { name, fingerprint } }", async (t) => {
+  const targets = [];
+  const sent = [];
+  let device;
+  const cloud = createLinkMux({ send: (frame) => { sent.push(frame); setImmediate(() => device.receive(frame)); } });
+  device = createLinkMux({ send: (frame) => setImmediate(() => cloud.receive(frame)), accept: async (target) => { targets.push(target); return { failed: "no-mcp" }; } });
+  t.after(() => { cloud.close(); device.close(); });
+  assert.deepEqual(await cloud.open({ mcp: { name: "local", port: 19501 } }), { failed: "no-mcp" });
+  assert.deepEqual(await cloud.open({ mcp: { name: "notes", fingerprint: "abc123" } }), { failed: "no-mcp" });
+  assert.deepEqual(targets, [{ mcp: { name: "local", port: 19501 } }, { mcp: { name: "notes", fingerprint: "abc123" } }]);
+  assert.deepEqual(JSON.parse(sent[0]), { t: "open", id: 1, mcp: { name: "local", port: 19501 } });
+});
+
+test("an mcp open is refused not-lent unless lends().mcp, and otherwise goes to the mcp door", async (t) => {
+  const end = await cloudEnd(t);
+  const stop = new AbortController();
+  t.after(() => stop.abort());
+  const echo = await echoServer(t);
+  let grant = { internet: true, chrome: true, mcp: false };
+  const doors = [];
+  const running = runDeviceLink({ url: end.url, signal: stop.signal, lends: () => grant,
+    mcp: { open: async (target) => { doors.push(target); return { socket: tcpConnect(echo, "127.0.0.1") }; } } });
+  await until(() => end.sessions.length === 1, "the link to open");
+  const { mux } = end.sessions[0];
+  assert.deepEqual(await mux.open({ mcp: { name: "local", port: 19501 } }), { refused: "not-lent" });
+  assert.deepEqual(doors, [], "a refused stream never reaches the door");
+  grant = { internet: false, chrome: false, mcp: true };
+  const opened = await mux.open({ mcp: { name: "local", port: 19501 } });
+  assert.ok(opened.join, JSON.stringify(opened));
+  assert.deepEqual(doors, [{ name: "local", port: 19501 }]);
+  stop.abort();
+  await running;
+});
+
 test("the computer opens a Chrome stream only while it lends Chrome, and a web stream only while it lends its internet connection", async (t) => {
   const end = await cloudEnd(t);
   const stop = new AbortController();

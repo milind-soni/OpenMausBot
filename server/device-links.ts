@@ -4,7 +4,7 @@ import { isIP, type Socket } from "node:net";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 
-import { createLinkMux, LINK_ASLEEP, LINK_ENDED, MAX_CHUNK, type LinkMux, type LinkOpened } from "../electron/device-link-protocol.mjs";
+import { createLinkMux, LINK_ASLEEP, LINK_ENDED, MAX_CHUNK, type LinkMux, type LinkOpened, type McpOpen } from "../electron/device-link-protocol.mjs";
 
 const PING_MS = 10_000;
 /** A page opens many connections: the computer is marked used at most this often. */
@@ -16,12 +16,19 @@ export interface DeviceRoute { open(target: { host: string; port: number }): Pro
 /** A lent computer's real Chrome, as one connection's way in. */
 export interface ChromeRoute { open(): Promise<LinkOpened> }
 
+/** A lent computer's MCP servers, as one stream's way in. */
+export interface McpRoute { open(target: McpOpen): Promise<LinkOpened> }
+
 export interface LinkedComputer {
   /** The lending registration's own key: its session and computer id. */
   key: string;
+  /** The computer's own id, which a route names. */
+  id: string;
   person: string;
   internet: boolean;
   chrome: boolean;
+  /** It takes MCP streams and lends them. */
+  mcp: boolean;
   /** Its sign-in is still live: asked at each page and each ping, so a session signed out carries no more browsing and
    * its link ends. */
   live: () => boolean;
@@ -82,34 +89,37 @@ export class DeviceLinks {
     });
   }
 
-  /** The newest open link of `person`'s computers that lends its internet connection, or null. */
-  route(person: string): DeviceRoute | null {
+  /** The newest open, live link of `person`'s computers that `wanted` accepts, with its open stamped as the computer's use. */
+  #newestLink(person: string, wanted: (computer: LinkedComputer) => boolean): ((target: Parameters<LinkMux["open"]>[0]) => Promise<LinkOpened>) | null {
     let newest: Link | null = null;
     for (const link of this.#links.values()) {
-      if (link.computer.person !== person || !link.computer.internet || link.ws.readyState !== link.ws.OPEN || !link.computer.live()) continue;
+      if (link.computer.person !== person || !wanted(link.computer) || link.ws.readyState !== link.ws.OPEN || !link.computer.live()) continue;
       if (!newest || link.since > newest.since) newest = link;
     }
     const chosen = newest;
-    return chosen ? { open: async (target) => {
+    return chosen ? async (target) => {
       const opened = await chosen.mux.open(target);
       if ("join" in opened && Date.now() - chosen.usedAt >= USED_EVERY_MS) { chosen.usedAt = Date.now(); chosen.computer.used?.(); }
       return opened;
-    } } : null;
+    } : null;
+  }
+
+  /** The newest open link of `person`'s computers that lends its internet connection, or null. */
+  route(person: string): DeviceRoute | null {
+    const open = this.#newestLink(person, (computer) => computer.internet);
+    return open && { open: (target) => open(target) };
   }
 
   /** The newest open link of `person`'s computers that lends its Chrome, or null. */
   chromeRoute(person: string): ChromeRoute | null {
-    let newest: Link | null = null;
-    for (const link of this.#links.values()) {
-      if (link.computer.person !== person || !link.computer.chrome || link.ws.readyState !== link.ws.OPEN || !link.computer.live()) continue;
-      if (!newest || link.since > newest.since) newest = link;
-    }
-    const chosen = newest;
-    return chosen ? { open: async () => {
-      const opened = await chosen.mux.open({ chrome: true });
-      if ("join" in opened && Date.now() - chosen.usedAt >= USED_EVERY_MS) { chosen.usedAt = Date.now(); chosen.computer.used?.(); }
-      return opened;
-    } } : null;
+    const open = this.#newestLink(person, (computer) => computer.chrome);
+    return open && { open: () => open({ chrome: true }) };
+  }
+
+  /** The newest open link of that one computer of `person`'s, when it lends MCP, or null. */
+  mcpRoute(person: string, computerId: string): McpRoute | null {
+    const open = this.#newestLink(person, (computer) => computer.id === computerId && computer.mcp);
+    return open && { open: (target) => open({ mcp: target }) };
   }
 
   /** Lending from that computer ended or changed: its link ends with it. */

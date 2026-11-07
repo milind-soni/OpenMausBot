@@ -11,15 +11,16 @@ export declare const OPEN_MS: number;
 /** A stream My Cloud asked for: joined to the browser's own connection once the computer has connected it. */
 export interface LinkStream { join(socket: Duplex, early?: readonly Buffer[]): void; cancel(): void }
 export type LinkOpened = LinkStream | { refused: string } | { failed: string } | { gone: true };
+export type McpOpen = { name: string; port: number } | { name: string; fingerprint: string };
 export interface LinkMux {
   receive(data: string | Buffer | ArrayBuffer | Uint8Array): void;
-  open(target: { host: string; port: number } | { chrome: true }): Promise<LinkOpened>;
+  open(target: { host: string; port: number } | { chrome: true } | { mcp: McpOpen }): Promise<LinkOpened>;
   readonly size: number;
   close(): void;
 }
 export declare function createLinkMux(options: {
   send(frame: string | Buffer): void;
-  accept?: ((target: { host: unknown; port: unknown } | { chrome: true }) => Promise<{ socket?: Duplex; refused?: string; failed?: string }>) | null;
+  accept?: ((target: { host: unknown; port: unknown } | { chrome: true } | { mcp: { name: unknown; port?: unknown; fingerprint?: unknown } }) => Promise<{ socket?: Duplex; refused?: string; failed?: string }>) | null;
   window?: number;
   maxStreams?: number;
   openMs?: number;
