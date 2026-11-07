@@ -70,6 +70,54 @@ afterEach(() => {
 });
 
 describe("Inspector on the app's live stream", () => {
+  it("buffers distinct equal-time live events during the initial snapshot load", async () => {
+    let finish!: (response: Response) => void;
+    vi.stubGlobal("fetch", () => new Promise<Response>((resolve) => { finish = resolve; }));
+    await mount(InspectorPanel);
+    const events = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((tab) => tab.textContent === "events")!;
+    flushSync(() => events.click());
+    frame(runtime("initial-live", { type: "item.started", itemType: "tool", title: "equal time live tail" }));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    finish(new Response(JSON.stringify({
+      entries: [{ kind: "runtime", at: "2026-10-04T09:00:00.000Z", data: runtime("initial-disk", { type: "item.started", itemType: "tool", title: "equal time disk row" }) }],
+      total: { runtime: 1, native: 0 },
+    })));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("equal time disk row"));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("equal time live tail"));
+    expect(document.querySelectorAll('button .tabular-nums')).toHaveLength(2);
+    expect(document.body.textContent).toContain("2 entries");
+  });
+
+  it("deduplicates live events already present in the initial snapshot", async () => {
+    let finish!: (response: Response) => void;
+    vi.stubGlobal("fetch", () => new Promise<Response>((resolve) => { finish = resolve; }));
+    await mount(InspectorPanel);
+    const events = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((tab) => tab.textContent === "events")!;
+    flushSync(() => events.click());
+    const overlap = runtime("initial-overlap", { type: "item.started", itemType: "tool", title: "initial overlap" });
+    frame(overlap);
+    finish(new Response(JSON.stringify({
+      entries: [{ kind: "runtime", at: overlap.createdAt, data: overlap }], total: { runtime: 40, native: 0 },
+    })));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("initial overlap"));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(document.querySelectorAll('button .tabular-nums')).toHaveLength(1);
+    expect(document.body.textContent).toContain("last 1 of 40");
+  });
+
+  it("keeps the initial live tail when the first snapshot fails", async () => {
+    let finish!: (response: Response) => void;
+    vi.stubGlobal("fetch", () => new Promise<Response>((resolve) => { finish = resolve; }));
+    await mount(InspectorPanel);
+    const events = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((tab) => tab.textContent === "events")!;
+    flushSync(() => events.click());
+    frame(runtime("initial-failed", { type: "item.started", itemType: "tool", title: "live despite failure" }));
+    finish(new Response("", { status: 503 }));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("live despite failure"));
+    expect(document.body.textContent).toContain("503");
+    expect(document.querySelectorAll('button .tabular-nums')).toHaveLength(1);
+  });
+
   it("keeps live events missing from a stale refresh snapshot, including an unflushed batch", async () => {
     await mount(InspectorPanel);
     const events = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((tab) => tab.textContent === "events")!;

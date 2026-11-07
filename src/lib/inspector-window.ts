@@ -3,6 +3,11 @@ import type { InspectorEntry, InspectorPage } from "../../shared/inspector";
 
 export const INSPECTOR_WINDOW_LIMIT = 400;
 
+/**
+ * Retains the latest window per log kind without changing their relative order.
+ * Counts belong to InspectorPage.total and are deliberately independent of this
+ * display window. The record limit does not bound individual payload sizes.
+ */
 export function boundInspectorEntries(entries: InspectorEntry[]): InspectorEntry[] {
   const counts = { runtime: 0, native: 0 };
   const kept: InspectorEntry[] = [];
@@ -13,6 +18,12 @@ export function boundInspectorEntries(entries: InspectorEntry[]): InspectorEntry
   return kept.length === entries.length ? entries : kept.reverse();
 }
 
+/**
+ * Appends a live batch without mutating the published page and advances its total.
+ * Event IDs deduplicate against the retained window and this batch only; an
+ * unbounded replay history would defeat the Inspector's retention limit.
+ * Empty or fully overlapping batches preserve the original page reference.
+ */
 export function appendInspectorRuntime(page: InspectorPage | null, events: RuntimeEvent[]): InspectorPage | null {
   if (!events.length) return page;
   const previous = page ?? { entries: [], total: { runtime: 0, native: 0 } };
@@ -30,6 +41,14 @@ export function appendInspectorRuntime(page: InspectorPage | null, events: Runti
   };
 }
 
+/**
+ * Reconciles a disk snapshot with the retained runtime tail when persistence lags.
+ * A shared event ID anchors publication order even for equal timestamps; without
+ * an overlap, only a later timestamp establishes that a retained event is newer.
+ * Events arriving during the request must be buffered separately by the caller
+ * and appended afterward, including distinct events with equal timestamps.
+ * Native records come from the snapshot, while the runtime total never decreases.
+ */
 export function mergeInspectorSnapshot(previous: InspectorPage | null, snapshot: InspectorPage): InspectorPage {
   const next = { ...snapshot, entries: boundInspectorEntries(snapshot.entries) };
   if (!previous) return next;

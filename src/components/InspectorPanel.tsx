@@ -17,6 +17,12 @@ const tabLabel = (key: LocaleKey) => (activeLocale() === "en" ? t(key) : capital
 
 type Lens = "run" | "events" | "raw";
 
+/**
+ * Displays one thread's Inspector snapshot and live event window.
+ * Snapshot requests share the live subscription's buffering lifecycle, including
+ * the initial request, because disk persistence can lag behind live delivery.
+ * Native expansion resets on a loaded snapshot: its positional keys are not identities.
+ */
 export function InspectorPanel({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
   const { dragProps } = useCaptionChrome();
@@ -56,7 +62,6 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
     setPage(null);
     setExpanded(new Set());
     stickToBottom.current = true;
-    void load();
     return () => loadAbort.current?.abort();
   }, [load]);
 
@@ -113,6 +118,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
         }
       },
     });
+    requestRefresh();
     return () => {
       alive = false;
       if (managedRefresh.current === requestRefresh) managedRefresh.current = () => {};
