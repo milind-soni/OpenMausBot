@@ -37,6 +37,13 @@ describe("reading Composio's answers", () => {
     expect(events[2]).toMatchObject({ allDay: true });
   });
 
+  it("takes a Teams link from an invite's description when the event has no conference link", () => {
+    const teams = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc%40thread.v2/0?context=x";
+    const [event] = eventsFromData({ items: [{ id: "teams-1", summary: "Vendor call", status: "confirmed", start: { dateTime: "2026-11-09T10:00:00Z" }, end: { dateTime: "2026-11-09T10:30:00Z" },
+      description: `Microsoft Teams meeting. Join: <${teams}> Meeting ID: 123` }] }, { id: "primary", owned: true });
+    expect(event).toMatchObject({ id: "teams-1", joinUrl: teams });
+  });
+
   it("reads mail headers, profiles, single messages, threads and the calendar list", () => {
     const emails = emailsFromData(fixture("composio-gmail-fetch"));
     expect(emails.map((email) => [email.id, email.threadId, email.from, email.subject])).toEqual([
