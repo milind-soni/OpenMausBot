@@ -22,7 +22,7 @@ import { deviceWord, type LentPlatform } from "./lent-computers.ts";
 import { replayHttp, replayPath } from "./lent-mcp-link.ts";
 import { StdioSessions } from "./lent-mcp-stdio.ts";
 import { probeMcpServer, type McpProbeResult } from "./mcp-probe.ts";
-import { isRemoteMcpServer, mcpServerServes, parseStoredMcpServer, type McpRunsOn, type StoredMcpServer } from "./mcp-registry.ts";
+import { isRemoteMcpServer, mcpServerServes, parseStoredMcpServer, type McpRunsOn, type StoredMcpServer, type StoredStdioMcpServer } from "./mcp-registry.ts";
 import { PASS } from "./routes/table.ts";
 import type { LentMcpServer, SharedComputers } from "./shared-computers.ts";
 
@@ -111,9 +111,9 @@ export type LentState =
   | { kind: "ready"; computerId: string; link: boolean; computer: string; device: Device }
   | { kind: "offline" | "stopped" | "never" | "outdated" | "no-terminal" | "port" | "not-lending"; computer: string; device: Device };
 
-const PROBLEMS = ["not-lending", "needs-approval", "declined", "no-server", "changed", "unreachable"] as const;
+const PROBLEMS = ["no-link", "not-lending", "needs-approval", "declined", "no-server", "changed", "unreachable"] as const;
 export type LentProblem = (typeof PROBLEMS)[number];
-const isProblem = (word: string): word is "offline" | LentProblem => word === "offline" || (PROBLEMS as readonly string[]).includes(word);
+const isProblem = (word: string): word is LentProblem => (PROBLEMS as readonly string[]).includes(word);
 
 export function lentState(computers: Pick<SharedComputers, "runsOn">, principal: string | null, server: ElsewhereServer): LentState {
   const { online, known } = computers.runsOn(principal, server.runsOn);
@@ -142,6 +142,7 @@ export function lentLine(name: string, state: Exclude<LentState, { kind: "ready"
     case "outdated": return `${name} runs on ${theirs}, whose OpenMausBot is too old to run it for ${place}: update OpenMausBot on that ${device}.`;
     case "port": return `${name} runs on ${theirs}, which reaches only an MCP server on its own port, 1024 or higher, at that ${device}'s address: save ${name} with the port its server listens on.`;
     case "no-terminal": return `${name} starts a program on ${theirs}, which doesn't let ${place} run programs right now: turn on "Let Clouds run commands on this ${device}" from the OpenMausBot icon on that ${device}.`;
+    case "no-link": return `${name} runs on ${theirs}, whose connection to ${place} isn't up yet: try again in a moment. If it stays this way, the network there may be blocking it.`;
     case "not-lending": return `${name} runs on ${theirs}, which isn't lending its MCP servers to ${place}: turn on "Let My Cloud use your MCP servers on this ${device}" from the OpenMausBot icon on that ${device}.`;
     case "needs-approval": return `Allow ${name} on ${theirs}: a prompt is waiting there. Then try again.`;
     case "declined": return `On ${theirs}, the person didn't allow ${name}. Ask them before trying again.`;
@@ -152,8 +153,8 @@ export function lentLine(name: string, state: Exclude<LentState, { kind: "ready"
 }
 
 /** Why a link to the computer opened no stream; null: there is no open link to it. */
-export function linkProblem(opened: Exclude<LinkOpened, LinkStream> | null): "offline" | LentProblem {
-  if (!opened) return "offline";
+export function linkProblem(opened: Exclude<LinkOpened, LinkStream> | null): LentProblem {
+  if (!opened) return "no-link";
   if ("refused" in opened) return opened.refused === "not-lent" ? "not-lending" : opened.refused === "needs-approval" || opened.refused === "declined" ? opened.refused : "unreachable";
   return "failed" in opened && (opened.failed === "no-server" || opened.failed === "changed") ? opened.failed : "unreachable";
 }
@@ -162,8 +163,9 @@ type Turn = { botId: string; threadId: string; generation: string };
 type Rpc = { jsonrpc?: unknown; id?: string | number | null; method?: unknown; params?: unknown };
 /** One request of a turn's engine to a server whose computer lends it over its link, at the door `prefix`. `said`
  * hears each problem it is answered with. */
-type Serving = { name: string; server: ElsewhereServer; state: Extract<LentState, { kind: "ready" }>; principal: string; turn: Turn; prefix: string; readBody(): Promise<unknown>; said?(problem: "offline" | LentProblem): void };
-type ThreadSessions = { generation: string; computerId: string; sessions: StdioSessions };
+type Serving = { name: string; server: ElsewhereServer; state: Extract<LentState, { kind: "ready" }>; principal: string; turn: Turn; active(): boolean; prefix: string; readBody(): Promise<unknown>; said?(problem: LentProblem): void };
+/** `latest`: the server as the newest request found it saved, and whether that request's turn still runs. */
+type ThreadSessions = { generation: string; computerId: string; latest: { server: StoredStdioMcpServer; active(): boolean }; sessions: StdioSessions };
 
 export interface LentMcpDeps {
   cfg(): Pick<AppConfig, "mcpServers">;
@@ -267,84 +269,99 @@ export function createLentMcp(deps: LentMcpDeps) {
 
   /** The thread's sessions of a command server. A new session from the thread's next turn, or any request for another
    * computer, ends the ones before it. */
-  function sessionsOf(key: string, at: Serving, fresh: boolean, fingerprint: string): ThreadSessions {
+  function sessionsOf(key: string, at: Serving, server: StoredStdioMcpServer, fresh: boolean): ThreadSessions {
     const kept = threads.get(key);
-    if (kept && kept.computerId === at.state.computerId && (!fresh || kept.generation === at.turn.generation)) return kept;
+    if (kept && kept.computerId === at.state.computerId && (!fresh || kept.generation === at.turn.generation)) {
+      kept.latest = { server, active: at.active };
+      return kept;
+    }
     if (kept) forget(key, kept);
-    const target = { name: at.name, fingerprint };
     const entry: ThreadSessions = {
       generation: at.turn.generation,
       computerId: at.state.computerId,
-      sessions: new StdioSessions({
-        open: () => deps.links.mcpRoute(at.principal, at.state.computerId)?.open(target) ?? Promise.resolve({ gone: true }),
-        idleMs: SESSION_IDLE_MS,
-        onEmpty: () => { if (threads.get(key) === entry) forget(key, entry); },
-      }),
+      latest: { server, active: at.active },
+      sessions: new StdioSessions({ open: () => openCommand(at, entry), idleMs: SESSION_IDLE_MS, onEmpty: () => { if (threads.get(key) === entry) forget(key, entry); } }),
     };
     threads.set(key, entry);
     return entry;
   }
 
+  /** A new session's stream, for the server as saved now; one that opens after its turn ended is cancelled. */
+  async function openCommand(at: Serving, entry: ThreadSessions): Promise<LinkOpened> {
+    const { server, active } = entry.latest;
+    const route = deps.links.mcpRoute(at.principal, at.state.computerId);
+    const opened = route ? await route.open({ name: at.name, fingerprint: commandFingerprint(server) }) : { gone: true as const };
+    if (!("join" in opened) || active()) return opened;
+    opened.cancel();
+    return { gone: true };
+  }
+
   /** Answers on this server for one the computer couldn't be asked for, or refused: an `initialize` gets the plain words
-   * as its session's instructions, and that session's later requests (`kept`) carry `refused-<problem>`; any other
-   * request gets them as its error. */
-  async function refuse(req: IncomingMessage, res: ServerResponse, at: Serving, problem: "offline" | LentProblem, kept: boolean, messages?: unknown[]): Promise<void> {
+   * as its session's instructions, and later requests in that session, which carry `refused-<problem>`, get a session
+   * with no tools; any other request gets them as its error. */
+  async function answerHere(req: IncomingMessage, res: ServerResponse, at: Serving, problem: LentProblem, parsed?: unknown): Promise<void> {
     at.said?.(problem);
     if (req.method === "DELETE") return void res.writeHead(200).end();
     if (req.method !== "POST") return void res.writeHead(405, { allow: "POST, DELETE" }).end();
-    const read = messages ?? await at.readBody();
-    const body = Array.isArray(read) ? read : [read];
+    const body = parsed ?? await at.readBody();
+    const messages = (Array.isArray(body) ? body : [body]).filter((message): message is Rpc => typeof message === "object" && message !== null && (message as Rpc).jsonrpc === "2.0");
+    if (!messages.length) return void res.writeHead(400).end();
+    const refusedSession = String(req.headers["mcp-session-id"]).startsWith("refused-");
     const line = lentLine(at.name, { kind: problem, computer: at.state.computer, device: at.state.device }, words);
-    const rpcs = body.filter((message): message is Rpc => typeof message === "object" && message !== null && typeof (message as Rpc).method === "string");
-    const answers = rpcs.filter((message) => Object.hasOwn(message, "id")).map(({ id, method, params }) => {
+    const answers = messages.filter((message) => typeof message.method === "string" && Object.hasOwn(message, "id")).map(({ id, method, params }) => {
       if (method === "initialize") return reply(id, { ...initialized(at.name, params), instructions: line });
-      if (kept && method === "tools/list") return reply(id, { tools: [] });
-      if (kept && method === "ping") return reply(id, {});
+      if (refusedSession && method === "tools/list") return reply(id, { tools: [] });
+      if (refusedSession && method === "ping") return reply(id, {});
       return method === "tools/call" ? callError(id, line) : rpcError(id, line);
     });
     if (!answers.length) return void res.writeHead(202).end();
-    const opening = rpcs.some((message) => message.method === "initialize");
-    res.writeHead(200, { "content-type": "application/json", ...(opening ? { "mcp-session-id": `refused-${problem}` } : {}) }).end(JSON.stringify(body.length > 1 ? answers : answers[0]));
+    const opening = messages.some((message) => message.method === "initialize");
+    res.writeHead(200, { "content-type": "application/json", ...(opening ? { "mcp-session-id": `refused-${problem}` } : {}) }).end(JSON.stringify(Array.isArray(body) ? answers : answers[0]));
   }
 
   async function serve(req: IncomingMessage, res: ServerResponse, at: Serving): Promise<void> {
     if (req.method !== "GET" && req.method !== "POST" && req.method !== "DELETE") return void res.writeHead(405, { allow: "GET, POST, DELETE" }).end();
+    if (!at.active()) return void res.writeHead(401).end();
     const session = req.headers["mcp-session-id"];
     if (typeof session === "string" && session.startsWith("refused-")) {
       const said = session.slice("refused-".length);
-      return refuse(req, res, at, isProblem(said) ? said : "unreachable", true);
+      return answerHere(req, res, at, isProblem(said) ? said : "unreachable");
     }
     const route = deps.links.mcpRoute(at.principal, at.state.computerId);
-    if (!route) return refuse(req, res, at, linkProblem(null), false);
+    if (!route) return answerHere(req, res, at, linkProblem(null));
     if (isRemoteMcpServer(at.server)) {
       const saved = new URL(at.server.url);
       const path = replayPath(req.url ?? "", at.prefix, { path: saved.pathname, query: saved.search });
       if (path === null) return void res.writeHead(404).end();
       const port = Number(saved.port);
       const opened = await route.open({ name: at.name, port }).catch((): { gone: true } => ({ gone: true }));
-      if (res.destroyed) return void ("join" in opened && opened.cancel());
-      if (!("join" in opened)) return refuse(req, res, at, linkProblem(opened), false);
+      const ended = res.destroyed || !at.active();
+      if (ended && "join" in opened) opened.cancel();
+      if (res.destroyed) return;
+      if (ended) return void res.writeHead(401).end();
+      if (!("join" in opened)) return answerHere(req, res, at, linkProblem(opened));
       return replayHttp(req, res, opened, { port, path, prefix: at.prefix, headers: at.server.headers });
     }
     const key = `${at.turn.threadId}\n${at.name}`;
-    const entry = sessionsOf(key, at, session === undefined, commandFingerprint(at.server));
+    const entry = sessionsOf(key, at, at.server, session === undefined);
     const outcome = await entry.sessions.handle(req, res);
-    const current = threads.get(key) === entry;
-    // A session that opened after its entry was ended ends too; an entry left with no session is forgotten.
-    if (outcome === "opened" ? !current : current && !entry.sessions.size) forget(key, entry);
-    if (outcome && outcome !== "opened") return refuse(req, res, at, linkProblem(outcome.refused), false, outcome.messages);
+    if (outcome === "opened" && threads.get(key) !== entry) forget(key, entry);
+    if (threads.get(key) === entry && !entry.sessions.size) forget(key, entry);
+    if (!outcome || outcome === "opened") return;
+    if (!at.active()) return void res.writeHead(401).end();
+    return answerHere(req, res, at, linkProblem(outcome.refused), outcome.body);
   }
 
   /** Test over the link: the probe reaches the server, as a turn of its own, through a loopback door only its token opens. */
   async function probeOverLink(name: string, server: ElsewhereServer, state: Serving["state"], principal: string, signal: AbortSignal): Promise<{ status: 200; body: McpProbeResult }> {
     const token = randomBytes(32).toString("hex");
     const turn = { botId: "mcp-test", threadId: `test-${randomUUID()}`, generation: randomUUID() };
-    let problem = null as "offline" | LentProblem | null;
+    let problem = null as LentProblem | null;
     const door = createServer((req, res) => {
       const path = (req.url ?? "").split("?")[0]!;
-      // Security: the door answers only its token, and only while the test runs.
-      if (signal.aborted || (path !== `/${token}` && !path.startsWith(`/${token}/`))) return void res.writeHead(404).end();
-      void serve(req, res, { name, server, state, principal, turn, prefix: `/${token}`, readBody: () => readBody(req), said: (said) => { problem = said; } }).catch(() => res.destroy());
+      // Security: the door answers only its token, and its turn ends with the test.
+      if (path !== `/${token}` && !path.startsWith(`/${token}/`)) return void res.writeHead(404).end();
+      void serve(req, res, { name, server, state, principal, turn, active: () => !signal.aborted, prefix: `/${token}`, readBody: () => readBody(req), said: (said) => { problem = said; } }).catch(() => res.destroy());
     });
     await new Promise<void>((done) => door.listen(0, "127.0.0.1", done));
     try {
@@ -404,8 +421,7 @@ export function createLentMcp(deps: LentMcpDeps) {
       const principal = server ? deps.principal(ctx.turn) : null;
       const state = server && principal ? lentState(deps.computers, principal, server) : null;
       if (server && principal && state?.kind === "ready" && state.link) {
-        if (!deps.active(ctx.turn)) return void ctx.res.writeHead(401).end();
-        return serve(ctx.req, ctx.res, { name, server, state, principal, turn: ctx.turn, prefix: LENT_MCP_PATH + name, readBody: ctx.readBody });
+        return serve(ctx.req, ctx.res, { name, server, state, principal, turn: ctx.turn, active: () => deps.active(ctx.turn), prefix: LENT_MCP_PATH + name, readBody: ctx.readBody });
       }
       if (ctx.method !== "POST") { ctx.res.writeHead(405, { allow: "POST" }).end(); return; }
       const answer = await rpc(rest, await ctx.readBody(), ctx.turn);

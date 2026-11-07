@@ -169,17 +169,17 @@ describe("StdioSessions", () => {
     expect(answer.status).toBe(502);
     expect(answer.headers.get("mcp-session-id")).toBeNull();
     expect(await answer.json()).toEqual({ refused: "needs-approval" });
-    expect(outcomes).toEqual([{ refused: { refused: "needs-approval" }, messages: [initialize] }]);
+    expect(outcomes).toEqual([{ refused: { refused: "needs-approval" }, body: initialize }]);
     expect(stdio.size).toBe(0);
 
     const thrown = await make(async () => { throw new Error("link gone"); });
     expect(await (await thrown.post(initialize)).json()).toEqual({ gone: true });
   });
 
-  it("a refused initialize comes back with the parsed messages, so the caller answers without reading the body again", async () => {
+  it("a refused initialize comes back with the parsed body, batch or not, so the caller answers without reading it again", async () => {
     const { post, outcomes } = await make(async () => ({ refused: "needs-approval" }));
     expect((await post([initialize])).status).toBe(502);
-    expect(outcomes).toEqual([{ refused: { refused: "needs-approval" }, messages: [initialize] }]);
+    expect(outcomes).toEqual([{ refused: { refused: "needs-approval" }, body: [initialize] }]);
   });
 
   it("onEmpty runs once the last session ends, by DELETE or by the idle sweep", async () => {

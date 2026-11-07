@@ -268,9 +268,10 @@ it("the words for a server the computer's link can't run now", () => {
   expect(lentLine("local", { kind: "no-server", computer: "studio", device: "PC" }, { ...words, personal: false })).toBe("studio has no definition of local to run.");
   expect(lentLine("local", { kind: "changed", ...mac }, words)).toBe("local changed since the person allowed it on your Mac (Ada's Mac): a new prompt is waiting there.");
   expect(lentLine("local", { kind: "unreachable", ...mac }, words)).toBe("local on your Mac (Ada's Mac) didn't answer. Check that it is running there.");
+  expect(lentLine("local", { kind: "no-link", ...mac }, words)).toBe("local runs on your Mac (Ada's Mac), whose connection to My Cloud isn't up yet: try again in a moment. If it stays this way, the network there may be blocking it.");
   const problems = [null, { refused: "not-lent" }, { refused: "needs-approval" }, { refused: "declined" }, { failed: "no-server" }, { failed: "changed" },
     { refused: "API_KEY=sk-secret" }, { failed: "bad-port" }, { failed: "busy" }, { failed: "timeout" }, { failed: "spawn-failed" }, { gone: true }] as const;
-  expect(problems.map((opened) => linkProblem(opened))).toEqual(["offline", "not-lending", "needs-approval", "declined", "no-server", "changed",
+  expect(problems.map((opened) => linkProblem(opened))).toEqual(["no-link", "not-lending", "needs-approval", "declined", "no-server", "changed",
     "unreachable", "unreachable", "unreachable", "unreachable", "unreachable", "unreachable"]);
 });
 
@@ -463,6 +464,63 @@ describe("a computer that lends its MCP servers over its link", () => {
     }
   });
 
+  it("a computer online with no link up yet is answered as no-link, and its refused session keeps that word", async () => {
+    const { lent } = fixture({ online: { mcpLink: true } });
+    const { post } = await engine(lent);
+    const line = "notes runs on your Mac (Ada's Mac), whose connection to My Cloud isn't up yet: try again in a moment. If it stays this way, the network there may be blocking it.";
+    expect((await post("notes", rpc("tools/call", { name: "search" }))).body.result).toEqual({ content: [{ type: "text", text: line }], isError: true });
+    const started = await post("notes", initialize);
+    expect(started).toMatchObject({ session: "refused-no-link", body: { result: { instructions: line } } });
+    expect((await post("notes", rpc("tools/call", { name: "search" }, 2), started.session)).body.result.content[0].text).toBe(line);
+  });
+
+  it("a turn that ends while its open is pending gets 401 and the stream is cancelled before anything reaches the server", async () => {
+    const mac = await startFakeHttpMcp({ tools: [{ name: "read_notes" }] });
+    cleanups.push(() => mac.close());
+    let active = true;
+    const cancelled: string[] = [];
+    const link = computer(() => { active = false; });
+    const route = link.links.mcpRoute("cloud-home", "mac-1");
+    link.links.mcpRoute.mockClear();
+    link.links.mcpRoute.mockImplementation(() => ({ open: async (target: McpOpen) => {
+      const opened = await route.open(target);
+      return "join" in opened ? { join: opened.join, cancel: () => cancelled.push(target.name) } : opened;
+    } }));
+    const { lent } = fixture({ online: { mcpLink: true }, servers: { local: { ...local, url: mac.url }, notes }, links: link.links, active: () => active });
+    const { send } = await engine(lent);
+    expect((await send("local", "POST", rpc("tools/list"))).status).toBe(401);
+    active = true;
+    expect((await send("notes", "POST", initialize)).status).toBe(401);
+    expect(cancelled).toEqual(["local", "notes"]);
+    expect(mac.seenPaths).toEqual([]);
+    expect(link.children).toEqual([]);
+  });
+
+  it("each open of a command server carries the fingerprint of its definition as saved now", async () => {
+    const link = computer();
+    const servers: Record<string, unknown> = { notes };
+    const { lent } = fixture({ online: { mcpLink: true }, servers, links: link.links });
+    const { post } = await engine(lent);
+    expect((await post("notes", initialize)).status).toBe(200);
+    servers.notes = { ...notes, args: ["--vault", "work"] };
+    expect((await post("notes", initialize)).status).toBe(200);
+    expect(link.opened).toEqual([
+      { name: "notes", fingerprint: commandFingerprint({ command: notes.command, args: [], env: notes.env }) },
+      { name: "notes", fingerprint: commandFingerprint({ command: notes.command, args: ["--vault", "work"], env: notes.env }) },
+    ]);
+  });
+
+  it("a refused answer keeps the body's shape: a one-element batch gets a one-element array, a body with no JSON-RPC message 400", async () => {
+    const { lent } = fixture({ online: { mcpLink: true }, links: computer(() => ({ refused: "declined" })).links });
+    const { post } = await engine(lent);
+    const line = "On your Mac (Ada's Mac), the person didn't allow local. Ask them before trying again.";
+    expect((await post("local", [rpc("tools/list")], "fake-session")).body).toEqual([{ jsonrpc: "2.0", id: 1, error: { code: -32603, message: line } }]);
+    expect((await post("local", { hello: "there" }, "fake-session")).status).toBe(400);
+    expect((await post("notes", [initialize])).body).toMatchObject([{ id: 1, result: { instructions: "On your Mac (Ada's Mac), the person didn't allow notes. Ask them before trying again." } }]);
+    expect((await post("notes", { hello: "there" }, "refused-declined")).status).toBe(400);
+    expect((await post("notes", { jsonrpc: "2.0", method: "notifications/initialized" }, "refused-declined")).status).toBe(202);
+  });
+
   it("a computer with the switch off is not-lending: mounts leaves it out, lines says so, nothing is opened", async () => {
     const link = computer();
     const { lent, requests } = fixture({ online: { mcpLink: false, terminal: true }, links: link.links });
@@ -529,8 +587,8 @@ describe("a computer that lends its MCP servers over its link", () => {
     expect(await declined.test("local", local, "cloud-home", signal)).toEqual({ status: 200, body: { ok: false, reason: "unreachable", error: "On your Mac (Ada's Mac), the person didn't allow local. Ask them before trying again." } });
     const waiting = fixture({ online: { mcpLink: true }, links: computer(() => ({ refused: "needs-approval" })).links }).lent;
     expect(await waiting.test("notes", notes, "cloud-home", signal)).toEqual({ status: 200, body: { ok: false, reason: "unreachable", error: "Allow notes on your Mac (Ada's Mac): a prompt is waiting there. Then try again." } });
-    const away = fixture({ online: { mcpLink: true } }).lent;
-    expect(await away.test("notes", notes, "cloud-home", signal)).toEqual({ status: 200, body: { ok: false, reason: "unreachable", error: "notes runs on your Mac (Ada's Mac), which is offline right now: OpenMausBot on it is closed, or the Mac is asleep or off." } });
+    const linkless = fixture({ online: { mcpLink: true } }).lent;
+    expect(await linkless.test("notes", notes, "cloud-home", signal)).toEqual({ status: 200, body: { ok: false, reason: "unreachable", error: "notes runs on your Mac (Ada's Mac), whose connection to My Cloud isn't up yet: try again in a moment. If it stays this way, the network there may be blocking it." } });
   });
 
   it("definition serves a command server's definition for its own computer and nothing for a URL server or another computer", () => {

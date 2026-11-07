@@ -75,8 +75,8 @@ export class StdioSessions {
 
   get size(): number { return this.#sessions.size; }
 
-  /** Answers the request itself, except an initialize the computer refused, which is returned with its parsed messages for the caller to answer. */
-  async handle(req: IncomingMessage, res: ServerResponse): Promise<"opened" | { refused: Exclude<LinkOpened, LinkStream>; messages: unknown[] } | void> {
+  /** Answers the request itself, except an initialize the computer refused, which is returned with its parsed body for the caller to answer. */
+  async handle(req: IncomingMessage, res: ServerResponse): Promise<"opened" | { refused: Exclude<LinkOpened, LinkStream>; body: unknown } | void> {
     const id = req.headers["mcp-session-id"];
     const known = () => (typeof id === "string" ? this.#sessions.get(id) : undefined);
     if (req.method === "GET" || req.method === "DELETE") {
@@ -106,7 +106,7 @@ export class StdioSessions {
     if (!target) {
       const opened = await this.#deps.open().catch((): { gone: true } => ({ gone: true }));
       if (res.destroyed) return void ("join" in opened && opened.cancel());
-      if (!("join" in opened)) return { refused: opened, messages };
+      if (!("join" in opened)) return { refused: opened, body: parsed };
       target = this.#start(opened);
     }
     if (requests.length) {
