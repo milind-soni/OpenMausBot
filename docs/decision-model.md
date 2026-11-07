@@ -196,8 +196,9 @@ switches are on. Engines never inherit
 them, and diagnostics exports mask them. Saving a key makes one tiny test
 call; a key the provider rejects is not saved. The **Test** button makes the
 same call on demand and, with no key pasted, also checks extraction. A Jev
-room decision costs about $0.00003; the test call costs less. An OpenRouter decision costs whatever the chosen model charges,
-usually a similar fraction of a cent.
+room decision costs about $0.00003; the test call costs less. An OpenRouter
+decision costs whatever the chosen model charges, usually a similar fraction
+of a cent.
 
 ## What leaves this machine
 
