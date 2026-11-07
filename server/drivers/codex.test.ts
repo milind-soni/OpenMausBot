@@ -1086,6 +1086,17 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     });
     expect(image && "data" in image ? image.data : "").toMatch(/^iVBOR/);
     expect(JSON.stringify(image)).not.toContain("provider-owned-path");
+    expect(image).not.toHaveProperty("fromTool");
+  });
+
+  it("marks an image an MCP tool's result returned as the tool's", async () => {
+    process.env.FAKE_CODEX_MODE = "mcp-image";
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-mcp-image", text: "take a screenshot" });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(recorder.events.filter((event) => event.type === "item.completed" && event.itemType === "assistant_image")).toEqual([
+      expect.objectContaining({ data: "iVBORw0KGgo=", fromTool: true }),
+    ]);
   });
 
   it("keeps the full command when a Windows interpreter prefix is long", async () => {

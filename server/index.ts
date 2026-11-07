@@ -6450,7 +6450,7 @@ bus.subscribe((event: RuntimeEvent) => {
           const saved = saveImage(decoded.bytes, decoded.mime);
           const key = turnAttachmentKey(event.threadId, event.turnId);
           const current = turnAttachmentsByTurn.get(key) ?? [];
-          current.push({ kind: "image", path: saved.path, mime: saved.mime });
+          current.push({ kind: "image", path: saved.path, mime: saved.mime, ...(event.fromTool ? { fromTool: true as const } : {}) });
           turnAttachmentsByTurn.set(key, current);
         } catch (error) {
           pushMessage({

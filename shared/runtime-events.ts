@@ -122,8 +122,9 @@ export type RuntimeEvent = RuntimeEventBase &
     | { type: "item.completed"; itemType: "tool"; ok: boolean; output?: string }
     | { type: "item.completed"; itemType: "assistant_text"; text: string }
     /** Provider-generated raster bytes, folded into the private attachment
-     * store and never forwarded to renderer SSE. */
-    | { type: "item.completed"; itemType: "assistant_image"; data: string; alt?: string }
+     * store and never forwarded to renderer SSE. `fromTool`: a tool's result
+     * returned the image to the engine; the bot did not make or send it. */
+    | { type: "item.completed"; itemType: "assistant_image"; data: string; alt?: string; fromTool?: true }
     | { type: "content.delta"; streamKind: "assistant_text" | "reasoning_text"; delta: string }
     | {
         type: "request.opened";
