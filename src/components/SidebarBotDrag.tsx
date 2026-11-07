@@ -114,6 +114,8 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
       onDragEnd: end,
       onDragOver: (event) => {
         if (!carries(event) || !moving.current.botId) return;
+        // Within one list only (the collapsed rail): another list's row shows no drop line, since the drop is refused.
+        if (latest.current.withinList && botListOf(latest.current.lists, botId) !== botListOf(latest.current.lists, moving.current.botId)) return show(null);
         event.preventDefault();
         event.stopPropagation();
         event.dataTransfer.dropEffect = "move";
