@@ -121,15 +121,19 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
           deferPoll(service, requestId, alias);
           return;
         }
-        state.updateConnectionIf(accountId, requestId, (record) =>
-          record.status === "connected" ? null : {
-            ...record,
-            status: "error",
-            lastError: error instanceof Error ? error.message.slice(0, 400) : "authorization polling failed",
-            updatedAt: new Date().toISOString(),
-          });
+        try {
+          state.updateConnectionIf(accountId, requestId, (record) =>
+            record.status === "connected" ? null : {
+              ...record,
+              status: "error",
+              lastError: error instanceof Error ? error.message.slice(0, 400) : "authorization polling failed",
+              updatedAt: new Date().toISOString(),
+            });
+        } catch {
+          // A replaced runtime, stale CAS or removed record means this poll no longer owns the row.
+        }
       },
-    ).finally(() => {
+    ).catch(() => undefined).finally(() => {
       pollsInFlight.delete(requestId);
     });
     pollsInFlight.set(requestId, run);

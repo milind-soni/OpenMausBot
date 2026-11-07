@@ -1,11 +1,12 @@
 // The local OpenConnector state store — explicit account-id mapping, 0600 persistence, and
 // the webhook-style seal. Also pins connector-key as a backup-excluded path.
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { DatabaseSync } from "node:sqlite";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { excludedWorkspaceAuthPath } from "../../workspace-backup-policy.ts";
 import {
   CONNECTOR_KEY_FILE,
@@ -186,6 +187,135 @@ describe("state persistence", () => {
     expect(excludedWorkspaceAuthPath("openconnector-state.json.lock.db-wal")).toBe(true);
     expect(excludedWorkspaceAuthPath("openconnector-state.json.lock.db-shm")).toBe(true);
     expect(excludedWorkspaceAuthPath("openconnector-state.json.123.05a7b3e0-1234-4abc-8def-0123456789ab.tmp")).toBe(true);
+  });
+
+  it("closes the injected SQLite handle on every lock lifecycle failure", () => {
+    const file = join(dir, `lock-lifecycle-${Math.random().toString(36).slice(2)}.json`);
+    const expectClosed = (statements: string[], thrownStatement: string, beginExpected: boolean, rollbackExpected: boolean) => {
+      const calls: string[] = [];
+      let closed = false;
+      const factory = vi.fn(() => {
+        writeFileSync(`${file}.lock.db`, "", { mode: 0o600 });
+        return {
+          exec: (statement: string) => {
+            calls.push(statement);
+            if (statement === thrownStatement) throw new Error("SQLITE_BUSY: database is locked");
+          },
+          close: () => { closed = true; },
+        } as unknown as DatabaseSync;
+      });
+      const store = new OpenConnectorStateStore(file, undefined, { createLockDatabase: factory });
+      expect(() => store.listConnections()).toThrow(/SQLITE_BUSY/);
+      expect(calls).toEqual(statements);
+      expect(closed).toBe(true);
+      expect(calls.includes("BEGIN EXCLUSIVE")).toBe(beginExpected);
+      expect(calls.includes("ROLLBACK")).toBe(rollbackExpected);
+    };
+
+    expectClosed(["PRAGMA busy_timeout = 5000"], "PRAGMA busy_timeout = 5000", false, false);
+    expectClosed(["PRAGMA busy_timeout = 5000", "CREATE TABLE IF NOT EXISTS state_lock (id INTEGER PRIMARY KEY CHECK (id = 1))"],
+      "CREATE TABLE IF NOT EXISTS state_lock (id INTEGER PRIMARY KEY CHECK (id = 1))", false, false);
+    expectClosed(["PRAGMA busy_timeout = 5000", "CREATE TABLE IF NOT EXISTS state_lock (id INTEGER PRIMARY KEY CHECK (id = 1))", "BEGIN EXCLUSIVE"],
+      "BEGIN EXCLUSIVE", true, false);
+    expectClosed([
+      "PRAGMA busy_timeout = 5000",
+      "CREATE TABLE IF NOT EXISTS state_lock (id INTEGER PRIMARY KEY CHECK (id = 1))",
+      "BEGIN EXCLUSIVE",
+      "COMMIT",
+      "ROLLBACK",
+    ], "COMMIT", true, true);
+  });
+
+  it("closes a busy lock handle and resumes after the holder releases it", () => {
+    const file = join(dir, `busy-${Math.random().toString(36).slice(2)}.json`);
+    const store = new OpenConnectorStateStore(file);
+    store.upsertConnection({ accountId: "oc:github:before", service: "github", status: "ACTIVE", updatedAt: "before" });
+    const lockPath = `${file}.lock.db`;
+    const holder = new DatabaseSync(lockPath);
+    holder.exec("PRAGMA busy_timeout = 1000");
+    holder.exec("CREATE TABLE IF NOT EXISTS state_lock (id INTEGER PRIMARY KEY CHECK (id = 1))");
+    holder.exec("BEGIN EXCLUSIVE");
+    const lockDescriptors = () => readdirSync("/proc/self/fd")
+      .filter((entry) => /^\d+$/.test(entry))
+      .map((entry) => {
+        try { return readlinkSync(join("/proc/self/fd", entry)); } catch { return ""; }
+      })
+      .filter((target) => target === lockPath);
+
+    const failedAt = Date.now();
+    expect(() => store.listConnections()).toThrow(/database is locked|SQLITE_BUSY/i);
+    expect(Date.now() - failedAt).toBeGreaterThanOrEqual(4_000);
+
+    holder.exec("COMMIT");
+    holder.close();
+    expect(lockDescriptors()).toEqual([]);
+    const recoveredAt = Date.now();
+    store.upsertConnection({ accountId: "oc:github:after", service: "github", status: "ACTIVE", updatedAt: "after" });
+    expect(Date.now() - recoveredAt).toBeLessThan(2_000);
+    expect(store.listConnections().map((record) => record.accountId)).toEqual(["oc:github:before", "oc:github:after"]);
+  });
+
+  it("rejects a cross-process stale CAS after another writer replaces the request", async () => {
+    const file = join(dir, `cas-replace-${Math.random().toString(36).slice(2)}.json`);
+    const parent = new OpenConnectorStateStore(file);
+    const record = { accountId: "oc:github:work", service: "github", alias: "work", connectionRequestId: "request-old", status: "pending", updatedAt: "old" };
+    parent.upsertConnection(record);
+    const moduleUrl = JSON.stringify(pathToFileURL(join(import.meta.dirname, "state.ts")).href);
+    const child = spawn(process.execPath, [
+      "--experimental-strip-types", "--input-type=module", "-e",
+      `const { OpenConnectorStateStore } = await import(${moduleUrl});
+       const store = new OpenConnectorStateStore(${JSON.stringify(file)});
+       store.upsertConnection({ ...${JSON.stringify(record)}, connectionRequestId: "request-new", updatedAt: "replaced" });
+       process.exit(0);`,
+    ], { stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    child.stdout.on("data", (chunk) => { output += chunk; });
+    child.stderr.on("data", (chunk) => { output += chunk; });
+    await new Promise<void>((resolve, reject) => {
+      child.on("error", reject);
+      child.on("exit", (code) => code === 0 ? resolve() : reject(new Error(`CAS replacement child exited ${code}: ${output}`)));
+    });
+    const before = readFileSync(file, "utf8");
+    expect(parent.updateConnectionIf(record.accountId, "request-old", () => ({
+      ...record,
+      status: "connected",
+      updatedAt: "stale-parent",
+    }))).toBeNull();
+    expect(readFileSync(file, "utf8")).toBe(before);
+    expect(new OpenConnectorStateStore(file).findConnectionByAccountId(record.accountId)).toMatchObject({
+      connectionRequestId: "request-new",
+      updatedAt: "replaced",
+    });
+  });
+
+  it("rejects a cross-process stale CAS after another process deletes the record", async () => {
+    const file = join(dir, `cas-delete-${Math.random().toString(36).slice(2)}.json`);
+    const parent = new OpenConnectorStateStore(file);
+    const record = { accountId: "oc:github:work", service: "github", alias: "work", connectionRequestId: "request-old", status: "pending", updatedAt: "old" };
+    parent.upsertConnection(record);
+    const moduleUrl = JSON.stringify(pathToFileURL(join(import.meta.dirname, "state.ts")).href);
+    const child = spawn(process.execPath, [
+      "--experimental-strip-types", "--input-type=module", "-e",
+      `const { OpenConnectorStateStore } = await import(${moduleUrl});
+       const store = new OpenConnectorStateStore(${JSON.stringify(file)});
+       if (!store.removeConnection(${JSON.stringify(record.accountId)})) process.exit(1);
+       process.exit(0);`,
+    ], { stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    child.stdout.on("data", (chunk) => { output += chunk; });
+    child.stderr.on("data", (chunk) => { output += chunk; });
+    await new Promise<void>((resolve, reject) => {
+      child.on("error", reject);
+      child.on("exit", (code) => code === 0 ? resolve() : reject(new Error(`CAS deletion child exited ${code}: ${output}`)));
+    });
+    const before = readFileSync(file, "utf8");
+    expect(parent.updateConnectionIf(record.accountId, "request-old", () => ({
+      ...record,
+      status: "connected",
+      updatedAt: "stale-parent",
+    }))).toBeNull();
+    expect(readFileSync(file, "utf8")).toBe(before);
+    expect(new OpenConnectorStateStore(file).findConnectionByAccountId(record.accountId)).toBeNull();
   });
 
   it("reads a missing or corrupt file as empty", () => {

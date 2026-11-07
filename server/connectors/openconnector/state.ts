@@ -59,18 +59,32 @@ const stateFileSchema = z.object({
   appOAuth: z.array(appOAuthRecordSchema).optional(),
 });
 
+interface OpenConnectorStateStoreOptions {
+  /** Test seam for asserting SQLite handle lifecycle; production uses node:sqlite directly. */
+  createLockDatabase?: () => DatabaseSync;
+  busyTimeoutMs?: number;
+}
+
 export class OpenConnectorStateStore {
   readonly file: string;
   private readonly runtimeUrl?: string;
   private readonly lockPath: string;
+  private readonly createLockDatabase: () => DatabaseSync;
+  private readonly busyTimeoutMs: number;
   private runtimeMismatch = false;
   private connections: OpenConnectorConnectionRecord[];
   private appOAuth: OpenConnectorAppOAuthRecord[];
 
-  constructor(file = join(DATA_DIR, OPENCONNECTOR_STATE_FILE), runtimeUrl?: string) {
+  constructor(
+    file = join(DATA_DIR, OPENCONNECTOR_STATE_FILE),
+    runtimeUrl?: string,
+    options: OpenConnectorStateStoreOptions = {},
+  ) {
     this.file = file;
     this.runtimeUrl = runtimeUrl?.trim() || undefined;
     this.lockPath = `${file}.lock.db`;
+    this.createLockDatabase = options.createLockDatabase ?? (() => new DatabaseSync(this.lockPath));
+    this.busyTimeoutMs = options.busyTimeoutMs ?? 5_000;
     const loaded = this.readUnlocked();
     this.runtimeMismatch = Boolean(this.runtimeUrl && loaded.runtimeUrl && loaded.runtimeUrl !== this.runtimeUrl);
     this.connections = loaded.connections;
@@ -100,11 +114,18 @@ export class OpenConnectorStateStore {
 
   private lock(): DatabaseSync {
     mkdirSync(dirname(this.lockPath), { recursive: true });
-    const database = new DatabaseSync(this.lockPath);
-    if (process.platform !== "win32" && (statSync(this.lockPath).mode & 0o777) !== 0o600) chmodSync(this.lockPath, 0o600);
-    database.exec("PRAGMA busy_timeout = 5000");
-    database.exec("CREATE TABLE IF NOT EXISTS state_lock (id INTEGER PRIMARY KEY CHECK (id = 1))");
-    return database;
+    const database = this.createLockDatabase();
+    try {
+      if (process.platform !== "win32" && (statSync(this.lockPath).mode & 0o777) !== 0o600) chmodSync(this.lockPath, 0o600);
+      database.exec(`PRAGMA busy_timeout = ${this.busyTimeoutMs}`);
+      database.exec("CREATE TABLE IF NOT EXISTS state_lock (id INTEGER PRIMARY KEY CHECK (id = 1))");
+      return database;
+    } catch (error) {
+      try {
+        database.close();
+      } catch {}
+      throw error;
+    }
   }
 
   /** A SQLite exclusive transaction serializes hosts, threads and processes without path-unlink races.
@@ -112,9 +133,10 @@ export class OpenConnectorStateStore {
    * store bound to another runtime can read an empty view but can never overwrite the newer state. */
   private withLock<T>(operation: () => T, persist = true): T {
     const database = this.lock();
-    database.exec("BEGIN EXCLUSIVE");
-    let committed = false;
+    let transactionStarted = false;
     try {
+      database.exec("BEGIN EXCLUSIVE");
+      transactionStarted = true;
       this.refreshUnlocked();
       if (persist && this.runtimeMismatch) {
         throw new Error("Refusing to write OpenConnector state for a different runtime URL");
@@ -126,10 +148,10 @@ export class OpenConnectorStateStore {
         this.persist();
       }
       database.exec("COMMIT");
-      committed = true;
+      transactionStarted = false;
       return result;
     } finally {
-      if (!committed) {
+      if (transactionStarted) {
         try {
           database.exec("ROLLBACK");
         } catch {}

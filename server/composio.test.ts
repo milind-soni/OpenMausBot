@@ -78,6 +78,9 @@ let brokerConnectedServicesFail = false;
 // What /broker/v1/catalog serves; null falls back to github only.
 let brokerCatalogBody: { items: Array<{ slug: string; name: string }> } | null = null;
 let sessionLookupFail = false;
+let isolationSessionBarrier: Promise<void> | null = null;
+let releaseIsolationSessionBarrier: (() => void) | null = null;
+let isolationSessionLookups = 0;
 // The project's own auth configs, and those the stub Session was created with: a Session knows only the configs named at creation.
 let customAuthConfigs: Array<Record<string, unknown>> = [];
 let sessionAuthConfigs: Record<string, string> = {};
@@ -167,22 +170,12 @@ beforeAll(async () => {
     const apiKey = String(req.headers["x-api-key"] ?? "");
     if (!["ak_test", "ak_status_pages", "ak_catalog_a", "ak_catalog_b", "ak_catalog_pages", "ak_catalog_partial", "ak_catalog_stuck",
         "ak_catalog_page_stuck", "ak_catalog_exhausted", "ak_catalog_stalled_total", "ak_catalog_end_short",
-        "ak_catalog_http_no_total", "ak_isolation_a", "ak_isolation_b"].includes(apiKey)) {
+        "ak_catalog_http_no_total", "ak_isolation"].includes(apiKey)) {
       res.writeHead(401, { "content-type": "application/json" });
       return res.end(JSON.stringify({ error: { message: "invalid project key" } }));
     }
 
     if (req.method === "POST" && url.pathname === "/api/v3.1/tool_router/session") {
-      const isolation = /^ak_isolation_(a|b)$/.exec(apiKey);
-      if (isolation) {
-        const sessionId = `trs_isolation_${isolation[1]}`;
-        res.writeHead(201, { "content-type": "application/json" });
-        return res.end(JSON.stringify({
-          session_id: sessionId,
-          mcp: { type: "http", url: `https://app.composio.dev/tool_router/v3/${sessionId}/mcp` },
-          config: { user_id: body.user_id, multi_account: body.multi_account },
-        }));
-      }
       sessionAuthConfigs = body.auth_configs ?? {};
       res.writeHead(201, { "content-type": "application/json" });
       return res.end(JSON.stringify({
@@ -312,6 +305,9 @@ beforeAll(async () => {
     }
     if (req.method === "GET" && /^\/api\/v3.1\/tool_router\/session\/trs_isolation_[ab]$/.test(url.pathname)) {
       const sessionId = url.pathname.split("/").at(-1)!;
+      isolationSessionLookups += 1;
+      if (isolationSessionBarrier && isolationSessionLookups >= 2) queueMicrotask(() => releaseIsolationSessionBarrier?.());
+      if (isolationSessionBarrier) await isolationSessionBarrier;
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(JSON.stringify({
         session_id: sessionId,
@@ -354,9 +350,15 @@ beforeAll(async () => {
         config: { user_id: "openmausbot_legacy" },
       }));
     }
-    if (req.method === "GET" && url.pathname.endsWith("/toolkits")
-      && (apiKey === "ak_isolation_a" || apiKey === "ak_isolation_b")) {
-      const slug = apiKey === "ak_isolation_a" ? "github" : "linear";
+    if (req.method === "GET" && url.pathname === "/api/v3.1/tool_router/session/trs_isolation_a/toolkits") {
+      const slug = "github";
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({
+        items: [{ slug, connected_account: { id: `ca_${slug}`, status: "ACTIVE" } }],
+      }));
+    }
+    if (req.method === "GET" && url.pathname === "/api/v3.1/tool_router/session/trs_isolation_b/toolkits") {
+      const slug = "linear";
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(JSON.stringify({
         items: [{ slug, connected_account: { id: `ca_${slug}`, status: "ACTIVE" } }],
@@ -391,13 +393,9 @@ beforeAll(async () => {
       };
       return res.end(JSON.stringify(page));
     }
-    if (req.method === "GET" && url.pathname === "/api/v3.1/connected_accounts"
-      && (apiKey === "ak_isolation_a" || apiKey === "ak_isolation_b")) {
-      const slug = apiKey === "ak_isolation_a" ? "github" : "linear";
+    if (req.method === "GET" && url.pathname === "/api/v3.1/connected_accounts" && apiKey === "ak_isolation") {
       res.writeHead(200, { "content-type": "application/json" });
-      return res.end(JSON.stringify({
-        items: [{ id: `ca_${slug}`, toolkit: { slug }, status: "ACTIVE" }],
-      }));
+      return res.end(JSON.stringify({ items: [] }));
     }
     if (req.method === "GET" && url.pathname === "/api/v3.1/connected_accounts") {
       if (connectedAccountsUnavailable) {
@@ -464,7 +462,12 @@ afterAll(async () => {
 
 describe.sequential("Composio Sessions", () => {
   // Fixtures change the project's auth configs from test to test; production reads them at most once a minute.
-  beforeEach(() => forgetProjectAuthConfigs());
+  beforeEach(() => {
+    forgetProjectAuthConfigs();
+    isolationSessionBarrier = null;
+    releaseIsolationSessionBarrier = null;
+    isolationSessionLookups = 0;
+  });
 
   it("rejects broker URL components and invalid tokens from the environment", () => {
     process.env.OMB_COMPOSIO_BROKER_TOKEN = "a".repeat(64);
@@ -1071,10 +1074,13 @@ describe.sequential("Composio Sessions", () => {
     }
   });
 
-  it("does not share unresolved project slug requests across sessions, and still serves a valid cache", async () => {
-    const configA = { composio: { apiKey: "ak_isolation_a", sessionId: "trs_isolation_a" } } as AppConfig;
-    const configB = { composio: { apiKey: "ak_isolation_b", sessionId: "trs_isolation_b" } } as AppConfig;
+  it("does not share unresolved requests for one API key across sessions, and still serves a valid cache", async () => {
+    const apiKey = "ak_isolation";
+    const configA = { composio: { apiKey, sessionId: "trs_isolation_a" } } as AppConfig;
+    const configB = { composio: { apiKey, sessionId: "trs_isolation_b" } } as AppConfig;
     forgetProjectAuthConfigs();
+    isolationSessionLookups = 0;
+    isolationSessionBarrier = new Promise<void>((resolve) => { releaseIsolationSessionBarrier = resolve; });
     const before = calls.length;
     const [slugsA, slugsB] = await Promise.all([
       connectedServiceSlugs(configA),
@@ -1085,6 +1091,11 @@ describe.sequential("Composio Sessions", () => {
     const concurrent = calls.slice(before);
     expect(concurrent.filter((call) => call.path.endsWith("/tool_router/session/trs_isolation_a"))).not.toHaveLength(0);
     expect(concurrent.filter((call) => call.path.endsWith("/tool_router/session/trs_isolation_b"))).not.toHaveLength(0);
+    expect(isolationSessionLookups).toBeGreaterThanOrEqual(2);
+    expect(concurrent.filter((call) => call.path.endsWith("/trs_isolation_a/toolkits")).map((call) => call.apiKey))
+      .toEqual([apiKey]);
+    expect(concurrent.filter((call) => call.path.endsWith("/trs_isolation_b/toolkits")).map((call) => call.apiKey))
+      .toEqual([apiKey]);
 
     const afterResolved = calls.length;
     const start = Date.now();
@@ -1095,6 +1106,8 @@ describe.sequential("Composio Sessions", () => {
       expect(calls.slice(afterResolved)).toEqual([]);
     } finally {
       now.mockRestore();
+      isolationSessionBarrier = null;
+      releaseIsolationSessionBarrier = null;
     }
   });
 

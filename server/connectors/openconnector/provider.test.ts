@@ -1,7 +1,7 @@
 // The OpenConnector provider behind the ConnectorProvider seam. A stub runtime on an ephemeral
 // port answers every call; the state store lives in a temp dir. No port 3000, no real runtime.
 import { createServer, type Server } from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -360,6 +360,61 @@ describe("background authorization convergence", () => {
     await vi.waitFor(() => {
       expect(state.findConnectionByAccountId("oc:github:restart")).toMatchObject({ status: "connected" });
     }, { timeout: 5_000, interval: 20 });
+  });
+
+  it("silently abandons background polling after the runtime state switches", async () => {
+    const state = new OpenConnectorStateStore(join(dir, `mismatch-${Math.random().toString(36).slice(2)}.json`), "https://first.example.test");
+    state.upsertConnection({
+      accountId: "oc:github:mismatch",
+      service: "github",
+      connectionRequestId: "cr_mismatch",
+      status: "pending",
+      updatedAt: "first-runtime",
+    });
+    connectionRequestStatus = 500;
+    gateConnectionRequests = true;
+    const unhandled: Array<unknown> = [];
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+    process.on("unhandledRejection", onUnhandled);
+    createOpenConnectorProvider({
+      settings: { url: origin, adminTokenRef: "env:STUB_ADMIN" },
+      env: { STUB_ADMIN: "admintok" },
+      state,
+      polling: { intervalMs: 10 },
+    });
+    try {
+      await vi.waitFor(() => {
+        expect(requestPollCalls().some((call) => call.path.includes("cr_mismatch"))).toBe(true);
+      }, { timeout: 5_000, interval: 20 });
+
+      const replaced = {
+        runtimeUrl: "https://second.example.test",
+        connections: [{
+          accountId: "oc:linear:new",
+          service: "linear",
+          connectionRequestId: "cr_new",
+          status: "pending",
+          updatedAt: "second-runtime",
+        }],
+        appOAuth: [],
+      };
+      const before = JSON.stringify(replaced);
+      writeFileSync(state.file, before, { mode: 0o600 });
+      gateConnectionRequests = false;
+      releaseGate?.();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(unhandled).toEqual([]);
+      expect(readFileSync(state.file, "utf8")).toBe(before);
+      expect(new OpenConnectorStateStore(state.file, "https://second.example.test").listConnections()).toEqual([
+        expect.objectContaining({ accountId: "oc:linear:new", status: "pending" }),
+      ]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+      gateConnectionRequests = false;
+      releaseGate = null;
+      connectionRequestStatus = 200;
+    }
   });
 
   it("defers polling while unavailable and resumes when the token becomes available", async () => {
