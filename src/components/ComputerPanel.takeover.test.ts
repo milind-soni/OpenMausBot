@@ -10,6 +10,8 @@ const fixture = vi.hoisted(() => ({
   held: false,
   /** Whether a take with a lease gets it: false plays a hold someone else already has. */
   owned: true,
+  /** True plays a take the server turns down. */
+  refuse: false,
   controls: [] as Array<{ action?: string; controlLeaseId?: string }>,
   posts: [] as string[],
   beacons: [] as Array<{ url: string; body: Record<string, unknown>; keepalive: boolean }>,
@@ -53,6 +55,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
       const body = JSON.parse(String(init.body));
       fixture.controls.push(body);
       if (body.action === "take") {
+        if (fixture.refuse) return { held: false, helpReason: null };
         const owned = !fixture.held || fixture.owned;
         fixture.held = true;
         return { held: true, helpReason: null, ...(body.controlLeaseId ? { owned: owned && fixture.owned, acquired: owned } : {}) };
@@ -148,6 +151,7 @@ beforeEach(() => {
   });
   fixture.held = false;
   fixture.owned = true;
+  fixture.refuse = false;
   fixture.controls = [];
   fixture.posts = [];
   fixture.beacons = [];
@@ -219,6 +223,35 @@ describe("taking control of a Local VM", () => {
     await shownLive();
     expect(liveDesktop()!.dataset.expanded, "taking control from full screen stays full screen").toBe("true");
     expect(watch()).toBeNull();
+  });
+
+  it("a refused Take control in full screen keeps watching and says why", async () => {
+    fixture.refuse = true;
+    await open(makeBot({ computer: "vm" }));
+    await press("Full screen");
+    const watch = () => document.querySelector<HTMLElement>("[data-watch-full-screen]");
+    const take = [...watch()!.querySelectorAll("button")].find((candidate) => candidate.textContent?.trim() === "Take control")!;
+    flushSync(() => take.click());
+    await settle();
+    expect(fixture.controls.map((control) => control.action)).toEqual(["take"]);
+    expect(watch(), "a failed take must not drop the person out of full screen").not.toBeNull();
+    expect(watch()!.querySelector("[role=alert]")?.textContent).toBeTruthy();
+  });
+
+  it("full screen keeps Tab inside and gives focus back to Full screen when it closes", async () => {
+    await open(makeBot({ computer: "vm" }));
+    const trigger = button("Full screen")!;
+    trigger.focus();
+    await press("Full screen");
+    const watch = document.querySelector<HTMLElement>("[data-watch-full-screen]")!;
+    const [exit, take] = [...watch.querySelectorAll("button")];
+    expect(document.activeElement).toBe(exit);
+    exit!.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
+    expect(document.activeElement, "Shift+Tab from Exit must stay in full screen").toBe(take);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await settle();
+    expect(document.querySelector("[data-watch-full-screen]")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
   });
 
   it("closing the panel, leaving its Screen view or closing the page gives back the hold it took", async () => {

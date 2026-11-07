@@ -1613,7 +1613,7 @@ export function ComputerPanel({
             )}
             <FullScreenButton
               held={control.held} frame={frameSrc} name={bot.name} onTakeControl={(expand) => void takeControl(expand)}
-              disabled={control.held && takeBlocked} takeDisabled={controlPending || takeBlocked}
+              disabled={control.held && takeBlocked} takeDisabled={controlPending || takeBlocked} error={errorText}
             />
             {cloudPreviewReady && canManageCloud && (cloudBackend === "vps" || boatState !== "archived") && (
               <button
