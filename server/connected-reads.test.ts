@@ -126,4 +126,24 @@ describe("a check's reads", () => {
     for (const frame of frames.filter((one) => one.slug?.startsWith("GMAIL_"))) expect(frame.item!.account).toBe("ca_newest");
     for (const frame of frames.filter((one) => one.slug?.startsWith("GOOGLECALENDAR_"))) expect(frame.item).not.toHaveProperty("account");
   });
+
+  it("asks again for the account after a failed lookup, and a relay error is not blamed on the named account", async () => {
+    const { deps, frames } = relay({ GMAIL_GET_PROFILE: () => ({ successful: true, data: { emailAddress: "new@x.test" } }) });
+    let asked = 0;
+    const accounts = async () => {
+      asked += 1;
+      if (asked === 1) throw new Error("inventory down");
+      return { gmail: "ca_newest" };
+    };
+    let broken = false;
+    const session = createConnectedReads({ ...deps, accounts, relay: async (payload, transport) =>
+      broken ? { status: 502, bytes: new Uint8Array() } : deps.relay(payload, transport) }).session();
+    expect(await session.address()).toBe("new@x.test");
+    expect(await session.address()).toBe("new@x.test");
+    expect(asked).toBe(2);
+    expect(frames.filter((one) => one.slug === "GMAIL_GET_PROFILE").map((one) => one.item!.account)).toEqual([undefined, "ca_newest"]);
+    broken = true;
+    const error = await session.address().catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ app: "gmail", severalAccounts: false });
+  });
 });

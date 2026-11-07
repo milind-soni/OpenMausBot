@@ -381,7 +381,11 @@ export function createConnectedReads(deps: ConnectedReadDeps): ConnectedReads {
           throw error;
         });
         const transport = await opened;
-        accounts ??= deps.accounts?.().catch((): AppAccounts => ({})) ?? Promise.resolve({});
+        // A failed lookup reads as no account named and is asked again on the next read, not kept for the session.
+        accounts ??= deps.accounts?.().catch((): AppAccounts => {
+          accounts = undefined;
+          return {};
+        }) ?? Promise.resolve({});
         account = (await accounts)[app];
         const answer = await deps.relay({
           jsonrpc: "2.0", id: CALL_ID, method: "tools/call",
@@ -393,7 +397,8 @@ export function createConnectedReads(deps: ConnectedReadDeps): ConnectedReads {
         if (error instanceof SourceError) throw error;
         if (gone && error instanceof ToolAnswerError && gone(error.message)) return GONE;
         if (signal.aborted) throw new SourceError(app, `${slug} did not answer within ${Math.round(readTimeoutMs / 1000)} seconds`);
-        throw new SourceError(app, errorText(error), account !== undefined);
+        // Only the tool's own refusal points at the named account; a relay hiccup (HTTP 5xx) is a later try.
+        throw new SourceError(app, errorText(error), account !== undefined && error instanceof ToolAnswerError);
       }
     }
 

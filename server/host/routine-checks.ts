@@ -109,7 +109,7 @@ export function troubleSentence(trouble: ReadonlyArray<ReadTrouble>): string | u
   if (!trouble.length) return undefined;
   const names = trouble.map((one) => appName[one.app]).join(" or ");
   if (trouble.some((one) => one.signedOut)) return `Couldn't read ${names}. Reconnect it in Connected apps.`;
-  if (trouble.some((one) => one.severalAccounts)) return `Couldn't read ${names}. Several accounts are connected, so I read the newest one; check it in Connected apps.`;
+  if (trouble.some((one) => one.severalAccounts)) return `Couldn't read ${names}. Several accounts are connected, so I read the newest one; check or reconnect it in Connected apps.`;
   return `Couldn't read ${names}. I'll try again soon.`;
 }
 
