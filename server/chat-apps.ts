@@ -12,7 +12,7 @@ import { speakerIn, type AgentCardResult, type AgentCardStore } from "./chat-wid
 import { compileJsxPage } from "./jsx-compile.ts";
 import { appDocRefs } from "./message-db.ts";
 import { createPageFiles, type PageFilesViewer } from "./page-files.ts";
-import { pageSignature, PageBundleError, readBotPageBundle, readPageBundle, skippedNote, type BotFolders, type PageBundle, type PageFile } from "./pages/bundle.ts";
+import { pageSignature, PageBundleError, readBotPageBundle, readPageBundle, skippedNote, stillReadable, type BotFolders, type PageBundle, type PageFile } from "./pages/bundle.ts";
 import { redactSecretsInText } from "./redact.ts";
 import type { Message, StoreChange } from "./store.ts";
 import { userError, type UserError } from "./user-errors.ts";
@@ -478,8 +478,8 @@ export interface ChatApps {
 /** How often live pages' folders are checked, and how many pages are watched at most (the newest). */
 const LIVE_EVERY_MS = 5_000;
 const LIVE_PAGES_MAX = 50;
-/** How often the live pages are listed again from the store, and how long a failed read or store waits to be tried again. */
-const LIVE_RELOAD_MS = 60_000, LIVE_RETRY_MS = 60_000;
+/** How long a failed read or store waits to be tried again. */
+const LIVE_RETRY_MS = 60_000;
 
 export function createChatApps(deps: {
   store: ChatAppsStore;
@@ -491,6 +491,8 @@ export function createChatApps(deps: {
   liveRows?(limit: number): Array<{ threadId: string; messageId: string }>;
   /** True while the workspace is being backed up or restored: live pages wait, so they don't write mid-snapshot. */
   paused?(): boolean;
+  /** The folders the page's bot may read in this conversation now; null once the bot is gone. A live page outside them stops being live. */
+  liveRoots?(threadId: string, botId: string | undefined): readonly string[] | null;
 }): ChatApps {
   const docs = new AppDocs(`${deps.dataDir}/app-docs`, deps.maxBytes ? { maxBytes: deps.maxBytes } : {});
   const references = deps.references ?? appDocRefs;
@@ -520,10 +522,10 @@ export function createChatApps(deps: {
     return Boolean(row && (row.app.doc === target.doc || row.app.history?.includes(target.doc)));
   };
   // Live pages, by row: the page's folder (looked up again only when its document changes), the folder's fingerprint
-  // when it was last read, and when a failed read or store is tried again. Listed from the store every minute, so a
-  // live page that arrived another way (an imported conversation) is picked up too.
+  // when it was last read, and when a failed read or store is tried again. The store is listed once, after a restart;
+  // pages made since are watched as they are made.
   const live = new Map<string, { threadId: string; messageId: string; doc?: string; folder?: string; signature?: string; retryAt?: number }>();
-  let liveListedAt = -Infinity, refreshing: Promise<number> | null = null;
+  let liveListed = false, refreshing: Promise<number> | null = null;
   const watch = (threadId: string, messageId: string) => {
     const key = `${threadId}\n${messageId}`;
     if (live.has(key)) return;
@@ -537,8 +539,8 @@ export function createChatApps(deps: {
   };
   const refreshOnce = async (): Promise<number> => {
     if (deps.paused?.()) return 0;
-    if (Date.now() - liveListedAt >= LIVE_RELOAD_MS) {
-      liveListedAt = Date.now();
+    if (!liveListed) {
+      liveListed = true;
       try { for (const row of [...(deps.liveRows?.(LIVE_PAGES_MAX) ?? [])].reverse()) watch(row.threadId, row.messageId); } catch (error) {
         console.error("chat apps: could not read live pages", error);
       }
@@ -555,6 +557,13 @@ export function createChatApps(deps: {
       const folder = row?.app.live && row.app.doc ? entry.folder : undefined;
       if (!row || !folder) { live.delete(key); continue; }
       if (entry.retryAt !== undefined && Date.now() < entry.retryAt) continue;
+      // The bot is gone or no longer has the folder: the card keeps the page it shows and stops being live.
+      if (deps.liveRoots && !(await stillReadable(folder, deps.liveRoots(entry.threadId, row.from?.botId)))) {
+        const { live: _live, ...kept } = row.app;
+        deps.store.patchMessage(entry.threadId, row.id, { app: kept });
+        live.delete(key);
+        continue;
+      }
       const retryLater = () => Object.assign(entry, { signature: undefined, retryAt: Date.now() + LIVE_RETRY_MS });
       try {
         // null too when the folder is no longer where the page was shown from (swapped for a link elsewhere).

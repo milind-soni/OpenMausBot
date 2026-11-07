@@ -103,6 +103,17 @@ export async function pageSource(requested: string, roots: readonly string[]): P
   return (await locate(requested, roots)).target;
 }
 
+/** Whether a live page's folder is still one the bot may read: false once the bot is gone (no roots) or the folder is
+ * outside its folders. A folder briefly missing still counts, so the refresh's own retry decides. */
+export async function stillReadable(folder: string, roots: readonly string[] | null): Promise<boolean> {
+  if (!roots?.length) return false;
+  try {
+    return (await pageSource(folder, roots)) === folder;
+  } catch (error) {
+    return error instanceof PageBundleError && error.status === 404;
+  }
+}
+
 /** Where the open `handle` really is, as the kernel names it (Linux): no folder swapped around the open can fake it. */
 const openedPath = (handle: FileHandle) => readlink(`/proc/self/fd/${handle.fd}`).catch(() => null);
 

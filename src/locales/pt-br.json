@@ -9163,6 +9163,8 @@
   "serverError.engineCheck.timeout": "{name} não respondeu em {seconds} segundos.",
   "chat.notice.acpEmpty": "{provider} terminou sem responder.",
   "chat.notice.acpNoReason": "{provider} parou sem informar o motivo.",
+  "chat.notice.acpMcpAppsFailed": "Não foi possível configurar os apps conectados, então {provider} não conseguiu começar esta resposta. Tente de novo ou troque a IA deste bot.",
+  "chat.notice.acpMcpServerFailed": "Não foi possível configurar o servidor MCP \"{server}\", então {provider} não conseguiu começar esta resposta. Tente de novo ou troque a IA deste bot.",
   "chat.notice.stop.refusal": "{provider} se recusou a continuar com este pedido (motivo da parada: {reason}). Tente novamente, reformule o pedido ou mude este bot para outra IA.",
   "chat.notice.stop.refusalGeneric": "A IA se recusou a continuar com este pedido (motivo da parada: {reason}). Tente novamente, reformule o pedido ou mude este bot para outra IA.",
   "chat.notice.stop.maxTokens": "A resposta de {provider} atingiu o tamanho máximo antes de terminar (motivo da parada: {reason}). Peça para continuar ou dar uma resposta mais curta.",
