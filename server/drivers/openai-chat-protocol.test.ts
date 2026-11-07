@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ChatToolCalls } from "./openai-chat-protocol.ts";
+import { ChatReasoningDetails, ChatToolCalls, MAX_REASONING_DETAIL_CHARS } from "./openai-chat-protocol.ts";
 
 const completeCall = {
   id: "call_echo",
@@ -180,5 +180,28 @@ describe("legacy function_call from OpenAI-compatible relays", () => {
     const long = new ChatToolCalls();
     long.addLegacy({ name: "n".repeat(65) });
     expect(() => long.finish("function_call", false)).toThrow(/size limit/);
+  });
+});
+
+describe("streamed reasoning details", () => {
+  const delta = (text: string) => [{ type: "reasoning.text", text, format: "unknown", index: 0 }];
+
+  it("keeps a long streamed reasoning trace whose per-delta blocks pass 256 KB of JSON", () => {
+    const details = new ChatReasoningDetails();
+    // ~40k characters of reasoning, streamed a few characters at a time as OpenRouter does.
+    for (let i = 0; i < 8_000; i += 1) details.add(delta("think"));
+    expect(details.blocks).toHaveLength(8_000);
+    expect(JSON.stringify(details.blocks).length).toBeGreaterThan(256_000);
+  });
+
+  it("accepts reasoning details just under 4 MB of JSON", () => {
+    const details = new ChatReasoningDetails();
+    details.add(delta("x".repeat(3_900_000)));
+    expect(details.blocks).toHaveLength(1);
+  });
+
+  it("still refuses reasoning details past the bound", () => {
+    const details = new ChatReasoningDetails();
+    expect(() => details.add(delta("x".repeat(MAX_REASONING_DETAIL_CHARS)))).toThrow(/exceeded the size limit/);
   });
 });
