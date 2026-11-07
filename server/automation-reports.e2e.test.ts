@@ -1,7 +1,8 @@
 // Automations report into the bot's chat, end to end: the real server and Claude driver, the scripted fake engine
 // answering each turn by what it was sent, and the permission broker reached the way the CLI's proxy reaches it.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 
@@ -433,4 +434,34 @@ it("brings the files a run sent with attach_file into its report", async () => {
   expect(await s.lines()).toEqual([expect.objectContaining({
     text: "Today's brief is attached.", attachments: [expect.objectContaining({ kind: "file", name: "brief.pdf" })],
   })]);
+}, 120_000);
+
+it("leaves the images a run's tools returned in the run, and reports the files it sent", async () => {
+  const calls = join(mkdtempSync(join(tmpdir(), "omb-report-files-")), "tool-calls.json");
+  fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_TOOL_CALLS_FILE: calls });
+  const { url, dataDir } = fixture.info;
+  const api = async (method: string, path: string, body?: unknown) => (await fetch(`${url}${path}`, {
+    method, headers: { "content-type": "application/json", origin: url }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  })).json() as Promise<any>;
+  const { bot } = await runControlOmb(["new-bot", "--name", "Pepper", "--url", url]) as any;
+  const folder = join(dataDir, "workspaces", bot.id);
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, "brief.pdf"), "%PDF-brief");
+  const page = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+  writeFileSync(calls, JSON.stringify([
+    { name: "Read", input: { file_path: "brief.pdf" }, output: [{ type: "image", source: { type: "base64", media_type: "image/png", data: page } }] },
+    { name: "attach_file", server: "agents", input: { path: join(folder, "brief.pdf") } },
+  ]));
+  const { routine } = await api("POST", "/api/routines", {
+    name: "Daily brief", prompt: "Do the Daily brief check.", botId: bot.id, enabled: false,
+    schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 },
+  });
+  const { run: { id } } = await api("POST", `/api/routines/${routine.id}/run`);
+  const run = async () => (await api("GET", "/api/routines")).runs.find((candidate: any) => candidate.id === id);
+  await expect.poll(async () => (await run())?.report?.state, { timeout: 30_000 }).toBe("posted");
+  const messages = async (threadId: string) => (await api("GET", `/api/threads/${threadId}/messages?limit=200`)).messages as any[];
+  const inRun = (await messages((await run()).threadId)).flatMap((message) => message.attachments ?? []);
+  expect(inRun).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "image", fromTool: true }), expect.objectContaining({ kind: "file", name: "brief.pdf" })]));
+  const report = (await messages(bot.activeTaskId)).filter((message) => message.automation);
+  expect(report).toEqual([expect.objectContaining({ attachments: [expect.objectContaining({ kind: "file", name: "brief.pdf" })] })]);
 }, 120_000);
