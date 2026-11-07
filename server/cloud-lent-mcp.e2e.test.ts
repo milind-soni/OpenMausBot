@@ -1,6 +1,6 @@
 // A real server booted as a Cloud home, the real outbound connector on the Mac side, and two MCP servers on the Mac: one
-// a program, one at a loopback address. Each runs only where the Mac lends it, and a bot's turn on My Cloud reaches it as
-// any other MCP server.
+// a program, one at a loopback address. Each runs only where the Mac lends it and its person allows it, and a bot's turn
+// on My Cloud reaches it as any other MCP server.
 import { randomBytes, randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
@@ -11,6 +11,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { createComputerSharing } from "../electron/computer-sharing.mjs";
+import { createMcpDoor } from "../electron/device-mcp.mjs";
 import { cloudPairingSignature } from "./cloud-home.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
@@ -28,7 +29,7 @@ let log = "";
 let owner = "";
 let connector: ReturnType<typeof createComputerSharing> | undefined;
 let macServer: Server | undefined;
-const macRequests: Array<{ authorization?: string; method?: string; client?: string }> = [];
+const macRequests: Array<{ authorization?: string; method?: string }> = [];
 const engines: ChildProcess[] = [];
 
 async function api(method: string, path: string, options: { body?: unknown; token?: string } = {}) {
@@ -84,8 +85,10 @@ async function turnOf(name: string): Promise<Turn> {
 function engineFor(spec: Spec): (method: string, params?: unknown) => Promise<any> {
   if (spec.url) {
     let id = 0;
+    let session: string | null = null;
     return async (method, params = {}) => {
-      const response = await fetch(spec.url!, { method: "POST", headers: { ...spec.headers, "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }) });
+      const response = await fetch(spec.url!, { method: "POST", headers: { ...spec.headers, "content-type": "application/json", accept: "application/json, text/event-stream", ...(session ? { "mcp-session-id": session } : {}) }, body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }) });
+      session = response.headers.get("mcp-session-id") ?? session;
       return (await response.json()) as any;
     };
   }
@@ -159,7 +162,7 @@ it("a bot on My Cloud uses MCP servers on the person's lent Mac, only as the Mac
   macServer = createServer(async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
     const message = JSON.parse(body);
-    macRequests.push({ authorization: req.headers.authorization, method: message.method, client: message.params?.clientInfo?.name });
+    macRequests.push({ authorization: req.headers.authorization, method: message.method });
     if (!("id" in message)) { res.writeHead(202).end(); return; }
     const result = message.method === "initialize" ? { protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "mac-notes", version: "1" } }
       : message.method === "tools/list" ? { tools: [{ name: "search_notes", description: "Search the notes on this Mac", inputSchema: { type: "object", properties: { q: { type: "string" } } } }] }
@@ -189,58 +192,63 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const notYet = await api("POST", "/api/mcp/servers/local/test", { token: owner });
   expect(notYet).toEqual({ status: 409, body: { error: "local runs on Ada's Mac, which isn't lent to My Cloud: it works once OpenMausBot is open on that computer and signed in to My Cloud." } });
 
-  // The Mac lends itself to My Cloud through the real connector, terminal off as lending starts.
+  // The Mac lends itself to My Cloud through the real connector, its MCP servers off as lending starts.
   const env = { id: "my-cloud", name: "My Cloud", origin: base };
   const file = join(home, "desktop-profile", "computer-sharing.json");
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, JSON.stringify({ version: 1, records: { [env.id]: { sessionId: null, environmentId: null, id: randomUUID(), secret: randomBytes(32).toString("hex"), enabled: true,
     folders: [], terminal: false, computer: false, internet: true, cloud: { accountId: "acct_fixture", origin: base } } } }));
-  let macServerPorts: number[] = [];
+  const macUser = join(home, "mac-user");
+  mkdirSync(macUser);
+  // The person's answers on the Mac, given when the test says.
+  const asks: Array<{ name: string; target: unknown }> = [];
+  const answers: Array<(allow: boolean) => void> = [];
   connector = createComputerSharing({
-    file, serverPorts: () => macServerPorts, environments: () => [env], localEnvironments: () => [MAC_INSTALL], myCloud: () => env, ownClouds: () => [env], cuaConnection: async () => null, enabled: async () => false,
+    file, environments: () => [env], localEnvironments: () => [MAC_INSTALL], myCloud: () => env, ownClouds: () => [env], cuaConnection: async () => null, enabled: async () => false,
     cloud: () => ({ status: "connected", accountId: "acct_fixture", origin: base }), home: join(home, "mac-home"),
     fetch: (url: string, init: RequestInit) => fetch(url, { ...init, headers: { ...init.headers as Record<string, string>, authorization: `Bearer ${owner}`, host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", origin: `https://${HOST}` } }),
+    linkHeaders: () => ({ authorization: `Bearer ${owner}`, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https" }),
+    mcp: (_env, definition) => createMcpDoor({ approvals: connector!.mcpApprovals, ownPorts: async () => [], definition, home: macUser,
+      prompt: (ask) => new Promise<boolean>((resolve) => { asks.push(ask); answers.push(resolve); }) }),
   });
   connector.start();
   await expect.poll(() => connector!.cloudState(env).connected, { timeout: 8000 }).toBe(true);
   const name = hostname().slice(0, 120);
 
-  // Test, from Settings: the address server's tools, listed on the Mac; the program needs the Mac's terminal.
+  // The person turns on "Your MCP servers": Test, from Settings, asks on the Mac first, and lists the address server's
+  // tools once the person allows it there.
+  await connector.lendMcp(true);
+  await expect.poll(async () => (await api("POST", "/api/mcp/servers/local/test", { token: owner })).body?.error ?? "", { timeout: 8000 }).toContain("a prompt is waiting there");
+  const port = Number(new URL(macUrl).port);
+  expect(asks).toEqual([{ name: "local", target: { kind: "url", port } }]);
+  answers[0]!(true);
+  await expect.poll(() => connector!.mcpApprovals.read().local).toEqual({ kind: "url", port });
   expect(await api("POST", "/api/mcp/servers/local/test", { token: owner })).toEqual({ status: 200, body: { ok: true, tools: [{ name: "search_notes", description: "Search the notes on this Mac" }] } });
-  const program = await api("POST", "/api/mcp/servers/notes/test", { token: owner });
-  expect(program.status).toBe(409);
-  expect(program.body.error).toContain(`notes starts a program on`);
-  expect(program.body.error).toContain("which doesn't let My Cloud run programs right now");
 
-  // A bot's turn: the address server is one of its MCP servers, at My Cloud's own address with no Mac key in it.
+  // A bot's turn: both servers are its MCP servers, at My Cloud's own address with no Mac key in it.
   const first = await turnOf("Notes bot");
   const local = first.mcpConfig.mcpServers.local!;
   expect(local).toBeDefined();
-  expect(first.mcpConfig.mcpServers.notes).toBeUndefined();
+  expect(first.mcpConfig.mcpServers.notes).toBeDefined();
   expect(JSON.stringify(first.mcpConfig)).not.toMatch(/mac-header-key|mac-env-key|mac-program/);
-  expect(first.systemPrompt).toContain("notes starts a program on");
   const call = await connected(engineFor(local));
   const listed = await call("tools/list");
   expect(listed.result.tools.map((tool: { name: string }) => tool.name)).toEqual(["search_notes"]);
   const answer = await call("tools/call", { name: "search_notes", arguments: { q: "plan" } });
   expect(answer.result).toEqual({ content: [{ type: "text", text: "On the Mac: plan" }] });
   // It reached the Mac's server from the Mac's connector, with the key saved on My Cloud.
-  expect(macRequests.filter((request) => request.method === "initialize").every((request) => request.client === "openmausbot-lent")).toBe(true);
   expect(macRequests.every((request) => request.authorization === "Bearer mac-header-key")).toBe(true);
-  expect(connector.activity(env.id).map((entry) => [entry.action, entry.ok])).toEqual(expect.arrayContaining([["mcp_tools", true], ["mcp_call", true]]));
+  expect(connector.activity(env.id).map((entry) => [entry.action, entry.detail, entry.ok])).toContainEqual(["mcp", "local", true]);
 
-  // Were the Mac's own OpenMausBot server on that port, the Mac refuses the call itself, in words the bot reads, and
-  // nothing reaches the port.
-  macServerPorts = [Number(new URL(macUrl).port)];
-  const reached = macRequests.length;
-  const own = await call("tools/call", { name: "search_notes", arguments: { q: "plan" } });
-  expect(own.result).toEqual({ content: [{ type: "text", text: "Only an MCP server on its own port (1024 or higher) at this computer's address can be reached, never this computer's own OpenMausBot or Chrome ports" }], isError: true });
-  expect(macRequests.length).toBe(reached);
-  macServerPorts = [];
-
-  // The person lets My Cloud run commands on this Mac: the program starts there, from the connector, never on My Cloud.
-  await connector.lendTerminal(true);
-  await expect.poll(async () => (await api("GET", "/api/shared-computers", { token: owner })).body.computers?.[0]?.scopes?.terminal, { timeout: 8000 }).toBe(true);
+  // The program: Test asks on the Mac once, then, once the person allows it, it starts there, from the connector, never
+  // on My Cloud, with the terminal still off.
+  const program = await api("POST", "/api/mcp/servers/notes/test", { token: owner });
+  expect(program.body.error).toContain("Allow notes on");
+  expect(program.body.error).toContain("a prompt is waiting there");
+  expect(asks).toHaveLength(2);
+  expect(asks[1]).toEqual({ name: "notes", target: { kind: "command", command: `${process.execPath} ${script}`, env: ["NOTES_TOKEN"] } });
+  answers[1]!(true);
+  await expect.poll(() => connector!.mcpApprovals.read().notes?.kind).toBe("command");
   const second = await turnOf("Program bot");
   const notes = second.mcpConfig.mcpServers.notes!;
   expect(notes).toBeDefined();

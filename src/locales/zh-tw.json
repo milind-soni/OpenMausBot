@@ -4803,5 +4803,7 @@
   "rail.localRemoveAsk": "要移除「{name}」嗎？它在這台電腦上的機器人、對話和檔案都會被刪除。它的資料夾會先移到垃圾桶。",
   "rail.localRemoveAskWin": "要移除「{name}」嗎？它在這台電腦上的機器人、對話和檔案都會被刪除。它的資料夾會先移到資源回收筒。",
   "rail.localRemoveFailed": "沒有移除，請稍後再試。",
-  "native.menu.newLocal": "在這台電腦上新增工作區…"
+  "native.menu.newLocal": "在這台電腦上新增工作區…",
+  "lending.action.mcp": "使用了 MCP 伺服器",
+  "native.lend.mcpSignIn": "請先登入 My Cloud，再把你的 MCP 伺服器借給它。"
 }

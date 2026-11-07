@@ -3128,5 +3128,7 @@
   "rail.localRemoveAsk": "Retirer « {name} » ? Ses bots, discussions et fichiers sur cet ordinateur sont supprimés. Son dossier va d'abord à la Corbeille.",
   "rail.localRemoveAskWin": "Retirer « {name} » ? Ses bots, discussions et fichiers sur cet ordinateur sont supprimés. Son dossier va d'abord à la Corbeille.",
   "rail.localRemoveFailed": "Il n'a pas été retiré. Réessayez dans un instant.",
-  "native.menu.newLocal": "Nouvel espace de travail sur cet ordinateur…"
+  "native.menu.newLocal": "Nouvel espace de travail sur cet ordinateur…",
+  "lending.action.mcp": "A utilisé un serveur MCP",
+  "native.lend.mcpSignIn": "Connectez-vous à My Cloud avant de lui prêter vos serveurs MCP."
 }

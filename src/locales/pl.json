@@ -6674,5 +6674,7 @@
   "rail.localRemoveAsk": "Usunąć „{name}”? Jego boty, czaty i pliki na tym komputerze zostaną usunięte. Najpierw jego folder trafi do Kosza.",
   "rail.localRemoveAskWin": "Usunąć „{name}”? Jego boty, czaty i pliki na tym komputerze zostaną usunięte. Najpierw jego folder trafi do Kosza.",
   "rail.localRemoveFailed": "Nie usunięto. Spróbuj ponownie za chwilę.",
-  "native.menu.newLocal": "Nowy obszar roboczy na tym komputerze…"
+  "native.menu.newLocal": "Nowy obszar roboczy na tym komputerze…",
+  "lending.action.mcp": "Użyto serwera MCP",
+  "native.lend.mcpSignIn": "Zaloguj się do My Cloud, zanim udostępnisz mu swoje serwery MCP."
 }

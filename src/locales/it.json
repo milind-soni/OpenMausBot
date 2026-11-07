@@ -6535,5 +6535,7 @@
   "rail.localRemoveAsk": "Rimuovere “{name}”? I suoi bot, chat e file su questo computer vengono eliminati. Prima la sua cartella va nel Cestino.",
   "rail.localRemoveAskWin": "Rimuovere “{name}”? I suoi bot, chat e file su questo computer vengono eliminati. Prima la sua cartella va nel Cestino.",
   "rail.localRemoveFailed": "Non è stato rimosso. Riprova tra un momento.",
-  "native.menu.newLocal": "Nuovo spazio di lavoro su questo computer…"
+  "native.menu.newLocal": "Nuovo spazio di lavoro su questo computer…",
+  "lending.action.mcp": "Ha usato un server MCP",
+  "native.lend.mcpSignIn": "Accedi a My Cloud prima di prestargli i tuoi server MCP."
 }

@@ -14,6 +14,7 @@ const ACTIONS: Record<string, LocaleKey> = {
   invalid: "lending.action.invalid",
   internet: "lending.action.website",
   chrome: "lending.action.chrome",
+  mcp: "lending.action.mcp",
 };
 
 /** Security: Electron main keeps this record; a server cannot write to it. */

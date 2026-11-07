@@ -5411,5 +5411,7 @@
   "rail.localRemoveAsk": "“{name}” kaldırılsın mı? Bu bilgisayardaki botları, sohbetleri ve dosyaları silinir. Klasörü önce Çöp Sepeti'ne gider.",
   "rail.localRemoveAskWin": "“{name}” kaldırılsın mı? Bu bilgisayardaki botları, sohbetleri ve dosyaları silinir. Klasörü önce Geri Dönüşüm Kutusu'na gider.",
   "rail.localRemoveFailed": "Kaldırılamadı. Birazdan tekrar deneyin.",
-  "native.menu.newLocal": "Bu bilgisayarda yeni çalışma alanı…"
+  "native.menu.newLocal": "Bu bilgisayarda yeni çalışma alanı…",
+  "lending.action.mcp": "Bir MCP sunucusu kullandı",
+  "native.lend.mcpSignIn": "MCP sunucularını My Cloud'a ödünç vermeden önce My Cloud'da oturum aç."
 }

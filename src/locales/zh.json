@@ -7479,5 +7479,7 @@
   "email.needsMicrosoft": "Outlook 在这里不接受邮箱密码：请使用 Microsoft 登录。",
   "email.needsAppPassword": "{provider} 在这里需要应用专用密码，而不是你的常用密码。",
   "serverError.mailbox.outgoingFields": "请检查发件服务器：名称如 mail.example.com，端口在 1 到 65535 之间，以及 SSL/TLS 或 STARTTLS。",
-  "native.menu.newLocal": "在这台电脑上新建工作区…"
+  "native.menu.newLocal": "在这台电脑上新建工作区…",
+  "lending.action.mcp": "使用了 MCP 服务器",
+  "native.lend.mcpSignIn": "请先登录 My Cloud，再把你的 MCP 服务器借给它。"
 }

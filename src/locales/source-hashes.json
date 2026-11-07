@@ -3265,7 +3265,9 @@
       "rail.localRemoveFailed": "29a77f76cc411a4f733e9d8a31e16e7ee108ad5855462085d2a043332b08e2f1",
       "engines.updatedTo": "da0fcccdc519425a9c333fda0838bbdd50d67fb0266194753bd1044abd0ecbb4",
       "homeLine.local": "81ce56630542e178fcb0c50e052e73a959517719e01d48d7747f416b0a7195c4",
-      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012"
+      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012",
+      "lending.action.mcp": "62046ba8ce17fd0c19bebe148856682c2f74937081aeca7ea16fffd3acb591e9",
+      "native.lend.mcpSignIn": "d2031df96ee978eaf3464505c7bf810b4d68303cc4edd8b75c78981f2bb7a518"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -9181,7 +9183,9 @@
       "rail.localRemoveFailed": "29a77f76cc411a4f733e9d8a31e16e7ee108ad5855462085d2a043332b08e2f1",
       "engines.updatedTo": "da0fcccdc519425a9c333fda0838bbdd50d67fb0266194753bd1044abd0ecbb4",
       "homeLine.local": "81ce56630542e178fcb0c50e052e73a959517719e01d48d7747f416b0a7195c4",
-      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012"
+      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012",
+      "lending.action.mcp": "62046ba8ce17fd0c19bebe148856682c2f74937081aeca7ea16fffd3acb591e9",
+      "native.lend.mcpSignIn": "d2031df96ee978eaf3464505c7bf810b4d68303cc4edd8b75c78981f2bb7a518"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -12313,7 +12317,9 @@
       "rail.localRemoveFailed": "29a77f76cc411a4f733e9d8a31e16e7ee108ad5855462085d2a043332b08e2f1",
       "engines.updatedTo": "da0fcccdc519425a9c333fda0838bbdd50d67fb0266194753bd1044abd0ecbb4",
       "homeLine.local": "81ce56630542e178fcb0c50e052e73a959517719e01d48d7747f416b0a7195c4",
-      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012"
+      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012",
+      "lending.action.mcp": "62046ba8ce17fd0c19bebe148856682c2f74937081aeca7ea16fffd3acb591e9",
+      "native.lend.mcpSignIn": "d2031df96ee978eaf3464505c7bf810b4d68303cc4edd8b75c78981f2bb7a518"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -15297,7 +15303,9 @@
       "rail.localRemoveFailed": "29a77f76cc411a4f733e9d8a31e16e7ee108ad5855462085d2a043332b08e2f1",
       "engines.updatedTo": "da0fcccdc519425a9c333fda0838bbdd50d67fb0266194753bd1044abd0ecbb4",
       "homeLine.local": "81ce56630542e178fcb0c50e052e73a959517719e01d48d7747f416b0a7195c4",
-      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012"
+      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012",
+      "lending.action.mcp": "62046ba8ce17fd0c19bebe148856682c2f74937081aeca7ea16fffd3acb591e9",
+      "native.lend.mcpSignIn": "d2031df96ee978eaf3464505c7bf810b4d68303cc4edd8b75c78981f2bb7a518"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -22894,7 +22902,9 @@
       "rail.localRemoveFailed": "29a77f76cc411a4f733e9d8a31e16e7ee108ad5855462085d2a043332b08e2f1",
       "engines.updatedTo": "da0fcccdc519425a9c333fda0838bbdd50d67fb0266194753bd1044abd0ecbb4",
       "homeLine.local": "81ce56630542e178fcb0c50e052e73a959517719e01d48d7747f416b0a7195c4",
-      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012"
+      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012",
+      "lending.action.mcp": "62046ba8ce17fd0c19bebe148856682c2f74937081aeca7ea16fffd3acb591e9",
+      "native.lend.mcpSignIn": "d2031df96ee978eaf3464505c7bf810b4d68303cc4edd8b75c78981f2bb7a518"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -32557,7 +32567,9 @@
       "rail.localRemoveFailed": "29a77f76cc411a4f733e9d8a31e16e7ee108ad5855462085d2a043332b08e2f1",
       "engines.updatedTo": "da0fcccdc519425a9c333fda0838bbdd50d67fb0266194753bd1044abd0ecbb4",
       "homeLine.local": "81ce56630542e178fcb0c50e052e73a959517719e01d48d7747f416b0a7195c4",
-      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012"
+      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012",
+      "lending.action.mcp": "62046ba8ce17fd0c19bebe148856682c2f74937081aeca7ea16fffd3acb591e9",
+      "native.lend.mcpSignIn": "d2031df96ee978eaf3464505c7bf810b4d68303cc4edd8b75c78981f2bb7a518"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -40040,7 +40052,9 @@
       "rail.localRemoveFailed": "29a77f76cc411a4f733e9d8a31e16e7ee108ad5855462085d2a043332b08e2f1",
       "engines.updatedTo": "da0fcccdc519425a9c333fda0838bbdd50d67fb0266194753bd1044abd0ecbb4",
       "homeLine.local": "81ce56630542e178fcb0c50e052e73a959517719e01d48d7747f416b0a7195c4",
-      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012"
+      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012",
+      "lending.action.mcp": "62046ba8ce17fd0c19bebe148856682c2f74937081aeca7ea16fffd3acb591e9",
+      "native.lend.mcpSignIn": "d2031df96ee978eaf3464505c7bf810b4d68303cc4edd8b75c78981f2bb7a518"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -44847,7 +44861,9 @@
       "rail.localRemoveFailed": "29a77f76cc411a4f733e9d8a31e16e7ee108ad5855462085d2a043332b08e2f1",
       "engines.updatedTo": "da0fcccdc519425a9c333fda0838bbdd50d67fb0266194753bd1044abd0ecbb4",
       "homeLine.local": "81ce56630542e178fcb0c50e052e73a959517719e01d48d7747f416b0a7195c4",
-      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012"
+      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012",
+      "lending.action.mcp": "62046ba8ce17fd0c19bebe148856682c2f74937081aeca7ea16fffd3acb591e9",
+      "native.lend.mcpSignIn": "d2031df96ee978eaf3464505c7bf810b4d68303cc4edd8b75c78981f2bb7a518"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -48272,7 +48288,9 @@
       "rail.localRemoveFailed": "29a77f76cc411a4f733e9d8a31e16e7ee108ad5855462085d2a043332b08e2f1",
       "engines.updatedTo": "da0fcccdc519425a9c333fda0838bbdd50d67fb0266194753bd1044abd0ecbb4",
       "homeLine.local": "81ce56630542e178fcb0c50e052e73a959517719e01d48d7747f416b0a7195c4",
-      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012"
+      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012",
+      "lending.action.mcp": "62046ba8ce17fd0c19bebe148856682c2f74937081aeca7ea16fffd3acb591e9",
+      "native.lend.mcpSignIn": "d2031df96ee978eaf3464505c7bf810b4d68303cc4edd8b75c78981f2bb7a518"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -53687,7 +53705,9 @@
       "rail.localRemoveFailed": "29a77f76cc411a4f733e9d8a31e16e7ee108ad5855462085d2a043332b08e2f1",
       "engines.updatedTo": "da0fcccdc519425a9c333fda0838bbdd50d67fb0266194753bd1044abd0ecbb4",
       "homeLine.local": "81ce56630542e178fcb0c50e052e73a959517719e01d48d7747f416b0a7195c4",
-      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012"
+      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012",
+      "lending.action.mcp": "62046ba8ce17fd0c19bebe148856682c2f74937081aeca7ea16fffd3acb591e9",
+      "native.lend.mcpSignIn": "d2031df96ee978eaf3464505c7bf810b4d68303cc4edd8b75c78981f2bb7a518"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -59102,7 +59122,9 @@
       "rail.localRemoveFailed": "29a77f76cc411a4f733e9d8a31e16e7ee108ad5855462085d2a043332b08e2f1",
       "engines.updatedTo": "da0fcccdc519425a9c333fda0838bbdd50d67fb0266194753bd1044abd0ecbb4",
       "homeLine.local": "81ce56630542e178fcb0c50e052e73a959517719e01d48d7747f416b0a7195c4",
-      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012"
+      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012",
+      "lending.action.mcp": "62046ba8ce17fd0c19bebe148856682c2f74937081aeca7ea16fffd3acb591e9",
+      "native.lend.mcpSignIn": "d2031df96ee978eaf3464505c7bf810b4d68303cc4edd8b75c78981f2bb7a518"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -65780,7 +65802,9 @@
       "rail.localRemoveFailed": "29a77f76cc411a4f733e9d8a31e16e7ee108ad5855462085d2a043332b08e2f1",
       "engines.updatedTo": "da0fcccdc519425a9c333fda0838bbdd50d67fb0266194753bd1044abd0ecbb4",
       "homeLine.local": "81ce56630542e178fcb0c50e052e73a959517719e01d48d7747f416b0a7195c4",
-      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012"
+      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012",
+      "lending.action.mcp": "62046ba8ce17fd0c19bebe148856682c2f74937081aeca7ea16fffd3acb591e9",
+      "native.lend.mcpSignIn": "d2031df96ee978eaf3464505c7bf810b4d68303cc4edd8b75c78981f2bb7a518"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -72520,7 +72544,9 @@
       "rail.localRemoveFailed": "29a77f76cc411a4f733e9d8a31e16e7ee108ad5855462085d2a043332b08e2f1",
       "engines.updatedTo": "da0fcccdc519425a9c333fda0838bbdd50d67fb0266194753bd1044abd0ecbb4",
       "homeLine.local": "81ce56630542e178fcb0c50e052e73a959517719e01d48d7747f416b0a7195c4",
-      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012"
+      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012",
+      "lending.action.mcp": "62046ba8ce17fd0c19bebe148856682c2f74937081aeca7ea16fffd3acb591e9",
+      "native.lend.mcpSignIn": "d2031df96ee978eaf3464505c7bf810b4d68303cc4edd8b75c78981f2bb7a518"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -79059,7 +79085,9 @@
       "rail.localRemoveFailed": "29a77f76cc411a4f733e9d8a31e16e7ee108ad5855462085d2a043332b08e2f1",
       "engines.updatedTo": "da0fcccdc519425a9c333fda0838bbdd50d67fb0266194753bd1044abd0ecbb4",
       "homeLine.local": "81ce56630542e178fcb0c50e052e73a959517719e01d48d7747f416b0a7195c4",
-      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012"
+      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012",
+      "lending.action.mcp": "62046ba8ce17fd0c19bebe148856682c2f74937081aeca7ea16fffd3acb591e9",
+      "native.lend.mcpSignIn": "d2031df96ee978eaf3464505c7bf810b4d68303cc4edd8b75c78981f2bb7a518"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -86322,7 +86350,9 @@
       "rail.localRemoveFailed": "29a77f76cc411a4f733e9d8a31e16e7ee108ad5855462085d2a043332b08e2f1",
       "engines.updatedTo": "da0fcccdc519425a9c333fda0838bbdd50d67fb0266194753bd1044abd0ecbb4",
       "homeLine.local": "81ce56630542e178fcb0c50e052e73a959517719e01d48d7747f416b0a7195c4",
-      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012"
+      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012",
+      "lending.action.mcp": "62046ba8ce17fd0c19bebe148856682c2f74937081aeca7ea16fffd3acb591e9",
+      "native.lend.mcpSignIn": "d2031df96ee978eaf3464505c7bf810b4d68303cc4edd8b75c78981f2bb7a518"
     }
   }
 }

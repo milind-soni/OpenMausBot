@@ -56,13 +56,13 @@ test("Files' list follows lending: a folder shared from the Files page becomes t
 
 test("lending for Files lends a folder read only on top of what is lent, and stops lending when it was all", async () => {
   const env = { id: "cloud", origin: "https://omb-u-aaaaaaaaaaaa.fly.dev" };
-  let state = { enabled: true, folders: [folder("Documents")], screen: true, internet: true, chrome: false, terminal: false };
+  let state = { enabled: true, folders: [folder("Documents")], screen: true, internet: true, chrome: false, terminal: false, mcp: true };
   const saved = [], revoked = [];
   const sharing = { cloudState: () => state, saveCloud: async (_env, input) => { saved.push(input); state = { ...state, ...input, enabled: true }; return state; }, revoke: () => { revoked.push(true); state = { ...state, enabled: false }; }, lentToCloud: () => ({ off: true }) };
   const lending = lendingForFiles({ environment: () => env, sharing: () => sharing, validate: async ([entry]) => [{ ...entry, name: entry.path.split("/").at(-1) }] });
   const lent = await lending.lend("/Users/ash/Clients");
   assert.equal(lent.write, false);
-  assert.deepEqual(saved.at(-1), { folders: [state.folders[0], lent], screen: true, internet: true, chrome: false, terminal: false });
+  assert.deepEqual(saved.at(-1), { folders: [state.folders[0], lent], screen: true, internet: true, chrome: false, terminal: false, mcp: true });
   assert.equal(await lending.lend("/Users/ash/Clients").then((again) => again.id), lent.id, "lent already: nothing changes");
   assert.equal(saved.length, 1);
   await lending.unlend(lent.id);

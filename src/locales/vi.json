@@ -5411,5 +5411,7 @@
   "rail.localRemoveAsk": "Xóa “{name}”? Bot, cuộc trò chuyện và tệp của nó trên máy tính này sẽ bị xóa. Thư mục của nó sẽ được chuyển vào Thùng rác trước.",
   "rail.localRemoveAskWin": "Xóa “{name}”? Bot, cuộc trò chuyện và tệp của nó trên máy tính này sẽ bị xóa. Thư mục của nó sẽ được chuyển vào Thùng rác trước.",
   "rail.localRemoveFailed": "Chưa xóa được. Hãy thử lại sau giây lát.",
-  "native.menu.newLocal": "Không gian làm việc mới trên máy tính này…"
+  "native.menu.newLocal": "Không gian làm việc mới trên máy tính này…",
+  "lending.action.mcp": "Đã dùng một máy chủ MCP",
+  "native.lend.mcpSignIn": "Hãy đăng nhập vào My Cloud trước khi cho nó dùng các máy chủ MCP của bạn."
 }

@@ -336,7 +336,7 @@ test("a desktop signed in to its own Cloud lends itself by itself: the internet 
   const [lent] = home.connects;
   assert.deepEqual({ folders: lent.folders, computer: lent.computer, terminal: lent.terminal, internet: lent.internet }, { folders: [], computer: false, terminal: false, internet: true },
     "the internet connection; no terminal, and no screen while computer control can't work here");
-  assert.deepEqual(state.sharing.cloudState(env), { enabled: true, folders: [], screen: false, terminal: false, internet: true, link: "on", chrome: true, chromeLink: "unsupported", busy: false, connected: true });
+  assert.deepEqual(state.sharing.cloudState(env), { enabled: true, folders: [], screen: false, terminal: false, mcp: false, internet: true, link: "on", chrome: true, chromeLink: "unsupported", busy: false, connected: true });
   assert.deepEqual(summaries.at(-1).clouds, ["My Cloud"], "the menu bar names the Cloud");
   const saved = JSON.parse(await readFile(state.file, "utf8")).records[env.id];
   assert.deepEqual({ internet: saved.internet, chrome: saved.chrome, folders: saved.folders, computer: saved.computer, terminal: saved.terminal, cloud: saved.cloud },

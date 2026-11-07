@@ -45,7 +45,7 @@ async function scratch(t) {
   return dir;
 }
 
-function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = false, timeouts = false, long = false } = {}) {
+function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = false, timeouts = false, long = false, link = false, mcpLink = false } = {}) {
   const json = (value, status = 200) => ({ ok: status < 400, status, body: (async function* () { yield Buffer.from(JSON.stringify(value)); })() });
   const state = { paired: true, environmentId: randomUUID(), sessionId: randomUUID(), connects: [], disconnects: 0, disconnectBodies: [], results: [], queue: [], waiting: null };
   const nextJob = () => new Promise(resolve => { state.waiting = resolve; });
@@ -56,7 +56,7 @@ function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = f
   state.fetch = async (url, init) => {
     const route = new URL(url).pathname;
     if (route === "/api/auth/session") return state.paired ? json({ kind: "session", id: state.sessionId, scopes, ...(cloudHome ? { cloudHome: true } : {}) }) : json({ error: "unauthorized" }, 401);
-    if (route === "/.well-known/openmausbot/environment") return json({ environmentId: state.environmentId, capabilities: { sharedComputers: true, ...(details ? { lendingDetails: true } : {}), ...(timeouts ? { commandTimeouts: true } : {}), ...(long ? { longCommands: true } : {}) } });
+    if (route === "/.well-known/openmausbot/environment") return json({ environmentId: state.environmentId, capabilities: { sharedComputers: true, ...(details ? { lendingDetails: true } : {}), ...(timeouts ? { commandTimeouts: true } : {}), ...(long ? { longCommands: true } : {}), ...(link ? { deviceLink: true } : {}), ...(mcpLink ? { lentMcpLink: true } : {}) } });
     const body = init?.body ? JSON.parse(init.body) : {};
     if (route === "/api/shared-computers/connect") { state.connects.push(body); return json({ ok: true }); }
     if (route.endsWith("/poll")) {
@@ -96,6 +96,7 @@ async function lendingFixture(t, options = {}) {
   let maintainerChecks = 0;
   const summaries = [];
   const leases = [];
+  const dials = [];
   const driver = await hangingDriver(dir);
   const sharing = createComputerSharing({
     file: path.join(dir, "profile", "computer-sharing.json"), fetch: home.fetch, environments: () => [options.env ?? env],
@@ -106,10 +107,10 @@ async function lendingFixture(t, options = {}) {
     cloud: asked => (typeof cloud === "function" ? cloud(asked) : cloud), home: path.join(dir, "home"),
     cuaConnection: async () => driver.connection, ...(options.idleSeconds ? { idleSeconds: options.idleSeconds } : {}),
     hostControl: options.hostControl ?? (async id => { leases.push(`acquire:${id}`); return { renew: async () => {}, release: async () => { leases.push(`release:${id}`); } }; }),
-    onChange: summary => summaries.push(summary),
+    onChange: summary => summaries.push(summary), WebSocket: class { constructor(url) { dials.push(url); } close() {} send() {} },
   });
   t.after(() => sharing.close());
-  return { dir, folderPath, home, sharing, driver, summaries, leases, maintainerChecks: () => maintainerChecks, setCloud: next => { cloud = next; } };
+  return { dir, folderPath, home, sharing, driver, summaries, leases, dials, maintainerChecks: () => maintainerChecks, setCloud: next => { cloud = next; } };
 }
 const connected = async (sharing, count = 1, home) => {
   const deadline = Date.now() + 5000;
@@ -171,6 +172,26 @@ test("Your Chrome does not outlive the switch: after an Off nothing reports it a
   sharing.revoke(env);
   assert.equal(sharing.cloudState(env).chrome, false);
   assert.equal((await sharing.saveCloud(env, { folders, screen: false })).chrome, false);
+});
+
+test("the connect body carries mcp only to a Cloud that advertises lentMcpLink, and the link stays open while MCP is lent", async t => {
+  for (const mcpLink of [false, true]) {
+    const { folderPath, home, sharing, dials } = await lendingFixture(t, { home: { link: true, mcpLink } });
+    const folders = [{ id: randomUUID(), path: folderPath, write: false }];
+    await sharing.saveCloud(env, { folders, mcp: true });
+    await connected(sharing, 1, home);
+    assert.equal(sharing.cloudState(env).mcp, true);
+    if (mcpLink) {
+      assert.equal(home.connects[0].mcp, true);
+      await until(() => dials.length === 1, "the link, kept open for MCP alone");
+      await sharing.saveCloud(env, { folders });
+      await connected(sharing, 2, home);
+      assert.equal(home.connects[1].mcp, false);
+    } else assert.equal("mcp" in home.connects[0], false, "an older Cloud refuses fields it does not know");
+    home.push({ action: "list_files", folder_id: home.connects.at(-1).folders[0].id });
+    await until(() => home.results.length === 1, "a job's answer");
+    assert.equal(dials.length, mcpLink ? 1 : 0, "no link for a Cloud that can't use it, or once nothing needs it");
+  }
 });
 
 test("refuses to lend unless the Cloud sign-in is verified for this exact machine, and never to a server that is not a Cloud home", async t => {
@@ -360,7 +381,7 @@ test("Pause is instant: the Cloud is told, running work is cancelled, nothing mo
   home.push({ action: "computer_call", tool_name: "click", arguments: {} });
   await delay(300);
   assert.equal((await readFile(driver.calls, "utf8")).trim(), "drag");
-  assert.deepEqual(summaries.at(-1), { lending: [], clouds: ["My Cloud"], waiting: [], using: [], paused: true, terminal: false, busy: null, screen: null });
+  assert.deepEqual(summaries.at(-1), { lending: [], clouds: ["My Cloud"], waiting: [], using: [], paused: true, terminal: false, mcp: false, busy: null, screen: null });
   assert.equal(sharing.cloudState(env).problem, "paused");
 });
 

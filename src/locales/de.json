@@ -3262,5 +3262,7 @@
   "rail.localRemoveAsk": "„{name}“ entfernen? Seine Bots, Chats und Dateien auf diesem Computer werden gelöscht. Sein Ordner kommt vorher in den Papierkorb.",
   "rail.localRemoveAskWin": "„{name}“ entfernen? Seine Bots, Chats und Dateien auf diesem Computer werden gelöscht. Sein Ordner kommt vorher in den Papierkorb.",
   "rail.localRemoveFailed": "Es wurde nicht entfernt. Versuch es gleich noch einmal.",
-  "native.menu.newLocal": "Neuer Arbeitsbereich auf diesem Computer…"
+  "native.menu.newLocal": "Neuer Arbeitsbereich auf diesem Computer…",
+  "lending.action.mcp": "Einen MCP-Server genutzt",
+  "native.lend.mcpSignIn": "Melde dich bei My Cloud an, bevor du ihm deine MCP-Server zur Verfügung stellst."
 }

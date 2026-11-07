@@ -7593,5 +7593,7 @@
   "email.needsMicrosoft": "Outlook はここでメールのパスワードを受け付けません。Microsoft でサインインしてください。",
   "email.needsAppPassword": "{provider} ではここでアプリ パスワードが必要です。通常のパスワードは使えません。",
   "serverError.mailbox.outgoingFields": "送信サーバーを確認してください: mail.example.com のような名前、1〜65535 のポート、SSL/TLS または STARTTLS。",
-  "native.menu.newLocal": "このコンピューターに新しいワークスペース…"
+  "native.menu.newLocal": "このコンピューターに新しいワークスペース…",
+  "lending.action.mcp": "MCP サーバーを使用",
+  "native.lend.mcpSignIn": "MCP サーバーを My Cloud に貸し出す前に、My Cloud にサインインしてください。"
 }

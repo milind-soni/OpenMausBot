@@ -7259,5 +7259,7 @@
   "rail.localRemoveAsk": "“{name}”을(를) 제거할까요? 이 컴퓨터에 있는 봇, 채팅, 파일이 삭제됩니다. 폴더는 먼저 휴지통으로 옮겨집니다.",
   "rail.localRemoveAskWin": "“{name}”을(를) 제거할까요? 이 컴퓨터에 있는 봇, 채팅, 파일이 삭제됩니다. 폴더는 먼저 휴지통으로 옮겨집니다.",
   "rail.localRemoveFailed": "제거되지 않았습니다. 잠시 후 다시 시도하세요.",
-  "native.menu.newLocal": "이 컴퓨터에 새 작업 공간…"
+  "native.menu.newLocal": "이 컴퓨터에 새 작업 공간…",
+  "lending.action.mcp": "MCP 서버 사용",
+  "native.lend.mcpSignIn": "My Cloud에 MCP 서버를 빌려주기 전에 먼저 My Cloud에 로그인하세요."
 }

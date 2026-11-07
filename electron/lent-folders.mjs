@@ -97,7 +97,7 @@ export function lendingForFiles({ environment, sharing, validate }) {
     const env = environment();
     return env ? { env, sharing: sharing() } : null;
   };
-  const kept = (state) => ({ screen: state.screen === true, internet: state.internet === true, chrome: state.chrome === true, terminal: state.terminal === true });
+  const kept = (state) => ({ screen: state.screen === true, internet: state.internet === true, chrome: state.chrome === true, terminal: state.terminal === true, mcp: state.mcp === true });
   /** What is lent now, the home folder keeping its editing (My Cloud is the person's own). */
   const stillLent = (folders) => existingFolders(folders, (list) => validate(list, { homeEdits: true }));
   return {

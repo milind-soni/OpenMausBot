@@ -9,7 +9,7 @@ import { lentScreenArguments, lentScreenToolListing } from "./lent-screen-tools.
 import { typeOneCharacterAtATime, typesInOneBurst } from "./paced-typing.mjs";
 import { helperMissing } from "./lent-screen-failures.mjs";
 import { commandPath } from "./shell-path.mjs";
-import { LENT_MCP_ACTIONS, lentMcpRefusal } from "./lent-mcp.mjs";
+import { MCP_JOBS_MOVED } from "./lent-mcp.mjs";
 
 /** Reads stay under the 4 MB body that carries a result to the server (base64 of 2 MiB is 2.8 MB); writes stay small. */
 const READ_LIMIT = 2 * 1024 * 1024;
@@ -291,14 +291,11 @@ export function createSharedCua(connection, { platform = process.platform, t } =
   };
 }
 
-export async function executeSharedOperation(grant, operation, signal, cua, lentMcp) {
+export async function executeSharedOperation(grant, operation, signal, cua) {
   signal.throwIfAborted();
   if (grant.enabled !== true) throw new Error("Computer sharing is off");
-  if (LENT_MCP_ACTIONS.has(operation.action)) {
-    const refused = lentMcpRefusal(grant, operation.server);
-    if (refused) throw new Error(refused);
-    return (await lentMcp()).call(operation, signal);
-  }
+  // Security: a job never starts or reaches an MCP server; only the link's door does, once this computer's person allows it.
+  if (operation.action === "mcp_tools" || operation.action === "mcp_call") throw new Error(MCP_JOBS_MOVED);
   if (operation.action === "run_command") {
     if (grant.terminal !== true) throw new Error("Terminal access is not enabled for this server");
     return sharedCommand(operation.command, grant.folders[0]?.path ?? process.env.HOME ?? process.env.USERPROFILE, signal, operation.timeout_seconds);

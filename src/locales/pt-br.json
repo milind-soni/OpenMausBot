@@ -9659,5 +9659,7 @@
   "remote.e2e.anywhere": "Acessível de qualquer lugar · criptografia de ponta a ponta",
   "remote.e2e.connecting": "Conectando ao MausBot Relay…",
   "remote.e2e.local": "Neste Wi-Fi e Tailscale · criptografia de ponta a ponta",
-  "serverError.mailbox.outgoingFields": "Confira o servidor de saída: um nome como mail.example.com, uma porta de 1 a 65535 e SSL/TLS ou STARTTLS."
+  "serverError.mailbox.outgoingFields": "Confira o servidor de saída: um nome como mail.example.com, uma porta de 1 a 65535 e SSL/TLS ou STARTTLS.",
+  "lending.action.mcp": "Usou um servidor MCP",
+  "native.lend.mcpSignIn": "Entre no My Cloud antes de permitir que ele use seus servidores MCP."
 }

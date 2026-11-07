@@ -5912,5 +5912,7 @@
   "rail.localRemoveAsk": "¿Quitar “{name}”? Sus bots, chats y archivos en este equipo se borran. Antes, su carpeta va a la Papelera.",
   "rail.localRemoveAskWin": "¿Quitar “{name}”? Sus bots, chats y archivos en este equipo se borran. Antes, su carpeta va a la Papelera de reciclaje.",
   "rail.localRemoveFailed": "No se quitó. Inténtalo de nuevo en un momento.",
-  "native.menu.newLocal": "Nuevo espacio de trabajo en este equipo…"
+  "native.menu.newLocal": "Nuevo espacio de trabajo en este equipo…",
+  "lending.action.mcp": "Usó un servidor MCP",
+  "native.lend.mcpSignIn": "Inicia sesión en My Cloud antes de prestarle tus servidores MCP."
 }
