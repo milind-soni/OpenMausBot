@@ -1542,6 +1542,52 @@ describe("connector tool inventory", () => {
     }
   });
 
+  it("does not share the connector tool cache across Sessions under one project API key", async () => {
+    const apiKey = "ak_isolation";
+    const configA = { composio: { apiKey, userId: "openmausbot_existing", sessionId: "trs_isolation_a" } } as AppConfig;
+    const configB = { composio: { apiKey, userId: "openmausbot_existing", sessionId: "trs_isolation_b" } } as AppConfig;
+    forgetProjectAuthConfigs();
+    const start = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(start + 1_000);
+    const remoteCalls: Array<{ url: string; method: string }> = [];
+    const realFetch = globalThis.fetch;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input);
+      const session = ["trs_isolation_a", "trs_isolation_b"].find((id) => url.includes(`${id}/mcp`));
+      if (!session) return realFetch(input, init);
+      const payload = JSON.parse(String(init?.body ?? "{}"));
+      remoteCalls.push({ url, method: payload.method ?? "" });
+      if (payload.method !== "tools/list") {
+        return Response.json({ jsonrpc: "2.0", id: payload.id ?? null, result: {} }, {
+          headers: { "mcp-session-id": session.replace("trs_", "mcp_") },
+        });
+      }
+      const tools = session.endsWith("_a")
+        ? [{ name: "GITHUB_CREATE_ISSUE", description: "session A" }]
+        : [{ name: "SLACK_POST_MESSAGE", description: "session B" }];
+      return Response.json({ jsonrpc: "2.0", id: payload.id, result: { tools } });
+    });
+    try {
+      await expect(listConnectorTools(configA)).resolves.toEqual({
+        github: [{ name: "GITHUB_CREATE_ISSUE", description: "session A" }],
+      });
+      await expect(listConnectorTools(configB)).resolves.toEqual({
+        slack: [{ name: "SLACK_POST_MESSAGE", description: "session B" }],
+      });
+      expect(remoteCalls.filter((call) => call.method === "tools/list" && call.url.includes("trs_isolation_b")))
+        .toHaveLength(1);
+      const afterFirstRead = remoteCalls.length;
+      await expect(listConnectorTools(configB)).resolves.toEqual({
+        slack: [{ name: "SLACK_POST_MESSAGE", description: "session B" }],
+      });
+      expect(remoteCalls.slice(afterFirstRead)).toEqual([]);
+    } finally {
+      fetchSpy.mockRestore();
+      now.mockRestore();
+      forgetProjectAuthConfigs();
+    }
+  });
+
   it("shares one in-flight walk between concurrent callers", async () => {
     setManagedBrokerAccess({ url: origin + "/broker", token: "a".repeat(64) });
     brokerMcpTools = [{ name: "GITHUB_CREATE_ISSUE" }, { name: "GITHUB_LIST_REPOS" }];

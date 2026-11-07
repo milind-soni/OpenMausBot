@@ -401,7 +401,8 @@ async function connectorToolsIdentity(cfg: AppConfig, as?: BrokerAccess): Promis
   const broker = as ?? brokerAccess();
   const rawKey = backendFingerprint(
     "connector-identity", apiBase(),
-    [apiKey ?? "", broker?.url ?? "", broker?.token ?? ""].join("\0"),
+    [apiKey ?? "", broker?.url ?? "", broker?.token ?? "",
+      ...(apiKey ? [cfg.composio?.sessionId ?? "", cfg.composio?.userId ?? ""] : [])].join("\0"),
   );
   const cached = connectorIdentityCache.get(rawKey);
   if (cached && Date.now() - cached.at < CONNECTOR_IDENTITY_CACHE_MS) return cached.identity;

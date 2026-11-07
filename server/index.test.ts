@@ -12648,13 +12648,14 @@ describe("harness HTTP API", () => {
     });
   });
 
-  it("accepts percent-encoded OpenConnector account IDs when removing one account", async () => {
+  it("accepts a boundary-length non-BMP OpenConnector alias when removing one account", async () => {
     const configPath = join(home, ".openmausbot", "config.json");
     const originalConfig = readFileSync(configPath, "utf8");
     const tokenPath = join(home, ".openmausbot", "openconnector-route-test-token");
     writeFileSync(tokenPath, "0".repeat(64), { mode: 0o600 });
     const config = JSON.parse(originalConfig);
-    const accountId = encodeURIComponent(`oc:github:${"あ".repeat(40)}.work`);
+    const alias = "\u{1F600}".repeat(64);
+    const accountId = encodeURIComponent(`oc:github:${alias}`);
     const statePath = join(home, ".openmausbot", "openconnector-state.json");
     const disconnectCalls: Array<{ method: string; path: string; authorization: string | undefined }> = [];
     const openConnector = createServer((req, res) => {
@@ -12680,7 +12681,7 @@ describe("harness HTTP API", () => {
       connections: [{
         accountId: decodeURIComponent(accountId),
         service: "github",
-        alias: `${"あ".repeat(40)}.work`,
+        alias,
         status: "connected",
         updatedAt: "2026-01-01T00:00:00.000Z",
       }],
@@ -12691,7 +12692,7 @@ describe("harness HTTP API", () => {
       expect(response.body).toEqual({ removed: 1 });
       expect(disconnectCalls).toEqual([{
         method: "DELETE",
-        path: `/api/connections/github?alias=${encodeURIComponent(`${"あ".repeat(40)}.work`)}`,
+        path: `/api/connections/github?alias=${encodeURIComponent(alias)}`,
         authorization: `Bearer ${"0".repeat(64)}`,
       }]);
     } finally {

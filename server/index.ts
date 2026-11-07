@@ -15153,7 +15153,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const body = await readBody(req); const refused = managedPolicy.appRefusal(m[1]); if (refused) return json(res, 403, { error: refused, code: "managed_policy" });
       const started = await composio.authorizeService(cfg, m[1], body.alias); void routineHolds?.connections("added"); return json(res, 200, started);
     }
-    m = path.match(/^\/api\/connectors\/([\w-]+)\/accounts\/([A-Za-z0-9][A-Za-z0-9_: %.-]{0,383})$/);
+    m = path.match(/^\/api\/connectors\/([\w-]+)\/accounts\/([^/]+)$/);
     if (m && method === "DELETE") { const accountId = decodeConnectedAccountId(m[2]); if (accountId === undefined) return json(res, 400, { error: "invalid connected-account ID" }); const removed = await composio.removeAccount(cfg, m[1], accountId); void routineHolds?.connections("removed"); return json(res, 200, removed); }
     m = path.match(/^\/api\/connectors\/([\w-]+)$/);
     if (m && method === "DELETE") { const removed = await composio.removeService(cfg, m[1]); void routineHolds?.connections("removed"); return json(res, 200, removed); }
