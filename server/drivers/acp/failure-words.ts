@@ -19,8 +19,7 @@ const MCP_START_FAILED = /^(?:[^:\n]*: )?mcp-client\(([^)\n]+)\): initial connec
 function mcpStartFailure(message: string, provider: string) {
   const server = MCP_START_FAILED.exec(message)?.[1];
   if (!server) return null;
-  const what = server === "composio" ? "Connected apps" : `The "${server}" MCP server`;
-  return { message: `${what} couldn't be set up, so ${provider} couldn't start this reply. Try again, or switch this bot to another AI.` };
+  return server === "composio" ? noticeFailure("chat.notice.acpMcpAppsFailed", { provider }) : noticeFailure("chat.notice.acpMcpServerFailed", { server, provider });
 }
 
 export function acpRuntimeFailure(error: unknown, provider: string, account?: { message?: string; text?: ServerText }) {

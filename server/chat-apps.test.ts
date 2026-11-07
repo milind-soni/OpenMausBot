@@ -672,7 +672,7 @@ describe("createChatApps", () => {
 });
 
 describe("a live folder page", () => {
-  function liveSetup(maxBytes?: number, paused?: () => boolean) {
+  function liveSetup(maxBytes?: number, paused?: () => boolean, liveRoots?: (threadId: string, botId: string | undefined) => readonly string[] | null) {
     const fake = fakeStore();
     const base = mkdtempSync(join(tmpdir(), "omb-live-pages-"));
     const dash = join(base, "dash");
@@ -681,7 +681,7 @@ describe("a live folder page", () => {
     writeFileSync(join(dash, "app.js"), "draw()");
     writeFileSync(join(dash, "data.csv"), "day,sales\n1,10\n");
     const live = vi.fn((): Array<{ threadId: string; messageId: string }> => []);
-    const apps = createChatApps({ store: fake.store, dataDir: mkdtempSync(join(tmpdir(), "omb-chat-apps-")), sweeps: false, liveRows: live, ...(maxBytes ? { maxBytes } : {}), ...(paused ? { paused } : {}) });
+    const apps = createChatApps({ store: fake.store, dataDir: mkdtempSync(join(tmpdir(), "omb-chat-apps-")), sweeps: false, liveRows: live, ...(maxBytes ? { maxBytes } : {}), ...(paused ? { paused } : {}), ...(liveRoots ? { liveRoots } : {}) });
     opened.push(apps);
     const folders = async () => ({ roots: [base], vmWorkspace: null });
     const show = (input: Record<string, unknown>) => apps.createAppCard({ bot: SCOUT, threadId: THREAD, input: { tool: "show_html", title: "Dash", ...input }, folders });
@@ -715,6 +715,44 @@ describe("a live folder page", () => {
     expect(row("m2").app).toMatchObject({ rev: 0 });
     expect(await apps.refreshLive()).toBe(0);
     expect(row("m1").app!.rev).toBe(1);
+  });
+
+  it("stops being live once its bot can no longer read the folder, or is gone", async () => {
+    let roots: readonly string[] | null = null;
+    const { apps, base, dash, show, row } = liveSetup(undefined, undefined, () => roots);
+    roots = [base];
+    await show({ path: "dash", live: true });
+    await apps.refreshLive();
+    writeFileSync(join(dash, "data.csv"), "day,sales\n1,12\n");
+    expect(await apps.refreshLive()).toBe(1);
+    // The conversation's working folder moved elsewhere: the card keeps the page it shows, and is no longer live.
+    roots = [mkdtempSync(join(tmpdir(), "omb-live-elsewhere-"))];
+    writeFileSync(join(dash, "data.csv"), "day,sales\n1,13\n");
+    expect(await apps.refreshLive()).toBe(0);
+    expect(row("m1").app).toMatchObject({ rev: 1 });
+    expect(row("m1").app).not.toHaveProperty("live");
+    // A bot that is gone: same.
+    roots = [base];
+    await show({ path: "dash", live: true });
+    await apps.refreshLive();
+    roots = null;
+    writeFileSync(join(dash, "data.csv"), "day,sales\n1,14\n");
+    expect(await apps.refreshLive()).toBe(0);
+    expect(row("m2").app).not.toHaveProperty("live");
+  });
+
+  it("lists the store's live pages once, after a restart, not on every refresh", async () => {
+    const { apps, live } = liveSetup();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      for (let minute = 0; minute < 3; minute++) {
+        await apps.refreshLive();
+        vi.setSystemTime(Date.now() + 61_000);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(live).toHaveBeenCalledTimes(1);
   });
 
   it("can be turned off, and a folder that is gone leaves the page as it was", async () => {

@@ -29,13 +29,14 @@ function writeSite(folder: string, files: Record<string, string> = SITE) {
 }
 const signIn = () => applyIncludedPagesMessage({ type: "openmausbot:included-pages", access: { url: FAKE_TOKEN_URL, token: FAKE_DESKTOP_TOKEN } });
 
-function setup(options: { home?: boolean; quota?: number; selfHosted?: boolean } = {}) {
+function setup(options: { home?: boolean; quota?: number; selfHosted?: boolean; liveRoots?: (botId: string, threadId: string) => readonly string[] | null; paused?: () => boolean } = {}) {
   const service = fakePagesService({ quota: options.quota });
   const work = join(dir, "work"), data = join(dir, "data");
   mkdirSync(work, { recursive: true });
   const cards: Array<{ threadId: string; id: string; text: string; card: PublishedPageCard }> = [];
   let ids = 0;
   const pages = createPublishedPages({ dataDir: data, cloudHome: options.home ? FAKE_HOME : null, selfHosted: options.selfHosted, fetch: (input, init) => service.fetch(input, init),
+    ...(options.liveRoots ? { liveRoots: options.liveRoots } : {}), ...(options.paused ? { paused: options.paused } : {}),
     patch: (threadId, messageId, text, card) => { const shown = cards.find((each) => each.id === messageId && each.threadId === threadId); if (shown) Object.assign(shown, { text, card }); } });
   const post = (threadId: string) => (text: string, card: PublishedPageCard) => { const id = `m${++ids}`; cards.push({ threadId, id, text, card }); return id; };
   const publish = (input: { path: string; title?: string; pageId?: string; botId?: string; threadId?: string }) => pages.publisher.publish({
@@ -458,6 +459,40 @@ describe("a live published page", () => {
     await publishLive(f, false);
     expect(f.pages.store.get(page!)).not.toHaveProperty("live");
     expect(f.service.pages.get(page!)!.files.get("index.html")).toBe(SITE["index.html"]);
+  });
+
+  it("stops being published again once its bot can no longer read the folder, and keeps its link", async () => {
+    let roots: readonly string[] | null = null;
+    const asked: string[] = [];
+    const f = setup({ liveRoots: (botId, threadId) => { asked.push(`${botId} ${threadId}`); return roots; } });
+    roots = [f.work];
+    signIn();
+    const site = writeSite(join(f.work, "site"));
+    await publishLive(f, true);
+    const [page] = [...f.service.pages.keys()];
+    writeFileSync(join(site, "style.css"), "h1{color:blue}");
+    expect(await f.pages.publisher.refreshLive(Date.now() + 61_000)).toBe(1);
+    expect(asked).toContain("bot-1 thread-1");
+    roots = null;
+    writeFileSync(join(site, "style.css"), "h1{color:green}");
+    expect(await f.pages.publisher.refreshLive(Date.now() + 130_000)).toBe(0);
+    expect(f.pages.store.get(page!)).not.toHaveProperty("live");
+    expect(f.pages.store.get(page!)).toMatchObject({ url: expect.any(String) });
+    expect(f.service.pages.get(page!)!.files.get("style.css")).toBe("h1{color:blue}");
+    expect(f.service.minted.map((call) => call.action)).toEqual(["create", "update"]);
+  });
+
+  it("waits while the workspace is backed up, restored or moved", async () => {
+    let paused = false;
+    const f = setup({ paused: () => paused });
+    signIn();
+    const site = writeSite(join(f.work, "site"));
+    await publishLive(f, true);
+    writeFileSync(join(site, "style.css"), "h1{color:blue}");
+    paused = true;
+    expect(await f.pages.publisher.refreshLive(Date.now() + 61_000)).toBe(0);
+    paused = false;
+    expect(await f.pages.publisher.refreshLive(Date.now() + 61_000)).toBe(1);
   });
 
   it("waits ten minutes before trying a folder that can't be published as it is", async () => {
