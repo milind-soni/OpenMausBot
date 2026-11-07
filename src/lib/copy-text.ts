@@ -33,35 +33,35 @@ function writeWeb(text: string): Promise<boolean> {
  * select-then-copy path works. No-op outside a real DOM.
  */
 function writeLegacy(text: string): boolean {
-  if (typeof document === "undefined" || !document.body) return false;
+  if (typeof document === "undefined" || !document.body || typeof document.execCommand !== "function") return false;
+  const active = document.activeElement as HTMLElement | null;
   const area = document.createElement("textarea");
   area.value = text;
   area.setAttribute("readonly", "");
   area.style.position = "fixed";
   area.style.left = "-9999px";
-  document.body.appendChild(area);
-  area.select();
-  area.setSelectionRange(0, text.length);
-  let ok = false;
   try {
-    ok = document.execCommand("copy");
+    document.body.appendChild(area);
+    area.select();
+    area.setSelectionRange(0, text.length);
+    return document.execCommand("copy");
   } catch {
-    ok = false;
+    return false;
+  } finally {
+    area.remove();
+    active?.focus?.({ preventScroll: true });
   }
-  area.remove();
-  return ok;
 }
 
-/** Web Clipboard API, then legacy execCommand (insecure-context mobile), then the desktop bridge. Never throws. */
+/** Web Clipboard API, then the desktop bridge, then legacy execCommand (insecure-context mobile). Never throws. */
 export async function copyText(text: string): Promise<CopyResult> {
   if (!text.trim()) return "empty";
   if (await writeWeb(text)) return "copied";
-  if (writeLegacy(text)) return "copied";
   try {
     if (typeof window !== "undefined" && (await window.ogb?.copyText?.(text)) === true) return "copied";
   } catch {
   }
-  return "failed";
+  return writeLegacy(text) ? "copied" : "failed";
 }
 
 interface CopyFeedbackOptions {
