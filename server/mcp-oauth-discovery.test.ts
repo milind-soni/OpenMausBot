@@ -181,6 +181,18 @@ describe("isAllowedDiscoveryUrl", () => {
     expect(isAllowedDiscoveryUrl("https://auth.example.com/prm", "https://mcp.example.com")).toBe(true);
     expect(isAllowedDiscoveryUrl("https://user:pw@auth.example.com/prm", "https://mcp.example.com")).toBe(false);
   });
+
+  it("keeps https on the server's own address, lets a private server name another private host, never loopback", () => {
+    // Plain http on the remote server's own origin is refused, as for a configured URL.
+    expect(isAllowedDiscoveryUrl("http://mcp.example.com/token", "http://mcp.example.com")).toBe(false);
+    // A LAN or VPN server may use a sign-in server on another private host...
+    expect(isAllowedDiscoveryUrl("https://10.0.0.6/token", "https://10.0.0.5")).toBe(true);
+    // ...but never this machine, however it is written.
+    expect(isAllowedDiscoveryUrl("https://127.0.0.1/x", "https://10.0.0.5")).toBe(false);
+    expect(isAllowedDiscoveryUrl("https://0.0.0.0/x", "https://10.0.0.5")).toBe(false);
+    expect(isAllowedDiscoveryUrl("https://[::ffff:127.0.0.1]/x", "https://10.0.0.5")).toBe(false);
+    expect(isAllowedDiscoveryUrl("https://[::]/x", "https://10.0.0.5")).toBe(false);
+  });
 });
 
 describe("isAllowedAuthUrl", () => {

@@ -57,7 +57,8 @@ export function isAllowedDiscoveryUrl(value: string, trustedOrigin: string): boo
   }
   if (url.username || url.password) return false;
   if (url.protocol !== "https:" && url.protocol !== "http:") return false;
-  if (url.origin === trustedOrigin) return true;
+  // The owner's own server keeps the configured-URL rule: https, or http on loopback only.
+  if (url.origin === trustedOrigin) return isAllowedAuthUrl(value);
   let trusted: URL;
   try {
     trusted = new URL(trustedOrigin);
@@ -66,8 +67,14 @@ export function isAllowedDiscoveryUrl(value: string, trustedOrigin: string): boo
   }
   // A local MCP server may name a sign-in server on another loopback port: both are code the owner installed here.
   if (isLoopbackName(trusted.hostname) && isLoopbackName(url.hostname)) return true;
-  if (url.protocol !== "https:") return false;
-  const host = url.hostname.replace(/^\[|\]$/gu, "").replace(/\.$/u, "").toLowerCase();
+  if (url.protocol !== "https:" || isLoopbackName(url.hostname)) return false;
+  // A server the owner reaches on a private network (LAN, VPN, tailnet) may name a sign-in server on another private host;
+  // a public server may only name public ones.
+  return isPublicHost(trusted.hostname) ? isPublicHost(url.hostname) : true;
+}
+
+function isPublicHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/gu, "").replace(/\.$/u, "").toLowerCase();
   if (isIP(host)) return isPublicDomainAddress(host);
   return host.includes(".") && !LOCAL_SUFFIX.test(host);
 }
@@ -75,8 +82,11 @@ export function isAllowedDiscoveryUrl(value: string, trustedOrigin: string): boo
 function isLoopbackName(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/gu, "").replace(/\.$/u, "").toLowerCase();
   if (host === "localhost") return true;
-  if (isIP(host) === 4) return host.startsWith("127.");
-  return isIP(host) === 6 && (host === "::1" || host === "0:0:0:0:0:0:0:1");
+  if (isIP(host) === 4) return host.startsWith("127.") || host === "0.0.0.0";
+  if (isIP(host) !== 6) return false;
+  const mapped = /^::ffff:(.+)$/u.exec(host)?.[1];
+  if (mapped) return mapped.startsWith("127.") || mapped === "0.0.0.0" || /^7f[0-9a-f]{2}:/u.test(mapped) || mapped === "0:0";
+  return host === "::1" || host === "0:0:0:0:0:0:0:1" || host === "::" || host === "0:0:0:0:0:0:0:0";
 }
 
 export function resourceMetadataUrl(wwwAuthenticate: string | null): string | null {
