@@ -423,6 +423,19 @@ describe("Chat MCP session", () => {
     warn.mockRestore();
   });
 
+  it("keeps a configured server that shares the own-apps name alive when the built-in own-apps mount fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ready = fixture();
+    const missing = { command: join(ready.dir, "does-not-exist"), args: [], env: {} };
+    const session = await mountChatTools({ composioOwn: missing, custom: { [OWN_APPS_SERVER]: ready.server } }, ready.controller.signal);
+    sessions.push(session);
+    expect(session.skipped.map((entry) => entry.server)).toEqual([OWN_APPS_SERVER]);
+    expect(alive(ready.read().pid)).toBe(true);
+    expect(session.definitions).toHaveLength(1);
+    await expect(session.execute(session.definitions[0]!.function.name, { value: "still works" }, ready.controller.signal)).resolves.toMatchObject({ ok: true });
+    warn.mockRestore();
+  });
+
   it("fails setup when the Local VM lists no tools, but not when the owner's selection leaves none", async () => {
     const empty = fixture(`if(message.method === "tools/list") { reply(message,{tools:[]}); continue; }`);
     await expect(empty.mount(true, true)).rejects.toThrow("The Local VM listed no tools");
