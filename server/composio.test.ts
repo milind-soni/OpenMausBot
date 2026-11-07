@@ -32,6 +32,7 @@ import {
 } from "./connector-advertisement.ts";
 import type { ConnectorToolGrant } from "../shared/wire.ts";
 import { CURATED_CONNECTOR_SLUGS } from "../shared/connector-curated.ts";
+import { EMAIL_READ_TOOL_NAMES, EMAIL_SLUG } from "../shared/email.ts";
 
 let api: Server;
 it("lists exactly the curated apps product analytics may name, in the same order", () => {
@@ -1009,6 +1010,18 @@ describe.sequential("Composio Sessions", () => {
     await expect(validateConnectorGrants(cfg, { gmail: { tools: ["SLACK_POST_MESSAGE"] } })).resolves.toMatch(/another service: SLACK_POST_MESSAGE/);
     // gmail is connected (no-auth toolkit) but absent from the live catalog.
     await expect(validateConnectorGrants(cfg, { gmail: { tools: ["GMAIL_SEND_EMAIL"] } })).resolves.toMatch(/missing from the connected-apps catalog: gmail/);
+  });
+
+  it("accepts the built-in Email app's grant, which is never in the connected-apps inventory", async () => {
+    const cfg: AppConfig = {
+      composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
+    };
+    const email = { tools: [...EMAIL_READ_TOOL_NAMES] };
+    await expect(validateConnectorGrants(cfg, { [EMAIL_SLUG]: email })).resolves.toBeNull();
+    await expect(validateConnectorGrants(cfg, { [EMAIL_SLUG]: { tools: "*" }, github: { tools: "*" } })).resolves.toBeNull();
+    // Other services are still checked next to it.
+    await expect(validateConnectorGrants(cfg, { [EMAIL_SLUG]: email, slack: { tools: ["SLACK_POST_MESSAGE"] } })).resolves.toMatch(/not connected: slack$/);
+    await expect(validateConnectorGrants(cfg, { [EMAIL_SLUG]: { tools: ["GITHUB_CREATE_ISSUE"] } })).resolves.toMatch(/another service: GITHUB_CREATE_ISSUE/);
   });
 
   it("never blocks a grant patch when the connection inventory is unreachable, but still checks prefixes", async () => {

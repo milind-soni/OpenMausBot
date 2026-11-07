@@ -28,6 +28,7 @@ import {
   serializeConnectorServiceSlugs,
 } from "./connector-advertisement.ts";
 import { serviceSlugFor, serviceSlugForCandidates } from "./connector-verdict.ts";
+import { EMAIL_SLUG } from "../shared/email.ts";
 import { parseMcpResponse, withToolsListFallback } from "./connector-tools-list.ts";
 import { brokerAccess, type BrokerAccess } from "./composio-broker-access.ts";
 export { applyManagedBrokerMessage, brokerAccess, setManagedBrokerAccess, type BrokerAccess } from "./composio-broker-access.ts";
@@ -526,14 +527,16 @@ export async function validateConnectorGrants(
     }
   }
   if (!connected) return null;
-  const unconnected = Object.keys(grants).filter((slug) => !connected[slug]?.connected);
+  // The built-in Email app is never in the connected-apps inventory or catalog; its own tools check its grant when called.
+  const services = Object.keys(grants).filter((slug) => slug !== EMAIL_SLUG);
+  const unconnected = services.filter((slug) => !connected[slug]?.connected);
   if (unconnected.length) {
     return `connectorTools names services that are not connected: ${unconnected.join(", ")}`;
   }
   const catalog = await listToolkits(cfg);
   if (catalog.source !== "api" || !catalog.pagination?.complete) return null;
   const known = new Set(catalog.cards.map((card) => card.slug.toLowerCase()));
-  const unknown = Object.keys(grants).filter((slug) => !known.has(slug));
+  const unknown = services.filter((slug) => !known.has(slug));
   if (unknown.length) {
     return `connectorTools names services missing from the connected-apps catalog: ${unknown.join(", ")}`;
   }
