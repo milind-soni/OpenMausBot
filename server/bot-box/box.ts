@@ -124,11 +124,13 @@ export class BoxRunner {
     if (!broker || plan.net !== "isolated") return { env, token: null, release: () => {}, unbrokered: [] };
     const ids = request.cwd ? taskWorkspaceIds(request.cwd, this.options.setup.dataDir) : null;
     // The token is minted first (its value goes in the environment), then granted exactly what the rewrite took out.
-    const minted = broker.mintForProcess({ botId: plan.botId, threadId: ids?.threadId ?? null, grants: {} });
+    // A process the bot's conversations share belongs to none of them.
+    const threadId = request.botThreads ? null : ids?.threadId ?? null;
+    const minted = broker.mintForProcess({ botId: plan.botId, threadId, grants: {} });
     const rewrite = brokerRewrite(env, minted.token, broker.port);
     broker.revoke(minted.token);
     if (!Object.keys(rewrite.grants).length) return { env, token: null, release: () => {}, unbrokered: rewrite.unbrokered };
-    const granted = broker.mintForProcess({ botId: plan.botId, threadId: ids?.threadId ?? null, grants: rewrite.grants });
+    const granted = broker.mintForProcess({ botId: plan.botId, threadId, grants: rewrite.grants });
     const again = brokerRewrite(env, granted.token, broker.port);
     return { env: again.env, token: granted.token, release: () => broker.revoke(granted.token), unbrokered: again.unbrokered };
   }
