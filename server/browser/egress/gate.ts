@@ -122,27 +122,38 @@ function readRequest(data: Buffer) {
  * By hand, because autoSelectFamily with a custom lookup never falls back: on Node 24, a list that mixes families
  * where the first cannot route (a host with no IPv6 route is the usual case) leaves the socket stalled until it
  * times out, with the IPv4 answer never tried. */
-function connectChecked(port: number, addresses: readonly ResolvedAddress[], staggerMs = 250): Promise<Socket> {
+function connectChecked(port: number, addresses: readonly ResolvedAddress[], track: (socket: Socket) => Socket, client: Socket, staggerMs = 250): Promise<Socket> {
   return new Promise((resolve, reject) => {
     const inFlight = new Set<Socket>();
     let next = 0;
     let settled = false;
+    // The gate closing or the browser leaving drops every attempt still dialing, so none waits out the OS timeout.
+    const giveUp = () => {
+      if (settled) return;
+      settled = true;
+      for (const attempt of inFlight) attempt.destroy();
+      reject(new Error("client left"));
+    };
+    client.once("close", giveUp);
+    const settle = () => { settled = true; client.off("close", giveUp); };
     const startNext = (): void => {
       if (settled || next >= addresses.length) return;
       const { address, family } = addresses[next++]!;
-      const attempt = connect({ host: address, port, family });
+      const attempt = track(connect({ host: address, port, family }));
       inFlight.add(attempt);
       attempt.once("connect", () => {
         if (settled) return void attempt.destroy();
-        settled = true;
+        settle();
         for (const other of inFlight) if (other !== attempt) other.destroy();
         resolve(attempt);
       });
       attempt.once("error", (error: NodeJS.ErrnoException) => {
         inFlight.delete(attempt);
         if (settled) return;
-        if (inFlight.size === 0 && next >= addresses.length) {
-          settled = true;
+        // A quick failure moves straight on to the next address instead of waiting out the stagger.
+        if (next < addresses.length) return startNext();
+        if (inFlight.size === 0) {
+          settle();
           reject(error);
         }
       });
@@ -223,8 +234,9 @@ export function openGate(options: GateOptions): Promise<EgressGate> {
         // attempts go to exactly the checked addresses, so a name that now resolves elsewhere changes nothing.
         let upstream: Socket;
         try {
-          upstream = track(await connectChecked(target.port, addresses));
+          upstream = await connectChecked(target.port, addresses, track, client);
         } catch {
+          if (client.destroyed) return;
           return refuse(client, CONNECTION_REFUSED);
         }
         if (client.destroyed) return void upstream.destroy();

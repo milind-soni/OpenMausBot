@@ -213,12 +213,12 @@ describe("egress gate", () => {
     const reachable = NodeNet.createServer((socket) => socket.end("reached"));
     await new Promise<void>((resolve) => reachable.listen(0, "127.0.0.1", resolve));
     const reachablePort = (reachable.address() as NodeNet.AddressInfo).port;
-    // A mixed list is what a public name usually resolves to. The first address is a public IPv6 this host cannot
-    // route (a machine with no IPv6 route leaves the old code stalled until the socket times out); the second is
-    // the local listener the gate must reach anyway. The name is this machine's own, as in the test above, so the
-    // loopback answer is a place to connect to, not a rebinding.
+    // A mixed list is what a public name usually resolves to. The first address fails (nothing listens on ::1 at this
+    // port, or the host has no IPv6 at all), with no network needed; the second is the local listener the gate must
+    // reach anyway. The name is this machine's own, as in the test above, so the loopback answer is a place to
+    // connect to, not a rebinding.
     const resolve = async () => [
-      { address: "2a00:1450:4009:c0f::54", family: 6 },
+      { address: "::1", family: 6 },
       { address: "127.0.0.1", family: 4 },
     ];
     const { port } = await gate({ ...serverRules, host: "desktop" }, [], resolve);
@@ -231,9 +231,7 @@ describe("egress gate", () => {
     socket.destroy();
     await new Promise<void>((resolve) => reachable.close(() => resolve()));
     expect(code).toBe(0);
-    // Without a route to the first address the second answers; with one, the first does. Either way the gate
-    // connected instead of stalling.
-    expect(answer.length === 0 || answer.toString() === "reached").toBe(true);
+    expect(answer.toString()).toBe("reached");
   });
 
   it("fails instead of crashing when it cannot listen", async () => {
