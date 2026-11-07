@@ -234,11 +234,62 @@ package-owned path to `root:root 0755` automatically.
 
 The packaged runtime remains outside ASAR for deterministic provenance and validation. In packaged builds neither a
 `CUA_DRIVER_PATH` value nor an ambient PATH candidate can replace it; on Wayland neither can bypass the safety gate.
+The one exception is Omarchy's package-owned `/usr/bin/cua-driver`, described in
+[Omarchy (Hyprland, experimental)](#omarchy-hyprland-experimental).
 
 The Xorg runtime uses private sockets, standard permission mode, per-action OpenMausBot approvals,
 telemetry/update-check suppression, strict driver identity, overlay-free startup, and lifecycle cleanup tests. Those
 defenses remain necessary, but none substitutes for the real-seat acceptance evidence required to enable Wayland. Linux
 **Auto** never routes to the user's desktop, and no Cloud or Local VM approval can authorize it.
+
+## Omarchy (Hyprland, experimental)
+
+[Omarchy](https://omarchy.org) is Arch Linux with the Hyprland compositor. **This computer** works there only with
+Cua's Hyprland plugin turned on. The plugin gives bots two seats of their own inside Hyprland (`Cua-Agent` and
+`Cua-Agent-2`), so the compositor delivers their input to the target window without touching your pointer or
+keyboard. Every other Wayland desktop (GNOME, KDE, Sway, or Hyprland without the plugin) keeps the safety gate above.
+Support is experimental, like the plugin itself, which Omarchy leaves off by default and outside its normal installer.
+
+1. Install and start the AppImage as in [Arch Linux and EndeavourOS](#arch-linux-and-endeavouros-appimage).
+2. Install Omarchy's Cua packages, `cua-driver-bin` and `cua-hyprland-plugin`, and turn the plugin on as
+   [Cua's Omarchy guide](https://cua.ai/docs/cua-sdk/guides/omarchy) describes. In Omarchy's Lua configuration that is
+   `hl.config({plugin = {cua = {enabled = true}}})`; in a legacy configuration, `plugin:cua:enabled = true`. Then run
+   `hyprctl reload`.
+3. Check it: `hyprctl -j cua:status` should report `"state":"input_v3_candidate"`, `"configured":true`, and an input
+   transport that is ready.
+4. In OpenMausBot, open **Local control**, choose **Enable local control (Beta)**, wait for **Ready**, then assign a bot
+   to **This computer**. Until the plugin is on, the card says how to turn it on, and **Try again** checks again.
+
+How OpenMausBot decides:
+
+- It treats the session as Hyprland only when `HYPRLAND_INSTANCE_SIGNATURE` is set and `XDG_CURRENT_DESKTOP` (or
+  `XDG_SESSION_DESKTOP`) names Hyprland.
+- It reads the plugin's status with the system `/usr/bin/hyprctl -j cua:status` (never a `hyprctl` from `PATH`), with a
+  two-second limit, and treats anything other than a loaded, configured input build with a ready transport and a
+  matching Hyprland ABI as off. It checks again every time local control starts, so a plugin left stale by a Hyprland
+  update turns local control off instead of failing halfway.
+- It prefers Omarchy's own driver. The plugin is built against the exact system Hyprland and ships beside the
+  `cua-driver-bin` package, so that pair matches. OpenMausBot never bundles the plugin, because plugins break on
+  Hyprland updates. This is the one exception to "only the bundled driver runs", and it is narrow:
+  - the driver must be the fixed path `/usr/bin/cua-driver`, owned by root and not writable by anyone else;
+  - `pacman -Qo` must say `cua-driver-bin` owns it (and owns its target, if it is a symlink);
+  - the package version must name the binary that answers `--version`, in the bundled driver's minor line at or above
+    the bundled patch release (0.41.3 or a later 0.41.x).
+
+  That is the same root-owned package trust you already give the compositor. A user-installed copy or a `PATH`
+  lookup never qualifies. If any check fails, OpenMausBot uses its bundled driver instead, started with
+  `CUA_DRIVER_RS_ENABLE_WAYLAND=1`.
+
+What works, and what doesn't:
+
+- Native Wayland apps that bind the agent seats (GTK 3 and 4, Qt 6) take background clicks, typing, scrolls and drags.
+  Qt 6 apps refuse background keys.
+- Chromium, Chrome and Electron apps bind only your seat, so the driver refuses background input to them. Bots are told
+  to open web pages in their own browser instead.
+- XWayland windows, Unicode and IME input, multiple keyboard layouts, and modified pointer gestures are outside
+  the plugin's input contract.
+- A foreground action you approve moves your keyboard focus and pointer, and does not put them back.
+- Every action still goes through OpenMausBot's approval flow, the same as on Xorg.
 
 ## Validate a package change
 
