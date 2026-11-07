@@ -4736,6 +4736,8 @@
   "routines.logsFor": "Registros de execução de {name}",
   "routines.logsHint": "Execuções recentes salvas de todos os seus bots. Abra uma execução para ver o resultado, o erro e a conversa correspondente.",
   "routines.markAllSeen": "Marcar tudo como lido",
+  "automations.unseenRuns.one": "1 execução com falha ou perdida não lida",
+  "automations.unseenRuns.many": "{count} execuções com falha ou perdidas não lidas",
   "routines.unread": "Falha não vista",
   "routines.activeSchedule": "Ativa",
   "routines.pausedSchedule": "Pausada",
