@@ -50,7 +50,7 @@ export function validLentMcpServer(server) {
 
 /** What the person allows when they allow a command server: its command, args and env names, so a changed key needs no
  * new Allow. Security: no env value is hashed into what crosses the link. */
-export const commandFingerprint = ({ command, args, env }) => createHash("sha256").update(JSON.stringify([command, args, Object.keys(env).sort()])).digest("hex");
+export const commandFingerprint = ({ command, args, env }) => createHash("sha256").update(JSON.stringify([command, args, Object.entries(env).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))])).digest("hex");
 
 export function isLoopbackAddress(url) {
   try {
@@ -108,10 +108,11 @@ export function windowsLaunch(command, args, env, exists = fs.existsSync) {
   return { file: env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", `"${line}"`], verbatim: true };
 }
 
-/** Ends a child and everything it started: the process group, or taskkill's whole tree on Windows. */
 export function killTree(child, { platform = process.platform, spawn: start = spawn } = {}) {
   if (!child.pid) return;
   if (platform === "win32") {
+    // Security: once a child has exited Windows may give its PID to another process, and taskkill /T /F would end that tree.
+    if (child.exitCode !== null || child.signalCode !== null) return;
     const killer = start("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
     killer.on("error", () => child.kill());
   } else {

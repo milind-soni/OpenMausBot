@@ -85,9 +85,9 @@ test("a command target is spawned once approved; the prompt shows the command on
   assert.deepEqual(await door.open(frame("echo", entry)), { refused: "needs-approval" });
   assert.equal(spawned.length, 0);
   assert.deepEqual(fetched, ["echo"]);
-  assert.deepEqual(asks.map(({ name, target }) => ({ name, target })), [{ name: "echo", target: { kind: "command", command: shownCommand(entry.command, entry.args) } }]);
+  assert.deepEqual(asks.map(({ name, target }) => ({ name, target })), [{ name: "echo", target: { kind: "command", command: shownCommand(entry.command, entry.args), env: ["MCP_TEST_FLAG", "SECRET_KEY"] } }]);
   const shown = JSON.stringify(asks[0].target);
-  assert.ok(!shown.includes("hunter2") && !shown.includes("env-secret-value") && !shown.includes("SECRET_KEY"), "no secret, no env");
+  assert.ok(!shown.includes("hunter2") && !shown.includes("env-secret-value"), "no secret, no env");
   asks[0].answer(true);
   await answered();
   assert.deepEqual(saved(), { echo: approved(entry) });
@@ -98,7 +98,6 @@ test("a command target is spawned once approved; the prompt shows the command on
   await until(() => got.text.includes("ready saved-env\n"), "the child's first line");
   socket.write("{\"jsonrpc\":\"2.0\",\"id\":1}\n");
   await until(() => got.text.includes("{\"jsonrpc\":\"2.0\",\"id\":1}\n"), "the echoed line");
-  await delay(100); // stderr written before the echo would have arrived by now
   assert.equal(got.text, "ready saved-env\n{\"jsonrpc\":\"2.0\",\"id\":1}\n");
 });
 
@@ -146,7 +145,7 @@ test("a changed definition under an old approval asks again and runs nothing", a
   const changed = { ...old, args: [...old.args, "--more"] };
   const { door, asks, spawned } = await setup(t, { echo: changed }, { saved: { echo: approved(old) } });
   assert.deepEqual(await door.open(frame("echo", changed)), { refused: "needs-approval" });
-  assert.deepEqual(asks.map(({ name, target }) => ({ name, target })), [{ name: "echo", target: { kind: "command", command: shownCommand(changed.command, changed.args) } }]);
+  assert.deepEqual(asks.map(({ name, target }) => ({ name, target })), [{ name: "echo", target: { kind: "command", command: shownCommand(changed.command, changed.args), env: ["MCP_TEST_FLAG"] } }]);
   assert.equal(spawned.length, 0);
   asks[0].answer(false);
   await answered();
@@ -159,6 +158,15 @@ test("a changed definition under an old approval asks again and runs nothing", a
   assert.deepEqual(await second.door.open({ name: "gone", fingerprint: commandFingerprint(old) }), { failed: "no-server" }, "no definition");
 });
 
+test("a changed env value under an old approval asks again and spawns nothing", async (t) => {
+  const old = echoEntry();
+  const changed = { ...old, env: { MCP_TEST_FLAG: "other-value" } };
+  const { door, asks, spawned } = await setup(t, { echo: changed }, { saved: { echo: approved(old) } });
+  assert.deepEqual(await door.open(frame("echo", changed)), { refused: "needs-approval" });
+  assert.equal(asks.length, 1);
+  assert.equal(spawned.length, 0);
+});
+
 test("a no holds ten minutes per name and per target; the prompt shows again after declineMs", async (t) => {
   let clock = 1_000_000;
   const { door, asks, saved } = await setup(t, {}, { now: () => clock });
@@ -168,6 +176,7 @@ test("a no holds ten minutes per name and per target; the prompt shows again aft
   assert.deepEqual(saved(), {}, "a no is not stored");
   assert.deepEqual(await door.open({ name: "native", port: 19501 }), { refused: "declined" });
   assert.deepEqual(await door.open({ name: "other", port: 19501 }), { refused: "declined" }, "the same port under another name");
+  assert.deepEqual(await door.open({ name: "native", port: 19502 }), { refused: "declined" }, "the same name on another port");
   clock += 599_999;
   assert.deepEqual(await door.open({ name: "native", port: 19501 }), { refused: "declined" });
   assert.equal(asks.length, 1);
@@ -263,10 +272,11 @@ test("ending the stream kills the child's tree; close() kills one still starting
     spawn: (...args) => { const child = spawn(...args); slow.spawned.push(child); slow.pids.push(child.pid); return child; },
   });
   const opening = slowDoor.open(frame("echo", plain));
+  await until(() => release, "the definition to be asked for");
   slowDoor.close();
   release();
   assert.deepEqual(await opening, { failed: "spawn-failed" });
-  await until(() => exited(slow.spawned[0]), "the late child to die");
+  assert.equal(slow.spawned.length, 0, "nothing starts after close()");
   slowDoor.close();
 });
 
@@ -284,7 +294,7 @@ test("windowsLaunch and taskkill /T are used on win32", async (t) => {
   await chmod(shim, 0o755);
   const entry = { command: shim, args: ["-y", "a b"], env: { KEY: "v" } };
   const calls = [];
-  const child = Object.assign(new EventEmitter(), { pid: 777, exitCode: null, stdin: new PassThrough(), stdout: new PassThrough(), kill() {} });
+  const child = Object.assign(new EventEmitter(), { pid: 777, exitCode: null, signalCode: null, stdin: new PassThrough(), stdout: new PassThrough(), kill() {} });
   const spawn = (...call) => {
     calls.push(call);
     if (call[0] === "taskkill") return new EventEmitter();
@@ -311,8 +321,45 @@ test("a Windows program that is not there is spawn-failed", async (t) => {
   assert.deepEqual(await door.open(frame("gone", entry)), { failed: "spawn-failed" });
 });
 
-test("the shown command hides keys and env", () => {
-  assert.equal(shownCommand("npx", ["-y", "dodopayments-mcp", "--token", "abc", "DODO_KEY=sk_live_1234567890abcdef"]), "npx -y dodopayments-mcp --token … DODO_KEY=…");
-  assert.equal(shownCommand("uvx", ["--API-KEY", "short", "sk_live_1234567890abcdef", "--port", "8080", "readable-but-long-name"]), "uvx --API-KEY … … --port 8080 readable-but-long-name");
+test("the shown command hides secrets by name and shows everything else in full", () => {
+  const shown = (...args) => shownCommand("npx", args);
+  for (const [args, secret] of [
+    [["--token=abc"], "abc"], [["API_KEY=abc"], "abc"], [["API_KEY=supersecretpasswordvalue"], "supersecretpasswordvalue"],
+    [["--key", "ghp_abc"], "ghp_abc"], [["--password", "hunter2"], "hunter2"],
+    [["postgresql://user:hunter2@localhost/db"], "hunter2"], [["--header", "Authorization: Bearer abc123"], "abc123"],
+    [["--header", "X-Note: Bearer abc123"], "abc123"],
+  ]) assert.ok(!shown(...args).includes(secret), shown(...args));
+  assert.equal(shown("--token=abc"), "npx --token=…");
+  assert.equal(shown("--key", "ghp_abc"), "npx --key …");
+  assert.equal(shown("postgresql://user:hunter2@localhost/db"), "npx postgresql://user:…@localhost/db");
+  assert.equal(shown("-y", "evilpackage123456789", "/Users/jane/vault", "--port", "8080"), "npx -y evilpackage123456789 /Users/jane/vault --port 8080");
   assert.equal(shownCommand("node", []), "node");
+});
+
+test("close() ends an open URL stream, and an open whose connect finishes after close() leaves no socket", async (t) => {
+  const port = await echoServer(t);
+  const { door } = await setup(t, {}, { saved: { native: { kind: "url", port } } });
+  const { socket } = await door.open({ name: "native", port });
+  let closed = false;
+  socket.on("close", () => { closed = true; });
+  door.close();
+  await until(() => closed, "the URL stream to end");
+
+  const sockets = [];
+  const late = await setup(t, {}, { saved: { native: { kind: "url", port } }, connect: (options) => { const s = new Socket(); sockets.push(s); return s.connect(options.port, options.host); } });
+  const opening = late.door.open({ name: "native", port });
+  late.door.close();
+  assert.deepEqual(await opening, { failed: "unreachable" });
+  await until(() => sockets.every((s) => s.destroyed), "no socket left");
+});
+
+test("a failing ownPorts or environment is a failed open, not a rejection", async (t) => {
+  const entry = echoEntry();
+  const first = await setup(t, {}, { ownPorts: async () => { throw new Error("no"); } });
+  assert.deepEqual(await first.door.open({ name: "x", port: 19501 }), { failed: "unreachable" });
+  const second = await setup(t, { echo: entry }, { saved: { echo: approved(entry) }, environment: async () => { throw new Error("no"); } });
+  assert.deepEqual(await second.door.open(frame("echo", entry)), { failed: "spawn-failed" });
+  assert.equal(second.spawned.length, 0);
+  const third = await setup(t, { echo: { command: 5, args: [], env: {} } });
+  assert.deepEqual(await third.door.open({ name: "echo", fingerprint: "f" }), { failed: "no-server" }, "a definition of the wrong shape");
 });

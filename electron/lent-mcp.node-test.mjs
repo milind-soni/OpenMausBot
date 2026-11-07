@@ -80,10 +80,11 @@ test("security: an address only on its own port, 1024 or higher, never one left 
   for (const url of ["http://127.0.0.1:19501/mcp", "http://localhost:19501/mcp", "http://[::1]:19501/mcp", "https://127.0.0.1:1024/mcp"]) assert.equal(lentMcpRefusal(cloud, http(url)), null, url);
 });
 
-test("commandFingerprint hashes command, args and env names, never env values", () => {
+test("commandFingerprint hashes command, args and the env, values included", () => {
   const server = { command: "notes-mcp", args: ["--dir", "notes"], env: { NOTES_TOKEN: "a", NOTES_DIR: "x" } };
   assert.match(commandFingerprint(server), /^[a-f0-9]{64}$/);
-  assert.equal(commandFingerprint({ ...server, env: { NOTES_DIR: "y", NOTES_TOKEN: "b" } }), commandFingerprint(server));
+  assert.equal(commandFingerprint({ ...server, env: { NOTES_DIR: "x", NOTES_TOKEN: "a" } }), commandFingerprint(server));
+  assert.notEqual(commandFingerprint({ ...server, env: { NOTES_DIR: "y", NOTES_TOKEN: "a" } }), commandFingerprint(server), "an env value changed");
   assert.notEqual(commandFingerprint({ ...server, args: ["--dir", "other"] }), commandFingerprint(server));
   assert.notEqual(commandFingerprint({ ...server, env: { NOTES_TOKEN: "a" } }), commandFingerprint(server));
 });
@@ -227,12 +228,13 @@ test("this computer's own installs, by the environment id each keeps", async t =
   assert.deepEqual(ownEnvironmentIds([path.join(dir, "a"), path.join(dir, "b"), path.join(dir, "missing"), null, path.join(dir, "a")]), [id]);
 });
 
-test("killTree ends the process group, or taskkill /T /F on win32", async () => {
+test("killTree ends the process group, or taskkill /T /F on win32", async t => {
   const calls = [];
   const spawn = (...call) => { calls.push(call); return { on() {} }; };
-  killTree({ pid: 4321, kill() { assert.fail("a Windows tree is ended by taskkill"); } }, { platform: "win32", spawn });
+  killTree({ pid: 4321, exitCode: null, signalCode: null, kill() { assert.fail("a Windows tree is ended by taskkill"); } }, { platform: "win32", spawn });
   assert.deepEqual(calls, [["taskkill", ["/PID", "4321", "/T", "/F"], { windowsHide: true, stdio: "ignore" }]]);
   killTree({ kill() { assert.fail("no pid, nothing to kill"); } }, { platform: "win32", spawn });
+  for (const exited of [{ exitCode: 0, signalCode: null }, { exitCode: null, signalCode: "SIGKILL" }]) killTree({ pid: 4321, ...exited, kill() { assert.fail("an exited child's PID may be someone else's"); } }, { platform: "win32", spawn });
   assert.equal(calls.length, 1);
 
   // A real group: the child starts a grandchild of its own, and both die.
@@ -240,9 +242,10 @@ test("killTree ends the process group, or taskkill /T /F on win32", async () => 
   const child = spawnReal(process.execPath, ["-e", 'const c = require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }); console.log(c.pid); setInterval(() => {}, 1000)'], { detached: true, stdio: ["ignore", "pipe", "ignore"] });
   const grandchild = Number(await new Promise(resolve => child.stdout.once("data", resolve)));
   const exited = new Promise(resolve => child.once("exit", resolve));
-  killTree(child, { platform: process.platform, spawn });
-  await exited;
   const gone = () => { try { process.kill(grandchild, 0); return false; } catch { return true; } };
+  t.after(() => { for (const pid of [child.pid, grandchild]) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } } });
+  killTree(child, { platform: process.platform, spawn });
+  await Promise.race([exited, new Promise((_, reject) => setTimeout(() => reject(new Error("the child did not exit")), 3000).unref())]);
   for (let i = 0; i < 300 && !gone(); i++) await new Promise(resolve => setTimeout(resolve, 10));
   assert.ok(gone(), "the grandchild died with it");
   assert.equal(calls.length, 1, "the real spawn is not touched off Windows");

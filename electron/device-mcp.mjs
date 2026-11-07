@@ -10,19 +10,19 @@ import { commandFingerprint, inheritedEnvironment, killTree, windowsLaunch } fro
 import { commandPath } from "./shell-path.mjs";
 
 const NAME = /^[a-z][a-z0-9_-]{0,31}$/;
-const SECRET_FLAG = /^--(?:token|password|passwd|api-key|apikey|secret|access-key|auth-token)$/i;
-const OPAQUE = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9_\-+=.~%]{16,}$/;
+const SECRETY = /token|secret|pass|key|auth|credential|bearer|api/i;
 const DECLINE_MS = 600_000;
 const CONNECT_MS = 10_000;
 
-/** The command line a person is shown: a flag's secret, an opaque key and a `KEY=` value become "…"; env is never shown. */
+/** The command line a person is shown: every arg in full except a value whose flag, `KEY=` or `Header:` name says it is
+ * a secret, a URL's password and a Bearer credential, which become "…". Env is never shown. */
 export function shownCommand(command, args) {
-  return [command, ...args.map((arg, i) => {
-    if (SECRET_FLAG.test(args[i - 1] ?? "")) return "…";
-    const pair = /^([^=]+)=(.*)$/.exec(arg);
-    if (pair && OPAQUE.test(pair[2])) return `${pair[1]}=…`;
-    return OPAQUE.test(arg) ? "…" : arg;
-  })].join(" ");
+  const hide = (arg) => {
+    const pair = /^([^=\s]+)=(.*)$/s.exec(arg) ?? /^([^:\s/][^:]*):\s*(.*)$/s.exec(arg);
+    if (pair && SECRETY.test(pair[1])) return `${pair[1]}${arg[pair[1].length]}${arg[pair[1].length] === ":" ? " " : ""}…`;
+    return arg.replace(/(\/\/[^/:@\s]*):[^@\s/]*@/g, "$1:…@").replace(/\bBearer\s+\S+/gi, "Bearer …");
+  };
+  return [command, ...args.map((arg, i) => (args[i - 1]?.startsWith("-") && !args[i - 1].includes("=") && SECRETY.test(args[i - 1]) ? "…" : hide(arg)))].join(" ");
 }
 
 function childStream(child, { platform, spawn }) {
@@ -63,30 +63,42 @@ export function createMcpDoor({
   // command is only the definition My Cloud serves now for that name, and only when it is the one the frame names.
   const wantedFor = async ({ name, port, fingerprint }) => {
     if (port !== undefined) {
-      const refused = !Number.isInteger(port) || port < 1024 || port > 65535 || (await ownPorts()).includes(port);
+      let own = [];
+      if (Number.isInteger(port) && port >= 1024 && port <= 65535) {
+        try { own = await ownPorts(); } catch { return { failed: "unreachable" }; }
+      }
+      const refused = !Number.isInteger(port) || port < 1024 || port > 65535 || own.includes(port);
       return refused ? { failed: "bad-port" } : { wanted: { kind: "url", port } };
     }
     if (typeof fingerprint !== "string") return { failed: "no-server" };
-    const entry = await definition(name).catch(() => null);
-    if (!entry) return { failed: "no-server" };
+    const entry = await Promise.resolve().then(() => definition(name)).catch(() => null);
+    const strings = (list) => Array.isArray(list) && list.every((item) => typeof item === "string");
+    const env = entry?.env;
+    if (typeof entry?.command !== "string" || !strings(entry.args) || !env || typeof env !== "object" || !Object.values(env).every((value) => typeof value === "string")) return { failed: "no-server" };
     if (commandFingerprint(entry) !== fingerprint) return { failed: "changed" };
     return { wanted: { kind: "command", fingerprint }, entry };
   };
 
-  // Security: the prompt names the exact target that is stored, so an Allow never covers more than the person saw.
+  // Security: the prompt names the exact target that is stored, and the env names the fingerprint covers.
   const ask = (name, wanted, entry) => {
+    const target = wanted.kind === "url" ? wanted : { kind: "command", command: shownCommand(entry.command, entry.args), env: Object.keys(entry.env).sort() };
     asking = true;
-    const target = wanted.kind === "url" ? wanted : { kind: "command", command: shownCommand(entry.command, entry.args) };
-    void prompt({ name, target })
-      .then((ok) => { if (ok) approvals.write({ ...approvals.read(), [name]: wanted }); else for (const key of holds(name, wanted)) declined.set(key, now() + declineMs); })
+    void Promise.resolve().then(() => prompt({ name, target }))
+      .then((ok) => { if (ok === true) approvals.write({ ...approvals.read(), [name]: wanted }); else for (const key of holds(name, wanted)) declined.set(key, now() + declineMs); })
       .catch(() => {})
       .finally(() => { asking = false; });
   };
 
-  const reach = (port) => new Promise((settle) => {
+  const reach = (port, started) => new Promise((settle) => {
+    if (started !== generation) { settle({ failed: "unreachable" }); return; }
     const socket = connect({ host: "127.0.0.1", port });
     const done = (result) => { clearTimeout(timer); socket.off("connect", opened); socket.off("error", failed); settle(result); };
-    const opened = () => done({ socket });
+    const opened = () => {
+      if (started !== generation) { socket.destroy(); done({ failed: "unreachable" }); return; }
+      live.add(socket);
+      socket.once("close", () => live.delete(socket));
+      done({ socket });
+    };
     const failed = () => { socket.destroy(); done({ failed: "unreachable" }); };
     const timer = setTimeout(() => { socket.destroy(); done({ failed: "timeout" }); }, connectMs);
     socket.once("connect", opened);
@@ -95,7 +107,9 @@ export function createMcpDoor({
 
   // Security: the child's stderr is never read: a server's stderr often holds its secrets.
   const run = async (entry, started) => {
-    const env = { ...(await environment()), ...entry.env };
+    let env;
+    try { env = { ...(await environment()), ...entry.env }; } catch { return { failed: "spawn-failed" }; }
+    if (started !== generation) return { failed: "spawn-failed" };
     const launch = platform === "win32"
       ? windowsLaunch(entry.command, entry.args, { ...env, ComSpec: env.ComSpec || process.env.ComSpec })
       : { file: entry.command, args: entry.args, verbatim: false };
@@ -127,7 +141,7 @@ export function createMcpDoor({
         if (!asking) ask(name, found.wanted, found.entry);
         return { refused: "needs-approval" };
       }
-      return found.wanted.kind === "url" ? reach(found.wanted.port) : run(found.entry, started);
+      return found.wanted.kind === "url" ? reach(found.wanted.port, started) : run(found.entry, started);
     },
     close() {
       generation += 1;

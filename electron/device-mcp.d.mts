@@ -2,7 +2,7 @@ import type { ChildProcess, SpawnOptions } from "node:child_process";
 import type { Duplex } from "node:stream";
 
 export type McpApproval = { kind: "url"; port: number } | { kind: "command"; fingerprint: string };
-export type McpPromptTarget = { kind: "url"; port: number } | { kind: "command"; command: string };
+export type McpPromptTarget = { kind: "url"; port: number } | { kind: "command"; command: string; env: string[] };
 export type McpDoorOpened =
   | { socket: Duplex }
   | { refused: "needs-approval" | "declined" }
