@@ -170,18 +170,34 @@ direct LAN requires choosing that computer or address again.
 Tailscale is an optional route away from home and on Wi-Fi networks that
 isolate clients. In desktop **Settings → Remote access**, the primary card remains
 **Secure HTTPS pairing — Recommended**. The separate **Tailscale pairing**
-card is only for people who already use Tailscale. Install or open Tailscale
-on both devices, sign in to the same tailnet, leave MagicDNS enabled, and
-choose **Turn on device access & check** followed by **Pair over Tailscale**.
-That first action explicitly starts Remote access so the phone has a listener
-to reach. OpenMausBot then places the computer's MagicDNS name in that
-dedicated QR; it never silently replaces the default hosted HTTPS route.
-Manual entry remains available as a fallback.
+card is only for people who already use Tailscale, and its switch is off
+until you turn it on: the app never starts, checks or configures Tailscale by
+itself. Install or open Tailscale on both devices, sign in to the same tailnet,
+leave MagicDNS enabled, turn the **Tailscale pairing** switch on (under
+**Advanced**), then choose **Pair over Tailscale**. Turning it on also starts
+Remote access so the phone has a listener to reach. OpenMausBot then places the
+computer's tailnet addresses in that dedicated QR; it never silently replaces
+the default hosted HTTPS route. Manual entry remains available as a fallback.
 
-The URL is still `http`, but the path is encrypted and authenticated by
-WireGuard inside the tailnet. Use the MagicDNS name rather than the
+With the switch on, the link also answers on this computer's tailnet address
+(found by Tailscale's own interface, never by a 100.64/10 address alone),
+and the app asks Tailscale for the computer's MagicDNS name once: when you turn
+the switch on, and again only when you choose **Check again**. It runs only
+Tailscale's command-line tool (`tailscale status --json`), never the macOS app's
+executable: with only the app installed it asks you to choose **Install CLI** in
+the Tailscale app's settings. It never opens the Tailscale app or signs it in. The
+URL is `http://<computer>.<tailnet>.ts.net:8810`, encrypted and authenticated
+by WireGuard inside the tailnet. Use the MagicDNS name rather than the
 `100.64.0.0/10` address: App Transport Security exceptions are domain-based,
 and `ios/project.yml` narrowly allows insecure HTTP for `ts.net` subdomains.
+Turning the switch off stops answering on the tailnet address; it never changes
+anything in your Tailscale.
+
+Each way in (Same Wi-Fi, Anywhere through MausBot, Tailscale, the HTTPS
+address) is its own switch and stays off until you turn it on. While nothing is
+paired and no code is open, the phone link sleeps: nothing listens and there is
+no relay connection. A desktop that is only a client of another computer starts
+none of it.
 
 Tailscale is optional. The direct path does not use an OpenMausBot-operated
 relay or create a cloud copy of local transcript data.

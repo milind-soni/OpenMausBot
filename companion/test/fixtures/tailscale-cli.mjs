@@ -14,6 +14,8 @@ if (mode === "gui" || process.env.TAILSCALE_BE_CLI !== "1") {
       TailscaleIPs: ["100.64.0.7"],
     },
   }));
+} else if (process.argv[2] === "serve" && process.argv[3] === "status") {
+  console.log("{}");
 } else if (process.argv[2] === "serve") {
   console.log("Serve configuration updated");
 } else {

@@ -17,6 +17,9 @@ export interface PhoneDevice {
   route?: "wifi" | "tailscale" | "relay" | null;
 }
 
+/** Same Wi-Fi, Anywhere through MausBot, Tailscale, and the HTTPS address. */
+export type CompanionRoute = "wifi" | "relay" | "tailscale" | "https";
+
 export interface CompanionState {
   enabled: boolean;
   keepAwake: boolean;
@@ -27,6 +30,12 @@ export interface CompanionState {
   addresses?: string[];
   tailscale?: string;
   tailnetName?: string;
+  /** Each way into this computer and whether the person turned it on. Absent on older builds. */
+  routes?: Record<CompanionRoute, { on: boolean; since: number | null; name?: string | null }>;
+  /** Routes the update kept on that the person has not been told about yet. */
+  notices?: CompanionRoute[];
+  /** Why Tailscale could not be turned on or checked just now. */
+  tailscaleProblem?: "not-installed" | "no-cli" | "not-running" | "needs-permission" | "signed-out";
   lan?: string | null;
   hosts?: string[];
   endpoints?: CompanionEndpoint[];
@@ -41,10 +50,16 @@ export interface CompanionState {
 
 export type CompanionBridge = {
   state: () => Promise<CompanionState>;
-  start: () => Promise<CompanionState>;
+  /** Turns on `routes` (Same Wi-Fi and the relay when omitted) and starts the phone link. */
+  start: (routes?: CompanionRoute[]) => Promise<CompanionState>;
   stop: () => Promise<CompanionState>;
   keepAwake: (enabled: boolean) => Promise<CompanionState>;
+  /** Check again: asks Tailscale for this computer's name while its route is on; starts nothing. */
   refreshTailscale: () => Promise<CompanionState>;
+  /** The rest are absent on an app build before per-route switches. */
+  setTailscale?: (on: boolean) => Promise<CompanionState>;
+  setRoute?: (route: CompanionRoute, on: boolean) => Promise<CompanionState>;
+  dismissNotice?: (route: CompanionRoute) => Promise<CompanionState>;
   pairing: (open: boolean, expectedToken?: string) => Promise<CompanionState>;
   cloudDesktop: (deviceId: string, allowed: boolean) => Promise<CompanionState>;
   browserControl: (deviceId: string, allowed: boolean) => Promise<CompanionState>;
