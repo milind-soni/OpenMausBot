@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 
 import { t } from "@/lib/i18n";
-import { lastSeen, minutesLeft } from "@/lib/pairing-time";
+import { codeUntil, lastSeen } from "@/lib/pairing-time";
 import { api } from "@/state/store";
 import { Card } from "./SettingsPrimitives";
 
@@ -97,7 +97,7 @@ export function TeamPhoneCard({ team, blocked }: { team: string; blocked?: strin
               ) : null}
               <div className="min-w-[200px] flex-1">
                 <div className="font-mono text-[18px] tracking-[0.14em] text-ink">{offer.code}</div>
-                <div className="mt-1 text-[13px] text-ink-secondary">{t("remote.serverPairing.expires", { minutes: minutesLeft(offer.expiresAt, now) })}</div>
+                <div className="mt-1 text-[13px] text-ink-secondary">{codeUntil(offer.expiresAt)}</div>
                 {offer.url ? null : <p className="mt-3 text-[13px] text-ink-secondary">{offer.hint ?? t("remote.serverPairing.noLink")}</p>}
               </div>
             </div>

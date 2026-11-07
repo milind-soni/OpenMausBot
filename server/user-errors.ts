@@ -1,10 +1,12 @@
+import { PAIRING_INPUT_PROBLEM_TEXT } from "../shared/pairing-code.ts";
 import { redactParams } from "../shared/redact.ts";
 import { formatServerText, type ServerErrorBody, type ServerTextParams } from "../shared/server-text.ts";
 
 /** The client translates by key and falls back to this English, which the server keeps sending for older clients. */
 export const USER_ERROR = {
   "serverError.pair.codeWrong": "pairing code is wrong or has expired; create a new one on the server",
-  "serverError.pair.tooMany": "too many failed pairing attempts from your address; try again in {seconds}s",
+  "serverError.pair.tooMany": "Too many wrong codes. Try again at {time}.",
+  ...PAIRING_INPUT_PROBLEM_TEXT,
   "serverError.pair.linkExpired": "this sign-in link has expired or was already used",
   "serverError.email.invalid": "enter a valid email address",
   "serverError.email.codeFormat": "enter the 8-digit code from the email",
