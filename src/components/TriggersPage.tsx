@@ -69,7 +69,7 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
 
   return (
     <main className="flex h-full min-w-0 flex-1 flex-col bg-app animate-workspace-in">
-      <header className={cn("shrink-0 border-b border-hairline/35 bg-app py-3 pe-4", macInset && !windowFramed(capabilities) && view === "calendar" ? "ps-[86px]" : view === "list" ? "ps-12 md:ps-4" : "ps-4")} style={windowDragStyle}>
+      <header className={cn("shrink-0 border-b border-hairline/35 bg-app py-3", macInset && !windowFramed(capabilities) && view === "calendar" ? "pl-[86px] pr-4" : view === "list" ? "ps-12 pe-4 md:ps-4" : "px-4")} style={windowDragStyle}>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" ref={backButtonRef} onClick={onBack} aria-label={t("automations.back")} title={t("automations.back")} className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink" style={windowNoDragStyle}><ArrowLeft size={18} /></button>
           <h1 data-tour="automations-page" className="me-1 text-[18px] font-semibold tracking-tight text-ink">{t("automations.title")}</h1>
