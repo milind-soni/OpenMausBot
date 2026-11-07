@@ -375,3 +375,41 @@ describe("page tools", () => {
       { path: "/api/internal/pages/unpublish", body: { page_id: "abcdefghijklmnopqrstuvwxyz" } }]);
   });
 });
+describe("coordinate_bots", () => {
+  const BASE = { bot_ids: ["bot-scout"], message: "Review the draft." };
+
+  async function coordinate(args: Record<string, unknown>) {
+    const calls: Array<{ path: string; body: any }> = [];
+    const result = await callTool("coordinate_bots", args, context({
+      client: {
+        api: async (path, init) => {
+          calls.push({ path, body: JSON.parse(String(init?.body)) });
+          return { id: "a1" };
+        },
+        apiResponse: async () => ({ ok: true, status: 200, body: {} }),
+      },
+    }));
+    return { result, calls };
+  }
+
+  it("drops an empty-string group_id instead of posting it", async () => {
+    const { result, calls } = await coordinate({ ...BASE, group_id: "" });
+    expect(result.isError).toBeFalsy();
+    expect(calls).toEqual([{ path: "/api/internal/coordinate-bots", body: { botIds: ["bot-scout"], message: "Review the draft." } }]);
+  });
+
+  it("drops a whitespace-only group_id", async () => {
+    const { calls } = await coordinate({ ...BASE, group_id: "   " });
+    expect(calls[0].body).not.toHaveProperty("groupId");
+  });
+
+  it("trims a real group_id", async () => {
+    const { calls } = await coordinate({ ...BASE, group_id: "  room-9  " });
+    expect(calls[0].body.groupId).toBe("room-9");
+  });
+
+  it("drops an empty camelCase groupId too", async () => {
+    const { calls } = await coordinate({ ...BASE, groupId: "" });
+    expect(calls[0].body).not.toHaveProperty("groupId");
+  });
+});

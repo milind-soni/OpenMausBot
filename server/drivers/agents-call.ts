@@ -281,7 +281,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       };
     }
     const r = await api("/api/internal/coordinate-bots", { method: "POST", body: JSON.stringify({
-      groupId: canonical.group_id, botIds: ids, message: canonical.message,
+      groupId: typeof canonical.group_id === "string" && canonical.group_id.trim() ? canonical.group_id.trim() : undefined, botIds: ids, message: canonical.message,
       reason: typeof canonical.reason === "string" && canonical.reason.trim() ? canonical.reason.trim() : undefined,
       rework: canonical.rework,
       thread: canonical.thread, reply: canonical.reply,
