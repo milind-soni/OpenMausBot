@@ -17,7 +17,7 @@ import { DATA_DIR } from "./config.ts";
 import { boxUploadsDir } from "./bot-box/plan.ts";
 
 export { FILE_MAX_BYTES, fileMaxBytes } from "../shared/upload-limits.ts";
-/** The per-file ceiling this process enforces on uploads (OMB_FILE_MAX_BYTES overridable, #4705). */
+/** The per-file ceiling this process enforces on uploads (OMB_FILE_MAX_BYTES overridable). */
 const FILE_LIMIT = fileMaxBytes();
 export const ATTACHMENTS_DIR = join(DATA_DIR, "attachments");
 

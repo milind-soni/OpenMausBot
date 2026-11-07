@@ -11,7 +11,7 @@ import { windowsPathDestinations } from "../shared/markdown-windows-paths.ts";
 import { inSecretFolder, SECRET_FILE_REFUSAL } from "./secret-folder.ts";
 import { fileMaxBytes } from "../shared/upload-limits.ts";
 
-/** Kept for compatibility: the shipped default. Enforcement follows OMB_FILE_MAX_BYTES (#4705). */
+/** Kept for compatibility: the shipped default. Enforcement follows OMB_FILE_MAX_BYTES. */
 export const MESSAGE_FILE_MAX_BYTES = 25 * 1024 * 1024;
 
 export interface OpenedMessageFile {
