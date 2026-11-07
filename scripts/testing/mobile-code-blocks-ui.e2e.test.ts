@@ -207,12 +207,13 @@ async function connect(url: string) {
     }
     const feedbackLayout = () => evaluate(`(() => { const card=${blocks}[0]; const button=card.querySelectorAll('button')[2]; const c=card.getBoundingClientRect(), b=button.getBoundingClientRect(); return {height:c.height,buttonWidth:b.width,buttonHeight:b.height,left:b.left-c.left,top:b.top-c.top}; })()`);
     const beforeFeedback = await feedbackLayout();
-    await evaluate(`Object.defineProperty(navigator.clipboard, 'writeText', { configurable:true,value:async()=>{throw new Error('fixture denial');} }); true`);
+    // Both ways to copy refuse: the clipboard API, and the legacy execCommand a phone on plain http falls back to.
+    await evaluate(`Object.defineProperty(navigator.clipboard, 'writeText', { configurable:true,value:async()=>{throw new Error('fixture denial');} }); Object.defineProperty(document, 'execCommand', { configurable:true,value:()=>false }); true`);
     await tap(0, "copy");
     await expect.poll(() => evaluate(`${blocks}[0].querySelector('[role="status"]')?.textContent`)).toBe("Could not copy");
     expect(await feedbackLayout()).toEqual(beforeFeedback);
     receipts.failureFeedback = true;
-    await evaluate(`Object.defineProperty(navigator.clipboard, 'writeText', { configurable:true,value:window.fixtureClipboardWrite }); true`);
+    await evaluate(`Object.defineProperty(navigator.clipboard, 'writeText', { configurable:true,value:window.fixtureClipboardWrite }); delete document.execCommand; true`);
     await tap(0, "copy");
     await expect.poll(() => evaluate(`${blocks}[0].querySelector('[role="status"]')?.textContent`)).toBe("Copied");
     expect(await feedbackLayout()).toEqual(beforeFeedback);

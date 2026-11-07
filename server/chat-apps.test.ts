@@ -745,7 +745,7 @@ describe("a live folder page", () => {
     await apps.refreshLive();
     // Files a page never takes (hidden, badly named, not a page file) are not a change.
     writeFileSync(join(dash, ".notes"), "x");
-    writeFileSync(join(dash, "a?b.html"), "x");
+    writeFileSync(join(dash, "a#b.html"), "x");
     writeFileSync(join(dash, "build.zip"), "x");
     expect(await apps.refreshLive()).toBe(0);
     patch(THREAD, "m1", { app: { ...row("m1").app!, title: "Sales" } });
