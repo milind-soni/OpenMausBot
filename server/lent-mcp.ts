@@ -272,13 +272,15 @@ export function createLentMcp(deps: LentMcpDeps) {
     },
 
     /** A server added here that needs the person's own computer, marked as running on the one of theirs lent now: the one
-     * named, else the one this session lends from, else the only one. With several and none of those, the adder is asked. */
+     * named, else the one this session lends from, else the only one. With several and none of those, the adder is asked.
+     * With none lent, a server that needs the person's computer is refused. */
     async place(server: StoredMcpServer, who: { principal: string | null; session?: string; computer?: string; newest?: boolean }): Promise<{ ok: true; server: StoredMcpServer } | { ok: false; error: string }> {
       if (server.runsOn || !who.principal) return { ok: true, server };
       const lenders = deps.computers.mcpLenders(who.principal);
       if (!(await needsTheirComputer(server, here))) return { ok: true, server };
       if (!lenders.length) {
-        return { ok: false, error: `${isRemoteMcpServer(server) ? "That address is" : "This command runs"} on the person's own computer, and no computer is lent to ${deps.place} now. Ask them to lend their Mac or PC${isRemoteMcpServer(server) ? "" : " with its terminal"}, then add it again.` };
+        const remote = isRemoteMcpServer(server);
+        return { ok: false, error: `${remote ? "That address is" : "This command runs"} on the person's own computer, and no computer is lent to ${deps.place} now. Ask them to lend their Mac or PC${remote ? "" : " with its terminal"}, then add it again.` };
       }
       const asked = who.computer?.trim().toLowerCase();
       const named = asked ? lenders.find((lender) => lender.name.toLowerCase() === asked) : undefined;
