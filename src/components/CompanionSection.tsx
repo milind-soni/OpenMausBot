@@ -15,6 +15,7 @@ import {
   companionBridge,
   loadCompanionBridgeState,
   shouldHydrateCompanionEmail,
+  type CompanionBridge,
   type CompanionState,
   type PhoneSetupController,
   usePhoneSetupController,
@@ -47,7 +48,7 @@ export interface TailscalePairingStatus {
 }
 
 export function deriveTailscalePairingStatus(
-  state: Pick<CompanionState, "enabled" | "tailscale" | "tailnetName" | "error">,
+  state: Pick<CompanionState, "enabled" | "tailscale" | "tailnetName" | "tailscaleProblem" | "error">,
   routeAvailable: boolean,
 ): TailscalePairingStatus {
   if (state.error) {
@@ -57,11 +58,22 @@ export function deriveTailscalePairingStatus(
       detail: state.error,
     };
   }
+  if (!state.enabled) {
+    return {
+      kind: "unchecked",
+      title: t("remote.status.off"),
+      detail: t("remote.tailscale.linkOff"),
+    };
+  }
   if (routeAvailable && state.tailnetName) {
     return {
       kind: "ready",
       title: t("remote.tailscale.ready", { name: state.tailnetName }),
-      detail: t("remote.tailscale.readyDetail"),
+      detail: state.tailscaleProblem === "port-taken"
+        ? t("remote.tailscale.portTaken")
+        : state.tailscaleProblem === "serve-refused"
+          ? t("remote.tailscale.httpsOff")
+          : t("remote.tailscale.readyDetail"),
     };
   }
   if (state.tailscale) {
@@ -71,18 +83,17 @@ export function deriveTailscalePairingStatus(
       detail: t("remote.tailscale.magicDnsDetail"),
     };
   }
-  if (state.enabled) {
-    return {
-      kind: "unavailable",
-      title: t("remote.tailscale.notConnected"),
-      detail: t("remote.tailscale.notConnectedDetail"),
-    };
-  }
   return {
-    kind: "unchecked",
-    title: t("remote.tailscale.already"),
-    detail: t("remote.tailscale.alreadyDetail"),
+    kind: "unavailable",
+    title: t("remote.tailscale.notConnected"),
+    detail: t("remote.tailscale.notConnectedDetail"),
   };
+}
+
+/** Older app builds have no switch: on falls back to the check that turns it on, and off cannot be asked of them. */
+export function setCompanionTailscale(companion: CompanionBridge, on: boolean): Promise<CompanionState> {
+  if (companion.setTailscale) return companion.setTailscale(on);
+  return on ? companion.refreshTailscale() : companion.state();
 }
 
 export function pairingSurfaceCopy(
@@ -189,6 +200,7 @@ export function CompanionSection({ profileEmail = "", focusRequest = 0 }: { prof
   const accountActionError = companionAccountActionError(c.account, c.accountError);
   const pairingCopy = pairingSurfaceCopy(c);
   const tailscaleStatus = deriveTailscalePairingStatus(state, c.tailscaleAvailable);
+  const tailscaleOn = state.tailscaleOn === true;
   const hosted = state.endpoints?.find((endpoint) => endpoint.kind === "hosted");
   const localRoutes = [
     state.tailnetName ? { label: "Tailscale", value: `${state.tailnetName}:${state.port}` } : null,
@@ -263,49 +275,61 @@ export function CompanionSection({ profileEmail = "", focusRequest = 0 }: { prof
           <PhonesList />
 
           <div className="border-t border-hairline/30 pt-4">
-            <div className="text-[13px] text-ink">{t("remote.pairing.tailscale.title")}</div>
-            <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{t("remote.tailscaleCard.subtitle")}</div>
-            <div className="mt-3">
-              <div className="rounded-xl bg-inset px-3 py-3" aria-live="polite">
-                <div className="flex items-start gap-2.5">
-                  <ShieldCheck
-                    size={16}
-                    className={`mt-0.5 shrink-0 ${tailscaleStatus.kind === "ready" ? "text-success" : "text-ink-secondary"}`}
-                  />
-                  <div className="min-w-0">
-                    <div className="text-[13px] font-medium text-ink">{tailscaleStatus.title}</div>
-                    <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-                      {tailscaleStatus.detail}
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-[13px] text-ink">{t("remote.pairing.tailscale.title")}</div>
+                <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{t("remote.tailscaleCard.subtitle")}</div>
+                <div className="mt-1 text-[12px] leading-relaxed text-ink-secondary">{t("remote.tailscaleSwitch.detail", { app: productName() })}</div>
+              </div>
+              <Switch
+                checked={tailscaleOn}
+                aria-label={t("remote.pairing.tailscale.title")}
+                disabled={c.busy || c.accountBusy || (Boolean(managedBy) && !tailscaleOn)}
+                onClick={() => void c.act((companion) => setCompanionTailscale(companion, !tailscaleOn))}
+              />
+            </div>
+            {tailscaleOn && (
+              <div className="mt-3">
+                <div className="rounded-xl bg-inset px-3 py-3" aria-live="polite">
+                  <div className="flex items-start gap-2.5">
+                    <ShieldCheck
+                      size={16}
+                      className={`mt-0.5 shrink-0 ${tailscaleStatus.kind === "ready" ? "text-success" : "text-ink-secondary"}`}
+                    />
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-medium text-ink">{tailscaleStatus.title}</div>
+                      <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
+                        {tailscaleStatus.detail}
+                      </div>
                     </div>
                   </div>
-            </div>
-          </div>
-          {tailscaleStatus.kind === "ready" ? (
-            <button
-              disabled={c.busy || c.accountBusy || Boolean(managedBy)}
-              title={managedBy ?? undefined}
-              onClick={() => {
-                c.useTailscale();
-                window.requestAnimationFrame(() => {
-                  pairingFlow.current?.scrollIntoView({ block: "start" });
-                  pairingFlow.current?.focus({ preventScroll: true });
-                });
-              }}
-              className="mt-3 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink hover:bg-control disabled:opacity-40"
-            >
-              {t("remote.pairOverTailscale")}
-            </button>
-          ) : (
-            <button
-              disabled={c.busy || c.accountBusy || (Boolean(managedBy) && !state.enabled)}
-              title={managedBy ?? undefined}
-              onClick={c.refreshTailscale}
-              className="mt-3 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink hover:bg-control disabled:opacity-40"
-            >
-              {c.busy ? t("common.checking") : managedBy && !state.enabled ? managedBy : state.enabled ? t("remote.checkAgain") : t("remote.turnOnAndCheck")}
-            </button>
-          )}
-            </div>
+                </div>
+                {tailscaleStatus.kind === "ready" ? (
+                  <button
+                    disabled={c.busy || c.accountBusy || Boolean(managedBy)}
+                    title={managedBy ?? undefined}
+                    onClick={() => {
+                      c.useTailscale();
+                      window.requestAnimationFrame(() => {
+                        pairingFlow.current?.scrollIntoView({ block: "start" });
+                        pairingFlow.current?.focus({ preventScroll: true });
+                      });
+                    }}
+                    className="mt-3 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink hover:bg-control disabled:opacity-40"
+                  >
+                    {t("remote.pairOverTailscale")}
+                  </button>
+                ) : state.enabled ? (
+                  <button
+                    disabled={c.busy || c.accountBusy}
+                    onClick={c.refreshTailscale}
+                    className="mt-3 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink hover:bg-control disabled:opacity-40"
+                  >
+                    {c.busy ? t("common.checking") : t("remote.checkAgain")}
+                  </button>
+                ) : null}
+              </div>
+            )}
           </div>
 
           <div className="flex items-center justify-between gap-4 border-t border-hairline/30 pt-4">

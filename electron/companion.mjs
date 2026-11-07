@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCompanionEntry } from "./companion-entry.mjs";
+import { COMPANION_SETTINGS_VERSION, countPairedPhones, phoneLinkStartsAtLaunch, readCompanionSettings } from "./companion-settings.mjs";
 import {
   cleanupCompanionOriginEndpoint,
   companionOriginHealth,
@@ -34,17 +35,27 @@ const entryPoint = (resourcesPath) =>
 const settingsFile = () => path.join(app.getPath("userData"), "companion-settings.json");
 
 function companionSettings() {
+  let raw = null;
   try {
-    const parsed = JSON.parse(fs.readFileSync(settingsFile(), "utf8"));
-    return { enabled: parsed?.enabled === true, keepAwake: parsed?.keepAwake === true };
+    raw = JSON.parse(fs.readFileSync(settingsFile(), "utf8"));
   } catch {
-    return { enabled: false, keepAwake: false };
   }
+  const settings = readCompanionSettings(raw, raw?.version === COMPANION_SETTINGS_VERSION ? 0 : countPairedPhones());
+  if (raw && raw.version !== COMPANION_SETTINGS_VERSION) writeCompanionSettings(settings);
+  return settings;
 }
 
-/** Anything unreadable is "off": the flag opens a network listener, so it fails closed. */
 export function companionEnabledAtRest() {
   return companionSettings().enabled;
+}
+
+export function companionTailscaleAtRest() {
+  return companionSettings().tailscale;
+}
+
+/** The launch rule, with this computer's paired phones read from the companion's store. */
+export function companionStartsAtLaunch({ remoteClient, serverReady }) {
+  return phoneLinkStartsAtLaunch({ remoteClient, serverReady, enabled: companionEnabledAtRest(), pairedPhones: countPairedPhones() });
 }
 
 export function companionKeepAwakeAtRest() {
@@ -52,10 +63,13 @@ export function companionKeepAwakeAtRest() {
 }
 
 function rememberCompanionSettings(patch) {
+  writeCompanionSettings({ ...companionSettings(), ...patch });
+}
+
+function writeCompanionSettings(next) {
   const file = settingsFile();
   const temporary = `${file}.${process.pid}.tmp`;
   try {
-    const next = { ...companionSettings(), ...patch };
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(temporary, JSON.stringify(next, null, 2));
     fs.renameSync(temporary, file);
@@ -74,6 +88,10 @@ export function rememberCompanionEnabled(enabled) {
 
 export function rememberCompanionKeepAwake(keepAwake) {
   rememberCompanionSettings({ keepAwake });
+}
+
+export function rememberCompanionTailscale(tailscale) {
+  rememberCompanionSettings({ tailscale });
 }
 
 async function control(method, urlPath, body, { timeoutMs = 4_000 } = {}) {
@@ -182,6 +200,8 @@ async function start({ resourcesPath, harnessPort, mutationToken, hostedUrl = nu
   delete childEnvironment.OMB_COMPANION_HOSTED_URL;
   delete childEnvironment.OMB_COMPANION_INTERNAL_ORIGIN;
   delete childEnvironment.OMB_PHONE_SECRET_PUBLIC_KEY;
+  delete childEnvironment.OMB_COMPANION_TAILSCALE;
+  if (companionTailscaleAtRest()) childEnvironment.OMB_COMPANION_TAILSCALE = "1";
   if (hostedUrl) childEnvironment.OMB_COMPANION_HOSTED_URL = hostedUrl;
   childEnvironment.OMB_COMPANION_INTERNAL_ORIGIN = allocatedOrigin.socketPath;
   if (/^[A-Za-z0-9_-]{87}$/.test(String(secretPublicKey ?? ""))) {
@@ -320,6 +340,7 @@ export async function companionState() {
     const state = {
       enabled: false,
       keepAwake,
+      tailscaleOn: companionTailscaleAtRest(),
       port: COMPANION_PORT,
       devices: [],
       connectedDeviceIds: [],
@@ -344,11 +365,13 @@ export async function companionState() {
   }
 }
 
-export async function companionRefreshTailscale() {
+/** Remembers the person's choice and tells a running sidecar; only "on" lets it run the Tailscale CLI. */
+export async function companionSetTailscale(on) {
+  rememberCompanionTailscale(on);
   if (!proc) return companionState();
   try {
-    // The sidecar's Tailscale CLI hunt is bounded to 5 s; allow more here.
-    const state = await control("POST", "/tailscale/refresh", undefined, { timeoutMs: 6_000 });
+    // The CLI hunt is bounded to 5 s, then `tailscale serve` may take its own 20 s.
+    const state = await control("POST", on ? "/tailscale/on" : "/tailscale/off", undefined, { timeoutMs: 40_000 });
     return {
       enabled: true,
       keepAwake: companionKeepAwakeAtRest(),
@@ -358,7 +381,7 @@ export async function companionRefreshTailscale() {
     const state = await companionState();
     return {
       ...state,
-      error: state.error ?? "Tailscale could not be checked.",
+      error: state.error ?? (on ? "Tailscale could not be turned on." : "Tailscale could not be turned off."),
     };
   }
 }

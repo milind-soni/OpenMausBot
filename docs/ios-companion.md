@@ -170,18 +170,28 @@ direct LAN requires choosing that computer or address again.
 Tailscale is an optional route away from home and on Wi-Fi networks that
 isolate clients. In desktop **Settings → Remote access**, the primary card remains
 **Secure HTTPS pairing — Recommended**. The separate **Tailscale pairing**
-card is only for people who already use Tailscale. Install or open Tailscale
-on both devices, sign in to the same tailnet, leave MagicDNS enabled, and
-choose **Turn on device access & check** followed by **Pair over Tailscale**.
-That first action explicitly starts Remote access so the phone has a listener
-to reach. OpenMausBot then places the computer's MagicDNS name in that
-dedicated QR; it never silently replaces the default hosted HTTPS route.
-Manual entry remains available as a fallback.
+card is only for people who already use Tailscale, and its switch is off
+until you turn it on: the app never starts, checks or configures Tailscale by
+itself. Install or open Tailscale on both devices, sign in to the same tailnet,
+leave MagicDNS enabled, turn the **Tailscale pairing** switch on (under
+**Advanced**), then choose **Pair over Tailscale**. Turning it on also starts
+Remote access so the phone has a listener to reach. OpenMausBot then places the
+computer's tailnet addresses in that dedicated QR; it never silently replaces
+the default hosted HTTPS route. Manual entry remains available as a fallback.
 
-The URL is still `http`, but the path is encrypted and authenticated by
-WireGuard inside the tailnet. Use the MagicDNS name rather than the
-`100.64.0.0/10` address: App Transport Security exceptions are domain-based,
-and `ios/project.yml` narrowly allows insecure HTTP for `ts.net` subdomains.
+With the switch on, the app asks Tailscale to serve the link at
+`https://<computer>.<tailnet>.ts.net:8813` (`tailscale serve --bg --https=8813`),
+with Tailscale's own certificate, when HTTPS certificates are enabled for the
+tailnet. The plain `http://<computer>.<tailnet>.ts.net:8810` name stays as a
+second route: it is encrypted and authenticated by WireGuard inside the
+tailnet. Use the MagicDNS name rather than the `100.64.0.0/10` address: App
+Transport Security exceptions are domain-based, and `ios/project.yml` narrowly
+allows insecure HTTP for `ts.net` subdomains. Turning the switch off removes
+only the serve entry the app added, never anything else in your Tailscale.
+
+The phone link itself starts by itself at launch only when a phone is paired
+with this computer and the computer runs its own workspace; a desktop that is
+only a client of another computer never starts it.
 
 Tailscale is optional. The direct path does not use an OpenMausBot-operated
 relay or create a cloud copy of local transcript data.

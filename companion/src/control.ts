@@ -9,6 +9,7 @@ import type { DeviceRegistry, DeviceRoutes } from "./devices.ts";
 import type { E2EDescriptor } from "./e2e/descriptor.ts";
 import type { LiveRoute } from "./e2e/registry.ts";
 import { companionEndpointCandidates, hostedCompanionUrl } from "./endpoints.ts";
+import type { Tailnet } from "./tailnet.ts";
 import { lanAddresses, lanInterfaces, tailnetName, tailscaleAddress } from "./listener.ts";
 import { defaultHostName } from "./mdns.ts";
 import { publicNetworks } from "./windows-network.ts";
@@ -33,7 +34,8 @@ export interface ControlOptions {
   disconnectDevice?: (deviceId: string) => void;
   /** Revoked, not merely changed: the harness ends the Live call that phone holds. */
   revoked?: (deviceId: string) => void;
-  refreshTailscale?: () => Promise<void>;
+  /** Present when the companion offers Tailscale; it runs a Tailscale binary only from `on()`. */
+  tailnet?: Pick<Tailnet, "on" | "off" | "state">;
   publicNetworks?: () => ReadonlySet<string>;
   /** End-to-end status; absent or `enabled: false` while it is off. */
   e2e?: () => E2EStatus;
@@ -197,6 +199,7 @@ export function companionState(options: Omit<ControlOptions, "controlToken">) {
     ? lead.name
     : null;
   const secretPublicKey = options.secretPublicKey?.() ?? null;
+  const tailnet = options.tailnet?.state() ?? null;
   return {
     // Lets a parent tell this sidecar from an unrelated process on the control port.
     pid: process.pid,
@@ -204,6 +207,9 @@ export function companionState(options: Omit<ControlOptions, "controlToken">) {
     addresses,
     ...(tailscale ? { tailscale } : {}),
     ...(tailscale && name ? { tailnetName: name } : {}),
+    tailscaleOn: tailnet?.on === true,
+    ...(tailnet?.httpsOrigin ? { tailnetHttps: tailnet.httpsOrigin } : {}),
+    ...(tailnet?.problem ? { tailscaleProblem: tailnet.problem } : {}),
     lan: lead?.address ?? null,
     // Windows has this network as Public, so its firewall likely drops a phone.
     ...(publicNetwork ? { publicNetwork } : {}),
@@ -213,6 +219,8 @@ export function companionState(options: Omit<ControlOptions, "controlToken">) {
       addresses,
       name,
       currentHostedUrl(options),
+      undefined,
+      tailnet?.httpsOrigin ?? null,
     ),
     ...(secretPublicKey ? { secretPublicKey } : {}),
     pairing: pairing ? { code: pairing.code, token: pairing.token, expiresAt: pairing.expiresAt } : null,
@@ -260,10 +268,18 @@ export function createControlServer(options: ControlOptions): Server {
       return json(res, 403, { error: "forbidden: open the companion's control page from the link it printed" });
     }
     if (method === "GET" && path === "/state") return json(res, 200, companionState(options));
-    if (method === "POST" && path === "/tailscale/refresh" && options.refreshTailscale) {
-      void options.refreshTailscale().then(
+    const tailnet = options.tailnet;
+    if (method === "POST" && (path === "/tailscale/refresh" || path === "/tailscale/on") && tailnet) {
+      void tailnet.on().then(
         () => json(res, 200, companionState(options)),
-        () => json(res, 500, { error: "could not refresh Tailscale" }),
+        () => json(res, 500, { error: "could not turn Tailscale on" }),
+      );
+      return;
+    }
+    if (method === "POST" && path === "/tailscale/off" && tailnet) {
+      void tailnet.off().then(
+        () => json(res, 200, companionState(options)),
+        () => json(res, 500, { error: "could not turn Tailscale off" }),
       );
       return;
     }

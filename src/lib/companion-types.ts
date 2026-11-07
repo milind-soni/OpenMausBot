@@ -27,6 +27,11 @@ export interface CompanionState {
   addresses?: string[];
   tailscale?: string;
   tailnetName?: string;
+  /** The person turned Tailscale on for the phone link; off, nothing runs the Tailscale CLI. Absent on older builds. */
+  tailscaleOn?: boolean;
+  /** The tailnet HTTPS address `tailscale serve` answers on while Tailscale is on. */
+  tailnetHttps?: string;
+  tailscaleProblem?: "not-found" | "port-taken" | "serve-refused";
   lan?: string | null;
   hosts?: string[];
   endpoints?: CompanionEndpoint[];
@@ -44,7 +49,10 @@ export type CompanionBridge = {
   start: () => Promise<CompanionState>;
   stop: () => Promise<CompanionState>;
   keepAwake: (enabled: boolean) => Promise<CompanionState>;
+  /** Turns Tailscale on (starting the phone link if needed) and checks it. */
   refreshTailscale: () => Promise<CompanionState>;
+  /** Absent on an app build before the Tailscale switch. */
+  setTailscale?: (on: boolean) => Promise<CompanionState>;
   pairing: (open: boolean, expectedToken?: string) => Promise<CompanionState>;
   cloudDesktop: (deviceId: string, allowed: boolean) => Promise<CompanionState>;
   browserControl: (deviceId: string, allowed: boolean) => Promise<CompanionState>;

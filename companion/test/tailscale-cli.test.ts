@@ -42,6 +42,7 @@ vi.mock("node:os", async (original) => ({
 import { createControlServer, type companionState } from "../src/control.ts";
 import { DeviceRegistry } from "../src/devices.ts";
 import { refreshTailnetName, tailnetName } from "../src/listener.ts";
+import { createTailnet } from "../src/tailnet.ts";
 import { tailscaleServe, tailscaleServeOff, tailscaleStatus } from "../../server/tailscale.ts";
 
 let control: Server | undefined;
@@ -63,12 +64,12 @@ afterEach(async () => {
 });
 
 describe("Tailscale from a shell-less standalone macOS app", () => {
-  it("refreshes the real control endpoint and advertises HTTP on the companion port", async () => {
+  it("turns Tailscale on through the real control endpoint and advertises its HTTPS address and the HTTP name", async () => {
     fixture.output = "gui";
     const attempts: string[] = [];
-    await refreshTailnetName((_cli, outcome) => attempts.push(outcome));
+    await refreshTailnetName((cli, outcome) => cli === standalone && attempts.push(outcome));
     expect(tailnetName()).toBeNull();
-    expect(attempts[0]).toBe("exited successfully in GUI mode instead of CLI mode");
+    expect(attempts).toEqual(["exited successfully in GUI mode instead of CLI mode"]);
     expect(attempts.join("\n")).not.toContain("private diagnostic");
 
     fixture.output = "auto";
@@ -79,7 +80,7 @@ describe("Tailscale from a shell-less standalone macOS app", () => {
       companionPort: 8787,
       discovery: () => ({ advertising: false, name: "Fixture" }),
       hostedUrl: () => "https://fixture.openmausbot.com",
-      refreshTailscale: () => refreshTailnetName(),
+      tailnet: createTailnet({ companionPort: 8787 }),
     });
     await new Promise<void>((resolve) => control!.listen(0, "127.0.0.1", resolve));
     const { port } = control.address() as { port: number };
@@ -87,22 +88,28 @@ describe("Tailscale from a shell-less standalone macOS app", () => {
     const state = await response.json() as ReturnType<typeof companionState>;
     expect(response.status).toBe(200);
     expect(state.tailnetName).toBe("fixture.tail1234.ts.net");
+    expect(state.endpoints).toContainEqual({ url: "https://fixture.tail1234.ts.net:8813", kind: "tailnet", priority: 90 });
     expect(state.endpoints).toContainEqual({ url: "http://fixture.tail1234.ts.net:8787", kind: "tailnet", priority: 100 });
     expect(state.endpoints).toContainEqual({ url: "https://fixture.openmausbot.com", kind: "hosted", priority: 0 });
     expect(state.endpoints.some((endpoint: { url: string }) => endpoint.url.includes("100.64.0.7"))).toBe(false);
     expect(state.pairing).toBeNull();
-    expect(fixture.calls).toHaveLength(1);
-    expect(fixture.calls[0].cli).toBe(standalone);
-    expect(fixture.calls[0].options.env?.TAILSCALE_BE_CLI).toBe("1");
+    const ran = fixture.calls.filter(({ cli }) => cli === standalone);
+    expect(ran.map(({ args }) => args)).toEqual([
+      ["status", "--json"],
+      ["serve", "status", "--json"],
+      ["serve", "--bg", "--https=8813", "http://127.0.0.1:8787"],
+    ]);
+    expect(ran.every(({ options }) => options.env?.TAILSCALE_BE_CLI === "1")).toBe(true);
     expect(process.env.TAILSCALE_BE_CLI).toBe("0");
   });
 
-  it("keeps trying installed CLI paths after a successful GUI-only exit", async () => {
+  it("uses a Tailscale CLI on the machine before the macOS app's own executable", async () => {
     fixture.output = "gui";
     fixture.fallback = true;
     await refreshTailnetName();
     expect(tailnetName()).toBe("fixture.tail1234.ts.net");
     expect(fixture.calls.at(-1)?.cli).toBe("/usr/bin/tailscale");
+    expect(fixture.calls.some(({ cli }) => cli === standalone)).toBe(false);
   });
 
   it.each([
@@ -113,9 +120,9 @@ describe("Tailscale from a shell-less standalone macOS app", () => {
     expect(tailnetName()).not.toBeNull();
     fixture.output = output;
     const attempts: string[] = [];
-    await refreshTailnetName((_cli, outcome) => attempts.push(outcome));
+    await refreshTailnetName((cli, outcome) => cli === standalone && attempts.push(outcome));
     expect(tailnetName()).toBeNull();
-    expect(attempts[0]).toBe(expected);
+    expect(attempts).toEqual([expected]);
     expect(attempts.join("\n")).not.toContain("private diagnostic");
   });
 
@@ -125,11 +132,12 @@ describe("Tailscale from a shell-less standalone macOS app", () => {
     if (!("status" in result)) throw new Error("fixture CLI not found");
     expect(await tailscaleServe(result.status, 8799)).toEqual({ origin: "https://fixture.tail1234.ts.net" });
     await tailscaleServeOff(result.status);
-    expect(fixture.calls.map(({ args }) => args)).toEqual([
+    const ran = fixture.calls.filter(({ cli }) => cli === standalone);
+    expect(ran.map(({ args }) => args)).toEqual([
       ["status", "--json"],
       ["serve", "--bg", "--https=443", "http://127.0.0.1:8799"],
       ["serve", "--https=443", "off"],
     ]);
-    expect(fixture.calls.every(({ options }) => options.env?.TAILSCALE_BE_CLI === "1" && !options.shell)).toBe(true);
+    expect(ran.every(({ options }) => options.env?.TAILSCALE_BE_CLI === "1" && !options.shell)).toBe(true);
   });
 });

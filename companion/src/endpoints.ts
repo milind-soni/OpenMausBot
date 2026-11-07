@@ -46,7 +46,8 @@ const httpOrigin = (host: string, port: number): string => {
   return `http://${authority}:${port}`;
 };
 
-/** Best first: the hosted HTTPS route when configured, then the direct routes
+/** Best first: the hosted HTTPS route when configured, the tailnet's HTTPS
+ * route while Tailscale is on, then the direct routes
  * in the host list's order, Bonjour last. The cap bounds QR size and the
  * connection walk. */
 export function companionEndpointCandidates(
@@ -55,11 +56,13 @@ export function companionEndpointCandidates(
   magicDnsName: string | null = tailnetName(),
   hostedUrl: string | null = null,
   bonjourHost: string = defaultHostName(),
+  tailnetHttps: string | null = null,
 ): CompanionEndpoint[] {
   const tailscale = tailscaleAddress(addresses);
   const candidates: CompanionEndpoint[] = [];
 
   if (hostedUrl) candidates.push({ url: hostedUrl, kind: "hosted", priority: 0 });
+  if (tailnetHttps) candidates.push({ url: tailnetHttps, kind: "tailnet", priority: 90 });
   if (tailscale && magicDnsName) {
     candidates.push({ url: httpOrigin(magicDnsName, port), kind: "tailnet", priority: 100 });
   }

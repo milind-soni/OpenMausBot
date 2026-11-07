@@ -68,18 +68,29 @@ export function tailscaleAddress(addresses: string[] = lanAddresses()): string |
  * shared space, not one of the private ranges that exemption covers. A
  * `ts.net` hostname can be exempted by name. Cached: asking is a subprocess. */
 let cachedTailnetName: string | null = null;
+let cachedTailscaleCli: string | null = null;
 let activeTailnetRefresh: Promise<void> | null = null;
 
 export function tailnetName(): string | null {
   return cachedTailnetName;
 }
 
+/** The CLI path that answered the last successful status. */
+export function tailscaleCli(): string | null {
+  return cachedTailnetName ? cachedTailscaleCli : null;
+}
+
+export function forgetTailnetName(): void {
+  cachedTailnetName = null;
+  cachedTailscaleCli = null;
+}
+
 export function tailscaleCandidates(home = homedir()): string[] {
   // Absolute paths first: an app opened from Finder gets
   // /usr/bin:/bin:/usr/sbin:/sbin, no Homebrew and no /usr/local.
+  // The macOS app's own executable comes last: run without CLI mode it opens
+  // the Tailscale app, which then connects.
   return [
-    "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
-    join(home, "Applications", "Tailscale.app", "Contents", "MacOS", "Tailscale"),
     "/opt/homebrew/bin/tailscale",
     "/usr/local/bin/tailscale",
     "/usr/bin/tailscale",
@@ -87,6 +98,8 @@ export function tailscaleCandidates(home = homedir()): string[] {
     "C:\\Program Files\\Tailscale\\tailscale.exe",
     "C:\\Program Files (x86)\\Tailscale\\tailscale.exe",
     "tailscale",
+    "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+    join(home, "Applications", "Tailscale.app", "Contents", "MacOS", "Tailscale"),
   ];
 }
 
@@ -154,10 +167,11 @@ async function refreshTailnetNameOnce(
     });
     if (name) {
       cachedTailnetName = name;
+      cachedTailscaleCli = cli;
       return;
     }
   }
-  cachedTailnetName = null;
+  forgetTailnetName();
 }
 
 /** Coalesce startup and user-triggered probes so a slower failure cannot

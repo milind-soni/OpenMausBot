@@ -12,7 +12,8 @@ import { createControlServer, hostCandidates, initialControlToken } from "./cont
 import { createConnectedDeviceTracker } from "./connected-devices.ts";
 import { DeviceRegistry } from "./devices.ts";
 import { companionEndpointCandidates, hostedCompanionUrl } from "./endpoints.ts";
-import { lanAddresses, refreshTailnetName, tailnetName, tailscaleAddress } from "./listener.ts";
+import { lanAddresses, tailnetName, tailscaleAddress } from "./listener.ts";
+import { createTailnet } from "./tailnet.ts";
 import {
   advertisableAddresses,
   clampBytes,
@@ -73,6 +74,7 @@ const COMPANION_PORT = num(process.env.OMB_COMPANION_PORT, 8810);
 const CONTROL_PORT = num(process.env.OMB_CONTROL_PORT, 8811);
 const SERVICE_TYPE = "_openmausbot._tcp";
 let hostedUrl = hostedCompanionUrl(process.env.OMB_COMPANION_HOSTED_URL);
+const tailnet = createTailnet({ companionPort: COMPANION_PORT, initiallyOn: process.env.OMB_COMPANION_TAILSCALE === "1" });
 const PRIVATE_ORIGIN = companionOriginSocket(process.env.OMB_COMPANION_INTERNAL_ORIGIN);
 const SECRET_PUBLIC_KEY = normalizedPhoneSecretPublicKey(
   process.env.OMB_PHONE_SECRET_PUBLIC_KEY ?? "",
@@ -151,7 +153,7 @@ const proxy = createProxyHandler({
     redeem: (code, deviceName, pairRequestId) => devices.redeem(code, deviceName, pairRequestId),
     serverName: machineName,
     hosts: () => hostCandidates(),
-    endpoints: () => companionEndpointCandidates(COMPANION_PORT, undefined, undefined, hostedUrl),
+    endpoints: () => companionEndpointCandidates(COMPANION_PORT, undefined, undefined, hostedUrl, undefined, tailnet.state().httpsOrigin),
     connected: connectedDevices.open,
     e2eDescriptor: (deviceId) => e2e.descriptor(deviceId),
     e2ePaired: (context, deviceId) => e2e.paired(context, deviceId),
@@ -229,7 +231,7 @@ const control = createControlServer({
     if (parentPort && !mutationToken) return;
     void notifyDeviceRevoked({ harnessPort: HARNESS_PORT, deviceId, mutationToken: mutationToken ?? undefined });
   },
-  refreshTailscale: () => refreshTailnetName(),
+  tailnet,
   e2e: () => ({ enabled: e2e.enabled, relay: relay?.status ?? "off", node: relay?.node ?? null, descriptor: e2e.descriptor(null) }),
   liveRoutes: () => e2e.routes(),
   // The phone hears where it may connect from inside its session first. Narrowed, the relay keeps it a moment so that
@@ -309,7 +311,7 @@ async function main(): Promise<void> {
   await refreshMachineName();
 
   const tailscaleTried: string[] = [];
-  await refreshTailnetName((cli, outcome) => tailscaleTried.push(`  ${cli} — ${outcome}`)).catch(() => {});
+  if (tailnet.state().on) await tailnet.on((cli, outcome) => tailscaleTried.push(`  ${cli} — ${outcome}`)).catch(() => {});
 
   // Through the watcher: a laptop may have no addresses yet, and they change
   // under a running sidecar. Discovery failing is never fatal.
@@ -327,7 +329,7 @@ async function main(): Promise<void> {
   console.log(`companion  http://0.0.0.0:${COMPANION_PORT}  →  harness 127.0.0.1:${HARNESS_PORT}`);
   if (!parentPort) console.log(`pair here  http://127.0.0.1:${CONTROL_PORT}/#token=${controlToken}`);
   if (reach) console.log(`on your phone, enter  ${reach}:${COMPANION_PORT}`);
-  if (tailscale && !tailnetName()) {
+  if (tailnet.state().on && !tailnetName()) {
     console.log("no MagicDNS name found. Tailscale CLI attempts:");
     for (const line of tailscaleTried) console.log(line);
   }

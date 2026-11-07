@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createControlServer, hostCandidates, initialControlToken, originIsLoopback } from "../src/control.ts";
 import { DeviceRegistry } from "../src/devices.ts";
+import type { TailnetState } from "../src/tailnet.ts";
 
 let control: Server;
 let port = 0;
@@ -11,6 +12,8 @@ let connectedDeviceIds: string[] = [];
 let disconnectedDeviceIds: string[] = [];
 let revokedDeviceIds: string[] = [];
 let tailscaleRefreshes = 0;
+let tailscaleOffs = 0;
+let tailnetState: TailnetState = { on: false, httpsOrigin: null, problem: null };
 let completedTailscaleRefreshes = 0;
 const CONTROL_TOKEN = "c".repeat(43);
 let controlToken: string | null = CONTROL_TOKEN;
@@ -53,10 +56,20 @@ beforeAll(async () => {
     revoked: (deviceId) => {
       revokedDeviceIds.push(deviceId);
     },
-    refreshTailscale: async () => {
-      tailscaleRefreshes += 1;
-      await Promise.resolve();
-      completedTailscaleRefreshes += 1;
+    tailnet: {
+      on: async () => {
+        tailscaleRefreshes += 1;
+        await Promise.resolve();
+        completedTailscaleRefreshes += 1;
+        tailnetState = { on: true, httpsOrigin: "https://laptop.tail1234.ts.net:8813", problem: null };
+        return tailnetState;
+      },
+      off: async () => {
+        tailscaleOffs += 1;
+        tailnetState = { on: false, httpsOrigin: null, problem: null };
+        return tailnetState;
+      },
+      state: () => tailnetState,
     },
   });
   port = await new Promise<number>((resolve) =>
@@ -201,6 +214,18 @@ describe("origins the control server will change state for", () => {
     expect(tailscaleRefreshes).toBe(before + 1);
     expect(completedTailscaleRefreshes).toBe(tailscaleRefreshes);
     expect(refreshed.body.pairing).toBeNull();
+  });
+
+  it("turns Tailscale on and off, and the state carries the switch and its HTTPS address", async () => {
+    const on = await ask("POST", "/tailscale/on");
+    expect(on.status).toBe(200);
+    expect(on.body).toMatchObject({ tailscaleOn: true, tailnetHttps: "https://laptop.tail1234.ts.net:8813" });
+    expect(on.body.endpoints).toContainEqual({ url: "https://laptop.tail1234.ts.net:8813", kind: "tailnet", priority: 90 });
+    const off = await ask("POST", "/tailscale/off");
+    expect(off.status).toBe(200);
+    expect(tailscaleOffs).toBe(1);
+    expect(off.body.tailscaleOn).toBe(false);
+    expect(off.body.tailnetHttps).toBeUndefined();
   });
 
   it("refuses a Tailscale refresh from a foreign page", async () => {

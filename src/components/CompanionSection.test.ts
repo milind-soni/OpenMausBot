@@ -208,7 +208,8 @@ describe("Tailscale pairing onboarding", () => {
   it("explains every step between unchecked and ready", () => {
     expect(deriveTailscalePairingStatus({ enabled: false }, false)).toMatchObject({
       kind: "unchecked",
-      detail: expect.stringContaining("turns on Remote access"),
+      title: "Remote access off",
+      detail: expect.stringContaining("once Remote access is on"),
     });
     expect(deriveTailscalePairingStatus({ enabled: true }, false).kind).toBe("unavailable");
     expect(deriveTailscalePairingStatus({
@@ -223,6 +224,12 @@ describe("Tailscale pairing onboarding", () => {
       kind: "ready",
       title: "Ready on mac.tail1234.ts.net",
     });
+  });
+
+  it("says why the tailnet has no HTTPS address when Tailscale would not serve one", () => {
+    const ready = { enabled: true, tailscale: "100.99.1.2", tailnetName: "mac.tail1234.ts.net" };
+    expect(deriveTailscalePairingStatus({ ...ready, tailscaleProblem: "port-taken" }, true).detail).toContain("Port 8813");
+    expect(deriveTailscalePairingStatus({ ...ready, tailscaleProblem: "serve-refused" }, true).detail).toContain("HTTPS certificates");
   });
 
   it("surfaces sidecar failures instead of pretending Tailscale is merely absent", () => {
