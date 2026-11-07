@@ -5791,6 +5791,7 @@
   "engineSetup.device.cancelled": "Sign-in cancelled. You can request a new code when ready.",
   "engineSetup.device.expired": "This code expired. Request a new code to try again.",
   "engineSetup.device.failed": "Sign-in could not be completed. Try again, or check the Codex installation.",
+  "engineSetup.device.unreachable": "Lost touch with the server during sign-in. Check the connection and start again.",
   "engineSetup.device.invalidChallenge": "Codex did not return a valid OpenAI sign-in link and code. Cancel and try again.",
   "engineSetup.device.flowEnded": "This sign-in session is no longer available. Check that this browser is still paired with Full access, then request a new code.",
   "engineSetup.device.tryAgain": "Try again",
