@@ -92,7 +92,7 @@ import { createReplyVoiceNotes } from "./host/reply-voice-notes.ts";
 import { runtimeRequestCardFields } from "./request-card.ts";
 import type { DirectSendInput, DirectSendReceipt } from "./direct-send.ts";
 import { finishedWithoutSummaryLine, ROOM_SUMMARY_REASK, roomTurnNarrationIds, roomTurnReply } from "./room-reply.ts";
-import { pickComputer } from "./computer-selection.ts";
+import { chosenPlace, pickComputer } from "./computer-selection.ts";
 import * as boat from "./boat.ts"; import { keyHint, keyStatus, nestedKeyStatus, withoutKeyHints } from "./key-hint.ts";
 import { cloudComputerRpc } from "./cloud-computer-tools.ts";
 import { chartRenderer, compileChart, dataEngine, validateVegaLite } from "./data/deps.ts";
@@ -13031,15 +13031,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 400, { error: "surface must be auto, cloud, vm, local, or browser" });
         }
         const unoffered = CLOUD_HOME && method === "POST" && requested !== "auto" ? cloudHomePlaceRefusal(parseSurface(requested)!) : undefined;
-        const options = await selectableComputers(bot);
+        const options = await selectableComputers(bot), chosen = chosenPlace(store.taskByThread(bot.id, internalCapability.threadId), bot.computer);
         const current = source ? source.mounted ?? "off" : await computerPreviewSurface(bot, bot.threadId);
         requireActiveInternalCapability();
-        if (method === "GET") return json(res, 200, { current, canSelect, ...(refusal ? { why: refusal } : {}), options });
+        if (method === "GET") return json(res, 200, { current, canSelect, ...(refusal ? { why: refusal } : {}), ...(chosen ? { chosen, chosenNote: `The person chose ${surfaceLabel(chosen)} for this conversation, and auto keeps it while it is available. Select another place only when they ask for one or it is unavailable.` } : {}), options });
         if (computerSelectionTurns.get(internalCapability.threadId) !== source) return json(res, 409, { error: "The user request ended before its computer was selected." });
         if (unoffered) return json(res, 409, { error: unoffered, options });
         const claim = autoVmClaims.get(internalCapability.threadId);
         const startsOnFirstCall = claim?.owner.generation === internalCapability.generation && claim.startsComputer === true && !claim.failed;
-        const picked = pickComputer(options, requested, current, startsOnFirstCall);
+        const picked = pickComputer(options, requested, current, startsOnFirstCall, chosen);
         const option = picked.option;
         if (!option?.available) return json(res, 409, { error: option?.reason ?? "No configured computer or browser is available. Open the Screen panel to set one up.", options });
         if (!source!.selected && picked.current) {
