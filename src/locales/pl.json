@@ -2031,6 +2031,7 @@
   "chat.rescue.connect": "Połącz swoją subskrypcję",
   "chat.rescue.connectHint": "Zaloguj się planem AI, za który już płacisz",
   "chat.error.signedOut": "{name} wymaga zalogowania. Zaloguj się poniżej, a następnie wyślij wiadomość ponownie.",
+  "chat.error.pastUsageLimit": "Poprzednie powiadomienie o limicie (czas resetu minął; sprawdź bieżące użycie)",
   "chat.error.details": "Szczegóły",
   "chat.error.requestTooLarge": "Ta wiadomość jest za duża dla {model}. Rozpocznij nowy czat albo wybierz model, który przyjmuje więcej.",
   "chat.error.dismiss": "Odrzuć",
