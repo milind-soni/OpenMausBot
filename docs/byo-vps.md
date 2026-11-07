@@ -23,7 +23,8 @@ passphrase, and never runs an agent remotely.
 ## Prerequisites
 
 - **Locally:** a `docker` CLI, version 18.09 or newer (that is when `docker -H ssh://` shipped). The Docker
-  daemon does not need to run locally — only the CLI is used.
+  daemon does not need to run locally — only the CLI is used; install it with the one line for your platform
+  below.
 - **On the VPS:** a running Docker daemon (`dockerd`) on x86_64 Linux.
 - **The SSH user** must be in the `docker` group on the VPS, so `docker info` works without sudo.
 
@@ -31,6 +32,20 @@ Be clear-eyed about that last point: membership in the `docker` group is root-eq
 Anyone who can talk to the daemon can mount the host filesystem into a container. Using this feature means
 trusting the VPS — and whoever else can reach its Docker daemon — completely. Give bots a dedicated server,
 not one that also holds things you would not hand to the agent.
+
+## Install the Docker client
+
+Only the client belongs on your own computer; the daemon stays on the VPS. One line per platform:
+
+```sh
+brew install docker                     # macOS
+winget install -e --id Docker.DockerCLI # Windows 10 or 11
+sudo apt install docker-ce-cli          # Debian or Ubuntu, Docker's apt repository
+```
+
+Windows also needs its OpenSSH client (`ssh.exe`, included since Windows 10 1809), because Docker's SSH
+transport runs it. Podman cannot replace the Docker CLI here: this backend only ever runs
+`docker -H ssh://<alias>`.
 
 ## The required SSH config alias
 

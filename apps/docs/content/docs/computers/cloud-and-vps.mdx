@@ -60,6 +60,16 @@ ssh my-vps true
 docker -H ssh://my-vps info
 ```
 
+Install the Docker client on your own computer; the daemon stays on the VPS:
+
+```bash
+brew install docker                     # macOS
+winget install -e --id Docker.DockerCLI # Windows 10 or 11
+sudo apt install docker-ce-cli          # Debian or Ubuntu, Docker's apt repository
+```
+
+Windows 10 1809 and later include the OpenSSH client this needs. Podman cannot replace the Docker CLI here: the VPS backend runs `docker -H ssh://<alias>` itself.
+
 The SSH user needs Docker access, which is root-equivalent on that server. Use a dedicated VPS and firewall inbound traffic to SSH only.
 
 The managed container publishes no ports, has no host mounts, and is checked before every attach. Its filesystem should be treated as disposable; move important results out before deleting or upgrading the container.
