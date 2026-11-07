@@ -4890,19 +4890,5 @@
   "server.meetings.end.meet_refused": "Google Meet 沒有讓我以訪客身分進入。主持人可以在主持人控制項中允許訪客，或者這場會議可能不允許組織外的人加入。",
   "server.meetings.end.speech_unavailable": "我無法為這場會議取得語音轉文字服務，所以沒有加入。",
   "server.meetings.card.settingUp": "正在設定逐字稿（僅首次，約一分鐘）…",
-  "server.meetings.card.speechStopped": "逐字稿已停止：{problem}",
-  "native.connect.empty": "輸入伺服器的位址，或貼上它的連結。",
-  "native.connect.codeOnly": "這是配對碼。也請輸入伺服器的位址，例如 {example}。",
-  "native.connect.emailCode": "這是電子郵件裡的登入碼。配對需要像 7KQ2-M9XD-H4TP 這樣的 12 字元配對碼。",
-  "native.connect.oldCode": "這是舊版 MausBot 的代碼。配對需要像 7KQ2-M9XD-H4TP 這樣的 12 字元配對碼：請在伺服器上執行 openmausbot pair。",
-  "native.connect.scriptKey": "這是指令碼金鑰。配對需要配對碼。",
-  "native.connect.notACode": "這不是配對碼。配對需要像 7KQ2-M9XD-H4TP 這樣的 12 字元配對碼。",
-  "native.connect.publicHttp": "http://{host} 位於公開網際網路且未加密，別人可能讀到你的對話。請使用它的 https 位址，或在前面加上 HTTPS（cloudflared、Caddy 或 Tailscale）。",
-  "native.connect.phoneLink": "這個連結是給手機上的 MausBot App 用的。請貼上伺服器顯示的連結，或它的位址。",
-  "native.connect.notAnAddress": "這不是伺服器位址。請貼上伺服器顯示的連結，或輸入它的位址，例如 {example}。",
-  "native.connect.unreachable": "無法連到 {host}。請確認伺服器正在執行，且這台電腦連得到它。",
-  "native.connect.dns": "{host} 還不存在。請檢查拼字，或等待 DNS 記錄生效。",
-  "native.connect.certificate": "{host} 的憑證還無效。新伺服器可能需要一分鐘取得憑證。",
-  "native.connect.notMausBot": "這個位址有回應，但它不是 MausBot 伺服器。",
-  "native.connect.loopback": "這指向這台電腦（{host}），而不是伺服器。請使用伺服器自己的位址。"
+  "server.meetings.card.speechStopped": "逐字稿已停止：{problem}"
 }

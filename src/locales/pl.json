@@ -6761,19 +6761,5 @@
   "server.meetings.end.meet_refused": "Google Meet nie wpuścił mnie jako gościa. Organizator może zezwolić na gości w ustawieniach organizatora albo spotkanie nie przyjmuje osób spoza organizacji.",
   "server.meetings.end.speech_unavailable": "Nie udało się uzyskać zamiany mowy na tekst dla tego spotkania, więc nie dołączyłem.",
   "server.meetings.card.settingUp": "Konfiguruję transkrypcję (jednorazowo, około minuty)…",
-  "server.meetings.card.speechStopped": "Transkrypcja zatrzymana: {problem}",
-  "native.connect.empty": "Wpisz adres serwera albo wklej jego link.",
-  "native.connect.codeOnly": "To jest kod parowania. Wpisz też adres serwera, np. {example}.",
-  "native.connect.emailCode": "To kod logowania z e-maila. Do parowania potrzebny jest 12-znakowy kod, np. 7KQ2-M9XD-H4TP.",
-  "native.connect.oldCode": "To kod ze starszej wersji MausBot. Do parowania potrzebny jest 12-znakowy kod, np. 7KQ2-M9XD-H4TP: na serwerze uruchom openmausbot pair.",
-  "native.connect.scriptKey": "To klucz skryptu. Do parowania potrzebny jest kod parowania.",
-  "native.connect.notACode": "To nie jest kod parowania. Do parowania potrzebny jest 12-znakowy kod, np. 7KQ2-M9XD-H4TP.",
-  "native.connect.publicHttp": "http://{host} jest w otwartym internecie i nie jest szyfrowany, więc inni mogliby czytać Twoje czaty. Użyj jego adresu https albo postaw przed nim HTTPS (cloudflared, Caddy lub Tailscale).",
-  "native.connect.phoneLink": "Ten link jest dla aplikacji MausBot na telefonie. Wklej link wyświetlony przez serwer albo jego adres.",
-  "native.connect.notAnAddress": "To nie jest adres serwera. Wklej link wyświetlony przez serwer albo wpisz jego adres, np. {example}.",
-  "native.connect.unreachable": "Nie można połączyć się z {host}. Sprawdź, czy serwer działa i jest osiągalny z tego komputera.",
-  "native.connect.dns": "{host} jeszcze nie istnieje. Sprawdź pisownię albo poczekaj na rekord DNS.",
-  "native.connect.certificate": "Certyfikat {host} nie jest jeszcze ważny. Nowy serwer może potrzebować minuty, żeby go dostać.",
-  "native.connect.notMausBot": "Ten adres odpowiada, ale to nie jest serwer MausBot.",
-  "native.connect.loopback": "To wskazuje na ten komputer ({host}), a nie na serwer. Użyj adresu samego serwera."
+  "server.meetings.card.speechStopped": "Transkrypcja zatrzymana: {problem}"
 }

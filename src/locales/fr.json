@@ -3215,19 +3215,5 @@
   "server.meetings.end.meet_refused": "Google Meet ne m'a pas laissé entrer comme invité. L'organisateur peut autoriser les invités dans les commandes de l'organisateur, ou la réunion n'accepte peut-être pas les personnes extérieures à l'organisation.",
   "server.meetings.end.speech_unavailable": "Je n'ai pas pu obtenir la transcription pour cette réunion, je ne l'ai donc pas rejointe.",
   "server.meetings.card.settingUp": "Configuration de la transcription (une seule fois, environ une minute)…",
-  "server.meetings.card.speechStopped": "Transcription arrêtée : {problem}",
-  "native.connect.empty": "Saisissez l'adresse du serveur ou collez son lien.",
-  "native.connect.codeOnly": "C'est un code d'appairage. Saisissez aussi l'adresse du serveur, par exemple {example}.",
-  "native.connect.emailCode": "C'est un code de connexion reçu par e-mail. L'appairage demande un code de 12 caractères comme 7KQ2-M9XD-H4TP.",
-  "native.connect.oldCode": "C'est un code d'une ancienne version de MausBot. L'appairage demande un code de 12 caractères comme 7KQ2-M9XD-H4TP : sur le serveur, lancez openmausbot pair.",
-  "native.connect.scriptKey": "C'est une clé de script. L'appairage demande un code d'appairage.",
-  "native.connect.notACode": "Ce n'est pas un code d'appairage. L'appairage demande un code de 12 caractères comme 7KQ2-M9XD-H4TP.",
-  "native.connect.publicHttp": "http://{host} est sur l'internet ouvert et n'est pas chiffré : d'autres pourraient lire vos discussions. Utilisez son adresse https, ou placez HTTPS devant (cloudflared, Caddy ou Tailscale).",
-  "native.connect.phoneLink": "Ce lien est destiné à l'app MausBot du téléphone. Collez le lien affiché par le serveur, ou son adresse.",
-  "native.connect.notAnAddress": "Ce n'est pas une adresse de serveur. Collez le lien affiché par le serveur, ou saisissez son adresse, par exemple {example}.",
-  "native.connect.unreachable": "Impossible de joindre {host}. Vérifiez que le serveur tourne et qu'il est joignable depuis cet ordinateur.",
-  "native.connect.dns": "{host} n'existe pas encore. Vérifiez l'orthographe, ou attendez l'enregistrement DNS.",
-  "native.connect.certificate": "Le certificat de {host} n'est pas encore valide. Un nouveau serveur peut mettre une minute à l'obtenir.",
-  "native.connect.notMausBot": "Cette adresse répond, mais ce n'est pas un serveur MausBot.",
-  "native.connect.loopback": "Ceci pointe vers cet ordinateur ({host}), pas vers le serveur. Utilisez l'adresse du serveur lui-même."
+  "server.meetings.card.speechStopped": "Transcription arrêtée : {problem}"
 }

@@ -5498,19 +5498,5 @@
   "server.meetings.end.meet_refused": "Google Meet beni misafir olarak içeri almadı. Toplantı sahibi, toplantı sahibi denetimlerinden misafirlere izin verebilir ya da toplantı kuruluş dışından kişileri kabul etmiyor olabilir.",
   "server.meetings.end.speech_unavailable": "Bu toplantı için konuşmayı yazıya dökme hizmeti alamadım, bu yüzden katılmadım.",
   "server.meetings.card.settingUp": "Döküm hazırlanıyor (bir kerelik, yaklaşık bir dakika)…",
-  "server.meetings.card.speechStopped": "Döküm durdu: {problem}",
-  "native.connect.empty": "Sunucunun adresini girin veya bağlantısını yapıştırın.",
-  "native.connect.codeOnly": "Bu bir eşleştirme kodu. Sunucunun adresini de girin, örneğin {example}.",
-  "native.connect.emailCode": "Bu, bir e-postadan gelen oturum açma kodu. Eşleştirme için 7KQ2-M9XD-H4TP gibi 12 karakterlik bir kod gerekir.",
-  "native.connect.oldCode": "Bu, eski bir MausBot sürümünün kodu. Eşleştirme için 7KQ2-M9XD-H4TP gibi 12 karakterlik bir kod gerekir: sunucuda openmausbot pair komutunu çalıştırın.",
-  "native.connect.scriptKey": "Bu bir betik anahtarı. Eşleştirme için bir eşleştirme kodu gerekir.",
-  "native.connect.notACode": "Bu bir eşleştirme kodu değil. Eşleştirme için 7KQ2-M9XD-H4TP gibi 12 karakterlik bir kod gerekir.",
-  "native.connect.publicHttp": "http://{host} açık internette ve şifrelenmemiş; başkaları sohbetlerinizi okuyabilir. Onun https adresini kullanın ya da önüne HTTPS koyun (cloudflared, Caddy veya Tailscale).",
-  "native.connect.phoneLink": "Bu bağlantı telefondaki MausBot uygulaması için. Sunucunun gösterdiği bağlantıyı ya da adresini yapıştırın.",
-  "native.connect.notAnAddress": "Bu bir sunucu adresi değil. Sunucunun gösterdiği bağlantıyı yapıştırın ya da adresini yazın, örneğin {example}.",
-  "native.connect.unreachable": "{host} adresine ulaşılamıyor. Sunucunun çalıştığını ve bu bilgisayardan erişilebildiğini kontrol edin.",
-  "native.connect.dns": "{host} henüz yok. Yazımı kontrol edin ya da DNS kaydını bekleyin.",
-  "native.connect.certificate": "{host} sertifikası henüz geçerli değil. Yeni bir sunucunun sertifika alması bir dakika sürebilir.",
-  "native.connect.notMausBot": "Bu adres yanıt veriyor ama bir MausBot sunucusu değil.",
-  "native.connect.loopback": "Bu, sunucuyu değil bu bilgisayarı ({host}) gösteriyor. Sunucunun kendi adresini kullanın."
+  "server.meetings.card.speechStopped": "Döküm durdu: {problem}"
 }

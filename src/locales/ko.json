@@ -7346,19 +7346,5 @@
   "server.meetings.end.meet_refused": "Google Meet이 저를 게스트로 들여보내지 않았습니다. 호스트는 호스트 제어에서 게스트를 허용할 수 있으며, 또는 이 회의가 조직 외부 사람을 허용하지 않을 수 있습니다.",
   "server.meetings.end.speech_unavailable": "이 회의에 음성 텍스트 변환을 사용할 수 없어서 참여하지 않았습니다.",
   "server.meetings.card.settingUp": "녹취 설정 중(최초 1회, 약 1분)…",
-  "server.meetings.card.speechStopped": "녹취가 중단됨: {problem}",
-  "native.connect.empty": "서버 주소를 입력하거나 링크를 붙여 넣으세요.",
-  "native.connect.codeOnly": "페어링 코드입니다. 서버 주소도 입력하세요. 예: {example}",
-  "native.connect.emailCode": "이메일로 받은 로그인 코드입니다. 페어링에는 7KQ2-M9XD-H4TP 같은 12자리 코드가 필요합니다.",
-  "native.connect.oldCode": "이전 MausBot의 코드입니다. 페어링에는 7KQ2-M9XD-H4TP 같은 12자리 코드가 필요합니다. 서버에서 openmausbot pair를 실행하세요.",
-  "native.connect.scriptKey": "스크립트 키입니다. 페어링에는 페어링 코드가 필요합니다.",
-  "native.connect.notACode": "페어링 코드가 아닙니다. 페어링에는 7KQ2-M9XD-H4TP 같은 12자리 코드가 필요합니다.",
-  "native.connect.publicHttp": "http://{host}는 공개 인터넷에 있고 암호화되지 않아 다른 사람이 채팅을 읽을 수 있습니다. https 주소를 사용하거나 앞단에 HTTPS를 두세요(cloudflared, Caddy 또는 Tailscale).",
-  "native.connect.phoneLink": "이 링크는 휴대폰의 MausBot 앱용입니다. 서버가 보여 준 링크나 주소를 붙여 넣으세요.",
-  "native.connect.notAnAddress": "서버 주소가 아닙니다. 서버가 보여 준 링크를 붙여 넣거나 주소를 입력하세요. 예: {example}",
-  "native.connect.unreachable": "{host}에 연결할 수 없습니다. 서버가 실행 중이고 이 컴퓨터에서 접근할 수 있는지 확인하세요.",
-  "native.connect.dns": "{host}가 아직 존재하지 않습니다. 철자를 확인하거나 DNS 레코드를 기다리세요.",
-  "native.connect.certificate": "{host}의 인증서가 아직 유효하지 않습니다. 새 서버는 인증서를 받는 데 1분 정도 걸릴 수 있습니다.",
-  "native.connect.notMausBot": "이 주소는 응답하지만 MausBot 서버가 아닙니다.",
-  "native.connect.loopback": "서버가 아니라 이 컴퓨터({host})를 가리킵니다. 서버 자체의 주소를 사용하세요."
+  "server.meetings.card.speechStopped": "녹취가 중단됨: {problem}"
 }
