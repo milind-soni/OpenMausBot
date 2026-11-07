@@ -193,7 +193,8 @@ const BLANK_MEANS_LEFT_OUT: Readonly<Record<string, readonly string[]>> = {
   coordinate_bots: ["group_id", "reason", "thread", "title", "reply", "done_when", "answers"],
   session_search: ["thread_id", "message_id", "query", "since", "until", "scope"],
   show_html: ["html", "jsx", "path"],
-  memory_update: ["old_text", "text", "until"],
+  // A blank text or old_text is a mistake the schema names, not "not given".
+  memory_update: ["until"],
 };
 
 function dropBlankArguments(name: string, input: Json): Json {
