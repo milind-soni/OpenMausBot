@@ -64,14 +64,15 @@ export function automationsFrom(sources: { routines: readonly Routine[]; webhook
 
 /** An unseen failed or missed run the person can clear: it belongs to an automation in `automations`, and opening that
  * automation marks it seen. A run whose automation or bot was deleted has nothing to open, so it never asks for attention,
- * nor does one a later completed run recovered from, which the list shows as Working. */
+ * nor does a schedule's run that a later completed run recovered from, which the list shows as Working. A webhook or app
+ * event's run stays: each handles its own event, so a later success does not redo the one that failed. */
 export function hasUnseenProblemRun(automations: readonly Automation[]): boolean {
   return unseenProblemRunCount(automations) > 0;
 }
 
 export function unseenProblemRunCount(automations: readonly Automation[]): number {
-  return automations.reduce((total, { runs }) => {
-    const recovered = runs.findIndex((run) => run.status === "completed");
+  return automations.reduce((total, { kind, runs }) => {
+    const recovered = kind === "schedule" ? runs.findIndex((run) => run.status === "completed") : -1;
     const outstanding = recovered === -1 ? runs : runs.slice(0, recovered);
     return total + outstanding.filter((run) => isRoutineProblemRun(run) && !run.seenAt).length;
   }, 0);

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { setLocale } from "@/lib/i18n";
 
+import type { AppTrigger } from "@/lib/app-triggers";
 import type { Routine, RoutineRun } from "@/lib/routines";
 import type { WebhookTrigger } from "@/lib/webhooks";
 import {
@@ -243,6 +244,15 @@ describe("failed or missed runs not read", () => {
     const list = [automation([run("completed", at(-1, 9)), run("failed", at(-2, 9))])];
     expect(unseenProblemRunCount(list)).toBe(0);
     expect(hasUnseenProblemRun(list)).toBe(false);
+  });
+
+  it("still counts a webhook or app event's failure after a later completed run, since each run handles its own event", () => {
+    const appTrigger = { id: "watch", name: "New mail", prompt: "Draft a reply.", botId: "scout", enabled: true } as AppTrigger;
+    const runs = [run("completed", at(-1, 9), { routineId: "hook" }), run("failed", at(-2, 9), { routineId: "hook" }), run("completed", at(-1, 9), { routineId: "watch" }), run("failed", at(-2, 9), { routineId: "watch" })];
+    const list = automationsFrom({ routines: [], webhooks: [webhook()], appTriggers: [appTrigger], runs });
+    expect(list.map(({ kind }) => kind)).toEqual(["webhook", "app"]);
+    expect(unseenProblemRunCount(list)).toBe(2);
+    expect(hasUnseenProblemRun(list)).toBe(true);
   });
 
   it("has nothing to count once every run is seen", () => {
