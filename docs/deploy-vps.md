@@ -2,7 +2,7 @@
 
 From a blank Linux server to OpenMausBot running on it around the clock, reachable from your laptop, the desktop app and your phone, with your bots working while every laptop is closed. It assumes nothing beyond being able to open a terminal and paste commands. About twenty minutes, most of it waiting.
 
-Three ways to make the server reachable are covered. Pick one; the rest of the guide is the same.
+Three ways to make the server reachable are covered. Pick one; the rest of the guide is the same. The short version of every path, including `--lan` and your own cloudflared or proxy (`--public-url`), is at the top of [Self-hosting](self-hosting.md#pick-a-way-in); this guide adds the server setup around it.
 
 | | You need | Who can reach it | Best for |
 |---|---|---|---|
@@ -122,18 +122,18 @@ One container for the server plus Caddy for HTTPS at `https://maus.example.com`.
 In this path, every `npx openmausbot …` command below is run inside the container instead:
 
 ```sh
-docker compose exec omb node dist-server/openmausbot.js pair --label "My MacBook"
+docker compose exec omb openmausbot pair --label "My MacBook"
 ```
 
 ## Path C: only your Tailscale network
 
-From the administrator shell, install Tailscale on the server and sign in (`curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up`). Enable HTTPS certificates for your tailnet once in the admin console (DNS → HTTPS Certificates), then run this from the `maus` shell:
+From the administrator shell, install Tailscale on the server and sign in (`curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up`). Enable HTTPS certificates for your tailnet once at https://login.tailscale.com/admin/dns (HTTPS Certificates), then run this from the `maus` shell:
 
 ```sh
 npx openmausbot serve --tailscale
 ```
 
-Tailscale terminates HTTPS with its own certificate and the pairing link uses the server's MagicDNS name (`https://maus.tail1234.ts.net`). Only devices on your tailnet can reach it, which is a very good property for a server that can run tools.
+Tailscale terminates HTTPS with its own certificate and the pairing link uses the server's MagicDNS name (`https://maus.tail1234.ts.net`). `serve` runs `tailscale serve` in the foreground, so the share ends when it stops. Only devices on your tailnet can reach it, which is a very good property for a server that can run tools.
 
 ## Give the bots a browser (optional)
 
@@ -183,37 +183,39 @@ restarting or upgrading. The systemd example below includes `~/.local/bin` in PA
 
 ## Pair your first device
 
-`serve` already printed a pairing link and QR code when it started. For another device later:
+`serve` already printed a pairing block when it started in a terminal (a service prints none into its log). For another device later:
 
 ```sh
 npx openmausbot pair --label "Kitchen iPad"
 ```
 
 ```
-pairing code:  RR8Y-BLR6-H939
-expires:       10:59:45 AM (single use)
-open or scan:  https://c-7f3a9c.openmausbot.com/pair#code=RR8Y-BLR6-H939
+Pairing code   RR8Y-BLR6-H939   works once, until 10:59 · everything
+Link           https://c-7f3a9c.openmausbot.com/pair#code=RR8Y-BLR6-H939
+
+  Desktop app   ＋ → Connect to a server, paste the link
+  Phone         scan with your camera or the MausBot app
 ```
 
 - **A browser:** open the link. The code is filled in; press **Connect**. That browser is paired for 30 days, renewed on use as above.
-- **The desktop app:** copy the link, then in the app's **Server** menu choose **Add Server from Copied Pairing Link…**. The menu switches between your own machine and every server you added.
-- **The phone:** scan the QR code from the iOS app's pairing screen, or paste the whole link into its address field. The phone can chat, approve, and read; creating bots, changing models, and connecting apps stay with you in the server's UI.
+- **The desktop app:** choose **＋ → Connect to a server** and paste the link, or type the address and the code. The rail at the window's left edge switches between your own machine and every server you added.
+- **The phone:** scan the QR code from the iOS app's pairing screen, or paste the whole link into its address field. A code from `pair --phone` can chat, approve, and read; creating bots, changing models, and connecting apps stay with you in the server's UI.
 
-Worth knowing: a code works **once** and expires after **five minutes** (`--ttl 24h` keeps it open up to a day, for a device you set up later; it is still single use, and a server restart ends every open code); the link only works on that address (typing the code by hand: open `…/pair` and enter it); ten wrong codes in a minute from one address pause pairing for that address for a minute; `--client` mints a code for a device that may chat and approve but not change settings or pair others.
+Worth knowing: a code works **once**, for **10 minutes** (`--ttl 24h` keeps it open up to a day, for a device you set up later; it is still single use, and a server restart ends every open code); the link only works on that address (typing the code by hand: open `…/pair` and enter it); five wrong codes in five minutes from one address lock pairing there for five minutes; `--phone` mints a code for a device that may chat and approve but not change settings or pair others.
 
 ## Manage devices
 
 Every paired device is a session:
 
 ```sh
-npx openmausbot sessions              # id, device, scope, last seen, expires
-npx openmausbot sessions revoke ID    # signs that device out and closes its stream at once
-npx openmausbot status                # what the server says about itself
+npx openmausbot devices               # id, device, scope, last seen, expires
+npx openmausbot devices revoke ID     # signs that device out and closes its stream at once
+npx openmausbot status                # the address others use, and whether it answers as this server
 ```
 
 ## Keep it running
 
-`npx openmausbot serve` is a plain foreground process. For systemd (paths A and C),
+`npx openmausbot serve` is a plain foreground process. `npx openmausbot service install --tunnel` (or `--tailscale`) writes a unit like the one below for you, with a copy of the release it runs beside your data. To write it by hand for systemd (paths A and C),
 install a chosen release first, from the `maus` shell. Replace `X.Y.Z` with the
 published version you want to run:
 
@@ -235,7 +237,7 @@ User=maus
 WorkingDirectory=/home/maus
 Environment=HOME=/home/maus
 Environment=PATH=/home/maus/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/home/maus/.local/bin/openmausbot serve --tunnel --no-pair
+ExecStart=/home/maus/.local/bin/openmausbot serve --tunnel
 Restart=always
 RestartSec=5
 
@@ -248,7 +250,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now openmausbot
 journalctl -u openmausbot -f            # the server's log, including "tunnel: live at …"
 ```
 
-Use `--tailscale` instead of `--tunnel` for path C. `--no-pair` skips printing a code at every restart; mint one with `npx openmausbot pair` when you need it. Docker (path B) restarts on its own (`restart: unless-stopped`).
+Use `--tailscale` instead of `--tunnel` for path C. A service is not a terminal, so `serve` writes no pairing code into the journal; mint one with `npx openmausbot pair` when you need it. Docker (path B) restarts on its own (`restart: unless-stopped`).
 
 Adjust the account, home, and PATH if yours differ; Node 24 must be available on
 that PATH. The service runs the installed CLI directly, so a restart uses the
@@ -330,7 +332,9 @@ Read this before putting anything else in front of the server.
 
 **"forbidden: pair this device to use the server remotely" / "this request came through a proxy".** Expected before pairing, and for tools that call the API without a session. Pair the device. Scripts send `Authorization: Bearer <token>` with the token from the pairing response instead of a cookie.
 
-**Pairing code refused.** It expired (five minutes, or its `--ttl`) or was used. Mint a new one. "Too many failed pairing attempts" means wait a minute.
+**Pairing code refused.** It expired (10 minutes, or its `--ttl`) or was used. Mint a new one. "Too many wrong codes. Try again at 11:19." means wait until then.
+
+**More errors** (from the desktop's Connect to a server sheet and the CLI's Reach line) are in the [troubleshooting table](self-hosting.md#troubleshooting).
 
 **A bot says the engine is not signed in.** Sign that engine in again on the server.
 
