@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { environmentDescriptor, loadEnvironmentId, serverVersion } from "./environment.ts";
+import { environmentDescriptor, loadEnvironmentId, serverInstall, serverVersion } from "./environment.ts";
 
 const dirs: string[] = [];
 
@@ -126,19 +126,26 @@ describe("environment identity", () => {
       capabilities: { remoteSessions: true, selfUpdate: "desktop-managed", emailSignIn: false, jobs: true },
     });
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false }).capabilities.selfUpdate).toBe("operator");
+    expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true }).capabilities, "the desktop updates its own server").not.toHaveProperty("install");
+    const none = () => false;
+    expect(serverInstall({}, "/home/me/.npm/_npx/1a2b/node_modules/openmausbot/dist-server/index.js", none)).toBe("npx");
+    expect(serverInstall({ OMB_CLI_PREFIX: "docker compose exec omb openmausbot" }, "/app/dist-server/index.js", none)).toBe("docker");
+    expect(serverInstall({}, "/app/dist-server/index.js", () => true)).toBe("docker");
+    expect(serverInstall({}, "/repo/server/index.ts", none)).toBe("source");
+    expect(serverInstall({}, "/usr/lib/node_modules/openmausbot/dist-server/index.js", none)).toBe("global");
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true, sharedComputers: false }).capabilities)
       .not.toHaveProperty("sharedComputers");
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true, sharedComputers: true }).capabilities)
       .toEqual({ remoteSessions: true, sharedComputers: true, lendingDetails: true, commandTimeouts: true, longCommands: true, fileEdits: true, lentMcp: true, selfUpdate: "desktop-managed", emailSignIn: false, jobs: true });
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: true }).capabilities)
-      .toEqual({ remoteSessions: true, cloudHome: true, move: 1, selfUpdate: "operator", emailSignIn: false, jobs: true });
+      .toEqual({ remoteSessions: true, cloudHome: true, move: 1, selfUpdate: "operator", install: expect.any(String), emailSignIn: false, jobs: true });
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: false }).capabilities).not.toHaveProperty("cloudHome");
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true }).capabilities, "only a Cloud home, or a server one person owns, takes a move").not.toHaveProperty("move");
-    expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, ownHome: true }).capabilities).toEqual({ remoteSessions: true, move: 1, selfUpdate: "operator", emailSignIn: false, jobs: true });
+    expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, ownHome: true }).capabilities).toEqual({ remoteSessions: true, move: 1, selfUpdate: "operator", install: expect.any(String), emailSignIn: false, jobs: true });
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, ownHome: false }).capabilities).not.toHaveProperty("move");
     // A lent computer may lend its internet connection only to a Cloud home that lends at all.
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: true, sharedComputers: true }).capabilities)
-      .toEqual({ remoteSessions: true, sharedComputers: true, lendingDetails: true, commandTimeouts: true, longCommands: true, fileEdits: true, deviceLink: true, lentMcp: true, myChromeLink: true, computerAsks: true, cloudHome: true, move: 1, selfUpdate: "operator", emailSignIn: false, jobs: true });
+      .toEqual({ remoteSessions: true, sharedComputers: true, lendingDetails: true, commandTimeouts: true, longCommands: true, fileEdits: true, deviceLink: true, lentMcp: true, myChromeLink: true, computerAsks: true, cloudHome: true, move: 1, selfUpdate: "operator", install: expect.any(String), emailSignIn: false, jobs: true });
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true, sharedComputers: true }).capabilities).not.toHaveProperty("deviceLink");
   });
 

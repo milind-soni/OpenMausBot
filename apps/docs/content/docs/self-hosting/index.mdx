@@ -12,7 +12,17 @@ OpenMausBot is local-first by default: the harness listens on loopback, agent CL
 2. Install and authenticate the agent CLIs you want to use separately; the npm OpenMausBot package does not include them. Use the same operating-system account for setup and the running server.
 3. Add optional third-party keys only for the services you need.
 4. Keep the harness on loopback.
-5. Use it from other devices by pairing them: a browser, the desktop app or the phone, over a public address, your own domain or your tailnet. See [Deploy on a VPS](/docs/self-hosting/deploy-vps).
+5. Use it from other devices by pairing them. `openmausbot serve` prints one pairing link for the way in you choose; paste it into the desktop app under **＋ → Connect to a server**, open it in a browser, or scan its QR with a phone.
+
+| You have | Run |
+|---|---|
+| HTTPS in front already (cloudflared, Caddy, nginx) | `npx openmausbot serve --public-url https://maus.example.com` |
+| A domain name, ports 80 and 443 open | `npx openmausbot serve --domain maus.example.com` |
+| Tailscale | `npx openmausbot serve --tailscale` |
+| Only this network | `npx openmausbot serve --lan` |
+| Nothing at all | `npx openmausbot login`, then `npx openmausbot serve --tunnel` |
+
+A code works once, for 10 minutes. `npx openmausbot pair` makes another, and `npx openmausbot devices` lists the paired devices. See [Deploy on a VPS](/docs/self-hosting/deploy-vps) for a server from scratch, and [Networking](/docs/self-hosting/networking).
 
 For a Linux service, the VPS guide covers [account setup](/docs/self-hosting/deploy-vps#before-you-start), [browser installation](/docs/self-hosting/deploy-vps#give-the-bots-a-browser-optional), and [unattended startup](/docs/self-hosting/deploy-vps#keep-it-running). Installing browser libraries as administrator still requires installing the browser in the service user's home. The service runs an installed, chosen release; upgrading it is an explicit step.
 
