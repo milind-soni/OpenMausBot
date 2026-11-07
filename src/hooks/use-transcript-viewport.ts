@@ -150,7 +150,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     const nextEnd = Math.min(messages.length, endIndex + TRANSCRIPT_WINDOW_SIZE);
     setTranscriptWindow((w) => ({ ...w, end: nextEnd >= messages.length ? null : nextEnd }));
   };
-  const olderPending = Boolean(state.loadingOlder[threadId]);
+  const olderPending = Boolean(state.loadingOlder[threadId] || state.deferredTranscripts[threadId]);
   const loadOlder = () => {
     holdRowForPrepend();
     dispatch({ type: "loadOlderMessages", threadId });

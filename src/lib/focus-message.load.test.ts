@@ -31,6 +31,23 @@ beforeEach(() => {
 });
 
 describe("landing on a search hit older than the loaded page", () => {
+  it.each(["bot", "room"])("loads from the newest page when the %s transcript is deferred", async (owner) => {
+    fixture.api.mockImplementation(async (path: string) => {
+      const before = new URL(path, "http://x").searchParams.get("before");
+      return before ? pages[before] : { messages: range(400, 600), hasMore: true };
+    });
+    const deferred = { ...state, bots: [{ ...bot, messages: [] }], groups: [{ ...group, messages: [] }] };
+    const threadId = owner === "bot" ? "t" : "rt";
+    await landOnSearchHit({ ...hit, threadId, ...(owner === "bot" ? { botId: "scout" } : { groupId: "room" }) }, deferred, dispatch, true);
+    expect(fixture.api.mock.calls.map(([path]) => path)).toEqual([
+      `/api/threads/${threadId}/messages?limit=200`,
+      `/api/threads/${threadId}/messages?limit=200&before=m400`,
+      `/api/threads/${threadId}/messages?limit=200&before=m200`,
+    ]);
+    expect(actions[1]).toMatchObject({ type: "olderMessages", threadId, messages: range(0, 600), hasMore: false });
+    expect(actions[2]).toMatchObject({ type: "focusMessage", threadId, messageId: "m50" });
+  });
+
   it("loads earlier pages of the open bot thread until the hit is there, then focuses it", async () => {
     await landOnSearchHit({ ...hit, botId: "scout", threadId: "t" }, state, dispatch, true);
     expect(fixture.api.mock.calls.map(([path]) => path)).toEqual([
