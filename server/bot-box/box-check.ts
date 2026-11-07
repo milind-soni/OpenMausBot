@@ -11,7 +11,7 @@ import { detectBox } from "./detect.ts";
 import { BOX_MUTATIONS, type BoxMutation } from "./plan.ts";
 import { runBoxSelfCheck } from "./self-check.ts";
 
-export const CHECK_DENY_ENV: ReadonlySet<string> = new Set(["COMPOSIO_API_KEY", "OMB_COMPOSIO_BROKER_TOKEN", "OMB_HIGHLEVEL_TOKEN"]);
+export const CHECK_DENY_ENV: ReadonlySet<string> = new Set(["COMPOSIO_API_KEY", "OMB_COMPOSIO_BROKER_TOKEN"]);
 
 export async function boxCheckMain(argv: readonly string[], env: Record<string, string | undefined> = process.env): Promise<number> {
   const mutate = new Set<BoxMutation>();

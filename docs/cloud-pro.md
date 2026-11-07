@@ -1208,7 +1208,7 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   the root supervisor that restarts them is -1000, never picked. When memory
   runs out the kernel takes a bot's process, never the workspace.
 - **OpenCode reaches OpenMausBot's own tools over HTTP.** The agents,
-  browser, computer, Data and HighLevel servers are endpoints of this server
+  browser, computer, Data, Email and phone servers are endpoints of this server
   (`/api/internal/mcp-http/<name>`, `server/routes/own-mcp-http.ts`) with the
   turn's capability in the Authorization header, instead of a Node proxy
   process each (about 20–30 MB PSS apiece) in every OpenCode session. A server
@@ -1708,9 +1708,8 @@ kinds, random ids, connector slugs, booleans and machine numbers. Connected
 apps are looked up in the background at most every 30 minutes, so a slow
 provider never holds the answer. `connectors.items` lists only apps the
 person set up: connected now, or connected once and since expired or failed.
-An app never connected, HighLevel without a saved connection included, is not
-listed. Cloud computers are not listed: through the
-Admin's Boat relay that would count as using an included service and hold back
+An app never connected is not listed. Cloud computers are not listed: through
+the Admin's Boat relay that would count as using an included service and hold back
 updates; a cloud computer that fails a turn arrives as its place's code
 (`cc-unavailable`, `cc-no-start`, `cc-provider`, …).
 

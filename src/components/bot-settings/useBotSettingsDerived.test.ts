@@ -3,12 +3,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Bot, InstanceInfo } from "@/state/store";
-import type { HighLevelStatus } from "@/lib/highlevel-sign-in";
 
 const fixture = vi.hoisted(() => ({
   instances: [] as unknown[],
   config: null as unknown,
-  highlevel: null as HighLevelStatus | null,
 }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
@@ -18,10 +16,6 @@ vi.mock("@/state/store", async (importOriginal) => {
   };
 });
 vi.mock("../DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: { host: { packaged: false } } }) }));
-vi.mock("@/lib/highlevel-status", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/lib/highlevel-status")>(),
-  useHighLevelStatus: () => fixture.highlevel,
-}));
 
 const { useBotSettingsDerived } = await import("./useBotSettingsDerived");
 
@@ -35,14 +29,14 @@ function derive() {
   return derived;
 }
 
-beforeEach(() => { vi.stubGlobal("window", {}); fixture.instances = []; fixture.config = null; fixture.highlevel = null; });
+beforeEach(() => { vi.stubGlobal("window", {}); fixture.instances = []; fixture.config = null; });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("connected apps in bot settings", () => {
-  it("lets the engine use connected apps through either Composio's MCP or the native HighLevel one", () => {
+  it("lets the engine use connected apps through either Composio's MCP or the native Email one", () => {
     fixture.instances = engine({ composioMcp: true });
     expect(derive().canUseConnectedApps).toBe(true);
-    fixture.instances = engine({ highlevelMcp: true });
+    fixture.instances = engine({ emailMcp: true });
     expect(derive().canUseConnectedApps).toBe(true);
     fixture.instances = engine({ dataMcp: true });
     expect(derive().canUseConnectedApps).toBe(false);
@@ -50,11 +44,7 @@ describe("connected apps in bot settings", () => {
     expect(derive().canUseConnectedApps).toBe(false);
   });
 
-  it("counts a connected HighLevel as configured connected apps even without the Composio service", () => {
-    expect(derive().connectedAppsConfigured).toBe(false);
-    fixture.highlevel = { state: "connected", location: { id: "loc_1", name: "Example Profiles" } };
-    expect(derive().connectedAppsConfigured).toBe(true);
-    fixture.highlevel = { state: "needs-sign-in" };
+  it("counts connected apps as configured once the Composio service is", () => {
     expect(derive().connectedAppsConfigured).toBe(false);
     fixture.config = { composio: { configured: true } };
     expect(derive().connectedAppsConfigured).toBe(true);

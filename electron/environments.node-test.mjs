@@ -487,3 +487,21 @@ test("a Cloud or team joining the list leaves this computer's page the active pl
   const gone = env.reconcileTeams({ environments: [{ id: "t", kind: "remote", name: "Acme", origin: "https://acme.example.test", team: { id: "team-a", role: "member" } }, saved.environments[0]], activeId: "t" }, [], () => "x", HOME);
   assert.equal(gone.state.activeId, "h", "a place on screen that's gone still falls back to My Cloud");
 });
+
+test("the Server menu lists the workspaces of this computer's own and offers a new one, so they are reached with the rail hidden too", () => {
+  const calls = [];
+  const options = { onSwitch: (id) => calls.push(["switch", id]), onConnect() {}, onForget() {}, onLocal: (id) => calls.push(["local", id]), onNewLocal: () => calls.push(["new"]) };
+  const state = { environments: [{ id: "office", name: "Office", origin: "https://office.example" }], activeId: "local" };
+  const items = env.workspaceMenuTemplate(state, { ...options, locals: [{ id: "work", label: "Work", shown: true }] });
+  assert.deepEqual(items.filter((item) => item.type === "radio").map((item) => [item.id, item.label, item.checked]),
+    [["workspace-local", "This computer", false], ["workspace-local-work", "Work", true], ["workspace-office", "Office", false]], "Work on screen: This computer isn't checked");
+  items.find((item) => item.id === "workspace-local-work").click();
+  items.find((item) => item.id === "workspace-new-local").click();
+  assert.equal(items.find((item) => item.id === "workspace-new-local").label, "New workspace on this computer…");
+  const home = { environments: [{ id: "home", name: "My Cloud", origin: "https://omb-u-1.fly.dev", home: true }], activeId: "local" };
+  const homeItems = env.workspaceMenuTemplate(home, { ...options, homeOrigin: "https://omb-u-1.fly.dev", locals: [{ id: "default", label: "This Mac" }, { id: "work", label: "Work" }] });
+  assert.deepEqual(homeItems.filter((item) => item.type === "radio").map((item) => item.label), ["This Mac", "Work", "My Cloud"]);
+  homeItems.find((item) => item.id === "workspace-local-default").click();
+  assert.deepEqual(calls, [["local", "work"], ["new"], ["local", "default"]]);
+  assert.equal(env.workspaceMenuTemplate(state, { onSwitch() {}, onConnect() {}, onForget() {} }).some((item) => String(item.id).startsWith("workspace-new-local")), false, "only where main offers it");
+});

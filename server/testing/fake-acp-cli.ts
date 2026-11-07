@@ -45,6 +45,8 @@
 //     refetches its models.dev cache only then; OPENCODE_CONFIG_CONTENT's provider models join any model list
 //   FAKE_ACP_MODELS_LIST=v2  OpenCode 2: `models` answers empty with exit 0, `models --verbose` and `models --refresh` exit 1;
 //     with FAKE_ACP_MODELS_REFRESH_FROM a running process refreshes its own list after FAKE_ACP_SELF_REFRESH_MS (default 300)
+//   FAKE_ACP_MODELS_LOCK  path: as OpenCode 1.19.4, a `models` or `acp` process without OPENCODE_DISABLE_MODELS_FETCH=1
+//     starts a catalog fetch under this lock and, ended early, leaves it; `models --refresh` fails while it is held
 //   FAKE_ACP_MODELS_LIST=auto-only  Cursor CLI 2026.10.22: `models` lists only `auto`
 //   FAKE_ACP_VERBOSE_FAIL_ONCE  marker path: the first `models --verbose` fails, like a new OpenCode home's first run
 //   FAKE_ACP_MODEL_STICKS  set_config_option succeeds but keeps the old model
@@ -310,7 +312,15 @@ if (argv[0] === "status" || argv[0] === "whoami") {
   console.log(JSON.stringify({ isAuthenticated: authenticated }));
   process.exit(0);
 }
+const catalogLock = process.env.FAKE_ACP_MODELS_LOCK;
+if (catalogLock && (argv[0] === "models" || argv[0] === "acp") && !argv.includes("--refresh") && process.env.OPENCODE_DISABLE_MODELS_FETCH !== "1") {
+  writeFileSync(catalogLock, String(process.pid));
+}
 if (argv[0] === "models" && argv.includes("--refresh")) {
+  if (catalogLock && existsSync(catalogLock)) {
+    console.error("models.dev cache is locked by another process");
+    process.exit(1);
+  }
   if (process.env.FAKE_ACP_MODELS_LIST === "v2") {
     console.error("Unrecognized flag: --refresh in command opencode models");
     process.exit(1);

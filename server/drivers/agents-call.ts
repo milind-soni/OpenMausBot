@@ -20,6 +20,7 @@ import { callUsageLimitsTool, USAGE_LIMITS_TOOL } from "./agents-usage-tool.ts";
 import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts";
 import { callComputerAskTool, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
 import { callImageTool, IMAGE_TOOL_NAMES } from "./agents-image-tools.ts";
+import { callMeetingTool, MEETING_TOOL_NAMES } from "./agents-meeting-tools.ts";
 import { callMausBotTool, MAUSBOT_TOOL_NAMES } from "./agents-mausbot-tools.ts";
 import { callPageTool, PAGE_TOOL_NAMES } from "./agents-pages-tools.ts";
 import { callPersonTool, PERSON_TOOL_NAMES } from "./agents-person-tools.ts";
@@ -220,6 +221,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   if (RESEARCH_TOOL_NAMES.has(name)) return callResearchTool(name, args, context);
   if (HELPER_TOOL_NAMES.has(name)) return callHelperTool(name, args, context);
   if (IMAGE_TOOL_NAMES.has(name)) return callImageTool(name, args, context);
+  if (MEETING_TOOL_NAMES.has(name)) return callMeetingTool(name, args, context);
   if (MAUSBOT_TOOL_NAMES.has(name)) return callMausBotTool(name, args, context);
   if (PAGE_TOOL_NAMES.has(name)) return callPageTool(name, args, context);
   if (PERSON_TOOL_NAMES.has(name)) return callPersonTool(name, args, context);
@@ -603,10 +605,13 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       return { text: `send_voice_note is limited to 1000 characters; this one is ${text.length}. Shorten the note.`, isError: true };
     }
     try {
-      await api("/api/internal/voice-note", {
+      const r = await api("/api/internal/voice-note", {
         method: "POST",
         body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, text }),
       });
+      if (r.attached !== true || typeof r.file !== "string" || !r.file) {
+        return { text: "Voice note not sent: OpenMausBot did not confirm the audio was saved. Tell the person the note did not go through; do not say it is attached.", isError: true };
+      }
       return { text: "Voice note recorded. It will be attached to this turn's reply when the turn ends; the note text is also the visible caption." };
     } catch (error) {
       return { text: `Voice note not sent: ${error instanceof Error ? error.message : String(error)}`, isError: true };

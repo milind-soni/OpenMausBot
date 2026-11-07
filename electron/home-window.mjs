@@ -238,8 +238,7 @@ export function createHomeWindow(deps) {
     now = Date.now, timers = DEFAULT_TIMERS, hosts = () => null, readyStore = null, ownMove = () => null, log = () => {}, t = nativeText.englishText.t } = deps;
   let home = { kind: "computer" }, screen = null, status = null, opens = 0, retry = null, tries = 0, loaded = null, newer = false, repairing = null;
   let recovering = null;
-  /** The profile (clean-workspace.mjs) the person opened from the rail while My Cloud is home, until they pick a place. Never
-   * remembered: each launch opens My Cloud. */
+  /** The profile (clean-workspace.mjs) the person opened from the rail while My Cloud is home, until they pick a place. */
   let profileShown = null;
   /** My Cloud asked for before the move made it home (`{ open }`), until its page loads or the person goes elsewhere;
    * `naming`: since when, and how often, a brand-new My Cloud's name was not found. */
@@ -534,8 +533,10 @@ export function createHomeWindow(deps) {
       clearRenewal();
       if (await clean.open(profileShown)) {
         if (!wanted(token)) return;
+        // `away`: a Cloud's page may still be on its way (a click just before this one); this page's load replaces it.
+        const leaving = away || onScreen() || !shows(localOrigin());
         ensureWindow(); clearRetry(); screen = null; status = null; shown = null; away = false;
-        return showLocal(onScreen() || !shows(localOrigin()));
+        return showLocal(leaving);
       }
       profileShown = null;
       if (!wanted(token)) return;
@@ -661,6 +662,17 @@ export function createHomeWindow(deps) {
     },
     /** The profile on screen, opened from the rail, else null. */
     profile: () => profileShown,
+    /** Whether `ask` ("cloud" for My Cloud, or a team or another Cloud of the person's own as remembered) would open now, by
+     * the session's word and nothing looked up: false for one gone from its list, not running, being set up or without an
+     * address, and for My Cloud while it isn't home or isn't running; null while nobody is signed in. As of the last
+     * refresh(). */
+    opensNow(ask) {
+      if (signedOut()) return null;
+      if (ask === "cloud") return home.kind === "cloud" && !notRunning();
+      const target = placeOf({ ask, remembered: remembered(), state: state() });
+      if (!otherPlace(target) || !target.origin || machineSetup(target.machine)) return false;
+      return !target.machine || !(PLAN_PROBLEMS.has(target.machine.status) || (target.kind === "team" && target.machine.hold));
+    },
     /** The person asked for My Cloud (the Server menu, the welcome, Settings, the ready notice). Before the move made it
      * home it opens as a saved server, and while the Admin sets it up the setup screen shows until it opens by itself. */
     async openCloud(open = null) {
