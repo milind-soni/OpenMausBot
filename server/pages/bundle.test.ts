@@ -12,9 +12,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   return { ...real, open: vi.fn(real.open), readdir: vi.fn(real.readdir), realpath: vi.fn(real.realpath), stat: vi.fn(real.stat) };
 });
 
-// The native resolver, like fs/promises realpath: on Windows it expands a short (RUNNER~1) temp path, so pageSignature's
-// own realpath check sees the same path it was given.
-const folder = () => realpathSync.native(mkdtempSync(join(tmpdir(), "omb-page-bundle-")));
+const folder = () => realpathSync(mkdtempSync(join(tmpdir(), "omb-page-bundle-")));
 
 describe("readPageBundle", () => {
   it("does not follow its folder swapped for a link while it is being read", async () => {
@@ -102,7 +100,8 @@ describe("readPageBundle", () => {
 
 describe("pageSignature", () => {
   it("counts videos only for a page that carries them", async () => {
-    const page = folder();
+    // As the page's own source is named: the native realpath, which on Windows expands a short (8.3) temp path.
+    const page = realpathSync.native(folder());
     writeFileSync(join(page, "index.html"), "<h1>Clip</h1>");
     writeFileSync(join(page, "clip.mp4"), "a");
     const plain = await pageSignature(page), withVideos = await pageSignature(page, { videos: true });
