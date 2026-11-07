@@ -181,6 +181,50 @@ describe("installing an engine's own build from Settings", () => {
   });
 });
 
+describe("an added server's model IDs", () => {
+  it("replaces the list, goes back to detecting models with an empty list, and refuses other servers", async () => {
+    const persisted: Array<Record<string, { driver: string; config?: Record<string, unknown> }>> = [];
+    const cfg = { instances: {
+      a: { driver: "fake" },
+      openaiCompat: { driver: "openai-compat", config: { url: "http://127.0.0.1:11434/v1" } },
+      "openai-compat-1": { driver: "openai-compat", config: { url: "https://api.example.com/v1", key: "k", managedModels: ["glm-4.6"] } },
+    } };
+    const { call, base } = await serve({
+      cfg: cfg as unknown as AppConfig,
+      persistProviderInstance: async (_id: string, instances: typeof persisted[number]) => {
+        persisted.push(structuredClone(instances));
+        (cfg as { instances: unknown }).instances = instances;
+      },
+    });
+    await call("PATCH", "/api/instances/openai-compat-1", { models: ["glm-5", " qwen3 ", "glm-5"] });
+    expect(persisted.at(-1)!["openai-compat-1"]!.config).toEqual({ url: "https://api.example.com/v1", key: "k", managedModels: ["glm-5", "qwen3"] });
+    await call("PATCH", "/api/instances/openai-compat-1", { models: [] });
+    expect(persisted.at(-1)!["openai-compat-1"]!.config).toEqual({ url: "https://api.example.com/v1", key: "k" });
+    const status = async (id: string, body: unknown) => (await fetch(`${base}/api/instances/${id}`, {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    })).status;
+    expect(await status("openaiCompat", { models: ["m"] })).toBe(400);
+    expect(await status("a", { models: ["m"] })).toBe(400);
+    for (const bad of [[""], ["x".repeat(201)], "glm-5", Array.from({ length: 65 }, (_, i) => `m${i}`)]) {
+      expect(await status("openai-compat-1", { models: bad })).toBe(400);
+    }
+    expect(persisted).toHaveLength(2);
+  });
+
+  it("lists the IDs entered for an added server so they can be edited", async () => {
+    const cfg = { instances: { "openai-compat-1": { driver: "openai-compat", config: { url: "https://api.example.com/v1", key: "k", managedModels: ["glm-4.6", "glm-5"] } } } };
+    const { base } = await serve({
+      cfg: cfg as unknown as AppConfig,
+      describeInstances: async () => [{ instanceId: "openai-compat-1", driverKind: "openai-compat" }, { instanceId: "a", driverKind: "fake" }],
+    });
+    const body = await (await fetch(`${base}/api/instances`)).json() as { instances: Array<Record<string, unknown>> };
+    expect(body.instances).toEqual([
+      { instanceId: "openai-compat-1", driverKind: "openai-compat", url: "https://api.example.com/v1", managedModels: ["glm-4.6", "glm-5"] },
+      { instanceId: "a", driverKind: "fake" },
+    ]);
+  });
+});
+
 describe("a server's reply wait", () => {
   it("saves minutes for an OpenAI-compatible server, clears them with null, and refuses other engines or bad values", async () => {
     const persisted: Array<Record<string, { driver: string; config?: Record<string, unknown> }>> = [];

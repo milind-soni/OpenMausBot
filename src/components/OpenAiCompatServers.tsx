@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Loader2, Plus, RotateCw, Trash2 } from "lucide-react";
+import { Loader2, Pencil, Plus, RotateCw, Trash2 } from "lucide-react";
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { keySaved } from "@/lib/product-events";
@@ -19,8 +19,8 @@ const ICON_BUTTON = "ui-icon-button shrink-0 hover:text-ink";
 /** Google's Gemini API speaks the OpenAI protocol here; the key comes from Google AI Studio. */
 export const GEMINI_PRESET = { name: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai" } as const;
 
-const saveReplyWait = (instanceId: string, minutes: number | null): Promise<{ instances?: unknown }> =>
-  api(`/api/instances/${encodeURIComponent(instanceId)}`, { method: "PATCH", body: JSON.stringify({ replyWaitMinutes: minutes }) });
+const saveSettings = (instanceId: string, settings: { replyWaitMinutes?: number | null; models?: string[] }): Promise<{ instances?: unknown }> =>
+  api(`/api/instances/${encodeURIComponent(instanceId)}`, { method: "PATCH", body: JSON.stringify(settings) });
 
 function ReplyWaitSelect({ server, disabled, onPick }: { server: InstanceInfo; disabled: boolean; onPick: (minutes: number | null) => void }) {
   return (
@@ -52,7 +52,7 @@ export function BuiltInReplyWait() {
     if (busy) return;
     setBusy(true);
     setError(null);
-    void saveReplyWait(server.instanceId, minutes)
+    void saveSettings(server.instanceId, { replyWaitMinutes: minutes })
       .then(async ({ instances }) => {
         if (Array.isArray(instances)) dispatch({ type: "instances", instances: instances as InstanceInfo[] });
         else await refreshInstances({ reportErrors: true });
@@ -74,7 +74,7 @@ export function OtherOpenAiCompatServers() {
   return <AddedServers servers={addedServers(state.instances)} />;
 }
 
-function AddedServers({ servers }: { servers: Array<InstanceInfo & { url?: string }> }) {
+function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> }) {
   const { dispatch, refreshInstances } = useStore();
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
@@ -82,6 +82,9 @@ function AddedServers({ servers }: { servers: Array<InstanceInfo & { url?: strin
   const [models, setModels] = useState("");
   const [busy, setBusy] = useState<"add" | "other" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** The server whose model IDs are open for editing, and the text being edited. */
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
   const ready = Boolean(name.trim() && url.trim() && key.trim());
 
   const run = (kind: "add" | "other", request: () => Promise<{ instances?: unknown }>, onDone?: () => void) => {
@@ -116,36 +119,74 @@ function AddedServers({ servers }: { servers: Array<InstanceInfo & { url?: strin
       <p className="mb-2 text-[12px] leading-4 text-ink-secondary">{t("apiInstances.subtitle")}</p>
       {servers.length === 0 && <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.empty")}</p>}
       {servers.map((server) => (
-        <div key={server.instanceId} className="mb-1.5 flex items-center justify-between gap-2 rounded-lg border border-hairline/60 bg-inset px-3 py-1.5">
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-[12px] text-ink">{server.displayName}</div>
-            {server.url && <div className="truncate font-mono text-[11px] text-ink-secondary">{server.url}</div>}
+        <div key={server.instanceId} className="mb-1.5 rounded-lg border border-hairline/60 bg-inset px-3 py-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[12px] text-ink">{server.displayName}</div>
+              {server.url && <div className="truncate font-mono text-[11px] text-ink-secondary">{server.url}</div>}
+            </div>
+            <ReplyWaitSelect
+              server={server}
+              disabled={busy !== null}
+              onPick={(minutes) => run("other", () => saveSettings(server.instanceId, { replyWaitMinutes: minutes }))}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setEditText((server.managedModels ?? []).join(", "));
+                setEditing(editing === server.instanceId ? null : server.instanceId);
+              }}
+              disabled={busy !== null}
+              aria-label={t("apiInstances.editModels", { name: server.displayName })}
+              aria-expanded={editing === server.instanceId}
+              title={t("apiInstances.editModels", { name: server.displayName })}
+              className={ICON_BUTTON}
+            >
+              <Pencil size={13} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={() => run("other", () => api(`/api/instances/${encodeURIComponent(server.instanceId)}/refresh-models`, { method: "POST" }))}
+              disabled={busy !== null}
+              aria-label={t("apiInstances.refreshModels", { name: server.displayName })}
+              title={t("apiInstances.refreshModels", { name: server.displayName })}
+              className={ICON_BUTTON}
+            >
+              <RotateCw size={13} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={() => run("other", () => api(`/api/instances/${encodeURIComponent(server.instanceId)}`, { method: "DELETE" }))}
+              disabled={busy !== null}
+              aria-label={t("apiInstances.remove", { name: server.displayName })}
+              title={t("apiInstances.remove", { name: server.displayName })}
+              className={`${ICON_BUTTON} hover:bg-danger/10 hover:text-danger`}
+            >
+              <Trash2 size={13} aria-hidden="true" />
+            </button>
           </div>
-          <ReplyWaitSelect
-            server={server}
-            disabled={busy !== null}
-            onPick={(minutes) => run("other", () => saveReplyWait(server.instanceId, minutes))}
-          />
-          <button
-            type="button"
-            onClick={() => run("other", () => api(`/api/instances/${encodeURIComponent(server.instanceId)}/refresh-models`, { method: "POST" }))}
-            disabled={busy !== null}
-            aria-label={t("apiInstances.refreshModels", { name: server.displayName })}
-            title={t("apiInstances.refreshModels", { name: server.displayName })}
-            className={ICON_BUTTON}
-          >
-            <RotateCw size={13} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            onClick={() => run("other", () => api(`/api/instances/${encodeURIComponent(server.instanceId)}`, { method: "DELETE" }))}
-            disabled={busy !== null}
-            aria-label={t("apiInstances.remove", { name: server.displayName })}
-            title={t("apiInstances.remove", { name: server.displayName })}
-            className={`${ICON_BUTTON} hover:bg-danger/10 hover:text-danger`}
-          >
-            <Trash2 size={13} aria-hidden="true" />
-          </button>
+          {editing === server.instanceId && (
+            <div className="mt-1.5 flex flex-col gap-1.5">
+              <input value={editText} onChange={(e) => setEditText(e.target.value)} placeholder={t("apiInstances.models")}
+                aria-label={t("apiInstances.modelsFor", { name: server.displayName })} spellCheck={false} disabled={busy !== null} className={cn(INPUT, "font-mono")} />
+              <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.editModelsHint")}</p>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => run(
+                    "other",
+                    () => saveSettings(server.instanceId, { models: modelIds(editText) }),
+                    () => setEditing(null),
+                  )}
+                  disabled={busy !== null}
+                  className="ui-button"
+                >
+                  {t("common.save")}
+                </button>
+                <button type="button" onClick={() => setEditing(null)} disabled={busy !== null} className="ui-button">{t("common.cancel")}</button>
+              </div>
+            </div>
+          )}
         </div>
       ))}
       <div className="mt-2 flex flex-col gap-1.5">
