@@ -52,10 +52,11 @@ describe("replayHttp", () => {
   it("replays with the saved headers, Host rewritten and Connection close, and the engine's authorization never sent", async () => {
     const { port, seen } = await upstream((_req, res) => res.end("ok"));
     const base = await door(port, { authorization: "Bearer mac-header-key", "x-api-key": "k" });
-    const answer = await within(fetch(`${base}/x`, { headers: { authorization: "Bearer turn-token", "x-engine": "e" } }));
+    const answer = await within(fetch(`${base}/x`, { headers: { authorization: "Bearer turn-token", "x-engine": "e", "accept-encoding": "gzip" } }));
     expect(await answer.text()).toBe("ok");
     expect(seen[0]).toMatchObject({ authorization: "Bearer mac-header-key", "x-api-key": "k", "x-engine": "e", host: `127.0.0.1:${port}`, connection: "close" });
     expect(JSON.stringify(seen)).not.toContain("turn-token");
+    expect(seen[0]?.["accept-encoding"]).toBeUndefined();
   });
 
   it("SSE streams through and Connection: close is not passed on", async () => {
@@ -96,6 +97,40 @@ describe("replayHttp", () => {
     });
     const text = await within(fetch(await door(port)).then((answer) => answer.text()));
     expect(text).toBe(`event: endpoint\ndata: ${PREFIX}/messages?sessionId=3\n\n`);
+  });
+
+  it("a multibyte character split across chunks arrives intact", async () => {
+    const bytes = Buffer.from("data: caf\u00e9 \u{1F600}\n\n");
+    const cut = bytes.indexOf(0xc3) + 1;
+    const { port } = await upstream((_req, res) => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write(bytes.subarray(0, cut));
+      setImmediate(() => res.end(bytes.subarray(cut)));
+    });
+    expect(await within(fetch(await door(port)).then((answer) => answer.text()))).toBe("data: caf\u00e9 \u{1F600}\n\n");
+  });
+
+  it("an unparseable endpoint value passes through and later events still arrive", async () => {
+    const { port } = await upstream((_req, res) => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end("event: endpoint\ndata: http://[\n\nevent: message\ndata: after\n\n");
+    });
+    expect(await within(fetch(await door(port)).then((answer) => answer.text()))).toBe("event: endpoint\ndata: http://[\n\nevent: message\ndata: after\n\n");
+  });
+
+  it("the engine closing its response mid-SSE closes the connection on the computer", async () => {
+    let far!: Socket;
+    const { port } = await upstream((req, res) => {
+      far = req.socket;
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write("data: first\n\n");
+    });
+    const abort = new AbortController();
+    const answer = await within(fetch(await door(port), { signal: abort.signal }));
+    await within(answer.body!.getReader().read());
+    const closed = within(new Promise<void>((done) => far.once("close", () => done())));
+    abort.abort();
+    await closed;
   });
 });
 
