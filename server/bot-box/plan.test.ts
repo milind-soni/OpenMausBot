@@ -44,6 +44,17 @@ linuxBox("the box plan", () => {
     expect(visibleInBox(plan, "/root/.ssh/id_ed25519")).toBe("none");
   });
 
+  it("a process the bot's conversations share sees all of that bot's conversation folders and uploads, and no other bot's", () => {
+    const plan = planBox(setup(), { command: "opencode", args: ["acp"], cwd, env: { HOME: home }, botThreads: true });
+    expect(plan.botId).toBe("bot-a");
+    for (const own of ["task-workspaces/bot-a/thread-1/a.md", "task-workspaces/bot-a/thread-2/notes.md", "workspaces/bot-a/MEMORY.md"]) expect(visibleInBox(plan, join(dataDir, own)), own).toBe("rw");
+    expect(visibleInBox(plan, join(dataDir, "box-uploads", "bot-a", "thread-2", "photo.png"))).toBe("ro");
+    for (const hidden of ["task-workspaces/bot-b/thread-9/notes.md", "workspaces/bot-b/MEMORY.md", "box-uploads/bot-b/thread-9/x.png", "messages.db"]) {
+      expect(visibleInBox(plan, join(dataDir, hidden)), hidden).toBe("none");
+    }
+    expect(visibleInBox(turn(), join(dataDir, "box-uploads", "bot-a", "thread-2", "photo.png")), "one conversation's box keeps only its own uploads").toBe("none");
+  });
+
   it("writes the bubblewrap argv in mount order, with its own namespaces and the bridged sockets", () => {
     const args = bwrapArgs(turn());
     const text = args.join(" ");
