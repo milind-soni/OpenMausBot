@@ -632,8 +632,6 @@ async function launchChrome(dir: string, config: MeetbotConfig, sink: string): P
     if (!target) await sleep(200);
   }
   const cdp = await Cdp.connect(target.webSocketDebuggerUrl);
-  await cdp.send("Page.enable");
-  await cdp.send("Runtime.enable");
   return { chrome, cdp };
 }
 

@@ -4,6 +4,7 @@ import { consentLine, findMeetingLink, parseMeetingLink, ZOOM_NOT_SUPPORTED } fr
 describe("meeting links", () => {
   it("knows Google Meet, Microsoft Teams and Jitsi links", () => {
     expect(parseMeetingLink("https://meet.google.com/abc-defg-hij")).toMatchObject({ ok: true, platform: "meet" });
+    expect(parseMeetingLink("https://meet.google.com/meet/abc-defg-hij")).toMatchObject({ ok: true, platform: "meet" });
     expect(parseMeetingLink("https://teams.microsoft.com/l/meetup-join/19%3ameeting_x%40thread.v2/0?context=%7b%7d")).toMatchObject({ ok: true, platform: "teams" });
     expect(parseMeetingLink("https://teams.live.com/meet/9381234567890?p=abcdef")).toMatchObject({ ok: true, platform: "teams" });
     expect(parseMeetingLink("https://meet.systemli.org/weeklysync")).toMatchObject({ ok: true, platform: "jitsi" });

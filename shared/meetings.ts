@@ -31,7 +31,7 @@ export type MeetingLink = { ok: true; platform: MeetingPlatform; url: string } |
 
 export const ZOOM_NOT_SUPPORTED = "Zoom meetings aren't supported yet. I can join Google Meet, Microsoft Teams and Jitsi links.";
 const NOT_A_MEETING = "That doesn't look like a Google Meet, Microsoft Teams or Jitsi meeting link.";
-const MEET_CODE = /^\/[a-z]{3}-[a-z]{4}-[a-z]{3}\/?$/i;
+const MEET_CODE = /^\/(?:meet\/)?[a-z]{3}-[a-z]{4}-[a-z]{3}\/?$/i;
 const JITSI_HOSTS = /(^|\.)jit\.si$|^8x8\.vc$|^meet\.systemli\.org$|(^|\.)jitsi\./i;
 
 export function parseMeetingLink(raw: string): MeetingLink {
