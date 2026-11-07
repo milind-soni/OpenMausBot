@@ -1,9 +1,29 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createEmailSignIn } from "./account-signin.ts";
 import { createSignInMail, SIGNIN_CODE_RESEND_MS, SIGNIN_CODE_TRIES, SIGNIN_CODE_TTL_MS, smtpOptions, type MailMessage } from "./sign-in-mail.ts";
+
+vi.mock("./enterprise.ts", async (importOriginal) => ({ ...(await importOriginal<typeof import("./enterprise.ts")>()), entitled: (feature: string) => feature === "whitelabel" }));
+
+const brandDir = mkdtempSync(join(tmpdir(), "omb-signin-brand-"));
+const brandFile = (content?: string) => {
+  const file = join(brandDir, `${Math.random().toString(36).slice(2)}.json`);
+  if (content !== undefined) writeFileSync(file, content);
+  return file;
+};
+
+beforeEach(() => {
+  vi.stubEnv("OMB_BRAND_FILE", brandFile());
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 const URL_ = "smtps://signin%40example.test:p%40ss@smtp.example.test:465";
 
@@ -90,6 +110,46 @@ describe("sign-in codes through the server's own mail server", () => {
     const refused = await signIn.start("her@example.test");
     expect(refused).toMatchObject({ ok: false, status: 502 });
     expect(refused.ok ? "" : refused.error).toContain("OMB_SIGNIN_SMTP_FROM");
+  });
+});
+
+describe("the product name in the message", () => {
+  it("is OpenMausBot when no brand is applied", async () => {
+    const box = mailbox();
+    await createSignInMail({ url: URL_, transport: box.transport }).send("her@example.test");
+    expect(box.sent[0]!.subject).toBe("Your OpenMausBot sign-in code");
+    expect(box.sent[0]!.text).toContain("to sign in to OpenMausBot is");
+  });
+
+  it("is the name of the brand file the server applies, read for each code", async () => {
+    const box = mailbox();
+    const file = brandFile(JSON.stringify({ name: "Acme Assistant" }));
+    vi.stubEnv("OMB_BRAND_FILE", file);
+    const mail = createSignInMail({ url: URL_, transport: box.transport, now: (() => { let clock = 0; return () => (clock += 60_000); })() });
+    await mail.send("her@example.test");
+    expect(box.sent[0]).toMatchObject({ subject: "Your Acme Assistant sign-in code" });
+    expect(box.sent[0]!.text).toContain("to sign in to Acme Assistant is");
+    expect(box.sent[0]!.text).not.toContain("OpenMausBot");
+    writeFileSync(file, JSON.stringify({ name: "Blue Team" }));
+    await mail.send("her@example.test");
+    expect(box.sent[1]!.subject).toBe("Your Blue Team sign-in code");
+  });
+
+  it("falls back to OpenMausBot for a broken brand file, and never lets a name break the subject line", async () => {
+    const box = mailbox();
+    vi.stubEnv("OMB_BRAND_FILE", brandFile("{nope"));
+    await createSignInMail({ url: URL_, transport: box.transport }).send("her@example.test");
+    expect(box.sent[0]!.subject).toBe("Your OpenMausBot sign-in code");
+    vi.stubEnv("OMB_BRAND_FILE", brandFile(JSON.stringify({ name: "Acme\r\nBcc: x@evil.test" })));
+    await createSignInMail({ url: URL_, transport: box.transport }).send("other@example.test");
+    expect(box.sent[1]!.subject).toBe("Your Acme  Bcc: x@evil.test sign-in code");
+    expect(box.sent[1]!.subject).not.toMatch(/[\r\n]/);
+  });
+
+  it("can be given a name directly", async () => {
+    const box = mailbox();
+    await createSignInMail({ url: URL_, transport: box.transport, productName: () => "Direct Name" }).send("her@example.test");
+    expect(box.sent[0]!.subject).toBe("Your Direct Name sign-in code");
   });
 });
 

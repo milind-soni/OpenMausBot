@@ -183,6 +183,27 @@ describe.skipIf(process.platform === "win32")("fleet agent over its socket", () 
     expect(m.calls).not.toContain("systemctl is-active openmausbot@beta.service");
   });
 
+  it("keeps the licence key, the mail relay address and provider keys out of its replies and its audit log", async () => {
+    const smtpUrl = "smtps://login%40acme.test:SMTP-SECRET-4@smtp.acme.test:465";
+    const reseller = { name: "Acme Chat", currency: "USD", wholesale: { workspaceMonthMinor: 0, userMonthMinor: 0 }, retail: { workspaceMonthMinor: 0, userMonthMinor: 0 }, smtp: { urlFile: "/etc/openmausbot/smtp.url", from: "login@acme.test" } };
+    const m = machine(root, { failing: ["systemctl enable --now openmausbot@beta.service"] });
+    m.files.set(fleetLayout(root).registryFile, JSON.stringify({ ...emptyRegistry("agentada.cc"), reseller }));
+    m.files.set("/etc/openmausbot/smtp.url", `${smtpUrl}\n`);
+    const auditFile = join(root, "audit.jsonl");
+    const server = await startFleetAgent({ socketPath, node: "/usr/bin/node", script: "/usr/lib/node_modules/openmausbot/cli.js", root, deps: m.deps, auditFile, licenseKey: "LICENSE-SECRET-2", now: () => new Date("2026-09-10T12:00:00Z") }, { log: () => {} });
+    stop = () => new Promise((resolve) => server.close(() => resolve()));
+    const create = (slug: string, openrouterKey = "OPENROUTER-SECRET-3") => fleetRequest(socketPath, "POST", "/workspaces", {
+      slug, admins: ["owner@example.test"], anthropicKey: "sk-ant-SECRET-1", portalUrl: "https://admin.example.test",
+      openrouterKey, openrouterUrl: `https://admin.example.test/api/gateway/${slug}/openrouter/v1`, openrouterModels: ["provider/first"],
+    });
+    const replies = [await create("acme"), await create("beta"), await create("gamma", "OPENROUTER SECRET-5"), await fleetRequest(socketPath, "PUT", "/brand", { tagline: "Ask us" })];
+    expect(replies.map((reply) => reply.status)).toEqual([200, 500, 400, 200]);
+    expect(m.files.get(join(root, "etc/openmausbot/instances/acme.env"))).toContain("OMB_LICENSE_KEY=LICENSE-SECRET-2\n");
+    for (const reply of [replies[0]!, replies[3]!]) expect(JSON.stringify(reply.body)).toContain("/etc/openmausbot/smtp.url carries a login");
+    const everything = `${JSON.stringify(replies.map((reply) => reply.body))}\n${readFileSync(auditFile, "utf8")}`;
+    for (const secret of ["LICENSE-SECRET-2", "sk-ant-SECRET-1", "OPENROUTER-SECRET-3", "SECRET-5", "SMTP-SECRET-4", smtpUrl]) expect(everything).not.toContain(secret);
+  });
+
   it("serializes complete mutations and exposes the reservation while creation is pending", async () => {
     let release!: () => void;
     const blocked = new Promise<void>((resolve) => { release = resolve; });
