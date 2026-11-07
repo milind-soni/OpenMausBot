@@ -764,7 +764,7 @@ const RECALL_FILLER = new Set(
 
 export function recallTerms(query: string): string[] {
   const out: string[] = [];
-  for (const raw of query.split(/\s+|(?<=\p{L})[/,;:.—–-]+(?=\p{L})/u)) {
+  for (const raw of query.split(/[\s、。！？；：，（）【】《》〈〉「」『』]+|(?<=\p{L})[/,;:.—–-]+(?=\p{L})/u)) {
     const token = raw.replace(/"/g, "").replace(/^[\s.,;:!?()[\]{}'`“”‘’]+|[\s.,;:!?()[\]{}'`“”‘’]+$/g, "").toLowerCase();
     if (token.length < 2 && !/\d/.test(token)) continue;
     if (!/[\p{L}\p{N}]/u.test(token)) continue;

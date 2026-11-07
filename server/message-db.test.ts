@@ -213,6 +213,23 @@ describe("message-db", () => {
     expect(recallMessages("audit", ["own-a", "own-b"])).toEqual([]);
   });
 
+  it("recalls exact Han tokens with CJK punctuation only in the requested threads and range", () => {
+    const text = "本季度预算审批结果：已通过";
+    insertMessage("own-a", msg("m1", text, { at: 2000 }));
+    insertMessage("own-a", msg("old", text, { at: 1000 }));
+    insertMessage("other-bot", msg("private", text, { at: 2000 }));
+    insertMessage("own-a", msg("chip", text, { kind: "activity", at: 2000 }));
+
+    const recall = (query: string) => recallMessages(query, ["own-a"], 12, { since: 1500 }, "any");
+    expect(recall("本季度预算审批结果?").map((hit) => hit.messageId)).toEqual(["m1"]);
+    for (const query of ["本季度预算审批结果？", "「本季度预算审批结果」", "预算、本季度预算审批结果；进度"]) {
+      const hits = recall(query);
+      expect(hits.map((hit) => hit.messageId)).toEqual(["m1"]);
+      expect(hits[0]?.snippet).toContain("[本季度预算审批结果]");
+    }
+    expect(recallMessages("本季度预算审批结果？", [], 12, undefined, "any")).toEqual([]);
+  });
+
   it("recall by time: a window on ranked hits, a newest-first listing without words", () => {
     const day = 86_400_000;
     const now = Date.UTC(2026, 8, 16, 12);
