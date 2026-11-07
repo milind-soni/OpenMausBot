@@ -5,6 +5,7 @@ import { EventEmitter } from "node:events";
 import type { NetworkInterfaceInfoIPv4 } from "node:os";
 import { describe, expect, it } from "vitest";
 
+import { isPrivateLanAddress } from "../src/direct-routes.ts";
 import { lanAddresses, tailscaleAddress } from "../src/listener.ts";
 import {
   advertisableAddresses,
@@ -574,9 +575,11 @@ describe("advertisableAddresses", () => {
     }
   });
 
-  it("keeps every LAN address on other platforms", () => {
-    expect(advertisableAddresses(mac, "linux")).toEqual(lanAddresses(mac));
-    expect(advertisableAddresses(mac, "win32")).toEqual(lanAddresses(mac));
+  it("keeps tunnel interfaces on other platforms, with the same private-LAN rule as a Mac", () => {
+    const kept = lanAddresses(mac).filter((address) => isPrivateLanAddress(address));
+    expect(kept).toEqual(expect.arrayContaining(["10.20.30.40", "10.9.0.2", "10.8.0.6"]));
+    expect(advertisableAddresses(mac, "linux")).toEqual(kept);
+    expect(advertisableAddresses(mac, "win32")).toEqual(kept);
   });
 });
 

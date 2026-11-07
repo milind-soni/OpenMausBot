@@ -5,6 +5,7 @@ import { createSocket } from "node:dgram";
 import { hostname, networkInterfaces } from "node:os";
 
 import { lanInterfaces } from "./listener.ts";
+import { directRoutes, isPrivateLanAddress, isTailnetAddress, tailnetInterfaceAddresses } from "./direct-routes.ts";
 
 const MDNS_ADDRESS = "224.0.0.251";
 const MDNS_PORT = 5353;
@@ -363,10 +364,14 @@ export function defaultHostName(machine = hostname()): string {
  * panicked the Mac. Typed-address and tailnet pairing do not use mDNS. */
 const MAC_TUNNEL_INTERFACE = /^(utun|ipsec|ppp)\d*$/i;
 
+/** Bonjour is part of Same Wi-Fi: nothing is advertised while it is off, never the tailnet address, and never a Mac's tunnel. */
 export function advertisableAddresses(interfaces = networkInterfaces(), platform = process.platform): string[] {
+  if (!directRoutes().wifi) return [];
+  const tailnet = tailnetInterfaceAddresses();
   return lanInterfaces(interfaces)
     .filter((entry) => platform !== "darwin" || !MAC_TUNNEL_INTERFACE.test(entry.name))
-    .map((entry) => entry.address);
+    .map((entry) => entry.address)
+    .filter((address) => !isTailnetAddress(address, tailnet) && isPrivateLanAddress(address));
 }
 
 
