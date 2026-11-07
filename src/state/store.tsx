@@ -611,6 +611,7 @@ export interface AppState {
   dataView: import("@/lib/composer-attachments").DataViewContext | null;
   focusMessage: { threadId: string; messageId: string; matchText?: string; nonce: number; consumed: boolean } | null;
   unreadDivider: { threadId: string; messageId: string } | null;
+  deferredUnreadDivider: { threadId: string; lastReadMessageId?: string } | null;
   connected: boolean;
   hydrated?: true;
   error: string | null;
@@ -894,12 +895,33 @@ function dismissOnboardingCard(state: AppState, botId: string): AppState {
 
 export const CLOUD_LINK_SETTINGS = { type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true } as const satisfies Action;
 
-function replayThreadSnapshotEvents(state: AppState, threadId: string): AppState {
+const awaitsTranscript = (owner: { messages: readonly Message[]; hasMore?: boolean }) => Boolean(owner.hasMore) && owner.messages.length === 0;
+
+function deferTranscript(state: AppState, threadId: string): AppState {
+  const snapshotRevision = state.snapshotRevision + 1;
+  return { ...state, snapshotRevision, deferredTranscripts: { ...state.deferredTranscripts, [threadId]: snapshotRevision } };
+}
+
+function settleTranscript(state: AppState, threadId: string): AppState {
   const { [threadId]: _loaded, ...deferredTranscripts } = state.deferredTranscripts;
+  const { [threadId]: _spinner, ...loadingOlder } = state.loadingOlder;
   const { [threadId]: frames = [], ...backgroundThreadEvents } = state.backgroundThreadEvents;
-  let next = { ...state, deferredTranscripts, backgroundThreadEvents };
+  let next: AppState = { ...state, deferredTranscripts, loadingOlder, backgroundThreadEvents };
+  const waiting = state.deferredUnreadDivider;
+  if (waiting?.threadId === threadId) {
+    const bot = state.bots.find((candidate) => candidate.threadId === threadId);
+    const messages = bot ? visibleMessages(bot) : state.groups.find((group) => group.threadId === threadId)?.messages ?? [];
+    const messageId = firstUnreadMessageId(messages, waiting.lastReadMessageId);
+    next = { ...next, deferredUnreadDivider: null, unreadDivider: messageId ? { threadId, messageId } : null };
+  }
   for (const frame of frames) next = reducer(next, frame);
   return next;
+}
+
+function openedThread(state: AppState, threadId: string, unread: boolean, messages: readonly Message[], lastReadMessageId?: string): Pick<AppState, "unreadDivider" | "deferredUnreadDivider"> {
+  return unread && state.deferredTranscripts[threadId] !== undefined
+    ? { unreadDivider: null, deferredUnreadDivider: { threadId, lastReadMessageId } }
+    : { unreadDivider: openedUnreadDivider(state, threadId, unread, messages, lastReadMessageId), deferredUnreadDivider: null };
 }
 
 export function reducer(state: AppState, action: Action): AppState {
@@ -956,7 +978,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const snapshotRevision = state.snapshotRevision + 1;
       const deferredTranscripts: AppState["deferredTranscripts"] = action.deferMessages
         ? Object.fromEntries([...hydrated.bots, ...hydrated.groups]
-          .filter((owner) => owner.hasMore && owner.messages.length === 0)
+          .filter(awaitsTranscript)
           .map((owner) => [owner.threadId, snapshotRevision]))
         : {};
       const snapshot = { ...hydrated, snapshotRevision, deferredTranscripts };
@@ -968,7 +990,6 @@ export function reducer(state: AppState, action: Action): AppState {
     case "transcriptLoaded": {
       if (state.deferredTranscripts[action.threadId] !== action.revision ||
           (state.transcriptGeneration[action.threadId] ?? 0) !== action.generation) return state;
-      const { [action.threadId]: _done, ...loadingOlder } = state.loadingOlder;
       const received = new Set(action.messages.map((message) => message.id));
       const merge = <T extends { threadId: string; messages: Message[] }>(owner: T): T => {
         if (owner.threadId !== action.threadId) return owner;
@@ -977,7 +998,7 @@ export function reducer(state: AppState, action: Action): AppState {
           messages: [...action.messages.map((message) => live.get(message.id) ?? message),
             ...owner.messages.filter((message) => !received.has(message.id))] };
       };
-      return replayThreadSnapshotEvents({ ...state, bots: state.bots.map(merge), groups: state.groups.map(merge), loadingOlder }, action.threadId);
+      return settleTranscript({ ...state, bots: state.bots.map(merge), groups: state.groups.map(merge) }, action.threadId);
     }
     case "loadOlderMessages":
       return state.loadingOlder[action.threadId]
@@ -1004,7 +1025,7 @@ export function reducer(state: AppState, action: Action): AppState {
         groups: state.groups.map((group) => (group.threadId === action.threadId ? prepend(group) : group)),
       };
       return action.messages.length && state.deferredTranscripts[action.threadId]
-        ? replayThreadSnapshotEvents(paged, action.threadId) : paged;
+        ? settleTranscript(paged, action.threadId) : paged;
     }
     case "sectionDeleted":
       return {
@@ -1097,7 +1118,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const fenced = action.group.messages ? bumpTranscriptGeneration(state, action.group.threadId) : state;
       const patched = { ...fenced, groups: patchedGroups(state.groups, action.group) };
       return action.group.messages && action.group.threadId && state.deferredTranscripts[action.group.threadId]
-        ? replayThreadSnapshotEvents(patched, action.group.threadId) : patched;
+        ? settleTranscript(patched, action.group.threadId) : patched;
     }
     case "groupSnapshot": {
       const group = snapshotPatch(state, action);
@@ -1128,7 +1149,7 @@ export function reducer(state: AppState, action: Action): AppState {
       if (room) {
         return {
           ...(action.id === state.selectedId && state.activeView === "chat" ? state : closeUnpinnedTray(state)),
-          unreadDivider: openedUnreadDivider(state, room.threadId, room.unread, room.messages, room.lastReadMessageId),
+          ...openedThread(state, room.threadId, room.unread, room.messages, room.lastReadMessageId),
           activeView: "chat",
           selectedId: action.id,
           groups: state.groups.map((g) => (g.id === action.id ? { ...g, unread: false } : g)),
@@ -1139,9 +1160,9 @@ export function reducer(state: AppState, action: Action): AppState {
         withMascotMotion(
           {
             ...(action.id === state.selectedId && state.activeView === "chat" ? state : closeUnpinnedTray(state)),
-            unreadDivider: opened
-              ? openedUnreadDivider(state, opened.threadId, threadOpensUnread(opened), visibleMessages(opened), threadReadCursor(opened))
-              : state.unreadDivider,
+            ...(opened
+              ? openedThread(state, opened.threadId, threadOpensUnread(opened), visibleMessages(opened), threadReadCursor(opened))
+              : { unreadDivider: state.unreadDivider }),
             activeView: "chat",
             selectedId: action.id,
           },
@@ -1812,10 +1833,13 @@ export function reducer(state: AppState, action: Action): AppState {
         awaitingThreadSnapshot: false,
         switchingTo: undefined,
       }));
-      switched = replayThreadSnapshotEvents(switched, action.bot.threadId);
+      const arrived = switched.bots.find((bot) => bot.id === action.bot.id);
+      switched = arrived && awaitsTranscript(arrived)
+        ? deferTranscript(switched, action.bot.threadId)
+        : settleTranscript(switched, action.bot.threadId);
       const opened = switched.bots.find((bot) => bot.id === action.bot.id);
       if (opened && opened.id === switched.selectedId) {
-        switched = { ...switched, unreadDivider: openedUnreadDivider(switched, opened.threadId, threadOpensUnread(opened), visibleMessages(opened), threadReadCursor(opened)) };
+        switched = { ...switched, ...openedThread(switched, opened.threadId, threadOpensUnread(opened), visibleMessages(opened), threadReadCursor(opened)) };
         // The snapshot predates the switch's own announcement and must not put the unread dot back.
         if (switched.activeView === "chat") switched = updateBot(switched, opened.id, (bot) => ({ ...bot,
           unread: Boolean(bot.tasks?.some((task) => task.threadId !== bot.threadId && task.unread)),
@@ -1953,6 +1977,7 @@ export const initialState: AppState = {
   dataView: null,
   focusMessage: null,
   unreadDivider: null,
+  deferredUnreadDivider: null,
   connected: false,
   error: null,
   notice: null,

@@ -2108,6 +2108,36 @@ describe("scrollback pages", () => {
     expect(reducer(loaded, page(snapshot))).toBe(loaded);
   });
 
+  it("defers again when a recovery snapshot switches the bot without its history", () => {
+    const snapshot = deferred();
+    const slim = reducer(snapshot, { type: "taskSwitched", bot: { ...bot, messages: [], hasMore: true } });
+    expect(slim.deferredTranscripts[bot.threadId]).toBe(slim.snapshotRevision);
+    expect(slim.snapshotRevision).toBeGreaterThan(snapshot.snapshotRevision);
+    const loaded = reducer(slim, page(slim));
+    expect(loaded.bots[0].messages.map((message) => message.id)).toEqual(["m3"]);
+    expect(loaded.deferredTranscripts).toEqual({});
+  });
+
+  it("clears the earlier-messages spinner whichever way the deferred history arrives", () => {
+    const waiting = reducer(deferred(), { type: "loadOlderMessages", threadId: bot.threadId });
+    expect(waiting.loadingOlder[bot.threadId]).toBe(true);
+    const switched = reducer(waiting, { type: "taskSwitched", bot });
+    expect(switched.loadingOlder).toEqual({});
+    expect(switched.deferredTranscripts).toEqual({});
+  });
+
+  it("places the unread divider once the history of an unread deferred chat arrives", () => {
+    const unread = reducer(initialState, { type: "hydrate", bots: [{ ...bot, messages: [], unread: true }],
+      groups: [], computerControl: {}, deferMessages: true });
+    const opened = reducer(unread, { type: "select", id: bot.id });
+    expect(opened.unreadDivider).toBeNull();
+    expect(opened.deferredUnreadDivider).toEqual({ threadId: bot.threadId, lastReadMessageId: undefined });
+    const reply = (id: string, at: number) => ({ ...message(id, at), role: "bot" }) as Message;
+    const loaded = reducer(opened, { ...page(opened), messages: [message("m1", 1), reply("m2", 2), reply("m3", 3)] });
+    expect(loaded.unreadDivider).toEqual({ threadId: bot.threadId, messageId: "m2" });
+    expect(loaded.deferredUnreadDivider).toBeNull();
+  });
+
   it("marks the thread loading so one click cannot ask twice", () => {
     const loading = reducer(state, { type: "loadOlderMessages", threadId: "thread-1" });
     expect(loading.loadingOlder["thread-1"]).toBe(true);
