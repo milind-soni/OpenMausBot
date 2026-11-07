@@ -69,7 +69,7 @@
     // exist; add relay2 when its box and DNS are up.
     // RELAY_ROLLOUT_PERCENT (0-100) admits computers by a stable hash of their host id; RELAY_ALLOW_INSTALLATIONS
     // (comma-separated installation ids) admits a few by name; RELAY_DISABLED "1" turns every token off.
-    "RELAY_NODES": "relay1.openmausbot.com",
+    "RELAY_NODES": "relay1.openmausbot.com,relay2.openmausbot.com",
     "RELAY_NODES_AMERICAS": "",
     "RELAY_TOKEN_KID": "k1",
     "RELAY_ROLLOUT_PERCENT": "0",
