@@ -212,7 +212,16 @@ describe("Test, and adding a server that needs the person's computer", () => {
     expect(await one.lent.place(address, { principal: null }), "a team Cloud, or a turn that can't use the computer").toEqual({ ok: true, server: address });
     const kept = { ...address, runsOn: { environmentId: "22222222-2222-4222-8222-222222222222", label: "Studio" } };
     expect(await one.lent.place(kept, { principal: "cloud-home" })).toEqual({ ok: true, server: kept });
-    expect(await fixture().lent.place(address, { principal: "cloud-home" }), "nothing lent now: it stays as added").toEqual({ ok: true, server: address });
+  });
+
+  it("with no computer lent, refuses a server that needs one and still saves one My Cloud answers", async () => {
+    const none = fixture();
+    expect(await none.lent.place(address, { principal: "cloud-home" })).toEqual({ ok: false, error: "That address is on the person's own computer, and no computer is lent to My Cloud now. Ask them to lend their Mac or PC, then add it again." });
+    const command = { command: "notes-mcp", args: [], env: {}, enabled: true };
+    const missing = fixture({ here: here({ program: () => false }) });
+    expect(await missing.lent.place(command, { principal: "cloud-home" })).toEqual({ ok: false, error: "This command runs on the person's own computer, and no computer is lent to My Cloud now. Ask them to lend their Mac or PC with its terminal, then add it again." });
+    const answered = fixture({ here: here({ answers: async () => true }) });
+    expect(await answered.lent.place(address, { principal: "cloud-home" })).toEqual({ ok: true, server: address });
   });
 
   it("refuses a loopback address for the lent computer on a port below 1024 or with none, saying how to add it", async () => {
