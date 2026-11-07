@@ -489,6 +489,8 @@ describe("ApprovalCard tool-call kinds", () => {
     const email = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage("mcp__email__EMAIL_SEND_MESSAGE") }));
     expect(email).toContain("Scout wants to send message");
     expect(email).not.toContain("email ·");
+    const device = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage("mcp__device__calendar_list") }));
+    expect(device).not.toContain("device ·");
   });
 
   it("labels the action from a qualified MCP title when the request carries no tool kind", () => {
